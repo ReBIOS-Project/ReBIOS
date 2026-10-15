@@ -180,24 +180,3 @@ void exit_io(struct vcpu *v, uint16_t port, unsigned size, bool in, uint32_t *va
         }
     }
 }
-
-void system_reset(void) {
-    printf("Resetting the system\n");
-    // The reset control register at CF9h, then the keyboard controller's
-    // reset line, then a triple fault.
-    outb(0xcf9, 0x02);
-    outb(0xcf9, 0x06);
-    for (int i = 0; i < 100000; i++) {
-        if (!(inb(0x64) & 2)) {
-            break;
-        }
-        cpu_relax();
-    }
-    outb(0x64, 0xfe);
-    struct {
-        uint16_t limit;
-        uint64_t base;
-    } __attribute__((packed)) null_idt = {0, 0};
-    asm volatile ("lidt %0\n\tint3" :: "m"(null_idt));
-    halt_forever();
-}

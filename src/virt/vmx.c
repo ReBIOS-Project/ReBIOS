@@ -18,6 +18,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <hw/power.h>
 #include <lib/log.h>
 #include <sys/cpu.h>
 #include <sys/mm.h>
@@ -519,7 +520,7 @@ static void vmx_handle_exit(struct vcpu *v) {
         case EXIT_REASON_TRIPLE_FAULT: {
             printf("Guest triple fault\n");
             vmx_dump_guest();
-            system_reset();
+            power_reset(false);
         }
         case EXIT_REASON_GETSEC:
         case EXIT_REASON_VMCLEAR:

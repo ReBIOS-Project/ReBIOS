@@ -18,6 +18,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <hw/power.h>
 #include <lib/log.h>
 #include <sys/cpu.h>
 #include <sys/mm.h>
@@ -165,7 +166,7 @@ static void svm_handle_exit(struct vcpu *v) {
         case SVM_EXIT_SHUTDOWN: {
             printf("Guest shutdown\n");
             svm_dump_guest(v);
-            system_reset();
+            power_reset(false);
         }
         case SVM_EXIT_VMRUN:
         case SVM_EXIT_VMLOAD:
