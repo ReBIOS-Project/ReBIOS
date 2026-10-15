@@ -1,0 +1,78 @@
+#! /bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# This file is part of ReBIOS.
+# Copyright (C) 2026 Mintsuki and contributors
+#
+# ReBIOS is free software: you can redistribute it and/or modify it under the
+# terms of the GNU General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any later
+# version.
+#
+# ReBIOS is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE. See the GNU General Public License for more
+# details.
+#
+# You should have received a copy of the GNU General Public License along
+# with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
+
+set -e
+
+# Keep cd from picking a same-named directory out of CDPATH.
+# Assigned first, as some shells fail to unset an unset variable.
+CDPATH=
+unset CDPATH
+
+# Keep git from being pointed at another repository, as happens in hooks.
+# They are assigned first for the same reason as CDPATH.
+GIT_DIR= GIT_WORK_TREE= GIT_COMMON_DIR= GIT_INDEX_FILE= GIT_OBJECT_DIRECTORY=
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY
+
+srcdir="$(dirname "$0")"
+test -z "$srcdir" && srcdir=.
+
+cd "$srcdir"
+
+clone_repo_commit() {
+    if test -d "$2/.git"; then
+        ( cd "$2" && git reset --hard )
+        ( cd "$2" && git clean -f -d )
+        if ! ( cd "$2" && git checkout -q $3 ); then
+            rm -rf "$2"
+        fi
+    else
+        if test -d "$2"; then
+            echo "error: '$2' is not a Git repository" 1>&2
+            exit 1
+        fi
+    fi
+    if ! test -d "$2"; then
+        git clone $1 "$2"
+        if ! ( cd "$2" && git checkout -q $3 ); then
+            rm -rf "$2"
+            exit 1
+        fi
+    fi
+}
+
+rm -f .deps-obtained
+
+clone_repo_commit \
+    https://github.com/osdev0/freestanding-c-hdrs.git \
+    freestanding-c-hdrs \
+    38fed4e1e3365733ddbfa03b0a28936243ad31e9
+
+clone_repo_commit \
+    https://github.com/osdev0/cc-runtime.git \
+    cc-runtime \
+    9891629daf3703d0ddecd295772df7da82ab25b9
+
+clone_repo_commit \
+    https://github.com/PicoEFI/PicoEFI.git \
+    picoefi \
+    8093094c4f5c4cc543689703d1b6e0b56a99ca34
+
+touch .deps-obtained
+
+printf "\nDependencies obtained successfully.\n"
