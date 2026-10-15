@@ -47,7 +47,7 @@ static bool is_legacy_prefix(uint8_t b) {
 unsigned insn_length_intercepted(struct vcpu *v) {
     struct segment cs;
     vcpu_get_seg(v, SEG_CS, &cs);
-    bool long_mode = (vcpu_efer(v) & EFER_LMA) && (cs.attrib & 0x200);
+    bool long_mode = (vcpu_efer(v) & EFER_LMA) && (cs.attrib & SEG_L);
     uint64_t linear = vcpu_rip(v);
     if (!long_mode) {
         linear = (cs.base + linear) & 0xffffffff;
@@ -98,4 +98,288 @@ unsigned insn_length_intercepted(struct vcpu *v) {
             return 0;
         }
     }
+}
+
+// What follows an opcode: whether a ModRM byte does, and which immediate.
+#define OP_MODRM 0x10
+#define OP_IMM_MASK 0x0f
+#define IMM_NONE 0
+#define IMM_B 1
+#define IMM_W 2
+// 2 bytes with 16-bit operands, 4 otherwise.
+#define IMM_Z 3
+// As large as the operand.
+#define IMM_V 4
+// A far pointer: an offset as IMM_Z, then a selector.
+#define IMM_AP 5
+// An offset as large as an address.
+#define IMM_O 6
+// ENTER's 16-bit size and 8-bit level.
+#define IMM_WB 7
+// A near branch's displacement: 4 bytes in 64-bit mode, else as IMM_Z.
+#define IMM_J 8
+// Escapes and prefixes, which the decoder handles before the tables.
+#define OP_SPECIAL 0x20
+
+#define M OP_MODRM
+#define B IMM_B
+#define W IMM_W
+#define Z IMM_Z
+#define V IMM_V
+#define AP IMM_AP
+#define O IMM_O
+#define WB IMM_WB
+#define J IMM_J
+#define S OP_SPECIAL
+
+static const uint8_t one_byte[256] = {
+    M, M, M, M, B, Z, 0, 0, M, M, M, M, B, Z, 0, S,
+    M, M, M, M, B, Z, 0, 0, M, M, M, M, B, Z, 0, 0,
+    M, M, M, M, B, Z, S, 0, M, M, M, M, B, Z, S, 0,
+    M, M, M, M, B, Z, S, 0, M, M, M, M, B, Z, S, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, M, M, S, S, S, S, Z, M | Z, B, M | B, 0, 0, 0, 0,
+    B, B, B, B, B, B, B, B, B, B, B, B, B, B, B, B,
+    M | B, M | Z, M | B, M | B, M, M, M, M, M, M, M, M, M, M, M, M,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, AP, 0, 0, 0, 0, 0,
+    O, O, O, O, 0, 0, 0, 0, B, Z, 0, 0, 0, 0, 0, 0,
+    B, B, B, B, B, B, B, B, V, V, V, V, V, V, V, V,
+    M | B, M | B, W, 0, M, M, M | B, M | Z, WB, 0, W, 0, 0, B, 0, 0,
+    M, M, M, M, B, B, 0, 0, M, M, M, M, M, M, M, M,
+    B, B, B, B, B, B, B, B, J, J, AP, B, 0, 0, 0, 0,
+    S, 0, S, S, 0, 0, M, M, 0, 0, 0, 0, 0, 0, M, M,
+};
+
+// The 0F map. 0F 38 and 0F 3A escape to maps of their own.
+static const uint8_t two_byte[256] = {
+    M, M, M, M, 0, 0, 0, 0, 0, 0, 0, 0, 0, M, 0, M | B,
+    M, M, M, M, M, M, M, M, M, M, M, M, M, M, M, M,
+    M, M, M, M, M, M, M, M, M, M, M, M, M, M, M, M,
+    0, 0, 0, 0, 0, 0, 0, 0, S, 0, S, 0, 0, 0, 0, 0,
+    M, M, M, M, M, M, M, M, M, M, M, M, M, M, M, M,
+    M, M, M, M, M, M, M, M, M, M, M, M, M, M, M, M,
+    M, M, M, M, M, M, M, M, M, M, M, M, M, M, M, M,
+    M | B, M | B, M | B, M | B, M, M, M, 0, M, M, M, M, M, M, M, M,
+    J, J, J, J, J, J, J, J, J, J, J, J, J, J, J, J,
+    M, M, M, M, M, M, M, M, M, M, M, M, M, M, M, M,
+    0, 0, 0, M, M | B, M, M, M, 0, 0, 0, M, M | B, M, M, M,
+    M, M, M, M, M, M, M, M, M, M, M | B, M, M, M, M, M,
+    M, M, M | B, M, M | B, M | B, M | B, M, 0, 0, 0, 0, 0, 0, 0, 0,
+    M, M, M, M, M, M, M, M, M, M, M, M, M, M, M, M,
+    M, M, M, M, M, M, M, M, M, M, M, M, M, M, M, M,
+    M, M, M, M, M, M, M, M, M, M, M, M, M, M, M, M,
+};
+
+#undef M
+#undef B
+#undef W
+#undef Z
+#undef V
+#undef AP
+#undef O
+#undef WB
+#undef J
+#undef S
+
+#define MAP_ONE 0
+#define MAP_0F 1
+#define MAP_0F38 2
+#define MAP_0F3A 3
+
+static unsigned imm_size(unsigned kind, const struct insn *insn, bool long_mode) {
+    switch (kind) {
+        case IMM_B: {
+            return 1;
+        }
+        case IMM_W: {
+            return 2;
+        }
+        case IMM_Z: {
+            return insn->operand_size == 2 ? 2 : 4;
+        }
+        case IMM_V: {
+            return insn->operand_size;
+        }
+        case IMM_AP: {
+            return (insn->operand_size == 2 ? 2 : 4) + 2;
+        }
+        case IMM_O: {
+            return insn->address_size;
+        }
+        case IMM_WB: {
+            return 3;
+        }
+        case IMM_J: {
+            return long_mode || insn->operand_size != 2 ? 4 : 2;
+        }
+        default: {
+            return 0;
+        }
+    }
+}
+
+// The bytes a ModRM byte at bytes[i] brings with it, itself included.
+static unsigned modrm_size(const uint8_t *bytes, unsigned i, unsigned address_size) {
+    uint8_t modrm = bytes[i];
+    unsigned mod = modrm >> 6;
+    unsigned rm = modrm & 7;
+    if (mod == 3) {
+        return 1;
+    }
+    if (address_size == 2) {
+        if (mod == 1) {
+            return 2;
+        }
+        return mod == 2 || rm == 6 ? 3 : 1;
+    }
+    unsigned size = 1;
+    if (rm == 4) {
+        size++;
+        if (mod == 0 && (bytes[i + 1] & 7) == 5) {
+            size += 4;
+        }
+    }
+    if (mod == 0 && rm == 5) {
+        size += 4;
+    } else if (mod == 1) {
+        size += 1;
+    } else if (mod == 2) {
+        size += 4;
+    }
+    return size;
+}
+
+bool insn_decode(struct vcpu *v, struct insn *insn) {
+    struct segment cs;
+    vcpu_get_seg(v, SEG_CS, &cs);
+    bool long_mode = (vcpu_efer(v) & EFER_LMA) && (cs.attrib & SEG_L);
+    bool big = !(vcpu_rflags(v) & RFLAGS_VM) && (vcpu_cr0(v) & CR0_PE) && (cs.attrib & SEG_DB);
+    uint64_t linear = vcpu_rip(v);
+    if (!long_mode) {
+        linear = (cs.base + linear) & 0xffffffff;
+    }
+
+    // Zeroes past what can be read make the decoding stop short, as the
+    // instruction then cannot be complete.
+    uint8_t bytes[INSN_MAX_LENGTH + 4] = {0};
+    if (!guest_linear_read(v, linear, bytes, INSN_MAX_LENGTH, true)) {
+        unsigned avail = 4096 - (linear & 4095);
+        if (avail >= INSN_MAX_LENGTH || !guest_linear_read(v, linear, bytes, avail, true)) {
+            return false;
+        }
+    }
+
+    unsigned operand = long_mode || big ? 4 : 2;
+    unsigned address = long_mode ? 8 : big ? 4 : 2;
+    bool operand_prefix = false;
+    bool address_prefix = false;
+    bool rex_w = false;
+    insn->rep = false;
+
+    unsigned i = 0;
+    for (;;) {
+        uint8_t b = bytes[i];
+        if (is_legacy_prefix(b)) {
+            operand_prefix |= b == 0x66;
+            address_prefix |= b == 0x67;
+            insn->rep |= b == 0xf2 || b == 0xf3;
+            // A REX prefix only counts right before the opcode.
+            rex_w = false;
+            i++;
+        } else if (long_mode && (b & 0xf0) == 0x40) {
+            rex_w = (b & 0x08) != 0;
+            i++;
+        } else {
+            break;
+        }
+        if (i >= INSN_MAX_LENGTH) {
+            return false;
+        }
+    }
+    if (rex_w) {
+        operand = 8;
+    } else if (operand_prefix) {
+        operand = operand == 2 ? 4 : 2;
+    }
+    if (address_prefix) {
+        address = address == 4 ? 2 : 4;
+    }
+    insn->operand_size = operand;
+    insn->address_size = address;
+
+    unsigned map = MAP_ONE;
+    uint8_t op = bytes[i];
+    // VEX, EVEX, and XOP take the place of LES, LDS, BOUND, and POP Ev
+    // where a ModRM byte could not follow.
+    bool vex = long_mode || (bytes[i + 1] & 0xc0) == 0xc0;
+    bool vex_like = false;
+    if ((op == 0xc4 || op == 0xc5) && vex) {
+        map = op == 0xc5 ? MAP_0F : bytes[i + 1] & 0x1f;
+        i += op == 0xc5 ? 2 : 3;
+        vex_like = true;
+    } else if (op == 0x62 && vex) {
+        map = bytes[i + 1] & 0x07;
+        i += 4;
+        vex_like = true;
+    } else if (op == 0x8f && (bytes[i + 1] & 0x1f) >= 8) {
+        // XOP: map 8 takes an 8-bit immediate, map 10 a 32-bit one.
+        unsigned xop_map = bytes[i + 1] & 0x1f;
+        i += 3;
+        i++;
+        i += modrm_size(bytes, i, address);
+        i += xop_map == 8 ? 1 : xop_map == 10 ? 4 : 0;
+        insn->opcode = INSN_OPCODE_OTHER;
+        insn->length = i;
+        return i <= INSN_MAX_LENGTH;
+    } else if (op == 0x0f) {
+        i++;
+        op = bytes[i];
+        map = MAP_0F;
+        if (op == 0x38 || op == 0x3a) {
+            map = op == 0x38 ? MAP_0F38 : MAP_0F3A;
+            i++;
+        }
+    }
+    if (i >= INSN_MAX_LENGTH) {
+        return false;
+    }
+    op = bytes[i++];
+
+    uint8_t entry;
+    if (map == MAP_ONE) {
+        entry = one_byte[op];
+        insn->opcode = op;
+    } else if (map == MAP_0F) {
+        entry = two_byte[op];
+        // VZEROUPPER and VZEROALL have no ModRM byte.
+        if (vex_like && op == 0x77) {
+            entry = 0;
+        } else if (vex_like) {
+            entry |= OP_MODRM;
+        }
+        insn->opcode = INSN_OPCODE_OTHER;
+    } else if (map == MAP_0F3A) {
+        entry = OP_MODRM | IMM_B;
+        insn->opcode = INSN_OPCODE_OTHER;
+    } else {
+        // 0F 38, and the EVEX maps 5 and 6.
+        entry = OP_MODRM;
+        insn->opcode = INSN_OPCODE_OTHER;
+    }
+    if (entry & OP_SPECIAL) {
+        return false;
+    }
+
+    unsigned imm = entry & OP_IMM_MASK;
+    if (entry & OP_MODRM) {
+        // TEST in group 3 is the only member with an immediate.
+        if (map == MAP_ONE && (op == 0xf6 || op == 0xf7) && ((bytes[i] >> 3) & 7) < 2) {
+            imm = op == 0xf6 ? IMM_B : IMM_Z;
+        }
+        i += modrm_size(bytes, i, address);
+    }
+    i += imm_size(imm, insn, long_mode);
+    insn->length = i;
+    return i <= INSN_MAX_LENGTH;
 }

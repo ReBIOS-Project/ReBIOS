@@ -44,6 +44,8 @@ enum seg_reg {
 
 // Attributes are in the VMCB's packed form: descriptor bits 47:40 in bits 7:0
 // and descriptor bits 55:52 in bits 11:8, plus SEG_UNUSABLE.
+#define SEG_L (1u << 9)
+#define SEG_DB (1u << 10)
 #define SEG_UNUSABLE (1u << 16)
 
 struct segment {
