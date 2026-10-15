@@ -73,6 +73,24 @@ ifeq ($(TOOLCHAIN),llvm)
     CC := clang
 endif
 
+# User controllable toolchain prefix for SeaBIOS, which only builds with GCC
+# and GNU binutils, so the "llvm" toolchain falls back to the host's.
+ifeq ($(TOOLCHAIN),llvm)
+    SEABIOS_TOOLCHAIN_PREFIX :=
+else
+    SEABIOS_TOOLCHAIN_PREFIX := $(TOOLCHAIN_PREFIX)
+endif
+
+# User controllable commands for building SeaBIOS.
+SEABIOS_CC := $(SEABIOS_TOOLCHAIN_PREFIX)gcc
+SEABIOS_LD := $(SEABIOS_TOOLCHAIN_PREFIX)ld
+SEABIOS_OBJCOPY := $(SEABIOS_TOOLCHAIN_PREFIX)objcopy
+SEABIOS_OBJDUMP := $(SEABIOS_TOOLCHAIN_PREFIX)objdump
+SEABIOS_STRIP := $(SEABIOS_TOOLCHAIN_PREFIX)strip
+
+# User controllable host C compiler, which builds SeaBIOS's tools.
+HOST_CC := cc
+
 # User controllable C flags.
 CFLAGS := -g -O2 -pipe
 
@@ -295,8 +313,11 @@ override OBJ := $(addprefix obj-$(ARCH)/,$(CFILES:.c=.c.o) $(ASFILES:.S=.S.o) $(
 override HEADER_DEPS := $(addprefix obj-$(ARCH)/,$(CFILES:.c=.c.d) $(ASFILES:.S=.S.d) $(NASMFILES:.asm=.asm.d))
 
 # Default target. This must come first, before header dependencies.
+# SeaBIOS goes first, as the core carries it.
 .PHONY: all
-all: bin-$(ARCH)/$(OUTPUT).efi
+all:
+	$(MAKE) seabios
+	$(MAKE) bin-$(ARCH)/$(OUTPUT).efi
 
 # Include header dependencies.
 -include $(HEADER_DEPS)
@@ -319,6 +340,9 @@ obj-$(ARCH)/src/memory.c.o obj-$(ARCH)/cc-runtime/src/cc-runtime.c.o: override C
 # Only the printf implementation sees the nanoprintf header.
 obj-$(ARCH)/src/lib/printf.c.o: override CPPFLAGS += \
     -I nanoprintf
+
+# The core carries SeaBIOS.
+obj-$(ARCH)/src/csm/seabios_blob.S.o: seabios/out/Csm16.bin
 
 # Compilation rules for *.c files.
 obj-$(ARCH)/%.c.o: %.c GNUmakefile
@@ -359,12 +383,13 @@ run: all edk2-ovmf-bins
 # Remove object files and the final executable.
 .PHONY: clean
 clean:
+	if test -f seabios/.config; then $(call SEABIOS_CALL,clean); fi
 	rm -rf bin-$(ARCH) obj-$(ARCH)
 
 # Remove everything built and generated including downloaded dependencies.
 .PHONY: distclean
 distclean:
-	rm -rf bin-* obj-* .deps-obtained .cache compile_commands.json freestanding-c-hdrs cc-runtime picoefi nanoprintf edk2-ovmf-bins edk2-ovmf-bins.tar.gz
+	rm -rf bin-* obj-* .deps-obtained .cache compile_commands.json freestanding-c-hdrs cc-runtime picoefi nanoprintf seabios edk2-ovmf-bins edk2-ovmf-bins.tar.gz
 
 # Install the final built executable to its final on-root location. Not
 # install(1), which takes other arguments on illumos and Solaris.
@@ -379,3 +404,26 @@ install: all
 uninstall:
 	rm -f "$(DESTDIR)$(PREFIX)/share/$(OUTPUT)/$(OUTPUT)-$(ARCH).efi"
 	-rmdir "$(DESTDIR)$(PREFIX)/share/$(OUTPUT)"
+
+# SeaBIOS is built as a CSM, but not handed our flags: it ignores CFLAGS and
+# LDFLAGS, and CPPFLAGS would replace its own.
+override SEABIOS_EXTRAVERSION := -ReBIOS
+override define SEABIOS_CALL
+	$(MAKE) -C seabios $(1) \
+		HOSTCC="$(HOST_CC)" \
+		CC="$(SEABIOS_CC)" \
+		LD="$(SEABIOS_LD)" \
+		OBJCOPY="$(SEABIOS_OBJCOPY)" \
+		OBJDUMP="$(SEABIOS_OBJDUMP)" \
+		STRIP="$(SEABIOS_STRIP)" \
+		EXTRAVERSION="$(SEABIOS_EXTRAVERSION)"
+endef
+
+# SeaBIOS build targets.
+.PHONY: seabios
+seabios: seabios/.config
+	$(call SEABIOS_CALL,)
+
+seabios/.config: GNUmakefile seabios-config
+	cp seabios-config seabios/.config
+	$(call SEABIOS_CALL,olddefconfig)

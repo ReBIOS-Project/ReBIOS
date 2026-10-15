@@ -8,8 +8,9 @@ real hardware, passing as much as possible through to them unchanged. It is
 meant as a drop-in replacement for CSMWrap.
 
 Building requires a GCC or Clang toolchain and "git", used to fetch the
-dependencies (see get-deps). "curl" is used to download the EDK2 OVMF
-firmware images for "make run".
+dependencies (see get-deps). SeaBIOS, which ReBIOS carries, additionally
+requires GCC, GNU binutils, and "python3". "curl" is used to download the
+EDK2 OVMF firmware images for "make run".
 
     ./get-deps
     make
@@ -31,6 +32,11 @@ for GCC and LLD for Clang. A different linker can be picked by adding a
 
 Link-time optimisation can be enabled by adding "-flto" to "CFLAGS":
     make CFLAGS='-g -O2 -pipe -flto'
+
+SeaBIOS is built with the GNU tools named by "SEABIOS_TOOLCHAIN_PREFIX",
+which follows "TOOLCHAIN_PREFIX" but is empty for the "llvm" toolchain, or by
+"SEABIOS_CC", "SEABIOS_LD", "SEABIOS_OBJCOPY", "SEABIOS_OBJDUMP", and
+"SEABIOS_STRIP" individually. "HOST_CC" builds its configuration tools.
 
 ReBIOS is free software: you can redistribute it and/or modify it under the
 terms of the GNU General Public License as published by the Free Software
