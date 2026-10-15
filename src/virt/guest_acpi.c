@@ -19,12 +19,14 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <uacpi/acpi.h>
 #include <memory.h>
 #include <core.h>
 #include <csm/e820.h>
 #include <handoff.h>
 #include <lib/heap.h>
 #include <lib/log.h>
+#include <sys/smp.h>
 #include <virt/guest_acpi.h>
 #include <virt/guest_mem.h>
 #include <virt/layout.h>
@@ -203,6 +205,44 @@ static bool table_left_out(const uint8_t *table) {
     return false;
 }
 
+// Marks the processors the guest does not get as unusable in a copy of the
+// MADT, leaving every structure in place.
+static void madt_hide_cpus(uint8_t *madt, uint32_t length) {
+    const uint32_t usable = ACPI_PIC_ENABLED | ACPI_PIC_ONLINE_CAPABLE;
+    bool changed = false;
+    uint32_t offset = sizeof(struct acpi_madt);
+    while (offset + sizeof(struct acpi_entry_hdr) <= length) {
+        uint8_t *entry = madt + offset;
+        uint8_t entry_length = entry[1];
+        if (entry_length < sizeof(struct acpi_entry_hdr) || entry_length > length - offset) {
+            break;
+        }
+        offset += entry_length;
+
+        uint32_t id;
+        uint8_t *flags;
+        if (entry[0] == ACPI_MADT_ENTRY_TYPE_LAPIC
+            && entry_length >= sizeof(struct acpi_madt_lapic)) {
+            id = entry[offsetof(struct acpi_madt_lapic, id)];
+            flags = entry + offsetof(struct acpi_madt_lapic, flags);
+        } else if (entry[0] == ACPI_MADT_ENTRY_TYPE_LOCAL_X2APIC
+                   && entry_length >= sizeof(struct acpi_madt_x2apic)) {
+            id = read32(entry + offsetof(struct acpi_madt_x2apic, id));
+            flags = entry + offsetof(struct acpi_madt_x2apic, flags);
+        } else {
+            continue;
+        }
+        if ((read32(flags) & usable) != 0 && !smp_guest_cpu(id)) {
+            write32(flags, read32(flags) & ~usable);
+            printf("Hiding processor %#x from the guest\n", id);
+            changed = true;
+        }
+    }
+    if (changed) {
+        checksum_set(madt, length, SDT_CHECKSUM);
+    }
+}
+
 bool guest_acpi_build(uint8_t rsdp[GUEST_ACPI_RSDP_SIZE]) {
     const uint8_t *host = host_rsdp();
     if (host == NULL) {
@@ -301,6 +341,12 @@ bool guest_acpi_build(uint8_t rsdp[GUEST_ACPI_RSDP_SIZE]) {
     uint8_t *copy = kmalloc(total);
     for (uint32_t i = 0; i < all; i++) {
         memcpy(copy + pieces[i].offset, pieces[i].src, pieces[i].length);
+    }
+    for (uint32_t i = 0; i < tables; i++) {
+        uint8_t *table = copy + pieces[i].offset;
+        if (memcmp(table, "APIC", 4) == 0) {
+            madt_hide_cpus(table, pieces[i].length);
+        }
     }
     if (dsdt != UINT32_MAX) {
         uint8_t *table = copy + pieces[fadt].offset;

@@ -30,8 +30,9 @@
 bool guest_acpi_facs(uint64_t *base, uint64_t *size);
 
 // Copies the firmware's ACPI tables into guest memory below 4 GiB, but for
-// those the guest must not or cannot use, and fills rsdp with an RSDP for the
-// copies. Returns false if there are no tables to copy.
+// those the guest must not or cannot use, with the processors the guest does
+// not get marked unusable, and fills rsdp with an RSDP for the copies. Needs
+// smp_start_aps(). Returns false if there are no tables to copy.
 bool guest_acpi_build(uint8_t rsdp[GUEST_ACPI_RSDP_SIZE]);
 
 #endif
