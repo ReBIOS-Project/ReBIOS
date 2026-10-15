@@ -40,3 +40,16 @@ uint64_t efi_alloc_pages_typed(uint64_t count, uint64_t max_addr, EFI_MEMORY_TYP
     }
     return addr;
 }
+
+EFI_HANDLE *efi_locate_handles(EFI_GUID *protocol, EFI_UINTN *count) {
+    EFI_HANDLE *handles;
+
+    // LocateHandleBuffer() came with EFI 1.10, as did the protocols of interest.
+    if (efi_bs->Hdr.Revision < EFI_1_10_SYSTEM_TABLE_REVISION
+        || efi_bs->LocateHandleBuffer(EfiByProtocol, protocol, NULL, count,
+                                      &handles) != EFI_SUCCESS) {
+        *count = 0;
+        return NULL;
+    }
+    return handles;
+}

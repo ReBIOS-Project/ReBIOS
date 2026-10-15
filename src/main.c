@@ -30,6 +30,7 @@
 #include <loader/fwtables.h>
 #include <loader/loader.h>
 #include <loader/paging.h>
+#include <loader/video.h>
 #include <sys/x86.h>
 
 #define CORE_HEAP_SIZE (64ull << 20)
@@ -206,9 +207,11 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     config_to_handoff(&loader_handoff->config);
     fwtables_collect();
     bootdev_collect();
+    video_init();
 
     printf("Map top %#llx\n", (unsigned long long)map_top);
 
+    video_exit_boot_services();
     if (!exit_boot_services()) {
         panic("Cannot exit boot services\n");
     }

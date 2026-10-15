@@ -33,4 +33,8 @@ extern bool efi_boot_services_exited;
 uint64_t efi_alloc_pages(uint64_t count, uint64_t max_addr);
 uint64_t efi_alloc_pages_typed(uint64_t count, uint64_t max_addr, EFI_MEMORY_TYPE type);
 
+// Returns the handles with the protocol, in handle order, in pool memory to
+// free with FreePool(), or NULL if there are none.
+EFI_HANDLE *efi_locate_handles(EFI_GUID *protocol, EFI_UINTN *count);
+
 #endif
