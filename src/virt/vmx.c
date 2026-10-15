@@ -285,7 +285,9 @@ void vmx_vcpu_init(struct vcpu *v) {
         panic("VMPTRLD failed\n");
     }
 
-    vmx_write(VMCS_PIN_CONTROLS, adjust_controls(pin_cap, 0, 0, "pin-based"));
+    // NMIs reach the hypervisor, which passes the guest's on.
+    vmx_write(VMCS_PIN_CONTROLS,
+              adjust_controls(pin_cap, 0, PIN_NMI_EXITING | PIN_VIRTUAL_NMIS, "pin-based"));
 
     vmx_write(VMCS_PROC_CONTROLS,
               adjust_controls(proc_cap, 0,
@@ -491,6 +493,19 @@ static void vmx_handle_exit(struct vcpu *v) {
     }
 
     switch (reason & 0xffff) {
+        case EXIT_REASON_EXCEPTION_NMI: {
+            uint32_t info = (uint32_t)vmx_read(VMCS_EXIT_INTR_INFO);
+            if ((info & (7u << 8)) != INTR_TYPE_NMI) {
+                printf("Unexpected exception exit, information %#x\n", info);
+                vmx_dump_guest();
+                panic("Unhandled VM exit\n");
+            }
+            event_nmi(v);
+            break;
+        }
+        case EXIT_REASON_NMI_WINDOW: {
+            break;
+        }
         case EXIT_REASON_CPUID: {
             exit_cpuid(v);
             break;

@@ -79,8 +79,8 @@ void svm_vcpu_init(struct vcpu *v) {
     v->vmcb_pa = (uint64_t)(uintptr_t)v->vmcb;
 
     struct vmcb_control *c = &v->vmcb->control;
-    c->intercept_misc1 = SVM_INTERCEPT_CPUID | SVM_INTERCEPT_INVD | SVM_INTERCEPT_IOIO
-                         | SVM_INTERCEPT_MSR | SVM_INTERCEPT_SHUTDOWN;
+    c->intercept_misc1 = SVM_INTERCEPT_NMI | SVM_INTERCEPT_CPUID | SVM_INTERCEPT_INVD
+                         | SVM_INTERCEPT_IOIO | SVM_INTERCEPT_MSR | SVM_INTERCEPT_SHUTDOWN;
     c->intercept_misc2 = SVM_INTERCEPT_VMRUN | SVM_INTERCEPT_VMMCALL | SVM_INTERCEPT_VMLOAD
                          | SVM_INTERCEPT_VMSAVE | SVM_INTERCEPT_STGI | SVM_INTERCEPT_CLGI
                          | SVM_INTERCEPT_SKINIT;
@@ -147,6 +147,12 @@ static void svm_handle_exit(struct vcpu *v) {
     struct vmcb_control *c = &v->vmcb->control;
 
     switch (c->exitcode) {
+        case SVM_EXIT_NMI: {
+            // Held while the host runs with GIF clear; the host's handler
+            // takes it.
+            asm volatile ("stgi\n\tnop\n\tclgi" ::: "memory");
+            break;
+        }
         case SVM_EXIT_CPUID: {
             exit_cpuid(v);
             break;

@@ -95,6 +95,7 @@ struct vcpu {
     uint32_t redeliver_error;
     // Whether vcpu_inject_exception() set up an event for the coming entry.
     bool injecting;
+    bool nmi_pending;
 
     // What the guest believes CR0 and CR4 hold, for the bits the host owns.
     uint64_t cr0_shadow;

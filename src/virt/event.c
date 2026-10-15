@@ -19,6 +19,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <lib/log.h>
+#include <sys/cpu.h>
 #include <virt/event.h>
 #include <virt/svm.h>
 #include <virt/vcpu.h>
@@ -27,11 +28,13 @@
 // The fields VMX's interruption information and SVM's events share.
 #define EVENT_VECTOR_MASK 0xffu
 #define EVENT_TYPE_MASK (7u << 8)
+#define EVENT_TYPE_NMI (2u << 8)
 #define EVENT_TYPE_EXCEPTION (3u << 8)
 #define EVENT_TYPE_SOFTWARE (4u << 8)
 #define EVENT_ERROR_VALID (1u << 11)
 #define EVENT_VALID (1u << 31)
 
+#define VECTOR_NMI 2
 #define VECTOR_BP 3
 #define VECTOR_OF 4
 
@@ -71,6 +74,10 @@ void event_exit(struct vcpu *v) {
     v->redeliver_error = error;
 }
 
+void event_nmi(struct vcpu *v) {
+    v->nmi_pending = true;
+}
+
 bool event_cut_short(struct vcpu *v) {
     return (v->redeliver & EVENT_VALID) != 0;
 }
@@ -84,6 +91,41 @@ static void inject(struct vcpu *v, uint32_t info, uint32_t error) {
         return;
     }
     v->vmcb->control.eventinj = info | (uint64_t)error << 32;
+}
+
+static void set_proc_control(uint32_t control, bool on) {
+    uint64_t controls = vmx_read(VMCS_PROC_CONTROLS);
+    vmx_write(VMCS_PROC_CONTROLS, on ? controls | control : controls & ~(uint64_t)control);
+}
+
+// SVM shows nothing of the guest's NMI blocking without its NMI
+// virtualisation, which not every processor has; an NMI goes in when the
+// next entry injects nothing else.
+static bool nmi_blocked(void) {
+    if (!virt_vmx) {
+        return false;
+    }
+    uint64_t intr = vmx_read(VMCS_GUEST_INTERRUPTIBILITY);
+    return (intr & (INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS | INTERRUPTIBILITY_NMI))
+           || vmx_read(VMCS_GUEST_ACTIVITY_STATE) == ACTIVITY_WAIT_SIPI;
+}
+
+static void deliver_nmi(struct vcpu *v) {
+    if (__atomic_exchange_n(&v->cpu->nmi_pending, false, __ATOMIC_ACQUIRE)) {
+        v->nmi_pending = true;
+    }
+    if (!v->nmi_pending) {
+        return;
+    }
+    if (nmi_blocked()) {
+        set_proc_control(PROC_NMI_WINDOW_EXITING, true);
+        return;
+    }
+    if (virt_vmx) {
+        set_proc_control(PROC_NMI_WINDOW_EXITING, false);
+    }
+    inject(v, EVENT_VALID | EVENT_TYPE_NMI | VECTOR_NMI, 0);
+    v->nmi_pending = false;
 }
 
 void event_entry(struct vcpu *v) {
@@ -100,5 +142,11 @@ void event_entry(struct vcpu *v) {
     if (v->redeliver & EVENT_VALID) {
         inject(v, v->redeliver, v->redeliver_error);
         v->redeliver = 0;
+        // The NMI follows once the guest takes this.
+        if (virt_vmx && (v->nmi_pending || v->cpu->nmi_pending)) {
+            set_proc_control(PROC_NMI_WINDOW_EXITING, true);
+        }
+        return;
     }
+    deliver_nmi(v);
 }
