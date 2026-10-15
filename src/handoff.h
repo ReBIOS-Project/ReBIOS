@@ -125,6 +125,9 @@ struct handoff {
     uint64_t pml4;
     uint64_t map_top;
 
+    // A page below 1 MiB, where the other processors start, or 0.
+    uint64_t ap_boot;
+
     // Memory the core manages itself.
     uint64_t heap_base;
     uint64_t heap_size;

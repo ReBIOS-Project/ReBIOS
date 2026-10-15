@@ -198,6 +198,12 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
         *(uint64_t *)(uintptr_t)cr3 = pml4 | 3;
     }
 
+    // Where SIPIs can start the other processors in real mode.
+    uint64_t ap_boot = loader_alloc_reserved(1, 0xfffff);
+    if (ap_boot == 0) {
+        printf("No page below 1 MiB to start the other processors in\n");
+    }
+
     uint64_t heap = loader_alloc_reserved(page_count(CORE_HEAP_SIZE), 0);
     if (heap == 0) {
         panic("Cannot allocate the core's heap\n");
@@ -207,6 +213,7 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     loader_handoff->efi_rt = (uintptr_t)efi_rt;
     loader_handoff->pml4 = pml4;
     loader_handoff->map_top = map_top;
+    loader_handoff->ap_boot = ap_boot;
     loader_handoff->heap_base = heap;
     loader_handoff->heap_size = CORE_HEAP_SIZE;
     loader_handoff->tsc_hz = measure_tsc_hz();

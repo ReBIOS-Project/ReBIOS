@@ -85,6 +85,11 @@ void exception_handler(struct exception_frame *frame) {
         this_cpu()->nmi_pending = true;
         return;
     }
+    if (frame->vector == 30) {
+        // An INIT that SVM redirected, meant for the guest.
+        this_cpu()->init_pending = true;
+        return;
+    }
 
     if (frame->vector == 13 || frame->vector == 6) {
         uint64_t resume = fixup_find(frame->rip);

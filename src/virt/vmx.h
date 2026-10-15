@@ -323,6 +323,9 @@
 #define ACTIVITY_SHUTDOWN 2
 #define ACTIVITY_WAIT_SIPI 3
 
+// IA32_VMX_MISC: the wait-for-SIPI activity state is supported.
+#define VMX_MISC_WAIT_SIPI (1ull << 8)
+
 // Capability MSRs (SDM 325462-092 Vol. 3D, Appendix A).
 #define MSR_IA32_VMX_BASIC 0x480
 #define MSR_IA32_VMX_PINBASED_CTLS 0x481

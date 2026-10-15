@@ -45,6 +45,7 @@
 static uint64_t vmx_basic;
 static uint64_t pin_cap, proc_cap, proc2_cap, exit_cap, entry_cap;
 static uint64_t ept_vpid_cap;
+static uint64_t vmx_misc;
 static uint64_t cr0_fixed0, cr0_fixed1, cr4_fixed0, cr4_fixed1;
 
 int vmx_enter(struct gprs *gprs, int launched);
@@ -127,6 +128,7 @@ bool vmx_supported(void) {
     }
 
     ept_vpid_cap = rdmsr(MSR_IA32_VMX_EPT_VPID_CAP);
+    vmx_misc = rdmsr(MSR_IA32_VMX_MISC);
     uint64_t ept_needed = EPT_CAP_WALK_4 | EPT_CAP_WB | EPT_CAP_2M | EPT_CAP_INVEPT
                           | EPT_CAP_INVEPT_ALL;
     if ((ept_vpid_cap & ept_needed) != ept_needed) {
@@ -135,6 +137,10 @@ bool vmx_supported(void) {
     }
 
     return true;
+}
+
+bool vmx_wait_for_sipi_supported(void) {
+    return (vmx_misc & VMX_MISC_WAIT_SIPI) != 0;
 }
 
 bool vmx_ept_huge_pages(void) {
@@ -515,6 +521,14 @@ static void vmx_handle_exit(struct vcpu *v) {
             // Throwing away the host's dirty cache lines is not an option.
             wbinvd();
             vcpu_skip_instruction(v);
+            break;
+        }
+        case EXIT_REASON_INIT: {
+            vcpu_init_signal(v);
+            break;
+        }
+        case EXIT_REASON_SIPI: {
+            vcpu_startup(v, (uint8_t)qual);
             break;
         }
         case EXIT_REASON_TRIPLE_FAULT: {

@@ -65,6 +65,9 @@ struct vcpu_mode {
     struct segment segs[SEG_IDTR + 1];
 };
 
+#define VCPU_SIPI_RUNNING (-2)
+#define VCPU_SIPI_WAITING (-1)
+
 struct cpu;
 struct vmcb;
 
@@ -88,6 +91,11 @@ struct vcpu {
     // What the guest believes CR0 and CR4 hold, for the bits the host owns.
     uint64_t cr0_shadow;
     uint64_t cr4_shadow;
+
+    // Where the processor cannot wait for start-up IPIs in the guest: whether
+    // the vCPU waits for one in the hypervisor, VCPU_SIPI_WAITING, or runs,
+    // VCPU_SIPI_RUNNING, or else the vector of the one passed on to it.
+    volatile int32_t sipi;
 
     // The legacy BIOS's 32-bit flat mode, and the mode its 16-bit code was in
     // when it last switched there, for HYPERCALL_CALL32_*.
@@ -125,5 +133,12 @@ void vcpu_inject_exception(struct vcpu *v, uint8_t vector, bool has_error, uint3
 // Puts the vCPU in the state the processor has after INIT, in real mode at
 // cs:ip, as for a start-up IPI or the reset vector.
 void vcpu_set_real_mode(struct vcpu *v, uint16_t cs, uint16_t ip);
+
+// Makes an application processor's vCPU wait for a start-up IPI, as after an
+// INIT.
+void vcpu_wait_for_sipi(struct vcpu *v);
+// An INIT for the vCPU, and a start-up IPI with its vector.
+void vcpu_init_signal(struct vcpu *v);
+void vcpu_startup(struct vcpu *v, uint8_t vector);
 
 #endif

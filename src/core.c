@@ -28,6 +28,7 @@
 #include <lib/time.h>
 #include <sys/cpu.h>
 #include <sys/mm.h>
+#include <sys/smp.h>
 #include <sys/x86.h>
 #include <virt/layout.h>
 #include <virt/vcpu.h>
@@ -50,6 +51,7 @@ static void bsp_main(void *arg) {
     virt_cpu_init();
 
     layout_init();
+    smp_start_aps();
 
     struct vcpu *v = vcpu_create(cpu);
     csm_boot_start(v);

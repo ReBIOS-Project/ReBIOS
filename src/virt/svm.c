@@ -21,6 +21,7 @@
 #include <hw/power.h>
 #include <lib/log.h>
 #include <sys/cpu.h>
+#include <sys/fixup.h>
 #include <sys/mm.h>
 #include <sys/x86.h>
 #include <virt/exit.h>
@@ -64,6 +65,11 @@ bool svm_huge_pages(void) {
 void svm_cpu_init(void) {
     wrmsr(MSR_EFER, rdmsr(MSR_EFER) | EFER_SVME);
     wrmsr(MSR_VM_HSAVE_PA, (uint64_t)(uintptr_t)page_alloc(1));
+    // INITs become #SX, which the guest's intercept or the host's handler
+    // takes, rather than resetting the processor under the hypervisor.
+    if (!wrmsr_safe(MSR_VM_CR, rdmsr(MSR_VM_CR) | VM_CR_R_INIT)) {
+        printf("Cannot redirect INIT on this processor\n");
+    }
 }
 
 void svm_vcpu_init(struct vcpu *v) {
@@ -76,8 +82,8 @@ void svm_vcpu_init(struct vcpu *v) {
     c->intercept_misc2 = SVM_INTERCEPT_VMRUN | SVM_INTERCEPT_VMMCALL | SVM_INTERCEPT_VMLOAD
                          | SVM_INTERCEPT_VMSAVE | SVM_INTERCEPT_STGI | SVM_INTERCEPT_CLGI
                          | SVM_INTERCEPT_SKINIT;
-    // The legacy BIOS's VMCALL hypercalls raise #UD here.
-    c->intercept_exceptions = 1u << 6;
+    // The legacy BIOS's VMCALL hypercalls raise #UD here, and INITs #SX.
+    c->intercept_exceptions = 1u << 6 | 1u << 30;
     c->iopm_base_pa = virt_io_bitmap();
     c->msrpm_base_pa = virt_msr_bitmap();
     c->guest_asid = 1;
@@ -147,6 +153,10 @@ static void svm_handle_exit(struct vcpu *v) {
             exit_invalid_opcode(v);
             break;
         }
+        case SVM_EXIT_EXCEPTION_BASE + 30: {
+            vcpu_init_signal(v);
+            break;
+        }
         case SVM_EXIT_VMMCALL: {
             exit_hypercall(v);
             break;
@@ -209,6 +219,9 @@ static void svm_handle_exit(struct vcpu *v) {
 
 void svm_run(struct vcpu *v) {
     for (;;) {
+        if (__atomic_exchange_n(&v->cpu->init_pending, false, __ATOMIC_ACQUIRE)) {
+            vcpu_init_signal(v);
+        }
         v->vmcb->save.rax = v->gprs.rax;
         uint64_t generation = __atomic_load_n(&gpt_generation, __ATOMIC_ACQUIRE);
         if (v->gpt_generation != generation) {

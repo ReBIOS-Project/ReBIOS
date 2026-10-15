@@ -18,10 +18,13 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <hw/lapic.h>
+#include <hw/power.h>
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <sys/cpu.h>
 #include <sys/mm.h>
+#include <sys/smp.h>
 #include <sys/x86.h>
 #include <virt/gpt.h>
 #include <virt/insn.h>
@@ -38,6 +41,7 @@ static uint8_t *io_bitmap;
 static uint8_t *msr_bitmap;
 
 bool vmx_ept_huge_pages(void);
+bool vmx_wait_for_sipi_supported(void);
 void vmx_get_seg(enum seg_reg reg, struct segment *seg);
 void vmx_set_seg(enum seg_reg reg, const struct segment *seg);
 uint64_t vmx_cr0_mask(void);
@@ -71,6 +75,10 @@ bool virt_init(void) {
 
     printf("Using %s\n", virt_vmx ? "VMX" : "SVM");
     return true;
+}
+
+bool virt_sipi_in_guest(void) {
+    return virt_vmx && vmx_wait_for_sipi_supported();
 }
 
 void virt_cpu_init(void) {
@@ -157,6 +165,7 @@ void virt_intercept_msr(uint32_t msr, bool read, bool write) {
 struct vcpu *vcpu_create(struct cpu *cpu) {
     struct vcpu *v = kmalloc(sizeof(*v));
     v->cpu = cpu;
+    v->sipi = VCPU_SIPI_RUNNING;
     cpu->vcpu = v;
     if (virt_vmx) {
         vmx_vcpu_init(v);
@@ -394,6 +403,41 @@ void vcpu_inject_exception(struct vcpu *v, uint8_t vector, bool has_error, uint3
         event |= SVM_EVENT_ERROR_VALID | (uint64_t)error << 32;
     }
     v->vmcb->control.eventinj = event;
+}
+
+void vcpu_wait_for_sipi(struct vcpu *v) {
+    vcpu_set_real_mode(v, 0, 0);
+    if (virt_sipi_in_guest()) {
+        vmx_write(VMCS_GUEST_ACTIVITY_STATE, ACTIVITY_WAIT_SIPI);
+        return;
+    }
+    // Otherwise the processor waits here for the hypervisor to pass the
+    // guest's start-up IPI on.
+    __atomic_store_n(&v->sipi, VCPU_SIPI_WAITING, __ATOMIC_RELEASE);
+    int32_t vector;
+    while ((vector = __atomic_load_n(&v->sipi, __ATOMIC_ACQUIRE)) < 0) {
+        cpu_relax();
+    }
+    __atomic_store_n(&v->sipi, VCPU_SIPI_RUNNING, __ATOMIC_RELAXED);
+    vcpu_startup(v, (uint8_t)vector);
+}
+
+void vcpu_init_signal(struct vcpu *v) {
+    if (v->cpu->bsp) {
+        // Its INIT takes the boot processor back to the BIOS.
+        printf("INIT for the boot processor, resetting\n");
+        power_reset(true);
+    }
+    lapic_init_reset();
+    vcpu_wait_for_sipi(v);
+}
+
+void vcpu_startup(struct vcpu *v, uint8_t vector) {
+    if (!smp_guest_cpu(v->cpu->apic_id)) {
+        vcpu_wait_for_sipi(v);
+        return;
+    }
+    vcpu_set_real_mode(v, (uint16_t)vector << 8, 0);
 }
 
 void vcpu_set_real_mode(struct vcpu *v, uint16_t cs, uint16_t ip) {

@@ -53,7 +53,10 @@ struct cpu {
     uint64_t gdt[5];
     struct tss64 tss;
     struct vcpu *vcpu;
+    volatile bool online;
     volatile bool nmi_pending;
+    // An INIT that SVM redirected while the host ran.
+    volatile bool init_pending;
 };
 
 _Static_assert(sizeof(struct cpu) <= 0x1000, "struct cpu overlaps the IST stacks");
