@@ -18,6 +18,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <lib/heap.h>
 #include <lib/log.h>
 #include <sys/cpu.h>
 #include <sys/mm.h>
@@ -154,7 +155,7 @@ void virt_intercept_msr(uint32_t msr, bool read, bool write) {
 }
 
 struct vcpu *vcpu_create(struct cpu *cpu) {
-    struct vcpu *v = mm_alloc(sizeof(*v));
+    struct vcpu *v = kmalloc(sizeof(*v));
     v->cpu = cpu;
     cpu->vcpu = v;
     if (virt_vmx) {

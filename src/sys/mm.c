@@ -112,34 +112,3 @@ void page_free(void *pages, size_t count) {
     }
     spinlock_release(&mm_lock);
 }
-
-// Small objects are carved out of pages and never freed: the core only makes
-// them while setting up.
-void *mm_alloc(size_t size) {
-    static uint8_t *chunk;
-    static size_t chunk_left;
-    static struct spinlock lock;
-
-    if (size > PAGE_SIZE) {
-        return page_alloc((size + PAGE_SIZE - 1) / PAGE_SIZE);
-    }
-
-    size_t align = 8;
-    while (align < size) {
-        align *= 2;
-    }
-
-    spinlock_acquire(&lock);
-    size_t pad = (size_t)(-(uintptr_t)chunk & (align - 1));
-    if (chunk == NULL || chunk_left < pad + size) {
-        chunk = page_alloc(1);
-        chunk_left = PAGE_SIZE;
-        pad = 0;
-    }
-    void *ret = chunk + pad;
-    chunk += pad + size;
-    chunk_left -= pad + size;
-    spinlock_release(&lock);
-
-    return ret;
-}

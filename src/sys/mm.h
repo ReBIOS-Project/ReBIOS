@@ -33,7 +33,4 @@ void *page_alloc(size_t count);
 void *page_alloc_aligned(size_t count, size_t align);
 void page_free(void *pages, size_t count);
 
-// Zeroed, aligned to the next power of two of size, up to a page.
-void *mm_alloc(size_t size);
-
 #endif
