@@ -21,6 +21,8 @@
 
 #include <handoff.h>
 
+extern struct handoff *core_handoff;
+
 // The hypervisor, which the loader calls once the firmware's boot services are
 // gone, on the page tables it made.
 __attribute__((noreturn)) void core_main(struct handoff *handoff);

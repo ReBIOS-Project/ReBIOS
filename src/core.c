@@ -31,6 +31,8 @@
 #include <virt/vcpu.h>
 #include <virt/virt.h>
 
+struct handoff *core_handoff;
+
 extern const uint8_t test_guest_start[];
 extern const uint8_t test_guest_hypercall[];
 extern const uint8_t test_guest_end[];
@@ -104,6 +106,8 @@ static void bsp_main(void *arg) {
 }
 
 void core_main(struct handoff *handoff) {
+    core_handoff = handoff;
+
     printf("ReBIOS core running, heap %#llx-%#llx\n",
            (unsigned long long)handoff->heap_base,
            (unsigned long long)(handoff->heap_base + handoff->heap_size));
