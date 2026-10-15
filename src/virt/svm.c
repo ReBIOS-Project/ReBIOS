@@ -76,6 +76,8 @@ void svm_vcpu_init(struct vcpu *v) {
     c->intercept_misc2 = SVM_INTERCEPT_VMRUN | SVM_INTERCEPT_VMMCALL | SVM_INTERCEPT_VMLOAD
                          | SVM_INTERCEPT_VMSAVE | SVM_INTERCEPT_STGI | SVM_INTERCEPT_CLGI
                          | SVM_INTERCEPT_SKINIT;
+    // The legacy BIOS's VMCALL hypercalls raise #UD here.
+    c->intercept_exceptions = 1u << 6;
     c->iopm_base_pa = virt_io_bitmap();
     c->msrpm_base_pa = virt_msr_bitmap();
     c->guest_asid = 1;
@@ -139,6 +141,10 @@ static void svm_handle_exit(struct vcpu *v) {
     switch (c->exitcode) {
         case SVM_EXIT_CPUID: {
             exit_cpuid(v);
+            break;
+        }
+        case SVM_EXIT_EXCEPTION_BASE + 6: {
+            exit_invalid_opcode(v);
             break;
         }
         case SVM_EXIT_VMMCALL: {

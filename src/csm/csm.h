@@ -76,6 +76,9 @@ struct csm_compat16_table {
     // for root buses itself.
     uint32_t extra_pci_root_list_pointer;
     uint8_t extra_pci_root_list_count;
+    // Another extension: when it holds the value that identifies a
+    // hypervisor's hypercall interface, the CSM16 may use that interface.
+    uint32_t hypervisor_interface;
 } __attribute__((packed));
 
 // The size of the specification's table, without SeaBIOS's extension.
@@ -99,7 +102,9 @@ _Static_assert(offsetof(struct csm_compat16_table, hi_permanent_memory_size) == 
 _Static_assert(CSM_COMPAT16_TABLE_SPEC_SIZE == 99, "CSM16 table layout");
 _Static_assert(offsetof(struct csm_compat16_table, extra_pci_root_list_count) == 103,
                "CSM16 table layout");
-_Static_assert(sizeof(struct csm_compat16_table) == 104, "CSM16 table layout");
+_Static_assert(offsetof(struct csm_compat16_table, hypervisor_interface) == 104,
+               "CSM16 table layout");
+_Static_assert(sizeof(struct csm_compat16_table) == 108, "CSM16 table layout");
 
 // EFI_COMPATIBILITY_FUNCTIONS, which the CSM16 takes in AX.
 #define CSM_COMPAT16_INITIALIZE_YOURSELF 0x0000

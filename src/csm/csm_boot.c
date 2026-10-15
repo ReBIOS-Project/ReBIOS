@@ -33,6 +33,7 @@
 #include <lib/log.h>
 #include <sys/mm.h>
 #include <virt/gpt.h>
+#include <virt/hypercall.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>
 
@@ -309,6 +310,11 @@ void csm_boot_start(struct vcpu *v) {
     uint64_t ecam = pci_cfg_ecam_base(0, 0);
     if (ecam < FOUR_GIB) {
         csm.compat16->pci_express_base = (uint32_t)ecam;
+    }
+    if (csm.compat16->table_length >= sizeof(struct csm_compat16_table)) {
+        csm.compat16->hypervisor_interface = HYPERCALL_INTERFACE;
+    } else {
+        printf("The legacy BIOS predates the hypervisor's interface\n");
     }
     if (h->acpi_rsdp != 0 && !csm_copy_rsdp(guest_low(csm.image_base), csm.image_base, image_size,
                                             csm.compat16, (const void *)(uintptr_t)h->acpi_rsdp)) {

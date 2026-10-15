@@ -34,4 +34,7 @@ void exit_xsetbv(struct vcpu *v);
 // An I/O port access the bitmaps trap. value is in and out.
 void exit_io(struct vcpu *v, uint16_t port, unsigned size, bool in, uint32_t *value);
 
+// A #UD the guest raised, which may be its VMCALL on an AMD processor.
+void exit_invalid_opcode(struct vcpu *v);
+
 #endif

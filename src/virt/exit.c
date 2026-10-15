@@ -18,11 +18,14 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <memory.h>
 #include <csm/csm_boot.h>
+#include <hw/power.h>
 #include <lib/log.h>
 #include <sys/fixup.h>
 #include <sys/x86.h>
 #include <virt/exit.h>
+#include <virt/guest_mem.h>
 #include <virt/hypercall.h>
 #include <virt/io.h>
 #include <virt/svm.h>
@@ -81,34 +84,86 @@ void exit_cpuid(struct vcpu *v) {
     vcpu_skip_instruction(v);
 }
 
-void exit_hypercall(struct vcpu *v) {
+// Returns whether the guest is to go on after the hypercall instruction; the
+// others set where it goes on themselves.
+static bool hypercall(struct vcpu *v) {
     uint32_t eax = (uint32_t)v->gprs.rax;
+    uint32_t ebx = (uint32_t)v->gprs.rbx;
 
     if ((eax & ~HYPERCALL_FUNCTION_MASK) != HYPERCALL_MAGIC) {
         vcpu_inject_exception(v, 6, false, 0);
-        return;
+        return false;
     }
 
     switch (eax & HYPERCALL_FUNCTION_MASK) {
         case HYPERCALL_DEBUG_PUTC: {
-            printf("%c", (char)v->gprs.rbx);
-            break;
+            printf("%c", (char)ebx);
+            return true;
         }
         case HYPERCALL_CSM_RETURN: {
-            // Picks where the guest goes next.
             csm_boot_returned(v);
-            return;
+            return false;
         }
-        case HYPERCALL_TEST_DONE: {
-            printf("Guest test done, result %#llx\n", (unsigned long long)v->gprs.rbx);
+        case HYPERCALL_RESET: {
+            if (ebx == HYPERCALL_RESET_SHUTDOWN) {
+                power_off();
+            }
+            if (ebx == HYPERCALL_RESET_COLD || ebx == HYPERCALL_RESET_WARM) {
+                power_reset(ebx == HYPERCALL_RESET_WARM);
+            }
             break;
         }
+        case HYPERCALL_CALL32_INIT: {
+            vcpu_save_mode(v, &v->call32_flat);
+            v->call32_ready = true;
+            return true;
+        }
+        case HYPERCALL_CALL32_ENTER: {
+            if (!v->call32_ready) {
+                break;
+            }
+            vcpu_save_mode(v, &v->call32_saved);
+            vcpu_load_mode(v, &v->call32_flat);
+            vcpu_set_rip(v, ebx);
+            return false;
+        }
+        case HYPERCALL_CALL32_RETURN: {
+            if (!v->call32_ready) {
+                break;
+            }
+            vcpu_load_mode(v, &v->call32_saved);
+            vcpu_set_rip(v, ebx);
+            return false;
+        }
         default: {
-            vcpu_inject_exception(v, 6, false, 0);
-            return;
+            break;
         }
     }
-    vcpu_skip_instruction(v);
+    vcpu_inject_exception(v, 6, false, 0);
+    return false;
+}
+
+void exit_hypercall(struct vcpu *v) {
+    if (hypercall(v)) {
+        vcpu_skip_instruction(v);
+    }
+}
+
+void exit_invalid_opcode(struct vcpu *v) {
+    static const uint8_t vmcall[] = {0x0f, 0x01, 0xc1};
+    struct segment cs;
+    uint8_t insn[sizeof(vmcall)];
+
+    vcpu_get_seg(v, SEG_CS, &cs);
+    uint64_t rip = vcpu_rip(v);
+    if (guest_linear_read(v, cs.base + rip, insn, sizeof(insn), true)
+        && memcmp(insn, vmcall, sizeof(vmcall)) == 0) {
+        if (hypercall(v)) {
+            vcpu_set_rip(v, rip + sizeof(vmcall));
+        }
+        return;
+    }
+    vcpu_inject_exception(v, 6, false, 0);
 }
 
 void exit_rdmsr(struct vcpu *v) {

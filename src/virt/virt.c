@@ -299,6 +299,49 @@ void vcpu_set_seg(struct vcpu *v, enum seg_reg reg, const struct segment *seg) {
     }
 }
 
+void vcpu_save_mode(struct vcpu *v, struct vcpu_mode *mode) {
+    mode->cr0 = vcpu_cr0(v);
+    mode->cr3 = vcpu_cr3(v);
+    mode->cr4 = vcpu_cr4(v);
+    mode->efer = vcpu_efer(v);
+    mode->rflags = vcpu_rflags(v);
+    for (int reg = SEG_ES; reg <= SEG_IDTR; reg++) {
+        vcpu_get_seg(v, reg, &mode->segs[reg]);
+    }
+}
+
+void vcpu_load_mode(struct vcpu *v, const struct vcpu_mode *mode) {
+    for (int reg = SEG_ES; reg <= SEG_IDTR; reg++) {
+        vcpu_set_seg(v, reg, &mode->segs[reg]);
+    }
+    vcpu_set_rflags(v, mode->rflags);
+
+    if (virt_vmx) {
+        v->cr0_shadow = mode->cr0;
+        v->cr4_shadow = mode->cr4;
+        vmx_write(VMCS_CR0_SHADOW, mode->cr0);
+        vmx_write(VMCS_CR4_SHADOW, mode->cr4);
+        vmx_write(VMCS_GUEST_CR0, vmx_cr0_real(mode->cr0));
+        vmx_write(VMCS_GUEST_CR4, vmx_cr4_real(mode->cr4));
+        vmx_write(VMCS_GUEST_CR3, mode->cr3);
+        vmx_write(VMCS_GUEST_EFER, mode->efer);
+        uint64_t entry = vmx_read(VMCS_ENTRY_CONTROLS) & ~(uint64_t)ENTRY_IA32E_MODE_GUEST;
+        if (mode->efer & EFER_LMA) {
+            entry |= ENTRY_IA32E_MODE_GUEST;
+        }
+        vmx_write(VMCS_ENTRY_CONTROLS, entry);
+        vmx_write(VMCS_GUEST_INTERRUPTIBILITY, 0);
+        return;
+    }
+
+    struct vmcb_save *s = &v->vmcb->save;
+    s->cr0 = mode->cr0;
+    s->cr3 = mode->cr3;
+    s->cr4 = mode->cr4;
+    s->efer = mode->efer | EFER_SVME;
+    v->vmcb->control.interrupt_shadow = 0;
+}
+
 void vcpu_skip_instruction(struct vcpu *v) {
     if (virt_vmx) {
         vmx_write(VMCS_GUEST_RIP, vmx_read(VMCS_GUEST_RIP) + vmx_read(VMCS_EXIT_INSTR_LEN));

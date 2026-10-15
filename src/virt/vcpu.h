@@ -53,6 +53,16 @@ struct segment {
     uint64_t base;
 };
 
+// The processor's operating mode, short of the general registers.
+struct vcpu_mode {
+    uint64_t cr0;
+    uint64_t cr3;
+    uint64_t cr4;
+    uint64_t efer;
+    uint64_t rflags;
+    struct segment segs[SEG_IDTR + 1];
+};
+
 struct cpu;
 struct vmcb;
 
@@ -76,6 +86,12 @@ struct vcpu {
     // What the guest believes CR0 and CR4 hold, for the bits the host owns.
     uint64_t cr0_shadow;
     uint64_t cr4_shadow;
+
+    // The legacy BIOS's 32-bit flat mode, and the mode its 16-bit code was in
+    // when it last switched there, for HYPERCALL_CALL32_*.
+    bool call32_ready;
+    struct vcpu_mode call32_flat;
+    struct vcpu_mode call32_saved;
 };
 
 extern bool virt_vmx;
@@ -95,6 +111,8 @@ uint64_t vcpu_cr4(struct vcpu *v);
 uint64_t vcpu_efer(struct vcpu *v);
 void vcpu_get_seg(struct vcpu *v, enum seg_reg reg, struct segment *seg);
 void vcpu_set_seg(struct vcpu *v, enum seg_reg reg, const struct segment *seg);
+void vcpu_save_mode(struct vcpu *v, struct vcpu_mode *mode);
+void vcpu_load_mode(struct vcpu *v, const struct vcpu_mode *mode);
 
 // Advances RIP past the instruction that caused the current exit.
 void vcpu_skip_instruction(struct vcpu *v);

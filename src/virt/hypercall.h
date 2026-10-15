@@ -29,7 +29,22 @@
 #define HYPERCALL_DEBUG_PUTC 0x0000
 // Returns from a CSM16 call, with its AX in SI and its BX in BX.
 #define HYPERCALL_CSM_RETURN 0x0001
-// Reports a self-test result in EBX.
-#define HYPERCALL_TEST_DONE 0xfffe
+// Resets the machine or powers it off, as EBX's HYPERCALL_RESET_* says.
+#define HYPERCALL_RESET 0x0002
+// Records the processor state, in 32-bit flat protected mode, that
+// HYPERCALL_CALL32_ENTER switches to.
+#define HYPERCALL_CALL32_INIT 0x0003
+// Saves the processor state and switches to the recorded one, at EBX.
+#define HYPERCALL_CALL32_ENTER 0x0004
+// Switches back to the state the last HYPERCALL_CALL32_ENTER saved, at EBX.
+#define HYPERCALL_CALL32_RETURN 0x0005
+
+#define HYPERCALL_RESET_COLD 0
+#define HYPERCALL_RESET_WARM 1
+#define HYPERCALL_RESET_SHUTDOWN 2
+
+// The CSM16 table's HypervisorInterface field, telling the legacy BIOS it may
+// make these hypercalls.
+#define HYPERCALL_INTERFACE 0x52420001
 
 #endif
