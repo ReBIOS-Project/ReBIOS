@@ -23,12 +23,13 @@
 #include <virt/vcpu.h>
 
 #define INSN_MAX_LENGTH 15
-// The opcode of an instruction outside the one-byte map.
+// The opcodes of instructions outside the one-byte map: the legacy 0F map's
+// as INSN_OPCODE_0F | the opcode byte, others' as INSN_OPCODE_OTHER.
+#define INSN_OPCODE_0F 0xf00
 #define INSN_OPCODE_OTHER 0x100
 
 struct insn {
     unsigned length;
-    // One-byte map opcodes as they are, others as INSN_OPCODE_OTHER.
     unsigned opcode;
     // In bytes.
     unsigned operand_size;
@@ -62,6 +63,32 @@ struct insn_store {
     bool high_byte;
 };
 
+// What a read from memory does, for those it can be emulated for: MOV,
+// MOVZX, and MOVSX load a register, TEST and CMP set the flags from memory
+// and a register or immediate, and BT sets CF from a bit of memory.
+#define INSN_LOAD_MOV 0
+#define INSN_LOAD_MOVZX 1
+#define INSN_LOAD_MOVSX 2
+#define INSN_LOAD_TEST 3
+#define INSN_LOAD_CMP 4
+#define INSN_LOAD_BT 5
+
+struct insn_load {
+    unsigned op;
+    // What is read, in bytes.
+    unsigned size;
+    // The register the instruction names, and its size in bytes.
+    unsigned reg;
+    unsigned reg_size;
+    // Whether reg is AH, CH, DH, or BH.
+    bool high_byte;
+    // Whether an immediate takes the register's place.
+    bool immediate;
+    uint64_t imm;
+    // Whether CMP subtracts memory from the register, not the other way.
+    bool memory_second;
+};
+
 // The length of the instruction at the guest's CS:RIP, for intercepted
 // instructions that only need skipping, on processors that do not report it.
 // Returns 0 if it cannot be read or is not one of those instructions.
@@ -74,6 +101,12 @@ bool insn_decode(struct vcpu *v, struct insn *insn);
 // What a decoded instruction writes to memory, for MOV, XCHG, OR, and AND.
 // Returns false for other instructions.
 bool insn_store(struct vcpu *v, const struct insn *insn, struct insn_store *store);
+
+// What a decoded instruction does with what it reads from memory, for MOV,
+// MOVZX, MOVSX, TEST, CMP, and BT. Returns false for other instructions.
+bool insn_load(const struct insn *insn, struct insn_load *load);
+// Completes it, memory having held value.
+void insn_load_complete(struct vcpu *v, const struct insn_load *load, uint64_t value);
 
 // The guest's general register, as the encoding numbers them.
 uint64_t insn_gpr(struct vcpu *v, unsigned reg);

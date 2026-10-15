@@ -366,7 +366,7 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
         } else if (vex_like) {
             entry |= OP_MODRM;
         }
-        insn->opcode = INSN_OPCODE_OTHER;
+        insn->opcode = vex_like ? INSN_OPCODE_OTHER : INSN_OPCODE_0F | op;
     } else if (map == MAP_0F3A) {
         entry = OP_MODRM | IMM_B;
         insn->opcode = INSN_OPCODE_OTHER;
@@ -548,6 +548,171 @@ uint64_t insn_store_apply(struct vcpu *v, const struct insn_store *store, uint64
         }
         default: {
             return store->value;
+        }
+    }
+}
+
+bool insn_load(const struct insn *insn, struct insn_load *load) {
+    unsigned op = insn->opcode;
+    unsigned group = (insn->modrm >> 3) & 7;
+    *load = (struct insn_load){.reg = group | ((insn->rex & REX_R) ? 8 : 0)};
+    // The byte forms are the even opcodes.
+    bool byte = !(op & 1);
+    switch (op) {
+        case 0x8a:
+        case 0x8b: {
+            load->op = INSN_LOAD_MOV;
+            break;
+        }
+        case 0xa0:
+        case 0xa1: {
+            load->op = INSN_LOAD_MOV;
+            load->reg = 0;
+            break;
+        }
+        case 0x84:
+        case 0x85: {
+            load->op = INSN_LOAD_TEST;
+            break;
+        }
+        case 0x38:
+        case 0x39:
+        case 0x3a:
+        case 0x3b: {
+            load->op = INSN_LOAD_CMP;
+            load->memory_second = op >= 0x3a;
+            break;
+        }
+        case 0xf6:
+        case 0xf7: {
+            // Group 3's /1 is an alias of TEST.
+            if (group > 1) {
+                return false;
+            }
+            load->op = INSN_LOAD_TEST;
+            load->immediate = true;
+            break;
+        }
+        case 0x80:
+        case 0x81:
+        case 0x83: {
+            if (group != 7) {
+                return false;
+            }
+            load->op = INSN_LOAD_CMP;
+            load->immediate = true;
+            break;
+        }
+        case INSN_OPCODE_0F | 0xb6:
+        case INSN_OPCODE_0F | 0xb7:
+        case INSN_OPCODE_0F | 0xbe:
+        case INSN_OPCODE_0F | 0xbf: {
+            load->op = (op & 8) ? INSN_LOAD_MOVSX : INSN_LOAD_MOVZX;
+            load->size = byte ? 1 : 2;
+            load->reg_size = insn->operand_size;
+            break;
+        }
+        case INSN_OPCODE_0F | 0xa3: {
+            load->op = INSN_LOAD_BT;
+            load->size = insn->operand_size;
+            load->reg_size = insn->operand_size;
+            break;
+        }
+        case INSN_OPCODE_0F | 0xba: {
+            if (group != 4) {
+                return false;
+            }
+            load->op = INSN_LOAD_BT;
+            load->size = insn->operand_size;
+            load->immediate = true;
+            break;
+        }
+        default: {
+            return false;
+        }
+    }
+    if (load->size == 0) {
+        load->size = byte ? 1 : insn->operand_size;
+        load->reg_size = load->size;
+    }
+    if (load->immediate) {
+        load->imm = sign_extend(insn->imm, insn->imm_size);
+    } else {
+        // Without a REX prefix, byte registers 4 to 7 are AH, CH, DH, and BH.
+        load->high_byte = load->reg_size == 1 && insn->rex == 0 && load->reg >= 4;
+    }
+    return true;
+}
+
+static void sub_flags(struct vcpu *v, uint64_t a, uint64_t b, unsigned size) {
+    uint64_t mask = size_mask(size);
+    a &= mask;
+    b &= mask;
+    uint64_t result = (a - b) & mask;
+    unsigned top = size * 8 - 1;
+    uint64_t flags = vcpu_rflags(v)
+                     & ~(uint64_t)(RFLAGS_CF | RFLAGS_OF | RFLAGS_SF | RFLAGS_ZF | RFLAGS_AF
+                                   | RFLAGS_PF);
+    if (a < b) {
+        flags |= RFLAGS_CF;
+    }
+    if ((((a ^ b) & (a ^ result)) >> top) & 1) {
+        flags |= RFLAGS_OF;
+    }
+    if ((result >> top) & 1) {
+        flags |= RFLAGS_SF;
+    }
+    if (result == 0) {
+        flags |= RFLAGS_ZF;
+    }
+    if ((a ^ b ^ result) & 0x10) {
+        flags |= RFLAGS_AF;
+    }
+    if (!__builtin_parity((unsigned)(result & 0xff))) {
+        flags |= RFLAGS_PF;
+    }
+    vcpu_set_rflags(v, flags);
+}
+
+void insn_load_complete(struct vcpu *v, const struct insn_load *load, uint64_t value) {
+    value &= size_mask(load->size);
+    uint64_t other = load->imm;
+    if (!load->immediate) {
+        other = load->high_byte ? insn_gpr(v, load->reg - 4) >> 8 : insn_gpr(v, load->reg);
+        other &= size_mask(load->reg_size);
+    }
+    switch (load->op) {
+        case INSN_LOAD_MOVSX: {
+            set_reg(v, load->reg, load->high_byte, load->reg_size,
+                    sign_extend(value, load->size));
+            break;
+        }
+        case INSN_LOAD_TEST: {
+            logic_flags(v, value & other & size_mask(load->size), load->size);
+            break;
+        }
+        case INSN_LOAD_CMP: {
+            if (load->memory_second) {
+                sub_flags(v, other, value, load->size);
+            } else {
+                sub_flags(v, value, other, load->size);
+            }
+            break;
+        }
+        case INSN_LOAD_BT: {
+            // The bit within what was read: the processor picked that part
+            // of memory by the offset.
+            unsigned bit = (unsigned)other & (load->size * 8 - 1);
+            uint64_t flags = vcpu_rflags(v) & ~(uint64_t)RFLAGS_CF;
+            if ((value >> bit) & 1) {
+                flags |= RFLAGS_CF;
+            }
+            vcpu_set_rflags(v, flags);
+            break;
+        }
+        default: {
+            set_reg(v, load->reg, load->high_byte, load->reg_size, value);
+            break;
         }
     }
 }
