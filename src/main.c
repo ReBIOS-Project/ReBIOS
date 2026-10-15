@@ -17,10 +17,17 @@
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
 #include <efi.h>
+#include <lib/log.h>
+#include <loader/efi_glue.h>
 
 EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
-    (void)image_handle;
-    system_table->ConOut->OutputString(system_table->ConOut, u"ReBIOS\r\n");
+    efi_image_handle = image_handle;
+    efi_st = system_table;
+    efi_bs = system_table->BootServices;
+    efi_rt = system_table->RuntimeServices;
+
+    log_init(0x3f8, 115200);
+    printf("ReBIOS\n");
     for (;;) {
     }
 }
