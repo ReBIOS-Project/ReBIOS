@@ -22,10 +22,96 @@
 #include <stdint.h>
 
 #define HANDOFF_MAX_RESERVED 16
+#define HANDOFF_MAX_PCI_ROMS 16
+#define HANDOFF_MAX_BLOCK_DEVICES 32
+#define HANDOFF_MAX_CPU_RANGES 64
 
 struct handoff_range {
     uint64_t base;
     uint64_t size;
+};
+
+struct handoff_pci_address {
+    uint16_t segment;
+    uint8_t bus;
+    // Device in bits 7:3, function in bits 2:0.
+    uint8_t devfn;
+};
+
+// A linear framebuffer as the firmware's graphics output left it. Each colour
+// component is size bits wide, starting at bit shift of a pixel.
+struct handoff_framebuffer {
+    uint64_t base;
+    uint64_t size;
+    uint32_t width;
+    uint32_t height;
+    uint32_t pitch;
+    uint8_t bpp;
+    uint8_t red_size;
+    uint8_t red_shift;
+    uint8_t green_size;
+    uint8_t green_shift;
+    uint8_t blue_size;
+    uint8_t blue_shift;
+    uint8_t reserved_size;
+    uint8_t reserved_shift;
+    uint8_t present;
+};
+
+// An x86 legacy option ROM image, copied to hypervisor memory.
+struct handoff_pci_rom {
+    struct handoff_pci_address address;
+    uint16_t vendor_id;
+    uint16_t device_id;
+    uint8_t base_class;
+    uint8_t subclass;
+    uint8_t prog_if;
+    uint32_t size;
+    uint64_t image;
+};
+
+struct handoff_video {
+    struct handoff_framebuffer framebuffer;
+    // The PCI device that owns the legacy VGA resources, if any.
+    uint8_t vga_present;
+    // Whether that device's legacy video BIOS is in vbios.
+    uint8_t vbios_present;
+    uint16_t vga_vendor_id;
+    uint16_t vga_device_id;
+    struct handoff_pci_address vga_device;
+    struct handoff_pci_rom vbios;
+};
+
+// Block devices the firmware knew of, as BIOS Boot Specification 1.01 device
+// types.
+struct handoff_block_device {
+    struct handoff_pci_address address;
+    uint8_t bbs_type;
+    uint8_t base_class;
+    uint8_t subclass;
+    // ReBIOS was loaded from this device.
+    uint8_t boot;
+};
+
+#define HANDOFF_CPU_FILTER_NONE 0
+#define HANDOFF_CPU_FILTER_ALLOW 1
+#define HANDOFF_CPU_FILTER_BLOCK 2
+
+struct handoff_config {
+    uint8_t serial;
+    uint8_t verbose;
+    uint8_t iommu_disable;
+    uint8_t vga_specified;
+    uint16_t serial_port;
+    uint32_t serial_baud;
+    struct handoff_pci_address vga_device;
+    // Which APIC IDs the guest gets, as inclusive ranges.
+    uint32_t cpu_filter;
+    uint32_t cpu_range_count;
+    struct {
+        uint32_t first;
+        uint32_t last;
+    } cpu_ranges[HANDOFF_MAX_CPU_RANGES];
 };
 
 // What the loader passes to the core.
@@ -49,6 +135,22 @@ struct handoff {
     uint64_t efi_mmap_size;
     uint64_t efi_mmap_desc_size;
     uint32_t efi_mmap_desc_version;
+
+    // The firmware's tables, which stay where they are.
+    uint64_t efi_system_table;
+    uint64_t efi_rt;
+    uint64_t acpi_rsdp;
+    // An SMBIOS 2.x entry point below 4GiB, with the structure table below
+    // 4GiB, or 0.
+    uint64_t smbios_entry;
+
+    struct handoff_config config;
+    struct handoff_video video;
+
+    uint32_t pci_rom_count;
+    uint32_t block_device_count;
+    struct handoff_pci_rom pci_roms[HANDOFF_MAX_PCI_ROMS];
+    struct handoff_block_device block_devices[HANDOFF_MAX_BLOCK_DEVICES];
 };
 
 #endif

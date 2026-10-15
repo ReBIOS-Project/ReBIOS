@@ -31,5 +31,6 @@ extern bool efi_boot_services_exited;
 
 // Returns 0 on failure. max_addr is inclusive; 0 means anywhere.
 uint64_t efi_alloc_pages(uint64_t count, uint64_t max_addr);
+uint64_t efi_alloc_pages_typed(uint64_t count, uint64_t max_addr, EFI_MEMORY_TYPE type);
 
 #endif

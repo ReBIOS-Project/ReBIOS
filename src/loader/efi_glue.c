@@ -28,10 +28,14 @@ EFI_RUNTIME_SERVICES *efi_rt;
 bool efi_boot_services_exited;
 
 uint64_t efi_alloc_pages(uint64_t count, uint64_t max_addr) {
-    EFI_PHYSICAL_ADDRESS addr = max_addr;
-    EFI_ALLOCATE_TYPE type = max_addr == 0 ? EfiAllocateAnyPages : EfiAllocateMaxAddress;
+    return efi_alloc_pages_typed(count, max_addr, EfiLoaderData);
+}
 
-    if (efi_bs->AllocatePages(type, EfiLoaderData, count, &addr) != EFI_SUCCESS) {
+uint64_t efi_alloc_pages_typed(uint64_t count, uint64_t max_addr, EFI_MEMORY_TYPE type) {
+    EFI_PHYSICAL_ADDRESS addr = max_addr;
+    EFI_ALLOCATE_TYPE alloc_type = max_addr == 0 ? EfiAllocateAnyPages : EfiAllocateMaxAddress;
+
+    if (efi_bs->AllocatePages(alloc_type, type, count, &addr) != EFI_SUCCESS) {
         return 0;
     }
     return addr;

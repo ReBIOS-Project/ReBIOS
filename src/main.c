@@ -25,12 +25,13 @@
 #include <handoff.h>
 #include <lib/log.h>
 #include <loader/efi_glue.h>
+#include <loader/loader.h>
 #include <loader/paging.h>
 #include <sys/x86.h>
 
 #define CORE_HEAP_SIZE (64ull << 20)
 
-static struct handoff *handoff;
+struct handoff *loader_handoff;
 
 static EFI_GUID loaded_image_guid = EFI_LOADED_IMAGE_PROTOCOL_GUID;
 
@@ -39,16 +40,15 @@ static uint64_t page_count(uint64_t size) {
 }
 
 static void reserve(uint64_t base, uint64_t pages) {
-    if (handoff->reserved_count == HANDOFF_MAX_RESERVED) {
+    if (loader_handoff->reserved_count == HANDOFF_MAX_RESERVED) {
         panic("Too many hypervisor memory ranges\n");
     }
-    handoff->reserved[handoff->reserved_count].base = base;
-    handoff->reserved[handoff->reserved_count].size = pages * 4096;
-    handoff->reserved_count++;
+    loader_handoff->reserved[loader_handoff->reserved_count].base = base;
+    loader_handoff->reserved[loader_handoff->reserved_count].size = pages * 4096;
+    loader_handoff->reserved_count++;
 }
 
-// Memory for the hypervisor, which the guest will never see.
-static uint64_t alloc_reserved(uint64_t pages, uint64_t max_addr) {
+uint64_t loader_alloc_reserved(uint64_t pages, uint64_t max_addr) {
     uint64_t base = efi_alloc_pages(pages, max_addr);
     if (base != 0) {
         reserve(base, pages);
@@ -67,7 +67,7 @@ static bool exit_boot_services(void) {
     uint64_t buf_size = 0;
 
     // Room for the buffer's own entry.
-    if (handoff->reserved_count == HANDOFF_MAX_RESERVED) {
+    if (loader_handoff->reserved_count == HANDOFF_MAX_RESERVED) {
         return false;
     }
 
@@ -93,10 +93,10 @@ static bool exit_boot_services(void) {
         if (efi_bs->ExitBootServices(efi_image_handle, map_key) == EFI_SUCCESS) {
             efi_boot_services_exited = true;
             reserve(buf, page_count(buf_size));
-            handoff->efi_mmap = buf;
-            handoff->efi_mmap_size = size;
-            handoff->efi_mmap_desc_size = desc_size;
-            handoff->efi_mmap_desc_version = desc_version;
+            loader_handoff->efi_mmap = buf;
+            loader_handoff->efi_mmap_size = size;
+            loader_handoff->efi_mmap_desc_size = desc_size;
+            loader_handoff->efi_mmap_desc_version = desc_version;
             return true;
         }
     }
@@ -147,8 +147,8 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     if (handoff_addr == 0) {
         panic("Cannot allocate the handoff\n");
     }
-    handoff = (struct handoff *)(uintptr_t)handoff_addr;
-    memset(handoff, 0, sizeof(*handoff));
+    loader_handoff = (struct handoff *)(uintptr_t)handoff_addr;
+    memset(loader_handoff, 0, sizeof(*loader_handoff));
     reserve(handoff_addr, page_count(sizeof(struct handoff)));
 
     // The core runs from this image, which stays where the firmware put it.
@@ -171,7 +171,7 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     // reached through a PML5 of one entry, as LA57 cannot change in long mode.
     uint64_t cr3 = pml4;
     if (read_cr4() & CR4_LA57) {
-        cr3 = alloc_reserved(1, UINT32_MAX);
+        cr3 = loader_alloc_reserved(1, UINT32_MAX);
         if (cr3 == 0) {
             panic("Cannot allocate a PML5\n");
         }
@@ -179,15 +179,17 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
         *(uint64_t *)(uintptr_t)cr3 = pml4 | 3;
     }
 
-    uint64_t heap = alloc_reserved(page_count(CORE_HEAP_SIZE), 0);
+    uint64_t heap = loader_alloc_reserved(page_count(CORE_HEAP_SIZE), 0);
     if (heap == 0) {
         panic("Cannot allocate the core's heap\n");
     }
 
-    handoff->pml4 = pml4;
-    handoff->map_top = map_top;
-    handoff->heap_base = heap;
-    handoff->heap_size = CORE_HEAP_SIZE;
+    loader_handoff->efi_system_table = (uintptr_t)system_table;
+    loader_handoff->efi_rt = (uintptr_t)efi_rt;
+    loader_handoff->pml4 = pml4;
+    loader_handoff->map_top = map_top;
+    loader_handoff->heap_base = heap;
+    loader_handoff->heap_size = CORE_HEAP_SIZE;
 
     printf("Map top %#llx\n", (unsigned long long)map_top);
 
@@ -198,5 +200,5 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     // The new tables identity map this code and its stack, like the firmware's.
     cli();
     write_cr3(cr3);
-    core_main(handoff);
+    core_main(loader_handoff);
 }
