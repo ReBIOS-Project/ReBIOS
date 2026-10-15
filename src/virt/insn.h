@@ -35,6 +35,31 @@ struct insn {
     unsigned address_size;
     // An F2 or F3 prefix.
     bool rep;
+    // The REX prefix, or 0.
+    uint8_t rex;
+    bool has_modrm;
+    uint8_t modrm;
+    // As it is encoded, imm_size bytes of it.
+    uint64_t imm;
+    unsigned imm_size;
+};
+
+// What a write to memory does, for those it can be emulated for.
+#define INSN_STORE_MOV 0
+#define INSN_STORE_XCHG 1
+#define INSN_STORE_OR 2
+#define INSN_STORE_AND 3
+
+struct insn_store {
+    unsigned op;
+    // In bytes.
+    unsigned size;
+    // What is written, or combined with memory.
+    uint64_t value;
+    // The register the instruction names, which XCHG loads.
+    unsigned reg;
+    // Whether reg is AH, CH, DH, or BH.
+    bool high_byte;
 };
 
 // The length of the instruction at the guest's CS:RIP, for intercepted
@@ -45,5 +70,17 @@ unsigned insn_length_intercepted(struct vcpu *v);
 // Decodes the length and the sizes of any instruction at the guest's CS:RIP.
 // Returns false if it cannot be read or is not a valid instruction.
 bool insn_decode(struct vcpu *v, struct insn *insn);
+
+// What a decoded instruction writes to memory, for MOV, XCHG, OR, and AND.
+// Returns false for other instructions.
+bool insn_store(struct vcpu *v, const struct insn *insn, struct insn_store *store);
+
+// The guest's general register, as the encoding numbers them.
+uint64_t insn_gpr(struct vcpu *v, unsigned reg);
+void insn_set_gpr(struct vcpu *v, unsigned reg, uint64_t value);
+
+// Completes a store to memory that held old: returns what it leaves there,
+// and loads the register or sets the flags as the instruction does.
+uint64_t insn_store_apply(struct vcpu *v, const struct insn_store *store, uint64_t old);
 
 #endif

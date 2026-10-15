@@ -275,7 +275,12 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
     bool operand_prefix = false;
     bool address_prefix = false;
     bool rex_w = false;
+    uint8_t rex = 0;
     insn->rep = false;
+    insn->modrm = 0;
+    insn->has_modrm = false;
+    insn->imm = 0;
+    insn->imm_size = 0;
 
     unsigned i = 0;
     for (;;) {
@@ -286,9 +291,11 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
             insn->rep |= b == 0xf2 || b == 0xf3;
             // A REX prefix only counts right before the opcode.
             rex_w = false;
+            rex = 0;
             i++;
         } else if (long_mode && (b & 0xf0) == 0x40) {
             rex_w = (b & 0x08) != 0;
+            rex = b;
             i++;
         } else {
             break;
@@ -307,6 +314,7 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
     }
     insn->operand_size = operand;
     insn->address_size = address;
+    insn->rex = rex;
 
     unsigned map = MAP_ONE;
     uint8_t op = bytes[i];
@@ -373,13 +381,173 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
 
     unsigned imm = entry & OP_IMM_MASK;
     if (entry & OP_MODRM) {
+        insn->has_modrm = true;
+        insn->modrm = bytes[i];
         // TEST in group 3 is the only member with an immediate.
         if (map == MAP_ONE && (op == 0xf6 || op == 0xf7) && ((bytes[i] >> 3) & 7) < 2) {
             imm = op == 0xf6 ? IMM_B : IMM_Z;
         }
         i += modrm_size(bytes, i, address);
     }
-    i += imm_size(imm, insn, long_mode);
+    insn->imm_size = imm_size(imm, insn, long_mode);
+    for (unsigned n = 0; n < insn->imm_size && n < sizeof(insn->imm); n++) {
+        insn->imm |= (uint64_t)bytes[i + n] << (n * 8);
+    }
+    i += insn->imm_size;
     insn->length = i;
     return i <= INSN_MAX_LENGTH;
+}
+
+#define REX_R 0x04
+
+uint64_t insn_gpr(struct vcpu *v, unsigned reg) {
+    if (reg == 4) {
+        return vcpu_rsp(v);
+    }
+    return ((uint64_t *)&v->gprs)[reg];
+}
+
+void insn_set_gpr(struct vcpu *v, unsigned reg, uint64_t value) {
+    if (reg == 4) {
+        vcpu_set_rsp(v, value);
+        return;
+    }
+    ((uint64_t *)&v->gprs)[reg] = value;
+}
+
+static uint64_t size_mask(unsigned size) {
+    return size >= 8 ? UINT64_MAX : (1ull << (size * 8)) - 1;
+}
+
+static uint64_t sign_extend(uint64_t value, unsigned size) {
+    if (size == 0 || size >= 8) {
+        return value;
+    }
+    unsigned shift = 64 - size * 8;
+    return (uint64_t)((int64_t)(value << shift) >> shift);
+}
+
+bool insn_store(struct vcpu *v, const struct insn *insn, struct insn_store *store) {
+    unsigned op = insn->opcode;
+    unsigned group = (insn->modrm >> 3) & 7;
+    switch (op) {
+        case 0x88:
+        case 0x89:
+        case 0xa2:
+        case 0xa3: {
+            store->op = INSN_STORE_MOV;
+            break;
+        }
+        case 0xc6:
+        case 0xc7: {
+            if (group != 0) {
+                return false;
+            }
+            store->op = INSN_STORE_MOV;
+            break;
+        }
+        case 0x86:
+        case 0x87: {
+            store->op = INSN_STORE_XCHG;
+            break;
+        }
+        case 0x08:
+        case 0x09: {
+            store->op = INSN_STORE_OR;
+            break;
+        }
+        case 0x20:
+        case 0x21: {
+            store->op = INSN_STORE_AND;
+            break;
+        }
+        case 0x80:
+        case 0x81:
+        case 0x83: {
+            if (group == 1) {
+                store->op = INSN_STORE_OR;
+            } else if (group == 4) {
+                store->op = INSN_STORE_AND;
+            } else {
+                return false;
+            }
+            break;
+        }
+        default: {
+            return false;
+        }
+    }
+
+    // The byte forms are the even opcodes.
+    bool byte = !(op & 1);
+    store->size = byte ? 1 : insn->operand_size;
+    store->reg = 0;
+    store->high_byte = false;
+    if (op == 0xc6 || op == 0xc7 || op == 0x80 || op == 0x81 || op == 0x83) {
+        store->value = sign_extend(insn->imm, insn->imm_size);
+    } else if (op == 0xa2 || op == 0xa3) {
+        store->value = v->gprs.rax;
+    } else {
+        store->reg = group | ((insn->rex & REX_R) ? 8 : 0);
+        // Without a REX prefix, byte registers 4 to 7 are AH, CH, DH, and BH.
+        if (byte && insn->rex == 0 && store->reg >= 4) {
+            store->high_byte = true;
+            store->value = insn_gpr(v, store->reg - 4) >> 8;
+        } else {
+            store->value = insn_gpr(v, store->reg);
+        }
+    }
+    store->value &= size_mask(store->size);
+    return true;
+}
+
+static void set_reg(struct vcpu *v, unsigned reg, bool high_byte, unsigned size, uint64_t value) {
+    if (high_byte) {
+        reg -= 4;
+        insn_set_gpr(v, reg, (insn_gpr(v, reg) & ~0xff00ull) | (value & 0xff) << 8);
+    } else if (size == 4) {
+        // 32-bit results are zero-extended.
+        insn_set_gpr(v, reg, value & 0xffffffffu);
+    } else {
+        uint64_t mask = size_mask(size);
+        insn_set_gpr(v, reg, (insn_gpr(v, reg) & ~mask) | (value & mask));
+    }
+}
+
+static void logic_flags(struct vcpu *v, uint64_t result, unsigned size) {
+    uint64_t flags = vcpu_rflags(v)
+                     & ~(uint64_t)(RFLAGS_CF | RFLAGS_OF | RFLAGS_SF | RFLAGS_ZF | RFLAGS_PF);
+    if (result == 0) {
+        flags |= RFLAGS_ZF;
+    }
+    if ((result >> (size * 8 - 1)) & 1) {
+        flags |= RFLAGS_SF;
+    }
+    if (!__builtin_parity((unsigned)(result & 0xff))) {
+        flags |= RFLAGS_PF;
+    }
+    vcpu_set_rflags(v, flags);
+}
+
+uint64_t insn_store_apply(struct vcpu *v, const struct insn_store *store, uint64_t old) {
+    uint64_t mask = size_mask(store->size);
+    switch (store->op) {
+        case INSN_STORE_XCHG: {
+            set_reg(v, store->reg, store->high_byte, store->size, old);
+            return store->value;
+        }
+        case INSN_STORE_OR: {
+            uint64_t result = (old | store->value) & mask;
+            logic_flags(v, result, store->size);
+            return result;
+        }
+        case INSN_STORE_AND: {
+            uint64_t result = old & store->value & mask;
+            logic_flags(v, result, store->size);
+            return result;
+        }
+        default: {
+            return store->value;
+        }
+    }
 }
