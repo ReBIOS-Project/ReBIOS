@@ -29,6 +29,7 @@
 #include <loader/efi_glue.h>
 #include <loader/fwtables.h>
 #include <loader/loader.h>
+#include <loader/oprom.h>
 #include <loader/paging.h>
 #include <loader/video.h>
 #include <sys/x86.h>
@@ -208,6 +209,7 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     fwtables_collect();
     bootdev_collect();
     video_init();
+    oprom_collect();
 
     printf("Map top %#llx\n", (unsigned long long)map_top);
 
