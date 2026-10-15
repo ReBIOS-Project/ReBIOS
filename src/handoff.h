@@ -100,7 +100,6 @@ struct handoff_block_device {
 struct handoff_config {
     uint8_t serial;
     uint8_t verbose;
-    uint8_t iommu_disable;
     uint8_t vga_specified;
     uint16_t serial_port;
     uint32_t serial_baud;

@@ -348,11 +348,11 @@ static const struct setting settings[] = {
     {.name = "serial_port", .apply = apply_serial_port},
     {.name = "serial_baud", .apply = apply_serial_baud},
     {.name = "verbose", .apply = apply_boolean, .flag = &config.verbose},
-    {.name = "iommu_disable", .apply = apply_boolean, .flag = &config.iommu_disable},
     {.name = "vgabios", .apply = apply_vgabios},
     {.name = "vga", .apply = apply_vga},
     {.name = "cpu_allowlist", .apply = apply_cpu_list, .filter = HANDOFF_CPU_FILTER_ALLOW},
     {.name = "cpu_blocklist", .apply = apply_cpu_list, .filter = HANDOFF_CPU_FILTER_BLOCK},
+    {.name = "iommu_disable", .apply = apply_obsolete},
     {.name = "system_thread", .apply = apply_obsolete},
 };
 
@@ -701,7 +701,6 @@ void config_to_handoff(struct handoff_config *out) {
     memset(out, 0, sizeof(*out));
     out->serial = config.serial;
     out->verbose = config.verbose;
-    out->iommu_disable = config.iommu_disable;
     out->vga_specified = config.vga_specified;
     out->serial_port = config.serial_port;
     out->serial_baud = config.serial_baud;

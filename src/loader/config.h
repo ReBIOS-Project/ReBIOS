@@ -31,7 +31,6 @@ struct config {
     uint16_t serial_port;
     uint32_t serial_baud;
     bool verbose;
-    bool iommu_disable;
     // NUL-terminated, empty when unset.
     EFI_CHAR16 vgabios[CONFIG_VGABIOS_MAX];
     bool vga_specified;

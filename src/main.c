@@ -28,6 +28,7 @@
 #include <loader/config.h>
 #include <loader/efi_glue.h>
 #include <loader/fwtables.h>
+#include <loader/iommu_check.h>
 #include <loader/loader.h>
 #include <loader/oprom.h>
 #include <loader/paging.h>
@@ -156,6 +157,10 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     printf("ReBIOS\n");
     config_load();
     log_init(config.serial ? config.serial_port : 0, config.serial_baud, config.verbose);
+
+    if (!iommu_check()) {
+        return EFI_UNSUPPORTED;
+    }
 
     uint64_t handoff_addr = efi_alloc_pages(page_count(sizeof(struct handoff)), 0);
     if (handoff_addr == 0) {
