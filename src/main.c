@@ -56,6 +56,14 @@ uint64_t loader_alloc_reserved(uint64_t pages, uint64_t max_addr) {
     return base;
 }
 
+// Timed against the firmware's delay service, whatever the TSC's frequency
+// enumeration says, which not every processor provides.
+static uint64_t measure_tsc_hz(void) {
+    uint64_t start = rdtsc();
+    efi_bs->Stall(20000);
+    return (rdtsc() - start) * 50;
+}
+
 // The memory map buffer must exist before the map that goes into it is taken,
 // so it gets slack for the descriptors its own allocation adds. It is only
 // recorded as reserved once final, so that it is not counted twice.
@@ -190,6 +198,7 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     loader_handoff->map_top = map_top;
     loader_handoff->heap_base = heap;
     loader_handoff->heap_size = CORE_HEAP_SIZE;
+    loader_handoff->tsc_hz = measure_tsc_hz();
 
     printf("Map top %#llx\n", (unsigned long long)map_top);
 

@@ -130,6 +130,9 @@ struct handoff {
     uint64_t heap_base;
     uint64_t heap_size;
 
+    // The TSC's rate, measured against the firmware's delay service.
+    uint64_t tsc_hz;
+
     // The memory map current at ExitBootServices().
     uint64_t efi_mmap;
     uint64_t efi_mmap_size;

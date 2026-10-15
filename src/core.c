@@ -23,6 +23,7 @@
 #include <core.h>
 #include <handoff.h>
 #include <lib/log.h>
+#include <lib/time.h>
 #include <sys/cpu.h>
 #include <sys/mm.h>
 #include <sys/x86.h>
@@ -108,6 +109,8 @@ void core_main(struct handoff *handoff) {
            (unsigned long long)(handoff->heap_base + handoff->heap_size));
 
     mm_init(handoff->heap_base, handoff->heap_size);
+    time_init(handoff->tsc_hz);
+    printf("TSC at %llu MHz\n", (unsigned long long)(handoff->tsc_hz / 1000000));
 
     struct cpu *bsp = cpu_area_alloc(0, 0, true);
     switch_stack(cpu_stack_top(bsp), bsp_main, handoff);
