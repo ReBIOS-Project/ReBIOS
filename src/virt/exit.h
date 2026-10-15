@@ -1,0 +1,39 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This file is part of ReBIOS.
+// Copyright (C) 2026 Mintsuki and contributors
+//
+// ReBIOS is free software: you can redistribute it and/or modify it under the
+// terms of the GNU General Public License as published by the Free Software
+// Foundation, either version 3 of the License, or (at your option) any later
+// version.
+//
+// ReBIOS is distributed in the hope that it will be useful, but WITHOUT ANY
+// WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+// FOR A PARTICULAR PURPOSE. See the GNU General Public License for more
+// details.
+//
+// You should have received a copy of the GNU General Public License along
+// with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
+
+#ifndef VIRT__EXIT_H
+#define VIRT__EXIT_H
+
+#include <stdint.h>
+#include <stdbool.h>
+#include <virt/vcpu.h>
+
+// Vendor-independent handling of the exits both backends share. The handlers
+// that complete the guest's instruction advance its RIP themselves.
+void exit_cpuid(struct vcpu *v);
+void exit_hypercall(struct vcpu *v);
+void exit_rdmsr(struct vcpu *v);
+void exit_wrmsr(struct vcpu *v);
+void exit_xsetbv(struct vcpu *v);
+
+// An I/O port access the bitmaps trap. value is in and out.
+void exit_io(struct vcpu *v, uint16_t port, unsigned size, bool in, uint32_t *value);
+
+__attribute__((noreturn)) void system_reset(void);
+
+#endif
