@@ -16,6 +16,7 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdint.h>
 #include <stdbool.h>
 #include <efi.h>
 #include <loader/efi_glue.h>
@@ -25,3 +26,13 @@ EFI_SYSTEM_TABLE *efi_st;
 EFI_BOOT_SERVICES *efi_bs;
 EFI_RUNTIME_SERVICES *efi_rt;
 bool efi_boot_services_exited;
+
+uint64_t efi_alloc_pages(uint64_t count, uint64_t max_addr) {
+    EFI_PHYSICAL_ADDRESS addr = max_addr;
+    EFI_ALLOCATE_TYPE type = max_addr == 0 ? EfiAllocateAnyPages : EfiAllocateMaxAddress;
+
+    if (efi_bs->AllocatePages(type, EfiLoaderData, count, &addr) != EFI_SUCCESS) {
+        return 0;
+    }
+    return addr;
+}

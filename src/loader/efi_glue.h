@@ -19,6 +19,7 @@
 #ifndef LOADER__EFI_GLUE_H
 #define LOADER__EFI_GLUE_H
 
+#include <stdint.h>
 #include <stdbool.h>
 #include <efi.h>
 
@@ -27,5 +28,8 @@ extern EFI_SYSTEM_TABLE *efi_st;
 extern EFI_BOOT_SERVICES *efi_bs;
 extern EFI_RUNTIME_SERVICES *efi_rt;
 extern bool efi_boot_services_exited;
+
+// Returns 0 on failure. max_addr is inclusive; 0 means anywhere.
+uint64_t efi_alloc_pages(uint64_t count, uint64_t max_addr);
 
 #endif
