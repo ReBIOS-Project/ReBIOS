@@ -25,6 +25,7 @@
 #include <sys/mm.h>
 #include <virt/gpt.h>
 #include <virt/insn.h>
+#include <virt/irq.h>
 #include <virt/vcpu.h>
 #include <virt/vioapic.h>
 
@@ -64,6 +65,17 @@ void vioapic_init(void) {
     gpt_flush();
 }
 
+bool vioapic_rte(uint32_t gsi, uint64_t *rte) {
+    for (uint32_t i = 0; i < count; i++) {
+        struct ioapic *io = vioapics[i].host;
+        if (gsi >= io->gsi_base && gsi - io->gsi_base < io->pins) {
+            *rte = __atomic_load_n(&vioapics[i].rtes[gsi - io->gsi_base], __ATOMIC_ACQUIRE);
+            return true;
+        }
+    }
+    return false;
+}
+
 static struct vioapic *find(uint64_t gpa) {
     for (uint32_t i = 0; i < count; i++) {
         if ((gpa & ~(uint64_t)(PAGE_SIZE - 1)) == vioapics[i].host->base) {
@@ -97,8 +109,12 @@ static uint32_t index_read(struct vioapic *vio, uint32_t index) {
     if (index & 1) {
         return (uint32_t)(rte >> 32);
     }
-    // What the host's entry reports of its interrupt.
-    uint64_t status = ioapic_rte_read(io, pin) & (IOAPIC_RTE_PENDING | IOAPIC_RTE_REMOTE_IRR);
+    // What the host's entry reports of its interrupt, where it is the
+    // guest's.
+    uint64_t status = 0;
+    if (!(rte & IOAPIC_RTE_MASKED)) {
+        status = ioapic_rte_read(io, pin) & (IOAPIC_RTE_PENDING | IOAPIC_RTE_REMOTE_IRR);
+    }
     return (uint32_t)(rte | status);
 }
 
@@ -119,8 +135,8 @@ static void index_write(struct vioapic *vio, uint32_t index, uint32_t value) {
         rte = (rte & ~0xffffffffull) | value;
     }
     rte &= RTE_WRITABLE;
-    vio->rtes[pin] = rte;
-    ioapic_rte_write(io, pin, rte);
+    __atomic_store_n(&vio->rtes[pin], rte, __ATOMIC_RELEASE);
+    irq_gsi_changed(io->gsi_base + pin);
 }
 
 static uint32_t reg_read(struct vioapic *vio, uint32_t offset) {

@@ -49,9 +49,16 @@ uint32_t lapic_cpu_apic_id(void);
 void lapic_send_ipi(uint32_t dest, uint32_t command);
 
 // The highest vector in service at the calling processor's local APIC, or 0,
-// and whether a vector is.
+// and whether a vector is, or is requested.
 uint8_t lapic_highest_isr(void);
 bool lapic_in_service(uint8_t vector);
+bool lapic_requested(uint8_t vector);
+
+void lapic_eoi(void);
+
+// Whether the calling processor takes the 8259's interrupts: its local APIC
+// globally disabled, or LINT0 an unmasked ExtINT entry.
+bool lapic_extint_open(void);
 
 // Puts the calling processor's local APIC in xAPIC mode, as a legacy BIOS
 // hands it over, unless the processor keeps it in x2APIC mode.

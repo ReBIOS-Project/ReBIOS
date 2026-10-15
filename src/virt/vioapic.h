@@ -30,4 +30,8 @@ void vioapic_init(void);
 // An access to an I/O APIC's page. Returns false if gpa is not in one.
 bool vioapic_access(struct vcpu *v, uint64_t gpa);
 
+// The guest's redirection entry for a GSI. Returns false if no I/O APIC has
+// it.
+bool vioapic_rte(uint32_t gsi, uint64_t *rte);
+
 #endif

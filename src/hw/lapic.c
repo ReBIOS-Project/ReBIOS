@@ -43,6 +43,7 @@
 #define APIC_DFR 0xe0
 #define APIC_SVR 0xf0
 #define APIC_ISR 0x100
+#define APIC_IRR 0x200
 #define APIC_ESR 0x280
 #define APIC_LVT_CMCI 0x2f0
 #define APIC_ICR_LOW 0x300
@@ -57,6 +58,8 @@
 #define APIC_TIMER_DIVIDE 0x3e0
 
 #define LVT_MASKED (1u << 16)
+#define LVT_DELIVERY_MASK (7u << 8)
+#define LVT_DELIVERY_EXTINT (7u << 8)
 // CMCI has an LVT entry where the version register's maximum entry is this
 // or more.
 #define LVT_CMCI_MIN_MAX_ENTRY 6
@@ -151,6 +154,23 @@ uint8_t lapic_highest_isr(void) {
 
 bool lapic_in_service(uint8_t vector) {
     return (lapic_read(APIC_ISR + (uint32_t)(vector / 32) * 0x10) >> (vector % 32)) & 1;
+}
+
+bool lapic_requested(uint8_t vector) {
+    return (lapic_read(APIC_IRR + (uint32_t)(vector / 32) * 0x10) >> (vector % 32)) & 1;
+}
+
+void lapic_eoi(void) {
+    lapic_write(APIC_EOI, 0);
+}
+
+bool lapic_extint_open(void) {
+    if (!(rdmsr(MSR_IA32_APIC_BASE) & APIC_BASE_EN)) {
+        return true;
+    }
+    // A software disabled local APIC holds every LVT entry masked.
+    uint32_t lvt = lapic_read(APIC_LVT_LINT0);
+    return !(lvt & LVT_MASKED) && (lvt & LVT_DELIVERY_MASK) == LVT_DELIVERY_EXTINT;
 }
 
 void lapic_xapic_mode(void) {

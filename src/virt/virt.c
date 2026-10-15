@@ -29,6 +29,7 @@
 #include <virt/event.h>
 #include <virt/gpt.h>
 #include <virt/insn.h>
+#include <virt/irq.h>
 #include <virt/svm.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>
@@ -196,6 +197,7 @@ void vcpu_before_entry(struct vcpu *v) {
             v->vmcb->control.tlb_control = 1;
         }
     }
+    irq_before_entry(v);
     event_entry(v);
 }
 

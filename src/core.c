@@ -31,6 +31,7 @@
 #include <sys/mm.h>
 #include <sys/smp.h>
 #include <sys/x86.h>
+#include <virt/irq.h>
 #include <virt/layout.h>
 #include <virt/vapic.h>
 #include <virt/vcpu.h>
@@ -58,6 +59,7 @@ static void bsp_main(void *arg) {
     vapic_init();
     ioapic_init();
     vioapic_init();
+    irq_init();
 
     struct vcpu *v = vcpu_create(cpu);
     csm_boot_start(v);

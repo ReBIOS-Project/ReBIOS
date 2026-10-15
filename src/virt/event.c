@@ -23,6 +23,7 @@
 #include <sys/cpu.h>
 #include <sys/x86.h>
 #include <virt/event.h>
+#include <virt/irq.h>
 #include <virt/svm.h>
 #include <virt/vcpu.h>
 #include <virt/vmx.h>
@@ -167,6 +168,10 @@ void event_intr_exiting(struct vcpu *v, bool on) {
 }
 
 void event_interrupt(uint8_t vector) {
+    if (irq_host_vector(vector)) {
+        irq_host_interrupt(vector);
+        return;
+    }
     struct vcpu *v = this_cpu()->vcpu;
     v->taken[vector / 64] |= 1ull << (vector % 64);
 }
@@ -207,23 +212,28 @@ static void interrupt_window(struct vcpu *v, bool on) {
 }
 
 static bool interrupt_pending(struct vcpu *v) {
-    return highest_taken(v) >= 0;
+    return highest_taken(v) >= 0 || irq_extint_pending(v);
 }
 
 static void deliver_interrupt(struct vcpu *v) {
     int vector = highest_taken(v);
-    if (vector < 0) {
+    if (vector < 0 && !irq_extint_pending(v)) {
         interrupt_window(v, false);
         return;
     }
     // One the guest took before, and has yet to EOI, outranks it, unless the
     // local APIC did not take it, as with an 8259's.
     if (!interruptible(v)
-        || (lapic_in_service((uint8_t)vector) && lapic_highest_isr() > vector)) {
+        || (vector >= 0 && lapic_in_service((uint8_t)vector) && lapic_highest_isr() > vector)) {
         interrupt_window(v, true);
         return;
     }
-    v->taken[vector / 64] &= ~(1ull << (vector % 64));
+    if (vector >= 0) {
+        v->taken[vector / 64] &= ~(1ull << (vector % 64));
+    } else {
+        // The 8259 answers the acknowledge only now, when the guest takes it.
+        vector = irq_extint_acknowledge();
+    }
     inject(v, EVENT_VALID | EVENT_TYPE_EXTERNAL | (uint32_t)vector, 0);
     interrupt_window(v, interrupt_pending(v));
 }
