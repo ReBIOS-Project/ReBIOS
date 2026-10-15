@@ -50,8 +50,13 @@ static uint64_t ept_vpid_cap;
 static uint64_t vmx_misc;
 static uint64_t cr0_fixed0, cr0_fixed1, cr4_fixed0, cr4_fixed1;
 
+#define VMX_ENTER_FAILED 1
+#define VMX_ENTER_KICKED 2
+
 int vmx_enter(struct gprs *gprs, int launched);
 void vmx_exit_entry(void);
+extern const uint8_t vmx_enter_restart[];
+extern const uint8_t vmx_enter_restart_end[];
 
 uint64_t vmx_read(uint32_t field) {
     uint64_t value;
@@ -138,6 +143,8 @@ bool vmx_supported(void) {
         return false;
     }
 
+    cpu_nmi_restart((uint64_t)(uintptr_t)vmx_enter_restart,
+                    (uint64_t)(uintptr_t)vmx_enter_restart_end);
     return true;
 }
 
@@ -596,8 +603,14 @@ void vmx_run(struct vcpu *v) {
     asm volatile ("vmptrld %0" :: "m"(v->vmcs_pa) : "cc", "memory");
 
     for (;;) {
-        event_entry(v);
-        if (vmx_enter(&v->gprs, v->vmx_launched) != 0) {
+        __atomic_store_n(&v->cpu->kicked, false, __ATOMIC_SEQ_CST);
+        vcpu_before_entry(v);
+        int result = vmx_enter(&v->gprs, v->vmx_launched);
+        if (result == VMX_ENTER_KICKED) {
+            event_cancel(v);
+            continue;
+        }
+        if (result == VMX_ENTER_FAILED) {
             uint64_t error = vmx_read(VMCS_VM_INSTR_ERROR);
             printf("VM%s failed, VM-instruction error %llu\n",
                    v->vmx_launched ? "RESUME" : "LAUNCH", (unsigned long long)error);

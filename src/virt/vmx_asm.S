@@ -16,6 +16,8 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <sys/cpu.h>
+
 /* Offsets into struct gprs. */
 #define GPR_RAX 0
 #define GPR_RCX 8
@@ -40,8 +42,8 @@
     /*
      * int vmx_enter(struct gprs *gprs, int launched)
      *
-     * Returns 0 after a VM exit, with the guest's registers in *gprs, or 1 if
-     * the VM entry failed.
+     * Returns 0 after a VM exit, with the guest's registers in *gprs, 1 if the
+     * VM entry failed, or 2 if an NMI reached the host before it.
      */
     .globl vmx_enter
     .type vmx_enter, @function
@@ -52,13 +54,25 @@ vmx_enter:
     pushq %r13
     pushq %r14
     pushq %r15
+    pushq %rsi
     /* Where vmx_exit_entry finds it, at the host RSP. */
     pushq %rdi
     movq $VMCS_HOST_RSP, %rax
     vmwrite %rsp, %rax
 
+    /*
+     * The host's NMI handler restarts an NMI that arrives from here to the
+     * VM entry here, as the kick it may be would be left unseen otherwise.
+     */
+    .globl vmx_enter_restart
+vmx_enter_restart:
+    movq %rsp, %rax
+    andq $-CPU_AREA_SIZE, %rax
+    cmpb $0, CPU_KICKED(%rax)
+    jne 3f
+    movq (%rsp), %rdi
     /* The moves below leave the flags alone. */
-    testl %esi, %esi
+    cmpl $0, 8(%rsp)
 
     movq GPR_RAX(%rdi), %rax
     movq GPR_RCX(%rdi), %rcx
@@ -76,20 +90,26 @@ vmx_enter:
     movq GPR_R15(%rdi), %r15
     movq GPR_RDI(%rdi), %rdi
 
-    jnz 1f
+    jne 1f
     vmlaunch
     jmp 2f
 1:
     vmresume
+    .globl vmx_enter_restart_end
+vmx_enter_restart_end:
 2:
-    addq $8, %rsp
+    movl $1, %eax
+    jmp 4f
+3:
+    movl $2, %eax
+4:
+    addq $16, %rsp
     popq %r15
     popq %r14
     popq %r13
     popq %r12
     popq %rbx
     popq %rbp
-    movl $1, %eax
     ret
     .size vmx_enter, . - vmx_enter
 
@@ -114,7 +134,7 @@ vmx_exit_entry:
     movq %r15, GPR_R15(%rdi)
     popq %rax
     movq %rax, GPR_RDI(%rdi)
-    addq $8, %rsp
+    addq $16, %rsp
     popq %r15
     popq %r14
     popq %r13

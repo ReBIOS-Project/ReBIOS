@@ -17,6 +17,7 @@
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
 #include <stdint.h>
+#include <stddef.h>
 #include <stdbool.h>
 #include <memory.h>
 #include <lib/log.h>
@@ -79,10 +80,28 @@ uint64_t fixup_find(uint64_t rip) {
     return 0;
 }
 
+_Static_assert(offsetof(struct cpu, kicked) == CPU_KICKED, "CPU_KICKED is out of date");
+
+static uint64_t nmi_restart_start;
+static uint64_t nmi_restart_end;
+
+void cpu_nmi_restart(uint64_t start, uint64_t end) {
+    nmi_restart_start = start;
+    nmi_restart_end = end;
+}
+
 void exception_handler(struct exception_frame *frame) {
     if (frame->vector == 2) {
-        // An NMI meant for the guest, which arrived while the host ran.
-        this_cpu()->nmi_pending = true;
+        struct cpu *cpu = this_cpu();
+        // A kick, or else an NMI meant for the guest, which arrived while the
+        // host ran.
+        if (!__atomic_exchange_n(&cpu->kick, false, __ATOMIC_ACQ_REL)) {
+            cpu->nmi_pending = true;
+        }
+        cpu->kicked = true;
+        if (frame->rip >= nmi_restart_start && frame->rip < nmi_restart_end) {
+            frame->rip = nmi_restart_start;
+        }
         return;
     }
     if (frame->vector == 30) {

@@ -125,15 +125,18 @@ void lapic_send_ipi(uint32_t dest, uint32_t command) {
         }
         cpu_relax();
     }
+    // The guest may be between its writes to the two halves.
+    uint32_t guest_high = *xapic_reg(APIC_ICR_HIGH);
     *xapic_reg(APIC_ICR_HIGH) = dest << 24;
     *xapic_reg(APIC_ICR_LOW) = command;
     while (*xapic_reg(APIC_ICR_LOW) & ICR_PENDING) {
         if (time_ns() > deadline) {
             printf("Local APIC %#x: IPI %#x not taken\n", lapic_cpu_apic_id(), command);
-            return;
+            break;
         }
         cpu_relax();
     }
+    *xapic_reg(APIC_ICR_HIGH) = guest_high;
 }
 
 void lapic_xapic_mode(void) {

@@ -19,9 +19,6 @@
 #ifndef SYS__CPU_H
 #define SYS__CPU_H
 
-#include <stdint.h>
-#include <stdbool.h>
-
 #define GDT_CODE 0x08
 #define GDT_DATA 0x10
 #define GDT_TSS 0x18
@@ -33,6 +30,14 @@
 #define CPU_IST_NMI_TOP 0x2000
 #define CPU_IST_DF_TOP 0x3000
 #define CPU_IST_MC_TOP 0x4000
+
+// The offset of struct cpu's kicked.
+#define CPU_KICKED 9
+
+#ifndef __ASSEMBLER__
+
+#include <stdint.h>
+#include <stdbool.h>
 
 struct tss64 {
     uint32_t reserved0;
@@ -50,10 +55,15 @@ struct cpu {
     uint32_t index;
     uint32_t apic_id;
     bool bsp;
+    // Whether an NMI reached the host since the vCPU loop last looked, which
+    // it must look again for before it enters the guest.
+    volatile bool kicked;
     uint64_t gdt[5];
     struct tss64 tss;
     struct vcpu *vcpu;
     volatile bool online;
+    // Whether a kick's NMI is on its way, so that the NMI is not the guest's.
+    volatile bool kick;
     volatile bool nmi_pending;
     // An INIT that SVM redirected while the host ran.
     volatile bool init_pending;
@@ -74,5 +84,10 @@ uint64_t cpu_stack_top(struct cpu *cpu);
 
 // Runs fn on the given stack, never returning.
 __attribute__((noreturn)) void switch_stack(uint64_t stack_top, void (*fn)(void *), void *arg);
+
+// Code an NMI that reaches the host restarts from start, if it interrupts it.
+void cpu_nmi_restart(uint64_t start, uint64_t end);
+
+#endif
 
 #endif

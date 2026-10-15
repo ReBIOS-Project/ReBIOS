@@ -232,17 +232,8 @@ static void svm_handle_exit(struct vcpu *v) {
 
 void svm_run(struct vcpu *v) {
     for (;;) {
-        if (__atomic_exchange_n(&v->cpu->init_pending, false, __ATOMIC_ACQUIRE)) {
-            vcpu_init_signal(v);
-        }
+        vcpu_before_entry(v);
         v->vmcb->save.rax = v->gprs.rax;
-        uint64_t generation = __atomic_load_n(&gpt_generation, __ATOMIC_ACQUIRE);
-        if (v->gpt_generation != generation) {
-            // Every ASID, as not every processor flushes by ASID.
-            v->vmcb->control.tlb_control = 1;
-            v->gpt_generation = generation;
-        }
-        event_entry(v);
         svm_enter(v->vmcb_pa, &v->gprs);
         v->gprs.rax = v->vmcb->save.rax;
         v->vmcb->control.tlb_control = 0;

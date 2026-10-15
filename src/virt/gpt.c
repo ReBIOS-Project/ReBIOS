@@ -22,8 +22,10 @@
 #include <lib/log.h>
 #include <lib/spinlock.h>
 #include <sys/mm.h>
+#include <sys/smp.h>
 #include <sys/x86.h>
 #include <virt/gpt.h>
+#include <virt/vcpu.h>
 
 #define ENTRY_ADDR_MASK 0x000ffffffffff000ull
 
@@ -246,12 +248,7 @@ bool gpt_translate(uint64_t gpa, uint64_t *hpa, uint32_t *prot) {
 
 void gpt_flush(void) {
     __atomic_add_fetch(&gpt_generation, 1, __ATOMIC_SEQ_CST);
-    if (use_ept) {
-        struct {
-            uint64_t eptp;
-            uint64_t reserved;
-        } desc = {0, 0};
-        // All-context invalidation, type 2.
-        asm volatile ("invept %0, %1" :: "m"(desc), "r"(2ull) : "memory", "cc");
+    for (uint32_t i = 0; i < smp_cpu_count(); i++) {
+        vcpu_kick(smp_cpu(i));
     }
 }

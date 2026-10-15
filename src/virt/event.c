@@ -75,7 +75,21 @@ void event_exit(struct vcpu *v) {
 }
 
 void event_nmi(struct vcpu *v) {
-    v->nmi_pending = true;
+    if (!__atomic_exchange_n(&v->cpu->kick, false, __ATOMIC_ACQ_REL)) {
+        v->nmi_pending = true;
+    }
+}
+
+void event_cancel(struct vcpu *v) {
+    uint32_t info = (uint32_t)vmx_read(VMCS_ENTRY_INTR_INFO);
+    if (!(info & INTR_INFO_VALID)) {
+        return;
+    }
+    v->redeliver = info;
+    if (info & INTR_INFO_ERROR_CODE) {
+        v->redeliver_error = (uint32_t)vmx_read(VMCS_ENTRY_EXCEPTION_ERROR);
+    }
+    vmx_write(VMCS_ENTRY_INTR_INFO, 0);
 }
 
 bool event_cut_short(struct vcpu *v) {

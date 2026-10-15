@@ -101,9 +101,9 @@ struct vcpu {
     uint64_t cr0_shadow;
     uint64_t cr4_shadow;
 
-    // Where the processor cannot wait for start-up IPIs in the guest: whether
-    // the vCPU waits for one in the hypervisor, VCPU_SIPI_WAITING, or runs,
-    // VCPU_SIPI_RUNNING, or else the vector of the one passed on to it.
+    // Whether the vCPU waits for a start-up IPI, VCPU_SIPI_WAITING, or runs,
+    // VCPU_SIPI_RUNNING, or else, where the processor cannot wait for one in
+    // the guest, the vector of the one passed on to it.
     volatile int32_t sipi;
 
     // The legacy BIOS's 32-bit flat mode, and the mode its 16-bit code was in
@@ -117,6 +117,14 @@ extern bool virt_vmx;
 
 struct vcpu *vcpu_create(struct cpu *cpu);
 __attribute__((noreturn)) void vcpu_run(struct vcpu *v);
+
+// Catches up with what changed while the vCPU was out of the guest, and sets
+// up what it gets on entering it.
+void vcpu_before_entry(struct vcpu *v);
+
+// Makes the CPU's vCPU leave the guest, if it runs it, for vcpu_before_entry()
+// to see what changed.
+void vcpu_kick(struct cpu *cpu);
 
 uint64_t vcpu_rip(struct vcpu *v);
 void vcpu_set_rip(struct vcpu *v, uint64_t rip);

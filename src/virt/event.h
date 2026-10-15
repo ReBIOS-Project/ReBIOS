@@ -29,8 +29,11 @@ void event_exit(struct vcpu *v);
 // Sets up what the guest gets on the coming entry, after the exit is handled.
 void event_entry(struct vcpu *v);
 
-// An NMI the processor took for the guest.
+// An NMI that made the guest exit: a kick, or one for the guest.
 void event_nmi(struct vcpu *v);
+
+// Takes back what event_entry() set up, for an entry that did not happen.
+void event_cancel(struct vcpu *v);
 
 // Whether the exit cut an event's delivery short, so that what it reports
 // happened delivering the event rather than running an instruction.

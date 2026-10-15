@@ -26,6 +26,7 @@
 #include <sys/mm.h>
 #include <sys/smp.h>
 #include <sys/x86.h>
+#include <virt/event.h>
 #include <virt/gpt.h>
 #include <virt/insn.h>
 #include <virt/svm.h>
@@ -173,6 +174,45 @@ struct vcpu *vcpu_create(struct cpu *cpu) {
         svm_vcpu_init(v);
     }
     return v;
+}
+
+void vcpu_before_entry(struct vcpu *v) {
+    if (__atomic_exchange_n(&v->cpu->init_pending, false, __ATOMIC_ACQUIRE)) {
+        vcpu_init_signal(v);
+    }
+    uint64_t generation = __atomic_load_n(&gpt_generation, __ATOMIC_ACQUIRE);
+    if (v->gpt_generation != generation) {
+        v->gpt_generation = generation;
+        if (virt_vmx) {
+            struct {
+                uint64_t eptp;
+                uint64_t reserved;
+            } desc = {0, 0};
+            // All-context invalidation, type 2.
+            asm volatile ("invept %0, %1" :: "m"(desc), "r"(2ull) : "memory", "cc");
+        } else {
+            // Every ASID, as not every processor flushes by ASID.
+            v->vmcb->control.tlb_control = 1;
+        }
+    }
+    event_entry(v);
+}
+
+void vcpu_kick(struct cpu *cpu) {
+    if (cpu == this_cpu() || !__atomic_load_n(&cpu->online, __ATOMIC_ACQUIRE)) {
+        return;
+    }
+    // One waiting for a start-up IPI catches up before it enters the guest
+    // again, and nested KVM livelocks on an NMI for it.
+    struct vcpu *v = cpu->vcpu;
+    if (v == NULL || __atomic_load_n(&v->sipi, __ATOMIC_ACQUIRE) == VCPU_SIPI_WAITING) {
+        return;
+    }
+    // An NMI already on its way does for this kick too, and a second would be
+    // taken for the guest's.
+    if (!__atomic_exchange_n(&cpu->kick, true, __ATOMIC_ACQ_REL)) {
+        lapic_send_ipi(cpu->apic_id, ICR_DELIVERY_NMI);
+    }
 }
 
 void vcpu_run(struct vcpu *v) {
@@ -408,18 +448,17 @@ void vcpu_inject_exception(struct vcpu *v, uint8_t vector, bool has_error, uint3
 
 void vcpu_wait_for_sipi(struct vcpu *v) {
     vcpu_set_real_mode(v, 0, 0);
+    __atomic_store_n(&v->sipi, VCPU_SIPI_WAITING, __ATOMIC_RELEASE);
     if (virt_sipi_in_guest()) {
         vmx_write(VMCS_GUEST_ACTIVITY_STATE, ACTIVITY_WAIT_SIPI);
         return;
     }
     // Otherwise the processor waits here for the hypervisor to pass the
     // guest's start-up IPI on.
-    __atomic_store_n(&v->sipi, VCPU_SIPI_WAITING, __ATOMIC_RELEASE);
     int32_t vector;
     while ((vector = __atomic_load_n(&v->sipi, __ATOMIC_ACQUIRE)) < 0) {
         cpu_relax();
     }
-    __atomic_store_n(&v->sipi, VCPU_SIPI_RUNNING, __ATOMIC_RELAXED);
     vcpu_startup(v, (uint8_t)vector);
 }
 
@@ -434,6 +473,7 @@ void vcpu_init_signal(struct vcpu *v) {
 }
 
 void vcpu_startup(struct vcpu *v, uint8_t vector) {
+    __atomic_store_n(&v->sipi, VCPU_SIPI_RUNNING, __ATOMIC_RELEASE);
     if (!smp_guest_cpu(v->cpu->apic_id)) {
         vcpu_wait_for_sipi(v);
         return;

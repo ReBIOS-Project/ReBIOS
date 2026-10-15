@@ -66,7 +66,8 @@ static void deliver(struct cpu *cpu, uint32_t command) {
         return;
     }
     if (__atomic_load_n(&cpu->vcpu->sipi, __ATOMIC_ACQUIRE) == VCPU_SIPI_RUNNING) {
-        printf("An INIT for running processor %#x, which it does not take yet\n", cpu->apic_id);
+        __atomic_store_n(&cpu->init_pending, true, __ATOMIC_RELEASE);
+        vcpu_kick(cpu);
     }
 }
 
