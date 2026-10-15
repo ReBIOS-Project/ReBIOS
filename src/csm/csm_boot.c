@@ -29,6 +29,7 @@
 #include <hw/ioapic.h>
 #include <hw/lapic_legacy.h>
 #include <hw/pci_cfg.h>
+#include <iommu/dma.h>
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <sys/mm.h>
@@ -236,6 +237,7 @@ static void next_rom(struct vcpu *v) {
 
 void csm_boot_returned(struct vcpu *v) {
     uint16_t status = (uint16_t)v->gprs.rsi;
+    dma_report_faults();
 
     switch (csm.stage) {
         case STAGE_INITIALIZE: {

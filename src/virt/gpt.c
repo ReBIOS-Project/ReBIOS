@@ -18,6 +18,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <iommu/dma.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
 #include <sys/mm.h>
@@ -198,6 +199,8 @@ static uint64_t *table_for(uint64_t gpa, int level) {
 }
 
 void gpt_map(uint64_t gpa, uint64_t hpa, uint64_t size, uint32_t prot, uint8_t memtype) {
+    dma_map(gpa, hpa, size, prot);
+
     spinlock_acquire(&gpt_lock);
 
     while (size != 0) {

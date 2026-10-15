@@ -24,6 +24,7 @@
 #include <handoff.h>
 #include <hw/acpi.h>
 #include <hw/pci_cfg.h>
+#include <iommu/dma.h>
 #include <lib/log.h>
 #include <lib/time.h>
 #include <sys/cpu.h>
@@ -82,6 +83,7 @@ static void bsp_main(void *arg) {
 
     acpi_init();
     pci_cfg_init();
+    dma_init();
 
     if (!virt_init()) {
         panic("Neither VMX nor SVM is usable on this processor\n");
@@ -93,6 +95,7 @@ static void bsp_main(void *arg) {
 
     struct vcpu *v = vcpu_create(cpu);
     csm_boot_start(v);
+    dma_enable();
     vcpu_run(v);
 }
 

@@ -43,7 +43,8 @@
 void gpt_init(bool ept, bool huge_pages);
 uint64_t gpt_root(void);
 
-// size and both addresses must be page aligned. prot 0 unmaps.
+// size and both addresses must be page aligned. prot 0 unmaps. The IOMMU
+// mirrors the mapping, so that device DMA sees the same memory.
 void gpt_map(uint64_t gpa, uint64_t hpa, uint64_t size, uint32_t prot, uint8_t memtype);
 
 // Returns false if gpa is unmapped.
