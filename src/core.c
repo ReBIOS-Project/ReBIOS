@@ -18,7 +18,6 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <efi.h>
 #include <core.h>
 #include <csm/csm_boot.h>
 #include <handoff.h>
@@ -30,55 +29,14 @@
 #include <sys/cpu.h>
 #include <sys/mm.h>
 #include <sys/x86.h>
-#include <virt/gpt.h>
+#include <virt/layout.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>
 
 struct handoff *core_handoff;
 
-static bool efi_type_is_ram(uint32_t type) {
-    switch (type) {
-        case EfiLoaderCode:
-        case EfiLoaderData:
-        case EfiBootServicesCode:
-        case EfiBootServicesData:
-        case EfiRuntimeServicesCode:
-        case EfiRuntimeServicesData:
-        case EfiConventionalMemory:
-        case EfiACPIReclaimMemory:
-        case EfiACPIMemoryNVS:
-        case EfiPersistentMemory: {
-            return true;
-        }
-        default: {
-            return false;
-        }
-    }
-}
-
-// Everything is mapped one to one, uncached unless the memory map says it is
-// RAM, except the hypervisor's own memory.
-static void guest_memory_setup(struct handoff *handoff) {
-    gpt_map(0, 0, handoff->map_top, GPT_RWX, MT_UC);
-
-    for (uint64_t off = 0; off + handoff->efi_mmap_desc_size <= handoff->efi_mmap_size;
-         off += handoff->efi_mmap_desc_size) {
-        EFI_MEMORY_DESCRIPTOR *desc = (EFI_MEMORY_DESCRIPTOR *)(uintptr_t)(handoff->efi_mmap + off);
-        bool ram = efi_type_is_ram(desc->Type)
-                   || (desc->Type == EfiReservedMemoryType && (desc->Attribute & EFI_MEMORY_WB));
-        if (ram) {
-            gpt_map(desc->PhysicalStart, desc->PhysicalStart, desc->NumberOfPages * PAGE_SIZE,
-                    GPT_RWX, MT_WB);
-        }
-    }
-
-    for (uint32_t i = 0; i < handoff->reserved_count; i++) {
-        gpt_map(handoff->reserved[i].base, 0, handoff->reserved[i].size, 0, 0);
-    }
-}
-
 static void bsp_main(void *arg) {
-    struct handoff *handoff = arg;
+    (void)arg;
     struct cpu *cpu = this_cpu();
 
     acpi_init();
@@ -91,7 +49,7 @@ static void bsp_main(void *arg) {
     cpu_tables_load(cpu, virt_vmx);
     virt_cpu_init();
 
-    guest_memory_setup(handoff);
+    layout_init();
 
     struct vcpu *v = vcpu_create(cpu);
     csm_boot_start(v);

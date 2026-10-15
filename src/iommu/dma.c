@@ -31,6 +31,7 @@
 #define ENTRY_ADDR_MASK 0x000ffffffffff000ull
 // What 4-level tables translate.
 #define DMA_ADDRESS_LIMIT (1ull << 48)
+#define LEGACY_END 0x100000ull
 
 // VT-d second-stage paging entries.
 #define VTD_R (1ull << 0)
@@ -189,7 +190,8 @@ void dma_map(uint64_t gpa, uint64_t hpa, uint64_t size, uint32_t prot) {
 }
 
 // One domain serves every device, so memory the firmware needs mapped for some
-// devices is mapped for all, one to one, as the guest has it too.
+// devices is mapped for all, one to one, as the guest has it too, but for the
+// first MiB, the guest's own memory.
 static void reserved_regions_apply(const struct iommu_tables *tables) {
     for (uint32_t i = 0; i < tables->reserved_count; i++) {
         const struct iommu_reserved_region *r = &tables->reserved[i];
@@ -200,6 +202,12 @@ static void reserved_regions_apply(const struct iommu_tables *tables) {
         }
         uint64_t base = r->base & ~(uint64_t)(PAGE_SIZE - 1);
         uint64_t last = r->last | (PAGE_SIZE - 1);
+        if (last < LEGACY_END) {
+            continue;
+        }
+        if (base < LEGACY_END) {
+            base = LEGACY_END;
+        }
         uint32_t prot = 0;
         if (r->exclusion || r->writable) {
             prot = GPT_R | GPT_W;
