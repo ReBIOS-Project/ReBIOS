@@ -26,6 +26,7 @@
 #include <virt/exit.h>
 #include <virt/gpt.h>
 #include <virt/guest_mem.h>
+#include <virt/vapic.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>
 #include <virt/vmx.h>
@@ -554,7 +555,8 @@ static void vmx_handle_exit(struct vcpu *v) {
         }
         case EXIT_REASON_EPT_VIOLATION: {
             uint64_t gpa = vmx_read(VMCS_GUEST_PHYS_ADDR);
-            if ((qual & EPT_QUAL_WRITE) && exit_absent_write(v, gpa)) {
+            if ((qual & EPT_QUAL_WRITE)
+                && (exit_absent_write(v, gpa) || vapic_mmio_write(v, gpa))) {
                 break;
             }
             printf("EPT violation at GPA %#llx, qualification %#llx\n", (unsigned long long)gpa,

@@ -30,6 +30,7 @@
 #include <virt/insn.h>
 #include <virt/io.h>
 #include <virt/layout.h>
+#include <virt/vapic.h>
 #include <virt/svm.h>
 #include <virt/vcpu.h>
 
@@ -191,6 +192,9 @@ void exit_rdmsr(struct vcpu *v) {
 void exit_wrmsr(struct vcpu *v) {
     uint32_t msr = (uint32_t)v->gprs.rcx;
     uint64_t value = ((uint64_t)(uint32_t)v->gprs.rdx << 32) | (uint32_t)v->gprs.rax;
+    if (vapic_msr_write(v, msr, value)) {
+        return;
+    }
 
     if (!virt_vmx && msr == MSR_EFER) {
         if (value & ~EFER_GUEST_MASK) {
