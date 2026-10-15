@@ -73,6 +73,11 @@ clone_repo_commit \
     picoefi \
     8093094c4f5c4cc543689703d1b6e0b56a99ca34
 
+clone_repo_commit \
+    https://github.com/charlesnicholson/nanoprintf.git \
+    nanoprintf \
+    bebaecbeaf430e36a2d30d31a2fed4e098388c93
+
 touch .deps-obtained
 
 printf "\nDependencies obtained successfully.\n"
