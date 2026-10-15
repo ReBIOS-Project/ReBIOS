@@ -31,6 +31,7 @@
 #include <iommu/dma.h>
 #include <lib/heap.h>
 #include <lib/log.h>
+#include <virt/guest_acpi.h>
 #include <virt/guest_mem.h>
 #include <virt/hypercall.h>
 #include <virt/layout.h>
@@ -306,6 +307,8 @@ void csm_boot_start(struct vcpu *v) {
 
     memset(layout_low(INIT_TABLE), 0, TABLES_END - INIT_TABLE);
     // The copies come before the map that shows them.
+    uint8_t rsdp[GUEST_ACPI_RSDP_SIZE];
+    bool acpi = guest_acpi_build(rsdp);
     uint16_t smbios_length;
     uint32_t smbios = smbios_copy(&smbios_length);
     uint32_t e820_count = e820_build();
@@ -320,9 +323,10 @@ void csm_boot_start(struct vcpu *v) {
     } else {
         printf("The legacy BIOS predates the hypervisor's interface\n");
     }
-    if (h->acpi_rsdp != 0 && !csm_copy_rsdp(layout_low(csm.image_base), csm.image_base, image_size,
-                                            csm.compat16, (const void *)(uintptr_t)h->acpi_rsdp)) {
+    if (acpi && !csm_copy_rsdp(layout_low(csm.image_base), csm.image_base, image_size,
+                               csm.compat16, rsdp)) {
         printf("Cannot hand the ACPI RSDP to the legacy BIOS\n");
+        acpi = false;
     }
     csm_compat16_table_checksum(csm.compat16);
 
@@ -343,7 +347,7 @@ void csm_boot_start(struct vcpu *v) {
     csm.bbs_count = csm_fill_bbs_table(layout_low(BBS_TABLE), CSM_BBS_MAX_ENTRIES,
                                        h->block_devices, h->block_device_count);
     struct csm_boot_params boot = {
-        .rsdp = (uint32_t)h->acpi_rsdp,
+        .rsdp = acpi ? csm.compat16->acpi_rsd_ptr_pointer : 0,
         .smbios_entry = smbios,
         .smbios_table_length = smbios_length,
         .bbs_table = BBS_TABLE,
