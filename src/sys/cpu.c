@@ -94,20 +94,20 @@ void exception_handler(struct exception_frame *frame) {
         }
     }
 
-    printf("\nHost exception %s (vector %llu), error code %#llx\n",
-           frame->vector < 32 ? exception_names[frame->vector] : "?",
-           (unsigned long long)frame->vector, (unsigned long long)frame->error_code);
-    printf("RIP %#llx CS %#llx RFLAGS %#llx RSP %#llx SS %#llx CR2 %#llx\n",
-           (unsigned long long)frame->rip, (unsigned long long)frame->cs,
-           (unsigned long long)frame->rflags, (unsigned long long)frame->rsp,
-           (unsigned long long)frame->ss, (unsigned long long)read_cr2());
-    printf("RAX %#llx RBX %#llx RCX %#llx RDX %#llx\n",
-           (unsigned long long)frame->rax, (unsigned long long)frame->rbx,
-           (unsigned long long)frame->rcx, (unsigned long long)frame->rdx);
-    printf("RSI %#llx RDI %#llx RBP %#llx R8 %#llx\n",
-           (unsigned long long)frame->rsi, (unsigned long long)frame->rdi,
-           (unsigned long long)frame->rbp, (unsigned long long)frame->r8);
-    panic("Unrecoverable exception in the hypervisor\n");
+    // One panic(), as the processor may hold the log's lock.
+    panic("Host exception %s (vector %llu), error code %#llx\n"
+          "RIP %#llx CS %#llx RFLAGS %#llx RSP %#llx SS %#llx CR2 %#llx\n"
+          "RAX %#llx RBX %#llx RCX %#llx RDX %#llx\n"
+          "RSI %#llx RDI %#llx RBP %#llx R8 %#llx\n",
+          frame->vector < 32 ? exception_names[frame->vector] : "?",
+          (unsigned long long)frame->vector, (unsigned long long)frame->error_code,
+          (unsigned long long)frame->rip, (unsigned long long)frame->cs,
+          (unsigned long long)frame->rflags, (unsigned long long)frame->rsp,
+          (unsigned long long)frame->ss, (unsigned long long)read_cr2(),
+          (unsigned long long)frame->rax, (unsigned long long)frame->rbx,
+          (unsigned long long)frame->rcx, (unsigned long long)frame->rdx,
+          (unsigned long long)frame->rsi, (unsigned long long)frame->rdi,
+          (unsigned long long)frame->rbp, (unsigned long long)frame->r8);
 }
 
 static void idt_set(int vector, uint64_t handler, uint8_t ist) {

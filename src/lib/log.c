@@ -24,6 +24,7 @@
 #include <hw/serial.h>
 #include <lib/log.h>
 #include <lib/printf.h>
+#include <lib/spinlock.h>
 #include <loader/efi_glue.h>
 #include <sys/x86.h>
 
@@ -31,6 +32,7 @@ static uint16_t log_serial_port;
 static bool log_console;
 static bool log_started;
 
+static struct spinlock log_lock;
 static char early_log[8192];
 static size_t early_log_len;
 static bool early_log_lost;
@@ -92,6 +94,20 @@ static void log_putc(int c, void *ctx) {
     log_emit(ctx, (char)c);
 }
 
+static void vprintf_unlocked(const char *fmt, va_list args) {
+    struct con_buffer buf;
+    buf.count = 0;
+    format(log_putc, &buf, fmt, args);
+    con_flush(&buf);
+}
+
+static void printf_unlocked(const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    vprintf_unlocked(fmt, args);
+    va_end(args);
+}
+
 static void log_start(void) {
     log_started = true;
     struct con_buffer buf;
@@ -101,7 +117,7 @@ static void log_start(void) {
     }
     con_flush(&buf);
     if (early_log_lost) {
-        printf("(log truncated)\n");
+        printf_unlocked("(log truncated)\n");
     }
 }
 
@@ -114,10 +130,9 @@ void log_init(uint16_t serial_port, uint32_t serial_baud, bool console) {
 }
 
 void vprintf(const char *fmt, va_list args) {
-    struct con_buffer buf;
-    buf.count = 0;
-    format(log_putc, &buf, fmt, args);
-    con_flush(&buf);
+    spinlock_acquire(&log_lock);
+    vprintf_unlocked(fmt, args);
+    spinlock_release(&log_lock);
 }
 
 void printf(const char *fmt, ...) {
@@ -133,10 +148,11 @@ void panic(const char *fmt, ...) {
     if (!log_started) {
         log_start();
     }
+    // Without the lock, which the panicking processor may hold.
     va_list args;
-    printf("PANIC: ");
+    printf_unlocked("PANIC: ");
     va_start(args, fmt);
-    vprintf(fmt, args);
+    vprintf_unlocked(fmt, args);
     va_end(args);
     halt_forever();
 }
