@@ -22,6 +22,7 @@
 #include <csm/csm_boot.h>
 #include <handoff.h>
 #include <hw/acpi.h>
+#include <hw/ioapic.h>
 #include <hw/pci_cfg.h>
 #include <iommu/dma.h>
 #include <lib/log.h>
@@ -33,6 +34,7 @@
 #include <virt/layout.h>
 #include <virt/vapic.h>
 #include <virt/vcpu.h>
+#include <virt/vioapic.h>
 #include <virt/virt.h>
 
 struct handoff *core_handoff;
@@ -54,6 +56,8 @@ static void bsp_main(void *arg) {
     layout_init();
     smp_start_aps();
     vapic_init();
+    ioapic_init();
+    vioapic_init();
 
     struct vcpu *v = vcpu_create(cpu);
     csm_boot_start(v);

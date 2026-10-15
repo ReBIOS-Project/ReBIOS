@@ -298,8 +298,9 @@
 
 #define EXIT_REASON_ENTRY_FAILURE (1u << 31)
 
-// EPT violation exit qualification: the access was a write.
+// EPT violation exit qualification: the access was a write, or a fetch.
 #define EPT_QUAL_WRITE (1ull << 1)
+#define EPT_QUAL_FETCH (1ull << 2)
 
 // Event injection and exit interruption information fields.
 #define INTR_INFO_VALID (1u << 31)

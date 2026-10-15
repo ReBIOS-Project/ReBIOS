@@ -25,7 +25,6 @@
 #include <csm/csm_boot.h>
 #include <csm/e820.h>
 #include <hw/intel_pit.h>
-#include <hw/ioapic.h>
 #include <hw/lapic_legacy.h>
 #include <hw/pci_cfg.h>
 #include <iommu/dma.h>
@@ -308,7 +307,6 @@ void csm_boot_start(struct vcpu *v) {
     const struct handoff *h = core_handoff;
 
     lapic_legacy_init();
-    ioapic_mask_all();
     intel_pit_ungate();
 
     uint32_t image_size = (uint32_t)(seabios_csm_end - seabios_csm);

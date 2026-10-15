@@ -30,6 +30,7 @@
 #include <virt/svm.h>
 #include <virt/vapic.h>
 #include <virt/vcpu.h>
+#include <virt/vioapic.h>
 #include <virt/virt.h>
 
 #define SVM_FEATURE_NP (1u << 0)
@@ -219,6 +220,9 @@ static void svm_handle_exit(struct vcpu *v) {
             }
             if ((c->exitinfo1 & NPF_WRITE)
                 && (exit_absent_write(v, c->exitinfo2) || vapic_mmio_write(v, c->exitinfo2))) {
+                break;
+            }
+            if (!(c->exitinfo1 & NPF_FETCH) && vioapic_access(v, c->exitinfo2)) {
                 break;
             }
             printf("Nested page fault at GPA %#llx, error code %#llx\n",

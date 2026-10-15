@@ -19,8 +19,57 @@
 #ifndef HW__IOAPIC_H
 #define HW__IOAPIC_H
 
-// Masks every redirection entry of every I/O APIC the MADT lists, as a legacy
-// BIOS hands them over, the 8259 delivering interrupts. Needs acpi_init().
-void ioapic_mask_all(void);
+#include <stdint.h>
+#include <stdbool.h>
+#include <lib/spinlock.h>
+
+#define IOAPIC_REG_ID 0x00
+#define IOAPIC_REG_VERSION 0x01
+#define IOAPIC_REG_ARBITRATION 0x02
+#define IOAPIC_REG_REDIR(n) (0x10 + 2 * (n))
+
+// Redirection table entry fields.
+#define IOAPIC_RTE_VECTOR_MASK 0xffull
+#define IOAPIC_RTE_DELIVERY_MASK (7ull << 8)
+#define IOAPIC_RTE_DELIVERY_EXTINT (7ull << 8)
+#define IOAPIC_RTE_LOGICAL (1ull << 11)
+#define IOAPIC_RTE_PENDING (1ull << 12)
+#define IOAPIC_RTE_ACTIVE_LOW (1ull << 13)
+#define IOAPIC_RTE_REMOTE_IRR (1ull << 14)
+#define IOAPIC_RTE_LEVEL (1ull << 15)
+#define IOAPIC_RTE_MASKED (1ull << 16)
+#define IOAPIC_RTE_DEST_SHIFT 56
+
+// The I/O APIC versions from which the EOI register is there.
+#define IOAPIC_VERSION_EOI 0x20
+
+struct ioapic {
+    uint64_t base;
+    uint32_t gsi_base;
+    uint32_t pins;
+    // The ID the MADT gives it.
+    uint8_t id;
+    // Its ID, version, and arbitration registers, as the firmware left them.
+    uint32_t id_reg;
+    uint32_t version;
+    uint32_t arbitration;
+    struct spinlock lock;
+};
+
+// Finds the I/O APICs the MADT lists, and masks every redirection entry, as a
+// legacy BIOS hands them over, the 8259 delivering interrupts. Needs
+// acpi_init().
+void ioapic_init(void);
+
+uint32_t ioapic_count(void);
+struct ioapic *ioapic_get(uint32_t index);
+// The I/O APIC a GSI goes to, and its pin there, or NULL.
+struct ioapic *ioapic_for_gsi(uint32_t gsi, uint32_t *pin);
+
+uint64_t ioapic_rte_read(struct ioapic *io, uint32_t pin);
+void ioapic_rte_write(struct ioapic *io, uint32_t pin, uint64_t rte);
+// An EOI for the level-triggered entries with the vector, where the I/O APIC
+// has the register for it.
+void ioapic_eoi(struct ioapic *io, uint8_t vector);
 
 #endif

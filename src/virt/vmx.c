@@ -29,6 +29,7 @@
 #include <virt/guest_mem.h>
 #include <virt/vapic.h>
 #include <virt/vcpu.h>
+#include <virt/vioapic.h>
 #include <virt/virt.h>
 #include <virt/vmx.h>
 
@@ -588,6 +589,9 @@ static void vmx_handle_exit(struct vcpu *v) {
             }
             if ((qual & EPT_QUAL_WRITE)
                 && (exit_absent_write(v, gpa) || vapic_mmio_write(v, gpa))) {
+                break;
+            }
+            if (!(qual & EPT_QUAL_FETCH) && vioapic_access(v, gpa)) {
                 break;
             }
             printf("EPT violation at GPA %#llx, qualification %#llx\n", (unsigned long long)gpa,

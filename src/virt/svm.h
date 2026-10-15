@@ -190,8 +190,9 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 #define SVM_EXIT_NPF 0x400
 #define SVM_EXIT_INVALID 0xffffffffffffffffull
 
-// Nested page fault error code: the access was a write.
+// Nested page fault error code: the access was a write, or a fetch.
 #define NPF_WRITE (1ull << 1)
+#define NPF_FETCH (1ull << 4)
 
 // Virtual interrupt control, at offset 060h.
 #define SVM_VINTR_IRQ (1ull << 8)
