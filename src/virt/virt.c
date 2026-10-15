@@ -342,9 +342,9 @@ void vcpu_load_mode(struct vcpu *v, const struct vcpu_mode *mode) {
     v->vmcb->control.interrupt_shadow = 0;
 }
 
-void vcpu_skip_instruction(struct vcpu *v) {
+void vcpu_advance(struct vcpu *v, unsigned length) {
     if (virt_vmx) {
-        vmx_write(VMCS_GUEST_RIP, vmx_read(VMCS_GUEST_RIP) + vmx_read(VMCS_EXIT_INSTR_LEN));
+        vmx_write(VMCS_GUEST_RIP, vmx_read(VMCS_GUEST_RIP) + length);
         uint64_t intr = vmx_read(VMCS_GUEST_INTERRUPTIBILITY);
         if (intr & (INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS)) {
             vmx_write(VMCS_GUEST_INTERRUPTIBILITY,
@@ -352,17 +352,25 @@ void vcpu_skip_instruction(struct vcpu *v) {
         }
         return;
     }
-    if (svm_nrips) {
-        v->vmcb->save.rip = v->vmcb->control.nrip;
-    } else {
-        unsigned len = insn_length_intercepted(v);
-        if (len == 0) {
-            panic("Cannot decode the intercepted instruction at %#llx\n",
-                  (unsigned long long)v->vmcb->save.rip);
-        }
-        v->vmcb->save.rip += len;
-    }
+    v->vmcb->save.rip += length;
     v->vmcb->control.interrupt_shadow = 0;
+}
+
+void vcpu_skip_instruction(struct vcpu *v) {
+    if (virt_vmx) {
+        vcpu_advance(v, (unsigned)vmx_read(VMCS_EXIT_INSTR_LEN));
+        return;
+    }
+    if (svm_nrips) {
+        vcpu_advance(v, (unsigned)(v->vmcb->control.nrip - v->vmcb->save.rip));
+        return;
+    }
+    unsigned len = insn_length_intercepted(v);
+    if (len == 0) {
+        panic("Cannot decode the intercepted instruction at %#llx\n",
+              (unsigned long long)v->vmcb->save.rip);
+    }
+    vcpu_advance(v, len);
 }
 
 void vcpu_inject_exception(struct vcpu *v, uint8_t vector, bool has_error, uint32_t error) {

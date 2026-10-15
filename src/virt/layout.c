@@ -41,6 +41,7 @@
 
 #define MAX_RANGES 1024
 #define MAX_TAKEN 8
+#define MAX_ABSENT 8
 
 struct range {
     uint64_t base;
@@ -76,6 +77,10 @@ static struct {
 static uint32_t taken_count;
 // Backs the guest's first 2 MiB.
 static uint8_t *low;
+static struct range absent[MAX_ABSENT];
+static uint32_t absent_count;
+// What absent memory reads as.
+static uint64_t ones_page;
 
 static uint64_t align_up(uint64_t x, uint64_t align) {
     return (x + align - 1) & ~(align - 1);
@@ -411,6 +416,9 @@ void layout_init(void) {
     for (uint32_t i = 0; i < pinned.count; i++) {
         list_remove(&free_ram, pinned.r[i].base, pinned.r[i].end);
     }
+    // The host's own legacy region is left alone, for its shadowing to be
+    // probed after the guest programs the chipset.
+    list_remove(&free_ram, VGA_BASE, ONE_MIB);
 
     // As much as the host has, from 1 MiB to the end of its memory below
     // 4 GiB, then from 4 GiB, around what must keep its address.
@@ -539,6 +547,38 @@ uint32_t layout_take(uint32_t size, uint32_t align, uint32_t e820_type) {
         return (uint32_t)base;
     }
     return 0;
+}
+
+void layout_absent(uint64_t gpa, uint64_t size) {
+    if (size == 0) {
+        return;
+    }
+    if (absent_count == MAX_ABSENT) {
+        printf("Too many absent ranges, keeping %#llx-%#llx\n", (unsigned long long)gpa,
+               (unsigned long long)(gpa + size - 1));
+        return;
+    }
+    if (ones_page == 0) {
+        uint8_t *page = page_alloc(1);
+        memset(page, 0xff, PAGE_SIZE);
+        ones_page = (uint64_t)(uintptr_t)page;
+    }
+    for (uint64_t offset = 0; offset < size; offset += PAGE_SIZE) {
+        gpt_map(gpa + offset, ones_page, PAGE_SIZE, GPT_R | GPT_X, MT_WB);
+    }
+    gpt_flush();
+    absent[absent_count].base = gpa;
+    absent[absent_count].end = gpa + size;
+    absent_count++;
+}
+
+bool layout_is_absent(uint64_t gpa) {
+    for (uint32_t i = 0; i < absent_count; i++) {
+        if (gpa >= absent[i].base && gpa < absent[i].end) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool layout_e820(struct e820_map *map) {

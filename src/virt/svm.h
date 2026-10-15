@@ -190,6 +190,9 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 #define SVM_EXIT_NPF 0x400
 #define SVM_EXIT_INVALID 0xffffffffffffffffull
 
+// Nested page fault error code: the access was a write.
+#define NPF_WRITE (1ull << 1)
+
 // Event injection.
 #define SVM_EVENT_VALID (1ull << 31)
 #define SVM_EVENT_ERROR_VALID (1ull << 11)

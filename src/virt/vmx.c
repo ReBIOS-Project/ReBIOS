@@ -539,8 +539,11 @@ static void vmx_handle_exit(struct vcpu *v) {
             break;
         }
         case EXIT_REASON_EPT_VIOLATION: {
-            printf("EPT violation at GPA %#llx, qualification %#llx\n",
-                   (unsigned long long)vmx_read(VMCS_GUEST_PHYS_ADDR),
+            uint64_t gpa = vmx_read(VMCS_GUEST_PHYS_ADDR);
+            if ((qual & EPT_QUAL_WRITE) && exit_absent_write(v, gpa)) {
+                break;
+            }
+            printf("EPT violation at GPA %#llx, qualification %#llx\n", (unsigned long long)gpa,
                    (unsigned long long)qual);
             vmx_dump_guest();
             panic("Unhandled guest-physical access\n");

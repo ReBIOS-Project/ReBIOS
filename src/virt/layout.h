@@ -40,6 +40,11 @@ void *layout_low(uint32_t gpa);
 // e820_type. Returns 0 if there is no room.
 uint32_t layout_take(uint32_t size, uint32_t align, uint32_t e820_type);
 
+// Makes [gpa, gpa + size), page aligned, read as all ones and ignore writes,
+// as addresses nothing decodes do.
+void layout_absent(uint64_t gpa, uint64_t size);
+bool layout_is_absent(uint64_t gpa);
+
 // Fills the guest's memory map.
 bool layout_e820(struct e820_map *map);
 

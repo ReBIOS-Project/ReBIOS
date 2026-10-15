@@ -184,6 +184,9 @@ static void svm_handle_exit(struct vcpu *v) {
             break;
         }
         case SVM_EXIT_NPF: {
+            if ((c->exitinfo1 & NPF_WRITE) && exit_absent_write(v, c->exitinfo2)) {
+                break;
+            }
             printf("Nested page fault at GPA %#llx, error code %#llx\n",
                    (unsigned long long)c->exitinfo2, (unsigned long long)c->exitinfo1);
             svm_dump_guest(v);

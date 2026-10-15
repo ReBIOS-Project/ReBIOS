@@ -31,6 +31,7 @@
 #include <iommu/dma.h>
 #include <lib/heap.h>
 #include <lib/log.h>
+#include <sys/mm.h>
 #include <virt/guest_acpi.h>
 #include <virt/guest_mem.h>
 #include <virt/hypercall.h>
@@ -61,6 +62,7 @@ extern const uint8_t csm_thunk_end[];
 #define LOW_PMM_BASE 0x10000
 #define LOW_PMM_SIZE 0x80000
 #define ROM_AREA_BASE 0xc0000
+#define BIOS_BASE 0xf0000
 #define ROM_AREA_END 0x100000
 #define OPTION_ROM_ALIGN 2048
 
@@ -171,6 +173,30 @@ static uint32_t smbios_copy(uint16_t *table_length) {
     return base;
 }
 
+// The upper memory no option ROM or the CSM16 uses reads as absent, as on a
+// PC whose BIOS shadows only its ROMs, for memory managers to map their own
+// there. The CSM16 marks where its data begins with an option ROM header.
+static void free_uma_absent(void) {
+    uint32_t end = csm.rom_end;
+    while (end < BIOS_BASE) {
+        const uint8_t *header = layout_low(end);
+        if (header[0] == 0x55 && header[1] == 0xaa) {
+            break;
+        }
+        end += OPTION_ROM_ALIGN;
+    }
+    if (end >= BIOS_BASE) {
+        printf("No end found to the free upper memory, keeping it as RAM\n");
+        return;
+    }
+    uint32_t start = (csm.rom_end + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+    end &= ~(PAGE_SIZE - 1);
+    if (start < end) {
+        printf("Upper memory %#x-%#x is free, and absent\n", start, end - 1);
+        layout_absent(start, end - start);
+    }
+}
+
 // Sets up the call the thunk makes next: function in AX, its table in ES:BX.
 static void csm_call(struct vcpu *v, uint16_t function, uint32_t table) {
     struct segment es = {(uint16_t)(table >> 4), 0x93, 0xffff, table & ~0xfu};
@@ -265,6 +291,7 @@ void csm_boot_returned(struct vcpu *v) {
         }
         case STAGE_PREPARE_TO_BOOT: {
             printf("Legacy BIOS ready to boot, status %#x\n", status);
+            free_uma_absent();
             csm.stage = STAGE_BOOT;
             csm_call(v, CSM_COMPAT16_BOOT, 0);
             break;

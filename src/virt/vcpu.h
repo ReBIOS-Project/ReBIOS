@@ -118,6 +118,8 @@ void vcpu_load_mode(struct vcpu *v, const struct vcpu_mode *mode);
 
 // Advances RIP past the instruction that caused the current exit.
 void vcpu_skip_instruction(struct vcpu *v);
+// Moves past length bytes of instruction, as completing it does.
+void vcpu_advance(struct vcpu *v, unsigned length);
 void vcpu_inject_exception(struct vcpu *v, uint8_t vector, bool has_error, uint32_t error);
 
 // Puts the vCPU in the state the processor has after INIT, in real mode at

@@ -37,4 +37,8 @@ void exit_io(struct vcpu *v, uint16_t port, unsigned size, bool in, uint32_t *va
 // A #UD the guest raised, which may be its VMCALL on an AMD processor.
 void exit_invalid_opcode(struct vcpu *v);
 
+// A write the guest-physical page tables did not allow. Returns false if it
+// is not to absent memory, or cannot be decoded.
+bool exit_absent_write(struct vcpu *v, uint64_t gpa);
+
 #endif
