@@ -18,8 +18,10 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <hw/lapic.h>
 #include <lib/log.h>
 #include <sys/cpu.h>
+#include <sys/x86.h>
 #include <virt/event.h>
 #include <virt/svm.h>
 #include <virt/vcpu.h>
@@ -28,6 +30,7 @@
 // The fields VMX's interruption information and SVM's events share.
 #define EVENT_VECTOR_MASK 0xffu
 #define EVENT_TYPE_MASK (7u << 8)
+#define EVENT_TYPE_EXTERNAL (0u << 8)
 #define EVENT_TYPE_NMI (2u << 8)
 #define EVENT_TYPE_EXCEPTION (3u << 8)
 #define EVENT_TYPE_SOFTWARE (4u << 8)
@@ -124,22 +127,105 @@ static bool nmi_blocked(void) {
            || vmx_read(VMCS_GUEST_ACTIVITY_STATE) == ACTIVITY_WAIT_SIPI;
 }
 
-static void deliver_nmi(struct vcpu *v) {
+// Returns whether it injected one.
+static bool deliver_nmi(struct vcpu *v) {
     if (__atomic_exchange_n(&v->cpu->nmi_pending, false, __ATOMIC_ACQUIRE)) {
         v->nmi_pending = true;
     }
     if (!v->nmi_pending) {
-        return;
+        return false;
     }
     if (nmi_blocked()) {
         set_proc_control(PROC_NMI_WINDOW_EXITING, true);
-        return;
+        return false;
     }
     if (virt_vmx) {
         set_proc_control(PROC_NMI_WINDOW_EXITING, false);
     }
     inject(v, EVENT_VALID | EVENT_TYPE_NMI | VECTOR_NMI, 0);
     v->nmi_pending = false;
+    return true;
+}
+
+void event_intr_exiting(struct vcpu *v, bool on) {
+    if (virt_vmx) {
+        uint64_t pin = vmx_read(VMCS_PIN_CONTROLS);
+        vmx_write(VMCS_PIN_CONTROLS,
+                  on ? pin | PIN_EXT_INTR_EXITING : pin & ~(uint64_t)PIN_EXT_INTR_EXITING);
+        return;
+    }
+    // Physical interrupts exit regardless of the guest's IF only with
+    // V_INTR_MASKING, which also keeps CR8 writes from the local APIC.
+    struct vmcb_control *c = &v->vmcb->control;
+    if (on) {
+        c->intercept_misc1 |= SVM_INTERCEPT_INTR;
+        c->vintr |= SVM_VINTR_MASKING;
+    } else {
+        c->intercept_misc1 &= ~SVM_INTERCEPT_INTR;
+        c->vintr &= ~SVM_VINTR_MASKING;
+    }
+}
+
+void event_interrupt(uint8_t vector) {
+    struct vcpu *v = this_cpu()->vcpu;
+    v->taken[vector / 64] |= 1ull << (vector % 64);
+}
+
+static int highest_taken(struct vcpu *v) {
+    for (int i = 3; i >= 0; i--) {
+        if (v->taken[i] != 0) {
+            return i * 64 + 63 - __builtin_clzll(v->taken[i]);
+        }
+    }
+    return -1;
+}
+
+static bool interruptible(struct vcpu *v) {
+    if (virt_vmx) {
+        return (vmx_read(VMCS_GUEST_RFLAGS) & RFLAGS_IF)
+               && !(vmx_read(VMCS_GUEST_INTERRUPTIBILITY)
+                    & (INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS))
+               && vmx_read(VMCS_GUEST_ACTIVITY_STATE) != ACTIVITY_WAIT_SIPI;
+    }
+    return (v->vmcb->save.rflags & RFLAGS_IF) && !(v->vmcb->control.interrupt_shadow & 1);
+}
+
+// An exit once the guest can take an interrupt.
+static void interrupt_window(struct vcpu *v, bool on) {
+    if (virt_vmx) {
+        set_proc_control(PROC_INTR_WINDOW_EXITING, on);
+        return;
+    }
+    struct vmcb_control *c = &v->vmcb->control;
+    if (on) {
+        c->vintr |= SVM_VINTR_IRQ | SVM_VINTR_IGN_TPR;
+        c->intercept_misc1 |= SVM_INTERCEPT_VINTR;
+    } else {
+        c->vintr &= ~(SVM_VINTR_IRQ | SVM_VINTR_IGN_TPR);
+        c->intercept_misc1 &= ~SVM_INTERCEPT_VINTR;
+    }
+}
+
+static bool interrupt_pending(struct vcpu *v) {
+    return highest_taken(v) >= 0;
+}
+
+static void deliver_interrupt(struct vcpu *v) {
+    int vector = highest_taken(v);
+    if (vector < 0) {
+        interrupt_window(v, false);
+        return;
+    }
+    // One the guest took before, and has yet to EOI, outranks it, unless the
+    // local APIC did not take it, as with an 8259's.
+    if (!interruptible(v)
+        || (lapic_in_service((uint8_t)vector) && lapic_highest_isr() > vector)) {
+        interrupt_window(v, true);
+        return;
+    }
+    v->taken[vector / 64] &= ~(1ull << (vector % 64));
+    inject(v, EVENT_VALID | EVENT_TYPE_EXTERNAL | (uint32_t)vector, 0);
+    interrupt_window(v, interrupt_pending(v));
 }
 
 void event_entry(struct vcpu *v) {
@@ -156,11 +242,20 @@ void event_entry(struct vcpu *v) {
     if (v->redeliver & EVENT_VALID) {
         inject(v, v->redeliver, v->redeliver_error);
         v->redeliver = 0;
-        // The NMI follows once the guest takes this.
+        // What else is pending follows once the guest takes this.
         if (virt_vmx && (v->nmi_pending || v->cpu->nmi_pending)) {
             set_proc_control(PROC_NMI_WINDOW_EXITING, true);
         }
+        if (interrupt_pending(v)) {
+            interrupt_window(v, true);
+        }
         return;
     }
-    deliver_nmi(v);
+    if (deliver_nmi(v)) {
+        if (interrupt_pending(v)) {
+            interrupt_window(v, true);
+        }
+        return;
+    }
+    deliver_interrupt(v);
 }

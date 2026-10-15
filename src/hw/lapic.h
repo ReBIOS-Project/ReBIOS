@@ -48,6 +48,11 @@ uint32_t lapic_cpu_apic_id(void);
 // command names a shorthand, and waits for the APIC to take it.
 void lapic_send_ipi(uint32_t dest, uint32_t command);
 
+// The highest vector in service at the calling processor's local APIC, or 0,
+// and whether a vector is.
+uint8_t lapic_highest_isr(void);
+bool lapic_in_service(uint8_t vector);
+
 // Puts the calling processor's local APIC in xAPIC mode, as a legacy BIOS
 // hands it over, unless the processor keeps it in x2APIC mode.
 void lapic_xapic_mode(void);

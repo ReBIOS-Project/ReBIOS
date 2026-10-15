@@ -139,6 +139,20 @@ void lapic_send_ipi(uint32_t dest, uint32_t command) {
     *xapic_reg(APIC_ICR_HIGH) = guest_high;
 }
 
+uint8_t lapic_highest_isr(void) {
+    for (int i = 7; i >= 0; i--) {
+        uint32_t isr = lapic_read(APIC_ISR + (uint32_t)i * 0x10);
+        if (isr != 0) {
+            return (uint8_t)(i * 32 + 31 - __builtin_clz(isr));
+        }
+    }
+    return 0;
+}
+
+bool lapic_in_service(uint8_t vector) {
+    return (lapic_read(APIC_ISR + (uint32_t)(vector / 32) * 0x10) >> (vector % 32)) & 1;
+}
+
 void lapic_xapic_mode(void) {
     uint64_t base = rdmsr(MSR_IA32_APIC_BASE);
     if ((base & APIC_BASE_EXTD) && !xapic_disabled()) {

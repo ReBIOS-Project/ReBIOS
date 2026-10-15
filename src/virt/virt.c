@@ -74,6 +74,7 @@ bool virt_init(void) {
         return false;
     }
 
+    cpu_interrupt_handler(event_interrupt);
     printf("Using %s\n", virt_vmx ? "VMX" : "SVM");
     return true;
 }

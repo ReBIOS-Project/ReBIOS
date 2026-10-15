@@ -50,6 +50,9 @@ struct exception_frame {
 
 // Offsets of the stubs from the table.
 extern const int32_t exception_stubs[32];
+extern const uint8_t interrupt_stubs[];
+
+#define INTERRUPT_STUB_SIZE 16
 
 static struct idt_entry idt[256];
 static bool idt_built;
@@ -84,6 +87,11 @@ _Static_assert(offsetof(struct cpu, kicked) == CPU_KICKED, "CPU_KICKED is out of
 
 static uint64_t nmi_restart_start;
 static uint64_t nmi_restart_end;
+static void (*interrupt_handler)(uint8_t vector);
+
+void cpu_interrupt_handler(void (*handler)(uint8_t vector)) {
+    interrupt_handler = handler;
+}
 
 void cpu_nmi_restart(uint64_t start, uint64_t end) {
     nmi_restart_start = start;
@@ -107,6 +115,15 @@ void exception_handler(struct exception_frame *frame) {
     if (frame->vector == 30) {
         // An INIT that SVM redirected, meant for the guest.
         this_cpu()->init_pending = true;
+        return;
+    }
+    // Vectors 16 to 31 are interrupts only where the host takes interrupts.
+    if (frame->vector >= 32
+        || (frame->vector >= 16 && frame->vector != 18 && this_cpu()->taking_interrupts)) {
+        if (interrupt_handler == NULL) {
+            panic("Host interrupt %llu with no handler\n", (unsigned long long)frame->vector);
+        }
+        interrupt_handler((uint8_t)frame->vector);
         return;
     }
 
@@ -158,6 +175,9 @@ static void idt_build(bool use_ist) {
             }
         }
         idt_set(i, (uint64_t)(uintptr_t)exception_stubs + exception_stubs[i], ist);
+    }
+    for (int i = 32; i < 256; i++) {
+        idt_set(i, (uint64_t)(uintptr_t)interrupt_stubs + (i - 32) * INTERRUPT_STUB_SIZE, 0);
     }
     idt_built = true;
 }

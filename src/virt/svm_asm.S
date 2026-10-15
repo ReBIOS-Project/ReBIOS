@@ -68,9 +68,16 @@ svm_enter:
     movq GPR_R15(%rsi), %r15
     movq GPR_RSI(%rsi), %rsi
 
+    /*
+     * With V_INTR_MASKING, the host's IF at VMRUN gates physical interrupts
+     * in the guest; GIF holds them off in the host meanwhile.
+     */
+    clgi
+    sti
     vmload %rax
     vmrun %rax
     vmsave %rax
+    cli
 
     /* RAX holds the VMCB address again, so it is free to address the gprs. */
     movq (%rsp), %rax

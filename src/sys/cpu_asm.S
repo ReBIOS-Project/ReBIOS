@@ -58,11 +58,12 @@ EXC_STUB 13, 1
 EXC_STUB 14, 1
 EXC_STUB 15, 0
 EXC_STUB 16, 0
-EXC_STUB 17, 1
+/* #AC, #CP, and #VC never happen in the host: these are interrupts. */
+EXC_STUB 17, 0
 EXC_STUB 18, 0
 EXC_STUB 19, 0
 EXC_STUB 20, 0
-EXC_STUB 21, 1
+EXC_STUB 21, 0
 EXC_STUB 22, 0
 EXC_STUB 23, 0
 EXC_STUB 24, 0
@@ -70,9 +71,22 @@ EXC_STUB 25, 0
 EXC_STUB 26, 0
 EXC_STUB 27, 0
 EXC_STUB 28, 0
-EXC_STUB 29, 1
+EXC_STUB 29, 0
 EXC_STUB 30, 1
 EXC_STUB 31, 0
+
+    /* Interrupt stubs for vectors 32 to 255, 16 bytes apart. */
+    .balign 16
+    .globl interrupt_stubs
+interrupt_stubs:
+    .set vector, 32
+    .rept 224
+    .balign 16
+    pushq $0
+    pushq $vector
+    jmp exception_common
+    .set vector, vector + 1
+    .endr
 
 exception_common:
     pushq %rax

@@ -147,6 +147,17 @@ static void svm_handle_exit(struct vcpu *v) {
     struct vmcb_control *c = &v->vmcb->control;
 
     switch (c->exitcode) {
+        case SVM_EXIT_INTR: {
+            // Held while the host runs with GIF clear; the host's handlers
+            // take them.
+            v->cpu->taking_interrupts = true;
+            asm volatile ("stgi\n\tsti\n\tnop\n\tcli\n\tclgi" ::: "memory");
+            v->cpu->taking_interrupts = false;
+            break;
+        }
+        case SVM_EXIT_VINTR: {
+            break;
+        }
         case SVM_EXIT_NMI: {
             // Held while the host runs with GIF clear; the host's handler
             // takes it.

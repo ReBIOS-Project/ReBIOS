@@ -312,8 +312,8 @@ void vmx_vcpu_init(struct vcpu *v) {
 
     vmx_write(VMCS_EXIT_CONTROLS,
               adjust_controls(exit_cap, EXIT_SAVE_DEBUG_CONTROLS,
-                              EXIT_HOST_ADDR_SPACE_SIZE | EXIT_SAVE_EFER | EXIT_LOAD_EFER
-                              | EXIT_SAVE_PAT | EXIT_LOAD_PAT,
+                              EXIT_HOST_ADDR_SPACE_SIZE | EXIT_ACK_INTR_ON_EXIT | EXIT_SAVE_EFER
+                              | EXIT_LOAD_EFER | EXIT_SAVE_PAT | EXIT_LOAD_PAT,
                               "VM-exit"));
     vmx_write(VMCS_ENTRY_CONTROLS,
               adjust_controls(entry_cap, ENTRY_LOAD_DEBUG_CONTROLS,
@@ -510,6 +510,11 @@ static void vmx_handle_exit(struct vcpu *v) {
             event_nmi(v);
             break;
         }
+        case EXIT_REASON_EXTERNAL_INTR: {
+            event_interrupt((uint8_t)vmx_read(VMCS_EXIT_INTR_INFO));
+            break;
+        }
+        case EXIT_REASON_INTR_WINDOW:
         case EXIT_REASON_NMI_WINDOW: {
             break;
         }

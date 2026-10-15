@@ -67,6 +67,8 @@ struct cpu {
     volatile bool nmi_pending;
     // An INIT that SVM redirected while the host ran.
     volatile bool init_pending;
+    // Whether the host is taking interrupts, as SVM has it do.
+    bool taking_interrupts;
 };
 
 _Static_assert(sizeof(struct cpu) <= 0x1000, "struct cpu overlaps the IST stacks");
@@ -87,6 +89,9 @@ __attribute__((noreturn)) void switch_stack(uint64_t stack_top, void (*fn)(void 
 
 // Code an NMI that reaches the host restarts from start, if it interrupts it.
 void cpu_nmi_restart(uint64_t start, uint64_t end);
+
+// Where interrupts the host takes go.
+void cpu_interrupt_handler(void (*handler)(uint8_t vector));
 
 #endif
 
