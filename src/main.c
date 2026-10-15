@@ -148,7 +148,7 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
 
     efi_bs->SetWatchdogTimer(0, 0, 0, NULL);
 
-    log_init(0x3f8, 115200);
+    log_init(0x3f8, 115200, true);
     printf("ReBIOS\n");
 
     uint64_t handoff_addr = efi_alloc_pages(page_count(sizeof(struct handoff)), 0);
