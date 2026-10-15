@@ -22,6 +22,8 @@
 #include <memory.h>
 #include <core.h>
 #include <handoff.h>
+#include <hw/acpi.h>
+#include <hw/pci_cfg.h>
 #include <lib/log.h>
 #include <lib/time.h>
 #include <sys/cpu.h>
@@ -83,6 +85,9 @@ static void guest_memory_setup(struct handoff *handoff) {
 static void bsp_main(void *arg) {
     struct handoff *handoff = arg;
     struct cpu *cpu = this_cpu();
+
+    acpi_init();
+    pci_cfg_init();
 
     if (!virt_init()) {
         panic("Neither VMX nor SVM is usable on this processor\n");
