@@ -24,6 +24,7 @@
 #include <core.h>
 #include <handoff.h>
 #include <lib/log.h>
+#include <loader/config.h>
 #include <loader/efi_glue.h>
 #include <loader/loader.h>
 #include <loader/paging.h>
@@ -148,8 +149,9 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
 
     efi_bs->SetWatchdogTimer(0, 0, 0, NULL);
 
-    log_init(0x3f8, 115200, true);
     printf("ReBIOS\n");
+    config_load();
+    log_init(config.serial ? config.serial_port : 0, config.serial_baud, config.verbose);
 
     uint64_t handoff_addr = efi_alloc_pages(page_count(sizeof(struct handoff)), 0);
     if (handoff_addr == 0) {
@@ -199,6 +201,7 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     loader_handoff->heap_base = heap;
     loader_handoff->heap_size = CORE_HEAP_SIZE;
     loader_handoff->tsc_hz = measure_tsc_hz();
+    config_to_handoff(&loader_handoff->config);
 
     printf("Map top %#llx\n", (unsigned long long)map_top);
 
