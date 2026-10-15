@@ -26,6 +26,7 @@
 #include <lib/log.h>
 #include <loader/config.h>
 #include <loader/efi_glue.h>
+#include <loader/fwtables.h>
 #include <loader/loader.h>
 #include <loader/paging.h>
 #include <sys/x86.h>
@@ -202,6 +203,7 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     loader_handoff->heap_size = CORE_HEAP_SIZE;
     loader_handoff->tsc_hz = measure_tsc_hz();
     config_to_handoff(&loader_handoff->config);
+    fwtables_collect();
 
     printf("Map top %#llx\n", (unsigned long long)map_top);
 
