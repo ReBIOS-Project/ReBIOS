@@ -79,6 +79,11 @@ clone_repo_commit \
     bebaecbeaf430e36a2d30d31a2fed4e098388c93
 
 clone_repo_commit \
+    https://github.com/uACPI/uACPI.git \
+    uACPI \
+    fd92d3f3bdd614afda47d08ff5fc373c6d1e4c27
+
+clone_repo_commit \
     https://github.com/ReBIOS-Project/seabios.git \
     seabios \
     7e059bb985f46799640d9363f42e17891ba00a9f

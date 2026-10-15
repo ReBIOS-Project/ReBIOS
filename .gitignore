@@ -6,6 +6,7 @@
 /cc-runtime
 /picoefi
 /nanoprintf
+/uACPI
 /seabios
 /edk2-ovmf-bins
 /edk2-ovmf-bins.tar.gz
