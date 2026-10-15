@@ -88,6 +88,14 @@ struct vcpu {
     // The gpt_generation the vCPU's TLB is current with.
     uint64_t gpt_generation;
 
+    // An event whose delivery an exit cut short, to deliver again, with its
+    // error code: in the format VMX's interruption information and SVM's
+    // events share.
+    uint32_t redeliver;
+    uint32_t redeliver_error;
+    // Whether vcpu_inject_exception() set up an event for the coming entry.
+    bool injecting;
+
     // What the guest believes CR0 and CR4 hold, for the bits the host owns.
     uint64_t cr0_shadow;
     uint64_t cr4_shadow;

@@ -24,6 +24,7 @@
 #include <sys/fixup.h>
 #include <sys/mm.h>
 #include <sys/x86.h>
+#include <virt/event.h>
 #include <virt/exit.h>
 #include <virt/gpt.h>
 #include <virt/svm.h>
@@ -195,6 +196,10 @@ static void svm_handle_exit(struct vcpu *v) {
             break;
         }
         case SVM_EXIT_NPF: {
+            if (event_cut_short(v)) {
+                panic("Event delivery reached emulated memory at %#llx\n",
+                      (unsigned long long)c->exitinfo2);
+            }
             if ((c->exitinfo1 & NPF_WRITE)
                 && (exit_absent_write(v, c->exitinfo2) || vapic_mmio_write(v, c->exitinfo2))) {
                 break;
@@ -231,9 +236,13 @@ void svm_run(struct vcpu *v) {
             v->vmcb->control.tlb_control = 1;
             v->gpt_generation = generation;
         }
+        event_entry(v);
         svm_enter(v->vmcb_pa, &v->gprs);
         v->gprs.rax = v->vmcb->save.rax;
         v->vmcb->control.tlb_control = 0;
+        // What it cut short comes back in EXITINTINFO.
+        v->vmcb->control.eventinj = 0;
+        event_exit(v);
         svm_handle_exit(v);
     }
 }

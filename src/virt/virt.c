@@ -387,6 +387,7 @@ void vcpu_inject_exception(struct vcpu *v, uint8_t vector, bool has_error, uint3
     if (!(vcpu_cr0(v) & CR0_PE)) {
         has_error = false;
     }
+    v->injecting = true;
 
     if (virt_vmx) {
         uint32_t info = INTR_INFO_VALID | INTR_TYPE_HW_EXCEPTION | vector;
@@ -462,6 +463,7 @@ void vcpu_set_real_mode(struct vcpu *v, uint16_t cs, uint16_t ip) {
     vcpu_set_rsp(v, 0);
     vcpu_set_rflags(v, RFLAGS_FIXED);
     v->gprs = (struct gprs){0};
+    v->redeliver = 0;
 
     v->cr0_shadow = CR0_ET;
     v->cr4_shadow = 0;

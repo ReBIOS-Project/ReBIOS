@@ -23,6 +23,7 @@
 #include <sys/cpu.h>
 #include <sys/mm.h>
 #include <sys/x86.h>
+#include <virt/event.h>
 #include <virt/exit.h>
 #include <virt/gpt.h>
 #include <virt/guest_mem.h>
@@ -555,6 +556,9 @@ static void vmx_handle_exit(struct vcpu *v) {
         }
         case EXIT_REASON_EPT_VIOLATION: {
             uint64_t gpa = vmx_read(VMCS_GUEST_PHYS_ADDR);
+            if (event_cut_short(v)) {
+                panic("Event delivery reached emulated memory at %#llx\n", (unsigned long long)gpa);
+            }
             if ((qual & EPT_QUAL_WRITE)
                 && (exit_absent_write(v, gpa) || vapic_mmio_write(v, gpa))) {
                 break;
@@ -577,6 +581,7 @@ void vmx_run(struct vcpu *v) {
     asm volatile ("vmptrld %0" :: "m"(v->vmcs_pa) : "cc", "memory");
 
     for (;;) {
+        event_entry(v);
         if (vmx_enter(&v->gprs, v->vmx_launched) != 0) {
             uint64_t error = vmx_read(VMCS_VM_INSTR_ERROR);
             printf("VM%s failed, VM-instruction error %llu\n",
@@ -585,6 +590,7 @@ void vmx_run(struct vcpu *v) {
             panic("Cannot enter the guest\n");
         }
         v->vmx_launched = true;
+        event_exit(v);
         vmx_handle_exit(v);
     }
 }
