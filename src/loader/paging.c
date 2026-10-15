@@ -29,7 +29,7 @@
 
 #define GIB (1ull << 30)
 
-uint64_t paging_build_identity_map(uint64_t *map_top) {
+uint64_t paging_build_identity_map(uint64_t *map_top, uint64_t *pages) {
     bool huge_pages = cpuid(0x80000000, 0).eax >= 0x80000001
                       && (cpuid(0x80000001, 0).edx & (1u << 26));
 
@@ -73,5 +73,6 @@ uint64_t paging_build_identity_map(uint64_t *map_top) {
     }
 
     *map_top = top;
+    *pages = table_pages;
     return tables;
 }

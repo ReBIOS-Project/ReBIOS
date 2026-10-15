@@ -21,8 +21,20 @@
 
 #include <stdint.h>
 
+#define HANDOFF_MAX_RESERVED 16
+
+struct handoff_range {
+    uint64_t base;
+    uint64_t size;
+};
+
 // What the loader passes to the core.
 struct handoff {
+    // Memory the hypervisor keeps, which the guest must never reach: ReBIOS's
+    // own image, the core's heap, page tables, and what the loader hands over.
+    struct handoff_range reserved[HANDOFF_MAX_RESERVED];
+    uint32_t reserved_count;
+
     // The page tables the core starts on, identity mapping the bottom of the
     // physical address space up to map_top.
     uint64_t pml4;

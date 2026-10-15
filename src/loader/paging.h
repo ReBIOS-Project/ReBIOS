@@ -21,10 +21,10 @@
 
 #include <stdint.h>
 
-// Builds long mode page tables identity mapping [0, *map_top), rounding
-// *map_top up to what the tables actually cover. They are placed below 4GiB,
-// as the APs load CR3 outside of long mode. Returns the physical address of
-// the PML4, or 0 on failure.
-uint64_t paging_build_identity_map(uint64_t *map_top);
+// Builds 4-level page tables identity mapping [0, *map_top), rounding
+// *map_top up to what the tables actually cover, in one block of *pages pages
+// below 4GiB, as the APs load CR3 outside of long mode. Returns the physical
+// address of the PML4, or 0 on failure.
+uint64_t paging_build_identity_map(uint64_t *map_top, uint64_t *pages);
 
 #endif
