@@ -16,39 +16,35 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#define HYPERCALL_TEST_DONE 0x5242fffe
+#include <virt/hypercall.h>
 
     /*
-     * A real-mode program, run at a segment boundary with CS at its start, that
-     * reports through the serial port and a hypercall. On SVM the hypercall is
+     * The real-mode code through which the guest calls the CSM16, run with CS at
+     * its start. The hypervisor sets up each call's registers and far pointer;
+     * the call's AX and BX come back to it through a hypercall, which on SVM is
      * patched to VMMCALL.
      */
     .section .rodata
-    .globl test_guest_start
-    .globl test_guest_hypercall
-    .globl test_guest_end
+    .globl csm_thunk_start
+    .globl csm_thunk_hypercall
+    .globl csm_thunk_halt
+    .globl csm_thunk_entry
+    .globl csm_thunk_end
     .code16
-test_guest_start:
-    cli
-    pushw %cs
-    popw %ds
-    movw $0x3f8, %dx
-    movw $(.Lmsg - test_guest_start), %si
-1:
-    lodsb
-    testb %al, %al
-    jz 2f
-    outb %al, %dx
-    jmp 1b
-2:
-    movl $HYPERCALL_TEST_DONE, %eax
-    movl $0x600d, %ebx
-test_guest_hypercall:
+csm_thunk_start:
+    lcallw *%cs:(csm_thunk_entry - csm_thunk_start)
+    movl %eax, %esi
+    movl $(HYPERCALL_MAGIC | HYPERCALL_CSM_RETURN), %eax
+csm_thunk_hypercall:
     vmcall
-3:
+    jmp csm_thunk_start
+csm_thunk_halt:
+    cli
     hlt
-    jmp 3b
-.Lmsg:
-    .asciz "Hello from the guest\r\n"
-test_guest_end:
+    jmp csm_thunk_halt
+    .balign 4
+csm_thunk_entry:
+    .word 0
+    .word 0
+csm_thunk_end:
     .code64

@@ -18,6 +18,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <csm/csm_boot.h>
 #include <lib/log.h>
 #include <sys/fixup.h>
 #include <sys/x86.h>
@@ -92,6 +93,11 @@ void exit_hypercall(struct vcpu *v) {
         case HYPERCALL_DEBUG_PUTC: {
             printf("%c", (char)v->gprs.rbx);
             break;
+        }
+        case HYPERCALL_CSM_RETURN: {
+            // Picks where the guest goes next.
+            csm_boot_returned(v);
+            return;
         }
         case HYPERCALL_TEST_DONE: {
             printf("Guest test done, result %#llx\n", (unsigned long long)v->gprs.rbx);

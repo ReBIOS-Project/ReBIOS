@@ -27,6 +27,8 @@
 
 // Writes the character in BL to the hypervisor's log.
 #define HYPERCALL_DEBUG_PUTC 0x0000
+// Returns from a CSM16 call, with its AX in SI and its BX in BX.
+#define HYPERCALL_CSM_RETURN 0x0001
 // Reports a self-test result in EBX.
 #define HYPERCALL_TEST_DONE 0xfffe
 

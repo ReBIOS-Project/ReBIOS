@@ -19,8 +19,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <efi.h>
-#include <memory.h>
 #include <core.h>
+#include <csm/csm_boot.h>
 #include <handoff.h>
 #include <hw/acpi.h>
 #include <hw/pci_cfg.h>
@@ -34,12 +34,6 @@
 #include <virt/virt.h>
 
 struct handoff *core_handoff;
-
-extern const uint8_t test_guest_start[];
-extern const uint8_t test_guest_hypercall[];
-extern const uint8_t test_guest_end[];
-
-#define TEST_GUEST_SEGMENT 0x0800
 
 static bool efi_type_is_ram(uint32_t type) {
     switch (type) {
@@ -98,15 +92,7 @@ static void bsp_main(void *arg) {
     guest_memory_setup(handoff);
 
     struct vcpu *v = vcpu_create(cpu);
-
-    uint8_t *program = (uint8_t *)(uintptr_t)(TEST_GUEST_SEGMENT << 4);
-    memcpy(program, test_guest_start, test_guest_end - test_guest_start);
-    if (!virt_vmx) {
-        // VMMCALL in place of VMCALL.
-        program[test_guest_hypercall - test_guest_start + 2] = 0xd9;
-    }
-    vcpu_set_real_mode(v, TEST_GUEST_SEGMENT, 0);
-
+    csm_boot_start(v);
     vcpu_run(v);
 }
 
