@@ -24,6 +24,7 @@
 #include <core.h>
 #include <handoff.h>
 #include <lib/log.h>
+#include <loader/bootdev.h>
 #include <loader/config.h>
 #include <loader/efi_glue.h>
 #include <loader/fwtables.h>
@@ -204,6 +205,7 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     loader_handoff->tsc_hz = measure_tsc_hz();
     config_to_handoff(&loader_handoff->config);
     fwtables_collect();
+    bootdev_collect();
 
     printf("Map top %#llx\n", (unsigned long long)map_top);
 
