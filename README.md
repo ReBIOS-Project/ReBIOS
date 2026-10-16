@@ -17,7 +17,8 @@ Logo art by [conkkerxd](https://github.com/conkkerxd).
 The idea is to drop ReBIOS into a `/EFI/BOOT/` directory on a FAT (12, 16, or 32) partition on the medium containing the legacy BIOS
 OS. UEFI firmware will pick this up and show the medium as a bootable device. Ideally, that's all that would be needed.
 
-1. **Build:** Build `rebios.efi` as described in [Building](#building).
+1. **Download:** Get the latest `rebios.efi` from the [Releases page](../../releases), or build it as described in
+  [Building](#building).
 2. **Deploy:** Copy `rebios.efi` to a FAT-formatted partition as `/EFI/BOOT/BOOTX64.EFI` (the hardcoded path is needed so that the
   firmware picks it up automatically).
 3. **Boot:** Select the UEFI boot entry for the drive onto which ReBIOS was deployed.

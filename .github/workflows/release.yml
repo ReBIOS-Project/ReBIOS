@@ -1,0 +1,157 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# This file is part of ReBIOS.
+# Copyright (C) 2026 Mintsuki and contributors
+#
+# ReBIOS is free software: you can redistribute it and/or modify it under the
+# terms of the GNU General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any later
+# version.
+#
+# ReBIOS is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE. See the GNU General Public License for more
+# details.
+#
+# You should have received a copy of the GNU General Public License along
+# with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (e.g. v0.1.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate release tag
+    runs-on: ubuntu-latest
+
+    outputs:
+      tag: ${{ steps.validate.outputs.tag }}
+      sha: ${{ steps.validate.outputs.sha }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Validate tag
+        id: validate
+        env:
+          TAG_INPUT: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -eu
+
+          if ! printf '%s' "$TAG_INPUT" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Invalid release tag: $TAG_INPUT" >&2
+            exit 1
+          fi
+
+          git fetch --force origin "refs/tags/$TAG_INPUT:refs/tags/$TAG_INPUT"
+          TAG_SHA="$(git rev-list -n 1 "refs/tags/$TAG_INPUT")"
+
+          echo "tag=$TAG_INPUT" >> "$GITHUB_OUTPUT"
+          echo "sha=$TAG_SHA" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build release artifacts
+    needs: validate
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Install dependencies
+        run: pacman --noconfirm -Syu && pacman --needed --noconfirm -S base-devel git nodejs python gzip xz
+
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+          fetch-depth: 0
+
+      - name: Git config
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Package source release tarballs
+        run: make dist
+
+      # The binary is built from the tarball, so that it is what the tarball
+      # builds.
+      - name: Build ReBIOS from the source release tarball
+        env:
+          TAG_NAME: ${{ needs.validate.outputs.tag }}
+        run: |
+          set -eu
+          VERSION="${TAG_NAME#v}"
+          mkdir build
+          tar -xf "rebios-$VERSION.tar.xz" -C build
+          make -C "build/rebios-$VERSION" -j"$(nproc)"
+          cp "build/rebios-$VERSION/bin/rebios.efi" ./
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-artifacts
+          if-no-files-found: error
+          path: |
+            rebios-*.tar.*
+            rebios.efi
+
+  release:
+    name: Upload release artifacts
+    needs:
+      - validate
+      - build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: release-artifacts
+          path: dist
+
+      - name: Create release notes
+        env:
+          TAG_NAME: ${{ needs.validate.outputs.tag }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          set -eu
+          VERSION="${TAG_NAME#v}"
+          cat >rel_notes.txt <<'EOF'
+          `rebios.efi` is ReBIOS, built from this release's source tarball. Copy it to a FAT-formatted partition as
+          `/EFI/BOOT/BOOTX64.EFI`, as the [README](@REPO_URL@/blob/@TAG@/README.md) explains.
+
+          To build ReBIOS from source, use one of the source tarballs uploaded with this release, `rebios-@VERSION@.tar.gz` or
+          `rebios-@VERSION@.tar.xz`, which come with ReBIOS's dependencies, or build from a Git checkout of the `@TAG@` tag,
+          running `./get-deps` first. The "Source code" zip and tarball GitHub generates for every
+          release lack the dependencies, and do not build.
+          EOF
+          sed -i -e "s|@VERSION@|$VERSION|g" -e "s|@TAG@|$TAG_NAME|g" -e "s|@REPO_URL@|$REPO_URL|g" rel_notes.txt
+
+      - name: Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.validate.outputs.tag }}
+          body_path: rel_notes.txt
+          files: |
+            dist/rebios-*.tar.*
+            dist/rebios.efi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
