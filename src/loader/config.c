@@ -330,10 +330,11 @@ static bool apply_vga_emulation(const struct setting *setting, struct span value
 }
 
 // In the order of the HANDOFF_VGA_SCALING_* values.
-static const char *const vga_scaling_names[] = {"stretch", "aspect", "center", "manual"};
+static const char *const vga_scaling_names[] = {"stretch", "aspect", "center", "manual",
+                                                "integer"};
 
 static bool apply_vga_scaling(const struct setting *setting, struct span value) {
-    if (!apply_choice(value, vga_scaling_names, 4, &config.vga_scaling)) {
+    if (!apply_choice(value, vga_scaling_names, 5, &config.vga_scaling)) {
         return false;
     }
     printf("  %s = %s\n", setting->name, vga_scaling_names[config.vga_scaling]);

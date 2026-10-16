@@ -835,6 +835,15 @@ static void place(uint32_t width, uint32_t height) {
             hgt = (uint64_t)height * scale;
             break;
         }
+        case HANDOFF_VGA_SCALING_INTEGER: {
+            uint32_t scale = fw / width < fh / height ? fw / width : fh / height;
+            if (scale == 0) {
+                scale = 1;
+            }
+            w = (uint64_t)width * scale;
+            hgt = (uint64_t)height * scale;
+            break;
+        }
         default: {
             break;
         }
@@ -950,7 +959,8 @@ bool vga_emulated(void) {
     return vga.on;
 }
 
-static const char *const scaling_names[] = {"stretched", "kept at 4:3", "centred", "scaled"};
+static const char *const scaling_names[] = {"stretched", "kept at 4:3", "centred", "scaled",
+                                            "scaled sharply"};
 
 bool vga_init(void) {
     const struct handoff *h = core_handoff;
@@ -993,7 +1003,7 @@ bool vga_init(void) {
     gpt_flush();
     vga.on = true;
 
-    unsigned scaling = h->config.vga_scaling < 4 ? h->config.vga_scaling : 0;
+    unsigned scaling = h->config.vga_scaling < 5 ? h->config.vga_scaling : 0;
     printf("Emulating a VGA, %s on the %ux%u framebuffer at %#llx\n", scaling_names[scaling],
            fb->width, fb->height, (unsigned long long)fb->base);
     return true;

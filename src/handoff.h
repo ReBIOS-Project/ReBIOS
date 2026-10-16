@@ -104,12 +104,14 @@ struct handoff_block_device {
 #define HANDOFF_VGA_EMULATION_NEVER 2
 
 // How an emulated VGA's display fills the framebuffer: all of it, as much of
-// it as 4:3 allows, at one framebuffer pixel per VGA pixel, or at vga_scale
-// pixels per pixel; centred unless stretched.
+// it as 4:3 allows, at one framebuffer pixel per VGA pixel, at vga_scale
+// pixels per pixel, or at the most whole pixels per pixel that fit; centred
+// unless stretched.
 #define HANDOFF_VGA_SCALING_STRETCH 0
 #define HANDOFF_VGA_SCALING_ASPECT 1
 #define HANDOFF_VGA_SCALING_CENTER 2
 #define HANDOFF_VGA_SCALING_MANUAL 3
+#define HANDOFF_VGA_SCALING_INTEGER 4
 
 struct handoff_config {
     uint8_t serial;
