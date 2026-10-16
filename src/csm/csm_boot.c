@@ -24,8 +24,12 @@
 #include <csm/csm.h>
 #include <csm/csm_boot.h>
 #include <csm/e820.h>
+#include <csm/mptable.h>
+#include <csm/pir.h>
+#include <hw/acpi_irq.h>
 #include <hw/intel_pit.h>
 #include <hw/pci_cfg.h>
+#include <hw/pci_enum.h>
 #include <iommu/dma.h>
 #include <lib/heap.h>
 #include <lib/log.h>
@@ -33,6 +37,7 @@
 #include <virt/guest_acpi.h>
 #include <virt/guest_mem.h>
 #include <virt/hypercall.h>
+#include <virt/irq.h>
 #include <virt/layout.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>
@@ -56,6 +61,9 @@ extern const uint8_t csm_thunk_end[];
 #define E820_TABLE 0x8400
 #define BBS_TABLE 0x9000
 #define BOOT_TABLE 0xa000
+#define MP_TABLE 0xd000
+#define PIR_TABLE 0xe000
+#define LEGACY_TABLE_SIZE 0x1000
 #define TABLES_END 0x10000
 #define LOW_PMM_BASE 0x10000
 #define LOW_PMM_SIZE 0x80000
@@ -85,8 +93,10 @@ _Static_assert(E820_TABLE + E820_MAX_ENTRIES * sizeof(struct e820_entry) <= BBS_
                "E820 table overlaps the BBS table");
 _Static_assert(BBS_TABLE + CSM_BBS_MAX_ENTRIES * sizeof(struct csm_bbs_entry) <= BOOT_TABLE,
                "BBS table overlaps the boot table");
-_Static_assert(BOOT_TABLE + sizeof(struct csm_boot_table) <= TABLES_END,
-               "boot table overlaps the low PMM memory");
+_Static_assert(BOOT_TABLE + sizeof(struct csm_boot_table) <= MP_TABLE,
+               "boot table overlaps the MP table");
+_Static_assert(PIR_TABLE + LEGACY_TABLE_SIZE <= TABLES_END,
+               "PCI IRQ routing table overlaps the low PMM memory");
 
 enum csm_stage {
     STAGE_INITIALIZE,
@@ -302,6 +312,43 @@ void csm_boot_returned(struct vcpu *v) {
     }
 }
 
+#define PCI_INTERRUPT_LINE 0x3c
+#define PCI_INTERRUPT_LINE_NONE 0xff
+
+static bool same_function(struct pci_addr a, struct pci_addr b) {
+    return a.segment == b.segment && a.bus == b.bus && a.device == b.device
+           && a.function == b.function;
+}
+
+// In PIC mode, PCI devices interrupt on the ISA IRQs the hypervisor picks,
+// which software finds in their Interrupt Line registers, as a BIOS writes
+// them: PCI Local Bus Specification 3.0, 6.2.4.
+static void pci_interrupts(void) {
+    uint32_t count;
+    const struct acpi_irq_pci_route *routes = acpi_irq_pci_routes(&count);
+    struct irq_pci_line *lines = kmalloc(count * sizeof(*lines));
+    for (uint32_t i = 0; i < count; i++) {
+        lines[i] = (struct irq_pci_line){routes[i].gsi, routes[i].level, routes[i].active_low};
+    }
+    irq_route_pci(lines, count, acpi_irq_isa_claimed());
+    kfree(lines);
+
+    const struct pci_topology *topology = pci_enum_topology();
+    for (uint32_t i = 0; i < topology->function_count; i++) {
+        const struct pci_function *f = &topology->functions[i];
+        if (f->interrupt_pin == 0 || f->interrupt_pin > 4) {
+            continue;
+        }
+        uint32_t line = PCI_INTERRUPT_LINE_NONE;
+        for (uint32_t j = 0; j < count; j++) {
+            if (same_function(routes[j].addr, f->addr) && irq_isa_irq(routes[j].gsi) >= 0) {
+                line = (uint32_t)irq_isa_irq(routes[j].gsi);
+            }
+        }
+        pci_cfg_write(f->addr, PCI_INTERRUPT_LINE, 1, line);
+    }
+}
+
 void csm_boot_start(struct vcpu *v) {
     const struct handoff *h = core_handoff;
 
@@ -329,6 +376,14 @@ void csm_boot_start(struct vcpu *v) {
     memcpy(thunk + (csm_thunk_entry - csm_thunk_start), entry, sizeof(entry));
 
     memset(layout_low(INIT_TABLE), 0, TABLES_END - INIT_TABLE);
+    pci_interrupts();
+    // The CSM16 copies them where legacy software looks for them.
+    uint32_t mp_length = mptable_build(layout_low(MP_TABLE), LEGACY_TABLE_SIZE, MP_TABLE);
+    uint32_t pir_length = pir_build(layout_low(PIR_TABLE), LEGACY_TABLE_SIZE);
+    if (pir_length != 0) {
+        csm.compat16->irq_routing_table_pointer = PIR_TABLE;
+        csm.compat16->irq_routing_table_length = pir_length;
+    }
     // The copies come before the map that shows them.
     uint8_t rsdp[GUEST_ACPI_RSDP_SIZE];
     bool acpi = guest_acpi_build(rsdp);
@@ -375,6 +430,7 @@ void csm_boot_start(struct vcpu *v) {
         .smbios_table_length = smbios_length,
         .bbs_table = BBS_TABLE,
         .bbs_entry_count = csm.bbs_count,
+        .mp_floating_pointer = mp_length != 0 ? MP_TABLE : 0,
         .e820_entry_count = e820_count,
     };
     csm_fill_boot_table(layout_low(BOOT_TABLE), &boot);
