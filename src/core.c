@@ -26,6 +26,7 @@
 #include <hw/lapic.h>
 #include <hw/lapic_legacy.h>
 #include <hw/pci_cfg.h>
+#include <hw/pci_relocate.h>
 #include <iommu/dma.h>
 #include <lib/log.h>
 #include <lib/time.h>
@@ -48,6 +49,7 @@ static void bsp_main(void *arg) {
 
     acpi_init();
     pci_cfg_init();
+    pci_relocate();
     dma_init();
 
     if (!virt_init()) {
