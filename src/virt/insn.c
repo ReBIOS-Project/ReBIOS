@@ -257,6 +257,15 @@ static unsigned decode_modrm(const uint8_t *bytes, unsigned i, struct insn *insn
     return size + disp_size;
 }
 
+// VEX's, EVEX's, and XOP's inverted R, X, and B, as the REX prefix they stand
+// in for. Outside 64-bit mode, addresses only use the first 8 registers.
+static void vex_rex(struct insn *insn, uint8_t rxb, bool w, bool long_mode) {
+    insn->w = w;
+    if (long_mode) {
+        insn->rex = 0x40 | (w ? 0x08 : 0) | ((~rxb >> 5) & 0x07);
+    }
+}
+
 bool insn_decode(struct vcpu *v, struct insn *insn) {
     struct segment cs;
     vcpu_get_seg(v, SEG_CS, &cs);
@@ -328,6 +337,12 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
     insn->operand_size = operand;
     insn->address_size = address;
     insn->rex = rex;
+    insn->w = rex_w;
+    if (insn->rep) {
+        insn->prefix = insn->rep_prefix == 0xf2 ? INSN_PREFIX_F2 : INSN_PREFIX_F3;
+    } else if (operand_prefix) {
+        insn->prefix = INSN_PREFIX_66;
+    }
 
     unsigned map = MAP_ONE;
     uint8_t op = bytes[i];
@@ -335,19 +350,46 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
     // where a ModRM byte could not follow.
     bool vex = long_mode || (bytes[i + 1] & 0xc0) == 0xc0;
     bool vex_like = false;
-    if ((op == 0xc4 || op == 0xc5) && vex) {
-        map = op == 0xc5 ? MAP_0F : bytes[i + 1] & 0x1f;
-        i += op == 0xc5 ? 2 : 3;
+    if (op == 0xc5 && vex) {
+        // R vvvv L pp, with X and B clear and W 0.
+        uint8_t b = bytes[i + 1];
+        vex_rex(insn, b | 0x60, false, long_mode);
+        insn->vector_length = (b >> 2) & 1;
+        insn->prefix = b & 3;
+        map = MAP_0F;
+        insn->space = INSN_SPACE_VEX | map;
+        i += 2;
+        vex_like = true;
+    } else if (op == 0xc4 && vex) {
+        // R X B mmmmm, then W vvvv L pp.
+        vex_rex(insn, bytes[i + 1], bytes[i + 2] >> 7, long_mode);
+        insn->vector_length = (bytes[i + 2] >> 2) & 1;
+        insn->prefix = bytes[i + 2] & 3;
+        map = bytes[i + 1] & 0x1f;
+        insn->space = INSN_SPACE_VEX | map;
+        i += 3;
         vex_like = true;
     } else if (op == 0x62 && vex) {
+        // R X B R' 0 mmm, W vvvv 1 pp, then z L'L b V' aaa.
+        vex_rex(insn, bytes[i + 1], bytes[i + 2] >> 7, long_mode);
+        insn->prefix = bytes[i + 2] & 3;
+        insn->vector_length = (bytes[i + 3] >> 5) & 3;
+        insn->evex_b = (bytes[i + 3] >> 4) & 1;
+        insn->evex_aaa = bytes[i + 3] & 7;
         map = bytes[i + 1] & 0x07;
+        insn->space = INSN_SPACE_EVEX | map;
         i += 4;
         vex_like = true;
     } else if (op == 0x8f && (bytes[i + 1] & 0x1f) >= 8) {
-        // XOP: map 8 takes an 8-bit immediate, map 10 a 32-bit one.
+        // XOP, laid out as VEX's three bytes: map 8 takes an 8-bit
+        // immediate, map 10 a 32-bit one.
         unsigned xop_map = bytes[i + 1] & 0x1f;
+        vex_rex(insn, bytes[i + 1], bytes[i + 2] >> 7, long_mode);
+        insn->vector_length = (bytes[i + 2] >> 2) & 1;
+        insn->prefix = bytes[i + 2] & 3;
+        insn->space = INSN_SPACE_XOP | xop_map;
         i += 3;
-        i++;
+        insn->opcode_byte = bytes[i++];
         i += decode_modrm(bytes, i, insn);
         i += xop_map == 8 ? 1 : xop_map == 10 ? 4 : 0;
         insn->opcode = INSN_OPCODE_OTHER;
@@ -362,11 +404,13 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
             map = op == 0x38 ? MAP_0F38 : MAP_0F3A;
             i++;
         }
+        insn->space = INSN_SPACE_LEGACY | map;
     }
     if (i >= INSN_MAX_LENGTH) {
         return false;
     }
     op = bytes[i++];
+    insn->opcode_byte = op;
 
     uint8_t entry;
     if (map == MAP_ONE) {

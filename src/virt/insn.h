@@ -28,6 +28,18 @@
 #define INSN_OPCODE_0F 0xf00
 #define INSN_OPCODE_OTHER 0x100
 
+// Opcode spaces: an encoding ORed with the number of its opcode map.
+#define INSN_SPACE_LEGACY 0x00
+#define INSN_SPACE_VEX 0x10
+#define INSN_SPACE_EVEX 0x20
+#define INSN_SPACE_XOP 0x30
+
+// Mandatory prefixes, numbered as VEX's pp field numbers them.
+#define INSN_PREFIX_NONE 0
+#define INSN_PREFIX_66 1
+#define INSN_PREFIX_F3 2
+#define INSN_PREFIX_F2 3
+
 struct insn {
     unsigned length;
     unsigned opcode;
@@ -56,6 +68,16 @@ struct insn {
     // As it is encoded, imm_size bytes of it.
     uint64_t imm;
     unsigned imm_size;
+    // The opcode space and the opcode byte in it.
+    uint8_t space;
+    uint8_t opcode_byte;
+    // The mandatory prefix, W (REX.W in legacy encodings), and L.
+    uint8_t prefix;
+    bool w;
+    uint8_t vector_length;
+    // EVEX's broadcast bit and opmask register.
+    bool evex_b;
+    uint8_t evex_aaa;
 };
 
 // The length of the instruction at the guest's CS:RIP, for intercepted
