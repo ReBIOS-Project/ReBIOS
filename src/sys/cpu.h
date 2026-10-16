@@ -69,6 +69,8 @@ struct cpu {
     volatile bool init_pending;
     // Whether the host is taking interrupts, as SVM has it do.
     bool taking_interrupts;
+    // IA32_APIC_BASE, once lapic_host_mode() set it for good, else 0.
+    uint64_t apic_base;
 };
 
 _Static_assert(sizeof(struct cpu) <= 0x1000, "struct cpu overlaps the IST stacks");

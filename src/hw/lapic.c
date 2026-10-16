@@ -21,6 +21,7 @@
 #include <hw/lapic.h>
 #include <lib/log.h>
 #include <lib/time.h>
+#include <sys/cpu.h>
 #include <sys/fixup.h>
 #include <sys/x86.h>
 
@@ -42,9 +43,14 @@
 
 #define IPI_TIMEOUT_NS 100000000ull
 
+// RDMSR is an exit when the hypervisor itself runs nested.
+static uint64_t apic_base(void) {
+    uint64_t base = this_cpu()->apic_base;
+    return base != 0 ? base : rdmsr(MSR_IA32_APIC_BASE);
+}
+
 static volatile uint32_t *xapic_reg(uint32_t reg) {
-    uint64_t base = rdmsr(MSR_IA32_APIC_BASE) & APIC_BASE_ADDRESS;
-    return (volatile uint32_t *)(uintptr_t)(base + reg);
+    return (volatile uint32_t *)(uintptr_t)((apic_base() & APIC_BASE_ADDRESS) + reg);
 }
 
 uint32_t lapic_read(uint32_t reg) {
@@ -63,7 +69,7 @@ void lapic_write(uint32_t reg, uint32_t value) {
 }
 
 bool lapic_x2apic(void) {
-    uint64_t base = rdmsr(MSR_IA32_APIC_BASE);
+    uint64_t base = apic_base();
     return (base & (APIC_BASE_EN | APIC_BASE_EXTD)) == (APIC_BASE_EN | APIC_BASE_EXTD);
 }
 
@@ -126,7 +132,7 @@ static uint32_t max_entry(void) {
     return (lapic_read(APIC_VERSION) >> 16) & 0xff;
 }
 
-bool lapic_host_mode(bool x2apic) {
+static bool host_mode(bool x2apic) {
     if (x2apic && !lapic_x2apic_supported()) {
         x2apic = false;
     }
@@ -167,6 +173,13 @@ bool lapic_host_mode(bool x2apic) {
         lapic_write(kept[i], values[i]);
     }
     return false;
+}
+
+bool lapic_host_mode(bool x2apic) {
+    this_cpu()->apic_base = 0;
+    x2apic = host_mode(x2apic);
+    this_cpu()->apic_base = rdmsr(MSR_IA32_APIC_BASE);
+    return x2apic;
 }
 
 void lapic_host_init(uint8_t spurious_vector, uint8_t timer_vector) {
