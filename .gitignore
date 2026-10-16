@@ -12,3 +12,5 @@
 /edk2-ovmf-bins.tar.gz
 /bin
 /obj
+/vgabios/bin
+/vgabios/obj

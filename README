@@ -38,6 +38,12 @@ which follows "TOOLCHAIN_PREFIX" but is empty for the "llvm" toolchain, or by
 "SEABIOS_CC", "SEABIOS_LD", "SEABIOS_OBJCOPY", "SEABIOS_OBJDUMP", and
 "SEABIOS_STRIP" individually. "HOST_CC" builds its configuration tools.
 
+The video BIOS is built likewise, with the GNU tools named by
+"VGABIOS_TOOLCHAIN_PREFIX", or by "VGABIOS_CC" and "VGABIOS_OBJCOPY", and with
+the flags "VGABIOS_CFLAGS" (by default -g -O2 -pipe), "VGABIOS_CPPFLAGS", and
+"VGABIOS_LDFLAGS" rather than "CFLAGS", "CPPFLAGS", and "LDFLAGS". It is always
+built with -Os, as it has to fit in 32 KiB.
+
 ReBIOS is free software: you can redistribute it and/or modify it under the
 terms of the GNU General Public License as published by the Free Software
 Foundation, either version 3 of the License, or (at your option) any later

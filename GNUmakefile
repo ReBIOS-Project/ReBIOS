@@ -77,6 +77,24 @@ SEABIOS_OBJCOPY := $(SEABIOS_TOOLCHAIN_PREFIX)objcopy
 SEABIOS_OBJDUMP := $(SEABIOS_TOOLCHAIN_PREFIX)objdump
 SEABIOS_STRIP := $(SEABIOS_TOOLCHAIN_PREFIX)strip
 
+# User controllable toolchain prefix for the video BIOS, which only builds with
+# GCC and GNU binutils too, so the "llvm" toolchain falls back to the host's.
+ifeq ($(TOOLCHAIN),llvm)
+    VGABIOS_TOOLCHAIN_PREFIX :=
+else
+    VGABIOS_TOOLCHAIN_PREFIX := $(TOOLCHAIN_PREFIX)
+endif
+
+# User controllable commands for building the video BIOS.
+VGABIOS_CC := $(VGABIOS_TOOLCHAIN_PREFIX)gcc
+VGABIOS_OBJCOPY := $(VGABIOS_TOOLCHAIN_PREFIX)objcopy
+
+# User controllable flags for the video BIOS, 16-bit code that is not built
+# with CFLAGS, CPPFLAGS, and LDFLAGS.
+VGABIOS_CFLAGS := -g -O2 -pipe
+VGABIOS_CPPFLAGS :=
+VGABIOS_LDFLAGS :=
+
 # User controllable host C compiler, which builds SeaBIOS's tools.
 HOST_CC := cc
 
@@ -293,10 +311,11 @@ override OBJ := $(addprefix obj/,$(CFILES:.c=.c.o) $(ASFILES:.S=.S.o) $(NASMFILE
 override HEADER_DEPS := $(addprefix obj/,$(CFILES:.c=.c.d) $(ASFILES:.S=.S.d) $(NASMFILES:.asm=.asm.d))
 
 # Default target. This must come first, before header dependencies.
-# SeaBIOS goes first, as the core carries it.
+# SeaBIOS and the video BIOS go first, as the core carries them.
 .PHONY: all
 all:
 	$(MAKE) seabios
+	$(MAKE) vgabios
 	$(MAKE) bin/$(OUTPUT).efi
 
 # Include header dependencies.
@@ -341,6 +360,9 @@ obj/src/lib/printf.c.o: override CPPFLAGS += \
 # The core carries SeaBIOS.
 obj/src/csm/seabios_blob.S.o: seabios/out/Csm16.bin
 
+# And the video BIOS of the VGA it emulates.
+obj/src/virt/vgabios_blob.S.o: vgabios/bin/vgabios.bin
+
 # Compilation rules for *.c files.
 obj/%.c.o: %.c GNUmakefile obj/CC obj/CFLAGS obj/CPPFLAGS
 	mkdir -p "$(dir $@)"
@@ -381,6 +403,7 @@ run: all edk2-ovmf-bins
 .PHONY: clean
 clean:
 	if test -f seabios/.config; then $(call SEABIOS_CALL,clean); fi
+	$(call VGABIOS_CALL,clean)
 	rm -rf bin obj
 
 # Remove everything built and generated including downloaded dependencies.
@@ -415,6 +438,22 @@ override define SEABIOS_CALL
 		STRIP="$(SEABIOS_STRIP)" \
 		EXTRAVERSION="$(SEABIOS_EXTRAVERSION)"
 endef
+
+# The emulated VGA's video BIOS, which its own makefile builds. Our command
+# line's flags would reach it too, so it is handed its own.
+override define VGABIOS_CALL
+	$(MAKE) -C vgabios $(1) \
+		CC="$(VGABIOS_CC)" \
+		OBJCOPY="$(VGABIOS_OBJCOPY)" \
+		CFLAGS="$(VGABIOS_CFLAGS)" \
+		CPPFLAGS="$(VGABIOS_CPPFLAGS)" \
+		LDFLAGS="$(VGABIOS_LDFLAGS)"
+endef
+
+# Video BIOS build targets.
+.PHONY: vgabios
+vgabios:
+	$(call VGABIOS_CALL,)
 
 # SeaBIOS build targets.
 .PHONY: seabios
