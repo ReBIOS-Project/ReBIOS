@@ -22,6 +22,7 @@
 #include <memory.h>
 #include <core.h>
 #include <handoff.h>
+#include <hw/pci_relocate.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
 #include <lib/time.h>
@@ -30,6 +31,7 @@
 #include <virt/gpt.h>
 #include <virt/io.h>
 #include <virt/mmio.h>
+#include <virt/pci_virt.h>
 #include <virt/vga.h>
 
 #define WINDOW_BASE 0xa0000
@@ -120,6 +122,54 @@
 #define MAX_HEIGHT 768
 #define REFRESH_NS 20000000u
 
+// The Bochs display interface's registers, at an index port and a data port,
+// with QEMU's include/hw/display/bochs-vbe.h values and semantics.
+#define DISPI_PORT 0x1ce
+#define DISPI_PORT_COUNT 3
+#define DISPI_ID 0x0
+#define DISPI_XRES 0x1
+#define DISPI_YRES 0x2
+#define DISPI_BPP 0x3
+#define DISPI_ENABLE 0x4
+#define DISPI_BANK 0x5
+#define DISPI_VIRT_WIDTH 0x6
+#define DISPI_VIRT_HEIGHT 0x7
+#define DISPI_X_OFFSET 0x8
+#define DISPI_Y_OFFSET 0x9
+#define DISPI_REG_COUNT 0xa
+#define DISPI_VIDEO_MEMORY_64K 0xa
+#define DISPI_ID0 0xb0c0
+#define DISPI_ID5 0xb0c5
+#define DISPI_ENABLED 0x01
+#define DISPI_GETCAPS 0x02
+#define DISPI_8BIT_DAC 0x20
+#define DISPI_LFB_ENABLED 0x40
+#define DISPI_NOCLEARMEM 0x80
+#define DISPI_MAX_XRES 16000
+#define DISPI_MAX_YRES 12000
+#define DISPI_MAX_BPP 32
+
+// The emulated display controller's PCI identity, QEMU's standard VGA's.
+#define VBE_VENDOR_ID 0x1234
+#define VBE_DEVICE_ID 0x1111
+#define VBE_SUBSYSTEM_VENDOR_ID 0x1af4
+#define VBE_SUBSYSTEM_ID 0x1100
+#define VBE_REVISION 0x02
+#define VBE_CLASS 0x030000
+
+#define PCI_COMMAND_IO 0x0001
+#define PCI_COMMAND_MEMORY 0x0002
+#define PCI_COMMAND_MASTER 0x0004
+#define PCI_COMMAND_INTX_DISABLE 0x0400
+#define PCI_BAR_PREFETCHABLE 0x08
+
+// Where the framebuffer BAR may be mapped: above the first megabyte, and below
+// the I/O APIC, local APIC, and firmware ranges.
+#define BAR_LOW 0x100000ull
+#define BAR_HIGH 0xfec00000ull
+
+#define NO_BANK UINT32_MAX
+
 static struct {
     bool on;
     struct spinlock lock;
@@ -146,7 +196,33 @@ static struct {
     uint8_t status_toggle;
     uint8_t *planes[4];
     bool dirty;
+    // The DAC takes 8 bits per primary, as the Bochs interface can select.
+    bool dac8;
+    bool palette_dirty;
 } vga;
+
+// The Bochs display interface, on video memory of its own, and the PCI
+// function whose BAR maps that memory.
+static struct {
+    bool present;
+    uint8_t *vram;
+    uint64_t vram_phys;
+    uint64_t vram_size;
+    uint16_t index;
+    uint16_t regs[DISPI_REG_COUNT];
+    uint32_t line_bytes;
+    uint32_t start;
+    // The bank the window at A0000h shows, while the interface is enabled.
+    uint32_t window_bank;
+    int device;
+    uint16_t command;
+    uint32_t bar;
+    uint8_t interrupt_line;
+    // Where the BAR maps the video memory, 0 if nowhere, and the memory type
+    // the identity mapping it replaced had.
+    uint64_t mapped;
+    uint8_t mapped_memtype;
+} vbe;
 
 // The display as last drawn, and where on the framebuffer.
 static struct {
@@ -165,6 +241,14 @@ static struct {
     uint32_t border;
     // One scan line, with a character clock to spare for panning.
     uint32_t line[MAX_WIDTH + 2 * 9 * 2];
+    // What the Bochs interface last showed: each line's hash, and the palette.
+    bool vbe_valid;
+    uint16_t vbe_bpp;
+    uint32_t vbe_line_bytes;
+    uint32_t vbe_start;
+    uint64_t *vbe_hashes;
+    uint32_t *vbe_line;
+    uint32_t vbe_palette[256];
 } out;
 
 static uint8_t rotate_right(uint8_t value, unsigned count) {
@@ -295,13 +379,31 @@ static uint8_t mem_read(uint32_t offset) {
     return (uint8_t)~differ;
 }
 
+static bool vbe_on(void) {
+    return vbe.present && (vbe.regs[DISPI_ENABLE] & DISPI_ENABLED);
+}
+
+// While the Bochs interface is on, the window's first 64 KiB show a bank of
+// its video memory, normally mapped there directly, and the rest nothing.
+static uint8_t *vbe_window_byte(uint32_t offset) {
+    uint64_t at = ((uint64_t)vbe.regs[DISPI_BANK] << 16) + offset;
+    return offset < PLANE_SIZE && at < vbe.vram_size ? vbe.vram + at : NULL;
+}
+
 static uint64_t window_read(struct vcpu *v, void *ctx, uint64_t offset, unsigned size) {
     (void)v;
     (void)ctx;
     uint64_t value = 0;
     spinlock_acquire(&vga.lock);
     for (unsigned i = 0; i < size; i++) {
-        value |= (uint64_t)mem_read((uint32_t)offset + i) << (8 * i);
+        uint8_t byte;
+        if (vbe_on()) {
+            uint8_t *p = vbe_window_byte((uint32_t)offset + i);
+            byte = p != NULL ? *p : 0xff;
+        } else {
+            byte = mem_read((uint32_t)offset + i);
+        }
+        value |= (uint64_t)byte << (8 * i);
     }
     spinlock_release(&vga.lock);
     return value;
@@ -313,7 +415,15 @@ static void window_write(struct vcpu *v, void *ctx, uint64_t offset, unsigned si
     (void)ctx;
     spinlock_acquire(&vga.lock);
     for (unsigned i = 0; i < size; i++) {
-        mem_write((uint32_t)offset + i, (uint8_t)(value >> (8 * i)));
+        uint8_t byte = (uint8_t)(value >> (8 * i));
+        if (vbe_on()) {
+            uint8_t *p = vbe_window_byte((uint32_t)offset + i);
+            if (p != NULL) {
+                *p = byte;
+            }
+        } else {
+            mem_write((uint32_t)offset + i, byte);
+        }
     }
     spinlock_release(&vga.lock);
 }
@@ -451,6 +561,7 @@ static void port_write(uint16_t port, uint8_t value) {
         }
         case 0x3c6: {
             vga.pel_mask = value;
+            vga.palette_dirty = true;
             break;
         }
         case 0x3c7: {
@@ -466,11 +577,12 @@ static void port_write(uint16_t port, uint8_t value) {
             break;
         }
         case 0x3c9: {
-            vga.dac_latch[vga.dac_step] = value & 0x3f;
+            vga.dac_latch[vga.dac_step] = vga.dac8 ? value : value & 0x3f;
             if (++vga.dac_step == 3) {
                 memcpy(vga.dac[vga.dac_write_index], vga.dac_latch, 3);
                 vga.dac_step = 0;
                 vga.dac_write_index++;
+                vga.palette_dirty = true;
             }
             break;
         }
@@ -543,6 +655,301 @@ static void ports_access(struct vcpu *v, void *ctx, uint16_t offset, unsigned si
     spinlock_release(&vga.lock);
 }
 
+static unsigned dispi_bits(void) {
+    return vbe.regs[DISPI_BPP] == 15 ? 16 : vbe.regs[DISPI_BPP];
+}
+
+// The registers brought back in range, and the scan line and display start
+// that follow from them, as QEMU's vbe_fixup_regs() does.
+static void dispi_fixup(void) {
+    uint16_t *r = vbe.regs;
+    if (!(r[DISPI_ENABLE] & DISPI_ENABLED)) {
+        return;
+    }
+    switch (r[DISPI_BPP]) {
+        case 4:
+        case 8:
+        case 15:
+        case 16:
+        case 24:
+        case 32: {
+            break;
+        }
+        default: {
+            r[DISPI_BPP] = 8;
+            break;
+        }
+    }
+    unsigned bits = dispi_bits();
+    r[DISPI_XRES] &= (uint16_t)~7u;
+    if (r[DISPI_XRES] == 0) {
+        r[DISPI_XRES] = 8;
+    }
+    if (r[DISPI_XRES] > DISPI_MAX_XRES) {
+        r[DISPI_XRES] = DISPI_MAX_XRES;
+    }
+    r[DISPI_VIRT_WIDTH] &= (uint16_t)~7u;
+    if (r[DISPI_VIRT_WIDTH] > DISPI_MAX_XRES) {
+        r[DISPI_VIRT_WIDTH] = DISPI_MAX_XRES;
+    }
+    if (r[DISPI_VIRT_WIDTH] < r[DISPI_XRES]) {
+        r[DISPI_VIRT_WIDTH] = r[DISPI_XRES];
+    }
+    uint32_t line = r[DISPI_VIRT_WIDTH] * bits / 8;
+    uint64_t max_y = vbe.vram_size / line;
+    if (r[DISPI_YRES] == 0) {
+        r[DISPI_YRES] = 1;
+    }
+    if (r[DISPI_YRES] > DISPI_MAX_YRES) {
+        r[DISPI_YRES] = DISPI_MAX_YRES;
+    }
+    if (r[DISPI_YRES] > max_y) {
+        r[DISPI_YRES] = (uint16_t)max_y;
+    }
+    if (r[DISPI_X_OFFSET] > DISPI_MAX_XRES) {
+        r[DISPI_X_OFFSET] = DISPI_MAX_XRES;
+    }
+    if (r[DISPI_Y_OFFSET] > DISPI_MAX_YRES) {
+        r[DISPI_Y_OFFSET] = DISPI_MAX_YRES;
+    }
+    uint64_t start = (uint64_t)r[DISPI_X_OFFSET] * bits / 8 + (uint64_t)r[DISPI_Y_OFFSET] * line;
+    uint64_t shown = (uint64_t)r[DISPI_YRES] * line;
+    if (start + shown > vbe.vram_size) {
+        r[DISPI_Y_OFFSET] = 0;
+        start = (uint64_t)r[DISPI_X_OFFSET] * bits / 8;
+        if (start + shown > vbe.vram_size) {
+            r[DISPI_X_OFFSET] = 0;
+            start = 0;
+        }
+    }
+    r[DISPI_VIRT_HEIGHT] = max_y > 0xffff ? 0xffff : (uint16_t)max_y;
+    vbe.line_bytes = line;
+    vbe.start = (uint32_t)start;
+}
+
+// The window at A0000h shows the bank the interface selects while it is on,
+// mapped there directly, and is the VGA's while it is off.
+static void window_update(void) {
+    uint32_t bank = vbe_on() ? vbe.regs[DISPI_BANK] : NO_BANK;
+    if (bank == vbe.window_bank) {
+        return;
+    }
+    if (bank == NO_BANK) {
+        gpt_map(WINDOW_BASE, 0, PLANE_SIZE, 0, 0);
+    } else {
+        gpt_map(WINDOW_BASE, vbe.vram_phys + ((uint64_t)bank << 16), PLANE_SIZE, GPT_RWX, MT_WB);
+    }
+    vbe.window_bank = bank;
+    gpt_flush();
+}
+
+static uint16_t dispi_read(uint16_t index) {
+    if (index < DISPI_REG_COUNT) {
+        if (vbe.regs[DISPI_ENABLE] & DISPI_GETCAPS) {
+            switch (index) {
+                case DISPI_XRES: {
+                    return DISPI_MAX_XRES;
+                }
+                case DISPI_YRES: {
+                    return DISPI_MAX_YRES;
+                }
+                case DISPI_BPP: {
+                    return DISPI_MAX_BPP;
+                }
+                default: {
+                    break;
+                }
+            }
+        }
+        return vbe.regs[index];
+    }
+    if (index == DISPI_VIDEO_MEMORY_64K) {
+        uint64_t blocks = vbe.vram_size >> 16;
+        return blocks > 0xffff ? 0xffff : (uint16_t)blocks;
+    }
+    return 0;
+}
+
+static void dispi_write(uint16_t index, uint16_t value) {
+    uint16_t *r = vbe.regs;
+    switch (index) {
+        case DISPI_ID: {
+            if (value >= DISPI_ID0 && value <= DISPI_ID5) {
+                r[DISPI_ID] = value;
+            }
+            break;
+        }
+        case DISPI_XRES:
+        case DISPI_YRES:
+        case DISPI_BPP:
+        case DISPI_VIRT_WIDTH:
+        case DISPI_X_OFFSET:
+        case DISPI_Y_OFFSET: {
+            r[index] = value;
+            dispi_fixup();
+            break;
+        }
+        case DISPI_BANK: {
+            r[DISPI_BANK] = (uint16_t)(value & ((vbe.vram_size >> 16) - 1));
+            window_update();
+            break;
+        }
+        case DISPI_ENABLE: {
+            if ((value & DISPI_ENABLED) && !(r[DISPI_ENABLE] & DISPI_ENABLED)) {
+                r[DISPI_VIRT_WIDTH] = 0;
+                r[DISPI_X_OFFSET] = 0;
+                r[DISPI_Y_OFFSET] = 0;
+                r[DISPI_ENABLE] |= DISPI_ENABLED;
+                dispi_fixup();
+                if (!(value & DISPI_NOCLEARMEM)) {
+                    memset(vbe.vram, 0, (size_t)r[DISPI_YRES] * vbe.line_bytes);
+                }
+            } else {
+                r[DISPI_BANK] = 0;
+            }
+            vga.dac8 = value & DISPI_8BIT_DAC;
+            vga.palette_dirty = true;
+            r[DISPI_ENABLE] = value;
+            window_update();
+            break;
+        }
+        default: {
+            break;
+        }
+    }
+    vga.dirty = true;
+}
+
+static void dispi_ports(struct vcpu *v, void *ctx, uint16_t offset, unsigned size, bool in,
+                        uint32_t *value) {
+    (void)v;
+    (void)ctx;
+    uint16_t mask = size == 1 ? 0xff : 0xffff;
+    spinlock_acquire(&vga.lock);
+    if (offset == 0) {
+        if (in) {
+            *value = vbe.index & mask;
+        } else {
+            vbe.index = (uint16_t)(*value & mask);
+        }
+    } else if (in) {
+        *value = dispi_read(vbe.index) & mask;
+    } else {
+        dispi_write(vbe.index, (uint16_t)(*value & mask));
+    }
+    spinlock_release(&vga.lock);
+}
+
+// Whether the guest-physical range is mapped to itself with one memory type,
+// as the layout maps what is neither RAM nor emulated, which the BAR may then
+// take over and give back.
+static bool range_identity(uint64_t base, uint64_t size, uint8_t *memtype) {
+    for (uint64_t a = base; a < base + size; a += PAGE_SIZE) {
+        uint64_t hpa;
+        uint32_t prot;
+        uint8_t type;
+        if (!gpt_translate(a, &hpa, &prot, &type) || hpa != a || (a != base && type != *memtype)) {
+            return false;
+        }
+        *memtype = type;
+    }
+    return true;
+}
+
+static void bar_remap(void) {
+    uint64_t want = 0;
+    if ((vbe.command & PCI_COMMAND_MEMORY) && vbe.bar >= BAR_LOW
+        && vbe.bar + vbe.vram_size <= BAR_HIGH) {
+        want = vbe.bar;
+    }
+    if (want == vbe.mapped) {
+        return;
+    }
+    if (vbe.mapped != 0) {
+        gpt_map(vbe.mapped, vbe.mapped, vbe.vram_size, GPT_RWX, vbe.mapped_memtype);
+        vbe.mapped = 0;
+    }
+    if (want != 0) {
+        if (range_identity(want, vbe.vram_size, &vbe.mapped_memtype)) {
+            gpt_map(want, vbe.vram_phys, vbe.vram_size, GPT_RWX, MT_WB);
+            vbe.mapped = want;
+        } else {
+            printf("Not mapping the emulated display controller's BAR at %#llx, over memory "
+                   "in use\n", (unsigned long long)want);
+        }
+    }
+    gpt_flush();
+}
+
+static uint32_t vbe_config_dword(uint32_t reg) {
+    switch (reg) {
+        case 0x00: {
+            return (uint32_t)VBE_DEVICE_ID << 16 | VBE_VENDOR_ID;
+        }
+        case 0x04: {
+            return vbe.command;
+        }
+        case 0x08: {
+            return (uint32_t)VBE_CLASS << 8 | VBE_REVISION;
+        }
+        case 0x10: {
+            return vbe.bar | PCI_BAR_PREFETCHABLE;
+        }
+        case 0x2c: {
+            return (uint32_t)VBE_SUBSYSTEM_ID << 16 | VBE_SUBSYSTEM_VENDOR_ID;
+        }
+        case 0x3c: {
+            return vbe.interrupt_line;
+        }
+        default: {
+            return 0;
+        }
+    }
+}
+
+static uint32_t vbe_config_read(void *ctx, uint32_t offset, unsigned size) {
+    (void)ctx;
+    spinlock_acquire(&vga.lock);
+    uint32_t dword = vbe_config_dword(offset & ~3u);
+    spinlock_release(&vga.lock);
+    uint32_t value = dword >> (8 * (offset & 3));
+    return size == 4 ? value : value & ((1u << (8 * size)) - 1);
+}
+
+// The command register's decoding and bus master bits, the BAR's address
+// bits, and the interrupt line take writes; the rest is read-only.
+static void vbe_config_write(void *ctx, uint32_t offset, unsigned size, uint32_t value) {
+    (void)ctx;
+    uint32_t reg = offset & ~3u;
+    unsigned shift = 8 * (offset & 3);
+    uint32_t mask = (size == 4 ? 0xffffffffu : (1u << (8 * size)) - 1) << shift;
+    spinlock_acquire(&vga.lock);
+    uint32_t dword = (vbe_config_dword(reg) & ~mask) | ((value << shift) & mask);
+    switch (reg) {
+        case 0x04: {
+            vbe.command = (uint16_t)(dword & (PCI_COMMAND_IO | PCI_COMMAND_MEMORY
+                                              | PCI_COMMAND_MASTER | PCI_COMMAND_INTX_DISABLE));
+            bar_remap();
+            break;
+        }
+        case 0x10: {
+            vbe.bar = dword & ~(uint32_t)(vbe.vram_size - 1) & ~0xfu;
+            bar_remap();
+            break;
+        }
+        case 0x3c: {
+            vbe.interrupt_line = (uint8_t)dword;
+            break;
+        }
+        default: {
+            break;
+        }
+    }
+    spinlock_release(&vga.lock);
+}
+
+static const struct pci_virt_ops vbe_config_ops = {vbe_config_read, vbe_config_write};
+
 static uint32_t expand6(uint8_t v) {
     v &= 0x3f;
     return (uint32_t)((v << 2) | (v >> 4));
@@ -550,6 +957,9 @@ static uint32_t expand6(uint8_t v) {
 
 static uint32_t dac_rgb(uint8_t index) {
     const uint8_t *c = vga.dac[index & vga.pel_mask];
+    if (vga.dac8) {
+        return (uint32_t)c[0] << 16 | (uint32_t)c[1] << 8 | c[2];
+    }
     return expand6(c[0]) << 16 | expand6(c[1]) << 8 | expand6(c[2]);
 }
 
@@ -807,8 +1217,9 @@ static void fb_put(uint8_t *row, uint32_t x, uint32_t pixel, uint8_t bpp) {
     }
 }
 
-// The framebuffer's rectangle the display fills, as the configuration asks.
-static void place(uint32_t width, uint32_t height) {
+// The framebuffer's rectangle the display fills, as the configuration asks,
+// at an aspect ratio of aspect_w:aspect_h where it is to be kept.
+static void place(uint32_t width, uint32_t height, uint32_t aspect_w, uint32_t aspect_h) {
     const struct handoff *h = core_handoff;
     uint32_t fw = h->video.framebuffer.width;
     uint32_t fh = h->video.framebuffer.height;
@@ -816,11 +1227,10 @@ static void place(uint32_t width, uint32_t height) {
     uint64_t hgt = fh;
     switch (h->config.vga_scaling) {
         case HANDOFF_VGA_SCALING_ASPECT: {
-            // As a VGA monitor shows every mode, at 4:3.
-            if ((uint64_t)fw * 3 >= (uint64_t)fh * 4) {
-                w = (uint64_t)fh * 4 / 3;
+            if ((uint64_t)fw * aspect_h >= (uint64_t)fh * aspect_w) {
+                w = (uint64_t)fh * aspect_w / aspect_h;
             } else {
-                hgt = (uint64_t)fw * 3 / 4;
+                hgt = (uint64_t)fw * aspect_h / aspect_w;
             }
             break;
         }
@@ -883,9 +1293,11 @@ static void draw(uint32_t width, uint32_t height, uint32_t border) {
         out.width = width;
         out.height = height;
         out.border = border;
-        place(width, height);
+        // As a VGA monitor shows every mode, at 4:3.
+        place(width, height, 4, 3);
         fb_clear(border);
         out.valid = true;
+        out.vbe_valid = false;
     }
 
     for (uint32_t sy = 0; sy < height; sy++) {
@@ -927,6 +1339,137 @@ static void draw(uint32_t width, uint32_t height, uint32_t border) {
     }
 }
 
+static uint32_t expand5(uint32_t v) {
+    return (v << 3) | (v >> 2);
+}
+
+static void vbe_convert(const uint8_t *p, uint32_t width, unsigned bpp, uint32_t *rgb) {
+    switch (bpp) {
+        case 8: {
+            for (uint32_t x = 0; x < width; x++) {
+                rgb[x] = out.vbe_palette[p[x]];
+            }
+            break;
+        }
+        case 15: {
+            for (uint32_t x = 0; x < width; x++) {
+                uint32_t v = p[2 * x] | (uint32_t)p[2 * x + 1] << 8;
+                rgb[x] = expand5((v >> 10) & 31) << 16 | expand5((v >> 5) & 31) << 8
+                         | expand5(v & 31);
+            }
+            break;
+        }
+        case 16: {
+            for (uint32_t x = 0; x < width; x++) {
+                uint32_t v = p[2 * x] | (uint32_t)p[2 * x + 1] << 8;
+                uint32_t g = (v >> 5) & 63;
+                rgb[x] = expand5(v >> 11) << 16 | ((g << 2) | (g >> 4)) << 8 | expand5(v & 31);
+            }
+            break;
+        }
+        case 24: {
+            for (uint32_t x = 0; x < width; x++) {
+                const uint8_t *q = p + 3 * x;
+                rgb[x] = (uint32_t)q[2] << 16 | (uint32_t)q[1] << 8 | q[0];
+            }
+            break;
+        }
+        case 32: {
+            for (uint32_t x = 0; x < width; x++) {
+                const uint8_t *q = p + 4 * x;
+                rgb[x] = (uint32_t)q[2] << 16 | (uint32_t)q[1] << 8 | q[0];
+            }
+            break;
+        }
+        default: {
+            memset(rgb, 0, width * sizeof(uint32_t));
+            break;
+        }
+    }
+}
+
+static uint64_t line_hash(const uint8_t *p, uint32_t bytes) {
+    uint64_t h = 0xcbf29ce484222325ull ^ bytes;
+    uint32_t i = 0;
+    for (; i + 8 <= bytes; i += 8) {
+        uint64_t w;
+        memcpy(&w, p + i, 8);
+        h = (h ^ w) * 0x100000001b3ull;
+        h ^= h >> 29;
+    }
+    for (; i < bytes; i++) {
+        h = (h ^ p[i]) * 0x100000001b3ull;
+    }
+    return h;
+}
+
+// The Bochs interface's display, its lines redrawn where their bytes changed,
+// as nothing traps the guest's writes to its memory.
+static void vbe_refresh(void) {
+    const struct handoff_framebuffer *fb = &core_handoff->video.framebuffer;
+    spinlock_acquire(&vga.lock);
+    uint32_t width = vbe.regs[DISPI_XRES];
+    uint32_t height = vbe.regs[DISPI_YRES];
+    uint16_t bpp = vbe.regs[DISPI_BPP];
+    uint32_t line_bytes = vbe.line_bytes;
+    uint32_t start = vbe.start;
+    bool palette = vga.palette_dirty;
+    vga.palette_dirty = false;
+    vga.dirty = false;
+    if (bpp == 8 && (palette || !out.vbe_valid)) {
+        for (unsigned i = 0; i < 256; i++) {
+            out.vbe_palette[i] = dac_rgb((uint8_t)i);
+        }
+    }
+    spinlock_release(&vga.lock);
+
+    bool all = !out.vbe_valid || width != out.width || height != out.height || bpp != out.vbe_bpp
+               || line_bytes != out.vbe_line_bytes || start != out.vbe_start
+               || (bpp == 8 && palette);
+    if (all) {
+        out.width = width;
+        out.height = height;
+        out.vbe_bpp = bpp;
+        out.vbe_line_bytes = line_bytes;
+        out.vbe_start = start;
+        // Its pixels are square.
+        place(width, height, width, height);
+        fb_clear(0);
+        out.vbe_valid = true;
+        out.valid = false;
+    }
+    uint32_t bytes = (width * (bpp == 15 ? 16 : bpp) + 7) / 8;
+    for (uint32_t sy = 0; sy < height; sy++) {
+        uint64_t at = start + (uint64_t)sy * line_bytes;
+        if (at + bytes > vbe.vram_size) {
+            break;
+        }
+        const uint8_t *p = vbe.vram + at;
+        uint64_t hash = line_hash(p, bytes);
+        if (!all && hash == out.vbe_hashes[sy]) {
+            continue;
+        }
+        out.vbe_hashes[sy] = hash;
+        vbe_convert(p, width, bpp, out.vbe_line);
+
+        uint32_t y0 = (uint32_t)(((uint64_t)sy * out.h + height - 1) / height);
+        uint32_t y1 = (uint32_t)(((uint64_t)(sy + 1) * out.h + height - 1) / height);
+        for (uint32_t y = y0; y < y1 && y < out.h; y++) {
+            uint8_t *row = (uint8_t *)(uintptr_t)fb->base + (uint64_t)(out.y + y) * fb->pitch;
+            uint32_t source = UINT32_MAX;
+            uint32_t pixel = 0;
+            for (uint32_t x = 0; x < out.w; x++) {
+                uint32_t rgb = out.vbe_line[out.xmap[x]];
+                if (rgb != source) {
+                    source = rgb;
+                    pixel = fb_pixel(rgb);
+                }
+                fb_put(row, out.x + x, pixel, fb->bpp);
+            }
+        }
+    }
+}
+
 void vga_refresh(void) {
     if (!vga.on || !this_cpu()->bsp) {
         return;
@@ -936,6 +1479,10 @@ void vga_refresh(void) {
         return;
     }
     out.last = now;
+    if (vbe_on()) {
+        vbe_refresh();
+        return;
+    }
     uint64_t frames = now / frame_ns();
     bool cursor_on = !((frames >> CURSOR_FRAMES_SHIFT) & 1);
     bool blink_on = !((frames >> BLINK_FRAMES_SHIFT) & 1);
@@ -957,6 +1504,43 @@ void vga_refresh(void) {
 
 bool vga_emulated(void) {
     return vga.on;
+}
+
+int vga_pci_device(void) {
+    return vbe.present ? vbe.device : -1;
+}
+
+// The Bochs interface on the video memory the loader reserved, and the PCI
+// function that maps it, where a host bridge window has room for its BAR.
+static void vbe_init(void) {
+    const struct handoff_video *video = &core_handoff->video;
+    vbe.vram_phys = video->vram_base;
+    vbe.vram = (uint8_t *)(uintptr_t)video->vram_base;
+    vbe.vram_size = video->vram_size;
+    vbe.regs[DISPI_ID] = DISPI_ID5;
+    vbe.window_bank = NO_BANK;
+    vbe.device = -1;
+    out.vbe_hashes = page_alloc((DISPI_MAX_YRES * sizeof(uint64_t) + PAGE_SIZE - 1) / PAGE_SIZE);
+    out.vbe_line = page_alloc((DISPI_MAX_XRES * sizeof(uint32_t) + PAGE_SIZE - 1) / PAGE_SIZE);
+    struct io_handler ports = {DISPI_PORT, DISPI_PORT_COUNT, dispi_ports, NULL};
+    io_register(&ports);
+    vbe.present = true;
+
+    uint64_t base;
+    if (!pci_relocate_reserve(0, 0, vbe.vram_size, &base)) {
+        printf("No room for the emulated display controller's BAR, so no linear framebuffer\n");
+        return;
+    }
+    vbe.bar = (uint32_t)base;
+    vbe.command = PCI_COMMAND_IO | PCI_COMMAND_MEMORY;
+    vbe.interrupt_line = 0xff;
+    vbe.device = pci_virt_add(&vbe_config_ops, NULL);
+    if (vbe.device < 0) {
+        return;
+    }
+    bar_remap();
+    printf("Emulated display controller at 00:%02x.0, %llu MiB of video memory at %#llx\n",
+           vbe.device, (unsigned long long)(vbe.vram_size >> 20), (unsigned long long)base);
 }
 
 static const char *const scaling_names[] = {"stretched", "kept at 4:3", "centred", "scaled",
@@ -1001,6 +1585,9 @@ bool vga_init(void) {
     mmio_register(WINDOW_BASE, WINDOW_SIZE, &window_ops, NULL);
     gpt_map(WINDOW_BASE, 0, WINDOW_SIZE, 0, 0);
     gpt_flush();
+    if (h->video.vram_size != 0) {
+        vbe_init();
+    }
     vga.on = true;
 
     unsigned scaling = h->config.vga_scaling < 5 ? h->config.vga_scaling : 0;

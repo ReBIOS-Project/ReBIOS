@@ -28,6 +28,11 @@
 bool vga_init(void);
 bool vga_emulated(void);
 
+// The device number on PCI bus 0 of the display controller the emulated VGA
+// is, with its Bochs display interface and framebuffer BAR, or -1 if it has
+// no PCI function.
+int vga_pci_device(void);
+
 // Redraws what the guest changed, at most as often as a display refreshes.
 // Only the boot processor draws.
 void vga_refresh(void);
