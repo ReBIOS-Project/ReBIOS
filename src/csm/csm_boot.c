@@ -41,6 +41,7 @@
 #include <virt/irq.h>
 #include <virt/layout.h>
 #include <virt/vcpu.h>
+#include <virt/vga.h>
 #include <virt/virt.h>
 
 extern const uint8_t seabios_csm[];
@@ -225,10 +226,43 @@ static void update_bbs(struct vcpu *v) {
     csm_call(v, CSM_COMPAT16_UPDATE_BBS, BOOT_TABLE);
 }
 
+extern const uint8_t vgabios_image[];
+extern const uint8_t vgabios_image_end[];
+
+// The emulated VGA's video BIOS as an option ROM: padded to the size its
+// header gives, with the checksum that makes its bytes add up to 0.
+static const struct handoff_pci_rom *emulated_vbios(void) {
+    static struct handoff_pci_rom rom;
+    if (rom.size != 0) {
+        return &rom;
+    }
+    const struct handoff *h = core_handoff;
+    uint32_t length = (uint32_t)(vgabios_image_end - vgabios_image);
+    uint32_t size = vgabios_image[2] * 512u;
+    uint8_t *image = page_alloc((size + PAGE_SIZE - 1) / PAGE_SIZE);
+    memset(image, 0, size);
+    memcpy(image, vgabios_image, length < size ? length : size);
+    uint8_t sum = 0;
+    for (uint32_t i = 0; i + 1 < size; i++) {
+        sum = (uint8_t)(sum + image[i]);
+    }
+    image[size - 1] = (uint8_t)-sum;
+    if (h->video.vga_present) {
+        rom.address = h->video.vga_device;
+        rom.vendor_id = h->video.vga_vendor_id;
+        rom.device_id = h->video.vga_device_id;
+    }
+    rom.base_class = 0x03;
+    rom.size = size;
+    rom.image = (uint64_t)(uintptr_t)image;
+    return &rom;
+}
+
 // Runs the next option ROM that fits, or moves on to the boot.
 static void next_rom(struct vcpu *v) {
     const struct handoff *h = core_handoff;
-    uint32_t rom_count = h->pci_rom_count + (h->video.vbios_present ? 1 : 0);
+    bool video = vga_emulated() || h->video.vbios_present;
+    uint32_t rom_count = h->pci_rom_count + (video ? 1 : 0);
     // SeaBIOS lets option ROMs grow up to where its own data begins.
     uint32_t rom_max = csm.compat16->uma_address;
     if (rom_max == 0 || rom_max > csm.image_base) {
@@ -237,10 +271,10 @@ static void next_rom(struct vcpu *v) {
 
     for (; csm.roms_done < rom_count; csm.roms_done++) {
         const struct handoff_pci_rom *rom;
-        if (h->video.vbios_present && csm.roms_done == 0) {
-            rom = &h->video.vbios;
+        if (video && csm.roms_done == 0) {
+            rom = vga_emulated() ? emulated_vbios() : &h->video.vbios;
         } else {
-            rom = &h->pci_roms[csm.roms_done - (h->video.vbios_present ? 1 : 0)];
+            rom = &h->pci_roms[csm.roms_done - (video ? 1 : 0)];
         }
 
         if (rom->address.segment != 0) {
