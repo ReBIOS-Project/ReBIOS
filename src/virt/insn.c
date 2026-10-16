@@ -21,6 +21,7 @@
 #include <sys/x86.h>
 #include <virt/guest_mem.h>
 #include <virt/insn.h>
+#include <virt/insn_mem_table.h>
 #include <virt/vcpu.h>
 
 static bool is_legacy_prefix(uint8_t b) {
@@ -477,12 +478,12 @@ static uint64_t segment_linear(struct vcpu *v, const struct insn *insn, int reg,
     return (segment.base + ea) & 0xffffffff;
 }
 
-bool insn_mem_linear(struct vcpu *v, const struct insn *insn, uint64_t *linear) {
+static bool mem_linear(struct vcpu *v, const struct insn *insn, int64_t disp, uint64_t *linear) {
     int segment = SEG_DS;
     uint64_t ea;
     if (insn->opcode >= 0xa0 && insn->opcode <= 0xa3) {
         ea = insn->imm;
-    } else if (!insn->has_modrm || insn->modrm >> 6 == 3 || insn->vex) {
+    } else if (!insn->has_modrm || insn->modrm >> 6 == 3) {
         return false;
     } else if (insn->address_size == 2) {
         unsigned mod = insn->modrm >> 6;
@@ -493,7 +494,7 @@ bool insn_mem_linear(struct vcpu *v, const struct insn *insn, uint64_t *linear) 
         uint64_t di = insn_gpr(v, 7);
         static const uint8_t base_is_bp = 1u << 2 | 1u << 3 | 1u << 6;
         uint64_t sums[8] = {bx + si, bx + di, bp + si, bp + di, si, di, bp, bx};
-        ea = (uint64_t)insn->disp;
+        ea = (uint64_t)disp;
         if (rm != 6 || mod != 0) {
             ea += sums[rm];
             if ((base_is_bp >> rm) & 1) {
@@ -504,7 +505,7 @@ bool insn_mem_linear(struct vcpu *v, const struct insn *insn, uint64_t *linear) 
     } else {
         unsigned mod = insn->modrm >> 6;
         unsigned rm = insn->modrm & 7;
-        ea = (uint64_t)insn->disp;
+        ea = (uint64_t)disp;
         unsigned base = rm;
         if (insn->has_sib) {
             base = insn->sib & 7;
@@ -530,6 +531,110 @@ bool insn_mem_linear(struct vcpu *v, const struct insn *insn, uint64_t *linear) 
         segment = insn->segment;
     }
     *linear = segment_linear(v, insn, segment, ea);
+    return true;
+}
+
+bool insn_mem_linear(struct vcpu *v, const struct insn *insn, uint64_t *linear) {
+    if (insn->vex) {
+        return false;
+    }
+    return mem_linear(v, insn, insn->disp, linear);
+}
+
+// The first form of the instruction's opcode it matches, if any.
+static const struct insn_mem_form *mem_form(const struct insn *insn) {
+    unsigned key = (unsigned)insn->space << 8 | insn->opcode_byte;
+    unsigned low = 0;
+    unsigned high = insn_mem_form_count;
+    while (low < high) {
+        unsigned mid = (low + high) / 2;
+        if (((unsigned)insn_mem_forms[mid].space << 8 | insn_mem_forms[mid].opcode) < key) {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+    unsigned reg = (insn->modrm >> 3) & 7;
+    unsigned mode = insn->long_mode ? INSN_MODE_64 : INSN_MODE_OTHER;
+    for (unsigned i = low; i < insn_mem_form_count; i++) {
+        const struct insn_mem_form *f = &insn_mem_forms[i];
+        if (((unsigned)f->space << 8 | f->opcode) != key) {
+            break;
+        }
+        if ((f->prefix == INSN_PREFIX_ANY || f->prefix == insn->prefix)
+            && (f->reg == INSN_REG_ANY || f->reg == reg) && (f->w == INSN_W_ANY || f->w == insn->w)
+            && (f->l == INSN_L_ANY || f->l == insn->vector_length) && (f->modes & mode) != 0) {
+            return f;
+        }
+    }
+    return NULL;
+}
+
+static unsigned mem_size(const struct insn *insn, const struct insn_mem_form *f) {
+    switch (f->size_kind) {
+        case INSN_SIZE_FIXED: {
+            return f->size;
+        }
+        case INSN_SIZE_VECTOR: {
+            return f->size << insn->vector_length;
+        }
+        case INSN_SIZE_OPERAND: {
+            return insn->operand_size;
+        }
+        case INSN_SIZE_STACK: {
+            return insn->long_mode && insn->operand_size == 4 ? 8 : insn->operand_size;
+        }
+        case INSN_SIZE_FAR: {
+            return insn->operand_size + 2;
+        }
+        case INSN_SIZE_PAIR: {
+            return insn->operand_size * 2;
+        }
+        case INSN_SIZE_FPU_ENV: {
+            return insn->operand_size == 2 ? 14 : 28;
+        }
+        case INSN_SIZE_FPU_STATE: {
+            return insn->operand_size == 2 ? 94 : 108;
+        }
+        default: {
+            return 0;
+        }
+    }
+}
+
+bool insn_mem_operand(struct vcpu *v, const struct insn *insn, struct insn_mem *mem) {
+    if (!insn->has_modrm || insn->modrm >> 6 == 3) {
+        return false;
+    }
+    const struct insn_mem_form *f = mem_form(insn);
+    if (f == NULL || f->size_kind == INSN_SIZE_UNKNOWN) {
+        return false;
+    }
+    if (f->size_kind == INSN_SIZE_NONE) {
+        *mem = (struct insn_mem){0};
+        return true;
+    }
+    bool evex = (insn->space & 0xf0) == INSN_SPACE_EVEX;
+    unsigned size = mem_size(insn, f);
+    unsigned scale = f->disp8_scale != 0 ? f->disp8_scale : size;
+    if (evex && insn->evex_b && f->broadcast != 0) {
+        size = f->broadcast;
+        scale = size;
+    }
+    // EVEX scales an 8-bit displacement: SDM 325462-092 Vol. 2A, 2.7.5.
+    int64_t disp = insn->disp;
+    if (evex && insn->disp_size == 1) {
+        disp *= scale;
+    }
+    if (!mem_linear(v, insn, disp, &mem->linear)) {
+        return false;
+    }
+    mem->size = size;
+    mem->access = f->access;
+    // EVEX masks with any opmask register but k0.
+    if (evex && insn->evex_aaa == 0) {
+        mem->access &= ~INSN_MEM_MASKED;
+    }
     return true;
 }
 

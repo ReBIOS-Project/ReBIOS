@@ -40,6 +40,12 @@
 #define INSN_PREFIX_F3 2
 #define INSN_PREFIX_F2 3
 
+// What an instruction does with a memory operand. A masked access is of only
+// the elements a mask selects.
+#define INSN_MEM_READ 0x01
+#define INSN_MEM_WRITE 0x02
+#define INSN_MEM_MASKED 0x04
+
 struct insn {
     unsigned length;
     unsigned opcode;
@@ -80,6 +86,13 @@ struct insn {
     uint8_t evex_aaa;
 };
 
+struct insn_mem {
+    uint64_t linear;
+    unsigned size;
+    // INSN_MEM_*.
+    unsigned access;
+};
+
 // The length of the instruction at the guest's CS:RIP, for intercepted
 // instructions that only need skipping, on processors that do not report it.
 // Returns 0 if it cannot be read or is not one of those instructions.
@@ -94,6 +107,11 @@ bool insn_decode(struct vcpu *v, struct insn *insn);
 // MOV's offset operand: false where it has neither. VEX, EVEX, and XOP forms
 // are not handled.
 bool insn_mem_linear(struct vcpu *v, const struct insn *insn, uint64_t *linear);
+// Where an instruction's ModRM memory operand is, and which of its bytes the
+// instruction reads and writes, as the Intel SDM and the AMD APM describe the
+// instruction: none where it only uses the operand's address, as CLFLUSH.
+// Returns false where the instruction has no such operand, or they do not say.
+bool insn_mem_operand(struct vcpu *v, const struct insn *insn, struct insn_mem *mem);
 // A string instruction's linear address: its destination at ES:rDI, or its
 // source at DS:rSI, or the segment an override names.
 uint64_t insn_string_linear(struct vcpu *v, const struct insn *insn, bool destination);
