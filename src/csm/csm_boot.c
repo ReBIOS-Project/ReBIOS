@@ -36,6 +36,7 @@
 #include <lib/log.h>
 #include <lib/printf.h>
 #include <sys/mm.h>
+#include <virt/edid.h>
 #include <virt/guest_acpi.h>
 #include <virt/guest_mem.h>
 #include <virt/hypercall.h>
@@ -264,6 +265,13 @@ static void emulated_vbios_info(uint8_t *image, uint32_t size, int device) {
     info.max_height = (uint16_t)video->framebuffer.height;
     info.edid_size = (uint16_t)video->edid_size;
     memcpy(info.edid, video->edid, video->edid_size);
+    // Without one, guests would not know the display's resolution.
+    if (info.edid_size == 0
+        && edid_synthesize(info.edid, video->framebuffer.width, video->framebuffer.height)) {
+        info.edid_size = EDID_BLOCK_SIZE;
+        printf("No EDID from the firmware, so the emulated VGA's display reports %ux%u at 60 Hz\n",
+               video->framebuffer.width, video->framebuffer.height);
+    }
     memcpy(image + at, &info, sizeof(info));
 }
 
