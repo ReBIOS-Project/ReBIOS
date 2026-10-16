@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# This file is part of ReBIOS.
+# Copyright (C) 2026 Mintsuki and contributors
+#
+# ReBIOS is free software: you can redistribute it and/or modify it under the
+# terms of the GNU General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any later
+# version.
+#
+# ReBIOS is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE. See the GNU General Public License for more
+# details.
+#
+# You should have received a copy of the GNU General Public License along
+# with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
+
+name: Check for compilation failures
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    name: Check for compilation failures
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+
+    steps:
+      - name: Install dependencies
+        run: pacman --noconfirm -Syu && pacman --needed --noconfirm -S base-devel git nodejs python llvm clang lld
+
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Get the dependencies
+        run: ./get-deps
+
+      - name: Build ReBIOS (GNU, default)
+        run: make all -j$(nproc) CFLAGS='-g -O2 -pipe -Werror' VGABIOS_CFLAGS='-g -O2 -pipe -Werror' && make clean
+
+      - name: Build ReBIOS (LLVM)
+        run: make all -j$(nproc) TOOLCHAIN=llvm CFLAGS='-g -O2 -pipe -Werror' VGABIOS_CFLAGS='-g -O2 -pipe -Werror' && make clean
