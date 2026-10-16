@@ -26,28 +26,17 @@
 # Change as needed.
 override OUTPUT := rebios
 
-# Target architecture to build for. Default to x86_64.
-ARCH := x86_64
-
 # Install prefix; /usr/local is a good, standard default pick.
 PREFIX := /usr/local
-
-# Check if the architecture is supported.
-ifeq ($(filter $(ARCH),x86_64),)
-    $(error Architecture $(ARCH) not supported)
-endif
 
 # Default user QEMU flags. These are appended to the QEMU command calls.
 QEMUFLAGS := -m 2G
 
-# Internal architecture specific variables that should not be changed by the
-# user.
-override QEMU_ARCH := $(ARCH)
-override EFI_BOOT_FILE := BOOTX64.EFI
+# Internal QEMU flags that should not be changed by the user.
 override QEMU_MACHINE_FLAGS := \
     -M q35
 override QEMU_UEFI_FLAGS := \
-    -drive if=pflash,unit=0,format=raw,file=edk2-ovmf-bins/ovmf-code-$(ARCH).fd,readonly=on
+    -drive if=pflash,unit=0,format=raw,file=edk2-ovmf-bins/ovmf-code-x86_64.fd,readonly=on
 
 # User controllable toolchain and toolchain prefix.
 TOOLCHAIN :=
@@ -139,6 +128,10 @@ override CC_HAS_COMPILE_FLAG = $(shell LC_ALL=C $(CC) $(CFLAGS) $(1) -c -x c /de
 # Check if the compiler supports a flag when linking, linking nothing.
 override CC_HAS_LINK_FLAG = $(shell LC_ALL=C $(CC) $(CFLAGS) $(LDFLAGS) $(1) -Wl,--version 2>&1 >/dev/null | $(call FLAG_IS_NAMED,$(1),$(2)); echo $$?)
 
+# Check if the linker supports a flag by searching its help, as older GNU
+# ld take unknown flags for different ones (-no-pie for -n -o -pie).
+override LD_HAS_FLAG = $(shell ! LC_ALL=C $(CC) $(CFLAGS) $(LDFLAGS) -Wl,--help 2>/dev/null | grep -qE '(^|[[:space:]])-?$(1)([[:space:],=[]|$$)'; echo $$?)
+
 # Internal C flags that should not be changed by the user.
 override CFLAGS += \
     -Wall \
@@ -151,7 +144,12 @@ override CFLAGS += \
     -fshort-wchar \
     -fPIE \
     -ffunction-sections \
-    -fdata-sections
+    -fdata-sections \
+    -m64 \
+    -march=x86-64 \
+    -mno-mmx \
+    -mno-sse \
+    -mno-red-zone
 
 # Internal C preprocessor flags that should not be changed by the user.
 override CPPFLAGS := \
@@ -166,14 +164,15 @@ override CPPFLAGS := \
 
 # Internal nasm flags that should not be changed by the user.
 override NASMFLAGS := \
+    -f elf64 \
     $(patsubst -g,-g -F dwarf,$(NASMFLAGS)) \
     -i src/ \
     -Wall
 
-# Make Clang target the freestanding ELF triple of the architecture.
+# If the C compiler is Clang, set the target as needed.
 ifeq ($(CC_IS_CLANG),1)
     override CC += \
-        -target $(ARCH)-unknown-none-elf
+        -target x86_64-unknown-none-elf
     # Use LLD unless LDFLAGS picks another linker.
     override LDFLAGS := \
         -fuse-ld=lld \
@@ -190,22 +189,8 @@ override LDFLAGS += \
     -Wl,--gc-sections \
     -Wl,--build-id=none \
     -Wl,--hash-style=gnu \
-    -Wl,-T,picoefi/$(ARCH)/link_script.lds
-
-# Architecture specific internal flags.
-ifeq ($(ARCH),x86_64)
-    override CFLAGS += \
-        -m64 \
-        -march=x86-64 \
-        -mno-mmx \
-        -mno-sse \
-        -mno-red-zone
-    override LDFLAGS += \
-        -Wl,-m,elf_x86_64
-    override NASMFLAGS := \
-        -f elf64 \
-        $(NASMFLAGS)
-endif
+    -Wl,-T,picoefi/x86_64/link_script.lds \
+    -Wl,-m,elf_x86_64
 
 # Check that the compiler works with the given flags, as the checks below
 # would otherwise blame a missing feature.
@@ -240,7 +225,7 @@ ifeq ($(CC_IS_CLANG),1)
     # flag is looked for by compiling, as linking is not checked yet.
     ifeq ($(CC_LINKS_VIA_DRIVER),1)
         override LDFLAGS += \
-            -target $(ARCH)-linux-gnu
+            -target x86_64-linux-gnu
         ifeq ($(call CC_HAS_COMPILE_FLAG,--no-default-config),1)
             override LDFLAGS += \
                 --no-default-config
@@ -279,18 +264,16 @@ ifeq ($(call CC_HAS_COMPILE_FLAG,-fno-stack-clash-protection),1)
         -fno-stack-clash-protection
 endif
 
-# Architecture specific checks.
-ifeq ($(ARCH),x86_64)
-    ifeq ($(call CC_HAS_COMPILE_FLAG,-fcf-protection=none),1)
-        override CFLAGS += \
-            -fcf-protection=none
-    endif
-    # GCC needs this flag for interrupt handlers and Clang below 3.9 has
-    # no name for it, where only a long double could reach the x87.
-    ifeq ($(call CC_HAS_COMPILE_FLAG,-mno-80387),1)
-        override CFLAGS += \
-            -mno-80387
-    endif
+ifeq ($(call CC_HAS_COMPILE_FLAG,-fcf-protection=none),1)
+    override CFLAGS += \
+        -fcf-protection=none
+endif
+
+# GCC needs this flag for interrupt handlers and Clang below 3.9 has no
+# name for it, where only a long double could reach the x87.
+ifeq ($(call CC_HAS_COMPILE_FLAG,-mno-80387),1)
+    override CFLAGS += \
+        -mno-80387
 endif
 
 # Tell the compiler as well if it takes the flag, as it otherwise passes
@@ -300,67 +283,63 @@ ifeq ($(call CC_HAS_LINK_FLAG,-pie),1)
         -pie
 endif
 
-# Use "find" to glob all *.c, *.S, and *.asm files in the tree
-# (except the src/arch/* directories, as those are gonna be added
-# in the next step).
-override SRCFILES := $(shell find -L src cc-runtime/src picoefi/$(ARCH) uACPI/source -type f ! -path 'src/arch/*' 2>/dev/null | LC_ALL=C sort)
-# Add architecture specific files, if they exist.
-override SRCFILES += $(shell find -L src/arch/$(ARCH) -type f 2>/dev/null | LC_ALL=C sort)
-# Obtain the object and header dependencies file names.
+# Use "find" to glob all *.c, *.S, and *.asm files in the tree and obtain the
+# object and header dependency file names.
+override SRCFILES := $(shell find -L src cc-runtime/src picoefi/x86_64 uACPI/source -type f 2>/dev/null | LC_ALL=C sort)
 override CFILES := $(filter %.c,$(SRCFILES))
 override ASFILES := $(filter %.S,$(SRCFILES))
 override NASMFILES := $(filter %.asm,$(SRCFILES))
-override OBJ := $(addprefix obj-$(ARCH)/,$(CFILES:.c=.c.o) $(ASFILES:.S=.S.o) $(NASMFILES:.asm=.asm.o))
-override HEADER_DEPS := $(addprefix obj-$(ARCH)/,$(CFILES:.c=.c.d) $(ASFILES:.S=.S.d) $(NASMFILES:.asm=.asm.d))
+override OBJ := $(addprefix obj/,$(CFILES:.c=.c.o) $(ASFILES:.S=.S.o) $(NASMFILES:.asm=.asm.o))
+override HEADER_DEPS := $(addprefix obj/,$(CFILES:.c=.c.d) $(ASFILES:.S=.S.d) $(NASMFILES:.asm=.asm.d))
 
 # Default target. This must come first, before header dependencies.
 # SeaBIOS goes first, as the core carries it.
 .PHONY: all
 all:
 	$(MAKE) seabios
-	$(MAKE) bin-$(ARCH)/$(OUTPUT).efi
+	$(MAKE) bin/$(OUTPUT).efi
 
 # Include header dependencies.
 -include $(HEADER_DEPS)
 
 # Rule to convert the final ELF executable to a .EFI PE executable.
-bin-$(ARCH)/$(OUTPUT).efi: bin-$(ARCH)/$(OUTPUT) GNUmakefile
+bin/$(OUTPUT).efi: bin/$(OUTPUT) GNUmakefile
 	mkdir -p "$(dir $@)"
 	$(OBJCOPY) -O binary $< $@
 	dd if=/dev/null of=$@ bs=4096 seek=$$(( ($$(wc -c < $@) + 4095) / 4096 )) 2>/dev/null
 
 # Link rules for the final executable.
-bin-$(ARCH)/$(OUTPUT): GNUmakefile picoefi/$(ARCH)/link_script.lds $(OBJ)
+bin/$(OUTPUT): GNUmakefile picoefi/x86_64/link_script.lds $(OBJ)
 	mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) $(LDFLAGS) $(OBJ) -o $@
 
 # The compiler may emit calls to the memory functions and the compiler
 # runtime that LTO does not account for, so never build those with LTO.
-obj-$(ARCH)/src/memory.c.o obj-$(ARCH)/cc-runtime/src/cc-runtime.c.o: override CFLAGS += -fno-lto
+obj/src/memory.c.o obj/cc-runtime/src/cc-runtime.c.o: override CFLAGS += -fno-lto
 
 # Only the printf implementation sees the nanoprintf header.
-obj-$(ARCH)/src/lib/printf.c.o: override CPPFLAGS += \
+obj/src/lib/printf.c.o: override CPPFLAGS += \
     -I nanoprintf
 
 # The core carries SeaBIOS.
-obj-$(ARCH)/src/csm/seabios_blob.S.o: seabios/out/Csm16.bin
+obj/src/csm/seabios_blob.S.o: seabios/out/Csm16.bin
 
 # Compilation rules for *.c files.
-obj-$(ARCH)/%.c.o: %.c GNUmakefile
+obj/%.c.o: %.c GNUmakefile
 	mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
 
 # Compilation rules for *.S files.
-obj-$(ARCH)/%.S.o: %.S GNUmakefile
+obj/%.S.o: %.S GNUmakefile
 	mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
 
 # Compilation rules for *.asm (nasm) files.
-obj-$(ARCH)/%.asm.o: %.asm GNUmakefile
+obj/%.asm.o: %.asm GNUmakefile
 	mkdir -p "$(dir $@)"
 	nasm $(NASMFLAGS) -MD $(@:.o=.d) -MP $< -o $@
 
-# Rules to download the UEFI firmware per architecture for testing.
+# Rules to download the UEFI firmware for testing.
 .INTERMEDIATE: edk2-ovmf-bins.tar.gz
 edk2-ovmf-bins.tar.gz:
 	curl -fL -o $@ https://github.com/osdev0/edk2-ovmf-stable-bins/releases/latest/download/edk2-ovmf-bins.tar.gz
@@ -373,8 +352,8 @@ edk2-ovmf-bins: edk2-ovmf-bins.tar.gz
 .PHONY: run
 run: all edk2-ovmf-bins
 	mkdir -p boot/EFI/BOOT
-	cp bin-$(ARCH)/$(OUTPUT).efi boot/EFI/BOOT/$(EFI_BOOT_FILE)
-	qemu-system-$(QEMU_ARCH) \
+	cp bin/$(OUTPUT).efi boot/EFI/BOOT/BOOTX64.EFI
+	qemu-system-x86_64 \
 		$(QEMU_MACHINE_FLAGS) \
 		$(QEMU_UEFI_FLAGS) \
 		-drive file=fat:rw:boot \
@@ -385,25 +364,25 @@ run: all edk2-ovmf-bins
 .PHONY: clean
 clean:
 	if test -f seabios/.config; then $(call SEABIOS_CALL,clean); fi
-	rm -rf bin-$(ARCH) obj-$(ARCH)
+	rm -rf bin obj
 
 # Remove everything built and generated including downloaded dependencies.
 .PHONY: distclean
-distclean:
-	rm -rf bin-* obj-* .deps-obtained .cache compile_commands.json freestanding-c-hdrs cc-runtime picoefi nanoprintf uACPI seabios edk2-ovmf-bins edk2-ovmf-bins.tar.gz
+distclean: clean
+	rm -rf .deps-obtained .cache compile_commands.json freestanding-c-hdrs cc-runtime picoefi nanoprintf uACPI seabios edk2-ovmf-bins edk2-ovmf-bins.tar.gz
 
 # Install the final built executable to its final on-root location. Not
 # install(1), which takes other arguments on illumos and Solaris.
 .PHONY: install
 install: all
 	mkdir -p "$(DESTDIR)$(PREFIX)/share/$(OUTPUT)"
-	cp bin-$(ARCH)/$(OUTPUT).efi "$(DESTDIR)$(PREFIX)/share/$(OUTPUT)/$(OUTPUT)-$(ARCH).efi"
-	chmod 644 "$(DESTDIR)$(PREFIX)/share/$(OUTPUT)/$(OUTPUT)-$(ARCH).efi"
+	cp bin/$(OUTPUT).efi "$(DESTDIR)$(PREFIX)/share/$(OUTPUT)/"
+	chmod 644 "$(DESTDIR)$(PREFIX)/share/$(OUTPUT)/$(OUTPUT).efi"
 
 # Try to undo whatever the "install" target did.
 .PHONY: uninstall
 uninstall:
-	rm -f "$(DESTDIR)$(PREFIX)/share/$(OUTPUT)/$(OUTPUT)-$(ARCH).efi"
+	rm -f "$(DESTDIR)$(PREFIX)/share/$(OUTPUT)/$(OUTPUT).efi"
 	-rmdir "$(DESTDIR)$(PREFIX)/share/$(OUTPUT)"
 
 # SeaBIOS is built as a CSM, but not handed our flags: it ignores CFLAGS and
