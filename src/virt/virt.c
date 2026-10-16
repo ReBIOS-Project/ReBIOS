@@ -29,10 +29,10 @@
 #include <virt/event.h>
 #include <virt/gpt.h>
 #include <virt/insn.h>
-#include <virt/irq.h>
 #include <virt/svm.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>
+#include <virt/vlapic.h>
 #include <virt/vmx.h>
 
 #define MSR_IA32_CR_PAT 0x277
@@ -43,7 +43,6 @@ static uint8_t *io_bitmap;
 static uint8_t *msr_bitmap;
 
 bool vmx_ept_huge_pages(void);
-bool vmx_wait_for_sipi_supported(void);
 void vmx_get_seg(enum seg_reg reg, struct segment *seg);
 void vmx_set_seg(enum seg_reg reg, const struct segment *seg);
 uint64_t vmx_cr0_mask(void);
@@ -78,10 +77,6 @@ bool virt_init(void) {
     cpu_interrupt_handler(event_interrupt);
     printf("Using %s\n", virt_vmx ? "VMX" : "SVM");
     return true;
-}
-
-bool virt_sipi_in_guest(void) {
-    return virt_vmx && vmx_wait_for_sipi_supported();
 }
 
 void virt_cpu_init(void) {
@@ -175,6 +170,7 @@ struct vcpu *vcpu_create(struct cpu *cpu) {
     } else {
         svm_vcpu_init(v);
     }
+    vlapic_create(v);
     return v;
 }
 
@@ -197,8 +193,8 @@ void vcpu_before_entry(struct vcpu *v) {
             v->vmcb->control.tlb_control = 1;
         }
     }
-    irq_before_entry(v);
     event_entry(v);
+    vlapic_before_entry(v);
 }
 
 void vcpu_kick(struct cpu *cpu) {
@@ -452,12 +448,6 @@ void vcpu_inject_exception(struct vcpu *v, uint8_t vector, bool has_error, uint3
 void vcpu_wait_for_sipi(struct vcpu *v) {
     vcpu_set_real_mode(v, 0, 0);
     __atomic_store_n(&v->sipi, VCPU_SIPI_WAITING, __ATOMIC_RELEASE);
-    if (virt_sipi_in_guest()) {
-        vmx_write(VMCS_GUEST_ACTIVITY_STATE, ACTIVITY_WAIT_SIPI);
-        return;
-    }
-    // Otherwise the processor waits here for the hypervisor to pass the
-    // guest's start-up IPI on.
     int32_t vector;
     while ((vector = __atomic_load_n(&v->sipi, __ATOMIC_ACQUIRE)) < 0) {
         cpu_relax();
@@ -471,7 +461,7 @@ void vcpu_init_signal(struct vcpu *v) {
         printf("INIT for the boot processor, resetting\n");
         power_reset(true);
     }
-    lapic_init_reset();
+    vlapic_reset(v);
     vcpu_wait_for_sipi(v);
 }
 

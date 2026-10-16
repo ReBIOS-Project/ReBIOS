@@ -28,10 +28,10 @@
 #include <virt/exit.h>
 #include <virt/gpt.h>
 #include <virt/svm.h>
-#include <virt/vapic.h>
 #include <virt/vcpu.h>
 #include <virt/vioapic.h>
 #include <virt/virt.h>
+#include <virt/vlapic.h>
 
 #define SVM_FEATURE_NP (1u << 0)
 #define SVM_FEATURE_NRIPS (1u << 3)
@@ -80,8 +80,12 @@ void svm_vcpu_init(struct vcpu *v) {
     v->vmcb_pa = (uint64_t)(uintptr_t)v->vmcb;
 
     struct vmcb_control *c = &v->vmcb->control;
-    c->intercept_misc1 = SVM_INTERCEPT_NMI | SVM_INTERCEPT_CPUID | SVM_INTERCEPT_INVD
-                         | SVM_INTERCEPT_IOIO | SVM_INTERCEPT_MSR | SVM_INTERCEPT_SHUTDOWN;
+    c->intercept_misc1 = SVM_INTERCEPT_INTR | SVM_INTERCEPT_NMI | SVM_INTERCEPT_CPUID
+                         | SVM_INTERCEPT_INVD | SVM_INTERCEPT_IOIO | SVM_INTERCEPT_MSR
+                         | SVM_INTERCEPT_SHUTDOWN;
+    // Physical interrupts exit whatever the guest's IF, and CR8 is the virtual
+    // local APIC's TPR.
+    c->vintr = SVM_VINTR_MASKING;
     c->intercept_misc2 = SVM_INTERCEPT_VMRUN | SVM_INTERCEPT_VMMCALL | SVM_INTERCEPT_VMLOAD
                          | SVM_INTERCEPT_VMSAVE | SVM_INTERCEPT_STGI | SVM_INTERCEPT_CLGI
                          | SVM_INTERCEPT_SKINIT;
@@ -218,11 +222,11 @@ static void svm_handle_exit(struct vcpu *v) {
                 panic("Event delivery reached emulated memory at %#llx\n",
                       (unsigned long long)c->exitinfo2);
             }
-            if ((c->exitinfo1 & NPF_WRITE)
-                && (exit_absent_write(v, c->exitinfo2) || vapic_mmio_write(v, c->exitinfo2))) {
+            if ((c->exitinfo1 & NPF_WRITE) && exit_absent_write(v, c->exitinfo2)) {
                 break;
             }
-            if (!(c->exitinfo1 & NPF_FETCH) && vioapic_access(v, c->exitinfo2)) {
+            if (!(c->exitinfo1 & NPF_FETCH)
+                && (vlapic_mmio(v, c->exitinfo2) || vioapic_access(v, c->exitinfo2))) {
                 break;
             }
             printf("Nested page fault at GPA %#llx, error code %#llx\n",
@@ -254,6 +258,7 @@ void svm_run(struct vcpu *v) {
         v->vmcb->control.tlb_control = 0;
         // What it cut short comes back in EXITINTINFO.
         v->vmcb->control.eventinj = 0;
+        vlapic_after_exit(v);
         event_exit(v);
         svm_handle_exit(v);
     }

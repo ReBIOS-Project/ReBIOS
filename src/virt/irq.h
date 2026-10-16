@@ -41,7 +41,11 @@ void irq_gsi_changed(uint32_t gsi);
 bool irq_extint_pending(struct vcpu *v);
 uint8_t irq_extint_acknowledge(void);
 
-// Catches up with routing only the boot processor can change, on it.
-void irq_before_entry(struct vcpu *v);
+// A guest vector the processor took: whether one of the guest's level-
+// triggered I/O APIC entries sent it here, which then waits for the guest's
+// EOI of the vector, masked at the host, its Remote IRR set.
+bool irq_mirror_taken(uint8_t vector);
+void irq_mirror_eoi(uint8_t vector);
+bool irq_remote_irr(uint32_t gsi);
 
 #endif

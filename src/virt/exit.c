@@ -30,9 +30,9 @@
 #include <virt/insn.h>
 #include <virt/io.h>
 #include <virt/layout.h>
-#include <virt/vapic.h>
 #include <virt/svm.h>
 #include <virt/vcpu.h>
+#include <virt/vlapic.h>
 
 #define MSR_IA32_CR_PAT 0x277
 
@@ -50,10 +50,14 @@ void exit_cpuid(struct vcpu *v) {
             // Hardware virtualisation is not offered to the guest yet, and no
             // hypervisor shows.
             r.ecx &= ~(1u << 5 | 1u << 31);
-            // These reflect the guest's CR4, not the host's.
+            // These reflect the guest's CR4 and local APIC, not the host's.
             r.ecx &= ~(1u << 27);
             if (vcpu_cr4(v) & CR4_OSXSAVE) {
                 r.ecx |= 1u << 27;
+            }
+            r.edx &= ~(1u << 9);
+            if (vlapic_enabled(v)) {
+                r.edx |= 1u << 9;
             }
             break;
         }
@@ -68,6 +72,10 @@ void exit_cpuid(struct vcpu *v) {
         }
         case 0x80000001: {
             r.ecx &= ~(1u << 2);
+            // AMD's copy of the APIC flag.
+            if ((r.edx & (1u << 9)) && !vlapic_enabled(v)) {
+                r.edx &= ~(1u << 9);
+            }
             break;
         }
         default: {
@@ -172,8 +180,14 @@ void exit_invalid_opcode(struct vcpu *v) {
 void exit_rdmsr(struct vcpu *v) {
     uint32_t msr = (uint32_t)v->gprs.rcx;
     uint64_t value;
+    bool fault;
 
-    if (!virt_vmx && msr == MSR_EFER) {
+    if (vlapic_rdmsr(v, msr, &value, &fault)) {
+        if (fault) {
+            vcpu_inject_exception(v, 13, true, 0);
+            return;
+        }
+    } else if (!virt_vmx && msr == MSR_EFER) {
         value = vcpu_efer(v);
     } else if (!virt_vmx && msr == MSR_IA32_CR_PAT) {
         value = v->vmcb->save.g_pat;
@@ -192,11 +206,14 @@ void exit_rdmsr(struct vcpu *v) {
 void exit_wrmsr(struct vcpu *v) {
     uint32_t msr = (uint32_t)v->gprs.rcx;
     uint64_t value = ((uint64_t)(uint32_t)v->gprs.rdx << 32) | (uint32_t)v->gprs.rax;
-    if (vapic_msr_write(v, msr, value)) {
-        return;
-    }
+    bool fault;
 
-    if (!virt_vmx && msr == MSR_EFER) {
+    if (vlapic_wrmsr(v, msr, value, &fault)) {
+        if (fault) {
+            vcpu_inject_exception(v, 13, true, 0);
+            return;
+        }
+    } else if (!virt_vmx && msr == MSR_EFER) {
         if (value & ~EFER_GUEST_MASK) {
             vcpu_inject_exception(v, 13, true, 0);
             return;

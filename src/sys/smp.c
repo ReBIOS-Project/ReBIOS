@@ -26,6 +26,7 @@
 #include <handoff.h>
 #include <hw/acpi.h>
 #include <hw/lapic.h>
+#include <hw/lapic_legacy.h>
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/time.h>
@@ -34,6 +35,7 @@
 #include <sys/x86.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>
+#include <virt/vlapic.h>
 
 // How long the processors get to start, emulated ones included.
 #define AP_START_TIMEOUT_NS 2000000000ull
@@ -114,7 +116,8 @@ static void ap_main(struct cpu *cpu) {
     cpu->online = true;
     __atomic_add_fetch(&aps_started, 1, __ATOMIC_RELEASE);
 
-    lapic_xapic_mode();
+    lapic_legacy_init();
+    lapic_host_init(VLAPIC_SPURIOUS_VECTOR, VLAPIC_TIMER_VECTOR);
     virt_cpu_init();
     struct vcpu *v = vcpu_create(cpu);
     vcpu_wait_for_sipi(v);

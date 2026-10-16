@@ -27,10 +27,10 @@
 #include <virt/exit.h>
 #include <virt/gpt.h>
 #include <virt/guest_mem.h>
-#include <virt/vapic.h>
 #include <virt/vcpu.h>
 #include <virt/vioapic.h>
 #include <virt/virt.h>
+#include <virt/vlapic.h>
 #include <virt/vmx.h>
 
 #define EPT_CAP_WALK_4 (1ull << 6)
@@ -48,7 +48,6 @@
 static uint64_t vmx_basic;
 static uint64_t pin_cap, proc_cap, proc2_cap, exit_cap, entry_cap;
 static uint64_t ept_vpid_cap;
-static uint64_t vmx_misc;
 static uint64_t cr0_fixed0, cr0_fixed1, cr4_fixed0, cr4_fixed1;
 
 #define VMX_ENTER_FAILED 1
@@ -136,7 +135,6 @@ bool vmx_supported(void) {
     }
 
     ept_vpid_cap = rdmsr(MSR_IA32_VMX_EPT_VPID_CAP);
-    vmx_misc = rdmsr(MSR_IA32_VMX_MISC);
     uint64_t ept_needed = EPT_CAP_WALK_4 | EPT_CAP_WB | EPT_CAP_2M | EPT_CAP_INVEPT
                           | EPT_CAP_INVEPT_ALL;
     if ((ept_vpid_cap & ept_needed) != ept_needed) {
@@ -147,10 +145,6 @@ bool vmx_supported(void) {
     cpu_nmi_restart((uint64_t)(uintptr_t)vmx_enter_restart,
                     (uint64_t)(uintptr_t)vmx_enter_restart_end);
     return true;
-}
-
-bool vmx_wait_for_sipi_supported(void) {
-    return (vmx_misc & VMX_MISC_WAIT_SIPI) != 0;
 }
 
 bool vmx_ept_huge_pages(void) {
@@ -293,13 +287,17 @@ void vmx_vcpu_init(struct vcpu *v) {
         panic("VMPTRLD failed\n");
     }
 
-    // NMIs reach the hypervisor, which passes the guest's on.
+    // Interrupts and NMIs reach the hypervisor, which passes the guest's on.
     vmx_write(VMCS_PIN_CONTROLS,
-              adjust_controls(pin_cap, 0, PIN_NMI_EXITING | PIN_VIRTUAL_NMIS, "pin-based"));
+              adjust_controls(pin_cap, 0,
+                              PIN_EXT_INTR_EXITING | PIN_NMI_EXITING | PIN_VIRTUAL_NMIS,
+                              "pin-based"));
 
+    // CR8 is the virtual local APIC's TPR.
     vmx_write(VMCS_PROC_CONTROLS,
               adjust_controls(proc_cap, 0,
-                              PROC_IO_BITMAPS | PROC_MSR_BITMAPS | PROC_SECONDARY_CONTROLS,
+                              PROC_IO_BITMAPS | PROC_MSR_BITMAPS | PROC_SECONDARY_CONTROLS
+                              | PROC_TPR_SHADOW,
                               "processor-based"));
 
     // What the guest's instructions need to work as they would without VMX.
@@ -516,7 +514,8 @@ static void vmx_handle_exit(struct vcpu *v) {
             break;
         }
         case EXIT_REASON_INTR_WINDOW:
-        case EXIT_REASON_NMI_WINDOW: {
+        case EXIT_REASON_NMI_WINDOW:
+        case EXIT_REASON_TPR_BELOW_THRESHOLD: {
             break;
         }
         case EXIT_REASON_CPUID: {
@@ -557,10 +556,6 @@ static void vmx_handle_exit(struct vcpu *v) {
             vcpu_init_signal(v);
             break;
         }
-        case EXIT_REASON_SIPI: {
-            vcpu_startup(v, (uint8_t)qual);
-            break;
-        }
         case EXIT_REASON_TRIPLE_FAULT: {
             printf("Guest triple fault\n");
             vmx_dump_guest();
@@ -587,11 +582,10 @@ static void vmx_handle_exit(struct vcpu *v) {
             if (event_cut_short(v)) {
                 panic("Event delivery reached emulated memory at %#llx\n", (unsigned long long)gpa);
             }
-            if ((qual & EPT_QUAL_WRITE)
-                && (exit_absent_write(v, gpa) || vapic_mmio_write(v, gpa))) {
+            if ((qual & EPT_QUAL_WRITE) && exit_absent_write(v, gpa)) {
                 break;
             }
-            if (!(qual & EPT_QUAL_FETCH) && vioapic_access(v, gpa)) {
+            if (!(qual & EPT_QUAL_FETCH) && (vlapic_mmio(v, gpa) || vioapic_access(v, gpa))) {
                 break;
             }
             printf("EPT violation at GPA %#llx, qualification %#llx\n", (unsigned long long)gpa,

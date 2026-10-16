@@ -196,6 +196,8 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 
 // Virtual interrupt control, at offset 060h.
 #define SVM_VINTR_IRQ (1ull << 8)
+#define SVM_VINTR_PRIO_SHIFT 16
+#define SVM_VINTR_PRIO_MASK (0xfull << SVM_VINTR_PRIO_SHIFT)
 #define SVM_VINTR_IGN_TPR (1ull << 20)
 #define SVM_VINTR_MASKING (1ull << 24)
 

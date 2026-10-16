@@ -69,6 +69,7 @@ struct vcpu_mode {
 #define VCPU_SIPI_WAITING (-1)
 
 struct cpu;
+struct vlapic;
 struct vmcb;
 
 struct vcpu {
@@ -96,10 +97,7 @@ struct vcpu {
     // Whether vcpu_inject_exception() set up an event for the coming entry.
     bool injecting;
     bool nmi_pending;
-    // Interrupts the processor took for the guest, while physical interrupts
-    // made it exit: acknowledged at the local APIC, which the guest then gets
-    // to EOI them at.
-    uint64_t taken[4];
+    struct vlapic *vlapic;
 
     // What the guest believes CR0 and CR4 hold, for the bits the host owns.
     uint64_t cr0_shadow;

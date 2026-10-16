@@ -26,6 +26,7 @@
 #include <virt/irq.h>
 #include <virt/svm.h>
 #include <virt/vcpu.h>
+#include <virt/vlapic.h>
 #include <virt/vmx.h>
 
 // The fields VMX's interruption information and SVM's events share.
@@ -124,8 +125,7 @@ static bool nmi_blocked(void) {
         return false;
     }
     uint64_t intr = vmx_read(VMCS_GUEST_INTERRUPTIBILITY);
-    return (intr & (INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS | INTERRUPTIBILITY_NMI))
-           || vmx_read(VMCS_GUEST_ACTIVITY_STATE) == ACTIVITY_WAIT_SIPI;
+    return (intr & (INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS | INTERRUPTIBILITY_NMI)) != 0;
 }
 
 // Returns whether it injected one.
@@ -148,94 +148,84 @@ static bool deliver_nmi(struct vcpu *v) {
     return true;
 }
 
-void event_intr_exiting(struct vcpu *v, bool on) {
-    if (virt_vmx) {
-        uint64_t pin = vmx_read(VMCS_PIN_CONTROLS);
-        vmx_write(VMCS_PIN_CONTROLS,
-                  on ? pin | PIN_EXT_INTR_EXITING : pin & ~(uint64_t)PIN_EXT_INTR_EXITING);
-        return;
-    }
-    // Physical interrupts exit regardless of the guest's IF only with
-    // V_INTR_MASKING, which also keeps CR8 writes from the local APIC.
-    struct vmcb_control *c = &v->vmcb->control;
-    if (on) {
-        c->intercept_misc1 |= SVM_INTERCEPT_INTR;
-        c->vintr |= SVM_VINTR_MASKING;
-    } else {
-        c->intercept_misc1 &= ~SVM_INTERCEPT_INTR;
-        c->vintr &= ~SVM_VINTR_MASKING;
-    }
-}
-
 void event_interrupt(uint8_t vector) {
+    struct vcpu *v = this_cpu()->vcpu;
+    switch (vector) {
+        case VLAPIC_SPURIOUS_VECTOR: {
+            return;
+        }
+        case VLAPIC_TIMER_VECTOR: {
+            lapic_eoi();
+            vlapic_timer_fired(v);
+            return;
+        }
+        default: {
+            break;
+        }
+    }
     if (irq_host_vector(vector)) {
         irq_host_interrupt(vector);
         return;
     }
-    struct vcpu *v = this_cpu()->vcpu;
-    v->taken[vector / 64] |= 1ull << (vector % 64);
-}
-
-static int highest_taken(struct vcpu *v) {
-    for (int i = 3; i >= 0; i--) {
-        if (v->taken[i] != 0) {
-            return i * 64 + 63 - __builtin_clzll(v->taken[i]);
-        }
-    }
-    return -1;
+    // One of the guest's MSIs or I/O APIC entries, addressed to this vCPU:
+    // level-triggered entries stay masked at the host until the guest's EOI.
+    bool level = irq_mirror_taken(vector);
+    lapic_eoi();
+    vlapic_accept(v, vector, level);
 }
 
 static bool interruptible(struct vcpu *v) {
     if (virt_vmx) {
         return (vmx_read(VMCS_GUEST_RFLAGS) & RFLAGS_IF)
                && !(vmx_read(VMCS_GUEST_INTERRUPTIBILITY)
-                    & (INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS))
-               && vmx_read(VMCS_GUEST_ACTIVITY_STATE) != ACTIVITY_WAIT_SIPI;
+                    & (INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS));
     }
     return (v->vmcb->save.rflags & RFLAGS_IF) && !(v->vmcb->control.interrupt_shadow & 1);
 }
 
-// An exit once the guest can take an interrupt.
-static void interrupt_window(struct vcpu *v, bool on) {
+#define WINDOW_OFF (-1)
+#define WINDOW_ANY 0
+
+// An exit once the guest can take an interrupt: any, or, for SVM, one of a
+// priority class only the TPR holds back. VMX's TPR threshold does that.
+static void interrupt_window(struct vcpu *v, int class) {
     if (virt_vmx) {
-        set_proc_control(PROC_INTR_WINDOW_EXITING, on);
+        set_proc_control(PROC_INTR_WINDOW_EXITING, class == WINDOW_ANY);
         return;
     }
     struct vmcb_control *c = &v->vmcb->control;
-    if (on) {
-        c->vintr |= SVM_VINTR_IRQ | SVM_VINTR_IGN_TPR;
+    c->vintr &= ~(SVM_VINTR_IRQ | SVM_VINTR_IGN_TPR | SVM_VINTR_PRIO_MASK);
+    c->intercept_misc1 &= ~SVM_INTERCEPT_VINTR;
+    if (class != WINDOW_OFF) {
+        c->vintr |= SVM_VINTR_IRQ;
+        c->vintr |= class == WINDOW_ANY ? SVM_VINTR_IGN_TPR : (uint64_t)class << SVM_VINTR_PRIO_SHIFT;
         c->intercept_misc1 |= SVM_INTERCEPT_VINTR;
-    } else {
-        c->vintr &= ~(SVM_VINTR_IRQ | SVM_VINTR_IGN_TPR);
-        c->intercept_misc1 &= ~SVM_INTERCEPT_VINTR;
     }
 }
 
 static bool interrupt_pending(struct vcpu *v) {
-    return highest_taken(v) >= 0 || irq_extint_pending(v);
+    return irq_extint_pending(v) || vlapic_pending(v) >= 0;
 }
 
 static void deliver_interrupt(struct vcpu *v) {
-    int vector = highest_taken(v);
-    if (vector < 0 && !irq_extint_pending(v)) {
-        interrupt_window(v, false);
+    bool extint = irq_extint_pending(v);
+    int vector = extint ? -1 : vlapic_pending(v);
+    if (!extint && vector < 0) {
+        interrupt_window(v, vlapic_tpr_held(v));
         return;
     }
-    // One the guest took before, and has yet to EOI, outranks it, unless the
-    // local APIC did not take it, as with an 8259's.
-    if (!interruptible(v)
-        || (vector >= 0 && lapic_in_service((uint8_t)vector) && lapic_highest_isr() > vector)) {
-        interrupt_window(v, true);
+    if (!interruptible(v)) {
+        interrupt_window(v, WINDOW_ANY);
         return;
     }
-    if (vector >= 0) {
-        v->taken[vector / 64] &= ~(1ull << (vector % 64));
-    } else {
+    if (extint) {
         // The 8259 answers the acknowledge only now, when the guest takes it.
         vector = irq_extint_acknowledge();
+    } else {
+        vlapic_take(v, (uint8_t)vector);
     }
     inject(v, EVENT_VALID | EVENT_TYPE_EXTERNAL | (uint32_t)vector, 0);
-    interrupt_window(v, interrupt_pending(v));
+    interrupt_window(v, interrupt_pending(v) ? WINDOW_ANY : WINDOW_OFF);
 }
 
 void event_entry(struct vcpu *v) {
@@ -257,13 +247,13 @@ void event_entry(struct vcpu *v) {
             set_proc_control(PROC_NMI_WINDOW_EXITING, true);
         }
         if (interrupt_pending(v)) {
-            interrupt_window(v, true);
+            interrupt_window(v, WINDOW_ANY);
         }
         return;
     }
     if (deliver_nmi(v)) {
         if (interrupt_pending(v)) {
-            interrupt_window(v, true);
+            interrupt_window(v, WINDOW_ANY);
         }
         return;
     }

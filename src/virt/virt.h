@@ -29,10 +29,6 @@ bool virt_init(void);
 // Enables virtualisation on the calling CPU.
 void virt_cpu_init(void);
 
-// Whether processors wait for start-up IPIs in the guest themselves, in
-// VMX's wait-for-SIPI state.
-bool virt_sipi_in_guest(void);
-
 // The intercept bitmaps every vCPU shares, in the vendor's format.
 uint64_t virt_io_bitmap(void);
 uint64_t virt_msr_bitmap(void);

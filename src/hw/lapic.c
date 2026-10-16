@@ -36,30 +36,6 @@
 #define APIC_BASE_EN (1ull << 11)
 #define APIC_BASE_ADDRESS 0x000ffffffffff000ull
 
-#define APIC_VERSION 0x30
-#define APIC_TPR 0x80
-#define APIC_EOI 0xb0
-#define APIC_LDR 0xd0
-#define APIC_DFR 0xe0
-#define APIC_SVR 0xf0
-#define APIC_ISR 0x100
-#define APIC_IRR 0x200
-#define APIC_ESR 0x280
-#define APIC_LVT_CMCI 0x2f0
-#define APIC_ICR_LOW 0x300
-#define APIC_ICR_HIGH 0x310
-#define APIC_LVT_TIMER 0x320
-#define APIC_LVT_THERMAL 0x330
-#define APIC_LVT_PERF 0x340
-#define APIC_LVT_LINT0 0x350
-#define APIC_LVT_LINT1 0x360
-#define APIC_LVT_ERROR 0x370
-#define APIC_TIMER_INITIAL 0x380
-#define APIC_TIMER_DIVIDE 0x3e0
-
-#define LVT_MASKED (1u << 16)
-#define LVT_DELIVERY_MASK (7u << 8)
-#define LVT_DELIVERY_EXTINT (7u << 8)
 // CMCI has an LVT entry where the version register's maximum entry is this
 // or more.
 #define LVT_CMCI_MIN_MAX_ENTRY 6
@@ -71,14 +47,14 @@ static volatile uint32_t *xapic_reg(uint32_t reg) {
     return (volatile uint32_t *)(uintptr_t)(base + reg);
 }
 
-static uint32_t lapic_read(uint32_t reg) {
+uint32_t lapic_read(uint32_t reg) {
     if (lapic_x2apic()) {
         return (uint32_t)rdmsr(MSR_X2APIC_FIRST + (reg >> 4));
     }
     return *xapic_reg(reg);
 }
 
-static void lapic_write(uint32_t reg, uint32_t value) {
+void lapic_write(uint32_t reg, uint32_t value) {
     if (lapic_x2apic()) {
         wrmsr(MSR_X2APIC_FIRST + (reg >> 4), value);
         return;
@@ -101,8 +77,11 @@ uint32_t lapic_cpu_apic_id(void) {
     return cpuid(1, 0).ebx >> 24;
 }
 
-// Whether the processor has the legacy xAPIC interface turned off for good.
-static bool xapic_disabled(void) {
+bool lapic_x2apic_supported(void) {
+    return (cpuid(1, 0).ecx & (1u << 21)) != 0;
+}
+
+bool lapic_xapic_locked(void) {
     if (cpuid(0, 0).eax < 7 || !(cpuid(7, 0).edx & (1u << 29))) {
         return false;
     }
@@ -128,83 +107,75 @@ void lapic_send_ipi(uint32_t dest, uint32_t command) {
         }
         cpu_relax();
     }
-    // The guest may be between its writes to the two halves.
-    uint32_t guest_high = *xapic_reg(APIC_ICR_HIGH);
     *xapic_reg(APIC_ICR_HIGH) = dest << 24;
     *xapic_reg(APIC_ICR_LOW) = command;
     while (*xapic_reg(APIC_ICR_LOW) & ICR_PENDING) {
         if (time_ns() > deadline) {
             printf("Local APIC %#x: IPI %#x not taken\n", lapic_cpu_apic_id(), command);
-            break;
+            return;
         }
         cpu_relax();
     }
-    *xapic_reg(APIC_ICR_HIGH) = guest_high;
-}
-
-uint8_t lapic_highest_isr(void) {
-    for (int i = 7; i >= 0; i--) {
-        uint32_t isr = lapic_read(APIC_ISR + (uint32_t)i * 0x10);
-        if (isr != 0) {
-            return (uint8_t)(i * 32 + 31 - __builtin_clz(isr));
-        }
-    }
-    return 0;
-}
-
-bool lapic_in_service(uint8_t vector) {
-    return (lapic_read(APIC_ISR + (uint32_t)(vector / 32) * 0x10) >> (vector % 32)) & 1;
-}
-
-bool lapic_requested(uint8_t vector) {
-    return (lapic_read(APIC_IRR + (uint32_t)(vector / 32) * 0x10) >> (vector % 32)) & 1;
 }
 
 void lapic_eoi(void) {
     lapic_write(APIC_EOI, 0);
 }
 
-bool lapic_extint_open(void) {
-    if (!(rdmsr(MSR_IA32_APIC_BASE) & APIC_BASE_EN)) {
-        return true;
-    }
-    // A software disabled local APIC holds every LVT entry masked.
-    uint32_t lvt = lapic_read(APIC_LVT_LINT0);
-    return !(lvt & LVT_MASKED) && (lvt & LVT_DELIVERY_MASK) == LVT_DELIVERY_EXTINT;
+static uint32_t max_entry(void) {
+    return (lapic_read(APIC_VERSION) >> 16) & 0xff;
 }
 
-void lapic_xapic_mode(void) {
+bool lapic_host_mode(bool x2apic) {
+    if (x2apic && !lapic_x2apic_supported()) {
+        x2apic = false;
+    }
+    if (!x2apic && lapic_xapic_locked()) {
+        x2apic = true;
+    }
     uint64_t base = rdmsr(MSR_IA32_APIC_BASE);
-    if ((base & APIC_BASE_EXTD) && !xapic_disabled()) {
-        // x2APIC mode can only be left for the disabled state.
-        base &= ~(APIC_BASE_EN | APIC_BASE_EXTD);
+    if (!(base & APIC_BASE_EN)) {
+        base = (base | APIC_BASE_EN) & ~APIC_BASE_EXTD;
         wrmsr(MSR_IA32_APIC_BASE, base);
     }
-    if (!(base & APIC_BASE_EN)) {
-        wrmsr(MSR_IA32_APIC_BASE, base | APIC_BASE_EN);
+    bool now = (base & APIC_BASE_EXTD) != 0;
+    if (x2apic == now) {
+        return x2apic;
     }
+    if (x2apic) {
+        wrmsr(MSR_IA32_APIC_BASE, base | APIC_BASE_EXTD);
+        return true;
+    }
+
+    // x2APIC mode is only left for the disabled state, which resets the
+    // registers: those the hypervisor set come back.
+    static const uint32_t kept[] = {
+        APIC_SVR, APIC_TPR, APIC_LVT_TIMER, APIC_LVT_THERMAL, APIC_LVT_PERF, APIC_LVT_LINT0,
+        APIC_LVT_LINT1, APIC_LVT_ERROR, APIC_TIMER_DIVIDE, APIC_LVT_CMCI,
+    };
+    unsigned count = sizeof(kept) / sizeof(kept[0]);
+    if (max_entry() < LVT_CMCI_MIN_MAX_ENTRY) {
+        count--;
+    }
+    uint32_t values[sizeof(kept) / sizeof(kept[0])];
+    for (unsigned i = 0; i < count; i++) {
+        values[i] = lapic_read(kept[i]);
+    }
+    wrmsr(MSR_IA32_APIC_BASE, base & ~(APIC_BASE_EN | APIC_BASE_EXTD));
+    wrmsr(MSR_IA32_APIC_BASE, (base & ~APIC_BASE_EXTD) | APIC_BASE_EN);
+    for (unsigned i = 0; i < count; i++) {
+        lapic_write(kept[i], values[i]);
+    }
+    return false;
 }
 
-void lapic_init_reset(void) {
-    uint32_t max_entry = (lapic_read(APIC_VERSION) >> 16) & 0xff;
-    static const uint32_t lvts[] = {
-        APIC_LVT_TIMER, APIC_LVT_THERMAL, APIC_LVT_PERF, APIC_LVT_LINT0, APIC_LVT_LINT1,
-        APIC_LVT_ERROR,
-    };
-    for (unsigned i = 0; i < sizeof(lvts) / sizeof(lvts[0]); i++) {
-        lapic_write(lvts[i], LVT_MASKED);
-    }
-    if (max_entry >= LVT_CMCI_MIN_MAX_ENTRY) {
-        lapic_write(APIC_LVT_CMCI, LVT_MASKED);
-    }
-    lapic_write(APIC_TIMER_INITIAL, 0);
-    lapic_write(APIC_TIMER_DIVIDE, 0);
+void lapic_host_init(uint8_t spurious_vector, uint8_t timer_vector) {
+    lapic_host_mode(false);
     lapic_write(APIC_TPR, 0);
-    lapic_write(APIC_ESR, 0);
-    if (!lapic_x2apic()) {
-        lapic_write(APIC_LDR, 0);
-        lapic_write(APIC_DFR, 0xffffffff);
-    }
+    lapic_write(APIC_SVR, APIC_SVR_ENABLED | spurious_vector);
+    lapic_write(APIC_LVT_LINT0, APIC_LVT_MASKED);
+    lapic_write(APIC_TIMER_INITIAL, 0);
+    lapic_write(APIC_LVT_TIMER, APIC_LVT_MASKED | timer_vector);
     // In-service interrupts end one EOI each, highest first.
     for (unsigned n = 0; n < 256; n++) {
         bool in_service = false;
@@ -214,7 +185,6 @@ void lapic_init_reset(void) {
         if (!in_service) {
             break;
         }
-        lapic_write(APIC_EOI, 0);
+        lapic_eoi();
     }
-    lapic_write(APIC_SVR, 0xff);
 }

@@ -35,11 +35,7 @@ void event_nmi(struct vcpu *v);
 // Takes back what event_entry() set up, for an entry that did not happen.
 void event_cancel(struct vcpu *v);
 
-// Whether physical interrupts make the vCPU exit, for the hypervisor to take
-// them, the guest getting its own injected. On the vCPU's processor.
-void event_intr_exiting(struct vcpu *v, bool on);
-
-// An interrupt the processor took.
+// An interrupt the processor took, which all make the guest exit.
 void event_interrupt(uint8_t vector);
 
 // Whether the exit cut an event's delivery short, so that what it reports

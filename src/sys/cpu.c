@@ -93,6 +93,10 @@ void cpu_interrupt_handler(void (*handler)(uint8_t vector)) {
     interrupt_handler = handler;
 }
 
+unsigned cpu_physical_address_bits(void) {
+    return cpuid(0x80000008, 0).eax & 0xff;
+}
+
 void cpu_nmi_restart(uint64_t start, uint64_t end) {
     nmi_restart_start = start;
     nmi_restart_end = end;

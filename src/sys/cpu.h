@@ -93,6 +93,9 @@ void cpu_nmi_restart(uint64_t start, uint64_t end);
 // Where interrupts the host takes go.
 void cpu_interrupt_handler(void (*handler)(uint8_t vector));
 
+// MAXPHYADDR.
+unsigned cpu_physical_address_bits(void);
+
 #endif
 
 #endif

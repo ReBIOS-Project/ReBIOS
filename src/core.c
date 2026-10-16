@@ -23,6 +23,8 @@
 #include <handoff.h>
 #include <hw/acpi.h>
 #include <hw/ioapic.h>
+#include <hw/lapic.h>
+#include <hw/lapic_legacy.h>
 #include <hw/pci_cfg.h>
 #include <iommu/dma.h>
 #include <lib/log.h>
@@ -33,10 +35,10 @@
 #include <sys/x86.h>
 #include <virt/irq.h>
 #include <virt/layout.h>
-#include <virt/vapic.h>
 #include <virt/vcpu.h>
 #include <virt/vioapic.h>
 #include <virt/virt.h>
+#include <virt/vlapic.h>
 
 struct handoff *core_handoff;
 
@@ -55,8 +57,12 @@ static void bsp_main(void *arg) {
     virt_cpu_init();
 
     layout_init();
+    // The guest's boot processor gets its local APIC as a legacy BIOS hands
+    // it over, the hypervisor the processor's.
+    lapic_legacy_init();
+    vlapic_init();
+    lapic_host_init(VLAPIC_SPURIOUS_VECTOR, VLAPIC_TIMER_VECTOR);
     smp_start_aps();
-    vapic_init();
     ioapic_init();
     vioapic_init();
     irq_init();

@@ -109,11 +109,14 @@ static uint32_t index_read(struct vioapic *vio, uint32_t index) {
     if (index & 1) {
         return (uint32_t)(rte >> 32);
     }
-    // What the host's entry reports of its interrupt, where it is the
-    // guest's.
+    // A level-triggered interrupt waits for the guest's EOI masked at the
+    // host, which the guest's Remote IRR shows instead.
     uint64_t status = 0;
     if (!(rte & IOAPIC_RTE_MASKED)) {
-        status = ioapic_rte_read(io, pin) & (IOAPIC_RTE_PENDING | IOAPIC_RTE_REMOTE_IRR);
+        status = ioapic_rte_read(io, pin) & IOAPIC_RTE_PENDING;
+    }
+    if (irq_remote_irr(io->gsi_base + pin)) {
+        status |= IOAPIC_RTE_REMOTE_IRR;
     }
     return (uint32_t)(rte | status);
 }
@@ -164,7 +167,7 @@ static void reg_write(struct vioapic *vio, uint32_t offset, uint32_t value) {
             break;
         }
         case REG_EOI: {
-            ioapic_eoi(vio->host, (uint8_t)value);
+            irq_mirror_eoi((uint8_t)value);
             break;
         }
         default: {

@@ -32,12 +32,12 @@
 #include <sys/cpu.h>
 #include <sys/smp.h>
 #include <sys/x86.h>
-#include <virt/event.h>
 #include <virt/io.h>
 #include <virt/irq.h>
 #include <virt/pic.h>
 #include <virt/vcpu.h>
 #include <virt/vioapic.h>
+#include <virt/vlapic.h>
 
 #define ISA_IRQS 16
 #define CASCADE_IRQ 2
@@ -68,6 +68,9 @@ struct route {
     // A level-triggered line the 8259 path took, held masked at the host
     // until the guest is done with it.
     bool asserted;
+    // A level-triggered interrupt of the guest's own entry, held likewise
+    // until the guest's EOI, which its Remote IRR shows.
+    bool held;
     uint64_t host_rte;
 };
 
@@ -75,10 +78,6 @@ static struct route *routes;
 static uint32_t route_count;
 static struct spinlock lock;
 static struct cpu *bsp;
-// Whether the boot processor's physical interrupts exit, and whether it has
-// routing to do that only it can.
-static bool bsp_exiting;
-static volatile bool bsp_dirty;
 static volatile bool extint_asserted;
 // The processor an unmasked I/O APIC ExtINT entry sends the 8259's
 // interrupts to, if any.
@@ -167,6 +166,9 @@ static uint64_t desired(uint32_t gsi, const struct route *r, enum owner *owner) 
     if (vioapic_rte(gsi, &rte) && !(rte & IOAPIC_RTE_MASKED)
         && (rte & IOAPIC_RTE_DELIVERY_MASK) != IOAPIC_RTE_DELIVERY_EXTINT) {
         *owner = OWNER_MIRROR;
+        if (r->held) {
+            rte |= IOAPIC_RTE_MASKED;
+        }
         return rte;
     }
     // While the guest has any 8259 input unmasked, its masked inputs latch
@@ -191,17 +193,6 @@ static uint64_t desired(uint32_t gsi, const struct route *r, enum owner *owner) 
     return IOAPIC_RTE_MASKED;
 }
 
-static bool pic_path_wanted(void) {
-    for (uint32_t gsi = 0; gsi < route_count; gsi++) {
-        enum owner owner;
-        if (routes[gsi].io != NULL && !(desired(gsi, &routes[gsi], &owner) & IOAPIC_RTE_MASKED)
-            && owner == OWNER_PIC) {
-            return true;
-        }
-    }
-    return false;
-}
-
 // Level-triggered lines the 8259 path took get a fresh look once the guest
 // is done with them: acknowledged, then unmasked and out of service. If still
 // asserted, they interrupt again when unmasked at the host.
@@ -223,15 +214,8 @@ static void resample(void) {
     }
 }
 
-// Brings the host's entries up to date. Only the boot processor unmasks the
-// 8259 path's, once its physical interrupts exit; others leave that to it.
 static void update(void) {
-    bool on_bsp = this_cpu() == bsp;
     resample();
-    if (on_bsp && !bsp_exiting && pic_path_wanted()) {
-        event_intr_exiting(bsp->vcpu, true);
-        bsp_exiting = true;
-    }
 
     extint_target = NULL;
     for (uint32_t gsi = 0; gsi < route_count; gsi++) {
@@ -246,12 +230,11 @@ static void update(void) {
         }
         enum owner owner;
         uint64_t rte = desired(gsi, r, &owner);
-        if (owner == OWNER_PIC && !(rte & IOAPIC_RTE_MASKED) && !(on_bsp && bsp_exiting)) {
-            bsp_dirty = true;
-            rte |= IOAPIC_RTE_MASKED;
-        }
-        if (owner != OWNER_PIC && r->asserted) {
+        if (owner != OWNER_PIC) {
             r->asserted = false;
+        }
+        if (owner != OWNER_MIRROR) {
+            r->held = false;
         }
         r->owner = owner;
         if (rte != r->host_rte) {
@@ -265,12 +248,8 @@ static void update(void) {
 
 // After the 8259s changed, on any processor.
 static void kick_after_update(void) {
-    struct cpu *self = this_cpu();
-    if (bsp_dirty && self != bsp) {
-        vcpu_kick(bsp);
-    }
     struct cpu *target = extint_target != NULL ? extint_target : bsp;
-    if (__atomic_load_n(&extint_asserted, __ATOMIC_ACQUIRE) && target != self) {
+    if (__atomic_load_n(&extint_asserted, __ATOMIC_ACQUIRE) && target != this_cpu()) {
         vcpu_kick(target);
     }
 }
@@ -329,7 +308,51 @@ bool irq_extint_pending(struct vcpu *v) {
     if (!__atomic_load_n(&extint_asserted, __ATOMIC_ACQUIRE)) {
         return false;
     }
-    return v->cpu == extint_target || lapic_extint_open();
+    return v->cpu == extint_target || vlapic_extint_open(v);
+}
+
+bool irq_mirror_taken(uint8_t vector) {
+    uint32_t self = this_cpu()->apic_id;
+    bool level = false;
+    spinlock_acquire(&lock);
+    for (uint32_t gsi = 0; gsi < route_count; gsi++) {
+        struct route *r = &routes[gsi];
+        uint64_t rte = r->host_rte;
+        if (r->owner != OWNER_MIRROR || !(rte & IOAPIC_RTE_LEVEL) || (rte & IOAPIC_RTE_MASKED)
+            || (uint8_t)rte != vector) {
+            continue;
+        }
+        // Only entries sent to this processor, where they name one.
+        if (!(rte & IOAPIC_RTE_LOGICAL) && (uint32_t)(rte >> IOAPIC_RTE_DEST_SHIFT) != self) {
+            continue;
+        }
+        r->held = true;
+        r->host_rte |= IOAPIC_RTE_MASKED;
+        ioapic_rte_write(r->io, r->pin, r->host_rte);
+        level = true;
+    }
+    spinlock_release(&lock);
+    return level;
+}
+
+void irq_mirror_eoi(uint8_t vector) {
+    spinlock_acquire(&lock);
+    bool released = false;
+    for (uint32_t gsi = 0; gsi < route_count; gsi++) {
+        struct route *r = &routes[gsi];
+        if (r->held && (uint8_t)r->host_rte == vector) {
+            r->held = false;
+            released = true;
+        }
+    }
+    if (released) {
+        update();
+    }
+    spinlock_release(&lock);
+}
+
+bool irq_remote_irr(uint32_t gsi) {
+    return gsi < route_count && __atomic_load_n(&routes[gsi].held, __ATOMIC_ACQUIRE);
 }
 
 uint8_t irq_extint_acknowledge(void) {
@@ -338,47 +361,6 @@ uint8_t irq_extint_acknowledge(void) {
     __atomic_store_n(&extint_asserted, pic_output(), __ATOMIC_RELEASE);
     spinlock_release(&lock);
     return vector;
-}
-
-// Whether an interrupt the 8259 path's entries sent may still reach the
-// boot processor's local APIC.
-static bool host_vector_in_flight(void) {
-    for (uint32_t gsi = 0; gsi < route_count; gsi++) {
-        struct route *r = &routes[gsi];
-        if (r->irq >= 0 && irq_vectors[r->irq] != 0
-            && (ioapic_rte_read(r->io, r->pin) & IOAPIC_RTE_PENDING)) {
-            return true;
-        }
-    }
-    for (unsigned irq = 0; irq < ISA_IRQS; irq++) {
-        if (irq_vectors[irq] != 0 && lapic_requested(irq_vectors[irq])) {
-            return true;
-        }
-    }
-    return false;
-}
-
-void irq_before_entry(struct vcpu *v) {
-    if (v->cpu != bsp) {
-        return;
-    }
-    spinlock_acquire(&lock);
-    if (__atomic_exchange_n(&bsp_dirty, false, __ATOMIC_ACQ_REL)) {
-        update();
-    }
-    bool unmasked = false;
-    for (uint32_t gsi = 0; gsi < route_count; gsi++) {
-        if (routes[gsi].owner == OWNER_PIC && !(routes[gsi].host_rte & IOAPIC_RTE_MASKED)) {
-            unmasked = true;
-        }
-    }
-    // Physical interrupts reach the guest directly again once none of the
-    // 8259 path's can arrive.
-    if (!unmasked && bsp_exiting && !host_vector_in_flight()) {
-        event_intr_exiting(v, false);
-        bsp_exiting = false;
-    }
-    spinlock_release(&lock);
 }
 
 static void pic_access(struct vcpu *v, void *ctx, uint16_t offset, unsigned size, bool in,
