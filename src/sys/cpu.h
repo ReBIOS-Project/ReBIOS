@@ -62,7 +62,7 @@ struct cpu {
     struct tss64 tss;
     struct vcpu *vcpu;
     volatile bool online;
-    // Whether a kick's NMI is on its way, so that the NMI is not the guest's.
+    // Whether a kick's interrupt is on its way, which does for further kicks.
     volatile bool kick;
     volatile bool nmi_pending;
     // An INIT that SVM redirected while the host ran.

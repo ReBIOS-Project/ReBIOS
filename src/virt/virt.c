@@ -201,16 +201,15 @@ void vcpu_kick(struct cpu *cpu) {
     if (cpu == this_cpu() || !__atomic_load_n(&cpu->online, __ATOMIC_ACQUIRE)) {
         return;
     }
-    // One waiting for a start-up IPI catches up before it enters the guest
-    // again, and nested KVM livelocks on an NMI for it.
+    // One waiting for a start-up IPI catches up before it enters the guest.
     struct vcpu *v = cpu->vcpu;
     if (v == NULL || __atomic_load_n(&v->sipi, __ATOMIC_ACQUIRE) == VCPU_SIPI_WAITING) {
         return;
     }
-    // An NMI already on its way does for this kick too, and a second would be
-    // taken for the guest's.
+    // Interrupts always make the guest exit, and one pending at an entry makes
+    // it exit at once.
     if (!__atomic_exchange_n(&cpu->kick, true, __ATOMIC_ACQ_REL)) {
-        lapic_send_ipi(cpu->apic_id, ICR_DELIVERY_NMI);
+        lapic_send_ipi(cpu->apic_id, ICR_DELIVERY_FIXED | VLAPIC_KICK_VECTOR);
     }
 }
 

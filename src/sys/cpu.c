@@ -105,11 +105,8 @@ void cpu_nmi_restart(uint64_t start, uint64_t end) {
 void exception_handler(struct exception_frame *frame) {
     if (frame->vector == 2) {
         struct cpu *cpu = this_cpu();
-        // A kick, or else an NMI meant for the guest, which arrived while the
-        // host ran.
-        if (!__atomic_exchange_n(&cpu->kick, false, __ATOMIC_ACQ_REL)) {
-            cpu->nmi_pending = true;
-        }
+        // The guest's, which arrived while the host ran.
+        cpu->nmi_pending = true;
         cpu->kicked = true;
         if (frame->rip >= nmi_restart_start && frame->rip < nmi_restart_end) {
             frame->rip = nmi_restart_start;

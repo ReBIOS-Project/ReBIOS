@@ -80,9 +80,7 @@ void event_exit(struct vcpu *v) {
 }
 
 void event_nmi(struct vcpu *v) {
-    if (!__atomic_exchange_n(&v->cpu->kick, false, __ATOMIC_ACQ_REL)) {
-        v->nmi_pending = true;
-    }
+    v->nmi_pending = true;
 }
 
 void event_cancel(struct vcpu *v) {
@@ -149,7 +147,8 @@ static bool deliver_nmi(struct vcpu *v) {
 }
 
 void event_interrupt(uint8_t vector) {
-    struct vcpu *v = this_cpu()->vcpu;
+    struct cpu *cpu = this_cpu();
+    struct vcpu *v = cpu->vcpu;
     switch (vector) {
         case VLAPIC_SPURIOUS_VECTOR: {
             return;
@@ -157,6 +156,11 @@ void event_interrupt(uint8_t vector) {
         case VLAPIC_TIMER_VECTOR: {
             lapic_eoi();
             vlapic_timer_fired(v);
+            return;
+        }
+        case VLAPIC_KICK_VECTOR: {
+            __atomic_store_n(&cpu->kick, false, __ATOMIC_SEQ_CST);
+            lapic_eoi();
             return;
         }
         default: {
