@@ -183,15 +183,22 @@ static void mem_outs(struct vcpu *v, uint16_t port, unsigned size, uint32_t valu
 
 static const struct emulate_mem guest_mem = {mem_read, mem_write, mem_ins, mem_outs};
 
-// The pages a single-stepped instruction runs against: what their regions read
-// as, which it may change.
+// The pages a single-stepped instruction runs against, and of them the bytes
+// the SDM and APM say it reads or writes: those are what their regions read
+// as, and come back as writes; other bytes it changes come back too.
 #define MAX_STEP_PAGES 4
+// Masked stores are vector stores.
+#define MAX_MASKED 64
 
 struct step_page {
     uint64_t gpa;
     const struct region *r;
     uint8_t *scratch;
     uint8_t *before;
+    // The operand's bytes in the page, if any.
+    unsigned start;
+    unsigned end;
+    uint8_t first[MAX_MASKED];
     bool mapped;
     uint64_t hpa;
     uint32_t prot;
@@ -201,18 +208,28 @@ struct step_page {
 struct mmio_step {
     unsigned count;
     struct step_page pages[MAX_STEP_PAGES];
+    // Whether the operand is known, and what it is.
+    bool known;
+    struct insn_mem mem;
+    uint64_t rip;
+    uint64_t next_rip;
+    // A masked store runs twice.
+    bool second;
 };
 
-static bool step_map(struct vcpu *v, uint64_t gpa) {
+// Maps a scratch page in place of the region's page at gpa. The operand's
+// bytes in it hold what the region reads as, where the instruction reads
+// them; others nothing in particular.
+static struct step_page *step_map(struct vcpu *v, uint64_t gpa, unsigned len) {
     struct mmio_step *s = v->step;
     uint64_t page = gpa & ~(uint64_t)(PAGE_SIZE - 1);
     const struct region *r = find(page);
     if (r == NULL || s->count == MAX_STEP_PAGES) {
-        return false;
+        return NULL;
     }
     for (unsigned i = 0; i < s->count; i++) {
         if (s->pages[i].gpa == page) {
-            return false;
+            return NULL;
         }
     }
     struct step_page *p = &s->pages[s->count++];
@@ -222,53 +239,136 @@ static bool step_map(struct vcpu *v, uint64_t gpa) {
     }
     p->gpa = page;
     p->r = r;
-    for (uint64_t offset = 0; offset < PAGE_SIZE; offset += 8) {
-        uint64_t value = r->ops->read(v, r->ctx, page + offset - r->base, 8);
-        memcpy(p->scratch + offset, &value, 8);
+    p->start = gpa - page;
+    p->end = p->start + len;
+    if (len == 0) {
+        // Not the operand: all of what the region reads as.
+        for (uint64_t offset = 0; offset < PAGE_SIZE; offset += 8) {
+            uint64_t value = r->ops->read(v, r->ctx, page + offset - r->base, 8);
+            memcpy(p->scratch + offset, &value, 8);
+        }
+    } else {
+        memset(p->scratch, 0xff, PAGE_SIZE);
+        if (s->mem.access & INSN_MEM_READ) {
+            region_access(v, r, gpa, p->scratch + p->start, len, false);
+        } else {
+            memset(p->scratch + p->start, 0, len);
+        }
     }
     memcpy(p->before, p->scratch, PAGE_SIZE);
     p->mapped = gpt_translate(page, &p->hpa, &p->prot, &p->memtype);
     gpt_map(page, (uint64_t)(uintptr_t)p->scratch, PAGE_SIZE, GPT_R | GPT_W, MT_WB);
     gpt_flush();
-    return true;
+    return p;
 }
 
 // The guest runs the instruction itself, with every other vCPU out of the
 // guest, as the pages are theirs too.
 static void step_begin(struct vcpu *v, uint64_t gpa, const struct insn *insn) {
+    if (v->step == NULL) {
+        v->step = kmalloc(sizeof(*v->step));
+        memset(v->step, 0, sizeof(*v->step));
+    }
+    struct mmio_step *s = v->step;
+    s->count = 0;
+    s->second = false;
+    s->known = insn_mem_operand(v, insn, &s->mem) && s->mem.size <= PAGE_SIZE
+               && (!(s->mem.access & INSN_MEM_MASKED) || s->mem.size <= MAX_MASKED);
+    if (s->known && s->mem.size == 0) {
+        // It only takes the operand's address, as CLFLUSH: nothing for the
+        // device.
+        vcpu_advance(v, insn->length);
+        return;
+    }
     if (!vcpu_can_single_step()) {
         printf("The instruction at %#llx that reached emulated memory at %#llx cannot be "
                "emulated, skipped\n", (unsigned long long)vcpu_rip(v), (unsigned long long)gpa);
         vcpu_advance(v, insn->length);
         return;
     }
-    if (v->step == NULL) {
-        v->step = kmalloc(sizeof(*v->step));
-        memset(v->step, 0, sizeof(*v->step));
+    uint64_t gpas[2];
+    unsigned lens[2];
+    unsigned pieces = 0;
+    if (s->known) {
+        if (!translate(v, s->mem.linear, s->mem.size, (s->mem.access & INSN_MEM_WRITE) != 0, gpas, lens,
+                       &pieces)) {
+            return;
+        }
+        // The fault may be another access of the instruction's, as
+        // MOVDIR64B's to its destination.
+        bool operand = false;
+        for (unsigned i = 0; i < pieces; i++) {
+            operand |= (gpas[i] ^ gpa) < PAGE_SIZE;
+        }
+        if (!operand) {
+            s->known = false;
+            pieces = 0;
+        }
     }
     vcpu_pause_others();
-    v->step->count = 0;
-    step_map(v, gpa);
+    for (unsigned i = 0; i < pieces; i++) {
+        step_map(v, gpas[i], lens[i]);
+    }
+    if (!s->known) {
+        step_map(v, gpa, 0);
+    }
+    s->rip = vcpu_rip(v);
+    s->next_rip = s->rip + insn->length;
     v->stepping = true;
     vcpu_single_step(v, true);
 }
 
+// Writes back the runs of bytes in [start, end) that changed, or that a
+// masked store's two runs wrote alike.
+static void write_runs(struct vcpu *v, struct step_page *p, unsigned start, unsigned end, bool masked) {
+    for (unsigned at = start; at < end;) {
+        bool written = masked ? p->first[at - p->start] == p->scratch[at] : p->scratch[at] != p->before[at];
+        if (!written) {
+            at++;
+            continue;
+        }
+        unsigned stop = at + 1;
+        while (stop < end && (masked ? p->first[stop - p->start] == p->scratch[stop]
+                                     : p->scratch[stop] != p->before[stop])) {
+            stop++;
+        }
+        region_access(v, p->r, p->gpa + at, p->scratch + at, stop - at, true);
+        at = stop;
+    }
+}
+
 void mmio_step_done(struct vcpu *v) {
     struct mmio_step *s = v->step;
+    // A step can end in a fault or an event instead, with nothing written.
+    bool completed = vcpu_rip(v) == s->next_rip;
+    bool writes = s->known && (s->mem.access & INSN_MEM_WRITE);
+    bool masked = writes && (s->mem.access & INSN_MEM_MASKED);
+    if (masked && completed && !s->second) {
+        // A masked store writes only the elements its mask selects, which
+        // may hold what they did: it runs again over other values, and
+        // writes its elements alike.
+        for (unsigned i = 0; i < s->count; i++) {
+            struct step_page *p = &s->pages[i];
+            memcpy(p->first, p->scratch + p->start, p->end - p->start);
+            memset(p->scratch + p->start, 0xff, p->end - p->start);
+        }
+        vcpu_set_rip(v, s->rip);
+        s->second = true;
+        return;
+    }
     for (unsigned i = 0; i < s->count; i++) {
         struct step_page *p = &s->pages[i];
-        // What changed, in runs: a write that left a byte as it was is unseen.
-        for (unsigned at = 0; at < PAGE_SIZE;) {
-            if (p->scratch[at] == p->before[at]) {
-                at++;
-                continue;
+        if (completed && writes && p->end != p->start) {
+            if (masked) {
+                write_runs(v, p, p->start, p->end, true);
+            } else {
+                // All of them, alike or not.
+                region_access(v, p->r, p->gpa + p->start, p->scratch + p->start, p->end - p->start, true);
             }
-            unsigned end = at;
-            while (end < PAGE_SIZE && p->scratch[end] != p->before[end]) {
-                end++;
-            }
-            region_access(v, p->r, p->gpa + at, p->scratch + at, end - at, true);
-            at = end;
+            write_runs(v, p, 0, p->start, false);
+            write_runs(v, p, p->end, PAGE_SIZE, false);
+        } else if (p->end == p->start || !masked) {
+            write_runs(v, p, 0, PAGE_SIZE, false);
         }
         if (p->mapped) {
             gpt_map(p->gpa, p->hpa, PAGE_SIZE, p->prot, p->memtype);
@@ -289,7 +389,7 @@ bool mmio_fault(struct vcpu *v, uint64_t gpa) {
     }
     if (v->stepping) {
         // The stepped instruction reaches another page, and runs again.
-        if (!step_map(v, gpa)) {
+        if (step_map(v, gpa, 0) == NULL) {
             panic("The instruction at %#llx reached emulated memory at %#llx while stepped\n",
                   (unsigned long long)vcpu_rip(v), (unsigned long long)gpa);
         }
