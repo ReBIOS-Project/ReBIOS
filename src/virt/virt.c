@@ -32,6 +32,7 @@
 #include <virt/insn.h>
 #include <virt/svm.h>
 #include <virt/vcpu.h>
+#include <virt/vga.h>
 #include <virt/virt.h>
 #include <virt/vlapic.h>
 #include <virt/vmx.h>
@@ -287,6 +288,7 @@ void vcpu_before_entry(struct vcpu *v) {
         event_entry(v);
     }
     vlapic_before_entry(v);
+    vga_refresh();
 }
 
 void vcpu_kick(struct cpu *cpu) {
@@ -326,6 +328,7 @@ void vcpu_halt(struct vcpu *v) {
         if (event_halt_ends(v)) {
             break;
         }
+        vga_refresh();
         cpu_halt();
     }
     cpu->taking_interrupts = false;
