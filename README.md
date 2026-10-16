@@ -199,6 +199,10 @@ download the EDK2 OVMF firmware images for `make run`.
 make
 ```
 
+Release tarballs (`rebios-<version>.tar.gz` and `.tar.xz`) come with the dependencies, so they build without `./get-deps`.
+`make dist` creates them from the current commit. The source archives GitHub generates for each release lack the dependencies,
+and do not build.
+
 Assembly files with the `*.S` extension are built using the same toolchain as the C sources. Only `*.asm` files, of which ReBIOS
 ships none, require `nasm`.
 

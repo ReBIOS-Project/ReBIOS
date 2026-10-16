@@ -111,7 +111,7 @@ NASMFLAGS := -g
 LDFLAGS :=
 
 # Ensure the dependencies have been obtained.
-ifneq ($(filter-out clean distclean,$(or $(MAKECMDGOALS),default)),)
+ifneq ($(filter-out clean distclean dist,$(or $(MAKECMDGOALS),default)),)
     ifeq ($(wildcard .deps-obtained),)
         $(error Please run the ./get-deps script first)
     endif
@@ -119,7 +119,7 @@ endif
 
 # Stop on a problem the checks below find, unless only cleaning, which needs
 # no toolchain.
-ifneq ($(filter-out clean distclean,$(or $(MAKECMDGOALS),default)),)
+ifneq ($(filter-out clean distclean dist,$(or $(MAKECMDGOALS),default)),)
     override TOOLCHAIN_ERROR = $(error $(1))
 else
     override TOOLCHAIN_ERROR =
@@ -410,6 +410,33 @@ clean:
 .PHONY: distclean
 distclean: clean
 	rm -rf .deps-obtained .cache compile_commands.json freestanding-c-hdrs cc-runtime picoefi nanoprintf uACPI seabios edk2-ovmf-bins edk2-ovmf-bins.tar.gz
+
+# Release tarballs are named after the commit's tag, without its "v", or else
+# after its abbreviated hash, and their files are dated as the commit is.
+ifneq ($(filter dist,$(MAKECMDGOALS)),)
+    override DIST_OUTPUT := $(OUTPUT)-$(shell git describe --exact-match --tags 2>/dev/null | sed 's/^v//' | grep . || printf 'g%s' "$$(git rev-parse --short HEAD)")
+    override DIST_DATE := $(shell TZ=UTC0 git -c log.showSignature=false log -1 --pretty=%cd --date='format-local:%Y%m%d%H%M')
+endif
+
+# Create release tarballs of the committed tree, with the dependencies in them.
+# SeaBIOS's version comes from its .version file once its .git is gone.
+.PHONY: dist
+dist:
+	rm -rf "$(DIST_OUTPUT)"
+	mkdir -p "$(DIST_OUTPUT)"
+	git archive HEAD | tar -xf - -C "$(DIST_OUTPUT)"
+	cd "$(DIST_OUTPUT)" && ./get-deps
+	git -C "$(DIST_OUTPUT)/seabios" describe --always --tags --long >"$(DIST_OUTPUT)/seabios/.version"
+	cd "$(DIST_OUTPUT)" && rm -rf .gitignore .github
+	cd "$(DIST_OUTPUT)" && for d in freestanding-c-hdrs cc-runtime picoefi nanoprintf uACPI seabios; do rm -rf "$$d/.git" "$$d/.github" "$$d/.gitignore"; done
+	rm -rf "$(DIST_OUTPUT)/nanoprintf/tests" "$(DIST_OUTPUT)/uACPI/tests"
+	find "$(DIST_OUTPUT)" -type f -perm -100 -exec chmod 755 '{}' +
+	find "$(DIST_OUTPUT)" -type f ! -perm -100 -exec chmod 644 '{}' +
+	TZ=UTC0 find "$(DIST_OUTPUT)" -exec touch -h -t $(DIST_DATE) '{}' +
+	tar -cf "$(DIST_OUTPUT).tar" $$(find "$(DIST_OUTPUT)" ! -type d | LC_ALL=C sort)
+	gzip -n <"$(DIST_OUTPUT).tar" >"$(DIST_OUTPUT).tar.gz"
+	( xz <"$(DIST_OUTPUT).tar" >"$(DIST_OUTPUT).tar.xz" || rm -f "$(DIST_OUTPUT).tar.xz" )
+	rm -rf "$(DIST_OUTPUT)" "$(DIST_OUTPUT).tar"
 
 # Install the final built executable to its final on-root location. Not
 # install(1), which takes other arguments on illumos and Solaris.
