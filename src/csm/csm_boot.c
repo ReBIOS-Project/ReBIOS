@@ -33,6 +33,7 @@
 #include <iommu/dma.h>
 #include <lib/heap.h>
 #include <lib/log.h>
+#include <lib/printf.h>
 #include <sys/mm.h>
 #include <virt/guest_acpi.h>
 #include <virt/guest_mem.h>
@@ -64,6 +65,8 @@ extern const uint8_t csm_thunk_end[];
 #define MP_TABLE 0xd000
 #define PIR_TABLE 0xe000
 #define LEGACY_TABLE_SIZE 0x1000
+#define EXTRA_PCI_ROOT_LIST 0xf000
+#define EXTRA_PCI_ROOTS_MAX 255
 #define TABLES_END 0x10000
 #define LOW_PMM_BASE 0x10000
 #define LOW_PMM_SIZE 0x80000
@@ -95,8 +98,10 @@ _Static_assert(BBS_TABLE + CSM_BBS_MAX_ENTRIES * sizeof(struct csm_bbs_entry) <=
                "BBS table overlaps the boot table");
 _Static_assert(BOOT_TABLE + sizeof(struct csm_boot_table) <= MP_TABLE,
                "boot table overlaps the MP table");
-_Static_assert(PIR_TABLE + LEGACY_TABLE_SIZE <= TABLES_END,
-               "PCI IRQ routing table overlaps the low PMM memory");
+_Static_assert(PIR_TABLE + LEGACY_TABLE_SIZE <= EXTRA_PCI_ROOT_LIST,
+               "PCI IRQ routing table overlaps the extra PCI root bus list");
+_Static_assert(EXTRA_PCI_ROOT_LIST + EXTRA_PCI_ROOTS_MAX <= TABLES_END,
+               "extra PCI root bus list overlaps the low PMM memory");
 
 enum csm_stage {
     STAGE_INITIALIZE,
@@ -349,6 +354,34 @@ static void pci_interrupts(void) {
     }
 }
 
+// The CSM16 scans the hierarchy of bus 0 itself, and the other root buses of
+// segment 0 only from this list, while it initialises.
+static void extra_pci_roots(void) {
+    uint8_t *list = layout_low(EXTRA_PCI_ROOT_LIST);
+    uint32_t count = 0;
+    const struct pci_topology *topology = pci_enum_topology();
+    for (uint32_t i = 0; topology != NULL && i < topology->root_bus_count; i++) {
+        const struct pci_root_bus *rb = &topology->root_buses[i];
+        if (rb->segment == 0 && rb->bus != 0 && count < EXTRA_PCI_ROOTS_MAX) {
+            list[count++] = rb->bus;
+        }
+    }
+    csm.compat16->extra_pci_root_list_pointer = EXTRA_PCI_ROOT_LIST;
+    csm.compat16->extra_pci_root_list_count = (uint8_t)count;
+
+    if (count == 0) {
+        printf("Extra PCI root buses for the legacy BIOS: none\n");
+    }
+    for (uint32_t first = 0; first < count; first += 16) {
+        char text[16 * 3 + 1];
+        size_t length = 0;
+        for (uint32_t i = first; i < count && i < first + 16; i++) {
+            length += (size_t)snprintf(text + length, sizeof(text) - length, " %02x", list[i]);
+        }
+        printf("Extra PCI root buses for the legacy BIOS:%s\n", text);
+    }
+}
+
 void csm_boot_start(struct vcpu *v) {
     const struct handoff *h = core_handoff;
 
@@ -398,6 +431,7 @@ void csm_boot_start(struct vcpu *v) {
     }
     if (csm.compat16->table_length >= sizeof(struct csm_compat16_table)) {
         csm.compat16->hypervisor_interface = HYPERCALL_INTERFACE;
+        extra_pci_roots();
     } else {
         printf("The legacy BIOS predates the hypervisor's interface\n");
     }
