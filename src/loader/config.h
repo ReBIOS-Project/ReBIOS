@@ -35,6 +35,10 @@ struct config {
     EFI_CHAR16 vgabios[CONFIG_VGABIOS_MAX];
     bool vga_specified;
     struct handoff_pci_address vga_device;
+    // One of the HANDOFF_VGA_EMULATION_* and HANDOFF_VGA_SCALING_* values.
+    uint8_t vga_emulation;
+    uint8_t vga_scaling;
+    uint8_t vga_scale;
     // One of the HANDOFF_CPU_FILTER_* values.
     uint32_t cpu_filter;
     uint32_t cpu_range_count;

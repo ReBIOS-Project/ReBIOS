@@ -307,6 +307,49 @@ static bool apply_vga(const struct setting *setting, struct span value) {
     return true;
 }
 
+static bool apply_choice(struct span value, const char *const *names, unsigned count,
+                         uint8_t *out) {
+    for (unsigned i = 0; i < count; i++) {
+        if (equals_ignoring_case(value, names[i])) {
+            *out = (uint8_t)i;
+            return true;
+        }
+    }
+    return false;
+}
+
+// In the order of the HANDOFF_VGA_EMULATION_* values.
+static const char *const vga_emulation_names[] = {"auto", "always", "never"};
+
+static bool apply_vga_emulation(const struct setting *setting, struct span value) {
+    if (!apply_choice(value, vga_emulation_names, 3, &config.vga_emulation)) {
+        return false;
+    }
+    printf("  %s = %s\n", setting->name, vga_emulation_names[config.vga_emulation]);
+    return true;
+}
+
+// In the order of the HANDOFF_VGA_SCALING_* values.
+static const char *const vga_scaling_names[] = {"stretch", "aspect", "center", "manual"};
+
+static bool apply_vga_scaling(const struct setting *setting, struct span value) {
+    if (!apply_choice(value, vga_scaling_names, 4, &config.vga_scaling)) {
+        return false;
+    }
+    printf("  %s = %s\n", setting->name, vga_scaling_names[config.vga_scaling]);
+    return true;
+}
+
+static bool apply_vga_scale(const struct setting *setting, struct span value) {
+    uint32_t scale;
+    if (!parse_integer(value, &scale) || scale == 0 || scale > 16) {
+        return false;
+    }
+    config.vga_scale = (uint8_t)scale;
+    printf("  %s = %u\n", setting->name, scale);
+    return true;
+}
+
 static bool apply_cpu_list(const struct setting *setting, struct span value) {
     if (config.cpu_filter != HANDOFF_CPU_FILTER_NONE && config.cpu_filter != setting->filter) {
         ignore_line("cpu_allowlist and cpu_blocklist are mutually exclusive");
@@ -350,6 +393,9 @@ static const struct setting settings[] = {
     {.name = "verbose", .apply = apply_boolean, .flag = &config.verbose},
     {.name = "vgabios", .apply = apply_vgabios},
     {.name = "vga", .apply = apply_vga},
+    {.name = "vga_emulation", .apply = apply_vga_emulation},
+    {.name = "vga_scaling", .apply = apply_vga_scaling},
+    {.name = "vga_scale", .apply = apply_vga_scale},
     {.name = "cpu_allowlist", .apply = apply_cpu_list, .filter = HANDOFF_CPU_FILTER_ALLOW},
     {.name = "cpu_blocklist", .apply = apply_cpu_list, .filter = HANDOFF_CPU_FILTER_BLOCK},
     {.name = "iommu_disable", .apply = apply_obsolete},
@@ -686,6 +732,9 @@ void config_load(void) {
     memset(&config, 0, sizeof(config));
     config.serial_port = 0x3f8;
     config.serial_baud = 115200;
+    config.vga_emulation = HANDOFF_VGA_EMULATION_AUTO;
+    config.vga_scaling = HANDOFF_VGA_SCALING_STRETCH;
+    config.vga_scale = 1;
     config.cpu_filter = HANDOFF_CPU_FILTER_NONE;
 
     if (apply_files()
@@ -705,6 +754,9 @@ void config_to_handoff(struct handoff_config *out) {
     out->serial_port = config.serial_port;
     out->serial_baud = config.serial_baud;
     out->vga_device = config.vga_device;
+    out->vga_emulation = config.vga_emulation;
+    out->vga_scaling = config.vga_scaling;
+    out->vga_scale = config.vga_scale;
     out->cpu_filter = config.cpu_filter;
     out->cpu_range_count = config.cpu_range_count;
     for (uint32_t i = 0; i < config.cpu_range_count; i++) {
