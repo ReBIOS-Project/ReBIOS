@@ -441,8 +441,10 @@ static void deliver(struct vcpu *from, struct vcpu *to, uint32_t command) {
         case ICR_DELIVERY_STARTUP: {
             // As on a processor, only a vCPU waiting for one takes it.
             int32_t waiting = VCPU_SIPI_WAITING;
-            __atomic_compare_exchange_n(&to->sipi, &waiting, (int32_t)vector, false,
-                                        __ATOMIC_RELEASE, __ATOMIC_RELAXED);
+            if (__atomic_compare_exchange_n(&to->sipi, &waiting, (int32_t)vector, false,
+                                            __ATOMIC_RELEASE, __ATOMIC_RELAXED)) {
+                vcpu_wake(to->cpu);
+            }
             break;
         }
         default: {

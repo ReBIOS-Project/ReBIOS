@@ -128,6 +128,13 @@ void vcpu_before_entry(struct vcpu *v);
 // to see what changed.
 void vcpu_kick(struct cpu *cpu);
 
+// Interrupts the processor's halt, as one waiting for a start-up IPI is in.
+void vcpu_wake(struct cpu *cpu);
+
+// The guest's HLT, which waits in the hypervisor, as an interrupt that only
+// becomes deliverable while the guest halts must end it.
+void vcpu_halt(struct vcpu *v);
+
 uint64_t vcpu_rip(struct vcpu *v);
 void vcpu_set_rip(struct vcpu *v, uint64_t rip);
 uint64_t vcpu_rsp(struct vcpu *v);

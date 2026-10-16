@@ -211,6 +211,14 @@ static bool interrupt_pending(struct vcpu *v) {
     return irq_extint_pending(v) || vlapic_pending(v) >= 0;
 }
 
+bool event_halt_ends(struct vcpu *v) {
+    struct cpu *cpu = v->cpu;
+    if (v->nmi_pending || cpu->nmi_pending || cpu->init_pending) {
+        return true;
+    }
+    return (vcpu_rflags(v) & RFLAGS_IF) && interrupt_pending(v);
+}
+
 static void deliver_interrupt(struct vcpu *v) {
     bool extint = irq_extint_pending(v);
     int vector = extint ? -1 : vlapic_pending(v);

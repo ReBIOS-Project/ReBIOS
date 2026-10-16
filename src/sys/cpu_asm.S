@@ -16,6 +16,8 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <sys/cpu.h>
+
     .text
 
     /* void switch_stack(uint64_t stack_top, void (*fn)(void *), void *arg) */
@@ -29,6 +31,27 @@ switch_stack:
     pushq $0
     jmpq *%rsi
     .size switch_stack, . - switch_stack
+
+    /*
+     * void cpu_halt(void)
+     * The host's NMI handler restarts an NMI that arrives before the HLT, as
+     * it would halt with the NMI's work left undone otherwise.
+     */
+    .globl cpu_halt
+    .globl cpu_halt_restart_end
+    .type cpu_halt, @function
+cpu_halt:
+    movq %rsp, %rax
+    andq $-CPU_AREA_SIZE, %rax
+    cmpb $0, CPU_KICKED(%rax)
+    jne 1f
+    sti
+    hlt
+cpu_halt_restart_end:
+1:
+    cli
+    ret
+    .size cpu_halt, . - cpu_halt
 
     /* Exception entry stubs: a dummy error code where the CPU pushes none. */
 .macro EXC_STUB vector, has_error

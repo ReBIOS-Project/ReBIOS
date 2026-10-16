@@ -32,6 +32,10 @@ void event_entry(struct vcpu *v);
 // An NMI that made the guest exit.
 void event_nmi(struct vcpu *v);
 
+// Whether something ends a HLT: an NMI, an INIT, or an interrupt the guest
+// takes.
+bool event_halt_ends(struct vcpu *v);
+
 // Takes back what event_entry() set up, for an entry that did not happen.
 void event_cancel(struct vcpu *v);
 

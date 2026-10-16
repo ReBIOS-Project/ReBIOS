@@ -206,10 +206,38 @@ void vcpu_kick(struct cpu *cpu) {
     if (v == NULL || __atomic_load_n(&v->sipi, __ATOMIC_ACQUIRE) == VCPU_SIPI_WAITING) {
         return;
     }
-    // Interrupts always make the guest exit, and one pending at an entry makes
-    // it exit at once.
+    vcpu_wake(cpu);
+}
+
+// Interrupts always make the guest exit, and one pending at an entry makes it
+// exit at once, as one ends a halt.
+void vcpu_wake(struct cpu *cpu) {
+    if (cpu == this_cpu() || !__atomic_load_n(&cpu->online, __ATOMIC_ACQUIRE)) {
+        return;
+    }
     if (!__atomic_exchange_n(&cpu->kick, true, __ATOMIC_ACQ_REL)) {
         lapic_send_ipi(cpu->apic_id, ICR_DELIVERY_FIXED | VLAPIC_KICK_VECTOR);
+    }
+}
+
+void vcpu_halt(struct vcpu *v) {
+    vcpu_skip_instruction(v);
+    struct cpu *cpu = v->cpu;
+    // SVM's host takes interrupts and NMIs only with GIF set.
+    if (!virt_vmx) {
+        asm volatile ("stgi" ::: "memory");
+    }
+    cpu->taking_interrupts = true;
+    for (;;) {
+        __atomic_store_n(&cpu->kicked, false, __ATOMIC_SEQ_CST);
+        if (event_halt_ends(v)) {
+            break;
+        }
+        cpu_halt();
+    }
+    cpu->taking_interrupts = false;
+    if (!virt_vmx) {
+        asm volatile ("clgi" ::: "memory");
     }
 }
 
@@ -444,12 +472,27 @@ void vcpu_inject_exception(struct vcpu *v, uint8_t vector, bool has_error, uint3
     v->vmcb->control.eventinj = event;
 }
 
+// Halted, as most processors wait out the guest's not starting them: the
+// start-up IPI's sender wakes it.
 void vcpu_wait_for_sipi(struct vcpu *v) {
     vcpu_set_real_mode(v, 0, 0);
+    struct cpu *cpu = v->cpu;
+    if (!virt_vmx) {
+        asm volatile ("stgi" ::: "memory");
+    }
+    cpu->taking_interrupts = true;
     __atomic_store_n(&v->sipi, VCPU_SIPI_WAITING, __ATOMIC_RELEASE);
     int32_t vector;
-    while ((vector = __atomic_load_n(&v->sipi, __ATOMIC_ACQUIRE)) < 0) {
-        cpu_relax();
+    for (;;) {
+        __atomic_store_n(&cpu->kicked, false, __ATOMIC_SEQ_CST);
+        if ((vector = __atomic_load_n(&v->sipi, __ATOMIC_ACQUIRE)) >= 0) {
+            break;
+        }
+        cpu_halt();
+    }
+    cpu->taking_interrupts = false;
+    if (!virt_vmx) {
+        asm volatile ("clgi" ::: "memory");
     }
     vcpu_startup(v, (uint8_t)vector);
 }

@@ -93,6 +93,10 @@ void cpu_nmi_restart(uint64_t start, uint64_t end);
 // Where interrupts the host takes go.
 void cpu_interrupt_handler(void (*handler)(uint8_t vector));
 
+// Halts until an interrupt or NMI, with interrupts enabled meanwhile, unless
+// an NMI arrived since kicked was cleared.
+void cpu_halt(void);
+
 // MAXPHYADDR.
 unsigned cpu_physical_address_bits(void);
 

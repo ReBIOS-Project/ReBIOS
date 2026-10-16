@@ -296,8 +296,8 @@ void vmx_vcpu_init(struct vcpu *v) {
     // CR8 is the virtual local APIC's TPR.
     vmx_write(VMCS_PROC_CONTROLS,
               adjust_controls(proc_cap, 0,
-                              PROC_IO_BITMAPS | PROC_MSR_BITMAPS | PROC_SECONDARY_CONTROLS
-                              | PROC_TPR_SHADOW,
+                              PROC_HLT_EXITING | PROC_IO_BITMAPS | PROC_MSR_BITMAPS
+                              | PROC_SECONDARY_CONTROLS | PROC_TPR_SHADOW,
                               "processor-based"));
 
     // What the guest's instructions need to work as they would without VMX.
@@ -511,6 +511,10 @@ static void vmx_handle_exit(struct vcpu *v) {
         }
         case EXIT_REASON_EXTERNAL_INTR: {
             event_interrupt((uint8_t)vmx_read(VMCS_EXIT_INTR_INFO));
+            break;
+        }
+        case EXIT_REASON_HLT: {
+            vcpu_halt(v);
             break;
         }
         case EXIT_REASON_INTR_WINDOW:

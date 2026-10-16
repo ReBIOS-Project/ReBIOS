@@ -102,6 +102,8 @@ void cpu_nmi_restart(uint64_t start, uint64_t end) {
     nmi_restart_end = end;
 }
 
+extern const char cpu_halt_restart_end[];
+
 void exception_handler(struct exception_frame *frame) {
     if (frame->vector == 2) {
         struct cpu *cpu = this_cpu();
@@ -110,6 +112,10 @@ void exception_handler(struct exception_frame *frame) {
         cpu->kicked = true;
         if (frame->rip >= nmi_restart_start && frame->rip < nmi_restart_end) {
             frame->rip = nmi_restart_start;
+        }
+        uint64_t halt = (uint64_t)(uintptr_t)cpu_halt;
+        if (frame->rip >= halt && frame->rip < (uint64_t)(uintptr_t)cpu_halt_restart_end) {
+            frame->rip = halt;
         }
         return;
     }

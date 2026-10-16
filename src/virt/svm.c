@@ -81,8 +81,8 @@ void svm_vcpu_init(struct vcpu *v) {
 
     struct vmcb_control *c = &v->vmcb->control;
     c->intercept_misc1 = SVM_INTERCEPT_INTR | SVM_INTERCEPT_NMI | SVM_INTERCEPT_CPUID
-                         | SVM_INTERCEPT_INVD | SVM_INTERCEPT_IOIO | SVM_INTERCEPT_MSR
-                         | SVM_INTERCEPT_SHUTDOWN;
+                         | SVM_INTERCEPT_HLT | SVM_INTERCEPT_INVD | SVM_INTERCEPT_IOIO
+                         | SVM_INTERCEPT_MSR | SVM_INTERCEPT_SHUTDOWN;
     // Physical interrupts exit whatever the guest's IF, and CR8 is the virtual
     // local APIC's TPR.
     c->vintr = SVM_VINTR_MASKING;
@@ -171,6 +171,10 @@ static void svm_handle_exit(struct vcpu *v) {
         }
         case SVM_EXIT_CPUID: {
             exit_cpuid(v);
+            break;
+        }
+        case SVM_EXIT_HLT: {
+            vcpu_halt(v);
             break;
         }
         case SVM_EXIT_EXCEPTION_BASE + 6: {
