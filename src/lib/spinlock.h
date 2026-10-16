@@ -34,6 +34,10 @@ static inline void spinlock_acquire(struct spinlock *lock) {
     }
 }
 
+static inline bool spinlock_try(struct spinlock *lock) {
+    return !__atomic_exchange_n(&lock->locked, true, __ATOMIC_ACQUIRE);
+}
+
 static inline void spinlock_release(struct spinlock *lock) {
     __atomic_store_n(&lock->locked, false, __ATOMIC_RELEASE);
 }

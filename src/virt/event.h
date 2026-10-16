@@ -26,8 +26,10 @@
 // handled.
 void event_exit(struct vcpu *v);
 
-// Sets up what the guest gets on the coming entry, after the exit is handled.
+// Sets up what the guest gets on the coming entry, after the exit is handled,
+// or an entry that delivers nothing and asks for no window to deliver in.
 void event_entry(struct vcpu *v);
+void event_hold(struct vcpu *v);
 
 // An NMI that made the guest exit.
 void event_nmi(struct vcpu *v);

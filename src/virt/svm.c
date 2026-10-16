@@ -149,8 +149,29 @@ static void svm_handle_io(struct vcpu *v) {
     v->vmcb->control.interrupt_shadow = 0;
 }
 
+// The single-step trap ends a step, and so does a fault, which goes on to the
+// guest.
+static void svm_step_exception(struct vcpu *v, unsigned vector) {
+    struct vmcb_control *c = &v->vmcb->control;
+    mmio_step_done(v);
+    if (vector == 1) {
+        return;
+    }
+    bool has_error = vector == 8 || (vector >= 10 && vector <= 14) || vector == 17 || vector == 21;
+    if (vector == 14) {
+        vcpu_inject_page_fault(v, c->exitinfo2, (uint32_t)c->exitinfo1);
+    } else {
+        vcpu_inject_exception(v, (uint8_t)vector, has_error, (uint32_t)c->exitinfo1);
+    }
+}
+
 static void svm_handle_exit(struct vcpu *v) {
     struct vmcb_control *c = &v->vmcb->control;
+    if (v->stepping && c->exitcode >= SVM_EXIT_EXCEPTION_BASE
+        && c->exitcode < SVM_EXIT_EXCEPTION_BASE + 32) {
+        svm_step_exception(v, (unsigned)(c->exitcode - SVM_EXIT_EXCEPTION_BASE));
+        return;
+    }
 
     switch (c->exitcode) {
         case SVM_EXIT_INTR: {

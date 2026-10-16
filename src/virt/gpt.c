@@ -228,7 +228,7 @@ void gpt_map(uint64_t gpa, uint64_t hpa, uint64_t size, uint32_t prot, uint8_t m
     spinlock_release(&gpt_lock);
 }
 
-bool gpt_translate(uint64_t gpa, uint64_t *hpa, uint32_t *prot) {
+bool gpt_translate(uint64_t gpa, uint64_t *hpa, uint32_t *prot, uint8_t *memtype) {
     uint64_t *table = root;
     for (int l = 3; l >= 0; l--) {
         uint64_t e = table[(gpa >> (12 + 9 * l)) & 511];
@@ -236,8 +236,11 @@ bool gpt_translate(uint64_t gpa, uint64_t *hpa, uint32_t *prot) {
             return false;
         }
         if (entry_large(e, l)) {
-            uint8_t memtype;
-            leaf_decode(e, l, prot, &memtype);
+            uint8_t type;
+            leaf_decode(e, l, prot, &type);
+            if (memtype != NULL) {
+                *memtype = type;
+            }
             *hpa = leaf_addr(e, l) | (gpa & (level_size(l) - 1));
             return true;
         }

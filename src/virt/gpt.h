@@ -47,8 +47,8 @@ uint64_t gpt_root(void);
 // mirrors the mapping, so that device DMA sees the same memory.
 void gpt_map(uint64_t gpa, uint64_t hpa, uint64_t size, uint32_t prot, uint8_t memtype);
 
-// Returns false if gpa is unmapped.
-bool gpt_translate(uint64_t gpa, uint64_t *hpa, uint32_t *prot);
+// Returns false if gpa is unmapped. memtype may be NULL.
+bool gpt_translate(uint64_t gpa, uint64_t *hpa, uint32_t *prot, uint8_t *memtype);
 
 // Drops cached translations, on every CPU that will next enter the guest.
 void gpt_flush(void);

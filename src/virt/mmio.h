@@ -43,4 +43,8 @@ void mmio_register(uint64_t base, uint64_t size, const struct mmio_ops *ops, voi
 // a region.
 bool mmio_fault(struct vcpu *v, uint64_t gpa);
 
+// The end of a single-step mmio_fault() set up for an instruction it does not
+// emulate itself: the step's monitor trap, single-step trap, or fault.
+void mmio_step_done(struct vcpu *v);
+
 #endif

@@ -22,6 +22,7 @@
 #include <hw/power.h>
 #include <lib/heap.h>
 #include <lib/log.h>
+#include <lib/spinlock.h>
 #include <sys/cpu.h>
 #include <sys/mm.h>
 #include <sys/smp.h>
@@ -43,6 +44,7 @@ static uint8_t *io_bitmap;
 static uint8_t *msr_bitmap;
 
 bool vmx_ept_huge_pages(void);
+bool vmx_monitor_trap_supported(void);
 void vmx_get_seg(enum seg_reg reg, struct segment *seg);
 void vmx_set_seg(enum seg_reg reg, const struct segment *seg);
 uint64_t vmx_cr0_mask(void);
@@ -174,7 +176,92 @@ struct vcpu *vcpu_create(struct cpu *cpu) {
     return v;
 }
 
+static struct spinlock world_lock;
+static struct cpu *world_owner;
+// Odd while the others are paused.
+static uint64_t world_epoch;
+static uint32_t world_acks;
+
+static void service_pause(struct vcpu *v) {
+    for (;;) {
+        uint64_t epoch = __atomic_load_n(&world_epoch, __ATOMIC_ACQUIRE);
+        if (!(epoch & 1) || __atomic_load_n(&world_owner, __ATOMIC_ACQUIRE) == v->cpu) {
+            return;
+        }
+        __atomic_add_fetch(&world_acks, 1, __ATOMIC_ACQ_REL);
+        while (__atomic_load_n(&world_epoch, __ATOMIC_ACQUIRE) == epoch) {
+            cpu_relax();
+        }
+    }
+}
+
+void vcpu_pause_others(void) {
+    struct cpu *self = this_cpu();
+    // Another pause may come first, which this one must not hold up.
+    while (!spinlock_try(&world_lock)) {
+        service_pause(self->vcpu);
+        cpu_relax();
+    }
+    __atomic_store_n(&world_acks, 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&world_owner, self, __ATOMIC_RELAXED);
+    __atomic_add_fetch(&world_epoch, 1, __ATOMIC_SEQ_CST);
+    // Those waiting for a start-up IPI stay out of the guest anyway.
+    uint32_t expected = 0;
+    for (uint32_t i = 0; i < smp_cpu_count(); i++) {
+        struct cpu *cpu = smp_cpu(i);
+        struct vcpu *v = cpu->vcpu;
+        if (cpu != self && __atomic_load_n(&cpu->online, __ATOMIC_ACQUIRE) && v != NULL
+            && __atomic_load_n(&v->sipi, __ATOMIC_ACQUIRE) != VCPU_SIPI_WAITING) {
+            expected++;
+            vcpu_kick(cpu);
+        }
+    }
+    while (__atomic_load_n(&world_acks, __ATOMIC_ACQUIRE) < expected) {
+        cpu_relax();
+    }
+}
+
+void vcpu_resume_others(void) {
+    __atomic_store_n(&world_owner, NULL, __ATOMIC_RELAXED);
+    __atomic_add_fetch(&world_epoch, 1, __ATOMIC_SEQ_CST);
+    spinlock_release(&world_lock);
+}
+
+bool vcpu_can_single_step(void) {
+    return !virt_vmx || vmx_monitor_trap_supported();
+}
+
+// The faults a stepped instruction may raise, which SVM intercepts so that the
+// step ends there.
+#define STEP_EXCEPTIONS (1u << 0 | 1u << 1 | 1u << 7 | 1u << 12 | 1u << 13 | 1u << 14 \
+                         | 1u << 16 | 1u << 17 | 1u << 19)
+
+void vcpu_single_step(struct vcpu *v, bool on) {
+    if (virt_vmx) {
+        uint64_t controls = vmx_read(VMCS_PROC_CONTROLS);
+        vmx_write(VMCS_PROC_CONTROLS, on ? controls | PROC_MONITOR_TRAP_FLAG
+                                         : controls & ~(uint64_t)PROC_MONITOR_TRAP_FLAG);
+        return;
+    }
+    // SVM has no monitor trap flag: a single-step #DB instead.
+    struct vmcb *vmcb = v->vmcb;
+    if (on) {
+        v->step_tf = (vmcb->save.rflags & RFLAGS_TF) != 0;
+        v->step_dr6 = vmcb->save.dr6;
+        v->step_exceptions = vmcb->control.intercept_exceptions;
+        vmcb->save.rflags |= RFLAGS_TF;
+        vmcb->control.intercept_exceptions |= STEP_EXCEPTIONS;
+        return;
+    }
+    if (!v->step_tf) {
+        vmcb->save.rflags &= ~(uint64_t)RFLAGS_TF;
+    }
+    vmcb->save.dr6 = v->step_dr6;
+    vmcb->control.intercept_exceptions = v->step_exceptions;
+}
+
 void vcpu_before_entry(struct vcpu *v) {
+    service_pause(v);
     if (__atomic_exchange_n(&v->cpu->init_pending, false, __ATOMIC_ACQUIRE)) {
         vcpu_init_signal(v);
     }
@@ -193,7 +280,12 @@ void vcpu_before_entry(struct vcpu *v) {
             v->vmcb->control.tlb_control = 1;
         }
     }
-    event_entry(v);
+    // A stepped instruction is to run, not an event's handler.
+    if (v->stepping) {
+        event_hold(v);
+    } else {
+        event_entry(v);
+    }
     vlapic_before_entry(v);
 }
 
@@ -230,6 +322,7 @@ void vcpu_halt(struct vcpu *v) {
     cpu->taking_interrupts = true;
     for (;;) {
         __atomic_store_n(&cpu->kicked, false, __ATOMIC_SEQ_CST);
+        service_pause(v);
         if (event_halt_ends(v)) {
             break;
         }

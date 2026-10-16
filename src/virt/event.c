@@ -240,6 +240,15 @@ static void deliver_interrupt(struct vcpu *v) {
     interrupt_window(v, interrupt_pending(v) ? WINDOW_ANY : WINDOW_OFF);
 }
 
+void event_hold(struct vcpu *v) {
+    if (virt_vmx) {
+        set_proc_control(PROC_INTR_WINDOW_EXITING, false);
+        set_proc_control(PROC_NMI_WINDOW_EXITING, false);
+        return;
+    }
+    interrupt_window(v, WINDOW_OFF);
+}
+
 void event_entry(struct vcpu *v) {
     if (v->injecting) {
         // What the exit's handler injected comes first: only exits that

@@ -148,6 +148,10 @@ bool vmx_supported(void) {
     return true;
 }
 
+bool vmx_monitor_trap_supported(void) {
+    return control_allowed(proc_cap, PROC_MONITOR_TRAP_FLAG);
+}
+
 bool vmx_ept_huge_pages(void) {
     return (ept_vpid_cap & EPT_CAP_1G) != 0;
 }
@@ -521,6 +525,10 @@ static void vmx_handle_exit(struct vcpu *v) {
         case EXIT_REASON_INTR_WINDOW:
         case EXIT_REASON_NMI_WINDOW:
         case EXIT_REASON_TPR_BELOW_THRESHOLD: {
+            break;
+        }
+        case EXIT_REASON_MONITOR_TRAP: {
+            mmio_step_done(v);
             break;
         }
         case EXIT_REASON_CPUID: {

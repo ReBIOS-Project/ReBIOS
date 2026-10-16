@@ -38,7 +38,7 @@ static bool guest_phys_access(uint64_t gpa, void *buf, size_t len, bool write) {
     while (len != 0) {
         uint64_t hpa;
         uint32_t prot;
-        if (!gpt_translate(gpa, &hpa, &prot) || !(prot & (write ? GPT_W : GPT_R))) {
+        if (!gpt_translate(gpa, &hpa, &prot, NULL) || !(prot & (write ? GPT_W : GPT_R))) {
             return false;
         }
         size_t chunk = PAGE_SIZE - (gpa & (PAGE_SIZE - 1));

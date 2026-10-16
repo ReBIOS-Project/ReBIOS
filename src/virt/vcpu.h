@@ -69,6 +69,7 @@ struct vcpu_mode {
 #define VCPU_SIPI_WAITING (-1)
 
 struct cpu;
+struct mmio_step;
 struct vlapic;
 struct vmcb;
 
@@ -98,6 +99,13 @@ struct vcpu {
     bool injecting;
     bool nmi_pending;
     struct vlapic *vlapic;
+    // Whether the guest runs one instruction against emulated memory's
+    // values, which mmio.c sets up, and what SVM's stepping changed.
+    bool stepping;
+    struct mmio_step *step;
+    bool step_tf;
+    uint64_t step_dr6;
+    uint32_t step_exceptions;
 
     // What the guest believes CR0 and CR4 hold, for the bits the host owns.
     uint64_t cr0_shadow;
@@ -134,6 +142,13 @@ void vcpu_wake(struct cpu *cpu);
 // The guest's HLT, which waits in the hypervisor, as an interrupt that only
 // becomes deliverable while the guest halts must end it.
 void vcpu_halt(struct vcpu *v);
+
+// Keeps every other vCPU out of the guest until vcpu_resume_others(), and
+// whether vCPUs can be single-stepped and making them.
+void vcpu_pause_others(void);
+void vcpu_resume_others(void);
+bool vcpu_can_single_step(void);
+void vcpu_single_step(struct vcpu *v, bool on);
 
 uint64_t vcpu_rip(struct vcpu *v);
 void vcpu_set_rip(struct vcpu *v, uint64_t rip);
