@@ -208,6 +208,13 @@ static void load_palette(uint8_t index) {
     }
 }
 
+void vgabios_load_palette_256(void) {
+    const __seg_fs struct vgabios_mode *m = find_mode(0x13);
+    if (m != 0) {
+        load_palette(m->palette);
+    }
+}
+
 // The offset of a character map in plane 2.
 static uint16_t font_block(uint8_t block) {
     return (uint16_t)((block & 3) * 0x4000u + ((block >> 2) & 1) * 0x2000u);
@@ -287,6 +294,7 @@ static void set_mode(uint8_t requested) {
     bool keep = requested & 0x80;
     uint16_t port = (m->misc & 1) ? 0x3d4 : 0x3b4;
 
+    vbe_disable();
     seq_write(0x01, m->seq[0] | SEQ_SCREEN_OFF);
     outb(MISC_WRITE, m->misc);
     seq_write(0x00, 0x01);
@@ -353,6 +361,10 @@ static void set_mode(uint8_t requested) {
     inb(port + 6);
     outb(AC_INDEX, AC_PAS);
     seq_write(0x01, m->seq[0]);
+}
+
+void vgabios_set_mode(uint8_t mode) {
+    set_mode(mode);
 }
 
 static void set_cursor(uint8_t page, uint8_t row, uint8_t column) {
@@ -1336,6 +1348,10 @@ void vgabios_int10(struct vgabios_regs *r) {
             if (r->bx == 0) {
                 state_information(r);
             }
+            break;
+        }
+        case 0x4f: {
+            vbe_int10(r);
             break;
         }
         default: {

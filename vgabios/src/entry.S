@@ -28,9 +28,20 @@ vgabios_header:
     // The initialisation entry point, which the BIOS calls far at offset 3.
     .byte 0xe9
     .word init_entry - (. + 2)
+    // VGABIOS_INFO_POINTER (info.h).
+    .org 0x08
+    .word vgabios_info
     // Software looks for an IBM video BIOS by this signature.
     .org 0x1e
     .ascii "IBM"
+
+    .section .rodata.info, "a"
+    .globl vgabios_info
+vgabios_info:
+    .word 0
+    .word 0xffff
+    .word 0, 0, 0
+    .skip 256
 
     .section .text.entry, "ax"
 init_entry:
@@ -76,3 +87,26 @@ vgabios_int10_entry:
     popw %ds
     popal
     iretw
+
+    .globl vbe_window_entry
+vbe_window_entry:
+    pushal
+    pushw %ds
+    pushw %es
+    pushw %fs
+    pushw %gs
+    movw %ss, %ax
+    movw %ax, %ds
+    movw %ax, %es
+    movw %cs, %ax
+    movw %ax, %fs
+    movzwl %sp, %esp
+    movl %esp, %eax
+    cld
+    calll vbe_window
+    popw %gs
+    popw %fs
+    popw %es
+    popw %ds
+    popal
+    lretw
