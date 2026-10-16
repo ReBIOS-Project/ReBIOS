@@ -29,7 +29,9 @@ override OUTPUT := rebios
 PREFIX := /usr/local
 
 # Default user QEMU flags. These are appended to the QEMU command calls.
-QEMUFLAGS := -m 2G
+# ReBIOS needs the host's VMX or SVM, which nested KVM passes on, and an IOMMU,
+# here without the interrupt remapping KVM's in-kernel irqchip cannot take.
+QEMUFLAGS := -m 2G -accel kvm -cpu host -device intel-iommu,intremap=off
 
 # Internal QEMU flags that should not be changed by the user.
 override QEMU_MACHINE_FLAGS := \
