@@ -31,6 +31,7 @@
 #include <virt/gpt.h>
 #include <virt/guest_acpi.h>
 #include <virt/layout.h>
+#include <virt/mmio.h>
 
 #define ONE_MIB 0x100000ull
 #define TWO_MIB 0x200000ull
@@ -41,7 +42,6 @@
 
 #define MAX_RANGES 1024
 #define MAX_TAKEN 8
-#define MAX_ABSENT 8
 
 struct range {
     uint64_t base;
@@ -77,8 +77,6 @@ static struct {
 static uint32_t taken_count;
 // Backs the guest's first 2 MiB.
 static uint8_t *low;
-static struct range absent[MAX_ABSENT];
-static uint32_t absent_count;
 // What absent memory reads as.
 static uint64_t ones_page;
 
@@ -549,13 +547,26 @@ uint32_t layout_take(uint32_t size, uint32_t align, uint32_t e820_type) {
     return 0;
 }
 
+static uint64_t absent_read(struct vcpu *v, void *ctx, uint64_t offset, unsigned size) {
+    (void)v;
+    (void)ctx;
+    (void)offset;
+    return size == 8 ? UINT64_MAX : (1ull << (size * 8)) - 1;
+}
+
+static void absent_write(struct vcpu *v, void *ctx, uint64_t offset, unsigned size,
+                         uint64_t value) {
+    (void)v;
+    (void)ctx;
+    (void)offset;
+    (void)size;
+    (void)value;
+}
+
+static const struct mmio_ops absent_ops = {absent_read, absent_write, true};
+
 void layout_absent(uint64_t gpa, uint64_t size) {
     if (size == 0) {
-        return;
-    }
-    if (absent_count == MAX_ABSENT) {
-        printf("Too many absent ranges, keeping %#llx-%#llx\n", (unsigned long long)gpa,
-               (unsigned long long)(gpa + size - 1));
         return;
     }
     if (ones_page == 0) {
@@ -563,22 +574,12 @@ void layout_absent(uint64_t gpa, uint64_t size) {
         memset(page, 0xff, PAGE_SIZE);
         ones_page = (uint64_t)(uintptr_t)page;
     }
+    // Reads hit the page of ones, writes exit.
+    mmio_register(gpa, size, &absent_ops, NULL);
     for (uint64_t offset = 0; offset < size; offset += PAGE_SIZE) {
         gpt_map(gpa + offset, ones_page, PAGE_SIZE, GPT_R | GPT_X, MT_WB);
     }
     gpt_flush();
-    absent[absent_count].base = gpa;
-    absent[absent_count].end = gpa + size;
-    absent_count++;
-}
-
-bool layout_is_absent(uint64_t gpa) {
-    for (uint32_t i = 0; i < absent_count; i++) {
-        if (gpa >= absent[i].base && gpa < absent[i].end) {
-            return true;
-        }
-    }
-    return false;
 }
 
 bool layout_e820(struct e820_map *map) {

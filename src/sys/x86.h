@@ -165,6 +165,10 @@ static inline uintptr_t read_cr2(void) {
     return value;
 }
 
+static inline void write_cr2(uintptr_t value) {
+    asm volatile ("mov %0, %%cr2" :: "r"(value));
+}
+
 static inline uintptr_t read_cr3(void) {
     uintptr_t value;
     asm volatile ("mov %%cr3, %0" : "=r"(value));

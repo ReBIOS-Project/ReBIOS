@@ -29,8 +29,8 @@
 #include <sys/smp.h>
 #include <sys/x86.h>
 #include <virt/gpt.h>
-#include <virt/insn.h>
 #include <virt/irq.h>
+#include <virt/mmio.h>
 #include <virt/svm.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>
@@ -124,6 +124,8 @@ static uint64_t pages[MAX_PAGES];
 static unsigned page_count;
 static struct spinlock page_lock;
 
+static const struct mmio_ops mmio_ops;
+
 static void trap_page(uint64_t page) {
     spinlock_acquire(&page_lock);
     for (unsigned i = 0; i < page_count; i++) {
@@ -139,17 +141,9 @@ static void trap_page(uint64_t page) {
     }
     pages[page_count++] = page;
     spinlock_release(&page_lock);
+    mmio_register(page, PAGE_SIZE, &mmio_ops, (void *)(uintptr_t)page);
     gpt_map(page, 0, PAGE_SIZE, 0, 0);
     gpt_flush();
-}
-
-static bool trapped(uint64_t page) {
-    for (unsigned i = 0; i < __atomic_load_n(&page_count, __ATOMIC_ACQUIRE); i++) {
-        if (pages[i] == page) {
-            return true;
-        }
-    }
-    return false;
 }
 
 void vlapic_init(void) {
@@ -678,52 +672,53 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
     return true;
 }
 
-bool vlapic_mmio(struct vcpu *v, uint64_t gpa) {
-    uint64_t page = gpa & ~(uint64_t)(PAGE_SIZE - 1);
-    if (!trapped(page)) {
-        return false;
-    }
-    struct vlapic *vl = v->vlapic;
-    struct insn insn;
-    if (!insn_decode(v, &insn)) {
-        panic("Cannot decode an access to the local APIC at %#llx\n",
-              (unsigned long long)vcpu_rip(v));
-    }
-    // Where it is not the vCPU's xAPIC, the page is not there.
-    bool there = enabled(vl) && !x2apic(vl) && page == (vl->base & APIC_BASE_ADDRESS);
-
-    uint32_t offset = gpa & (PAGE_SIZE - 1);
-    uint32_t reg = offset & ~0xfu;
-    unsigned shift = (gpa & 3) * 8;
-    // Only the first 32 bits of each 16-byte slot hold anything.
-    bool slot = (offset & 0xc) == 0;
-    struct insn_store store;
-    struct insn_load load;
-    if (insn_store(v, &insn, &store) && (gpa & 3) + store.size <= 4) {
-        uint32_t old = 0;
-        if (store.op != INSN_STORE_MOV || store.size != 4) {
-            if (!there || !slot || !reg_read(v, reg, &old)) {
-                old = there ? 0 : 0xffffffff;
-            }
-        }
-        uint32_t mask = (uint32_t)(store.size == 4 ? 0xffffffffu : (1u << (store.size * 8)) - 1)
-                        << shift;
-        uint64_t value = insn_store_apply(v, &store, (old & mask) >> shift);
-        if (there && slot) {
-            reg_write(v, reg, (old & ~mask) | (((uint32_t)value << shift) & mask));
-        }
-    } else if (insn_load(&insn, &load) && (gpa & 3) + load.size <= 4) {
-        uint32_t value = there ? 0 : 0xffffffff;
-        if (there && slot && !reg_read(v, reg, &value)) {
-            value = 0;
-        }
-        insn_load_complete(v, &load, value >> shift);
-    } else {
-        printf("An access to local APIC register %#x that is not emulated, skipped\n", offset);
-    }
-    vcpu_advance(v, insn.length);
-    return true;
+// Where the page is not the vCPU's xAPIC, it is not there.
+static bool xapic_at(const struct vlapic *vl, uint64_t page) {
+    return enabled(vl) && !x2apic(vl) && page == (vl->base & APIC_BASE_ADDRESS);
 }
+
+// Registers are 32 bits wide, in the first 32 bits of each 16-byte slot.
+static uint32_t dword_read(struct vcpu *v, uint64_t page, uint64_t offset) {
+    if (!xapic_at(v->vlapic, page)) {
+        return 0xffffffff;
+    }
+    uint32_t value = 0;
+    if ((offset & 0xc) != 0 || !reg_read(v, (uint32_t)offset, &value)) {
+        return 0;
+    }
+    return value;
+}
+
+static void dword_write(struct vcpu *v, uint64_t page, uint64_t offset, uint32_t value) {
+    if (xapic_at(v->vlapic, page) && (offset & 0xc) == 0) {
+        reg_write(v, (uint32_t)offset, value);
+    }
+}
+
+static uint64_t mmio_read(struct vcpu *v, void *ctx, uint64_t offset, unsigned size) {
+    uint64_t page = (uint64_t)(uintptr_t)ctx;
+    if (size == 8) {
+        return dword_read(v, page, offset) | (uint64_t)dword_read(v, page, offset + 4) << 32;
+    }
+    uint64_t mask = (1ull << (size * 8)) - 1;
+    return (dword_read(v, page, offset & ~3ull) >> ((offset & 3) * 8)) & mask;
+}
+
+static void mmio_write(struct vcpu *v, void *ctx, uint64_t offset, unsigned size, uint64_t value) {
+    uint64_t page = (uint64_t)(uintptr_t)ctx;
+    if (size == 8) {
+        dword_write(v, page, offset, (uint32_t)value);
+        dword_write(v, page, offset + 4, (uint32_t)(value >> 32));
+        return;
+    }
+    // Narrower writes change part of a register.
+    unsigned shift = (offset & 3) * 8;
+    uint32_t mask = (uint32_t)(size == 4 ? 0xffffffffu : (1u << (size * 8)) - 1) << shift;
+    uint32_t old = size == 4 ? 0 : dword_read(v, page, offset & ~3ull);
+    dword_write(v, page, offset & ~3ull, (old & ~mask) | (((uint32_t)value << shift) & mask));
+}
+
+static const struct mmio_ops mmio_ops = {mmio_read, mmio_write, false};
 
 static bool apic_base_write(struct vcpu *v, uint64_t value) {
     struct vlapic *vl = v->vlapic;

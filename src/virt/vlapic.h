@@ -41,9 +41,6 @@ void vlapic_create(struct vcpu *v);
 // The state INIT leaves the local APIC in.
 void vlapic_reset(struct vcpu *v);
 
-// An access to the local APIC's page. Returns false if gpa is not in it.
-bool vlapic_mmio(struct vcpu *v, uint64_t gpa);
-
 // The local APIC's MSRs: return false for others, and set *fault where the
 // access raises #GP.
 bool vlapic_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault);

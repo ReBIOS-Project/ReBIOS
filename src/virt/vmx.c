@@ -27,6 +27,7 @@
 #include <virt/exit.h>
 #include <virt/gpt.h>
 #include <virt/guest_mem.h>
+#include <virt/mmio.h>
 #include <virt/vcpu.h>
 #include <virt/vioapic.h>
 #include <virt/virt.h>
@@ -586,10 +587,7 @@ static void vmx_handle_exit(struct vcpu *v) {
             if (event_cut_short(v)) {
                 panic("Event delivery reached emulated memory at %#llx\n", (unsigned long long)gpa);
             }
-            if ((qual & EPT_QUAL_WRITE) && exit_absent_write(v, gpa)) {
-                break;
-            }
-            if (!(qual & EPT_QUAL_FETCH) && (vlapic_mmio(v, gpa) || vioapic_access(v, gpa))) {
+            if (!(qual & EPT_QUAL_FETCH) && mmio_fault(v, gpa)) {
                 break;
             }
             printf("EPT violation at GPA %#llx, qualification %#llx\n", (unsigned long long)gpa,

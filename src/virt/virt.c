@@ -472,6 +472,16 @@ void vcpu_inject_exception(struct vcpu *v, uint8_t vector, bool has_error, uint3
     v->vmcb->control.eventinj = event;
 }
 
+void vcpu_inject_page_fault(struct vcpu *v, uint64_t linear, uint32_t error) {
+    // VMX leaves CR2 as it is for the guest, and the host takes no page faults.
+    if (virt_vmx) {
+        write_cr2(linear);
+    } else {
+        v->vmcb->save.cr2 = linear;
+    }
+    vcpu_inject_exception(v, 14, true, error);
+}
+
 // Halted, as most processors wait out the guest's not starting them: the
 // start-up IPI's sender wakes it.
 void vcpu_wait_for_sipi(struct vcpu *v) {

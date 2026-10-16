@@ -24,8 +24,8 @@
 #include <lib/spinlock.h>
 #include <sys/mm.h>
 #include <virt/gpt.h>
-#include <virt/insn.h>
 #include <virt/irq.h>
+#include <virt/mmio.h>
 #include <virt/vcpu.h>
 #include <virt/vioapic.h>
 
@@ -48,6 +48,8 @@ struct vioapic {
 static struct vioapic *vioapics;
 static uint32_t count;
 
+static const struct mmio_ops mmio_ops;
+
 void vioapic_init(void) {
     count = ioapic_count();
     vioapics = kmalloc(count * sizeof(*vioapics));
@@ -60,6 +62,7 @@ void vioapic_init(void) {
             vio->rtes[pin] = IOAPIC_RTE_MASKED;
         }
         // Every access to the page exits.
+        mmio_register(io->base, PAGE_SIZE, &mmio_ops, vio);
         gpt_map(io->base, 0, PAGE_SIZE, 0, 0);
     }
     gpt_flush();
@@ -74,15 +77,6 @@ bool vioapic_rte(uint32_t gsi, uint64_t *rte) {
         }
     }
     return false;
-}
-
-static struct vioapic *find(uint64_t gpa) {
-    for (uint32_t i = 0; i < count; i++) {
-        if ((gpa & ~(uint64_t)(PAGE_SIZE - 1)) == vioapics[i].host->base) {
-            return &vioapics[i];
-        }
-    }
-    return NULL;
 }
 
 static uint32_t index_read(struct vioapic *vio, uint32_t index) {
@@ -176,37 +170,36 @@ static void reg_write(struct vioapic *vio, uint32_t offset, uint32_t value) {
     }
 }
 
-bool vioapic_access(struct vcpu *v, uint64_t gpa) {
-    struct vioapic *vio = find(gpa);
-    if (vio == NULL) {
-        return false;
-    }
-    struct insn insn;
-    if (!insn_decode(v, &insn)) {
-        panic("Cannot decode an access to I/O APIC %u at %#llx\n", vio->host->id,
-              (unsigned long long)vcpu_rip(v));
-    }
-
-    // Registers are 32 bits wide; narrower accesses take part of one. Read
-    // and modify instructions may fault as reads, so the instruction tells.
-    uint32_t offset = gpa & (PAGE_SIZE - 4);
-    unsigned shift = (gpa & 3) * 8;
-    struct insn_store store;
-    struct insn_load load;
+// Registers are 32 bits wide; narrower accesses take part of one.
+static uint64_t mmio_read(struct vcpu *v, void *ctx, uint64_t offset, unsigned size) {
+    (void)v;
+    struct vioapic *vio = ctx;
     spinlock_acquire(&vio->lock);
-    if (insn_store(v, &insn, &store) && (gpa & 3) + store.size <= 4) {
-        uint32_t old = store.op == INSN_STORE_MOV && store.size == 4 ? 0 : reg_read(vio, offset);
-        uint32_t mask = (uint32_t)(store.size == 4 ? 0xffffffffu : (1u << (store.size * 8)) - 1)
-                        << shift;
-        uint64_t value = insn_store_apply(v, &store, (old & mask) >> shift);
-        reg_write(vio, offset, (old & ~mask) | (((uint32_t)value << shift) & mask));
-    } else if (insn_load(&insn, &load) && (gpa & 3) + load.size <= 4) {
-        insn_load_complete(v, &load, reg_read(vio, offset) >> shift);
+    uint64_t value;
+    if (size == 8) {
+        value = reg_read(vio, (uint32_t)offset) | (uint64_t)reg_read(vio, (uint32_t)offset + 4) << 32;
     } else {
-        printf("An access to I/O APIC %u register %#x that is not emulated, skipped\n",
-               vio->host->id, offset);
+        uint64_t mask = (1ull << (size * 8)) - 1;
+        value = (reg_read(vio, (uint32_t)offset & ~3u) >> ((offset & 3) * 8)) & mask;
     }
     spinlock_release(&vio->lock);
-    vcpu_advance(v, insn.length);
-    return true;
+    return value;
 }
+
+static void mmio_write(struct vcpu *v, void *ctx, uint64_t offset, unsigned size, uint64_t value) {
+    (void)v;
+    struct vioapic *vio = ctx;
+    spinlock_acquire(&vio->lock);
+    if (size == 8) {
+        reg_write(vio, (uint32_t)offset, (uint32_t)value);
+        reg_write(vio, (uint32_t)offset + 4, (uint32_t)(value >> 32));
+    } else {
+        unsigned shift = (offset & 3) * 8;
+        uint32_t mask = (uint32_t)(size == 4 ? 0xffffffffu : (1u << (size * 8)) - 1) << shift;
+        uint32_t old = size == 4 ? 0 : reg_read(vio, (uint32_t)offset & ~3u);
+        reg_write(vio, (uint32_t)offset & ~3u, (old & ~mask) | (((uint32_t)value << shift) & mask));
+    }
+    spinlock_release(&vio->lock);
+}
+
+static const struct mmio_ops mmio_ops = {mmio_read, mmio_write, false};

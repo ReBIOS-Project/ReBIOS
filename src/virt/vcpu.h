@@ -155,6 +155,7 @@ void vcpu_skip_instruction(struct vcpu *v);
 // Moves past length bytes of instruction, as completing it does.
 void vcpu_advance(struct vcpu *v, unsigned length);
 void vcpu_inject_exception(struct vcpu *v, uint8_t vector, bool has_error, uint32_t error);
+void vcpu_inject_page_fault(struct vcpu *v, uint64_t linear, uint32_t error);
 
 // Puts the vCPU in the state the processor has after INIT, in real mode at
 // cs:ip, as for a start-up IPI or the reset vector.

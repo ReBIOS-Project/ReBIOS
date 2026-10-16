@@ -27,6 +27,7 @@
 #include <virt/event.h>
 #include <virt/exit.h>
 #include <virt/gpt.h>
+#include <virt/mmio.h>
 #include <virt/svm.h>
 #include <virt/vcpu.h>
 #include <virt/vioapic.h>
@@ -226,11 +227,7 @@ static void svm_handle_exit(struct vcpu *v) {
                 panic("Event delivery reached emulated memory at %#llx\n",
                       (unsigned long long)c->exitinfo2);
             }
-            if ((c->exitinfo1 & NPF_WRITE) && exit_absent_write(v, c->exitinfo2)) {
-                break;
-            }
-            if (!(c->exitinfo1 & NPF_FETCH)
-                && (vlapic_mmio(v, c->exitinfo2) || vioapic_access(v, c->exitinfo2))) {
+            if (!(c->exitinfo1 & NPF_FETCH) && mmio_fault(v, c->exitinfo2)) {
                 break;
             }
             printf("Nested page fault at GPA %#llx, error code %#llx\n",

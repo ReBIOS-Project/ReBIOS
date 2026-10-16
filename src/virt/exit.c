@@ -27,9 +27,7 @@
 #include <virt/exit.h>
 #include <virt/guest_mem.h>
 #include <virt/hypercall.h>
-#include <virt/insn.h>
 #include <virt/io.h>
-#include <virt/layout.h>
 #include <virt/svm.h>
 #include <virt/vcpu.h>
 #include <virt/vlapic.h>
@@ -248,49 +246,6 @@ void exit_xsetbv(struct vcpu *v) {
         return;
     }
     vcpu_skip_instruction(v);
-}
-
-// A register a string instruction steps, as wide as its addresses: the upper
-// bits stay put but for 32-bit addresses, whose results are zero extended.
-static uint64_t string_step(uint64_t reg, int64_t delta, unsigned address_size) {
-    if (address_size == 8) {
-        return reg + delta;
-    }
-    if (address_size == 4) {
-        return (uint32_t)(reg + delta);
-    }
-    return (reg & ~0xffffull) | ((reg + delta) & 0xffff);
-}
-
-bool exit_absent_write(struct vcpu *v, uint64_t gpa) {
-    if (!layout_is_absent(gpa)) {
-        return false;
-    }
-    struct insn insn;
-    if (!insn_decode(v, &insn)) {
-        return false;
-    }
-
-    // INS, MOVS, and STOS, which move on as if they had written.
-    if (insn.opcode == 0x6c || insn.opcode == 0x6d || insn.opcode == 0xa4 || insn.opcode == 0xa5
-        || insn.opcode == 0xaa || insn.opcode == 0xab) {
-        unsigned size = (insn.opcode & 1) ? insn.operand_size : 1;
-        uint64_t mask = insn.address_size == 8 ? UINT64_MAX : (1ull << (insn.address_size * 8)) - 1;
-        uint64_t count = insn.rep ? v->gprs.rcx & mask : 1;
-        int64_t delta = (int64_t)(count * size);
-        if (vcpu_rflags(v) & RFLAGS_DF) {
-            delta = -delta;
-        }
-        v->gprs.rdi = string_step(v->gprs.rdi, delta, insn.address_size);
-        if (insn.opcode == 0xa4 || insn.opcode == 0xa5) {
-            v->gprs.rsi = string_step(v->gprs.rsi, delta, insn.address_size);
-        }
-        if (insn.rep) {
-            v->gprs.rcx = string_step(v->gprs.rcx, -(int64_t)count, insn.address_size);
-        }
-    }
-    vcpu_advance(v, insn.length);
-    return true;
 }
 
 void exit_io(struct vcpu *v, uint16_t port, unsigned size, bool in, uint32_t *value) {
