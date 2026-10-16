@@ -138,11 +138,34 @@ struct host_bridge {
     uacpi_namespace_node *node;
     uint16_t segment;
     uint8_t bus;
+    // Its root bus has a function decoding memory the records lack: a CardBus
+    // bridge, or virtual functions.
+    bool undescribed;
     // The memory windows of its _CRS, as given, and how many lie below 4 GiB.
     struct window *windows;
     uint32_t window_count;
     uint32_t window_capacity;
     uint32_t low_window_count;
+};
+
+// A host bridge as pci_relocate_reserve() needs it.
+struct reserve_bridge {
+    uint16_t segment;
+    uint8_t bus;
+    bool undescribed;
+    // Its windows clipped to [1 MiB, 4 GiB), in reserve_state.windows.
+    struct window *windows;
+    uint32_t window_count;
+};
+
+// What pci_relocate() leaves for pci_relocate_reserve().
+struct reserve_state {
+    struct reserve_bridge *bridges;
+    uint32_t bridge_count;
+    struct window *windows;
+    // Within [1 MiB, 4 GiB): what is claimed, what any function decodes where
+    // pci_relocate() left it, and what was reserved.
+    struct range_list used;
 };
 
 // A memory BAR, an expansion ROM BAR, or a bridge memory window.
@@ -207,6 +230,8 @@ struct saved_command {
 };
 
 static const char *const host_bridge_ids[] = {"PNP0A03", "PNP0A08", NULL};
+
+static struct reserve_state reserve_state;
 
 static uint64_t range_end(uint64_t base, uint64_t size) {
     return size > UINT64_MAX - base ? UINT64_MAX : base + size;
@@ -332,6 +357,35 @@ static bool list_fit(const struct range_list *l, uint64_t size, uint64_t align, 
         }
     }
     return false;
+}
+
+// The lowest address of [base, end) where size bytes aligned to align overlap
+// none of the list's ranges.
+static bool list_fit_between(const struct range_list *l, uint64_t base, uint64_t end,
+                             uint64_t size, uint64_t align, uint64_t *at) {
+    uint64_t x;
+    if (!align_up(base, align, &x)) {
+        return false;
+    }
+    for (uint32_t i = 0; i < l->count; i++) {
+        if (x >= end || end - x < size) {
+            return false;
+        }
+        if (l->r[i].end <= x) {
+            continue;
+        }
+        if (l->r[i].base >= x + size) {
+            break;
+        }
+        if (!align_up(l->r[i].end, align, &x)) {
+            return false;
+        }
+    }
+    if (x >= end || end - x < size) {
+        return false;
+    }
+    *at = x;
+    return true;
 }
 
 static void claim(struct relocation *r, uint64_t base, uint64_t size) {
@@ -711,8 +765,7 @@ static uacpi_iteration_decision device_found(void *user, uacpi_namespace_node *n
     return UACPI_ITERATION_DECISION_CONTINUE;
 }
 
-static const struct host_bridge *host_bridge_for(const struct relocation *r, uint16_t segment,
-                                                 uint8_t bus) {
+static struct host_bridge *host_bridge_for(struct relocation *r, uint16_t segment, uint8_t bus) {
     for (uint32_t i = 0; i < r->bridge_count; i++) {
         if (r->bridges[i].segment == segment && r->bridges[i].bus == bus) {
             return &r->bridges[i];
@@ -1507,17 +1560,18 @@ static void root_lay_out(struct relocation *r, uint32_t root, const struct host_
 
 static void root_process(struct relocation *r, uint32_t root) {
     const struct pci_root_bus *rb = &r->topology->root_buses[root];
-    const struct host_bridge *hb = host_bridge_for(r, rb->segment, rb->bus);
+    struct host_bridge *hb = host_bridge_for(r, rb->segment, rb->bus);
     if (hb == NULL) {
         printf("PCI root bus %04x:%02x: no host bridge, left as it is\n", rb->segment, rb->bus);
     } else if (hb->low_window_count == 0) {
         printf("PCI root bus %04x:%02x: no windows below 4 GiB, left as it is\n", rb->segment,
                rb->bus);
-    } else if (!root_blocked(r, root)) {
-        if (root_wanted(r, root)) {
-            root_lay_out(r, root, hb);
-            return;
-        }
+    } else if (root_blocked(r, root)) {
+        hb->undescribed = true;
+    } else if (root_wanted(r, root)) {
+        root_lay_out(r, root, hb);
+        return;
+    } else {
         printf("PCI root bus %04x:%02x: nothing to move above 4 GiB\n", rb->segment, rb->bus);
     }
     log_left_high(r, root, false);
@@ -1535,7 +1589,84 @@ static void relocation_free(struct relocation *r) {
     list_free(&r->claimed);
 }
 
+static void used_add(uint64_t base, uint64_t end) {
+    list_add(&reserve_state.used, base < ONE_MIB ? ONE_MIB : base,
+             end > FOUR_GIB ? FOUR_GIB : end);
+}
+
+// A root bus with a function decoding memory the records lack may decode
+// anywhere in its host bridge's windows. A disabled expansion ROM BAR still
+// holds the address an operating system would enable it at.
+static void reserve_keep(const struct relocation *r) {
+    struct reserve_state *s = &reserve_state;
+    uint32_t window_total = 0;
+    for (uint32_t i = 0; i < r->bridge_count; i++) {
+        window_total += r->bridges[i].window_count;
+    }
+    s->bridges = kmalloc(r->bridge_count * sizeof(*s->bridges));
+    s->windows = kmalloc(window_total * sizeof(*s->windows));
+    s->bridge_count = r->bridge_count;
+    uint32_t window_count = 0;
+    for (uint32_t i = 0; i < r->bridge_count; i++) {
+        const struct host_bridge *hb = &r->bridges[i];
+        struct reserve_bridge *b = &s->bridges[i];
+        *b = (struct reserve_bridge){
+            .segment = hb->segment,
+            .bus = hb->bus,
+            .undescribed = hb->undescribed,
+            .windows = &s->windows[window_count],
+        };
+        for (uint32_t k = 0; k < hb->window_count; k++) {
+            const struct window *w = &hb->windows[k];
+            uint64_t base = w->base < ONE_MIB ? ONE_MIB : w->base;
+            uint64_t end = w->end > FOUR_GIB ? FOUR_GIB : w->end;
+            if (base >= end) {
+                continue;
+            }
+            b->windows[b->window_count++] = (struct window){base, end, w->prefetchable};
+            if (hb->undescribed) {
+                used_add(base, end);
+            }
+        }
+        window_count += b->window_count;
+    }
+
+    for (uint32_t i = 0; i < r->claimed.count; i++) {
+        used_add(r->claimed.r[i].base, r->claimed.r[i].end);
+    }
+    const struct pci_topology *t = r->topology;
+    for (uint32_t i = 0; i < t->function_count; i++) {
+        const struct pci_function *f = &t->functions[i];
+        for (uint8_t n = 0; n < f->bar_count && n < 6; n++) {
+            const struct pci_bar *bar = &f->bars[n];
+            if ((bar->kind == PCI_BAR_MEM32 || bar->kind == PCI_BAR_MEM64) && bar->size != 0
+                && bar->base != 0) {
+                used_add(bar->base, range_end(bar->base, bar->size));
+            }
+        }
+        if (f->rom.kind == PCI_BAR_MEM32 && f->rom.size != 0 && f->rom.base != 0) {
+            used_add(f->rom.base, range_end(f->rom.base, f->rom.size));
+        }
+        if (f->header_type == HEADER_BRIDGE) {
+            if (f->mem_limit >= f->mem_base) {
+                used_add(f->mem_base, (uint64_t)f->mem_limit + 1);
+            }
+            if (f->pref_limit >= f->pref_base) {
+                used_add(f->pref_base, range_end(f->pref_limit, 1));
+            }
+        }
+    }
+}
+
+static void reserve_free(void) {
+    kfree(reserve_state.bridges);
+    kfree(reserve_state.windows);
+    list_free(&reserve_state.used);
+    reserve_state = (struct reserve_state){.bridges = NULL};
+}
+
 void pci_relocate(void) {
+    reserve_free();
     const struct pci_topology *t = pci_enum_scan();
     pci_enum_shrink_rebars(BAR_SIZE_MAX);
     if (!acpi_init()) {
@@ -1570,5 +1701,67 @@ void pci_relocate(void) {
     if (fb->present && range_end(fb->base, fb->size) > FOUR_GIB) {
         printf("Framebuffer stays above 4 GiB at 0x%llx\n", (unsigned long long)fb->base);
     }
+    reserve_keep(&r);
     relocation_free(&r);
+}
+
+// The lowest address where size bytes aligned to size lie in one of the
+// bridge's windows of this kind, clear of what is used.
+static const struct window *reserve_fit(const struct reserve_bridge *b, bool prefetchable,
+                                        uint64_t size, uint64_t *at) {
+    const struct window *found = NULL;
+    for (uint32_t i = 0; i < b->window_count; i++) {
+        const struct window *w = &b->windows[i];
+        uint64_t x;
+        if (w->prefetchable == prefetchable
+            && list_fit_between(&reserve_state.used, w->base, w->end, size, size, &x)
+            && (found == NULL || x < *at)) {
+            found = w;
+            *at = x;
+        }
+    }
+    return found;
+}
+
+bool pci_relocate_reserve(uint16_t segment, uint8_t bus, uint64_t size, uint64_t *base) {
+    const struct reserve_bridge *b = NULL;
+    for (uint32_t i = 0; i < reserve_state.bridge_count && b == NULL; i++) {
+        if (reserve_state.bridges[i].segment == segment && reserve_state.bridges[i].bus == bus) {
+            b = &reserve_state.bridges[i];
+        }
+    }
+    const char *why = NULL;
+    const struct window *w = NULL;
+    uint64_t at = 0;
+    if (size == 0 || (size & (size - 1)) != 0) {
+        why = "not a power of two";
+    } else if (b == NULL) {
+        why = "no host bridge";
+    } else if (b->window_count == 0) {
+        why = "no windows below 4 GiB";
+    } else if (b->undescribed) {
+        why = "not all the memory it decodes is known";
+    } else {
+        // Non-prefetchable space goes to the BARs that need it.
+        w = reserve_fit(b, true, size, &at);
+        if (w == NULL) {
+            w = reserve_fit(b, false, size, &at);
+        }
+        if (w == NULL) {
+            why = "no room below 4 GiB";
+        }
+    }
+    if (why != NULL) {
+        printf("PCI root bus %04x:%02x: cannot reserve 0x%llx bytes, %s\n", segment, bus,
+               (unsigned long long)size, why);
+        return false;
+    }
+
+    list_add(&reserve_state.used, at, at + size);
+    printf("PCI root bus %04x:%02x: reserved 0x%llx-0x%llx in %swindow 0x%llx-0x%llx\n",
+           segment, bus, (unsigned long long)at, (unsigned long long)(at + size - 1),
+           w->prefetchable ? "prefetchable " : "", (unsigned long long)w->base,
+           (unsigned long long)(w->end - 1));
+    *base = at;
+    return true;
 }
