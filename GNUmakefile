@@ -357,6 +357,10 @@ obj/src/memory.c.o obj/cc-runtime/src/cc-runtime.c.o: override CFLAGS += -fno-lt
 obj/src/lib/printf.c.o: override CPPFLAGS += \
     -I nanoprintf
 
+# Only the CSM boot code sees the video BIOS's interface to the hypervisor.
+obj/src/csm/csm_boot.c.o: override CPPFLAGS += \
+    -I vgabios/src
+
 # The core carries SeaBIOS.
 obj/src/csm/seabios_blob.S.o: seabios/out/Csm16.bin
 

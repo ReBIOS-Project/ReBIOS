@@ -72,8 +72,10 @@ framebuffer and scaled to the screen. It is not SeaVGABIOS: text modes (40 and 8
 underline, the cursor, loadable fonts), CGA, EGA, and VGA graphics modes, and programs that program the VGA registers and video
 memory directly (e.g. pretty much all MS-DOS games, MS-DOS Editor, etc.) work as on a real VGA.
 
-The emulated VGA does not offer the VESA BIOS extensions (VBE) yet, so OSes that only drive the screen through them get no
-high-resolution modes on it.
+Its Video BIOS also offers the VESA BIOS Extensions (VBE 3.0): modes in 8, 15, 16, 24, and 32 bits per pixel up to the screen's
+resolution, through a banked window or a linear framebuffer, and the display's EDID where the firmware has it. Operating systems
+see it as a QEMU/Bochs standard VGA PCI device (1234:1111), which drivers for that device can drive too, while the real video card
+stays visible as well.
 
 ## Configuration
 
@@ -176,7 +178,8 @@ Yes! CSMWrap starts SeaBIOS on the bare hardware as the UEFI firmware leaves it.
 real machine, but for what it adds back of the legacy PC:
 
 - **A real VGA without a legacy Video BIOS.** Where CSMWrap has to fall back to SeaVGABIOS, with which only text written through
-  the BIOS shows, ReBIOS emulates a complete VGA (see [Video Card Considerations](#video-card-considerations)).
+  the BIOS shows, ReBIOS emulates a complete VGA, with VBE modes up to the screen's resolution (see
+  [Video Card Considerations](#video-card-considerations)).
 - **Legacy interrupt controllers.** The 8259 PICs, the I/O APICs, and the local APICs the OS sees are virtual, so DOS-era software
   works on machines whose chipset lacks the 8259s or locks x2APIC mode on, and ReBIOS itself routes PCI interrupts to free ISA
   IRQs for PIC mode, whatever the firmware's PIC mode wiring.

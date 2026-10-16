@@ -19,6 +19,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <vgabios_info.h>
 #include <memory.h>
 #include <core.h>
 #include <csm/csm.h>
@@ -246,8 +247,29 @@ static void update_bbs(struct vcpu *v) {
 extern const uint8_t vgabios_image[];
 extern const uint8_t vgabios_image_end[];
 
+// What the emulated VGA's video BIOS learns of the display controller it
+// drives (vgabios/src/vgabios_info.h).
+static void emulated_vbios_info(uint8_t *image, uint32_t size, int device) {
+    const struct handoff_video *video = &core_handoff->video;
+    uint16_t at = (uint16_t)(image[VGABIOS_INFO_POINTER] | image[VGABIOS_INFO_POINTER + 1] << 8);
+    if (at + sizeof(struct vgabios_info) > size) {
+        return;
+    }
+    struct vgabios_info info = {0};
+    if (video->vram_size != 0) {
+        info.flags = VGABIOS_INFO_DISPI;
+    }
+    info.pci_bdf = device >= 0 ? (uint16_t)(device << 3) : 0xffff;
+    info.max_width = (uint16_t)video->framebuffer.width;
+    info.max_height = (uint16_t)video->framebuffer.height;
+    info.edid_size = (uint16_t)video->edid_size;
+    memcpy(info.edid, video->edid, video->edid_size);
+    memcpy(image + at, &info, sizeof(info));
+}
+
 // The emulated VGA's video BIOS as an option ROM: padded to the size its
-// header gives, with the checksum that makes its bytes add up to 0.
+// header gives, with the checksum that makes its bytes add up to 0. It is the
+// emulated display controller's, where there is one.
 static const struct handoff_pci_rom *emulated_vbios(void) {
     static struct handoff_pci_rom rom;
     if (rom.size != 0) {
@@ -259,12 +281,18 @@ static const struct handoff_pci_rom *emulated_vbios(void) {
     uint8_t *image = page_alloc((size + PAGE_SIZE - 1) / PAGE_SIZE);
     memset(image, 0, size);
     memcpy(image, vgabios_image, length < size ? length : size);
+    int device = vga_pci_device();
+    emulated_vbios_info(image, size, device);
     uint8_t sum = 0;
     for (uint32_t i = 0; i + 1 < size; i++) {
         sum = (uint8_t)(sum + image[i]);
     }
     image[size - 1] = (uint8_t)-sum;
-    if (h->video.vga_present) {
+    if (device >= 0) {
+        rom.address = (struct handoff_pci_address){0, 0, (uint8_t)(device << 3)};
+        rom.vendor_id = 0x1234;
+        rom.device_id = 0x1111;
+    } else if (h->video.vga_present) {
         rom.address = h->video.vga_device;
         rom.vendor_id = h->video.vga_vendor_id;
         rom.device_id = h->video.vga_device_id;
