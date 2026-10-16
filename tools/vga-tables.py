@@ -21,7 +21,8 @@
 #
 # Writes the emulated VGA's video BIOS tables: the 8x8, 8x14, and 8x16 fonts,
 # taken from QEMU's VGA BIOS, and each standard mode's registers and DAC
-# palette, as vgadump.asm recorded QEMU's VGA BIOS programming them.
+# palette, as vgadump.asm recorded QEMU's VGA BIOS programming them, with the
+# 350- and 200-line text modes made from those (QEMU's BIOS has none).
 import re
 import sys
 
@@ -95,6 +96,7 @@ def fix_mode7(ac):
 
 palettes = []
 modes = []
+raw = {}
 for b in blocks:
     mode = int(b[0], 16)
     misc = int(b[1], 16)
@@ -123,8 +125,45 @@ for b in blocks:
     if key not in palettes:
         palettes.append(key)
     kind, width, height, segment = MODES[mode]
+    lines = 400 if kind == 'MODE_TEXT' else height
     modes.append((mode, kind, columns, rows, char_height, palettes.index(key), width, height,
-                  segment, page_size, misc, seq[1:5], crtc, ac[:20], gc))
+                  segment, page_size, misc, seq[1:5], crtc, ac[:20], gc, lines))
+    raw[mode] = (misc, seq, crtc)
+
+# The CRT controller's vertical timing registers, and its maximum scan line
+# register's bits beyond the cell height.
+VERTICAL = (0x06, 0x07, 0x10, 0x11, 0x12, 0x15, 0x16)
+HORIZONTAL = (0x00, 0x01, 0x02, 0x03, 0x04, 0x05)
+
+# A text mode at another line count: the vertical timing of a graphics mode
+# with that many lines, the horizontal timing and dot clock of the 8-dot
+# graphics mode with as many columns (or the text mode's own, for mode 7's
+# 9-dot cells), and the text mode's other registers.
+def variant(text, lines, vertical_mode, horizontal_mode, height, cursor, underline):
+    (mode, kind, columns, rows, _, palette, width, h, segment, page_size, misc, seq, crtc, ac,
+     gc, _) = text
+    vmisc, _, vcrtc = raw[vertical_mode]
+    hmisc, hseq, hcrtc = raw[horizontal_mode]
+    crtc = list(crtc)
+    for r in VERTICAL:
+        crtc[r] = vcrtc[r]
+    for r in HORIZONTAL:
+        crtc[r] = hcrtc[r]
+    crtc[0x09] = (vcrtc[0x09] & 0xe0) | (height - 1)
+    crtc[0x0a], crtc[0x0b] = cursor
+    crtc[0x14] = underline
+    seq = list(seq)
+    seq[0] = hseq[1]
+    misc = (vmisc & 0xc0) | (hmisc & 0x3f)
+    return (mode, kind, columns, rows, height, palette, width, h, segment, page_size, misc, seq,
+            crtc, ac, gc, lines)
+
+for text in [m for m in modes if m[0] in (0x00, 0x01, 0x02, 0x03)]:
+    narrow = text[2] == 40
+    modes.append(variant(text, 350, 0x10, 0x0d if narrow else 0x10, 14, (0x0b, 0x0c), 0x1f))
+    modes.append(variant(text, 200, 0x0e, 0x0d if narrow else 0x0e, 8, (0x06, 0x07), 0x1f))
+mode7 = [m for m in modes if m[0] == 0x07][0]
+modes.append(variant(mode7, 350, 0x10, 0x07, 14, (0x0b, 0x0c), 0x0d))
 
 def hexrows(data, per_row=16, indent='    '):
     lines = []
@@ -154,10 +193,12 @@ for i, p in enumerate(palettes):
     o.append('    {palette%d, %d},' % (i, len(p) // 3))
 o.append('};')
 o.append('')
-o.append('const __seg_fs struct vgabios_mode vgabios_modes[VGABIOS_MODE_COUNT] = {')
+o.append('const __seg_fs uint8_t vgabios_mode_count = %d;' % len(modes))
+o.append('')
+o.append('const __seg_fs struct vgabios_mode vgabios_modes[%d] = {' % len(modes))
 for m in modes:
     (mode, kind, columns, rows, char_height, palette, width, height, segment, page_size, misc,
-     seq, crtc, ac, gc) = m
+     seq, crtc, ac, gc, lines) = m
     o.append('    {')
     o.append('        .mode = 0x%02x,' % mode)
     o.append('        .kind = %s,' % kind)
@@ -169,6 +210,7 @@ for m in modes:
     o.append('        .height = %d,' % height)
     o.append('        .segment = 0x%04x,' % segment)
     o.append('        .page_size = 0x%04x,' % page_size)
+    o.append('        .scan_lines = %d,' % lines)
     o.append('        .misc = 0x%02x,' % misc)
     o.append('        .seq = {%s},' % ', '.join('0x%02x' % x for x in seq))
     o.append('        .crtc = {')

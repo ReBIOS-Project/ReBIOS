@@ -34,8 +34,6 @@
 #define MODE_PLANAR 3
 #define MODE_LINEAR 4
 
-#define VGABIOS_MODE_COUNT 15
-
 struct vgabios_mode {
     uint8_t mode;
     uint8_t kind;
@@ -47,6 +45,8 @@ struct vgabios_mode {
     uint16_t height;
     uint16_t segment;
     uint16_t page_size;
+    // Text modes come at 200, 350, and 400 lines.
+    uint16_t scan_lines;
     uint8_t misc;
     // Sequencer registers 1 to 4.
     uint8_t seq[4];
@@ -65,7 +65,8 @@ extern const __seg_fs uint8_t vgabios_font8[256 * 8];
 extern const __seg_fs uint8_t vgabios_font14[256 * 14];
 extern const __seg_fs uint8_t vgabios_font16[256 * 16];
 extern const __seg_fs struct vgabios_palette vgabios_palettes[];
-extern const __seg_fs struct vgabios_mode vgabios_modes[VGABIOS_MODE_COUNT];
+extern const __seg_fs uint8_t vgabios_mode_count;
+extern const __seg_fs struct vgabios_mode vgabios_modes[];
 
 // The caller's registers, as the entry code saves them.
 struct vgabios_regs {

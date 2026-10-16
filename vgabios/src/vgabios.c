@@ -130,13 +130,34 @@ static uint8_t ac_read(uint8_t index) {
     return value;
 }
 
-static const __seg_fs struct vgabios_mode *find_mode(uint8_t number) {
-    for (unsigned i = 0; i < VGABIOS_MODE_COUNT; i++) {
-        if (vgabios_modes[i].mode == number) {
+// The mode at a line count, or with any if lines is 0 or none has it.
+static const __seg_fs struct vgabios_mode *find_mode_lines(uint8_t number, uint16_t lines) {
+    const __seg_fs struct vgabios_mode *any = 0;
+    for (unsigned i = 0; i < vgabios_mode_count; i++) {
+        if (vgabios_modes[i].mode != number) {
+            continue;
+        }
+        if (lines == 0 || vgabios_modes[i].scan_lines == lines) {
             return &vgabios_modes[i];
         }
+        if (any == 0) {
+            any = &vgabios_modes[i];
+        }
     }
-    return 0;
+    return any;
+}
+
+static const __seg_fs struct vgabios_mode *find_mode(uint8_t number) {
+    return find_mode_lines(number, 0);
+}
+
+// The line count INT 10h AH=12h BL=30h picked for the text modes.
+static uint16_t text_lines(void) {
+    uint8_t flags = peekb(BDA, BDA_VGA_FLAGS);
+    if (flags & VGA_FLAGS_200) {
+        return 200;
+    }
+    return (flags & VGA_FLAGS_400) ? 400 : 350;
 }
 
 static const __seg_fs struct vgabios_mode *current_mode(void) {
@@ -257,6 +278,9 @@ static void clear_screen(const __seg_fs struct vgabios_mode *m) {
 
 static void set_mode(uint8_t requested) {
     const __seg_fs struct vgabios_mode *m = find_mode(requested & 0x7f);
+    if (m != 0 && is_text(m)) {
+        m = find_mode_lines(m->mode, text_lines());
+    }
     if (m == 0) {
         return;
     }
