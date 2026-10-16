@@ -211,6 +211,23 @@ static void free_uma_absent(void) {
     }
 }
 
+// The option ROMs, and what the CSM16 keeps read-only from the end of its
+// low memory zone, which it reports as that of the free upper memory, are
+// locked as a BIOS locks its shadow RAM.
+static void lock_roms(void) {
+    uint32_t roms_end = (csm.rom_end + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+    if (roms_end > ROM_AREA_BASE) {
+        printf("Option ROMs %#x-%#x are read-only\n", ROM_AREA_BASE, roms_end - 1);
+        layout_read_only(ROM_AREA_BASE, roms_end - ROM_AREA_BASE);
+    }
+    uint32_t start = csm.compat16->uma_address + csm.compat16->uma_size;
+    start = (start + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+    if (start >= roms_end && start < ROM_AREA_END) {
+        printf("Legacy BIOS %#x-%#x is read-only\n", start, ROM_AREA_END - 1);
+        layout_read_only(start, ROM_AREA_END - start);
+    }
+}
+
 // Sets up the call the thunk makes next: function in AX, its table in ES:BX.
 static void csm_call(struct vcpu *v, uint16_t function, uint32_t table) {
     struct segment es = {(uint16_t)(table >> 4), 0x93, 0xffff, table & ~0xfu};
@@ -339,6 +356,7 @@ void csm_boot_returned(struct vcpu *v) {
         case STAGE_PREPARE_TO_BOOT: {
             printf("Legacy BIOS ready to boot, status %#x\n", status);
             free_uma_absent();
+            lock_roms();
             csm.stage = STAGE_BOOT;
             csm_call(v, CSM_COMPAT16_BOOT, 0);
             break;

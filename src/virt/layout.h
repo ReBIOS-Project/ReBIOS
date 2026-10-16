@@ -44,6 +44,10 @@ uint32_t layout_take(uint32_t size, uint32_t align, uint32_t e820_type);
 // as addresses nothing decodes do.
 void layout_absent(uint64_t gpa, uint64_t size);
 
+// Makes [gpa, gpa + size) of the guest's first megabyte read-only, as a BIOS
+// locks shadowed ROMs: writes go nowhere. Page aligned.
+void layout_read_only(uint64_t gpa, uint64_t size);
+
 // Fills the guest's memory map.
 bool layout_e820(struct e820_map *map);
 

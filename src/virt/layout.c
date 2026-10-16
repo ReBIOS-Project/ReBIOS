@@ -582,6 +582,34 @@ void layout_absent(uint64_t gpa, uint64_t size) {
     gpt_flush();
 }
 
+static uint64_t rom_read(struct vcpu *v, void *ctx, uint64_t offset, unsigned size) {
+    (void)v;
+    uint64_t value = 0;
+    memcpy(&value, low + (uintptr_t)ctx + offset, size);
+    return value;
+}
+
+static void rom_write(struct vcpu *v, void *ctx, uint64_t offset, unsigned size,
+                      uint64_t value) {
+    (void)v;
+    (void)ctx;
+    (void)offset;
+    (void)size;
+    (void)value;
+}
+
+static const struct mmio_ops rom_ops = {rom_read, rom_write, true};
+
+void layout_read_only(uint64_t gpa, uint64_t size) {
+    if (size == 0 || gpa >= ONE_MIB || size > ONE_MIB - gpa) {
+        return;
+    }
+    // Reads go to the memory, writes exit to be dropped.
+    mmio_register(gpa, size, &rom_ops, (void *)(uintptr_t)gpa);
+    gpt_map(gpa, (uint64_t)(uintptr_t)(low + gpa), size, GPT_R | GPT_X, MT_WB);
+    gpt_flush();
+}
+
 bool layout_e820(struct e820_map *map) {
     bool ok = true;
     e820_init(map);
