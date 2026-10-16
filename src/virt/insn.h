@@ -34,12 +34,25 @@ struct insn {
     // In bytes.
     unsigned operand_size;
     unsigned address_size;
-    // An F2 or F3 prefix.
+    // Whether the code is 64-bit.
+    bool long_mode;
+    // An F2 or F3 prefix, and the last of them: F2 is REPNE, F3 REP or REPE.
     bool rep;
+    uint8_t rep_prefix;
+    bool lock;
+    // The segment register an override prefix names, or -1.
+    int segment;
     // The REX prefix, or 0.
     uint8_t rex;
+    // Whether it is VEX, EVEX, or XOP encoded.
+    bool vex;
     bool has_modrm;
     uint8_t modrm;
+    bool has_sib;
+    uint8_t sib;
+    // Sign-extended, disp_size bytes of it encoded.
+    int64_t disp;
+    unsigned disp_size;
     // As it is encoded, imm_size bytes of it.
     uint64_t imm;
     unsigned imm_size;
@@ -94,8 +107,9 @@ struct insn_load {
 // Returns 0 if it cannot be read or is not one of those instructions.
 unsigned insn_length_intercepted(struct vcpu *v);
 
-// Decodes the length and the sizes of any instruction at the guest's CS:RIP.
-// Returns false if it cannot be read or is not a valid instruction.
+// Decodes any instruction at the guest's CS:RIP: its length, sizes, prefixes,
+// and ModRM operand. Returns false if it cannot be read or is not a valid
+// instruction.
 bool insn_decode(struct vcpu *v, struct insn *insn);
 
 // What a decoded instruction writes to memory, for MOV, XCHG, OR, and AND.
@@ -107,6 +121,14 @@ bool insn_store(struct vcpu *v, const struct insn *insn, struct insn_store *stor
 bool insn_load(const struct insn *insn, struct insn_load *load);
 // Completes it, memory having held value.
 void insn_load_complete(struct vcpu *v, const struct insn_load *load, uint64_t value);
+
+// The linear address of a decoded instruction's ModRM memory operand, or of
+// MOV's offset operand: false where it has neither. VEX, EVEX, and XOP forms
+// are not handled.
+bool insn_mem_linear(struct vcpu *v, const struct insn *insn, uint64_t *linear);
+// A string instruction's linear address: its destination at ES:rDI, or its
+// source at DS:rSI, or the segment an override names.
+uint64_t insn_string_linear(struct vcpu *v, const struct insn *insn, bool destination);
 
 // The guest's general register, as the encoding numbers them.
 uint64_t insn_gpr(struct vcpu *v, unsigned reg);

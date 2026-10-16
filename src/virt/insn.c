@@ -219,35 +219,42 @@ static unsigned imm_size(unsigned kind, const struct insn *insn, bool long_mode)
     }
 }
 
-// The bytes a ModRM byte at bytes[i] brings with it, itself included.
-static unsigned modrm_size(const uint8_t *bytes, unsigned i, unsigned address_size) {
+static int64_t read_signed(const uint8_t *bytes, unsigned size) {
+    uint64_t value = 0;
+    for (unsigned n = 0; n < size; n++) {
+        value |= (uint64_t)bytes[n] << (n * 8);
+    }
+    unsigned shift = 64 - size * 8;
+    return (int64_t)(value << shift) >> shift;
+}
+
+// Decodes a ModRM byte at bytes[i] and what it brings with it: returns their
+// size, the ModRM byte included.
+static unsigned decode_modrm(const uint8_t *bytes, unsigned i, struct insn *insn) {
     uint8_t modrm = bytes[i];
     unsigned mod = modrm >> 6;
     unsigned rm = modrm & 7;
+    insn->has_modrm = true;
+    insn->modrm = modrm;
     if (mod == 3) {
         return 1;
     }
-    if (address_size == 2) {
-        if (mod == 1) {
-            return 2;
-        }
-        return mod == 2 || rm == 6 ? 3 : 1;
-    }
     unsigned size = 1;
-    if (rm == 4) {
-        size++;
-        if (mod == 0 && (bytes[i + 1] & 7) == 5) {
-            size += 4;
+    unsigned disp_size;
+    if (insn->address_size == 2) {
+        disp_size = mod == 1 ? 1 : mod == 2 || rm == 6 ? 2 : 0;
+    } else {
+        if (rm == 4) {
+            insn->has_sib = true;
+            insn->sib = bytes[i + 1];
+            size++;
         }
+        bool no_base = mod == 0 && (rm == 5 || (rm == 4 && (insn->sib & 7) == 5));
+        disp_size = mod == 1 ? 1 : mod == 2 || no_base ? 4 : 0;
     }
-    if (mod == 0 && rm == 5) {
-        size += 4;
-    } else if (mod == 1) {
-        size += 1;
-    } else if (mod == 2) {
-        size += 4;
-    }
-    return size;
+    insn->disp_size = disp_size;
+    insn->disp = read_signed(bytes + i + size, disp_size);
+    return size + disp_size;
 }
 
 bool insn_decode(struct vcpu *v, struct insn *insn) {
@@ -276,11 +283,7 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
     bool address_prefix = false;
     bool rex_w = false;
     uint8_t rex = 0;
-    insn->rep = false;
-    insn->modrm = 0;
-    insn->has_modrm = false;
-    insn->imm = 0;
-    insn->imm_size = 0;
+    *insn = (struct insn){.long_mode = long_mode, .segment = -1};
 
     unsigned i = 0;
     for (;;) {
@@ -288,7 +291,17 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
         if (is_legacy_prefix(b)) {
             operand_prefix |= b == 0x66;
             address_prefix |= b == 0x67;
-            insn->rep |= b == 0xf2 || b == 0xf3;
+            insn->lock |= b == 0xf0;
+            if (b == 0xf2 || b == 0xf3) {
+                insn->rep = true;
+                insn->rep_prefix = b;
+            }
+            // In 64-bit mode, only FS and GS overrides have an effect.
+            int segment = b == 0x26 ? SEG_ES : b == 0x2e ? SEG_CS : b == 0x36 ? SEG_SS
+                          : b == 0x3e ? SEG_DS : b == 0x64 ? SEG_FS : b == 0x65 ? SEG_GS : -1;
+            if (segment >= 0 && (!long_mode || segment == SEG_FS || segment == SEG_GS)) {
+                insn->segment = segment;
+            }
             // A REX prefix only counts right before the opcode.
             rex_w = false;
             rex = 0;
@@ -335,9 +348,10 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
         unsigned xop_map = bytes[i + 1] & 0x1f;
         i += 3;
         i++;
-        i += modrm_size(bytes, i, address);
+        i += decode_modrm(bytes, i, insn);
         i += xop_map == 8 ? 1 : xop_map == 10 ? 4 : 0;
         insn->opcode = INSN_OPCODE_OTHER;
+        insn->vex = true;
         insn->length = i;
         return i <= INSN_MAX_LENGTH;
     } else if (op == 0x0f) {
@@ -379,15 +393,14 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
         return false;
     }
 
+    insn->vex = vex_like;
     unsigned imm = entry & OP_IMM_MASK;
     if (entry & OP_MODRM) {
-        insn->has_modrm = true;
-        insn->modrm = bytes[i];
         // TEST in group 3 is the only member with an immediate.
         if (map == MAP_ONE && (op == 0xf6 || op == 0xf7) && ((bytes[i] >> 3) & 7) < 2) {
             imm = op == 0xf6 ? IMM_B : IMM_Z;
         }
-        i += modrm_size(bytes, i, address);
+        i += decode_modrm(bytes, i, insn);
     }
     insn->imm_size = imm_size(imm, insn, long_mode);
     for (unsigned n = 0; n < insn->imm_size && n < sizeof(insn->imm); n++) {
@@ -398,7 +411,93 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
     return i <= INSN_MAX_LENGTH;
 }
 
+#define REX_B 0x01
+#define REX_X 0x02
 #define REX_R 0x04
+
+static uint64_t address_mask(unsigned size) {
+    return size == 8 ? UINT64_MAX : (1ull << (size * 8)) - 1;
+}
+
+// Outside 64-bit mode the linear address space wraps at 4 GiB, and in it only
+// FS and GS have bases.
+static uint64_t segment_linear(struct vcpu *v, const struct insn *insn, int reg, uint64_t ea) {
+    struct segment segment;
+    if (insn->long_mode) {
+        if (reg != SEG_FS && reg != SEG_GS) {
+            return ea;
+        }
+        vcpu_get_seg(v, reg, &segment);
+        return segment.base + ea;
+    }
+    vcpu_get_seg(v, reg, &segment);
+    return (segment.base + ea) & 0xffffffff;
+}
+
+bool insn_mem_linear(struct vcpu *v, const struct insn *insn, uint64_t *linear) {
+    int segment = SEG_DS;
+    uint64_t ea;
+    if (insn->opcode >= 0xa0 && insn->opcode <= 0xa3) {
+        ea = insn->imm;
+    } else if (!insn->has_modrm || insn->modrm >> 6 == 3 || insn->vex) {
+        return false;
+    } else if (insn->address_size == 2) {
+        unsigned mod = insn->modrm >> 6;
+        unsigned rm = insn->modrm & 7;
+        uint64_t bx = insn_gpr(v, 3);
+        uint64_t bp = insn_gpr(v, 5);
+        uint64_t si = insn_gpr(v, 6);
+        uint64_t di = insn_gpr(v, 7);
+        static const uint8_t base_is_bp = 1u << 2 | 1u << 3 | 1u << 6;
+        uint64_t sums[8] = {bx + si, bx + di, bp + si, bp + di, si, di, bp, bx};
+        ea = (uint64_t)insn->disp;
+        if (rm != 6 || mod != 0) {
+            ea += sums[rm];
+            if ((base_is_bp >> rm) & 1) {
+                segment = SEG_SS;
+            }
+        }
+        ea &= 0xffff;
+    } else {
+        unsigned mod = insn->modrm >> 6;
+        unsigned rm = insn->modrm & 7;
+        ea = (uint64_t)insn->disp;
+        unsigned base = rm;
+        if (insn->has_sib) {
+            base = insn->sib & 7;
+            unsigned index = ((insn->sib >> 3) & 7) | ((insn->rex & REX_X) ? 8 : 0);
+            if (index != 4) {
+                ea += insn_gpr(v, index) << (insn->sib >> 6);
+            }
+        }
+        if (mod == 0 && base == 5) {
+            // No base: in 64-bit mode, without a SIB byte, RIP-relative.
+            if (!insn->has_sib && insn->long_mode) {
+                ea += vcpu_rip(v) + insn->length;
+            }
+        } else {
+            ea += insn_gpr(v, base | ((insn->rex & REX_B) ? 8 : 0));
+            if (base == 4 || base == 5) {
+                segment = SEG_SS;
+            }
+        }
+        ea &= address_mask(insn->address_size);
+    }
+    if (insn->segment >= 0) {
+        segment = insn->segment;
+    }
+    *linear = segment_linear(v, insn, segment, ea);
+    return true;
+}
+
+uint64_t insn_string_linear(struct vcpu *v, const struct insn *insn, bool destination) {
+    uint64_t mask = address_mask(insn->address_size);
+    if (destination) {
+        return segment_linear(v, insn, SEG_ES, v->gprs.rdi & mask);
+    }
+    int segment = insn->segment >= 0 ? insn->segment : SEG_DS;
+    return segment_linear(v, insn, segment, v->gprs.rsi & mask);
+}
 
 uint64_t insn_gpr(struct vcpu *v, unsigned reg) {
     if (reg == 4) {
