@@ -33,6 +33,22 @@ void irq_init(void);
 bool irq_host_vector(uint8_t vector);
 void irq_host_interrupt(uint8_t vector);
 
+// A GSI PCI devices interrupt on, as the ACPI namespace has it in APIC mode.
+struct irq_pci_line {
+    uint32_t gsi;
+    bool level;
+    bool active_low;
+};
+
+// Has the guest's 8259s see each GSI PCI devices use on an ISA IRQ: one of
+// those neither ISA devices (isa_claimed, bit n for IRQ n), the SCI, nor the
+// hypervisor's own devices use, in turn, so that as few GSIs share one as can
+// be. Before the guest runs.
+void irq_route_pci(const struct irq_pci_line *lines, uint32_t count, uint16_t isa_claimed);
+
+// The ISA IRQ the guest's 8259s see a GSI's interrupts on, or -1.
+int irq_isa_irq(uint32_t gsi);
+
 // After the guest changed an I/O APIC entry.
 void irq_gsi_changed(uint32_t gsi);
 

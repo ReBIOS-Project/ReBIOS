@@ -43,6 +43,14 @@
 #define CASCADE_IRQ 2
 #define XAPIC_MAX_ID 0xff
 
+// The ISA IRQs of the devices the hypervisor provides: the PIT, the keyboard
+// controller's keyboard and mouse ports, the cascade, the RTC, and FERR#.
+#define HYPERVISOR_IRQS (1u << 0 | 1u << 1 | 1u << 2 | 1u << 8 | 1u << 12 | 1u << 13)
+
+// The order free ISA IRQs go to PCI in, those period BIOSes gave it first.
+static const uint8_t pci_irqs[] = {11, 10, 9, 5, 15, 14, 7, 6, 4, 3};
+#define PERIOD_PCI_IRQS 4
+
 // The vectors the host's interrupts for the 8259s arrive on: those guests
 // never use, of exceptions, but #MC's and #SX's, which the host takes as
 // exceptions. The cascade has no source, nor IRQ 13 (FERR#).
@@ -296,6 +304,58 @@ void irq_host_interrupt(uint8_t vector) {
     kick_after_update();
 }
 
+// As a BIOS sets the ELCR for level-triggered sources, such as the SCI.
+static void elcr_init(void) {
+    uint16_t elcr = 0;
+    for (uint32_t gsi = 0; gsi < route_count; gsi++) {
+        if (routes[gsi].irq >= 0 && routes[gsi].level) {
+            elcr |= 1u << routes[gsi].irq;
+        }
+    }
+    pic_write(PIC_ELCR_MASTER, (uint8_t)elcr);
+    pic_write(PIC_ELCR_SLAVE, (uint8_t)(elcr >> 8));
+}
+
+void irq_route_pci(const struct irq_pci_line *lines, uint32_t count, uint16_t isa_claimed) {
+    uint16_t taken = HYPERVISOR_IRQS | isa_claimed;
+    struct acpi_fadt *fadt;
+    if (uacpi_table_fadt(&fadt) == UACPI_STATUS_OK && fadt->sci_int < ISA_IRQS) {
+        taken |= 1u << fadt->sci_int;
+    }
+    uint8_t pool[sizeof(pci_irqs)];
+    unsigned pool_size = 0;
+    for (unsigned i = 0; i < sizeof(pci_irqs); i++) {
+        if (!(taken & (1u << pci_irqs[i]))) {
+            pool[pool_size++] = pci_irqs[i];
+        }
+    }
+    // With none free, PCI shares those it had of old.
+    if (pool_size == 0) {
+        memcpy(pool, pci_irqs, PERIOD_PCI_IRQS);
+        pool_size = PERIOD_PCI_IRQS;
+    }
+
+    spinlock_acquire(&lock);
+    unsigned next = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t gsi = lines[i].gsi;
+        if (gsi >= route_count || routes[gsi].io == NULL || routes[gsi].irq >= 0) {
+            continue;
+        }
+        struct route *r = &routes[gsi];
+        r->irq = pool[next++ % pool_size];
+        r->level = lines[i].level;
+        r->active_low = lines[i].active_low;
+        printf("GSI %u is ISA IRQ %d for PCI\n", gsi, r->irq);
+    }
+    elcr_init();
+    spinlock_release(&lock);
+}
+
+int irq_isa_irq(uint32_t gsi) {
+    return gsi < route_count ? routes[gsi].irq : -1;
+}
+
 void irq_gsi_changed(uint32_t gsi) {
     (void)gsi;
     spinlock_acquire(&lock);
@@ -393,15 +453,7 @@ void irq_init(void) {
 
     routes_init();
     pic_reset();
-    // As a BIOS sets the ELCR for level-triggered sources, such as the SCI.
-    uint16_t elcr = 0;
-    for (uint32_t gsi = 0; gsi < route_count; gsi++) {
-        if (routes[gsi].irq >= 0 && routes[gsi].level) {
-            elcr |= 1u << routes[gsi].irq;
-        }
-    }
-    pic_write(PIC_ELCR_MASTER, (uint8_t)elcr);
-    pic_write(PIC_ELCR_SLAVE, (uint8_t)(elcr >> 8));
+    elcr_init();
 
     static const uint16_t ports[] = {PIC_MASTER_CMD, PIC_SLAVE_CMD, PIC_ELCR_MASTER};
     for (unsigned i = 0; i < sizeof(ports) / sizeof(ports[0]); i++) {
