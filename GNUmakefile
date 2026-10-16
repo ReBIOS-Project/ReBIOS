@@ -302,14 +302,31 @@ all:
 # Include header dependencies.
 -include $(HEADER_DEPS)
 
+# Each kind of file depends on records of the variables it is built with,
+# named after them. Each record gets its variable as set here, as target
+# specific values, like the -fno-lto below, would otherwise reach it
+# through the files depending on it.
+override VARSFILES := $(addprefix obj/,CC OBJCOPY CFLAGS CPPFLAGS LDFLAGS NASMFLAGS)
+$(foreach f,$(VARSFILES),$(eval $(f): override $(notdir $(f)) := $$($(notdir $(f)))))
+
+# Remake the records that differ, compared here rather than by a recipe run
+# every time, so that make can still tell when there is nothing to be done.
+override CHANGED_VARSFILES := $(foreach f,$(VARSFILES),$(shell printf '%s\n' '$(subst ','\'',$($(notdir $(f))))' | cmp -s - $(f) 2>/dev/null || echo $(f)))
+.PHONY: FORCE
+FORCE:
+$(CHANGED_VARSFILES): FORCE
+$(VARSFILES):
+	@mkdir -p "$(dir $@)"
+	@printf '%s\n' '$(subst ','\'',$($(notdir $@)))' > $@
+
 # Rule to convert the final ELF executable to a .EFI PE executable.
-bin/$(OUTPUT).efi: bin/$(OUTPUT) GNUmakefile
+bin/$(OUTPUT).efi: bin/$(OUTPUT) GNUmakefile obj/OBJCOPY
 	mkdir -p "$(dir $@)"
 	$(OBJCOPY) -O binary $< $@
 	dd if=/dev/null of=$@ bs=4096 seek=$$(( ($$(wc -c < $@) + 4095) / 4096 )) 2>/dev/null
 
 # Link rules for the final executable.
-bin/$(OUTPUT): GNUmakefile picoefi/x86_64/link_script.lds $(OBJ)
+bin/$(OUTPUT): GNUmakefile obj/CC obj/CFLAGS obj/LDFLAGS picoefi/x86_64/link_script.lds $(OBJ)
 	mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) $(LDFLAGS) $(OBJ) -o $@
 
@@ -325,17 +342,17 @@ obj/src/lib/printf.c.o: override CPPFLAGS += \
 obj/src/csm/seabios_blob.S.o: seabios/out/Csm16.bin
 
 # Compilation rules for *.c files.
-obj/%.c.o: %.c GNUmakefile
+obj/%.c.o: %.c GNUmakefile obj/CC obj/CFLAGS obj/CPPFLAGS
 	mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
 
 # Compilation rules for *.S files.
-obj/%.S.o: %.S GNUmakefile
+obj/%.S.o: %.S GNUmakefile obj/CC obj/CFLAGS obj/CPPFLAGS
 	mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
 
 # Compilation rules for *.asm (nasm) files.
-obj/%.asm.o: %.asm GNUmakefile
+obj/%.asm.o: %.asm GNUmakefile obj/NASMFLAGS
 	mkdir -p "$(dir $@)"
 	nasm $(NASMFLAGS) -MD $(@:.o=.d) -MP $< -o $@
 
