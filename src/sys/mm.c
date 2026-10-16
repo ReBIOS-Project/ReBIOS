@@ -112,3 +112,80 @@ void page_free(void *pages, size_t count) {
     }
     spinlock_release(&mm_lock);
 }
+
+#define PTE_P (1ull << 0)
+#define PTE_PWT (1ull << 3)
+#define PTE_PCD (1ull << 4)
+#define PTE_PS (1ull << 7)
+#define PTE_PAT_4K (1ull << 7)
+#define PTE_PAT_LARGE (1ull << 12)
+#define PTE_ADDRESS 0x000ffffffffff000ull
+#define PTE_LARGE_FLAGS 0x0fffull
+#define SIZE_2M 0x200000ull
+#define SIZE_1G 0x40000000ull
+
+static uint64_t *table_of(uint64_t entry) {
+    return (uint64_t *)(uintptr_t)(entry & PTE_ADDRESS);
+}
+
+// The PAT entry the host's IA32_PAT makes write-combining is the one PWT
+// alone selects.
+static uint64_t write_combining(uint64_t entry, uint64_t pat_bit) {
+    return (entry & ~(PTE_PCD | pat_bit)) | PTE_PWT;
+}
+
+// Replaces a large page with a table of 512 pages of the next size down,
+// alike but for their addresses.
+static void split(uint64_t *entry, uint64_t size, bool to_4k) {
+    uint64_t *table = page_alloc(1);
+    uint64_t base = *entry & PTE_ADDRESS & ~(size - 1);
+    uint64_t flags = *entry & PTE_LARGE_FLAGS;
+    if (to_4k) {
+        bool pat = *entry & PTE_PAT_LARGE;
+        flags = (flags & ~PTE_PS) | (pat ? PTE_PAT_4K : 0);
+    }
+    for (uint64_t i = 0; i < 512; i++) {
+        table[i] = (base + i * (size / 512)) | flags;
+    }
+    *entry = (uint64_t)(uintptr_t)table | (*entry & 0x7) | PTE_P;
+}
+
+void mm_write_combining(uint64_t base, uint64_t size) {
+    uint64_t start = base & ~(uint64_t)(PAGE_SIZE - 1);
+    uint64_t end = (base + size + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
+    uint64_t *top = table_of(read_cr3());
+    if (read_cr4() & CR4_LA57) {
+        top = table_of(top[0]);
+    }
+    for (uint64_t a = start; a < end;) {
+        uint64_t *pml4e = &top[(a >> 39) & 511];
+        if (!(*pml4e & PTE_P)) {
+            return;
+        }
+        uint64_t *pdpte = &table_of(*pml4e)[(a >> 30) & 511];
+        if (!(*pdpte & PTE_P)) {
+            return;
+        }
+        if (*pdpte & PTE_PS) {
+            if (a % SIZE_1G == 0 && end - a >= SIZE_1G) {
+                *pdpte = write_combining(*pdpte, PTE_PAT_LARGE);
+                a += SIZE_1G;
+                continue;
+            }
+            split(pdpte, SIZE_1G, false);
+        }
+        uint64_t *pde = &table_of(*pdpte)[(a >> 21) & 511];
+        if (*pde & PTE_PS) {
+            if (a % SIZE_2M == 0 && end - a >= SIZE_2M) {
+                *pde = write_combining(*pde, PTE_PAT_LARGE);
+                a += SIZE_2M;
+                continue;
+            }
+            split(pde, SIZE_2M, true);
+        }
+        uint64_t *pte = &table_of(*pde)[(a >> 12) & 511];
+        *pte = write_combining(*pte, PTE_PAT_4K);
+        a += PAGE_SIZE;
+    }
+    write_cr3(read_cr3());
+}

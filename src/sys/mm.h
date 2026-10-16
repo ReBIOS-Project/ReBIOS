@@ -33,4 +33,8 @@ void *page_alloc(size_t count);
 void *page_alloc_aligned(size_t count, size_t align);
 void page_free(void *pages, size_t count);
 
+// Makes the hypervisor's accesses to [base, base + size) write-combining, as
+// for a framebuffer, through the PAT entry the host programs for it.
+void mm_write_combining(uint64_t base, uint64_t size);
+
 #endif
