@@ -70,6 +70,8 @@ struct handoff_pci_rom {
     uint64_t image;
 };
 
+#define HANDOFF_MAX_EDID 256
+
 struct handoff_video {
     struct handoff_framebuffer framebuffer;
     // The PCI device that owns the legacy VGA resources, if any.
@@ -83,6 +85,10 @@ struct handoff_video {
     // The emulated VGA's video memory, if the VGA is to be emulated.
     uint64_t vram_base;
     uint64_t vram_size;
+    // The framebuffer's display's EDID, its first blocks, as the firmware has
+    // it.
+    uint32_t edid_size;
+    uint8_t edid[HANDOFF_MAX_EDID];
 };
 
 // Block devices the firmware knew of, as BIOS Boot Specification 1.01 device

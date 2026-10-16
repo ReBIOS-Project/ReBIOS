@@ -19,8 +19,8 @@
 #ifndef LOADER__DISPLAY_H
 #define LOADER__DISPLAY_H
 
-// Reserves the emulated VGA's video memory, if the VGA is to be emulated.
-// Needs video_init().
+// Reserves the emulated VGA's video memory, if the VGA is to be emulated, and
+// records the display's EDID. Needs video_init().
 void display_collect(void);
 
 #endif
