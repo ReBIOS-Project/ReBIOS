@@ -80,6 +80,9 @@ struct handoff_video {
     uint16_t vga_device_id;
     struct handoff_pci_address vga_device;
     struct handoff_pci_rom vbios;
+    // The emulated VGA's video memory, if the VGA is to be emulated.
+    uint64_t vram_base;
+    uint64_t vram_size;
 };
 
 // Block devices the firmware knew of, as BIOS Boot Specification 1.01 device
