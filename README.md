@@ -166,6 +166,9 @@ Yes! Native CSM firmware is often riddled with issues and hardly tested against 
 and open-source legacy BIOS implementation - SeaBIOS - and it is tested against legacy OSes. Issues affecting modern, commonly
 shipped CSM implementations do not affect ReBIOS, like for example:
 
+- ACPI tables legacy OSes cannot use. Native CSM hands the OS the firmware's own tables, written for modern Windows: Windows 2000
+  and XP stop on their AML (STOP 0xA5), and Windows 98 and ME end up installed without ACPI. ReBIOS gives the OS ACPI tables of its
+  own, in AML that even Windows 98 understands, whose methods call into ReBIOS, which runs the firmware's AML itself.
 - Dirty control register values at handoff. (This is something that [cregfix](https://github.com/mintsuki/cregfix) was created to
   work around). ReBIOS starts the legacy BIOS with the control registers in their reset state.
 - Legacy BIOS routines failing to reliably run when called from Virtual 8086 Mode. EMM386, Windows 3.x under 386 enhanced mode, and
@@ -183,6 +186,11 @@ And when it comes to improvements that are not necessarily bugs in CSM implement
 Yes! CSMWrap starts SeaBIOS on the bare hardware as the UEFI firmware leaves it. ReBIOS runs it in a virtual machine that is the
 real machine, but for what it adds back of the legacy PC:
 
+- **ACPI for legacy OSes.** CSMWrap passes the firmware's ACPI tables on as they are, and with them AML written for modern
+  Windows, on which Windows 2000 and XP stop (STOP 0xA5) and without which Windows 98 and ME must be installed. ReBIOS runs the
+  firmware's ACPI itself and gives the OS ACPI tables of its own, in AML that ACPI 1.0 interpreters such as Windows 98's
+  understand, whose methods call into ReBIOS to run the firmware's: the OS still sees the machine's devices and gets their
+  events, and the memory the firmware keeps for its AML no longer breaks up the OS's.
 - **A real VGA without a legacy Video BIOS.** Where CSMWrap has to fall back to SeaVGABIOS, with which only text written through
   the BIOS shows, ReBIOS emulates a complete VGA, with VBE modes up to the screen's resolution (see
   [Video Card Considerations](#video-card-considerations)).
@@ -190,7 +198,7 @@ real machine, but for what it adds back of the legacy PC:
   works on machines whose chipset lacks the 8259s or locks x2APIC mode on, and ReBIOS itself routes PCI interrupts to free ISA
   IRQs for PIC mode, whatever the firmware's PIC mode wiring.
 - **A PC's memory map.** The OS gets memory from 1 MiB up to 4 GiB as contiguous as the firmware's reserved ranges allow,
-  wherever the machine's memory actually is; its own copies of the ACPI and SMBIOS tables; the option ROMs and the BIOS
+  wherever the machine's memory actually is; its own copy of the SMBIOS tables; the option ROMs and the BIOS
   write-protected, as a BIOS would leave them; and the upper memory that no ROM uses free for memory managers to find (e.g. for
   JemmEx's UMBs and EMS page frame).
 - **DMA from anywhere.** The IOMMU maps device DMA exactly as the OS sees memory, so the BIOS's buffers in upper memory, and the
