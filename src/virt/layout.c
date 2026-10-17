@@ -28,7 +28,6 @@
 #include <lib/log.h>
 #include <sys/mm.h>
 #include <virt/gpt.h>
-#include <virt/guest_acpi.h>
 #include <virt/layout.h>
 #include <virt/mmio.h>
 
@@ -195,16 +194,16 @@ static bool type_is_memory(uint32_t type) {
     }
 }
 
-// What the guest must find where the host has it: what ACPI's code may point
-// to, memory-mapped I/O, and what the firmware keeps for itself or for
-// devices. The runtime services are the hypervisor's alone, and the guest has
-// its own copies of the ACPI tables.
+// What the guest must find where the host has it: memory-mapped I/O, and what
+// the firmware keeps for itself or for devices. The runtime services and the
+// firmware's ACPI are the hypervisor's alone.
 static bool type_is_identity(uint32_t type) {
     switch (type) {
         case EfiRuntimeServicesCode:
         case EfiRuntimeServicesData:
         case EfiUnusableMemory:
         case EfiACPIReclaimMemory:
+        case EfiACPIMemoryNVS:
         case EfiUnacceptedMemoryType: {
             return false;
         }
@@ -220,8 +219,6 @@ static uint8_t identity_memtype(const struct identity_range *r) {
         case EfiMemoryMappedIOPortSpace: {
             return MT_UC;
         }
-        case EfiACPIReclaimMemory:
-        case EfiACPIMemoryNVS:
         case EfiPersistentMemory: {
             return MT_WB;
         }
@@ -381,13 +378,6 @@ void layout_init(void) {
                 high_top = end;
             }
         }
-    }
-
-    uint64_t facs;
-    uint64_t facs_size;
-    if (guest_acpi_facs(&facs, &facs_size)) {
-        identity_add(align_down(facs, PAGE_SIZE), align_up(facs + facs_size, PAGE_SIZE),
-                     EfiACPIMemoryNVS, efi_attribute_at(facs));
     }
 
     // One domain serves every device, so what one device needs one to one

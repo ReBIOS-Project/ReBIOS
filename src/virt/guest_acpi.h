@@ -23,15 +23,11 @@
 
 #define GUEST_ACPI_RSDP_SIZE 36
 
-// The firmware's FACS, which the guest must find where the firmware has it:
-// the firmware reads the waking vector there, and shares the global lock.
-// Returns false if there is none.
-bool guest_acpi_facs(uint64_t *base, uint64_t *size);
-
-// Copies the firmware's ACPI tables into guest memory below 4 GiB, but for
-// those the guest must not or cannot use, with the processors the guest does
-// not get marked unusable, and fills rsdp with an RSDP for the copies. Needs
-// smp_start_aps(). Returns false if there are no tables to copy.
+// Puts the guest's ACPI tables into its memory below 4 GiB: the hypervisor's
+// FADT, FACS, and DSDT, an RSDT for ACPI 1.0, and copies of the firmware's
+// tables that make sense to the guest as they are, with the processors the
+// guest does not get marked unusable. Fills rsdp with an RSDP for them. Needs
+// smp_start_aps() and vacpi_init(). Returns false if there is no usable ACPI.
 bool guest_acpi_build(uint8_t rsdp[GUEST_ACPI_RSDP_SIZE]);
 
 #endif

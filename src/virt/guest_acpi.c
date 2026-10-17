@@ -29,13 +29,13 @@
 #include <virt/guest_acpi.h>
 #include <virt/guest_mem.h>
 #include <virt/layout.h>
+#include <virt/vacpi.h>
 
 #define RSDP_CHECKSUM 8
+#define RSDP_OEM_ID 9
 #define RSDP_REVISION 15
 #define RSDP_RSDT 16
-#define RSDP_LENGTH 20
 #define RSDP_XSDT 24
-#define RSDP_EXTENDED_CHECKSUM 32
 #define RSDP_V1_SIZE 20
 
 #define SDT_LENGTH 4
@@ -43,27 +43,17 @@
 #define SDT_CHECKSUM 9
 #define SDT_HEADER_SIZE 36
 
-#define FADT_FIRMWARE_CTRL 36
-#define FADT_DSDT 40
-#define FADT_X_FIRMWARE_CTRL 132
-#define FADT_X_DSDT 140
-#define FACS_LENGTH 4
-#define FACS_MIN_SIZE 64
-
-#define WPBT_HANDOFF_SIZE 36
-#define WPBT_HANDOFF_ADDRESS 40
-#define WPBT_HANDOFF_MAX (64u << 20)
-
 #define TABLE_ALIGN 16
+#define FACS_ALIGN 64
 
-// The IOMMU's tables, as the guest must never take the IOMMU over, those only
-// UEFI systems have or whose code lives in UEFI runtime services memory, and
-// those that describe the host's memory, which the guest's is not.
-static const char *const left_out[] = {
-    "DMAR", "IVRS", "UEFI", "BGRT", "PRMT", "SRAT", "SLIT", "HMAT", "MSCT",
+// The tables the guest gets besides those the hypervisor generates: none
+// points the guest at host memory or at hardware the hypervisor keeps for
+// itself.
+static const char *const kept[] = {
+    "APIC", "HPET", "MCFG", "MSDM", "SLIC", "SPCR", "DBGP", "DBG2", "WAET", "WSMT", "VFCT", "BOOT",
 };
 
-// What goes into the guest's copy: a table, or the WPBT's binary.
+// A table of the guest's, and where it goes among them.
 struct piece {
     const uint8_t *src;
     uint32_t length;
@@ -83,10 +73,6 @@ static uint64_t read64(const uint8_t *p) {
 }
 
 static void write32(uint8_t *p, uint32_t value) {
-    memcpy(p, &value, sizeof(value));
-}
-
-static void write64(uint8_t *p, uint64_t value) {
     memcpy(p, &value, sizeof(value));
 }
 
@@ -143,67 +129,6 @@ static uint32_t root_count(const uint8_t *root, uint32_t entry_size) {
     return (read32(root + SDT_LENGTH) - SDT_HEADER_SIZE) / entry_size;
 }
 
-static const uint8_t *host_fadt(void) {
-    const uint8_t *rsdp = host_rsdp();
-    if (rsdp == NULL) {
-        return NULL;
-    }
-    uint32_t entry_size;
-    const uint8_t *root = host_root(rsdp, &entry_size);
-    if (root == NULL) {
-        return NULL;
-    }
-    for (uint32_t i = 0; i < root_count(root, entry_size); i++) {
-        const uint8_t *table = host_table(root_entry(root, entry_size, i));
-        if (table != NULL && memcmp(table, "FACP", 4) == 0) {
-            return table;
-        }
-    }
-    return NULL;
-}
-
-bool guest_acpi_facs(uint64_t *base, uint64_t *size) {
-    const uint8_t *fadt = host_fadt();
-    if (fadt == NULL) {
-        return false;
-    }
-    uint64_t facs = 0;
-    if (read32(fadt + SDT_LENGTH) >= FADT_X_FIRMWARE_CTRL + 8) {
-        facs = read64(fadt + FADT_X_FIRMWARE_CTRL);
-    }
-    if (facs == 0) {
-        facs = read32(fadt + FADT_FIRMWARE_CTRL);
-    }
-    uint64_t top = core_handoff->map_top;
-    if (facs == 0 || facs >= top || top - facs < FACS_MIN_SIZE) {
-        return false;
-    }
-    uint32_t length = read32((const uint8_t *)(uintptr_t)facs + FACS_LENGTH);
-    *base = facs;
-    *size = length > FACS_MIN_SIZE ? length : FACS_MIN_SIZE;
-    return true;
-}
-
-// Whether the WPBT points to a binary its copy can take along.
-static bool wpbt_usable(const uint8_t *table, uint32_t length) {
-    if (length < WPBT_HANDOFF_ADDRESS + 8) {
-        return false;
-    }
-    uint32_t size = read32(table + WPBT_HANDOFF_SIZE);
-    uint64_t addr = read64(table + WPBT_HANDOFF_ADDRESS);
-    uint64_t top = core_handoff->map_top;
-    return size != 0 && size <= WPBT_HANDOFF_MAX && addr != 0 && addr < top && top - addr >= size;
-}
-
-static bool table_left_out(const uint8_t *table) {
-    for (size_t i = 0; i < sizeof(left_out) / sizeof(left_out[0]); i++) {
-        if (memcmp(table, left_out[i], 4) == 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
 // Marks the processors the guest does not get as unusable in a copy of the
 // MADT, leaving every structure in place.
 static void madt_hide_cpus(uint8_t *madt, uint32_t length) {
@@ -242,131 +167,77 @@ static void madt_hide_cpus(uint8_t *madt, uint32_t length) {
     }
 }
 
-bool guest_acpi_build(uint8_t rsdp[GUEST_ACPI_RSDP_SIZE]) {
-    const uint8_t *host = host_rsdp();
-    if (host == NULL) {
-        return false;
+static bool table_kept(const uint8_t *table) {
+    for (size_t i = 0; i < sizeof(kept) / sizeof(kept[0]); i++) {
+        if (memcmp(table, kept[i], 4) == 0) {
+            return true;
+        }
     }
-    uint32_t entry_size;
-    const uint8_t *root = host_root(host, &entry_size);
-    if (root == NULL) {
-        printf("The firmware's ACPI root table is unusable\n");
-        return false;
-    }
-    uint32_t count = root_count(root, entry_size);
+    return false;
+}
 
-    // The tables the root lists, then the DSDT and the WPBT's binary, which
-    // the copies of the FADT and WPBT point to.
+bool guest_acpi_build(uint8_t rsdp[GUEST_ACPI_RSDP_SIZE]) {
+    uint32_t dsdt_length;
+    uint8_t *dsdt = vacpi_dsdt(&dsdt_length);
+    if (dsdt == NULL) {
+        return false;
+    }
+    const uint8_t *host = host_rsdp();
+    uint32_t entry_size = 4;
+    const uint8_t *root = host != NULL ? host_root(host, &entry_size) : NULL;
+    uint32_t count = root != NULL ? root_count(root, entry_size) : 0;
+
+    // The FADT, the copies, then the DSDT, which only the FADT lists.
     struct piece *pieces = kmalloc((count + 2) * sizeof(*pieces));
     uint32_t tables = 0;
-    uint32_t fadt = UINT32_MAX;
-    uint32_t wpbt = UINT32_MAX;
+    pieces[tables++] = (struct piece){NULL, VACPI_FADT_SIZE, 0};
     for (uint32_t i = 0; i < count; i++) {
-        uint64_t addr = root_entry(root, entry_size, i);
-        const uint8_t *table = host_table(addr);
-        if (table == NULL) {
-            printf("Leaving the ACPI table at %#llx out of the guest's, as it is unusable\n",
-                   (unsigned long long)addr);
-            continue;
+        const uint8_t *table = host_table(root_entry(root, entry_size, i));
+        if (table != NULL && table_kept(table)) {
+            pieces[tables++] = (struct piece){table, read32(table + SDT_LENGTH), 0};
         }
-        if (table_left_out(table)) {
-            printf("Leaving the %.4s table out of the guest's ACPI tables\n", (const char *)table);
-            continue;
-        }
-        uint32_t length = read32(table + SDT_LENGTH);
-        if (memcmp(table, "WPBT", 4) == 0) {
-            if (wpbt != UINT32_MAX || !wpbt_usable(table, length)) {
-                printf("Leaving a WPBT out of the guest's ACPI tables\n");
-                continue;
-            }
-            wpbt = tables;
-        }
-        if (memcmp(table, "FACP", 4) == 0 && fadt == UINT32_MAX) {
-            fadt = tables;
-        }
-        pieces[tables++] = (struct piece){table, length, 0};
     }
+    uint32_t dsdt_piece = tables;
+    pieces[dsdt_piece] = (struct piece){dsdt, dsdt_length, 0};
 
-    uint32_t all = tables;
-    uint32_t dsdt = UINT32_MAX;
-    if (fadt != UINT32_MAX) {
-        const uint8_t *table = pieces[fadt].src;
-        uint64_t addr = 0;
-        if (pieces[fadt].length >= FADT_X_DSDT + 8) {
-            addr = read64(table + FADT_X_DSDT);
-        }
-        if (addr == 0) {
-            addr = read32(table + FADT_DSDT);
-        }
-        const uint8_t *dsdt_table = host_table(addr);
-        if (dsdt_table != NULL) {
-            dsdt = all;
-            pieces[all++] = (struct piece){dsdt_table, read32(dsdt_table + SDT_LENGTH), 0};
-        } else {
-            printf("The FADT points to no usable DSDT\n");
-        }
-    }
-    uint32_t binary = UINT32_MAX;
-    if (wpbt != UINT32_MAX) {
-        const uint8_t *table = pieces[wpbt].src;
-        const void *src = (const void *)(uintptr_t)read64(table + WPBT_HANDOFF_ADDRESS);
-        binary = all;
-        pieces[all++] = (struct piece){src, read32(table + WPBT_HANDOFF_SIZE), 0};
-    }
-
-    bool have_xsdt = host[RSDP_REVISION] >= 2;
     uint32_t offset = 0;
-    for (uint32_t i = 0; i < all; i++) {
+    for (uint32_t i = 0; i <= dsdt_piece; i++) {
         pieces[i].offset = offset;
         offset = align_up(offset + pieces[i].length, TABLE_ALIGN);
     }
     uint32_t rsdt_offset = offset;
     uint32_t rsdt_length = SDT_HEADER_SIZE + tables * 4;
-    offset = align_up(offset + rsdt_length, TABLE_ALIGN);
-    uint32_t xsdt_offset = offset;
-    uint32_t xsdt_length = SDT_HEADER_SIZE + tables * 8;
-    if (have_xsdt) {
-        offset = align_up(offset + xsdt_length, TABLE_ALIGN);
-    }
-    uint32_t total = offset;
+    uint32_t total = align_up(offset + rsdt_length, TABLE_ALIGN);
 
     uint32_t base = layout_take(total, TABLE_ALIGN, E820_ACPI);
-    if (base == 0) {
+    // The OS keeps what it shares with itself across reclaiming the tables.
+    uint32_t facs = layout_take(VACPI_FACS_SIZE, FACS_ALIGN, E820_NVS);
+    if (base == 0 || facs == 0) {
         printf("No room in the guest's memory for its ACPI tables\n");
         kfree(pieces);
+        kfree(dsdt);
         return false;
     }
 
     uint8_t *copy = kmalloc(total);
-    for (uint32_t i = 0; i < all; i++) {
+    for (uint32_t i = 1; i <= dsdt_piece; i++) {
         memcpy(copy + pieces[i].offset, pieces[i].src, pieces[i].length);
     }
-    for (uint32_t i = 0; i < tables; i++) {
+    for (uint32_t i = 1; i < tables; i++) {
         uint8_t *table = copy + pieces[i].offset;
         if (memcmp(table, "APIC", 4) == 0) {
             madt_hide_cpus(table, pieces[i].length);
         }
     }
-    if (dsdt != UINT32_MAX) {
-        uint8_t *table = copy + pieces[fadt].offset;
-        uint32_t addr = base + pieces[dsdt].offset;
-        write32(table + FADT_DSDT, addr);
-        if (pieces[fadt].length >= FADT_X_DSDT + 8) {
-            write64(table + FADT_X_DSDT, addr);
-        }
-        checksum_set(table, pieces[fadt].length, SDT_CHECKSUM);
-    }
-    if (binary != UINT32_MAX) {
-        uint8_t *table = copy + pieces[wpbt].offset;
-        write64(table + WPBT_HANDOFF_ADDRESS, base + pieces[binary].offset);
-        checksum_set(table, pieces[wpbt].length, SDT_CHECKSUM);
-    }
+    vacpi_fadt(copy, facs, base + pieces[dsdt_piece].offset);
 
-    // The root tables keep the firmware's identification, and an RSDT is
-    // there for ACPI 1.0 systems even if the firmware has only an XSDT.
-    const uint8_t *rsdt_header = host_table(read32(host + RSDP_RSDT));
+    const uint8_t *rsdt_header = host != NULL ? host_table(read32(host + RSDP_RSDT)) : NULL;
     uint8_t *rsdt = copy + rsdt_offset;
-    memcpy(rsdt, rsdt_header != NULL ? rsdt_header : root, SDT_HEADER_SIZE);
+    if (rsdt_header != NULL || root != NULL) {
+        memcpy(rsdt, rsdt_header != NULL ? rsdt_header : root, SDT_HEADER_SIZE);
+    } else {
+        memcpy(rsdt + 10, "REBIOSREBIOS  ", 14);
+    }
     memcpy(rsdt, "RSDT", 4);
     write32(rsdt + SDT_LENGTH, rsdt_length);
     rsdt[SDT_REVISION] = 1;
@@ -374,31 +245,21 @@ bool guest_acpi_build(uint8_t rsdp[GUEST_ACPI_RSDP_SIZE]) {
         write32(rsdt + SDT_HEADER_SIZE + i * 4, base + pieces[i].offset);
     }
     checksum_set(rsdt, rsdt_length, SDT_CHECKSUM);
-    if (have_xsdt) {
-        uint8_t *xsdt = copy + xsdt_offset;
-        memcpy(xsdt, entry_size == 8 ? root : rsdt, SDT_HEADER_SIZE);
-        memcpy(xsdt, "XSDT", 4);
-        write32(xsdt + SDT_LENGTH, xsdt_length);
-        xsdt[SDT_REVISION] = 1;
-        for (uint32_t i = 0; i < tables; i++) {
-            write64(xsdt + SDT_HEADER_SIZE + i * 8, base + pieces[i].offset);
-        }
-        checksum_set(xsdt, xsdt_length, SDT_CHECKSUM);
-    }
 
+    uint8_t facs_table[VACPI_FACS_SIZE];
+    vacpi_facs(facs_table);
+    guest_phys_write(facs, facs_table, sizeof(facs_table));
     guest_phys_write(base, copy, total);
     kfree(copy);
     kfree(pieces);
+    kfree(dsdt);
 
     memset(rsdp, 0, GUEST_ACPI_RSDP_SIZE);
-    memcpy(rsdp, host, have_xsdt ? GUEST_ACPI_RSDP_SIZE : RSDP_V1_SIZE);
+    memcpy(rsdp, "RSD PTR ", 8);
+    memcpy(rsdp + RSDP_OEM_ID, host != NULL ? host + RSDP_OEM_ID : (const uint8_t *)"REBIOS", 6);
     write32(rsdp + RSDP_RSDT, base + rsdt_offset);
     checksum_set(rsdp, RSDP_V1_SIZE, RSDP_CHECKSUM);
-    if (have_xsdt) {
-        write32(rsdp + RSDP_LENGTH, GUEST_ACPI_RSDP_SIZE);
-        write64(rsdp + RSDP_XSDT, base + xsdt_offset);
-        checksum_set(rsdp, GUEST_ACPI_RSDP_SIZE, RSDP_EXTENDED_CHECKSUM);
-    }
-    printf("Guest ACPI tables at %#x, %u bytes, %u listed\n", base, total, tables);
+    printf("Guest ACPI tables at %#x, %u bytes, %u listed, FACS at %#x\n", base, total, tables,
+           facs);
     return true;
 }
