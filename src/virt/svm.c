@@ -27,6 +27,7 @@
 #include <virt/exit.h>
 #include <virt/gpt.h>
 #include <virt/mmio.h>
+#include <virt/profile.h>
 #include <virt/svm.h>
 #include <virt/vcpu.h>
 #include <virt/vioapic.h>
@@ -166,6 +167,7 @@ static void svm_step_exception(struct vcpu *v, unsigned vector) {
 
 static void svm_handle_exit(struct vcpu *v) {
     struct vmcb_control *c = &v->vmcb->control;
+    profile_exit(v, (uint32_t)c->exitcode);
     if (v->stepping && c->exitcode >= SVM_EXIT_EXCEPTION_BASE
         && c->exitcode < SVM_EXIT_EXCEPTION_BASE + 32) {
         svm_step_exception(v, (unsigned)(c->exitcode - SVM_EXIT_EXCEPTION_BASE));

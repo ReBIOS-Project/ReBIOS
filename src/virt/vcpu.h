@@ -120,6 +120,9 @@ struct vcpu {
     bool call32_ready;
     struct vcpu_mode call32_flat;
     struct vcpu_mode call32_saved;
+    // For profile.c: the exit being handled, and when it began.
+    unsigned profile_slot;
+    uint64_t profile_tsc;
 };
 
 extern bool virt_vmx;

@@ -27,6 +27,7 @@
 #include <virt/guest_mem.h>
 #include <virt/hypercall.h>
 #include <virt/io.h>
+#include <virt/profile.h>
 #include <virt/svm.h>
 #include <virt/vcpu.h>
 #include <virt/vlapic.h>
@@ -103,6 +104,7 @@ static bool hypercall(struct vcpu *v) {
         return false;
     }
 
+    profile_hypercall(eax & HYPERCALL_FUNCTION_MASK);
     switch (eax & HYPERCALL_FUNCTION_MASK) {
         case HYPERCALL_DEBUG_PUTC: {
             printf("%c", (char)ebx);
@@ -248,6 +250,7 @@ void exit_xsetbv(struct vcpu *v) {
 }
 
 void exit_io(struct vcpu *v, uint16_t port, unsigned size, bool in, uint32_t *value) {
+    profile_io(port);
     if (!io_dispatch(v, port, size, in, value)) {
         printf("Unexpected trapped I/O to port %#x\n", port);
         if (in) {

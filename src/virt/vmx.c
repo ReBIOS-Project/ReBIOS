@@ -27,6 +27,7 @@
 #include <virt/gpt.h>
 #include <virt/guest_mem.h>
 #include <virt/mmio.h>
+#include <virt/profile.h>
 #include <virt/task.h>
 #include <virt/vcpu.h>
 #include <virt/vioapic.h>
@@ -550,6 +551,7 @@ static void vmx_handle_io(struct vcpu *v, uint64_t qual) {
 
 static void vmx_handle_exit(struct vcpu *v) {
     uint32_t reason = vmx_read(VMCS_EXIT_REASON);
+    profile_exit(v, reason & 0xffff);
     uint64_t qual = vmx_read(VMCS_EXIT_QUALIFICATION);
 
     if (reason & EXIT_REASON_ENTRY_FAILURE) {

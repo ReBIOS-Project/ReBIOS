@@ -35,6 +35,7 @@
 #include <sys/x86.h>
 #include <virt/irq.h>
 #include <virt/layout.h>
+#include <virt/profile.h>
 #include <virt/vacpi.h>
 #include <virt/vcpu.h>
 #include <virt/vga.h>
@@ -71,6 +72,7 @@ static void bsp_main(void *arg) {
     vioapic_init();
     irq_init();
     vacpi_init();
+    profile_init();
 
     struct vcpu *v = vcpu_create(cpu);
     csm_boot_start(v);

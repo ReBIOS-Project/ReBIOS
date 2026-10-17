@@ -29,6 +29,7 @@
 #include <virt/event.h>
 #include <virt/gpt.h>
 #include <virt/insn.h>
+#include <virt/profile.h>
 #include <virt/svm.h>
 #include <virt/vcpu.h>
 #include <virt/vga.h>
@@ -261,6 +262,7 @@ void vcpu_single_step(struct vcpu *v, bool on) {
 }
 
 void vcpu_before_entry(struct vcpu *v) {
+    profile_entry(v);
     service_pause(v);
     if (__atomic_exchange_n(&v->cpu->init_pending, false, __ATOMIC_ACQUIRE)) {
         vcpu_init_signal(v);

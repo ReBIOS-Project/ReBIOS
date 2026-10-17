@@ -29,6 +29,7 @@
 #include <virt/insn.h>
 #include <virt/io.h>
 #include <virt/mmio.h>
+#include <virt/profile.h>
 #include <virt/vcpu.h>
 
 #define MAX_REGIONS 32
@@ -417,6 +418,7 @@ bool mmio_fault(struct vcpu *v, uint64_t gpa) {
     if (r == NULL) {
         return false;
     }
+    profile_mmio(gpa);
     if (r == &absent) {
         static unsigned reported;
         if (__atomic_fetch_add(&reported, 1, __ATOMIC_RELAXED) < ABSENT_REPORTS) {
