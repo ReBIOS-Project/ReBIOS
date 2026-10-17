@@ -33,6 +33,9 @@
 
 #define MAX_REGIONS 32
 
+// The accesses to where nothing decodes that are logged.
+#define ABSENT_REPORTS 16
+
 struct region {
     uint64_t base;
     uint64_t size;
@@ -54,12 +57,39 @@ void mmio_register(uint64_t base, uint64_t size, const struct mmio_ops *ops, voi
     spinlock_release(&region_lock);
 }
 
+static uint64_t absent_read(struct vcpu *v, void *ctx, uint64_t offset, unsigned size) {
+    (void)v;
+    (void)ctx;
+    (void)offset;
+    return size == 8 ? UINT64_MAX : (1ull << (size * 8)) - 1;
+}
+
+static void absent_write(struct vcpu *v, void *ctx, uint64_t offset, unsigned size,
+                         uint64_t value) {
+    (void)v;
+    (void)ctx;
+    (void)offset;
+    (void)size;
+    (void)value;
+}
+
+static const struct mmio_ops absent_ops = {absent_read, absent_write, true};
+
+// What the guest reaches where it has neither memory nor a device, as a PC
+// does where nothing decodes: such as the addresses an OS moves a BAR to.
+static const struct region absent = {0, UINT64_MAX, &absent_ops, NULL};
+
 static const struct region *find(uint64_t gpa) {
     unsigned count = __atomic_load_n(&region_count, __ATOMIC_ACQUIRE);
     for (unsigned i = 0; i < count; i++) {
         if (gpa - regions[i].base < regions[i].size) {
             return &regions[i];
         }
+    }
+    uint64_t hpa;
+    uint32_t prot;
+    if (!gpt_translate(gpa & ~(uint64_t)(PAGE_SIZE - 1), &hpa, &prot, NULL)) {
+        return &absent;
     }
     return NULL;
 }
@@ -383,8 +413,16 @@ void mmio_step_done(struct vcpu *v) {
 }
 
 bool mmio_fault(struct vcpu *v, uint64_t gpa) {
-    if (find(gpa) == NULL) {
+    const struct region *r = find(gpa);
+    if (r == NULL) {
         return false;
+    }
+    if (r == &absent) {
+        static unsigned reported;
+        if (__atomic_fetch_add(&reported, 1, __ATOMIC_RELAXED) < ABSENT_REPORTS) {
+            printf("The guest reached %#llx, where nothing decodes, from %#llx\n",
+                   (unsigned long long)gpa, (unsigned long long)vcpu_rip(v));
+        }
     }
     if (v->stepping) {
         // The stepped instruction reaches another page, and runs again.
