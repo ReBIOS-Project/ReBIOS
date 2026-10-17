@@ -67,6 +67,8 @@ static uint32_t identity_count;
 static struct range_list ram;
 // What layout_take() may still hand out.
 static struct range_list takeable;
+// The guest's address space where it has no RAM for want of host memory.
+static struct range_list kept;
 static struct {
     uint64_t base;
     uint64_t end;
@@ -356,6 +358,7 @@ void layout_init(void) {
     list_init(&pinned);
     list_init(&ram);
     list_init(&takeable);
+    list_init(&kept);
     identity = kmalloc(MAX_RANGES * sizeof(*identity));
 
     uint64_t low_top = ONE_MIB;
@@ -436,6 +439,14 @@ void layout_init(void) {
             uint64_t size = fill.r[i].end - fill.r[i].base;
             if (sum + size > available) {
                 uint64_t cut = fill.r[i].base + (available - sum);
+                // What the hypervisor's own use of the host's memory leaves
+                // the guest without shows as reserved, as memory a BIOS keeps
+                // does, for an OS not to take it for room for devices.
+                for (uint32_t j = 0; j < ram.count; j++) {
+                    if (ram.r[j].end > cut) {
+                        list_add(&kept, ram.r[j].base > cut ? ram.r[j].base : cut, ram.r[j].end);
+                    }
+                }
                 list_remove(&fill, cut, UINT64_MAX);
                 list_remove(&ram, cut, UINT64_MAX);
                 break;
@@ -617,6 +628,9 @@ bool layout_e820(struct e820_map *map) {
     }
     for (uint32_t i = 0; i < taken_count; i++) {
         ok &= e820_set(map, taken[i].base, taken[i].end - taken[i].base, taken[i].e820_type);
+    }
+    for (uint32_t i = 0; i < kept.count; i++) {
+        ok &= e820_set(map, kept.r[i].base, kept.r[i].end - kept.r[i].base, E820_RESERVED);
     }
     ok &= e820_set_low_memory(map);
     return ok;
