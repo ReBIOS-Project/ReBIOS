@@ -27,6 +27,7 @@
 #include <virt/gpt.h>
 #include <virt/guest_mem.h>
 #include <virt/mmio.h>
+#include <virt/task.h>
 #include <virt/vcpu.h>
 #include <virt/vioapic.h>
 #include <virt/virt.h>
@@ -398,6 +399,15 @@ static void vmx_dump_guest(void) {
     }
 }
 
+static void load_pdptes(void) {
+    uint64_t pdptes[4] = {0};
+    guest_phys_read(vmx_read(VMCS_GUEST_CR3) & 0xffffffe0, pdptes, sizeof(pdptes));
+    vmx_write(VMCS_GUEST_PDPTE0, pdptes[0]);
+    vmx_write(VMCS_GUEST_PDPTE1, pdptes[1]);
+    vmx_write(VMCS_GUEST_PDPTE2, pdptes[2]);
+    vmx_write(VMCS_GUEST_PDPTE3, pdptes[3]);
+}
+
 // What the processor does itself on a MOV to CR0 or CR4 that it carries out:
 // paging with EFER.LME on activates long mode, and PAE paging outside long
 // mode loads the PDPTEs CR3 points to. Returns false where the move raises
@@ -419,14 +429,61 @@ static bool vmx_paging_changed(uint64_t cr0, uint64_t cr4) {
     vmx_write(VMCS_GUEST_EFER, efer);
     vmx_write(VMCS_ENTRY_CONTROLS, entry);
     if (paging && pae && !(efer & EFER_LMA)) {
-        uint64_t pdptes[4] = {0};
-        guest_phys_read(vmx_read(VMCS_GUEST_CR3) & 0xffffffe0, pdptes, sizeof(pdptes));
-        vmx_write(VMCS_GUEST_PDPTE0, pdptes[0]);
-        vmx_write(VMCS_GUEST_PDPTE1, pdptes[1]);
-        vmx_write(VMCS_GUEST_PDPTE2, pdptes[2]);
-        vmx_write(VMCS_GUEST_PDPTE3, pdptes[3]);
+        load_pdptes();
     }
     return true;
+}
+
+void vmx_load_guest_cr3(uint64_t cr3) {
+    vmx_write(VMCS_GUEST_CR3, cr3);
+    if ((vmx_read(VMCS_GUEST_CR0) & CR0_PG) && (vmx_read(VMCS_GUEST_CR4) & CR4_PAE)
+        && !(vmx_read(VMCS_GUEST_EFER) & EFER_LMA)) {
+        load_pdptes();
+    }
+    // As MOV to CR3 drops the guest's translations.
+    if (vpid_usable()) {
+        struct {
+            uint64_t vpid;
+            uint64_t addr;
+        } vpid_desc = {0, 0};
+        asm volatile ("invvpid %0, %1" :: "m"(vpid_desc), "r"(2ull) : "cc", "memory");
+    }
+}
+
+void vmx_task_switched(struct vcpu *v, bool nmi) {
+    v->cr0_shadow |= CR0_TS;
+    vmx_write(VMCS_CR0_SHADOW, v->cr0_shadow);
+    vmx_write(VMCS_GUEST_CR0, vmx_read(VMCS_GUEST_CR0) | CR0_TS);
+    // The local breakpoints are the old task's.
+    vmx_write(VMCS_GUEST_DR7, vmx_read(VMCS_GUEST_DR7) & ~(uint64_t)0x155);
+    uint64_t intr = vmx_read(VMCS_GUEST_INTERRUPTIBILITY)
+                    & ~(uint64_t)(INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS);
+    if (nmi) {
+        intr |= INTERRUPTIBILITY_NMI;
+    }
+    vmx_write(VMCS_GUEST_INTERRUPTIBILITY, intr);
+}
+
+// The source of a task switch, exit qualification bits 31:30, and, for task
+// gates, the event the IDT delivered, which the switch consumes: SDM
+// 325462-093 Vol. 3C, Table 30-2 and 28.4.2.
+static void vmx_handle_task_switch(struct vcpu *v, uint64_t qual) {
+    enum task_source source = (enum task_source)((qual >> 30) & 3);
+    struct task_event event = {0};
+    if (source == TASK_GATE) {
+        uint32_t info = (uint32_t)vmx_read(VMCS_IDT_VECTORING_INFO);
+        uint32_t type = info & (7u << 8);
+        event.software = type == INTR_TYPE_SW_INTR || type == INTR_TYPE_PRIV_SW_EXCEPTION
+                         || type == INTR_TYPE_SW_EXCEPTION;
+        event.nmi = type == INTR_TYPE_NMI;
+        event.error_valid = (info & INTR_INFO_ERROR_CODE) != 0;
+        if (event.error_valid) {
+            event.error = (uint32_t)vmx_read(VMCS_IDT_VECTORING_ERROR);
+        }
+        v->redeliver = 0;
+    }
+    task_switch(v, (uint16_t)qual, source, source == TASK_GATE ? &event : NULL,
+                (unsigned)vmx_read(VMCS_EXIT_INSTR_LEN));
 }
 
 static void vmx_handle_cr_access(struct vcpu *v, uint64_t qual) {
@@ -540,6 +597,10 @@ static void vmx_handle_exit(struct vcpu *v) {
         }
         case EXIT_REASON_CR_ACCESS: {
             vmx_handle_cr_access(v, qual);
+            break;
+        }
+        case EXIT_REASON_TASK_SWITCH: {
+            vmx_handle_task_switch(v, qual);
             break;
         }
         case EXIT_REASON_IO: {

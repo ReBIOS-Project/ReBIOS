@@ -76,14 +76,11 @@ static bool read_entry(uint64_t gpa, uint64_t *entry, bool wide) {
     return true;
 }
 
-bool guest_linear_to_phys(struct vcpu *v, uint64_t linear, bool write, bool fetch,
-                          uint64_t *gpa, uint32_t *pf_error) {
+static bool linear_to_phys(struct vcpu *v, uint64_t linear, bool write, bool fetch, bool user,
+                           uint64_t *gpa, uint32_t *pf_error) {
     uint64_t cr0 = vcpu_cr0(v);
     uint64_t cr4 = vcpu_cr4(v);
     uint64_t efer = vcpu_efer(v);
-    struct segment ss;
-    vcpu_get_seg(v, SEG_SS, &ss);
-    bool user = ((ss.attrib >> 5) & 3) == 3;
 
     *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0) | (fetch ? PF_ERROR_I : 0);
 
@@ -166,6 +163,52 @@ bool guest_linear_to_phys(struct vcpu *v, uint64_t linear, bool write, bool fetc
         table = wide ? entry & PTE_ADDR : entry & 0xfffff000;
     }
     return false;
+}
+
+bool guest_linear_to_phys(struct vcpu *v, uint64_t linear, bool write, bool fetch,
+                          uint64_t *gpa, uint32_t *pf_error) {
+    struct segment ss;
+    vcpu_get_seg(v, SEG_SS, &ss);
+    bool user = ((ss.attrib >> 5) & 3) == 3;
+    return linear_to_phys(v, linear, write, fetch, user, gpa, pf_error);
+}
+
+// What the processor reads and writes for itself, such as descriptor tables
+// and the TSS, it does with supervisor rights at any CPL.
+static bool system_access(struct vcpu *v, uint64_t linear, void *buf, size_t len, bool write,
+                          uint32_t *pf_error, uint64_t *pf_linear) {
+    uint8_t *p = buf;
+    while (len != 0) {
+        uint64_t gpa;
+        if (!linear_to_phys(v, linear, write, false, false, &gpa, pf_error)) {
+            *pf_linear = linear;
+            return false;
+        }
+        size_t chunk = PAGE_SIZE - (linear & (PAGE_SIZE - 1));
+        if (chunk > len) {
+            chunk = len;
+        }
+        bool ok = write ? guest_phys_write(gpa, p, chunk) : guest_phys_read(gpa, p, chunk);
+        if (!ok) {
+            *pf_error = 0;
+            *pf_linear = linear;
+            return false;
+        }
+        linear += chunk;
+        p += chunk;
+        len -= chunk;
+    }
+    return true;
+}
+
+bool guest_system_read(struct vcpu *v, uint64_t linear, void *buf, size_t len, uint32_t *pf_error,
+                       uint64_t *pf_linear) {
+    return system_access(v, linear, buf, len, false, pf_error, pf_linear);
+}
+
+bool guest_system_write(struct vcpu *v, uint64_t linear, const void *buf, size_t len,
+                        uint32_t *pf_error, uint64_t *pf_linear) {
+    return system_access(v, linear, (void *)buf, len, true, pf_error, pf_linear);
 }
 
 bool guest_linear_read(struct vcpu *v, uint64_t linear, void *buf, size_t len, bool fetch) {

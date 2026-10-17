@@ -354,6 +354,13 @@ void vmx_vcpu_init(struct vcpu *v);
 __attribute__((noreturn)) void vmx_run(struct vcpu *v);
 
 uint64_t vmx_read(uint32_t field);
+
+// Loads the guest's CR3 as a MOV to CR3 would, for what the hypervisor carries
+// out for the guest: the PDPTEs of PAE paging, and the guest's translations.
+void vmx_load_guest_cr3(uint64_t cr3);
+// What a task switch does besides loading the new task: CR0.TS, DR7's local
+// enables, and, for an NMI delivered through a task gate, blocking NMIs.
+void vmx_task_switched(struct vcpu *v, bool nmi);
 void vmx_write(uint32_t field, uint64_t value);
 
 #endif

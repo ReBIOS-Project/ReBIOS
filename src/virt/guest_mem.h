@@ -40,5 +40,12 @@ bool guest_linear_to_phys(struct vcpu *v, uint64_t linear, bool write, bool fetc
 
 // Reads at a linear address, crossing pages as needed.
 bool guest_linear_read(struct vcpu *v, uint64_t linear, void *buf, size_t len, bool fetch);
+// As the processor accesses descriptor tables and the TSS: with supervisor
+// rights, crossing pages. On failure, *pf_error holds the page fault error
+// code to raise at *pf_linear, or 0 where the address is not RAM.
+bool guest_system_read(struct vcpu *v, uint64_t linear, void *buf, size_t len, uint32_t *pf_error,
+                       uint64_t *pf_linear);
+bool guest_system_write(struct vcpu *v, uint64_t linear, const void *buf, size_t len,
+                        uint32_t *pf_error, uint64_t *pf_linear);
 
 #endif
