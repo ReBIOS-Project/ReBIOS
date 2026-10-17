@@ -30,6 +30,8 @@
 // Redirection table entry fields.
 #define IOAPIC_RTE_VECTOR_MASK 0xffull
 #define IOAPIC_RTE_DELIVERY_MASK (7ull << 8)
+#define IOAPIC_RTE_DELIVERY_FIXED (0ull << 8)
+#define IOAPIC_RTE_DELIVERY_LOWEST (1ull << 8)
 #define IOAPIC_RTE_DELIVERY_EXTINT (7ull << 8)
 #define IOAPIC_RTE_LOGICAL (1ull << 11)
 #define IOAPIC_RTE_PENDING (1ull << 12)

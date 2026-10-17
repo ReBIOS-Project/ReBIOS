@@ -24,6 +24,7 @@
 
 // Vectors the hypervisor takes its own interrupts on at the processor's
 // local APIC, which guests use for none of their MSIs and I/O APIC entries.
+#define VLAPIC_DEVICE_VECTOR 0xfc
 #define VLAPIC_KICK_VECTOR 0xfd
 #define VLAPIC_TIMER_VECTOR 0xfe
 #define VLAPIC_SPURIOUS_VECTOR 0xff
@@ -50,6 +51,10 @@ bool vlapic_enabled(struct vcpu *v);
 
 // A fixed interrupt for the vCPU, from any processor.
 void vlapic_accept(struct vcpu *v, uint8_t vector, bool level);
+// An interrupt the hypervisor sends as an I/O APIC entry would, to the vCPUs
+// an 8-bit destination names, or to one of them for lowest priority.
+void vlapic_deliver_external(uint32_t dest, bool logical, uint8_t vector, bool level,
+                             bool lowest);
 // The processor's timer, which runs the vCPU's local APIC timer, fired.
 void vlapic_timer_fired(struct vcpu *v);
 

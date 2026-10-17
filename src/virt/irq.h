@@ -47,6 +47,9 @@ void irq_route_pci(const struct irq_pci_line *lines, uint32_t count, uint16_t is
 
 // The ISA IRQ the guest's 8259s see a GSI's interrupts on, or -1.
 int irq_isa_irq(uint32_t gsi);
+// The GSI of an ISA IRQ, as the MADT overrides it, or UINT32_MAX. Before
+// irq_route_pci() puts PCI's on ISA IRQs.
+uint32_t irq_isa_gsi(unsigned irq);
 
 // After the guest changed an I/O APIC entry.
 void irq_gsi_changed(uint32_t gsi);
@@ -62,5 +65,16 @@ uint8_t irq_extint_acknowledge(void);
 bool irq_mirror_taken(uint8_t vector);
 void irq_mirror_eoi(uint8_t vector);
 bool irq_remote_irr(uint32_t gsi);
+
+// Takes the host's line of a GSI for the hypervisor: its interrupts call
+// handler on the boot processor, with the line masked until handler returns.
+void irq_take_host_line(uint32_t gsi, void (*handler)(void *ctx), void *ctx);
+// An interrupt on VLAPIC_DEVICE_VECTOR.
+void irq_device_interrupt(void);
+
+// The level of a line the hypervisor drives for the guest on a GSI, which
+// reaches the guest's I/O APIC entry or 8259 input for the GSI as a device's
+// level-triggered line would.
+void irq_virtual_line(uint32_t gsi, bool asserted);
 
 #endif

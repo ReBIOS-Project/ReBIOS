@@ -162,6 +162,10 @@ void event_interrupt(uint8_t vector) {
             lapic_eoi();
             return;
         }
+        case VLAPIC_DEVICE_VECTOR: {
+            irq_device_interrupt();
+            return;
+        }
         default: {
             break;
         }

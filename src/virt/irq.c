@@ -62,6 +62,8 @@ enum owner {
     // The guest's I/O APIC entry, as it is.
     OWNER_MIRROR,
     OWNER_PIC,
+    // The hypervisor's own, on VLAPIC_DEVICE_VECTOR.
+    OWNER_HYPERVISOR,
 };
 
 struct route {
@@ -79,6 +81,16 @@ struct route {
     // until the guest's EOI, which its Remote IRR shows.
     bool held;
     uint64_t host_rte;
+    // A host line the hypervisor took, the handler its interrupts call.
+    void (*handler)(void *ctx);
+    void *handler_ctx;
+    // A line the hypervisor drives for the guest, its level, and, for the
+    // guest's level-triggered I/O APIC entry, its Remote IRR.
+    bool virtual_line;
+    bool virtual_asserted;
+    bool virtual_held;
+    // What a guest's edge-triggered entry last saw.
+    bool virtual_edge_seen;
 };
 
 static struct route *routes;
@@ -170,6 +182,22 @@ bool irq_host_vector(uint8_t vector) {
 // What the host's entry for a GSI is to hold, and who owns it.
 static uint64_t desired(uint32_t gsi, const struct route *r, enum owner *owner) {
     uint64_t rte;
+    if (r->handler != NULL) {
+        *owner = OWNER_HYPERVISOR;
+        rte = VLAPIC_DEVICE_VECTOR | (uint64_t)bsp->apic_id << IOAPIC_RTE_DEST_SHIFT;
+        if (r->level) {
+            rte |= IOAPIC_RTE_LEVEL;
+        }
+        if (r->active_low) {
+            rte |= IOAPIC_RTE_ACTIVE_LOW;
+        }
+        return rte;
+    }
+    // A line the hypervisor drives has none at the host.
+    if (r->virtual_line) {
+        *owner = OWNER_NONE;
+        return IOAPIC_RTE_MASKED;
+    }
     if (vioapic_rte(gsi, &rte) && !(rte & IOAPIC_RTE_MASKED)
         && (rte & IOAPIC_RTE_DELIVERY_MASK) != IOAPIC_RTE_DELIVERY_EXTINT) {
         *owner = OWNER_MIRROR;
@@ -210,7 +238,7 @@ static void resample(void) {
         }
         bool deasserted = false;
         for (uint32_t gsi = 0; gsi < route_count; gsi++) {
-            if (routes[gsi].irq == (int)irq && routes[gsi].asserted) {
+            if (routes[gsi].irq == (int)irq && routes[gsi].asserted && !routes[gsi].virtual_line) {
                 routes[gsi].asserted = false;
                 deasserted = true;
             }
@@ -219,6 +247,34 @@ static void resample(void) {
             pic_set_irq(irq, false);
         }
     }
+}
+
+// Where a line the hypervisor drives reaches the guest: its I/O APIC entry,
+// while unmasked, else its 8259.
+static void virtual_deliver(uint32_t gsi, struct route *r) {
+    uint64_t vrte;
+    bool apic = vioapic_rte(gsi, &vrte) && !(vrte & IOAPIC_RTE_MASKED)
+                && (vrte & IOAPIC_RTE_DELIVERY_MASK) != IOAPIC_RTE_DELIVERY_EXTINT;
+    if (r->irq >= 0) {
+        pic_set_irq((unsigned)r->irq, !apic && r->virtual_asserted);
+    }
+    if (!apic) {
+        r->virtual_held = false;
+        r->virtual_edge_seen = r->virtual_asserted;
+        return;
+    }
+    uint32_t mode = (uint32_t)(vrte & IOAPIC_RTE_DELIVERY_MASK);
+    bool level = (vrte & IOAPIC_RTE_LEVEL) != 0;
+    bool send = level ? r->virtual_asserted && !r->virtual_held
+                      : r->virtual_asserted && !r->virtual_edge_seen;
+    r->virtual_edge_seen = r->virtual_asserted;
+    if (!send || (mode != IOAPIC_RTE_DELIVERY_FIXED && mode != IOAPIC_RTE_DELIVERY_LOWEST)) {
+        return;
+    }
+    r->virtual_held = level;
+    vlapic_deliver_external((uint32_t)(vrte >> IOAPIC_RTE_DEST_SHIFT),
+                            (vrte & IOAPIC_RTE_LOGICAL) != 0, (uint8_t)vrte, level,
+                            mode == IOAPIC_RTE_DELIVERY_LOWEST);
 }
 
 static void update(void) {
@@ -231,6 +287,9 @@ static void update(void) {
         if (vioapic_rte(gsi, &vrte) && !(vrte & IOAPIC_RTE_MASKED)
             && (vrte & IOAPIC_RTE_DELIVERY_MASK) == IOAPIC_RTE_DELIVERY_EXTINT) {
             extint_target = smp_cpu_by_apic_id((uint32_t)(vrte >> IOAPIC_RTE_DEST_SHIFT));
+        }
+        if (r->virtual_line) {
+            virtual_deliver(gsi, r);
         }
         if (r->io == NULL) {
             continue;
@@ -355,6 +414,15 @@ int irq_isa_irq(uint32_t gsi) {
     return gsi < route_count ? routes[gsi].irq : -1;
 }
 
+uint32_t irq_isa_gsi(unsigned irq) {
+    for (uint32_t gsi = 0; gsi < route_count; gsi++) {
+        if (routes[gsi].irq == (int)irq) {
+            return gsi;
+        }
+    }
+    return UINT32_MAX;
+}
+
 void irq_gsi_changed(uint32_t gsi) {
     (void)gsi;
     spinlock_acquire(&lock);
@@ -403,6 +471,11 @@ void irq_mirror_eoi(uint8_t vector) {
             r->held = false;
             released = true;
         }
+        uint64_t vrte;
+        if (r->virtual_held && vioapic_rte(gsi, &vrte) && (uint8_t)vrte == vector) {
+            r->virtual_held = false;
+            released = true;
+        }
     }
     if (released) {
         update();
@@ -411,7 +484,66 @@ void irq_mirror_eoi(uint8_t vector) {
 }
 
 bool irq_remote_irr(uint32_t gsi) {
-    return gsi < route_count && __atomic_load_n(&routes[gsi].held, __ATOMIC_ACQUIRE);
+    return gsi < route_count && (__atomic_load_n(&routes[gsi].held, __ATOMIC_ACQUIRE)
+                                 || __atomic_load_n(&routes[gsi].virtual_held, __ATOMIC_ACQUIRE));
+}
+
+void irq_take_host_line(uint32_t gsi, void (*handler)(void *ctx), void *ctx) {
+    if (gsi >= route_count || routes[gsi].io == NULL) {
+        printf("No host line for GSI %u\n", gsi);
+        return;
+    }
+    spinlock_acquire(&lock);
+    routes[gsi].handler = handler;
+    routes[gsi].handler_ctx = ctx;
+    update();
+    spinlock_release(&lock);
+}
+
+void irq_device_interrupt(void) {
+    spinlock_acquire(&lock);
+    for (uint32_t gsi = 0; gsi < route_count; gsi++) {
+        struct route *r = &routes[gsi];
+        if (r->handler == NULL) {
+            continue;
+        }
+        // Masked while its handler runs, as a level-triggered line stays
+        // asserted until the handler has dealt with its device.
+        ioapic_rte_write(r->io, r->pin, r->host_rte | IOAPIC_RTE_MASKED);
+        if (r->host_rte & IOAPIC_RTE_LEVEL) {
+            ioapic_eoi(r->io, VLAPIC_DEVICE_VECTOR);
+        }
+    }
+    lapic_eoi();
+    spinlock_release(&lock);
+
+    for (uint32_t gsi = 0; gsi < route_count; gsi++) {
+        if (routes[gsi].handler != NULL) {
+            routes[gsi].handler(routes[gsi].handler_ctx);
+        }
+    }
+
+    spinlock_acquire(&lock);
+    for (uint32_t gsi = 0; gsi < route_count; gsi++) {
+        struct route *r = &routes[gsi];
+        if (r->handler != NULL) {
+            ioapic_rte_write(r->io, r->pin, r->host_rte);
+        }
+    }
+    spinlock_release(&lock);
+}
+
+void irq_virtual_line(uint32_t gsi, bool asserted) {
+    if (gsi >= route_count) {
+        return;
+    }
+    spinlock_acquire(&lock);
+    struct route *r = &routes[gsi];
+    r->virtual_line = true;
+    r->virtual_asserted = asserted;
+    update();
+    spinlock_release(&lock);
+    kick_after_update();
 }
 
 uint8_t irq_extint_acknowledge(void) {

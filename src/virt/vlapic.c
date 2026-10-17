@@ -410,6 +410,20 @@ static bool matches(const struct vlapic *target, uint32_t dest, bool logical, bo
     return mda >> 4 == logical_id >> 4 && (mda & logical_id & 0xf) != 0;
 }
 
+void vlapic_deliver_external(uint32_t dest, bool logical, uint8_t vector, bool level,
+                             bool lowest) {
+    for (uint32_t i = 0; i < smp_cpu_count(); i++) {
+        struct vcpu *to = smp_cpu(i)->vcpu;
+        if (to == NULL || !matches(to->vlapic, dest, logical, false)) {
+            continue;
+        }
+        vlapic_accept(to, vector, level);
+        if (lowest) {
+            break;
+        }
+    }
+}
+
 static void deliver(struct vcpu *from, struct vcpu *to, uint32_t command) {
     uint8_t vector = command & ICR_VECTOR_MASK;
     switch (command & ICR_DELIVERY_MASK) {
