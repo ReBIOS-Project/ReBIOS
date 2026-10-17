@@ -131,6 +131,7 @@ struct handoff_config {
     uint8_t vga_emulation;
     uint8_t vga_scaling;
     uint8_t vga_scale;
+    uint8_t profile;
     // Which APIC IDs the guest gets, as inclusive ranges.
     uint32_t cpu_filter;
     uint32_t cpu_range_count;

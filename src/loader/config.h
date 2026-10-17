@@ -38,6 +38,7 @@ struct config {
     uint8_t vga_emulation;
     uint8_t vga_scaling;
     uint8_t vga_scale;
+    bool profile;
     // One of the HANDOFF_CPU_FILTER_* values.
     uint32_t cpu_filter;
     uint32_t cpu_range_count;

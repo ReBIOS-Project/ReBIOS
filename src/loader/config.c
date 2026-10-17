@@ -396,6 +396,7 @@ static const struct setting settings[] = {
     {.name = "vga_emulation", .apply = apply_vga_emulation},
     {.name = "vga_scaling", .apply = apply_vga_scaling},
     {.name = "vga_scale", .apply = apply_vga_scale},
+    {.name = "profile", .apply = apply_boolean, .flag = &config.profile},
     {.name = "cpu_allowlist", .apply = apply_cpu_list, .filter = HANDOFF_CPU_FILTER_ALLOW},
     {.name = "cpu_blocklist", .apply = apply_cpu_list, .filter = HANDOFF_CPU_FILTER_BLOCK},
     {.name = "iommu_disable", .apply = apply_obsolete},
@@ -757,6 +758,7 @@ void config_to_handoff(struct handoff_config *out) {
     out->vga_emulation = config.vga_emulation;
     out->vga_scaling = config.vga_scaling;
     out->vga_scale = config.vga_scale;
+    out->profile = config.profile;
     out->cpu_filter = config.cpu_filter;
     out->cpu_range_count = config.cpu_range_count;
     for (uint32_t i = 0; i < config.cpu_range_count; i++) {
