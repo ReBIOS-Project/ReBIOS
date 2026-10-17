@@ -23,13 +23,18 @@
 #include <uacpi/kernel_api.h>
 #include <uacpi/tables.h>
 #include <uacpi/uacpi.h>
+#include <uacpi/event.h>
+#include <uacpi/utilities.h>
 #include <core.h>
+#include <handoff.h>
 #include <hw/acpi.h>
+#include <hw/ec.h>
 #include <hw/pci_cfg.h>
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
 #include <lib/time.h>
+#include <sys/cpu.h>
 #include <sys/x86.h>
 
 // Holds the table list until uacpi_initialize() moves it to the heap, at
@@ -42,9 +47,9 @@
 
 #define WAIT_FOREVER 0xffff
 
-// Nothing signals an event waited on forever: the global lock's is signalled
-// by the SCI handler, but the SCI is the guest's. uACPI tries the lock again
-// after each wait, so such waits poll it instead.
+// The global lock's event is signalled by the SCI handler, which does not run
+// while the hypervisor waits with interrupts off. uACPI tries the lock again
+// after each wait, so waits forever poll it instead.
 #define FOREVER_POLL_MS 1
 
 struct io_range {
@@ -56,19 +61,25 @@ struct event {
     uint64_t counter;
 };
 
-struct event_enable {
-    struct acpi_gas reg;
-    uint64_t value;
+struct work {
+    struct work *next;
+    uacpi_work_handler handler;
+    uacpi_handle ctx;
 };
 
 static bool init_done;
 static bool init_ok;
 static bool tables_ok;
 
-static struct event_enable *event_enables;
-static unsigned event_enable_count;
-
 static uint8_t interrupt_handle;
+static uacpi_interrupt_handler sci_handler;
+static uacpi_handle sci_ctx;
+static uint32_t sci_irq;
+
+static struct spinlock lock;
+static struct spinlock work_lock;
+static struct work *work_head;
+static struct work *work_tail;
 
 uacpi_status uacpi_kernel_get_rsdp(uacpi_phys_addr *out_rsdp_address) {
     if (core_handoff->acpi_rsdp == 0) {
@@ -364,7 +375,7 @@ void uacpi_kernel_reset_event(uacpi_handle handle) {
 }
 
 uacpi_thread_id uacpi_kernel_get_thread_id(void) {
-    return (uacpi_thread_id)(uintptr_t)1;
+    return this_cpu();
 }
 
 static uint64_t read_rflags(void) {
@@ -420,13 +431,13 @@ uacpi_status uacpi_kernel_handle_firmware_request(uacpi_firmware_request *reques
     return UACPI_STATUS_OK;
 }
 
-// The SCI belongs to the guest, so the hypervisor never takes it.
+// Kept for acpi_sci_interrupt(), whose caller connects the SCI.
 uacpi_status uacpi_kernel_install_interrupt_handler(uacpi_u32 irq, uacpi_interrupt_handler handler,
                                                     uacpi_handle ctx,
                                                     uacpi_handle *out_irq_handle) {
-    (void)irq;
-    (void)handler;
-    (void)ctx;
+    sci_irq = irq;
+    sci_handler = handler;
+    sci_ctx = ctx;
     *out_irq_handle = &interrupt_handle;
     return UACPI_STATUS_OK;
 }
@@ -435,92 +446,96 @@ uacpi_status uacpi_kernel_uninstall_interrupt_handler(uacpi_interrupt_handler ha
                                                       uacpi_handle irq_handle) {
     (void)handler;
     (void)irq_handle;
+    sci_handler = NULL;
     return UACPI_STATUS_OK;
 }
 
+// Work runs when the processor that queued it releases acpi_lock(), in the
+// order it came in: GPE methods and Notify() handlers alike.
 uacpi_status uacpi_kernel_schedule_work(uacpi_work_type type, uacpi_work_handler handler,
                                         uacpi_handle ctx) {
     (void)type;
-    (void)handler;
-    (void)ctx;
-    return UACPI_STATUS_UNIMPLEMENTED;
-}
-
-uacpi_status uacpi_kernel_wait_for_work_completion(void) {
+    struct work *w = kmalloc(sizeof(*w));
+    w->handler = handler;
+    w->ctx = ctx;
+    spinlock_acquire(&work_lock);
+    if (work_tail != NULL) {
+        work_tail->next = w;
+    } else {
+        work_head = w;
+    }
+    work_tail = w;
+    spinlock_release(&work_lock);
     return UACPI_STATUS_OK;
 }
 
-static void event_enable_save(const struct acpi_gas *block, uint64_t offset, unsigned width) {
-    struct acpi_gas reg = {
-        .address_space_id = block->address_space_id,
-        .register_bit_width = width * 8,
-        .register_bit_offset = 0,
-        .access_size = width == 2 ? ACPI_ACCESS_WORD : ACPI_ACCESS_BYTE,
-        .address = block->address + offset,
-    };
-    uint64_t value;
-    if (uacpi_gas_read(&reg, &value) == UACPI_STATUS_OK) {
-        event_enables[event_enable_count].reg = reg;
-        event_enables[event_enable_count].value = value;
-        event_enable_count++;
+static void work_run(void) {
+    for (;;) {
+        spinlock_acquire(&work_lock);
+        struct work *w = work_head;
+        if (w != NULL) {
+            work_head = w->next;
+            if (work_head == NULL) {
+                work_tail = NULL;
+            }
+        }
+        spinlock_release(&work_lock);
+        if (w == NULL) {
+            return;
+        }
+        w->handler(w->ctx);
+        kfree(w);
     }
 }
 
-// uacpi_initialize() disables the fixed events, and uacpi_namespace_load()
-// disables the GPEs and enables the global lock event. These belong to the
-// firmware's SMI handlers until the guest takes ACPI over, so the enable
-// registers, which make up the second half of each event block, get their
-// values back afterwards.
-static void event_enables_save(void) {
-    struct acpi_fadt *fadt;
-    if (uacpi_table_fadt(&fadt) != UACPI_STATUS_OK || (fadt->flags & ACPI_HW_REDUCED_ACPI)) {
-        return;
-    }
-
-    unsigned pm1_half = fadt->pm1_evt_len / 2;
-    unsigned gpe0_half = fadt->gpe0_blk_len / 2;
-    unsigned gpe1_half = fadt->gpe1_blk_len / 2;
-    event_enables = kmalloc((2 * pm1_half + gpe0_half + gpe1_half) * sizeof(*event_enables));
-
-    // PM1 registers take byte or word accesses, GPE registers byte accesses.
-    unsigned pm1_width = pm1_half % 2 == 0 ? 2 : 1;
-    const struct acpi_gas *pm1[] = {&fadt->x_pm1a_evt_blk, &fadt->x_pm1b_evt_blk};
-    for (unsigned i = 0; i < 2; i++) {
-        if (pm1[i]->address == 0) {
-            continue;
-        }
-        for (unsigned off = 0; off < pm1_half; off += pm1_width) {
-            event_enable_save(pm1[i], pm1_half + off, pm1_width);
-        }
-    }
-    if (fadt->x_gpe0_blk.address != 0) {
-        for (unsigned off = 0; off < gpe0_half; off++) {
-            event_enable_save(&fadt->x_gpe0_blk, gpe0_half + off, 1);
-        }
-    }
-    if (fadt->x_gpe1_blk.address != 0) {
-        for (unsigned off = 0; off < gpe1_half; off++) {
-            event_enable_save(&fadt->x_gpe1_blk, gpe1_half + off, 1);
-        }
-    }
+uacpi_status uacpi_kernel_wait_for_work_completion(void) {
+    work_run();
+    return UACPI_STATUS_OK;
 }
 
-static void event_enables_restore(void) {
-    for (unsigned i = 0; i < event_enable_count; i++) {
-        struct event_enable *e = &event_enables[i];
-        uint64_t value;
-        if (uacpi_gas_read(&e->reg, &value) != UACPI_STATUS_OK || value == e->value) {
-            continue;
-        }
-        printf("Restoring ACPI event enables at %s %#llx to %#llx from %#llx\n",
-               e->reg.address_space_id == UACPI_ADDRESS_SPACE_SYSTEM_IO ? "port" : "address",
-               (unsigned long long)e->reg.address, (unsigned long long)e->value,
-               (unsigned long long)value);
-        uacpi_gas_write(&e->reg, e->value);
+void acpi_lock(void) {
+    spinlock_acquire(&lock);
+}
+
+void acpi_unlock(void) {
+    work_run();
+    spinlock_release(&lock);
+}
+
+bool acpi_sci_irq(uint32_t *irq) {
+    if (sci_handler == NULL) {
+        return false;
     }
-    kfree(event_enables);
-    event_enables = NULL;
-    event_enable_count = 0;
+    *irq = sci_irq;
+    return true;
+}
+
+void acpi_sci_interrupt(void *ctx) {
+    (void)ctx;
+    acpi_lock();
+    if (sci_handler != NULL) {
+        sci_handler(sci_ctx);
+    }
+    acpi_unlock();
+}
+
+void acpi_namespace_start(void) {
+    acpi_lock();
+    ec_init();
+    uacpi_status status = uacpi_namespace_initialize();
+    if (status != UACPI_STATUS_OK) {
+        printf("Cannot initialise the ACPI namespace: %s\n", uacpi_status_to_string(status));
+    }
+    // Again, should _INI have undone it.
+    status = uacpi_set_interrupt_model(UACPI_INTERRUPT_MODEL_IOAPIC);
+    if (status != UACPI_STATUS_OK) {
+        printf("Cannot put the firmware in APIC mode: %s\n", uacpi_status_to_string(status));
+    }
+    status = uacpi_finalize_gpe_initialization();
+    if (status != UACPI_STATUS_OK) {
+        printf("Cannot enable the ACPI GPEs: %s\n", uacpi_status_to_string(status));
+    }
+    acpi_unlock();
 }
 
 bool acpi_tables_ready(void) {
@@ -547,8 +562,7 @@ bool acpi_init(void) {
     }
     tables_ok = true;
 
-    event_enables_save();
-    status = uacpi_initialize(UACPI_FLAG_NO_ACPI_MODE);
+    status = uacpi_initialize(0);
     if (status != UACPI_STATUS_OK) {
         printf("Cannot initialise uACPI: %s\n", uacpi_status_to_string(status));
     } else {
@@ -557,7 +571,6 @@ bool acpi_init(void) {
             printf("Cannot load the ACPI namespace: %s\n", uacpi_status_to_string(status));
         }
     }
-    event_enables_restore();
 
     if (status != UACPI_STATUS_OK) {
         // uACPI drops all of its state on failure, its tables included.
