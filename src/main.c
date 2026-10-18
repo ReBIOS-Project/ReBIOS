@@ -225,6 +225,15 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     bootdev_collect();
     drives_collect();
     video_init();
+    // Firmware may put the framebuffer above all memory.
+    const struct handoff_framebuffer *fb = &loader_handoff->video.framebuffer;
+    uint64_t fb_size = (uint64_t)fb->pitch * fb->height;
+    if (fb->size > fb_size) {
+        fb_size = fb->size;
+    }
+    if (fb->present && !paging_map_device(pml4, fb->base, fb_size)) {
+        panic("Cannot map the framebuffer\n");
+    }
     display_collect();
     oprom_collect();
 
