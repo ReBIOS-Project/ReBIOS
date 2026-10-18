@@ -27,7 +27,7 @@ jobs:
 
     steps:
       - name: Install dependencies
-        run: pacman --noconfirm -Syu && pacman --needed --noconfirm -S base-devel git nodejs python llvm clang lld
+        run: pacman --noconfirm -Syu && pacman --needed --noconfirm -S base-devel git nodejs python llvm clang lld mtools
 
       - name: Checkout code
         uses: actions/checkout@v7
@@ -35,8 +35,8 @@ jobs:
       - name: Get the dependencies
         run: ./get-deps
 
-      - name: Build ReBIOS (GNU, default)
-        run: make all -j$(nproc) CFLAGS='-g -O2 -pipe -Werror' VGABIOS_CFLAGS='-g -O2 -pipe -Werror' && make clean
+      - name: Build ReBIOS and its USB stick image (GNU, default)
+        run: make usb -j$(nproc) CFLAGS='-g -O2 -pipe -Werror' VGABIOS_CFLAGS='-g -O2 -pipe -Werror' && make clean
 
-      - name: Build ReBIOS (LLVM)
-        run: make all -j$(nproc) TOOLCHAIN=llvm CFLAGS='-g -O2 -pipe -Werror' VGABIOS_CFLAGS='-g -O2 -pipe -Werror' && make clean
+      - name: Build ReBIOS and its USB stick image (LLVM)
+        run: make usb -j$(nproc) TOOLCHAIN=llvm CFLAGS='-g -O2 -pipe -Werror' VGABIOS_CFLAGS='-g -O2 -pipe -Werror' && make clean
