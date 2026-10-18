@@ -35,6 +35,26 @@ most legacy OSes one may want to boot.
 
 ReBIOS only exists for 64-bit (x86-64) UEFI firmware: there is no `BOOTIA32.EFI`.
 
+### The ReBIOS USB stick
+
+ReBIOS can also run from a USB stick of its own, which leaves the legacy OS's drives as they are: they need no FAT partition for
+ReBIOS, which matters for OSes installed on other file systems, such as NTFS. The stick takes up a USB port while the computer
+runs.
+
+1. **Download:** Get the latest `rebios-usb.img` from the [Releases page](https://github.com/ReBIOS-Project/ReBIOS/releases), or
+  build it with `make usb` (see [Building](#building)).
+2. **Write:** Write the image to a USB stick, raw, with e.g. `dd` (`dd if=rebios-usb.img of=/dev/sdX bs=4M`), Rufus, or
+  balenaEtcher. Whatever the stick held is lost.
+3. **Boot:** Select the UEFI boot entry for the stick.
+
+ReBIOS then boots the computer's other drives, those with something to boot first: internal drives, then CDs and DVDs, then other
+USB drives. The `boot_drive` setting in the stick's `/EFI/BOOT/rebios.ini` names a drive instead (see [Options](#options)), and
+SeaBIOS's boot menu, on Esc, picks any drive for one boot.
+
+The stick's partition is an EFI system partition, which legacy OSes give no drive letter, so that it moves none of theirs. Linux
+mounts it as it does any FAT partition, for editing the configuration; Windows gives it a drive letter only when asked to, e.g.
+with `diskpart`'s `assign` command.
+
 ## Additional Prerequisites
 
 ### Hardware
@@ -118,7 +138,7 @@ printf '\x07\x00\x00\x00%s' "$(cat rebios.ini)" > /sys/firmware/efi/efivars/ReBI
 | `serial_port` | hex/int | `0x3f8` | Serial I/O port address (COM1=`0x3f8`, COM2=`0x2f8`, COM3=`0x3e8`, COM4=`0x2e8`) |
 | `serial_baud` | int | `115200` | Serial baud rate |
 | `verbose` | bool | `false` | Show debug output on screen while ReBIOS starts |
-| `boot_drive` | `self`/`auto`/drive | `self` | The drive SeaBIOS boots first, the others following in the `auto` order. `self`: the drive ReBIOS was started from, if it has a legacy boot sector. `auto`: drives with something to boot (a legacy boot sector, or a bootable CD or DVD) before those without, internal drives before CDs and DVDs before external (USB) drives, and the drive ReBIOS was started from last. Anything else names a drive by its UEFI device path (e.g. `PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x1,0xFFFF,0x0)`), or else by part of its model name (e.g. `Samsung SSD 860`), case aside, as ReBIOS lists them when `verbose` is on |
+| `boot_drive` | `self`/`auto`/drive | `self` | The drive SeaBIOS boots first, the others following in the `auto` order. `self`: the drive ReBIOS was started from, if it has a legacy boot sector. `auto`: drives with something to boot (a legacy boot sector, or a bootable CD or DVD) before those without, internal drives before CDs and DVDs before external (USB) drives, and the drive ReBIOS was started from last; the [ReBIOS USB stick](#the-rebios-usb-stick)'s setting. Anything else names a drive by its UEFI device path (e.g. `PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x1,0xFFFF,0x0)`), or else by part of its model name (e.g. `Samsung SSD 860`), case aside, as ReBIOS lists them when `verbose` is on |
 | `vgabios` | string | *(empty)* | Path to a custom VBIOS file on the partition ReBIOS was started from (e.g. `\EFI\ReBIOS\vgabios.bin`). When empty, the card's built-in OpROM is used, and, failing that, the emulated VGA. If vgabios is set to `cbfs`, vgabios.bin is loaded from coreboot's CBFS. If you set it to `cbfs:filename` you can use a custom CBFS filename |
 | `vga` | PCI address | *(empty)* | PCI address of the VGA card to use (e.g. `00:02.0`). Format: `BB:DD.F` (hex). When empty, the card the firmware displays on is preferred |
 | `vga_emulation` | `auto`/`always`/`never` | `auto` | When to emulate a VGA: when the card has no usable Video BIOS, always (even if it has one), or never (a card without a usable Video BIOS then gets none) |
@@ -211,6 +231,9 @@ real machine, but for what it adds back of the legacy PC:
 - **Virtual 8086 mode without a system thread.** SeaBIOS reaches its 32-bit code from V86 mode through the hypervisor, and disk
   transfers into EMS pages work.
 - **Every processor.** No logical processor is kept for ReBIOS itself.
+- **A boot drive of choice.** SeaBIOS boots first whichever drive the configuration names, by model or device path, or picks one
+  by itself, so ReBIOS can also run from a USB stick of its own, sparing legacy OS installations a FAT partition for it (see
+  [The ReBIOS USB stick](#the-rebios-usb-stick)).
 
 ## Building
 
@@ -221,6 +244,8 @@ download the EDK2 OVMF firmware images for `make run`.
 ./get-deps
 make
 ```
+
+`make usb` also builds `bin/rebios-usb.img`, the image for [the ReBIOS USB stick](#the-rebios-usb-stick), which needs mtools.
 
 Release tarballs (`rebios-<version>.tar.gz` and `.tar.xz`) come with the dependencies, so they build without `./get-deps`.
 `make dist` creates them from the current commit. The source archives GitHub generates for each release lack the dependencies,
