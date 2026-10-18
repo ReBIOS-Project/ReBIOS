@@ -33,8 +33,8 @@ uint64_t virt_io_bitmap(void);
 uint64_t virt_msr_bitmap(void);
 void virt_intercept_io(uint16_t port, unsigned count, bool intercept);
 void virt_intercept_msr(uint32_t msr, bool read, bool write);
-// VMX's MSR bitmap for vCPUs whose x2APIC the processor virtualises, made by
-// the first of these calls, which pass reads or writes of an x2APIC MSR.
+// The MSR bitmap for vCPUs whose x2APIC the processor virtualises, made by the
+// first of these calls, which pass reads or writes of an x2APIC MSR.
 uint64_t virt_msr_bitmap_x2apic(void);
 void virt_x2apic_msr_passed(uint32_t msr, bool read, bool write);
 

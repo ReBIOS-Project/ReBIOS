@@ -212,6 +212,7 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 #define SVM_VINTR_MASKING (1ull << 24)
 #define SVM_VINTR_GIF_ENABLE (1ull << 25)
 #define SVM_VINTR_NMI_ENABLE (1ull << 26)
+#define SVM_VINTR_X2AVIC (1ull << 30)
 #define SVM_VINTR_AVIC (1ull << 31)
 
 // Event injection.
@@ -234,8 +235,10 @@ extern bool svm_nrips;
 // guest can (APM 24593 rev. 3.45, 15.21.10), with GIF virtualised, as Linux
 // 7.3's KVM has it.
 extern bool svm_vnmi;
-// The processor's AVIC (APM 24593 rev. 3.45, 15.29), where it can be used.
+// The processor's AVIC (APM 24593 rev. 3.45, 15.29), where it can be used, and
+// whether it runs x2APIC mode's MSRs too (APM 24593 rev. 3.45, 15.29.10).
 extern bool svm_avic;
+extern bool svm_x2avic;
 
 bool svm_supported(void);
 // The guest's translations go before its next run, as when the hypervisor

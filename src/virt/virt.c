@@ -45,8 +45,8 @@ bool virt_vmx;
 
 static uint8_t *io_bitmap;
 static uint8_t *msr_bitmap;
-// VMX's for vCPUs whose x2APIC the processor virtualises: the same but for
-// the accesses to x2APIC registers it passes.
+// For vCPUs whose x2APIC the processor virtualises: the same but for the
+// accesses to x2APIC registers it passes.
 static uint8_t *msr_bitmap_x2apic;
 
 bool vmx_ept_huge_pages(void);
@@ -138,32 +138,23 @@ static void bitmap_set(uint8_t *bitmap, unsigned bit, bool set) {
     }
 }
 
-// Read and write bitmaps for the low MSRs, then the high ones; others always
-// exit.
-static void vmx_bitmap_set(uint8_t *bitmap, uint32_t msr, bool read, bool write) {
-    unsigned base;
-    if (msr <= 0x1fff) {
-        base = 0;
-    } else if (msr >= 0xc0000000 && msr <= 0xc0001fff) {
-        base = 0x400 * 8;
-    } else {
-        return;
-    }
-    unsigned bit = msr & 0x1fff;
-    bitmap_set(bitmap, base + bit, read);
-    bitmap_set(bitmap, base + 0x800 * 8 + bit, write);
-}
-
-void virt_intercept_msr(uint32_t msr, bool read, bool write) {
+// Where an MSR's read and write bits are: VMX's read bitmaps for the low MSRs
+// and the high ones, then their write bitmaps; SVM's two bits per MSR, in
+// three ranges. Others always exit.
+static bool msr_bits(uint32_t msr, unsigned *read, unsigned *write) {
     if (virt_vmx) {
-        vmx_bitmap_set(msr_bitmap, msr, read, write);
-        if (msr_bitmap_x2apic != NULL && (msr < 0x800 || msr > 0x8ff)) {
-            vmx_bitmap_set(msr_bitmap_x2apic, msr, read, write);
+        unsigned base;
+        if (msr <= 0x1fff) {
+            base = 0;
+        } else if (msr >= 0xc0000000 && msr <= 0xc0001fff) {
+            base = 0x400 * 8;
+        } else {
+            return false;
         }
-        return;
+        *read = base + (msr & 0x1fff);
+        *write = *read + 0x800 * 8;
+        return true;
     }
-
-    // Two bits per MSR, in three ranges; others always exit.
     unsigned offset;
     if (msr <= 0x1fff) {
         offset = 0;
@@ -172,24 +163,41 @@ void virt_intercept_msr(uint32_t msr, bool read, bool write) {
     } else if (msr >= 0xc0010000 && msr <= 0xc0011fff) {
         offset = 0x1000;
     } else {
+        return false;
+    }
+    *read = offset * 8 + (msr & 0x1fff) * 2;
+    *write = *read + 1;
+    return true;
+}
+
+void virt_intercept_msr(uint32_t msr, bool read, bool write) {
+    unsigned read_bit, write_bit;
+    if (!msr_bits(msr, &read_bit, &write_bit)) {
         return;
     }
-    unsigned bit = offset * 8 + (msr & 0x1fff) * 2;
-    bitmap_set(msr_bitmap, bit, read);
-    bitmap_set(msr_bitmap, bit + 1, write);
+    bitmap_set(msr_bitmap, read_bit, read);
+    bitmap_set(msr_bitmap, write_bit, write);
+    if (msr_bitmap_x2apic != NULL && (msr < 0x800 || msr > 0x8ff)) {
+        bitmap_set(msr_bitmap_x2apic, read_bit, read);
+        bitmap_set(msr_bitmap_x2apic, write_bit, write);
+    }
 }
 
 void virt_x2apic_msr_passed(uint32_t msr, bool read, bool write) {
+    unsigned pages = virt_vmx ? 1 : 2;
     if (msr_bitmap_x2apic == NULL) {
-        msr_bitmap_x2apic = page_alloc(1);
-        memcpy(msr_bitmap_x2apic, msr_bitmap, PAGE_SIZE);
+        msr_bitmap_x2apic = page_alloc(pages);
+        memcpy(msr_bitmap_x2apic, msr_bitmap, pages * PAGE_SIZE);
     }
-    unsigned bit = msr & 0x1fff;
+    unsigned read_bit, write_bit;
+    if (!msr_bits(msr, &read_bit, &write_bit)) {
+        return;
+    }
     if (read) {
-        bitmap_set(msr_bitmap_x2apic, bit, false);
+        bitmap_set(msr_bitmap_x2apic, read_bit, false);
     }
     if (write) {
-        bitmap_set(msr_bitmap_x2apic, 0x800 * 8 + bit, false);
+        bitmap_set(msr_bitmap_x2apic, write_bit, false);
     }
 }
 

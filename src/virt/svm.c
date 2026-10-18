@@ -42,6 +42,7 @@
 #define SVM_FEATURE_FLUSH_BY_ASID (1u << 6)
 #define SVM_FEATURE_DECODE_ASSISTS (1u << 7)
 #define SVM_FEATURE_AVIC (1u << 13)
+#define SVM_FEATURE_X2AVIC (1u << 18)
 #define SVM_FEATURE_VGIF (1u << 16)
 #define SVM_FEATURE_VNMI (1u << 25)
 
@@ -62,6 +63,7 @@
 bool svm_nrips;
 bool svm_vnmi;
 bool svm_avic;
+bool svm_x2avic;
 // TLB_CONTROL can flush the guest's ASID alone (APM 24593 rev. 3.45, Table
 // 15-9), sparing the host's translations.
 static bool flush_by_asid;
@@ -185,6 +187,7 @@ bool svm_supported(void) {
     struct cpu_signature signature = cpu_signature();
     svm_avic = (features & SVM_FEATURE_AVIC) != 0 && signature.family != 0x17
                && signature.family != 0x18;
+    svm_x2avic = svm_avic && (features & SVM_FEATURE_X2AVIC) != 0;
     return true;
 }
 
