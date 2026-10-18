@@ -40,6 +40,7 @@
 #define SVM_FEATURE_NRIPS (1u << 3)
 #define SVM_FEATURE_VMCB_CLEAN (1u << 5)
 #define SVM_FEATURE_FLUSH_BY_ASID (1u << 6)
+#define SVM_FEATURE_DECODE_ASSISTS (1u << 7)
 
 #define CPUID_80000001_ECX_OSVW (1u << 9)
 #define MSR_MCG_CAP 0x179
@@ -60,6 +61,9 @@ bool svm_nrips;
 // 15-9), sparing the host's translations.
 static bool flush_by_asid;
 static bool vmcb_clean_bits;
+// Nested page faults bring the guest's instruction bytes along (APM 24593
+// rev. 3.45, 15.8.4).
+static bool decode_assists;
 
 #define CLEAN_I (1u << 0)
 #define CLEAN_IOPM (1u << 1)
@@ -167,6 +171,7 @@ bool svm_supported(void) {
     svm_nrips = (features & SVM_FEATURE_NRIPS) != 0;
     flush_by_asid = (features & SVM_FEATURE_FLUSH_BY_ASID) != 0;
     vmcb_clean_bits = (features & SVM_FEATURE_VMCB_CLEAN) != 0;
+    decode_assists = (features & SVM_FEATURE_DECODE_ASSISTS) != 0;
     return true;
 }
 
@@ -380,6 +385,13 @@ static void svm_handle_exit(struct vcpu *v) {
                 panic("Event delivery reached emulated memory at %#llx\n",
                       (unsigned long long)c->exitinfo2);
             }
+            // Only where they could all be fetched, or the instruction may
+            // be longer.
+            if (decode_assists && (c->insn_len & 0xf) == sizeof(v->fetched)) {
+                memcpy(v->fetched, c->insn_bytes, sizeof(v->fetched));
+                v->fetched_count = sizeof(v->fetched);
+                v->fetched_rip = v->vmcb->save.rip;
+            }
             if (!(c->exitinfo1 & NPF_FETCH) && mmio_fault(v, c->exitinfo2)) {
                 break;
             }
@@ -443,6 +455,7 @@ void svm_run(struct vcpu *v) {
         clean_before_entry(v);
         svm_enter(v->vmcb_pa, &v->gprs);
         clean_after_exit(v);
+        v->fetched_count = 0;
         v->gprs.rax = v->vmcb->save.rax;
         v->vmcb->control.tlb_control = 0;
         // What it cut short comes back in EXITINTINFO.

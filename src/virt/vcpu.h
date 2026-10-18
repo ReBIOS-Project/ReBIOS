@@ -91,6 +91,11 @@ struct vcpu {
     uint64_t vmcb_pa;
     // The VMCB as the last exit left it, for its clean bits.
     uint8_t *vmcb_seen;
+    // The instruction bytes the processor fetched for the exit at hand, at
+    // fetched_rip, if fetched_count is not 0.
+    uint8_t fetched[15];
+    uint8_t fetched_count;
+    uint64_t fetched_rip;
     // The gpt_generation the vCPU's TLB is current with.
     uint64_t gpt_generation;
 

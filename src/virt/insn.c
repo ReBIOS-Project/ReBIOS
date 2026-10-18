@@ -17,6 +17,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <memory.h>
 #include <sys/x86.h>
 #include <virt/guest_mem.h>
 #include <virt/insn.h>
@@ -279,7 +280,9 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
     // Zeroes past what can be read make the decoding stop short, as the
     // instruction then cannot be complete.
     uint8_t bytes[INSN_MAX_LENGTH + 4] = {0};
-    if (!guest_linear_read(v, linear, bytes, INSN_MAX_LENGTH, true)) {
+    if (v->fetched_count == INSN_MAX_LENGTH && v->fetched_rip == vcpu_rip(v)) {
+        memcpy(bytes, v->fetched, INSN_MAX_LENGTH);
+    } else if (!guest_linear_read(v, linear, bytes, INSN_MAX_LENGTH, true)) {
         unsigned avail = 4096 - (linear & 4095);
         if (avail >= INSN_MAX_LENGTH || !guest_linear_read(v, linear, bytes, avail, true)) {
             return false;
