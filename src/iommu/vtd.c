@@ -17,6 +17,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <hw/pci_cfg.h>
 #include <iommu/iommu_tables.h>
 #include <iommu/vtd.h>
 #include <lib/heap.h>
@@ -50,6 +51,9 @@
 #define CAP_NFR_SHIFT 40
 #define CAP_DWD (1ull << 54)
 #define CAP_DRD (1ull << 55)
+
+#define PCI_VENDOR_INTEL 0x8086
+#define PCI_BASE_CLASS_DISPLAY 0x03
 
 #define ECAP_C (1ull << 0)
 #define ECAP_QI (1ull << 1)
@@ -104,6 +108,7 @@ struct vtd_unit {
     uint64_t cap;
     uint64_t ecap;
     bool four_levels;
+    bool keep_translating;
     uint64_t *root_table;
     uint64_t *context_table;
     uint64_t *queue;
@@ -200,6 +205,43 @@ static void invalidate_all(struct vtd_unit *u) {
     queue_sync(u);
 }
 
+// Intel's integrated graphics of these device ID families, behind a unit of
+// their own, can hang if the translation the firmware left on stops under
+// them, so it stays on (as Linux's quirk_igfx_skip_te_disable() has it).
+static const uint8_t keep_translating_ids[] = {
+    0x45, 0x46, 0x4c, 0x4e, 0x8a, 0x98, 0x9a, 0xa7, 0x7d,
+};
+
+static bool keep_translating(const struct iommu_tables *tables, uint32_t index, uint64_t cap) {
+    if (tables->units[index].include_all || !(cap & (CAP_DRD | CAP_DWD))) {
+        return false;
+    }
+    bool listed = false;
+    for (uint32_t i = 0; i < tables->range_count; i++) {
+        const struct iommu_device_range *r = &tables->ranges[i];
+        if (r->unit != index) {
+            continue;
+        }
+        for (uint32_t rid = r->first; rid <= r->last; rid++) {
+            struct pci_addr a = {r->segment, (uint8_t)(rid >> 8), (uint8_t)(rid >> 3 & 0x1f),
+                                 (uint8_t)(rid & 7)};
+            uint32_t id = pci_cfg_read(a, 0, 4);
+            if (id == UINT32_MAX) {
+                continue;
+            }
+            if (pci_cfg_read(a, 0x0b, 1) != PCI_BASE_CLASS_DISPLAY) {
+                return false;
+            }
+            for (size_t j = 0; j < sizeof(keep_translating_ids); j++) {
+                if ((id & 0xffff) == PCI_VENDOR_INTEL && id >> 24 == keep_translating_ids[j]) {
+                    listed = true;
+                }
+            }
+        }
+    }
+    return listed;
+}
+
 bool vtd_probe(const struct iommu_tables *tables, int *leaf_level) {
     unit_count = tables->unit_count;
     units = kmalloc(unit_count * sizeof(*units));
@@ -234,6 +276,7 @@ bool vtd_probe(const struct iommu_tables *tables, int *leaf_level) {
         if (!(u->ecap & ECAP_C)) {
             coherent = false;
         }
+        u->keep_translating = keep_translating(tables, i, u->cap);
     }
 
     *leaf_level = leaf;
@@ -244,7 +287,10 @@ bool vtd_probe(const struct iommu_tables *tables, int *leaf_level) {
 // queue, or protected memory regions on, all of which would stand in the way.
 static void unit_take_over(struct vtd_unit *u) {
     uint32_t status = reg_read32(u, REG_GSTS);
-    if (status & GCMD_TE) {
+    if ((status & GCMD_TE) && u->keep_translating) {
+        printf("VT-d unit at %#llx goes on translating for the graphics behind it\n",
+               (unsigned long long)u->base);
+    } else if (status & GCMD_TE) {
         global_command(u, GCMD_TE, false, "stop translating");
     }
     if (status & GCMD_IRE) {
