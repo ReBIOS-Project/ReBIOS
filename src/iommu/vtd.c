@@ -55,6 +55,9 @@
 #define PCI_VENDOR_INTEL 0x8086
 #define PCI_BASE_CLASS_DISPLAY 0x03
 
+#define MODEL_SANDY_BRIDGE 0x2a
+#define MODEL_SANDY_BRIDGE_X 0x2d
+
 #define ECAP_C (1ull << 0)
 #define ECAP_QI (1ull << 1)
 
@@ -246,6 +249,13 @@ bool vtd_probe(const struct iommu_tables *tables, int *leaf_level) {
     unit_count = tables->unit_count;
     units = kmalloc(unit_count * sizeof(*units));
     int leaf = 2;
+    // Sandy Bridge's units claim large pages they do not have, and go wrong
+    // when a walk's length changes under DMA in flight (as Xen's
+    // quirk_iommu_caps() has it): small pages only, then.
+    struct cpu_signature s = cpu_signature();
+    if (s.family == 6 && (s.model == MODEL_SANDY_BRIDGE || s.model == MODEL_SANDY_BRIDGE_X)) {
+        leaf = 0;
+    }
 
     for (uint32_t i = 0; i < unit_count; i++) {
         struct vtd_unit *u = &units[i];
