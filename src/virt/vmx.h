@@ -300,6 +300,7 @@
 // EPT violation exit qualification: the access was a write, or a fetch.
 #define EPT_QUAL_WRITE (1ull << 1)
 #define EPT_QUAL_FETCH (1ull << 2)
+#define EPT_QUAL_NMI_UNBLOCKED (1ull << 12)
 
 // Event injection and exit interruption information fields.
 #define INTR_INFO_VALID (1u << 31)

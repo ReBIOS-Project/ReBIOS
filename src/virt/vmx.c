@@ -767,6 +767,13 @@ static void vmx_handle_exit(struct vcpu *v) {
             if (event_cut_short(v)) {
                 panic("Event delivery reached emulated memory at %#llx\n", (unsigned long long)gpa);
             }
+            // An IRET that started with NMIs blocked unblocked them before
+            // the exit: they are blocked again for it to run again (SDM
+            // 325462-093 Vol. 3C, 30.2.3).
+            if (qual & EPT_QUAL_NMI_UNBLOCKED) {
+                vmx_write(VMCS_GUEST_INTERRUPTIBILITY,
+                          vmx_read(VMCS_GUEST_INTERRUPTIBILITY) | INTERRUPTIBILITY_NMI);
+            }
             if (!(qual & EPT_QUAL_FETCH) && mmio_fault(v, gpa)) {
                 break;
             }
