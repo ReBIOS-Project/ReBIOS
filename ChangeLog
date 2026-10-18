@@ -1,0 +1,101 @@
+2026-10-18  Mintsuki  <mintsuki@protonmail.com>
+
+    *** Release 0.2.0 ***
+
+    Noteworthy changes compared to the previous release, 0.1.0:
+
+    New features:
+        - The OS now gets ACPI tables that ReBIOS generates, in ACPI 1.0 AML
+          that even Windows 98 understands, rather than copies of the
+          firmware's. Their methods call into ReBIOS, which runs the firmware's
+          AML itself, and so the OS still sees the machine's devices and their
+          resources, gets their events and notifications, the embedded
+          controller's included, and powers off. Windows 98 installs and runs
+          in ACPI mode, and the memory the firmware keeps for its AML no longer
+          breaks up the OS's: MS-DOS on OVMF saw only 7 MiB of XMS.
+        - The ReBIOS USB stick: `make usb` builds an image for a USB stick that
+          runs ReBIOS and boots the computer's other drives, which then need no
+          FAT partition for ReBIOS. Releases ship it as `rebios-usb.img`.
+        - New `boot_drive` setting, for the drive the legacy BIOS boots first:
+          the one ReBIOS was started from (`self`, the default), one ReBIOS
+          picks (`auto`: drives with something to boot first, internal ones,
+          then CDs and DVDs, then external ones), or one named by its UEFI
+          device path or by part of its model name.
+        - Lay out PCI memory anew for the OS, without moving BARs on the
+          hardware: BARs of 256 MiB or less come below 4 GiB, larger ones stay
+          above it for 64-bit OSes, and the OS's memory below 4 GiB reaches up
+          to those BARs, even where the firmware ends low memory well below
+          them. The OS gets MTRRs that match.
+        - Emulate the A20 gate of port 92h and of the keyboard controller:
+          while the OS keeps it closed, every odd MiB of memory mirrors the
+          even one below it, as on a PC.
+        - New `profile` setting, which logs every 10 seconds how often and why
+          the OS makes ReBIOS step in. A debugging aid.
+
+    Bug fixes:
+        - Carry out the OS's hardware task switches on Intel processors, which
+          leave them to the hypervisor. ReBIOS used to stop.
+        - Let addresses with nothing behind them read as all ones, and drop
+          writes to them, as on a PC. ReBIOS used to stop.
+        - Reserve, in the OS's memory map, the address space below 4 GiB that
+          no memory backs, so that the OS places no device there.
+        - Emulate string I/O, such as REP OUTSW, to the ports ReBIOS emulates.
+          Windows 7's boot graphics on the emulated VGA stopped ReBIOS.
+        - Emulated VGA: build the Video BIOS for the 386, so that the x86
+          emulators that run Video BIOSes, such as 64-bit Windows', find no
+          instructions they lack. Windows 7 x64 showed a black screen after its
+          boot animation.
+        - Emulated VGA: return the VBE mode list in the caller's information
+          block, where 64-bit Windows' emulator finds it. Windows 7 x64 ran in
+          16 colours.
+        - Raise the OS's single-step traps after the instructions ReBIOS
+          carries out for it, and after each iteration of a string instruction,
+          as the processor would. Debuggers lost control stepping over trapped
+          port I/O, CPUID, or emulated memory accesses.
+        - Let pending interrupts in as soon as the OS has taken an exception
+          that ReBIOS raised, rather than at its next unrelated exit.
+        - Intel: block NMIs again for an IRET from an NMI handler that an EPT
+          violation interrupted, as the SDM requires.
+        - Intel: hide from CPUID the instructions VMX would not let the OS run:
+          RDTSCP, RDPID, INVPCID, XSAVES, WAITPKG, PCONFIG, MSRLIST, and
+          PBNDKB.
+        - AMD Family 10h and 12h: work around erratum 383, as AMD's revision
+          guide asks of hypervisors.
+        - AMD Family 15h Models 10h-1Fh: work around IOMMU erratum 746, and
+          wait for the IOMMU event log entries its tail pointer ran ahead of
+          (erratum 732).
+        - Intel: keep up the DMA translation the firmware left on for the
+          integrated graphics of recent generations, which can hang when it is
+          turned off, and map only small pages on Sandy Bridge's IOMMUs, which
+          do not implement the large ones they claim.
+        - Connect the storage controllers the firmware left alone, as with fast
+          boot enabled, so that their drives can be ordered.
+        - Allocate the loader's memory below 4 GiB where there is room, as some
+          firmware leaves memory above 4 GiB out of its page tables.
+        - Refuse memory maps whose descriptors are too small to read, and VT-d
+          units with nothing answering at their registers, rather than misread
+          them.
+
+    Miscellaneous:
+        - ReBIOS is now licensed under the GNU GPL version 2 only, rather than
+          version 3 or later, so that GPLv2-only code, such as Linux's, can be
+          used. SeaBIOS, under the GNU LGPL version 3, remains a separate
+          program, which ReBIOS carries and runs as the legacy BIOS.
+        - Emulated VGA: VBE modes in the screen's own size and format draw
+          straight to the screen.
+        - Cache VMCS reads and writes between VM entries, which speeds up
+          ReBIOS when it runs nested, as under KVM.
+        - `make run` runs QEMU with nested KVM and an Intel IOMMU.
+        - Follow the latest PicoEFI C template: relocations are packed where
+          the linker can, and builds cope with distribution flags that add
+          `-fexceptions` and with Clang drivers that ignore `-fuse-ld`.
+        - Update uACPI to its latest revision, beyond 7.0.0, and the PicoEFI,
+          freestanding-c-hdrs, and freestanding-lgrt (formerly cc-runtime)
+          subprojects.
+        - Releases come with this ChangeLog, which their notes link to.
+
+2026-10-16  Mintsuki  <mintsuki@protonmail.com>
+
+    *** Release 0.1.0 ***
+
+    The first release.
