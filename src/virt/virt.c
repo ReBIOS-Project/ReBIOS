@@ -264,6 +264,8 @@ void vcpu_single_step(struct vcpu *v, bool on) {
 void vcpu_before_entry(struct vcpu *v) {
     profile_entry(v);
     service_pause(v);
+    // Before the flush below, which the display's remapping may need.
+    vga_refresh();
     if (__atomic_exchange_n(&v->cpu->init_pending, false, __ATOMIC_ACQUIRE)) {
         vcpu_init_signal(v);
     }
@@ -291,7 +293,6 @@ void vcpu_before_entry(struct vcpu *v) {
         event_entry(v);
     }
     vlapic_before_entry(v);
-    vga_refresh();
 }
 
 void vcpu_kick(struct cpu *cpu) {

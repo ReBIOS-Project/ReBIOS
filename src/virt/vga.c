@@ -31,6 +31,7 @@
 #include <virt/io.h>
 #include <virt/mmio.h>
 #include <virt/pci_virt.h>
+#include <virt/vcpu.h>
 #include <virt/vga.h>
 
 #define WINDOW_BASE 0xa0000
@@ -221,6 +222,13 @@ static struct {
     // the identity mapping it replaced had.
     uint64_t mapped;
     uint8_t mapped_memtype;
+    // While the guest's mode is the firmware framebuffer's own, shown from the
+    // start of video memory, the first direct_size bytes of video memory are
+    // that framebuffer, which nothing then has to copy to. Panning or flipping
+    // pages ends that until the next mode set.
+    uint64_t direct_size;
+    bool direct;
+    bool panned;
 } vbe;
 
 // The display as last drawn, and where on the framebuffer.
@@ -382,11 +390,43 @@ static bool vbe_on(void) {
     return vbe.present && (vbe.regs[DISPI_ENABLE] & DISPI_ENABLED);
 }
 
+// Video memory as the guest reaches it now.
+static uint8_t *vram_at(uint64_t offset) {
+    if (vbe.direct && offset < vbe.direct_size) {
+        return (uint8_t *)(uintptr_t)core_handoff->video.framebuffer.base + offset;
+    }
+    return vbe.vram + offset;
+}
+
+static void vram_clear(uint64_t size) {
+    uint64_t done = 0;
+    if (vbe.direct) {
+        done = size < vbe.direct_size ? size : vbe.direct_size;
+        memset(vram_at(0), 0, done);
+    }
+    memset(vbe.vram + done, 0, size - done);
+}
+
+// Maps size bytes of video memory from offset on at gpa, as the guest reaches
+// them now.
+static void map_vram(uint64_t gpa, uint64_t offset, uint64_t size) {
+    if (vbe.direct && offset < vbe.direct_size) {
+        uint64_t n = vbe.direct_size - offset < size ? vbe.direct_size - offset : size;
+        gpt_map(gpa, core_handoff->video.framebuffer.base + offset, n, GPT_RWX, MT_WC);
+        gpa += n;
+        offset += n;
+        size -= n;
+    }
+    if (size != 0) {
+        gpt_map(gpa, vbe.vram_phys + offset, size, GPT_RWX, MT_WB);
+    }
+}
+
 // While the Bochs interface is on, the window's first 64 KiB show a bank of
 // its video memory, normally mapped there directly, and the rest nothing.
 static uint8_t *vbe_window_byte(uint32_t offset) {
     uint64_t at = ((uint64_t)vbe.regs[DISPI_BANK] << 16) + offset;
-    return offset < PLANE_SIZE && at < vbe.vram_size ? vbe.vram + at : NULL;
+    return offset < PLANE_SIZE && at < vbe.vram_size ? vram_at(at) : NULL;
 }
 
 static uint64_t window_read(struct vcpu *v, void *ctx, uint64_t offset, unsigned size) {
@@ -736,7 +776,7 @@ static void window_update(void) {
     if (bank == NO_BANK) {
         gpt_map(WINDOW_BASE, 0, PLANE_SIZE, 0, 0);
     } else {
-        gpt_map(WINDOW_BASE, vbe.vram_phys + ((uint64_t)bank << 16), PLANE_SIZE, GPT_RWX, MT_WB);
+        map_vram(WINDOW_BASE, (uint64_t)bank << 16, PLANE_SIZE);
     }
     vbe.window_bank = bank;
     gpt_flush();
@@ -786,6 +826,9 @@ static void dispi_write(uint16_t index, uint16_t value) {
         case DISPI_Y_OFFSET: {
             r[index] = value;
             dispi_fixup();
+            if (vbe_on() && vbe.start != 0) {
+                vbe.panned = true;
+            }
             break;
         }
         case DISPI_BANK: {
@@ -800,8 +843,9 @@ static void dispi_write(uint16_t index, uint16_t value) {
                 r[DISPI_Y_OFFSET] = 0;
                 r[DISPI_ENABLE] |= DISPI_ENABLED;
                 dispi_fixup();
+                vbe.panned = false;
                 if (!(value & DISPI_NOCLEARMEM)) {
-                    memset(vbe.vram, 0, (size_t)r[DISPI_YRES] * vbe.line_bytes);
+                    vram_clear((uint64_t)r[DISPI_YRES] * vbe.line_bytes);
                 }
             } else {
                 r[DISPI_BANK] = 0;
@@ -870,7 +914,7 @@ static void bar_remap(void) {
     }
     if (want != 0) {
         if (range_identity(want, vbe.vram_size, &vbe.mapped_memtype)) {
-            gpt_map(want, vbe.vram_phys, vbe.vram_size, GPT_RWX, MT_WB);
+            map_vram(want, 0, vbe.vram_size);
             vbe.mapped = want;
         } else {
             printf("Not mapping the emulated display controller's BAR at %#llx, over memory "
@@ -1404,7 +1448,52 @@ static uint64_t line_hash(const uint8_t *p, uint32_t bytes) {
 
 // The Bochs interface's display, its lines redrawn where their bytes changed,
 // as nothing traps the guest's writes to its memory.
+static bool direct_wanted(void) {
+    const struct handoff_framebuffer *fb = &core_handoff->video.framebuffer;
+    return vbe.direct_size != 0 && vbe_on() && !vbe.panned && vbe.regs[DISPI_BPP] == 32
+           && vbe.regs[DISPI_XRES] == fb->width && vbe.regs[DISPI_YRES] == fb->height
+           && vbe.line_bytes == fb->pitch && vbe.start == 0;
+}
+
+// Moves the start of video memory into the firmware's framebuffer or back as
+// the mode has it, with the other processors out of the guest, as what they
+// write meanwhile would be lost.
+static void direct_update(void) {
+    spinlock_acquire(&vga.lock);
+    bool want = direct_wanted();
+    spinlock_release(&vga.lock);
+    // A stepping vCPU keeps the others paused itself.
+    if (want == vbe.direct || this_cpu()->vcpu->stepping) {
+        return;
+    }
+    vcpu_pause_others();
+    spinlock_acquire(&vga.lock);
+    want = direct_wanted();
+    if (want != vbe.direct) {
+        uint8_t *fb = (uint8_t *)(uintptr_t)core_handoff->video.framebuffer.base;
+        if (want) {
+            memcpy(fb, vbe.vram, vbe.direct_size);
+        } else {
+            memcpy(vbe.vram, fb, vbe.direct_size);
+        }
+        vbe.direct = want;
+        if (vbe.mapped != 0) {
+            map_vram(vbe.mapped, 0, vbe.vram_size);
+        }
+        if (vbe.window_bank != NO_BANK) {
+            map_vram(WINDOW_BASE, (uint64_t)vbe.window_bank << 16, PLANE_SIZE);
+        }
+        gpt_flush();
+        out.vbe_valid = false;
+    }
+    spinlock_release(&vga.lock);
+    vcpu_resume_others();
+}
+
 static void vbe_refresh(void) {
+    if (vbe.direct) {
+        return;
+    }
     const struct handoff_framebuffer *fb = &core_handoff->video.framebuffer;
     spinlock_acquire(&vga.lock);
     uint32_t width = vbe.regs[DISPI_XRES];
@@ -1478,6 +1567,9 @@ void vga_refresh(void) {
         return;
     }
     out.last = now;
+    if (vbe.present) {
+        direct_update();
+    }
     if (vbe_on()) {
         vbe_refresh();
         return;
@@ -1524,6 +1616,17 @@ static void vbe_init(void) {
     struct io_handler ports = {DISPI_PORT, DISPI_PORT_COUNT, dispi_ports, NULL};
     io_register(&ports);
     vbe.present = true;
+
+    // Bochs' 32 bpp pixels hold blue, green, and red in their first three
+    // bytes, and its scan lines are a multiple of 32 bytes.
+    const struct handoff_framebuffer *fb = &video->framebuffer;
+    uint64_t frame = ((uint64_t)fb->pitch * fb->height + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
+    if (fb->present && fb->bpp == 32 && fb->red_size == 8 && fb->red_shift == 16
+        && fb->green_size == 8 && fb->green_shift == 8 && fb->blue_size == 8
+        && fb->blue_shift == 0 && fb->pitch % 32 == 0 && fb->base % PAGE_SIZE == 0
+        && frame <= fb->size && frame <= vbe.vram_size) {
+        vbe.direct_size = frame;
+    }
 
     uint64_t base;
     if (!pci_relocate_reserve(0, 0, vbe.vram_size, &base)) {
