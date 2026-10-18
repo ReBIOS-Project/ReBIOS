@@ -8,6 +8,7 @@
 /nanoprintf
 /uACPI
 /seabios
+/vgabios/freestanding-lgrt
 /edk2-ovmf-bins
 /edk2-ovmf-bins.tar.gz
 /bin

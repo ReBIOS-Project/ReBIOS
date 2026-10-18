@@ -465,7 +465,7 @@ clean:
 # Remove everything built and generated including downloaded dependencies.
 .PHONY: distclean
 distclean: clean
-	rm -rf .deps-obtained .cache compile_commands.json freestanding-c-hdrs freestanding-lgrt picoefi nanoprintf uACPI seabios edk2-ovmf-bins edk2-ovmf-bins.tar.gz
+	rm -rf .deps-obtained .cache compile_commands.json freestanding-c-hdrs freestanding-lgrt picoefi nanoprintf uACPI seabios vgabios/freestanding-lgrt edk2-ovmf-bins edk2-ovmf-bins.tar.gz
 
 # Release tarballs are named after the commit's tag, without its "v", or else
 # after its abbreviated hash, and their files are dated as the commit is.
@@ -484,7 +484,7 @@ dist:
 	cd "$(DIST_OUTPUT)" && ./get-deps
 	git -C "$(DIST_OUTPUT)/seabios" describe --always --tags --long >"$(DIST_OUTPUT)/seabios/.version"
 	cd "$(DIST_OUTPUT)" && rm -rf .gitignore .github
-	cd "$(DIST_OUTPUT)" && for d in freestanding-c-hdrs freestanding-lgrt picoefi nanoprintf uACPI seabios; do rm -rf "$$d/.git" "$$d/.github" "$$d/.gitignore"; done
+	cd "$(DIST_OUTPUT)" && for d in freestanding-c-hdrs freestanding-lgrt picoefi nanoprintf uACPI seabios vgabios/freestanding-lgrt; do rm -rf "$$d/.git" "$$d/.github" "$$d/.gitignore"; done
 	rm -rf "$(DIST_OUTPUT)/nanoprintf/tests" "$(DIST_OUTPUT)/uACPI/tests"
 	find "$(DIST_OUTPUT)" -type f -perm -100 -exec chmod 755 '{}' +
 	find "$(DIST_OUTPUT)" -type f ! -perm -100 -exec chmod 644 '{}' +
