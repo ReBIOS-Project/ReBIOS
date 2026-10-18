@@ -35,12 +35,47 @@
 #include <virt/svm.h>
 #include <virt/vcpu.h>
 #include <virt/vlapic.h>
+#include <virt/vmx.h>
 
 #define MSR_IA32_CR_PAT 0x277
 
 // EFER bits a guest may set: SCE, LME, LMA (ignored), NXE, LMSLE, FFXSR, and
 // TCE. SVME is kept for the host.
 #define EFER_GUEST_MASK 0xed01ull
+
+#define CPUID_7_EBX_INVPCID (1u << 10)
+#define CPUID_7_ECX_WAITPKG (1u << 5)
+#define CPUID_7_ECX_RDPID (1u << 22)
+#define CPUID_7_EDX_PCONFIG (1u << 18)
+#define CPUID_7_1_EAX_MSRLIST (1u << 27)
+#define CPUID_7_1_EBX_PBNDKB (1u << 1)
+#define CPUID_D_1_EAX_XSAVES (1u << 3)
+#define CPUID_80000001_EDX_RDTSCP (1u << 27)
+
+// The instructions VMX makes #UD unless a VM-execution control lets them run
+// (SDM 325462-093 Vol. 3C, 28.3) show only where the guest's VMCS sets it.
+static void vmx_hide_disabled(uint32_t leaf, uint32_t subleaf, struct cpuid_regs *r) {
+    bool rdtscp = vmx_secondary_allowed(PROC2_RDTSCP);
+    if (leaf == 7 && subleaf == 0) {
+        if (!vmx_secondary_allowed(PROC2_INVPCID)) {
+            r->ebx &= ~CPUID_7_EBX_INVPCID;
+        }
+        if (!vmx_secondary_allowed(PROC2_USER_WAIT_PAUSE)) {
+            r->ecx &= ~CPUID_7_ECX_WAITPKG;
+        }
+        if (!rdtscp) {
+            r->ecx &= ~CPUID_7_ECX_RDPID;
+        }
+        r->edx &= ~CPUID_7_EDX_PCONFIG;
+    } else if (leaf == 7 && subleaf == 1) {
+        r->eax &= ~CPUID_7_1_EAX_MSRLIST;
+        r->ebx &= ~CPUID_7_1_EBX_PBNDKB;
+    } else if (leaf == 0xd && subleaf == 1 && !vmx_secondary_allowed(PROC2_XSAVES)) {
+        r->eax &= ~CPUID_D_1_EAX_XSAVES;
+    } else if (leaf == 0x80000001 && !rdtscp) {
+        r->edx &= ~CPUID_80000001_EDX_RDTSCP;
+    }
+}
 
 void exit_cpuid(struct vcpu *v) {
     uint32_t leaf = (uint32_t)v->gprs.rax;
@@ -88,6 +123,10 @@ void exit_cpuid(struct vcpu *v) {
             }
             break;
         }
+    }
+
+    if (virt_vmx) {
+        vmx_hide_disabled(leaf, subleaf, &r);
     }
 
     v->gprs.rax = r.eax;
