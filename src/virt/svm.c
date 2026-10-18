@@ -36,6 +36,7 @@
 
 #define SVM_FEATURE_NP (1u << 0)
 #define SVM_FEATURE_NRIPS (1u << 3)
+#define SVM_FEATURE_FLUSH_BY_ASID (1u << 6)
 
 #define CPUID_80000001_ECX_OSVW (1u << 9)
 #define MSR_MCG_CAP 0x179
@@ -52,6 +53,9 @@
 #define VECTOR_MC 18
 
 bool svm_nrips;
+// TLB_CONTROL can flush the guest's ASID alone (APM 24593 rev. 3.45, Table
+// 15-9), sparing the host's translations.
+static bool flush_by_asid;
 
 // Erratum 383 (Revision Guide for AMD Family 10h Processors 41322 rev.
 // 3.92): page size changes under nested paging can leave duplicate TLB
@@ -111,11 +115,12 @@ bool svm_supported(void) {
         return false;
     }
     svm_nrips = (features & SVM_FEATURE_NRIPS) != 0;
+    flush_by_asid = (features & SVM_FEATURE_FLUSH_BY_ASID) != 0;
     return true;
 }
 
 void svm_flush_guest_tlb(struct vcpu *v) {
-    v->vmcb->control.tlb_control = 1;
+    v->vmcb->control.tlb_control = flush_by_asid ? 3 : 1;
 }
 
 bool svm_huge_pages(void) {
