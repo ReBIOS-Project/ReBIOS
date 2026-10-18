@@ -72,21 +72,15 @@ scope of this README.
 
 ### Firmware Settings
 
-ReBIOS is designed to be as drop-in as possible, but these settings, which most firmware exposes and often enables by default, must
-be enabled:
+ReBIOS is designed to be as drop-in as possible, but these settings, which most modern firmware that ReBIOS targets exposes,
+and often enables by default, must be enabled:
 
-1. **Virtualisation Technology** (Intel VT-x/VMX, AMD SVM)
-2. **IOMMU** (Intel VT-d, AMD IOMMU)
+1. **Virtualisation Technology** (Intel VT-x/VMX, AMD-V/SVM)
+2. **IOMMU** (Intel VT-d, AMD-Vi)
 
 Unlike with CSMWrap, there is no need to disable **X2APIC**: the legacy OS gets an xAPIC of its own, whatever mode the hardware's
-is in.
-
-ReBIOS moves 64-bit PCI memory below 4 GiB and shrinks Resizable BARs, so these settings should be fine either way, but are worth
-trying to disable if things still do not work (ideally this should *not* be necessary, please report an issue if you need this on
-your hardware!):
-
-1. **Above 4G Decoding**
-2. **Resizable BAR/Smart Access Memory**
+is in. There is also no need to disable **Above 4G Decoding** and there *should* be no need to disable **Resizable BAR** (please
+report an issue if your configuration only works with **Resizable BAR** disabled!).
 
 ### Video Card Considerations
 

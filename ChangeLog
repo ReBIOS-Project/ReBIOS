@@ -12,7 +12,7 @@
           resources, gets their events and notifications, the embedded
           controller's included, and powers off. Windows 98 installs and runs
           in ACPI mode, and the memory the firmware keeps for its AML no longer
-          breaks up the OS's: MS-DOS on OVMF saw only 7 MiB of XMS.
+          breaks up the OS's.
         - The ReBIOS USB stick: `make usb` builds an image for a USB stick that
           runs ReBIOS and boots the computer's other drives, which then need no
           FAT partition for ReBIOS. Releases ship it as `rebios-usb.img`.
