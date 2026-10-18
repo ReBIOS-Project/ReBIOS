@@ -3,7 +3,7 @@
 /.deps-obtained
 /boot
 /freestanding-c-hdrs
-/cc-runtime
+/freestanding-lgrt
 /picoefi
 /nanoprintf
 /uACPI

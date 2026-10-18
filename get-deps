@@ -60,17 +60,17 @@ rm -f .deps-obtained
 clone_repo_commit \
     https://github.com/osdev0/freestanding-c-hdrs.git \
     freestanding-c-hdrs \
-    38fed4e1e3365733ddbfa03b0a28936243ad31e9
+    5b4a649b38e1d27f2b7470f593d58e907438aca5
 
 clone_repo_commit \
-    https://github.com/osdev0/cc-runtime.git \
-    cc-runtime \
-    9891629daf3703d0ddecd295772df7da82ab25b9
+    https://github.com/osdev0/freestanding-lgrt.git \
+    freestanding-lgrt \
+    a6e79759589f9905ec08c5fdc7f10f34f668d145
 
 clone_repo_commit \
     https://github.com/PicoEFI/PicoEFI.git \
     picoefi \
-    3dd1020bfc28451be0bc56ce4594889358284597
+    0515ccde7a3ac9c52e32c9c21c924a8d50d3261e
 
 clone_repo_commit \
     https://github.com/charlesnicholson/nanoprintf.git \

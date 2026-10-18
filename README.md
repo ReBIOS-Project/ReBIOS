@@ -311,5 +311,5 @@ ReBIOS builds in software of others, under their own licenses:
 - [PicoEFI](https://github.com/PicoEFI/PicoEFI) and [freestanding-c-hdrs](https://github.com/osdev0/freestanding-c-hdrs), by
   Mintsuki and contributors, under the 0BSD license.
 - [nanoprintf](https://github.com/charlesnicholson/nanoprintf), by Charles Nicholson, under the Unlicense or the 0BSD license.
-- [cc-runtime](https://github.com/osdev0/cc-runtime), from LLVM's compiler-rt, under the Apache License 2.0 with LLVM
-  exceptions.
+- [freestanding-lgrt](https://github.com/osdev0/freestanding-lgrt), from LLVM's compiler-rt, under the Apache License 2.0
+  with LLVM exceptions.
