@@ -383,6 +383,30 @@ obj/%.asm.o: %.asm GNUmakefile obj/NASMFLAGS
 	mkdir -p "$(dir $@)"
 	nasm $(NASMFLAGS) -MD $(@:.o=.d) -MP $< -o $@
 
+# The USB stick's boot sector, outside the executable.
+obj/usb/mbr.bin: usb/mbr.S GNUmakefile obj/CC obj/OBJCOPY
+	mkdir -p "$(dir $@)"
+	$(CC) -c -x assembler-with-cpp $< -o $(@:.bin=.o)
+	$(OBJCOPY) -O binary -j .text $(@:.bin=.o) $@
+
+# An image for a USB stick that runs ReBIOS: 8 MiB, its FAT16 partition from
+# 1 MiB holding ReBIOS as the removable media boot file, and the stick's
+# configuration.
+.PHONY: usb
+usb:
+	$(MAKE) all
+	$(MAKE) bin/$(OUTPUT)-usb.img
+
+bin/$(OUTPUT)-usb.img: GNUmakefile obj/usb/mbr.bin usb/rebios.ini bin/$(OUTPUT).efi
+	rm -f $@.tmp
+	dd if=/dev/zero of=$@.tmp bs=1048576 count=8
+	dd if=obj/usb/mbr.bin of=$@.tmp conv=notrunc
+	mformat -i $@.tmp@@1M -T 14336 -h 255 -s 63 -H 2048 -c 1 -N 52424f53 -v REBIOS ::
+	mmd -i $@.tmp@@1M ::/EFI ::/EFI/BOOT
+	mcopy -m -i $@.tmp@@1M bin/$(OUTPUT).efi ::/EFI/BOOT/BOOTX64.EFI
+	mcopy -m -i $@.tmp@@1M usb/rebios.ini ::/EFI/BOOT/rebios.ini
+	mv $@.tmp $@
+
 # Rules to download the UEFI firmware for testing.
 .INTERMEDIATE: edk2-ovmf-bins.tar.gz
 edk2-ovmf-bins.tar.gz:
