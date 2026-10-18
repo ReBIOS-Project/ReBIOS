@@ -163,6 +163,10 @@ bin/$(OUTPUT): GNUmakefile obj/CC obj/CFLAGS obj/LDFLAGS vgabios.lds $(OBJ)
 	mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) $(LDFLAGS) $(OBJ) -o $@
 
+# The compiler may emit calls to the memory functions that LTO does not
+# account for, so never build them with LTO.
+obj/src/memory.c.o: override CFLAGS += -fno-lto
+
 # Compilation rules for *.c files.
 obj/%.c.o: %.c GNUmakefile obj/CC obj/CFLAGS obj/CPPFLAGS
 	mkdir -p "$(dir $@)"
