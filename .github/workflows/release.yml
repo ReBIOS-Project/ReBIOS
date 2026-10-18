@@ -74,7 +74,7 @@ jobs:
 
     steps:
       - name: Install dependencies
-        run: pacman --noconfirm -Syu && pacman --needed --noconfirm -S base-devel git nodejs python gzip xz
+        run: pacman --noconfirm -Syu && pacman --needed --noconfirm -S base-devel git nodejs python gzip xz mtools
 
       - name: Checkout code
         uses: actions/checkout@v7
@@ -88,9 +88,9 @@ jobs:
       - name: Package source release tarballs
         run: make dist
 
-      # The binary is built from the tarball, so that it is what the tarball
-      # builds.
-      - name: Build ReBIOS from the source release tarball
+      # The binary and the USB stick image are built from the tarball, so
+      # that they are what the tarball builds.
+      - name: Build ReBIOS and its USB stick image from the source release tarball
         env:
           TAG_NAME: ${{ needs.validate.outputs.tag }}
         run: |
@@ -98,8 +98,8 @@ jobs:
           VERSION="${TAG_NAME#v}"
           mkdir build
           tar -xf "rebios-$VERSION.tar.xz" -C build
-          make -C "build/rebios-$VERSION" -j"$(nproc)"
-          cp "build/rebios-$VERSION/bin/rebios.efi" ./
+          make -C "build/rebios-$VERSION" -j"$(nproc)" usb
+          cp "build/rebios-$VERSION/bin/rebios.efi" "build/rebios-$VERSION/bin/rebios-usb.img" ./
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v7
@@ -109,6 +109,7 @@ jobs:
           path: |
             rebios-*.tar.*
             rebios.efi
+            rebios-usb.img
 
   release:
     name: Upload release artifacts
@@ -137,6 +138,10 @@ jobs:
           `rebios.efi` is ReBIOS, built from this release's source tarball. Copy it to a FAT-formatted partition as
           `/EFI/BOOT/BOOTX64.EFI`, as the [README](@REPO_URL@/blob/@TAG@/README.md) explains.
 
+          `rebios-usb.img` is an image for a USB stick that runs ReBIOS, built from the same tarball. Write it to a
+          stick, raw, and boot the stick in UEFI mode: ReBIOS then boots the computer's other drives, which need no
+          changes for it. The README explains this too.
+
           To build ReBIOS from source, use one of the source tarballs uploaded with this release, `rebios-@VERSION@.tar.gz` or
           `rebios-@VERSION@.tar.xz`, which come with ReBIOS's dependencies, or build from a Git checkout of the `@TAG@` tag,
           running `./get-deps` first. The "Source code" zip and tarball GitHub generates for every
@@ -152,5 +157,6 @@ jobs:
           files: |
             dist/rebios-*.tar.*
             dist/rebios.efi
+            dist/rebios-usb.img
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
