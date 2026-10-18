@@ -118,6 +118,7 @@ printf '\x07\x00\x00\x00%s' "$(cat rebios.ini)" > /sys/firmware/efi/efivars/ReBI
 | `serial_port` | hex/int | `0x3f8` | Serial I/O port address (COM1=`0x3f8`, COM2=`0x2f8`, COM3=`0x3e8`, COM4=`0x2e8`) |
 | `serial_baud` | int | `115200` | Serial baud rate |
 | `verbose` | bool | `false` | Show debug output on screen while ReBIOS starts |
+| `boot_drive` | `self`/`auto`/drive | `self` | The drive SeaBIOS boots first, the others following in the `auto` order. `self`: the drive ReBIOS was started from, if it has a legacy boot sector. `auto`: drives with something to boot (a legacy boot sector, or a bootable CD or DVD) before those without, internal drives before CDs and DVDs before external (USB) drives, and the drive ReBIOS was started from last. Anything else names a drive by its UEFI device path (e.g. `PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x1,0xFFFF,0x0)`), or else by part of its model name (e.g. `Samsung SSD 860`), case aside, as ReBIOS lists them when `verbose` is on |
 | `vgabios` | string | *(empty)* | Path to a custom VBIOS file on the partition ReBIOS was started from (e.g. `\EFI\ReBIOS\vgabios.bin`). When empty, the card's built-in OpROM is used, and, failing that, the emulated VGA. If vgabios is set to `cbfs`, vgabios.bin is loaded from coreboot's CBFS. If you set it to `cbfs:filename` you can use a custom CBFS filename |
 | `vga` | PCI address | *(empty)* | PCI address of the VGA card to use (e.g. `00:02.0`). Format: `BB:DD.F` (hex). When empty, the card the firmware displays on is preferred |
 | `vga_emulation` | `auto`/`always`/`never` | `auto` | When to emulate a VGA: when the card has no usable Video BIOS, always (even if it has one), or never (a card without a usable Video BIOS then gets none) |
@@ -145,6 +146,9 @@ vgabios = \EFI\ReBIOS\vgabios.bin
 ; Show the emulated VGA as a 4:3 monitor would, and hide APIC IDs 4 through 6 from the OS.
 vga_scaling = aspect
 cpu_blocklist = 4-6
+
+; Boot the drive whose model name has "WDC WD5000" in it first.
+boot_drive = WDC WD5000
 ```
 
 ## Frequently Asked Questions
