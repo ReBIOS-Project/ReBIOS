@@ -252,6 +252,16 @@ void event_hold(struct vcpu *v) {
     interrupt_window(v, WINDOW_OFF);
 }
 
+// The windows for what is pending, once the guest has taken what goes first.
+static void windows_after(struct vcpu *v) {
+    if (virt_vmx && (v->nmi_pending || v->cpu->nmi_pending)) {
+        set_proc_control(PROC_NMI_WINDOW_EXITING, true);
+    }
+    if (interrupt_pending(v)) {
+        interrupt_window(v, WINDOW_ANY);
+    }
+}
+
 void event_entry(struct vcpu *v) {
     if (v->injecting) {
         // What the exit's handler injected comes first: only exits that
@@ -261,18 +271,13 @@ void event_entry(struct vcpu *v) {
         }
         v->redeliver = 0;
         v->injecting = false;
+        windows_after(v);
         return;
     }
     if (v->redeliver & EVENT_VALID) {
         inject(v, v->redeliver, v->redeliver_error);
         v->redeliver = 0;
-        // What else is pending follows once the guest takes this.
-        if (virt_vmx && (v->nmi_pending || v->cpu->nmi_pending)) {
-            set_proc_control(PROC_NMI_WINDOW_EXITING, true);
-        }
-        if (interrupt_pending(v)) {
-            interrupt_window(v, WINDOW_ANY);
-        }
+        windows_after(v);
         return;
     }
     if (deliver_nmi(v)) {
