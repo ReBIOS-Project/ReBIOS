@@ -17,6 +17,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <memory.h>
 #include <hw/power.h>
 #include <lib/log.h>
 #include <sys/cpu.h>
@@ -60,7 +61,7 @@ void vmx_exit_entry(void);
 extern const uint8_t vmx_enter_restart[];
 extern const uint8_t vmx_enter_restart_end[];
 
-uint64_t vmx_read(uint32_t field) {
+static uint64_t vmread(uint32_t field) {
     uint64_t value;
     bool ok;
     asm volatile ("vmread %2, %0\n\t"
@@ -74,7 +75,7 @@ uint64_t vmx_read(uint32_t field) {
     return value;
 }
 
-void vmx_write(uint32_t field, uint64_t value) {
+static void vmwrite(uint32_t field, uint64_t value) {
     bool ok;
     asm volatile ("vmwrite %1, %2\n\t"
                   "seta %0"
@@ -87,6 +88,108 @@ void vmx_write(uint32_t field, uint64_t value) {
         panic("VMWRITE of %#llx to field %#x failed, error %llu\n",
               (unsigned long long)value, field, (unsigned long long)error);
     }
+}
+
+// Fields by width, type, and index (SDM 325462-093 Vol. 3C, Table 27-22);
+// those ReBIOS uses all have an index below 32.
+#define CACHE_SLOTS 512
+#define FIELD_SLOT(field) (((field) >> 13 & 3) << 7 | ((field) >> 10 & 3) << 5 | ((field) >> 1 & 31))
+#define SLOT_FIELD(slot) (((slot) >> 7 & 3) << 13 | ((slot) >> 5 & 3) << 10 | ((slot) & 31) << 1)
+#define FIELD_TYPE_HOST 3
+
+// What the VMCS holds, as far as known, and what is still to be written to it:
+// under nested virtualisation every VMREAD and VMWRITE traps, so each field is
+// read at most once an exit, and the writes wait for the entry. The guest state
+// and the exit information are known from the exit on; the controls stay known.
+struct vmcs_cache {
+    uint64_t values[CACHE_SLOTS];
+    uint64_t valid[CACHE_SLOTS / 64];
+    uint64_t dirty[CACHE_SLOTS / 64];
+};
+
+// The host state is the hypervisor's own, written once, and by the entry stub.
+static struct vmcs_cache *cache_for(uint32_t field) {
+    struct vcpu *v = this_cpu()->vcpu;
+    if (v == NULL || (field >> 10 & 3) == FIELD_TYPE_HOST || (field & 1)
+        || (field >> 1 & 0x1ff) >= 32) {
+        return NULL;
+    }
+    return v->vmcs_cache;
+}
+
+uint64_t vmx_read(uint32_t field) {
+    struct vmcs_cache *c = cache_for(field);
+    if (c == NULL) {
+        return vmread(field);
+    }
+    unsigned slot = FIELD_SLOT(field);
+    uint64_t bit = 1ull << (slot % 64);
+    if (!(c->valid[slot / 64] & bit)) {
+        c->values[slot] = vmread(field);
+        c->valid[slot / 64] |= bit;
+    }
+    return c->values[slot];
+}
+
+void vmx_write(uint32_t field, uint64_t value) {
+    struct vmcs_cache *c = cache_for(field);
+    if (c == NULL) {
+        vmwrite(field, value);
+        return;
+    }
+    // VMWRITE ignores what does not fit the field.
+    switch (field >> 13 & 3) {
+        case 0: {
+            value &= 0xffff;
+            break;
+        }
+        case 2: {
+            value &= 0xffffffff;
+            break;
+        }
+        default: {
+            break;
+        }
+    }
+    unsigned slot = FIELD_SLOT(field);
+    uint64_t bit = 1ull << (slot % 64);
+    if ((c->valid[slot / 64] & bit) && c->values[slot] == value) {
+        return;
+    }
+    c->values[slot] = value;
+    c->valid[slot / 64] |= bit;
+    c->dirty[slot / 64] |= bit;
+}
+
+static void cache_flush(struct vmcs_cache *c) {
+    for (unsigned w = 0; w < CACHE_SLOTS / 64; w++) {
+        uint64_t dirty = c->dirty[w];
+        c->dirty[w] = 0;
+        while (dirty != 0) {
+            unsigned slot = w * 64 + (unsigned)__builtin_ctzll(dirty);
+            dirty &= dirty - 1;
+            vmwrite(SLOT_FIELD(slot), c->values[slot]);
+        }
+    }
+}
+
+static void cache_forget(struct vmcs_cache *c, uint32_t field) {
+    unsigned slot = FIELD_SLOT(field);
+    c->valid[slot / 64] &= ~(1ull << (slot % 64));
+}
+
+// A VM exit changes the guest state and the exit information, types 2 and 1:
+// for each width, the lower half of its second word of slots and the upper
+// half of its first. Of the controls, it clears the injected event's valid bit
+// and may set the IA-32e mode guest entry control (SDM 325462-093 Vol. 3C,
+// 30.2).
+static void cache_exited(struct vmcs_cache *c) {
+    for (unsigned w = 0; w < CACHE_SLOTS / 64; w += 2) {
+        c->valid[w] &= 0xffffffffull;
+        c->valid[w + 1] &= ~0xffffffffull;
+    }
+    cache_forget(c, VMCS_ENTRY_INTR_INFO);
+    cache_forget(c, VMCS_ENTRY_CONTROLS);
 }
 
 static bool control_allowed(uint64_t cap, uint32_t bits) {
@@ -279,6 +382,8 @@ uint64_t vmx_cr4_real(uint64_t guest_cr4) {
 void vmx_vcpu_init(struct vcpu *v) {
     struct cpu *cpu = v->cpu;
 
+    v->vmcs_cache = page_alloc((sizeof(struct vmcs_cache) + PAGE_SIZE - 1) / PAGE_SIZE);
+    memset(v->vmcs_cache, 0, sizeof(struct vmcs_cache));
     v->vmcs = page_alloc(1);
     v->vmcs_pa = (uint64_t)(uintptr_t)v->vmcs;
     *(uint32_t *)v->vmcs = (uint32_t)vmx_basic & 0x7fffffff;
@@ -684,18 +789,20 @@ void vmx_run(struct vcpu *v) {
     for (;;) {
         __atomic_store_n(&v->cpu->kicked, false, __ATOMIC_SEQ_CST);
         vcpu_before_entry(v);
+        cache_flush(v->vmcs_cache);
         int result = vmx_enter(&v->gprs, v->vmx_launched);
         if (result == VMX_ENTER_KICKED) {
             event_cancel(v);
             continue;
         }
         if (result == VMX_ENTER_FAILED) {
-            uint64_t error = vmx_read(VMCS_VM_INSTR_ERROR);
+            uint64_t error = vmread(VMCS_VM_INSTR_ERROR);
             printf("VM%s failed, VM-instruction error %llu\n",
                    v->vmx_launched ? "RESUME" : "LAUNCH", (unsigned long long)error);
             vmx_dump_guest();
             panic("Cannot enter the guest\n");
         }
+        cache_exited(v->vmcs_cache);
         v->vmx_launched = true;
         event_exit(v);
         vmx_handle_exit(v);

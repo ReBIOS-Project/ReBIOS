@@ -71,6 +71,7 @@ struct cpu;
 struct mmio_step;
 struct vlapic;
 struct vmcb;
+struct vmcs_cache;
 
 struct vcpu {
     // Must come first: the entry stubs address it from the struct's start.
@@ -82,6 +83,7 @@ struct vcpu {
     void *vmcs;
     uint64_t vmcs_pa;
     bool vmx_launched;
+    struct vmcs_cache *vmcs_cache;
 
     // SVM.
     struct vmcb *vmcb;
