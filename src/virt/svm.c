@@ -37,7 +37,59 @@
 #define SVM_FEATURE_NP (1u << 0)
 #define SVM_FEATURE_NRIPS (1u << 3)
 
+#define CPUID_80000001_ECX_OSVW (1u << 9)
+#define MSR_MCG_CAP 0x179
+#define MSR_MCG_STATUS 0x17a
+#define MCG_STATUS_MCIP (1ull << 2)
+#define MSR_MC0_STATUS 0x401
+#define MCI_STATUS_OVER (1ull << 62)
+#define MSR_OSVW_ID_LENGTH 0xc0010140
+#define MSR_OSVW_STATUS 0xc0010141
+#define MSR_DC_CFG 0xc0011022
+#define DC_CFG_ERRATUM_383 (1ull << 47)
+#define OSVW_ERRATUM_383 3
+#define ERRATUM_383_SIGNATURE 0xb600000000010015ull
+#define VECTOR_MC 18
+
 bool svm_nrips;
+
+// Erratum 383 (Revision Guide for AMD Family 10h Processors 41322 rev.
+// 3.92): page size changes under nested paging can leave duplicate TLB
+// entries, which machine-check. The guide has hypervisors set MSRC001_1022
+// bit 47 and catch the machine check, whose signature means the guest's
+// state is lost. OSVW says whether a processor has it; family 12h does too.
+static bool erratum_383;
+
+static bool erratum_383_present(void) {
+    if (cpuid(0x80000001, 0).ecx & CPUID_80000001_ECX_OSVW) {
+        uint64_t length;
+        uint64_t status;
+        if (rdmsr_safe(MSR_OSVW_ID_LENGTH, &length) && length > OSVW_ERRATUM_383
+            && rdmsr_safe(MSR_OSVW_STATUS, &status)) {
+            return (status >> OSVW_ERRATUM_383) & 1;
+        }
+    }
+    struct cpu_signature s = cpu_signature();
+    uint32_t model_stepping = s.model << 4 | s.stepping;
+    return (s.family == 0x10 && model_stepping >= 0x21)
+           || (s.family == 0x12 && model_stepping <= 0x10);
+}
+
+static void svm_machine_check(struct vcpu *v) {
+    uint64_t status;
+    if (rdmsr_safe(MSR_MC0_STATUS, &status)
+        && (status & ~MCI_STATUS_OVER) == ERRATUM_383_SIGNATURE) {
+        uint64_t banks = rdmsr(MSR_MCG_CAP) & 0xff;
+        for (uint64_t i = 0; i < banks; i++) {
+            wrmsr(MSR_MC0_STATUS + 4 * (uint32_t)i, 0);
+        }
+        wrmsr(MSR_MCG_STATUS, rdmsr(MSR_MCG_STATUS) & ~MCG_STATUS_MCIP);
+        printf("AMD erratum 383: a TLB multimatch machine check lost the guest's state\n");
+        power_reset(false);
+    }
+    // As the guest would have taken it without the intercept.
+    vcpu_inject_exception(v, VECTOR_MC, false, 0);
+}
 
 void svm_enter(uint64_t vmcb_pa, struct gprs *gprs);
 
@@ -74,6 +126,14 @@ void svm_cpu_init(void) {
     if (!wrmsr_safe(MSR_VM_CR, rdmsr(MSR_VM_CR) | VM_CR_R_INIT)) {
         printf("Cannot redirect INIT on this processor\n");
     }
+    erratum_383 = erratum_383_present();
+    uint64_t dc_cfg;
+    if (erratum_383 && (!rdmsr_safe(MSR_DC_CFG, &dc_cfg)
+                        || !wrmsr_safe(MSR_DC_CFG, dc_cfg | DC_CFG_ERRATUM_383))) {
+        printf("Cannot work around AMD erratum 383 on this processor\n");
+    } else if (erratum_383 && this_cpu()->bsp) {
+        printf("Working around AMD erratum 383\n");
+    }
 }
 
 void svm_vcpu_init(struct vcpu *v) {
@@ -92,6 +152,9 @@ void svm_vcpu_init(struct vcpu *v) {
                          | SVM_INTERCEPT_SKINIT;
     // The legacy BIOS's VMCALL hypercalls raise #UD here, and INITs #SX.
     c->intercept_exceptions = 1u << 6 | 1u << 30;
+    if (erratum_383) {
+        c->intercept_exceptions |= 1u << VECTOR_MC;
+    }
     c->iopm_base_pa = virt_io_bitmap();
     c->msrpm_base_pa = virt_msr_bitmap();
     c->guest_asid = 1;
@@ -206,6 +269,10 @@ static void svm_handle_exit(struct vcpu *v) {
         }
         case SVM_EXIT_EXCEPTION_BASE + 6: {
             exit_invalid_opcode(v);
+            break;
+        }
+        case SVM_EXIT_EXCEPTION_BASE + VECTOR_MC: {
+            svm_machine_check(v);
             break;
         }
         case SVM_EXIT_EXCEPTION_BASE + 30: {

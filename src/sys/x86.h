@@ -101,6 +101,26 @@ static inline struct cpuid_regs cpuid(uint32_t leaf, uint32_t subleaf) {
     return r;
 }
 
+// CPUID leaf 1's display family, model, and stepping, which both vendors
+// define alike: the extended model counts for base families 6 and 0Fh.
+struct cpu_signature {
+    uint32_t family;
+    uint32_t model;
+    uint32_t stepping;
+};
+
+static inline struct cpu_signature cpu_signature(void) {
+    uint32_t eax = cpuid(1, 0).eax;
+    struct cpu_signature s = {(eax >> 8) & 0xf, (eax >> 4) & 0xf, eax & 0xf};
+    if (s.family == 6 || s.family == 0xf) {
+        s.model |= ((eax >> 16) & 0xf) << 4;
+    }
+    if (s.family == 0xf) {
+        s.family += (eax >> 20) & 0xff;
+    }
+    return s;
+}
+
 static inline uint64_t rdmsr(uint32_t msr) {
     uint32_t lo, hi;
     asm volatile ("rdmsr" : "=a"(lo), "=d"(hi) : "c"(msr) : "memory");
