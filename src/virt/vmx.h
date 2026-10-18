@@ -318,6 +318,10 @@
 #define INTERRUPTIBILITY_SMI (1u << 2)
 #define INTERRUPTIBILITY_NMI (1u << 3)
 
+// Guest pending debug exceptions.
+#define PENDING_DBG_ENABLED (1ull << 12)
+#define PENDING_DBG_BS (1ull << 14)
+
 // Guest activity states.
 #define ACTIVITY_ACTIVE 0
 #define ACTIVITY_HLT 1

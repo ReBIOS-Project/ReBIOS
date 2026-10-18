@@ -216,7 +216,7 @@ static bool interrupt_pending(struct vcpu *v) {
 
 bool event_halt_ends(struct vcpu *v) {
     struct cpu *cpu = v->cpu;
-    if (v->nmi_pending || cpu->nmi_pending || cpu->init_pending) {
+    if (v->nmi_pending || cpu->nmi_pending || cpu->init_pending || v->injecting) {
         return true;
     }
     return (vcpu_rflags(v) & RFLAGS_IF) && interrupt_pending(v);
@@ -277,6 +277,13 @@ void event_entry(struct vcpu *v) {
     if (v->redeliver & EVENT_VALID) {
         inject(v, v->redeliver, v->redeliver_error);
         v->redeliver = 0;
+        windows_after(v);
+        return;
+    }
+    // A debug trap the processor left pending, as a monitor trap flag exit
+    // does, would be lost to an injected event (SDM 325462-093 Vol. 3C,
+    // 29.7.3), and goes before interrupts and their windows.
+    if (virt_vmx && (vmx_read(VMCS_GUEST_PENDING_DBG) & (PENDING_DBG_ENABLED | PENDING_DBG_BS))) {
         windows_after(v);
         return;
     }

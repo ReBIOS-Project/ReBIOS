@@ -148,6 +148,9 @@ static void svm_handle_io(struct vcpu *v) {
     // Reported whether or not next RIP saving is supported.
     v->vmcb->save.rip = v->vmcb->control.exitinfo2;
     v->vmcb->control.interrupt_shadow = 0;
+    if (vcpu_guest_tf(v)) {
+        vcpu_step_trap(v);
+    }
 }
 
 // The single-step trap ends a step, and so does a fault, which goes on to the

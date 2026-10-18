@@ -178,8 +178,13 @@ void vcpu_load_mode(struct vcpu *v, const struct vcpu_mode *mode);
 
 // Advances RIP past the instruction that caused the current exit.
 void vcpu_skip_instruction(struct vcpu *v);
-// Moves past length bytes of instruction, as completing it does.
+// Moves past length bytes of instruction, as completing it does, with the
+// single-step trap the guest's TF asks for.
 void vcpu_advance(struct vcpu *v, unsigned length);
+// Whether the guest single-steps, and its trap after an instruction, or a
+// string instruction's iteration, that the hypervisor carried out for it.
+bool vcpu_guest_tf(struct vcpu *v);
+void vcpu_step_trap(struct vcpu *v);
 void vcpu_inject_exception(struct vcpu *v, uint8_t vector, bool has_error, uint32_t error);
 void vcpu_inject_page_fault(struct vcpu *v, uint64_t linear, uint32_t error);
 

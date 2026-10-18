@@ -412,6 +412,10 @@ void mmio_step_done(struct vcpu *v) {
     v->stepping = false;
     vcpu_single_step(v, false);
     vcpu_resume_others();
+    // SVM's stepping took the trap the guest's own TF asked for.
+    if (completed && !virt_vmx && v->step_tf) {
+        vcpu_step_trap(v);
+    }
 }
 
 bool mmio_fault(struct vcpu *v, uint64_t gpa) {

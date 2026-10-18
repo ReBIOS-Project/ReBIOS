@@ -236,6 +236,8 @@ bool vcpu_can_single_step(void) {
 
 // The faults a stepped instruction may raise, which SVM intercepts so that the
 // step ends there.
+#define DR6_BS (1ull << 14)
+
 #define STEP_EXCEPTIONS (1u << 0 | 1u << 1 | 1u << 7 | 1u << 12 | 1u << 13 | 1u << 14 \
                          | 1u << 16 | 1u << 17 | 1u << 19)
 
@@ -519,6 +521,26 @@ void vcpu_load_mode(struct vcpu *v, const struct vcpu_mode *mode) {
     v->vmcb->control.interrupt_shadow = 0;
 }
 
+bool vcpu_guest_tf(struct vcpu *v) {
+    // SVM's stepping sets TF for itself, keeping the guest's aside.
+    if (!virt_vmx && v->stepping) {
+        return v->step_tf;
+    }
+    return (vcpu_rflags(v) & RFLAGS_TF) != 0;
+}
+
+void vcpu_step_trap(struct vcpu *v) {
+    if (virt_vmx) {
+        // VMX switches DR7 but not DR6, so the processor's is the guest's.
+        uint64_t dr6;
+        asm volatile ("mov %%dr6, %0" : "=r"(dr6));
+        asm volatile ("mov %0, %%dr6" :: "r"(dr6 | DR6_BS));
+    } else {
+        v->vmcb->save.dr6 |= DR6_BS;
+    }
+    vcpu_inject_exception(v, 1, false, 0);
+}
+
 void vcpu_advance(struct vcpu *v, unsigned length) {
     if (virt_vmx) {
         vmx_write(VMCS_GUEST_RIP, vmx_read(VMCS_GUEST_RIP) + length);
@@ -527,10 +549,13 @@ void vcpu_advance(struct vcpu *v, unsigned length) {
             vmx_write(VMCS_GUEST_INTERRUPTIBILITY,
                       intr & ~(uint64_t)(INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS));
         }
-        return;
+    } else {
+        v->vmcb->save.rip += length;
+        v->vmcb->control.interrupt_shadow = 0;
     }
-    v->vmcb->save.rip += length;
-    v->vmcb->control.interrupt_shadow = 0;
+    if (vcpu_guest_tf(v)) {
+        vcpu_step_trap(v);
+    }
 }
 
 void vcpu_skip_instruction(struct vcpu *v) {
