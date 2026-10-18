@@ -135,6 +135,8 @@ jobs:
           set -eu
           VERSION="${TAG_NAME#v}"
           cat >rel_notes.txt <<'EOF'
+          Changelog can be found [here](@REPO_URL@/blob/@TAG@/ChangeLog).
+
           `rebios.efi` is ReBIOS, built from this release's source tarball. Copy it to a FAT-formatted partition as
           `/EFI/BOOT/BOOTX64.EFI`, as the [README](@REPO_URL@/blob/@TAG@/README.md) explains.
 
