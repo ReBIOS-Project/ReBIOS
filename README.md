@@ -262,12 +262,13 @@ people.
 
 ## License
 
-ReBIOS is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or (at your option) any later version. See [LICENSE](LICENSE).
+ReBIOS is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License version 2 as
+published by the Free Software Foundation. See [LICENSE](LICENSE).
 
 ReBIOS builds in software of others, under their own licenses:
 
-- [SeaBIOS](https://www.seabios.org/), under the GNU LGPL, version 3.
+- [SeaBIOS](https://www.seabios.org/), under the GNU LGPL, version 3: a separate program, which ReBIOS carries and runs as the
+  legacy BIOS of the machine it virtualises.
 - [uACPI](https://github.com/uACPI/uACPI), by Daniil Tatianin, under the MIT license.
 - [PicoEFI](https://github.com/PicoEFI/PicoEFI) and [freestanding-c-hdrs](https://github.com/osdev0/freestanding-c-hdrs), by
   Mintsuki and contributors, under the 0BSD license.
