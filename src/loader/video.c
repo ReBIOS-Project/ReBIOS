@@ -552,6 +552,14 @@ static bool try_other_display_devices(const struct pci_io_device *tried,
     return found;
 }
 
+static void record_vga_device(const struct pci_io_device *dev) {
+    struct handoff_video *video = &loader_handoff->video;
+    video->vga_present = 1;
+    video->vga_device = dev->address;
+    video->vga_vendor_id = dev->vendor_id;
+    video->vga_device_id = dev->device_id;
+}
+
 static bool install_vbios(const struct vbios_choice *choice) {
     struct handoff_video *video = &loader_handoff->video;
     const struct pci_io_device *dev = &choice->dev;
@@ -565,11 +573,8 @@ static bool install_vbios(const struct vbios_choice *choice) {
     memcpy((void *)(uintptr_t)copy, choice->image, choice->size);
     memset((uint8_t *)(uintptr_t)copy + choice->size, 0, pages * 4096 - choice->size);
 
-    video->vga_present = 1;
+    record_vga_device(dev);
     video->vbios_present = 1;
-    video->vga_device = dev->address;
-    video->vga_vendor_id = dev->vendor_id;
-    video->vga_device_id = dev->device_id;
     video->vbios.address = dev->address;
     video->vbios.vendor_id = dev->vendor_id;
     video->vbios.device_id = dev->device_id;
@@ -602,18 +607,21 @@ void video_init(void) {
     struct pci_io_device dev;
     struct vbios_choice choice;
     bool found = false;
+    bool have_dev = false;
 
     bool have_user = load_user_vbios(&user);
     const struct user_vbios *user_vbios = have_user ? &user : NULL;
 
     if (config.vga_specified) {
-        if (find_pci_device(config.vga_device, &dev)) {
+        have_dev = find_pci_device(config.vga_device, &dev);
+        if (have_dev) {
             found = try_device(&dev, user_vbios, &choice);
         } else {
             printf("The configured VGA device " PCI_ADDRESS_FMT " does not exist\n",
                    PCI_ADDRESS_ARGS(config.vga_device));
         }
     } else if (gop_handle != NULL && gop_pci_device(gop_handle, &dev)) {
+        have_dev = true;
         found = try_device(&dev, user_vbios, &choice)
                 || try_other_display_devices(&dev, &choice);
     } else if (have_user) {
@@ -625,6 +633,11 @@ void video_init(void) {
 
     if (!found || !install_vbios(&choice)) {
         printf("No usable VBIOS\n");
+        // It keeps its legacy VGA resources, for the emulated VGA to stand in
+        // for.
+        if (have_dev) {
+            record_vga_device(&dev);
+        }
     }
 
     if (user.buffer != NULL) {
