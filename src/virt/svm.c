@@ -131,7 +131,8 @@ static void svm_handle_io(struct vcpu *v) {
     // SZ8, SZ16 and SZ32 are one-hot.
     size = size == 4 ? 4 : size == 2 ? 2 : 1;
     if (string) {
-        panic("String I/O to trapped port %#x is not supported yet\n", port);
+        exit_string_io(v, port);
+        return;
     }
 
     uint32_t value = (uint32_t)v->gprs.rax;

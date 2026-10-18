@@ -642,7 +642,8 @@ static void vmx_handle_io(struct vcpu *v, uint64_t qual) {
     uint16_t port = qual >> 16;
 
     if (string) {
-        panic("String I/O to trapped port %#x is not supported yet\n", port);
+        exit_string_io(v, port);
+        return;
     }
 
     uint32_t value = (uint32_t)v->gprs.rax;

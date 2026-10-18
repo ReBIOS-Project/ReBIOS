@@ -23,10 +23,13 @@
 #include <lib/log.h>
 #include <sys/fixup.h>
 #include <sys/x86.h>
+#include <virt/emulate.h>
 #include <virt/exit.h>
 #include <virt/guest_mem.h>
 #include <virt/hypercall.h>
+#include <virt/insn.h>
 #include <virt/io.h>
+#include <virt/mmio.h>
 #include <virt/mtrr.h>
 #include <virt/profile.h>
 #include <virt/svm.h>
@@ -250,12 +253,43 @@ void exit_xsetbv(struct vcpu *v) {
     vcpu_skip_instruction(v);
 }
 
-void exit_io(struct vcpu *v, uint16_t port, unsigned size, bool in, uint32_t *value) {
-    profile_io(port);
+static void port_access(struct vcpu *v, uint16_t port, unsigned size, bool in, uint32_t *value) {
     if (!io_dispatch(v, port, size, in, value)) {
         printf("Unexpected trapped I/O to port %#x\n", port);
         if (in) {
             *value = 0xffffffff;
         }
+    }
+}
+
+void exit_io(struct vcpu *v, uint16_t port, unsigned size, bool in, uint32_t *value) {
+    profile_io(port);
+    port_access(v, port, size, in, value);
+}
+
+static bool string_ins(struct vcpu *v, uint64_t linear, uint16_t port, unsigned size,
+                       uint32_t *value) {
+    (void)linear;
+    port_access(v, port, size, true, value);
+    return true;
+}
+
+static void string_outs(struct vcpu *v, uint16_t port, unsigned size, uint32_t value) {
+    port_access(v, port, size, false, &value);
+}
+
+static const struct emulate_mem string_mem = {mmio_read_linear, mmio_write_linear, string_ins,
+                                              string_outs};
+
+void exit_string_io(struct vcpu *v, uint16_t port) {
+    profile_io(port);
+    struct insn insn;
+    if (!insn_decode(v, &insn)) {
+        panic("Cannot decode the instruction at %#llx that reached trapped port %#x\n",
+              (unsigned long long)vcpu_rip(v), port);
+    }
+    // Another processor may have changed it since: it then runs again.
+    if (insn.opcode >= 0x6c && insn.opcode <= 0x6f) {
+        emulate(v, &insn, &string_mem);
     }
 }

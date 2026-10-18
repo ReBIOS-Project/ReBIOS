@@ -37,6 +37,12 @@ struct mmio_ops {
 // Emulates a page-aligned region, for every vCPU.
 void mmio_register(uint64_t base, uint64_t size, const struct mmio_ops *ops, void *ctx);
 
+// Guest memory at a linear address as the guest's instructions reach it: RAM,
+// emulated regions, or nothing. Accesses are of at most 8 bytes; they return
+// false where the access faulted, having raised the fault.
+bool mmio_read_linear(struct vcpu *v, uint64_t linear, void *buf, unsigned size);
+bool mmio_write_linear(struct vcpu *v, uint64_t linear, const void *buf, unsigned size);
+
 // An EPT violation or a nested page fault at gpa, for an access other than a
 // fetch: emulates the instruction that made it. Returns false if gpa is not in
 // a region.

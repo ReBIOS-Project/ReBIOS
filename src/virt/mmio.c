@@ -166,11 +166,11 @@ static bool access(struct vcpu *v, uint64_t linear, void *buf, unsigned size, bo
     return true;
 }
 
-static bool mem_read(struct vcpu *v, uint64_t linear, void *buf, unsigned size) {
+bool mmio_read_linear(struct vcpu *v, uint64_t linear, void *buf, unsigned size) {
     return access(v, linear, buf, size, false);
 }
 
-static bool mem_write(struct vcpu *v, uint64_t linear, const void *buf, unsigned size) {
+bool mmio_write_linear(struct vcpu *v, uint64_t linear, const void *buf, unsigned size) {
     return access(v, linear, (void *)buf, size, true);
 }
 
@@ -211,7 +211,8 @@ static void mem_outs(struct vcpu *v, uint16_t port, unsigned size, uint32_t valu
     }
 }
 
-static const struct emulate_mem guest_mem = {mem_read, mem_write, mem_ins, mem_outs};
+static const struct emulate_mem guest_mem = {mmio_read_linear, mmio_write_linear, mem_ins,
+                                             mem_outs};
 
 // The pages a single-stepped instruction runs against, and of them the bytes
 // the SDM and APM say it reads or writes: those are what their regions read
