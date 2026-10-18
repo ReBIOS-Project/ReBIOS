@@ -65,7 +65,8 @@ override CC_HAS_COMPILE_FLAG = $(shell LC_ALL=C $(CC) $(CFLAGS) $(1) -c -x c /de
 # in 32 KiB, whatever optimisation level is asked for. It reads its own data
 # through FS, so it has neither jump tables nor tables of switch values, which
 # it would read through DS, and no calls for loops to library functions it
-# does not have.
+# does not have. It keeps to the 386's instructions, as software emulators run
+# video BIOSes too, Windows' on x86-64 among them.
 override CFLAGS += \
     -Os \
     -Wall \
@@ -82,7 +83,7 @@ override CFLAGS += \
     -ffunction-sections \
     -fdata-sections \
     -m16 \
-    -march=i686 \
+    -march=i386 \
     -mregparm=3 \
     -mno-mmx
 
