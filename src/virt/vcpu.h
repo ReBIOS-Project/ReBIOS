@@ -89,6 +89,8 @@ struct vcpu {
     // SVM.
     struct vmcb *vmcb;
     uint64_t vmcb_pa;
+    // The VMCB as the last exit left it, for its clean bits.
+    uint8_t *vmcb_seen;
     // The gpt_generation the vCPU's TLB is current with.
     uint64_t gpt_generation;
 

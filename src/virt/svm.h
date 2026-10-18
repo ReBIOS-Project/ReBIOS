@@ -56,7 +56,11 @@ struct vmcb_control {
     uint64_t nrip;
     uint8_t insn_len;
     uint8_t insn_bytes[15];
-    uint8_t reserved3[0x400 - 0xe0];
+    uint64_t avic_backing_page;
+    uint64_t reserved3;
+    uint64_t avic_logical_table;
+    uint64_t avic_physical_table;
+    uint8_t reserved4[0x400 - 0x100];
 } __attribute__((packed));
 
 struct vmcb_seg {
@@ -126,6 +130,8 @@ _Static_assert(offsetof(struct vmcb_control, n_cr3) == 0xb0, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_control, vmcb_clean) == 0xc0, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_control, nrip) == 0xc8, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_control, insn_len) == 0xd0, "VMCB layout");
+_Static_assert(offsetof(struct vmcb_control, avic_backing_page) == 0xe0, "VMCB layout");
+_Static_assert(offsetof(struct vmcb_control, avic_physical_table) == 0xf8, "VMCB layout");
 _Static_assert(sizeof(struct vmcb_control) == 0x400, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_save, tr) == 0x90, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_save, cpl) == 0xcb, "VMCB layout");

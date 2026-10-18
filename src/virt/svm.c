@@ -16,7 +16,9 @@
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
 #include <stdint.h>
+#include <stddef.h>
 #include <stdbool.h>
+#include <memory.h>
 #include <hw/power.h>
 #include <lib/log.h>
 #include <sys/cpu.h>
@@ -36,6 +38,7 @@
 
 #define SVM_FEATURE_NP (1u << 0)
 #define SVM_FEATURE_NRIPS (1u << 3)
+#define SVM_FEATURE_VMCB_CLEAN (1u << 5)
 #define SVM_FEATURE_FLUSH_BY_ASID (1u << 6)
 
 #define CPUID_80000001_ECX_OSVW (1u << 9)
@@ -56,6 +59,53 @@ bool svm_nrips;
 // TLB_CONTROL can flush the guest's ASID alone (APM 24593 rev. 3.45, Table
 // 15-9), sparing the host's translations.
 static bool flush_by_asid;
+static bool vmcb_clean_bits;
+
+#define CLEAN_I (1u << 0)
+#define CLEAN_IOPM (1u << 1)
+#define CLEAN_ASID (1u << 2)
+#define CLEAN_NP (1u << 4)
+#define CLEAN_CRX (1u << 5)
+#define CLEAN_DRX (1u << 6)
+#define CLEAN_DT (1u << 7)
+#define CLEAN_SEG (1u << 8)
+#define CLEAN_LBR (1u << 10)
+#define CLEAN_AVIC (1u << 11)
+
+#define VMCB_AT(field) offsetof(struct vmcb, field)
+
+// The state each VMCB clean bit covers (APM 24593 rev. 3.45, 15.15.3), as
+// ranges of the VMCB, each group clean where the hypervisor left all of it as
+// the last exit did. The TPR and CR2 groups, which entries often change, are
+// always reloaded, as Linux 7.3's KVM does, and so is the CET group.
+static const struct {
+    uint16_t offset;
+    uint16_t size;
+    uint32_t bit;
+} clean_ranges[] = {
+    {VMCB_AT(control.intercept_cr), 0x18, CLEAN_I},
+    {VMCB_AT(control.pause_filter_threshold), 4, CLEAN_I},
+    {VMCB_AT(control.tsc_offset), 8, CLEAN_I},
+    {VMCB_AT(control.iopm_base_pa), 16, CLEAN_IOPM},
+    {VMCB_AT(control.guest_asid), 4, CLEAN_ASID},
+    {VMCB_AT(control.np_enable), 8, CLEAN_NP},
+    {VMCB_AT(control.n_cr3), 8, CLEAN_NP},
+    {VMCB_AT(save.g_pat), 8, CLEAN_NP},
+    {VMCB_AT(save.efer), 8, CLEAN_CRX},
+    {VMCB_AT(save.cr4), 24, CLEAN_CRX},
+    {VMCB_AT(save.dr7), 16, CLEAN_DRX},
+    {VMCB_AT(save.gdtr), 16, CLEAN_DT},
+    {VMCB_AT(save.idtr), 16, CLEAN_DT},
+    {VMCB_AT(save.es), 64, CLEAN_SEG},
+    {VMCB_AT(save.cpl), 1, CLEAN_SEG},
+    {VMCB_AT(save.dbgctl), 40, CLEAN_LBR},
+    {VMCB_AT(control.avic_apic_bar), 8, CLEAN_AVIC},
+    {VMCB_AT(control.avic_backing_page), 8, CLEAN_AVIC},
+    {VMCB_AT(control.avic_logical_table), 16, CLEAN_AVIC},
+};
+
+#define CLEAN_TRACKED (CLEAN_I | CLEAN_IOPM | CLEAN_ASID | CLEAN_NP | CLEAN_CRX | CLEAN_DRX \
+                       | CLEAN_DT | CLEAN_SEG | CLEAN_LBR | CLEAN_AVIC)
 
 // Erratum 383 (Revision Guide for AMD Family 10h Processors 41322 rev.
 // 3.92): page size changes under nested paging can leave duplicate TLB
@@ -116,6 +166,7 @@ bool svm_supported(void) {
     }
     svm_nrips = (features & SVM_FEATURE_NRIPS) != 0;
     flush_by_asid = (features & SVM_FEATURE_FLUSH_BY_ASID) != 0;
+    vmcb_clean_bits = (features & SVM_FEATURE_VMCB_CLEAN) != 0;
     return true;
 }
 
@@ -352,11 +403,46 @@ static void svm_handle_exit(struct vcpu *v) {
     }
 }
 
+// The groups the hypervisor did not change since the last exit, which the
+// processor may then keep from it; none before the first.
+static void clean_before_entry(struct vcpu *v) {
+    struct vmcb_control *c = &v->vmcb->control;
+    if (v->vmcb_seen == NULL) {
+        c->vmcb_clean = 0;
+        return;
+    }
+    const uint8_t *now = (const uint8_t *)v->vmcb;
+    uint32_t clean = CLEAN_TRACKED;
+    for (unsigned i = 0; i < sizeof(clean_ranges) / sizeof(clean_ranges[0]); i++) {
+        uint16_t at = clean_ranges[i].offset;
+        if (memcmp(now + at, v->vmcb_seen + at, clean_ranges[i].size) != 0) {
+            clean &= ~clean_ranges[i].bit;
+        }
+    }
+    c->vmcb_clean = clean;
+}
+
+static void clean_after_exit(struct vcpu *v) {
+    if (!vmcb_clean_bits) {
+        return;
+    }
+    if (v->vmcb_seen == NULL) {
+        v->vmcb_seen = page_alloc(1);
+    }
+    const uint8_t *now = (const uint8_t *)v->vmcb;
+    for (unsigned i = 0; i < sizeof(clean_ranges) / sizeof(clean_ranges[0]); i++) {
+        uint16_t at = clean_ranges[i].offset;
+        memcpy(v->vmcb_seen + at, now + at, clean_ranges[i].size);
+    }
+}
+
 void svm_run(struct vcpu *v) {
     for (;;) {
         vcpu_before_entry(v);
         v->vmcb->save.rax = v->gprs.rax;
+        clean_before_entry(v);
         svm_enter(v->vmcb_pa, &v->gprs);
+        clean_after_exit(v);
         v->gprs.rax = v->vmcb->save.rax;
         v->vmcb->control.tlb_control = 0;
         // What it cut short comes back in EXITINTINFO.
