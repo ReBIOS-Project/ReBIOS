@@ -298,6 +298,23 @@ static uint32_t far_pointer(uint16_t offset) {
     return (uint32_t)code_segment() << 16 | offset;
 }
 
+// The mode numbers the Reserved area of a VbeInfoBlock holds, after the fields
+// and before the terminator.
+#define MODE_LIST_MAX 110
+
+// Lists the modes that fit, of the uncommon depths or of the others, after the
+// count already at segment:list.
+static unsigned list_modes(uint16_t segment, uint16_t list, unsigned count, bool uncommon) {
+    for (unsigned i = 0; i < MODE_COUNT && count < MODE_LIST_MAX; i++) {
+        struct mode m;
+        if (mode_find(mode_numbers[i], &m) && (m.bpp == 15 || m.bpp == 24) == uncommon) {
+            pokew(segment, (uint16_t)(list + 2 * count), mode_numbers[i]);
+            count++;
+        }
+    }
+    return count;
+}
+
 static void controller_info(struct vgabios_regs *r) {
     bool vbe2 = peekw(r->es, r->di) == ('V' | 'B' << 8)
                 && peekw(r->es, (uint16_t)(r->di + 2)) == ('E' | '2' << 8);
@@ -311,7 +328,6 @@ static void controller_info(struct vgabios_regs *r) {
     b.oem_string = far_pointer((uint16_t)(uintptr_t)oem_string);
     // The DAC can take 8 bits per primary.
     b.capabilities = 0x00000001;
-    b.mode_list = far_pointer((uint16_t)(uintptr_t)mode_numbers);
     b.total_memory = dispi_read(DISPI_VIDEO_MEMORY_64K);
     if (vbe2) {
         b.vendor_name = far_pointer((uint16_t)(uintptr_t)vendor_name);
@@ -319,6 +335,14 @@ static void controller_info(struct vgabios_regs *r) {
         b.product_revision = far_pointer((uint16_t)(uintptr_t)product_revision);
     }
     far_fill8(r->es, r->di, 0, vbe2 ? 512 : 256);
+    // The mode list goes in the block, as some callers see nothing else of
+    // real-mode memory: Windows on x86-64, through its emulator. Should more
+    // modes fit than the block holds, 15 and 24 bpp ones are left out first.
+    uint16_t list = (uint16_t)(r->di + sizeof(b));
+    unsigned count = list_modes(r->es, list, 0, false);
+    count = list_modes(r->es, list, count, true);
+    pokew(r->es, (uint16_t)(list + 2 * count), 0xffff);
+    b.mode_list = (uint32_t)r->es << 16 | list;
     far_copy(r->es, r->di, stack_segment(), (uint16_t)(uintptr_t)&b, sizeof(b));
     r->ax = STATUS_SUCCESS;
 }
