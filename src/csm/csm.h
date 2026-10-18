@@ -78,6 +78,10 @@ struct csm_compat16_table {
     // Another extension: when it holds the value that identifies a
     // hypervisor's hypercall interface, the CSM16 may use that interface.
     uint32_t hypervisor_interface;
+    // And another: the address of a boot order list in the format of
+    // SeaBIOS's bootorder file, which the CSM16 then follows instead of the
+    // BBS table's priorities, or 0.
+    uint32_t boot_order_pointer;
 } __attribute__((packed));
 
 // The size of the specification's table, without SeaBIOS's extension.
@@ -103,7 +107,9 @@ _Static_assert(offsetof(struct csm_compat16_table, extra_pci_root_list_count) ==
                "CSM16 table layout");
 _Static_assert(offsetof(struct csm_compat16_table, hypervisor_interface) == 104,
                "CSM16 table layout");
-_Static_assert(sizeof(struct csm_compat16_table) == 108, "CSM16 table layout");
+_Static_assert(offsetof(struct csm_compat16_table, boot_order_pointer) == 108,
+               "CSM16 table layout");
+_Static_assert(sizeof(struct csm_compat16_table) == 112, "CSM16 table layout");
 
 // EFI_COMPATIBILITY_FUNCTIONS, which the CSM16 takes in AX.
 #define CSM_COMPAT16_INITIALIZE_YOURSELF 0x0000

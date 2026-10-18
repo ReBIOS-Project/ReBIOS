@@ -70,6 +70,7 @@ extern const uint8_t csm_thunk_end[];
 #define LEGACY_TABLE_SIZE 0x1000
 #define EXTRA_PCI_ROOT_LIST 0xf000
 #define EXTRA_PCI_ROOTS_MAX 255
+#define BOOT_ORDER 0xf100
 #define TABLES_END 0x10000
 #define LOW_PMM_BASE 0x10000
 #define LOW_PMM_SIZE 0x80000
@@ -441,6 +442,30 @@ static void pci_interrupts(void) {
     }
 }
 
+// The CSM16 copies the list while it initialises. A list too long for the
+// tables loses its last lines.
+static void boot_order(void) {
+    const char *list = core_handoff->boot_order;
+    size_t room = TABLES_END - BOOT_ORDER - 1;
+    size_t length = 0;
+    while (length < HANDOFF_MAX_BOOT_ORDER && list[length] != 0) {
+        length++;
+    }
+    if (length == 0) {
+        return;
+    }
+    if (length > room) {
+        length = room;
+        while (length > 0 && list[length] != '\n') {
+            length--;
+        }
+    }
+    char *to = layout_low(BOOT_ORDER);
+    memcpy(to, list, length);
+    to[length] = 0;
+    csm.compat16->boot_order_pointer = BOOT_ORDER;
+}
+
 // The CSM16 scans the hierarchy of bus 0 itself, and the other root buses of
 // segment 0 only from this list, while it initialises.
 static void extra_pci_roots(void) {
@@ -518,11 +543,16 @@ void csm_boot_start(struct vcpu *v) {
         uint64_t bus0 = plan->ecam - ((uint64_t)plan->ecam_start << 20);
         csm.compat16->pci_express_base = (uint32_t)bus0;
     }
-    if (csm.compat16->table_length >= sizeof(struct csm_compat16_table)) {
+    if (csm.compat16->table_length >= offsetof(struct csm_compat16_table, boot_order_pointer)) {
         csm.compat16->hypervisor_interface = HYPERCALL_INTERFACE;
         extra_pci_roots();
     } else {
         printf("The legacy BIOS predates the hypervisor's interface\n");
+    }
+    if (csm.compat16->table_length >= sizeof(struct csm_compat16_table)) {
+        boot_order();
+    } else {
+        printf("The legacy BIOS takes no boot order, ordering by controller\n");
     }
     if (acpi && !csm_copy_rsdp(layout_low(csm.image_base), csm.image_base, image_size,
                                csm.compat16, rsdp)) {
