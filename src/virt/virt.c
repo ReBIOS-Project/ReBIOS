@@ -17,6 +17,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <memory.h>
 #include <hw/lapic.h>
 #include <hw/power.h>
 #include <lib/heap.h>
@@ -44,6 +45,9 @@ bool virt_vmx;
 
 static uint8_t *io_bitmap;
 static uint8_t *msr_bitmap;
+// VMX's for vCPUs whose x2APIC the processor virtualises: the same but for
+// the accesses to x2APIC registers it passes.
+static uint8_t *msr_bitmap_x2apic;
 
 bool vmx_ept_huge_pages(void);
 bool vmx_monitor_trap_supported(void);
@@ -111,6 +115,10 @@ uint64_t virt_msr_bitmap(void) {
     return (uint64_t)(uintptr_t)msr_bitmap;
 }
 
+uint64_t virt_msr_bitmap_x2apic(void) {
+    return (uint64_t)(uintptr_t)msr_bitmap_x2apic;
+}
+
 void virt_intercept_io(uint16_t port, unsigned count, bool intercept) {
     for (unsigned i = 0; i < count; i++) {
         unsigned p = port + i;
@@ -130,21 +138,28 @@ static void bitmap_set(uint8_t *bitmap, unsigned bit, bool set) {
     }
 }
 
+// Read and write bitmaps for the low MSRs, then the high ones; others always
+// exit.
+static void vmx_bitmap_set(uint8_t *bitmap, uint32_t msr, bool read, bool write) {
+    unsigned base;
+    if (msr <= 0x1fff) {
+        base = 0;
+    } else if (msr >= 0xc0000000 && msr <= 0xc0001fff) {
+        base = 0x400 * 8;
+    } else {
+        return;
+    }
+    unsigned bit = msr & 0x1fff;
+    bitmap_set(bitmap, base + bit, read);
+    bitmap_set(bitmap, base + 0x800 * 8 + bit, write);
+}
+
 void virt_intercept_msr(uint32_t msr, bool read, bool write) {
     if (virt_vmx) {
-        // Read and write bitmaps for the low MSRs, then the high ones; others
-        // always exit.
-        unsigned base;
-        if (msr <= 0x1fff) {
-            base = 0;
-        } else if (msr >= 0xc0000000 && msr <= 0xc0001fff) {
-            base = 0x400 * 8;
-        } else {
-            return;
+        vmx_bitmap_set(msr_bitmap, msr, read, write);
+        if (msr_bitmap_x2apic != NULL && (msr < 0x800 || msr > 0x8ff)) {
+            vmx_bitmap_set(msr_bitmap_x2apic, msr, read, write);
         }
-        unsigned bit = msr & 0x1fff;
-        bitmap_set(msr_bitmap, base + bit, read);
-        bitmap_set(msr_bitmap, base + 0x800 * 8 + bit, write);
         return;
     }
 
@@ -162,6 +177,20 @@ void virt_intercept_msr(uint32_t msr, bool read, bool write) {
     unsigned bit = offset * 8 + (msr & 0x1fff) * 2;
     bitmap_set(msr_bitmap, bit, read);
     bitmap_set(msr_bitmap, bit + 1, write);
+}
+
+void virt_x2apic_msr_passed(uint32_t msr, bool read, bool write) {
+    if (msr_bitmap_x2apic == NULL) {
+        msr_bitmap_x2apic = page_alloc(1);
+        memcpy(msr_bitmap_x2apic, msr_bitmap, PAGE_SIZE);
+    }
+    unsigned bit = msr & 0x1fff;
+    if (read) {
+        bitmap_set(msr_bitmap_x2apic, bit, false);
+    }
+    if (write) {
+        bitmap_set(msr_bitmap_x2apic, 0x800 * 8 + bit, false);
+    }
 }
 
 struct vcpu *vcpu_create(struct cpu *cpu) {

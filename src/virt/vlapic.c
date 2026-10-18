@@ -146,6 +146,19 @@ static uint64_t apic_access_page;
 // to exits.
 static bool apicv;
 static bool posted_interrupts;
+// x2APIC mode's MSRs, where the processor virtualises them, read from the
+// registers and write to them, but for those MSRs whose access exits.
+static bool x2apic_virtualization;
+
+// The x2APIC MSRs whose registers hold what they read as, and those whose
+// writes VMX virtualises with virtual-interrupt delivery (SDM 325462-093
+// Vol. 3C, 32.5).
+static const uint32_t x2apic_passed_reads[] = {
+    APIC_ID, APIC_VERSION, APIC_TPR, APIC_PPR, APIC_LDR, APIC_SVR, APIC_ESR, APIC_LVT_CMCI,
+    APIC_LVT_TIMER, APIC_LVT_THERMAL, APIC_LVT_PERF, APIC_LVT_LINT0, APIC_LVT_LINT1,
+    APIC_LVT_ERROR, APIC_TIMER_INITIAL, APIC_TIMER_DIVIDE,
+};
+static const uint32_t x2apic_passed_writes[] = {APIC_TPR, APIC_EOI, APIC_SELF_IPI};
 
 static const struct mmio_ops mmio_ops;
 
@@ -184,6 +197,7 @@ void vlapic_init(void) {
         apic_access_page = (uint64_t)(uintptr_t)page;
         apicv = vmx_secondary_allowed(PROC2_APIC_REG_VIRT | PROC2_VIRT_INTR_DELIVERY);
         posted_interrupts = apicv && vmx_pin_allowed(PIN_POSTED_INTR);
+        x2apic_virtualization = apicv && vmx_secondary_allowed(PROC2_VIRT_X2APIC);
     }
     trap_page(APIC_DEFAULT_BASE);
     virt_intercept_msr(MSR_IA32_APIC_BASE, true, true);
@@ -191,6 +205,18 @@ void vlapic_init(void) {
     virt_intercept_msr(MSR_IA32_XAPIC_DISABLE_STATUS, true, true);
     for (uint32_t msr = MSR_X2APIC_FIRST; msr <= MSR_X2APIC_LAST; msr++) {
         virt_intercept_msr(msr, true, true);
+    }
+    if (x2apic_virtualization) {
+        for (unsigned i = 0; i < sizeof(x2apic_passed_reads) / sizeof(x2apic_passed_reads[0]); i++) {
+            virt_x2apic_msr_passed(MSR_X2APIC_FIRST + (x2apic_passed_reads[i] >> 4), true, false);
+        }
+        for (uint32_t reg = APIC_ISR; reg < APIC_IRR + 0x80; reg += 0x10) {
+            virt_x2apic_msr_passed(MSR_X2APIC_FIRST + (reg >> 4), true, false);
+        }
+        for (unsigned i = 0; i < sizeof(x2apic_passed_writes) / sizeof(x2apic_passed_writes[0]);
+             i++) {
+            virt_x2apic_msr_passed(MSR_X2APIC_FIRST + (x2apic_passed_writes[i] >> 4), false, true);
+        }
     }
 }
 
@@ -207,23 +233,29 @@ static bool sw_enabled(const struct vlapic *vl) {
 }
 
 // The processor virtualises the vCPU's accesses to the APIC-access page while
-// its local APIC is in xAPIC mode.
+// its local APIC is in xAPIC mode, and its x2APIC MSRs in x2APIC mode.
 static void access_virtualization(const struct vlapic *vl) {
     if (apic_access_page == 0) {
         return;
     }
     uint64_t controls = vmx_read(VMCS_PROC_CONTROLS2);
+    uint64_t was = controls;
+    controls &= ~(uint64_t)(PROC2_VIRT_APIC_ACCESSES | PROC2_VIRT_X2APIC);
+    bool x2 = x2apic_virtualization && x2apic(vl);
     if (enabled(vl) && !x2apic(vl)) {
         // Translations from before it may not know the page is special
         // (SDM 325462-093 Vol. 3C, 32.4.5).
-        if (!(controls & PROC2_VIRT_APIC_ACCESSES)) {
+        if (!(was & PROC2_VIRT_APIC_ACCESSES)) {
             gpt_flush();
         }
         controls |= PROC2_VIRT_APIC_ACCESSES;
-    } else {
-        controls &= ~(uint64_t)PROC2_VIRT_APIC_ACCESSES;
+    } else if (x2) {
+        controls |= PROC2_VIRT_X2APIC;
     }
     vmx_write(VMCS_PROC_CONTROLS2, controls);
+    if (x2apic_virtualization) {
+        vmx_write(VMCS_MSR_BITMAP, x2 ? virt_msr_bitmap_x2apic() : virt_msr_bitmap());
+    }
 }
 
 static uint32_t x2apic_ldr(uint32_t id) {
