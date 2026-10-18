@@ -18,6 +18,10 @@
 #ifndef LOADER__DRIVES_H
 #define LOADER__DRIVES_H
 
+// Has the firmware's drivers take on the storage and USB controllers they have
+// not, so that their drives show.
+void drives_connect(void);
+
 // Orders the drives the firmware knows, as the boot_drive setting asks, into
 // loader_handoff->boot_order.
 void drives_collect(void);

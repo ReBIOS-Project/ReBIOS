@@ -84,6 +84,8 @@ struct disk_info {
 #define XHCI_CAP_SUPPORTED_PROTOCOL 2
 #define XHCI_CAP_MAX 64
 #define PCI_CLASS_SERIAL_USB_XHCI 0x0c0330
+#define PCI_BASE_CLASS_STORAGE 0x01
+#define PCI_CLASS_SERIAL_USB 0x0c03
 
 // El Torito 1.0, figure 7: the Boot Record Volume Descriptor, in sector 17.
 #define EL_TORITO_SECTOR 17
@@ -726,6 +728,45 @@ static bool drive_before(const struct drive *a, const struct drive *b) {
         }
     }
     return false;
+}
+
+static bool driver_managed(EFI_HANDLE handle, EFI_GUID *protocol) {
+    EFI_OPEN_PROTOCOL_INFORMATION_ENTRY *entries;
+    EFI_UINTN count;
+    if (efi_bs->OpenProtocolInformation(handle, protocol, &entries, &count) != EFI_SUCCESS) {
+        return false;
+    }
+    bool managed = false;
+    for (EFI_UINTN i = 0; i < count; i++) {
+        if (entries[i].Attributes
+            & (EFI_OPEN_PROTOCOL_BY_DRIVER | EFI_OPEN_PROTOCOL_BY_CHILD_CONTROLLER)) {
+            managed = true;
+        }
+    }
+    efi_bs->FreePool(entries);
+    return managed;
+}
+
+// Firmware set to boot fast may leave the controllers it does not boot from
+// unconnected, their drives without Block I/O. Connecting again controllers
+// that drivers manage has upset some firmware, so only the others are.
+void drives_connect(void) {
+    EFI_UINTN count;
+    EFI_HANDLE *handles = efi_locate_handles(&pci_io_guid, &count);
+    for (EFI_UINTN i = 0; handles != NULL && i < count; i++) {
+        EFI_PCI_IO_PROTOCOL *pci_io = protocol_get(handles[i], &pci_io_guid);
+        if (pci_io == NULL) {
+            continue;
+        }
+        uint32_t class = pci_class(pci_io);
+        if ((class >> 16 == PCI_BASE_CLASS_STORAGE || class >> 8 == PCI_CLASS_SERIAL_USB)
+            && !driver_managed(handles[i], &pci_io_guid)) {
+            efi_bs->ConnectController(handles[i], NULL, NULL, true);
+        }
+    }
+    if (handles != NULL) {
+        efi_bs->FreePool(handles);
+    }
 }
 
 void drives_collect(void) {
