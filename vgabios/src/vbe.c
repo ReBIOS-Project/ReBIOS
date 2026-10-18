@@ -54,9 +54,6 @@
 #define BDA_VIDEO_CONTROL 0x87
 #define VIDEO_CONTROL_KEPT 0x80
 
-#define PCI_CONFIG_ADDRESS 0xcf8
-#define PCI_CONFIG_DATA 0xcfc
-
 #define INPUT_STATUS1 0x3da
 #define STATUS1_RETRACE 0x08
 
@@ -222,17 +219,8 @@ static bool mode_find(uint16_t number, struct mode *m) {
     return mode_get(number, m) && mode_supported(m);
 }
 
-// The framebuffer BAR of the emulated display controller, 0 if it has none.
 static uint32_t lfb_address(void) {
-    uint16_t bdf = vgabios_info.pci_bdf;
-    if (bdf == 0xffff) {
-        return 0;
-    }
-    uint32_t saved = inl(PCI_CONFIG_ADDRESS);
-    outl(PCI_CONFIG_ADDRESS, 0x80000000u | (uint32_t)bdf << 8 | 0x10);
-    uint32_t bar = inl(PCI_CONFIG_DATA) & ~0xfu;
-    outl(PCI_CONFIG_ADDRESS, saved);
-    return bar;
+    return vgabios_info.lfb;
 }
 
 static void wait_retrace(void) {

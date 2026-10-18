@@ -28,14 +28,13 @@
 bool vga_init(void);
 bool vga_emulated(void);
 
-// The size of the BAR of the display controller vga_init() is to present, 0
-// if it is to present none.
-uint64_t vga_bar_size(void);
+// The size of the linear framebuffer vga_init() is to give the guest, 0 if it
+// is to give none.
+uint64_t vga_lfb_size(void);
 
-// The device number on PCI bus 0 of the display controller the emulated VGA
-// is, with its Bochs display interface and framebuffer BAR, or -1 if it has
-// no PCI function.
-int vga_pci_device(void);
+// Where the guest finds the emulated VGA's linear framebuffer, or 0 if it has
+// none.
+uint64_t vga_lfb(void);
 
 // Redraws what the guest changed, at most as often as a display refreshes.
 // Only the boot processor draws.

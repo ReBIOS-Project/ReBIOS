@@ -29,13 +29,12 @@
 
 struct vgabios_info {
     uint16_t flags;
-    // The emulated display controller, as PCI bus and device-function in its
-    // high and low bytes, or 0xffff if there is none.
-    uint16_t pci_bdf;
     // The largest mode the display shows unscaled, the framebuffer's.
     uint16_t max_width;
     uint16_t max_height;
     uint16_t edid_size;
+    // The linear framebuffer's physical address, or 0 if there is none.
+    uint32_t lfb;
     uint8_t edid[256];
 };
 

@@ -31,8 +31,13 @@
 // Needs pci_enum_scan().
 void layout_init(void);
 
+// Where layout_init() put the emulated VGA's linear framebuffer, vga_lfb_size()
+// bytes of bus 0's PCI memory that no BAR uses, or 0 if it put none.
+uint64_t layout_lfb(void);
+
 // Whether [base, base + size) is clear of the guest's RAM, of what it finds
-// at host addresses, and of its configuration space window, for a BAR there.
+// at host addresses, of its configuration space window, and of the linear
+// framebuffer, for a BAR there.
 bool layout_mmio_free(uint64_t base, uint64_t size);
 
 // The hypervisor's view of guest-physical address gpa, below 1 MiB and

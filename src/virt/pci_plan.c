@@ -41,6 +41,7 @@
 #define ELEMENT_ROM 1
 #define ELEMENT_LOW_WINDOW 2
 #define ELEMENT_HIGH_WINDOW 3
+#define ELEMENT_LFB 4
 
 #define VIRT_FUNCTION (-1)
 #define NO_CONTAINER UINT32_MAX
@@ -51,8 +52,8 @@
 // PCI memory below.
 #define PLATFORM_BASE 0xfec00000ull
 
-// A BAR, an expansion ROM, or a bridge's window, in the memory of the root bus
-// or bridge it is behind.
+// A BAR, an expansion ROM, a bridge's window, or the emulated VGA's linear
+// framebuffer, in the memory of the root bus or bridge it is behind.
 struct element {
     int32_t function;
     uint8_t kind;
@@ -288,6 +289,10 @@ static void assign(const struct pci_topology *t, struct container *containers, u
             continue;
         }
         uint64_t base = (e->high ? c->high_base : c->low_base) + e->offset;
+        if (e->kind == ELEMENT_LFB) {
+            plan.lfb = base;
+            continue;
+        }
         if (e->function == VIRT_FUNCTION) {
             plan.virt_bar = base;
             continue;
@@ -322,7 +327,8 @@ static void assign(const struct pci_topology *t, struct container *containers, u
 }
 
 const struct pci_plan *pci_plan_make(const struct pci_plan_range *obstacles, uint32_t count,
-                                     uint64_t virt_bar_size, uint64_t high_floor) {
+                                     uint64_t virt_bar_size, uint64_t lfb_size,
+                                     uint64_t high_floor) {
     const struct pci_topology *t = pci_enum_topology();
     uint32_t n = t->function_count;
     uint32_t roots = t->root_bus_count;
@@ -387,6 +393,14 @@ const struct pci_plan *pci_plan_make(const struct pci_plan_range *obstacles, uin
                                                                  false, virt_bar_size,
                                                                  virt_bar_size, 0});
             }
+        }
+    }
+    // In a root bus's window: an installed Windows 7 keeps to 16 colours with
+    // the linear framebuffer in reserved memory.
+    for (uint32_t r = 0; r < roots && lfb_size != 0; r++) {
+        if (t->root_buses[r].segment == 0 && t->root_buses[r].bus == 0) {
+            element_add(&containers[n + r], (struct element){0, ELEMENT_LFB, 0, false, lfb_size,
+                                                             2 * ONE_MIB, 0});
         }
     }
 

@@ -80,6 +80,8 @@ static struct {
     uint32_t e820_type;
 } taken[MAX_TAKEN];
 static uint32_t taken_count;
+// The emulated VGA's linear framebuffer.
+static uint64_t lfb;
 // Backs the guest's first 2 MiB.
 static uint8_t *low;
 // What absent memory reads as.
@@ -462,7 +464,7 @@ void layout_init(void) {
     }
     uint64_t high_floor = FOUR_GIB + available + pinned_high;
     high_floor = align_up(high_floor > pinned_top ? high_floor : pinned_top, ONE_GIB);
-    const struct pci_plan *plan = pci_plan_make(obstacles, pinned.count, vga_bar_size(),
+    const struct pci_plan *plan = pci_plan_make(obstacles, pinned.count, 0, vga_lfb_size(),
                                                 high_floor);
     kfree(obstacles);
 
@@ -472,6 +474,7 @@ void layout_init(void) {
     for (uint32_t i = 0; i < pinned.count; i++) {
         list_remove(&ram, pinned.r[i].base, pinned.r[i].end);
     }
+    lfb = plan->lfb;
     struct range_list fill;
     list_init(&fill);
     for (uint32_t i = 0; i < ram.count; i++) {
@@ -545,9 +548,16 @@ void layout_init(void) {
     kfree(free_ram.r);
 }
 
+uint64_t layout_lfb(void) {
+    return lfb;
+}
+
 bool layout_mmio_free(uint64_t base, uint64_t size) {
     uint64_t end = base + size;
     if (end < base || base < ONE_MIB) {
+        return false;
+    }
+    if (lfb != 0 && base < lfb + vga_lfb_size() && end > lfb) {
         return false;
     }
     const struct pci_plan *plan = pci_plan();

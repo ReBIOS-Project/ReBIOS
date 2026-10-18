@@ -163,16 +163,6 @@ static inline uint16_t inw(uint16_t port) {
     return value;
 }
 
-static inline void outl(uint16_t port, uint32_t value) {
-    asm volatile ("outl %0, %1" :: "a"(value), "Nd"(port));
-}
-
-static inline uint32_t inl(uint16_t port) {
-    uint32_t value;
-    asm volatile ("inl %1, %0" : "=a"(value) : "Nd"(port));
-    return value;
-}
-
 static inline void pokel(uint16_t segment, uint16_t offset, uint32_t value) {
     asm volatile ("movw %w0, %%gs\n\tmovl %1, %%gs:(%k2)"
                   :: "r"(segment), "r"(value), "r"((uint32_t)offset) : "memory");

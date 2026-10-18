@@ -66,6 +66,8 @@ struct pci_plan {
     uint64_t ecam;
     uint8_t ecam_start;
     uint8_t ecam_end;
+    // The emulated VGA's linear framebuffer on segment 0's bus 0, or 0.
+    uint64_t lfb;
     // The guest's PCI hole starts here, and its larger BARs from high_floor.
     uint64_t tolud;
     uint64_t high_floor;
@@ -73,10 +75,11 @@ struct pci_plan {
 
 // Lays the guest's PCI memory out around obstacles, the sorted ranges below
 // 4 GiB the guest finds at their addresses, as high below 4 GiB as it goes,
-// with a function of the hypervisor's own if virt_bar_size is not 0, and the
-// larger BARs from high_floor up. Needs pci_enum_scan() and pci_cfg_init().
+// with a function of the hypervisor's own if virt_bar_size is not 0, with
+// lfb_size bytes for the emulated VGA's linear framebuffer, and the larger
+// BARs from high_floor up. Needs pci_enum_scan() and pci_cfg_init().
 const struct pci_plan *pci_plan_make(const struct pci_plan_range *obstacles, uint32_t count,
-                                     uint64_t virt_bar_size, uint64_t high_floor);
+                                     uint64_t virt_bar_size, uint64_t lfb_size, uint64_t high_floor);
 
 // The plan, or NULL before pci_plan_make().
 const struct pci_plan *pci_plan(void);

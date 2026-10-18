@@ -37,9 +37,8 @@ vgabios_header:
     .section .rodata.info, "a"
     .globl vgabios_info
 vgabios_info:
-    .word 0
-    .word 0xffff
-    .word 0, 0, 0
+    .word 0, 0, 0, 0
+    .long 0
     .skip 256
 
     .section .text.entry, "ax"

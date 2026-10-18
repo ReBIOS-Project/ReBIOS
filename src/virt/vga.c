@@ -30,8 +30,6 @@
 #include <virt/io.h>
 #include <virt/layout.h>
 #include <virt/mmio.h>
-#include <virt/pci_plan.h>
-#include <virt/pci_virt.h>
 #include <virt/vcpu.h>
 #include <virt/vga.h>
 
@@ -150,20 +148,6 @@
 #define DISPI_MAX_YRES 12000
 #define DISPI_MAX_BPP 32
 
-// The emulated display controller's PCI identity, QEMU's standard VGA's.
-#define VBE_VENDOR_ID 0x1234
-#define VBE_DEVICE_ID 0x1111
-#define VBE_SUBSYSTEM_VENDOR_ID 0x1af4
-#define VBE_SUBSYSTEM_ID 0x1100
-#define VBE_REVISION 0x02
-#define VBE_CLASS 0x030000
-
-#define PCI_COMMAND_IO 0x0001
-#define PCI_COMMAND_MEMORY 0x0002
-#define PCI_COMMAND_MASTER 0x0004
-#define PCI_COMMAND_INTX_DISABLE 0x0400
-#define PCI_BAR_PREFETCHABLE 0x08
-
 #define NO_BANK UINT32_MAX
 
 static struct {
@@ -197,8 +181,8 @@ static struct {
     bool palette_dirty;
 } vga;
 
-// The Bochs display interface, on video memory of its own, and the PCI
-// function whose BAR maps that memory.
+// The Bochs display interface, on video memory of its own, which the guest
+// finds as reserved memory.
 static struct {
     bool present;
     uint8_t *vram;
@@ -210,12 +194,9 @@ static struct {
     uint32_t start;
     // The bank the window at A0000h shows, while the interface is enabled.
     uint32_t window_bank;
-    int device;
-    uint16_t command;
-    uint32_t bar;
-    uint8_t interrupt_line;
-    // Where the BAR maps the video memory, 0 if nowhere.
-    uint64_t mapped;
+    // Where the guest finds the video memory as its linear framebuffer, 0 if
+    // nowhere.
+    uint64_t lfb;
     // While the guest's mode is the firmware framebuffer's own, shown from the
     // start of video memory, the first direct_size bytes of video memory are
     // that framebuffer, which nothing then has to copy to. Panning or flipping
@@ -877,99 +858,6 @@ static void dispi_ports(struct vcpu *v, void *ctx, uint16_t offset, unsigned siz
     spinlock_release(&vga.lock);
 }
 
-static void bar_remap(void) {
-    uint64_t want = 0;
-    if (vbe.command & PCI_COMMAND_MEMORY) {
-        want = vbe.bar;
-    }
-    if (want == vbe.mapped) {
-        return;
-    }
-    if (vbe.mapped != 0) {
-        gpt_map(vbe.mapped, 0, vbe.vram_size, 0, 0);
-        vbe.mapped = 0;
-    }
-    if (want != 0) {
-        if (layout_mmio_free(want, vbe.vram_size)) {
-            map_vram(want, 0, vbe.vram_size);
-            vbe.mapped = want;
-        } else {
-            printf("Not mapping the emulated display controller's BAR at %#llx, over memory "
-                   "in use\n", (unsigned long long)want);
-        }
-    }
-    gpt_flush();
-}
-
-static uint32_t vbe_config_dword(uint32_t reg) {
-    switch (reg) {
-        case 0x00: {
-            return (uint32_t)VBE_DEVICE_ID << 16 | VBE_VENDOR_ID;
-        }
-        case 0x04: {
-            return vbe.command;
-        }
-        case 0x08: {
-            return (uint32_t)VBE_CLASS << 8 | VBE_REVISION;
-        }
-        case 0x10: {
-            return vbe.bar | PCI_BAR_PREFETCHABLE;
-        }
-        case 0x2c: {
-            return (uint32_t)VBE_SUBSYSTEM_ID << 16 | VBE_SUBSYSTEM_VENDOR_ID;
-        }
-        case 0x3c: {
-            return vbe.interrupt_line;
-        }
-        default: {
-            return 0;
-        }
-    }
-}
-
-static uint32_t vbe_config_read(void *ctx, uint32_t offset, unsigned size) {
-    (void)ctx;
-    spinlock_acquire(&vga.lock);
-    uint32_t dword = vbe_config_dword(offset & ~3u);
-    spinlock_release(&vga.lock);
-    uint32_t value = dword >> (8 * (offset & 3));
-    return size == 4 ? value : value & ((1u << (8 * size)) - 1);
-}
-
-// The command register's decoding and bus master bits, the BAR's address
-// bits, and the interrupt line take writes; the rest is read-only.
-static void vbe_config_write(void *ctx, uint32_t offset, unsigned size, uint32_t value) {
-    (void)ctx;
-    uint32_t reg = offset & ~3u;
-    unsigned shift = 8 * (offset & 3);
-    uint32_t mask = (size == 4 ? 0xffffffffu : (1u << (8 * size)) - 1) << shift;
-    spinlock_acquire(&vga.lock);
-    uint32_t dword = (vbe_config_dword(reg) & ~mask) | ((value << shift) & mask);
-    switch (reg) {
-        case 0x04: {
-            vbe.command = (uint16_t)(dword & (PCI_COMMAND_IO | PCI_COMMAND_MEMORY
-                                              | PCI_COMMAND_MASTER | PCI_COMMAND_INTX_DISABLE));
-            bar_remap();
-            break;
-        }
-        case 0x10: {
-            vbe.bar = dword & ~(uint32_t)(vbe.vram_size - 1) & ~0xfu;
-            bar_remap();
-            break;
-        }
-        case 0x3c: {
-            vbe.interrupt_line = (uint8_t)dword;
-            break;
-        }
-        default: {
-            break;
-        }
-    }
-    spinlock_release(&vga.lock);
-}
-
-static const struct pci_virt_ops vbe_config_ops = {vbe_config_read, vbe_config_write};
-
 static uint32_t expand6(uint8_t v) {
     v &= 0x3f;
     return (uint32_t)((v << 2) | (v >> 4));
@@ -1454,8 +1342,8 @@ static void direct_update(void) {
             memcpy(vbe.vram, fb, vbe.direct_size);
         }
         vbe.direct = want;
-        if (vbe.mapped != 0) {
-            map_vram(vbe.mapped, 0, vbe.vram_size);
+        if (vbe.lfb != 0) {
+            map_vram(vbe.lfb, 0, vbe.vram_size);
         }
         if (vbe.window_bank != NO_BANK) {
             map_vram(WINDOW_BASE, (uint64_t)vbe.window_bank << 16, PLANE_SIZE);
@@ -1574,12 +1462,12 @@ bool vga_emulated(void) {
     return vga.on;
 }
 
-int vga_pci_device(void) {
-    return vbe.present ? vbe.device : -1;
+uint64_t vga_lfb(void) {
+    return vbe.present ? vbe.lfb : 0;
 }
 
-// The Bochs interface on the video memory the loader reserved, and the PCI
-// function that maps it, where a host bridge window has room for its BAR.
+// The Bochs interface on the video memory the loader reserved, there for the
+// guest where the layout found room.
 static void vbe_init(void) {
     const struct handoff_video *video = &core_handoff->video;
     vbe.vram_phys = video->vram_base;
@@ -1587,7 +1475,6 @@ static void vbe_init(void) {
     vbe.vram_size = video->vram_size;
     vbe.regs[DISPI_ID] = DISPI_ID5;
     vbe.window_bank = NO_BANK;
-    vbe.device = -1;
     out.vbe_hashes = page_alloc((DISPI_MAX_YRES * sizeof(uint64_t) + PAGE_SIZE - 1) / PAGE_SIZE);
     out.vbe_line = page_alloc((DISPI_MAX_XRES * sizeof(uint32_t) + PAGE_SIZE - 1) / PAGE_SIZE);
     struct io_handler ports = {DISPI_PORT, DISPI_PORT_COUNT, dispi_ports, NULL};
@@ -1605,22 +1492,15 @@ static void vbe_init(void) {
         vbe.direct_size = frame;
     }
 
-    const struct pci_plan *plan = pci_plan();
-    if (plan == NULL || plan->virt_bar == 0) {
-        printf("No room for the emulated display controller's BAR, so no linear framebuffer\n");
+    vbe.lfb = layout_lfb();
+    if (vbe.lfb == 0) {
+        printf("No room for the emulated VGA's linear framebuffer\n");
         return;
     }
-    uint64_t base = plan->virt_bar;
-    vbe.bar = (uint32_t)base;
-    vbe.command = PCI_COMMAND_IO | PCI_COMMAND_MEMORY;
-    vbe.interrupt_line = 0xff;
-    vbe.device = pci_virt_add(&vbe_config_ops, NULL);
-    if (vbe.device < 0) {
-        return;
-    }
-    bar_remap();
-    printf("Emulated display controller at 00:%02x.0, %llu MiB of video memory at %#llx\n",
-           vbe.device, (unsigned long long)(vbe.vram_size >> 20), (unsigned long long)base);
+    map_vram(vbe.lfb, 0, vbe.vram_size);
+    gpt_flush();
+    printf("Emulated VGA's linear framebuffer: %llu MiB at %#llx\n",
+           (unsigned long long)(vbe.vram_size >> 20), (unsigned long long)vbe.lfb);
 }
 
 static const char *const scaling_names[] = {"stretched", "kept at 4:3", "centred", "scaled",
@@ -1645,7 +1525,7 @@ static bool framebuffer_usable(const struct handoff_framebuffer *fb) {
     return fb->present && (fb->bpp == 32 || fb->bpp == 24 || fb->bpp == 16);
 }
 
-uint64_t vga_bar_size(void) {
+uint64_t vga_lfb_size(void) {
     const struct handoff *h = core_handoff;
     if (!emulation_wanted() || !framebuffer_usable(&h->video.framebuffer)) {
         return 0;
