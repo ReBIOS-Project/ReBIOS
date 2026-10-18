@@ -162,6 +162,12 @@ void event_interrupt(uint8_t vector) {
             lapic_eoi();
             return;
         }
+        // A notification outside the guest: what it posted is merged before
+        // the next entry.
+        case VLAPIC_POSTED_VECTOR: {
+            lapic_eoi();
+            return;
+        }
         case VLAPIC_DEVICE_VECTOR: {
             irq_device_interrupt();
             return;

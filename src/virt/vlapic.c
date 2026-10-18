@@ -91,6 +91,16 @@ static const uint32_t lvt_writable[LVT_COUNT] = {
     0x107ff, 0x700ff, 0x107ff, 0x107ff, 0x1a7ff, 0x1a7ff, 0x100ff,
 };
 
+// Interrupts other processors post for a vCPU, which VMX takes into its
+// registers itself while it runs (SDM 325462-093 Vol. 3C, 32.6, Table 32-2).
+struct posted {
+    uint32_t pir[8];
+    uint32_t notification;
+    uint32_t reserved[7];
+};
+
+#define POSTED_ON (1u << 0)
+
 struct vlapic {
     uint64_t base;
     uint32_t id;
@@ -102,6 +112,9 @@ struct vlapic {
     uint32_t pending[8];
     uint32_t pending_level[8];
     uint32_t esr_pending;
+    // Edge-triggered requests where VMX processes posted interrupts: a level-
+    // triggered one must be in the registers before its vector's EOI exit is.
+    struct posted *posted;
 };
 
 static uint32_t regs_get(const struct vlapic *vl, uint32_t offset) {
@@ -132,6 +145,7 @@ static uint64_t apic_access_page;
 // (SDM 325462-093 Vol. 3C, 32.2, 32.4), which leaves writes with side effects
 // to exits.
 static bool apicv;
+static bool posted_interrupts;
 
 static const struct mmio_ops mmio_ops;
 
@@ -169,6 +183,7 @@ void vlapic_init(void) {
         memset(page, 0xff, PAGE_SIZE);
         apic_access_page = (uint64_t)(uintptr_t)page;
         apicv = vmx_secondary_allowed(PROC2_APIC_REG_VIRT | PROC2_VIRT_INTR_DELIVERY);
+        posted_interrupts = apicv && vmx_pin_allowed(PIN_POSTED_INTR);
     }
     trap_page(APIC_DEFAULT_BASE);
     virt_intercept_msr(MSR_IA32_APIC_BASE, true, true);
@@ -267,6 +282,19 @@ static void merge(struct vlapic *vl) {
         regs_set(vl, tmr, (regs_get(vl, tmr) & ~bits) | level);
         regs_set(vl, APIC_IRR + i * 0x10, regs_get(vl, APIC_IRR + i * 0x10) | bits);
     }
+    if (vl->posted == NULL
+        || !(__atomic_load_n(&vl->posted->notification, __ATOMIC_ACQUIRE) & POSTED_ON)) {
+        return;
+    }
+    __atomic_and_fetch(&vl->posted->notification, ~POSTED_ON, __ATOMIC_ACQ_REL);
+    for (unsigned i = 0; i < 8; i++) {
+        uint32_t bits = __atomic_exchange_n(&vl->posted->pir[i], 0, __ATOMIC_ACQUIRE);
+        if (bits != 0) {
+            uint32_t tmr = APIC_TMR + i * 0x10;
+            regs_set(vl, tmr, regs_get(vl, tmr) & ~bits);
+            regs_set(vl, APIC_IRR + i * 0x10, regs_get(vl, APIC_IRR + i * 0x10) | bits);
+        }
+    }
 }
 
 // x2APIC mode has the whole ID in the register.
@@ -293,6 +321,9 @@ static void reset_registers(struct vcpu *v) {
     struct vlapic *vl = v->vlapic;
     for (unsigned i = 0; i < 8; i++) {
         __atomic_store_n(&vl->pending[i], 0, __ATOMIC_RELAXED);
+        if (vl->posted != NULL) {
+            __atomic_store_n(&vl->posted->pir[i], 0, __ATOMIC_RELAXED);
+        }
         regs_set(vl, APIC_ISR + i * 0x10, 0);
         regs_set(vl, APIC_TMR + i * 0x10, 0);
         regs_set(vl, APIC_IRR + i * 0x10, 0);
@@ -340,6 +371,12 @@ void vlapic_create(struct vcpu *v) {
             vmx_write(VMCS_PROC_CONTROLS2, vmx_read(VMCS_PROC_CONTROLS2) | PROC2_APIC_REG_VIRT
                                                | PROC2_VIRT_INTR_DELIVERY);
         }
+        if (posted_interrupts) {
+            vl->posted = page_alloc(1);
+            vmx_write(VMCS_PIN_CONTROLS, vmx_read(VMCS_PIN_CONTROLS) | PIN_POSTED_INTR);
+            vmx_write(VMCS_POSTED_INTR_NV, VLAPIC_POSTED_VECTOR);
+            vmx_write(VMCS_POSTED_INTR_DESC, (uint64_t)(uintptr_t)vl->posted);
+        }
     }
     reset_registers(v);
     access_virtualization(vl);
@@ -374,6 +411,15 @@ void vlapic_accept(struct vcpu *v, uint8_t vector, bool level) {
         return;
     }
     uint32_t bit = 1u << (vector % 32);
+    // A running guest takes it without an exit.
+    if (vl->posted != NULL && !level && v->cpu != this_cpu()) {
+        __atomic_or_fetch(&vl->posted->pir[vector / 32], bit, __ATOMIC_RELEASE);
+        if (!(__atomic_fetch_or(&vl->posted->notification, POSTED_ON, __ATOMIC_ACQ_REL)
+              & POSTED_ON)) {
+            lapic_send_ipi(v->cpu->apic_id, ICR_DELIVERY_FIXED | VLAPIC_POSTED_VECTOR);
+        }
+        return;
+    }
     if (level) {
         __atomic_or_fetch(&vl->pending_level[vector / 32], bit, __ATOMIC_RELAXED);
     } else {

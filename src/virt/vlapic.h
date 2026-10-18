@@ -24,6 +24,7 @@
 
 // Vectors the hypervisor takes its own interrupts on at the processor's
 // local APIC, which guests use for none of their MSIs and I/O APIC entries.
+#define VLAPIC_POSTED_VECTOR 0xfb
 #define VLAPIC_DEVICE_VECTOR 0xfc
 #define VLAPIC_KICK_VECTOR 0xfd
 #define VLAPIC_TIMER_VECTOR 0xfe

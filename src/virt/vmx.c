@@ -256,6 +256,10 @@ bool vmx_secondary_allowed(uint32_t control) {
     return control_allowed(proc2_cap, control);
 }
 
+bool vmx_pin_allowed(uint32_t control) {
+    return control_allowed(pin_cap, control);
+}
+
 bool vmx_monitor_trap_supported(void) {
     return control_allowed(proc_cap, PROC_MONITOR_TRAP_FLAG);
 }

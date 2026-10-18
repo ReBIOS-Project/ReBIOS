@@ -365,6 +365,8 @@ void vmx_vcpu_init(struct vcpu *v);
 __attribute__((noreturn)) void vmx_run(struct vcpu *v);
 // Whether the guest's VMCS gets the secondary processor-based control.
 bool vmx_secondary_allowed(uint32_t control);
+// Whether the guest's VMCS gets the pin-based control.
+bool vmx_pin_allowed(uint32_t control);
 
 uint64_t vmx_read(uint32_t field);
 
