@@ -94,8 +94,8 @@ memory directly (e.g. pretty much all MS-DOS games, MS-DOS Editor, etc.) work as
 
 Its Video BIOS also offers the VESA BIOS Extensions (VBE 3.0): modes in 8, 15, 16, 24, and 32 bits per pixel up to the screen's
 resolution, through a banked window or a linear framebuffer, and the display's EDID where the firmware has it. Operating systems
-see it as a QEMU/Bochs standard VGA PCI device (1234:1111), which drivers for that device can drive too, while the real video card
-stays visible as well.
+still see the real video card as the only display adapter, which its own drivers can drive, while the linear framebuffer is in PCI
+memory that no device uses.
 
 ## Configuration
 
