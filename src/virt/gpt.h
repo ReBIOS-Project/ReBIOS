@@ -40,13 +40,20 @@
 #define HOST_PAT 0x0407050600070106ull
 
 void gpt_init(bool ept, bool huge_pages);
+// The tables the processor walks now, which gpt_mask_a20() switches.
 uint64_t gpt_root(void);
 
 // size and both addresses must be page aligned. prot 0 unmaps. The IOMMU
 // mirrors the mapping, so that device DMA sees the same memory.
 void gpt_map(uint64_t gpa, uint64_t hpa, uint64_t size, uint32_t prot, uint8_t memtype);
 
-// Returns false if gpa is unmapped. memtype may be NULL.
+// Has the processor, but not device DMA, see guest-physical memory below 4 GiB
+// with address bit 20 clear, as a closed A20 gate makes it, or as it is.
+void gpt_mask_a20(bool on);
+// The guest-physical address the processor reaches for gpa, A20 included.
+uint64_t gpt_cpu_gpa(uint64_t gpa);
+
+// Returns false if gpa is unmapped, ignoring A20. memtype may be NULL.
 bool gpt_translate(uint64_t gpa, uint64_t *hpa, uint32_t *prot, uint8_t *memtype);
 
 // Drops cached translations, on every CPU that will next enter the guest.

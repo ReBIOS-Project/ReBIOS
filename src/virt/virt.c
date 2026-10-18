@@ -271,6 +271,7 @@ void vcpu_before_entry(struct vcpu *v) {
     if (v->gpt_generation != generation) {
         v->gpt_generation = generation;
         if (virt_vmx) {
+            vmx_load_gpt_root();
             struct {
                 uint64_t eptp;
                 uint64_t reserved;
@@ -278,6 +279,7 @@ void vcpu_before_entry(struct vcpu *v) {
             // All-context invalidation, type 2.
             asm volatile ("invept %0, %1" :: "m"(desc), "r"(2ull) : "memory", "cc");
         } else {
+            v->vmcb->control.n_cr3 = gpt_root();
             // Every ASID, as not every processor flushes by ASID.
             v->vmcb->control.tlb_control = 1;
         }

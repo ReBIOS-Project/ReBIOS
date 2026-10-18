@@ -355,6 +355,7 @@ __attribute__((noreturn)) void vmx_run(struct vcpu *v);
 
 uint64_t vmx_read(uint32_t field);
 
+void vmx_load_gpt_root(void);
 // Loads the guest's CR3 as a MOV to CR3 would, for what the hypervisor carries
 // out for the guest: the PDPTEs of PAE paging, and the guest's translations.
 void vmx_load_guest_cr3(uint64_t cr3);

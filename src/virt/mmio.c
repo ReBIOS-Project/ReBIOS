@@ -414,6 +414,7 @@ void mmio_step_done(struct vcpu *v) {
 }
 
 bool mmio_fault(struct vcpu *v, uint64_t gpa) {
+    gpa = gpt_cpu_gpa(gpa);
     const struct region *r = find(gpa);
     if (r == NULL) {
         return false;

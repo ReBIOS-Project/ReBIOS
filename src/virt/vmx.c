@@ -336,7 +336,7 @@ void vmx_vcpu_init(struct vcpu *v) {
     vmx_write(VMCS_IO_BITMAP_A, virt_io_bitmap());
     vmx_write(VMCS_IO_BITMAP_B, virt_io_bitmap() + PAGE_SIZE);
     vmx_write(VMCS_MSR_BITMAP, virt_msr_bitmap());
-    vmx_write(VMCS_EPT_POINTER, gpt_root() | EPTP_WALK_4 | EPTP_WB);
+    vmx_load_gpt_root();
     if (vpid_usable()) {
         vmx_write(VMCS_VPID, 1);
     }
@@ -433,6 +433,10 @@ static bool vmx_paging_changed(uint64_t cr0, uint64_t cr4) {
         load_pdptes();
     }
     return true;
+}
+
+void vmx_load_gpt_root(void) {
+    vmx_write(VMCS_EPT_POINTER, gpt_root() | EPTP_WALK_4 | EPTP_WB);
 }
 
 void vmx_load_guest_cr3(uint64_t cr3) {

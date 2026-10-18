@@ -65,6 +65,7 @@ bool guest_phys_write(uint64_t gpa, const void *buf, size_t len) {
 }
 
 static bool read_entry(uint64_t gpa, uint64_t *entry, bool wide) {
+    gpa = gpt_cpu_gpa(gpa);
     if (wide) {
         return guest_phys_read(gpa, entry, 8);
     }
@@ -85,7 +86,7 @@ static bool linear_to_phys(struct vcpu *v, uint64_t linear, bool write, bool fet
     *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0) | (fetch ? PF_ERROR_I : 0);
 
     if (!(cr0 & CR0_PG)) {
-        *gpa = linear & 0xffffffff;
+        *gpa = gpt_cpu_gpa(linear & 0xffffffff);
         return true;
     }
 
@@ -157,7 +158,7 @@ static bool linear_to_phys(struct vcpu *v, uint64_t linear, bool write, bool fet
             if (fetch && !executable) {
                 return false;
             }
-            *gpa = base | (linear & page_mask);
+            *gpa = gpt_cpu_gpa(base | (linear & page_mask));
             return true;
         }
         table = wide ? entry & PTE_ADDR : entry & 0xfffff000;

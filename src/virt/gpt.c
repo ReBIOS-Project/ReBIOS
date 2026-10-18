@@ -46,11 +46,20 @@
 #define NPT_PAT_4K (1ull << 7)
 #define NPT_PAT_LARGE (1ull << 12)
 
+// What a closed A20 gate folds, up to where a legacy guest reaches.
+#define A20_BIT 0x100000ull
+#define A20_LIMIT 0x100000000ull
+
 uint64_t gpt_generation;
 
 static bool use_ept;
 static bool have_huge_pages;
 static uint64_t *root;
+// The processor's view while the guest's A20 gate is closed: below A20_LIMIT,
+// every odd MiB is the even one before it, and above it, root's own tables.
+// Built when first needed.
+static uint64_t *masked_root;
+static bool masked;
 static struct spinlock gpt_lock;
 
 static uint64_t level_size(int level) {
@@ -171,13 +180,14 @@ void gpt_init(bool ept, bool huge_pages) {
 }
 
 uint64_t gpt_root(void) {
-    return (uint64_t)(uintptr_t)root;
+    return (uint64_t)(uintptr_t)(__atomic_load_n(&masked, __ATOMIC_ACQUIRE) ? masked_root : root);
 }
 
-// Returns the table that holds the entry for gpa at level, creating the tables
-// on the way, and splitting large leaves into tables of the same mappings.
-static uint64_t *table_for(uint64_t gpa, int level) {
-    uint64_t *table = root;
+// Returns the table under top that holds the entry for gpa at level, creating
+// the tables on the way, and splitting large leaves into tables of the same
+// mappings.
+static uint64_t *table_for(uint64_t *top, uint64_t gpa, int level) {
+    uint64_t *table = top;
     for (int l = 3; l > level; l--) {
         uint64_t *e = &table[(gpa >> (12 + 9 * l)) & 511];
         if (!entry_present(*e)) {
@@ -199,32 +209,88 @@ static uint64_t *table_for(uint64_t gpa, int level) {
     return table;
 }
 
+// The masked view's entry for a page of an even MiB, which also stands for the
+// page a MiB above it.
+static void mirror(uint64_t gpa, uint64_t entry) {
+    uint64_t *table = table_for(masked_root, gpa, 0);
+    unsigned i = (gpa >> 12) & 511;
+    table[i] = entry;
+    table[i + 256] = entry;
+}
+
+static void share_upper(void) {
+    for (unsigned i = 1; i < 512; i++) {
+        masked_root[i] = root[i];
+    }
+    uint64_t *pdpt = (uint64_t *)(uintptr_t)(root[0] & ENTRY_ADDR_MASK);
+    uint64_t *masked_pdpt = table_for(masked_root, 0, 2);
+    for (unsigned i = A20_LIMIT / level_size(2); i < 512; i++) {
+        masked_pdpt[i] = pdpt[i];
+    }
+}
+
 void gpt_map(uint64_t gpa, uint64_t hpa, uint64_t size, uint32_t prot, uint8_t memtype) {
     dma_map(gpa, hpa, size, prot);
 
     spinlock_acquire(&gpt_lock);
 
-    while (size != 0) {
+    for (uint64_t at = 0; at < size;) {
         int level = 0;
         for (int l = have_huge_pages ? 2 : 1; l > 0; l--) {
             uint64_t ls = level_size(l);
-            if ((gpa & (ls - 1)) == 0 && (hpa & (ls - 1)) == 0 && size >= ls) {
+            if (((gpa + at) & (ls - 1)) == 0 && ((hpa + at) & (ls - 1)) == 0 && size - at >= ls) {
                 level = l;
                 break;
             }
         }
 
-        uint64_t *table = table_for(gpa, level);
+        uint64_t *table = table_for(root, gpa + at, level);
         // A leaf that replaces a table leaks the table, as other CPUs may
         // still walk it until their next flush.
-        table[(gpa >> (12 + 9 * level)) & 511] = leaf_entry(hpa, prot, memtype, level);
+        table[((gpa + at) >> (12 + 9 * level)) & 511] = leaf_entry(hpa + at, prot, memtype, level);
+        at += level_size(level);
+    }
 
-        gpa += level_size(level);
-        hpa += level_size(level);
-        size -= level_size(level);
+    if (masked_root != NULL) {
+        for (uint64_t at = 0; at < size && gpa + at < A20_LIMIT; at += PAGE_SIZE) {
+            if (!((gpa + at) & A20_BIT)) {
+                mirror(gpa + at, leaf_entry(hpa + at, prot, memtype, 0));
+            }
+        }
+        if (gpa + size > A20_LIMIT) {
+            share_upper();
+        }
     }
 
     spinlock_release(&gpt_lock);
+}
+
+void gpt_mask_a20(bool on) {
+    spinlock_acquire(&gpt_lock);
+    if (on && masked_root == NULL) {
+        masked_root = page_alloc(1);
+        for (uint64_t mib = 0; mib < A20_LIMIT; mib += 2 * A20_BIT) {
+            for (uint64_t gpa = mib; gpa < mib + A20_BIT; gpa += PAGE_SIZE) {
+                uint64_t hpa;
+                uint32_t prot;
+                uint8_t memtype;
+                if (gpt_translate(gpa, &hpa, &prot, &memtype)) {
+                    mirror(gpa, leaf_entry(hpa, prot, memtype, 0));
+                }
+            }
+        }
+        share_upper();
+    }
+    __atomic_store_n(&masked, on, __ATOMIC_RELEASE);
+    spinlock_release(&gpt_lock);
+    gpt_flush();
+}
+
+uint64_t gpt_cpu_gpa(uint64_t gpa) {
+    if (gpa < A20_LIMIT && __atomic_load_n(&masked, __ATOMIC_ACQUIRE)) {
+        return gpa & ~A20_BIT;
+    }
+    return gpa;
 }
 
 bool gpt_translate(uint64_t gpa, uint64_t *hpa, uint32_t *prot, uint8_t *memtype) {
