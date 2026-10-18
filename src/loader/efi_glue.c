@@ -30,11 +30,16 @@ uint64_t efi_alloc_pages(uint64_t count, uint64_t max_addr) {
     return efi_alloc_pages_typed(count, max_addr, EfiLoaderData);
 }
 
+// Some firmware leaves memory above 4 GiB out of the page tables the loader
+// runs on until it has its own, so that is where an address-free allocation
+// goes last.
 uint64_t efi_alloc_pages_typed(uint64_t count, uint64_t max_addr, EFI_MEMORY_TYPE type) {
-    EFI_PHYSICAL_ADDRESS addr = max_addr;
-    EFI_ALLOCATE_TYPE alloc_type = max_addr == 0 ? EfiAllocateAnyPages : EfiAllocateMaxAddress;
-
-    if (efi_bs->AllocatePages(alloc_type, type, count, &addr) != EFI_SUCCESS) {
+    EFI_PHYSICAL_ADDRESS addr = max_addr == 0 ? UINT32_MAX : max_addr;
+    if (efi_bs->AllocatePages(EfiAllocateMaxAddress, type, count, &addr) == EFI_SUCCESS) {
+        return addr;
+    }
+    if (max_addr != 0 || efi_bs->AllocatePages(EfiAllocateAnyPages, type, count, &addr)
+                         != EFI_SUCCESS) {
         return 0;
     }
     return addr;
