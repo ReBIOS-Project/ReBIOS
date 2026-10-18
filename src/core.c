@@ -25,7 +25,7 @@
 #include <hw/lapic.h>
 #include <hw/lapic_legacy.h>
 #include <hw/pci_cfg.h>
-#include <hw/pci_relocate.h>
+#include <hw/pci_enum.h>
 #include <iommu/dma.h>
 #include <lib/log.h>
 #include <lib/time.h>
@@ -37,6 +37,8 @@
 #include <virt/irq.h>
 #include <virt/layout.h>
 #include <virt/mtrr.h>
+#include <virt/pci_plan.h>
+#include <virt/pci_virt.h>
 #include <virt/profile.h>
 #include <virt/vacpi.h>
 #include <virt/vcpu.h>
@@ -53,7 +55,8 @@ static void bsp_main(void *arg) {
 
     acpi_init();
     pci_cfg_init();
-    pci_relocate();
+    pci_enum_scan();
+    pci_enum_shrink_rebars(PCI_PLAN_LOW_BAR_MAX);
     dma_init();
 
     if (!virt_init()) {
@@ -64,6 +67,7 @@ static void bsp_main(void *arg) {
     mtrr_init();
 
     layout_init();
+    pci_virt_init();
     a20_init();
     vga_init();
     // The guest's boot processor gets its local APIC as a legacy BIOS hands

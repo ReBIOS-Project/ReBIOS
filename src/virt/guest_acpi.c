@@ -29,6 +29,7 @@
 #include <virt/guest_acpi.h>
 #include <virt/guest_mem.h>
 #include <virt/layout.h>
+#include <virt/pci_plan.h>
 #include <virt/vacpi.h>
 
 #define RSDP_CHECKSUM 8
@@ -167,6 +168,36 @@ static void madt_hide_cpus(uint8_t *madt, uint32_t length) {
     }
 }
 
+// The guest's configuration space windows: segment 0's where the PCI plan put
+// it, and the others' where the host has them, if the guest's memory leaves
+// them clear. Returns the new length.
+static uint32_t mcfg_fix(uint8_t *mcfg, uint32_t length) {
+    const struct pci_plan *plan = pci_plan();
+    uint32_t out = sizeof(struct acpi_mcfg);
+    uint32_t entry = sizeof(struct acpi_mcfg_allocation);
+    for (uint32_t off = out; off <= length && length - off >= entry; off += entry) {
+        struct acpi_mcfg_allocation e;
+        memcpy(&e, mcfg + off, sizeof(e));
+        if (e.segment == 0) {
+            if (plan == NULL || plan->ecam == 0) {
+                continue;
+            }
+            e.address = plan->ecam - ((uint64_t)plan->ecam_start << 20);
+            e.start_bus = plan->ecam_start;
+            e.end_bus = plan->ecam_end;
+        } else if (e.start_bus > e.end_bus
+                   || !layout_mmio_free(e.address + ((uint64_t)e.start_bus << 20),
+                                        ((uint64_t)e.end_bus - e.start_bus + 1) << 20)) {
+            continue;
+        }
+        memcpy(mcfg + out, &e, sizeof(e));
+        out += sizeof(e);
+    }
+    write32(mcfg + SDT_LENGTH, out);
+    checksum_set(mcfg, out, SDT_CHECKSUM);
+    return out;
+}
+
 static bool table_kept(const uint8_t *table) {
     for (size_t i = 0; i < sizeof(kept) / sizeof(kept[0]); i++) {
         if (memcmp(table, kept[i], 4) == 0) {
@@ -227,6 +258,9 @@ bool guest_acpi_build(uint8_t rsdp[GUEST_ACPI_RSDP_SIZE]) {
         uint8_t *table = copy + pieces[i].offset;
         if (memcmp(table, "APIC", 4) == 0) {
             madt_hide_cpus(table, pieces[i].length);
+        } else if (memcmp(table, "MCFG", 4) == 0
+                   && pieces[i].length >= sizeof(struct acpi_mcfg)) {
+            pieces[i].length = mcfg_fix(table, pieces[i].length);
         }
     }
     vacpi_fadt(copy, facs, base + pieces[dsdt_piece].offset);

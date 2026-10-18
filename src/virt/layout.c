@@ -23,6 +23,7 @@
 #include <core.h>
 #include <csm/e820.h>
 #include <handoff.h>
+#include <hw/pci_host.h>
 #include <iommu/iommu_tables.h>
 #include <lib/heap.h>
 #include <lib/log.h>
@@ -30,6 +31,8 @@
 #include <virt/gpt.h>
 #include <virt/layout.h>
 #include <virt/mmio.h>
+#include <virt/pci_plan.h>
+#include <virt/vga.h>
 
 #define ONE_MIB 0x100000ull
 #define TWO_MIB 0x200000ull
@@ -63,6 +66,8 @@ struct identity_range {
 
 static struct identity_range *identity;
 static uint32_t identity_count;
+// Where the identity ranges are, merged.
+static struct range_list pinned;
 // The guest's RAM from 1 MiB.
 static struct range_list ram;
 // What layout_take() may still hand out.
@@ -178,31 +183,15 @@ static bool type_is_free(uint32_t type) {
     }
 }
 
-// Memory of some kind, as opposed to I/O and address space the firmware
-// keeps.
-static bool type_is_memory(uint32_t type) {
-    switch (type) {
-        case EfiRuntimeServicesCode:
-        case EfiRuntimeServicesData:
-        case EfiUnusableMemory:
-        case EfiACPIReclaimMemory:
-        case EfiACPIMemoryNVS:
-        case EfiPersistentMemory: {
-            return true;
-        }
-        default: {
-            return type_is_free(type);
-        }
-    }
-}
-
-// What the guest must find where the host has it: memory-mapped I/O, and what
-// the firmware keeps for itself or for devices. The runtime services and the
+// What the guest must find where the host has it: what the firmware keeps for
+// itself or for devices. The runtime services, with the I/O they map, and the
 // firmware's ACPI are the hypervisor's alone.
 static bool type_is_identity(uint32_t type) {
     switch (type) {
         case EfiRuntimeServicesCode:
         case EfiRuntimeServicesData:
+        case EfiMemoryMappedIO:
+        case EfiMemoryMappedIOPortSpace:
         case EfiUnusableMemory:
         case EfiACPIReclaimMemory:
         case EfiACPIMemoryNVS:
@@ -261,6 +250,26 @@ static void identity_add(uint64_t base, uint64_t end, uint32_t efi_type, uint64_
         panic("Too many host ranges for the guest\n");
     }
     identity[identity_count++] = (struct identity_range){base, end, efi_type, attribute};
+}
+
+// Takes [base, end) out of the identity ranges, which may split one.
+static void identity_remove(uint64_t base, uint64_t end) {
+    for (uint32_t i = 0; i < identity_count; i++) {
+        struct identity_range *r = &identity[i];
+        if (r->end <= base || r->base >= end) {
+            continue;
+        }
+        if (r->base < base && r->end > end) {
+            identity_add(end, r->end, r->efi_type, r->attribute);
+            identity[i].end = base;
+        } else if (r->base < base) {
+            r->end = base;
+        } else if (r->end > end) {
+            r->base = end;
+        } else {
+            identity[i--] = identity[--identity_count];
+        }
+    }
 }
 
 // Takes a size-aligned block of size bytes off the list.
@@ -350,10 +359,30 @@ static void assign_rest(const struct range_list *guest, const struct range_list 
     }
 }
 
+// Above 4 GiB, from 4 GiB on, as much as there is around what keeps its place.
+static void add_high(struct range_list *fill, uint64_t size) {
+    uint64_t at = FOUR_GIB;
+    for (uint32_t i = 0; i <= pinned.count && size != 0; i++) {
+        uint64_t stop = i < pinned.count ? pinned.r[i].base : UINT64_MAX;
+        if (stop <= at) {
+            if (i < pinned.count && pinned.r[i].end > at) {
+                at = pinned.r[i].end;
+            }
+            continue;
+        }
+        uint64_t len = stop - at < size ? stop - at : size;
+        list_add(&ram, at, at + len);
+        list_add(fill, at, at + len);
+        size -= len;
+        if (i < pinned.count) {
+            at = pinned.r[i].end;
+        }
+    }
+}
+
 void layout_init(void) {
     const struct handoff *h = core_handoff;
     struct range_list free_ram;
-    struct range_list pinned;
     list_init(&free_ram);
     list_init(&pinned);
     list_init(&ram);
@@ -361,8 +390,6 @@ void layout_init(void) {
     list_init(&kept);
     identity = kmalloc(MAX_RANGES * sizeof(*identity));
 
-    uint64_t low_top = ONE_MIB;
-    uint64_t high_top = FOUR_GIB;
     const EFI_MEMORY_DESCRIPTOR *d;
     for (uint32_t i = 0; (d = efi_desc(i)) != NULL; i++) {
         uint64_t base = d->PhysicalStart;
@@ -372,14 +399,6 @@ void layout_init(void) {
         }
         if (type_is_identity(d->Type)) {
             identity_add(base, end, d->Type, d->Attribute);
-        }
-        if (type_is_memory(d->Type)) {
-            if (base < FOUR_GIB && end > low_top) {
-                low_top = end < FOUR_GIB ? end : FOUR_GIB;
-            }
-            if (end > high_top) {
-                high_top = end;
-            }
         }
     }
 
@@ -397,6 +416,16 @@ void layout_init(void) {
         identity_add(base, end, EfiReservedMemoryType, efi_attribute_at(base));
     }
 
+    // The interrupt controllers, the timers, and what the guest's ACPI
+    // describes, but never the configuration space windows or the IOMMUs.
+    const struct pci_host *host = pci_host_scan();
+    for (uint32_t i = 0; i < host->claimed_count; i++) {
+        identity_add(host->claimed[i].base, host->claimed[i].end, EfiMemoryMappedIO, 0);
+    }
+    for (uint32_t i = 0; i < host->private_count; i++) {
+        identity_remove(host->private[i].base, host->private[i].end);
+    }
+
     for (uint32_t i = 0; i < identity_count; i++) {
         list_add(&pinned, identity[i].base, identity[i].end);
     }
@@ -410,30 +439,50 @@ void layout_init(void) {
     // probed after the guest programs the chipset.
     list_remove(&free_ram, VGA_BASE, ONE_MIB);
 
-    // As much as the host has, from 1 MiB to the end of its memory below
-    // 4 GiB, then from 4 GiB, around what must keep its address.
-    list_add(&ram, ONE_MIB, low_top);
-    list_add(&ram, FOUR_GIB, high_top);
-    for (uint32_t i = 0; i < pinned.count; i++) {
-        list_remove(&ram, pinned.r[i].base, pinned.r[i].end);
-    }
-
     uint64_t low_hpa;
     if (!take_block(&free_ram, TWO_MIB, &low_hpa)) {
         panic("No 2 MiB block of host memory for the guest's low memory\n");
     }
     low = (uint8_t *)(uintptr_t)low_hpa;
     memset(low, 0, TWO_MIB);
+    uint64_t available = list_total(&free_ram);
 
+    // The PCI hole as high as its BARs allow, and the larger BARs above
+    // whatever RAM the guest could have above 4 GiB.
+    struct pci_plan_range *obstacles = kmalloc((pinned.count + 1) * sizeof(*obstacles));
+    uint64_t pinned_high = 0;
+    uint64_t pinned_top = FOUR_GIB;
+    for (uint32_t i = 0; i < pinned.count; i++) {
+        obstacles[i] = (struct pci_plan_range){pinned.r[i].base, pinned.r[i].end};
+        if (pinned.r[i].end > FOUR_GIB) {
+            uint64_t base = pinned.r[i].base > FOUR_GIB ? pinned.r[i].base : FOUR_GIB;
+            pinned_high += pinned.r[i].end - base;
+            pinned_top = pinned.r[i].end;
+        }
+    }
+    uint64_t high_floor = FOUR_GIB + available + pinned_high;
+    high_floor = align_up(high_floor > pinned_top ? high_floor : pinned_top, ONE_GIB);
+    const struct pci_plan *plan = pci_plan_make(obstacles, pinned.count, vga_bar_size(),
+                                                high_floor);
+    kfree(obstacles);
+
+    // From 1 MiB to the PCI hole, around what must keep its address, then
+    // above 4 GiB what the host's memory has left.
+    list_add(&ram, ONE_MIB, plan->tolud);
+    for (uint32_t i = 0; i < pinned.count; i++) {
+        list_remove(&ram, pinned.r[i].base, pinned.r[i].end);
+    }
     struct range_list fill;
     list_init(&fill);
     for (uint32_t i = 0; i < ram.count; i++) {
         list_add(&fill, ram.r[i].base, ram.r[i].end);
     }
     list_remove(&fill, 0, TWO_MIB);
-    uint64_t available = list_total(&free_ram);
     uint64_t wanted = list_total(&fill);
-    if (wanted > available) {
+    if (wanted < available) {
+        add_high(&fill, available - wanted);
+        wanted = available;
+    } else if (wanted > available) {
         uint64_t sum = 0;
         for (uint32_t i = 0; i < fill.count; i++) {
             uint64_t size = fill.r[i].end - fill.r[i].base;
@@ -456,17 +505,8 @@ void layout_init(void) {
         wanted = available;
     }
 
-    // One to one, for what the host's memory map leaves out, such as the PCI
-    // hole, but none of the host's memory except what the guest must share.
-    gpt_map(0, 0, h->map_top, GPT_RWX, MT_UC);
-    for (uint32_t i = 0; (d = efi_desc(i)) != NULL; i++) {
-        if (type_is_memory(d->Type)) {
-            gpt_map(d->PhysicalStart, 0, d->NumberOfPages * PAGE_SIZE, 0, 0);
-        }
-    }
-    for (uint32_t i = 0; i < h->reserved_count; i++) {
-        gpt_map(h->reserved[i].base, 0, h->reserved[i].size, 0, 0);
-    }
+    // Nothing is mapped but what the guest has: what reaches nothing reads as
+    // absent.
     for (uint32_t i = 0; i < identity_count; i++) {
         const struct identity_range *r = &identity[i];
         gpt_map(r->base, r->base, r->end - r->base, GPT_RWX, identity_memtype(r));
@@ -500,14 +540,32 @@ void layout_init(void) {
            (unsigned long long)(below >> 20),
            (unsigned long long)(takeable.count != 0 ? takeable.r[takeable.count - 1].end : 0),
            (unsigned long long)(above >> 20));
-    if (available > wanted) {
-        printf("%llu MiB of host memory left over\n",
-               (unsigned long long)((available - wanted) >> 20));
-    }
 
     kfree(fill.r);
-    kfree(pinned.r);
     kfree(free_ram.r);
+}
+
+bool layout_mmio_free(uint64_t base, uint64_t size) {
+    uint64_t end = base + size;
+    if (end < base || base < ONE_MIB) {
+        return false;
+    }
+    const struct pci_plan *plan = pci_plan();
+    if (plan != NULL && plan->ecam != 0) {
+        uint64_t ecam_end = plan->ecam + (((uint64_t)plan->ecam_end - plan->ecam_start + 1) << 20);
+        if (base < ecam_end && end > plan->ecam) {
+            return false;
+        }
+    }
+    const struct range_list *lists[] = {&ram, &pinned, &kept};
+    for (unsigned l = 0; l < 3; l++) {
+        for (uint32_t i = 0; i < lists[l]->count; i++) {
+            if (base < lists[l]->r[i].end && end > lists[l]->r[i].base) {
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 void *layout_low(uint32_t gpa) {
@@ -631,6 +689,11 @@ bool layout_e820(struct e820_map *map) {
     }
     for (uint32_t i = 0; i < kept.count; i++) {
         ok &= e820_set(map, kept.r[i].base, kept.r[i].end - kept.r[i].base, E820_RESERVED);
+    }
+    const struct pci_plan *plan = pci_plan();
+    if (plan != NULL && plan->ecam != 0) {
+        ok &= e820_set(map, plan->ecam, ((uint64_t)plan->ecam_end - plan->ecam_start + 1) << 20,
+                       E820_RESERVED);
     }
     ok &= e820_set_low_memory(map);
     return ok;

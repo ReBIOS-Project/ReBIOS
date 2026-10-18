@@ -30,6 +30,7 @@
 #include <memory.h>
 #include <csm/e820.h>
 #include <hw/acpi.h>
+#include <hw/pci_host.h>
 #include <hw/power.h>
 #include <lib/aml.h>
 #include <lib/heap.h>
@@ -42,6 +43,7 @@
 #include <virt/irq.h>
 #include <virt/layout.h>
 #include <virt/mmio.h>
+#include <virt/pci_plan.h>
 #include <virt/vacpi.h>
 
 // The mailbox the guest's AML calls the firmware's methods through: a header,
@@ -474,10 +476,13 @@ static bool shape_usable(uacpi_object *obj) {
     return true;
 }
 
+static bool crs_replaced(uacpi_namespace_node *device);
+
 static void emit_method(struct aml *a, uacpi_namespace_node *node, const char name[4],
                         bool in_processor) {
     if (name_in(name, left_out_methods) || event_method(name)
-        || (in_processor && name_in(name, left_out_processor))) {
+        || (in_processor && name_in(name, left_out_processor))
+        || (memcmp(name, "_CRS", 4) == 0 && crs_replaced(uacpi_namespace_node_parent(node)))) {
         return;
     }
     uacpi_namespace_node_info *info;
@@ -547,7 +552,8 @@ static void emit_method(struct aml *a, uacpi_namespace_node *node, const char na
 }
 
 static void emit_name(struct aml *a, uacpi_namespace_node *node, const char name[4]) {
-    if (name_in(name, left_out_names)) {
+    if (name_in(name, left_out_names)
+        || (memcmp(name, "_CRS", 4) == 0 && crs_replaced(uacpi_namespace_node_parent(node)))) {
         return;
     }
     uacpi_object *obj;
@@ -650,6 +656,231 @@ static void emit_scopes(struct aml *a, uacpi_namespace_node *parent);
 
 static const char *const link_ids[] = {"PNP0C0F", NULL};
 static const char *const ec_ids[] = {"PNP0C09", NULL};
+static const char *const host_bridge_ids[] = {"PNP0A03", "PNP0A08", NULL};
+static const char *const motherboard_ids[] = {"PNP0C01", "PNP0C02", NULL};
+
+// Resource descriptors, ACPI 6.6, 6.4: small items have their length in bits
+// 2:0, large ones in the 16 bits after the first byte.
+#define RES_LARGE 0x80u
+#define RES_END_TAG 0x79
+#define RES_MEMORY24 0x81
+#define RES_MEMORY32 0x85
+#define RES_FIXED_MEMORY32 0x86
+#define RES_DWORD_ADDRESS 0x87
+#define RES_WORD_ADDRESS 0x88
+#define RES_QWORD_ADDRESS 0x8a
+#define RES_EXTENDED_ADDRESS 0x8b
+#define ADDRESS_MEMORY 0
+// A producer's fixed window, readable and writable, uncached or cacheable.
+#define ADDRESS_FIXED_PRODUCER 0x0c
+#define MEMORY_RW 0x01
+#define MEMORY_CACHEABLE 0x02
+#define CRS_MAX 2048
+#define ONE_MIB 0x100000ull
+
+static uint64_t le(const uint8_t *p, unsigned bytes) {
+    uint64_t value = 0;
+    for (unsigned i = bytes; i-- > 0;) {
+        value = value << 8 | p[i];
+    }
+    return value;
+}
+
+static void put_le(uint8_t *p, uint64_t value, unsigned bytes) {
+    for (unsigned i = 0; i < bytes; i++) {
+        p[i] = (uint8_t)(value >> (8 * i));
+    }
+}
+
+static uint32_t resource_size(const uint8_t *p, uint32_t left) {
+    if (!(p[0] & RES_LARGE)) {
+        return 1 + (p[0] & 7u);
+    }
+    return left < 3 ? left + 1 : 3 + (uint32_t)le(p + 1, 2);
+}
+
+// The memory a descriptor of size bytes describes, if any.
+static bool resource_memory(const uint8_t *p, uint32_t size, uint64_t *base, uint64_t *end) {
+    uint64_t min;
+    uint64_t max;
+    uint64_t length;
+    switch (p[0]) {
+        case RES_MEMORY24: {
+            if (size < 12) {
+                return false;
+            }
+            min = le(p + 4, 2) << 8;
+            max = le(p + 6, 2) << 8;
+            length = le(p + 10, 2) << 8;
+            break;
+        }
+        case RES_MEMORY32: {
+            if (size < 20) {
+                return false;
+            }
+            min = le(p + 4, 4);
+            max = le(p + 8, 4);
+            length = le(p + 16, 4);
+            break;
+        }
+        case RES_FIXED_MEMORY32: {
+            if (size < 12) {
+                return false;
+            }
+            min = le(p + 4, 4);
+            length = le(p + 8, 4);
+            max = min + length;
+            break;
+        }
+        case RES_WORD_ADDRESS: {
+            if (size < 16 || p[3] != ADDRESS_MEMORY) {
+                return false;
+            }
+            min = le(p + 8, 2);
+            max = le(p + 10, 2);
+            length = le(p + 14, 2);
+            break;
+        }
+        case RES_DWORD_ADDRESS: {
+            if (size < 26 || p[3] != ADDRESS_MEMORY) {
+                return false;
+            }
+            min = le(p + 10, 4);
+            max = le(p + 14, 4);
+            length = le(p + 22, 4);
+            break;
+        }
+        case RES_QWORD_ADDRESS: {
+            if (size < 46 || p[3] != ADDRESS_MEMORY) {
+                return false;
+            }
+            min = le(p + 14, 8);
+            max = le(p + 22, 8);
+            length = le(p + 38, 8);
+            break;
+        }
+        case RES_EXTENDED_ADDRESS: {
+            if (size < 56 || p[3] != ADDRESS_MEMORY) {
+                return false;
+            }
+            min = le(p + 16, 8);
+            max = le(p + 24, 8);
+            length = le(p + 40, 8);
+            break;
+        }
+        default: {
+            return false;
+        }
+    }
+    *base = min;
+    *end = length != 0 ? min + length : max + 1;
+    return true;
+}
+
+static uint32_t put_window(uint8_t *out, uint64_t base, uint64_t end, bool high) {
+    if (high) {
+        uint8_t d[46] = {RES_QWORD_ADDRESS, 43, 0, ADDRESS_MEMORY, ADDRESS_FIXED_PRODUCER,
+                         MEMORY_RW | MEMORY_CACHEABLE};
+        put_le(d + 14, base, 8);
+        put_le(d + 22, end - 1, 8);
+        put_le(d + 38, end - base, 8);
+        memcpy(out, d, sizeof(d));
+        return sizeof(d);
+    }
+    uint8_t d[26] = {RES_DWORD_ADDRESS, 23, 0, ADDRESS_MEMORY, ADDRESS_FIXED_PRODUCER, MEMORY_RW};
+    put_le(d + 10, base, 4);
+    put_le(d + 14, end - 1, 4);
+    put_le(d + 22, end - base, 4);
+    memcpy(out, d, sizeof(d));
+    return sizeof(d);
+}
+
+static bool overlaps_private(uint64_t base, uint64_t end) {
+    const struct pci_host *host = pci_host_scan();
+    for (uint32_t i = 0; i < host->private_count; i++) {
+        if (base < host->private[i].end && end > host->private[i].base) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static const struct pci_plan_root *plan_root(uacpi_namespace_node *bridge) {
+    const struct pci_host *host = pci_host_scan();
+    const struct pci_plan *plan = pci_plan();
+    for (uint32_t i = 0; i < host->bridge_count && plan != NULL; i++) {
+        if (host->bridges[i].node != bridge) {
+            continue;
+        }
+        for (uint32_t r = 0; r < plan->root_count; r++) {
+            if (plan->roots[r].segment == host->bridges[i].segment
+                && plan->roots[r].bus == host->bridges[i].bus) {
+                return &plan->roots[r];
+            }
+        }
+    }
+    return NULL;
+}
+
+static bool crs_replaced(uacpi_namespace_node *device) {
+    return uacpi_device_matches_pnp_id(device, host_bridge_ids)
+           || uacpi_device_matches_pnp_id(device, motherboard_ids);
+}
+
+// The guest's _CRS of a host bridge or a motherboard device, from the
+// firmware's: a host bridge's windows are its root bus's in the guest's PCI
+// plan, but for the legacy ones below 1 MiB, and a motherboard device never
+// claims the configuration space windows and the IOMMUs, which the guest has
+// not at their addresses.
+static void emit_crs(struct aml *a, uacpi_namespace_node *device) {
+    uacpi_object *obj;
+    if (uacpi_eval(device, "_CRS", NULL, &obj) != UACPI_STATUS_OK || obj == NULL) {
+        return;
+    }
+    uacpi_data_view view;
+    if (uacpi_object_get_type(obj) != UACPI_OBJECT_BUFFER
+        || uacpi_object_get_buffer(obj, &view) != UACPI_STATUS_OK) {
+        uacpi_object_unref(obj);
+        return;
+    }
+    bool bridge = uacpi_device_matches_pnp_id(device, host_bridge_ids);
+    uint8_t *out = kmalloc(CRS_MAX);
+    uint32_t size = 0;
+    const uint8_t *in = view.const_bytes;
+    uint32_t left = (uint32_t)view.length;
+    while (left != 0 && in[0] != RES_END_TAG) {
+        uint32_t n = resource_size(in, left);
+        if (n > left) {
+            break;
+        }
+        uint64_t base;
+        uint64_t end;
+        bool keep = true;
+        if (resource_memory(in, n, &base, &end)) {
+            keep = bridge ? end <= ONE_MIB : !overlaps_private(base, end);
+        }
+        if (keep && size + n <= CRS_MAX - 2 * 46 - 2) {
+            memcpy(out + size, in, n);
+            size += n;
+        }
+        in += n;
+        left -= n;
+    }
+    uacpi_object_unref(obj);
+    const struct pci_plan_root *root = bridge ? plan_root(device) : NULL;
+    if (root != NULL && root->low.end != root->low.base) {
+        size += put_window(out + size, root->low.base, root->low.end, false);
+    }
+    if (root != NULL && root->high.end != root->high.base) {
+        size += put_window(out + size, root->high.base, root->high.end, true);
+    }
+    out[size++] = RES_END_TAG;
+    out[size++] = 0;
+    aml_op(a, AML_NAME);
+    emit_seg(a, "_CRS");
+    aml_buffer(a, out, size);
+    kfree(out);
+}
 
 // The devices the guest does not get, known before anything refers to them.
 static uacpi_iteration_decision hide_found(void *user, uacpi_namespace_node *node,
@@ -692,6 +923,9 @@ static void emit_object(struct aml *a, uacpi_namespace_node *node, bool in_proce
             aml_begin(a, AML_DEVICE);
             emit_seg(a, name.text);
             emit_children(a, node, false);
+            if (crs_replaced(node) && child_named(node, "_CRS")) {
+                emit_crs(a, node);
+            }
             if (child_named(node, "_PRT")) {
                 emit_prt(a, node);
             }
@@ -1196,16 +1430,26 @@ static void emit_mailbox_device(struct aml *a) {
     aml_name(a, "RBMB");
     aml_name_int(a, "_HID", eisa_id("PNP0C02"));
     aml_name_int(a, "_UID", 0x5242);
+    // The mailbox, and the guest's configuration space window, which an OS
+    // uses only once a motherboard resource claims it.
     uint8_t crs[] = {
-        0x86, 0x09, 0x00, 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0x79, 0x00,
+        RES_FIXED_MEMORY32, 0x09, 0x00, 0x01, 0, 0, 0, 0, 0, 0, 0, 0,
+        RES_FIXED_MEMORY32, 0x09, 0x00, 0x01, 0, 0, 0, 0, 0, 0, 0, 0, RES_END_TAG, 0x00,
     };
-    uint32_t base = vacpi.mailbox;
-    uint32_t size = MBX_SIZE + DOORBELL_SIZE;
-    memcpy(crs + 4, &base, 4);
-    memcpy(crs + 8, &size, 4);
+    put_le(crs + 4, vacpi.mailbox, 4);
+    put_le(crs + 8, MBX_SIZE + DOORBELL_SIZE, 4);
+    uint32_t crs_size = 12;
+    const struct pci_plan *plan = pci_plan();
+    if (plan != NULL && plan->ecam != 0) {
+        put_le(crs + 16, plan->ecam, 4);
+        put_le(crs + 20, ((uint64_t)plan->ecam_end - plan->ecam_start + 1) << 20, 4);
+        crs_size += 12;
+    }
+    crs[crs_size] = RES_END_TAG;
+    crs[crs_size + 1] = 0x00;
     aml_op(a, AML_NAME);
     aml_name(a, "_CRS");
-    aml_buffer(a, crs, sizeof(crs));
+    aml_buffer(a, crs, crs_size + 2);
 
     aml_op(a, AML_OPERATION_REGION);
     aml_name(a, "MBXR");

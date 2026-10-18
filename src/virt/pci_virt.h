@@ -28,11 +28,15 @@ struct pci_virt_ops {
     void (*write)(void *ctx, uint32_t offset, unsigned size, uint32_t value);
 };
 
-// Presents a single-function device on a device number of segment 0's bus 0
-// that no hardware uses, through the configuration mechanism of ports CF8h and
-// CFCh and through the bus's ECAM window, which reach every other function as
-// before. Needs pci_enum_scan(). Returns the device number, or -1 if no device
-// number is free.
+// Takes the guest's configuration space accesses over, through ports CF8h and
+// CFCh and through the configuration space windows, segment 0's where the plan
+// puts it and the others' where the host has them, and gives the guest the
+// plan's BARs and bridge windows, mapped onto the host's BARs. Needs
+// layout_init().
+void pci_virt_init(void);
+
+// Presents the plan's single-function device of the hypervisor's own on
+// segment 0's bus 0. Returns its device number, or -1 if the plan has none.
 int pci_virt_add(const struct pci_virt_ops *ops, void *ctx);
 
 #endif

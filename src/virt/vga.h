@@ -18,6 +18,7 @@
 #ifndef VIRT__VGA_H
 #define VIRT__VGA_H
 
+#include <stdint.h>
 #include <stdbool.h>
 
 // Gives the guest a VGA of its own when it has no usable video BIOS, or the
@@ -26,6 +27,10 @@
 // whether the VGA is the hypervisor's.
 bool vga_init(void);
 bool vga_emulated(void);
+
+// The size of the BAR of the display controller vga_init() is to present, 0
+// if it is to present none.
+uint64_t vga_bar_size(void);
 
 // The device number on PCI bus 0 of the display controller the emulated VGA
 // is, with its Bochs display interface and framebuffer BAR, or -1 if it has

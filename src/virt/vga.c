@@ -21,7 +21,6 @@
 #include <memory.h>
 #include <core.h>
 #include <handoff.h>
-#include <hw/pci_relocate.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
 #include <lib/time.h>
@@ -29,7 +28,9 @@
 #include <sys/mm.h>
 #include <virt/gpt.h>
 #include <virt/io.h>
+#include <virt/layout.h>
 #include <virt/mmio.h>
+#include <virt/pci_plan.h>
 #include <virt/pci_virt.h>
 #include <virt/vcpu.h>
 #include <virt/vga.h>
@@ -163,11 +164,6 @@
 #define PCI_COMMAND_INTX_DISABLE 0x0400
 #define PCI_BAR_PREFETCHABLE 0x08
 
-// Where the framebuffer BAR may be mapped: above the first megabyte, and below
-// the I/O APIC, local APIC, and firmware ranges.
-#define BAR_LOW 0x100000ull
-#define BAR_HIGH 0xfec00000ull
-
 #define NO_BANK UINT32_MAX
 
 static struct {
@@ -218,10 +214,8 @@ static struct {
     uint16_t command;
     uint32_t bar;
     uint8_t interrupt_line;
-    // Where the BAR maps the video memory, 0 if nowhere, and the memory type
-    // the identity mapping it replaced had.
+    // Where the BAR maps the video memory, 0 if nowhere.
     uint64_t mapped;
-    uint8_t mapped_memtype;
     // While the guest's mode is the firmware framebuffer's own, shown from the
     // start of video memory, the first direct_size bytes of video memory are
     // that framebuffer, which nothing then has to copy to. Panning or flipping
@@ -883,37 +877,20 @@ static void dispi_ports(struct vcpu *v, void *ctx, uint16_t offset, unsigned siz
     spinlock_release(&vga.lock);
 }
 
-// Whether the guest-physical range is mapped to itself with one memory type,
-// as the layout maps what is neither RAM nor emulated, which the BAR may then
-// take over and give back.
-static bool range_identity(uint64_t base, uint64_t size, uint8_t *memtype) {
-    for (uint64_t a = base; a < base + size; a += PAGE_SIZE) {
-        uint64_t hpa;
-        uint32_t prot;
-        uint8_t type;
-        if (!gpt_translate(a, &hpa, &prot, &type) || hpa != a || (a != base && type != *memtype)) {
-            return false;
-        }
-        *memtype = type;
-    }
-    return true;
-}
-
 static void bar_remap(void) {
     uint64_t want = 0;
-    if ((vbe.command & PCI_COMMAND_MEMORY) && vbe.bar >= BAR_LOW
-        && vbe.bar + vbe.vram_size <= BAR_HIGH) {
+    if (vbe.command & PCI_COMMAND_MEMORY) {
         want = vbe.bar;
     }
     if (want == vbe.mapped) {
         return;
     }
     if (vbe.mapped != 0) {
-        gpt_map(vbe.mapped, vbe.mapped, vbe.vram_size, GPT_RWX, vbe.mapped_memtype);
+        gpt_map(vbe.mapped, 0, vbe.vram_size, 0, 0);
         vbe.mapped = 0;
     }
     if (want != 0) {
-        if (range_identity(want, vbe.vram_size, &vbe.mapped_memtype)) {
+        if (layout_mmio_free(want, vbe.vram_size)) {
             map_vram(want, 0, vbe.vram_size);
             vbe.mapped = want;
         } else {
@@ -1628,11 +1605,12 @@ static void vbe_init(void) {
         vbe.direct_size = frame;
     }
 
-    uint64_t base;
-    if (!pci_relocate_reserve(0, 0, vbe.vram_size, &base)) {
+    const struct pci_plan *plan = pci_plan();
+    if (plan == NULL || plan->virt_bar == 0) {
         printf("No room for the emulated display controller's BAR, so no linear framebuffer\n");
         return;
     }
+    uint64_t base = plan->virt_bar;
     vbe.bar = (uint32_t)base;
     vbe.command = PCI_COMMAND_IO | PCI_COMMAND_MEMORY;
     vbe.interrupt_line = 0xff;
@@ -1648,24 +1626,40 @@ static void vbe_init(void) {
 static const char *const scaling_names[] = {"stretched", "kept at 4:3", "centred", "scaled",
                                             "scaled sharply"};
 
-bool vga_init(void) {
+static bool emulation_wanted(void) {
     const struct handoff *h = core_handoff;
     switch (h->config.vga_emulation) {
         case HANDOFF_VGA_EMULATION_NEVER: {
             return false;
         }
         case HANDOFF_VGA_EMULATION_ALWAYS: {
-            break;
+            return true;
         }
         default: {
-            if (h->video.vbios_present) {
-                return false;
-            }
-            break;
+            return !h->video.vbios_present;
         }
     }
+}
+
+static bool framebuffer_usable(const struct handoff_framebuffer *fb) {
+    return fb->present && (fb->bpp == 32 || fb->bpp == 24 || fb->bpp == 16);
+}
+
+uint64_t vga_bar_size(void) {
+    const struct handoff *h = core_handoff;
+    if (!emulation_wanted() || !framebuffer_usable(&h->video.framebuffer)) {
+        return 0;
+    }
+    return h->video.vram_size;
+}
+
+bool vga_init(void) {
+    const struct handoff *h = core_handoff;
+    if (!emulation_wanted()) {
+        return false;
+    }
     const struct handoff_framebuffer *fb = &h->video.framebuffer;
-    if (!fb->present || (fb->bpp != 32 && fb->bpp != 24 && fb->bpp != 16)) {
+    if (!framebuffer_usable(fb)) {
         printf("No framebuffer to show an emulated VGA on\n");
         return false;
     }

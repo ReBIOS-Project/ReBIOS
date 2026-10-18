@@ -23,12 +23,17 @@
 #include <csm/e820.h>
 
 // The guest-physical memory map: RAM where a PC has it, contiguous from 1 MiB
-// wherever the host's own map allows, backed by whatever host memory is free,
-// and the host ranges the guest must find at their own addresses.
+// to the guest's PCI hole, backed by whatever host memory is free, and the
+// host ranges the guest must find at their own addresses.
 
-// Maps the guest's memory, and the rest of the physical address space one to
-// one, except host memory the guest has no business with.
+// Lays out the guest's PCI memory, pci_plan_make(), then maps the guest's RAM
+// and what it finds at host addresses; what is mapped nowhere reads as absent.
+// Needs pci_enum_scan().
 void layout_init(void);
+
+// Whether [base, base + size) is clear of the guest's RAM, of what it finds
+// at host addresses, and of its configuration space window, for a BAR there.
+bool layout_mmio_free(uint64_t base, uint64_t size);
 
 // The hypervisor's view of guest-physical address gpa, below 1 MiB and
 // outside the VGA window.

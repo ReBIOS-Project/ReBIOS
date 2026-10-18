@@ -41,6 +41,7 @@
 #include <virt/hypercall.h>
 #include <virt/irq.h>
 #include <virt/layout.h>
+#include <virt/pci_plan.h>
 #include <virt/vcpu.h>
 #include <virt/vga.h>
 #include <virt/virt.h>
@@ -81,7 +82,6 @@ extern const uint8_t csm_thunk_end[];
 // memory while it starts up.
 #define HIGH_PMM_SIZE (8u << 20)
 #define HIGH_PMM_ALIGN 0x10000
-#define FOUR_GIB 0x100000000ull
 
 // The 2.x SMBIOS entry point's fields. The structure table goes right after
 // the longest entry point there is.
@@ -512,9 +512,11 @@ void csm_boot_start(struct vcpu *v) {
     uint32_t e820_count = e820_build();
     csm.compat16->e820_pointer = E820_TABLE;
     csm.compat16->e820_length = e820_count * sizeof(struct e820_entry);
-    uint64_t ecam = pci_cfg_ecam_base(0, 0);
-    if (ecam < FOUR_GIB) {
-        csm.compat16->pci_express_base = (uint32_t)ecam;
+    // Where bus 0's would be, as the legacy BIOS takes it.
+    const struct pci_plan *plan = pci_plan();
+    if (plan != NULL && plan->ecam != 0) {
+        uint64_t bus0 = plan->ecam - ((uint64_t)plan->ecam_start << 20);
+        csm.compat16->pci_express_base = (uint32_t)bus0;
     }
     if (csm.compat16->table_length >= sizeof(struct csm_compat16_table)) {
         csm.compat16->hypervisor_interface = HYPERCALL_INTERFACE;
