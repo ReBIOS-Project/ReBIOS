@@ -280,6 +280,7 @@ static void virtual_deliver(uint32_t gsi, struct route *r) {
 static void update(void) {
     resample();
 
+    struct cpu *was = extint_target;
     extint_target = NULL;
     for (uint32_t gsi = 0; gsi < route_count; gsi++) {
         struct route *r = &routes[gsi];
@@ -310,6 +311,9 @@ static void update(void) {
     }
 
     __atomic_store_n(&extint_asserted, pic_output(), __ATOMIC_RELEASE);
+    if (extint_target != was) {
+        vlapic_extint_moved();
+    }
 }
 
 // After the 8259s changed, on any processor.
@@ -429,6 +433,10 @@ void irq_gsi_changed(uint32_t gsi) {
     update();
     spinlock_release(&lock);
     kick_after_update();
+}
+
+bool irq_extint_routed(void) {
+    return __atomic_load_n(&extint_target, __ATOMIC_ACQUIRE) != NULL;
 }
 
 bool irq_extint_pending(struct vcpu *v) {

@@ -41,6 +41,7 @@
 #define SVM_FEATURE_VMCB_CLEAN (1u << 5)
 #define SVM_FEATURE_FLUSH_BY_ASID (1u << 6)
 #define SVM_FEATURE_DECODE_ASSISTS (1u << 7)
+#define SVM_FEATURE_AVIC (1u << 13)
 #define SVM_FEATURE_VGIF (1u << 16)
 #define SVM_FEATURE_VNMI (1u << 25)
 
@@ -60,6 +61,7 @@
 
 bool svm_nrips;
 bool svm_vnmi;
+bool svm_avic;
 // TLB_CONTROL can flush the guest's ASID alone (APM 24593 rev. 3.45, Table
 // 15-9), sparing the host's translations.
 static bool flush_by_asid;
@@ -177,6 +179,12 @@ bool svm_supported(void) {
     decode_assists = (features & SVM_FEATURE_DECODE_ASSISTS) != 0;
     svm_vnmi = (features & (SVM_FEATURE_VNMI | SVM_FEATURE_VGIF))
                == (SVM_FEATURE_VNMI | SVM_FEATURE_VGIF);
+    // AVIC may miss IPIs on family 17h, and on Hygon's 18h made from it, where
+    // AMD advises against it (56323 rev. 1.03 and 55449 rev. 1.21, erratum
+    // 1235).
+    struct cpu_signature signature = cpu_signature();
+    svm_avic = (features & SVM_FEATURE_AVIC) != 0 && signature.family != 0x17
+               && signature.family != 0x18;
     return true;
 }
 
@@ -408,6 +416,14 @@ static void svm_handle_exit(struct vcpu *v) {
             svm_dump_guest(v);
             panic("Unhandled guest-physical access\n");
         }
+        case SVM_EXIT_AVIC_INCOMPLETE_IPI: {
+            vlapic_avic_ipi_exit(v, c->exitinfo1, c->exitinfo2);
+            break;
+        }
+        case SVM_EXIT_AVIC_NOACCEL: {
+            vlapic_avic_access_exit(v, c->exitinfo1);
+            break;
+        }
         case SVM_EXIT_INVALID: {
             printf("VMRUN failed, invalid guest state\n");
             svm_dump_guest(v);
@@ -461,7 +477,10 @@ void svm_run(struct vcpu *v) {
         vcpu_before_entry(v);
         v->vmcb->save.rax = v->gprs.rax;
         clean_before_entry(v);
+        // Before the processor looks at the guest's interrupt requests.
+        __atomic_store_n(&v->in_guest, true, __ATOMIC_SEQ_CST);
         svm_enter(v->vmcb_pa, &v->gprs);
+        __atomic_store_n(&v->in_guest, false, __ATOMIC_RELEASE);
         clean_after_exit(v);
         v->fetched_count = 0;
         v->gprs.rax = v->vmcb->save.rax;

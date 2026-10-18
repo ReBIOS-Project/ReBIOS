@@ -322,6 +322,7 @@ void vcpu_before_entry(struct vcpu *v) {
             svm_flush_guest_tlb(v);
         }
     }
+    vlapic_prepare_entry(v);
     // A stepped instruction is to run, not an event's handler.
     if (v->stepping) {
         event_hold(v);
@@ -362,6 +363,7 @@ void vcpu_halt(struct vcpu *v) {
         asm volatile ("stgi" ::: "memory");
     }
     cpu->taking_interrupts = true;
+    vlapic_halt(v, true);
     for (;;) {
         __atomic_store_n(&cpu->kicked, false, __ATOMIC_SEQ_CST);
         service_pause(v);
@@ -374,6 +376,7 @@ void vcpu_halt(struct vcpu *v) {
         vga_refresh();
         cpu_halt();
     }
+    vlapic_halt(v, false);
     cpu->taking_interrupts = false;
     if (!virt_vmx) {
         asm volatile ("clgi" ::: "memory");

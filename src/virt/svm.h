@@ -193,6 +193,8 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 #define SVM_EXIT_SKINIT 0x86
 #define SVM_EXIT_XSETBV 0x8d
 #define SVM_EXIT_NPF 0x400
+#define SVM_EXIT_AVIC_INCOMPLETE_IPI 0x401
+#define SVM_EXIT_AVIC_NOACCEL 0x402
 #define SVM_EXIT_INVALID 0xffffffffffffffffull
 
 // Nested page fault error code: the access was a write, or a fetch.
@@ -210,6 +212,7 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 #define SVM_VINTR_MASKING (1ull << 24)
 #define SVM_VINTR_GIF_ENABLE (1ull << 25)
 #define SVM_VINTR_NMI_ENABLE (1ull << 26)
+#define SVM_VINTR_AVIC (1ull << 31)
 
 // Event injection.
 #define SVM_EVENT_VALID (1ull << 31)
@@ -231,6 +234,8 @@ extern bool svm_nrips;
 // guest can (APM 24593 rev. 3.45, 15.21.10), with GIF virtualised, as Linux
 // 7.3's KVM has it.
 extern bool svm_vnmi;
+// The processor's AVIC (APM 24593 rev. 3.45, 15.29), where it can be used.
+extern bool svm_avic;
 
 bool svm_supported(void);
 // The guest's translations go before its next run, as when the hypervisor

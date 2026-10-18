@@ -91,6 +91,8 @@ struct vcpu {
     uint64_t vmcb_pa;
     // The VMCB as the last exit left it, for its clean bits.
     uint8_t *vmcb_seen;
+    // Whether the vCPU is in the guest or entering it, for AVIC's doorbells.
+    volatile bool in_guest;
     // The instruction bytes the processor fetched for the exit at hand, at
     // fetched_rip, if fetched_count is not 0.
     uint8_t fetched[15];

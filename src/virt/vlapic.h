@@ -78,6 +78,17 @@ void vlapic_eoi_exit(struct vcpu *v, uint8_t vector);
 // The guest wrote a register with side effects at a page offset, with the
 // value already in place.
 void vlapic_apic_write(struct vcpu *v, uint32_t offset);
+// AVIC's exits: an IPI it could not complete, and an access it does not
+// accelerate (APM 24593 rev. 3.45, 15.29.9).
+void vlapic_avic_ipi_exit(struct vcpu *v, uint64_t info1, uint64_t info2);
+void vlapic_avic_access_exit(struct vcpu *v, uint64_t info1);
+// The I/O APIC entry for the 8259 changed, which decides whether AVIC can run
+// the local APICs.
+void vlapic_extint_moved(void);
+// Before the vCPU's events are seen to, as its local APIC's mode may change.
+void vlapic_prepare_entry(struct vcpu *v);
+// The vCPU waits in the hypervisor for its HLT to end, or no longer does.
+void vlapic_halt(struct vcpu *v, bool halting);
 
 // The TPR, which the guest also changes through CR8 without exits, kept in
 // step around entries.

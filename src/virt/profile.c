@@ -31,8 +31,8 @@
 
 #define PERIOD_NS 10000000000ull
 
-// VMX's basic exit reasons are below 0x100, as are SVM's exit codes but its
-// nested page faults (0x400 up), which go to slots from 0x100.
+// VMX's basic exit reasons are below 0x100, as are SVM's exit codes but those
+// from 0x400 on, nested page faults and AVIC's, which go to slots from 0x100.
 #define SLOTS 0x200
 #define PAGES 64
 #define TOP 8
@@ -104,6 +104,12 @@ static const char *svm_name(unsigned slot) {
         }
         case 0x100: {
             return "nested page fault";
+        }
+        case 0x101: {
+            return "AVIC IPI";
+        }
+        case 0x102: {
+            return "AVIC access";
         }
         default: {
             if (slot >= 0x40 && slot < 0x60) {

@@ -58,6 +58,8 @@ void irq_gsi_changed(uint32_t gsi);
 // ExtINT entry, and the interrupt acknowledge that answers it.
 bool irq_extint_pending(struct vcpu *v);
 uint8_t irq_extint_acknowledge(void);
+// Whether an I/O APIC entry delivers the 8259's interrupts.
+bool irq_extint_routed(void);
 
 // A guest vector the processor took: whether one of the guest's level-
 // triggered I/O APIC entries sent it here, which then waits for the guest's

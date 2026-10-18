@@ -68,6 +68,19 @@
 #define X2APIC_BROADCAST 0xffffffffu
 #define TIMER_DIVIDE_WRITABLE 0xbu
 
+#define MSR_AVIC_DOORBELL 0xc001011b
+// The physical APIC ID table's entries and the logical one's (APM 24593 rev.
+// 3.45, Tables 15-23 and 15-24), for xAPIC mode's 8-bit IDs, FFh being
+// broadcast.
+#define AVIC_ENTRY_VALID (1ull << 63)
+#define AVIC_ENTRY_RUNNING (1ull << 62)
+#define AVIC_LOGICAL_VALID (1u << 31)
+#define AVIC_LOGICAL_ENTRIES 64
+#define AVIC_MAX_ID 0xfe
+// Why an IPI AVIC took on exits (APM 24593 rev. 3.45, Table 15-27).
+#define AVIC_IPI_NOT_RUNNING 1
+#define AVIC_IPI_BAD_BACKING_PAGE 3
+
 enum {
     LVT_CMCI,
     LVT_TIMER,
@@ -115,6 +128,8 @@ struct vlapic {
     // Edge-triggered requests where VMX processes posted interrupts: a level-
     // triggered one must be in the registers before its vector's EOI exit is.
     struct posted *posted;
+    // Whether AVIC runs the vCPU's local APIC.
+    bool avic;
 };
 
 static uint32_t regs_get(const struct vlapic *vl, uint32_t offset) {
@@ -123,6 +138,16 @@ static uint32_t regs_get(const struct vlapic *vl, uint32_t offset) {
 
 static void regs_set(struct vlapic *vl, uint32_t offset, uint32_t value) {
     *(volatile uint32_t *)(vl->regs + offset) = value;
+}
+
+// AVIC sets bits of the IRR and TMR in the guest, and other processors set
+// them for it.
+static void regs_or(struct vlapic *vl, uint32_t offset, uint32_t bits) {
+    __atomic_or_fetch((uint32_t *)(vl->regs + offset), bits, __ATOMIC_SEQ_CST);
+}
+
+static void regs_and(struct vlapic *vl, uint32_t offset, uint32_t bits) {
+    __atomic_and_fetch((uint32_t *)(vl->regs + offset), bits, __ATOMIC_SEQ_CST);
 }
 
 static uint32_t host_version;
@@ -160,6 +185,30 @@ static const uint32_t x2apic_passed_reads[] = {
 };
 static const uint32_t x2apic_passed_writes[] = {APIC_TPR, APIC_EOI, APIC_SELF_IPI};
 
+// SVM's AVIC runs the local APICs (APM 24593 rev. 3.45, 15.29), all of them or
+// none: it checks the permissions of the page the shared nested page tables map
+// behind a local APIC's page (APM 24593 rev. 3.45, 15.29.3), which a vCPU it
+// does not run would reach instead. It cannot run them while a vCPU can take
+// the 8259's interrupts, whose interrupt windows it ignores (APM 24593 rev.
+// 3.45, 15.29.4.1), while one is in x2APIC mode, or while their logical IDs do
+// not fit its table.
+static bool avic_supported;
+static volatile bool avic_wanted;
+// Something that decides it changed: it is decided again before the next
+// entry, out of the exit handlers, as the other vCPUs leave the guest for it.
+static volatile bool avic_recheck;
+static struct spinlock avic_lock;
+static uint64_t *avic_physical_table;
+static uint32_t *avic_logical_table;
+
+// The writes AVIC completes before it exits (APM 24593 rev. 3.45, Table 15-22),
+// as Linux 7.3's KVM has them.
+static const uint32_t avic_trapped_writes[] = {
+    APIC_ID, APIC_EOI, APIC_RRD, APIC_LDR, APIC_DFR, APIC_SVR, APIC_ESR, APIC_ICR_LOW,
+    APIC_LVT_TIMER, APIC_LVT_THERMAL, APIC_LVT_PERF, APIC_LVT_LINT0, APIC_LVT_LINT1,
+    APIC_LVT_ERROR, APIC_TIMER_INITIAL, APIC_TIMER_DIVIDE,
+};
+
 static const struct mmio_ops mmio_ops;
 
 static void trap_page(uint64_t page) {
@@ -178,7 +227,7 @@ static void trap_page(uint64_t page) {
     pages[page_count++] = page;
     spinlock_release(&page_lock);
     mmio_register(page, PAGE_SIZE, &mmio_ops, (void *)(uintptr_t)page);
-    if (apic_access_page != 0) {
+    if (apic_access_page != 0 && (virt_vmx || avic_wanted)) {
         gpt_map(page, apic_access_page, PAGE_SIZE, GPT_RWX, MT_WB);
     } else {
         gpt_map(page, 0, PAGE_SIZE, 0, 0);
@@ -198,6 +247,16 @@ void vlapic_init(void) {
         apicv = vmx_secondary_allowed(PROC2_APIC_REG_VIRT | PROC2_VIRT_INTR_DELIVERY);
         posted_interrupts = apicv && vmx_pin_allowed(PIN_POSTED_INTR);
         x2apic_virtualization = apicv && vmx_secondary_allowed(PROC2_VIRT_X2APIC);
+    }
+    if (!virt_vmx && svm_avic) {
+        // RAM, as AVIC may fail to redirect accesses to MMIO (AMD 56683 rev.
+        // 1.08, erratum 1308).
+        uint8_t *page = page_alloc(1);
+        memset(page, 0xff, PAGE_SIZE);
+        apic_access_page = (uint64_t)(uintptr_t)page;
+        avic_physical_table = page_alloc(1);
+        avic_logical_table = page_alloc(1);
+        avic_supported = true;
     }
     trap_page(APIC_DEFAULT_BASE);
     virt_intercept_msr(MSR_IA32_APIC_BASE, true, true);
@@ -235,7 +294,7 @@ static bool sw_enabled(const struct vlapic *vl) {
 // The processor virtualises the vCPU's accesses to the APIC-access page while
 // its local APIC is in xAPIC mode, and its x2APIC MSRs in x2APIC mode.
 static void access_virtualization(const struct vlapic *vl) {
-    if (apic_access_page == 0) {
+    if (!virt_vmx || apic_access_page == 0) {
         return;
     }
     uint64_t controls = vmx_read(VMCS_PROC_CONTROLS2);
@@ -274,7 +333,11 @@ static bool vector_set(const struct vlapic *vl, uint32_t base, unsigned vector) 
 static void set_vector(struct vlapic *vl, uint32_t base, unsigned vector, bool on) {
     uint32_t offset = vector_reg(base, vector);
     uint32_t bit = 1u << (vector % 32);
-    regs_set(vl, offset, on ? regs_get(vl, offset) | bit : regs_get(vl, offset) & ~bit);
+    if (on) {
+        regs_or(vl, offset, bit);
+    } else {
+        regs_and(vl, offset, ~bit);
+    }
 }
 
 static int highest(const struct vlapic *vl, uint32_t base) {
@@ -311,8 +374,9 @@ static void merge(struct vlapic *vl) {
         }
         uint32_t level = __atomic_load_n(&vl->pending_level[i], __ATOMIC_RELAXED) & bits;
         uint32_t tmr = APIC_TMR + i * 0x10;
-        regs_set(vl, tmr, (regs_get(vl, tmr) & ~bits) | level);
-        regs_set(vl, APIC_IRR + i * 0x10, regs_get(vl, APIC_IRR + i * 0x10) | bits);
+        regs_and(vl, tmr, ~(bits & ~level));
+        regs_or(vl, tmr, level);
+        regs_or(vl, APIC_IRR + i * 0x10, bits);
     }
     if (vl->posted == NULL
         || !(__atomic_load_n(&vl->posted->notification, __ATOMIC_ACQUIRE) & POSTED_ON)) {
@@ -322,9 +386,8 @@ static void merge(struct vlapic *vl) {
     for (unsigned i = 0; i < 8; i++) {
         uint32_t bits = __atomic_exchange_n(&vl->posted->pir[i], 0, __ATOMIC_ACQUIRE);
         if (bits != 0) {
-            uint32_t tmr = APIC_TMR + i * 0x10;
-            regs_set(vl, tmr, regs_get(vl, tmr) & ~bits);
-            regs_set(vl, APIC_IRR + i * 0x10, regs_get(vl, APIC_IRR + i * 0x10) | bits);
+            regs_and(vl, APIC_TMR + i * 0x10, ~bits);
+            regs_or(vl, APIC_IRR + i * 0x10, bits);
         }
     }
 }
@@ -347,6 +410,141 @@ static void mirror_logical(const struct vlapic *vl) {
 // the vector, which is the hypervisor's.
 static void timer_lvt(const struct vlapic *vl) {
     lapic_write(APIC_LVT_TIMER, (regs_get(vl, APIC_LVT_TIMER) & ~0xffu) | VLAPIC_TIMER_VECTOR);
+}
+
+static void avic_recheck_soon(void) {
+    if (avic_supported) {
+        __atomic_store_n(&avic_recheck, true, __ATOMIC_RELEASE);
+    }
+}
+
+void vlapic_extint_moved(void) {
+    avic_recheck_soon();
+}
+
+// AVIC finds the targets of logical destinations in a table of one vCPU per
+// destination bit, all in the same format (APM 24593 rev. 3.45, 15.29.5.3):
+// built from the software-enabled local APICs' LDRs and DFRs, with whether they
+// fit it, as Linux 7.3's KVM has it.
+static bool avic_logical_rebuild(void) {
+    uint32_t table[AVIC_LOGICAL_ENTRIES] = {0};
+    int mode = -1;
+    bool fits = true;
+    for (uint32_t i = 0; i < smp_cpu_count(); i++) {
+        struct vcpu *to = smp_cpu(i)->vcpu;
+        if (to == NULL || to->vlapic == NULL) {
+            continue;
+        }
+        struct vlapic *vl = to->vlapic;
+        uint32_t ldr = regs_get(vl, APIC_LDR);
+        if (!enabled(vl) || !sw_enabled(vl) || x2apic(vl) || ldr == 0) {
+            continue;
+        }
+        bool flat = (regs_get(vl, APIC_DFR) & DFR_FLAT) == DFR_FLAT;
+        if (mode >= 0 && mode != flat) {
+            fits = false;
+        }
+        mode = flat;
+        uint32_t logical_id = ldr >> 24;
+        uint32_t bits = flat ? logical_id : logical_id & 0xf;
+        uint32_t cluster = flat ? 0 : logical_id >> 4;
+        if ((bits & (bits - 1)) != 0 || vl->id > AVIC_MAX_ID) {
+            fits = false;
+            continue;
+        }
+        // Cluster 15 is reserved: the hypervisor delivers there.
+        if (bits == 0 || cluster == 0xf) {
+            continue;
+        }
+        uint32_t index = cluster * 4 + (uint32_t)__builtin_ctz(bits);
+        if (table[index] != 0) {
+            fits = false;
+            continue;
+        }
+        table[index] = AVIC_LOGICAL_VALID | vl->id;
+    }
+    for (unsigned i = 0; i < AVIC_LOGICAL_ENTRIES; i++) {
+        if (avic_logical_table[i] != table[i]) {
+            __atomic_store_n(&avic_logical_table[i], table[i], __ATOMIC_RELEASE);
+        }
+    }
+    return fits;
+}
+
+static bool avic_decide(void) {
+    spinlock_acquire(&avic_lock);
+    bool want = avic_logical_rebuild() && !irq_extint_routed();
+    spinlock_release(&avic_lock);
+    for (uint32_t i = 0; i < smp_cpu_count() && want; i++) {
+        struct vcpu *to = smp_cpu(i)->vcpu;
+        if (to != NULL && to->vlapic != NULL) {
+            want = to->vlapic->id <= AVIC_MAX_ID && !vlapic_extint_open(to)
+                   && !x2apic(to->vlapic);
+        }
+    }
+    return want;
+}
+
+// The other vCPUs are kept out of the guest while the page behind the local
+// APICs' changes, and switch before they go back in.
+static void avic_update(void) {
+    if (avic_decide() == __atomic_load_n(&avic_wanted, __ATOMIC_ACQUIRE)) {
+        return;
+    }
+    vcpu_pause_others();
+    bool want = avic_decide();
+    if (want != avic_wanted) {
+        __atomic_store_n(&avic_wanted, want, __ATOMIC_RELEASE);
+        spinlock_acquire(&page_lock);
+        for (unsigned i = 0; i < page_count; i++) {
+            if (want) {
+                gpt_map(pages[i], apic_access_page, PAGE_SIZE, GPT_RWX, MT_WB);
+            } else {
+                gpt_map(pages[i], 0, PAGE_SIZE, 0, 0);
+            }
+        }
+        spinlock_release(&page_lock);
+        gpt_flush();
+    }
+    vcpu_resume_others();
+}
+
+// Whether the vCPU is on its processor, in the guest or not, as far as AVIC's
+// IPIs go: they exit for the others, for the hypervisor to wake them.
+static void avic_running(struct vlapic *vl, bool running) {
+    uint64_t *entry = &avic_physical_table[vl->id];
+    uint64_t value = __atomic_load_n(entry, __ATOMIC_RELAXED) & ~AVIC_ENTRY_RUNNING;
+    __atomic_store_n(entry, value | (running ? AVIC_ENTRY_RUNNING : 0), __ATOMIC_SEQ_CST);
+}
+
+static void avic_switch(struct vcpu *v, bool on) {
+    struct vlapic *vl = v->vlapic;
+    struct vmcb_control *c = &v->vmcb->control;
+    if (on) {
+        c->vintr |= SVM_VINTR_AVIC;
+    } else {
+        c->vintr &= ~SVM_VINTR_AVIC;
+    }
+    avic_running(vl, on);
+    // The TLB may hold translations of the local APIC's page from before, which
+    // AVIC redirects now or no longer does, as Linux 7.3's KVM finds.
+    svm_flush_guest_tlb(v);
+    __atomic_store_n(&vl->avic, on, __ATOMIC_SEQ_CST);
+}
+
+// The request is in the registers, which AVIC delivers from in the guest when
+// told, and at the next entry anyway (APM 24593 rev. 3.45, 15.29.8.2).
+static void avic_notify(struct vcpu *v) {
+    if (v->cpu == this_cpu()) {
+        return;
+    }
+    if (!__atomic_load_n(&v->vlapic->avic, __ATOMIC_SEQ_CST)) {
+        vcpu_kick(v->cpu);
+    } else if (__atomic_load_n(&v->in_guest, __ATOMIC_SEQ_CST)) {
+        wrmsr(MSR_AVIC_DOORBELL, v->cpu->apic_id);
+    } else if (__atomic_load_n(&v->cpu->taking_interrupts, __ATOMIC_SEQ_CST)) {
+        vcpu_kick(v->cpu);
+    }
 }
 
 static void reset_registers(struct vcpu *v) {
@@ -379,6 +577,7 @@ static void reset_registers(struct vcpu *v) {
     timer_lvt(vl);
     lapic_write(APIC_TIMER_DIVIDE, 0);
     mirror_logical(vl);
+    avic_recheck_soon();
 }
 
 void vlapic_reset(struct vcpu *v) {
@@ -410,6 +609,20 @@ void vlapic_create(struct vcpu *v) {
             vmx_write(VMCS_POSTED_INTR_DESC, (uint64_t)(uintptr_t)vl->posted);
         }
     }
+    if (avic_supported) {
+        struct vmcb_control *c = &v->vmcb->control;
+        c->avic_apic_bar = vl->base & APIC_BASE_ADDRESS;
+        c->avic_backing_page = (uint64_t)(uintptr_t)vl->regs;
+        c->avic_logical_table = (uint64_t)(uintptr_t)avic_logical_table;
+        c->avic_physical_table = (uint64_t)(uintptr_t)avic_physical_table | AVIC_MAX_ID;
+        // Broadcasts skip the vCPUs without one, rather than exit, as Linux
+        // 7.3's KVM finds.
+        if (vl->id <= AVIC_MAX_ID) {
+            __atomic_store_n(&avic_physical_table[vl->id],
+                             (uint64_t)(uintptr_t)vl->regs | AVIC_ENTRY_VALID | vl->id,
+                             __ATOMIC_RELEASE);
+        }
+    }
     reset_registers(v);
     access_virtualization(vl);
     if (v->cpu->bsp) {
@@ -429,8 +642,7 @@ uint64_t vlapic_page(struct vcpu *v) {
 }
 
 bool vlapic_virtual_delivery(struct vcpu *v) {
-    (void)v;
-    return apicv;
+    return virt_vmx ? apicv : __atomic_load_n(&v->vlapic->avic, __ATOMIC_ACQUIRE);
 }
 
 void vlapic_accept(struct vcpu *v, uint8_t vector, bool level) {
@@ -443,6 +655,16 @@ void vlapic_accept(struct vcpu *v, uint8_t vector, bool level) {
         return;
     }
     uint32_t bit = 1u << (vector % 32);
+    if (!virt_vmx && __atomic_load_n(&vl->avic, __ATOMIC_SEQ_CST)) {
+        if (level) {
+            regs_or(vl, vector_reg(APIC_TMR, vector), bit);
+        } else {
+            regs_and(vl, vector_reg(APIC_TMR, vector), ~bit);
+        }
+        regs_or(vl, vector_reg(APIC_IRR, vector), bit);
+        avic_notify(v);
+        return;
+    }
     // A running guest takes it without an exit.
     if (vl->posted != NULL && !level && v->cpu != this_cpu()) {
         __atomic_or_fetch(&vl->posted->pir[vector / 32], bit, __ATOMIC_RELEASE);
@@ -536,11 +758,45 @@ static void virtual_delivery(struct vlapic *vl) {
     }
 }
 
+void vlapic_prepare_entry(struct vcpu *v) {
+    struct vlapic *vl = v->vlapic;
+    merge(vl);
+    if (!avic_supported) {
+        return;
+    }
+    // A step holds the other vCPUs out already.
+    if (!v->stepping && __atomic_exchange_n(&avic_recheck, false, __ATOMIC_ACQ_REL)) {
+        avic_update();
+    }
+    // AVIC would redirect a stepped instruction's accesses to the local
+    // APIC's page past the page the step maps there.
+    bool want = __atomic_load_n(&avic_wanted, __ATOMIC_ACQUIRE) && !v->stepping;
+    if (want != vl->avic) {
+        avic_switch(v, want);
+    }
+}
+
+void vlapic_halt(struct vcpu *v, bool halting) {
+    struct vlapic *vl = v->vlapic;
+    if (vl->avic) {
+        avic_running(vl, !halting);
+    }
+}
+
 void vlapic_before_entry(struct vcpu *v) {
     struct vlapic *vl = v->vlapic;
     merge(vl);
     if (apicv) {
         virtual_delivery(vl);
+        return;
+    }
+    // AVIC delivers from the registers itself, and keeps the PPR and V_TPR in
+    // step with the TPR only for the guest's own changes (APM 24593 rev.
+    // 3.45, 15.29.3.1).
+    if (vl->avic) {
+        regs_set(vl, APIC_PPR, ppr(vl));
+        struct vmcb_control *c = &v->vmcb->control;
+        c->vintr = (c->vintr & ~0xfull) | (tpr_get(vl) >> 4);
         return;
     }
     if (virt_vmx) {
@@ -554,10 +810,10 @@ void vlapic_before_entry(struct vcpu *v) {
 }
 
 void vlapic_after_exit(struct vcpu *v) {
-    if (virt_vmx) {
+    struct vlapic *vl = v->vlapic;
+    if (virt_vmx || vl->avic) {
         return;
     }
-    struct vlapic *vl = v->vlapic;
     uint32_t vtpr = (uint32_t)(v->vmcb->control.vintr & 0xf);
     if (vtpr != tpr_get(vl) >> 4) {
         tpr_set(vl, vtpr << 4);
@@ -654,40 +910,32 @@ static void deliver(struct vcpu *from, struct vcpu *to, uint32_t command) {
     }
 }
 
+static bool ipi_target(struct vcpu *from, struct vcpu *to, uint32_t dest, uint32_t command) {
+    switch (command & ICR_SHORTHAND_MASK) {
+        case ICR_SHORTHAND_SELF: {
+            return to == from;
+        }
+        case ICR_SHORTHAND_ALL: {
+            return true;
+        }
+        case ICR_SHORTHAND_OTHERS: {
+            return to != from;
+        }
+        default: {
+            return matches(to->vlapic, dest, (command & ICR_LOGICAL) != 0, x2apic(from->vlapic));
+        }
+    }
+}
+
 static void send_ipi(struct vcpu *from, uint32_t dest, uint32_t command) {
     uint32_t mode = command & ICR_DELIVERY_MASK;
     // The INIT level de-assert of old processors does nothing.
     if (mode == ICR_DELIVERY_INIT && !(command & ICR_ASSERT)) {
         return;
     }
-    bool x2apic_dest = x2apic(from->vlapic);
-    bool logical = (command & ICR_LOGICAL) != 0;
-    uint32_t shorthand = command & ICR_SHORTHAND_MASK;
     for (uint32_t i = 0; i < smp_cpu_count(); i++) {
         struct vcpu *to = smp_cpu(i)->vcpu;
-        if (to == NULL) {
-            continue;
-        }
-        bool hit;
-        switch (shorthand) {
-            case ICR_SHORTHAND_SELF: {
-                hit = to == from;
-                break;
-            }
-            case ICR_SHORTHAND_ALL: {
-                hit = true;
-                break;
-            }
-            case ICR_SHORTHAND_OTHERS: {
-                hit = to != from;
-                break;
-            }
-            default: {
-                hit = matches(to->vlapic, dest, logical, x2apic_dest);
-                break;
-            }
-        }
-        if (!hit) {
+        if (to == NULL || !ipi_target(from, to, dest, command)) {
             continue;
         }
         deliver(from, to, command);
@@ -780,6 +1028,9 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
             if (i == LVT_TIMER) {
                 timer_lvt(vl);
             }
+            if (i == LVT_LINT0) {
+                avic_recheck_soon();
+            }
             return true;
         }
     }
@@ -810,6 +1061,7 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
                 }
                 timer_lvt(vl);
             }
+            avic_recheck_soon();
             return true;
         }
         case APIC_ESR: {
@@ -837,11 +1089,13 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
         case APIC_LDR: {
             regs_set(vl, APIC_LDR, value & 0xff000000);
             mirror_logical(vl);
+            avic_recheck_soon();
             break;
         }
         case APIC_DFR: {
             regs_set(vl, APIC_DFR, value | 0x0fffffff);
             mirror_logical(vl);
+            avic_recheck_soon();
             break;
         }
         case APIC_ICR_HIGH: {
@@ -863,6 +1117,60 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
 void vlapic_eoi_exit(struct vcpu *v, uint8_t vector) {
     (void)v;
     irq_mirror_eoi(vector);
+}
+
+void vlapic_avic_ipi_exit(struct vcpu *v, uint64_t info1, uint64_t info2) {
+    struct vlapic *vl = v->vlapic;
+    uint32_t low = (uint32_t)info1;
+    uint32_t high = (uint32_t)(info1 >> 32);
+    uint32_t dest = x2apic(vl) ? high : high >> 24;
+    uint32_t id = (uint32_t)(info2 >> 32);
+    // AVIC set the requests of every target.
+    if (id == AVIC_IPI_NOT_RUNNING) {
+        for (uint32_t i = 0; i < smp_cpu_count(); i++) {
+            struct vcpu *to = smp_cpu(i)->vcpu;
+            if (to != NULL && to != v && ipi_target(v, to, dest, low)) {
+                avic_notify(to);
+            }
+        }
+        return;
+    }
+    if (id == AVIC_IPI_BAD_BACKING_PAGE) {
+        printf("AVIC found no backing page for IPI %#x to %#x\n", low, dest);
+    }
+    // Kinds and targets AVIC does not deliver, with none of their requests set,
+    // the write done but maybe not its delivery status, as Linux 7.3's KVM
+    // finds.
+    regs_set(vl, APIC_ICR_LOW, low & ~ICR_PENDING);
+    send_ipi(v, dest, low);
+}
+
+static bool avic_trapped(uint32_t offset) {
+    for (unsigned i = 0; i < sizeof(avic_trapped_writes) / sizeof(avic_trapped_writes[0]); i++) {
+        if (avic_trapped_writes[i] == offset) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void vlapic_avic_access_exit(struct vcpu *v, uint64_t info1) {
+    uint32_t offset = (uint32_t)info1 & 0xff0;
+    bool write = (info1 >> 32) & 1;
+    // The write is in the registers already, past its instruction.
+    if (write && avic_trapped(offset)) {
+        // Remote Read is read-only.
+        if (offset == APIC_RRD) {
+            regs_set(v->vlapic, APIC_RRD, 0);
+        } else {
+            vlapic_apic_write(v, offset);
+        }
+        return;
+    }
+    // Others exit before the access.
+    if (!mmio_fault(v, vlapic_page(v) + offset)) {
+        panic("Unhandled local APIC access at offset %#x\n", offset);
+    }
 }
 
 void vlapic_apic_write(struct vcpu *v, uint32_t offset) {
@@ -944,6 +1252,11 @@ static bool apic_base_write(struct vcpu *v, uint64_t value) {
 
     vl->base = (value & ~APIC_BASE_BSP) | (vl->base & APIC_BASE_BSP);
     access_virtualization(vl);
+    if (avic_supported) {
+        v->vmcb->control.avic_apic_bar = vl->base & APIC_BASE_ADDRESS;
+        svm_flush_guest_tlb(v);
+        avic_recheck_soon();
+    }
     if (!en) {
         if (was_en) {
             reset_registers(v);
