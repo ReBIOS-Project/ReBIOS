@@ -302,6 +302,12 @@
 #define EPT_QUAL_FETCH (1ull << 2)
 #define EPT_QUAL_NMI_UNBLOCKED (1ull << 12)
 
+// APIC-access exit qualification: the page offset, and the access type.
+#define APIC_ACCESS_OFFSET_MASK 0xfffull
+#define APIC_ACCESS_TYPE(qual) (((qual) >> 12) & 0xf)
+#define APIC_ACCESS_DATA_READ 0
+#define APIC_ACCESS_DATA_WRITE 1
+
 // Event injection and exit interruption information fields.
 #define INTR_INFO_VALID (1u << 31)
 #define INTR_INFO_ERROR_CODE (1u << 11)

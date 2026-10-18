@@ -766,6 +766,18 @@ static void vmx_handle_exit(struct vcpu *v) {
             vcpu_inject_exception(v, 6, false, 0);
             break;
         }
+        case EXIT_REASON_APIC_ACCESS: {
+            // What the processor does not virtualise of the local APIC's page
+            // (SDM 325462-093 Vol. 3C, 32.4), which is the vCPU's own.
+            uint64_t type = APIC_ACCESS_TYPE(qual);
+            if ((type == APIC_ACCESS_DATA_READ || type == APIC_ACCESS_DATA_WRITE)
+                && mmio_fault(v, vlapic_page(v) + (qual & APIC_ACCESS_OFFSET_MASK))) {
+                break;
+            }
+            printf("Local APIC access, qualification %#llx\n", (unsigned long long)qual);
+            vmx_dump_guest();
+            panic("Unhandled local APIC access\n");
+        }
         case EXIT_REASON_EPT_VIOLATION: {
             uint64_t gpa = vmx_read(VMCS_GUEST_PHYS_ADDR);
             if (event_cut_short(v)) {

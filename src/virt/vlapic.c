@@ -17,6 +17,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <memory.h>
 #include <hw/lapic.h>
 #include <hw/power.h>
 #include <lib/heap.h>
@@ -117,11 +118,16 @@ static uint32_t legacy_svr;
 static uint32_t legacy_lint0;
 static uint32_t legacy_lint1;
 
-// Pages the guest has had its local APICs at, which all exit.
+// Pages the guest has had its local APICs at, which all exit, but for the
+// accesses the processor virtualises.
 #define MAX_PAGES 4
 static uint64_t pages[MAX_PAGES];
 static unsigned page_count;
 static struct spinlock page_lock;
+// Where VMX virtualises accesses to those pages, they are this page (SDM
+// 325462-093 Vol. 3C, 32.4), whose contents the processor then leaves alone:
+// vCPUs not in xAPIC mode find nothing there.
+static uint64_t apic_access_page;
 
 static const struct mmio_ops mmio_ops;
 
@@ -141,7 +147,11 @@ static void trap_page(uint64_t page) {
     pages[page_count++] = page;
     spinlock_release(&page_lock);
     mmio_register(page, PAGE_SIZE, &mmio_ops, (void *)(uintptr_t)page);
-    gpt_map(page, 0, PAGE_SIZE, 0, 0);
+    if (apic_access_page != 0) {
+        gpt_map(page, apic_access_page, PAGE_SIZE, GPT_RWX, MT_WB);
+    } else {
+        gpt_map(page, 0, PAGE_SIZE, 0, 0);
+    }
     gpt_flush();
 }
 
@@ -150,6 +160,11 @@ void vlapic_init(void) {
     legacy_svr = lapic_read(APIC_SVR);
     legacy_lint0 = lapic_read(APIC_LVT_LINT0);
     legacy_lint1 = lapic_read(APIC_LVT_LINT1);
+    if (virt_vmx && vmx_secondary_allowed(PROC2_VIRT_APIC_ACCESSES)) {
+        uint8_t *page = page_alloc(1);
+        memset(page, 0xff, PAGE_SIZE);
+        apic_access_page = (uint64_t)(uintptr_t)page;
+    }
     trap_page(APIC_DEFAULT_BASE);
     virt_intercept_msr(MSR_IA32_APIC_BASE, true, true);
     virt_intercept_msr(MSR_IA32_ARCH_CAPABILITIES, true, false);
@@ -169,6 +184,26 @@ static bool x2apic(const struct vlapic *vl) {
 
 static bool sw_enabled(const struct vlapic *vl) {
     return (vl->svr & APIC_SVR_ENABLED) != 0;
+}
+
+// The processor virtualises the vCPU's accesses to the APIC-access page while
+// its local APIC is in xAPIC mode.
+static void access_virtualization(const struct vlapic *vl) {
+    if (apic_access_page == 0) {
+        return;
+    }
+    uint64_t controls = vmx_read(VMCS_PROC_CONTROLS2);
+    if (enabled(vl) && !x2apic(vl)) {
+        // Translations from before it may not know the page is special
+        // (SDM 325462-093 Vol. 3C, 32.4.5).
+        if (!(controls & PROC2_VIRT_APIC_ACCESSES)) {
+            gpt_flush();
+        }
+        controls |= PROC2_VIRT_APIC_ACCESSES;
+    } else {
+        controls &= ~(uint64_t)PROC2_VIRT_APIC_ACCESSES;
+    }
+    vmx_write(VMCS_PROC_CONTROLS2, controls);
 }
 
 static uint32_t x2apic_ldr(uint32_t id) {
@@ -262,8 +297,12 @@ void vlapic_create(struct vcpu *v) {
         vl->vapic_page = page_alloc(1);
         vmx_write(VMCS_VIRTUAL_APIC_ADDR, (uint64_t)(uintptr_t)vl->vapic_page);
         vmx_write(VMCS_TPR_THRESHOLD, 0);
+        if (apic_access_page != 0) {
+            vmx_write(VMCS_APIC_ACCESS_ADDR, apic_access_page);
+        }
     }
     reset_registers(v);
+    access_virtualization(vl);
     if (v->cpu->bsp) {
         // Its LINT entries as lapic_legacy_init() set the processor's.
         vl->svr = legacy_svr & SVR_WRITABLE;
@@ -274,6 +313,10 @@ void vlapic_create(struct vcpu *v) {
 
 bool vlapic_enabled(struct vcpu *v) {
     return enabled(v->vlapic);
+}
+
+uint64_t vlapic_page(struct vcpu *v) {
+    return v->vlapic->base & APIC_BASE_ADDRESS;
 }
 
 void vlapic_accept(struct vcpu *v, uint8_t vector, bool level) {
@@ -753,6 +796,7 @@ static bool apic_base_write(struct vcpu *v, uint64_t value) {
     }
 
     vl->base = (value & ~APIC_BASE_BSP) | (vl->base & APIC_BASE_BSP);
+    access_virtualization(vl);
     if (!en) {
         if (was_en) {
             reset_registers(v);
