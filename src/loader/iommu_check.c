@@ -95,9 +95,17 @@ static bool checksum_ok(const uint8_t *table, uint32_t length) {
 // What the core needs of a VT-d unit, as boot services are the last chance to
 // go back: queued invalidation, and second-stage tables of 3 or 4 levels.
 static bool vtd_unit_usable(uint64_t base) {
+    if (base == 0) {
+        printf("A VT-d unit has no register base\n");
+        return false;
+    }
     const volatile uint64_t *regs = (const volatile uint64_t *)(uintptr_t)base;
     uint64_t cap = regs[VTD_CAP / 8];
     uint64_t ecap = regs[VTD_ECAP / 8];
+    if (cap == UINT64_MAX && ecap == UINT64_MAX) {
+        printf("Nothing answers at the VT-d unit's registers, %#llx\n", (unsigned long long)base);
+        return false;
+    }
     if (((cap >> VTD_CAP_SAGAW_SHIFT) & VTD_SAGAW_3_OR_4_LEVELS) != 0 && (ecap & VTD_ECAP_QI)) {
         return true;
     }
