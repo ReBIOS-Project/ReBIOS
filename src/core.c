@@ -33,6 +33,7 @@
 #include <sys/mm.h>
 #include <sys/smp.h>
 #include <sys/x86.h>
+#include <virt/a20.h>
 #include <virt/irq.h>
 #include <virt/layout.h>
 #include <virt/profile.h>
@@ -61,6 +62,7 @@ static void bsp_main(void *arg) {
     virt_cpu_init();
 
     layout_init();
+    a20_init();
     vga_init();
     // The guest's boot processor gets its local APIC as a legacy BIOS hands
     // it over, the hypervisor the processor's.
