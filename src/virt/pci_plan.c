@@ -43,7 +43,6 @@
 #define ELEMENT_HIGH_WINDOW 3
 #define ELEMENT_LFB 4
 
-#define VIRT_FUNCTION (-1)
 #define NO_CONTAINER UINT32_MAX
 // Below this, the top of the guest's RAM is where its PCI memory starts at
 // the latest, as the processor's and chipset's fixed ranges are above.
@@ -55,7 +54,7 @@
 // A BAR, an expansion ROM, a bridge's window, or the emulated VGA's linear
 // framebuffer, in the memory of the root bus or bridge it is behind.
 struct element {
-    int32_t function;
+    uint32_t function;
     uint8_t kind;
     uint8_t bar;
     bool high;
@@ -265,22 +264,6 @@ static void ecam_extent(const struct pci_topology *t, bool *present, uint8_t *st
     *end = last;
 }
 
-// The lowest device number of segment 0's bus 0 that nothing answers on.
-static int free_device(const struct pci_topology *t) {
-    for (uint8_t d = 1; d < 32; d++) {
-        bool used = false;
-        for (uint32_t i = 0; i < t->function_count && !used; i++) {
-            const struct pci_function *f = &t->functions[i];
-            used = f->addr.segment == 0 && f->addr.bus == 0 && f->addr.device == d;
-        }
-        if (!used && pci_cfg_read((struct pci_addr){0, 0, d, 0}, 0, 2) == 0xffff) {
-            return d;
-        }
-    }
-    printf("No free device number on PCI bus 0 for a virtual device\n");
-    return -1;
-}
-
 static void assign(const struct pci_topology *t, struct container *containers, uint32_t index) {
     struct container *c = &containers[index];
     for (uint32_t i = 0; i < c->count; i++) {
@@ -291,10 +274,6 @@ static void assign(const struct pci_topology *t, struct container *containers, u
         uint64_t base = (e->high ? c->high_base : c->low_base) + e->offset;
         if (e->kind == ELEMENT_LFB) {
             plan.lfb = base;
-            continue;
-        }
-        if (e->function == VIRT_FUNCTION) {
-            plan.virt_bar = base;
             continue;
         }
         const struct pci_function *f = &t->functions[e->function];
@@ -327,8 +306,7 @@ static void assign(const struct pci_topology *t, struct container *containers, u
 }
 
 const struct pci_plan *pci_plan_make(const struct pci_plan_range *obstacles, uint32_t count,
-                                     uint64_t virt_bar_size, uint64_t lfb_size,
-                                     uint64_t high_floor) {
+                                     uint64_t lfb_size, uint64_t high_floor) {
     const struct pci_topology *t = pci_enum_topology();
     uint32_t n = t->function_count;
     uint32_t roots = t->root_bus_count;
@@ -377,22 +355,12 @@ const struct pci_plan *pci_plan_make(const struct pci_plan_range *obstacles, uin
             bool high = bar->size > PCI_PLAN_LOW_BAR_MAX && bar->kind == PCI_BAR_MEM64
                         && path_reaches_high(f, bar->prefetchable);
             uint64_t size = element_size(bar->size);
-            element_add(c, (struct element){(int32_t)i, ELEMENT_BAR, b, high, size, size, 0});
+            element_add(c, (struct element){i, ELEMENT_BAR, b, high, size, size, 0});
         }
         if (f->rom.kind == PCI_BAR_MEM32 && f->rom.size != 0 && f->rom.base != 0
             && routed(f, f->rom.base, f->rom.size)) {
             uint64_t size = element_size(f->rom.size);
-            element_add(c, (struct element){(int32_t)i, ELEMENT_ROM, 0, false, size, size, 0});
-        }
-    }
-    plan.virt_device = virt_bar_size != 0 ? free_device(t) : -1;
-    if (plan.virt_device >= 0) {
-        for (uint32_t r = 0; r < roots; r++) {
-            if (t->root_buses[r].segment == 0 && t->root_buses[r].bus == 0) {
-                element_add(&containers[n + r], (struct element){VIRT_FUNCTION, ELEMENT_BAR, 0,
-                                                                 false, virt_bar_size,
-                                                                 virt_bar_size, 0});
-            }
+            element_add(c, (struct element){i, ELEMENT_ROM, 0, false, size, size, 0});
         }
     }
     // In a root bus's window: an installed Windows 7 keeps to 16 colours with
@@ -427,13 +395,13 @@ const struct pci_plan *pci_plan_make(const struct pci_plan_range *obstacles, uin
         struct container *parent = &containers[parents[i]];
         if (c->low_size != 0) {
             uint64_t align = c->low_align > WINDOW_GRANULE ? c->low_align : WINDOW_GRANULE;
-            element_add(parent, (struct element){(int32_t)i, ELEMENT_LOW_WINDOW, 0, false,
+            element_add(parent, (struct element){i, ELEMENT_LOW_WINDOW, 0, false,
                                                  align_up(c->low_size, WINDOW_GRANULE), align,
                                                  0});
         }
         if (c->high_size != 0) {
             uint64_t align = c->high_align > WINDOW_GRANULE ? c->high_align : WINDOW_GRANULE;
-            element_add(parent, (struct element){(int32_t)i, ELEMENT_HIGH_WINDOW, 0, true,
+            element_add(parent, (struct element){i, ELEMENT_HIGH_WINDOW, 0, true,
                                                  align_up(c->high_size, WINDOW_GRANULE), align,
                                                  0});
         }

@@ -110,9 +110,6 @@ struct ecam_window {
 
 static struct {
     bool on;
-    int device;
-    const struct pci_virt_ops *ops;
-    void *ctx;
     // The guest's configuration address, which never reaches the hardware:
     // the hypervisor makes every data access itself.
     uint32_t config_address;
@@ -356,9 +353,6 @@ static bool in_rebar(const struct vfunction *vf, uint32_t offset) {
 }
 
 static uint32_t function_read(struct pci_addr a, uint32_t offset, unsigned size) {
-    if (a.segment == 0 && a.bus == 0 && (int)a.device == virt.device && virt.ops != NULL) {
-        return a.function == 0 ? virt.ops->read(virt.ctx, offset, size) : all_ones(size);
-    }
     struct vfunction *vf = vfunction_find(a);
     if (vf != NULL && vf->hidden) {
         return all_ones(size);
@@ -371,12 +365,6 @@ static uint32_t function_read(struct pci_addr a, uint32_t offset, unsigned size)
 }
 
 static void function_write(struct pci_addr a, uint32_t offset, unsigned size, uint32_t value) {
-    if (a.segment == 0 && a.bus == 0 && (int)a.device == virt.device && virt.ops != NULL) {
-        if (a.function == 0) {
-            virt.ops->write(virt.ctx, offset, size, value);
-        }
-        return;
-    }
     struct vfunction *vf = vfunction_find(a);
     if (vf != NULL && (vf->hidden || in_rebar(vf, offset))) {
         return;
@@ -598,7 +586,6 @@ void pci_virt_init(void) {
         return;
     }
     virt.on = true;
-    virt.device = plan->virt_device;
     uint32_t extended = cpuid(0x80000000, 0).eax;
     unsigned bits = extended >= 0x80000008 ? cpuid(0x80000008, 0).eax & 0xff : 36;
     virt.address_limit = 1ull << bits;
@@ -624,15 +611,4 @@ void pci_virt_init(void) {
     ecam_windows(plan);
     gpt_flush();
     printf("PCI: %u of the guest's BARs mapped onto the host's\n", mapped);
-}
-
-int pci_virt_add(const struct pci_virt_ops *ops, void *ctx) {
-    if (!virt.on || virt.device < 0 || virt.ops != NULL) {
-        return -1;
-    }
-    spinlock_acquire(&virt.lock);
-    virt.ops = ops;
-    virt.ctx = ctx;
-    spinlock_release(&virt.lock);
-    return virt.device;
 }
