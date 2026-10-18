@@ -101,7 +101,7 @@ static bool exit_boot_services(void) {
             }
             continue;
         }
-        if (status != EFI_SUCCESS) {
+        if (status != EFI_SUCCESS || desc_size < sizeof(EFI_MEMORY_DESCRIPTOR)) {
             return false;
         }
 
@@ -134,7 +134,8 @@ static uint64_t memory_map_top(void) {
         return top;
     }
     if (efi_bs->GetMemoryMap(&size, (EFI_MEMORY_DESCRIPTOR *)(uintptr_t)buf, &map_key,
-                             &desc_size, &desc_version) == EFI_SUCCESS) {
+                             &desc_size, &desc_version) == EFI_SUCCESS
+        && desc_size >= sizeof(EFI_MEMORY_DESCRIPTOR)) {
         for (EFI_UINTN off = 0; off + desc_size <= size; off += desc_size) {
             EFI_MEMORY_DESCRIPTOR *desc = (EFI_MEMORY_DESCRIPTOR *)(uintptr_t)(buf + off);
             uint64_t end = desc->PhysicalStart + desc->NumberOfPages * 4096;
