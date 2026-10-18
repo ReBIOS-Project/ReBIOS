@@ -29,6 +29,7 @@
 #include <virt/event.h>
 #include <virt/gpt.h>
 #include <virt/insn.h>
+#include <virt/mtrr.h>
 #include <virt/profile.h>
 #include <virt/svm.h>
 #include <virt/vcpu.h>
@@ -174,6 +175,7 @@ struct vcpu *vcpu_create(struct cpu *cpu) {
         svm_vcpu_init(v);
     }
     vlapic_create(v);
+    mtrr_vcpu_init(v);
     return v;
 }
 

@@ -36,6 +36,7 @@
 #include <virt/a20.h>
 #include <virt/irq.h>
 #include <virt/layout.h>
+#include <virt/mtrr.h>
 #include <virt/profile.h>
 #include <virt/vacpi.h>
 #include <virt/vcpu.h>
@@ -60,6 +61,7 @@ static void bsp_main(void *arg) {
     }
     cpu_tables_load(cpu, virt_vmx);
     virt_cpu_init();
+    mtrr_init();
 
     layout_init();
     a20_init();

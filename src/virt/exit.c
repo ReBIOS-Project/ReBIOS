@@ -27,6 +27,7 @@
 #include <virt/guest_mem.h>
 #include <virt/hypercall.h>
 #include <virt/io.h>
+#include <virt/mtrr.h>
 #include <virt/profile.h>
 #include <virt/svm.h>
 #include <virt/vcpu.h>
@@ -181,7 +182,7 @@ void exit_rdmsr(struct vcpu *v) {
     uint64_t value;
     bool fault;
 
-    if (vlapic_rdmsr(v, msr, &value, &fault)) {
+    if (vlapic_rdmsr(v, msr, &value, &fault) || mtrr_rdmsr(v, msr, &value, &fault)) {
         if (fault) {
             vcpu_inject_exception(v, 13, true, 0);
             return;
@@ -207,7 +208,7 @@ void exit_wrmsr(struct vcpu *v) {
     uint64_t value = ((uint64_t)(uint32_t)v->gprs.rdx << 32) | (uint32_t)v->gprs.rax;
     bool fault;
 
-    if (vlapic_wrmsr(v, msr, value, &fault)) {
+    if (vlapic_wrmsr(v, msr, value, &fault) || mtrr_wrmsr(v, msr, value, &fault)) {
         if (fault) {
             vcpu_inject_exception(v, 13, true, 0);
             return;

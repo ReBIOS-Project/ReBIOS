@@ -20,6 +20,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <virt/mtrr.h>
 
 // Indexed by the register numbers used in instruction encodings. The RSP slot
 // is unused: the guest's RSP lives in the VMCS or VMCB.
@@ -107,6 +108,12 @@ struct vcpu {
     bool step_tf;
     uint64_t step_dr6;
     uint32_t step_exceptions;
+
+    // The guest's MTRRs: the default type, the fixed ranges, and the variable
+    // ranges' bases and masks.
+    uint64_t mtrr_def_type;
+    uint64_t mtrr_fixed[MTRR_FIXED_COUNT];
+    uint64_t mtrr_variable[2 * MTRR_VARIABLE_COUNT];
 
     // What the guest believes CR0 and CR4 hold, for the bits the host owns.
     uint64_t cr0_shadow;
