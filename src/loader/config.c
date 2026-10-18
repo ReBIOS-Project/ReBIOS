@@ -294,6 +294,14 @@ static bool apply_vgabios(const struct setting *setting, struct span value) {
     return true;
 }
 
+static bool apply_boot_drive(const struct setting *setting, struct span value) {
+    size_t len = value.len < CONFIG_BOOT_DRIVE_MAX ? value.len : CONFIG_BOOT_DRIVE_MAX - 1;
+    memset(config.boot_drive, 0, sizeof(config.boot_drive));
+    memcpy(config.boot_drive, value.ptr, len);
+    printf("  %s = %.*s%s\n", setting->name, (int)len, value.ptr, len == 0 ? "(self)" : "");
+    return true;
+}
+
 static bool apply_vga(const struct setting *setting, struct span value) {
     struct handoff_pci_address address;
     if (!parse_pci_address(value, &address)) {
@@ -391,6 +399,7 @@ static const struct setting settings[] = {
     {.name = "serial_port", .apply = apply_serial_port},
     {.name = "serial_baud", .apply = apply_serial_baud},
     {.name = "verbose", .apply = apply_boolean, .flag = &config.verbose},
+    {.name = "boot_drive", .apply = apply_boot_drive},
     {.name = "vgabios", .apply = apply_vgabios},
     {.name = "vga", .apply = apply_vga},
     {.name = "vga_emulation", .apply = apply_vga_emulation},

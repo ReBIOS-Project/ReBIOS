@@ -26,6 +26,7 @@
 #include <loader/bootdev.h>
 #include <loader/config.h>
 #include <loader/display.h>
+#include <loader/drives.h>
 #include <loader/efi_glue.h>
 #include <loader/fwtables.h>
 #include <loader/iommu_check.h>
@@ -220,6 +221,7 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     config_to_handoff(&loader_handoff->config);
     fwtables_collect();
     bootdev_collect();
+    drives_collect();
     video_init();
     display_collect();
     oprom_collect();

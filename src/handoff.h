@@ -24,6 +24,7 @@
 #define HANDOFF_MAX_PCI_ROMS 16
 #define HANDOFF_MAX_BLOCK_DEVICES 32
 #define HANDOFF_MAX_CPU_RANGES 64
+#define HANDOFF_MAX_BOOT_ORDER 4096
 
 struct handoff_range {
     uint64_t base;
@@ -184,6 +185,10 @@ struct handoff {
     uint32_t block_device_count;
     struct handoff_pci_rom pci_roms[HANDOFF_MAX_PCI_ROMS];
     struct handoff_block_device block_devices[HANDOFF_MAX_BLOCK_DEVICES];
+
+    // The legacy BIOS's boot order: the drives as the lines of SeaBIOS's
+    // bootorder file name them, the first to be tried first; NUL-terminated.
+    char boot_order[HANDOFF_MAX_BOOT_ORDER];
 };
 
 #endif

@@ -24,6 +24,7 @@
 #include <handoff.h>
 
 #define CONFIG_VGABIOS_MAX 256
+#define CONFIG_BOOT_DRIVE_MAX 256
 
 struct config {
     bool serial;
@@ -39,6 +40,9 @@ struct config {
     uint8_t vga_scaling;
     uint8_t vga_scale;
     bool profile;
+    // NUL-terminated: "self", "auto", or a drive's device path or part of its
+    // model; empty when unset, which is "self".
+    char boot_drive[CONFIG_BOOT_DRIVE_MAX];
     // One of the HANDOFF_CPU_FILTER_* values.
     uint32_t cpu_filter;
     uint32_t cpu_range_count;
