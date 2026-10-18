@@ -218,6 +218,10 @@ struct vcpu;
 extern bool svm_nrips;
 
 bool svm_supported(void);
+// The guest's translations go before its next run, as when the hypervisor
+// changes its paging state or nested page tables (APM 24593 rev. 3.45,
+// 15.16).
+void svm_flush_guest_tlb(struct vcpu *v);
 bool svm_huge_pages(void);
 void svm_cpu_init(void);
 void svm_vcpu_init(struct vcpu *v);

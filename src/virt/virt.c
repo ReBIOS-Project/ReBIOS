@@ -319,8 +319,7 @@ void vcpu_before_entry(struct vcpu *v) {
             asm volatile ("invept %0, %1" :: "m"(desc), "r"(2ull) : "memory", "cc");
         } else {
             v->vmcb->control.n_cr3 = gpt_root();
-            // Every ASID, as not every processor flushes by ASID.
-            v->vmcb->control.tlb_control = 1;
+            svm_flush_guest_tlb(v);
         }
     }
     // A stepped instruction is to run, not an event's handler.
@@ -555,6 +554,7 @@ void vcpu_load_mode(struct vcpu *v, const struct vcpu_mode *mode) {
     s->cr4 = mode->cr4;
     s->efer = mode->efer | EFER_SVME;
     v->vmcb->control.interrupt_shadow = 0;
+    svm_flush_guest_tlb(v);
 }
 
 bool vcpu_guest_tf(struct vcpu *v) {
@@ -736,4 +736,5 @@ void vcpu_set_real_mode(struct vcpu *v, uint16_t cs, uint16_t ip) {
     s->efer = EFER_SVME;
     s->cpl = 0;
     v->vmcb->control.interrupt_shadow = 0;
+    svm_flush_guest_tlb(v);
 }

@@ -262,6 +262,8 @@ void exit_wrmsr(struct vcpu *v) {
         }
         uint64_t old = v->vmcb->save.efer;
         v->vmcb->save.efer = (value & ~(uint64_t)EFER_LMA) | (old & EFER_LMA) | EFER_SVME;
+        // The processor would have flushed them for the guest's own write.
+        svm_flush_guest_tlb(v);
     } else if (!virt_vmx && msr == MSR_IA32_CR_PAT) {
         // Each entry must name one of the types 0, 1, 4, 5, 6, or 7.
         for (int i = 0; i < 8; i++) {

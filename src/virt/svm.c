@@ -114,6 +114,10 @@ bool svm_supported(void) {
     return true;
 }
 
+void svm_flush_guest_tlb(struct vcpu *v) {
+    v->vmcb->control.tlb_control = 1;
+}
+
 bool svm_huge_pages(void) {
     return (cpuid(0x80000001, 0).edx & (1u << 26)) != 0;
 }
