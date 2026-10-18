@@ -37,5 +37,9 @@ void virt_intercept_msr(uint32_t msr, bool read, bool write);
 // first of these calls, which pass reads or writes of an x2APIC MSR.
 uint64_t virt_msr_bitmap_x2apic(void);
 void virt_x2apic_msr_passed(uint32_t msr, bool read, bool write);
+// The same, for vCPUs whose IPIs it virtualises too, made once that one is
+// done by passing the ICR's MSR as well.
+uint64_t virt_msr_bitmap_x2apic_icr(void);
+void virt_x2apic_icr_passed(uint32_t msr);
 
 #endif

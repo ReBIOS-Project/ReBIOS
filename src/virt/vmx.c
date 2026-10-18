@@ -49,7 +49,7 @@
 #define EPTP_WALK_4 (3 << 3)
 
 static uint64_t vmx_basic;
-static uint64_t pin_cap, proc_cap, proc2_cap, exit_cap, entry_cap;
+static uint64_t pin_cap, proc_cap, proc2_cap, proc3_cap, exit_cap, entry_cap;
 static uint64_t ept_vpid_cap;
 static uint64_t cr0_fixed0, cr0_fixed1, cr4_fixed0, cr4_fixed1;
 
@@ -234,6 +234,10 @@ bool vmx_supported(void) {
         return false;
     }
     proc2_cap = rdmsr(MSR_IA32_VMX_PROCBASED_CTLS2);
+    // The allowed 1-settings alone (SDM 325462-093 Vol. 3D, A.3.4).
+    if (control_allowed(proc_cap, PROC_TERTIARY_CONTROLS)) {
+        proc3_cap = rdmsr(MSR_IA32_VMX_PROCBASED_CTLS3);
+    }
     if (!control_allowed(proc2_cap, PROC2_EPT | PROC2_UNRESTRICTED_GUEST)) {
         printf("VMX lacks EPT or unrestricted guest support\n");
         return false;
@@ -258,6 +262,10 @@ bool vmx_secondary_allowed(uint32_t control) {
 
 bool vmx_pin_allowed(uint32_t control) {
     return control_allowed(pin_cap, control);
+}
+
+bool vmx_tertiary_allowed(uint64_t control) {
+    return (proc3_cap & control) == control;
 }
 
 bool vmx_monitor_trap_supported(void) {

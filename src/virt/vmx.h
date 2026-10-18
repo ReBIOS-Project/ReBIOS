@@ -24,6 +24,7 @@
 // VMCS field encodings (SDM 325462-092 Vol. 3D, Appendix B).
 #define VMCS_VPID 0x0000
 #define VMCS_POSTED_INTR_NV 0x0002
+#define VMCS_LAST_PID_POINTER_INDEX 0x0008
 #define VMCS_GUEST_ES_SEL 0x0800
 #define VMCS_GUEST_CS_SEL 0x0802
 #define VMCS_GUEST_SS_SEL 0x0804
@@ -57,6 +58,8 @@
 #define VMCS_EOI_EXIT2 0x2020
 #define VMCS_EOI_EXIT3 0x2022
 #define VMCS_XSS_EXIT_BITMAP 0x202c
+#define VMCS_TERTIARY_CONTROLS 0x2034
+#define VMCS_PID_POINTER_TABLE 0x2042
 #define VMCS_GUEST_PHYS_ADDR 0x2400
 #define VMCS_LINK_POINTER 0x2800
 #define VMCS_GUEST_DEBUGCTL 0x2802
@@ -175,6 +178,7 @@
 #define PROC_RDTSC_EXITING (1u << 12)
 #define PROC_CR3_LOAD_EXITING (1u << 15)
 #define PROC_CR3_STORE_EXITING (1u << 16)
+#define PROC_TERTIARY_CONTROLS (1u << 17)
 #define PROC_CR8_LOAD_EXITING (1u << 19)
 #define PROC_CR8_STORE_EXITING (1u << 20)
 #define PROC_TPR_SHADOW (1u << 21)
@@ -210,6 +214,10 @@
 #define PROC2_MBEC (1u << 22)
 #define PROC2_TSC_SCALING (1u << 25)
 #define PROC2_USER_WAIT_PAUSE (1u << 26)
+
+// Tertiary processor-based VM-execution controls (SDM 325462-093 Vol. 3C,
+// Table 27-8).
+#define PROC3_IPI_VIRT (1ull << 4)
 
 // Primary VM-exit controls (SDM 325462-092 Vol. 3C, Table 27-14).
 #define EXIT_SAVE_DEBUG_CONTROLS (1u << 2)
@@ -353,6 +361,7 @@
 #define MSR_IA32_VMX_TRUE_EXIT_CTLS 0x48f
 #define MSR_IA32_VMX_TRUE_ENTRY_CTLS 0x490
 #define MSR_IA32_VMX_VMFUNC 0x491
+#define MSR_IA32_VMX_PROCBASED_CTLS3 0x492
 
 #define FEATURE_CONTROL_LOCK (1u << 0)
 #define FEATURE_CONTROL_VMX_OUTSIDE_SMX (1u << 2)
@@ -367,6 +376,8 @@ __attribute__((noreturn)) void vmx_run(struct vcpu *v);
 bool vmx_secondary_allowed(uint32_t control);
 // Whether the guest's VMCS gets the pin-based control.
 bool vmx_pin_allowed(uint32_t control);
+// Whether it gets the tertiary processor-based control.
+bool vmx_tertiary_allowed(uint64_t control);
 
 uint64_t vmx_read(uint32_t field);
 

@@ -123,11 +123,15 @@ enum avic_mode {
 // registers itself while it runs (SDM 325462-093 Vol. 3C, 32.6, Table 32-2).
 struct posted {
     uint32_t pir[8];
+    // ON, then the vector and the destination of the notifications IPI
+    // virtualisation sends.
     uint32_t notification;
-    uint32_t reserved[7];
+    uint32_t destination;
+    uint32_t reserved[6];
 };
 
 #define POSTED_ON (1u << 0)
+#define POSTED_VECTOR_SHIFT 16
 
 struct vlapic {
     uint64_t base;
@@ -144,6 +148,8 @@ struct vlapic {
     // triggered one must be in the registers before its vector's EOI exit is.
     struct posted *posted;
     enum avic_mode avic;
+    // Whether VMX virtualises the vCPU's IPIs.
+    bool ipiv;
 };
 
 static uint32_t regs_get(const struct vlapic *vl, uint32_t offset) {
@@ -188,6 +194,17 @@ static bool posted_interrupts;
 // x2APIC mode's MSRs, where the processor virtualises them, read from the
 // registers and write to them, but for those MSRs whose access exits.
 static bool x2apic_virtualization;
+// VMX posts IPIs between vCPUs itself (SDM 325462-093 Vol. 3C, 32.1.6), to
+// PIDs a table finds by APIC ID, and sends their notifications to
+// destinations it reads in the mode of the sender's local APIC: a vCPU does
+// so only while its processor's is the mode they are written in, which
+// follows the vCPUs'.
+static bool ipi_virtualization;
+static uint64_t *pid_table;
+static uint32_t pid_table_last;
+static struct spinlock ipiv_lock;
+static volatile bool ipiv_x2apic;
+static volatile bool ipiv_recheck;
 
 // The x2APIC MSRs whose registers hold what they read as, and those whose
 // writes VMX virtualises with virtual-interrupt delivery (SDM 325462-093
@@ -264,6 +281,22 @@ void vlapic_init(void) {
         apicv = vmx_secondary_allowed(PROC2_APIC_REG_VIRT | PROC2_VIRT_INTR_DELIVERY);
         posted_interrupts = apicv && vmx_pin_allowed(PIN_POSTED_INTR);
         x2apic_virtualization = apicv && vmx_secondary_allowed(PROC2_VIRT_X2APIC);
+        ipi_virtualization = posted_interrupts && vmx_tertiary_allowed(PROC3_IPI_VIRT);
+    }
+    if (ipi_virtualization) {
+        for (uint32_t i = 0; i < smp_cpu_count(); i++) {
+            if (smp_cpu(i)->apic_id > pid_table_last) {
+                pid_table_last = smp_cpu(i)->apic_id;
+            }
+        }
+        // The last index is a 16-bit field.
+        if (pid_table_last > 0xffff) {
+            ipi_virtualization = false;
+        } else {
+            pid_table = page_alloc(((pid_table_last + 1) * 8 + PAGE_SIZE - 1) / PAGE_SIZE);
+            ipiv_x2apic = lapic_x2apic();
+            ipiv_recheck = true;
+        }
     }
     if (!virt_vmx && svm_avic) {
         // RAM, as AVIC may fail to redirect accesses to MMIO (AMD 56683 rev.
@@ -296,6 +329,11 @@ void vlapic_init(void) {
         if (svm_x2avic) {
             virt_x2apic_msr_passed(MSR_X2APIC_ICR, false, true);
         }
+    }
+    // Without IPI virtualisation, a write to the ICR's MSR would be the
+    // processor's (SDM 325462-093 Vol. 3C, 32.5).
+    if (ipi_virtualization && x2apic_virtualization) {
+        virt_x2apic_icr_passed(MSR_X2APIC_ICR);
     }
 }
 
@@ -333,7 +371,11 @@ static void access_virtualization(const struct vlapic *vl) {
     }
     vmx_write(VMCS_PROC_CONTROLS2, controls);
     if (x2apic_virtualization) {
-        vmx_write(VMCS_MSR_BITMAP, x2 ? virt_msr_bitmap_x2apic() : virt_msr_bitmap());
+        uint64_t bitmap = virt_msr_bitmap();
+        if (x2) {
+            bitmap = vl->ipiv ? virt_msr_bitmap_x2apic_icr() : virt_msr_bitmap_x2apic();
+        }
+        vmx_write(VMCS_MSR_BITMAP, bitmap);
     }
 }
 
@@ -430,6 +472,59 @@ static void mirror_logical(const struct vlapic *vl) {
 // the vector, which is the hypervisor's.
 static void timer_lvt(const struct vlapic *vl) {
     lapic_write(APIC_LVT_TIMER, (regs_get(vl, APIC_LVT_TIMER) & ~0xffu) | VLAPIC_TIMER_VECTOR);
+}
+
+// As a local APIC in either mode reads it (SDM 325462-093 Vol. 3C, 32.1.6.2).
+static uint32_t ipiv_destination(uint32_t id, bool x2apic) {
+    return x2apic ? id : (id << 8) & 0xff00;
+}
+
+static void ipiv_recheck_soon(void) {
+    if (ipi_virtualization) {
+        __atomic_store_n(&ipiv_recheck, true, __ATOMIC_RELEASE);
+    }
+}
+
+// The destinations change mode once every vCPU but those waiting for a
+// start-up IPI is in the other: none virtualises IPIs then, as a vCPU only
+// changes its mode out of the guest.
+static void ipiv_reformat(void) {
+    spinlock_acquire(&ipiv_lock);
+    bool to = !ipiv_x2apic;
+    bool all = true;
+    for (uint32_t i = 0; i < smp_cpu_count() && all; i++) {
+        struct cpu *cpu = smp_cpu(i);
+        if (cpu->vcpu == NULL
+            || __atomic_load_n(&cpu->vcpu->sipi, __ATOMIC_ACQUIRE) == VCPU_SIPI_WAITING) {
+            continue;
+        }
+        uint64_t base = __atomic_load_n(&cpu->apic_base, __ATOMIC_ACQUIRE);
+        all = base != 0 && ((base & APIC_BASE_EXTD) != 0) == to;
+    }
+    if (all) {
+        for (uint32_t i = 0; i < smp_cpu_count(); i++) {
+            struct vcpu *v = smp_cpu(i)->vcpu;
+            if (v != NULL && v->vlapic != NULL) {
+                __atomic_store_n(&v->vlapic->posted->destination,
+                                 ipiv_destination(v->vlapic->id, to), __ATOMIC_RELEASE);
+            }
+        }
+        __atomic_store_n(&ipiv_x2apic, to, __ATOMIC_RELEASE);
+    }
+    spinlock_release(&ipiv_lock);
+}
+
+static void ipiv_entry(struct vcpu *v) {
+    struct vlapic *vl = v->vlapic;
+    if (__atomic_exchange_n(&ipiv_recheck, false, __ATOMIC_ACQ_REL)) {
+        ipiv_reformat();
+    }
+    bool on = lapic_x2apic() == __atomic_load_n(&ipiv_x2apic, __ATOMIC_ACQUIRE);
+    if (on != vl->ipiv) {
+        vl->ipiv = on;
+        vmx_write(VMCS_TERTIARY_CONTROLS, on ? PROC3_IPI_VIRT : 0);
+        access_virtualization(vl);
+    }
 }
 
 static void avic_recheck_soon(void) {
@@ -647,6 +742,7 @@ static void reset_registers(struct vcpu *v) {
 
 void vlapic_reset(struct vcpu *v) {
     reset_registers(v);
+    ipiv_recheck_soon();
 }
 
 void vlapic_create(struct vcpu *v) {
@@ -672,6 +768,18 @@ void vlapic_create(struct vcpu *v) {
             vmx_write(VMCS_PIN_CONTROLS, vmx_read(VMCS_PIN_CONTROLS) | PIN_POSTED_INTR);
             vmx_write(VMCS_POSTED_INTR_NV, VLAPIC_POSTED_VECTOR);
             vmx_write(VMCS_POSTED_INTR_DESC, (uint64_t)(uintptr_t)vl->posted);
+        }
+        if (ipi_virtualization) {
+            spinlock_acquire(&ipiv_lock);
+            vl->posted->notification = (uint32_t)VLAPIC_POSTED_VECTOR << POSTED_VECTOR_SHIFT;
+            vl->posted->destination = ipiv_destination(vl->id, ipiv_x2apic);
+            spinlock_release(&ipiv_lock);
+            __atomic_store_n(&pid_table[vl->id], (uint64_t)(uintptr_t)vl->posted | 1,
+                             __ATOMIC_RELEASE);
+            vmx_write(VMCS_PROC_CONTROLS, vmx_read(VMCS_PROC_CONTROLS) | PROC_TERTIARY_CONTROLS);
+            vmx_write(VMCS_TERTIARY_CONTROLS, 0);
+            vmx_write(VMCS_PID_POINTER_TABLE, (uint64_t)(uintptr_t)pid_table);
+            vmx_write(VMCS_LAST_PID_POINTER_INDEX, pid_table_last);
         }
     }
     if (avic_supported) {
@@ -826,6 +934,9 @@ static void virtual_delivery(struct vlapic *vl) {
 void vlapic_prepare_entry(struct vcpu *v) {
     struct vlapic *vl = v->vlapic;
     merge(vl);
+    if (ipi_virtualization) {
+        ipiv_entry(v);
+    }
     if (!avic_supported) {
         return;
     }
@@ -1177,11 +1288,17 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
     return true;
 }
 
-// x2APIC mode's ICR, one 64-bit register.
+// x2APIC mode's ICR is one 64-bit register, which VMX keeps whole at its
+// offset (SDM 325462-093 Vol. 3C, 32.5) and AVIC as xAPIC mode's two halves
+// (APM 24593 rev. 3.45, 15.29.10).
+static uint32_t x2apic_icr_high(void) {
+    return virt_vmx ? APIC_ICR_LOW + 4 : APIC_ICR_HIGH;
+}
+
 static void x2apic_icr_write(struct vcpu *v, uint64_t value) {
     struct vlapic *vl = v->vlapic;
     regs_set(vl, APIC_ICR_LOW, (uint32_t)value & ~ICR_PENDING);
-    regs_set(vl, APIC_ICR_HIGH, (uint32_t)(value >> 32));
+    regs_set(vl, x2apic_icr_high(), (uint32_t)(value >> 32));
     send_ipi(v, (uint32_t)(value >> 32), (uint32_t)value);
 }
 
@@ -1275,7 +1392,7 @@ void vlapic_apic_write(struct vcpu *v, uint32_t offset) {
         return;
     }
     if (offset == APIC_ICR_LOW && x2apic(vl)) {
-        x2apic_icr_write(v, (uint64_t)regs_get(vl, APIC_ICR_HIGH) << 32
+        x2apic_icr_write(v, (uint64_t)regs_get(vl, x2apic_icr_high()) << 32
                                 | regs_get(vl, APIC_ICR_LOW));
         return;
     }
@@ -1364,6 +1481,7 @@ static bool apic_base_write(struct vcpu *v, uint64_t value) {
     }
     if (extd != was_x2 || !was_en) {
         lapic_host_mode(extd);
+        ipiv_recheck_soon();
         if (!was_en) {
             reset_registers(v);
         }
@@ -1371,6 +1489,7 @@ static bool apic_base_write(struct vcpu *v, uint64_t value) {
             // x2APIC mode derives the LDR, and keeps no ICR high half.
             regs_set(vl, APIC_LDR, x2apic_ldr(vl->id));
             regs_set(vl, APIC_ICR_HIGH, 0);
+            regs_set(vl, x2apic_icr_high(), 0);
         }
         id_reg(vl);
         timer_lvt(vl);
@@ -1419,7 +1538,7 @@ bool vlapic_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
     }
     *value = low;
     if (msr == MSR_X2APIC_ICR) {
-        *value |= (uint64_t)regs_get(vl, APIC_ICR_HIGH) << 32;
+        *value |= (uint64_t)regs_get(vl, x2apic_icr_high()) << 32;
     }
     return true;
 }

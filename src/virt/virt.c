@@ -46,8 +46,10 @@ bool virt_vmx;
 static uint8_t *io_bitmap;
 static uint8_t *msr_bitmap;
 // For vCPUs whose x2APIC the processor virtualises: the same but for the
-// accesses to x2APIC registers it passes.
+// accesses to x2APIC registers it passes, and for those whose IPIs it
+// virtualises too, the ICR's as well.
 static uint8_t *msr_bitmap_x2apic;
+static uint8_t *msr_bitmap_x2apic_icr;
 
 bool vmx_ept_huge_pages(void);
 bool vmx_monitor_trap_supported(void);
@@ -119,6 +121,10 @@ uint64_t virt_msr_bitmap_x2apic(void) {
     return (uint64_t)(uintptr_t)msr_bitmap_x2apic;
 }
 
+uint64_t virt_msr_bitmap_x2apic_icr(void) {
+    return (uint64_t)(uintptr_t)msr_bitmap_x2apic_icr;
+}
+
 void virt_intercept_io(uint16_t port, unsigned count, bool intercept) {
     for (unsigned i = 0; i < count; i++) {
         unsigned p = port + i;
@@ -181,6 +187,10 @@ void virt_intercept_msr(uint32_t msr, bool read, bool write) {
         bitmap_set(msr_bitmap_x2apic, read_bit, read);
         bitmap_set(msr_bitmap_x2apic, write_bit, write);
     }
+    if (msr_bitmap_x2apic_icr != NULL && (msr < 0x800 || msr > 0x8ff)) {
+        bitmap_set(msr_bitmap_x2apic_icr, read_bit, read);
+        bitmap_set(msr_bitmap_x2apic_icr, write_bit, write);
+    }
 }
 
 void virt_x2apic_msr_passed(uint32_t msr, bool read, bool write) {
@@ -198,6 +208,17 @@ void virt_x2apic_msr_passed(uint32_t msr, bool read, bool write) {
     }
     if (write) {
         bitmap_set(msr_bitmap_x2apic, write_bit, false);
+    }
+}
+
+void virt_x2apic_icr_passed(uint32_t msr) {
+    unsigned pages = virt_vmx ? 1 : 2;
+    msr_bitmap_x2apic_icr = page_alloc(pages);
+    memcpy(msr_bitmap_x2apic_icr, msr_bitmap_x2apic, pages * PAGE_SIZE);
+    unsigned read_bit, write_bit;
+    if (msr_bits(msr, &read_bit, &write_bit)) {
+        bitmap_set(msr_bitmap_x2apic_icr, read_bit, false);
+        bitmap_set(msr_bitmap_x2apic_icr, write_bit, false);
     }
 }
 
