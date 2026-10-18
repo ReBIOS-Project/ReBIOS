@@ -90,6 +90,7 @@ static struct amdvi_unit *units;
 static uint32_t unit_count;
 static uint64_t *device_table;
 
+#define EVENT_WRITE_TIMEOUT_NS 1000000ull
 #define L2_CONFIG_INDEX 0xf0
 #define L2_CONFIG_WRITE (1u << 8)
 #define L2_CONFIG_DATA 0xf4
@@ -277,11 +278,22 @@ void amdvi_report_faults(void) {
         uint32_t head = (reg_read(u, REG_EVENT_HEAD) >> 4) & (LOG_ENTRIES - 1);
         uint32_t tail = (reg_read(u, REG_EVENT_TAIL) >> 4) & (LOG_ENTRIES - 1);
         while (head != tail) {
-            const uint32_t *event = &u->events[head * 4];
+            volatile uint32_t *event = &u->events[head * 4];
+            // Erratum 732 (Revision Guide for AMD Family 15h Models 10h-1Fh
+            // Processors 48931 rev. 3.08): the tail can move before the entry
+            // is written. Entries start as zeros, and are zeroed once read, so
+            // an event code of 0 means one still to come.
+            uint64_t deadline = time_ns() + EVENT_WRITE_TIMEOUT_NS;
+            while (event[1] >> CMD_SHIFT == 0 && time_ns() < deadline) {
+                cpu_relax();
+            }
             uint32_t source = event[0] & 0xffff;
             printf("AMD-Vi unit %u: event %#x from %02x:%02x.%x: %08x %08x %08x %08x\n", i,
                    event[1] >> CMD_SHIFT, source >> 8, (source >> 3) & 0x1f, source & 7,
                    event[0], event[1], event[2], event[3]);
+            for (unsigned j = 0; j < 4; j++) {
+                event[j] = 0;
+            }
             head = (head + 1) % LOG_ENTRIES;
         }
         reg_write(u, REG_EVENT_HEAD, (uint64_t)head << 4);
