@@ -196,25 +196,6 @@ static int acpi_find_iommu(void) {
     return rsdt != 0 ? sdt_find_iommu((const uint8_t *)(uintptr_t)rsdt, 4) : FOUND_NONE;
 }
 
-static void console_show(const char *text) {
-    EFI_CHAR16 buf[128];
-    size_t count = 0;
-    for (const char *p = text; *p != '\0'; p++) {
-        // Room for a CR, the character, and the terminator.
-        if (count + 3 > sizeof(buf) / sizeof(buf[0])) {
-            buf[count] = 0;
-            efi_st->ConOut->OutputString(efi_st->ConOut, buf);
-            count = 0;
-        }
-        if (*p == '\n') {
-            buf[count++] = u'\r';
-        }
-        buf[count++] = (EFI_CHAR16)(unsigned char)*p;
-    }
-    buf[count] = 0;
-    efi_st->ConOut->OutputString(efi_st->ConOut, buf);
-}
-
 bool iommu_check(void) {
     int found = acpi_find_iommu();
     if (found == FOUND_USABLE) {
@@ -227,8 +208,7 @@ bool iommu_check(void) {
     if (found == FOUND_UNUSABLE) {
         notice = "ReBIOS cannot use the IOMMU the firmware reports.\n";
     }
-    printf("%s", notice);
-    console_show(notice);
+    log_notice("%s", notice);
     efi_bs->Stall(NOTICE_SECONDS * 1000000);
     return false;
 }

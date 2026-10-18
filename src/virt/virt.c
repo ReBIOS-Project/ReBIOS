@@ -266,6 +266,10 @@ void vcpu_single_step(struct vcpu *v, bool on) {
 }
 
 void vcpu_before_entry(struct vcpu *v) {
+    // The guest would draw over a panic's message.
+    if (log_panicked()) {
+        halt_forever();
+    }
     profile_entry(v);
     service_pause(v);
     // Before the flush below, which the display's remapping may need.
@@ -335,6 +339,9 @@ void vcpu_halt(struct vcpu *v) {
         service_pause(v);
         if (event_halt_ends(v)) {
             break;
+        }
+        if (log_panicked()) {
+            halt_forever();
         }
         vga_refresh();
         cpu_halt();

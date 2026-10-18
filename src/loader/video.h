@@ -18,7 +18,10 @@
 #ifndef LOADER__VIDEO_H
 #define LOADER__VIDEO_H
 
-// Fills loader_handoff->video. Needs config_load() to have run.
+// Picks the graphics output, and describes its framebuffer in
+// loader_handoff->video. Needs config_load() to have run.
+void video_find_framebuffer(void);
+// Fills the rest of loader_handoff->video.
 void video_init(void);
 
 // Must run right before ExitBootServices().

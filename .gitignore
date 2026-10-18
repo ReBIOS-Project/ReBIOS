@@ -6,6 +6,7 @@
 /freestanding-lgrt
 /picoefi
 /nanoprintf
+/flanterm
 /uACPI
 /seabios
 /vgabios/freestanding-lgrt

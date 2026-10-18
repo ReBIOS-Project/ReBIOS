@@ -79,6 +79,11 @@ clone_repo_commit \
     bebaecbeaf430e36a2d30d31a2fed4e098388c93
 
 clone_repo_commit \
+    https://github.com/Mintsuki/Flanterm.git \
+    flanterm \
+    0b7b2e32b8e1f4a539d488aa3405b73f078071ad
+
+clone_repo_commit \
     https://github.com/uACPI/uACPI.git \
     uACPI \
     c0edecef62bcac6ce3f783540099190bafadadda

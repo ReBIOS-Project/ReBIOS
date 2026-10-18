@@ -585,22 +585,23 @@ static bool install_vbios(const struct vbios_choice *choice) {
     return true;
 }
 
-void video_init(void) {
-    struct handoff_video *video = &loader_handoff->video;
+static EFI_HANDLE gop_handle;
+
+void video_find_framebuffer(void) {
     EFI_GRAPHICS_OUTPUT_PROTOCOL *gop = NULL;
+    gop_handle = choose_gop(&gop);
+    if (gop_handle != NULL) {
+        describe_framebuffer(gop, &loader_handoff->video.framebuffer);
+    } else {
+        printf("No usable graphics output\n");
+    }
+}
+
+void video_init(void) {
     struct user_vbios user;
     struct pci_io_device dev;
     struct vbios_choice choice;
     bool found = false;
-
-    memset(video, 0, sizeof(*video));
-
-    EFI_HANDLE gop_handle = choose_gop(&gop);
-    if (gop_handle != NULL) {
-        describe_framebuffer(gop, &video->framebuffer);
-    } else {
-        printf("No usable graphics output\n");
-    }
 
     bool have_user = load_user_vbios(&user);
     const struct user_vbios *user_vbios = have_user ? &user : NULL;

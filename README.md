@@ -287,6 +287,7 @@ people.
 *   **[PicoEFI](https://github.com/PicoEFI/PicoEFI)** for the EFI C runtime, build system, and headers.
 *   **[uACPI](https://github.com/uACPI/uACPI)** for ACPI table handling and AML evaluation.
 *   **[nanoprintf](https://github.com/charlesnicholson/nanoprintf)** for formatted output.
+*   **[Flanterm](https://github.com/Mintsuki/Flanterm)** for the console ReBIOS shows its output on.
 *   **[QEMU](https://www.qemu.org/)**, whose VGA BIOS the emulated VGA's fonts (public domain fonts from Joseph Gil's
     fntcol16 collection) and mode register values were taken from.
 *   **[EDK2 (TianoCore)](https://github.com/tianocore/edk2)** for the OVMF firmware ReBIOS is tested on.
@@ -305,5 +306,6 @@ ReBIOS builds in software of others, under their own licenses:
 - [PicoEFI](https://github.com/PicoEFI/PicoEFI) and [freestanding-c-hdrs](https://github.com/osdev0/freestanding-c-hdrs), by
   Mintsuki and contributors, under the 0BSD license.
 - [nanoprintf](https://github.com/charlesnicholson/nanoprintf), by Charles Nicholson, under the Unlicense or the 0BSD license.
+- [Flanterm](https://github.com/Mintsuki/Flanterm), by Mintsuki and contributors, under the BSD 2-Clause license.
 - [freestanding-lgrt](https://github.com/osdev0/freestanding-lgrt), from LLVM's compiler-rt, under the Apache License 2.0
   with LLVM exceptions.

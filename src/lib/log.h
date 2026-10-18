@@ -22,11 +22,21 @@
 #include <stdbool.h>
 #include <stdarg.h>
 
+struct flanterm_context;
+
 // Until this is called, the log is kept, to be written out here. A serial
 // port of 0 means none.
 void log_init(uint16_t serial_port, uint32_t serial_baud, bool console);
+// What the log shows goes to this console from now on, rather than the
+// firmware's, as it lasts beyond ExitBootServices().
+void log_set_screen(struct flanterm_context *screen);
+// The guest draws on the screen from now on: only panics still reach it.
+void log_hand_over_screen(void);
 void vprintf(const char *fmt, va_list args);
 __attribute__((format(printf, 1, 2))) void printf(const char *fmt, ...);
+// Like printf(), but shown whatever the configuration.
+__attribute__((format(printf, 1, 2))) void log_notice(const char *fmt, ...);
 __attribute__((noreturn, format(printf, 1, 2))) void panic(const char *fmt, ...);
+bool log_panicked(void);
 
 #endif

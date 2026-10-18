@@ -85,6 +85,7 @@ static void bsp_main(void *arg) {
     struct vcpu *v = vcpu_create(cpu);
     csm_boot_start(v);
     dma_enable();
+    log_hand_over_screen();
     vcpu_run(v);
 }
 

@@ -25,6 +25,7 @@
 #include <lib/log.h>
 #include <loader/bootdev.h>
 #include <loader/config.h>
+#include <loader/console.h>
 #include <loader/display.h>
 #include <loader/drives.h>
 #include <loader/efi_glue.h>
@@ -158,11 +159,6 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
 
     printf("ReBIOS\n");
     config_load();
-    log_init(config.serial ? config.serial_port : 0, config.serial_baud, config.verbose);
-
-    if (!iommu_check()) {
-        return EFI_UNSUPPORTED;
-    }
 
     uint64_t handoff_addr = efi_alloc_pages(page_count(sizeof(struct handoff)), 0);
     if (handoff_addr == 0) {
@@ -171,6 +167,14 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     loader_handoff = (struct handoff *)(uintptr_t)handoff_addr;
     memset(loader_handoff, 0, sizeof(*loader_handoff));
     reserve(handoff_addr, page_count(sizeof(struct handoff)));
+
+    video_find_framebuffer();
+    console_init();
+    log_init(config.serial ? config.serial_port : 0, config.serial_baud, config.verbose);
+
+    if (!iommu_check()) {
+        return EFI_UNSUPPORTED;
+    }
 
     // The core runs from this image, which stays where the firmware put it.
     EFI_LOADED_IMAGE_PROTOCOL *image;
