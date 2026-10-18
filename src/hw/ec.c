@@ -54,6 +54,9 @@ static struct {
     uint16_t command;
     bool global_lock;
     unsigned ports;
+    uacpi_handle query_work;
+    // A work item must not be scheduled again before its handler runs.
+    bool query_pending;
 } ec;
 
 static bool wait_status(uint8_t mask, uint8_t value) {
@@ -152,6 +155,7 @@ static bool query(uint8_t *value) {
 // Runs the _Qxx method of each event the EC has pending, 0 meaning none.
 static void query_work(uacpi_handle ctx) {
     (void)ctx;
+    ec.query_pending = false;
     for (unsigned i = 0; i < EC_QUERY_LIMIT; i++) {
         if (!(inb(ec.command) & EC_SCI_EVT)) {
             return;
@@ -177,7 +181,10 @@ static uacpi_interrupt_ret gpe_handler(uacpi_handle ctx, uacpi_namespace_node *g
     (void)ctx;
     (void)gpe_device;
     (void)idx;
-    uacpi_kernel_schedule_work(UACPI_WORK_GPE_EXECUTION, query_work, NULL);
+    if (!ec.query_pending) {
+        ec.query_pending = true;
+        uacpi_kernel_schedule_work(UACPI_WORK_GPE_EXECUTION, ec.query_work, query_work, NULL);
+    }
     return UACPI_INTERRUPT_HANDLED | UACPI_GPE_REENABLE;
 }
 
@@ -293,6 +300,7 @@ void ec_init(void) {
         printf("The embedded controller has no usable _GPE\n");
         return;
     }
+    ec.query_work = uacpi_kernel_create_work_item();
     status = uacpi_install_gpe_handler(gpe_device, idx, UACPI_GPE_TRIGGERING_EDGE, gpe_handler,
                                        NULL);
     if (status != UACPI_STATUS_OK) {

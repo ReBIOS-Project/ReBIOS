@@ -47,9 +47,10 @@
 
 #define WAIT_FOREVER 0xffff
 
-// The global lock's event is signalled by the SCI handler, which does not run
-// while the hypervisor waits with interrupts off. uACPI tries the lock again
-// after each wait, so waits forever poll it instead.
+// Events, semaphores created with no units, are only signalled by the SCI
+// handler (the global lock's release) or AML on another processor, neither of
+// which runs while the hypervisor waits with interrupts off. uACPI tries the
+// global lock again after each wait, so waits forever on events poll instead.
 #define FOREVER_POLL_MS 1
 
 struct io_range {
@@ -57,8 +58,9 @@ struct io_range {
     uint32_t length;
 };
 
-struct event {
-    uint64_t counter;
+struct semaphore {
+    uint64_t units;
+    bool event;
 };
 
 struct work {
@@ -304,74 +306,45 @@ void uacpi_kernel_sleep(uacpi_u64 msec) {
     }
 }
 
-static bool lock_try(struct spinlock *lock) {
-    return !__atomic_exchange_n(&lock->locked, true, __ATOMIC_ACQUIRE);
-}
-
 static bool timed_out(uint64_t start_ns, uacpi_u16 timeout_ms) {
     return timeout_ms != WAIT_FOREVER && time_ns() - start_ns >= (uint64_t)timeout_ms * 1000000;
 }
 
-uacpi_handle uacpi_kernel_create_mutex(void) {
-    return kmalloc(sizeof(struct spinlock));
+uacpi_handle uacpi_kernel_create_semaphore(uacpi_u32 initial_units) {
+    struct semaphore *semaphore = kmalloc(sizeof(*semaphore));
+    semaphore->units = initial_units;
+    semaphore->event = initial_units == 0;
+    return semaphore;
 }
 
-void uacpi_kernel_free_mutex(uacpi_handle handle) {
+void uacpi_kernel_free_semaphore(uacpi_handle handle) {
     kfree(handle);
 }
 
-uacpi_status uacpi_kernel_acquire_mutex(uacpi_handle handle, uacpi_u16 timeout) {
+uacpi_status uacpi_kernel_wait_for_semaphore(uacpi_handle handle, uacpi_u16 timeout) {
+    struct semaphore *semaphore = handle;
+    if (timeout == WAIT_FOREVER && semaphore->event) {
+        timeout = FOREVER_POLL_MS;
+    }
     uint64_t start = time_ns();
-    while (!lock_try(handle)) {
+    for (;;) {
+        uint64_t units = __atomic_load_n(&semaphore->units, __ATOMIC_RELAXED);
+        while (units != 0) {
+            if (__atomic_compare_exchange_n(&semaphore->units, &units, units - 1, false,
+                                            __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
+                return UACPI_STATUS_OK;
+            }
+        }
         if (timed_out(start, timeout)) {
             return UACPI_STATUS_TIMEOUT;
         }
         cpu_relax();
     }
-    return UACPI_STATUS_OK;
 }
 
-void uacpi_kernel_release_mutex(uacpi_handle handle) {
-    spinlock_release(handle);
-}
-
-uacpi_handle uacpi_kernel_create_event(void) {
-    return kmalloc(sizeof(struct event));
-}
-
-void uacpi_kernel_free_event(uacpi_handle handle) {
-    kfree(handle);
-}
-
-uacpi_bool uacpi_kernel_wait_for_event(uacpi_handle handle, uacpi_u16 timeout) {
-    struct event *event = handle;
-    if (timeout == WAIT_FOREVER) {
-        timeout = FOREVER_POLL_MS;
-    }
-    uint64_t start = time_ns();
-    for (;;) {
-        uint64_t count = __atomic_load_n(&event->counter, __ATOMIC_RELAXED);
-        while (count != 0) {
-            if (__atomic_compare_exchange_n(&event->counter, &count, count - 1, false,
-                                            __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
-                return UACPI_TRUE;
-            }
-        }
-        if (timed_out(start, timeout)) {
-            return UACPI_FALSE;
-        }
-        cpu_relax();
-    }
-}
-
-void uacpi_kernel_signal_event(uacpi_handle handle) {
-    struct event *event = handle;
-    __atomic_fetch_add(&event->counter, 1, __ATOMIC_RELEASE);
-}
-
-void uacpi_kernel_reset_event(uacpi_handle handle) {
-    struct event *event = handle;
-    __atomic_store_n(&event->counter, 0, __ATOMIC_RELEASE);
+void uacpi_kernel_signal_semaphore(uacpi_handle handle) {
+    struct semaphore *semaphore = handle;
+    __atomic_fetch_add(&semaphore->units, 1, __ATOMIC_RELEASE);
 }
 
 uacpi_thread_id uacpi_kernel_get_thread_id(void) {
@@ -450,12 +423,21 @@ uacpi_status uacpi_kernel_uninstall_interrupt_handler(uacpi_interrupt_handler ha
     return UACPI_STATUS_OK;
 }
 
+uacpi_handle uacpi_kernel_create_work_item(void) {
+    return kmalloc(sizeof(struct work));
+}
+
+void uacpi_kernel_free_work_item(uacpi_handle handle) {
+    kfree(handle);
+}
+
 // Work runs when the processor that queued it releases acpi_lock(), in the
 // order it came in: GPE methods and Notify() handlers alike.
-uacpi_status uacpi_kernel_schedule_work(uacpi_work_type type, uacpi_work_handler handler,
-                                        uacpi_handle ctx) {
+void uacpi_kernel_schedule_work(uacpi_work_type type, uacpi_handle work_item,
+                                uacpi_work_handler handler, uacpi_handle ctx) {
     (void)type;
-    struct work *w = kmalloc(sizeof(*w));
+    struct work *w = work_item;
+    w->next = NULL;
     w->handler = handler;
     w->ctx = ctx;
     spinlock_acquire(&work_lock);
@@ -466,7 +448,6 @@ uacpi_status uacpi_kernel_schedule_work(uacpi_work_type type, uacpi_work_handler
     }
     work_tail = w;
     spinlock_release(&work_lock);
-    return UACPI_STATUS_OK;
 }
 
 static void work_run(void) {
@@ -483,8 +464,10 @@ static void work_run(void) {
         if (w == NULL) {
             return;
         }
-        w->handler(w->ctx);
-        kfree(w);
+        // The handler may schedule its item again, or free it.
+        uacpi_work_handler handler = w->handler;
+        uacpi_handle ctx = w->ctx;
+        handler(ctx);
     }
 }
 
