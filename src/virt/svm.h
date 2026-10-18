@@ -201,10 +201,15 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 
 // Virtual interrupt control, at offset 060h.
 #define SVM_VINTR_IRQ (1ull << 8)
+#define SVM_VINTR_GIF (1ull << 9)
+#define SVM_VINTR_NMI (1ull << 11)
+#define SVM_VINTR_NMI_MASK (1ull << 12)
 #define SVM_VINTR_PRIO_SHIFT 16
 #define SVM_VINTR_PRIO_MASK (0xfull << SVM_VINTR_PRIO_SHIFT)
 #define SVM_VINTR_IGN_TPR (1ull << 20)
 #define SVM_VINTR_MASKING (1ull << 24)
+#define SVM_VINTR_GIF_ENABLE (1ull << 25)
+#define SVM_VINTR_NMI_ENABLE (1ull << 26)
 
 // Event injection.
 #define SVM_EVENT_VALID (1ull << 31)
@@ -222,6 +227,10 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 struct vcpu;
 
 extern bool svm_nrips;
+// The processor keeps the guest's NMI blocking and takes a virtual NMI when the
+// guest can (APM 24593 rev. 3.45, 15.21.10), with GIF virtualised, as Linux
+// 7.3's KVM has it.
+extern bool svm_vnmi;
 
 bool svm_supported(void);
 // The guest's translations go before its next run, as when the hypervisor

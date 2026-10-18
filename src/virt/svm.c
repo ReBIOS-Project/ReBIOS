@@ -41,6 +41,8 @@
 #define SVM_FEATURE_VMCB_CLEAN (1u << 5)
 #define SVM_FEATURE_FLUSH_BY_ASID (1u << 6)
 #define SVM_FEATURE_DECODE_ASSISTS (1u << 7)
+#define SVM_FEATURE_VGIF (1u << 16)
+#define SVM_FEATURE_VNMI (1u << 25)
 
 #define CPUID_80000001_ECX_OSVW (1u << 9)
 #define MSR_MCG_CAP 0x179
@@ -57,6 +59,7 @@
 #define VECTOR_MC 18
 
 bool svm_nrips;
+bool svm_vnmi;
 // TLB_CONTROL can flush the guest's ASID alone (APM 24593 rev. 3.45, Table
 // 15-9), sparing the host's translations.
 static bool flush_by_asid;
@@ -172,6 +175,8 @@ bool svm_supported(void) {
     flush_by_asid = (features & SVM_FEATURE_FLUSH_BY_ASID) != 0;
     vmcb_clean_bits = (features & SVM_FEATURE_VMCB_CLEAN) != 0;
     decode_assists = (features & SVM_FEATURE_DECODE_ASSISTS) != 0;
+    svm_vnmi = (features & (SVM_FEATURE_VNMI | SVM_FEATURE_VGIF))
+               == (SVM_FEATURE_VNMI | SVM_FEATURE_VGIF);
     return true;
 }
 
@@ -212,6 +217,9 @@ void svm_vcpu_init(struct vcpu *v) {
     // Physical interrupts exit whatever the guest's IF, and CR8 is the virtual
     // local APIC's TPR.
     c->vintr = SVM_VINTR_MASKING;
+    if (svm_vnmi) {
+        c->vintr |= SVM_VINTR_GIF_ENABLE | SVM_VINTR_GIF | SVM_VINTR_NMI_ENABLE;
+    }
     c->intercept_misc2 = SVM_INTERCEPT_VMRUN | SVM_INTERCEPT_VMMCALL | SVM_INTERCEPT_VMLOAD
                          | SVM_INTERCEPT_VMSAVE | SVM_INTERCEPT_STGI | SVM_INTERCEPT_CLGI
                          | SVM_INTERCEPT_SKINIT;

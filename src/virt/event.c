@@ -133,6 +133,13 @@ static bool deliver_nmi(struct vcpu *v) {
     if (!v->nmi_pending) {
         return false;
     }
+    // The processor takes it once the guest can; one pending there already
+    // stands for this one too, as a processor holds one NMI back at most.
+    if (!virt_vmx && svm_vnmi) {
+        v->vmcb->control.vintr |= SVM_VINTR_NMI;
+        v->nmi_pending = false;
+        return false;
+    }
     if (nmi_blocked()) {
         set_proc_control(PROC_NMI_WINDOW_EXITING, true);
         return false;
@@ -229,6 +236,10 @@ static bool window_needed(struct vcpu *v) {
 bool event_halt_ends(struct vcpu *v) {
     struct cpu *cpu = v->cpu;
     if (v->nmi_pending || cpu->nmi_pending || cpu->init_pending || v->injecting) {
+        return true;
+    }
+    if (!virt_vmx && svm_vnmi
+        && (v->vmcb->control.vintr & (SVM_VINTR_NMI | SVM_VINTR_NMI_MASK)) == SVM_VINTR_NMI) {
         return true;
     }
     return (vcpu_rflags(v) & RFLAGS_IF) && interrupt_pending(v);
