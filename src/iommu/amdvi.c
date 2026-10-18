@@ -17,6 +17,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <hw/pci_cfg.h>
 #include <iommu/amdvi.h>
 #include <iommu/iommu_tables.h>
 #include <lib/heap.h>
@@ -88,6 +89,31 @@ struct amdvi_unit {
 static struct amdvi_unit *units;
 static uint32_t unit_count;
 static uint64_t *device_table;
+
+#define L2_CONFIG_INDEX 0xf0
+#define L2_CONFIG_WRITE (1u << 8)
+#define L2_CONFIG_DATA 0xf4
+#define L2_L2B_CK_GATE_CONTROL 0x90
+#define CK_GATE_L2B_MISC_DISABLE (1u << 2)
+
+// Erratum 746 (Revision Guide for AMD Family 15h Models 10h-1Fh Processors
+// 48931 rev. 3.08): logging can stall the IOMMU's translations while the L2B
+// miscellaneous clock is gated, which the firmware is to have turned off
+// (registers from the BKDG, 42300 rev. 3.12, D0F2xF0 and D0F2xF4_x90).
+static void erratum_746(struct pci_addr a) {
+    struct cpu_signature s = cpu_signature();
+    if (s.family != 0x15 || s.model < 0x10 || s.model > 0x1f) {
+        return;
+    }
+    pci_cfg_write(a, L2_CONFIG_INDEX, 4, L2_L2B_CK_GATE_CONTROL);
+    uint32_t value = pci_cfg_read(a, L2_CONFIG_DATA, 4);
+    if (!(value & CK_GATE_L2B_MISC_DISABLE)) {
+        pci_cfg_write(a, L2_CONFIG_INDEX, 4, L2_L2B_CK_GATE_CONTROL | L2_CONFIG_WRITE);
+        pci_cfg_write(a, L2_CONFIG_DATA, 4, value | CK_GATE_L2B_MISC_DISABLE);
+        pci_cfg_write(a, L2_CONFIG_INDEX, 4, L2_L2B_CK_GATE_CONTROL);
+        printf("Working around AMD erratum 746\n");
+    }
+}
 
 static uint64_t reg_read(const struct amdvi_unit *u, uint32_t reg) {
     return *(volatile uint64_t *)(uintptr_t)(u->base + reg);
@@ -163,6 +189,10 @@ bool amdvi_probe(const struct iommu_tables *tables, int *leaf_level) {
             printf("AMD-Vi unit %u has no registers\n", i);
             return false;
         }
+        const struct iommu_unit *t = &tables->units[i];
+        uint16_t rid = t->amd_rid;
+        erratum_746((struct pci_addr){t->segment, (uint8_t)(rid >> 8), (uint8_t)(rid >> 3 & 0x1f),
+                                      (uint8_t)(rid & 7)});
         printf("AMD-Vi unit %u at %#llx: features %#llx, control %#llx\n", i,
                (unsigned long long)u->base, (unsigned long long)reg_read(u, REG_FEATURES),
                (unsigned long long)reg_read(u, REG_CONTROL));
