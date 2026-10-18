@@ -69,6 +69,15 @@ int vlapic_tpr_held(struct vcpu *v);
 // Whether the 8259's interrupts reach the vCPU through LINT0.
 bool vlapic_extint_open(struct vcpu *v);
 
+// Whether the processor delivers the vCPU's interrupts from its local APIC
+// itself, which then only need putting in its registers.
+bool vlapic_virtual_delivery(struct vcpu *v);
+// The guest ended a level-triggered interrupt the processor delivered.
+void vlapic_eoi_exit(struct vcpu *v, uint8_t vector);
+// The guest wrote a register with side effects at a page offset, with the
+// value already in place.
+void vlapic_apic_write(struct vcpu *v, uint32_t offset);
+
 // The TPR, which the guest also changes through CR8 without exits, kept in
 // step around entries.
 void vlapic_before_entry(struct vcpu *v);

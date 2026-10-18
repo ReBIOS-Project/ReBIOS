@@ -128,6 +128,10 @@ static struct spinlock page_lock;
 // 325462-093 Vol. 3C, 32.4), whose contents the processor then leaves alone:
 // vCPUs not in xAPIC mode find nothing there.
 static uint64_t apic_access_page;
+// VMX also virtualises reads of the registers and the delivery of interrupts
+// (SDM 325462-093 Vol. 3C, 32.2, 32.4), which leaves writes with side effects
+// to exits.
+static bool apicv;
 
 static const struct mmio_ops mmio_ops;
 
@@ -164,6 +168,7 @@ void vlapic_init(void) {
         uint8_t *page = page_alloc(1);
         memset(page, 0xff, PAGE_SIZE);
         apic_access_page = (uint64_t)(uintptr_t)page;
+        apicv = vmx_secondary_allowed(PROC2_APIC_REG_VIRT | PROC2_VIRT_INTR_DELIVERY);
     }
     trap_page(APIC_DEFAULT_BASE);
     virt_intercept_msr(MSR_IA32_APIC_BASE, true, true);
@@ -331,6 +336,10 @@ void vlapic_create(struct vcpu *v) {
         if (apic_access_page != 0) {
             vmx_write(VMCS_APIC_ACCESS_ADDR, apic_access_page);
         }
+        if (apicv) {
+            vmx_write(VMCS_PROC_CONTROLS2, vmx_read(VMCS_PROC_CONTROLS2) | PROC2_APIC_REG_VIRT
+                                               | PROC2_VIRT_INTR_DELIVERY);
+        }
     }
     reset_registers(v);
     access_virtualization(vl);
@@ -348,6 +357,11 @@ bool vlapic_enabled(struct vcpu *v) {
 
 uint64_t vlapic_page(struct vcpu *v) {
     return v->vlapic->base & APIC_BASE_ADDRESS;
+}
+
+bool vlapic_virtual_delivery(struct vcpu *v) {
+    (void)v;
+    return apicv;
 }
 
 void vlapic_accept(struct vcpu *v, uint8_t vector, bool level) {
@@ -425,9 +439,32 @@ bool vlapic_extint_open(struct vcpu *v) {
     return !(lvt & APIC_LVT_MASKED) && (lvt & LVT_DELIVERY_MASK) == LVT_DELIVERY_EXTINT;
 }
 
+// The processor takes the requested and in-service vectors from the
+// registers, and EOIs exit for the level-triggered vectors the I/O APICs wait
+// on (SDM 325462-093 Vol. 3C, 27.4.2, 32.1.4).
+static void virtual_delivery(struct vlapic *vl) {
+    int irr = enabled(vl) && sw_enabled(vl) ? highest(vl, APIC_IRR) : -1;
+    int isr = highest(vl, APIC_ISR);
+    vmx_write(VMCS_GUEST_INTR_STATUS,
+              (uint64_t)(isr < 0 ? 0 : isr) << 8 | (uint64_t)(irr < 0 ? 0 : irr));
+    bool broadcast = !(regs_get(vl, APIC_SVR) & SVR_SUPPRESS_EOI_BROADCAST);
+    for (unsigned i = 0; i < 4; i++) {
+        uint64_t level = 0;
+        if (broadcast) {
+            level = regs_get(vl, APIC_TMR + i * 0x20)
+                    | (uint64_t)regs_get(vl, APIC_TMR + i * 0x20 + 0x10) << 32;
+        }
+        vmx_write(VMCS_EOI_EXIT0 + i * 2, level);
+    }
+}
+
 void vlapic_before_entry(struct vcpu *v) {
     struct vlapic *vl = v->vlapic;
     merge(vl);
+    if (apicv) {
+        virtual_delivery(vl);
+        return;
+    }
     if (virt_vmx) {
         // An exit when the guest lowers its TPR below what holds back.
         int held = vlapic_tpr_held(v);
@@ -669,11 +706,17 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
         }
     }
     switch (reg) {
+        case APIC_ID: {
+            // Read-only here, where a virtualised write may have changed it.
+            id_reg(vl);
+            return !x2;
+        }
         case APIC_TPR: {
             tpr_set(vl, value);
             return true;
         }
         case APIC_EOI: {
+            regs_set(vl, APIC_EOI, 0);
             eoi(vl);
             return !x2 || value == 0;
         }
@@ -728,7 +771,7 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
             break;
         }
         case APIC_ICR_LOW: {
-            regs_set(vl, APIC_ICR_LOW, value);
+            regs_set(vl, APIC_ICR_LOW, value & ~ICR_PENDING);
             send_ipi(v, regs_get(vl, APIC_ICR_HIGH) >> 24, value);
             break;
         }
@@ -737,6 +780,21 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
         }
     }
     return true;
+}
+
+void vlapic_eoi_exit(struct vcpu *v, uint8_t vector) {
+    (void)v;
+    irq_mirror_eoi(vector);
+}
+
+void vlapic_apic_write(struct vcpu *v, uint32_t offset) {
+    struct vlapic *vl = v->vlapic;
+    // A self-IPI with a vector that is not one (SDM 325462-093 Vol. 3C, 32.5).
+    if (offset == APIC_SELF_IPI) {
+        vlapic_accept(v, (uint8_t)regs_get(vl, APIC_SELF_IPI), false);
+        return;
+    }
+    reg_write(v, offset, regs_get(vl, offset));
 }
 
 // Where the page is not the vCPU's xAPIC, it is not there.
@@ -905,7 +963,7 @@ bool vlapic_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
         return true;
     }
     if (msr == MSR_X2APIC_ICR) {
-        regs_set(vl, APIC_ICR_LOW, (uint32_t)value);
+        regs_set(vl, APIC_ICR_LOW, (uint32_t)value & ~ICR_PENDING);
         regs_set(vl, APIC_ICR_HIGH, (uint32_t)(value >> 32));
         send_ipi(v, (uint32_t)(value >> 32), (uint32_t)value);
     } else if (msr == MSR_X2APIC_SELF_IPI) {

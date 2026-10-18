@@ -778,6 +778,14 @@ static void vmx_handle_exit(struct vcpu *v) {
             vmx_dump_guest();
             panic("Unhandled local APIC access\n");
         }
+        case EXIT_REASON_VIRTUALIZED_EOI: {
+            vlapic_eoi_exit(v, (uint8_t)qual);
+            break;
+        }
+        case EXIT_REASON_APIC_WRITE: {
+            vlapic_apic_write(v, (uint32_t)(qual & 0xff0));
+            break;
+        }
         case EXIT_REASON_EPT_VIOLATION: {
             uint64_t gpa = vmx_read(VMCS_GUEST_PHYS_ADDR);
             if (event_cut_short(v)) {

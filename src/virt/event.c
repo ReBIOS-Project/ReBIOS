@@ -214,6 +214,12 @@ static bool interrupt_pending(struct vcpu *v) {
     return irq_extint_pending(v) || vlapic_pending(v) >= 0;
 }
 
+// What only an exit once the guest takes interrupts can deliver: the
+// processor delivers the local APIC's itself where it virtualises them.
+static bool window_needed(struct vcpu *v) {
+    return irq_extint_pending(v) || (!vlapic_virtual_delivery(v) && vlapic_pending(v) >= 0);
+}
+
 bool event_halt_ends(struct vcpu *v) {
     struct cpu *cpu = v->cpu;
     if (v->nmi_pending || cpu->nmi_pending || cpu->init_pending || v->injecting) {
@@ -224,9 +230,10 @@ bool event_halt_ends(struct vcpu *v) {
 
 static void deliver_interrupt(struct vcpu *v) {
     bool extint = irq_extint_pending(v);
-    int vector = extint ? -1 : vlapic_pending(v);
+    bool virtual_delivery = vlapic_virtual_delivery(v);
+    int vector = extint || virtual_delivery ? -1 : vlapic_pending(v);
     if (!extint && vector < 0) {
-        interrupt_window(v, vlapic_tpr_held(v));
+        interrupt_window(v, virtual_delivery ? WINDOW_OFF : vlapic_tpr_held(v));
         return;
     }
     if (!interruptible(v)) {
@@ -240,7 +247,7 @@ static void deliver_interrupt(struct vcpu *v) {
         vlapic_take(v, (uint8_t)vector);
     }
     inject(v, EVENT_VALID | EVENT_TYPE_EXTERNAL | (uint32_t)vector, 0);
-    interrupt_window(v, interrupt_pending(v) ? WINDOW_ANY : WINDOW_OFF);
+    interrupt_window(v, window_needed(v) ? WINDOW_ANY : WINDOW_OFF);
 }
 
 void event_hold(struct vcpu *v) {
@@ -257,7 +264,7 @@ static void windows_after(struct vcpu *v) {
     if (virt_vmx && (v->nmi_pending || v->cpu->nmi_pending)) {
         set_proc_control(PROC_NMI_WINDOW_EXITING, true);
     }
-    if (interrupt_pending(v)) {
+    if (window_needed(v)) {
         interrupt_window(v, WINDOW_ANY);
     }
 }
@@ -288,7 +295,7 @@ void event_entry(struct vcpu *v) {
         return;
     }
     if (deliver_nmi(v)) {
-        if (interrupt_pending(v)) {
+        if (window_needed(v)) {
             interrupt_window(v, WINDOW_ANY);
         }
         return;
