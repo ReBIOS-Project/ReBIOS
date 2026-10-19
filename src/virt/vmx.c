@@ -508,6 +508,31 @@ void vmx_vmcs_create(struct vcpu *v, struct vmx_vmcs *vmcs) {
     vmptrld(v->vmcs_pa);
 }
 
+uint64_t vmx_shadow_vmcs_create(void) {
+    uint32_t *region = page_alloc(1);
+    region[0] = ((uint32_t)vmx_basic & 0x7fffffff) | 1u << 31;
+    uint64_t pa = (uint64_t)(uintptr_t)region;
+    vmclear(pa);
+    return pa;
+}
+
+void vmx_other_vmcs(struct vcpu *v, uint64_t pa) {
+    cache_flush(v->vmcs_cache);
+    vmptrld(pa);
+}
+
+uint64_t vmx_other_read(uint32_t field) {
+    return vmread(field);
+}
+
+void vmx_other_write(uint32_t field, uint64_t value) {
+    vmwrite(field, value);
+}
+
+void vmx_own_vmcs(struct vcpu *v) {
+    vmptrld(v->vmcs_pa);
+}
+
 void vmx_vmcs_swap(struct vcpu *v, struct vmx_vmcs *other) {
     cache_flush(v->vmcs_cache);
     struct vmx_vmcs current = {

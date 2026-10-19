@@ -57,6 +57,8 @@
 #define VMCS_EOI_EXIT1 0x201e
 #define VMCS_EOI_EXIT2 0x2020
 #define VMCS_EOI_EXIT3 0x2022
+#define VMCS_VMREAD_BITMAP 0x2026
+#define VMCS_VMWRITE_BITMAP 0x2028
 #define VMCS_XSS_EXIT_BITMAP 0x202c
 #define VMCS_TERTIARY_CONTROLS 0x2034
 #define VMCS_PID_POINTER_TABLE 0x2042
@@ -402,6 +404,13 @@ bool vmx_tertiary_allowed(uint64_t control);
 uint64_t vmx_capability(uint32_t msr);
 // Another VMCS for the vCPU, with the hypervisor's host state alone.
 void vmx_vmcs_create(struct vcpu *v, struct vmx_vmcs *vmcs);
+// A shadow VMCS (SDM 325462-093 Vol. 3C, 27.10), cleared: its address.
+uint64_t vmx_shadow_vmcs_create(void);
+// Accesses to a VMCS other than the vCPU's, which is current again after.
+void vmx_other_vmcs(struct vcpu *v, uint64_t pa);
+uint64_t vmx_other_read(uint32_t field);
+void vmx_other_write(uint32_t field, uint64_t value);
+void vmx_own_vmcs(struct vcpu *v);
 // Makes another VMCS the vCPU's current one, the current one going into it.
 void vmx_vmcs_swap(struct vcpu *v, struct vmx_vmcs *other);
 

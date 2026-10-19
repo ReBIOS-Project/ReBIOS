@@ -89,11 +89,16 @@
 #define FIELD_WIDTH(field) ((field) >> 13 & 3)
 #define FIELD_RESERVED 0xffff9000u
 #define FIELD_TYPE_EXIT_INFO 1
+#define FIELD_TYPE_GUEST 2
 #define FIELD_WIDTH_16 0
 #define FIELD_WIDTH_64 1
 #define FIELD_WIDTH_32 2
 
 #define VMCS_CR3_TARGET0 0x6008
+
+// The access-rights bits that are not reserved (SDM 325462-093 Vol. 3C, Table
+// 27-2).
+#define AR_WRITABLE 0x1f0ffull
 
 // The fields the guest's VMCSs have: the controls of what it is offered, and
 // all of the guest state, host state, and exit information.
@@ -158,6 +163,8 @@ struct nvmx {
     // Whether the guest's VMLAUNCH or VMRESUME waits for the entry into
     // VMCS02.
     bool run_pending;
+    // The shadow VMCS that serves the guest's VMREADs and VMWRITEs.
+    uint64_t shadow;
     // VMCS02's VM-exit MSR-store list: IA32_TSC, while the guest's own list has
     // it.
     uint64_t tsc_store[2] __attribute__((aligned(16)));
@@ -200,6 +207,10 @@ static uint64_t cap_ept_vpid;
 static unsigned cr3_targets;
 // The VMX-preemption timer counts TSC >> timer_rate.
 static unsigned timer_rate;
+// Whether VMCS shadowing serves the guest, and its bitmaps.
+static bool shadowing;
+static uint8_t *vmread_bitmap;
+static uint8_t *vmwrite_bitmap;
 // MAXPHYADDR (SDM 325462-093 Vol. 3C, 31.3.1).
 static unsigned phys_width;
 // The largest pages EPT02 maps: 2 MiB, or 1 GiB.
@@ -290,6 +301,12 @@ static unsigned ept02_budget;
 
 static int field_slot(uint32_t field);
 
+static void shadowing_init(uint64_t misc);
+static void shadow_load(struct vcpu *v, struct nvmx *n, bool all);
+static void shadow_store(struct vcpu *v, struct nvmx *n);
+static void shadow_unload(void);
+static void shadow_update(struct vcpu *v, struct nvmx *n, uint32_t field);
+
 // A capability MSR: allowed 0-settings low, allowed 1-settings high.
 static uint64_t capability(uint64_t hardware, uint32_t emulated, uint32_t required) {
     uint32_t allowed1 = (uint32_t)(hardware >> 32) & emulated;
@@ -353,6 +370,8 @@ void nvmx_init(void) {
     cap_cr4_fixed0 = vmx_capability(MSR_IA32_VMX_CR4_FIXED0);
     cap_cr4_fixed1 = vmx_capability(MSR_IA32_VMX_CR4_FIXED1);
 
+    shadowing_init(misc);
+
     uint32_t max_index = 0;
     for (unsigned i = 0; i < FIELD_COUNT; i++) {
         if (field_slot(fields[i]) >= 0 && FIELD_INDEX(fields[i]) > max_index) {
@@ -375,6 +394,11 @@ void nvmx_vcpu_init(struct vcpu *v) {
     struct nvmx *n = kmalloc(sizeof(*n));
     *n = (struct nvmx){.current = NO_VMCS};
     v->nvmx = n;
+    if (shadowing) {
+        n->shadow = vmx_shadow_vmcs_create();
+        vmx_write(VMCS_VMREAD_BITMAP, (uint64_t)(uintptr_t)vmread_bitmap);
+        vmx_write(VMCS_VMWRITE_BITMAP, (uint64_t)(uintptr_t)vmwrite_bitmap);
+    }
 }
 
 static void ept02_drop_all(struct nvmx *n);
@@ -560,10 +584,20 @@ static void vmxon(struct vcpu *v, struct nvmx *n, uint32_t info) {
     n->vmxon_ptr = addr;
     n->current = NO_VMCS;
     n->vmcs12 = NULL;
+    // Outside VMX operation, the guest's VMREAD and VMWRITE are to fault.
+    if (shadowing) {
+        vmx_write(VMCS_PROC_CONTROLS2, vmx_read(VMCS_PROC_CONTROLS2) | PROC2_VMCS_SHADOWING);
+    }
     succeed(v);
 }
 
 static void vmxoff(struct vcpu *v, struct nvmx *n) {
+    shadow_store(v, n);
+    shadow_unload();
+    if (shadowing) {
+        vmx_write(VMCS_PROC_CONTROLS2,
+                  vmx_read(VMCS_PROC_CONTROLS2) & ~(uint64_t)PROC2_VMCS_SHADOWING);
+    }
     n->vmxon = false;
     n->current = NO_VMCS;
     n->vmcs12 = NULL;
@@ -588,6 +622,8 @@ static void vmclear(struct vcpu *v, struct nvmx *n, uint32_t info) {
     }
     *(volatile uint32_t *)(region + VMCS12_LAUNCHED) = 0;
     if (addr == n->current) {
+        shadow_store(v, n);
+        shadow_unload();
         n->current = NO_VMCS;
         n->vmcs12 = NULL;
     }
@@ -612,8 +648,12 @@ static void vmptrld(struct vcpu *v, struct nvmx *n, uint32_t info) {
         fail(v, ERROR_VMPTRLD_REVISION);
         return;
     }
-    n->current = addr;
-    n->vmcs12 = region;
+    if (addr != n->current) {
+        shadow_store(v, n);
+        n->current = addr;
+        n->vmcs12 = region;
+        shadow_load(v, n, true);
+    }
     succeed(v);
 }
 
@@ -683,6 +723,12 @@ static void vmwrite(struct vcpu *v, struct nvmx *n, uint32_t info) {
         fail(v, ERROR_UNSUPPORTED_FIELD);
         return;
     }
+    // Some processors drop the access rights' reserved bits on VMWRITE, as
+    // Linux 7.3's KVM finds, which the shadow VMCS serving the guest's VMREADs
+    // of them then does: so do its other reads.
+    if (field >= VMCS_GUEST_ES_AR && field <= VMCS_GUEST_TR_AR) {
+        value &= AR_WRITABLE;
+    }
     uint64_t *at = field_at(n, slot);
     if (field & FIELD_HIGH) {
         *at = (*at & 0xffffffff) | value << 32;
@@ -702,6 +748,7 @@ static void vmwrite(struct vcpu *v, struct nvmx *n, uint32_t info) {
         }
         *at = value;
     }
+    shadow_update(v, n, field);
     succeed(v);
 }
 
@@ -749,6 +796,120 @@ static const uint16_t exit_fields[] = {
 };
 
 #define ARRAY_COUNT(a) (sizeof(a) / sizeof((a)[0]))
+
+// VMCS shadowing for the guest (SDM 325462-093 Vol. 3C, 27.10): where the
+// processor has it, the guest's VMREADs and VMWRITEs of the fields its
+// hypervisor uses most, as Linux 7.3's KVM chooses them, reach a shadow VMCS
+// holding VMCS12's values instead of exiting. Writes of the access rights still
+// exit, and the exit information is read there only where the processor's
+// VMWRITE can load it (IA32_VMX_MISC bit 29).
+static const uint16_t shadow_read_write[] = {
+    VMCS_HOST_FS_SEL, VMCS_HOST_GS_SEL, VMCS_PIN_CONTROLS, VMCS_PROC_CONTROLS,
+    VMCS_EXCEPTION_BITMAP, VMCS_ENTRY_INTR_INFO, VMCS_ENTRY_EXCEPTION_ERROR, VMCS_ENTRY_INSTR_LEN,
+    VMCS_GUEST_INTERRUPTIBILITY, VMCS_PREEMPTION_TIMER, VMCS_GUEST_RIP, VMCS_GUEST_RSP,
+    VMCS_GUEST_RFLAGS, VMCS_GUEST_CR0, VMCS_GUEST_CR3, VMCS_GUEST_CR4, VMCS_CR0_MASK,
+    VMCS_CR0_SHADOW, VMCS_CR4_SHADOW, VMCS_HOST_FS_BASE, VMCS_HOST_GS_BASE,
+};
+static const uint16_t shadow_read_only[] = {VMCS_GUEST_CS_AR, VMCS_GUEST_SS_AR};
+static const uint16_t shadow_exit_information[] = {
+    VMCS_EXIT_REASON, VMCS_EXIT_QUALIFICATION, VMCS_EXIT_INTR_INFO, VMCS_EXIT_INTR_ERROR,
+    VMCS_IDT_VECTORING_INFO, VMCS_IDT_VECTORING_ERROR, VMCS_EXIT_INSTR_LEN,
+    VMCS_GUEST_LINEAR_ADDR, VMCS_GUEST_PHYS_ADDR,
+};
+
+// What the shadow VMCS holds, and of it what the guest writes there.
+static uint16_t shadow_loaded[48];
+static unsigned shadow_loaded_count;
+static uint16_t shadow_stored[48];
+static unsigned shadow_stored_count;
+
+static void shadow_field(uint16_t field, bool written) {
+    if (field_slot(field) < 0) {
+        return;
+    }
+    vmread_bitmap[field >> 3] &= (uint8_t)~(1u << (field & 7));
+    shadow_loaded[shadow_loaded_count++] = field;
+    if (FIELD_WIDTH(field) == FIELD_WIDTH_64) {
+        vmread_bitmap[(field | FIELD_HIGH) >> 3] &= (uint8_t)~(1u << ((field | FIELD_HIGH) & 7));
+    }
+    if (written) {
+        vmwrite_bitmap[field >> 3] &= (uint8_t)~(1u << (field & 7));
+        shadow_stored[shadow_stored_count++] = field;
+    }
+}
+
+static void shadowing_init(uint64_t misc) {
+    shadowing = vmx_secondary_allowed(PROC2_VMCS_SHADOWING);
+    if (!shadowing) {
+        return;
+    }
+    vmread_bitmap = page_alloc(1);
+    vmwrite_bitmap = page_alloc(1);
+    memset(vmread_bitmap, 0xff, PAGE_SIZE);
+    memset(vmwrite_bitmap, 0xff, PAGE_SIZE);
+    for (unsigned i = 0; i < ARRAY_COUNT(shadow_read_write); i++) {
+        shadow_field(shadow_read_write[i], true);
+    }
+    for (unsigned i = 0; i < ARRAY_COUNT(shadow_read_only); i++) {
+        shadow_field(shadow_read_only[i], false);
+    }
+    for (unsigned i = 0; (misc & MISC_VMWRITE_ANY) && i < ARRAY_COUNT(shadow_exit_information);
+         i++) {
+        shadow_field(shadow_exit_information[i], false);
+    }
+}
+
+static bool field_shadowed(uint32_t field) {
+    return shadowing && !(vmread_bitmap[(field & 0x7fff) >> 3] & (1u << (field & 7)));
+}
+
+// The guest's current VMCS for VMCS shadowing: its fields in the shadow VMCS,
+// which the link pointer then names. After an exit, only those exits change:
+// the rest change by the guest's own VMWRITEs, which go there.
+static void shadow_load(struct vcpu *v, struct nvmx *n, bool all) {
+    if (!shadowing) {
+        return;
+    }
+    vmx_other_vmcs(v, n->shadow);
+    for (unsigned i = 0; i < shadow_loaded_count; i++) {
+        uint16_t field = shadow_loaded[i];
+        if (all || FIELD_TYPE(field) == FIELD_TYPE_EXIT_INFO
+            || FIELD_TYPE(field) == FIELD_TYPE_GUEST || field == VMCS_ENTRY_INTR_INFO) {
+            vmx_other_write(field, get12(n, field));
+        }
+    }
+    vmx_own_vmcs(v);
+    vmx_write(VMCS_LINK_POINTER, n->shadow);
+}
+
+// What the guest wrote through VMCS shadowing, into VMCS12.
+static void shadow_store(struct vcpu *v, struct nvmx *n) {
+    if (!shadowing || n->vmcs12 == NULL) {
+        return;
+    }
+    vmx_other_vmcs(v, n->shadow);
+    for (unsigned i = 0; i < shadow_stored_count; i++) {
+        set12(n, shadow_stored[i], vmx_other_read(shadow_stored[i]));
+    }
+    vmx_own_vmcs(v);
+}
+
+// No current VMCS: VMCS shadowing then fails VMREAD and VMWRITE as they
+// should (SDM 325462-093 Vol. 3C, 33.3).
+static void shadow_unload(void) {
+    if (shadowing) {
+        vmx_write(VMCS_LINK_POINTER, ~0ull);
+    }
+}
+
+static void shadow_update(struct vcpu *v, struct nvmx *n, uint32_t field) {
+    field &= ~FIELD_HIGH;
+    if (field_shadowed(field)) {
+        vmx_other_vmcs(v, n->shadow);
+        vmx_other_write(field, get12(n, field));
+        vmx_own_vmcs(v);
+    }
+}
 
 static bool allowed(uint64_t value, uint64_t cap) {
     uint32_t required = (uint32_t)cap;
@@ -1710,6 +1871,7 @@ static void exit_to_l1(struct vcpu *v, struct nvmx *n, uint32_t reason, uint64_t
         printf("The guest's VM-exit MSR-load list failed\n");
     }
     vmx_load_gpt_root(v);
+    shadow_load(v, n, false);
 }
 
 // An entry failing on the guest state, as the guest sees it: an exit with
@@ -1726,6 +1888,7 @@ static void vmlaunch(struct vcpu *v, struct nvmx *n, bool resume) {
         fail_invalid(v);
         return;
     }
+    shadow_store(v, n);
     if (vmx_read(VMCS_GUEST_INTERRUPTIBILITY) & INTERRUPTIBILITY_MOV_SS) {
         fail(v, ERROR_ENTRY_MOV_SS);
         return;
