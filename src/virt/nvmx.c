@@ -43,6 +43,7 @@
 // ReBIOS's own: the launch state, and the fields in the order of the table
 // below. Software is not to read or write them otherwise.
 #define VMCS12_REVISION 0x52424e56u
+#define VMCS12_SHADOW (1u << 31)
 #define VMCS12_LAUNCHED 8
 #define VMCS12_FIELDS 16
 
@@ -113,7 +114,7 @@ static const uint16_t fields[] = {
     0x0c00, 0x0c02, 0x0c04, 0x0c06, 0x0c08, 0x0c0a, 0x0c0c,
     0x2000, 0x2002, 0x2004, 0x2006, 0x2008, 0x200a, 0x200e, 0x2010, 0x2012, 0x2014, 0x2016,
     0x2018, 0x201a, 0x202c, 0x2032,
-    0x201c, 0x201e, 0x2020, 0x2022, 0x2024,
+    0x201c, 0x201e, 0x2020, 0x2022, 0x2024, 0x2026, 0x2028,
     0x2400,
     0x2800, 0x2802, 0x2804, 0x2806, 0x280a, 0x280c, 0x280e, 0x2810,
     0x2c00, 0x2c02,
@@ -159,6 +160,8 @@ struct nvmx {
     uint64_t vmxon_ptr;
     uint64_t current;
     uint8_t *vmcs12;
+    // Whether the current VMCS is a shadow VMCS, which no entry takes.
+    bool current_shadow;
     // VMCS02, which runs the guest's guest, while VMCS01 is the vCPU's, and
     // VMCS01 while VMCS02 is.
     struct vmx_vmcs other;
@@ -266,8 +269,9 @@ static unsigned ept02_budget;
     (PROC2_VIRT_APIC_ACCESSES | PROC2_EPT | PROC2_DESC_TABLE_EXITING | PROC2_RDTSCP             \
      | PROC2_VIRT_X2APIC | PROC2_VPID | PROC2_WBINVD_EXITING | PROC2_UNRESTRICTED_GUEST         \
      | PROC2_APIC_REG_VIRT | PROC2_VIRT_INTR_DELIVERY | PROC2_PAUSE_LOOP_EXITING               \
-     | PROC2_RDRAND_EXITING | PROC2_INVPCID | PROC2_VMFUNC | PROC2_RDSEED_EXITING | PROC2_PML   \
-     | PROC2_XSAVES | PROC2_MBEC | PROC2_TSC_SCALING | PROC2_USER_WAIT_PAUSE)
+     | PROC2_RDRAND_EXITING | PROC2_INVPCID | PROC2_VMFUNC | PROC2_VMCS_SHADOWING              \
+     | PROC2_RDSEED_EXITING | PROC2_PML | PROC2_XSAVES | PROC2_MBEC | PROC2_TSC_SCALING          \
+     | PROC2_USER_WAIT_PAUSE)
 #define EXIT_EMULATED                                                                        \
     (EXIT_SAVE_DEBUG_CONTROLS | EXIT_HOST_ADDR_SPACE_SIZE | EXIT_ACK_INTR_ON_EXIT | EXIT_SAVE_PAT \
      | EXIT_LOAD_PAT | EXIT_SAVE_EFER | EXIT_LOAD_EFER | EXIT_SAVE_PREEMPTION_TIMER \
@@ -476,6 +480,10 @@ static bool field_offered(uint32_t field) {
         case VMCS_VMFUNC_CONTROLS: {
             return (proc2 & PROC2_VMFUNC) != 0;
         }
+        case VMCS_VMREAD_BITMAP:
+        case VMCS_VMWRITE_BITMAP: {
+            return (proc2 & PROC2_VMCS_SHADOWING) != 0;
+        }
         case VMCS_EPTP_LIST: {
             return (proc2 & PROC2_VMFUNC) && (cap_vmfunc & VMFUNC_EPTP_SWITCHING);
         }
@@ -519,8 +527,12 @@ static int field_slot(uint32_t field) {
     return field_slots[FIELD_WIDTH(field)][FIELD_TYPE(field)][FIELD_INDEX(field)] - 1;
 }
 
+static uint64_t *field_in(uint8_t *vmcs, int slot) {
+    return (uint64_t *)(vmcs + VMCS12_FIELDS + (size_t)slot * 8);
+}
+
 static uint64_t *field_at(const struct nvmx *n, int slot) {
-    return (uint64_t *)(n->vmcs12 + VMCS12_FIELDS + (size_t)slot * 8);
+    return field_in(n->vmcs12, slot);
 }
 
 // The guest's RAM at a guest-physical page, for the regions VMX instructions
@@ -740,7 +752,11 @@ static void vmptrld(struct vcpu *v, struct nvmx *n, uint32_t info) {
         fail(v, ERROR_VMPTRLD_VMXON);
         return;
     }
-    if (*(volatile uint32_t *)region != VMCS12_REVISION) {
+    // Shadow VMCSs need VMCS shadowing (SDM 325462-093 Vol. 3C, 27.2).
+    uint32_t revision = *(volatile uint32_t *)region;
+    bool shadow = (revision & VMCS12_SHADOW) != 0;
+    if ((revision & ~VMCS12_SHADOW) != VMCS12_REVISION
+        || (shadow && !(cap_proc2 >> 32 & PROC2_VMCS_SHADOWING))) {
         fail(v, ERROR_VMPTRLD_REVISION);
         return;
     }
@@ -750,6 +766,7 @@ static void vmptrld(struct vcpu *v, struct nvmx *n, uint32_t info) {
         n->vmcs12 = region;
         shadow_load(v, n, true);
     }
+    n->current_shadow = shadow;
     succeed(v);
 }
 
@@ -762,12 +779,9 @@ static void vmptrst(struct vcpu *v, struct nvmx *n, uint32_t info) {
 }
 
 // Outside 64-bit mode, VMREAD and VMWRITE take 32-bit operands (SDM
-// 325462-093 Vol. 3C, 33.3).
-static void vmread(struct vcpu *v, struct nvmx *n, uint32_t info) {
-    if (n->vmcs12 == NULL) {
-        fail_invalid(v);
-        return;
-    }
+// 325462-093 Vol. 3C, 33.3). They access a VMCS region given, while their
+// failures go to the current VMCS.
+static void vmread_in(struct vcpu *v, uint8_t *vmcs, uint32_t info) {
     bool wide = long_mode_64(v);
     uint32_t field = (uint32_t)guest_reg(v, INFO_REG2(info));
     int slot = wide && (guest_reg(v, INFO_REG2(info)) >> 32) ? -1 : field_slot(field);
@@ -775,7 +789,7 @@ static void vmread(struct vcpu *v, struct nvmx *n, uint32_t info) {
         fail(v, ERROR_UNSUPPORTED_FIELD);
         return;
     }
-    uint64_t value = *field_at(n, slot);
+    uint64_t value = *field_in(vmcs, slot);
     if (field & FIELD_HIGH) {
         value >>= 32;
     }
@@ -794,11 +808,8 @@ static void vmread(struct vcpu *v, struct nvmx *n, uint32_t info) {
     succeed(v);
 }
 
-static void vmwrite(struct vcpu *v, struct nvmx *n, uint32_t info) {
-    if (n->vmcs12 == NULL) {
-        fail_invalid(v);
-        return;
-    }
+// Returns whether it wrote the field, then in *written.
+static bool vmwrite_in(struct vcpu *v, uint8_t *vmcs, uint32_t info, uint32_t *written) {
     bool wide = long_mode_64(v);
     uint64_t value = 0;
     if (info & INFO_REGISTER) {
@@ -807,7 +818,7 @@ static void vmwrite(struct vcpu *v, struct nvmx *n, uint32_t info) {
         uint64_t linear;
         unsigned size = wide ? 8 : 4;
         if (!operand_address(v, info, size, &linear) || !mmio_read_linear(v, linear, &value, size)) {
-            return;
+            return false;
         }
     }
     if (!wide) {
@@ -817,7 +828,7 @@ static void vmwrite(struct vcpu *v, struct nvmx *n, uint32_t info) {
     int slot = wide && (guest_reg(v, INFO_REG2(info)) >> 32) ? -1 : field_slot(field);
     if (slot < 0) {
         fail(v, ERROR_UNSUPPORTED_FIELD);
-        return;
+        return false;
     }
     // Some processors drop the access rights' reserved bits on VMWRITE, as
     // Linux 7.3's KVM finds, which the shadow VMCS serving the guest's VMREADs
@@ -825,7 +836,7 @@ static void vmwrite(struct vcpu *v, struct nvmx *n, uint32_t info) {
     if (field >= VMCS_GUEST_ES_AR && field <= VMCS_GUEST_TR_AR) {
         value &= AR_WRITABLE;
     }
-    uint64_t *at = field_at(n, slot);
+    uint64_t *at = field_in(vmcs, slot);
     if (field & FIELD_HIGH) {
         *at = (*at & 0xffffffff) | value << 32;
     } else {
@@ -844,8 +855,28 @@ static void vmwrite(struct vcpu *v, struct nvmx *n, uint32_t info) {
         }
         *at = value;
     }
-    shadow_update(v, n, field);
+    *written = field;
     succeed(v);
+    return true;
+}
+
+static void vmread(struct vcpu *v, struct nvmx *n, uint32_t info) {
+    if (n->vmcs12 == NULL) {
+        fail_invalid(v);
+        return;
+    }
+    vmread_in(v, n->vmcs12, info);
+}
+
+static void vmwrite(struct vcpu *v, struct nvmx *n, uint32_t info) {
+    if (n->vmcs12 == NULL) {
+        fail_invalid(v);
+        return;
+    }
+    uint32_t field;
+    if (vmwrite_in(v, n->vmcs12, info, &field)) {
+        shadow_update(v, n, field);
+    }
 }
 
 static uint64_t get12(const struct nvmx *n, uint32_t field) {
@@ -1523,6 +1554,11 @@ static bool controls_valid(const struct nvmx *n) {
     if ((proc2 & PROC2_PML) && !valid_address(get12(n, VMCS_PML_ADDRESS))) {
         return false;
     }
+    if ((proc2 & PROC2_VMCS_SHADOWING)
+        && (!valid_address(get12(n, VMCS_VMREAD_BITMAP))
+            || !valid_address(get12(n, VMCS_VMWRITE_BITMAP)))) {
+        return false;
+    }
     if (proc2 & PROC2_VMFUNC) {
         uint64_t functions = get12(n, VMCS_VMFUNC_CONTROLS);
         if ((functions & ~cap_vmfunc)
@@ -1887,8 +1923,9 @@ static void write_vmcs02(struct vcpu *v, struct nvmx *n, const struct l1_values 
         .pin = pin | PIN_EXT_INTR_EXITING | PIN_NMI_EXITING | PIN_VIRTUAL_NMIS,
         .proc = (proc & ~(uint64_t)PROC_IO_BITMAPS) | PROC_UNCOND_IO_EXITING | PROC_MSR_BITMAPS
                 | PROC_SECONDARY_CONTROLS,
-        // EPT02's dirty flags are not the guest's: its walks log for it.
-        .proc2 = (proc2 & ~(uint64_t)PROC2_PML) | PROC2_EPT,
+        // EPT02's dirty flags are not the guest's: its walks log for it. The
+        // guest's shadow VMCS is in its own format, which the hypervisor reads.
+        .proc2 = (proc2 & ~(uint64_t)(PROC2_PML | PROC2_VMCS_SHADOWING)) | PROC2_EPT,
     };
     apic_virtualization(n, &c);
     vmx_write(VMCS_PIN_CONTROLS, c.pin);
@@ -2213,6 +2250,21 @@ static void entry_failure(struct vcpu *v, struct nvmx *n, uint32_t reason, uint6
     exit_to_l1(v, n, EXIT_REASON_ENTRY_FAILURE | reason, qual, 0, 0, false);
 }
 
+// SDM 325462-093 Vol. 3C, 29.3.1.5: a VMCS other than the current one, a
+// shadow VMCS exactly where VMCS shadowing is on.
+static bool link_pointer_valid(const struct nvmx *n) {
+    uint64_t link = get12(n, VMCS_LINK_POINTER);
+    if (link == NO_VMCS) {
+        return true;
+    }
+    const uint8_t *region = valid_address(link) ? guest_page(link) : NULL;
+    if (region == NULL || link == n->current) {
+        return false;
+    }
+    uint32_t shadow = (proc2_12(n) & PROC2_VMCS_SHADOWING) ? VMCS12_SHADOW : 0;
+    return *(const volatile uint32_t *)region == (VMCS12_REVISION | shadow);
+}
+
 // The checks of SDM 325462-093 Vol. 3C, 29.3.1.5 on the activity states VMCS02
 // does not enter, and so the processor's do not make: the guest's guest waits
 // in them here, as they would block the hypervisor's interrupts too (SDM
@@ -2234,7 +2286,8 @@ static bool inactive_valid(const struct nvmx *n, uint64_t activity) {
 }
 
 static void vmlaunch(struct vcpu *v, struct nvmx *n, bool resume) {
-    if (n->vmcs12 == NULL) {
+    // Nor with a shadow VMCS (SDM 325462-093 Vol. 3C, 29.1).
+    if (n->vmcs12 == NULL || n->current_shadow) {
         fail_invalid(v);
         return;
     }
@@ -2289,8 +2342,8 @@ static void vmlaunch(struct vcpu *v, struct nvmx *n, bool resume) {
     n->run_pending = true;
 
     // The processor checks VMCS02's guest state, but for the link pointer and
-    // the activity states the guest is not offered.
-    if (get12(n, VMCS_LINK_POINTER) != ~0ull) {
+    // the activity states it does not enter VMCS02 in.
+    if (!link_pointer_valid(n)) {
         entry_failure(v, n, EXIT_REASON_INVALID_GUEST_STATE, QUAL_LINK_POINTER);
         return;
     }
@@ -2682,6 +2735,40 @@ static bool eptp_switch(struct vcpu *v, struct nvmx *n) {
     return true;
 }
 
+// The guest's guest's VMREAD or VMWRITE, which reaches the VMCS the link
+// pointer names where the guest's VMCS shadowing and bitmaps let it (SDM
+// 325462-093 Vol. 3C, 33.3), else exits.
+static bool shadow_access(struct vcpu *v, struct nvmx *n, uint32_t reason) {
+    if (!(proc2_12(n) & PROC2_VMCS_SHADOWING)) {
+        return false;
+    }
+    uint32_t info = (uint32_t)vmx_read(VMCS_EXIT_INSTR_INFO);
+    uint64_t field = operand_register(v, info);
+    uint64_t bitmap = get12(n, reason == EXIT_REASON_VMREAD ? VMCS_VMREAD_BITMAP
+                                                           : VMCS_VMWRITE_BITMAP);
+    const uint8_t *page = guest_page(bitmap);
+    if ((field >> 15) != 0 || page == NULL || (page[field >> 3] >> (field & 7) & 1)) {
+        return false;
+    }
+    if (guest_cpl(v) > 0) {
+        vcpu_inject_exception(v, 13, true, 0);
+        return true;
+    }
+    uint64_t link = get12(n, VMCS_LINK_POINTER);
+    uint8_t *shadow = link == NO_VMCS ? NULL : guest_page(link);
+    if (shadow == NULL) {
+        fail_invalid(v);
+        return true;
+    }
+    uint32_t written;
+    if (reason == EXIT_REASON_VMREAD) {
+        vmread_in(v, shadow, info);
+    } else {
+        vmwrite_in(v, shadow, info, &written);
+    }
+    return true;
+}
+
 bool nvmx_l2_exit(struct vcpu *v, uint32_t reason, uint64_t qual) {
     struct nvmx *n = v->nvmx;
     if (n == NULL || !n->in_l2) {
@@ -2702,6 +2789,10 @@ bool nvmx_l2_exit(struct vcpu *v, uint32_t reason, uint64_t qual) {
               (unsigned long long)vmx_read(VMCS_GUEST_PHYS_ADDR));
     }
     if ((reason & 0xffff) == EXIT_REASON_VMFUNC && eptp_switch(v, n)) {
+        return true;
+    }
+    if (((reason & 0xffff) == EXIT_REASON_VMREAD || (reason & 0xffff) == EXIT_REASON_VMWRITE)
+        && shadow_access(v, n, reason & 0xffff)) {
         return true;
     }
     if (!l1_wants(v, n, reason & 0xffff, qual)) {
