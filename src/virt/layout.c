@@ -185,40 +185,11 @@ static bool type_is_free(uint32_t type) {
     }
 }
 
-// What the guest must find where the host has it: what the firmware keeps for
-// itself or for devices. The runtime services, with the I/O they map, and the
-// firmware's ACPI are the hypervisor's alone.
-static bool type_is_identity(uint32_t type) {
-    switch (type) {
-        case EfiRuntimeServicesCode:
-        case EfiRuntimeServicesData:
-        case EfiMemoryMappedIO:
-        case EfiMemoryMappedIOPortSpace:
-        case EfiUnusableMemory:
-        case EfiACPIReclaimMemory:
-        case EfiACPIMemoryNVS:
-        case EfiUnacceptedMemoryType: {
-            return false;
-        }
-        default: {
-            return !type_is_free(type);
-        }
-    }
-}
-
 static uint8_t identity_memtype(const struct identity_range *r) {
-    switch (r->efi_type) {
-        case EfiMemoryMappedIO:
-        case EfiMemoryMappedIOPortSpace: {
-            return MT_UC;
-        }
-        case EfiPersistentMemory: {
-            return MT_WB;
-        }
-        default: {
-            return (r->attribute & EFI_MEMORY_WB) ? MT_WB : MT_UC;
-        }
+    if (r->efi_type == EfiMemoryMappedIO) {
+        return MT_UC;
     }
+    return (r->attribute & EFI_MEMORY_WB) ? MT_WB : MT_UC;
 }
 
 static const EFI_MEMORY_DESCRIPTOR *efi_desc(uint32_t index) {
@@ -398,9 +369,6 @@ void layout_init(void) {
         uint64_t end = base + d->NumberOfPages * PAGE_SIZE;
         if (type_is_free(d->Type)) {
             list_add(&free_ram, base, end);
-        }
-        if (type_is_identity(d->Type)) {
-            identity_add(base, end, d->Type, d->Attribute);
         }
     }
 
