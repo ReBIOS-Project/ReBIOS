@@ -2721,11 +2721,11 @@ static void ept_violation(struct vcpu *v, struct nvmx *n, uint64_t qual) {
         panic("Event delivery of the guest's guest reached emulated memory at %#llx\n",
               (unsigned long long)w.gpa);
     }
-    if (!(qual & EPT_QUAL_FETCH) && mmio_fault(v, w.gpa)) {
-        return;
+    if (qual & EPT_QUAL_FETCH) {
+        mmio_fetch(v, w.gpa);
+    } else {
+        mmio_fault(v, w.gpa);
     }
-    panic("EPT violation of the guest's guest at %#llx (the guest's %#llx), qualification "
-          "%#llx\n", (unsigned long long)gpa, (unsigned long long)w.gpa, (unsigned long long)qual);
 }
 
 // The guest's guest's VMFUNC, which exits for every function: EPTP switching

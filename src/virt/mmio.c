@@ -291,13 +291,14 @@ static struct step_page *step_map(struct vcpu *v, uint64_t gpa, unsigned len) {
     }
     memcpy(p->before, p->scratch, PAGE_SIZE);
     p->mapped = gpt_translate(page, &p->hpa, &p->prot, &p->memtype);
-    gpt_map(page, (uint64_t)(uintptr_t)p->scratch, PAGE_SIZE, GPT_R | GPT_W, MT_WB);
+    gpt_map(page, (uint64_t)(uintptr_t)p->scratch, PAGE_SIZE, GPT_RWX, MT_WB);
     gpt_flush();
     return p;
 }
 
 // The guest runs the instruction itself, with every other vCPU out of the
-// guest, as the pages are theirs too.
+// guest, as the pages are theirs too; one the decoder does not know, insn
+// NULL, against the whole page.
 static void step_begin(struct vcpu *v, uint64_t gpa, const struct insn *insn) {
     if (v->step == NULL) {
         v->step = kmalloc(sizeof(*v->step));
@@ -306,7 +307,7 @@ static void step_begin(struct vcpu *v, uint64_t gpa, const struct insn *insn) {
     struct mmio_step *s = v->step;
     s->count = 0;
     s->second = false;
-    s->known = insn_mem_operand(v, insn, &s->mem) && s->mem.size <= PAGE_SIZE
+    s->known = insn != NULL && insn_mem_operand(v, insn, &s->mem) && s->mem.size <= PAGE_SIZE
                && (!(s->mem.access & INSN_MEM_MASKED) || s->mem.size <= MAX_MASKED);
     if (s->known && s->mem.size == 0) {
         // It only takes the operand's address, as CLFLUSH: nothing for the
@@ -317,7 +318,11 @@ static void step_begin(struct vcpu *v, uint64_t gpa, const struct insn *insn) {
     if (!vcpu_can_single_step()) {
         printf("The instruction at %#llx that reached emulated memory at %#llx cannot be "
                "emulated, skipped\n", (unsigned long long)vcpu_rip(v), (unsigned long long)gpa);
-        vcpu_advance(v, insn->length);
+        if (insn != NULL) {
+            vcpu_advance(v, insn->length);
+        } else {
+            vcpu_inject_exception(v, 6, false, 0);
+        }
         return;
     }
     uint64_t gpas[2];
@@ -347,7 +352,8 @@ static void step_begin(struct vcpu *v, uint64_t gpa, const struct insn *insn) {
         step_map(v, gpa, 0);
     }
     s->rip = vcpu_rip(v);
-    s->next_rip = s->rip + insn->length;
+    // Where its length is not known, whether it completed is not either.
+    s->next_rip = insn != NULL ? s->rip + insn->length : UINT64_MAX;
     v->stepping = true;
     vcpu_single_step(v, true);
 }
@@ -425,7 +431,32 @@ void mmio_step_done(struct vcpu *v) {
     }
 }
 
-bool mmio_fault(struct vcpu *v, uint64_t gpa) {
+// Ends a step that cannot go on, its writes dropped: past its instruction where
+// that is known, else with #UD.
+static void step_abort(struct vcpu *v) {
+    struct mmio_step *s = v->step;
+    for (unsigned i = 0; i < s->count; i++) {
+        struct step_page *p = &s->pages[i];
+        if (p->mapped) {
+            gpt_map(p->gpa, p->hpa, PAGE_SIZE, p->prot, p->memtype);
+        } else {
+            gpt_map(p->gpa, 0, PAGE_SIZE, 0, 0);
+        }
+    }
+    gpt_flush();
+    s->count = 0;
+    v->stepping = false;
+    vcpu_single_step(v, false);
+    vcpu_resume_others();
+    if (s->next_rip != UINT64_MAX) {
+        vcpu_set_rip(v, s->next_rip);
+    } else {
+        vcpu_inject_exception(v, 6, false, 0);
+    }
+}
+
+// A data access, or a fetch, to emulated memory.
+static bool fault(struct vcpu *v, uint64_t gpa, bool fetch) {
     gpa = gpt_cpu_gpa(gpa);
     const struct region *r = find(gpa);
     if (r == NULL) {
@@ -440,24 +471,38 @@ bool mmio_fault(struct vcpu *v, uint64_t gpa) {
         }
     }
     if (v->stepping) {
-        // The stepped instruction reaches another page, and runs again.
-        if (step_map(v, gpa, 0) == NULL) {
-            panic("The instruction at %#llx reached emulated memory at %#llx while stepped\n",
-                  (unsigned long long)vcpu_rip(v), (unsigned long long)gpa);
+        // The stepped instruction reaches another page, and runs again; one
+        // that reaches more than a step can map is left out.
+        if (step_map(v, gpa, 0) == NULL && find(gpa) != NULL) {
+            printf("The instruction at %#llx reaches more emulated memory than can be stepped, "
+                   "skipped\n", (unsigned long long)vcpu_rip(v));
+            step_abort(v);
         }
+        return true;
+    }
+    // Code there runs against the page, a step at a time.
+    if (fetch) {
+        step_begin(v, gpa, NULL);
         return true;
     }
     struct insn insn;
     if (!insn_decode(v, &insn)) {
         // The guest's EPT may not let it fetch the instruction.
-        if (nvmx_exit_pending(v)) {
-            return true;
+        if (!nvmx_exit_pending(v)) {
+            step_begin(v, gpa, NULL);
         }
-        panic("Cannot decode the instruction at %#llx that reached emulated memory at %#llx\n",
-              (unsigned long long)vcpu_rip(v), (unsigned long long)gpa);
+        return true;
     }
     if (emulate(v, &insn, &guest_mem) == EMULATE_UNSUPPORTED) {
         step_begin(v, gpa, &insn);
     }
     return true;
+}
+
+bool mmio_fault(struct vcpu *v, uint64_t gpa) {
+    return fault(v, gpa, false);
+}
+
+bool mmio_fetch(struct vcpu *v, uint64_t gpa) {
+    return fault(v, gpa, true);
 }

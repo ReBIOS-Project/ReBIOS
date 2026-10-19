@@ -972,13 +972,14 @@ static void vmx_handle_exit(struct vcpu *v) {
                 vmx_async_access(vlapic_page(v));
                 break;
             }
-            if ((type == APIC_ACCESS_DATA_READ || type == APIC_ACCESS_DATA_WRITE)
-                && mmio_fault(v, vlapic_page(v) + (qual & APIC_ACCESS_OFFSET_MASK))) {
-                break;
+            if (type == APIC_ACCESS_DATA_READ || type == APIC_ACCESS_DATA_WRITE) {
+                mmio_fault(v, vlapic_page(v) + (qual & APIC_ACCESS_OFFSET_MASK));
+            } else if (event_cut_short(v)) {
+                panic("Event delivery reached the local APIC's page\n");
+            } else {
+                mmio_fetch(v, vlapic_page(v));
             }
-            printf("Local APIC access, qualification %#llx\n", (unsigned long long)qual);
-            vmx_dump_guest();
-            panic("Unhandled local APIC access\n");
+            break;
         }
         case EXIT_REASON_VIRTUALIZED_EOI: {
             vlapic_eoi_exit(v, (uint8_t)qual);
@@ -1004,13 +1005,12 @@ static void vmx_handle_exit(struct vcpu *v) {
                 vmx_write(VMCS_GUEST_INTERRUPTIBILITY,
                           vmx_read(VMCS_GUEST_INTERRUPTIBILITY) | INTERRUPTIBILITY_NMI);
             }
-            if (!(qual & EPT_QUAL_FETCH) && mmio_fault(v, gpa)) {
-                break;
+            if (qual & EPT_QUAL_FETCH) {
+                mmio_fetch(v, gpa);
+            } else {
+                mmio_fault(v, gpa);
             }
-            printf("EPT violation at GPA %#llx, qualification %#llx\n", (unsigned long long)gpa,
-                   (unsigned long long)qual);
-            vmx_dump_guest();
-            panic("Unhandled guest-physical access\n");
+            break;
         }
         default: {
             printf("Unhandled VM exit, reason %u, qualification %#llx\n", reason,

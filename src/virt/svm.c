@@ -411,13 +411,12 @@ static void svm_handle_exit(struct vcpu *v) {
                 v->fetched_count = sizeof(v->fetched);
                 v->fetched_rip = v->vmcb->save.rip;
             }
-            if (!(c->exitinfo1 & NPF_FETCH) && mmio_fault(v, c->exitinfo2)) {
-                break;
+            if (c->exitinfo1 & NPF_FETCH) {
+                mmio_fetch(v, c->exitinfo2);
+            } else {
+                mmio_fault(v, c->exitinfo2);
             }
-            printf("Nested page fault at GPA %#llx, error code %#llx\n",
-                   (unsigned long long)c->exitinfo2, (unsigned long long)c->exitinfo1);
-            svm_dump_guest(v);
-            panic("Unhandled guest-physical access\n");
+            break;
         }
         case SVM_EXIT_AVIC_INCOMPLETE_IPI: {
             vlapic_avic_ipi_exit(v, c->exitinfo1, c->exitinfo2);

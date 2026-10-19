@@ -1484,9 +1484,7 @@ void vlapic_avic_access_exit(struct vcpu *v, uint64_t info1) {
         }
         return;
     }
-    if (!mmio_fault(v, vlapic_page(v) + offset)) {
-        panic("Unhandled local APIC access at offset %#x\n", offset);
-    }
+    mmio_fault(v, vlapic_page(v) + offset);
 }
 
 void vlapic_apic_write(struct vcpu *v, uint32_t offset) {

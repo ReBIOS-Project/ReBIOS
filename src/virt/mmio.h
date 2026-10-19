@@ -44,9 +44,12 @@ bool mmio_read_linear(struct vcpu *v, uint64_t linear, void *buf, unsigned size)
 bool mmio_write_linear(struct vcpu *v, uint64_t linear, const void *buf, unsigned size);
 
 // An EPT violation or a nested page fault at gpa, for an access other than a
-// fetch: emulates the instruction that made it. Returns false if gpa is not in
-// a region.
+// fetch: emulates the instruction that made it, where nothing decodes as
+// memory that is not there. Returns false where gpa is mapped after all, as
+// another vCPU may just have mapped it: the guest then runs the access again.
 bool mmio_fault(struct vcpu *v, uint64_t gpa);
+// One for a fetch, of code there: runs it a step at a time.
+bool mmio_fetch(struct vcpu *v, uint64_t gpa);
 
 // The end of a single-step mmio_fault() set up for an instruction it does not
 // emulate itself: the step's monitor trap, single-step trap, or fault.
