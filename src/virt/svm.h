@@ -216,6 +216,9 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 #define SVM_VINTR_X2AVIC (1ull << 30)
 #define SVM_VINTR_AVIC (1ull << 31)
 
+// Virtualisation extensions, at offset 0B8h.
+#define SVM_VIRT_EXT_LBR (1ull << 0)
+
 // Event injection.
 #define SVM_EVENT_VALID (1ull << 31)
 #define SVM_EVENT_ERROR_VALID (1ull << 11)
@@ -237,6 +240,8 @@ struct vcpu;
 // Whether the hypervisor works around AMD's erratum 383 (41322 rev. 3.92) with
 // DC_CFG.
 extern bool svm_erratum_383;
+// Whether VMRUN and #VMEXIT switch DebugCtl and the last branch records.
+extern bool svm_lbr_virtualisation;
 extern bool svm_nrips;
 // The processor keeps the guest's NMI blocking and takes a virtual NMI when the
 // guest can (APM 24593 rev. 3.45, 15.21.10), with GIF virtualised, as Linux

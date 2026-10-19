@@ -123,6 +123,15 @@
 #define MSR_AMD_CPUID_7_FEATURES 0xc0011002
 #define MSR_AMD_CPUID_EXT_FEATURES 0xc0011005
 
+// The last branch records, which only LBR virtualisation keeps the guest's
+// (APM 24593 rev. 3.45, 13.1.1.6, 13.1.1.7, and 15.23): hidden where SVM lacks
+// it, as they would record the hypervisor's branches. DebugCtl's other bits,
+// on in the hypervisor too there, act on nothing it does at CPL 0 without TF.
+#define MSR_DEBUGCTL 0x1d9
+#define MSR_LAST_BRANCH_FROM_IP 0x1db
+#define MSR_LAST_INT_TO_IP 0x1de
+#define DEBUGCTL_LBR 1u
+
 // AMD's memory routing (APM 24593 rev. 3.45, 3.2.1, 7.9.2, and 7.9.4; PPR 55772
 // rev. 3.08, MSRC001_0058): the guest's own, from its memory map, so that none
 // of its writes routes the host's memory. SMM and SVM appear locked, as the
@@ -190,6 +199,7 @@ static bool pt_hidden;
 static bool mpx_hidden;
 // IA32_XSS, which exists where XSAVES does.
 static bool xss;
+static bool lbr_hidden;
 // The tables of the processor's model-specific MSRs, where it has any.
 static const struct msr_model *model;
 // Physical address bits the processor lacks, for the guest's AMD addresses.
@@ -278,6 +288,13 @@ void msr_init(void) {
             virt_intercept_msr(MSR_DC_CFG, false, true);
         }
         virt_intercept_msr(MSR_AMD_HWCR, true, true);
+        if (!svm_lbr_virtualisation) {
+            lbr_hidden = true;
+            virt_intercept_msr(MSR_DEBUGCTL, false, true);
+            for (uint32_t msr = MSR_LAST_BRANCH_FROM_IP; msr <= MSR_LAST_INT_TO_IP; msr++) {
+                virt_intercept_msr(msr, true, true);
+            }
+        }
         virt_intercept_msr(MSR_AMD_NB_CFG, true, true);
         for (uint32_t msr = MSR_AMD_CPUID_7_FEATURES; msr <= MSR_AMD_CPUID_EXT_FEATURES; msr++) {
             virt_intercept_msr(msr, true, true);
@@ -490,8 +507,12 @@ static bool amd_memory_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool 
     return true;
 }
 
+static bool lbr_msr(uint32_t msr) {
+    return lbr_hidden && msr >= MSR_LAST_BRANCH_FROM_IP && msr <= MSR_LAST_INT_TO_IP;
+}
+
 bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
-    if ((pt_hidden && pt_msr(msr)) || (mpx_hidden && msr == MSR_IA32_BNDCFGS)) {
+    if ((pt_hidden && pt_msr(msr)) || (mpx_hidden && msr == MSR_IA32_BNDCFGS) || lbr_msr(msr)) {
         *fault = true;
         return true;
     }
@@ -578,7 +599,7 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
 }
 
 bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
-    if ((pt_hidden && pt_msr(msr)) || (mpx_hidden && msr == MSR_IA32_BNDCFGS)) {
+    if ((pt_hidden && pt_msr(msr)) || (mpx_hidden && msr == MSR_IA32_BNDCFGS) || lbr_msr(msr)) {
         *fault = true;
         return true;
     }
@@ -655,6 +676,13 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
             uint64_t fixed = ~NB_CFG_ENABLE_CF8_EXT_CFG;
             *fault = !rdmsr_safe(msr, &hardware) || ((value ^ hardware) & fixed)
                      || !wrmsr_safe(msr, value);
+            return true;
+        }
+        case MSR_DEBUGCTL: {
+            if (!lbr_hidden) {
+                return false;
+            }
+            *fault = (value & DEBUGCTL_LBR) || !wrmsr_safe(msr, value);
             return true;
         }
         case MSR_DC_CFG: {

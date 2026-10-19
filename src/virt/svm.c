@@ -37,6 +37,7 @@
 #include <virt/vlapic.h>
 
 #define SVM_FEATURE_NP (1u << 0)
+#define SVM_FEATURE_LBRV (1u << 1)
 #define SVM_FEATURE_NRIPS (1u << 3)
 #define SVM_FEATURE_VMCB_CLEAN (1u << 5)
 #define SVM_FEATURE_FLUSH_BY_ASID (1u << 6)
@@ -58,6 +59,7 @@
 #define ERRATUM_383_SIGNATURE 0xb600000000010015ull
 #define VECTOR_MC 18
 
+bool svm_lbr_virtualisation;
 bool svm_nrips;
 bool svm_vnmi;
 bool svm_avic;
@@ -182,6 +184,7 @@ bool svm_supported(void) {
         printf("SVM lacks nested paging\n");
         return false;
     }
+    svm_lbr_virtualisation = (features & SVM_FEATURE_LBRV) != 0;
     svm_nrips = (features & SVM_FEATURE_NRIPS) != 0;
     flush_by_asid = (features & SVM_FEATURE_FLUSH_BY_ASID) != 0;
     vmcb_clean_bits = (features & SVM_FEATURE_VMCB_CLEAN) != 0;
@@ -261,6 +264,11 @@ void svm_vcpu_init(struct vcpu *v) {
     }
     c->np_enable = 1;
     c->n_cr3 = gpt_root();
+    // The guest's DebugCtl and last branch records, from the save area's
+    // power-on zeros, are its own (APM 24593 rev. 3.45, 15.23.1).
+    if (svm_lbr_virtualisation) {
+        c->virt_ext |= SVM_VIRT_EXT_LBR;
+    }
 
     struct vmcb_save *s = &v->vmcb->save;
     // The PAT's power-on value.
