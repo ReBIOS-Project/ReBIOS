@@ -933,10 +933,15 @@ static void vmx_handle_exit(struct vcpu *v) {
     }
 
     if (reason & EXIT_REASON_ENTRY_FAILURE) {
+        // A machine check during the entry is the guest's to handle; a state
+        // the processor will not enter ends the guest as a triple fault does.
+        if ((reason & 0xffff) == EXIT_REASON_MACHINE_CHECK) {
+            vcpu_inject_exception(v, 18, false, 0);
+            return;
+        }
         printf("VM entry failed, exit reason %#x, qualification %#llx\n", reason,
                (unsigned long long)qual);
-        vmx_dump_guest();
-        panic("Cannot enter the guest\n");
+        vmx_shutdown("The guest's state cannot be entered");
     }
 
     switch (reason & 0xffff) {

@@ -439,9 +439,7 @@ static void svm_handle_exit(struct vcpu *v) {
             break;
         }
         case SVM_EXIT_INVALID: {
-            printf("VMRUN failed, invalid guest state\n");
-            svm_dump_guest(v);
-            panic("Cannot enter the guest\n");
+            svm_shutdown(v, "The guest's state cannot be entered");
         }
         default: {
             // An exception the hypervisor did not ask for is the guest's after
