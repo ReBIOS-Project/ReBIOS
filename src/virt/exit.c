@@ -23,6 +23,7 @@
 #include <lib/log.h>
 #include <sys/fixup.h>
 #include <sys/x86.h>
+#include <virt/cpuid.h>
 #include <virt/emulate.h>
 #include <virt/exit.h>
 #include <virt/guest_mem.h>
@@ -41,136 +42,8 @@
 
 #define MSR_IA32_CR_PAT 0x277
 
-// EFER bits a guest may set: SCE, LME, LMA (ignored), NXE, LMSLE, FFXSR, and
-// TCE. SVME is kept for the host.
-#define EFER_GUEST_MASK 0xed01ull
-
-#define CPUID_7_EBX_INVPCID (1u << 10)
-#define CPUID_7_EBX_PT (1u << 25)
-#define CPUID_7_ECX_WAITPKG (1u << 5)
-#define CPUID_7_ECX_RDPID (1u << 22)
-#define CPUID_7_EDX_PCONFIG (1u << 18)
-#define CPUID_7_1_EAX_MSRLIST (1u << 27)
-#define CPUID_7_1_EBX_PBNDKB (1u << 1)
-#define CPUID_D_1_EAX_XSAVES (1u << 3)
-#define CPUID_D_1_ECX_PT_STATE (1u << 8)
-#define CPUID_D_PT_STATE 8
-#define CPUID_PT 0x14
-#define CPUID_80000001_EDX_NX (1u << 20)
-#define CPUID_80000001_EDX_RDTSCP (1u << 27)
-
-// The instructions VMX makes #UD unless a VM-execution control lets them run
-// (SDM 325462-093 Vol. 3C, 28.3) show only where the guest's VMCS sets it, and
-// Intel PT only where its output can go through EPT and its tracing stop at
-// exits, with its state in XSAVES's components too (msr.c).
-static void vmx_hide_disabled(uint32_t leaf, uint32_t subleaf, struct cpuid_regs *r) {
-    bool rdtscp = vmx_secondary_allowed(PROC2_RDTSCP);
-    bool pt = vmx_pt_passthrough();
-    if (!pt && (leaf == CPUID_PT || (leaf == 0xd && subleaf == CPUID_D_PT_STATE))) {
-        *r = (struct cpuid_regs){0};
-        return;
-    }
-    if (leaf == 7 && subleaf == 0) {
-        if (!pt) {
-            r->ebx &= ~CPUID_7_EBX_PT;
-        }
-        if (!vmx_secondary_allowed(PROC2_INVPCID)) {
-            r->ebx &= ~CPUID_7_EBX_INVPCID;
-        }
-        if (!vmx_secondary_allowed(PROC2_USER_WAIT_PAUSE)) {
-            r->ecx &= ~CPUID_7_ECX_WAITPKG;
-        }
-        if (!rdtscp) {
-            r->ecx &= ~CPUID_7_ECX_RDPID;
-        }
-        r->edx &= ~CPUID_7_EDX_PCONFIG;
-    } else if (leaf == 7 && subleaf == 1) {
-        r->eax &= ~CPUID_7_1_EAX_MSRLIST;
-        r->ebx &= ~CPUID_7_1_EBX_PBNDKB;
-    } else if (leaf == 0xd && subleaf == 1) {
-        if (!vmx_secondary_allowed(PROC2_XSAVES)) {
-            r->eax &= ~CPUID_D_1_EAX_XSAVES;
-        }
-        if (!pt) {
-            r->ecx &= ~CPUID_D_1_ECX_PT_STATE;
-        }
-    } else if (leaf == 0x80000001 && !rdtscp) {
-        r->edx &= ~CPUID_80000001_EDX_RDTSCP;
-    }
-}
-
 void exit_cpuid(struct vcpu *v) {
-    uint32_t leaf = (uint32_t)v->gprs.rax;
-    uint32_t subleaf = (uint32_t)v->gprs.rcx;
-    struct cpuid_regs r = cpuid(leaf, subleaf);
-
-    // Under IA32_MISC_ENABLE's limit only the legacy leaves 0-2 remain, and
-    // leaves out of range answer as the last basic one (SDM 325462-093 Vol. 1,
-    // 21.1.3).
-    bool limited = (v->misc_enable & MISC_ENABLE_LIMIT_CPUID) != 0;
-    if (limited && (leaf < 0x80000000 ? leaf > 2 : leaf > cpuid(0x80000000, 0).eax)) {
-        leaf = 2;
-        r = cpuid(leaf, 0);
-    }
-
-    switch (leaf) {
-        case 0: {
-            if (limited) {
-                r.eax = 2;
-            }
-            break;
-        }
-        case 1: {
-            // No hypervisor shows, and VMX only where the guest gets it.
-            r.ecx &= ~(1u << 31);
-            if (!nvmx_enabled) {
-                r.ecx &= ~(1u << 5);
-            }
-            // These reflect the guest's CR4 and local APIC, not the host's.
-            r.ecx &= ~(1u << 27);
-            if (vcpu_cr4(v) & CR4_OSXSAVE) {
-                r.ecx |= 1u << 27;
-            }
-            r.edx &= ~(1u << 9);
-            if (vlapic_enabled(v)) {
-                r.edx |= 1u << 9;
-            }
-            break;
-        }
-        case 7: {
-            if (subleaf == 0) {
-                r.ecx &= ~(1u << 4);
-                if (vcpu_cr4(v) & CR4_PKE) {
-                    r.ecx |= 1u << 4;
-                }
-            }
-            break;
-        }
-        case 0x80000001: {
-            r.ecx &= ~(1u << 2);
-            // AMD's copy of the APIC flag.
-            if ((r.edx & (1u << 9)) && !vlapic_enabled(v)) {
-                r.edx &= ~(1u << 9);
-            }
-            if (v->misc_enable & MISC_ENABLE_XD_DISABLE) {
-                r.edx &= ~CPUID_80000001_EDX_NX;
-            }
-            break;
-        }
-        default: {
-            // Hypervisors report themselves in leaves 40000000h-4FFFFFFFh,
-            // which the processor itself answers as any leaf past its last.
-            if (leaf >= 0x40000000 && leaf <= 0x4fffffff) {
-                r = cpuid(cpuid(0, 0).eax + 1, subleaf);
-            }
-            break;
-        }
-    }
-
-    if (virt_vmx) {
-        vmx_hide_disabled(leaf, subleaf, &r);
-    }
-
+    struct cpuid_regs r = cpuid_guest(v, (uint32_t)v->gprs.rax, (uint32_t)v->gprs.rcx);
     v->gprs.rax = r.eax;
     v->gprs.rbx = r.ebx;
     v->gprs.rcx = r.ecx;
@@ -300,7 +173,7 @@ bool exit_msr_write(struct vcpu *v, uint32_t msr, uint64_t value) {
         return !fault;
     }
     if (!virt_vmx && msr == MSR_EFER) {
-        if (value & ~EFER_GUEST_MASK) {
+        if (value & ~cpuid_efer_allowed(v)) {
             return false;
         }
         uint64_t old = v->vmcb->save.efer;
@@ -337,7 +210,8 @@ void exit_xsetbv(struct vcpu *v) {
     uint32_t index = (uint32_t)v->gprs.rcx;
     uint64_t value = ((uint64_t)(uint32_t)v->gprs.rdx << 32) | (uint32_t)v->gprs.rax;
 
-    if (!xsetbv_safe(index, value)) {
+    // Only the state components the guest gets.
+    if ((index == 0 && (value & ~cpuid_xcr0_allowed())) || !xsetbv_safe(index, value)) {
         vcpu_inject_exception(v, 13, true, 0);
         return;
     }

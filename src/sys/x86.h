@@ -80,6 +80,10 @@
 #define EFER_LMA (1u << 10)
 #define EFER_NXE (1u << 11)
 #define EFER_SVME (1u << 12)
+#define EFER_LMSLE (1u << 13)
+#define EFER_FFXSR (1u << 14)
+#define EFER_TCE (1u << 15)
+#define EFER_AIBRSE (1u << 21)
 
 #define RFLAGS_CF (1u << 0)
 #define RFLAGS_FIXED (1u << 1)

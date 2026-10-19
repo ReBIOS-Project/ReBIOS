@@ -24,16 +24,18 @@
 #include <sys/mm.h>
 #include <sys/smp.h>
 #include <sys/x86.h>
+#include <virt/cpuid.h>
 #include <virt/layout.h>
 #include <virt/msr.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>
 #include <virt/vmx.h>
 
-// SDM 325462-093 Vol. 1, Tables 21-16, 21-19, and 21-23.
+// SDM 325462-093 Vol. 1, Tables 21-16, 21-19, 21-23, and 21-35.
 #define CPUID_6_EAX_HW_FEEDBACK (1u << 19)
 #define CPUID_7_EBX_PT (1u << 25)
 #define CPUID_7_1_EBX_CPUIDMAXVAL_LIM_RMV (1u << 3)
+#define CPUID_D_1_EAX_XSAVES (1u << 3)
 
 // SDM 325462-093 Vol. 3B, 17.6.4 and 17.6.5.
 #define MSR_IA32_HW_FEEDBACK_PTR 0x17d0
@@ -43,15 +45,15 @@
 
 // Intel PT's MSRs (SDM 325462-093 Vol. 4, Table 2-2), those from the first
 // trigger's to IA32_RTIT_CR3_MATCH taking in IA32_RTIT_CTL and
-// IA32_RTIT_STATUS, and IA32_XSS's bit for its state.
+// IA32_RTIT_STATUS.
 #define MSR_IA32_RTIT_OUTPUT_BASE 0x560
 #define MSR_IA32_RTIT_OUTPUT_MASK_PTRS 0x561
 #define MSR_IA32_RTIT_TRIGGER0_CFG 0x568
 #define MSR_IA32_RTIT_CR3_MATCH 0x572
 #define MSR_IA32_RTIT_ADDR0_A 0x580
 #define MSR_IA32_RTIT_ADDR3_B 0x587
+
 #define MSR_IA32_XSS 0xda0
-#define XSS_PT (1u << 8)
 
 // IA32_MISC_ENABLE's bits the processor's keep clear, as the CPUID limit would
 // hide leaves the hypervisor reads and XD disable would make EFER.NXE, which
@@ -85,6 +87,8 @@ static uint32_t hfi_package_count;
 // Intel PT where it cannot be the guest's: its output would go to host
 // addresses, and its tracing would go on through the hypervisor's own code.
 static bool pt_hidden;
+// IA32_XSS, which exists where XSAVES does.
+static bool xss;
 
 static void misc_enable_init(void) {
     // IA32_MISC_ENABLE is Intel's, and VMX runs only on Intel's processors.
@@ -136,8 +140,15 @@ static void pt_init(void) {
             virt_intercept_msr(msr, true, true);
         }
     }
-    // XRSTORS would load IA32_RTIT_CTL from its PT state.
-    virt_intercept_msr(MSR_IA32_XSS, false, true);
+}
+
+// The supervisor state components XSAVES and XRSTORS handle: only those the
+// guest gets, as XRSTORS would load PT's IA32_RTIT_CTL, for one.
+static void xss_init(void) {
+    if (cpuid(0, 0).eax >= 0xd && (cpuid(0xd, 1).eax & CPUID_D_1_EAX_XSAVES)) {
+        xss = true;
+        virt_intercept_msr(MSR_IA32_XSS, false, true);
+    }
 }
 
 void msr_init(void) {
@@ -145,6 +156,7 @@ void msr_init(void) {
     misc_enable_init();
     hfi_init();
     pt_init();
+    xss_init();
 }
 
 // The guest's IA32_HW_FEEDBACK_PTR for the processor's package, made if
@@ -251,10 +263,10 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
             return true;
         }
         case MSR_IA32_XSS: {
-            if (!pt_hidden) {
+            if (!xss) {
                 return false;
             }
-            *fault = (value & XSS_PT) || !wrmsr_safe(msr, value);
+            *fault = (value & ~cpuid_xss_allowed()) || !wrmsr_safe(msr, value);
             return true;
         }
         case MSR_IA32_HW_FEEDBACK_CONFIG: {

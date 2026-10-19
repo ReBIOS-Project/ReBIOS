@@ -34,6 +34,7 @@
 #include <sys/smp.h>
 #include <sys/x86.h>
 #include <virt/a20.h>
+#include <virt/cpuid.h>
 #include <virt/irq.h>
 #include <virt/layout.h>
 #include <virt/msr.h>
@@ -67,6 +68,7 @@ static void bsp_main(void *arg) {
     cpu_tables_load(cpu, virt_vmx);
     virt_cpu_init();
     msr_init();
+    cpuid_init();
     mtrr_init();
 
     layout_init();
