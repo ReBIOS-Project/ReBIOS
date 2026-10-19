@@ -63,6 +63,9 @@
 #define SVR_WRITABLE 0x1ff
 #define SVR_SUPPRESS_EOI_BROADCAST (1u << 12)
 #define LVT_DELIVERY_MASK (7u << 8)
+#define LVT_DELIVERY_FIXED (0u << 8)
+#define LVT_DELIVERY_SMI (2u << 8)
+#define LVT_DELIVERY_NMI (4u << 8)
 #define LVT_DELIVERY_EXTINT (7u << 8)
 #define DFR_FLAT 0xf0000000u
 #define ESR_RECEIVE_ILLEGAL_VECTOR (1u << 6)
@@ -194,6 +197,7 @@ static bool lvt_reg_present(uint32_t reg) {
 static uint32_t legacy_svr;
 static uint32_t legacy_lint0;
 static uint32_t legacy_lint1;
+static uint32_t legacy_thermal;
 
 // Pages the guest has had its local APICs at, which all exit, but for the
 // accesses the processor virtualises.
@@ -301,6 +305,9 @@ void vlapic_init(void) {
     legacy_svr = lapic_read(APIC_SVR);
     legacy_lint0 = lapic_read(APIC_LVT_LINT0);
     legacy_lint1 = lapic_read(APIC_LVT_LINT1);
+    if (lvt_present(LVT_THERMAL)) {
+        legacy_thermal = lapic_read(APIC_LVT_THERMAL);
+    }
     if (virt_vmx && vmx_secondary_allowed(PROC2_VIRT_APIC_ACCESSES)) {
         uint8_t *page = page_alloc(1);
         memset(page, 0xff, PAGE_SIZE);
@@ -502,6 +509,25 @@ static void mirror_logical(const struct vlapic *vl) {
 // the vector, which is the hypervisor's.
 static void timer_lvt(const struct vlapic *vl) {
     lapic_write(APIC_LVT_TIMER, (regs_get(vl, APIC_LVT_TIMER) & ~0xffu) | VLAPIC_TIMER_VECTOR);
+}
+
+// The processor's thermal interrupt, on the hypervisor's vector while the
+// guest's entry asks for an interrupt or an NMI, and its SMIs, which go to the
+// firmware, as the guest's entry has them.
+static void thermal_lvt(const struct vlapic *vl) {
+    if (!lvt_present(LVT_THERMAL)) {
+        return;
+    }
+    uint32_t lvt = regs_get(vl, APIC_LVT_THERMAL);
+    uint32_t mode = lvt & LVT_DELIVERY_MASK;
+    uint32_t host = APIC_LVT_MASKED;
+    if (mode == LVT_DELIVERY_SMI) {
+        host = lvt;
+    } else if (!(lvt & APIC_LVT_MASKED)
+               && (mode == LVT_DELIVERY_FIXED || mode == LVT_DELIVERY_NMI)) {
+        host = VLAPIC_THERMAL_VECTOR;
+    }
+    lapic_write(APIC_LVT_THERMAL, host);
 }
 
 // As a local APIC in either mode reads it (SDM 325462-093 Vol. 3C, 32.1.6.2).
@@ -765,6 +791,7 @@ static void reset_registers(struct vcpu *v) {
     regs_set(vl, APIC_TIMER_DIVIDE, 0);
     lapic_write(APIC_TIMER_INITIAL, 0);
     timer_lvt(vl);
+    thermal_lvt(vl);
     lapic_write(APIC_TIMER_DIVIDE, 0);
     mirror_logical(vl);
     avic_recheck_soon();
@@ -829,10 +856,15 @@ void vlapic_create(struct vcpu *v) {
     reset_registers(v);
     access_virtualization(vl);
     if (v->cpu->bsp) {
-        // Its LINT entries as lapic_legacy_init() set the processor's.
+        // Its LINT entries as lapic_legacy_init() set the processor's, and its
+        // thermal entry as that left the firmware's.
         regs_set(vl, APIC_SVR, legacy_svr & SVR_WRITABLE);
         regs_set(vl, APIC_LVT_LINT0, legacy_lint0 & lvt_writable[LVT_LINT0]);
         regs_set(vl, APIC_LVT_LINT1, legacy_lint1 & lvt_writable[LVT_LINT1]);
+        if (lvt_present(LVT_THERMAL)) {
+            regs_set(vl, APIC_LVT_THERMAL, legacy_thermal & lvt_writable[LVT_THERMAL]);
+            thermal_lvt(vl);
+        }
     }
 }
 
@@ -903,6 +935,18 @@ void vlapic_timer_fired(struct vcpu *v) {
     uint32_t lvt = regs_get(vl, APIC_LVT_TIMER);
     if (!(lvt & APIC_LVT_MASKED)) {
         vlapic_accept(v, (uint8_t)lvt, false);
+    }
+}
+
+void vlapic_thermal_fired(struct vcpu *v) {
+    uint32_t lvt = regs_get(v->vlapic, APIC_LVT_THERMAL);
+    if (lvt & APIC_LVT_MASKED) {
+        return;
+    }
+    if ((lvt & LVT_DELIVERY_MASK) == LVT_DELIVERY_FIXED) {
+        vlapic_accept(v, (uint8_t)lvt, false);
+    } else if ((lvt & LVT_DELIVERY_MASK) == LVT_DELIVERY_NMI) {
+        __atomic_store_n(&v->cpu->nmi_pending, true, __ATOMIC_RELEASE);
     }
 }
 
@@ -1257,6 +1301,9 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
             if (i == LVT_TIMER) {
                 timer_lvt(vl);
             }
+            if (i == LVT_THERMAL) {
+                thermal_lvt(vl);
+            }
             if (i == LVT_LINT0) {
                 avic_recheck_soon();
             }
@@ -1291,6 +1338,7 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
                     }
                 }
                 timer_lvt(vl);
+                thermal_lvt(vl);
             }
             avic_recheck_soon();
             return true;
@@ -1550,6 +1598,7 @@ static bool apic_base_write(struct vcpu *v, uint64_t value) {
         }
         id_reg(vl);
         timer_lvt(vl);
+        thermal_lvt(vl);
         lapic_write(APIC_TIMER_DIVIDE, regs_get(vl, APIC_TIMER_DIVIDE));
         mirror_logical(vl);
     }
