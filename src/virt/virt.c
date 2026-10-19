@@ -334,6 +334,7 @@ void vcpu_before_entry(struct vcpu *v) {
     service_pause(v);
     // Before the flush below, which the display's remapping may need.
     vga_refresh();
+    nvmx_wait(v);
     // VMX operation blocks INIT, which its guest's exits take.
     if (!nvmx_holds_init(v) && __atomic_exchange_n(&v->cpu->init_pending, false, __ATOMIC_ACQUIRE)) {
         vcpu_init_signal(v);
@@ -393,8 +394,7 @@ void vcpu_exit_soon(struct vcpu *v) {
     }
 }
 
-void vcpu_halt(struct vcpu *v) {
-    vcpu_skip_instruction(v);
+void vcpu_wait(struct vcpu *v, bool (*ends)(struct vcpu *v), bool spin) {
     struct cpu *cpu = v->cpu;
     // SVM's host takes interrupts and NMIs only with GIF set.
     if (!virt_vmx) {
@@ -405,20 +405,30 @@ void vcpu_halt(struct vcpu *v) {
     for (;;) {
         __atomic_store_n(&cpu->kicked, false, __ATOMIC_SEQ_CST);
         service_pause(v);
-        if (event_halt_ends(v)) {
+        if (ends(v)) {
             break;
         }
         if (log_panicked()) {
             halt_forever();
         }
         vga_refresh();
-        cpu_halt();
+        if (spin) {
+            asm volatile ("sti\n\tnop\n\tcli" ::: "memory");
+            cpu_relax();
+        } else {
+            cpu_halt();
+        }
     }
     vlapic_halt(v, false);
     cpu->taking_interrupts = false;
     if (!virt_vmx) {
         asm volatile ("clgi" ::: "memory");
     }
+}
+
+void vcpu_halt(struct vcpu *v) {
+    vcpu_skip_instruction(v);
+    vcpu_wait(v, event_halt_ends, false);
 }
 
 void vcpu_run(struct vcpu *v) {

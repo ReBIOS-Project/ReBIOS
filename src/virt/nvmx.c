@@ -194,6 +194,10 @@ struct nvmx {
     // process.
     int pi_vector;
     bool pi_pending;
+    // The activity state the guest's guest waits in here, and the vector of
+    // the start-up IPI that ends the wait for one, else -1.
+    int inactive;
+    int sipi;
     struct ept02 ept02[EPT02_ROOTS];
     struct ept02 *current02;
     unsigned ept02_pages;
@@ -286,6 +290,8 @@ static unsigned ept02_budget;
 #define MISC_TIMER_RATE 0x1full
 #define MISC_STORE_LMA (1ull << 5)
 #define MISC_ACTIVITY_HLT (1ull << 6)
+#define MISC_ACTIVITY_SHUTDOWN (1ull << 7)
+#define MISC_ACTIVITY_WAIT_SIPI (1ull << 8)
 #define MISC_CR3_TARGETS_SHIFT 16
 #define MISC_CR3_TARGETS_MASK 0x1ffull
 #define MISC_VMWRITE_ANY (1ull << 29)
@@ -387,9 +393,9 @@ void nvmx_init(void) {
         cr3_targets = 4;
     }
     timer_rate = (unsigned)(misc & MISC_TIMER_RATE);
-    cap_misc = timer_rate | MISC_STORE_LMA | MISC_ACTIVITY_HLT
-               | (uint64_t)cr3_targets << MISC_CR3_TARGETS_SHIFT | MISC_VMWRITE_ANY
-               | (misc & MISC_ZERO_LENGTH_INJECTION);
+    cap_misc = timer_rate | MISC_STORE_LMA | MISC_ACTIVITY_HLT | MISC_ACTIVITY_SHUTDOWN
+               | MISC_ACTIVITY_WAIT_SIPI | (uint64_t)cr3_targets << MISC_CR3_TARGETS_SHIFT
+               | MISC_VMWRITE_ANY | (misc & MISC_ZERO_LENGTH_INJECTION);
 
     cap_cr0_fixed0 = vmx_capability(MSR_IA32_VMX_CR0_FIXED0);
     cap_cr0_fixed1 = vmx_capability(MSR_IA32_VMX_CR0_FIXED1);
@@ -418,7 +424,7 @@ void nvmx_vcpu_init(struct vcpu *v) {
         return;
     }
     struct nvmx *n = kmalloc(sizeof(*n));
-    *n = (struct nvmx){.current = NO_VMCS, .pi_vector = -1};
+    *n = (struct nvmx){.current = NO_VMCS, .pi_vector = -1, .sipi = -1};
     v->nvmx = n;
     if (shadowing) {
         n->shadow = vmx_shadow_vmcs_create();
@@ -2056,8 +2062,9 @@ static void posted_process(struct nvmx *n) {
 }
 
 // The guest's guest no longer processes posted interrupts. A notification
-// the hypervisor has yet to process came before an exit, or, for an entry
-// that failed, is the guest's interrupt.
+// the hypervisor has yet to process came before an exit, or, where the guest's
+// guest could not take it, after an entry that failed or in an inactive state,
+// is the guest's interrupt.
 static void posted_leave(struct vcpu *v, struct nvmx *n, bool entered) {
     int vector = __atomic_exchange_n(&n->pi_vector, -1, __ATOMIC_SEQ_CST);
     if (!__atomic_exchange_n(&n->pi_pending, false, __ATOMIC_SEQ_CST)) {
@@ -2087,7 +2094,8 @@ static void exit_to_l1(struct vcpu *v, struct nvmx *n, uint32_t reason, uint64_t
     bool nmi = (reason & 0xffff) == EXIT_REASON_EXCEPTION_NMI
                && (intr_info & (7u << 8)) == INTR_TYPE_NMI;
     bool failed = (reason & EXIT_REASON_ENTRY_FAILURE) != 0;
-    posted_leave(v, n, !failed);
+    // The inactive states block the notification's interrupt as any other.
+    posted_leave(v, n, !failed && n->inactive == ACTIVITY_ACTIVE);
     if (!failed) {
         save_l2_state(n);
         set12(n, VMCS_ENTRY_INTR_INFO, get12(n, VMCS_ENTRY_INTR_INFO) & ~(uint64_t)INTR_INFO_VALID);
@@ -2126,6 +2134,7 @@ static void exit_to_l1(struct vcpu *v, struct nvmx *n, uint32_t reason, uint64_t
     v->redeliver = 0;
     v->injecting = false;
     n->run_pending = false;
+    __atomic_store_n(&n->inactive, ACTIVITY_ACTIVE, __ATOMIC_SEQ_CST);
     if (!failed) {
         uint64_t tsc = processor && n->tsc_stored ? n->tsc_store[1] : rdtsc();
         store_msr_list(v, get12(n, VMCS_EXIT_MSR_STORE_ADDR), get12(n, VMCS_EXIT_MSR_STORE_COUNT),
@@ -2151,6 +2160,26 @@ static void entry_failure(struct vcpu *v, struct nvmx *n, uint32_t reason, uint6
         *(volatile uint32_t *)(n->vmcs12 + VMCS12_LAUNCHED) = 0;
     }
     exit_to_l1(v, n, EXIT_REASON_ENTRY_FAILURE | reason, qual, 0, 0, false);
+}
+
+// The checks of SDM 325462-093 Vol. 3C, 29.3.1.5 on the activity states VMCS02
+// does not enter, and so the processor's do not make: the guest's guest waits
+// in them here, as they would block the hypervisor's interrupts too (SDM
+// 325462-093 Vol. 3C, 28.2).
+static bool inactive_valid(const struct nvmx *n, uint64_t activity) {
+    if (activity < ACTIVITY_SHUTDOWN) {
+        return true;
+    }
+    if (get12(n, VMCS_GUEST_INTERRUPTIBILITY) & (INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS)) {
+        return false;
+    }
+    uint32_t injected = (uint32_t)get12(n, VMCS_ENTRY_INTR_INFO);
+    if (!(injected & INTR_INFO_VALID)) {
+        return true;
+    }
+    uint32_t type = injected & (7u << 8);
+    return activity == ACTIVITY_SHUTDOWN
+           && (type == INTR_TYPE_NMI || (type == INTR_TYPE_HW_EXCEPTION && (injected & 0xff) == 18));
 }
 
 static void vmlaunch(struct vcpu *v, struct nvmx *n, bool resume) {
@@ -2214,7 +2243,8 @@ static void vmlaunch(struct vcpu *v, struct nvmx *n, bool resume) {
         entry_failure(v, n, EXIT_REASON_INVALID_GUEST_STATE, QUAL_LINK_POINTER);
         return;
     }
-    if (get12(n, VMCS_GUEST_ACTIVITY_STATE) > ACTIVITY_HLT) {
+    uint64_t activity = get12(n, VMCS_GUEST_ACTIVITY_STATE);
+    if (activity > ACTIVITY_WAIT_SIPI || !inactive_valid(n, activity)) {
         entry_failure(v, n, EXIT_REASON_INVALID_GUEST_STATE, QUAL_GUEST_STATE);
         return;
     }
@@ -2222,7 +2252,20 @@ static void vmlaunch(struct vcpu *v, struct nvmx *n, bool resume) {
                                     get12(n, VMCS_ENTRY_MSR_LOAD_COUNT));
     if (failed) {
         entry_failure(v, n, EXIT_REASON_MSR_LOADING, failed);
+        return;
     }
+    if (activity < ACTIVITY_SHUTDOWN) {
+        return;
+    }
+    // An injected event leaves the guest's guest active (SDM 325462-093 Vol.
+    // 3C, 29.7.2), else it waits here.
+    if (v->injecting) {
+        vmx_write(VMCS_GUEST_ACTIVITY_STATE, ACTIVITY_ACTIVE);
+        return;
+    }
+    n->run_pending = false;
+    __atomic_store_n(&n->sipi, -1, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&n->inactive, (int)activity, __ATOMIC_SEQ_CST);
 }
 
 static uint64_t operand_register(struct vcpu *v, uint32_t info) {
@@ -2375,6 +2418,41 @@ bool nvmx_in_l2(struct vcpu *v) {
 
 bool nvmx_holds_init(struct vcpu *v) {
     return v->nvmx != NULL && v->nvmx->vmxon;
+}
+
+// What ends the guest's guest's wait: a start-up IPI, else INIT, the
+// VMX-preemption timer, or an NMI not blocked (SDM 325462-093 Vol. 3C, 28.2,
+// 29.7.1).
+static bool inactive_ends(struct vcpu *v) {
+    struct nvmx *n = v->nvmx;
+    if (n->inactive == ACTIVITY_WAIT_SIPI) {
+        return __atomic_load_n(&n->sipi, __ATOMIC_ACQUIRE) >= 0;
+    }
+    uint64_t pin = get12(n, VMCS_PIN_CONTROLS);
+    bool nmi = v->nmi_pending || __atomic_load_n(&v->cpu->nmi_pending, __ATOMIC_ACQUIRE);
+    bool nmi_blocked = !(pin & PIN_VIRTUAL_NMIS)
+                       && (get12(n, VMCS_GUEST_INTERRUPTIBILITY) & INTERRUPTIBILITY_NMI);
+    return __atomic_load_n(&v->cpu->init_pending, __ATOMIC_ACQUIRE) || (nmi && !nmi_blocked)
+           || ((pin & PIN_PREEMPTION_TIMER) && timer_left(n) == 0);
+}
+
+void nvmx_wait(struct vcpu *v) {
+    struct nvmx *n = v->nvmx;
+    if (n == NULL || !n->in_l2 || n->inactive == ACTIVITY_ACTIVE || inactive_ends(v)) {
+        return;
+    }
+    // Nothing interrupts a halt when the timer expires.
+    bool timer = n->inactive == ACTIVITY_SHUTDOWN
+                 && (get12(n, VMCS_PIN_CONTROLS) & PIN_PREEMPTION_TIMER);
+    vcpu_wait(v, inactive_ends, timer);
+}
+
+bool nvmx_sipi(struct vcpu *v, uint8_t vector) {
+    struct nvmx *n = v->nvmx;
+    int none = -1;
+    return n != NULL && __atomic_load_n(&n->inactive, __ATOMIC_ACQUIRE) == ACTIVITY_WAIT_SIPI
+           && __atomic_compare_exchange_n(&n->sipi, &none, vector, false, __ATOMIC_ACQ_REL,
+                                          __ATOMIC_RELAXED);
 }
 
 // The guest's I/O bitmaps, or else its unconditional I/O exiting, decide on
@@ -2596,6 +2674,12 @@ bool nvmx_before_entry(struct vcpu *v) {
         set12(n, VMCS_GUEST_LINEAR_ADDR, n->pending_linear);
         return false;
     }
+    // A start-up IPI ends the wait for one (SDM 325462-093 Vol. 3C, 28.2).
+    if (n->inactive == ACTIVITY_WAIT_SIPI) {
+        int vector = __atomic_exchange_n(&n->sipi, -1, __ATOMIC_SEQ_CST);
+        exit_to_l1(v, n, EXIT_REASON_SIPI, (uint64_t)vector, 0, 0, false);
+        return false;
+    }
     // The guest's events wait for an instruction boundary: past the delivery of
     // what its entry injects, or of what an exit cut short, as on hardware and
     // in Linux 7.3's KVM. An interrupt of the hypervisor's own then ends the
@@ -2623,6 +2707,20 @@ bool nvmx_before_entry(struct vcpu *v) {
                        false);
             return false;
         }
+    }
+    // The shutdown state blocks interrupts, but not the VMX-preemption timer's
+    // exit, and an NMI the guest's guest takes leaves it (SDM 325462-093 Vol.
+    // 3C, 28.2).
+    if (n->inactive == ACTIVITY_SHUTDOWN) {
+        if ((pin & PIN_PREEMPTION_TIMER) && timer_left(n) == 0) {
+            exit_to_l1(v, n, EXIT_REASON_PREEMPTION_TIMER, 0, 0, 0, false);
+            return false;
+        }
+        if (!v->nmi_pending) {
+            panic("The guest's guest left the shutdown state with nothing to wake it\n");
+        }
+        __atomic_store_n(&n->inactive, ACTIVITY_ACTIVE, __ATOMIC_SEQ_CST);
+        vmx_write(VMCS_GUEST_ACTIVITY_STATE, ACTIVITY_ACTIVE);
     }
     bool extint = (pin & PIN_EXT_INTR_EXITING) && irq_extint_pending(v);
     int vector = (!(pin & PIN_EXT_INTR_EXITING) || extint) ? -1 : vlapic_pending(v);

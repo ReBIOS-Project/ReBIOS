@@ -50,6 +50,12 @@ bool nvmx_entry_failed(struct vcpu *v, uint32_t error);
 bool nvmx_before_entry(struct vcpu *v);
 // Whether INIT waits, as VMX operation blocks it.
 bool nvmx_holds_init(struct vcpu *v);
+// Before the vCPU's entry: in the activity states the guest's guest waits in
+// here, until something ends the wait.
+void nvmx_wait(struct vcpu *v);
+// A start-up IPI for the vCPU, from any processor: whether its guest's guest
+// waited for one, for the vCPU to wake for.
+bool nvmx_sipi(struct vcpu *v, uint8_t vector);
 // A fixed, edge-triggered interrupt for the guest, from any processor:
 // whether it is the notification of its guest's posted interrupts instead,
 // for the vCPU's processor to process with VLAPIC_NESTED_POSTED_VECTOR.

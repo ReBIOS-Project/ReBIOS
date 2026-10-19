@@ -1126,7 +1126,8 @@ static void deliver(struct vcpu *from, struct vcpu *to, uint32_t command) {
             // As on a processor, only a vCPU waiting for one takes it.
             int32_t waiting = VCPU_SIPI_WAITING;
             if (__atomic_compare_exchange_n(&to->sipi, &waiting, (int32_t)vector, false,
-                                            __ATOMIC_RELEASE, __ATOMIC_RELAXED)) {
+                                            __ATOMIC_RELEASE, __ATOMIC_RELAXED)
+                || nvmx_sipi(to, vector)) {
                 vcpu_wake(to->cpu);
             }
             break;
