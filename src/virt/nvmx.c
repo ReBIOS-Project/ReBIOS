@@ -2805,9 +2805,15 @@ bool nvmx_l2_exit(struct vcpu *v, uint32_t reason, uint64_t qual) {
         ept_violation(v, n, qual);
         return true;
     }
+    // EPT02 is only a cache, made again from the guest's EPT and the
+    // hypervisor's.
     if ((reason & 0xffff) == EXIT_REASON_EPT_MISCONFIG && ept12(n)) {
-        panic("EPT02 is misconfigured at %#llx\n",
-              (unsigned long long)vmx_read(VMCS_GUEST_PHYS_ADDR));
+        printf("EPT02 is misconfigured at %#llx, made again\n",
+               (unsigned long long)vmx_read(VMCS_GUEST_PHYS_ADDR));
+        ept02_drop_all(n);
+        vmx_load_gpt_root(v);
+        vmx_invept_all();
+        return true;
     }
     if ((reason & 0xffff) == EXIT_REASON_VMFUNC && eptp_switch(v, n)) {
         return true;
