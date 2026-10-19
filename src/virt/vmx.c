@@ -21,6 +21,7 @@
 #include <hw/power.h>
 #include <lib/log.h>
 #include <sys/cpu.h>
+#include <sys/fixup.h>
 #include <sys/mm.h>
 #include <sys/x86.h>
 #include <virt/event.h>
@@ -55,6 +56,7 @@
 static uint64_t vmx_basic;
 static uint64_t pin_cap, proc_cap, proc2_cap, proc3_cap, exit_cap, entry_cap;
 static uint64_t ept_vpid_cap;
+static bool pt_passthrough;
 static uint64_t cr0_fixed0, cr0_fixed1, cr4_fixed0, cr4_fixed1;
 
 #define VMX_ENTER_FAILED 1
@@ -255,6 +257,14 @@ bool vmx_supported(void) {
         return false;
     }
 
+    // Where Intel PT may trace in VMX operation, its output can go through
+    // EPT, and exits and entries can switch it off and on again (SDM
+    // 325462-093 Vol. 3C, 36.5); the controls exist only where it does.
+    pt_passthrough = (rdmsr(MSR_IA32_VMX_MISC) & VMX_MISC_PT)
+                     && control_allowed(proc2_cap, PROC2_PT_USE_GPA)
+                     && control_allowed(exit_cap, EXIT_CLEAR_RTIT_CTL)
+                     && control_allowed(entry_cap, ENTRY_LOAD_RTIT_CTL);
+
     cpu_nmi_restart((uint64_t)(uintptr_t)vmx_enter_restart,
                     (uint64_t)(uintptr_t)vmx_enter_restart_end);
     return true;
@@ -313,6 +323,10 @@ bool vmx_monitor_trap_supported(void) {
 
 bool vmx_ept_huge_pages(void) {
     return (ept_vpid_cap & EPT_CAP_1G) != 0;
+}
+
+bool vmx_pt_passthrough(void) {
+    return pt_passthrough;
 }
 
 bool vmx_vpid_usable(void) {
@@ -505,6 +519,9 @@ void vmx_vmcs_create(struct vcpu *v, struct vmx_vmcs *vmcs) {
     vmclear(vmcs->pa);
     vmptrld(vmcs->pa);
     write_host_state(v->cpu);
+    if (pt_passthrough) {
+        vmwrite(VMCS_GUEST_RTIT_CTL, 0);
+    }
     vmptrld(v->vmcs_pa);
 }
 
@@ -575,6 +592,15 @@ void vmx_vcpu_init(struct vcpu *v) {
     // What the guest's instructions need to work as they would without VMX.
     uint32_t proc2_want = PROC2_RDTSCP | PROC2_INVPCID | PROC2_XSAVES | PROC2_USER_WAIT_PAUSE;
     uint32_t proc2_require = PROC2_EPT | PROC2_UNRESTRICTED_GUEST;
+    uint32_t exit_want = EXIT_SAVE_DEBUG_CONTROLS;
+    uint32_t entry_want = ENTRY_LOAD_DEBUG_CONTROLS;
+    // Intel PT's trace without the hypervisor's exits in it.
+    if (pt_passthrough) {
+        proc2_require |= PROC2_PT_USE_GPA;
+        proc2_want |= PROC2_CONCEAL_VMX_FROM_PT;
+        exit_want |= EXIT_CLEAR_RTIT_CTL | EXIT_CONCEAL_VMX_FROM_PT;
+        entry_want |= ENTRY_LOAD_RTIT_CTL | ENTRY_CONCEAL_VMX_FROM_PT;
+    }
     if (vmx_vpid_usable()) {
         proc2_require |= PROC2_VPID;
     }
@@ -587,13 +613,12 @@ void vmx_vcpu_init(struct vcpu *v) {
     }
 
     vmx_write(VMCS_EXIT_CONTROLS,
-              adjust_controls(exit_cap, EXIT_SAVE_DEBUG_CONTROLS,
+              adjust_controls(exit_cap, exit_want,
                               EXIT_HOST_ADDR_SPACE_SIZE | EXIT_ACK_INTR_ON_EXIT | EXIT_SAVE_EFER
                               | EXIT_LOAD_EFER | EXIT_SAVE_PAT | EXIT_LOAD_PAT,
                               "VM-exit"));
     vmx_write(VMCS_ENTRY_CONTROLS,
-              adjust_controls(entry_cap, ENTRY_LOAD_DEBUG_CONTROLS,
-                              ENTRY_LOAD_EFER | ENTRY_LOAD_PAT, "VM-entry"));
+              adjust_controls(entry_cap, entry_want, ENTRY_LOAD_EFER | ENTRY_LOAD_PAT, "VM-entry"));
 
     vmx_write(VMCS_EXCEPTION_BITMAP, 0);
     vmx_write(VMCS_PF_ERROR_MASK, 0);
@@ -603,6 +628,11 @@ void vmx_vcpu_init(struct vcpu *v) {
     vmx_write(VMCS_EXIT_MSR_LOAD_COUNT, 0);
     vmx_write(VMCS_ENTRY_MSR_LOAD_COUNT, 0);
     vmx_write(VMCS_ENTRY_INTR_INFO, 0);
+    // Exits save the guest's IA32_RTIT_CTL here for entries to load (SDM
+    // 325462-093 Vol. 3C, 30.3.1).
+    if (pt_passthrough) {
+        vmx_write(VMCS_GUEST_RTIT_CTL, 0);
+    }
 
     vmx_write(VMCS_IO_BITMAP_A, virt_io_bitmap());
     vmx_write(VMCS_IO_BITMAP_B, virt_io_bitmap() + PAGE_SIZE);
@@ -628,6 +658,25 @@ void vmx_vcpu_init(struct vcpu *v) {
     vmx_write(VMCS_GUEST_INTERRUPTIBILITY, 0);
     vmx_write(VMCS_GUEST_ACTIVITY_STATE, ACTIVITY_ACTIVE);
     vmx_write(VMCS_GUEST_PENDING_DBG, 0);
+}
+
+void vmx_async_access(uint64_t gpa) {
+    // Trace output there ends the guest's tracing with an operational error,
+    // as output to restricted memory does (SDM 325462-093 Vol. 3C, 36.3.10).
+    // Outside the guest IA32_RTIT_CTL is 0, which lets IA32_RTIT_STATUS be
+    // written.
+    uint64_t ctl = pt_passthrough ? vmx_read(VMCS_GUEST_RTIT_CTL) : 0;
+    uint64_t status;
+    if ((ctl & RTIT_CTL_TRACEEN) && rdmsr_safe(MSR_IA32_RTIT_STATUS, &status)) {
+        wrmsr_safe(MSR_IA32_RTIT_STATUS, status | RTIT_STATUS_ERROR);
+        vmx_write(VMCS_GUEST_RTIT_CTL, ctl & ~(uint64_t)RTIT_CTL_TRACEEN);
+        return;
+    }
+    static unsigned reported;
+    if (__atomic_fetch_add(&reported, 1, __ATOMIC_RELAXED) < 8) {
+        printf("An access the processor made for the guest outside of any instruction reached "
+               "%#llx, where it has no RAM\n", (unsigned long long)gpa);
+    }
 }
 
 static void vmx_dump_guest(void) {
@@ -919,6 +968,10 @@ static void vmx_handle_exit(struct vcpu *v) {
             // What the processor does not virtualise of the local APIC's page
             // (SDM 325462-093 Vol. 3C, 32.4), which is the vCPU's own.
             uint64_t type = APIC_ACCESS_TYPE(qual);
+            if (type == APIC_ACCESS_LINEAR_ASYNC || type == APIC_ACCESS_PHYSICAL_ASYNC) {
+                vmx_async_access(vlapic_page(v));
+                break;
+            }
             if ((type == APIC_ACCESS_DATA_READ || type == APIC_ACCESS_DATA_WRITE)
                 && mmio_fault(v, vlapic_page(v) + (qual & APIC_ACCESS_OFFSET_MASK))) {
                 break;
@@ -937,6 +990,10 @@ static void vmx_handle_exit(struct vcpu *v) {
         }
         case EXIT_REASON_EPT_VIOLATION: {
             uint64_t gpa = vmx_read(VMCS_GUEST_PHYS_ADDR);
+            if (qual & EPT_QUAL_ASYNC) {
+                vmx_async_access(gpa);
+                break;
+            }
             if (event_cut_short(v)) {
                 panic("Event delivery reached emulated memory at %#llx\n", (unsigned long long)gpa);
             }

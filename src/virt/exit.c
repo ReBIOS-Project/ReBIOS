@@ -46,20 +46,34 @@
 #define EFER_GUEST_MASK 0xed01ull
 
 #define CPUID_7_EBX_INVPCID (1u << 10)
+#define CPUID_7_EBX_PT (1u << 25)
 #define CPUID_7_ECX_WAITPKG (1u << 5)
 #define CPUID_7_ECX_RDPID (1u << 22)
 #define CPUID_7_EDX_PCONFIG (1u << 18)
 #define CPUID_7_1_EAX_MSRLIST (1u << 27)
 #define CPUID_7_1_EBX_PBNDKB (1u << 1)
 #define CPUID_D_1_EAX_XSAVES (1u << 3)
+#define CPUID_D_1_ECX_PT_STATE (1u << 8)
+#define CPUID_D_PT_STATE 8
+#define CPUID_PT 0x14
 #define CPUID_80000001_EDX_NX (1u << 20)
 #define CPUID_80000001_EDX_RDTSCP (1u << 27)
 
 // The instructions VMX makes #UD unless a VM-execution control lets them run
-// (SDM 325462-093 Vol. 3C, 28.3) show only where the guest's VMCS sets it.
+// (SDM 325462-093 Vol. 3C, 28.3) show only where the guest's VMCS sets it, and
+// Intel PT only where its output can go through EPT and its tracing stop at
+// exits, with its state in XSAVES's components too (msr.c).
 static void vmx_hide_disabled(uint32_t leaf, uint32_t subleaf, struct cpuid_regs *r) {
     bool rdtscp = vmx_secondary_allowed(PROC2_RDTSCP);
+    bool pt = vmx_pt_passthrough();
+    if (!pt && (leaf == CPUID_PT || (leaf == 0xd && subleaf == CPUID_D_PT_STATE))) {
+        *r = (struct cpuid_regs){0};
+        return;
+    }
     if (leaf == 7 && subleaf == 0) {
+        if (!pt) {
+            r->ebx &= ~CPUID_7_EBX_PT;
+        }
         if (!vmx_secondary_allowed(PROC2_INVPCID)) {
             r->ebx &= ~CPUID_7_EBX_INVPCID;
         }
@@ -73,8 +87,13 @@ static void vmx_hide_disabled(uint32_t leaf, uint32_t subleaf, struct cpuid_regs
     } else if (leaf == 7 && subleaf == 1) {
         r->eax &= ~CPUID_7_1_EAX_MSRLIST;
         r->ebx &= ~CPUID_7_1_EBX_PBNDKB;
-    } else if (leaf == 0xd && subleaf == 1 && !vmx_secondary_allowed(PROC2_XSAVES)) {
-        r->eax &= ~CPUID_D_1_EAX_XSAVES;
+    } else if (leaf == 0xd && subleaf == 1) {
+        if (!vmx_secondary_allowed(PROC2_XSAVES)) {
+            r->eax &= ~CPUID_D_1_EAX_XSAVES;
+        }
+        if (!pt) {
+            r->ecx &= ~CPUID_D_1_ECX_PT_STATE;
+        }
     } else if (leaf == 0x80000001 && !rdtscp) {
         r->edx &= ~CPUID_80000001_EDX_RDTSCP;
     }

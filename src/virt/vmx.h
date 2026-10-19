@@ -77,6 +77,7 @@
 #define VMCS_GUEST_PDPTE1 0x280c
 #define VMCS_GUEST_PDPTE2 0x280e
 #define VMCS_GUEST_PDPTE3 0x2810
+#define VMCS_GUEST_RTIT_CTL 0x2814
 #define VMCS_HOST_PAT 0x2c00
 #define VMCS_HOST_EFER 0x2c02
 
@@ -220,8 +221,10 @@
 #define PROC2_RDSEED_EXITING (1u << 16)
 #define PROC2_PML (1u << 17)
 #define PROC2_EPT_VE (1u << 18)
+#define PROC2_CONCEAL_VMX_FROM_PT (1u << 19)
 #define PROC2_XSAVES (1u << 20)
 #define PROC2_MBEC (1u << 22)
+#define PROC2_PT_USE_GPA (1u << 24)
 #define PROC2_TSC_SCALING (1u << 25)
 #define PROC2_USER_WAIT_PAUSE (1u << 26)
 
@@ -239,6 +242,8 @@
 #define EXIT_SAVE_EFER (1u << 20)
 #define EXIT_LOAD_EFER (1u << 21)
 #define EXIT_SAVE_PREEMPTION_TIMER (1u << 22)
+#define EXIT_CONCEAL_VMX_FROM_PT (1u << 24)
+#define EXIT_CLEAR_RTIT_CTL (1u << 25)
 
 // VM-entry controls (SDM 325462-092 Vol. 3C, Table 27-17).
 #define ENTRY_LOAD_DEBUG_CONTROLS (1u << 2)
@@ -247,6 +252,8 @@
 #define ENTRY_LOAD_PERF_GLOBAL_CTRL (1u << 13)
 #define ENTRY_LOAD_PAT (1u << 14)
 #define ENTRY_LOAD_EFER (1u << 15)
+#define ENTRY_CONCEAL_VMX_FROM_PT (1u << 17)
+#define ENTRY_LOAD_RTIT_CTL (1u << 18)
 
 // Guest segment access rights (SDM 325462-092 Vol. 3C, Table 27-2).
 #define VMX_AR_L (1u << 13)
@@ -319,7 +326,8 @@
 // EPT violation exit qualification (SDM 325462-093 Vol. 3C, Table 30-7): the
 // access, the rights the EPT entries gave (bits 6:3), whether the guest-linear
 // address is known and was translated rather than a paging-structure entry's,
-// what paging gave the linear address, and IRET's NMI unblocking.
+// what paging gave the linear address, IRET's NMI unblocking, and whether the
+// processor made the access outside of any instruction.
 #define EPT_QUAL_READ (1ull << 0)
 #define EPT_QUAL_WRITE (1ull << 1)
 #define EPT_QUAL_FETCH (1ull << 2)
@@ -330,12 +338,16 @@
 #define EPT_QUAL_WRITABLE (1ull << 10)
 #define EPT_QUAL_XD (1ull << 11)
 #define EPT_QUAL_NMI_UNBLOCKED (1ull << 12)
+#define EPT_QUAL_ASYNC (1ull << 16)
 
-// APIC-access exit qualification: the page offset, and the access type.
+// APIC-access exit qualification: the page offset, and the access type (SDM
+// 325462-093 Vol. 3C, Table 30-6).
 #define APIC_ACCESS_OFFSET_MASK 0xfffull
 #define APIC_ACCESS_TYPE(qual) (((qual) >> 12) & 0xf)
 #define APIC_ACCESS_DATA_READ 0
 #define APIC_ACCESS_DATA_WRITE 1
+#define APIC_ACCESS_LINEAR_ASYNC 4
+#define APIC_ACCESS_PHYSICAL_ASYNC 11
 
 // Event injection and exit interruption information fields.
 #define INTR_INFO_VALID (1u << 31)
@@ -383,6 +395,10 @@
 #define MSR_IA32_VMX_TRUE_ENTRY_CTLS 0x490
 #define MSR_IA32_VMX_VMFUNC 0x491
 #define MSR_IA32_VMX_PROCBASED_CTLS3 0x492
+
+// IA32_VMX_MISC: Intel PT can run in VMX operation (SDM 325462-093 Vol. 3D,
+// A.6).
+#define VMX_MISC_PT (1ull << 14)
 
 #define FEATURE_CONTROL_LOCK (1u << 0)
 #define FEATURE_CONTROL_VMX_OUTSIDE_SMX (1u << 2)
@@ -434,6 +450,12 @@ void vmx_invept_all(void);
 void vmx_invvpid(unsigned type, uint16_t vpid, uint64_t address);
 // Whether the hypervisor tags the guest's translations with VPIDs.
 bool vmx_vpid_usable(void);
+// Whether the guest gets Intel PT: its output through EPT, its tracing stopped
+// at exits and resumed at entries.
+bool vmx_pt_passthrough(void);
+// An access the processor made for the guest outside of any instruction that
+// reached gpa, where the guest has no RAM.
+void vmx_async_access(uint64_t gpa);
 // Loads the guest's CR3 as a MOV to CR3 would, for what the hypervisor carries
 // out for the guest: the PDPTEs of PAE paging, and the guest's translations.
 void vmx_load_guest_cr3(uint64_t cr3);

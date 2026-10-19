@@ -28,9 +28,11 @@
 #include <virt/msr.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>
+#include <virt/vmx.h>
 
-// SDM 325462-093 Vol. 1, Tables 21-16 and 21-23.
+// SDM 325462-093 Vol. 1, Tables 21-16, 21-19, and 21-23.
 #define CPUID_6_EAX_HW_FEEDBACK (1u << 19)
+#define CPUID_7_EBX_PT (1u << 25)
 #define CPUID_7_1_EBX_CPUIDMAXVAL_LIM_RMV (1u << 3)
 
 // SDM 325462-093 Vol. 3B, 17.6.4 and 17.6.5.
@@ -38,6 +40,18 @@
 #define MSR_IA32_HW_FEEDBACK_CONFIG 0x17d1
 #define HW_FEEDBACK_PTR_VALID 1u
 #define HW_FEEDBACK_CONFIG_ENABLE 1u
+
+// Intel PT's MSRs (SDM 325462-093 Vol. 4, Table 2-2), those from the first
+// trigger's to IA32_RTIT_CR3_MATCH taking in IA32_RTIT_CTL and
+// IA32_RTIT_STATUS, and IA32_XSS's bit for its state.
+#define MSR_IA32_RTIT_OUTPUT_BASE 0x560
+#define MSR_IA32_RTIT_OUTPUT_MASK_PTRS 0x561
+#define MSR_IA32_RTIT_TRIGGER0_CFG 0x568
+#define MSR_IA32_RTIT_CR3_MATCH 0x572
+#define MSR_IA32_RTIT_ADDR0_A 0x580
+#define MSR_IA32_RTIT_ADDR3_B 0x587
+#define MSR_IA32_XSS 0xda0
+#define XSS_PT (1u << 8)
 
 // IA32_MISC_ENABLE's bits the processor's keep clear, as the CPUID limit would
 // hide leaves the hypervisor reads and XD disable would make EFER.NXE, which
@@ -67,6 +81,10 @@ static unsigned package_shift;
 static struct spinlock hfi_lock;
 static struct hfi_package *hfi_packages;
 static uint32_t hfi_package_count;
+
+// Intel PT where it cannot be the guest's: its output would go to host
+// addresses, and its tracing would go on through the hypervisor's own code.
+static bool pt_hidden;
 
 static void misc_enable_init(void) {
     // IA32_MISC_ENABLE is Intel's, and VMX runs only on Intel's processors.
@@ -101,10 +119,32 @@ static void hfi_init(void) {
     virt_intercept_msr(MSR_IA32_HW_FEEDBACK_CONFIG, false, true);
 }
 
+static bool pt_msr(uint32_t msr) {
+    return msr == MSR_IA32_RTIT_OUTPUT_BASE || msr == MSR_IA32_RTIT_OUTPUT_MASK_PTRS
+           || (msr >= MSR_IA32_RTIT_TRIGGER0_CFG && msr <= MSR_IA32_RTIT_CR3_MATCH)
+           || (msr >= MSR_IA32_RTIT_ADDR0_A && msr <= MSR_IA32_RTIT_ADDR3_B);
+}
+
+static void pt_init(void) {
+    if (!virt_vmx || vmx_pt_passthrough() || cpuid(0, 0).eax < 7
+        || !(cpuid(7, 0).ebx & CPUID_7_EBX_PT)) {
+        return;
+    }
+    pt_hidden = true;
+    for (uint32_t msr = MSR_IA32_RTIT_OUTPUT_BASE; msr <= MSR_IA32_RTIT_ADDR3_B; msr++) {
+        if (pt_msr(msr)) {
+            virt_intercept_msr(msr, true, true);
+        }
+    }
+    // XRSTORS would load IA32_RTIT_CTL from its PT state.
+    virt_intercept_msr(MSR_IA32_XSS, false, true);
+}
+
 void msr_init(void) {
     // First, as the CPUID limit hides the leaves the rest reads.
     misc_enable_init();
     hfi_init();
+    pt_init();
 }
 
 // The guest's IA32_HW_FEEDBACK_PTR for the processor's package, made if
@@ -143,6 +183,10 @@ void msr_vcpu_init(struct vcpu *v) {
 }
 
 bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
+    if (pt_hidden && pt_msr(msr)) {
+        *fault = true;
+        return true;
+    }
     switch (msr) {
         case MSR_IA32_MISC_ENABLE: {
             if (!misc_enable_copied) {
@@ -172,6 +216,10 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
 }
 
 bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
+    if (pt_hidden && pt_msr(msr)) {
+        *fault = true;
+        return true;
+    }
     switch (msr) {
         case MSR_IA32_MISC_ENABLE: {
             if (!misc_enable_copied) {
@@ -200,6 +248,13 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
                 hfi_package(true)->guest = value;
             }
             spinlock_release(&hfi_lock);
+            return true;
+        }
+        case MSR_IA32_XSS: {
+            if (!pt_hidden) {
+                return false;
+            }
+            *fault = (value & XSS_PT) || !wrmsr_safe(msr, value);
             return true;
         }
         case MSR_IA32_HW_FEEDBACK_CONFIG: {

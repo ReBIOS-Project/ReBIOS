@@ -298,6 +298,7 @@ static unsigned ept02_budget;
 #define MISC_ACTIVITY_HLT (1ull << 6)
 #define MISC_ACTIVITY_SHUTDOWN (1ull << 7)
 #define MISC_ACTIVITY_WAIT_SIPI (1ull << 8)
+#define MISC_PT (1ull << 14)
 #define MISC_CR3_TARGETS_SHIFT 16
 #define MISC_CR3_TARGETS_MASK 0x1ffull
 #define MISC_VMWRITE_ANY (1ull << 29)
@@ -410,6 +411,11 @@ void nvmx_init(void) {
     cap_misc = timer_rate | MISC_STORE_LMA | MISC_ACTIVITY_HLT | MISC_ACTIVITY_SHUTDOWN
                | MISC_ACTIVITY_WAIT_SIPI | (uint64_t)cr3_targets << MISC_CR3_TARGETS_SHIFT
                | MISC_VMWRITE_ANY | (misc & MISC_ZERO_LENGTH_INJECTION);
+    // Its own Intel PT keeps working in VMX operation, paused while its guests
+    // run.
+    if (vmx_pt_passthrough()) {
+        cap_misc |= MISC_PT;
+    }
 
     cap_cr0_fixed0 = vmx_capability(MSR_IA32_VMX_CR0_FIXED0);
     cap_cr0_fixed1 = vmx_capability(MSR_IA32_VMX_CR0_FIXED1);
@@ -1272,7 +1278,7 @@ static enum ept12_result ept12_walk(struct nvmx *n, uint64_t gpa, uint64_t acces
 // rights the guest's EPT gives, and what else the guest is offered of it.
 static uint64_t ept12_qual(uint64_t access, const struct ept12_walk *w) {
     uint64_t kept = EPT_QUAL_READ | EPT_QUAL_WRITE | EPT_QUAL_FETCH | EPT_QUAL_LINEAR
-                    | EPT_QUAL_TRANSLATION | EPT_QUAL_NMI_UNBLOCKED;
+                    | EPT_QUAL_TRANSLATION | EPT_QUAL_NMI_UNBLOCKED | EPT_QUAL_ASYNC;
     if (cap_ept_vpid & CAP_ADVANCED_INFO) {
         kept |= EPT_QUAL_USER | EPT_QUAL_WRITABLE | EPT_QUAL_XD;
     }
@@ -1927,6 +1933,13 @@ static void write_vmcs02(struct vcpu *v, struct nvmx *n, const struct l1_values 
         // guest's shadow VMCS is in its own format, which the hypervisor reads.
         .proc2 = (proc2 & ~(uint64_t)(PROC2_PML | PROC2_VMCS_SHADOWING)) | PROC2_EPT,
     };
+    // The guest's guest's trace output goes through EPT02, into its own memory.
+    if (vmx_pt_passthrough()) {
+        c.proc2 |= PROC2_PT_USE_GPA;
+        if (vmx_secondary_allowed(PROC2_CONCEAL_VMX_FROM_PT)) {
+            c.proc2 |= PROC2_CONCEAL_VMX_FROM_PT;
+        }
+    }
     apic_virtualization(n, &c);
     vmx_write(VMCS_PIN_CONTROLS, c.pin);
     vmx_write(VMCS_PROC_CONTROLS, c.proc);
@@ -2698,6 +2711,10 @@ static void ept_violation(struct vcpu *v, struct nvmx *n, uint64_t qual) {
         return;
     }
     if (ept02_allows(n, ept02_fill(n, gpa, &w), w.access)) {
+        return;
+    }
+    if (qual & EPT_QUAL_ASYNC) {
+        vmx_async_access(w.gpa);
         return;
     }
     if (event_cut_short(v)) {
