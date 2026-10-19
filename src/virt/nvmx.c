@@ -112,8 +112,8 @@ static const uint16_t fields[] = {
     0x0800, 0x0802, 0x0804, 0x0806, 0x0808, 0x080a, 0x080c, 0x080e, 0x0810, 0x0812,
     0x0c00, 0x0c02, 0x0c04, 0x0c06, 0x0c08, 0x0c0a, 0x0c0c,
     0x2000, 0x2002, 0x2004, 0x2006, 0x2008, 0x200a, 0x200e, 0x2010, 0x2012, 0x2014, 0x2016,
-    0x201a, 0x202c, 0x2032,
-    0x201c, 0x201e, 0x2020, 0x2022,
+    0x2018, 0x201a, 0x202c, 0x2032,
+    0x201c, 0x201e, 0x2020, 0x2022, 0x2024,
     0x2400,
     0x2800, 0x2802, 0x2804, 0x2806, 0x280a, 0x280c, 0x280e, 0x2810,
     0x2c00, 0x2c02,
@@ -227,6 +227,7 @@ static uint64_t cap_proc2, cap_misc;
 static uint64_t cap_cr0_fixed0, cap_cr0_fixed1, cap_cr4_fixed0, cap_cr4_fixed1;
 static uint64_t cap_vmcs_enum;
 static uint64_t cap_ept_vpid;
+static uint64_t cap_vmfunc;
 // The CR3-target values the processor has, of the four the guest may get.
 static unsigned cr3_targets;
 // The VMX-preemption timer counts TSC >> timer_rate.
@@ -265,8 +266,8 @@ static unsigned ept02_budget;
     (PROC2_VIRT_APIC_ACCESSES | PROC2_EPT | PROC2_DESC_TABLE_EXITING | PROC2_RDTSCP             \
      | PROC2_VIRT_X2APIC | PROC2_VPID | PROC2_WBINVD_EXITING | PROC2_UNRESTRICTED_GUEST         \
      | PROC2_APIC_REG_VIRT | PROC2_VIRT_INTR_DELIVERY | PROC2_PAUSE_LOOP_EXITING               \
-     | PROC2_RDRAND_EXITING | PROC2_INVPCID | PROC2_RDSEED_EXITING | PROC2_PML | PROC2_XSAVES    \
-     | PROC2_MBEC | PROC2_TSC_SCALING | PROC2_USER_WAIT_PAUSE)
+     | PROC2_RDRAND_EXITING | PROC2_INVPCID | PROC2_VMFUNC | PROC2_RDSEED_EXITING | PROC2_PML   \
+     | PROC2_XSAVES | PROC2_MBEC | PROC2_TSC_SCALING | PROC2_USER_WAIT_PAUSE)
 #define EXIT_EMULATED                                                                        \
     (EXIT_SAVE_DEBUG_CONTROLS | EXIT_HOST_ADDR_SPACE_SIZE | EXIT_ACK_INTR_ON_EXIT | EXIT_SAVE_PAT \
      | EXIT_LOAD_PAT | EXIT_SAVE_EFER | EXIT_LOAD_EFER | EXIT_SAVE_PREEMPTION_TIMER \
@@ -299,6 +300,10 @@ static unsigned ept02_budget;
 #define MISC_ZERO_LENGTH_INJECTION (1ull << 30)
 
 #define FEATURE_CONTROL_GUEST (FEATURE_CONTROL_LOCK | FEATURE_CONTROL_VMX_OUTSIDE_SMX)
+
+// VM function 0 (SDM 325462-093 Vol. 3C, 28.5.7.3) and its EPTP list's size.
+#define VMFUNC_EPTP_SWITCHING (1ull << 0)
+#define EPTP_LIST_ENTRIES 512
 
 #define CPUID_7_1_EAX_LAM (1u << 26)
 
@@ -380,6 +385,10 @@ void nvmx_init(void) {
     // user-mode linear addresses from others.
     if (!(ept_vpid & CAP_ADVANCED_INFO)) {
         cap_proc2 &= ~((uint64_t)PROC2_MBEC << 32);
+    }
+    // EPTP switching is the hypervisor's to carry out, on EPT02.
+    if (cap_proc2 >> 32 & PROC2_EPT) {
+        cap_vmfunc = VMFUNC_EPTP_SWITCHING;
     }
     phys_width = cpuid(0x80000008, 0).eax & 0xff;
     if (cap_proc2 >> 32 & PROC2_VIRT_APIC_ACCESSES) {
@@ -463,6 +472,12 @@ static bool field_offered(uint32_t field) {
         }
         case VMCS_XSS_EXIT_BITMAP: {
             return (proc2 & PROC2_XSAVES) != 0;
+        }
+        case VMCS_VMFUNC_CONTROLS: {
+            return (proc2 & PROC2_VMFUNC) != 0;
+        }
+        case VMCS_EPTP_LIST: {
+            return (proc2 & PROC2_VMFUNC) && (cap_vmfunc & VMFUNC_EPTP_SWITCHING);
         }
         case VMCS_TSC_MULTIPLIER: {
             return (proc2 & PROC2_TSC_SCALING) != 0;
@@ -1508,6 +1523,14 @@ static bool controls_valid(const struct nvmx *n) {
     if ((proc2 & PROC2_PML) && !valid_address(get12(n, VMCS_PML_ADDRESS))) {
         return false;
     }
+    if (proc2 & PROC2_VMFUNC) {
+        uint64_t functions = get12(n, VMCS_VMFUNC_CONTROLS);
+        if ((functions & ~cap_vmfunc)
+            || ((functions & VMFUNC_EPTP_SWITCHING)
+                && (!(proc2 & PROC2_EPT) || !valid_address(get12(n, VMCS_EPTP_LIST))))) {
+            return false;
+        }
+    }
     if ((proc2 & PROC2_VPID) && get12(n, VMCS_VPID) == 0) {
         return false;
     }
@@ -1892,6 +1915,10 @@ static void write_vmcs02(struct vcpu *v, struct nvmx *n, const struct l1_values 
     // VMCS01's own bitmap has nothing for VMCS02's to add.
     if (proc2 & PROC2_XSAVES) {
         vmx_write(VMCS_XSS_EXIT_BITMAP, get12(n, VMCS_XSS_EXIT_BITMAP));
+    }
+    // The guest's VM functions all exit, for the hypervisor to carry out.
+    if (proc2 & PROC2_VMFUNC) {
+        vmx_write(VMCS_VMFUNC_CONTROLS, 0);
     }
     vmx_write(VMCS_MSR_BITMAP, (uint64_t)(uintptr_t)n->msr_bitmap);
     n->tsc_stored = msr_list_has(get12(n, VMCS_EXIT_MSR_STORE_ADDR),
@@ -2631,6 +2658,30 @@ static void ept_violation(struct vcpu *v, struct nvmx *n, uint64_t qual) {
           "%#llx\n", (unsigned long long)gpa, (unsigned long long)w.gpa, (unsigned long long)qual);
 }
 
+// The guest's guest's VMFUNC, which exits for every function: EPTP switching
+// carried out where the guest enables it and it makes no exit itself (SDM
+// 325462-093 Vol. 3C, 28.5.7.3), else the guest's exit.
+static bool eptp_switch(struct vcpu *v, struct nvmx *n) {
+    uint64_t function = v->gprs.rax & 0xffffffff;
+    uint64_t index = v->gprs.rcx & 0xffffffff;
+    if (function != 0 || !(get12(n, VMCS_VMFUNC_CONTROLS) & VMFUNC_EPTP_SWITCHING)
+        || index >= EPTP_LIST_ENTRIES) {
+        return false;
+    }
+    uint64_t at = get12(n, VMCS_EPTP_LIST) + index * 8;
+    const uint8_t *page = guest_page(at & ~0xfffull);
+    // Where nothing decodes, it reads as all ones, which is invalid.
+    uint64_t eptp = page == NULL ? ~0ull : *(const volatile uint64_t *)(page + (at & 0xfff));
+    uint64_t current = get12(n, VMCS_EPT_POINTER);
+    if (!eptp_valid(eptp) || EPTP_LEVELS(eptp) != EPTP_LEVELS(current)) {
+        return false;
+    }
+    set12(n, VMCS_EPT_POINTER, eptp);
+    vmx_load_gpt_root(v);
+    vcpu_skip_instruction(v);
+    return true;
+}
+
 bool nvmx_l2_exit(struct vcpu *v, uint32_t reason, uint64_t qual) {
     struct nvmx *n = v->nvmx;
     if (n == NULL || !n->in_l2) {
@@ -2649,6 +2700,9 @@ bool nvmx_l2_exit(struct vcpu *v, uint32_t reason, uint64_t qual) {
     if ((reason & 0xffff) == EXIT_REASON_EPT_MISCONFIG && ept12(n)) {
         panic("EPT02 is misconfigured at %#llx\n",
               (unsigned long long)vmx_read(VMCS_GUEST_PHYS_ADDR));
+    }
+    if ((reason & 0xffff) == EXIT_REASON_VMFUNC && eptp_switch(v, n)) {
+        return true;
     }
     if (!l1_wants(v, n, reason & 0xffff, qual)) {
         if ((reason & 0xffff) == EXIT_REASON_CR_ACCESS) {
@@ -2875,7 +2929,12 @@ bool nvmx_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
             *value = cap_ept_vpid;
             return true;
         }
-        case MSR_IA32_VMX_VMFUNC:
+        // It exists only with VM functions (SDM 325462-093 Vol. 3D, A.11).
+        case MSR_IA32_VMX_VMFUNC: {
+            *fault = !(cap_proc2 >> 32 & PROC2_VMFUNC);
+            *value = cap_vmfunc;
+            return true;
+        }
         case MSR_IA32_VMX_PROCBASED_CTLS3: {
             *fault = true;
             return true;
