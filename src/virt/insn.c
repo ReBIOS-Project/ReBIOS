@@ -471,10 +471,10 @@ static uint64_t segment_linear(struct vcpu *v, const struct insn *insn, int reg,
     struct segment segment;
     if (insn->long_mode) {
         if (reg != SEG_FS && reg != SEG_GS) {
-            return ea;
+            return vcpu_lam(v, ea);
         }
         vcpu_get_seg(v, reg, &segment);
-        return segment.base + ea;
+        return vcpu_lam(v, segment.base + ea);
     }
     vcpu_get_seg(v, reg, &segment);
     return (segment.base + ea) & 0xffffffff;

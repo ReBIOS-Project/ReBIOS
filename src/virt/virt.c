@@ -484,6 +484,25 @@ uint64_t vcpu_cr4(struct vcpu *v) {
     return v->vmcb->save.cr4;
 }
 
+// User addresses clear bit 63 (SDM 325462-093 Vol. 3A, 4.4.1).
+uint64_t vcpu_lam(struct vcpu *v, uint64_t linear) {
+    int bit;
+    if (linear >> 63) {
+        if (!(vcpu_cr4(v) & CR4_LAM_SUP)) {
+            return linear;
+        }
+        bit = (vcpu_cr4(v) & CR4_LA57) ? 56 : 47;
+    } else if (vcpu_cr3(v) & CR3_LAM_U57) {
+        bit = 56;
+    } else if (vcpu_cr3(v) & CR3_LAM_U48) {
+        bit = 47;
+    } else {
+        return linear;
+    }
+    uint64_t metadata = ((1ull << 63) - 1) & ~((2ull << bit) - 1);
+    return (linear >> bit & 1) ? linear | metadata : linear & ~metadata;
+}
+
 uint64_t vcpu_efer(struct vcpu *v) {
     if (virt_vmx) {
         return vmx_read(VMCS_GUEST_EFER);
