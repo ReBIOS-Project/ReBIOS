@@ -27,6 +27,9 @@ struct vcpu;
 // processor under the hypervisor too. Needs virt_init() and cpu_tables_load().
 void msr_init(void);
 void msr_vcpu_init(struct vcpu *v);
+// Sets each processor up as it starts for the MSRs the guest gets: on AMD's
+// Zen, the TSC held at P0's current frequency.
+void msr_cpu_init(void);
 
 // Whether msr is one the guest has a copy of; fault is set if the access raises
 // #GP.

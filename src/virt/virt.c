@@ -115,6 +115,7 @@ void virt_cpu_init(void) {
     } else {
         svm_cpu_init();
     }
+    msr_cpu_init();
 }
 
 uint64_t virt_io_bitmap(void) {

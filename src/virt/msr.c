@@ -108,6 +108,16 @@
 #define HWCR_IR_PERF_EN (1u << 30)
 #define HWCR_GUEST (HWCR_MC_STATUS_WR_EN | HWCR_CPB_DIS | HWCR_IR_PERF_EN)
 
+// AMD's TSC counts at P0's frequency (BKDG 42301 rev. 3.14, MSR0000_0010), so
+// the guest's writes to the P-state definitions would change the rate the
+// hypervisor times itself by, but where Family 10h's TscFreqSel or Zen's
+// LockTscToCurrentP0 holds it at the frequency P0 had when set (BKDG 31116
+// rev. 3.62, PPR 55772 rev. 3.08, MSRC001_0015). Families 15h and 16h hold
+// it at none: their definitions are read-only.
+#define MSR_AMD_PSTATE_DEF0 0xc0010064
+#define MSR_AMD_PSTATE_DEF7 0xc001006b
+#define HWCR_LOCK_TSC_TO_CURRENT_P0 (1u << 21)
+
 // AMD's northbridge configuration (BKDG 31116 rev. 3.62, 42301 rev. 3.14,
 // MSRC001_001F): the processor's, of which the guest may change only
 // EnableCf8ExtCfg, which Linux 7.3 sets on every family for extended
@@ -200,6 +210,7 @@ static bool mpx_hidden;
 // IA32_XSS, which exists where XSAVES does.
 static bool xss;
 static bool lbr_hidden;
+static bool pstates_read_only;
 // The tables of the processor's model-specific MSRs, where it has any.
 static const struct msr_model *model;
 // Physical address bits the processor lacks, for the guest's AMD addresses.
@@ -288,6 +299,13 @@ void msr_init(void) {
             virt_intercept_msr(MSR_DC_CFG, false, true);
         }
         virt_intercept_msr(MSR_AMD_HWCR, true, true);
+        uint32_t family = cpu_signature().family;
+        if (family == 0x15 || family == 0x16) {
+            pstates_read_only = true;
+            for (uint32_t msr = MSR_AMD_PSTATE_DEF0; msr <= MSR_AMD_PSTATE_DEF7; msr++) {
+                virt_intercept_msr(msr, false, true);
+            }
+        }
         if (!svm_lbr_virtualisation) {
             lbr_hidden = true;
             virt_intercept_msr(MSR_DEBUGCTL, false, true);
@@ -318,6 +336,15 @@ void msr_init(void) {
         virt_intercept_msr(MSR_IA32_CORE_CAPABILITIES, true, false);
         virt_intercept_msr(MSR_IA32_ARCH_CAPABILITIES, true, false);
         virt_intercept_msr(MSR_PLATFORM_INFO, true, false);
+    }
+}
+
+void msr_cpu_init(void) {
+    uint32_t family = cpu_signature().family;
+    uint64_t hwcr;
+    if (!virt_vmx && (family == 0x17 || family == 0x19 || family == 0x1a)
+        && rdmsr_safe(MSR_AMD_HWCR, &hwcr) && !(hwcr & HWCR_LOCK_TSC_TO_CURRENT_P0)) {
+        wrmsr_safe(MSR_AMD_HWCR, hwcr | HWCR_LOCK_TSC_TO_CURRENT_P0);
     }
 }
 
@@ -599,7 +626,8 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
 }
 
 bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
-    if ((pt_hidden && pt_msr(msr)) || (mpx_hidden && msr == MSR_IA32_BNDCFGS) || lbr_msr(msr)) {
+    if ((pt_hidden && pt_msr(msr)) || (mpx_hidden && msr == MSR_IA32_BNDCFGS) || lbr_msr(msr)
+        || (pstates_read_only && msr >= MSR_AMD_PSTATE_DEF0 && msr <= MSR_AMD_PSTATE_DEF7)) {
         *fault = true;
         return true;
     }
