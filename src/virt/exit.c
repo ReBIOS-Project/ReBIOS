@@ -152,7 +152,7 @@ bool exit_msr_read(struct vcpu *v, uint32_t msr, uint64_t *value) {
         *value = 0;
         return true;
     }
-    return rdmsr_safe(msr, value);
+    return msr_allowed(msr) && rdmsr_safe(msr, value);
 }
 
 void exit_rdmsr(struct vcpu *v) {
@@ -192,7 +192,7 @@ bool exit_msr_write(struct vcpu *v, uint32_t msr, uint64_t value) {
     } else if (!virt_vmx && (msr == MSR_VM_HSAVE_PA || msr == MSR_VM_CR)) {
         // The guest has no SVM of its own to configure yet.
     } else {
-        return wrmsr_safe(msr, value);
+        return msr_allowed(msr) && wrmsr_safe(msr, value);
     }
     return true;
 }

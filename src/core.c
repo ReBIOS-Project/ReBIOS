@@ -81,6 +81,7 @@ static void bsp_main(void *arg) {
     smp_init();
     vlapic_init();
     nvmx_init();
+    msr_allowed_init();
     lapic_host_init(VLAPIC_SPURIOUS_VECTOR, VLAPIC_TIMER_VECTOR);
     smp_start_aps();
     ioapic_init();

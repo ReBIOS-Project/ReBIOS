@@ -32,7 +32,12 @@ void virt_cpu_init(void);
 uint64_t virt_io_bitmap(void);
 uint64_t virt_msr_bitmap(void);
 void virt_intercept_io(uint16_t port, unsigned count, bool intercept);
+// Makes the guest's reads, writes, or both of an MSR exit, for a module to
+// handle them, whatever virt_pass_msr() says; the others follow that.
 void virt_intercept_msr(uint32_t msr, bool read, bool write);
+// Lets the guest's accesses to an MSR no module has chosen for reach the
+// processor without exits.
+void virt_pass_msr(uint32_t msr);
 // The MSR bitmap for vCPUs whose x2APIC the processor virtualises, made by the
 // first of these calls, which pass reads or writes of an x2APIC MSR.
 uint64_t virt_msr_bitmap_x2apic(void);

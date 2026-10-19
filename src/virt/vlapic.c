@@ -39,14 +39,11 @@
 #include <virt/vlapic.h>
 #include <virt/vmx.h>
 
-#define MSR_IA32_ARCH_CAPABILITIES 0x10a
 #define MSR_IA32_XAPIC_DISABLE_STATUS 0xbd
 #define MSR_X2APIC_FIRST 0x800
 #define MSR_X2APIC_LAST 0x8ff
 #define MSR_X2APIC_ICR 0x830
 #define MSR_X2APIC_SELF_IPI 0x83f
-
-#define ARCH_CAPABILITIES_XAPIC_DISABLE_STATUS (1ull << 21)
 
 #define APIC_BASE_BSP (1ull << 8)
 #define APIC_BASE_EXTD (1ull << 10)
@@ -344,7 +341,6 @@ void vlapic_init(void) {
     }
     trap_page(APIC_DEFAULT_BASE);
     virt_intercept_msr(MSR_IA32_APIC_BASE, true, true);
-    virt_intercept_msr(MSR_IA32_ARCH_CAPABILITIES, true, false);
     virt_intercept_msr(MSR_IA32_XAPIC_DISABLE_STATUS, true, true);
     for (uint32_t msr = MSR_X2APIC_FIRST; msr <= MSR_X2APIC_LAST; msr++) {
         virt_intercept_msr(msr, true, true);
@@ -1614,14 +1610,6 @@ bool vlapic_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
             *value = vl->base;
             return true;
         }
-        case MSR_IA32_ARCH_CAPABILITIES: {
-            // The guest's xAPIC mode is never off for good.
-            if (!rdmsr_safe(msr, value)) {
-                *fault = true;
-            }
-            *value &= ~ARCH_CAPABILITIES_XAPIC_DISABLE_STATUS;
-            return true;
-        }
         case MSR_IA32_XAPIC_DISABLE_STATUS: {
             *value = 0;
             *fault = !lapic_xapic_locked();
@@ -1653,10 +1641,6 @@ bool vlapic_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
     switch (msr) {
         case MSR_IA32_APIC_BASE: {
             *fault = !apic_base_write(v, value);
-            return true;
-        }
-        case MSR_IA32_ARCH_CAPABILITIES: {
-            *fault = true;
             return true;
         }
         case MSR_IA32_XAPIC_DISABLE_STATUS: {

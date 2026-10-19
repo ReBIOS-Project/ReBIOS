@@ -27,6 +27,8 @@
 #include <virt/cpuid.h>
 #include <virt/layout.h>
 #include <virt/msr.h>
+#include <virt/msr_table.h>
+#include <virt/nvmx.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>
 #include <virt/vmx.h>
@@ -56,6 +58,34 @@
 
 #define MSR_IA32_BNDCFGS 0xd90
 #define MSR_IA32_XSS 0xda0
+
+// IA32_FEATURE_CONTROL as the guest sees it (SDM 325462-093 Vol. 4, Table
+// 2-2): locked, as vmx_cpu_init() leaves it, VMX outside SMX where the guest
+// gets VMX, and the firmware's local machine check enable; not SMX's or SGX's.
+#define FEATURE_CONTROL_LMCE_ON (1u << 20)
+
+// IA32_ARCH_CAPABILITIES' bits the guest sees (SDM 325462-093 Vol. 4, Table
+// 2-2): the defined ones, but for the microcode update interface's 9, 16, and
+// 22, and 21, XAPIC_DISABLE_STATUS, as the guest's xAPIC mode is never off for
+// good. IA32_CORE_CAPABILITIES has only model-specific ones (SDM 325462-093
+// Vol. 4, Tables 2-46 and 2-56): 3, RSM_IN_CPL0_ONLY, and 4 and 5, the UC-lock
+// and split-lock disables' support; 2 enumerates MSR_INTEGRITY_CAPABILITIES,
+// which the guest lacks.
+#define MSR_IA32_CORE_CAPABILITIES 0xcf
+#define MSR_IA32_ARCH_CAPABILITIES 0x10a
+#define ARCH_CAPABILITIES_KNOWN 0x17f9efdffull
+#define CORE_CAPABILITIES_KNOWN 0x38ull
+
+// MSR_PLATFORM_INFO's bits the model tables of SDM 325462-093 Vol. 4 define:
+// the ratios, what is programmable, PPIN, the 16K DCU mode, LPM, and the
+// ConfigTDP levels, but not BIOS Guard's, PEG2DMIDIS', or SMM's. Bit 31, which
+// those tables reserve, is where processors report CPUID faulting (Linux 7.3's
+// MSR_PLATFORM_INFO_CPUID_FAULT), kept where MSR_FEATURE_ENABLES is the
+// guest's.
+#define MSR_PLATFORM_INFO 0xce
+#define MSR_FEATURE_ENABLES 0x140
+#define PLATFORM_INFO_KNOWN 0x00ffff077480ff00ull
+#define PLATFORM_INFO_CPUID_FAULT (1ull << 31)
 
 // AMD's microcode patch loader, which loads the patch at the linear address
 // written (Linux 7.3's MSR_AMD64_PATCH_LOADER): the guest's writes load
@@ -100,6 +130,8 @@ static bool pt_hidden;
 static bool mpx_hidden;
 // IA32_XSS, which exists where XSAVES does.
 static bool xss;
+// The tables of the processor's model-specific MSRs, where it has any.
+static const struct msr_model *model;
 
 static void misc_enable_init(void) {
     // IA32_MISC_ENABLE is Intel's, and VMX runs only on Intel's processors.
@@ -181,6 +213,61 @@ void msr_init(void) {
     if (!virt_vmx) {
         virt_intercept_msr(MSR_AMD_PATCH_LOADER, false, true);
     }
+    if (virt_vmx) {
+        virt_intercept_msr(MSR_IA32_FEATURE_CONTROL, true, true);
+        virt_intercept_msr(MSR_IA32_CORE_CAPABILITIES, true, false);
+        virt_intercept_msr(MSR_IA32_ARCH_CAPABILITIES, true, false);
+        virt_intercept_msr(MSR_PLATFORM_INFO, true, false);
+    }
+}
+
+static bool in_ranges(const struct msr_range *ranges, size_t count, uint32_t msr) {
+    for (size_t i = 0; i < count; i++) {
+        if (msr >= ranges[i].first && msr <= ranges[i].last) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool msr_allowed(uint32_t msr) {
+    // AMD's processors keep every MSR no module handles.
+    if (!virt_vmx) {
+        return true;
+    }
+    if (in_ranges(msr_intel_architectural, msr_intel_architectural_count, msr)) {
+        return true;
+    }
+    for (size_t i = 0; model != NULL && i < model->count; i++) {
+        if (in_ranges(model->tables[i]->ranges, model->tables[i]->count, msr)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void pass_ranges(const struct msr_range *ranges, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        for (uint64_t msr = ranges[i].first; msr <= ranges[i].last; msr++) {
+            virt_pass_msr((uint32_t)msr);
+        }
+    }
+}
+
+void msr_allowed_init(void) {
+    if (!virt_vmx) {
+        return;
+    }
+    struct cpu_signature s = cpu_signature();
+    for (size_t i = 0; i < msr_intel_model_count; i++) {
+        if (msr_intel_models[i].family == s.family && msr_intel_models[i].model == s.model) {
+            model = &msr_intel_models[i];
+        }
+    }
+    pass_ranges(msr_intel_architectural, msr_intel_architectural_count);
+    for (size_t i = 0; model != NULL && i < model->count; i++) {
+        pass_ranges(model->tables[i]->ranges, model->tables[i]->count);
+    }
 }
 
 // The guest's IA32_HW_FEEDBACK_PTR for the processor's package, made if
@@ -224,6 +311,34 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
         return true;
     }
     switch (msr) {
+        case MSR_IA32_FEATURE_CONTROL: {
+            if (!virt_vmx) {
+                return false;
+            }
+            *fault = !rdmsr_safe(msr, value);
+            *value = (*value & FEATURE_CONTROL_LMCE_ON) | FEATURE_CONTROL_LOCK
+                     | (nvmx_enabled ? FEATURE_CONTROL_VMX_OUTSIDE_SMX : 0);
+            return true;
+        }
+        case MSR_IA32_CORE_CAPABILITIES:
+        case MSR_IA32_ARCH_CAPABILITIES: {
+            if (!virt_vmx) {
+                return false;
+            }
+            *fault = !rdmsr_safe(msr, value);
+            *value &= msr == MSR_IA32_ARCH_CAPABILITIES ? ARCH_CAPABILITIES_KNOWN
+                                                        : CORE_CAPABILITIES_KNOWN;
+            return true;
+        }
+        case MSR_PLATFORM_INFO: {
+            if (!virt_vmx) {
+                return false;
+            }
+            *fault = !msr_allowed(msr) || !rdmsr_safe(msr, value);
+            *value &= PLATFORM_INFO_KNOWN
+                      | (msr_allowed(MSR_FEATURE_ENABLES) ? PLATFORM_INFO_CPUID_FAULT : 0);
+            return true;
+        }
         case MSR_IA32_MISC_ENABLE: {
             if (!misc_enable_copied) {
                 return false;
@@ -257,6 +372,13 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
         return true;
     }
     switch (msr) {
+        case MSR_IA32_FEATURE_CONTROL: {
+            if (!virt_vmx) {
+                return false;
+            }
+            *fault = true;
+            return true;
+        }
         case MSR_IA32_MISC_ENABLE: {
             if (!misc_enable_copied) {
                 return false;

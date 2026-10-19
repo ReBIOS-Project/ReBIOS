@@ -47,6 +47,8 @@ bool virt_vmx;
 
 static uint8_t *io_bitmap;
 static uint8_t *msr_bitmap;
+// The accesses to MSRs a module has chosen for, as their bits in msr_bitmap.
+static uint8_t *msr_claimed;
 // For vCPUs whose x2APIC the processor virtualises: the same but for the
 // accesses to x2APIC registers it passes, and for those whose IPIs it
 // virtualises too, the ICR's as well.
@@ -71,11 +73,15 @@ bool virt_init(void) {
         // I/O bitmaps A and B, then the MSR bitmap.
         io_bitmap = page_alloc(2);
         msr_bitmap = page_alloc(1);
+        msr_claimed = page_alloc(1);
+        // Only the MSRs the guest gets go to the processor (msr.c).
+        memset(msr_bitmap, 0xff, PAGE_SIZE);
         gpt_init(true, vmx_ept_huge_pages());
     } else if (!intel && svm_supported()) {
         virt_vmx = false;
         io_bitmap = page_alloc(3);
         msr_bitmap = page_alloc(2);
+        msr_claimed = page_alloc(2);
         gpt_init(false, svm_huge_pages());
         // Only nested paging gives the guest its own view of these.
         virt_intercept_msr(MSR_EFER, true, true);
@@ -179,19 +185,44 @@ static bool msr_bits(uint32_t msr, unsigned *read, unsigned *write) {
 }
 
 void virt_intercept_msr(uint32_t msr, bool read, bool write) {
-    unsigned read_bit, write_bit;
-    if (!msr_bits(msr, &read_bit, &write_bit)) {
+    unsigned bits[2];
+    if (!msr_bits(msr, &bits[0], &bits[1])) {
         return;
     }
-    bitmap_set(msr_bitmap, read_bit, read);
-    bitmap_set(msr_bitmap, write_bit, write);
-    if (msr_bitmap_x2apic != NULL && (msr < 0x800 || msr > 0x8ff)) {
-        bitmap_set(msr_bitmap_x2apic, read_bit, read);
-        bitmap_set(msr_bitmap_x2apic, write_bit, write);
+    bool chosen[2] = {read, write};
+    for (unsigned i = 0; i < 2; i++) {
+        if (!chosen[i]) {
+            continue;
+        }
+        bitmap_set(msr_claimed, bits[i], true);
+        bitmap_set(msr_bitmap, bits[i], true);
+        if (msr_bitmap_x2apic != NULL && (msr < 0x800 || msr > 0x8ff)) {
+            bitmap_set(msr_bitmap_x2apic, bits[i], true);
+        }
+        if (msr_bitmap_x2apic_icr != NULL && (msr < 0x800 || msr > 0x8ff)) {
+            bitmap_set(msr_bitmap_x2apic_icr, bits[i], true);
+        }
     }
-    if (msr_bitmap_x2apic_icr != NULL && (msr < 0x800 || msr > 0x8ff)) {
-        bitmap_set(msr_bitmap_x2apic_icr, read_bit, read);
-        bitmap_set(msr_bitmap_x2apic_icr, write_bit, write);
+}
+
+void virt_pass_msr(uint32_t msr) {
+    unsigned bits[2];
+    if (!msr_bits(msr, &bits[0], &bits[1])) {
+        return;
+    }
+    // The x2APIC registers' bits in the x2APIC bitmaps are the local APIC's.
+    bool x2apic_register = msr >= 0x800 && msr <= 0x8ff;
+    for (unsigned i = 0; i < 2; i++) {
+        if (msr_claimed[bits[i] / 8] & (1 << (bits[i] % 8))) {
+            continue;
+        }
+        bitmap_set(msr_bitmap, bits[i], false);
+        if (!x2apic_register && msr_bitmap_x2apic != NULL) {
+            bitmap_set(msr_bitmap_x2apic, bits[i], false);
+        }
+        if (!x2apic_register && msr_bitmap_x2apic_icr != NULL) {
+            bitmap_set(msr_bitmap_x2apic_icr, bits[i], false);
+        }
     }
 }
 

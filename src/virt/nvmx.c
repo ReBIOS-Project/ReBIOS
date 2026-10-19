@@ -304,8 +304,6 @@ static unsigned ept02_budget;
 #define MISC_VMWRITE_ANY (1ull << 29)
 #define MISC_ZERO_LENGTH_INJECTION (1ull << 30)
 
-#define FEATURE_CONTROL_GUEST (FEATURE_CONTROL_LOCK | FEATURE_CONTROL_VMX_OUTSIDE_SMX)
-
 // VM function 0 (SDM 325462-093 Vol. 3C, 28.5.7.3) and its EPTP list's size.
 #define VMFUNC_EPTP_SWITCHING (1ull << 0)
 #define EPTP_LIST_ENTRIES 512
@@ -432,7 +430,6 @@ void nvmx_init(void) {
     }
     cap_vmcs_enum = max_index << 1;
 
-    virt_intercept_msr(MSR_IA32_FEATURE_CONTROL, true, true);
     for (uint32_t msr = MSR_IA32_VMX_BASIC; msr <= MSR_IA32_VMX_PROCBASED_CTLS3; msr++) {
         virt_intercept_msr(msr, true, true);
     }
@@ -2986,10 +2983,6 @@ bool nvmx_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
         return false;
     }
     switch (msr) {
-        case MSR_IA32_FEATURE_CONTROL: {
-            *value = FEATURE_CONTROL_GUEST;
-            return true;
-        }
         case MSR_IA32_VMX_BASIC: {
             *value = cap_basic;
             return true;
@@ -3080,12 +3073,10 @@ bool nvmx_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
     (void)v;
     (void)value;
     *fault = false;
-    if (!nvmx_enabled
-        || (msr != MSR_IA32_FEATURE_CONTROL
-            && (msr < MSR_IA32_VMX_BASIC || msr > MSR_IA32_VMX_PROCBASED_CTLS3))) {
+    if (!nvmx_enabled || msr < MSR_IA32_VMX_BASIC || msr > MSR_IA32_VMX_PROCBASED_CTLS3) {
         return false;
     }
-    // Locked, and the capability MSRs read-only.
+    // The capability MSRs are read-only.
     *fault = true;
     return true;
 }

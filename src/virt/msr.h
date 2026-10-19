@@ -33,4 +33,12 @@ void msr_vcpu_init(struct vcpu *v);
 bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault);
 bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault);
 
+// Whether the guest's accesses to an MSR no module handles reach the processor:
+// for MSRs the hypervisor knows, of the processor's model, as safe to give the
+// guest; the others raise #GP as on a processor without them. The init lets
+// those reach it without exits, once the modules have chosen theirs (after
+// nvmx_init()).
+bool msr_allowed(uint32_t msr);
+void msr_allowed_init(void);
+
 #endif

@@ -31,7 +31,7 @@ void nvmx_vcpu_init(struct vcpu *v);
 
 // The guest's VMX instructions, by the exits they cause.
 void nvmx_instruction(struct vcpu *v, uint32_t reason);
-// The guest's IA32_FEATURE_CONTROL and VMX capability MSRs.
+// The guest's VMX capability MSRs.
 bool nvmx_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault);
 bool nvmx_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault);
 // Whether the guest may write a value to CR0 or CR4, as VMX operation and the
