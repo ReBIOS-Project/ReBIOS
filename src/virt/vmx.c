@@ -431,24 +431,90 @@ uint64_t vmx_cr4_real(uint64_t guest_cr4) {
     return (guest_cr4 | cr4_fixed0) & cr4_fixed1;
 }
 
-void vmx_vcpu_init(struct vcpu *v) {
-    struct cpu *cpu = v->cpu;
+// The hypervisor's own, but for the stack, which the entry stub writes.
+static void write_host_state(struct cpu *cpu) {
+    vmx_write(VMCS_HOST_CR0, read_cr0());
+    vmx_write(VMCS_HOST_CR3, read_cr3());
+    vmx_write(VMCS_HOST_CR4, read_cr4());
+    vmx_write(VMCS_HOST_CS_SEL, GDT_CODE);
+    vmx_write(VMCS_HOST_SS_SEL, GDT_DATA);
+    vmx_write(VMCS_HOST_DS_SEL, GDT_DATA);
+    vmx_write(VMCS_HOST_ES_SEL, GDT_DATA);
+    vmx_write(VMCS_HOST_FS_SEL, 0);
+    vmx_write(VMCS_HOST_GS_SEL, 0);
+    vmx_write(VMCS_HOST_TR_SEL, GDT_TSS);
+    vmx_write(VMCS_HOST_FS_BASE, 0);
+    vmx_write(VMCS_HOST_GS_BASE, 0);
+    vmx_write(VMCS_HOST_TR_BASE, (uint64_t)(uintptr_t)&cpu->tss);
+    vmx_write(VMCS_HOST_GDTR_BASE, (uint64_t)(uintptr_t)cpu->gdt);
+    vmx_write(VMCS_HOST_IDTR_BASE, cpu_idt_base());
+    vmx_write(VMCS_HOST_SYSENTER_CS, 0);
+    vmx_write(VMCS_HOST_SYSENTER_ESP, 0);
+    vmx_write(VMCS_HOST_SYSENTER_EIP, 0);
+    vmx_write(VMCS_HOST_EFER, rdmsr(MSR_EFER));
+    vmx_write(VMCS_HOST_PAT, HOST_PAT);
+    vmx_write(VMCS_HOST_RIP, (uint64_t)(uintptr_t)vmx_exit_entry);
+}
 
-    v->vmcs_cache = page_alloc((sizeof(struct vmcs_cache) + PAGE_SIZE - 1) / PAGE_SIZE);
-    memset(v->vmcs_cache, 0, sizeof(struct vmcs_cache));
-    v->vmcs = page_alloc(1);
-    v->vmcs_pa = (uint64_t)(uintptr_t)v->vmcs;
-    *(uint32_t *)v->vmcs = (uint32_t)vmx_basic & 0x7fffffff;
-
+static void vmclear(uint64_t pa) {
     bool ok;
-    asm volatile ("vmclear %1\n\tseta %0" : "=qm"(ok) : "m"(v->vmcs_pa) : "cc", "memory");
+    asm volatile ("vmclear %1\n\tseta %0" : "=qm"(ok) : "m"(pa) : "cc", "memory");
     if (!ok) {
         panic("VMCLEAR failed\n");
     }
-    asm volatile ("vmptrld %1\n\tseta %0" : "=qm"(ok) : "m"(v->vmcs_pa) : "cc", "memory");
+}
+
+static void vmptrld(uint64_t pa) {
+    bool ok;
+    asm volatile ("vmptrld %1\n\tseta %0" : "=qm"(ok) : "m"(pa) : "cc", "memory");
     if (!ok) {
         panic("VMPTRLD failed\n");
     }
+}
+
+static struct vmcs_cache *cache_alloc(void) {
+    struct vmcs_cache *c = page_alloc((sizeof(struct vmcs_cache) + PAGE_SIZE - 1) / PAGE_SIZE);
+    memset(c, 0, sizeof(*c));
+    return c;
+}
+
+void vmx_vmcs_create(struct vcpu *v, struct vmx_vmcs *vmcs) {
+    vmcs->cache = cache_alloc();
+    vmcs->vmcs = page_alloc(1);
+    vmcs->pa = (uint64_t)(uintptr_t)vmcs->vmcs;
+    vmcs->launched = false;
+    *(uint32_t *)vmcs->vmcs = (uint32_t)vmx_basic & 0x7fffffff;
+    vmclear(vmcs->pa);
+    vmptrld(vmcs->pa);
+    write_host_state(v->cpu);
+    vmptrld(v->vmcs_pa);
+}
+
+void vmx_vmcs_swap(struct vcpu *v, struct vmx_vmcs *other) {
+    cache_flush(v->vmcs_cache);
+    struct vmx_vmcs current = {
+        .vmcs = v->vmcs,
+        .pa = v->vmcs_pa,
+        .launched = v->vmx_launched,
+        .cache = v->vmcs_cache,
+    };
+    v->vmcs = other->vmcs;
+    v->vmcs_pa = other->pa;
+    v->vmx_launched = other->launched;
+    v->vmcs_cache = other->cache;
+    *other = current;
+    vmptrld(v->vmcs_pa);
+}
+
+void vmx_vcpu_init(struct vcpu *v) {
+    struct cpu *cpu = v->cpu;
+
+    v->vmcs_cache = cache_alloc();
+    v->vmcs = page_alloc(1);
+    v->vmcs_pa = (uint64_t)(uintptr_t)v->vmcs;
+    *(uint32_t *)v->vmcs = (uint32_t)vmx_basic & 0x7fffffff;
+    vmclear(v->vmcs_pa);
+    vmptrld(v->vmcs_pa);
 
     // Interrupts and NMIs reach the hypervisor, which passes the guest's on.
     vmx_write(VMCS_PIN_CONTROLS,
@@ -501,27 +567,7 @@ void vmx_vcpu_init(struct vcpu *v) {
     vmx_write(VMCS_CR0_MASK, vmx_cr0_mask());
     vmx_write(VMCS_CR4_MASK, vmx_cr4_mask());
 
-    vmx_write(VMCS_HOST_CR0, read_cr0());
-    vmx_write(VMCS_HOST_CR3, read_cr3());
-    vmx_write(VMCS_HOST_CR4, read_cr4());
-    vmx_write(VMCS_HOST_CS_SEL, GDT_CODE);
-    vmx_write(VMCS_HOST_SS_SEL, GDT_DATA);
-    vmx_write(VMCS_HOST_DS_SEL, GDT_DATA);
-    vmx_write(VMCS_HOST_ES_SEL, GDT_DATA);
-    vmx_write(VMCS_HOST_FS_SEL, 0);
-    vmx_write(VMCS_HOST_GS_SEL, 0);
-    vmx_write(VMCS_HOST_TR_SEL, GDT_TSS);
-    vmx_write(VMCS_HOST_FS_BASE, 0);
-    vmx_write(VMCS_HOST_GS_BASE, 0);
-    vmx_write(VMCS_HOST_TR_BASE, (uint64_t)(uintptr_t)&cpu->tss);
-    vmx_write(VMCS_HOST_GDTR_BASE, (uint64_t)(uintptr_t)cpu->gdt);
-    vmx_write(VMCS_HOST_IDTR_BASE, cpu_idt_base());
-    vmx_write(VMCS_HOST_SYSENTER_CS, 0);
-    vmx_write(VMCS_HOST_SYSENTER_ESP, 0);
-    vmx_write(VMCS_HOST_SYSENTER_EIP, 0);
-    vmx_write(VMCS_HOST_EFER, rdmsr(MSR_EFER));
-    vmx_write(VMCS_HOST_PAT, HOST_PAT);
-    vmx_write(VMCS_HOST_RIP, (uint64_t)(uintptr_t)vmx_exit_entry);
+    write_host_state(cpu);
 
     vmx_write(VMCS_LINK_POINTER, ~0ull);
     vmx_write(VMCS_GUEST_DEBUGCTL, 0);
@@ -715,6 +761,9 @@ static void vmx_handle_exit(struct vcpu *v) {
     uint32_t reason = vmx_read(VMCS_EXIT_REASON);
     profile_exit(v, reason & 0xffff);
     uint64_t qual = vmx_read(VMCS_EXIT_QUALIFICATION);
+    if (nvmx_l2_exit(v, reason, qual)) {
+        return;
+    }
 
     if (reason & EXIT_REASON_ENTRY_FAILURE) {
         printf("VM entry failed, exit reason %#x, qualification %#llx\n", reason,
@@ -880,13 +929,20 @@ void vmx_run(struct vcpu *v) {
         }
         if (result == VMX_ENTER_FAILED) {
             uint64_t error = vmread(VMCS_VM_INSTR_ERROR);
+            if (nvmx_entry_failed(v, (uint32_t)error)) {
+                continue;
+            }
             printf("VM%s failed, VM-instruction error %llu\n",
                    v->vmx_launched ? "RESUME" : "LAUNCH", (unsigned long long)error);
             vmx_dump_guest();
             panic("Cannot enter the guest\n");
         }
         cache_exited(v->vmcs_cache);
-        v->vmx_launched = true;
+        // Only a VM entry that loaded the guest state and MSRs launches the
+        // VMCS (SDM 325462-093 Vol. 3C, chapter 29).
+        if (!(vmx_read(VMCS_EXIT_REASON) & EXIT_REASON_ENTRY_FAILURE)) {
+            v->vmx_launched = true;
+        }
         event_exit(v);
         vmx_handle_exit(v);
     }

@@ -56,6 +56,9 @@
 #define CR4_PKE (1u << 22)
 #define CR4_CET (1u << 23)
 
+#define CR3_LAM_U57 (1ull << 61)
+#define CR3_LAM_U48 (1ull << 62)
+
 #define MSR_IA32_APIC_BASE 0x1b
 #define MSR_IA32_FEATURE_CONTROL 0x3a
 #define MSR_IA32_PAT 0x277

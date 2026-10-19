@@ -38,4 +38,27 @@ bool nvmx_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault);
 // VMX it gets have it.
 bool nvmx_cr_allowed(struct vcpu *v, unsigned cr, uint64_t value);
 
+// Whether the vCPU runs the guest's own guest, VMCS02 being its current VMCS.
+bool nvmx_in_l2(struct vcpu *v);
+// An exit of the guest's guest: whether it went to the guest, else the
+// hypervisor's to handle as its own.
+bool nvmx_l2_exit(struct vcpu *v, uint32_t reason, uint64_t qual);
+// A failed entry of the guest's guest: whether it was one, now the guest's.
+bool nvmx_entry_failed(struct vcpu *v, uint32_t error);
+// Before the vCPU's entry: whether it enters the guest's guest, the guest's
+// own events seen to as exits.
+bool nvmx_before_entry(struct vcpu *v);
+// Whether INIT waits, as VMX operation blocks it.
+bool nvmx_holds_init(struct vcpu *v);
+
+// An exception that what the hypervisor carries out for the guest's guest
+// raises: whether the guest's exception bitmap makes it an exit instead, with
+// the qualification given.
+bool nvmx_exception(struct vcpu *v, uint8_t vector, bool has_error, uint32_t error, uint64_t qual);
+// Whether the guest's guest is to make an MTF exit after each instruction, and
+// such an exit after one the hypervisor carried out, with a single-step trap
+// pending: whether there is one.
+bool nvmx_monitor_trap_flag(struct vcpu *v);
+bool nvmx_monitor_trap(struct vcpu *v, bool single_step);
+
 #endif

@@ -334,7 +334,8 @@ void vcpu_before_entry(struct vcpu *v) {
     service_pause(v);
     // Before the flush below, which the display's remapping may need.
     vga_refresh();
-    if (__atomic_exchange_n(&v->cpu->init_pending, false, __ATOMIC_ACQUIRE)) {
+    // VMX operation blocks INIT, which its guest's exits take.
+    if (!nvmx_holds_init(v) && __atomic_exchange_n(&v->cpu->init_pending, false, __ATOMIC_ACQUIRE)) {
         vcpu_init_signal(v);
     }
     uint64_t generation = __atomic_load_n(&gpt_generation, __ATOMIC_ACQUIRE);
@@ -354,6 +355,9 @@ void vcpu_before_entry(struct vcpu *v) {
         }
     }
     vlapic_prepare_entry(v);
+    if (nvmx_before_entry(v)) {
+        return;
+    }
     // A stepped instruction is to run, not an event's handler.
     if (v->stepping) {
         event_hold(v);
@@ -381,6 +385,13 @@ void vcpu_wake(struct cpu *cpu) {
     if (cpu == this_cpu() || !__atomic_load_n(&cpu->online, __ATOMIC_ACQUIRE)) {
         return;
     }
+    if (!__atomic_exchange_n(&cpu->kick, true, __ATOMIC_ACQ_REL)) {
+        lapic_send_ipi(cpu->apic_id, ICR_DELIVERY_FIXED | VLAPIC_KICK_VECTOR);
+    }
+}
+
+void vcpu_exit_soon(struct vcpu *v) {
+    struct cpu *cpu = v->cpu;
     if (!__atomic_exchange_n(&cpu->kick, true, __ATOMIC_ACQ_REL)) {
         lapic_send_ipi(cpu->apic_id, ICR_DELIVERY_FIXED | VLAPIC_KICK_VECTOR);
     }
@@ -600,6 +611,11 @@ bool vcpu_guest_tf(struct vcpu *v) {
 }
 
 void vcpu_step_trap(struct vcpu *v) {
+    // A debug exception's exit takes DR6's bits as its qualification, leaving
+    // DR6 alone (SDM 325462-093 Vol. 3C, 30.2.1).
+    if (nvmx_exception(v, 1, false, 0, DR6_BS)) {
+        return;
+    }
     if (virt_vmx) {
         // VMX switches DR7 but not DR6, so the processor's is the guest's.
         uint64_t dr6;
@@ -609,6 +625,19 @@ void vcpu_step_trap(struct vcpu *v) {
         v->vmcb->save.dr6 |= DR6_BS;
     }
     vcpu_inject_exception(v, 1, false, 0);
+}
+
+void vcpu_step_boundary(struct vcpu *v) {
+    if (nvmx_monitor_trap(v, vcpu_guest_tf(v))) {
+        return;
+    }
+    if (vcpu_guest_tf(v)) {
+        vcpu_step_trap(v);
+    }
+}
+
+bool vcpu_stepped(struct vcpu *v) {
+    return vcpu_guest_tf(v) || nvmx_monitor_trap_flag(v);
 }
 
 void vcpu_advance(struct vcpu *v, unsigned length) {
@@ -623,9 +652,7 @@ void vcpu_advance(struct vcpu *v, unsigned length) {
         v->vmcb->save.rip += length;
         v->vmcb->control.interrupt_shadow = 0;
     }
-    if (vcpu_guest_tf(v)) {
-        vcpu_step_trap(v);
-    }
+    vcpu_step_boundary(v);
 }
 
 void vcpu_skip_instruction(struct vcpu *v) {
@@ -650,6 +677,9 @@ void vcpu_inject_exception(struct vcpu *v, uint8_t vector, bool has_error, uint3
     if (!(vcpu_cr0(v) & CR0_PE)) {
         has_error = false;
     }
+    if (nvmx_exception(v, vector, has_error, error, 0)) {
+        return;
+    }
     v->injecting = true;
 
     if (virt_vmx) {
@@ -670,6 +700,11 @@ void vcpu_inject_exception(struct vcpu *v, uint8_t vector, bool has_error, uint3
 }
 
 void vcpu_inject_page_fault(struct vcpu *v, uint64_t linear, uint32_t error) {
+    // A page fault's exit takes the address as its qualification, leaving CR2
+    // alone (SDM 325462-093 Vol. 3C, 30.2.1).
+    if (nvmx_exception(v, 14, true, error, linear)) {
+        return;
+    }
     // VMX leaves CR2 as it is for the guest, and the host takes no page faults.
     if (virt_vmx) {
         write_cr2(linear);

@@ -23,6 +23,7 @@
 #include <sys/x86.h>
 #include <virt/event.h>
 #include <virt/irq.h>
+#include <virt/nvmx.h>
 #include <virt/svm.h>
 #include <virt/vcpu.h>
 #include <virt/vlapic.h>
@@ -51,11 +52,16 @@ void event_exit(struct vcpu *v) {
             return;
         }
         // Software interrupts and exceptions leave RIP at their instruction,
-        // which raises them again.
+        // which raises them again; those the guest injects into its guest
+        // have none, so the guest's guest's go in again with their length,
+        // as KVM has it.
         unsigned type = info & EVENT_TYPE_MASK;
         if (type == INTR_TYPE_SW_INTR || type == INTR_TYPE_PRIV_SW_EXCEPTION
             || type == INTR_TYPE_SW_EXCEPTION) {
-            return;
+            if (!nvmx_in_l2(v)) {
+                return;
+            }
+            v->redeliver_length = (uint32_t)vmx_read(VMCS_EXIT_INSTR_LEN);
         }
         if (info & INTR_INFO_ERROR_CODE) {
             error = (uint32_t)vmx_read(VMCS_IDT_VECTORING_ERROR);

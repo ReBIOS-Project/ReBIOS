@@ -367,6 +367,15 @@
 #define FEATURE_CONTROL_VMX_OUTSIDE_SMX (1u << 2)
 
 struct vcpu;
+struct vmcs_cache;
+
+// A VMCS of the vCPU's but its current one, as the vCPU keeps that.
+struct vmx_vmcs {
+    void *vmcs;
+    uint64_t pa;
+    bool launched;
+    struct vmcs_cache *cache;
+};
 
 bool vmx_supported(void);
 void vmx_cpu_init(void);
@@ -381,6 +390,10 @@ bool vmx_tertiary_allowed(uint64_t control);
 // A VMX capability MSR, the TRUE ones as the processor's controls are where it
 // has none.
 uint64_t vmx_capability(uint32_t msr);
+// Another VMCS for the vCPU, with the hypervisor's host state alone.
+void vmx_vmcs_create(struct vcpu *v, struct vmx_vmcs *vmcs);
+// Makes another VMCS the vCPU's current one, the current one going into it.
+void vmx_vmcs_swap(struct vcpu *v, struct vmx_vmcs *other);
 
 uint64_t vmx_read(uint32_t field);
 

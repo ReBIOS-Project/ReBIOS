@@ -51,6 +51,8 @@ bool vlapic_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault);
 bool vlapic_enabled(struct vcpu *v);
 // The guest-physical page of the vCPU's local APIC in xAPIC mode.
 uint64_t vlapic_page(struct vcpu *v);
+// The page VMX virtualises the local APIC's page on, or 0.
+uint64_t vlapic_access_address(void);
 
 // A fixed interrupt for the vCPU, from any processor.
 void vlapic_accept(struct vcpu *v, uint8_t vector, bool level);

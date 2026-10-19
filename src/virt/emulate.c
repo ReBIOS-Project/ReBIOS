@@ -462,14 +462,13 @@ static enum emulate_result string_op(struct ctx *c) {
     unsigned address_size = insn->address_size;
     uint64_t mask = address_size == 8 ? UINT64_MAX : (1ull << (address_size * 8)) - 1;
     uint64_t count = insn->rep ? v->gprs.rcx & mask : 1;
-    // A single-stepping guest traps after each iteration.
-    bool step = vcpu_guest_tf(v);
+    bool step = vcpu_stepped(v);
 
     for (unsigned n = 0; count != 0; n++) {
         if (n == (step ? 1u : STRING_BATCH)) {
             // The rest when the instruction runs again.
             if (step) {
-                vcpu_step_trap(v);
+                vcpu_step_boundary(v);
             }
             return EMULATE_DONE;
         }

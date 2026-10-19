@@ -29,6 +29,7 @@
 #include <virt/insn.h>
 #include <virt/io.h>
 #include <virt/mmio.h>
+#include <virt/nvmx.h>
 #include <virt/profile.h>
 #include <virt/vcpu.h>
 
@@ -412,6 +413,10 @@ void mmio_step_done(struct vcpu *v) {
     v->stepping = false;
     vcpu_single_step(v, false);
     vcpu_resume_others();
+    // The hypervisor's own step took the guest's MTF exit for its guest.
+    if (completed) {
+        nvmx_monitor_trap(v, false);
+    }
     // SVM's stepping took the trap the guest's own TF asked for.
     if (completed && !virt_vmx && v->step_tf) {
         vcpu_step_trap(v);

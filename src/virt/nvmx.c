@@ -23,12 +23,17 @@
 #include <handoff.h>
 #include <lib/heap.h>
 #include <lib/log.h>
+#include <sys/cpu.h>
+#include <sys/mm.h>
 #include <sys/x86.h>
+#include <virt/exit.h>
 #include <virt/gpt.h>
+#include <virt/irq.h>
 #include <virt/mmio.h>
 #include <virt/nvmx.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>
+#include <virt/vlapic.h>
 #include <virt/vmx.h>
 
 // The guest's VMCS regions hold the revision identifier and the VMX-abort
@@ -49,8 +54,25 @@
 #define ERROR_VMPTRLD_VMXON 10
 #define ERROR_VMPTRLD_REVISION 11
 #define ERROR_UNSUPPORTED_FIELD 12
+#define ERROR_ENTRY_HOST_STATE 8
 #define ERROR_VMXON_IN_ROOT 15
 #define ERROR_ENTRY_MOV_SS 26
+
+// Qualifications of entries failing on the guest state (SDM 325462-093 Vol.
+// 3C, 29.8): the default, and the VMCS link pointer.
+#define QUAL_GUEST_STATE 0
+#define QUAL_LINK_POINTER 4
+
+#define MSR_LIST_MAX 512
+#define MSR_IA32_TSC 0x10
+#define MSR_IA32_SYSENTER_CS 0x174
+#define MSR_IA32_SYSENTER_ESP 0x175
+#define MSR_IA32_SYSENTER_EIP 0x176
+#define MSR_IA32_DEBUGCTL 0x1d9
+#define MSR_IA32_PAT 0x277
+#define MSR_IA32_SMM_MONITOR_CTL 0x9b
+#define MSR_FS_BASE 0xc0000100
+#define MSR_GS_BASE 0xc0000101
 
 #define VMX_RESULT_FLAGS (RFLAGS_CF | RFLAGS_PF | RFLAGS_AF | RFLAGS_ZF | RFLAGS_SF | RFLAGS_OF)
 
@@ -67,6 +89,8 @@
 #define FIELD_WIDTH_16 0
 #define FIELD_WIDTH_64 1
 #define FIELD_WIDTH_32 2
+
+#define VMCS_CR3_TARGET0 0x6008
 
 // The fields the guest's VMCSs have: the controls of what it is offered, and
 // all of the guest state, host state, and exit information.
@@ -107,6 +131,30 @@ struct nvmx {
     uint64_t vmxon_ptr;
     uint64_t current;
     uint8_t *vmcs12;
+    // VMCS02, which runs the guest's guest, while VMCS01 is the vCPU's, and
+    // VMCS01 while VMCS02 is.
+    struct vmx_vmcs other;
+    bool created;
+    bool in_l2;
+    // Whether the entry under way is a VMLAUNCH, which only launches the VMCS
+    // once it gets past the guest state.
+    bool launching;
+    // Whether the guest's VMLAUNCH or VMRESUME waits for the entry into
+    // VMCS02.
+    bool run_pending;
+    // VMCS02's VM-exit MSR-store list: IA32_TSC, while the guest's own list has
+    // it.
+    uint64_t tsc_store[2] __attribute__((aligned(16)));
+    bool tsc_stored;
+    // The guest's MSR bitmap with the hypervisor's intercepts added.
+    uint8_t *msr_bitmap;
+    // An exit of the guest's guest that what the hypervisor carried out for it
+    // raised, for the next entry.
+    bool pending;
+    uint32_t pending_reason;
+    uint32_t pending_info;
+    uint32_t pending_error;
+    uint64_t pending_qual;
 };
 
 bool nvmx_enabled;
@@ -120,6 +168,8 @@ static uint64_t cap_true_pin, cap_true_proc, cap_true_exit, cap_true_entry;
 static uint64_t cap_proc2, cap_misc;
 static uint64_t cap_cr0_fixed0, cap_cr0_fixed1, cap_cr4_fixed0, cap_cr4_fixed1;
 static uint64_t cap_vmcs_enum;
+// The CR3-target values the processor has, of the four the guest may get.
+static unsigned cr3_targets;
 
 // What the default1 classes of the controls the old capability MSRs report
 // as fixed (SDM 325462-093 Vol. 3D, A.2).
@@ -129,6 +179,8 @@ static uint64_t cap_vmcs_enum;
 #define ENTRY_DEFAULT1 0x000011ffu
 
 #define PIN_EMULATED (PIN_EXT_INTR_EXITING | PIN_NMI_EXITING | PIN_VIRTUAL_NMIS | PIN_DEFAULT1)
+#define PIN_REQUIRED (PIN_EXT_INTR_EXITING | PIN_NMI_EXITING)
+#define PROC_REQUIRED (PROC_CR8_LOAD_EXITING | PROC_CR8_STORE_EXITING)
 #define PROC_EMULATED                                                                         \
     (PROC_INTR_WINDOW_EXITING | PROC_TSC_OFFSETTING | PROC_HLT_EXITING | PROC_INVLPG_EXITING \
      | PROC_MWAIT_EXITING | PROC_RDPMC_EXITING | PROC_RDTSC_EXITING | PROC_CR3_LOAD_EXITING   \
@@ -156,15 +208,18 @@ static uint64_t cap_vmcs_enum;
 #define BASIC_NO_ERROR_CODE (1ull << 56)
 
 // IA32_VMX_MISC (SDM 325462-093 Vol. 3D, A.6): exits store EFER.LMA in the
-// IA-32e mode guest control, the HLT activity state, four CR3-target values,
+// IA-32e mode guest control, the HLT activity state, the CR3-target values,
 // and VMWRITE writes the exit information too.
 #define MISC_STORE_LMA (1ull << 5)
 #define MISC_ACTIVITY_HLT (1ull << 6)
 #define MISC_CR3_TARGETS_SHIFT 16
+#define MISC_CR3_TARGETS_MASK 0x1ffull
 #define MISC_VMWRITE_ANY (1ull << 29)
 #define MISC_ZERO_LENGTH_INJECTION (1ull << 30)
 
 #define FEATURE_CONTROL_GUEST (FEATURE_CONTROL_LOCK | FEATURE_CONTROL_VMX_OUTSIDE_SMX)
+
+#define CPUID_7_1_EAX_LAM (1u << 26)
 
 // A capability MSR: allowed 0-settings low, allowed 1-settings high.
 static uint64_t capability(uint64_t hardware, uint32_t emulated, uint32_t required) {
@@ -193,18 +248,26 @@ void nvmx_init(void) {
     cap_basic = VMCS12_REVISION | 4096ull << BASIC_SIZE_SHIFT | BASIC_MEMTYPE_WB | BASIC_INS_OUTS
                 | BASIC_TRUE_CONTROLS | (basic & BASIC_NO_ERROR_CODE);
 
-    cap_true_pin = capability(vmx_capability(MSR_IA32_VMX_TRUE_PINBASED_CTLS), PIN_EMULATED, 0);
-    cap_true_proc = capability(vmx_capability(MSR_IA32_VMX_TRUE_PROCBASED_CTLS), PROC_EMULATED, 0);
+    // Interrupts and NMIs reach the guest with the guest's guest out of the
+    // way, and CR8 accesses exit, as they would reach the local APIC's TPR.
+    cap_true_pin = capability(vmx_capability(MSR_IA32_VMX_TRUE_PINBASED_CTLS), PIN_EMULATED,
+                              PIN_REQUIRED);
+    cap_true_proc = capability(vmx_capability(MSR_IA32_VMX_TRUE_PROCBASED_CTLS), PROC_EMULATED,
+                               PROC_REQUIRED);
     cap_true_exit = capability(vmx_capability(MSR_IA32_VMX_TRUE_EXIT_CTLS), EXIT_EMULATED, 0);
     cap_true_entry = capability(vmx_capability(MSR_IA32_VMX_TRUE_ENTRY_CTLS), ENTRY_EMULATED, 0);
-    cap_pin = capability(cap_true_pin, PIN_EMULATED, PIN_DEFAULT1);
-    cap_proc = capability(cap_true_proc, PROC_EMULATED, PROC_DEFAULT1);
+    cap_pin = capability(cap_true_pin, PIN_EMULATED, PIN_REQUIRED | PIN_DEFAULT1);
+    cap_proc = capability(cap_true_proc, PROC_EMULATED, PROC_REQUIRED | PROC_DEFAULT1);
     cap_exit = capability(cap_true_exit, EXIT_EMULATED, EXIT_DEFAULT1);
     cap_entry = capability(cap_true_entry, ENTRY_EMULATED, ENTRY_DEFAULT1);
     cap_proc2 = capability(vmx_capability(MSR_IA32_VMX_PROCBASED_CTLS2), PROC2_EMULATED, 0);
 
     uint64_t misc = vmx_capability(MSR_IA32_VMX_MISC);
-    cap_misc = MISC_STORE_LMA | MISC_ACTIVITY_HLT | 4ull << MISC_CR3_TARGETS_SHIFT
+    cr3_targets = (unsigned)(misc >> MISC_CR3_TARGETS_SHIFT & MISC_CR3_TARGETS_MASK);
+    if (cr3_targets > 4) {
+        cr3_targets = 4;
+    }
+    cap_misc = MISC_STORE_LMA | MISC_ACTIVITY_HLT | (uint64_t)cr3_targets << MISC_CR3_TARGETS_SHIFT
                | MISC_VMWRITE_ANY | (misc & MISC_ZERO_LENGTH_INJECTION);
 
     cap_cr0_fixed0 = vmx_capability(MSR_IA32_VMX_CR0_FIXED0);
@@ -236,6 +299,10 @@ static int field_slot(uint32_t field) {
         return -1;
     }
     if (FIELD_INDEX(field) >= MAX_INDEX) {
+        return -1;
+    }
+    if (field >= VMCS_CR3_TARGET0 && field < VMCS_CR3_TARGET0 + 8
+        && (field - VMCS_CR3_TARGET0) / 2 >= cr3_targets) {
         return -1;
     }
     return field_slots[FIELD_WIDTH(field)][FIELD_TYPE(field)][FIELD_INDEX(field)] - 1;
@@ -545,6 +612,579 @@ static void vmwrite(struct vcpu *v, struct nvmx *n, uint32_t info) {
     succeed(v);
 }
 
+static uint64_t get12(const struct nvmx *n, uint32_t field) {
+    return *field_at(n, field_slot(field));
+}
+
+static void set12(struct nvmx *n, uint32_t field, uint64_t value) {
+    *field_at(n, field_slot(field)) = value;
+}
+
+// The guest state VMCS12 and VMCS02 hold alike, but for DR7, IA32_DEBUGCTL,
+// IA32_PAT, and IA32_EFER, which the controls decide on.
+static const uint16_t guest_fields[] = {
+    VMCS_GUEST_ES_SEL, VMCS_GUEST_CS_SEL, VMCS_GUEST_SS_SEL, VMCS_GUEST_DS_SEL, VMCS_GUEST_FS_SEL,
+    VMCS_GUEST_GS_SEL, VMCS_GUEST_LDTR_SEL, VMCS_GUEST_TR_SEL,
+    VMCS_GUEST_ES_LIMIT, VMCS_GUEST_CS_LIMIT, VMCS_GUEST_SS_LIMIT, VMCS_GUEST_DS_LIMIT,
+    VMCS_GUEST_FS_LIMIT, VMCS_GUEST_GS_LIMIT, VMCS_GUEST_LDTR_LIMIT, VMCS_GUEST_TR_LIMIT,
+    VMCS_GUEST_GDTR_LIMIT, VMCS_GUEST_IDTR_LIMIT,
+    VMCS_GUEST_ES_AR, VMCS_GUEST_CS_AR, VMCS_GUEST_SS_AR, VMCS_GUEST_DS_AR, VMCS_GUEST_FS_AR,
+    VMCS_GUEST_GS_AR, VMCS_GUEST_LDTR_AR, VMCS_GUEST_TR_AR,
+    VMCS_GUEST_INTERRUPTIBILITY, VMCS_GUEST_ACTIVITY_STATE, VMCS_GUEST_SYSENTER_CS,
+    VMCS_GUEST_CR0, VMCS_GUEST_CR3, VMCS_GUEST_CR4,
+    VMCS_GUEST_ES_BASE, VMCS_GUEST_CS_BASE, VMCS_GUEST_SS_BASE, VMCS_GUEST_DS_BASE,
+    VMCS_GUEST_FS_BASE, VMCS_GUEST_GS_BASE, VMCS_GUEST_LDTR_BASE, VMCS_GUEST_TR_BASE,
+    VMCS_GUEST_GDTR_BASE, VMCS_GUEST_IDTR_BASE,
+    VMCS_GUEST_RSP, VMCS_GUEST_RIP, VMCS_GUEST_RFLAGS, VMCS_GUEST_PENDING_DBG,
+    VMCS_GUEST_SYSENTER_ESP, VMCS_GUEST_SYSENTER_EIP,
+};
+
+// The controls VMCS02 takes from VMCS12 as they are.
+static const uint16_t control_fields[] = {
+    VMCS_EXCEPTION_BITMAP, VMCS_PF_ERROR_MASK, VMCS_PF_ERROR_MATCH, VMCS_CR3_TARGET_COUNT,
+    VMCS_ENTRY_INTR_INFO, VMCS_ENTRY_EXCEPTION_ERROR, VMCS_ENTRY_INSTR_LEN,
+    VMCS_CR0_MASK, VMCS_CR4_MASK, VMCS_CR0_SHADOW, VMCS_CR4_SHADOW,
+    VMCS_TSC_OFFSET,
+};
+
+// The exit information VMCS12 gets from VMCS02 for exits the processor
+// itself made; the I/O RCX, RSI, RDI, and RIP fields, which only SMIs fill
+// (SDM 325462-093 Vol. 3C, 27.9.1), stay zero.
+static const uint16_t exit_fields[] = {
+    VMCS_EXIT_INTR_INFO, VMCS_EXIT_INTR_ERROR, VMCS_IDT_VECTORING_INFO, VMCS_IDT_VECTORING_ERROR,
+    VMCS_EXIT_INSTR_LEN, VMCS_EXIT_INSTR_INFO, VMCS_GUEST_LINEAR_ADDR, VMCS_GUEST_PHYS_ADDR,
+};
+
+#define ARRAY_COUNT(a) (sizeof(a) / sizeof((a)[0]))
+
+static bool allowed(uint64_t value, uint64_t cap) {
+    uint32_t required = (uint32_t)cap;
+    uint32_t permitted = (uint32_t)(cap >> 32);
+    return (value & required) == required && !(value & ~(uint64_t)permitted);
+}
+
+static bool canonical(uint64_t address) {
+    unsigned bits = (cpuid(0x80000008, 0).eax >> 8) & 0xff;
+    return (uint64_t)((int64_t)(address << (64 - bits)) >> (64 - bits)) == address;
+}
+
+static bool pat_valid(uint64_t pat) {
+    for (int i = 0; i < 8; i++) {
+        uint8_t type = pat >> (i * 8);
+        if (type > 7 || type == 2 || type == 3) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// A list of MSR entries, 16 bytes each, its last byte within the address
+// width too (SDM 325462-093 Vol. 3C, 29.2.1.2, 29.2.1.3).
+static bool msr_list_valid(uint64_t address, uint64_t count) {
+    unsigned width = cpuid(0x80000008, 0).eax & 0xff;
+    return count == 0
+           || ((address & 15) == 0 && (address >> width) == 0
+               && ((address + count * 16 - 1) >> width) == 0);
+}
+
+// An entry in the guest's RAM, or NULL.
+static uint8_t *msr_entry(uint64_t address, uint64_t index) {
+    uint64_t at = address + index * 16;
+    uint8_t *page = guest_page(at & ~0xfffull);
+    return page == NULL ? NULL : page + (at & 0xfff);
+}
+
+// The checks on the controls ReBIOS does not leave to the processor's on
+// VMCS02 (SDM 325462-093 Vol. 3C, 29.2.1).
+static bool controls_valid(const struct nvmx *n) {
+    uint64_t pin = get12(n, VMCS_PIN_CONTROLS);
+    uint64_t proc = get12(n, VMCS_PROC_CONTROLS);
+    uint64_t proc2 = (proc & PROC_SECONDARY_CONTROLS) ? get12(n, VMCS_PROC_CONTROLS2) : 0;
+    if (!allowed(pin, cap_true_pin) || !allowed(proc, cap_true_proc)
+        || !allowed(get12(n, VMCS_EXIT_CONTROLS), cap_true_exit)
+        || !allowed(get12(n, VMCS_ENTRY_CONTROLS), cap_true_entry)
+        || ((proc & PROC_SECONDARY_CONTROLS) && !allowed(proc2, cap_proc2))) {
+        return false;
+    }
+    if (get12(n, VMCS_CR3_TARGET_COUNT) > cr3_targets
+        || ((proc & PROC_NMI_WINDOW_EXITING) && !(pin & PIN_VIRTUAL_NMIS))) {
+        return false;
+    }
+    if (proc & PROC_IO_BITMAPS) {
+        uint64_t a = get12(n, VMCS_IO_BITMAP_A);
+        uint64_t b = get12(n, VMCS_IO_BITMAP_B);
+        if (!valid_address(a) || !valid_address(b)) {
+            return false;
+        }
+    }
+    if (proc & PROC_MSR_BITMAPS) {
+        uint64_t bitmap = get12(n, VMCS_MSR_BITMAP);
+        if (!valid_address(bitmap)) {
+            return false;
+        }
+    }
+    return msr_list_valid(get12(n, VMCS_EXIT_MSR_STORE_ADDR), get12(n, VMCS_EXIT_MSR_STORE_COUNT))
+           && msr_list_valid(get12(n, VMCS_EXIT_MSR_LOAD_ADDR), get12(n, VMCS_EXIT_MSR_LOAD_COUNT))
+           && msr_list_valid(get12(n, VMCS_ENTRY_MSR_LOAD_ADDR), get12(n, VMCS_ENTRY_MSR_LOAD_COUNT));
+}
+
+// The checks on the host state (SDM 325462-093 Vol. 3C, 29.2.2, 29.2.3),
+// which the exits of the guest's guest load into VMCS01.
+static bool host_state_valid(const struct nvmx *n) {
+    uint64_t exit = get12(n, VMCS_EXIT_CONTROLS);
+    bool host64 = (exit & EXIT_HOST_ADDR_SPACE_SIZE) != 0;
+    uint64_t cr0 = get12(n, VMCS_HOST_CR0);
+    uint64_t cr3 = get12(n, VMCS_HOST_CR3);
+    uint64_t cr4 = get12(n, VMCS_HOST_CR4);
+    unsigned width = cpuid(0x80000008, 0).eax & 0xff;
+    // CR3 has LAM's bits where the processor has LAM (SDM 325462-093 Vol. 3A,
+    // 4.4.1).
+    if (cpuid(7, 1).eax & CPUID_7_1_EAX_LAM) {
+        cr3 &= ~(CR3_LAM_U57 | CR3_LAM_U48);
+    }
+    if ((cr0 & cap_cr0_fixed0) != cap_cr0_fixed0 || (cr0 & ~cap_cr0_fixed1)
+        || (cr4 & cap_cr4_fixed0) != cap_cr4_fixed0 || (cr4 & ~cap_cr4_fixed1)
+        || ((cr4 & CR4_CET) && !(cr0 & CR0_WP)) || (cr3 >> width) != 0) {
+        return false;
+    }
+    static const uint16_t selectors[] = {
+        VMCS_HOST_ES_SEL, VMCS_HOST_CS_SEL, VMCS_HOST_SS_SEL, VMCS_HOST_DS_SEL, VMCS_HOST_FS_SEL,
+        VMCS_HOST_GS_SEL, VMCS_HOST_TR_SEL,
+    };
+    for (unsigned i = 0; i < ARRAY_COUNT(selectors); i++) {
+        if (get12(n, selectors[i]) & 7) {
+            return false;
+        }
+    }
+    if (get12(n, VMCS_HOST_CS_SEL) == 0 || get12(n, VMCS_HOST_TR_SEL) == 0
+        || (!host64 && get12(n, VMCS_HOST_SS_SEL) == 0)) {
+        return false;
+    }
+    uint64_t rip = get12(n, VMCS_HOST_RIP);
+    if (host64) {
+        if (!(cr4 & CR4_PAE) || !canonical(rip)) {
+            return false;
+        }
+    } else if ((get12(n, VMCS_ENTRY_CONTROLS) & ENTRY_IA32E_MODE_GUEST) || (cr4 & CR4_PCIDE)
+               || (rip >> 32) != 0) {
+        return false;
+    }
+    static const uint16_t bases[] = {
+        VMCS_HOST_FS_BASE, VMCS_HOST_GS_BASE, VMCS_HOST_TR_BASE, VMCS_HOST_GDTR_BASE,
+        VMCS_HOST_IDTR_BASE, VMCS_HOST_SYSENTER_ESP, VMCS_HOST_SYSENTER_EIP,
+    };
+    for (unsigned i = 0; i < ARRAY_COUNT(bases); i++) {
+        if (!canonical(get12(n, bases[i]))) {
+            return false;
+        }
+    }
+    if (exit & EXIT_LOAD_EFER) {
+        uint64_t efer = get12(n, VMCS_HOST_EFER);
+        bool lma = (efer & EFER_LMA) != 0;
+        bool lme = (efer & EFER_LME) != 0;
+        if ((efer & ~(uint64_t)(EFER_SCE | EFER_LME | EFER_LMA | EFER_NXE)) || lma != host64
+            || lme != host64) {
+            return false;
+        }
+    }
+    return !(exit & EXIT_LOAD_PAT) || pat_valid(get12(n, VMCS_HOST_PAT));
+}
+
+// The MSRs a VMCS switches are the current VMCS's, the others as RDMSR and
+// WRMSR have them.
+static bool msr_read(struct vcpu *v, uint32_t msr, uint64_t *value) {
+    switch (msr) {
+        case MSR_EFER: {
+            *value = vmx_read(VMCS_GUEST_EFER);
+            return true;
+        }
+        case MSR_IA32_PAT: {
+            *value = vmx_read(VMCS_GUEST_PAT);
+            return true;
+        }
+        case MSR_IA32_DEBUGCTL: {
+            *value = vmx_read(VMCS_GUEST_DEBUGCTL);
+            return true;
+        }
+        case MSR_IA32_SYSENTER_CS: {
+            *value = vmx_read(VMCS_GUEST_SYSENTER_CS);
+            return true;
+        }
+        case MSR_IA32_SYSENTER_ESP: {
+            *value = vmx_read(VMCS_GUEST_SYSENTER_ESP);
+            return true;
+        }
+        case MSR_IA32_SYSENTER_EIP: {
+            *value = vmx_read(VMCS_GUEST_SYSENTER_EIP);
+            return true;
+        }
+        default: {
+            return exit_msr_read(v, msr, value);
+        }
+    }
+}
+
+static bool msr_write(struct vcpu *v, uint32_t msr, uint64_t value) {
+    switch (msr) {
+        case MSR_EFER: {
+            // WRMSR leaves LMA alone.
+            uint64_t old = vmx_read(VMCS_GUEST_EFER);
+            if (value & ~(uint64_t)(EFER_SCE | EFER_LME | EFER_LMA | EFER_NXE)) {
+                return false;
+            }
+            vmx_write(VMCS_GUEST_EFER, (value & ~(uint64_t)EFER_LMA) | (old & EFER_LMA));
+            return true;
+        }
+        case MSR_IA32_PAT: {
+            if (!pat_valid(value)) {
+                return false;
+            }
+            vmx_write(VMCS_GUEST_PAT, value);
+            return true;
+        }
+        case MSR_IA32_DEBUGCTL: {
+            vmx_write(VMCS_GUEST_DEBUGCTL, value);
+            return true;
+        }
+        case MSR_IA32_SYSENTER_CS: {
+            vmx_write(VMCS_GUEST_SYSENTER_CS, value & 0xffffffff);
+            return true;
+        }
+        case MSR_IA32_SYSENTER_ESP: {
+            vmx_write(VMCS_GUEST_SYSENTER_ESP, value);
+            return true;
+        }
+        case MSR_IA32_SYSENTER_EIP: {
+            vmx_write(VMCS_GUEST_SYSENTER_EIP, value);
+            return true;
+        }
+        default: {
+            return exit_msr_write(v, msr, value);
+        }
+    }
+}
+
+// The entries an MSR-load list may not name (SDM 325462-093 Vol. 3C, 29.4).
+static bool msr_loadable(uint32_t msr, uint32_t reserved) {
+    return reserved == 0 && msr != MSR_FS_BASE && msr != MSR_GS_BASE && (msr >> 8) != 8
+           && msr != MSR_IA32_SMM_MONITOR_CTL;
+}
+
+// The number of the entry that failed, from 1, or 0; past IA32_VMX_MISC's
+// maximum, as Linux 7.3's KVM has it.
+static uint64_t load_msr_list(struct vcpu *v, uint64_t address, uint64_t count) {
+    for (uint64_t i = 0; i < count; i++) {
+        const uint8_t *entry = msr_entry(address, i);
+        if (i == MSR_LIST_MAX || entry == NULL) {
+            return i + 1;
+        }
+        uint32_t msr = *(const volatile uint32_t *)entry;
+        uint32_t reserved = *(const volatile uint32_t *)(entry + 4);
+        uint64_t value = *(const volatile uint64_t *)(entry + 8);
+        if (!msr_loadable(msr, reserved) || !msr_write(v, msr, value)) {
+            return i + 1;
+        }
+    }
+    return 0;
+}
+
+// IA32_TSC as it was at the exit, the rest as they are. Longer lists than
+// IA32_VMX_MISC's maximum are undefined (SDM 325462-093 Vol. 3C, A.6).
+static void store_msr_list(struct vcpu *v, uint64_t address, uint64_t count, uint64_t tsc) {
+    for (uint64_t i = 0; i < count && i < MSR_LIST_MAX; i++) {
+        uint8_t *entry = msr_entry(address, i);
+        if (entry == NULL) {
+            continue;
+        }
+        uint32_t msr = *(volatile uint32_t *)entry;
+        uint64_t value = 0;
+        if (msr == MSR_IA32_TSC) {
+            value = tsc;
+        } else {
+            msr_read(v, msr, &value);
+        }
+        *(volatile uint64_t *)(entry + 8) = value;
+    }
+}
+
+static bool msr_list_has(uint64_t address, uint64_t count, uint32_t msr) {
+    for (uint64_t i = 0; i < count && i < MSR_LIST_MAX; i++) {
+        const uint8_t *entry = msr_entry(address, i);
+        if (entry != NULL && *(const volatile uint32_t *)entry == msr) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The MSR bitmap of the guest's guest: where the guest has its own, that with
+// the hypervisor's intercepts added, as either may want the exits.
+static void merge_msr_bitmap(struct nvmx *n, uint64_t proc) {
+    if (n->msr_bitmap == NULL) {
+        n->msr_bitmap = page_alloc(1);
+    }
+    // The base bitmap intercepts the x2APIC MSRs, which VMCS02 does not
+    // virtualise.
+    const uint8_t *own_msr = (const uint8_t *)(uintptr_t)virt_msr_bitmap();
+    if (proc & PROC_MSR_BITMAPS) {
+        const uint8_t *bitmap = guest_page(get12(n, VMCS_MSR_BITMAP));
+        for (unsigned i = 0; i < PAGE_SIZE; i++) {
+            n->msr_bitmap[i] = bitmap == NULL ? 0xff : bitmap[i] | own_msr[i];
+        }
+    } else {
+        memset(n->msr_bitmap, 0xff, PAGE_SIZE);
+    }
+}
+
+// What VMCS02 takes from VMCS01, read while that is the current one.
+struct l1_values {
+    uint64_t exit_controls;
+    uint64_t entry_controls;
+    uint64_t dr7;
+    uint64_t debugctl;
+    uint64_t pat;
+    uint64_t efer;
+};
+
+static void write_vmcs02(struct nvmx *n, const struct l1_values *l1) {
+    uint64_t pin = get12(n, VMCS_PIN_CONTROLS);
+    uint64_t proc = get12(n, VMCS_PROC_CONTROLS);
+    uint64_t proc2 = (proc & PROC_SECONDARY_CONTROLS) ? get12(n, VMCS_PROC_CONTROLS2) : 0;
+    uint64_t entry = get12(n, VMCS_ENTRY_CONTROLS);
+
+    merge_msr_bitmap(n, proc);
+    // The hypervisor takes the interrupts and NMIs, through its own EPT, as
+    // it does for the guest; VMCS02 has no VPID, as the guest's guest's
+    // translations go with each entry and exit while the guest uses none.
+    vmx_write(VMCS_PIN_CONTROLS, pin | PIN_EXT_INTR_EXITING | PIN_NMI_EXITING | PIN_VIRTUAL_NMIS);
+    // The processor consults the guest's I/O bitmaps at each access (SDM
+    // 325462-093 Vol. 3C, 27.6.4), which may change meanwhile: every access
+    // exits, to have them read then.
+    uint64_t proc02 = (proc & ~(uint64_t)PROC_IO_BITMAPS) | PROC_UNCOND_IO_EXITING
+                      | PROC_MSR_BITMAPS | PROC_SECONDARY_CONTROLS;
+    vmx_write(VMCS_PROC_CONTROLS, proc02);
+    // On the hypervisor's EPT, the local APIC's page is the page VMCS01
+    // virtualises it on, which VMCS02 has every access to exit from.
+    uint64_t proc2_02 = proc2 | PROC2_EPT;
+    if (vlapic_access_address() != 0) {
+        proc2_02 |= PROC2_VIRT_APIC_ACCESSES;
+        vmx_write(VMCS_APIC_ACCESS_ADDR, vlapic_access_address());
+    }
+    vmx_write(VMCS_PROC_CONTROLS2, proc2_02);
+    vmx_write(VMCS_EXIT_CONTROLS, l1->exit_controls);
+    vmx_write(VMCS_ENTRY_CONTROLS, (l1->entry_controls & ~(uint64_t)ENTRY_IA32E_MODE_GUEST)
+                                       | (entry & ENTRY_IA32E_MODE_GUEST));
+    for (unsigned i = 0; i < ARRAY_COUNT(control_fields); i++) {
+        vmx_write(control_fields[i], get12(n, control_fields[i]));
+    }
+    for (unsigned i = 0; i < cr3_targets; i++) {
+        vmx_write(VMCS_CR3_TARGET0 + 2 * i, get12(n, VMCS_CR3_TARGET0 + 2 * i));
+    }
+    vmx_write(VMCS_MSR_BITMAP, (uint64_t)(uintptr_t)n->msr_bitmap);
+    n->tsc_stored = msr_list_has(get12(n, VMCS_EXIT_MSR_STORE_ADDR),
+                                 get12(n, VMCS_EXIT_MSR_STORE_COUNT), MSR_IA32_TSC);
+    n->tsc_store[0] = MSR_IA32_TSC;
+    vmx_write(VMCS_EXIT_MSR_STORE_ADDR, (uint64_t)(uintptr_t)n->tsc_store);
+    vmx_write(VMCS_EXIT_MSR_STORE_COUNT, n->tsc_stored ? 1 : 0);
+    vmx_write(VMCS_EXIT_MSR_LOAD_COUNT, 0);
+    vmx_write(VMCS_ENTRY_MSR_LOAD_COUNT, 0);
+    vmx_write(VMCS_LINK_POINTER, ~0ull);
+    vmx_load_gpt_root();
+
+    for (unsigned i = 0; i < ARRAY_COUNT(guest_fields); i++) {
+        vmx_write(guest_fields[i], get12(n, guest_fields[i]));
+    }
+    // What entries load without the controls for it (SDM 325462-093 Vol. 3C,
+    // 29.3.2.1).
+    bool debug = (entry & ENTRY_LOAD_DEBUG_CONTROLS) != 0;
+    vmx_write(VMCS_GUEST_DR7, debug ? get12(n, VMCS_GUEST_DR7) : l1->dr7);
+    vmx_write(VMCS_GUEST_DEBUGCTL, debug ? get12(n, VMCS_GUEST_DEBUGCTL) : l1->debugctl);
+    vmx_write(VMCS_GUEST_PAT, (entry & ENTRY_LOAD_PAT) ? get12(n, VMCS_GUEST_PAT) : l1->pat);
+    uint64_t efer = get12(n, VMCS_GUEST_EFER);
+    if (!(entry & ENTRY_LOAD_EFER)) {
+        efer = l1->efer & ~(uint64_t)(EFER_LMA | EFER_LME);
+        if (entry & ENTRY_IA32E_MODE_GUEST) {
+            efer |= EFER_LMA;
+            if (get12(n, VMCS_GUEST_CR0) & CR0_PG) {
+                efer |= EFER_LME;
+            }
+        }
+    }
+    vmx_write(VMCS_GUEST_EFER, efer);
+    // The processor takes PAE paging's PDPTEs from VMCS02, which has EPT.
+    vmx_load_guest_cr3(get12(n, VMCS_GUEST_CR3));
+}
+
+static void save_l2_state(struct nvmx *n) {
+    for (unsigned i = 0; i < ARRAY_COUNT(guest_fields); i++) {
+        set12(n, guest_fields[i], vmx_read(guest_fields[i]));
+    }
+    uint64_t exit = get12(n, VMCS_EXIT_CONTROLS);
+    if (exit & EXIT_SAVE_DEBUG_CONTROLS) {
+        set12(n, VMCS_GUEST_DR7, vmx_read(VMCS_GUEST_DR7));
+        set12(n, VMCS_GUEST_DEBUGCTL, vmx_read(VMCS_GUEST_DEBUGCTL));
+    }
+    if (exit & EXIT_SAVE_PAT) {
+        set12(n, VMCS_GUEST_PAT, vmx_read(VMCS_GUEST_PAT));
+    }
+    uint64_t efer = vmx_read(VMCS_GUEST_EFER);
+    if (exit & EXIT_SAVE_EFER) {
+        set12(n, VMCS_GUEST_EFER, efer);
+    }
+    // As IA32_VMX_MISC bit 5 has it.
+    uint64_t entry = get12(n, VMCS_ENTRY_CONTROLS) & ~(uint64_t)ENTRY_IA32E_MODE_GUEST;
+    set12(n, VMCS_ENTRY_CONTROLS, entry | ((efer & EFER_LMA) ? ENTRY_IA32E_MODE_GUEST : 0));
+}
+
+static struct segment host_segment(const struct nvmx *n, uint32_t selector_field, uint32_t attrib,
+                                   uint64_t base) {
+    struct segment seg = {
+        .selector = (uint16_t)get12(n, selector_field),
+        .attrib = attrib,
+        .limit = 0xffffffff,
+        .base = base,
+    };
+    if (seg.selector == 0) {
+        seg.attrib = SEG_UNUSABLE;
+    }
+    return seg;
+}
+
+// SDM 325462-093 Vol. 3C, 30.5.
+static void load_l1_host_state(struct vcpu *v, struct nvmx *n, bool nmi) {
+    uint64_t exit = get12(n, VMCS_EXIT_CONTROLS);
+    bool host64 = (exit & EXIT_HOST_ADDR_SPACE_SIZE) != 0;
+    uint64_t nmi_blocked = vmx_read(VMCS_GUEST_INTERRUPTIBILITY) & INTERRUPTIBILITY_NMI;
+
+    struct vcpu_mode mode;
+    // The bits a VM exit leaves alone.
+    uint64_t kept = CR0_ET | CR0_CD | CR0_NW | 0xffffffff00000000ull | 0x1ff80000ull
+                    | 0x20000ull | 0xffc0ull;
+    mode.cr0 = (vcpu_cr0(v) & kept) | (get12(n, VMCS_HOST_CR0) & ~kept);
+    mode.cr4 = get12(n, VMCS_HOST_CR4);
+    if (host64) {
+        mode.cr4 |= CR4_PAE;
+    } else {
+        mode.cr4 &= ~(uint64_t)CR4_PCIDE;
+    }
+    mode.cr3 = get12(n, VMCS_HOST_CR3);
+    mode.efer = (exit & EXIT_LOAD_EFER) ? get12(n, VMCS_HOST_EFER) : vcpu_efer(v);
+    mode.efer &= ~(uint64_t)(EFER_LMA | EFER_LME);
+    if (host64) {
+        mode.efer |= EFER_LMA | EFER_LME;
+    }
+    mode.rflags = RFLAGS_FIXED;
+
+    uint32_t code = 0x9b | (1u << 11) | (host64 ? SEG_L : SEG_DB);
+    uint32_t data = 0x93 | (1u << 11) | SEG_DB;
+    mode.segs[SEG_CS] = host_segment(n, VMCS_HOST_CS_SEL, code, 0);
+    mode.segs[SEG_SS] = host_segment(n, VMCS_HOST_SS_SEL, data, 0);
+    mode.segs[SEG_DS] = host_segment(n, VMCS_HOST_DS_SEL, data, 0);
+    mode.segs[SEG_ES] = host_segment(n, VMCS_HOST_ES_SEL, data, 0);
+    mode.segs[SEG_FS] = host_segment(n, VMCS_HOST_FS_SEL, data, get12(n, VMCS_HOST_FS_BASE));
+    mode.segs[SEG_GS] = host_segment(n, VMCS_HOST_GS_SEL, data, get12(n, VMCS_HOST_GS_BASE));
+    // 64-bit mode uses FS and GS bases however unusable.
+    mode.segs[SEG_FS].base = get12(n, VMCS_HOST_FS_BASE);
+    mode.segs[SEG_GS].base = get12(n, VMCS_HOST_GS_BASE);
+    mode.segs[SEG_TR] = (struct segment){
+        .selector = (uint16_t)get12(n, VMCS_HOST_TR_SEL),
+        .attrib = 0x8b,
+        .limit = 0x67,
+        .base = get12(n, VMCS_HOST_TR_BASE),
+    };
+    mode.segs[SEG_LDTR] = (struct segment){.attrib = SEG_UNUSABLE};
+    mode.segs[SEG_GDTR] = (struct segment){.limit = 0xffff, .base = get12(n, VMCS_HOST_GDTR_BASE)};
+    mode.segs[SEG_IDTR] = (struct segment){.limit = 0xffff, .base = get12(n, VMCS_HOST_IDTR_BASE)};
+    vcpu_load_mode(v, &mode);
+    vmx_load_guest_cr3(mode.cr3);
+
+    vcpu_set_rip(v, get12(n, VMCS_HOST_RIP));
+    vcpu_set_rsp(v, get12(n, VMCS_HOST_RSP));
+    vmx_write(VMCS_GUEST_DR7, 0x400);
+    vmx_write(VMCS_GUEST_DEBUGCTL, 0);
+    vmx_write(VMCS_GUEST_SYSENTER_CS, get12(n, VMCS_HOST_SYSENTER_CS));
+    vmx_write(VMCS_GUEST_SYSENTER_ESP, get12(n, VMCS_HOST_SYSENTER_ESP));
+    vmx_write(VMCS_GUEST_SYSENTER_EIP, get12(n, VMCS_HOST_SYSENTER_EIP));
+    if (exit & EXIT_LOAD_PAT) {
+        vmx_write(VMCS_GUEST_PAT, get12(n, VMCS_HOST_PAT));
+    }
+    // Exits keep NMI blocking but where NMIs cause them (SDM 325462-093 Vol.
+    // 3C, 30.5.5).
+    vmx_write(VMCS_GUEST_INTERRUPTIBILITY, nmi ? INTERRUPTIBILITY_NMI : nmi_blocked);
+    vmx_write(VMCS_GUEST_ACTIVITY_STATE, ACTIVITY_ACTIVE);
+    vmx_write(VMCS_GUEST_PENDING_DBG, 0);
+}
+
+// The exit of the guest's guest to the guest, VMCS02 being the vCPU's
+// current VMCS: what the processor recorded where it made the exit, else the
+// exit's reason, qualification, and interruption information. An entry that
+// fails on the guest state leaves the guest state, the rest of the exit
+// information, the MSR-store area, and the event to inject alone (SDM
+// 325462-093 Vol. 3C, 27.8.3, 29.8).
+static void exit_to_l1(struct vcpu *v, struct nvmx *n, uint32_t reason, uint64_t qual,
+                       uint32_t intr_info, uint32_t intr_error, bool processor) {
+    bool nmi = (reason & 0xffff) == EXIT_REASON_EXCEPTION_NMI
+               && (intr_info & (7u << 8)) == INTR_TYPE_NMI;
+    bool failed = (reason & EXIT_REASON_ENTRY_FAILURE) != 0;
+    if (!failed) {
+        save_l2_state(n);
+        set12(n, VMCS_ENTRY_INTR_INFO, get12(n, VMCS_ENTRY_INTR_INFO) & ~(uint64_t)INTR_INFO_VALID);
+    }
+    set12(n, VMCS_EXIT_REASON, reason);
+    set12(n, VMCS_EXIT_QUALIFICATION, qual);
+    if (!failed && processor) {
+        for (unsigned i = 0; i < ARRAY_COUNT(exit_fields); i++) {
+            set12(n, exit_fields[i], vmx_read(exit_fields[i]));
+        }
+    } else if (!failed) {
+        for (unsigned i = 0; i < ARRAY_COUNT(exit_fields); i++) {
+            set12(n, exit_fields[i], 0);
+        }
+        set12(n, VMCS_EXIT_INTR_INFO, intr_info);
+        set12(n, VMCS_EXIT_INTR_ERROR, intr_error);
+        // An event the entry was to inject, or one an exit cut short, is the
+        // guest's to inject again, as Linux 7.3's KVM has it.
+        uint32_t injected = (uint32_t)vmx_read(VMCS_ENTRY_INTR_INFO);
+        if (injected & INTR_INFO_VALID) {
+            set12(n, VMCS_IDT_VECTORING_INFO, injected);
+            set12(n, VMCS_IDT_VECTORING_ERROR, vmx_read(VMCS_ENTRY_EXCEPTION_ERROR));
+            set12(n, VMCS_EXIT_INSTR_LEN, vmx_read(VMCS_ENTRY_INSTR_LEN));
+            vmx_write(VMCS_ENTRY_INTR_INFO, 0);
+        } else if (v->redeliver & INTR_INFO_VALID) {
+            set12(n, VMCS_IDT_VECTORING_INFO, v->redeliver);
+            set12(n, VMCS_IDT_VECTORING_ERROR, v->redeliver_error);
+            set12(n, VMCS_EXIT_INSTR_LEN, v->redeliver_length);
+        }
+    }
+    v->redeliver = 0;
+    v->injecting = false;
+    n->run_pending = false;
+    if (!failed) {
+        uint64_t tsc = processor && n->tsc_stored ? n->tsc_store[1] : rdtsc();
+        store_msr_list(v, get12(n, VMCS_EXIT_MSR_STORE_ADDR), get12(n, VMCS_EXIT_MSR_STORE_COUNT),
+                       tsc);
+    }
+
+    vmx_vmcs_swap(v, &n->other);
+    n->in_l2 = false;
+    n->launching = false;
+    load_l1_host_state(v, n, nmi);
+    // A failure here would be a VMX abort, which shuts the processor down.
+    if (load_msr_list(v, get12(n, VMCS_EXIT_MSR_LOAD_ADDR), get12(n, VMCS_EXIT_MSR_LOAD_COUNT))) {
+        printf("The guest's VM-exit MSR-load list failed\n");
+    }
+    vmx_load_gpt_root();
+}
+
+// An entry failing on the guest state, as the guest sees it: an exit with
+// VMCS02 never entered.
+static void entry_failure(struct vcpu *v, struct nvmx *n, uint32_t reason, uint64_t qual) {
+    if (n->launching) {
+        *(volatile uint32_t *)(n->vmcs12 + VMCS12_LAUNCHED) = 0;
+    }
+    exit_to_l1(v, n, EXIT_REASON_ENTRY_FAILURE | reason, qual, 0, 0, false);
+}
+
 static void vmlaunch(struct vcpu *v, struct nvmx *n, bool resume) {
     if (n->vmcs12 == NULL) {
         fail_invalid(v);
@@ -563,7 +1203,54 @@ static void vmlaunch(struct vcpu *v, struct nvmx *n, bool resume) {
         fail(v, ERROR_VMRESUME_NOT_LAUNCHED);
         return;
     }
-    fail(v, ERROR_ENTRY_CONTROLS);
+    if (!controls_valid(n)) {
+        fail(v, ERROR_ENTRY_CONTROLS);
+        return;
+    }
+    if (!host_state_valid(n)) {
+        fail(v, ERROR_ENTRY_HOST_STATE);
+        return;
+    }
+
+    struct l1_values l1 = {
+        .exit_controls = vmx_read(VMCS_EXIT_CONTROLS),
+        .entry_controls = vmx_read(VMCS_ENTRY_CONTROLS),
+        .dr7 = vmx_read(VMCS_GUEST_DR7),
+        .debugctl = vmx_read(VMCS_GUEST_DEBUGCTL),
+        .pat = vmx_read(VMCS_GUEST_PAT),
+        .efer = vmx_read(VMCS_GUEST_EFER),
+    };
+    if (!n->created) {
+        vmx_vmcs_create(v, &n->other);
+        n->created = true;
+    }
+    vmx_vmcs_swap(v, &n->other);
+    n->in_l2 = true;
+    n->launching = !resume;
+    if (!resume) {
+        *(volatile uint32_t *)(n->vmcs12 + VMCS12_LAUNCHED) = 1;
+    }
+    write_vmcs02(n, &l1);
+    v->redeliver = 0;
+    // What the guest injects goes before the hypervisor's own deliveries.
+    v->injecting = (get12(n, VMCS_ENTRY_INTR_INFO) & INTR_INFO_VALID) != 0;
+    n->run_pending = true;
+
+    // The processor checks VMCS02's guest state, but for the link pointer and
+    // the activity states the guest is not offered.
+    if (get12(n, VMCS_LINK_POINTER) != ~0ull) {
+        entry_failure(v, n, EXIT_REASON_INVALID_GUEST_STATE, QUAL_LINK_POINTER);
+        return;
+    }
+    if (get12(n, VMCS_GUEST_ACTIVITY_STATE) > ACTIVITY_HLT) {
+        entry_failure(v, n, EXIT_REASON_INVALID_GUEST_STATE, QUAL_GUEST_STATE);
+        return;
+    }
+    uint64_t failed = load_msr_list(v, get12(n, VMCS_ENTRY_MSR_LOAD_ADDR),
+                                    get12(n, VMCS_ENTRY_MSR_LOAD_COUNT));
+    if (failed) {
+        entry_failure(v, n, EXIT_REASON_MSR_LOADING, failed);
+    }
 }
 
 void nvmx_instruction(struct vcpu *v, uint32_t reason) {
@@ -621,6 +1308,202 @@ void nvmx_instruction(struct vcpu *v, uint32_t reason) {
             break;
         }
     }
+}
+
+bool nvmx_in_l2(struct vcpu *v) {
+    return v->nvmx != NULL && v->nvmx->in_l2;
+}
+
+bool nvmx_holds_init(struct vcpu *v) {
+    return v->nvmx != NULL && v->nvmx->vmxon;
+}
+
+// The guest's I/O bitmaps, or else its unconditional I/O exiting, decide on
+// I/O; an access wrapping past port FFFFh always exits (SDM 325462-093 Vol.
+// 3C, 28.1.3).
+static bool io_wanted(const struct nvmx *n, uint64_t proc, uint64_t qual) {
+    if (!(proc & PROC_IO_BITMAPS)) {
+        return (proc & PROC_UNCOND_IO_EXITING) != 0;
+    }
+    unsigned size = (unsigned)(qual & 7) + 1;
+    unsigned port = (unsigned)(qual >> 16) & 0xffff;
+    if (port + size > 0x10000) {
+        return true;
+    }
+    for (unsigned p = port; p < port + size; p++) {
+        uint64_t bitmap = get12(n, p < 0x8000 ? VMCS_IO_BITMAP_A : VMCS_IO_BITMAP_B);
+        const uint8_t *page = guest_page(bitmap);
+        if (page == NULL || (page[(p & 0x7fff) / 8] >> (p % 8) & 1)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// MSRs outside the bitmap's ranges always exit (SDM 325462-093 Vol. 3C,
+// 27.6.9).
+static bool msr_wanted(const struct nvmx *n, uint64_t proc, uint32_t msr, bool write) {
+    if (!(proc & PROC_MSR_BITMAPS)) {
+        return true;
+    }
+    unsigned offset;
+    if (msr <= 0x1fff) {
+        offset = 0;
+    } else if (msr >= 0xc0000000 && msr <= 0xc0001fff) {
+        offset = 0x400;
+    } else {
+        return true;
+    }
+    const uint8_t *page = guest_page(get12(n, VMCS_MSR_BITMAP));
+    if (page == NULL) {
+        return true;
+    }
+    unsigned bit = msr & 0x1fff;
+    return page[(write ? 0x800 : 0) + offset + bit / 8] >> (bit % 8) & 1;
+}
+
+// Whether the guest asked for an exit of its guest's: VMCS02's controls are
+// its own but for interrupts, NMIs, I/O, and MSRs, whose exits are the
+// hypervisor's where the guest's controls do not take them, and EPT and the
+// local APIC's page, which are the hypervisor's own.
+static bool l1_wants(struct vcpu *v, const struct nvmx *n, uint32_t reason, uint64_t qual) {
+    uint64_t proc = get12(n, VMCS_PROC_CONTROLS);
+    switch (reason) {
+        case EXIT_REASON_EXCEPTION_NMI: {
+            uint32_t info = (uint32_t)vmx_read(VMCS_EXIT_INTR_INFO);
+            return (info & (7u << 8)) != INTR_TYPE_NMI;
+        }
+        case EXIT_REASON_EXTERNAL_INTR:
+        case EXIT_REASON_EPT_VIOLATION:
+        case EXIT_REASON_EPT_MISCONFIG:
+        case EXIT_REASON_APIC_ACCESS: {
+            return false;
+        }
+        case EXIT_REASON_INTR_WINDOW: {
+            return (proc & PROC_INTR_WINDOW_EXITING) != 0;
+        }
+        case EXIT_REASON_NMI_WINDOW: {
+            return (proc & PROC_NMI_WINDOW_EXITING) != 0;
+        }
+        case EXIT_REASON_MONITOR_TRAP: {
+            // The guest's by its control or by the pending MTF exit it
+            // injected (SDM 325462-093 Vol. 3C, 29.6.2).
+            return !v->stepping;
+        }
+        case EXIT_REASON_IO: {
+            return io_wanted(n, proc, qual);
+        }
+        case EXIT_REASON_RDMSR:
+        case EXIT_REASON_WRMSR: {
+            return msr_wanted(n, proc, (uint32_t)v->gprs.rcx, reason == EXIT_REASON_WRMSR);
+        }
+        default: {
+            return true;
+        }
+    }
+}
+
+bool nvmx_l2_exit(struct vcpu *v, uint32_t reason, uint64_t qual) {
+    struct nvmx *n = v->nvmx;
+    if (n == NULL || !n->in_l2) {
+        return false;
+    }
+    n->run_pending = false;
+    if (reason & EXIT_REASON_ENTRY_FAILURE) {
+        entry_failure(v, n, reason & 0xffff, qual);
+        return true;
+    }
+    n->launching = false;
+    if (!l1_wants(v, n, reason & 0xffff, qual)) {
+        return false;
+    }
+    uint32_t info = (uint32_t)vmx_read(VMCS_EXIT_INTR_INFO);
+    exit_to_l1(v, n, reason, qual, info, 0, true);
+    return true;
+}
+
+bool nvmx_entry_failed(struct vcpu *v, uint32_t error) {
+    struct nvmx *n = v->nvmx;
+    if (n == NULL || !n->in_l2) {
+        return false;
+    }
+    if (n->launching) {
+        *(volatile uint32_t *)(n->vmcs12 + VMCS12_LAUNCHED) = 0;
+    }
+    vmx_vmcs_swap(v, &n->other);
+    n->in_l2 = false;
+    n->launching = false;
+    n->run_pending = false;
+    vmx_load_gpt_root();
+    fail(v, error);
+    return true;
+}
+
+// The guest's INIT, NMIs, and interrupts are exits of its guest's, as VMCS12
+// exits on them; else the guest's guest goes on, with an event an exit cut
+// short delivered again.
+bool nvmx_before_entry(struct vcpu *v) {
+    struct nvmx *n = v->nvmx;
+    if (n == NULL || !n->in_l2) {
+        return false;
+    }
+    // The instruction it came from is what the guest's guest was running.
+    if (n->pending) {
+        n->pending = false;
+        exit_to_l1(v, n, n->pending_reason, n->pending_qual, n->pending_info, n->pending_error,
+                   false);
+        return false;
+    }
+    // The guest's events wait for an instruction boundary: past the delivery of
+    // what its entry injects, or of what an exit cut short, as on hardware and
+    // in Linux 7.3's KVM. An interrupt of the hypervisor's own then ends the
+    // entry.
+    bool waiting = n->run_pending || (v->redeliver & INTR_INFO_VALID);
+    if (!waiting && __atomic_exchange_n(&v->cpu->init_pending, false, __ATOMIC_ACQUIRE)) {
+        exit_to_l1(v, n, EXIT_REASON_INIT, 0, 0, 0, false);
+        return false;
+    }
+    if (__atomic_exchange_n(&v->cpu->nmi_pending, false, __ATOMIC_ACQUIRE)) {
+        v->nmi_pending = true;
+    }
+    if (!waiting && v->nmi_pending) {
+        v->nmi_pending = false;
+        exit_to_l1(v, n, EXIT_REASON_EXCEPTION_NMI, 0, INTR_INFO_VALID | INTR_TYPE_NMI | 2, 0,
+                   false);
+        return false;
+    }
+    bool extint = irq_extint_pending(v);
+    int vector = extint ? -1 : vlapic_pending(v);
+    if (waiting) {
+        if (extint || vector >= 0 || v->nmi_pending
+            || __atomic_load_n(&v->cpu->init_pending, __ATOMIC_ACQUIRE)) {
+            vcpu_exit_soon(v);
+        }
+    } else if (extint || vector >= 0) {
+        uint32_t info = 0;
+        if (get12(n, VMCS_EXIT_CONTROLS) & EXIT_ACK_INTR_ON_EXIT) {
+            if (extint) {
+                vector = irq_extint_acknowledge();
+            } else {
+                vlapic_take(v, (uint8_t)vector);
+            }
+            info = INTR_INFO_VALID | INTR_TYPE_EXT_INTR | (uint32_t)vector;
+        }
+        exit_to_l1(v, n, EXIT_REASON_EXTERNAL_INTR, 0, info, 0, false);
+        return false;
+    }
+    if (v->injecting) {
+        v->injecting = false;
+    } else if (v->redeliver & INTR_INFO_VALID) {
+        if (v->redeliver & INTR_INFO_ERROR_CODE) {
+            vmx_write(VMCS_ENTRY_EXCEPTION_ERROR, v->redeliver_error);
+        }
+        vmx_write(VMCS_ENTRY_INTR_INFO, v->redeliver);
+        // Software events' length; the processor looks at no other's.
+        vmx_write(VMCS_ENTRY_INSTR_LEN, v->redeliver_length);
+        v->redeliver = 0;
+    }
+    return true;
 }
 
 bool nvmx_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
@@ -738,4 +1621,61 @@ bool nvmx_cr_allowed(struct vcpu *v, unsigned cr, uint64_t value) {
         return (value & cap_cr0_fixed0) == cap_cr0_fixed0 && !(value & ~cap_cr0_fixed1);
     }
     return (value & cap_cr4_fixed0) == cap_cr4_fixed0 && !(value & ~cap_cr4_fixed1);
+}
+
+// SDM 325462-093 Vol. 3C, 28.2: a page fault takes bit 14 of the bitmap where
+// its error code matches, else the other way.
+bool nvmx_exception(struct vcpu *v, uint8_t vector, bool has_error, uint32_t error, uint64_t qual) {
+    struct nvmx *n = v->nvmx;
+    if (n == NULL || !n->in_l2) {
+        return false;
+    }
+    if (n->pending) {
+        return true;
+    }
+    bool exits = (get12(n, VMCS_EXCEPTION_BITMAP) >> vector) & 1;
+    if (vector == 14) {
+        uint32_t mask = (uint32_t)get12(n, VMCS_PF_ERROR_MASK);
+        uint32_t match = (uint32_t)get12(n, VMCS_PF_ERROR_MATCH);
+        exits = exits == ((error & mask) == match);
+    }
+    if (!exits) {
+        return false;
+    }
+    n->pending = true;
+    n->pending_reason = EXIT_REASON_EXCEPTION_NMI;
+    n->pending_info = INTR_INFO_VALID | INTR_TYPE_HW_EXCEPTION | vector;
+    n->pending_error = 0;
+    if (has_error) {
+        n->pending_info |= INTR_INFO_ERROR_CODE;
+        n->pending_error = error;
+    }
+    n->pending_qual = qual;
+    return true;
+}
+
+bool nvmx_monitor_trap_flag(struct vcpu *v) {
+    struct nvmx *n = v->nvmx;
+    return n != NULL && n->in_l2 && (get12(n, VMCS_PROC_CONTROLS) & PROC_MONITOR_TRAP_FLAG);
+}
+
+// The processor did not run the instruction, which would have made the exit
+// itself, leaving a single-step trap pending (SDM 325462-093 Vol. 3C, 28.5.2).
+bool nvmx_monitor_trap(struct vcpu *v, bool single_step) {
+    if (!nvmx_monitor_trap_flag(v)) {
+        return false;
+    }
+    struct nvmx *n = v->nvmx;
+    if (n->pending) {
+        return true;
+    }
+    if (single_step) {
+        vmx_write(VMCS_GUEST_PENDING_DBG, vmx_read(VMCS_GUEST_PENDING_DBG) | PENDING_DBG_BS);
+    }
+    n->pending = true;
+    n->pending_reason = EXIT_REASON_MONITOR_TRAP;
+    n->pending_info = 0;
+    n->pending_error = 0;
+    n->pending_qual = 0;
+    return true;
 }

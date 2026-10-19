@@ -103,10 +103,11 @@ struct vcpu {
     uint64_t gpt_generation;
 
     // An event whose delivery an exit cut short, to deliver again, with its
-    // error code: in the format VMX's interruption information and SVM's
-    // events share.
+    // error code and, for VMX's software events, instruction length: in the
+    // format VMX's interruption information and SVM's events share.
     uint32_t redeliver;
     uint32_t redeliver_error;
+    uint32_t redeliver_length;
     // Whether vcpu_inject_exception() set up an event for the coming entry.
     bool injecting;
     bool nmi_pending;
@@ -157,6 +158,9 @@ void vcpu_before_entry(struct vcpu *v);
 // Makes the CPU's vCPU leave the guest, if it runs it, for vcpu_before_entry()
 // to see what changed.
 void vcpu_kick(struct cpu *cpu);
+// An interrupt of the hypervisor's own pending at the entry, which ends it
+// right after any event it delivers.
+void vcpu_exit_soon(struct vcpu *v);
 
 // Interrupts the processor's halt, as one waiting for a start-up IPI is in.
 void vcpu_wake(struct cpu *cpu);
@@ -196,6 +200,11 @@ void vcpu_advance(struct vcpu *v, unsigned length);
 // string instruction's iteration, that the hypervisor carried out for it.
 bool vcpu_guest_tf(struct vcpu *v);
 void vcpu_step_trap(struct vcpu *v);
+// After an instruction, or a string instruction's iteration, the hypervisor
+// carried out: the trap the guest's TF asks for, or the MTF exit the guest asks
+// its guest to make; and whether either stops the guest after each.
+void vcpu_step_boundary(struct vcpu *v);
+bool vcpu_stepped(struct vcpu *v);
 void vcpu_inject_exception(struct vcpu *v, uint8_t vector, bool has_error, uint32_t error);
 void vcpu_inject_page_fault(struct vcpu *v, uint64_t linear, uint32_t error);
 

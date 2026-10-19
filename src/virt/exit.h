@@ -28,6 +28,10 @@ void exit_cpuid(struct vcpu *v);
 void exit_hypercall(struct vcpu *v);
 void exit_rdmsr(struct vcpu *v);
 void exit_wrmsr(struct vcpu *v);
+// An MSR the guest reads or writes as RDMSR or WRMSR would have it, but for
+// the instruction; false where it faults.
+bool exit_msr_read(struct vcpu *v, uint32_t msr, uint64_t *value);
+bool exit_msr_write(struct vcpu *v, uint32_t msr, uint64_t value);
 void exit_xsetbv(struct vcpu *v);
 
 // An I/O port access the bitmaps trap. value is in and out.

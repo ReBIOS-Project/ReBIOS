@@ -222,48 +222,47 @@ void exit_invalid_opcode(struct vcpu *v) {
     vcpu_inject_exception(v, 6, false, 0);
 }
 
-void exit_rdmsr(struct vcpu *v) {
-    uint32_t msr = (uint32_t)v->gprs.rcx;
-    uint64_t value;
+bool exit_msr_read(struct vcpu *v, uint32_t msr, uint64_t *value) {
     bool fault;
+    if (vlapic_rdmsr(v, msr, value, &fault) || mtrr_rdmsr(v, msr, value, &fault)
+        || nvmx_rdmsr(v, msr, value, &fault)) {
+        return !fault;
+    }
+    if (!virt_vmx && msr == MSR_EFER) {
+        *value = vcpu_efer(v);
+        return true;
+    }
+    if (!virt_vmx && msr == MSR_IA32_CR_PAT) {
+        *value = v->vmcb->save.g_pat;
+        return true;
+    }
+    if (!virt_vmx && msr == MSR_VM_HSAVE_PA) {
+        *value = 0;
+        return true;
+    }
+    return rdmsr_safe(msr, value);
+}
 
-    if (vlapic_rdmsr(v, msr, &value, &fault) || mtrr_rdmsr(v, msr, &value, &fault)
-        || nvmx_rdmsr(v, msr, &value, &fault)) {
-        if (fault) {
-            vcpu_inject_exception(v, 13, true, 0);
-            return;
-        }
-    } else if (!virt_vmx && msr == MSR_EFER) {
-        value = vcpu_efer(v);
-    } else if (!virt_vmx && msr == MSR_IA32_CR_PAT) {
-        value = v->vmcb->save.g_pat;
-    } else if (!virt_vmx && msr == MSR_VM_HSAVE_PA) {
-        value = 0;
-    } else if (!rdmsr_safe(msr, &value)) {
+void exit_rdmsr(struct vcpu *v) {
+    uint64_t value;
+    if (!exit_msr_read(v, (uint32_t)v->gprs.rcx, &value)) {
         vcpu_inject_exception(v, 13, true, 0);
         return;
     }
-
     v->gprs.rax = (uint32_t)value;
     v->gprs.rdx = value >> 32;
     vcpu_skip_instruction(v);
 }
 
-void exit_wrmsr(struct vcpu *v) {
-    uint32_t msr = (uint32_t)v->gprs.rcx;
-    uint64_t value = ((uint64_t)(uint32_t)v->gprs.rdx << 32) | (uint32_t)v->gprs.rax;
+bool exit_msr_write(struct vcpu *v, uint32_t msr, uint64_t value) {
     bool fault;
-
     if (vlapic_wrmsr(v, msr, value, &fault) || mtrr_wrmsr(v, msr, value, &fault)
         || nvmx_wrmsr(v, msr, value, &fault)) {
-        if (fault) {
-            vcpu_inject_exception(v, 13, true, 0);
-            return;
-        }
-    } else if (!virt_vmx && msr == MSR_EFER) {
+        return !fault;
+    }
+    if (!virt_vmx && msr == MSR_EFER) {
         if (value & ~EFER_GUEST_MASK) {
-            vcpu_inject_exception(v, 13, true, 0);
-            return;
+            return false;
         }
         uint64_t old = v->vmcb->save.efer;
         v->vmcb->save.efer = (value & ~(uint64_t)EFER_LMA) | (old & EFER_LMA) | EFER_SVME;
@@ -274,14 +273,21 @@ void exit_wrmsr(struct vcpu *v) {
         for (int i = 0; i < 8; i++) {
             uint8_t type = value >> (i * 8);
             if (type > 7 || type == 2 || type == 3) {
-                vcpu_inject_exception(v, 13, true, 0);
-                return;
+                return false;
             }
         }
         v->vmcb->save.g_pat = value;
     } else if (!virt_vmx && (msr == MSR_VM_HSAVE_PA || msr == MSR_VM_CR)) {
         // The guest has no SVM of its own to configure yet.
-    } else if (!wrmsr_safe(msr, value)) {
+    } else {
+        return wrmsr_safe(msr, value);
+    }
+    return true;
+}
+
+void exit_wrmsr(struct vcpu *v) {
+    uint64_t value = ((uint64_t)(uint32_t)v->gprs.rdx << 32) | (uint32_t)v->gprs.rax;
+    if (!exit_msr_write(v, (uint32_t)v->gprs.rcx, value)) {
         vcpu_inject_exception(v, 13, true, 0);
         return;
     }
@@ -299,12 +305,47 @@ void exit_xsetbv(struct vcpu *v) {
     vcpu_skip_instruction(v);
 }
 
-static void port_access(struct vcpu *v, uint16_t port, unsigned size, bool in, uint32_t *value) {
-    if (!io_dispatch(v, port, size, in, value)) {
-        printf("Unexpected trapped I/O to port %#x\n", port);
-        if (in) {
-            *value = 0xffffffff;
+// The guest's guest's accesses all exit, those to ports nobody traps too.
+static void port_native(uint16_t port, unsigned size, bool in, uint32_t *value) {
+    switch (size) {
+        case 1: {
+            if (in) {
+                *value = inb(port);
+            } else {
+                outb(port, (uint8_t)*value);
+            }
+            break;
         }
+        case 2: {
+            if (in) {
+                *value = inw(port);
+            } else {
+                outw(port, (uint16_t)*value);
+            }
+            break;
+        }
+        default: {
+            if (in) {
+                *value = inl(port);
+            } else {
+                outl(port, *value);
+            }
+            break;
+        }
+    }
+}
+
+static void port_access(struct vcpu *v, uint16_t port, unsigned size, bool in, uint32_t *value) {
+    if (io_dispatch(v, port, size, in, value)) {
+        return;
+    }
+    if (nvmx_in_l2(v)) {
+        port_native(port, size, in, value);
+        return;
+    }
+    printf("Unexpected trapped I/O to port %#x\n", port);
+    if (in) {
+        *value = 0xffffffff;
     }
 }
 

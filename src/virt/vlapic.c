@@ -32,6 +32,7 @@
 #include <virt/insn.h>
 #include <virt/irq.h>
 #include <virt/mmio.h>
+#include <virt/nvmx.h>
 #include <virt/svm.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>
@@ -267,6 +268,10 @@ static void trap_page(uint64_t page) {
         gpt_map(page, 0, PAGE_SIZE, 0, 0);
     }
     gpt_flush();
+}
+
+uint64_t vlapic_access_address(void) {
+    return virt_vmx ? apic_access_page : 0;
 }
 
 void vlapic_init(void) {
@@ -934,7 +939,8 @@ static void virtual_delivery(struct vlapic *vl) {
 void vlapic_prepare_entry(struct vcpu *v) {
     struct vlapic *vl = v->vlapic;
     merge(vl);
-    if (ipi_virtualization) {
+    // VMCS01's, which the guest's guest's VMCS is not.
+    if (ipi_virtualization && !nvmx_in_l2(v)) {
         ipiv_entry(v);
     }
     if (!avic_supported) {
