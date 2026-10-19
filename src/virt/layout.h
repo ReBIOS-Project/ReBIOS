@@ -39,6 +39,13 @@ uint64_t layout_lfb(void);
 // at host addresses, of its configuration space window, and of the linear
 // framebuffer, for a BAR there.
 bool layout_mmio_free(uint64_t base, uint64_t size);
+// Whether [gpa, gpa + size) is all the guest's RAM.
+bool layout_ram(uint64_t gpa, uint64_t size);
+// The host address of pages pages of the guest's RAM from gpa, for the
+// processor to write to by host address: they move to contiguous host memory,
+// contents and all, while the other vCPUs wait, where they are not. False
+// where that would take more of the hypervisor's memory than it gives.
+bool layout_contiguous(uint64_t gpa, unsigned pages, uint64_t *hpa);
 
 // The hypervisor's view of guest-physical address gpa, below 1 MiB and
 // outside the VGA window.

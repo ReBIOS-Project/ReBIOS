@@ -100,6 +100,8 @@ void cpu_halt(void);
 
 // MAXPHYADDR.
 unsigned cpu_physical_address_bits(void);
+// How far an APIC ID shifts right to its package's ID.
+unsigned cpu_package_shift(void);
 
 #endif
 

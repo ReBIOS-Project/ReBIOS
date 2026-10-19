@@ -96,6 +96,34 @@ unsigned cpu_physical_address_bits(void) {
     return cpuid(0x80000008, 0).eax & 0xff;
 }
 
+unsigned cpu_package_shift(void) {
+    // Leaf 1Fh's domains, else leaf 0Bh's, each there where its first subleaf
+    // counts processors, the last one's shift reaching the package (SDM
+    // 325462-093 Vol. 1, Tables 21-31 and 21-70).
+    uint32_t max = cpuid(0, 0).eax;
+    static const uint32_t leaves[] = {0x1f, 0xb};
+    for (unsigned i = 0; i < sizeof(leaves) / sizeof(leaves[0]); i++) {
+        if (max < leaves[i] || (cpuid(leaves[i], 0).ebx & 0xffff) == 0) {
+            continue;
+        }
+        unsigned shift = 0;
+        for (uint32_t subleaf = 0;; subleaf++) {
+            struct cpuid_regs r = cpuid(leaves[i], subleaf);
+            if ((r.ebx & 0xffff) == 0) {
+                return shift;
+            }
+            shift = r.eax & 0x1f;
+        }
+    }
+    // Leaf 1's count of IDs in the package, a power of two.
+    uint32_t ids = (cpuid(1, 0).ebx >> 16) & 0xff;
+    unsigned shift = 0;
+    while ((1u << shift) < ids) {
+        shift++;
+    }
+    return shift;
+}
+
 void cpu_nmi_restart(uint64_t start, uint64_t end) {
     nmi_restart_start = start;
     nmi_restart_end = end;

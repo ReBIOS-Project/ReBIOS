@@ -32,6 +32,7 @@
 #include <virt/layout.h>
 #include <virt/mmio.h>
 #include <virt/pci_plan.h>
+#include <virt/vcpu.h>
 #include <virt/vga.h>
 
 #define ONE_MIB 0x100000ull
@@ -43,6 +44,8 @@
 
 #define MAX_RANGES 1024
 #define MAX_TAKEN 8
+// What layout_contiguous() may take of the hypervisor's memory.
+#define MAX_MOVED_PAGES 64
 
 struct range {
     uint64_t base;
@@ -86,6 +89,7 @@ static uint64_t lfb;
 static uint8_t *low;
 // What absent memory reads as.
 static uint64_t ones_page;
+static unsigned moved_pages;
 
 static uint64_t align_up(uint64_t x, uint64_t align) {
     return (x + align - 1) & ~(align - 1);
@@ -544,6 +548,63 @@ bool layout_mmio_free(uint64_t base, uint64_t size) {
         }
     }
     return true;
+}
+
+bool layout_ram(uint64_t gpa, uint64_t size) {
+    uint64_t end = gpa + size;
+    if (end < gpa) {
+        return false;
+    }
+    if (end <= VGA_BASE) {
+        return true;
+    }
+    for (uint32_t i = 0; i < ram.count; i++) {
+        if (gpa >= ram.r[i].base && end <= ram.r[i].end) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool contiguous(uint64_t gpa, unsigned pages, uint64_t *hpa) {
+    uint32_t prot;
+    for (unsigned i = 0; i < pages; i++) {
+        uint64_t at;
+        if (!gpt_translate(gpa + i * PAGE_SIZE, &at, &prot, NULL)
+            || (i != 0 && at != *hpa + i * PAGE_SIZE)) {
+            return false;
+        }
+        if (i == 0) {
+            *hpa = at;
+        }
+    }
+    return true;
+}
+
+bool layout_contiguous(uint64_t gpa, unsigned pages, uint64_t *hpa) {
+    if (contiguous(gpa, pages, hpa)) {
+        return true;
+    }
+    vcpu_pause_others();
+    bool ok = contiguous(gpa, pages, hpa);
+    if (!ok && moved_pages + pages <= MAX_MOVED_PAGES) {
+        uint8_t *block = page_alloc(pages);
+        for (unsigned i = 0; i < pages; i++) {
+            uint64_t from;
+            uint32_t prot;
+            gpt_translate(gpa + i * PAGE_SIZE, &from, &prot, NULL);
+            memcpy(block + i * PAGE_SIZE, (void *)(uintptr_t)from, PAGE_SIZE);
+        }
+        // The pages left behind stay unused, as the processor may still have
+        // been told their addresses.
+        map_ram(gpa, (uint64_t)(uintptr_t)block, pages * PAGE_SIZE);
+        gpt_flush();
+        moved_pages += pages;
+        *hpa = (uint64_t)(uintptr_t)block;
+        ok = true;
+    }
+    vcpu_resume_others();
+    return ok;
 }
 
 void *layout_low(uint32_t gpa) {
