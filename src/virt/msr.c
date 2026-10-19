@@ -95,6 +95,19 @@
 // processor does not change under the hypervisor.
 #define MSR_AMD_PATCH_LOADER 0xc0010020
 
+// AMD's hardware configuration (APM 24593 rev. 3.45, 3.2.10 and 15.32.1; PPR
+// 56713 rev. 3.05, MSRC001_0015): the processor's, with SMM locked, as the
+// guest has none, and SmmLock's writes ignored, as locked ones are. The guest
+// may change core performance boost, the instructions retired counter, and
+// machine check status writes, which Linux 7.3's machine check code turns on
+// (arch/x86/kernel/cpu/mce/amd.c).
+#define MSR_AMD_HWCR 0xc0010015
+#define HWCR_SMM_LOCK (1u << 0)
+#define HWCR_MC_STATUS_WR_EN (1u << 18)
+#define HWCR_CPB_DIS (1u << 25)
+#define HWCR_IR_PERF_EN (1u << 30)
+#define HWCR_GUEST (HWCR_MC_STATUS_WR_EN | HWCR_CPB_DIS | HWCR_IR_PERF_EN)
+
 // AMD's memory routing (APM 24593 rev. 3.45, 3.2.1, 7.9.2, and 7.9.4; PPR 55772
 // rev. 3.08, MSRC001_0058): the guest's own, from its memory map, so that none
 // of its writes routes the host's memory. SMM and SVM appear locked, as the
@@ -249,6 +262,7 @@ void msr_init(void) {
         if (svm_erratum_383) {
             virt_intercept_msr(MSR_DC_CFG, false, true);
         }
+        virt_intercept_msr(MSR_AMD_HWCR, true, true);
         address_reserved = ~((1ull << cpu_physical_address_bits()) - 1) & ((1ull << 52) - 1);
         virt_intercept_msr(MSR_AMD_SYSCFG, true, true);
         for (uint32_t msr = MSR_AMD_IORR_BASE0; msr <= MSR_AMD_IORR_MASK1; msr++) {
@@ -493,6 +507,14 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
             *value = (*value & ~MISC_ENABLE_COPIED) | v->misc_enable;
             return true;
         }
+        case MSR_AMD_HWCR: {
+            if (virt_vmx) {
+                return false;
+            }
+            *fault = !rdmsr_safe(msr, value);
+            *value |= HWCR_SMM_LOCK;
+            return true;
+        }
         case MSR_IA32_HW_FEEDBACK_PTR: {
             if (!hfi) {
                 return false;
@@ -562,6 +584,16 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
                 return false;
             }
             *fault = false;
+            return true;
+        }
+        case MSR_AMD_HWCR: {
+            if (virt_vmx) {
+                return false;
+            }
+            uint64_t hardware;
+            uint64_t fixed = ~(uint64_t)(HWCR_GUEST | HWCR_SMM_LOCK);
+            *fault = !rdmsr_safe(msr, &hardware) || ((value ^ hardware) & fixed)
+                     || !wrmsr_safe(msr, (hardware & ~(uint64_t)HWCR_GUEST) | (value & HWCR_GUEST));
             return true;
         }
         case MSR_DC_CFG: {
