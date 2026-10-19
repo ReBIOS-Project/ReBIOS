@@ -181,35 +181,41 @@ static void patch32(uint8_t *page, const uint8_t *field, uint64_t value) {
     memcpy(page + (field - ap_boot_start), &v, sizeof(v));
 }
 
-void smp_start_aps(void) {
+void smp_init(void) {
     struct cpu *bsp = this_cpu();
     bsp->apic_id = lapic_cpu_apic_id();
     bsp->online = true;
 
     uint32_t *ids;
     uint32_t count = madt_aps(&ids);
+    if (count != 0 && core_handoff->ap_boot == 0) {
+        printf("Not starting the %u other processors without a page below 1 MiB\n", count);
+        count = 0;
+    }
     cpus = kmalloc((count + 1) * sizeof(*cpus));
     cpus[0] = bsp;
-    cpu_count = 1;
+    for (uint32_t i = 0; i < count; i++) {
+        cpus[i + 1] = cpu_area_alloc(i + 1, ids[i], false);
+    }
+    kfree(ids);
+    cpu_count = count + 1;
+}
+
+void smp_start_aps(void) {
+    uint32_t count = cpu_count - 1;
     if (count == 0) {
         return;
     }
     uint64_t page = core_handoff->ap_boot;
-    if (page == 0) {
-        printf("Not starting the %u other processors without a page below 1 MiB\n", count);
-        return;
-    }
     if (read_cr3() >= (1ull << 32)) {
         panic("The page tables are beyond the other processors' reach\n");
     }
 
     struct ap_boot_entry *table = kmalloc(count * sizeof(*table));
     for (uint32_t i = 0; i < count; i++) {
-        struct cpu *cpu = cpu_area_alloc(i + 1, ids[i], false);
-        cpus[i + 1] = cpu;
-        table[i] = (struct ap_boot_entry){ids[i], 0, (uint64_t)(uintptr_t)cpu};
+        struct cpu *cpu = cpus[i + 1];
+        table[i] = (struct ap_boot_entry){cpu->apic_id, 0, (uint64_t)(uintptr_t)cpu};
     }
-    __atomic_store_n(&cpu_count, count + 1, __ATOMIC_RELEASE);
 
     uint8_t *code = (uint8_t *)(uintptr_t)page;
     memcpy(code, ap_boot_start, ap_boot_end - ap_boot_start);
@@ -249,5 +255,4 @@ void smp_start_aps(void) {
             printf("Processor %#x is not the guest's\n", cpus[i]->apic_id);
         }
     }
-    kfree(ids);
 }

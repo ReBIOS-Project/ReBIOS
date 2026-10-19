@@ -73,6 +73,7 @@ static void bsp_main(void *arg) {
     // The guest's boot processor gets its local APIC as a legacy BIOS hands
     // it over, the hypervisor the processor's.
     lapic_legacy_init();
+    smp_init();
     vlapic_init();
     lapic_host_init(VLAPIC_SPURIOUS_VECTOR, VLAPIC_TIMER_VECTOR);
     smp_start_aps();

@@ -22,12 +22,14 @@
 #include <stdbool.h>
 #include <sys/cpu.h>
 
-// Starts every other processor the MADT lists into the hypervisor, where it
-// waits for the guest to start it. Needs acpi_init(), virt_init(), and the
-// guest's memory.
+// Finds the processors the MADT lists, and gives each its area. Needs
+// acpi_init().
+void smp_init(void);
+// Starts every other processor into the hypervisor, where it waits for the
+// guest to start it. Needs virt_init() and the guest's memory.
 void smp_start_aps(void);
 
-// The processors started, the boot processor first.
+// The processors found, the boot processor first, started or not.
 uint32_t smp_cpu_count(void);
 struct cpu *smp_cpu(uint32_t index);
 struct cpu *smp_cpu_by_apic_id(uint32_t apic_id);
