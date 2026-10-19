@@ -112,7 +112,7 @@ static const uint16_t fields[] = {
     0x0800, 0x0802, 0x0804, 0x0806, 0x0808, 0x080a, 0x080c, 0x080e, 0x0810, 0x0812,
     0x0c00, 0x0c02, 0x0c04, 0x0c06, 0x0c08, 0x0c0a, 0x0c0c,
     0x2000, 0x2002, 0x2004, 0x2006, 0x2008, 0x200a, 0x200e, 0x2010, 0x2012, 0x2014, 0x2016,
-    0x201a, 0x2032,
+    0x201a, 0x202c, 0x2032,
     0x201c, 0x201e, 0x2020, 0x2022,
     0x2400,
     0x2800, 0x2802, 0x2804, 0x2806, 0x280a, 0x280c, 0x280e, 0x2810,
@@ -265,8 +265,8 @@ static unsigned ept02_budget;
     (PROC2_VIRT_APIC_ACCESSES | PROC2_EPT | PROC2_DESC_TABLE_EXITING | PROC2_RDTSCP             \
      | PROC2_VIRT_X2APIC | PROC2_VPID | PROC2_WBINVD_EXITING | PROC2_UNRESTRICTED_GUEST         \
      | PROC2_APIC_REG_VIRT | PROC2_VIRT_INTR_DELIVERY | PROC2_PAUSE_LOOP_EXITING               \
-     | PROC2_RDRAND_EXITING | PROC2_INVPCID | PROC2_RDSEED_EXITING | PROC2_PML | PROC2_MBEC      \
-     | PROC2_TSC_SCALING)
+     | PROC2_RDRAND_EXITING | PROC2_INVPCID | PROC2_RDSEED_EXITING | PROC2_PML | PROC2_XSAVES    \
+     | PROC2_MBEC | PROC2_TSC_SCALING)
 #define EXIT_EMULATED                                                                        \
     (EXIT_SAVE_DEBUG_CONTROLS | EXIT_HOST_ADDR_SPACE_SIZE | EXIT_ACK_INTR_ON_EXIT | EXIT_SAVE_PAT \
      | EXIT_LOAD_PAT | EXIT_SAVE_EFER | EXIT_LOAD_EFER | EXIT_SAVE_PREEMPTION_TIMER \
@@ -460,6 +460,9 @@ static bool field_offered(uint32_t field) {
         case VMCS_PML_ADDRESS:
         case VMCS_GUEST_PML_INDEX: {
             return (proc2 & PROC2_PML) != 0;
+        }
+        case VMCS_XSS_EXIT_BITMAP: {
+            return (proc2 & PROC2_XSAVES) != 0;
         }
         case VMCS_TSC_MULTIPLIER: {
             return (proc2 & PROC2_TSC_SCALING) != 0;
@@ -1885,6 +1888,10 @@ static void write_vmcs02(struct vcpu *v, struct nvmx *n, const struct l1_values 
     if (proc2 & PROC2_PAUSE_LOOP_EXITING) {
         vmx_write(VMCS_PLE_GAP, get12(n, VMCS_PLE_GAP));
         vmx_write(VMCS_PLE_WINDOW, get12(n, VMCS_PLE_WINDOW));
+    }
+    // VMCS01's own bitmap has nothing for VMCS02's to add.
+    if (proc2 & PROC2_XSAVES) {
+        vmx_write(VMCS_XSS_EXIT_BITMAP, get12(n, VMCS_XSS_EXIT_BITMAP));
     }
     vmx_write(VMCS_MSR_BITMAP, (uint64_t)(uintptr_t)n->msr_bitmap);
     n->tsc_stored = msr_list_has(get12(n, VMCS_EXIT_MSR_STORE_ADDR),
