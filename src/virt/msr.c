@@ -30,6 +30,7 @@
 #include <virt/msr_table.h>
 #include <virt/nvmx.h>
 #include <virt/pci_plan.h>
+#include <virt/svm.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>
 #include <virt/vmx.h>
@@ -245,6 +246,9 @@ void msr_init(void) {
     xss_init();
     if (!virt_vmx) {
         virt_intercept_msr(MSR_AMD_PATCH_LOADER, false, true);
+        if (svm_erratum_383) {
+            virt_intercept_msr(MSR_DC_CFG, false, true);
+        }
         address_reserved = ~((1ull << cpu_physical_address_bits()) - 1) & ((1ull << 52) - 1);
         virt_intercept_msr(MSR_AMD_SYSCFG, true, true);
         for (uint32_t msr = MSR_AMD_IORR_BASE0; msr <= MSR_AMD_IORR_MASK1; msr++) {
@@ -558,6 +562,14 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
                 return false;
             }
             *fault = false;
+            return true;
+        }
+        case MSR_DC_CFG: {
+            // AMD's erratum 383 workaround (41322 rev. 3.92) stays on (svm.c).
+            if (virt_vmx || !svm_erratum_383) {
+                return false;
+            }
+            *fault = !wrmsr_safe(msr, value | DC_CFG_ERRATUM_383);
             return true;
         }
         case MSR_IA32_XSS: {

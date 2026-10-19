@@ -54,8 +54,6 @@
 #define MCI_STATUS_OVER (1ull << 62)
 #define MSR_OSVW_ID_LENGTH 0xc0010140
 #define MSR_OSVW_STATUS 0xc0010141
-#define MSR_DC_CFG 0xc0011022
-#define DC_CFG_ERRATUM_383 (1ull << 47)
 #define OSVW_ERRATUM_383 3
 #define ERRATUM_383_SIGNATURE 0xb600000000010015ull
 #define VECTOR_MC 18
@@ -132,7 +130,7 @@ static const struct {
 // entries, which machine-check. The guide has hypervisors set MSRC001_1022
 // bit 47 and catch the machine check, whose signature means the guest's
 // state is lost. OSVW says whether a processor has it; family 12h does too.
-static bool erratum_383;
+bool svm_erratum_383;
 
 static bool erratum_383_present(void) {
     if (cpuid(0x80000001, 0).ecx & CPUID_80000001_ECX_OSVW) {
@@ -221,12 +219,12 @@ void svm_cpu_init(void) {
     if (!wrmsr_safe(MSR_VM_CR, rdmsr(MSR_VM_CR) | VM_CR_R_INIT)) {
         printf("Cannot redirect INIT on this processor\n");
     }
-    erratum_383 = erratum_383_present();
+    svm_erratum_383 = erratum_383_present();
     uint64_t dc_cfg;
-    if (erratum_383 && (!rdmsr_safe(MSR_DC_CFG, &dc_cfg)
-                        || !wrmsr_safe(MSR_DC_CFG, dc_cfg | DC_CFG_ERRATUM_383))) {
+    if (svm_erratum_383 && (!rdmsr_safe(MSR_DC_CFG, &dc_cfg)
+                            || !wrmsr_safe(MSR_DC_CFG, dc_cfg | DC_CFG_ERRATUM_383))) {
         printf("Cannot work around AMD erratum 383 on this processor\n");
-    } else if (erratum_383 && this_cpu()->bsp) {
+    } else if (svm_erratum_383 && this_cpu()->bsp) {
         printf("Working around AMD erratum 383\n");
     }
 }
@@ -250,7 +248,7 @@ void svm_vcpu_init(struct vcpu *v) {
                          | SVM_INTERCEPT_SKINIT;
     // The legacy BIOS's VMCALL hypercalls raise #UD here, and INITs #SX.
     c->intercept_exceptions = 1u << 6 | 1u << 30;
-    if (erratum_383) {
+    if (svm_erratum_383) {
         c->intercept_exceptions |= 1u << VECTOR_MC;
     }
     c->iopm_base_pa = virt_io_bitmap();

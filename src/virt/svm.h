@@ -224,6 +224,8 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 #define SVM_EVENT_TYPE_EXCEPTION (3ull << 8)
 #define SVM_EVENT_TYPE_SOFT_INT (4ull << 8)
 
+#define MSR_DC_CFG 0xc0011022
+#define DC_CFG_ERRATUM_383 (1ull << 47)
 #define MSR_VM_CR 0xc0010114
 #define MSR_VM_HSAVE_PA 0xc0010117
 #define VM_CR_R_INIT (1u << 1)
@@ -232,6 +234,9 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 
 struct vcpu;
 
+// Whether the hypervisor works around AMD's erratum 383 (41322 rev. 3.92) with
+// DC_CFG.
+extern bool svm_erratum_383;
 extern bool svm_nrips;
 // The processor keeps the guest's NMI blocking and takes a virtual NMI when the
 // guest can (APM 24593 rev. 3.45, 15.21.10), with GIF virtualised, as Linux
