@@ -444,11 +444,28 @@ static void svm_handle_exit(struct vcpu *v) {
             panic("Cannot enter the guest\n");
         }
         default: {
-            printf("Unhandled #VMEXIT, code %#llx, info %#llx %#llx\n",
-                   (unsigned long long)c->exitcode, (unsigned long long)c->exitinfo1,
-                   (unsigned long long)c->exitinfo2);
-            svm_dump_guest(v);
-            panic("Unhandled #VMEXIT\n");
+            // An exception the hypervisor did not ask for is the guest's after
+            // all; other intercepts, of instructions, #UD.
+            uint64_t code = c->exitcode;
+            if (code >= SVM_EXIT_EXCEPTION_BASE && code < SVM_EXIT_EXCEPTION_BASE + 32) {
+                unsigned vector = (unsigned)(code - SVM_EXIT_EXCEPTION_BASE);
+                if (vector == 14) {
+                    vcpu_inject_page_fault(v, c->exitinfo2, (uint32_t)c->exitinfo1);
+                } else {
+                    bool has_error = vector == 8 || (vector >= 10 && vector <= 14) || vector == 17
+                                     || vector == 21;
+                    vcpu_inject_exception(v, (uint8_t)vector, has_error, (uint32_t)c->exitinfo1);
+                }
+                break;
+            }
+            static unsigned reported;
+            if (__atomic_fetch_add(&reported, 1, __ATOMIC_RELAXED) < 8) {
+                printf("Unexpected #VMEXIT, code %#llx, info %#llx %#llx: #UD for the guest\n",
+                       (unsigned long long)code, (unsigned long long)c->exitinfo1,
+                       (unsigned long long)c->exitinfo2);
+            }
+            vcpu_inject_exception(v, 6, false, 0);
+            break;
         }
     }
 }

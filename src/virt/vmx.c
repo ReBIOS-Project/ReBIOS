@@ -890,12 +890,18 @@ static void vmx_handle_exit(struct vcpu *v) {
     switch (reason & 0xffff) {
         case EXIT_REASON_EXCEPTION_NMI: {
             uint32_t info = (uint32_t)vmx_read(VMCS_EXIT_INTR_INFO);
-            if ((info & (7u << 8)) != INTR_TYPE_NMI) {
-                printf("Unexpected exception exit, information %#x\n", info);
-                vmx_dump_guest();
-                panic("Unhandled VM exit\n");
+            if ((info & (7u << 8)) == INTR_TYPE_NMI) {
+                event_nmi(v);
+            } else if ((info & (7u << 8)) == INTR_TYPE_HW_EXCEPTION) {
+                // None the hypervisor asked for: the guest's after all.
+                uint32_t error = (uint32_t)vmx_read(VMCS_EXIT_INTR_ERROR);
+                if ((info & 0xff) == 14) {
+                    vcpu_inject_page_fault(v, qual, error);
+                } else {
+                    vcpu_inject_exception(v, (uint8_t)info, (info & INTR_INFO_ERROR_CODE) != 0,
+                                          error);
+                }
             }
-            event_nmi(v);
             break;
         }
         case EXIT_REASON_EXTERNAL_INTR: {
@@ -1028,11 +1034,24 @@ static void vmx_handle_exit(struct vcpu *v) {
             }
             break;
         }
+        case EXIT_REASON_EPT_MISCONFIG: {
+            // Only the hypervisor's own EPT going wrong makes these.
+            panic("The EPT entry for %#llx is misconfigured\n",
+                  (unsigned long long)vmx_read(VMCS_GUEST_PHYS_ADDR));
+        }
         default: {
-            printf("Unhandled VM exit, reason %u, qualification %#llx\n", reason,
-                   (unsigned long long)qual);
-            vmx_dump_guest();
-            panic("Unhandled VM exit\n");
+            // Instructions VMX makes exit, such as SEAMCALL and TDCALL, and
+            // those of features the guest does not get, exist for it no more
+            // than those features.
+            static uint64_t reported[2];
+            unsigned basic = reason & 0x7f;
+            if (!(__atomic_fetch_or(&reported[basic / 64], 1ull << (basic % 64), __ATOMIC_RELAXED)
+                  & 1ull << (basic % 64))) {
+                printf("Unexpected VM exit, reason %u, qualification %#llx: #UD for the guest\n",
+                       reason, (unsigned long long)qual);
+            }
+            vcpu_inject_exception(v, 6, false, 0);
+            break;
         }
     }
 }
