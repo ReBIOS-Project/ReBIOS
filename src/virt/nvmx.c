@@ -109,9 +109,10 @@
 // all of the guest state, host state, and exit information.
 static const uint16_t fields[] = {
     0x0000, 0x0002,
-    0x0800, 0x0802, 0x0804, 0x0806, 0x0808, 0x080a, 0x080c, 0x080e, 0x0810,
+    0x0800, 0x0802, 0x0804, 0x0806, 0x0808, 0x080a, 0x080c, 0x080e, 0x0810, 0x0812,
     0x0c00, 0x0c02, 0x0c04, 0x0c06, 0x0c08, 0x0c0a, 0x0c0c,
-    0x2000, 0x2002, 0x2004, 0x2006, 0x2008, 0x200a, 0x2010, 0x2012, 0x2014, 0x2016, 0x201a,
+    0x2000, 0x2002, 0x2004, 0x2006, 0x2008, 0x200a, 0x200e, 0x2010, 0x2012, 0x2014, 0x2016,
+    0x201a,
     0x201c, 0x201e, 0x2020, 0x2022,
     0x2400,
     0x2800, 0x2802, 0x2804, 0x2806, 0x280a, 0x280c, 0x280e, 0x2810,
@@ -260,7 +261,7 @@ static unsigned ept02_budget;
     (PROC2_VIRT_APIC_ACCESSES | PROC2_EPT | PROC2_DESC_TABLE_EXITING | PROC2_RDTSCP             \
      | PROC2_VIRT_X2APIC | PROC2_VPID | PROC2_WBINVD_EXITING | PROC2_UNRESTRICTED_GUEST         \
      | PROC2_APIC_REG_VIRT | PROC2_VIRT_INTR_DELIVERY | PROC2_RDRAND_EXITING | PROC2_INVPCID     \
-     | PROC2_RDSEED_EXITING | PROC2_MBEC)
+     | PROC2_RDSEED_EXITING | PROC2_PML | PROC2_MBEC)
 #define EXIT_EMULATED                                                                        \
     (EXIT_SAVE_DEBUG_CONTROLS | EXIT_HOST_ADDR_SPACE_SIZE | EXIT_ACK_INTR_ON_EXIT | EXIT_SAVE_PAT \
      | EXIT_LOAD_PAT | EXIT_SAVE_EFER | EXIT_LOAD_EFER | EXIT_SAVE_PREEMPTION_TIMER \
@@ -448,6 +449,10 @@ static bool field_offered(uint32_t field) {
         }
         case VMCS_APIC_ACCESS_ADDR: {
             return (proc2 & PROC2_VIRT_APIC_ACCESSES) != 0;
+        }
+        case VMCS_PML_ADDRESS:
+        case VMCS_GUEST_PML_INDEX: {
+            return (proc2 & PROC2_PML) != 0;
         }
         case VMCS_GUEST_INTR_STATUS:
         case VMCS_EOI_EXIT0:
@@ -863,7 +868,7 @@ static const uint16_t exit_fields[] = {
 // exit, and the exit information is read there only where the processor's
 // VMWRITE can load it (IA32_VMX_MISC bit 29).
 static const uint16_t shadow_read_write[] = {
-    VMCS_GUEST_INTR_STATUS, VMCS_HOST_FS_SEL, VMCS_HOST_GS_SEL, VMCS_PIN_CONTROLS,
+    VMCS_GUEST_INTR_STATUS, VMCS_GUEST_PML_INDEX, VMCS_HOST_FS_SEL, VMCS_HOST_GS_SEL, VMCS_PIN_CONTROLS,
     VMCS_PROC_CONTROLS, VMCS_EXCEPTION_BITMAP, VMCS_ENTRY_INTR_INFO, VMCS_ENTRY_EXCEPTION_ERROR,
     VMCS_ENTRY_INSTR_LEN, VMCS_TPR_THRESHOLD, VMCS_GUEST_INTERRUPTIBILITY, VMCS_PREEMPTION_TIMER,
     VMCS_GUEST_RIP, VMCS_GUEST_RSP, VMCS_GUEST_RFLAGS, VMCS_GUEST_CR0, VMCS_GUEST_CR3,
@@ -1033,6 +1038,9 @@ static bool ept12(const struct nvmx *n) {
 // Reserved in entries that reference tables, bit 7 aside.
 #define EPT_TABLE_RESERVED 0x78ull
 
+// The page-modification log's entries (SDM 325462-093 Vol. 3C, 31.3.6).
+#define PML_ENTRIES 512
+
 // The EPTP (SDM 325462-093 Vol. 3C, Table 27-9).
 #define EPTP_LEVELS(eptp) ((int)((eptp) >> 3 & 7) + 1)
 #define EPTP_AD (1ull << 6)
@@ -1099,6 +1107,7 @@ enum ept12_result {
     EPT12_MAPPED,
     EPT12_VIOLATION,
     EPT12_MISCONFIG,
+    EPT12_PML_FULL,
 };
 
 // Where nothing decodes, an entry reads as all ones, which is misconfigured.
@@ -1107,9 +1116,22 @@ static uint64_t *ept12_entry(uint64_t gpa) {
     return page == NULL ? NULL : (uint64_t *)(page + (gpa & 0xff8));
 }
 
+// Page-modification logging (SDM 325462-093 Vol. 3C, 31.3.6) of an address of
+// the guest's guest whose dirty flag the guest's EPT got.
+static void pml_log(struct nvmx *n, uint64_t gpa) {
+    uint64_t index = get12(n, VMCS_GUEST_PML_INDEX);
+    uint64_t at = get12(n, VMCS_PML_ADDRESS) + index * 8;
+    uint8_t *page = guest_page(at & ~0xfffull);
+    if (page != NULL) {
+        *(volatile uint64_t *)(page + (at & 0xfff)) = gpa & ~0xfffull;
+    }
+    set12(n, VMCS_GUEST_PML_INDEX, (index - 1) & 0xffff);
+}
+
 // SDM 325462-093 Vol. 3C, 31.3.2, 31.3.3, and 31.3.5: on an access that the
-// guest's EPT allows, the walk sets its accessed and dirty flags.
-static enum ept12_result ept12_walk(const struct nvmx *n, uint64_t gpa, uint64_t access,
+// guest's EPT allows, the walk sets its accessed and dirty flags, but where the
+// page-modification log has no room left (SDM 325462-093 Vol. 3C, 31.3.6).
+static enum ept12_result ept12_walk(struct nvmx *n, uint64_t gpa, uint64_t access,
                                     struct ept12_walk *w) {
     uint64_t eptp = get12(n, VMCS_EPT_POINTER);
     bool mbec = (proc2_12(n) & PROC2_MBEC) != 0;
@@ -1158,15 +1180,26 @@ static enum ept12_result ept12_walk(const struct nvmx *n, uint64_t gpa, uint64_t
         return EPT12_VIOLATION;
     }
     if (ad) {
+        bool pml = (proc2_12(n) & PROC2_PML) != 0;
+        bool updates = (access & EPT_QUAL_WRITE) && !(w->entry[l] & EPT_DIRTY);
+        for (int i = levels - 1; i >= l; i--) {
+            updates |= !(w->entry[i] & EPT_ACCESSED);
+        }
+        if (pml && updates && get12(n, VMCS_GUEST_PML_INDEX) >= PML_ENTRIES) {
+            return EPT12_PML_FULL;
+        }
         for (int i = levels - 1; i >= l; i--) {
             __atomic_fetch_or(used[i], EPT_ACCESSED, __ATOMIC_RELAXED);
             w->entry[i] |= EPT_ACCESSED;
         }
         w->leaf |= EPT_ACCESSED;
         if (access & EPT_QUAL_WRITE) {
-            __atomic_fetch_or(used[l], EPT_DIRTY, __ATOMIC_RELAXED);
+            uint64_t old = __atomic_fetch_or(used[l], EPT_DIRTY, __ATOMIC_RELAXED);
             w->leaf |= EPT_DIRTY;
             w->entry[l] |= EPT_DIRTY;
+            if (pml && !(old & EPT_DIRTY)) {
+                pml_log(n, gpa);
+            }
         }
     }
     return EPT12_MAPPED;
@@ -1254,8 +1287,10 @@ static uint64_t ept02_pointer(struct nvmx *n) {
 }
 
 // An EPT02 leaf for the guest's mapping and the hypervisor's. With accessed
-// and dirty flags, writes wait for the guest's dirty flag. Where the
-// hypervisor's memory type is not write-back, it wins but over uncacheable.
+// and dirty flags, writes wait for the guest's dirty flag, which the leaf then
+// takes as set until the guest's INVEPT, as a processor may (SDM 325462-093
+// Vol. 3C, 31.3.5). Where the hypervisor's memory type is not write-back, it
+// wins but over uncacheable.
 static uint64_t ept02_leaf(const struct nvmx *n, const struct ept12_walk *w, uint64_t hpa,
                            uint32_t prot, uint8_t memtype, int level) {
     uint64_t e = hpa & EPT_ADDRESS & ~(level_size(level) - 1);
@@ -1450,7 +1485,10 @@ static bool controls_valid(const struct nvmx *n) {
         if (!eptp_valid(get12(n, VMCS_EPT_POINTER))) {
             return false;
         }
-    } else if (proc2 & (PROC2_UNRESTRICTED_GUEST | PROC2_MBEC)) {
+    } else if (proc2 & (PROC2_UNRESTRICTED_GUEST | PROC2_PML | PROC2_MBEC)) {
+        return false;
+    }
+    if ((proc2 & PROC2_PML) && !valid_address(get12(n, VMCS_PML_ADDRESS))) {
         return false;
     }
     if ((proc2 & PROC2_VPID) && get12(n, VMCS_VPID) == 0) {
@@ -1809,7 +1847,8 @@ static void write_vmcs02(struct vcpu *v, struct nvmx *n, const struct l1_values 
         .pin = pin | PIN_EXT_INTR_EXITING | PIN_NMI_EXITING | PIN_VIRTUAL_NMIS,
         .proc = (proc & ~(uint64_t)PROC_IO_BITMAPS) | PROC_UNCOND_IO_EXITING | PROC_MSR_BITMAPS
                 | PROC_SECONDARY_CONTROLS,
-        .proc2 = proc2 | PROC2_EPT,
+        // EPT02's dirty flags are not the guest's: its walks log for it.
+        .proc2 = (proc2 & ~(uint64_t)PROC2_PML) | PROC2_EPT,
     };
     apic_virtualization(n, &c);
     vmx_write(VMCS_PIN_CONTROLS, c.pin);
@@ -2461,6 +2500,10 @@ static void ept_violation(struct vcpu *v, struct nvmx *n, uint64_t qual) {
         exit_to_l1(v, n, EXIT_REASON_EPT_VIOLATION, ept12_qual(qual, &w), 0, 0, true);
         return;
     }
+    if (result == EPT12_PML_FULL) {
+        exit_to_l1(v, n, EXIT_REASON_PML_FULL, qual & EPT_QUAL_NMI_UNBLOCKED, 0, 0, true);
+        return;
+    }
     // An IRET that started with NMIs blocked unblocked them before the exit:
     // they are blocked again for it to run again (SDM 325462-093 Vol. 3C,
     // 30.2.3).
@@ -2774,6 +2817,9 @@ bool nvmx_ept_translate(struct vcpu *v, uint64_t gpa, uint64_t access, uint64_t 
     n->pending_linear = (access & EPT_QUAL_LINEAR) ? linear : 0;
     if (result == EPT12_MISCONFIG) {
         n->pending_reason = EXIT_REASON_EPT_MISCONFIG;
+        n->pending_qual = 0;
+    } else if (result == EPT12_PML_FULL) {
+        n->pending_reason = EXIT_REASON_PML_FULL;
         n->pending_qual = 0;
     } else {
         n->pending_reason = EXIT_REASON_EPT_VIOLATION;
