@@ -57,6 +57,12 @@
 #define MSR_IA32_BNDCFGS 0xd90
 #define MSR_IA32_XSS 0xda0
 
+// AMD's microcode patch loader, which loads the patch at the linear address
+// written (Linux 7.3's MSR_AMD64_PATCH_LOADER): the guest's writes load
+// nothing, as VMX has Intel's do (SDM 325462-093 Vol. 3C, 28.3), so that the
+// processor does not change under the hypervisor.
+#define MSR_AMD_PATCH_LOADER 0xc0010020
+
 // IA32_MISC_ENABLE's bits the processor's keep clear, as the CPUID limit would
 // hide leaves the hypervisor reads and XD disable would make EFER.NXE, which
 // the host's and the guest's EFER may have set, reserved; either may also be
@@ -172,6 +178,9 @@ void msr_init(void) {
     pt_init();
     mpx_init();
     xss_init();
+    if (!virt_vmx) {
+        virt_intercept_msr(MSR_AMD_PATCH_LOADER, false, true);
+    }
 }
 
 // The guest's IA32_HW_FEEDBACK_PTR for the processor's package, made if
@@ -275,6 +284,13 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
                 hfi_package(true)->guest = value;
             }
             spinlock_release(&hfi_lock);
+            return true;
+        }
+        case MSR_AMD_PATCH_LOADER: {
+            if (virt_vmx) {
+                return false;
+            }
+            *fault = false;
             return true;
         }
         case MSR_IA32_XSS: {
