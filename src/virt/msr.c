@@ -116,6 +116,13 @@
 #define MSR_AMD_NB_CFG 0xc001001f
 #define NB_CFG_ENABLE_CF8_EXT_CFG (1ull << 46)
 
+// AMD's CPUID override MSRs (PPR 55772 rev. 3.08, MSRC001_1002 to
+// MSRC001_1005): the guest's copies of the processor's, in which it may clear
+// bits and set back those the processor had, for its CPUID to hide them
+// (cpuid.c). The processor's would change what CPUID tells the hypervisor.
+#define MSR_AMD_CPUID_7_FEATURES 0xc0011002
+#define MSR_AMD_CPUID_EXT_FEATURES 0xc0011005
+
 // AMD's memory routing (APM 24593 rev. 3.45, 3.2.1, 7.9.2, and 7.9.4; PPR 55772
 // rev. 3.08, MSRC001_0058): the guest's own, from its memory map, so that none
 // of its writes routes the host's memory. SMM and SVM appear locked, as the
@@ -272,6 +279,9 @@ void msr_init(void) {
         }
         virt_intercept_msr(MSR_AMD_HWCR, true, true);
         virt_intercept_msr(MSR_AMD_NB_CFG, true, true);
+        for (uint32_t msr = MSR_AMD_CPUID_7_FEATURES; msr <= MSR_AMD_CPUID_EXT_FEATURES; msr++) {
+            virt_intercept_msr(msr, true, true);
+        }
         address_reserved = ~((1ull << cpu_physical_address_bits()) - 1) & ((1ull << 52) - 1);
         virt_intercept_msr(MSR_AMD_SYSCFG, true, true);
         for (uint32_t msr = MSR_AMD_IORR_BASE0; msr <= MSR_AMD_IORR_MASK1; msr++) {
@@ -405,8 +415,17 @@ void msr_vcpu_init(struct vcpu *v) {
     v->misc_enable = misc_enable_firmware;
     if (!virt_vmx) {
         amd_memory_init(v);
+        // From the processor the vCPU is created on, which is its own.
+        v->amd_cpuid_present = 0;
+        for (unsigned i = 0; i < 4; i++) {
+            if (rdmsr_safe(MSR_AMD_CPUID_7_FEATURES + i, &v->amd_cpuid_hardware[i])) {
+                v->amd_cpuid_present |= 1u << i;
+            }
+            v->amd_cpuid[i] = v->amd_cpuid_hardware[i];
+        }
     }
 }
+
 
 // The guest's AMD memory routing MSRs, and those of SMM and SVM that it may
 // read; true where the MSR is one.
@@ -477,6 +496,14 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
         return true;
     }
     if (!virt_vmx && amd_memory_rdmsr(v, msr, value, fault)) {
+        return true;
+    }
+    if (!virt_vmx && msr >= MSR_AMD_CPUID_7_FEATURES && msr <= MSR_AMD_CPUID_EXT_FEATURES) {
+        unsigned i = msr - MSR_AMD_CPUID_7_FEATURES;
+        *fault = !((v->amd_cpuid_present >> i) & 1);
+        if (!*fault) {
+            *value = v->amd_cpuid[i];
+        }
         return true;
     }
     switch (msr) {
@@ -556,6 +583,14 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
         return true;
     }
     if (!virt_vmx && amd_memory_wrmsr(v, msr, value, fault)) {
+        return true;
+    }
+    if (!virt_vmx && msr >= MSR_AMD_CPUID_7_FEATURES && msr <= MSR_AMD_CPUID_EXT_FEATURES) {
+        unsigned i = msr - MSR_AMD_CPUID_7_FEATURES;
+        *fault = !((v->amd_cpuid_present >> i) & 1) || (value & ~v->amd_cpuid_hardware[i]);
+        if (!*fault) {
+            v->amd_cpuid[i] = value;
+        }
         return true;
     }
     switch (msr) {

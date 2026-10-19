@@ -505,6 +505,29 @@ uint64_t cpuid_efer_allowed(struct vcpu *v) {
     return efer;
 }
 
+// The bits the guest cleared through AMD's CPUID override MSRs (msr.c), each
+// the high half then the low half of two registers (PPR 55772 rev. 3.08,
+// MSRC001_1002 to MSRC001_1005), which hide even what reflects its state.
+static void amd_overrides(struct vcpu *v, uint32_t leaf, uint32_t subleaf, struct cpuid_regs *r) {
+    uint64_t cleared[4];
+    for (unsigned i = 0; i < 4; i++) {
+        cleared[i] = ((v->amd_cpuid_present >> i) & 1) ? v->amd_cpuid_hardware[i] & ~v->amd_cpuid[i]
+                                                       : 0;
+    }
+    if (leaf == 7 && subleaf == 0) {
+        r->eax &= ~(uint32_t)(cleared[0] >> 32);
+        r->ebx &= ~(uint32_t)cleared[0];
+    } else if (leaf == 6) {
+        r->ecx &= ~(uint32_t)cleared[1];
+    } else if (leaf == 1) {
+        r->ecx &= ~(uint32_t)(cleared[2] >> 32);
+        r->edx &= ~(uint32_t)cleared[2];
+    } else if (leaf == 0x80000001) {
+        r->ecx &= ~(uint32_t)(cleared[3] >> 32);
+        r->edx &= ~(uint32_t)cleared[3];
+    }
+}
+
 struct cpuid_regs cpuid_guest(struct vcpu *v, uint32_t leaf, uint32_t subleaf) {
     // Leaves past the last read on Intel's processors as the last basic one
     // (SDM 325462-093 Vol. 1, 21.1.3), which IA32_MISC_ENABLE's limit makes
@@ -628,6 +651,9 @@ struct cpuid_regs cpuid_guest(struct vcpu *v, uint32_t leaf, uint32_t subleaf) {
         default: {
             break;
         }
+    }
+    if (!virt_vmx) {
+        amd_overrides(v, leaf, subleaf, &r);
     }
     return r;
 }

@@ -136,6 +136,11 @@ struct vcpu {
     uint64_t amd_top_mem;
     uint64_t amd_top_mem2;
     uint64_t amd_mmio_cfg_base;
+    // AMD's CPUID override MSRs, MSRC001_1002 to MSRC001_1005 (msr.c): the
+    // processor's values, the guest's, and which ones the processor has.
+    uint64_t amd_cpuid_hardware[4];
+    uint64_t amd_cpuid[4];
+    uint8_t amd_cpuid_present;
 
     // What the guest believes CR0 and CR4 hold, for the bits the host owns.
     uint64_t cr0_shadow;
