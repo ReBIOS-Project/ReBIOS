@@ -210,8 +210,6 @@ static unsigned ept02_budget;
 #define ENTRY_DEFAULT1 0x000011ffu
 
 #define PIN_EMULATED (PIN_EXT_INTR_EXITING | PIN_NMI_EXITING | PIN_VIRTUAL_NMIS | PIN_DEFAULT1)
-#define PIN_REQUIRED (PIN_EXT_INTR_EXITING | PIN_NMI_EXITING)
-#define PROC_REQUIRED (PROC_CR8_LOAD_EXITING | PROC_CR8_STORE_EXITING)
 #define PROC_EMULATED                                                                         \
     (PROC_INTR_WINDOW_EXITING | PROC_TSC_OFFSETTING | PROC_HLT_EXITING | PROC_INVLPG_EXITING \
      | PROC_MWAIT_EXITING | PROC_RDPMC_EXITING | PROC_RDTSC_EXITING | PROC_CR3_LOAD_EXITING   \
@@ -307,16 +305,12 @@ void nvmx_init(void) {
     cap_basic = VMCS12_REVISION | 4096ull << BASIC_SIZE_SHIFT | BASIC_MEMTYPE_WB | BASIC_INS_OUTS
                 | BASIC_TRUE_CONTROLS | (basic & BASIC_NO_ERROR_CODE);
 
-    // Interrupts and NMIs reach the guest with the guest's guest out of the
-    // way, and CR8 accesses exit, as they would reach the local APIC's TPR.
-    cap_true_pin = capability(vmx_capability(MSR_IA32_VMX_TRUE_PINBASED_CTLS), PIN_EMULATED,
-                              PIN_REQUIRED);
-    cap_true_proc = capability(vmx_capability(MSR_IA32_VMX_TRUE_PROCBASED_CTLS), PROC_EMULATED,
-                               PROC_REQUIRED);
+    cap_true_pin = capability(vmx_capability(MSR_IA32_VMX_TRUE_PINBASED_CTLS), PIN_EMULATED, 0);
+    cap_true_proc = capability(vmx_capability(MSR_IA32_VMX_TRUE_PROCBASED_CTLS), PROC_EMULATED, 0);
     cap_true_exit = capability(vmx_capability(MSR_IA32_VMX_TRUE_EXIT_CTLS), EXIT_EMULATED, 0);
     cap_true_entry = capability(vmx_capability(MSR_IA32_VMX_TRUE_ENTRY_CTLS), ENTRY_EMULATED, 0);
-    cap_pin = capability(cap_true_pin, PIN_EMULATED, PIN_REQUIRED | PIN_DEFAULT1);
-    cap_proc = capability(cap_true_proc, PROC_EMULATED, PROC_REQUIRED | PROC_DEFAULT1);
+    cap_pin = capability(cap_true_pin, PIN_EMULATED, PIN_DEFAULT1);
+    cap_proc = capability(cap_true_proc, PROC_EMULATED, PROC_DEFAULT1);
     cap_exit = capability(cap_true_exit, EXIT_EMULATED, EXIT_DEFAULT1);
     cap_entry = capability(cap_true_entry, ENTRY_EMULATED, ENTRY_DEFAULT1);
     cap_proc2 = capability(vmx_capability(MSR_IA32_VMX_PROCBASED_CTLS2), PROC2_EMULATED, 0);
@@ -1178,6 +1172,7 @@ static bool controls_valid(const struct nvmx *n) {
         return false;
     }
     if (get12(n, VMCS_CR3_TARGET_COUNT) > cr3_targets
+        || ((pin & PIN_VIRTUAL_NMIS) && !(pin & PIN_NMI_EXITING))
         || ((proc & PROC_NMI_WINDOW_EXITING) && !(pin & PIN_VIRTUAL_NMIS))) {
         return false;
     }
@@ -1439,8 +1434,10 @@ static void write_vmcs02(struct vcpu *v, struct nvmx *n, const struct l1_values 
     // The processor consults the guest's I/O bitmaps at each access (SDM
     // 325462-093 Vol. 3C, 27.6.4), which may change meanwhile: every access
     // exits, to have them read then.
+    // CR8 is the TPR of the guest's local APIC, which only the hypervisor has.
     uint64_t proc02 = (proc & ~(uint64_t)PROC_IO_BITMAPS) | PROC_UNCOND_IO_EXITING
-                      | PROC_MSR_BITMAPS | PROC_SECONDARY_CONTROLS;
+                      | PROC_MSR_BITMAPS | PROC_SECONDARY_CONTROLS | PROC_CR8_LOAD_EXITING
+                      | PROC_CR8_STORE_EXITING;
     vmx_write(VMCS_PROC_CONTROLS, proc02);
     // On the hypervisor's EPT, the local APIC's page is the page VMCS01
     // virtualises it on, which VMCS02 has every access to exit from.
@@ -1957,7 +1954,7 @@ static bool msr_wanted(const struct nvmx *n, uint64_t proc, uint32_t msr, bool w
 }
 
 // Whether the guest asked for an exit of its guest's: VMCS02's controls are
-// its own but for interrupts, NMIs, I/O, and MSRs, whose exits are the
+// its own but for interrupts, NMIs, I/O, MSRs, and CR8, whose exits are the
 // hypervisor's where the guest's controls do not take them, and EPT and the
 // local APIC's page, which are the hypervisor's own.
 static bool l1_wants(struct vcpu *v, const struct nvmx *n, uint32_t reason, uint64_t qual) {
@@ -1991,10 +1988,34 @@ static bool l1_wants(struct vcpu *v, const struct nvmx *n, uint32_t reason, uint
         case EXIT_REASON_WRMSR: {
             return msr_wanted(n, proc, (uint32_t)v->gprs.rcx, reason == EXIT_REASON_WRMSR);
         }
+        case EXIT_REASON_CR_ACCESS: {
+            if ((qual & 15) != 8) {
+                return true;
+            }
+            return (proc & (((qual >> 4) & 3) == 0 ? PROC_CR8_LOAD_EXITING
+                                                   : PROC_CR8_STORE_EXITING)) != 0;
+        }
         default: {
             return true;
         }
     }
+}
+
+// The guest's guest's MOV to and from CR8, where the guest does not take them:
+// the guest's local APIC's TPR.
+static void cr8_access(struct vcpu *v, uint64_t qual) {
+    unsigned reg = (qual >> 8) & 15;
+    if (((qual >> 4) & 3) == 0) {
+        uint64_t value = guest_reg(v, reg);
+        if (value >> 4) {
+            vcpu_inject_exception(v, 13, true, 0);
+            return;
+        }
+        vlapic_set_cr8(v, (uint32_t)value);
+    } else {
+        set_guest_reg(v, reg, vlapic_cr8(v));
+    }
+    vcpu_skip_instruction(v);
 }
 
 // What the processor found missing in EPT02: the guest's to have exit where
@@ -2054,6 +2075,10 @@ bool nvmx_l2_exit(struct vcpu *v, uint32_t reason, uint64_t qual) {
               (unsigned long long)vmx_read(VMCS_GUEST_PHYS_ADDR));
     }
     if (!l1_wants(v, n, reason & 0xffff, qual)) {
+        if ((reason & 0xffff) == EXIT_REASON_CR_ACCESS) {
+            cr8_access(v, qual);
+            return true;
+        }
         return false;
     }
     uint32_t info = (uint32_t)vmx_read(VMCS_EXIT_INTR_INFO);
@@ -2078,9 +2103,10 @@ bool nvmx_entry_failed(struct vcpu *v, uint32_t error) {
     return true;
 }
 
-// The guest's INIT, NMIs, and interrupts are exits of its guest's, as VMCS12
-// exits on them; else the guest's guest goes on, with an event an exit cut
-// short delivered again.
+// The guest's INIT, and its NMIs and interrupts where VMCS12 exits on them,
+// are exits of its guest's; else the guest's guest goes on, taking what the
+// guest does not, but after the windows the guest asks for, as those exits come
+// before NMIs and interrupts (SDM 325462-093 Vol. 3C, 28.2).
 bool nvmx_before_entry(struct vcpu *v) {
     struct nvmx *n = v->nvmx;
     if (n == NULL || !n->in_l2) {
@@ -2104,19 +2130,29 @@ bool nvmx_before_entry(struct vcpu *v) {
         exit_to_l1(v, n, EXIT_REASON_INIT, 0, 0, 0, false);
         return false;
     }
+    uint64_t pin = get12(n, VMCS_PIN_CONTROLS);
+    uint64_t proc = get12(n, VMCS_PROC_CONTROLS);
     if (__atomic_exchange_n(&v->cpu->nmi_pending, false, __ATOMIC_ACQUIRE)) {
         v->nmi_pending = true;
     }
-    if (!waiting && v->nmi_pending) {
-        v->nmi_pending = false;
-        exit_to_l1(v, n, EXIT_REASON_EXCEPTION_NMI, 0, INTR_INFO_VALID | INTR_TYPE_NMI | 2, 0,
-                   false);
-        return false;
+    // Without virtual NMIs, the guest's guest's blocking by NMI holds them
+    // back, until an NMI window.
+    bool nmi_held = false;
+    if (!waiting && v->nmi_pending && (pin & PIN_NMI_EXITING)) {
+        if (!(pin & PIN_VIRTUAL_NMIS)
+            && (vmx_read(VMCS_GUEST_INTERRUPTIBILITY) & INTERRUPTIBILITY_NMI)) {
+            nmi_held = true;
+        } else {
+            v->nmi_pending = false;
+            exit_to_l1(v, n, EXIT_REASON_EXCEPTION_NMI, 0, INTR_INFO_VALID | INTR_TYPE_NMI | 2, 0,
+                       false);
+            return false;
+        }
     }
-    bool extint = irq_extint_pending(v);
-    int vector = extint ? -1 : vlapic_pending(v);
+    bool extint = (pin & PIN_EXT_INTR_EXITING) && irq_extint_pending(v);
+    int vector = (!(pin & PIN_EXT_INTR_EXITING) || extint) ? -1 : vlapic_pending(v);
     if (waiting) {
-        if (extint || vector >= 0 || v->nmi_pending
+        if (extint || vector >= 0 || (v->nmi_pending && (pin & PIN_NMI_EXITING))
             || __atomic_load_n(&v->cpu->init_pending, __ATOMIC_ACQUIRE)) {
             vcpu_exit_soon(v);
         }
@@ -2133,17 +2169,20 @@ bool nvmx_before_entry(struct vcpu *v) {
         exit_to_l1(v, n, EXIT_REASON_EXTERNAL_INTR, 0, info, 0, false);
         return false;
     }
-    if (v->injecting) {
-        v->injecting = false;
-    } else if (v->redeliver & INTR_INFO_VALID) {
-        if (v->redeliver & INTR_INFO_ERROR_CODE) {
-            vmx_write(VMCS_ENTRY_EXCEPTION_ERROR, v->redeliver_error);
-        }
-        vmx_write(VMCS_ENTRY_INTR_INFO, v->redeliver);
-        // Software events' length; the processor looks at no other's.
-        vmx_write(VMCS_ENTRY_INSTR_LEN, v->redeliver_length);
-        v->redeliver = 0;
+    uint64_t windows = PROC_INTR_WINDOW_EXITING | PROC_NMI_WINDOW_EXITING;
+    vmx_write(VMCS_PROC_CONTROLS, vmx_read(VMCS_PROC_CONTROLS) & ~windows);
+    // A stepped instruction is to run, not an event's handler.
+    if (v->stepping) {
+        event_hold(v);
+        return true;
     }
+    event_entry_for(v, !(pin & PIN_NMI_EXITING),
+                    !(pin & PIN_EXT_INTR_EXITING) && !(proc & PROC_INTR_WINDOW_EXITING));
+    uint64_t wanted = proc & windows;
+    if (nmi_held) {
+        wanted |= PROC_NMI_WINDOW_EXITING;
+    }
+    vmx_write(VMCS_PROC_CONTROLS, vmx_read(VMCS_PROC_CONTROLS) | wanted);
     return true;
 }
 

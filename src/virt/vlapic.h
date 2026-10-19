@@ -51,6 +51,10 @@ bool vlapic_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault);
 bool vlapic_enabled(struct vcpu *v);
 // The guest-physical page of the vCPU's local APIC in xAPIC mode.
 uint64_t vlapic_page(struct vcpu *v);
+// The TPR as CR8 reads and writes it, in bits 3:0 (SDM 325462-093 Vol. 3A,
+// 13.8.6.1).
+uint32_t vlapic_cr8(struct vcpu *v);
+void vlapic_set_cr8(struct vcpu *v, uint32_t value);
 // The page VMX virtualises the local APIC's page on, or 0.
 uint64_t vlapic_access_address(void);
 // Whether host memory is the page the processor virtualises the local APIC's

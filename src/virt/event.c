@@ -283,16 +283,16 @@ void event_hold(struct vcpu *v) {
 }
 
 // The windows for what is pending, once the guest has taken what goes first.
-static void windows_after(struct vcpu *v) {
-    if (virt_vmx && (v->nmi_pending || v->cpu->nmi_pending)) {
+static void windows_after(struct vcpu *v, bool nmis, bool interrupts) {
+    if (virt_vmx && nmis && (v->nmi_pending || v->cpu->nmi_pending)) {
         set_proc_control(PROC_NMI_WINDOW_EXITING, true);
     }
-    if (window_needed(v)) {
+    if (interrupts && window_needed(v)) {
         interrupt_window(v, WINDOW_ANY);
     }
 }
 
-void event_entry(struct vcpu *v) {
+static void entry(struct vcpu *v, bool nmis, bool interrupts) {
     if (v->injecting) {
         // What the exit's handler injected comes first: only exits that
         // instructions cause inject, and those never cut a delivery short.
@@ -301,27 +301,42 @@ void event_entry(struct vcpu *v) {
         }
         v->redeliver = 0;
         v->injecting = false;
-        windows_after(v);
+        windows_after(v, nmis, interrupts);
         return;
     }
     if (v->redeliver & EVENT_VALID) {
         inject(v, v->redeliver, v->redeliver_error);
+        unsigned type = v->redeliver & EVENT_TYPE_MASK;
+        if (virt_vmx && (type == INTR_TYPE_SW_INTR || type == INTR_TYPE_PRIV_SW_EXCEPTION
+                         || type == INTR_TYPE_SW_EXCEPTION)) {
+            vmx_write(VMCS_ENTRY_INSTR_LEN, v->redeliver_length);
+        }
         v->redeliver = 0;
-        windows_after(v);
+        windows_after(v, nmis, interrupts);
         return;
     }
     // A debug trap the processor left pending, as a monitor trap flag exit
     // does, would be lost to an injected event (SDM 325462-093 Vol. 3C,
     // 29.7.3), and goes before interrupts and their windows.
     if (virt_vmx && (vmx_read(VMCS_GUEST_PENDING_DBG) & (PENDING_DBG_ENABLED | PENDING_DBG_BS))) {
-        windows_after(v);
+        windows_after(v, nmis, interrupts);
         return;
     }
-    if (deliver_nmi(v)) {
-        if (window_needed(v)) {
+    if (nmis && deliver_nmi(v)) {
+        if (interrupts && window_needed(v)) {
             interrupt_window(v, WINDOW_ANY);
         }
         return;
     }
-    deliver_interrupt(v);
+    if (interrupts) {
+        deliver_interrupt(v);
+    }
+}
+
+void event_entry(struct vcpu *v) {
+    entry(v, true, true);
+}
+
+void event_entry_for(struct vcpu *v, bool nmis, bool interrupts) {
+    entry(v, nmis, interrupts);
 }

@@ -29,6 +29,10 @@ void event_exit(struct vcpu *v);
 // or an entry that delivers nothing and asks for no window to deliver in.
 void event_entry(struct vcpu *v);
 void event_hold(struct vcpu *v);
+// As event_entry(), delivering NMIs and interrupts only where told to, for an
+// entry that runs the guest's guest: what it does not take as exits, the
+// processor would deliver to it.
+void event_entry_for(struct vcpu *v, bool nmis, bool interrupts);
 
 // An NMI that made the guest exit.
 void event_nmi(struct vcpu *v);

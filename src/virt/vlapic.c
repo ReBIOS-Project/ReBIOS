@@ -824,6 +824,10 @@ uint64_t vlapic_page(struct vcpu *v) {
 }
 
 bool vlapic_virtual_delivery(struct vcpu *v) {
+    // VMCS02 delivers none of the guest's interrupts itself.
+    if (nvmx_in_l2(v)) {
+        return false;
+    }
     return virt_vmx ? apicv : __atomic_load_n(&v->vlapic->avic, __ATOMIC_ACQUIRE) != AVIC_OFF;
 }
 
@@ -886,6 +890,14 @@ int vlapic_pending(struct vcpu *v) {
         return -1;
     }
     return irr;
+}
+
+uint32_t vlapic_cr8(struct vcpu *v) {
+    return tpr_get(v->vlapic) >> 4;
+}
+
+void vlapic_set_cr8(struct vcpu *v, uint32_t value) {
+    tpr_set(v->vlapic, value << 4);
 }
 
 int vlapic_tpr_held(struct vcpu *v) {
