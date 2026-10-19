@@ -227,6 +227,7 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 #define MSR_VM_CR 0xc0010114
 #define MSR_VM_HSAVE_PA 0xc0010117
 #define VM_CR_R_INIT (1u << 1)
+#define VM_CR_LOCK (1u << 3)
 #define VM_CR_SVMDIS (1u << 4)
 
 struct vcpu;

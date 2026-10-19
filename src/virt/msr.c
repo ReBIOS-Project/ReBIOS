@@ -29,6 +29,7 @@
 #include <virt/msr.h>
 #include <virt/msr_table.h>
 #include <virt/nvmx.h>
+#include <virt/pci_plan.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>
 #include <virt/vmx.h>
@@ -93,6 +94,36 @@
 // processor does not change under the hypervisor.
 #define MSR_AMD_PATCH_LOADER 0xc0010020
 
+// AMD's memory routing (APM 24593 rev. 3.45, 3.2.1, 7.9.2, and 7.9.4; PPR 55772
+// rev. 3.08, MSRC001_0058): the guest's own, from its memory map, so that none
+// of its writes routes the host's memory. SMM and SVM appear locked, as the
+// guest has neither (APM 24593 rev. 3.45, 15.30.1, 15.30.3, 15.31.1, and
+// 15.32).
+#define MSR_AMD_SYSCFG 0xc0010010
+#define MSR_AMD_IORR_BASE0 0xc0010016
+#define MSR_AMD_IORR_MASK1 0xc0010019
+#define MSR_AMD_TOP_MEM 0xc001001a
+#define MSR_AMD_TOP_MEM2 0xc001001d
+#define MSR_AMD_MMIO_CFG_BASE 0xc0010058
+#define MSR_AMD_SMM_ADDR 0xc0010112
+#define MSR_AMD_SMM_MASK 0xc0010113
+#define MSR_AMD_SMM_CTL 0xc0010116
+#define MSR_AMD_SVM_KEY 0xc0010118
+#define MSR_AMD_SMM_KEY 0xc0010119
+#define SYSCFG_MTRR_FIX_DRAM_EN (1u << 18)
+#define SYSCFG_MTRR_VAR_DRAM_EN (1u << 20)
+#define SYSCFG_MTRR_TOM2_EN (1u << 21)
+#define SYSCFG_TOM2_FORCE_WB (1u << 22)
+// MtrrFixDramEn to Tom2ForceMemTypeWB.
+#define SYSCFG_GUEST (0x1fu << 18)
+#define IORR_BASE_RD_WR (3u << 3)
+#define IORR_MASK_VALID (1u << 11)
+#define FOUR_GIB 0x100000000ull
+#define TOP_MEM_UNIT (8ull << 20)
+#define MMIO_CFG_ENABLE 1u
+#define MMIO_CFG_BUS_RANGE 0x3cu
+#define MMIO_CFG_BASE_MASK 0x0000fffffff00000ull
+
 // IA32_MISC_ENABLE's bits the processor's keep clear, as the CPUID limit would
 // hide leaves the hypervisor reads and XD disable would make EFER.NXE, which
 // the host's and the guest's EFER may have set, reserved; either may also be
@@ -132,6 +163,8 @@ static bool mpx_hidden;
 static bool xss;
 // The tables of the processor's model-specific MSRs, where it has any.
 static const struct msr_model *model;
+// Physical address bits the processor lacks, for the guest's AMD addresses.
+static uint64_t address_reserved;
 
 static void misc_enable_init(void) {
     // IA32_MISC_ENABLE is Intel's, and VMX runs only on Intel's processors.
@@ -212,6 +245,19 @@ void msr_init(void) {
     xss_init();
     if (!virt_vmx) {
         virt_intercept_msr(MSR_AMD_PATCH_LOADER, false, true);
+        address_reserved = ~((1ull << cpu_physical_address_bits()) - 1) & ((1ull << 52) - 1);
+        virt_intercept_msr(MSR_AMD_SYSCFG, true, true);
+        for (uint32_t msr = MSR_AMD_IORR_BASE0; msr <= MSR_AMD_IORR_MASK1; msr++) {
+            virt_intercept_msr(msr, true, true);
+        }
+        virt_intercept_msr(MSR_AMD_TOP_MEM, true, true);
+        virt_intercept_msr(MSR_AMD_TOP_MEM2, true, true);
+        virt_intercept_msr(MSR_AMD_MMIO_CFG_BASE, true, true);
+        virt_intercept_msr(MSR_AMD_SMM_ADDR, true, true);
+        virt_intercept_msr(MSR_AMD_SMM_MASK, true, true);
+        virt_intercept_msr(MSR_AMD_SMM_CTL, true, true);
+        virt_intercept_msr(MSR_AMD_SVM_KEY, true, true);
+        virt_intercept_msr(MSR_AMD_SMM_KEY, true, true);
     }
     if (virt_vmx) {
         virt_intercept_msr(MSR_IA32_FEATURE_CONTROL, true, true);
@@ -301,13 +347,109 @@ static uint64_t hfi_host_pointer(uint64_t value) {
     return hpa | HW_FEEDBACK_PTR_VALID;
 }
 
+// What a BIOS sets up for the guest's memory map: memory to its PCI hole and
+// above 4 GiB to its RAM's end, write-back, both on 8 MiB boundaries, and its
+// configuration space window, from bus 0, as a power of two buses.
+static void amd_memory_init(struct vcpu *v) {
+    const struct pci_plan *plan = pci_plan();
+    v->amd_top_mem = (plan != NULL ? plan->tolud : FOUR_GIB) & ~(TOP_MEM_UNIT - 1);
+    v->amd_top_mem2 = layout_high_ram_end() & ~(TOP_MEM_UNIT - 1);
+    v->amd_syscfg = SYSCFG_MTRR_FIX_DRAM_EN | SYSCFG_MTRR_VAR_DRAM_EN;
+    if (v->amd_top_mem2 > FOUR_GIB) {
+        v->amd_syscfg |= SYSCFG_MTRR_TOM2_EN | SYSCFG_TOM2_FORCE_WB;
+    } else {
+        v->amd_top_mem2 = 0;
+    }
+    for (unsigned i = 0; i < 4; i++) {
+        v->amd_iorr[i] = 0;
+    }
+    v->amd_mmio_cfg_base = 0;
+    if (plan != NULL && plan->ecam != 0 && plan->ecam >= (uint64_t)plan->ecam_start << 20) {
+        uint64_t range = 0;
+        while ((1u << range) <= plan->ecam_end) {
+            range++;
+        }
+        v->amd_mmio_cfg_base = (plan->ecam - ((uint64_t)plan->ecam_start << 20))
+                               | range << 2 | MMIO_CFG_ENABLE;
+    }
+}
+
 void msr_vcpu_init(struct vcpu *v) {
     v->misc_enable = misc_enable_firmware;
+    if (!virt_vmx) {
+        amd_memory_init(v);
+    }
+}
+
+// The guest's AMD memory routing MSRs, and those of SMM and SVM that it may
+// read; true where the MSR is one.
+static bool amd_memory_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
+    *fault = false;
+    if (msr == MSR_AMD_SYSCFG) {
+        *value = v->amd_syscfg;
+    } else if (msr >= MSR_AMD_IORR_BASE0 && msr <= MSR_AMD_IORR_MASK1) {
+        *value = v->amd_iorr[msr - MSR_AMD_IORR_BASE0];
+    } else if (msr == MSR_AMD_TOP_MEM) {
+        *value = v->amd_top_mem;
+    } else if (msr == MSR_AMD_TOP_MEM2) {
+        *value = v->amd_top_mem2;
+    } else if (msr == MSR_AMD_MMIO_CFG_BASE) {
+        *value = v->amd_mmio_cfg_base;
+    } else if (msr == MSR_AMD_SMM_ADDR || msr == MSR_AMD_SMM_MASK || msr == MSR_AMD_SVM_KEY
+               || msr == MSR_AMD_SMM_KEY) {
+        // No SMRAM, and keys read as 0.
+        *value = 0;
+    } else if (msr == MSR_AMD_SMM_CTL) {
+        // Write-only.
+        *fault = true;
+    } else {
+        return false;
+    }
+    return true;
+}
+
+static bool amd_memory_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
+    *fault = false;
+    if (msr == MSR_AMD_SYSCFG) {
+        *fault = ((value ^ v->amd_syscfg) & ~(uint64_t)SYSCFG_GUEST) != 0;
+        if (!*fault) {
+            v->amd_syscfg = value;
+        }
+    } else if (msr >= MSR_AMD_IORR_BASE0 && msr <= MSR_AMD_IORR_MASK1) {
+        bool base = (msr - MSR_AMD_IORR_BASE0) % 2 == 0;
+        uint64_t defined = (((1ull << 52) - 1) & ~0xfffull)
+                           | (base ? IORR_BASE_RD_WR : IORR_MASK_VALID);
+        *fault = (value & address_reserved) != 0;
+        if (!*fault) {
+            v->amd_iorr[msr - MSR_AMD_IORR_BASE0] = value & defined;
+        }
+    } else if (msr == MSR_AMD_TOP_MEM || msr == MSR_AMD_TOP_MEM2) {
+        uint64_t top = value & ((1ull << 52) - 1) & ~(TOP_MEM_UNIT - 1);
+        *fault = (value & address_reserved) != 0;
+        if (!*fault && msr == MSR_AMD_TOP_MEM) {
+            v->amd_top_mem = top;
+        } else if (!*fault) {
+            v->amd_top_mem2 = top;
+        }
+    } else if (msr == MSR_AMD_MMIO_CFG_BASE) {
+        v->amd_mmio_cfg_base = value & (MMIO_CFG_BASE_MASK | MMIO_CFG_BUS_RANGE | MMIO_CFG_ENABLE);
+    } else if (msr == MSR_AMD_SMM_ADDR || msr == MSR_AMD_SMM_MASK || msr == MSR_AMD_SMM_CTL) {
+        // Locked, as SmmLock has them.
+        *fault = true;
+    } else if (msr == MSR_AMD_SVM_KEY || msr == MSR_AMD_SMM_KEY) {
+        // Keys that match none, as a zero key does.
+    } else {
+        return false;
+    }
+    return true;
 }
 
 bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
     if ((pt_hidden && pt_msr(msr)) || (mpx_hidden && msr == MSR_IA32_BNDCFGS)) {
         *fault = true;
+        return true;
+    }
+    if (!virt_vmx && amd_memory_rdmsr(v, msr, value, fault)) {
         return true;
     }
     switch (msr) {
@@ -369,6 +511,9 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
 bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
     if ((pt_hidden && pt_msr(msr)) || (mpx_hidden && msr == MSR_IA32_BNDCFGS)) {
         *fault = true;
+        return true;
+    }
+    if (!virt_vmx && amd_memory_wrmsr(v, msr, value, fault)) {
         return true;
     }
     switch (msr) {

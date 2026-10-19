@@ -39,6 +39,8 @@ uint64_t layout_lfb(void);
 // at host addresses, of its configuration space window, and of the linear
 // framebuffer, for a BAR there.
 bool layout_mmio_free(uint64_t base, uint64_t size);
+// Where the guest's RAM above 4 GiB ends: 4 GiB where it has none there.
+uint64_t layout_high_ram_end(void);
 // Whether [gpa, gpa + size) is all the guest's RAM.
 bool layout_ram(uint64_t gpa, uint64_t size);
 // The host address of pages pages of the guest's RAM from gpa, for the

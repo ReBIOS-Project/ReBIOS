@@ -550,6 +550,16 @@ bool layout_mmio_free(uint64_t base, uint64_t size) {
     return true;
 }
 
+uint64_t layout_high_ram_end(void) {
+    uint64_t end = FOUR_GIB;
+    for (uint32_t i = 0; i < ram.count; i++) {
+        if (ram.r[i].end > end) {
+            end = ram.r[i].end;
+        }
+    }
+    return end;
+}
+
 bool layout_ram(uint64_t gpa, uint64_t size) {
     uint64_t end = gpa + size;
     if (end < gpa) {

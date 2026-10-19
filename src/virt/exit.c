@@ -152,6 +152,12 @@ bool exit_msr_read(struct vcpu *v, uint32_t msr, uint64_t *value) {
         *value = 0;
         return true;
     }
+    // SVM, which the guest does not get, as a BIOS that disabled it leaves it
+    // (APM 24593 rev. 3.45, 15.30.1).
+    if (!virt_vmx && msr == MSR_VM_CR) {
+        *value = VM_CR_LOCK | VM_CR_SVMDIS;
+        return true;
+    }
     return msr_allowed(msr) && rdmsr_safe(msr, value);
 }
 
