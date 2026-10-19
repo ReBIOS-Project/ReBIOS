@@ -69,11 +69,12 @@ static uint64_t last_report;
 static const char *vmx_names[] = {
     [0] = "exception or NMI", [1] = "interrupt", [2] = "triple fault", [3] = "INIT",
     [4] = "SIPI", [7] = "interrupt window", [8] = "NMI window", [9] = "task switch",
-    [10] = "CPUID", [12] = "HLT", [18] = "VMCALL", [28] = "CR access", [30] = "I/O",
-    [31] = "RDMSR", [32] = "WRMSR", [37] = "monitor trap", [43] = "TPR below threshold",
-    [44] = "APIC access", [45] = "EOI", [48] = "EPT violation",
-    [49] = "EPT misconfiguration", [52] = "preemption timer", [55] = "XSETBV",
-    [56] = "APIC write",
+    [10] = "CPUID", [12] = "HLT", [18] = "VMCALL", [19] = "VMCLEAR", [20] = "VMLAUNCH",
+    [21] = "VMPTRLD", [22] = "VMPTRST", [23] = "VMREAD", [24] = "VMRESUME", [25] = "VMWRITE",
+    [26] = "VMXOFF", [27] = "VMXON", [28] = "CR access", [30] = "I/O", [31] = "RDMSR",
+    [32] = "WRMSR", [37] = "monitor trap", [43] = "TPR below threshold", [44] = "APIC access",
+    [45] = "EOI", [48] = "EPT violation", [49] = "EPT misconfiguration", [50] = "INVEPT",
+    [52] = "preemption timer", [53] = "INVVPID", [55] = "XSETBV", [56] = "APIC write",
 };
 
 static const char *svm_name(unsigned slot) {
