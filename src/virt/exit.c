@@ -409,13 +409,15 @@ static const struct emulate_mem string_mem = {mmio_read_linear, mmio_write_linea
 
 void exit_string_io(struct vcpu *v, uint16_t port) {
     profile_io(port);
+    // One the hypervisor cannot read, as where another processor just changed
+    // its mapping, runs again.
     struct insn insn;
     if (!insn_decode(v, &insn)) {
-        if (nvmx_exit_pending(v)) {
-            return;
+        if (!nvmx_exit_pending(v)) {
+            printf("Cannot decode the instruction at %#llx that reached trapped port %#x\n",
+                   (unsigned long long)vcpu_rip(v), port);
         }
-        panic("Cannot decode the instruction at %#llx that reached trapped port %#x\n",
-              (unsigned long long)vcpu_rip(v), port);
+        return;
     }
     // Another processor may have changed it since: it then runs again.
     if (insn.opcode >= 0x6c && insn.opcode <= 0x6f) {

@@ -691,10 +691,13 @@ void vcpu_skip_instruction(struct vcpu *v) {
         vcpu_advance(v, (unsigned)(v->vmcb->control.nrip - v->vmcb->save.rip));
         return;
     }
+    // One the hypervisor cannot read, as where another processor just changed
+    // its mapping, runs again.
     unsigned len = insn_length_intercepted(v);
     if (len == 0) {
-        panic("Cannot decode the intercepted instruction at %#llx\n",
-              (unsigned long long)v->vmcb->save.rip);
+        printf("Cannot decode the intercepted instruction at %#llx\n",
+               (unsigned long long)v->vmcb->save.rip);
+        return;
     }
     vcpu_advance(v, len);
 }
