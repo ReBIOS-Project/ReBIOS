@@ -83,6 +83,7 @@
 #define EFER_LMSLE (1u << 13)
 #define EFER_FFXSR (1u << 14)
 #define EFER_TCE (1u << 15)
+#define EFER_UAIE (1u << 20)
 #define EFER_AIBRSE (1u << 21)
 
 #define RFLAGS_CF (1u << 0)

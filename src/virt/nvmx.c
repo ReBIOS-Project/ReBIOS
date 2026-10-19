@@ -621,7 +621,7 @@ static bool operand_address(struct vcpu *v, uint32_t info, unsigned size, uint64
         if (reg == SEG_FS || reg == SEG_GS) {
             address += seg.base;
         }
-        address = vcpu_lam(v, address);
+        address = vcpu_untagged(v, reg, address);
         unsigned shift = (vcpu_cr4(v) & CR4_LA57) ? 7 : 16;
         if ((uint64_t)((int64_t)(address << shift) >> shift) != address) {
             vcpu_inject_exception(v, fault, true, 0);

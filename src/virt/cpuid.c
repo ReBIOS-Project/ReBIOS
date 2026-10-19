@@ -285,12 +285,12 @@ static const struct leaf_bits amd_leaves[] = {
     // EAX counter size, overflow; EBX last counter; ECX COS counting.
     {0x80000020, 5, {0x000001ff, 0x0000ffff, 0x00000001, 0x00000000}},
     // EAX NoNestedDataBp, FsGsBaseWriteNotSerializing, LFENCE serialising, null selector clears
-    // base, AutomaticIBRS, NoSmmCtlMSR, fast short STOSB, fast short CMPSB,
+    // base, UpperAddressIgnore, AutomaticIBRS, NoSmmCtlMSR, fast short STOSB, fast short CMPSB,
     // PreciseRetirePmc2Manual, PrefetchCtlMsr, L2 TLB size x32, AMD ERMSB, 0F 01 /7 reclaim, EPSF,
     // fast REP SCASB, PREFETCHI, FP512 downgrade, AVX512_BMM, ERAPS, SBPB, IBPB_BRTYPE, SRSO_NO,
     // SRSO_USER_KERNEL_NO, SRSO_MSR_FIX; EBX RAP size; ECX TSA_SQ_NO, TSA_L1_NO, VERW_CLEAR, BTB
     // context isolation.
-    {0x80000021, SUBLEAF_ALL, {0xf9bdff47, 0x00ff0000, 0x00000126, 0x00000000}},
+    {0x80000021, SUBLEAF_ALL, {0xf9bdffc7, 0x00ff0000, 0x00000126, 0x00000000}},
     // EAX PerfMonV2, LBR and PMC freeze; EBX core counters, NB counters.
     {0x80000022, SUBLEAF_ALL, {0x00000005, 0x0000fc0f, 0x00000000, 0x00000000}},
     // EAX shift, asymmetric, heterogeneous, efficiency ranking; EBX processors, efficiency rank,
@@ -345,6 +345,7 @@ static const struct last_subleaf amd_last_subleaves[] = {
 #define CPUID_80000001_EDX_RDTSCP (1u << 27)
 #define CPUID_80000001_EDX_LM (1u << 29)
 #define CPUID_80000008_EBX_LMSLE_UNSUPPORTED (1u << 20)
+#define CPUID_80000021_EAX_UPPER_ADDRESS_IGNORE (1u << 7)
 #define CPUID_80000021_EAX_AUTOMATIC_IBRS (1u << 8)
 
 // XSAVE's state components: their flags in subleaf ECX (supervisor, aligned,
@@ -493,7 +494,11 @@ uint64_t cpuid_efer_allowed(struct vcpu *v) {
         if (!(cpuid_guest(v, 0x80000008, 0).ebx & CPUID_80000008_EBX_LMSLE_UNSUPPORTED)) {
             efer |= EFER_LMSLE;
         }
-        if (cpuid_guest(v, 0x80000021, 0).eax & CPUID_80000021_EAX_AUTOMATIC_IBRS) {
+        uint32_t features = cpuid_guest(v, 0x80000021, 0).eax;
+        if (features & CPUID_80000021_EAX_UPPER_ADDRESS_IGNORE) {
+            efer |= EFER_UAIE;
+        }
+        if (features & CPUID_80000021_EAX_AUTOMATIC_IBRS) {
             efer |= EFER_AIBRSE;
         }
     }

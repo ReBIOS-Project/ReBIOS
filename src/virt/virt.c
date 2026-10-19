@@ -496,8 +496,12 @@ uint64_t vcpu_cr4(struct vcpu *v) {
     return v->vmcb->save.cr4;
 }
 
-// User addresses clear bit 63 (SDM 325462-093 Vol. 3A, 4.4.1).
-uint64_t vcpu_lam(struct vcpu *v, uint64_t linear) {
+// User addresses clear bit 63 (SDM 325462-093 Vol. 3A, 4.4.1). Upper Address
+// Ignore takes bits 63:57 of DS and ES accesses for bit 56's.
+uint64_t vcpu_untagged(struct vcpu *v, enum seg_reg reg, uint64_t linear) {
+    if (!virt_vmx && (reg == SEG_DS || reg == SEG_ES) && (vcpu_efer(v) & EFER_UAIE)) {
+        return (uint64_t)((int64_t)(linear << 7) >> 7);
+    }
     int bit;
     if (linear >> 63) {
         if (!(vcpu_cr4(v) & CR4_LAM_SUP)) {

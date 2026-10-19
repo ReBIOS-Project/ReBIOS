@@ -192,9 +192,10 @@ uint64_t vcpu_cr0(struct vcpu *v);
 uint64_t vcpu_cr3(struct vcpu *v);
 uint64_t vcpu_cr4(struct vcpu *v);
 uint64_t vcpu_efer(struct vcpu *v);
-// A 64-bit mode data access's linear address, without the metadata LAM masks
-// (SDM 325462-093 Vol. 3A, 4.4.2).
-uint64_t vcpu_lam(struct vcpu *v, uint64_t linear);
+// A 64-bit mode data access's linear address through a segment, without the
+// metadata LAM masks (SDM 325462-093 Vol. 3A, 4.4.2) or the bits Upper Address
+// Ignore leaves out (APM 24593 rev. 3.45, 5.10.2).
+uint64_t vcpu_untagged(struct vcpu *v, enum seg_reg reg, uint64_t linear);
 void vcpu_get_seg(struct vcpu *v, enum seg_reg reg, struct segment *seg);
 void vcpu_set_seg(struct vcpu *v, enum seg_reg reg, const struct segment *seg);
 void vcpu_save_mode(struct vcpu *v, struct vcpu_mode *mode);
