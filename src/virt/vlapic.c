@@ -172,6 +172,24 @@ static void regs_and(struct vlapic *vl, uint32_t offset, uint32_t bits) {
 }
 
 static uint32_t host_version;
+
+// The Max LVT Entry of the version register each LVT entry needs (SDM
+// 325462-093 Vol. 3A, 13.4.8): those beyond it are not there.
+static const uint8_t lvt_max_needed[LVT_COUNT] = {6, 0, 5, 4, 0, 0, 0};
+
+static bool lvt_present(unsigned i) {
+    return ((host_version >> 16) & 0xff) >= lvt_max_needed[i];
+}
+
+static bool lvt_reg_present(uint32_t reg) {
+    for (unsigned i = 0; i < LVT_COUNT; i++) {
+        if (reg == lvt_regs[i]) {
+            return lvt_present(i);
+        }
+    }
+    return true;
+}
+
 // What a legacy BIOS hands the boot processor's local APIC over with.
 static uint32_t legacy_svr;
 static uint32_t legacy_lint0;
@@ -326,7 +344,10 @@ void vlapic_init(void) {
     }
     if (x2apic_virtualization || svm_x2avic) {
         for (unsigned i = 0; i < sizeof(x2apic_passed_reads) / sizeof(x2apic_passed_reads[0]); i++) {
-            virt_x2apic_msr_passed(MSR_X2APIC_FIRST + (x2apic_passed_reads[i] >> 4), true, false);
+            uint32_t reg = x2apic_passed_reads[i];
+            if (lvt_reg_present(reg)) {
+                virt_x2apic_msr_passed(MSR_X2APIC_FIRST + (reg >> 4), true, false);
+            }
         }
         for (uint32_t reg = APIC_ISR; reg < APIC_IRR + 0x80; reg += 0x10) {
             virt_x2apic_msr_passed(MSR_X2APIC_FIRST + (reg >> 4), true, false);
@@ -738,7 +759,7 @@ static void reset_registers(struct vcpu *v) {
     regs_set(vl, APIC_ICR_LOW, 0);
     regs_set(vl, APIC_ICR_HIGH, 0);
     for (unsigned i = 0; i < LVT_COUNT; i++) {
-        regs_set(vl, lvt_regs[i], APIC_LVT_MASKED);
+        regs_set(vl, lvt_regs[i], lvt_present(i) ? APIC_LVT_MASKED : 0);
     }
     regs_set(vl, APIC_TIMER_INITIAL, 0);
     regs_set(vl, APIC_TIMER_DIVIDE, 0);
@@ -1147,7 +1168,7 @@ static bool reg_read(struct vcpu *v, uint32_t reg, uint32_t *value) {
     struct vlapic *vl = v->vlapic;
     bool x2 = x2apic(vl);
     for (unsigned i = 0; i < LVT_COUNT; i++) {
-        if (reg == lvt_regs[i]) {
+        if (reg == lvt_regs[i] && lvt_present(i)) {
             *value = regs_get(vl, reg);
             return true;
         }
@@ -1214,7 +1235,7 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
     struct vlapic *vl = v->vlapic;
     bool x2 = x2apic(vl);
     for (unsigned i = 0; i < LVT_COUNT; i++) {
-        if (reg == lvt_regs[i]) {
+        if (reg == lvt_regs[i] && lvt_present(i)) {
             value &= lvt_writable[i];
             // A software disabled local APIC keeps them masked.
             if (!sw_enabled(vl)) {
@@ -1253,7 +1274,9 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
             regs_set(vl, APIC_SVR, value & writable);
             if (!sw_enabled(vl)) {
                 for (unsigned i = 0; i < LVT_COUNT; i++) {
-                    regs_set(vl, lvt_regs[i], regs_get(vl, lvt_regs[i]) | APIC_LVT_MASKED);
+                    if (lvt_present(i)) {
+                        regs_set(vl, lvt_regs[i], regs_get(vl, lvt_regs[i]) | APIC_LVT_MASKED);
+                    }
                 }
                 timer_lvt(vl);
             }
