@@ -55,6 +55,10 @@ uint64_t gpt_cpu_gpa(uint64_t gpa);
 
 // Returns false if gpa is unmapped, ignoring A20. memtype may be NULL.
 bool gpt_translate(uint64_t gpa, uint64_t *hpa, uint32_t *prot, uint8_t *memtype);
+// Also the level of the leaf that maps it: 0 for 4 KiB, 1 for 2 MiB, 2 for
+// 1 GiB.
+bool gpt_translate_leaf(uint64_t gpa, uint64_t *hpa, uint32_t *prot, uint8_t *memtype,
+                        int *level);
 
 // Drops cached translations, on every CPU that will next enter the guest.
 void gpt_flush(void);

@@ -210,7 +210,8 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
         printf("No page below 1 MiB to start the other processors in\n");
     }
 
-    uint64_t heap = loader_alloc_reserved(page_count(CORE_HEAP_SIZE), 0);
+    uint64_t heap_size = CORE_HEAP_SIZE + (config.nested ? NESTED_HEAP_SIZE : 0);
+    uint64_t heap = loader_alloc_reserved(page_count(heap_size), 0);
     if (heap == 0) {
         panic("Cannot allocate the core's heap\n");
     }
@@ -221,7 +222,7 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     loader_handoff->map_top = map_top;
     loader_handoff->ap_boot = ap_boot;
     loader_handoff->heap_base = heap;
-    loader_handoff->heap_size = CORE_HEAP_SIZE;
+    loader_handoff->heap_size = heap_size;
     loader_handoff->tsc_hz = measure_tsc_hz();
     config_to_handoff(&loader_handoff->config);
     fwtables_collect();

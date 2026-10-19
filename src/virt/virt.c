@@ -342,13 +342,9 @@ void vcpu_before_entry(struct vcpu *v) {
     if (v->gpt_generation != generation) {
         v->gpt_generation = generation;
         if (virt_vmx) {
-            vmx_load_gpt_root();
-            struct {
-                uint64_t eptp;
-                uint64_t reserved;
-            } desc = {0, 0};
-            // All-context invalidation, type 2.
-            asm volatile ("invept %0, %1" :: "m"(desc), "r"(2ull) : "memory", "cc");
+            nvmx_gpt_changed(v);
+            vmx_load_gpt_root(v);
+            vmx_invept_all();
         } else {
             v->vmcb->control.n_cr3 = gpt_root();
             svm_flush_guest_tlb(v);

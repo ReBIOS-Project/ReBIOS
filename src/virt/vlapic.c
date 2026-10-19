@@ -274,6 +274,10 @@ uint64_t vlapic_access_address(void) {
     return virt_vmx ? apic_access_page : 0;
 }
 
+bool vlapic_access_page(uint64_t hpa) {
+    return apic_access_page != 0 && hpa == apic_access_page;
+}
+
 void vlapic_init(void) {
     host_version = lapic_read(APIC_VERSION);
     legacy_svr = lapic_read(APIC_SVR);

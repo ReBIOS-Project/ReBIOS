@@ -51,6 +51,16 @@ bool nvmx_before_entry(struct vcpu *v);
 // Whether INIT waits, as VMX operation blocks it.
 bool nvmx_holds_init(struct vcpu *v);
 
+// Whether the vCPU runs the guest's guest through the guest's EPT, which then
+// translates what the vCPU's accesses take as guest-physical addresses.
+bool nvmx_ept_active(struct vcpu *v);
+// An address of the guest's guest through the guest's EPT, for an access the
+// way an EPT violation's qualification gives one; false where that is an exit
+// instead, which waits for the next entry.
+bool nvmx_ept_translate(struct vcpu *v, uint64_t gpa, uint64_t access, uint64_t linear,
+                        uint64_t *out);
+// Whether such an exit waits.
+bool nvmx_exit_pending(struct vcpu *v);
 // An exception that what the hypervisor carries out for the guest's guest
 // raises: whether the guest's exception bitmap makes it an exit instead, with
 // the qualification given.
@@ -60,5 +70,10 @@ bool nvmx_exception(struct vcpu *v, uint8_t vector, bool has_error, uint32_t err
 // pending: whether there is one.
 bool nvmx_monitor_trap_flag(struct vcpu *v);
 bool nvmx_monitor_trap(struct vcpu *v, bool single_step);
+// The EPTP of VMCS02's shadow of the guest's EPT, or 0 where the vCPU runs on
+// the hypervisor's EPT.
+uint64_t nvmx_ept_pointer(struct vcpu *v);
+// The hypervisor's EPT changed, and with it what the shadows hold.
+void nvmx_gpt_changed(struct vcpu *v);
 
 #endif

@@ -27,6 +27,9 @@
 #define PF_ERROR_W (1u << 1)
 #define PF_ERROR_U (1u << 2)
 #define PF_ERROR_I (1u << 4)
+// Not a page fault: the access made an exit of the guest's guest instead,
+// which waits for the next entry.
+#define PF_ERROR_EXIT (1u << 31)
 
 // Accesses guest-physical memory that is mapped to RAM. Returns false if any
 // of it is not.

@@ -20,6 +20,10 @@
 
 #include <stdint.h>
 
+// The page tables the processor runs the guest's guests with, which the
+// hypervisor builds from the guest's and its own.
+#define NESTED_HEAP_SIZE (128ull << 20)
+
 #define HANDOFF_MAX_RESERVED 16
 #define HANDOFF_MAX_PCI_ROMS 16
 #define HANDOFF_MAX_BLOCK_DEVICES 32
@@ -159,7 +163,8 @@ struct handoff {
     // A page below 1 MiB, where the other processors start, or 0.
     uint64_t ap_boot;
 
-    // Memory the core manages itself.
+    // Memory the core manages itself, NESTED_HEAP_SIZE more of it where the
+    // guest gets VMX or SVM of its own.
     uint64_t heap_base;
     uint64_t heap_size;
 

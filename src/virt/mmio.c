@@ -128,7 +128,9 @@ static bool translate(struct vcpu *v, uint64_t linear, unsigned size, bool write
         uint64_t gpa;
         uint32_t pf_error;
         if (!guest_linear_to_phys(v, linear, write, false, &gpa, &pf_error)) {
-            vcpu_inject_page_fault(v, linear, pf_error);
+            if (!(pf_error & PF_ERROR_EXIT)) {
+                vcpu_inject_page_fault(v, linear, pf_error);
+            }
             return false;
         }
         unsigned chunk = PAGE_SIZE - (linear & (PAGE_SIZE - 1));
@@ -447,6 +449,10 @@ bool mmio_fault(struct vcpu *v, uint64_t gpa) {
     }
     struct insn insn;
     if (!insn_decode(v, &insn)) {
+        // The guest's EPT may not let it fetch the instruction.
+        if (nvmx_exit_pending(v)) {
+            return true;
+        }
         panic("Cannot decode the instruction at %#llx that reached emulated memory at %#llx\n",
               (unsigned long long)vcpu_rip(v), (unsigned long long)gpa);
     }

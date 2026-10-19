@@ -293,7 +293,8 @@ uint64_t gpt_cpu_gpa(uint64_t gpa) {
     return gpa;
 }
 
-bool gpt_translate(uint64_t gpa, uint64_t *hpa, uint32_t *prot, uint8_t *memtype) {
+bool gpt_translate_leaf(uint64_t gpa, uint64_t *hpa, uint32_t *prot, uint8_t *memtype,
+                        int *level) {
     uint64_t *table = root;
     for (int l = 3; l >= 0; l--) {
         uint64_t e = table[(gpa >> (12 + 9 * l)) & 511];
@@ -306,12 +307,19 @@ bool gpt_translate(uint64_t gpa, uint64_t *hpa, uint32_t *prot, uint8_t *memtype
             if (memtype != NULL) {
                 *memtype = type;
             }
+            if (level != NULL) {
+                *level = l;
+            }
             *hpa = leaf_addr(e, l) | (gpa & (level_size(l) - 1));
             return true;
         }
         table = (uint64_t *)(uintptr_t)(e & ENTRY_ADDR_MASK);
     }
     return false;
+}
+
+bool gpt_translate(uint64_t gpa, uint64_t *hpa, uint32_t *prot, uint8_t *memtype) {
+    return gpt_translate_leaf(gpa, hpa, prot, memtype, NULL);
 }
 
 void gpt_flush(void) {

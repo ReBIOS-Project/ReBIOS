@@ -318,6 +318,14 @@ static bool vpid_usable(void) {
               == (VPID_CAP_INVVPID | VPID_CAP_INVVPID_ALL);
 }
 
+void vmx_invept_all(void) {
+    struct {
+        uint64_t eptp;
+        uint64_t reserved;
+    } desc = {0, 0};
+    asm volatile ("invept %0, %1" :: "m"(desc), "r"(2ull) : "cc", "memory");
+}
+
 void vmx_cpu_init(void) {
     uint64_t feature_control = rdmsr(MSR_IA32_FEATURE_CONTROL);
     if (!(feature_control & FEATURE_CONTROL_LOCK)) {
@@ -341,11 +349,7 @@ void vmx_cpu_init(void) {
         panic("VMXON failed\n");
     }
 
-    struct {
-        uint64_t eptp;
-        uint64_t reserved;
-    } ept_desc = {0, 0};
-    asm volatile ("invept %0, %1" :: "m"(ept_desc), "r"(2ull) : "cc", "memory");
+    vmx_invept_all();
     if (vpid_usable()) {
         struct {
             uint64_t vpid;
@@ -559,7 +563,7 @@ void vmx_vcpu_init(struct vcpu *v) {
     vmx_write(VMCS_IO_BITMAP_A, virt_io_bitmap());
     vmx_write(VMCS_IO_BITMAP_B, virt_io_bitmap() + PAGE_SIZE);
     vmx_write(VMCS_MSR_BITMAP, virt_msr_bitmap());
-    vmx_load_gpt_root();
+    vmx_load_gpt_root(v);
     if (vpid_usable()) {
         vmx_write(VMCS_VPID, 1);
     }
@@ -638,16 +642,21 @@ static bool vmx_paging_changed(uint64_t cr0, uint64_t cr4) {
     return true;
 }
 
-void vmx_load_gpt_root(void) {
-    vmx_write(VMCS_EPT_POINTER, gpt_root() | EPTP_WALK_4 | EPTP_WB);
+void vmx_load_gpt_root(struct vcpu *v) {
+    uint64_t eptp = nvmx_ept_pointer(v);
+    vmx_write(VMCS_EPT_POINTER, eptp != 0 ? eptp : gpt_root() | EPTP_WALK_4 | EPTP_WB);
 }
 
-void vmx_load_guest_cr3(uint64_t cr3) {
-    vmx_write(VMCS_GUEST_CR3, cr3);
+void vmx_load_guest_pdptes(void) {
     if ((vmx_read(VMCS_GUEST_CR0) & CR0_PG) && (vmx_read(VMCS_GUEST_CR4) & CR4_PAE)
         && !(vmx_read(VMCS_GUEST_EFER) & EFER_LMA)) {
         load_pdptes();
     }
+}
+
+void vmx_load_guest_cr3(uint64_t cr3) {
+    vmx_write(VMCS_GUEST_CR3, cr3);
+    vmx_load_guest_pdptes();
     // As MOV to CR3 drops the guest's translations.
     if (vpid_usable()) {
         struct {

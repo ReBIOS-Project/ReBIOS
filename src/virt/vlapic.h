@@ -53,6 +53,9 @@ bool vlapic_enabled(struct vcpu *v);
 uint64_t vlapic_page(struct vcpu *v);
 // The page VMX virtualises the local APIC's page on, or 0.
 uint64_t vlapic_access_address(void);
+// Whether host memory is the page the processor virtualises the local APIC's
+// page on, which only VMCS01's controls give a meaning.
+bool vlapic_access_page(uint64_t hpa);
 
 // A fixed interrupt for the vCPU, from any processor.
 void vlapic_accept(struct vcpu *v, uint8_t vector, bool level);

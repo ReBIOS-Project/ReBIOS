@@ -23,7 +23,9 @@
 #include <sys/x86.h>
 #include <virt/gpt.h>
 #include <virt/guest_mem.h>
+#include <virt/nvmx.h>
 #include <virt/vcpu.h>
+#include <virt/vmx.h>
 
 #define PTE_P (1ull << 0)
 #define PTE_W (1ull << 1)
@@ -64,8 +66,27 @@ bool guest_phys_write(uint64_t gpa, const void *buf, size_t len) {
     return guest_phys_access(gpa, (void *)buf, len, true);
 }
 
-static bool read_entry(uint64_t gpa, uint64_t *entry, bool wide) {
-    gpa = gpt_cpu_gpa(gpa);
+// gpa as the processor reaches it for an access, given as an EPT violation's
+// qualification would: through the guest's EPT where the vCPU runs the
+// guest's guest, else past the A20 gate.
+static bool reach(struct vcpu *v, uint64_t gpa, uint64_t access, uint64_t linear, uint64_t *out,
+                  uint32_t *pf_error) {
+    if (nvmx_ept_active(v)) {
+        if (!nvmx_ept_translate(v, gpa, access, linear, out)) {
+            *pf_error = PF_ERROR_EXIT;
+            return false;
+        }
+        return true;
+    }
+    *out = gpt_cpu_gpa(gpa);
+    return true;
+}
+
+static bool read_entry(struct vcpu *v, uint64_t gpa, uint64_t linear, uint64_t *entry, bool wide,
+                       uint32_t *pf_error) {
+    if (!reach(v, gpa, EPT_QUAL_READ | EPT_QUAL_LINEAR, linear, &gpa, pf_error)) {
+        return false;
+    }
     if (wide) {
         return guest_phys_read(gpa, entry, 8);
     }
@@ -77,6 +98,14 @@ static bool read_entry(uint64_t gpa, uint64_t *entry, bool wide) {
     return true;
 }
 
+static uint64_t data_access(bool write, bool fetch) {
+    uint64_t access = EPT_QUAL_LINEAR | EPT_QUAL_TRANSLATION;
+    if (write) {
+        return access | EPT_QUAL_WRITE;
+    }
+    return access | (fetch ? EPT_QUAL_FETCH : EPT_QUAL_READ);
+}
+
 static bool linear_to_phys(struct vcpu *v, uint64_t linear, bool write, bool fetch, bool user,
                            uint64_t *gpa, uint32_t *pf_error) {
     uint64_t cr0 = vcpu_cr0(v);
@@ -85,9 +114,11 @@ static bool linear_to_phys(struct vcpu *v, uint64_t linear, bool write, bool fet
 
     *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0) | (fetch ? PF_ERROR_I : 0);
 
+    // Without paging, every linear address is a user-mode one, writable and
+    // executable (SDM 325462-093 Vol. 3C, Table 30-7).
     if (!(cr0 & CR0_PG)) {
-        *gpa = gpt_cpu_gpa(linear & 0xffffffff);
-        return true;
+        uint64_t access = data_access(write, fetch) | EPT_QUAL_USER | EPT_QUAL_WRITABLE;
+        return reach(v, linear & 0xffffffff, access, linear, gpa, pf_error);
     }
 
     int levels;
@@ -98,9 +129,14 @@ static bool linear_to_phys(struct vcpu *v, uint64_t linear, bool write, bool fet
         wide = true;
         table = vcpu_cr3(v) & PTE_ADDR;
     } else if (cr4 & CR4_PAE) {
-        // The PDPT, of 4 entries, is reached through CR3 bits 31:5.
+        // The PDPT, of 4 entries, is reached through CR3 bits 31:5; with EPT,
+        // VMX keeps the PDPTE registers in the VMCS.
+        unsigned i = (linear >> 30) & 3;
         uint64_t pdpte;
-        if (!read_entry((vcpu_cr3(v) & 0xffffffe0) + ((linear >> 30) & 3) * 8, &pdpte, true)) {
+        if (virt_vmx) {
+            pdpte = vmx_read(VMCS_GUEST_PDPTE0 + 2 * i);
+        } else if (!read_entry(v, (vcpu_cr3(v) & 0xffffffe0) + i * 8, linear, &pdpte, true,
+                               pf_error)) {
             return false;
         }
         if (!(pdpte & PTE_P)) {
@@ -123,7 +159,7 @@ static bool linear_to_phys(struct vcpu *v, uint64_t linear, bool write, bool fet
         unsigned shift = wide ? 12 + 9 * level : 12 + 10 * level;
         unsigned index = (linear >> shift) & (wide ? 511 : 1023);
         uint64_t entry;
-        if (!read_entry(table + index * (wide ? 8 : 4), &entry, wide)) {
+        if (!read_entry(v, table + index * (wide ? 8 : 4), linear, &entry, wide, pf_error)) {
             return false;
         }
         if (!(entry & PTE_P)) {
@@ -158,8 +194,17 @@ static bool linear_to_phys(struct vcpu *v, uint64_t linear, bool write, bool fet
             if (fetch && !executable) {
                 return false;
             }
-            *gpa = gpt_cpu_gpa(base | (linear & page_mask));
-            return true;
+            uint64_t access = data_access(write, fetch);
+            if (user_ok) {
+                access |= EPT_QUAL_USER;
+            }
+            if (writable) {
+                access |= EPT_QUAL_WRITABLE;
+            }
+            if (!executable) {
+                access |= EPT_QUAL_XD;
+            }
+            return reach(v, base | (linear & page_mask), access, linear, gpa, pf_error);
         }
         table = wide ? entry & PTE_ADDR : entry & 0xfffff000;
     }

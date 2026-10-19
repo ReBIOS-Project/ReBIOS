@@ -372,6 +372,9 @@ void exit_string_io(struct vcpu *v, uint16_t port) {
     profile_io(port);
     struct insn insn;
     if (!insn_decode(v, &insn)) {
+        if (nvmx_exit_pending(v)) {
+            return;
+        }
         panic("Cannot decode the instruction at %#llx that reached trapped port %#x\n",
               (unsigned long long)vcpu_rip(v), port);
     }

@@ -305,9 +305,19 @@
 
 #define EXIT_REASON_ENTRY_FAILURE (1u << 31)
 
-// EPT violation exit qualification: the access was a write, or a fetch.
+// EPT violation exit qualification (SDM 325462-093 Vol. 3C, Table 30-7): the
+// access, the rights the EPT entries gave (bits 6:3), whether the guest-linear
+// address is known and was translated rather than a paging-structure entry's,
+// what paging gave the linear address, and IRET's NMI unblocking.
+#define EPT_QUAL_READ (1ull << 0)
 #define EPT_QUAL_WRITE (1ull << 1)
 #define EPT_QUAL_FETCH (1ull << 2)
+#define EPT_QUAL_RIGHTS_SHIFT 3
+#define EPT_QUAL_LINEAR (1ull << 7)
+#define EPT_QUAL_TRANSLATION (1ull << 8)
+#define EPT_QUAL_USER (1ull << 9)
+#define EPT_QUAL_WRITABLE (1ull << 10)
+#define EPT_QUAL_XD (1ull << 11)
 #define EPT_QUAL_NMI_UNBLOCKED (1ull << 12)
 
 // APIC-access exit qualification: the page offset, and the access type.
@@ -397,10 +407,17 @@ void vmx_vmcs_swap(struct vcpu *v, struct vmx_vmcs *other);
 
 uint64_t vmx_read(uint32_t field);
 
-void vmx_load_gpt_root(void);
+// The EPT the vCPU's current VMCS takes: the hypervisor's, or the shadow of
+// the guest's EPT that runs its guest's guest.
+void vmx_load_gpt_root(struct vcpu *v);
+// INVEPT of every EPTP.
+void vmx_invept_all(void);
 // Loads the guest's CR3 as a MOV to CR3 would, for what the hypervisor carries
 // out for the guest: the PDPTEs of PAE paging, and the guest's translations.
 void vmx_load_guest_cr3(uint64_t cr3);
+// PAE paging's PDPTEs from what the guest's CR3 points to, as VM entries load
+// them without EPT.
+void vmx_load_guest_pdptes(void);
 // What a task switch does besides loading the new task: CR0.TS, DR7's local
 // enables, and, for an NMI delivered through a task gate, blocking NMIs.
 void vmx_task_switched(struct vcpu *v, bool nmi);
