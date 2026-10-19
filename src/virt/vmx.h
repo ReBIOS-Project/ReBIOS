@@ -410,8 +410,12 @@ uint64_t vmx_read(uint32_t field);
 // The EPT the vCPU's current VMCS takes: the hypervisor's, or the shadow of
 // the guest's EPT that runs its guest's guest.
 void vmx_load_gpt_root(struct vcpu *v);
-// INVEPT of every EPTP.
+// INVEPT of every EPTP, and INVVPID of the type, or of all VPIDs but 0 where
+// the processor lacks that type.
 void vmx_invept_all(void);
+void vmx_invvpid(unsigned type, uint16_t vpid, uint64_t address);
+// Whether the hypervisor tags the guest's translations with VPIDs.
+bool vmx_vpid_usable(void);
 // Loads the guest's CR3 as a MOV to CR3 would, for what the hypervisor carries
 // out for the guest: the PDPTEs of PAE paging, and the guest's translations.
 void vmx_load_guest_cr3(uint64_t cr3);

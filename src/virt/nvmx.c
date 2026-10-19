@@ -137,6 +137,10 @@ struct ept02 {
 
 #define EPT02_ROOTS 4
 
+// VMCS01's VPID is 1. VPIDs tag translations per logical processor, so every
+// vCPU's VMCS02 may share one.
+#define VPID02 2
+
 // VMX as the guest gets it.
 struct nvmx {
     bool vmxon;
@@ -164,6 +168,8 @@ struct nvmx {
     struct ept02 *current02;
     unsigned ept02_pages;
     unsigned ept02_next;
+    // The guest's VPID whose translations VPID02 holds.
+    uint16_t vpid12;
     // An exit of the guest's guest that what the hypervisor carried out for it
     // raised, for the next entry.
     bool pending;
@@ -213,8 +219,8 @@ static unsigned ept02_budget;
      | PROC_NMI_WINDOW_EXITING | PROC_MOV_DR_EXITING | PROC_UNCOND_IO_EXITING                  \
      | PROC_IO_BITMAPS | PROC_MONITOR_TRAP_FLAG | PROC_MSR_BITMAPS | PROC_MONITOR_EXITING        \
      | PROC_PAUSE_EXITING | PROC_SECONDARY_CONTROLS | PROC_DEFAULT1)
-#define PROC2_EMULATED                                                                      \
-    (PROC2_EPT | PROC2_DESC_TABLE_EXITING | PROC2_RDTSCP | PROC2_WBINVD_EXITING              \
+#define PROC2_EMULATED                                                                         \
+    (PROC2_EPT | PROC2_DESC_TABLE_EXITING | PROC2_RDTSCP | PROC2_VPID | PROC2_WBINVD_EXITING    \
      | PROC2_UNRESTRICTED_GUEST | PROC2_RDRAND_EXITING | PROC2_INVPCID | PROC2_RDSEED_EXITING \
      | PROC2_MBEC)
 #define EXIT_EMULATED                                                                        \
@@ -262,9 +268,17 @@ static unsigned ept02_budget;
 #define CAP_ADVANCED_INFO (1ull << 22)
 #define CAP_INVEPT_SINGLE (1ull << 25)
 #define CAP_INVEPT_ALL (1ull << 26)
+#define CAP_INVVPID (1ull << 32)
+#define CAP_INVVPID_ADDRESS (1ull << 40)
+#define CAP_INVVPID_SINGLE (1ull << 41)
+#define CAP_INVVPID_ALL (1ull << 42)
+#define CAP_INVVPID_GLOBALS (1ull << 43)
 #define CAP_EPT_OFFERED                                                                       \
     (CAP_EXEC_ONLY | CAP_WALK_4 | CAP_WALK_5 | CAP_UC | CAP_WB | CAP_2M | CAP_1G | CAP_INVEPT \
      | CAP_AD | CAP_ADVANCED_INFO | CAP_INVEPT_SINGLE | CAP_INVEPT_ALL)
+#define CAP_VPID_OFFERED                                                                      \
+    (CAP_INVVPID | CAP_INVVPID_ADDRESS | CAP_INVVPID_SINGLE | CAP_INVVPID_ALL                 \
+     | CAP_INVVPID_GLOBALS)
 
 // A capability MSR: allowed 0-settings low, allowed 1-settings high.
 static uint64_t capability(uint64_t hardware, uint32_t emulated, uint32_t required) {
@@ -308,6 +322,12 @@ void nvmx_init(void) {
     cap_proc2 = capability(vmx_capability(MSR_IA32_VMX_PROCBASED_CTLS2), PROC2_EMULATED, 0);
     uint64_t ept_vpid = vmx_capability(MSR_IA32_VMX_EPT_VPID_CAP);
     cap_ept_vpid = ept_vpid & CAP_EPT_OFFERED;
+    // VMCS02 needs a VPID of its own for the guest's.
+    if (vmx_vpid_usable()) {
+        cap_ept_vpid |= ept_vpid & CAP_VPID_OFFERED;
+    } else {
+        cap_proc2 &= ~((uint64_t)PROC2_VPID << 32);
+    }
     // Only the processor's advanced information tells EPT02's fetches from
     // user-mode linear addresses from others.
     if (!(ept_vpid & CAP_ADVANCED_INFO)) {
@@ -1167,6 +1187,9 @@ static bool controls_valid(const struct nvmx *n) {
     } else if (proc2 & (PROC2_UNRESTRICTED_GUEST | PROC2_MBEC)) {
         return false;
     }
+    if ((proc2 & PROC2_VPID) && get12(n, VMCS_VPID) == 0) {
+        return false;
+    }
     if (proc & PROC_IO_BITMAPS) {
         uint64_t a = get12(n, VMCS_IO_BITMAP_A);
         uint64_t b = get12(n, VMCS_IO_BITMAP_B);
@@ -1447,6 +1470,17 @@ static void write_vmcs02(struct vcpu *v, struct nvmx *n, const struct l1_values 
     // EPT02 shadows the guest's EPT where it has one, else the guest's guest
     // runs on the hypervisor's EPT as the guest does.
     vmx_load_gpt_root(v);
+    // Without VPIDs of the guest's, the processor drops the guest's guest's
+    // translations with each entry and exit, as VPID 0's; VPID02 holds those
+    // of one of the guest's VPIDs at a time.
+    if (proc2 & PROC2_VPID) {
+        uint16_t vpid = (uint16_t)get12(n, VMCS_VPID);
+        vmx_write(VMCS_VPID, VPID02);
+        if (vpid != n->vpid12) {
+            vmx_invvpid(1, VPID02, 0);
+            n->vpid12 = vpid;
+        }
+    }
 
     for (unsigned i = 0; i < ARRAY_COUNT(guest_fields); i++) {
         vmx_write(guest_fields[i], get12(n, guest_fields[i]));
@@ -1776,6 +1810,30 @@ static void invept(struct vcpu *v, struct nvmx *n, uint32_t info) {
     succeed(v);
 }
 
+static void invvpid(struct vcpu *v, struct nvmx *n, uint32_t info) {
+    static const uint64_t types[] = {
+        CAP_INVVPID_ADDRESS, CAP_INVVPID_SINGLE, CAP_INVVPID_ALL, CAP_INVVPID_GLOBALS,
+    };
+    uint64_t type = operand_register(v, info);
+    if (type > 3 || !(cap_ept_vpid & types[type])) {
+        fail(v, ERROR_INVALID_OPERAND);
+        return;
+    }
+    uint64_t desc[2];
+    if (!read_descriptor(v, info, desc)) {
+        return;
+    }
+    uint16_t vpid = (uint16_t)desc[0];
+    if ((desc[0] >> 16) != 0 || (type != 2 && vpid == 0) || (type == 0 && !canonical(desc[1]))) {
+        fail(v, ERROR_INVALID_OPERAND);
+        return;
+    }
+    if (type == 2 || vpid == n->vpid12) {
+        vmx_invvpid(type == 2 ? 1 : (unsigned)type, VPID02, desc[1]);
+    }
+    succeed(v);
+}
+
 void nvmx_instruction(struct vcpu *v, uint32_t reason) {
     struct nvmx *n = v->nvmx;
     // The processor raises these itself in real mode, virtual-8086 mode and
@@ -1783,9 +1841,11 @@ void nvmx_instruction(struct vcpu *v, uint32_t reason) {
     // shadow has, nor for what the guest is not offered (SDM 325462-093 Vol.
     // 3C, 33.3).
     bool invept_offered = (cap_proc2 >> 32 & PROC2_EPT) && (cap_ept_vpid & CAP_INVEPT);
+    bool invvpid_offered = (cap_proc2 >> 32 & PROC2_VPID) && (cap_ept_vpid & CAP_INVVPID);
     if (n == NULL || !(vcpu_cr4(v) & CR4_VMXE) || (reason != EXIT_REASON_VMXON && !n->vmxon)
-        || (reason == EXIT_REASON_INVEPT && !invept_offered) || reason == EXIT_REASON_INVVPID
-        || reason == EXIT_REASON_VMFUNC || reason == EXIT_REASON_GETSEC) {
+        || (reason == EXIT_REASON_INVEPT && !invept_offered)
+        || (reason == EXIT_REASON_INVVPID && !invvpid_offered) || reason == EXIT_REASON_VMFUNC
+        || reason == EXIT_REASON_GETSEC) {
         vcpu_inject_exception(v, 6, false, 0);
         return;
     }
@@ -1830,6 +1890,10 @@ void nvmx_instruction(struct vcpu *v, uint32_t reason) {
         }
         case EXIT_REASON_INVEPT: {
             invept(v, n, info);
+            break;
+        }
+        case EXIT_REASON_INVVPID: {
+            invvpid(v, n, info);
             break;
         }
         default: {

@@ -44,7 +44,10 @@
 #define EPT_CAP_INVEPT (1ull << 20)
 #define EPT_CAP_INVEPT_ALL (1ull << 26)
 #define VPID_CAP_INVVPID (1ull << 32)
+#define VPID_CAP_INVVPID_ADDRESS (1ull << 40)
+#define VPID_CAP_INVVPID_SINGLE (1ull << 41)
 #define VPID_CAP_INVVPID_ALL (1ull << 42)
+#define VPID_CAP_INVVPID_GLOBALS (1ull << 43)
 
 #define EPTP_WB 6
 #define EPTP_WALK_4 (3 << 3)
@@ -312,7 +315,7 @@ bool vmx_ept_huge_pages(void) {
     return (ept_vpid_cap & EPT_CAP_1G) != 0;
 }
 
-static bool vpid_usable(void) {
+bool vmx_vpid_usable(void) {
     return control_allowed(proc2_cap, PROC2_VPID)
            && (ept_vpid_cap & (VPID_CAP_INVVPID | VPID_CAP_INVVPID_ALL))
               == (VPID_CAP_INVVPID | VPID_CAP_INVVPID_ALL);
@@ -324,6 +327,21 @@ void vmx_invept_all(void) {
         uint64_t reserved;
     } desc = {0, 0};
     asm volatile ("invept %0, %1" :: "m"(desc), "r"(2ull) : "cc", "memory");
+}
+
+void vmx_invvpid(unsigned type, uint16_t vpid, uint64_t address) {
+    static const uint64_t types[] = {
+        VPID_CAP_INVVPID_ADDRESS, VPID_CAP_INVVPID_SINGLE, VPID_CAP_INVVPID_ALL,
+        VPID_CAP_INVVPID_GLOBALS,
+    };
+    if (type > 3 || !(ept_vpid_cap & types[type])) {
+        type = 2;
+    }
+    struct {
+        uint64_t vpid;
+        uint64_t address;
+    } desc = {vpid, address};
+    asm volatile ("invvpid %0, %1" :: "m"(desc), "r"((uint64_t)type) : "cc", "memory");
 }
 
 void vmx_cpu_init(void) {
@@ -350,12 +368,8 @@ void vmx_cpu_init(void) {
     }
 
     vmx_invept_all();
-    if (vpid_usable()) {
-        struct {
-            uint64_t vpid;
-            uint64_t addr;
-        } vpid_desc = {0, 0};
-        asm volatile ("invvpid %0, %1" :: "m"(vpid_desc), "r"(2ull) : "cc", "memory");
+    if (vmx_vpid_usable()) {
+        vmx_invvpid(2, 0, 0);
     }
 }
 
@@ -536,7 +550,7 @@ void vmx_vcpu_init(struct vcpu *v) {
     // What the guest's instructions need to work as they would without VMX.
     uint32_t proc2_want = PROC2_RDTSCP | PROC2_INVPCID | PROC2_XSAVES | PROC2_USER_WAIT_PAUSE;
     uint32_t proc2_require = PROC2_EPT | PROC2_UNRESTRICTED_GUEST;
-    if (vpid_usable()) {
+    if (vmx_vpid_usable()) {
         proc2_require |= PROC2_VPID;
     }
     vmx_write(VMCS_PROC_CONTROLS2,
@@ -564,7 +578,7 @@ void vmx_vcpu_init(struct vcpu *v) {
     vmx_write(VMCS_IO_BITMAP_B, virt_io_bitmap() + PAGE_SIZE);
     vmx_write(VMCS_MSR_BITMAP, virt_msr_bitmap());
     vmx_load_gpt_root(v);
-    if (vpid_usable()) {
+    if (vmx_vpid_usable()) {
         vmx_write(VMCS_VPID, 1);
     }
 
@@ -658,12 +672,8 @@ void vmx_load_guest_cr3(uint64_t cr3) {
     vmx_write(VMCS_GUEST_CR3, cr3);
     vmx_load_guest_pdptes();
     // As MOV to CR3 drops the guest's translations.
-    if (vpid_usable()) {
-        struct {
-            uint64_t vpid;
-            uint64_t addr;
-        } vpid_desc = {0, 0};
-        asm volatile ("invvpid %0, %1" :: "m"(vpid_desc), "r"(2ull) : "cc", "memory");
+    if (vmx_vpid_usable()) {
+        vmx_invvpid(2, 0, 0);
     }
 }
 
