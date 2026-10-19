@@ -76,6 +76,11 @@
 #define MSR_IA32_SMM_MONITOR_CTL 0x9b
 #define MSR_FS_BASE 0xc0000100
 #define MSR_GS_BASE 0xc0000101
+#define MSR_X2APIC_FIRST 0x800
+#define MSR_X2APIC_LAST 0x8ff
+#define MSR_X2APIC_TPR 0x808
+#define MSR_X2APIC_EOI 0x80b
+#define MSR_X2APIC_SELF_IPI 0x83f
 
 #define VMX_RESULT_FLAGS (RFLAGS_CF | RFLAGS_PF | RFLAGS_AF | RFLAGS_ZF | RFLAGS_SF | RFLAGS_OF)
 
@@ -103,15 +108,16 @@
 // The fields the guest's VMCSs have: the controls of what it is offered, and
 // all of the guest state, host state, and exit information.
 static const uint16_t fields[] = {
-    0x0000,
-    0x0800, 0x0802, 0x0804, 0x0806, 0x0808, 0x080a, 0x080c, 0x080e,
+    0x0000, 0x0002,
+    0x0800, 0x0802, 0x0804, 0x0806, 0x0808, 0x080a, 0x080c, 0x080e, 0x0810,
     0x0c00, 0x0c02, 0x0c04, 0x0c06, 0x0c08, 0x0c0a, 0x0c0c,
-    0x2000, 0x2002, 0x2004, 0x2006, 0x2008, 0x200a, 0x2010, 0x201a,
+    0x2000, 0x2002, 0x2004, 0x2006, 0x2008, 0x200a, 0x2010, 0x2012, 0x2014, 0x2016, 0x201a,
+    0x201c, 0x201e, 0x2020, 0x2022,
     0x2400,
     0x2800, 0x2802, 0x2804, 0x2806, 0x280a, 0x280c, 0x280e, 0x2810,
     0x2c00, 0x2c02,
     0x4000, 0x4002, 0x4004, 0x4006, 0x4008, 0x400a, 0x400c, 0x400e, 0x4010, 0x4012, 0x4014,
-    0x4016, 0x4018, 0x401a, 0x401e,
+    0x4016, 0x4018, 0x401a, 0x401c, 0x401e,
     0x4400, 0x4402, 0x4404, 0x4406, 0x4408, 0x440a, 0x440c, 0x440e,
     0x4800, 0x4802, 0x4804, 0x4806, 0x4808, 0x480a, 0x480c, 0x480e, 0x4810, 0x4812,
     0x4814, 0x4816, 0x4818, 0x481a, 0x481c, 0x481e, 0x4820, 0x4822,
@@ -174,6 +180,19 @@ struct nvmx {
     uint64_t timer_deadline;
     // The guest's MSR bitmap with the hypervisor's intercepts added.
     uint8_t *msr_bitmap;
+    // The guest's virtual-APIC page and posted-interrupt descriptor for its
+    // guest, the APIC-access address VMCS02 has for it, and whether EPT02
+    // maps the page behind the local APICs' pages, which only that address
+    // then gives a meaning.
+    uint8_t *vapic;
+    uint32_t *pid;
+    uint64_t apic_access02;
+    bool ept02_apic;
+    // While the guest's guest processes posted interrupts, their notification
+    // vector, else -1, and whether a notification came for the hypervisor to
+    // process.
+    int pi_vector;
+    bool pi_pending;
     struct ept02 ept02[EPT02_ROOTS];
     struct ept02 *current02;
     unsigned ept02_pages;
@@ -213,6 +232,8 @@ static uint8_t *vmread_bitmap;
 static uint8_t *vmwrite_bitmap;
 // MAXPHYADDR (SDM 325462-093 Vol. 3C, 31.3.1).
 static unsigned phys_width;
+// An APIC-access address nothing maps, for where the guest's maps to nothing.
+static uint64_t access_nowhere;
 // The largest pages EPT02 maps: 2 MiB, or 1 GiB.
 static int ept02_level_max;
 // The EPT02 tables each vCPU may have, of the heap's NESTED_HEAP_SIZE.
@@ -227,18 +248,19 @@ static unsigned ept02_budget;
 
 #define PIN_EMULATED \
     (PIN_EXT_INTR_EXITING | PIN_NMI_EXITING | PIN_VIRTUAL_NMIS | PIN_PREEMPTION_TIMER \
-     | PIN_DEFAULT1)
+     | PIN_POSTED_INTR | PIN_DEFAULT1)
 #define PROC_EMULATED                                                                         \
     (PROC_INTR_WINDOW_EXITING | PROC_TSC_OFFSETTING | PROC_HLT_EXITING | PROC_INVLPG_EXITING \
      | PROC_MWAIT_EXITING | PROC_RDPMC_EXITING | PROC_RDTSC_EXITING | PROC_CR3_LOAD_EXITING   \
      | PROC_CR3_STORE_EXITING | PROC_CR8_LOAD_EXITING | PROC_CR8_STORE_EXITING                 \
-     | PROC_NMI_WINDOW_EXITING | PROC_MOV_DR_EXITING | PROC_UNCOND_IO_EXITING                  \
+     | PROC_TPR_SHADOW | PROC_NMI_WINDOW_EXITING | PROC_MOV_DR_EXITING | PROC_UNCOND_IO_EXITING \
      | PROC_IO_BITMAPS | PROC_MONITOR_TRAP_FLAG | PROC_MSR_BITMAPS | PROC_MONITOR_EXITING        \
      | PROC_PAUSE_EXITING | PROC_SECONDARY_CONTROLS | PROC_DEFAULT1)
 #define PROC2_EMULATED                                                                         \
-    (PROC2_EPT | PROC2_DESC_TABLE_EXITING | PROC2_RDTSCP | PROC2_VPID | PROC2_WBINVD_EXITING    \
-     | PROC2_UNRESTRICTED_GUEST | PROC2_RDRAND_EXITING | PROC2_INVPCID | PROC2_RDSEED_EXITING \
-     | PROC2_MBEC)
+    (PROC2_VIRT_APIC_ACCESSES | PROC2_EPT | PROC2_DESC_TABLE_EXITING | PROC2_RDTSCP             \
+     | PROC2_VIRT_X2APIC | PROC2_VPID | PROC2_WBINVD_EXITING | PROC2_UNRESTRICTED_GUEST         \
+     | PROC2_APIC_REG_VIRT | PROC2_VIRT_INTR_DELIVERY | PROC2_RDRAND_EXITING | PROC2_INVPCID     \
+     | PROC2_RDSEED_EXITING | PROC2_MBEC)
 #define EXIT_EMULATED                                                                        \
     (EXIT_SAVE_DEBUG_CONTROLS | EXIT_HOST_ADDR_SPACE_SIZE | EXIT_ACK_INTR_ON_EXIT | EXIT_SAVE_PAT \
      | EXIT_LOAD_PAT | EXIT_SAVE_EFER | EXIT_LOAD_EFER | EXIT_SAVE_PREEMPTION_TIMER \
@@ -352,6 +374,9 @@ void nvmx_init(void) {
         cap_proc2 &= ~((uint64_t)PROC2_MBEC << 32);
     }
     phys_width = cpuid(0x80000008, 0).eax & 0xff;
+    if (cap_proc2 >> 32 & PROC2_VIRT_APIC_ACCESSES) {
+        access_nowhere = (uint64_t)(uintptr_t)page_alloc(1);
+    }
     ept02_level_max = (ept_vpid & CAP_1G) ? 2 : 1;
     ept02_budget = NESTED_HEAP_SIZE / PAGE_SIZE / smp_cpu_count();
 
@@ -392,7 +417,7 @@ void nvmx_vcpu_init(struct vcpu *v) {
         return;
     }
     struct nvmx *n = kmalloc(sizeof(*n));
-    *n = (struct nvmx){.current = NO_VMCS};
+    *n = (struct nvmx){.current = NO_VMCS, .pi_vector = -1};
     v->nvmx = n;
     if (shadowing) {
         n->shadow = vmx_shadow_vmcs_create();
@@ -402,6 +427,40 @@ void nvmx_vcpu_init(struct vcpu *v) {
 }
 
 static void ept02_drop_all(struct nvmx *n);
+
+// Fields that exist only where the guest is offered what they are for (SDM
+// 325462-093 Vol. 3D, Appendix B).
+static bool field_offered(uint32_t field) {
+    uint32_t pin = (uint32_t)(cap_true_pin >> 32);
+    uint32_t proc = (uint32_t)(cap_true_proc >> 32);
+    uint32_t proc2 = (uint32_t)(cap_proc2 >> 32);
+    switch (field) {
+        case VMCS_PREEMPTION_TIMER: {
+            return (pin & PIN_PREEMPTION_TIMER) != 0;
+        }
+        case VMCS_POSTED_INTR_NV:
+        case VMCS_POSTED_INTR_DESC: {
+            return (pin & PIN_POSTED_INTR) != 0;
+        }
+        case VMCS_VIRTUAL_APIC_ADDR:
+        case VMCS_TPR_THRESHOLD: {
+            return (proc & PROC_TPR_SHADOW) != 0;
+        }
+        case VMCS_APIC_ACCESS_ADDR: {
+            return (proc2 & PROC2_VIRT_APIC_ACCESSES) != 0;
+        }
+        case VMCS_GUEST_INTR_STATUS:
+        case VMCS_EOI_EXIT0:
+        case VMCS_EOI_EXIT1:
+        case VMCS_EOI_EXIT2:
+        case VMCS_EOI_EXIT3: {
+            return (proc2 & PROC2_VIRT_INTR_DELIVERY) != 0;
+        }
+        default: {
+            return true;
+        }
+    }
+}
 
 static int field_slot(uint32_t field) {
     if (field & FIELD_RESERVED) {
@@ -417,7 +476,7 @@ static int field_slot(uint32_t field) {
         && (field - VMCS_CR3_TARGET0) / 2 >= cr3_targets) {
         return -1;
     }
-    if (field == VMCS_PREEMPTION_TIMER && !(cap_true_pin >> 32 & PIN_PREEMPTION_TIMER)) {
+    if (!field_offered(field & ~FIELD_HIGH)) {
         return -1;
     }
     return field_slots[FIELD_WIDTH(field)][FIELD_TYPE(field)][FIELD_INDEX(field)] - 1;
@@ -428,13 +487,13 @@ static uint64_t *field_at(const struct nvmx *n, int slot) {
 }
 
 // The guest's RAM at a guest-physical page, for the regions VMX instructions
-// name.
+// and VMCSs name: not the page behind its local APICs' pages.
 static uint8_t *guest_page(uint64_t gpa) {
     uint64_t hpa;
     uint32_t prot;
     uint8_t memtype;
     if (!gpt_translate(gpa, &hpa, &prot, &memtype) || (prot & (GPT_R | GPT_W)) != (GPT_R | GPT_W)
-        || memtype != MT_WB) {
+        || memtype != MT_WB || vlapic_access_page(hpa & ~0xfffull)) {
         return NULL;
     }
     return (uint8_t *)(uintptr_t)hpa;
@@ -804,11 +863,12 @@ static const uint16_t exit_fields[] = {
 // exit, and the exit information is read there only where the processor's
 // VMWRITE can load it (IA32_VMX_MISC bit 29).
 static const uint16_t shadow_read_write[] = {
-    VMCS_HOST_FS_SEL, VMCS_HOST_GS_SEL, VMCS_PIN_CONTROLS, VMCS_PROC_CONTROLS,
-    VMCS_EXCEPTION_BITMAP, VMCS_ENTRY_INTR_INFO, VMCS_ENTRY_EXCEPTION_ERROR, VMCS_ENTRY_INSTR_LEN,
-    VMCS_GUEST_INTERRUPTIBILITY, VMCS_PREEMPTION_TIMER, VMCS_GUEST_RIP, VMCS_GUEST_RSP,
-    VMCS_GUEST_RFLAGS, VMCS_GUEST_CR0, VMCS_GUEST_CR3, VMCS_GUEST_CR4, VMCS_CR0_MASK,
-    VMCS_CR0_SHADOW, VMCS_CR4_SHADOW, VMCS_HOST_FS_BASE, VMCS_HOST_GS_BASE,
+    VMCS_GUEST_INTR_STATUS, VMCS_HOST_FS_SEL, VMCS_HOST_GS_SEL, VMCS_PIN_CONTROLS,
+    VMCS_PROC_CONTROLS, VMCS_EXCEPTION_BITMAP, VMCS_ENTRY_INTR_INFO, VMCS_ENTRY_EXCEPTION_ERROR,
+    VMCS_ENTRY_INSTR_LEN, VMCS_TPR_THRESHOLD, VMCS_GUEST_INTERRUPTIBILITY, VMCS_PREEMPTION_TIMER,
+    VMCS_GUEST_RIP, VMCS_GUEST_RSP, VMCS_GUEST_RFLAGS, VMCS_GUEST_CR0, VMCS_GUEST_CR3,
+    VMCS_GUEST_CR4, VMCS_CR0_MASK, VMCS_CR0_SHADOW, VMCS_CR4_SHADOW, VMCS_HOST_FS_BASE,
+    VMCS_HOST_GS_BASE,
 };
 static const uint16_t shadow_read_only[] = {VMCS_GUEST_CS_AR, VMCS_GUEST_SS_AR};
 static const uint16_t shadow_exit_information[] = {
@@ -1161,6 +1221,7 @@ static void ept02_drop_all(struct nvmx *n) {
             ept02_drop(n, &n->ept02[i]);
         }
     }
+    n->ept02_apic = false;
 }
 
 // The EPTP of the shadow of VMCS12's EPT.
@@ -1232,16 +1293,22 @@ static uint64_t ept02_leaf(const struct nvmx *n, const struct ept12_walk *w, uin
 
 // Maps an address of the guest's guest in VMCS02's EPT02 as the walk of the
 // guest's EPT found it and the hypervisor's EPT has the guest's memory, but
-// for the page that virtualises the local APIC for VMCS01 alone. Returns the
-// rights it got.
+// for the page behind the guest's local APICs' pages, which is the guest's
+// guest's only where it is VMCS02's APIC-access page. Returns the rights it
+// got.
 static uint64_t ept02_fill(struct nvmx *n, uint64_t gpa, const struct ept12_walk *w) {
     uint64_t hpa;
     uint32_t prot;
     uint8_t memtype;
     int level;
-    if (!gpt_translate_leaf(w->gpa, &hpa, &prot, &memtype, &level)
-        || vlapic_access_page(hpa & ~0xfffull)) {
+    if (!gpt_translate_leaf(w->gpa, &hpa, &prot, &memtype, &level)) {
         return 0;
+    }
+    if (vlapic_access_page(hpa & ~0xfffull)) {
+        if ((hpa & ~0xfffull) != n->apic_access02) {
+            return 0;
+        }
+        n->ept02_apic = true;
     }
     if (level > w->level) {
         level = w->level;
@@ -1357,6 +1424,27 @@ static bool controls_valid(const struct nvmx *n) {
         || ((proc & PROC_NMI_WINDOW_EXITING) && !(pin & PIN_VIRTUAL_NMIS))
         || ((exit & EXIT_SAVE_PREEMPTION_TIMER) && !(pin & PIN_PREEMPTION_TIMER))) {
         return false;
+    }
+    // VMCS02 has addresses and a notification vector of the hypervisor's,
+    // and exits on and acknowledges interrupts for it anyway.
+    if ((proc & PROC_TPR_SHADOW)
+        && (!valid_address(get12(n, VMCS_VIRTUAL_APIC_ADDR))
+            || (!(proc2 & PROC2_VIRT_INTR_DELIVERY) && (get12(n, VMCS_TPR_THRESHOLD) >> 4) != 0))) {
+        return false;
+    }
+    if ((proc2 & PROC2_VIRT_APIC_ACCESSES) && !valid_address(get12(n, VMCS_APIC_ACCESS_ADDR))) {
+        return false;
+    }
+    if ((proc2 & PROC2_VIRT_INTR_DELIVERY) && !(pin & PIN_EXT_INTR_EXITING)) {
+        return false;
+    }
+    if (pin & PIN_POSTED_INTR) {
+        uint64_t desc = get12(n, VMCS_POSTED_INTR_DESC);
+        if (!(proc2 & PROC2_VIRT_INTR_DELIVERY) || !(exit & EXIT_ACK_INTR_ON_EXIT)
+            || (get12(n, VMCS_POSTED_INTR_NV) >> 8) != 0 || (desc & 0x3f) != 0
+            || (desc >> phys_width) != 0) {
+            return false;
+        }
     }
     if (proc2 & PROC2_EPT) {
         if (!eptp_valid(get12(n, VMCS_EPT_POINTER))) {
@@ -1575,22 +1663,44 @@ static bool msr_list_has(uint64_t address, uint64_t count, uint32_t msr) {
     return false;
 }
 
+// The guest's bit for an MSR up to 1FFFH in VMX's layout (SDM 325462-093 Vol.
+// 3C, 27.6.9), in place of the hypervisor's.
+static void guest_msr_bit(uint8_t *merged, const uint8_t *bitmap, uint32_t msr, bool write) {
+    unsigned bit = (write ? 0x800 * 8 : 0) + msr;
+    uint8_t mask = (uint8_t)(1u << (bit % 8));
+    merged[bit / 8] = (uint8_t)((merged[bit / 8] & ~mask) | (bitmap[bit / 8] & mask));
+}
+
 // The MSR bitmap of the guest's guest: where the guest has its own, that with
 // the hypervisor's intercepts added, as either may want the exits.
-static void merge_msr_bitmap(struct nvmx *n, uint64_t proc) {
+static void merge_msr_bitmap(struct nvmx *n, uint64_t proc, uint64_t proc2) {
     if (n->msr_bitmap == NULL) {
         n->msr_bitmap = page_alloc(1);
     }
-    // The base bitmap intercepts the x2APIC MSRs, which VMCS02 does not
-    // virtualise.
-    const uint8_t *own_msr = (const uint8_t *)(uintptr_t)virt_msr_bitmap();
-    if (proc & PROC_MSR_BITMAPS) {
-        const uint8_t *bitmap = guest_page(get12(n, VMCS_MSR_BITMAP));
-        for (unsigned i = 0; i < PAGE_SIZE; i++) {
-            n->msr_bitmap[i] = bitmap == NULL ? 0xff : bitmap[i] | own_msr[i];
-        }
-    } else {
+    if (!(proc & PROC_MSR_BITMAPS)) {
         memset(n->msr_bitmap, 0xff, PAGE_SIZE);
+        return;
+    }
+    const uint8_t *own_msr = (const uint8_t *)(uintptr_t)virt_msr_bitmap();
+    const uint8_t *bitmap = guest_page(get12(n, VMCS_MSR_BITMAP));
+    for (unsigned i = 0; i < PAGE_SIZE; i++) {
+        n->msr_bitmap[i] = bitmap == NULL ? 0xff : bitmap[i] | own_msr[i];
+    }
+    // The base bitmap intercepts the x2APIC MSRs, for the guest's local APIC,
+    // but for those whose accesses the processor virtualises for the guest (SDM
+    // 325462-093 Vol. 3C, 32.5), as Linux 7.3's KVM has them.
+    if (bitmap == NULL || !(proc2 & PROC2_VIRT_X2APIC)) {
+        return;
+    }
+    if (proc2 & PROC2_APIC_REG_VIRT) {
+        memcpy(n->msr_bitmap + MSR_X2APIC_FIRST / 8, bitmap + MSR_X2APIC_FIRST / 8,
+               (MSR_X2APIC_LAST + 1 - MSR_X2APIC_FIRST) / 8);
+    }
+    guest_msr_bit(n->msr_bitmap, bitmap, MSR_X2APIC_TPR, false);
+    guest_msr_bit(n->msr_bitmap, bitmap, MSR_X2APIC_TPR, true);
+    if (proc2 & PROC2_VIRT_INTR_DELIVERY) {
+        guest_msr_bit(n->msr_bitmap, bitmap, MSR_X2APIC_EOI, true);
+        guest_msr_bit(n->msr_bitmap, bitmap, MSR_X2APIC_SELF_IPI, true);
     }
 }
 
@@ -1604,31 +1714,107 @@ struct l1_values {
     uint64_t efer;
 };
 
+// The controls VMCS02 virtualises the local APIC with: the guest's, on its
+// pages, but for the vector its posted interrupts' notifications reach the
+// processor with.
+struct apic_controls {
+    uint64_t pin;
+    uint64_t proc;
+    uint64_t proc2;
+};
+
+static void apic_virtualization(struct nvmx *n, struct apic_controls *c) {
+    uint64_t pin = get12(n, VMCS_PIN_CONTROLS);
+    uint64_t proc = get12(n, VMCS_PROC_CONTROLS);
+    uint64_t proc2 = proc2_12(n);
+    n->vapic = NULL;
+    n->pid = NULL;
+    n->apic_access02 = 0;
+    int pi_vector = -1;
+    if (proc & PROC_TPR_SHADOW) {
+        n->vapic = guest_page(get12(n, VMCS_VIRTUAL_APIC_ADDR));
+        // One the processor cannot take, to fail the entry.
+        uint64_t address = ~0ull;
+        if (n->vapic != NULL) {
+            address = (uint64_t)(uintptr_t)n->vapic;
+        } else if ((proc & (PROC_CR8_LOAD_EXITING | PROC_CR8_STORE_EXITING))
+                       == (PROC_CR8_LOAD_EXITING | PROC_CR8_STORE_EXITING)
+                   && !(proc2 & (PROC2_VIRT_APIC_ACCESSES | PROC2_VIRT_X2APIC
+                                 | PROC2_VIRT_INTR_DELIVERY))) {
+            // Nothing uses the page then, which need not be RAM, as Linux 7.3's
+            // KVM has it.
+            c->proc &= ~(uint64_t)PROC_TPR_SHADOW;
+        }
+        vmx_write(VMCS_VIRTUAL_APIC_ADDR, address);
+        vmx_write(VMCS_TPR_THRESHOLD, get12(n, VMCS_TPR_THRESHOLD));
+    } else {
+        // CR8 is the TPR of the guest's local APIC, which only the hypervisor
+        // has.
+        c->proc |= PROC_CR8_LOAD_EXITING | PROC_CR8_STORE_EXITING;
+    }
+    if (proc2 & PROC2_VIRT_APIC_ACCESSES) {
+        uint64_t hpa;
+        uint32_t prot;
+        uint8_t memtype;
+        n->apic_access02 = gpt_translate(get12(n, VMCS_APIC_ACCESS_ADDR), &hpa, &prot, &memtype)
+                               ? hpa
+                               : access_nowhere;
+        vmx_write(VMCS_APIC_ACCESS_ADDR, n->apic_access02);
+    } else if (!(proc & PROC_TPR_SHADOW) && !(proc2 & PROC2_EPT) && vlapic_access_address() != 0) {
+        // On the hypervisor's EPT, the guest's local APIC's page is the page
+        // VMCS01 virtualises it on, which VMCS02 has every access to exit
+        // from.
+        c->proc2 |= PROC2_VIRT_APIC_ACCESSES;
+        vmx_write(VMCS_APIC_ACCESS_ADDR, vlapic_access_address());
+    }
+    if (n->ept02_apic && !vlapic_access_page(n->apic_access02)) {
+        ept02_drop_all(n);
+        vmx_invept_all();
+    }
+    if (proc2 & PROC2_VIRT_INTR_DELIVERY) {
+        vmx_write(VMCS_GUEST_INTR_STATUS, get12(n, VMCS_GUEST_INTR_STATUS));
+        for (unsigned i = 0; i < 4; i++) {
+            vmx_write(VMCS_EOI_EXIT0 + 2 * i, get12(n, VMCS_EOI_EXIT0 + 2 * i));
+        }
+    }
+    if (pin & PIN_POSTED_INTR) {
+        uint64_t desc = get12(n, VMCS_POSTED_INTR_DESC);
+        uint8_t *page = guest_page(desc & ~0xfffull);
+        if (page != NULL && n->vapic != NULL) {
+            n->pid = (uint32_t *)(page + (desc & 0xfff));
+            vmx_write(VMCS_POSTED_INTR_NV, VLAPIC_NESTED_POSTED_VECTOR);
+            vmx_write(VMCS_POSTED_INTR_DESC, (uint64_t)(uintptr_t)n->pid);
+            pi_vector = (int)get12(n, VMCS_POSTED_INTR_NV);
+        } else {
+            // Its notifications are the guest's interrupts then, as Linux 7.3's
+            // KVM has it.
+            c->pin &= ~(uint64_t)PIN_POSTED_INTR;
+        }
+    }
+    __atomic_store_n(&n->pi_vector, pi_vector, __ATOMIC_SEQ_CST);
+}
+
 static void write_vmcs02(struct vcpu *v, struct nvmx *n, const struct l1_values *l1) {
     uint64_t pin = get12(n, VMCS_PIN_CONTROLS);
     uint64_t proc = get12(n, VMCS_PROC_CONTROLS);
     uint64_t proc2 = (proc & PROC_SECONDARY_CONTROLS) ? get12(n, VMCS_PROC_CONTROLS2) : 0;
     uint64_t entry = get12(n, VMCS_ENTRY_CONTROLS);
 
-    merge_msr_bitmap(n, proc);
+    merge_msr_bitmap(n, proc, proc2);
     // The hypervisor takes the interrupts and NMIs, as it does for the guest.
-    vmx_write(VMCS_PIN_CONTROLS, pin | PIN_EXT_INTR_EXITING | PIN_NMI_EXITING | PIN_VIRTUAL_NMIS);
     // The processor consults the guest's I/O bitmaps at each access (SDM
     // 325462-093 Vol. 3C, 27.6.4), which may change meanwhile: every access
     // exits, to have them read then.
-    // CR8 is the TPR of the guest's local APIC, which only the hypervisor has.
-    uint64_t proc02 = (proc & ~(uint64_t)PROC_IO_BITMAPS) | PROC_UNCOND_IO_EXITING
-                      | PROC_MSR_BITMAPS | PROC_SECONDARY_CONTROLS | PROC_CR8_LOAD_EXITING
-                      | PROC_CR8_STORE_EXITING;
-    vmx_write(VMCS_PROC_CONTROLS, proc02);
-    // On the hypervisor's EPT, the local APIC's page is the page VMCS01
-    // virtualises it on, which VMCS02 has every access to exit from.
-    uint64_t proc2_02 = proc2 | PROC2_EPT;
-    if (!(proc2 & PROC2_EPT) && vlapic_access_address() != 0) {
-        proc2_02 |= PROC2_VIRT_APIC_ACCESSES;
-        vmx_write(VMCS_APIC_ACCESS_ADDR, vlapic_access_address());
-    }
-    vmx_write(VMCS_PROC_CONTROLS2, proc2_02);
+    struct apic_controls c = {
+        .pin = pin | PIN_EXT_INTR_EXITING | PIN_NMI_EXITING | PIN_VIRTUAL_NMIS,
+        .proc = (proc & ~(uint64_t)PROC_IO_BITMAPS) | PROC_UNCOND_IO_EXITING | PROC_MSR_BITMAPS
+                | PROC_SECONDARY_CONTROLS,
+        .proc2 = proc2 | PROC2_EPT,
+    };
+    apic_virtualization(n, &c);
+    vmx_write(VMCS_PIN_CONTROLS, c.pin);
+    vmx_write(VMCS_PROC_CONTROLS, c.proc);
+    vmx_write(VMCS_PROC_CONTROLS2, c.proc2);
     vmx_write(VMCS_EXIT_CONTROLS, l1->exit_controls);
     vmx_write(VMCS_ENTRY_CONTROLS, (l1->entry_controls & ~(uint64_t)ENTRY_IA32E_MODE_GUEST)
                                        | (entry & ENTRY_IA32E_MODE_GUEST));
@@ -1717,6 +1903,9 @@ static void save_l2_state(struct nvmx *n) {
             set12(n, VMCS_GUEST_PDPTE0 + 2 * i, vmx_read(VMCS_GUEST_PDPTE0 + 2 * i));
         }
     }
+    if (proc2_12(n) & PROC2_VIRT_INTR_DELIVERY) {
+        set12(n, VMCS_GUEST_INTR_STATUS, vmx_read(VMCS_GUEST_INTR_STATUS));
+    }
     // As IA32_VMX_MISC bit 5 has it.
     uint64_t entry = get12(n, VMCS_ENTRY_CONTROLS) & ~(uint64_t)ENTRY_IA32E_MODE_GUEST;
     set12(n, VMCS_ENTRY_CONTROLS, entry | ((efer & EFER_LMA) ? ENTRY_IA32E_MODE_GUEST : 0));
@@ -1801,6 +1990,47 @@ static void load_l1_host_state(struct vcpu *v, struct nvmx *n, bool nmi) {
     vmx_write(VMCS_GUEST_PENDING_DBG, 0);
 }
 
+// The posted-interrupt descriptor's requests, then its notification bits
+// (SDM 325462-093 Vol. 3C, Table 32-2), and the virtual-APIC page's VIRR.
+#define PID_NOTIFICATION 8
+#define PID_ON 1u
+#define VAPIC_IRR 0x200
+
+// Posted-interrupt processing of a notification the guest sent its guest's
+// processor, as the processor does it (SDM 325462-093 Vol. 3C, 32.6), with
+// VMCS02 current.
+static void posted_process(struct nvmx *n) {
+    __atomic_and_fetch(&n->pid[PID_NOTIFICATION], ~PID_ON, __ATOMIC_SEQ_CST);
+    int highest = -1;
+    for (unsigned i = 0; i < 8; i++) {
+        uint32_t bits = __atomic_exchange_n(&n->pid[i], 0, __ATOMIC_SEQ_CST);
+        if (bits != 0) {
+            uint32_t *irr = (uint32_t *)(n->vapic + VAPIC_IRR + i * 0x10);
+            __atomic_or_fetch(irr, bits, __ATOMIC_SEQ_CST);
+            highest = (int)(i * 32 + 31) - __builtin_clz(bits);
+        }
+    }
+    uint64_t status = vmx_read(VMCS_GUEST_INTR_STATUS);
+    if (highest > (int)(status & 0xff)) {
+        vmx_write(VMCS_GUEST_INTR_STATUS, (status & ~0xffull) | (uint64_t)highest);
+    }
+}
+
+// The guest's guest no longer processes posted interrupts. A notification
+// the hypervisor has yet to process came before an exit, or, for an entry
+// that failed, is the guest's interrupt.
+static void posted_leave(struct vcpu *v, struct nvmx *n, bool entered) {
+    int vector = __atomic_exchange_n(&n->pi_vector, -1, __ATOMIC_SEQ_CST);
+    if (!__atomic_exchange_n(&n->pi_pending, false, __ATOMIC_SEQ_CST)) {
+        return;
+    }
+    if (entered && n->pid != NULL) {
+        posted_process(n);
+    } else if (vector >= 0) {
+        vlapic_accept(v, (uint8_t)vector, false);
+    }
+}
+
 // What is left of the VMX-preemption timer of the guest's guest.
 static uint64_t timer_left(const struct nvmx *n) {
     uint64_t now = rdtsc() >> timer_rate;
@@ -1818,6 +2048,7 @@ static void exit_to_l1(struct vcpu *v, struct nvmx *n, uint32_t reason, uint64_t
     bool nmi = (reason & 0xffff) == EXIT_REASON_EXCEPTION_NMI
                && (intr_info & (7u << 8)) == INTR_TYPE_NMI;
     bool failed = (reason & EXIT_REASON_ENTRY_FAILURE) != 0;
+    posted_leave(v, n, !failed);
     if (!failed) {
         save_l2_state(n);
         set12(n, VMCS_ENTRY_INTR_INFO, get12(n, VMCS_ENTRY_INTR_INFO) & ~(uint64_t)INTR_INFO_VALID);
@@ -2164,9 +2395,11 @@ static bool l1_wants(struct vcpu *v, const struct nvmx *n, uint32_t reason, uint
         }
         case EXIT_REASON_EXTERNAL_INTR:
         case EXIT_REASON_EPT_VIOLATION:
-        case EXIT_REASON_EPT_MISCONFIG:
-        case EXIT_REASON_APIC_ACCESS: {
+        case EXIT_REASON_EPT_MISCONFIG: {
             return false;
+        }
+        case EXIT_REASON_APIC_ACCESS: {
+            return (proc2_12(n) & PROC2_VIRT_APIC_ACCESSES) != 0;
         }
         case EXIT_REASON_INTR_WINDOW: {
             return (proc & PROC_INTR_WINDOW_EXITING) != 0;
@@ -2292,6 +2525,7 @@ bool nvmx_entry_failed(struct vcpu *v, uint32_t error) {
     if (n->launching) {
         *(volatile uint32_t *)(n->vmcs12 + VMCS12_LAUNCHED) = 0;
     }
+    posted_leave(v, n, false);
     vmx_vmcs_swap(v, &n->other);
     n->in_l2 = false;
     n->launching = false;
@@ -2349,6 +2583,14 @@ bool nvmx_before_entry(struct vcpu *v) {
     }
     bool extint = (pin & PIN_EXT_INTR_EXITING) && irq_extint_pending(v);
     int vector = (!(pin & PIN_EXT_INTR_EXITING) || extint) ? -1 : vlapic_pending(v);
+    // The notification of the guest's posted interrupts, which the guest's
+    // guest's processor takes instead of exiting (SDM 325462-093 Vol. 3C,
+    // 32.6).
+    if (vector >= 0 && vector == n->pi_vector) {
+        vlapic_dismiss(v, (uint8_t)vector);
+        __atomic_store_n(&n->pi_pending, true, __ATOMIC_SEQ_CST);
+        vector = vlapic_pending(v);
+    }
     if (waiting) {
         if (extint || vector >= 0 || (v->nmi_pending && (pin & PIN_NMI_EXITING))
             || __atomic_load_n(&v->cpu->init_pending, __ATOMIC_ACQUIRE)) {
@@ -2366,6 +2608,9 @@ bool nvmx_before_entry(struct vcpu *v) {
         }
         exit_to_l1(v, n, EXIT_REASON_EXTERNAL_INTR, 0, info, 0, false);
         return false;
+    }
+    if (n->pid != NULL && __atomic_exchange_n(&n->pi_pending, false, __ATOMIC_SEQ_CST)) {
+        posted_process(n);
     }
     uint64_t windows = PROC_INTR_WINDOW_EXITING | PROC_NMI_WINDOW_EXITING;
     vmx_write(VMCS_PROC_CONTROLS, vmx_read(VMCS_PROC_CONTROLS) & ~windows);
@@ -2572,6 +2817,19 @@ bool nvmx_exception(struct vcpu *v, uint8_t vector, bool has_error, uint32_t err
     n->pending_gpa = 0;
     n->pending_linear = 0;
     return true;
+}
+
+// The guest's interrupt with the notification vector of its guest's posted
+// interrupts, while its guest runs, is a notification (SDM 325462-093 Vol.
+// 3C, 32.6). The vCPU may leave its guest meanwhile and not see it.
+bool nvmx_posted_notification(struct vcpu *v, uint8_t vector) {
+    struct nvmx *n = v->nvmx;
+    if (n == NULL || __atomic_load_n(&n->pi_vector, __ATOMIC_SEQ_CST) != vector) {
+        return false;
+    }
+    __atomic_store_n(&n->pi_pending, true, __ATOMIC_SEQ_CST);
+    return __atomic_load_n(&n->pi_vector, __ATOMIC_SEQ_CST) == vector
+           || !__atomic_exchange_n(&n->pi_pending, false, __ATOMIC_SEQ_CST);
 }
 
 bool nvmx_monitor_trap_flag(struct vcpu *v) {

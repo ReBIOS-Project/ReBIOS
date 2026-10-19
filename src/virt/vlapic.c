@@ -861,6 +861,12 @@ void vlapic_accept(struct vcpu *v, uint8_t vector, bool level) {
         __atomic_or_fetch(&vl->esr_pending, ESR_RECEIVE_ILLEGAL_VECTOR, __ATOMIC_RELAXED);
         return;
     }
+    if (!level && nvmx_posted_notification(v, vector)) {
+        if (v->cpu != this_cpu()) {
+            lapic_send_ipi(v->cpu->apic_id, ICR_DELIVERY_FIXED | VLAPIC_NESTED_POSTED_VECTOR);
+        }
+        return;
+    }
     uint32_t bit = 1u << (vector % 32);
     if (!virt_vmx && __atomic_load_n(&vl->avic, __ATOMIC_SEQ_CST) != AVIC_OFF) {
         if (level) {
@@ -1049,6 +1055,11 @@ static void eoi(struct vlapic *vl) {
         && !(regs_get(vl, APIC_SVR) & SVR_SUPPRESS_EOI_BROADCAST)) {
         irq_mirror_eoi((uint8_t)vector);
     }
+}
+
+void vlapic_dismiss(struct vcpu *v, uint8_t vector) {
+    vlapic_take(v, vector);
+    eoi(v->vlapic);
 }
 
 static bool matches(const struct vlapic *target, uint32_t dest, bool logical, bool x2apic_dest) {

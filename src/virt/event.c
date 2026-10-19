@@ -176,8 +176,9 @@ void event_interrupt(uint8_t vector) {
             return;
         }
         // A notification outside the guest: what it posted is merged before
-        // the next entry.
-        case VLAPIC_POSTED_VECTOR: {
+        // the next entry, the guest's guest's too.
+        case VLAPIC_POSTED_VECTOR:
+        case VLAPIC_NESTED_POSTED_VECTOR: {
             lapic_eoi();
             return;
         }

@@ -24,6 +24,7 @@
 
 // Vectors the hypervisor takes its own interrupts on at the processor's
 // local APIC, which guests use for none of their MSIs and I/O APIC entries.
+#define VLAPIC_NESTED_POSTED_VECTOR 0xfa
 #define VLAPIC_POSTED_VECTOR 0xfb
 #define VLAPIC_DEVICE_VECTOR 0xfc
 #define VLAPIC_KICK_VECTOR 0xfd
@@ -73,6 +74,9 @@ void vlapic_timer_fired(struct vcpu *v);
 // The vector of the interrupt the vCPU takes next, or -1, and taking it.
 int vlapic_pending(struct vcpu *v);
 void vlapic_take(struct vcpu *v, uint8_t vector);
+// Taking it and ending it at once, as posted-interrupt processing does with
+// its notification (SDM 325462-093 Vol. 3C, 32.6).
+void vlapic_dismiss(struct vcpu *v, uint8_t vector);
 // The priority class of a requested interrupt that only the TPR holds back,
 // or -1.
 int vlapic_tpr_held(struct vcpu *v);
