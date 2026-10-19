@@ -792,19 +792,28 @@ static void vmx_handle_task_switch(struct vcpu *v, uint64_t qual) {
                 (unsigned)vmx_read(VMCS_EXIT_INSTR_LEN));
 }
 
-static void vmx_handle_cr_access(struct vcpu *v, uint64_t qual) {
-    unsigned cr = qual & 15;
-    unsigned type = (qual >> 4) & 3;
-    unsigned reg = (qual >> 8) & 15;
+// The access types of control register exits' qualification (SDM 325462-093
+// Vol. 3C, Table 30-3).
+#define CR_ACCESS_MOV_TO 0
+#define CR_ACCESS_MOV_FROM 1
+#define CR_ACCESS_CLTS 2
+#define CR_ACCESS_LMSW 3
 
-    // Only CR0 and CR4 writes trap, through their guest/host masks; LMSW and
-    // CLTS can only touch CR0 bits the guest owns entirely.
-    if (type != 0 || (cr != 0 && cr != 4)) {
-        panic("Unexpected control register access, qualification %#llx\n",
-              (unsigned long long)qual);
+static uint64_t guest_reg(struct vcpu *v, unsigned reg) {
+    return reg == 4 ? vmx_read(VMCS_GUEST_RSP) : ((uint64_t *)&v->gprs)[reg];
+}
+
+static void set_guest_reg(struct vcpu *v, unsigned reg, uint64_t value) {
+    if (reg == 4) {
+        vmx_write(VMCS_GUEST_RSP, value);
+    } else {
+        ((uint64_t *)&v->gprs)[reg] = value;
     }
+}
 
-    uint64_t value = reg == 4 ? vmx_read(VMCS_GUEST_RSP) : ((uint64_t *)&v->gprs)[reg];
+// What a write of CR0 or CR4 does, with the bits the host owns as the guest
+// believes them.
+static void cr_write(struct vcpu *v, unsigned cr, uint64_t value) {
     uint64_t cr0 = cr == 0 ? vmx_cr0_real(value) : vmx_read(VMCS_GUEST_CR0);
     uint64_t cr4 = cr == 4 ? vmx_cr4_real(value) : vmx_read(VMCS_GUEST_CR4);
     // Long mode cannot do without PAE, and 64-bit code without paging.
@@ -829,6 +838,49 @@ static void vmx_handle_cr_access(struct vcpu *v, uint64_t qual) {
         vmx_write(VMCS_GUEST_CR4, cr4);
     }
     vcpu_skip_instruction(v);
+}
+
+// CR0 and CR4 writes trap through their guest/host masks; the other accesses
+// only would where their exiting controls, which the hypervisor leaves clear,
+// or masks covering CR0's low bits, made them.
+static void vmx_handle_cr_access(struct vcpu *v, uint64_t qual) {
+    unsigned cr = qual & 15;
+    unsigned type = (qual >> 4) & 3;
+    unsigned reg = (qual >> 8) & 15;
+    uint64_t cr0 = vcpu_cr0(v);
+    switch (type) {
+        case CR_ACCESS_MOV_TO: {
+            uint64_t value = guest_reg(v, reg);
+            if (cr == 0 || cr == 4) {
+                cr_write(v, cr, value);
+            } else if (cr == 3) {
+                vmx_load_guest_cr3(value);
+                vcpu_skip_instruction(v);
+            } else if (value >> 4) {
+                vcpu_inject_exception(v, 13, true, 0);
+            } else {
+                vlapic_set_cr8(v, (uint32_t)value);
+                vcpu_skip_instruction(v);
+            }
+            break;
+        }
+        case CR_ACCESS_MOV_FROM: {
+            set_guest_reg(v, reg, cr == 3 ? vmx_read(VMCS_GUEST_CR3) : vlapic_cr8(v));
+            vcpu_skip_instruction(v);
+            break;
+        }
+        case CR_ACCESS_CLTS: {
+            cr_write(v, 0, cr0 & ~(uint64_t)CR0_TS);
+            break;
+        }
+        default: {
+            // LMSW loads MP, EM, and TS, and PE but never clears it (SDM
+            // 325462-093 Vol. 2A, LMSW).
+            uint64_t msw = (qual >> 16) & 0xf;
+            cr_write(v, 0, (cr0 & ~0xeull) | (msw & 0xe) | ((cr0 | msw) & CR0_PE));
+            break;
+        }
+    }
 }
 
 static void vmx_handle_io(struct vcpu *v, uint64_t qual) {
