@@ -126,6 +126,9 @@ struct vcpu {
     uint64_t mtrr_def_type;
     uint64_t mtrr_fixed[MTRR_FIXED_COUNT];
     uint64_t mtrr_variable[2 * MTRR_VARIABLE_COUNT];
+    // The guest's copies of the IA32_MISC_ENABLE bits the processor's keep
+    // clear (msr.c).
+    uint64_t misc_enable;
 
     // What the guest believes CR0 and CR4 hold, for the bits the host owns.
     uint64_t cr0_shadow;

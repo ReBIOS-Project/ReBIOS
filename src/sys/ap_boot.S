@@ -70,6 +70,28 @@ ap_boot_pm32:
     movl %eax, %ds
     movl %eax, %es
     movl %eax, %ss
+    /* Intel's firmware may limit CPUID's leaves, which the APIC ID lookup
+       reads, or disable the XD bit, which EFER.NXE needs: IA32_MISC_ENABLE
+       bits 22 and 34, which the hypervisor keeps clear (virt/msr.c). */
+    xorl %eax, %eax
+    cpuid
+    cmpl $0x756e6547, %ebx
+    jne 1f
+    cmpl $0x49656e69, %edx
+    jne 1f
+    cmpl $0x6c65746e, %ecx
+    jne 1f
+    movl $0x1a0, %ecx
+    rdmsr
+    testl $(1 << 22), %eax
+    jnz 2f
+    testl $(1 << 2), %edx
+    jz 1f
+2:
+    andl $~(1 << 22), %eax
+    andl $~(1 << 2), %edx
+    wrmsr
+1:
     movl PARAMS + PARAM_CR4(%ebp), %eax
     movl %eax, %cr4
     movl PARAMS + PARAM_CR3(%ebp), %eax

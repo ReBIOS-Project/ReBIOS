@@ -62,8 +62,13 @@
 
 #define MSR_IA32_APIC_BASE 0x1b
 #define MSR_IA32_FEATURE_CONTROL 0x3a
+#define MSR_IA32_MISC_ENABLE 0x1a0
 #define MSR_IA32_PAT 0x277
 #define MSR_EFER 0xc0000080
+
+// SDM 325462-093 Vol. 4, Tables 2-2 and 2-3.
+#define MISC_ENABLE_LIMIT_CPUID (1ull << 22)
+#define MISC_ENABLE_XD_DISABLE (1ull << 34)
 
 #define EFER_SCE (1u << 0)
 #define EFER_LME (1u << 8)

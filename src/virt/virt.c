@@ -30,6 +30,7 @@
 #include <virt/event.h>
 #include <virt/gpt.h>
 #include <virt/insn.h>
+#include <virt/msr.h>
 #include <virt/mtrr.h>
 #include <virt/nvmx.h>
 #include <virt/profile.h>
@@ -235,6 +236,7 @@ struct vcpu *vcpu_create(struct cpu *cpu) {
     }
     vlapic_create(v);
     mtrr_vcpu_init(v);
+    msr_vcpu_init(v);
     nvmx_vcpu_init(v);
     return v;
 }

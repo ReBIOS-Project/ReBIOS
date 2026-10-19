@@ -30,6 +30,7 @@
 #include <virt/insn.h>
 #include <virt/io.h>
 #include <virt/mmio.h>
+#include <virt/msr.h>
 #include <virt/mtrr.h>
 #include <virt/nvmx.h>
 #include <virt/profile.h>
@@ -51,6 +52,7 @@
 #define CPUID_7_1_EAX_MSRLIST (1u << 27)
 #define CPUID_7_1_EBX_PBNDKB (1u << 1)
 #define CPUID_D_1_EAX_XSAVES (1u << 3)
+#define CPUID_80000001_EDX_NX (1u << 20)
 #define CPUID_80000001_EDX_RDTSCP (1u << 27)
 
 // The instructions VMX makes #UD unless a VM-execution control lets them run
@@ -83,7 +85,22 @@ void exit_cpuid(struct vcpu *v) {
     uint32_t subleaf = (uint32_t)v->gprs.rcx;
     struct cpuid_regs r = cpuid(leaf, subleaf);
 
+    // Under IA32_MISC_ENABLE's limit only the legacy leaves 0-2 remain, and
+    // leaves out of range answer as the last basic one (SDM 325462-093 Vol. 1,
+    // 21.1.3).
+    bool limited = (v->misc_enable & MISC_ENABLE_LIMIT_CPUID) != 0;
+    if (limited && (leaf < 0x80000000 ? leaf > 2 : leaf > cpuid(0x80000000, 0).eax)) {
+        leaf = 2;
+        r = cpuid(leaf, 0);
+    }
+
     switch (leaf) {
+        case 0: {
+            if (limited) {
+                r.eax = 2;
+            }
+            break;
+        }
         case 1: {
             // No hypervisor shows, and VMX only where the guest gets it.
             r.ecx &= ~(1u << 31);
@@ -115,6 +132,9 @@ void exit_cpuid(struct vcpu *v) {
             // AMD's copy of the APIC flag.
             if ((r.edx & (1u << 9)) && !vlapic_enabled(v)) {
                 r.edx &= ~(1u << 9);
+            }
+            if (v->misc_enable & MISC_ENABLE_XD_DISABLE) {
+                r.edx &= ~CPUID_80000001_EDX_NX;
             }
             break;
         }
@@ -225,7 +245,7 @@ void exit_invalid_opcode(struct vcpu *v) {
 bool exit_msr_read(struct vcpu *v, uint32_t msr, uint64_t *value) {
     bool fault;
     if (vlapic_rdmsr(v, msr, value, &fault) || mtrr_rdmsr(v, msr, value, &fault)
-        || nvmx_rdmsr(v, msr, value, &fault)) {
+        || msr_rdmsr(v, msr, value, &fault) || nvmx_rdmsr(v, msr, value, &fault)) {
         return !fault;
     }
     if (!virt_vmx && msr == MSR_EFER) {
@@ -257,7 +277,7 @@ void exit_rdmsr(struct vcpu *v) {
 bool exit_msr_write(struct vcpu *v, uint32_t msr, uint64_t value) {
     bool fault;
     if (vlapic_wrmsr(v, msr, value, &fault) || mtrr_wrmsr(v, msr, value, &fault)
-        || nvmx_wrmsr(v, msr, value, &fault)) {
+        || msr_wrmsr(v, msr, value, &fault) || nvmx_wrmsr(v, msr, value, &fault)) {
         return !fault;
     }
     if (!virt_vmx && msr == MSR_EFER) {
