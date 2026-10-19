@@ -1832,6 +1832,7 @@ struct l1_values {
     uint64_t debugctl;
     uint64_t pat;
     uint64_t efer;
+    uint64_t bndcfgs;
 };
 
 // The controls VMCS02 virtualises the local APIC with: the guest's, on its
@@ -2003,6 +2004,11 @@ static void write_vmcs02(struct vcpu *v, struct nvmx *n, const struct l1_values 
     vmx_write(VMCS_GUEST_DR7, debug ? get12(n, VMCS_GUEST_DR7) : l1->dr7);
     vmx_write(VMCS_GUEST_DEBUGCTL, debug ? get12(n, VMCS_GUEST_DEBUGCTL) : l1->debugctl);
     vmx_write(VMCS_GUEST_PAT, (entry & ENTRY_LOAD_PAT) ? get12(n, VMCS_GUEST_PAT) : l1->pat);
+    // The guest has no controls for IA32_BNDCFGS: its guest runs with its
+    // value, and leaves it its own.
+    if (vmx_mpx_passthrough()) {
+        vmx_write(VMCS_GUEST_BNDCFGS, l1->bndcfgs);
+    }
     uint64_t efer = get12(n, VMCS_GUEST_EFER);
     if (!(entry & ENTRY_LOAD_EFER)) {
         efer = l1->efer & ~(uint64_t)(EFER_LMA | EFER_LME);
@@ -2242,9 +2248,13 @@ static void exit_to_l1(struct vcpu *v, struct nvmx *n, uint32_t reason, uint64_t
                        tsc);
     }
 
+    uint64_t bndcfgs = vmx_mpx_passthrough() ? vmx_read(VMCS_GUEST_BNDCFGS) : 0;
     vmx_vmcs_swap(v, &n->other);
     n->in_l2 = false;
     n->launching = false;
+    if (vmx_mpx_passthrough()) {
+        vmx_write(VMCS_GUEST_BNDCFGS, bndcfgs);
+    }
     load_l1_host_state(v, n, nmi);
     // A failure here would be a VMX abort, which shuts the processor down.
     if (load_msr_list(v, get12(n, VMCS_EXIT_MSR_LOAD_ADDR), get12(n, VMCS_EXIT_MSR_LOAD_COUNT))) {
@@ -2334,6 +2344,7 @@ static void vmlaunch(struct vcpu *v, struct nvmx *n, bool resume) {
         .debugctl = vmx_read(VMCS_GUEST_DEBUGCTL),
         .pat = vmx_read(VMCS_GUEST_PAT),
         .efer = vmx_read(VMCS_GUEST_EFER),
+        .bndcfgs = vmx_mpx_passthrough() ? vmx_read(VMCS_GUEST_BNDCFGS) : 0,
     };
     if (!n->created) {
         vmx_vmcs_create(v, &n->other);

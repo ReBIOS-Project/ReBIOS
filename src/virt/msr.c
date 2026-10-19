@@ -33,6 +33,7 @@
 
 // SDM 325462-093 Vol. 1, Tables 21-16, 21-19, 21-23, and 21-35.
 #define CPUID_6_EAX_HW_FEEDBACK (1u << 19)
+#define CPUID_7_EBX_MPX (1u << 14)
 #define CPUID_7_EBX_PT (1u << 25)
 #define CPUID_7_1_EBX_CPUIDMAXVAL_LIM_RMV (1u << 3)
 #define CPUID_D_1_EAX_XSAVES (1u << 3)
@@ -53,6 +54,7 @@
 #define MSR_IA32_RTIT_ADDR0_A 0x580
 #define MSR_IA32_RTIT_ADDR3_B 0x587
 
+#define MSR_IA32_BNDCFGS 0xd90
 #define MSR_IA32_XSS 0xda0
 
 // IA32_MISC_ENABLE's bits the processor's keep clear, as the CPUID limit would
@@ -87,6 +89,9 @@ static uint32_t hfi_package_count;
 // Intel PT where it cannot be the guest's: its output would go to host
 // addresses, and its tracing would go on through the hypervisor's own code.
 static bool pt_hidden;
+// MPX where its supervisor configuration would stay on in the hypervisor
+// (vmx.c).
+static bool mpx_hidden;
 // IA32_XSS, which exists where XSAVES does.
 static bool xss;
 
@@ -142,6 +147,15 @@ static void pt_init(void) {
     }
 }
 
+static void mpx_init(void) {
+    if (!virt_vmx || vmx_mpx_passthrough() || cpuid(0, 0).eax < 7
+        || !(cpuid(7, 0).ebx & CPUID_7_EBX_MPX)) {
+        return;
+    }
+    mpx_hidden = true;
+    virt_intercept_msr(MSR_IA32_BNDCFGS, true, true);
+}
+
 // The supervisor state components XSAVES and XRSTORS handle: only those the
 // guest gets, as XRSTORS would load PT's IA32_RTIT_CTL, for one.
 static void xss_init(void) {
@@ -156,6 +170,7 @@ void msr_init(void) {
     misc_enable_init();
     hfi_init();
     pt_init();
+    mpx_init();
     xss_init();
 }
 
@@ -195,7 +210,7 @@ void msr_vcpu_init(struct vcpu *v) {
 }
 
 bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
-    if (pt_hidden && pt_msr(msr)) {
+    if ((pt_hidden && pt_msr(msr)) || (mpx_hidden && msr == MSR_IA32_BNDCFGS)) {
         *fault = true;
         return true;
     }
@@ -228,7 +243,7 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
 }
 
 bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
-    if (pt_hidden && pt_msr(msr)) {
+    if ((pt_hidden && pt_msr(msr)) || (mpx_hidden && msr == MSR_IA32_BNDCFGS)) {
         *fault = true;
         return true;
     }

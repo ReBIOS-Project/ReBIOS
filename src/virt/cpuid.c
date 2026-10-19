@@ -64,15 +64,15 @@ static const struct leaf_bits intel_leaves[] = {
     // APERF/MPERF, EPB, Thread Director classes; EDX HFI capabilities, HFI table size, HFI row.
     {0x6, SUBLEAF_ALL, {0x00dfeff7, 0x0000000f, 0x0000ff09, 0xffff0fff}},
     // EAX last subleaf; EBX FSGSBASE, TSC_ADJUST, BMI1, HLE, AVX2, FDP_EXCPTN_ONLY, SMEP, BMI2,
-    // ERMS, INVPCID, RTM, RDT-M, FCS/FDS deprecation, RDT-A, AVX512F, AVX512DQ, RDSEED, ADX, SMAP,
-    // AVX512_IFMA, CLFLUSHOPT, CLWB, Intel PT, AVX512PF, AVX512ER, AVX512CD, SHA, AVX512BW,
+    // ERMS, INVPCID, RTM, RDT-M, FCS/FDS deprecation, MPX, RDT-A, AVX512F, AVX512DQ, RDSEED, ADX,
+    // SMAP, AVX512_IFMA, CLFLUSHOPT, CLWB, Intel PT, AVX512PF, AVX512ER, AVX512CD, SHA, AVX512BW,
     // AVX512VL; ECX PREFETCHWT1, AVX512_VBMI, UMIP, PKU, WAITPKG, AVX512_VBMI2, CET_SS, GFNI, VAES,
-    // VPCLMULQDQ, AVX512_VNNI, AVX512_BITALG, AVX512_VPOPCNTDQ, LA57, RDPID, Key Locker, bus lock
-    // detect, CLDEMOTE, MOVDIRI, MOVDIR64B, PKS; EDX AVX512_4VNNIW, AVX512_4FMAPS, FSRM,
+    // VPCLMULQDQ, AVX512_VNNI, AVX512_BITALG, AVX512_VPOPCNTDQ, LA57, MAWAU, RDPID, Key Locker, bus
+    // lock detect, CLDEMOTE, MOVDIRI, MOVDIR64B, PKS; EDX AVX512_4VNNIW, AVX512_4FMAPS, FSRM,
     // AVX512_VP2INTERSECT, MCU_OPT_CTRL, MD_CLEAR, RTM_ALWAYS_ABORT, RTM_FORCE_ABORT, SERIALIZE,
     // hybrid, TSXLDTRK, arch LBRs, CET_IBT, AMX_BF16, AVX512_FP16, AMX_TILE, AMX_INT8, IBRS/IBPB,
     // STIBP, L1D_FLUSH, ARCH_CAPABILITIES, CORE_CAPABILITIES, SSBD.
-    {0x7, 0, {0xffffffff, 0xffbfbffb, 0x9bc15fef, 0xffd9ef1c}},
+    {0x7, 0, {0xffffffff, 0xffbffffb, 0x9bff5fef, 0xffd9ef1c}},
     // EAX SHA512, SM3, SM4, AVX_VNNI, AVX512_BF16, LASS, CMPCCXADD, ARCH_PERFMON_EXT, fast
     // zero-length MOVSB, fast short STOSB, fast short CMPSB/SCASB, LKGS, WRMSRNS, AMX_FP16, HRESET,
     // AVX_IFMA, LAM; EBX PPIN, CPUIDMAXVAL_LIM_RMV; ECX RDT-M asymmetric, RDT-A asymmetric; EDX
@@ -86,9 +86,9 @@ static const struct leaf_bits intel_leaves[] = {
     {0xa, SUBLEAF_ALL, {0xffffffff, 0x00001fff, 0xffffffff, 0x000f9fff}},
     // EAX shift; EBX processors; ECX level, type; EDX x2APIC ID.
     {0xb, SUBLEAF_ALL, {0x0000001f, 0x0000ffff, 0x0000ffff, 0xffffffff}},
-    // EAX x87, SSE, AVX, opmask, ZMM_Hi256, Hi16_ZMM, PKRU, TILECFG, TILEDATA; EBX size enabled;
-    // ECX size supported.
-    {0xd, 0, {0x000602e7, 0xffffffff, 0xffffffff, 0x00000000}},
+    // EAX x87, SSE, AVX, BNDREGS, BNDCSR, opmask, ZMM_Hi256, Hi16_ZMM, PKRU, TILECFG, TILEDATA; EBX
+    // size enabled; ECX size supported.
+    {0xd, 0, {0x000602ff, 0xffffffff, 0xffffffff, 0x00000000}},
     // EAX XSAVEOPT, XSAVEC, XGETBV1, XSAVES, XFD; EBX size enabled; ECX PT, CET_U, CET_S, HDC, LBR,
     // HWP.
     {0xd, 1, {0x0000001f, 0xffffffff, 0x0001b900, 0x00000000}},
@@ -324,10 +324,12 @@ static const struct last_subleaf amd_last_subleaves[] = {
 #define CPUID_1_ECX_OSXSAVE (1u << 27)
 #define CPUID_1_EDX_APIC (1u << 9)
 #define CPUID_7_EBX_INVPCID (1u << 10)
+#define CPUID_7_EBX_MPX (1u << 14)
 #define CPUID_7_EBX_PT (1u << 25)
 #define CPUID_7_ECX_PKU (1u << 3)
 #define CPUID_7_ECX_OSPKE (1u << 4)
 #define CPUID_7_ECX_WAITPKG (1u << 5)
+#define CPUID_7_ECX_MAWAU (0x1fu << 17)
 #define CPUID_7_ECX_RDPID (1u << 22)
 #define CPUID_7_EDX_ARCH_LBR (1u << 19)
 #define CPUID_D_1_EAX_XSAVES (1u << 3)
@@ -351,6 +353,7 @@ static const struct last_subleaf amd_last_subleaves[] = {
 #define XSAVE_LAST_COMPONENT 63
 #define XSAVE_COMPONENT_FLAGS 7u
 #define XSAVE_LEGACY_AND_HEADER 576
+#define XSAVE_MPX (3u << 3)
 #define XSAVE_PT 8
 #define XSAVE_LBR 15
 
@@ -419,6 +422,10 @@ static bool pt(void) {
     return virt_vmx && vmx_pt_passthrough();
 }
 
+static bool mpx(void) {
+    return virt_vmx && vmx_mpx_passthrough();
+}
+
 static bool vmx_runs(uint32_t control) {
     return !virt_vmx || vmx_secondary_allowed(control);
 }
@@ -433,6 +440,9 @@ void cpuid_init(void) {
     struct cpuid_regs user = masked(0xd, 0);
     struct cpuid_regs supervisor = masked(0xd, 1);
     xcr0_allowed = user.eax | (uint64_t)user.edx << 32;
+    if (!mpx()) {
+        xcr0_allowed &= ~(uint64_t)XSAVE_MPX;
+    }
     xsaves = (supervisor.eax & CPUID_D_1_EAX_XSAVES) && vmx_runs(PROC2_XSAVES);
     if (xsaves) {
         xss_allowed = supervisor.ecx | (uint64_t)supervisor.edx << 32;
@@ -544,6 +554,10 @@ struct cpuid_regs cpuid_guest(struct vcpu *v, uint32_t leaf, uint32_t subleaf) {
             }
             if (!pt()) {
                 r.ebx &= ~CPUID_7_EBX_PT;
+            }
+            if (!mpx()) {
+                r.ebx &= ~CPUID_7_EBX_MPX;
+                r.ecx &= ~CPUID_7_ECX_MAWAU;
             }
             r.edx &= ~CPUID_7_EDX_ARCH_LBR;
             break;

@@ -57,6 +57,7 @@ static uint64_t vmx_basic;
 static uint64_t pin_cap, proc_cap, proc2_cap, proc3_cap, exit_cap, entry_cap;
 static uint64_t ept_vpid_cap;
 static bool pt_passthrough;
+static bool mpx_passthrough;
 static uint64_t cr0_fixed0, cr0_fixed1, cr4_fixed0, cr4_fixed1;
 
 #define VMX_ENTER_FAILED 1
@@ -264,6 +265,12 @@ bool vmx_supported(void) {
                      && control_allowed(proc2_cap, PROC2_PT_USE_GPA)
                      && control_allowed(exit_cap, EXIT_CLEAR_RTIT_CTL)
                      && control_allowed(entry_cap, ENTRY_LOAD_RTIT_CTL);
+    // With supervisor MPX on and BNDPRESERVE clear, the hypervisor's own
+    // branches would reset the guest's bounds registers (SDM 325462-093
+    // Vol. 1, E.5.3), unless exits clear IA32_BNDCFGS and entries load it
+    // again (E.5.7).
+    mpx_passthrough = control_allowed(exit_cap, EXIT_CLEAR_BNDCFGS)
+                      && control_allowed(entry_cap, ENTRY_LOAD_BNDCFGS);
 
     cpu_nmi_restart((uint64_t)(uintptr_t)vmx_enter_restart,
                     (uint64_t)(uintptr_t)vmx_enter_restart_end);
@@ -327,6 +334,10 @@ bool vmx_ept_huge_pages(void) {
 
 bool vmx_pt_passthrough(void) {
     return pt_passthrough;
+}
+
+bool vmx_mpx_passthrough(void) {
+    return mpx_passthrough;
 }
 
 bool vmx_vpid_usable(void) {
@@ -522,6 +533,9 @@ void vmx_vmcs_create(struct vcpu *v, struct vmx_vmcs *vmcs) {
     if (pt_passthrough) {
         vmwrite(VMCS_GUEST_RTIT_CTL, 0);
     }
+    if (mpx_passthrough) {
+        vmwrite(VMCS_GUEST_BNDCFGS, 0);
+    }
     vmptrld(v->vmcs_pa);
 }
 
@@ -601,6 +615,10 @@ void vmx_vcpu_init(struct vcpu *v) {
         exit_want |= EXIT_CLEAR_RTIT_CTL | EXIT_CONCEAL_VMX_FROM_PT;
         entry_want |= ENTRY_LOAD_RTIT_CTL | ENTRY_CONCEAL_VMX_FROM_PT;
     }
+    if (mpx_passthrough) {
+        exit_want |= EXIT_CLEAR_BNDCFGS;
+        entry_want |= ENTRY_LOAD_BNDCFGS;
+    }
     if (vmx_vpid_usable()) {
         proc2_require |= PROC2_VPID;
     }
@@ -628,10 +646,13 @@ void vmx_vcpu_init(struct vcpu *v) {
     vmx_write(VMCS_EXIT_MSR_LOAD_COUNT, 0);
     vmx_write(VMCS_ENTRY_MSR_LOAD_COUNT, 0);
     vmx_write(VMCS_ENTRY_INTR_INFO, 0);
-    // Exits save the guest's IA32_RTIT_CTL here for entries to load (SDM
-    // 325462-093 Vol. 3C, 30.3.1).
+    // Exits save the guest's IA32_RTIT_CTL and IA32_BNDCFGS here for entries
+    // to load (SDM 325462-093 Vol. 3C, 30.3.1).
     if (pt_passthrough) {
         vmx_write(VMCS_GUEST_RTIT_CTL, 0);
+    }
+    if (mpx_passthrough) {
+        vmx_write(VMCS_GUEST_BNDCFGS, 0);
     }
 
     vmx_write(VMCS_IO_BITMAP_A, virt_io_bitmap());

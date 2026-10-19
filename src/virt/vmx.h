@@ -77,6 +77,7 @@
 #define VMCS_GUEST_PDPTE1 0x280c
 #define VMCS_GUEST_PDPTE2 0x280e
 #define VMCS_GUEST_PDPTE3 0x2810
+#define VMCS_GUEST_BNDCFGS 0x2812
 #define VMCS_GUEST_RTIT_CTL 0x2814
 #define VMCS_HOST_PAT 0x2c00
 #define VMCS_HOST_EFER 0x2c02
@@ -242,6 +243,7 @@
 #define EXIT_SAVE_EFER (1u << 20)
 #define EXIT_LOAD_EFER (1u << 21)
 #define EXIT_SAVE_PREEMPTION_TIMER (1u << 22)
+#define EXIT_CLEAR_BNDCFGS (1u << 23)
 #define EXIT_CONCEAL_VMX_FROM_PT (1u << 24)
 #define EXIT_CLEAR_RTIT_CTL (1u << 25)
 
@@ -252,6 +254,7 @@
 #define ENTRY_LOAD_PERF_GLOBAL_CTRL (1u << 13)
 #define ENTRY_LOAD_PAT (1u << 14)
 #define ENTRY_LOAD_EFER (1u << 15)
+#define ENTRY_LOAD_BNDCFGS (1u << 16)
 #define ENTRY_CONCEAL_VMX_FROM_PT (1u << 17)
 #define ENTRY_LOAD_RTIT_CTL (1u << 18)
 
@@ -453,6 +456,7 @@ bool vmx_vpid_usable(void);
 // Whether the guest gets Intel PT: its output through EPT, its tracing stopped
 // at exits and resumed at entries.
 bool vmx_pt_passthrough(void);
+bool vmx_mpx_passthrough(void);
 // An access the processor made for the guest outside of any instruction that
 // reached gpa, where the guest has no RAM.
 void vmx_async_access(uint64_t gpa);
