@@ -855,6 +855,23 @@ static void vmx_handle_io(struct vcpu *v, uint64_t qual) {
     vcpu_skip_instruction(v);
 }
 
+// The guest got where the processor cannot go on from, as a triple fault
+// does: the machine resets, as a PC's chipset makes it.
+__attribute__((noreturn)) static void vmx_shutdown(const char *why) {
+    printf("%s\n", why);
+    vmx_dump_guest();
+    power_reset(false);
+}
+
+// An event whose delivery reached emulated memory at gpa: the hypervisor
+// delivers it itself where it can.
+static void emulated_delivery(struct vcpu *v, uint64_t gpa) {
+    if (!event_deliver_real_mode(v)) {
+        printf("Event delivery reached emulated memory at %#llx\n", (unsigned long long)gpa);
+        vmx_shutdown("The guest's event cannot be delivered");
+    }
+}
+
 static void vmx_handle_exit(struct vcpu *v) {
     uint32_t reason = vmx_read(VMCS_EXIT_REASON);
     profile_exit(v, reason & 0xffff);
@@ -941,9 +958,7 @@ static void vmx_handle_exit(struct vcpu *v) {
             break;
         }
         case EXIT_REASON_TRIPLE_FAULT: {
-            printf("Guest triple fault\n");
-            vmx_dump_guest();
-            power_reset(false);
+            vmx_shutdown("Guest triple fault");
         }
         case EXIT_REASON_GETSEC: {
             vcpu_inject_exception(v, 6, false, 0);
@@ -975,7 +990,7 @@ static void vmx_handle_exit(struct vcpu *v) {
             if (type == APIC_ACCESS_DATA_READ || type == APIC_ACCESS_DATA_WRITE) {
                 mmio_fault(v, vlapic_page(v) + (qual & APIC_ACCESS_OFFSET_MASK));
             } else if (event_cut_short(v)) {
-                panic("Event delivery reached the local APIC's page\n");
+                emulated_delivery(v, vlapic_page(v));
             } else {
                 mmio_fetch(v, vlapic_page(v));
             }
@@ -996,7 +1011,8 @@ static void vmx_handle_exit(struct vcpu *v) {
                 break;
             }
             if (event_cut_short(v)) {
-                panic("Event delivery reached emulated memory at %#llx\n", (unsigned long long)gpa);
+                emulated_delivery(v, gpa);
+                break;
             }
             // An IRET that started with NMIs blocked unblocked them before
             // the exit: they are blocked again for it to run again (SDM

@@ -2717,9 +2717,13 @@ static void ept_violation(struct vcpu *v, struct nvmx *n, uint64_t qual) {
         vmx_async_access(w.gpa);
         return;
     }
+    // An event the hypervisor cannot deliver itself ends the guest's guest as
+    // a triple fault would.
     if (event_cut_short(v)) {
-        panic("Event delivery of the guest's guest reached emulated memory at %#llx\n",
-              (unsigned long long)w.gpa);
+        if (!event_deliver_real_mode(v)) {
+            exit_to_l1(v, n, EXIT_REASON_TRIPLE_FAULT, 0, 0, 0, true);
+        }
+        return;
     }
     if (qual & EPT_QUAL_FETCH) {
         mmio_fetch(v, w.gpa);

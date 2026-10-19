@@ -50,5 +50,9 @@ void event_interrupt(uint8_t vector);
 // Whether the exit cut an event's delivery short, so that what it reports
 // happened delivering the event rather than running an instruction.
 bool event_cut_short(struct vcpu *v);
+// Delivers such an event, an interrupt or an exception, as a real-mode
+// processor does, through what memory is to the hypervisor's emulation, as
+// where it reached emulated memory: false where it cannot.
+bool event_deliver_real_mode(struct vcpu *v);
 
 #endif

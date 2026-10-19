@@ -316,6 +316,14 @@ static void svm_step_exception(struct vcpu *v, unsigned vector) {
     }
 }
 
+// The guest got where the processor cannot go on from, as a triple fault
+// does: the machine resets, as a PC's chipset makes it.
+__attribute__((noreturn)) static void svm_shutdown(struct vcpu *v, const char *why) {
+    printf("%s\n", why);
+    svm_dump_guest(v);
+    power_reset(false);
+}
+
 static void svm_handle_exit(struct vcpu *v) {
     struct vmcb_control *c = &v->vmcb->control;
     profile_exit(v, (uint32_t)c->exitcode);
@@ -386,9 +394,7 @@ static void svm_handle_exit(struct vcpu *v) {
             break;
         }
         case SVM_EXIT_SHUTDOWN: {
-            printf("Guest shutdown\n");
-            svm_dump_guest(v);
-            power_reset(false);
+            svm_shutdown(v, "Guest shutdown");
         }
         case SVM_EXIT_VMRUN:
         case SVM_EXIT_VMLOAD:
@@ -400,9 +406,15 @@ static void svm_handle_exit(struct vcpu *v) {
             break;
         }
         case SVM_EXIT_NPF: {
+            // The hypervisor delivers an event whose delivery reached
+            // emulated memory itself where it can.
             if (event_cut_short(v)) {
-                panic("Event delivery reached emulated memory at %#llx\n",
-                      (unsigned long long)c->exitinfo2);
+                if (!event_deliver_real_mode(v)) {
+                    printf("Event delivery reached emulated memory at %#llx\n",
+                           (unsigned long long)c->exitinfo2);
+                    svm_shutdown(v, "The guest's event cannot be delivered");
+                }
+                break;
             }
             // Only where they could all be fetched, or the instruction may
             // be longer.
