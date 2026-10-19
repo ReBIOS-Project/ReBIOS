@@ -118,7 +118,7 @@ static const uint16_t fields[] = {
     0x2800, 0x2802, 0x2804, 0x2806, 0x280a, 0x280c, 0x280e, 0x2810,
     0x2c00, 0x2c02,
     0x4000, 0x4002, 0x4004, 0x4006, 0x4008, 0x400a, 0x400c, 0x400e, 0x4010, 0x4012, 0x4014,
-    0x4016, 0x4018, 0x401a, 0x401c, 0x401e,
+    0x4016, 0x4018, 0x401a, 0x401c, 0x401e, 0x4020, 0x4022,
     0x4400, 0x4402, 0x4404, 0x4406, 0x4408, 0x440a, 0x440c, 0x440e,
     0x4800, 0x4802, 0x4804, 0x4806, 0x4808, 0x480a, 0x480c, 0x480e, 0x4810, 0x4812,
     0x4814, 0x4816, 0x4818, 0x481a, 0x481c, 0x481e, 0x4820, 0x4822,
@@ -264,8 +264,9 @@ static unsigned ept02_budget;
 #define PROC2_EMULATED                                                                         \
     (PROC2_VIRT_APIC_ACCESSES | PROC2_EPT | PROC2_DESC_TABLE_EXITING | PROC2_RDTSCP             \
      | PROC2_VIRT_X2APIC | PROC2_VPID | PROC2_WBINVD_EXITING | PROC2_UNRESTRICTED_GUEST         \
-     | PROC2_APIC_REG_VIRT | PROC2_VIRT_INTR_DELIVERY | PROC2_RDRAND_EXITING | PROC2_INVPCID     \
-     | PROC2_RDSEED_EXITING | PROC2_PML | PROC2_MBEC | PROC2_TSC_SCALING)
+     | PROC2_APIC_REG_VIRT | PROC2_VIRT_INTR_DELIVERY | PROC2_PAUSE_LOOP_EXITING               \
+     | PROC2_RDRAND_EXITING | PROC2_INVPCID | PROC2_RDSEED_EXITING | PROC2_PML | PROC2_MBEC      \
+     | PROC2_TSC_SCALING)
 #define EXIT_EMULATED                                                                        \
     (EXIT_SAVE_DEBUG_CONTROLS | EXIT_HOST_ADDR_SPACE_SIZE | EXIT_ACK_INTR_ON_EXIT | EXIT_SAVE_PAT \
      | EXIT_LOAD_PAT | EXIT_SAVE_EFER | EXIT_LOAD_EFER | EXIT_SAVE_PREEMPTION_TIMER \
@@ -462,6 +463,10 @@ static bool field_offered(uint32_t field) {
         }
         case VMCS_TSC_MULTIPLIER: {
             return (proc2 & PROC2_TSC_SCALING) != 0;
+        }
+        case VMCS_PLE_GAP:
+        case VMCS_PLE_WINDOW: {
+            return (proc2 & PROC2_PAUSE_LOOP_EXITING) != 0;
         }
         case VMCS_GUEST_INTR_STATUS:
         case VMCS_EOI_EXIT0:
@@ -1876,6 +1881,10 @@ static void write_vmcs02(struct vcpu *v, struct nvmx *n, const struct l1_values 
     // as the guest's VMCS has it.
     if (proc2 & PROC2_TSC_SCALING) {
         vmx_write(VMCS_TSC_MULTIPLIER, get12(n, VMCS_TSC_MULTIPLIER));
+    }
+    if (proc2 & PROC2_PAUSE_LOOP_EXITING) {
+        vmx_write(VMCS_PLE_GAP, get12(n, VMCS_PLE_GAP));
+        vmx_write(VMCS_PLE_WINDOW, get12(n, VMCS_PLE_WINDOW));
     }
     vmx_write(VMCS_MSR_BITMAP, (uint64_t)(uintptr_t)n->msr_bitmap);
     n->tsc_stored = msr_list_has(get12(n, VMCS_EXIT_MSR_STORE_ADDR),
