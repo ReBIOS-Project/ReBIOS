@@ -38,7 +38,8 @@ struct vmcb_control {
     uint64_t tsc_offset;
     uint32_t guest_asid;
     uint8_t tlb_control;
-    uint8_t reserved1[3];
+    uint8_t rap_control;
+    uint8_t reserved1[2];
     uint64_t vintr;
     uint64_t interrupt_shadow;
     uint64_t exitcode;

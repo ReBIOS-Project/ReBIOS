@@ -71,6 +71,15 @@ static bool vmcb_clean_bits;
 // Nested page faults bring the guest's instruction bytes along (APM 24593
 // rev. 3.45, 15.8.4).
 static bool decode_assists;
+// With ERAPS the guest counts on the processor to clear the return address
+// predictor wherever its TLB is flushed (APM 24593 rev. 3.45, 3.2.9): VMRUN
+// clears it where the hypervisor changes the guest's paging, and the guest gets
+// the whole predictor (APM 24593 rev. 3.45, 15.37.2).
+static bool eraps;
+
+#define CPUID_80000021_EAX_ERAPS (1u << 24)
+#define RAP_ALLOW_LARGER (1u << 0)
+#define RAP_CLEAR (1u << 1)
 
 #define CLEAN_I (1u << 0)
 #define CLEAN_IOPM (1u << 1)
@@ -188,11 +197,16 @@ bool svm_supported(void) {
     svm_avic = (features & SVM_FEATURE_AVIC) != 0 && signature.family != 0x17
                && signature.family != 0x18;
     svm_x2avic = svm_avic && (features & SVM_FEATURE_X2AVIC) != 0;
+    eraps = cpuid(0x80000000, 0).eax >= 0x80000021
+            && (cpuid(0x80000021, 0).eax & CPUID_80000021_EAX_ERAPS) != 0;
     return true;
 }
 
 void svm_flush_guest_tlb(struct vcpu *v) {
     v->vmcb->control.tlb_control = flush_by_asid ? 3 : 1;
+    if (eraps) {
+        v->vmcb->control.rap_control |= RAP_CLEAR;
+    }
 }
 
 bool svm_huge_pages(void) {
@@ -244,6 +258,9 @@ void svm_vcpu_init(struct vcpu *v) {
     c->guest_asid = 1;
     // Flush everything on the first VMRUN, then nothing.
     c->tlb_control = 1;
+    if (eraps) {
+        c->rap_control = RAP_ALLOW_LARGER | RAP_CLEAR;
+    }
     c->np_enable = 1;
     c->n_cr3 = gpt_root();
 
@@ -514,6 +531,7 @@ void svm_run(struct vcpu *v) {
         v->fetched_count = 0;
         v->gprs.rax = v->vmcb->save.rax;
         v->vmcb->control.tlb_control = 0;
+        v->vmcb->control.rap_control &= ~RAP_CLEAR;
         // What it cut short comes back in EXITINTINFO.
         v->vmcb->control.eventinj = 0;
         vlapic_after_exit(v);

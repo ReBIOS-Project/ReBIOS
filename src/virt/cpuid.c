@@ -287,10 +287,10 @@ static const struct leaf_bits amd_leaves[] = {
     // EAX NoNestedDataBp, FsGsBaseWriteNotSerializing, LFENCE serialising, null selector clears
     // base, AutomaticIBRS, NoSmmCtlMSR, fast short STOSB, fast short CMPSB,
     // PreciseRetirePmc2Manual, PrefetchCtlMsr, L2 TLB size x32, AMD ERMSB, 0F 01 /7 reclaim, EPSF,
-    // fast REP SCASB, PREFETCHI, FP512 downgrade, AVX512_BMM, SBPB, IBPB_BRTYPE, SRSO_NO,
-    // SRSO_USER_KERNEL_NO, SRSO_MSR_FIX; ECX TSA_SQ_NO, TSA_L1_NO, VERW_CLEAR, BTB context
-    // isolation.
-    {0x80000021, SUBLEAF_ALL, {0xf8bdff47, 0x00000000, 0x00000126, 0x00000000}},
+    // fast REP SCASB, PREFETCHI, FP512 downgrade, AVX512_BMM, ERAPS, SBPB, IBPB_BRTYPE, SRSO_NO,
+    // SRSO_USER_KERNEL_NO, SRSO_MSR_FIX; EBX RAP size; ECX TSA_SQ_NO, TSA_L1_NO, VERW_CLEAR, BTB
+    // context isolation.
+    {0x80000021, SUBLEAF_ALL, {0xf9bdff47, 0x00ff0000, 0x00000126, 0x00000000}},
     // EAX PerfMonV2, LBR and PMC freeze; EBX core counters, NB counters.
     {0x80000022, SUBLEAF_ALL, {0x00000005, 0x0000fc0f, 0x00000000, 0x00000000}},
     // EAX shift, asymmetric, heterogeneous, efficiency ranking; EBX processors, efficiency rank,
