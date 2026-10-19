@@ -580,6 +580,11 @@ void vmx_vcpu_init(struct vcpu *v) {
     }
     vmx_write(VMCS_PROC_CONTROLS2,
               adjust_controls(proc2_cap, proc2_want, proc2_require, "secondary"));
+    // XSAVES and XRSTORS exit for the IA32_XSS bits the bitmap has (SDM
+    // 325462-093 Vol. 3C, 27.6.20): none.
+    if (vmx_read(VMCS_PROC_CONTROLS2) & PROC2_XSAVES) {
+        vmx_write(VMCS_XSS_EXIT_BITMAP, 0);
+    }
 
     vmx_write(VMCS_EXIT_CONTROLS,
               adjust_controls(exit_cap, EXIT_SAVE_DEBUG_CONTROLS,
