@@ -37,6 +37,7 @@
 #include <virt/irq.h>
 #include <virt/layout.h>
 #include <virt/mtrr.h>
+#include <virt/nvmx.h>
 #include <virt/pci_plan.h>
 #include <virt/pci_virt.h>
 #include <virt/profile.h>
@@ -75,6 +76,7 @@ static void bsp_main(void *arg) {
     lapic_legacy_init();
     smp_init();
     vlapic_init();
+    nvmx_init();
     lapic_host_init(VLAPIC_SPURIOUS_VECTOR, VLAPIC_TIMER_VECTOR);
     smp_start_aps();
     ioapic_init();

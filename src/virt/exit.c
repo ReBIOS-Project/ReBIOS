@@ -31,6 +31,7 @@
 #include <virt/io.h>
 #include <virt/mmio.h>
 #include <virt/mtrr.h>
+#include <virt/nvmx.h>
 #include <virt/profile.h>
 #include <virt/svm.h>
 #include <virt/vcpu.h>
@@ -84,9 +85,11 @@ void exit_cpuid(struct vcpu *v) {
 
     switch (leaf) {
         case 1: {
-            // Hardware virtualisation is not offered to the guest yet, and no
-            // hypervisor shows.
-            r.ecx &= ~(1u << 5 | 1u << 31);
+            // No hypervisor shows, and VMX only where the guest gets it.
+            r.ecx &= ~(1u << 31);
+            if (!nvmx_enabled) {
+                r.ecx &= ~(1u << 5);
+            }
             // These reflect the guest's CR4 and local APIC, not the host's.
             r.ecx &= ~(1u << 27);
             if (vcpu_cr4(v) & CR4_OSXSAVE) {
@@ -224,7 +227,8 @@ void exit_rdmsr(struct vcpu *v) {
     uint64_t value;
     bool fault;
 
-    if (vlapic_rdmsr(v, msr, &value, &fault) || mtrr_rdmsr(v, msr, &value, &fault)) {
+    if (vlapic_rdmsr(v, msr, &value, &fault) || mtrr_rdmsr(v, msr, &value, &fault)
+        || nvmx_rdmsr(v, msr, &value, &fault)) {
         if (fault) {
             vcpu_inject_exception(v, 13, true, 0);
             return;
@@ -250,7 +254,8 @@ void exit_wrmsr(struct vcpu *v) {
     uint64_t value = ((uint64_t)(uint32_t)v->gprs.rdx << 32) | (uint32_t)v->gprs.rax;
     bool fault;
 
-    if (vlapic_wrmsr(v, msr, value, &fault) || mtrr_wrmsr(v, msr, value, &fault)) {
+    if (vlapic_wrmsr(v, msr, value, &fault) || mtrr_wrmsr(v, msr, value, &fault)
+        || nvmx_wrmsr(v, msr, value, &fault)) {
         if (fault) {
             vcpu_inject_exception(v, 13, true, 0);
             return;

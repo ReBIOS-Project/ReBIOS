@@ -28,6 +28,7 @@
 #include <virt/gpt.h>
 #include <virt/guest_mem.h>
 #include <virt/mmio.h>
+#include <virt/nvmx.h>
 #include <virt/profile.h>
 #include <virt/task.h>
 #include <virt/vcpu.h>
@@ -266,6 +267,41 @@ bool vmx_pin_allowed(uint32_t control) {
 
 bool vmx_tertiary_allowed(uint64_t control) {
     return (proc3_cap & control) == control;
+}
+
+uint64_t vmx_capability(uint32_t msr) {
+    switch (msr) {
+        case MSR_IA32_VMX_BASIC: {
+            return vmx_basic;
+        }
+        case MSR_IA32_VMX_TRUE_PINBASED_CTLS: {
+            return pin_cap;
+        }
+        case MSR_IA32_VMX_TRUE_PROCBASED_CTLS: {
+            return proc_cap;
+        }
+        case MSR_IA32_VMX_PROCBASED_CTLS2: {
+            return proc2_cap;
+        }
+        case MSR_IA32_VMX_TRUE_EXIT_CTLS: {
+            return exit_cap;
+        }
+        case MSR_IA32_VMX_TRUE_ENTRY_CTLS: {
+            return entry_cap;
+        }
+        case MSR_IA32_VMX_EPT_VPID_CAP: {
+            return ept_vpid_cap;
+        }
+        case MSR_IA32_VMX_CR0_FIXED1: {
+            return cr0_fixed1;
+        }
+        case MSR_IA32_VMX_CR4_FIXED1: {
+            return cr4_fixed1;
+        }
+        default: {
+            return rdmsr(msr);
+        }
+    }
 }
 
 bool vmx_monitor_trap_supported(void) {
@@ -635,7 +671,7 @@ static void vmx_handle_cr_access(struct vcpu *v, uint64_t qual) {
             return;
         }
     }
-    if (!vmx_paging_changed(cr0, cr4)) {
+    if (!nvmx_cr_allowed(v, cr, value) || !vmx_paging_changed(cr0, cr4)) {
         vcpu_inject_exception(v, 13, true, 0);
         return;
     }
@@ -762,7 +798,10 @@ static void vmx_handle_exit(struct vcpu *v) {
             vmx_dump_guest();
             power_reset(false);
         }
-        case EXIT_REASON_GETSEC:
+        case EXIT_REASON_GETSEC: {
+            vcpu_inject_exception(v, 6, false, 0);
+            break;
+        }
         case EXIT_REASON_VMCLEAR:
         case EXIT_REASON_VMLAUNCH:
         case EXIT_REASON_VMPTRLD:
@@ -775,7 +814,7 @@ static void vmx_handle_exit(struct vcpu *v) {
         case EXIT_REASON_INVEPT:
         case EXIT_REASON_INVVPID:
         case EXIT_REASON_VMFUNC: {
-            vcpu_inject_exception(v, 6, false, 0);
+            nvmx_instruction(v, reason & 0xffff);
             break;
         }
         case EXIT_REASON_APIC_ACCESS: {

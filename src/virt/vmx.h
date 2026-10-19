@@ -378,6 +378,9 @@ bool vmx_secondary_allowed(uint32_t control);
 bool vmx_pin_allowed(uint32_t control);
 // Whether it gets the tertiary processor-based control.
 bool vmx_tertiary_allowed(uint64_t control);
+// A VMX capability MSR, the TRUE ones as the processor's controls are where it
+// has none.
+uint64_t vmx_capability(uint32_t msr);
 
 uint64_t vmx_read(uint32_t field);
 
