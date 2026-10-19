@@ -70,6 +70,10 @@ bool nvmx_exception(struct vcpu *v, uint8_t vector, bool has_error, uint32_t err
 // pending: whether there is one.
 bool nvmx_monitor_trap_flag(struct vcpu *v);
 bool nvmx_monitor_trap(struct vcpu *v, bool single_step);
+// Right before an entry: VMCS02's VMX-preemption timer, from what is left of
+// the guest's, so that time the hypervisor takes counts as the guest's guest's,
+// as it would without the hypervisor; off while the hypervisor steps.
+void nvmx_arm_timer(struct vcpu *v);
 // The EPTP of VMCS02's shadow of the guest's EPT, or 0 where the vCPU runs on
 // the hypervisor's EPT.
 uint64_t nvmx_ept_pointer(struct vcpu *v);

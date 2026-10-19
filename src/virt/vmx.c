@@ -940,6 +940,7 @@ void vmx_run(struct vcpu *v) {
     for (;;) {
         __atomic_store_n(&v->cpu->kicked, false, __ATOMIC_SEQ_CST);
         vcpu_before_entry(v);
+        nvmx_arm_timer(v);
         cache_flush(v->vmcs_cache);
         int result = vmx_enter(&v->gprs, v->vmx_launched);
         if (result == VMX_ENTER_KICKED) {

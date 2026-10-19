@@ -110,7 +110,7 @@ static const uint16_t fields[] = {
     0x4400, 0x4402, 0x4404, 0x4406, 0x4408, 0x440a, 0x440c, 0x440e,
     0x4800, 0x4802, 0x4804, 0x4806, 0x4808, 0x480a, 0x480c, 0x480e, 0x4810, 0x4812,
     0x4814, 0x4816, 0x4818, 0x481a, 0x481c, 0x481e, 0x4820, 0x4822,
-    0x4824, 0x4826, 0x4828, 0x482a,
+    0x4824, 0x4826, 0x4828, 0x482a, 0x482e,
     0x4c00,
     0x6000, 0x6002, 0x6004, 0x6006, 0x6008, 0x600a, 0x600c, 0x600e,
     0x6400, 0x6402, 0x6404, 0x6406, 0x6408, 0x640a,
@@ -162,6 +162,9 @@ struct nvmx {
     // it.
     uint64_t tsc_store[2] __attribute__((aligned(16)));
     bool tsc_stored;
+    // While the guest's guest runs with the VMX-preemption timer: the TSC,
+    // shifted by the timer's rate, at which it expires.
+    uint64_t timer_deadline;
     // The guest's MSR bitmap with the hypervisor's intercepts added.
     uint8_t *msr_bitmap;
     struct ept02 ept02[EPT02_ROOTS];
@@ -195,6 +198,8 @@ static uint64_t cap_vmcs_enum;
 static uint64_t cap_ept_vpid;
 // The CR3-target values the processor has, of the four the guest may get.
 static unsigned cr3_targets;
+// The VMX-preemption timer counts TSC >> timer_rate.
+static unsigned timer_rate;
 // MAXPHYADDR (SDM 325462-093 Vol. 3C, 31.3.1).
 static unsigned phys_width;
 // The largest pages EPT02 maps: 2 MiB, or 1 GiB.
@@ -209,7 +214,9 @@ static unsigned ept02_budget;
 #define EXIT_DEFAULT1 0x00036dffu
 #define ENTRY_DEFAULT1 0x000011ffu
 
-#define PIN_EMULATED (PIN_EXT_INTR_EXITING | PIN_NMI_EXITING | PIN_VIRTUAL_NMIS | PIN_DEFAULT1)
+#define PIN_EMULATED \
+    (PIN_EXT_INTR_EXITING | PIN_NMI_EXITING | PIN_VIRTUAL_NMIS | PIN_PREEMPTION_TIMER \
+     | PIN_DEFAULT1)
 #define PROC_EMULATED                                                                         \
     (PROC_INTR_WINDOW_EXITING | PROC_TSC_OFFSETTING | PROC_HLT_EXITING | PROC_INVLPG_EXITING \
      | PROC_MWAIT_EXITING | PROC_RDPMC_EXITING | PROC_RDTSC_EXITING | PROC_CR3_LOAD_EXITING   \
@@ -223,7 +230,8 @@ static unsigned ept02_budget;
      | PROC2_MBEC)
 #define EXIT_EMULATED                                                                        \
     (EXIT_SAVE_DEBUG_CONTROLS | EXIT_HOST_ADDR_SPACE_SIZE | EXIT_ACK_INTR_ON_EXIT | EXIT_SAVE_PAT \
-     | EXIT_LOAD_PAT | EXIT_SAVE_EFER | EXIT_LOAD_EFER | EXIT_DEFAULT1)
+     | EXIT_LOAD_PAT | EXIT_SAVE_EFER | EXIT_LOAD_EFER | EXIT_SAVE_PREEMPTION_TIMER \
+     | EXIT_DEFAULT1)
 #define ENTRY_EMULATED \
     (ENTRY_LOAD_DEBUG_CONTROLS | ENTRY_IA32E_MODE_GUEST | ENTRY_LOAD_PAT | ENTRY_LOAD_EFER \
      | ENTRY_DEFAULT1)
@@ -237,9 +245,11 @@ static unsigned ept02_budget;
 #define BASIC_TRUE_CONTROLS (1ull << 55)
 #define BASIC_NO_ERROR_CODE (1ull << 56)
 
-// IA32_VMX_MISC (SDM 325462-093 Vol. 3D, A.6): exits store EFER.LMA in the
-// IA-32e mode guest control, the HLT activity state, the CR3-target values,
-// and VMWRITE writes the exit information too.
+// IA32_VMX_MISC (SDM 325462-093 Vol. 3D, A.6): the VMX-preemption timer's
+// rate, exits store EFER.LMA in the IA-32e mode guest control, the HLT
+// activity state, the CR3-target values, and VMWRITE writes the exit
+// information too.
+#define MISC_TIMER_RATE 0x1full
 #define MISC_STORE_LMA (1ull << 5)
 #define MISC_ACTIVITY_HLT (1ull << 6)
 #define MISC_CR3_TARGETS_SHIFT 16
@@ -278,6 +288,8 @@ static unsigned ept02_budget;
     (CAP_INVVPID | CAP_INVVPID_ADDRESS | CAP_INVVPID_SINGLE | CAP_INVVPID_ALL                 \
      | CAP_INVVPID_GLOBALS)
 
+static int field_slot(uint32_t field);
+
 // A capability MSR: allowed 0-settings low, allowed 1-settings high.
 static uint64_t capability(uint64_t hardware, uint32_t emulated, uint32_t required) {
     uint32_t allowed1 = (uint32_t)(hardware >> 32) & emulated;
@@ -291,15 +303,10 @@ void nvmx_init(void) {
     }
     nvmx_enabled = true;
 
-    uint32_t max_index = 0;
     for (unsigned i = 0; i < FIELD_COUNT; i++) {
         uint32_t field = fields[i];
         field_slots[FIELD_WIDTH(field)][FIELD_TYPE(field)][FIELD_INDEX(field)] = (uint8_t)(i + 1);
-        if (FIELD_INDEX(field) > max_index) {
-            max_index = FIELD_INDEX(field);
-        }
     }
-    cap_vmcs_enum = max_index << 1;
 
     uint64_t basic = vmx_capability(MSR_IA32_VMX_BASIC);
     cap_basic = VMCS12_REVISION | 4096ull << BASIC_SIZE_SHIFT | BASIC_MEMTYPE_WB | BASIC_INS_OUTS
@@ -336,13 +343,23 @@ void nvmx_init(void) {
     if (cr3_targets > 4) {
         cr3_targets = 4;
     }
-    cap_misc = MISC_STORE_LMA | MISC_ACTIVITY_HLT | (uint64_t)cr3_targets << MISC_CR3_TARGETS_SHIFT
-               | MISC_VMWRITE_ANY | (misc & MISC_ZERO_LENGTH_INJECTION);
+    timer_rate = (unsigned)(misc & MISC_TIMER_RATE);
+    cap_misc = timer_rate | MISC_STORE_LMA | MISC_ACTIVITY_HLT
+               | (uint64_t)cr3_targets << MISC_CR3_TARGETS_SHIFT | MISC_VMWRITE_ANY
+               | (misc & MISC_ZERO_LENGTH_INJECTION);
 
     cap_cr0_fixed0 = vmx_capability(MSR_IA32_VMX_CR0_FIXED0);
     cap_cr0_fixed1 = vmx_capability(MSR_IA32_VMX_CR0_FIXED1);
     cap_cr4_fixed0 = vmx_capability(MSR_IA32_VMX_CR4_FIXED0);
     cap_cr4_fixed1 = vmx_capability(MSR_IA32_VMX_CR4_FIXED1);
+
+    uint32_t max_index = 0;
+    for (unsigned i = 0; i < FIELD_COUNT; i++) {
+        if (field_slot(fields[i]) >= 0 && FIELD_INDEX(fields[i]) > max_index) {
+            max_index = FIELD_INDEX(fields[i]);
+        }
+    }
+    cap_vmcs_enum = max_index << 1;
 
     virt_intercept_msr(MSR_IA32_FEATURE_CONTROL, true, true);
     for (uint32_t msr = MSR_IA32_VMX_BASIC; msr <= MSR_IA32_VMX_PROCBASED_CTLS3; msr++) {
@@ -374,6 +391,9 @@ static int field_slot(uint32_t field) {
     }
     if (field >= VMCS_CR3_TARGET0 && field < VMCS_CR3_TARGET0 + 8
         && (field - VMCS_CR3_TARGET0) / 2 >= cr3_targets) {
+        return -1;
+    }
+    if (field == VMCS_PREEMPTION_TIMER && !(cap_true_pin >> 32 & PIN_PREEMPTION_TIMER)) {
         return -1;
     }
     return field_slots[FIELD_WIDTH(field)][FIELD_TYPE(field)][FIELD_INDEX(field)] - 1;
@@ -1165,15 +1185,16 @@ static bool controls_valid(const struct nvmx *n) {
     uint64_t pin = get12(n, VMCS_PIN_CONTROLS);
     uint64_t proc = get12(n, VMCS_PROC_CONTROLS);
     uint64_t proc2 = (proc & PROC_SECONDARY_CONTROLS) ? get12(n, VMCS_PROC_CONTROLS2) : 0;
-    if (!allowed(pin, cap_true_pin) || !allowed(proc, cap_true_proc)
-        || !allowed(get12(n, VMCS_EXIT_CONTROLS), cap_true_exit)
+    uint64_t exit = get12(n, VMCS_EXIT_CONTROLS);
+    if (!allowed(pin, cap_true_pin) || !allowed(proc, cap_true_proc) || !allowed(exit, cap_true_exit)
         || !allowed(get12(n, VMCS_ENTRY_CONTROLS), cap_true_entry)
         || ((proc & PROC_SECONDARY_CONTROLS) && !allowed(proc2, cap_proc2))) {
         return false;
     }
     if (get12(n, VMCS_CR3_TARGET_COUNT) > cr3_targets
         || ((pin & PIN_VIRTUAL_NMIS) && !(pin & PIN_NMI_EXITING))
-        || ((proc & PROC_NMI_WINDOW_EXITING) && !(pin & PIN_VIRTUAL_NMIS))) {
+        || ((proc & PROC_NMI_WINDOW_EXITING) && !(pin & PIN_VIRTUAL_NMIS))
+        || ((exit & EXIT_SAVE_PREEMPTION_TIMER) && !(pin & PIN_PREEMPTION_TIMER))) {
         return false;
     }
     if (proc2 & PROC2_EPT) {
@@ -1619,6 +1640,12 @@ static void load_l1_host_state(struct vcpu *v, struct nvmx *n, bool nmi) {
     vmx_write(VMCS_GUEST_PENDING_DBG, 0);
 }
 
+// What is left of the VMX-preemption timer of the guest's guest.
+static uint64_t timer_left(const struct nvmx *n) {
+    uint64_t now = rdtsc() >> timer_rate;
+    return n->timer_deadline > now ? n->timer_deadline - now : 0;
+}
+
 // The exit of the guest's guest to the guest, VMCS02 being the vCPU's
 // current VMCS: what the processor recorded where it made the exit, else the
 // exit's reason, qualification, and interruption information. An entry that
@@ -1633,6 +1660,11 @@ static void exit_to_l1(struct vcpu *v, struct nvmx *n, uint32_t reason, uint64_t
     if (!failed) {
         save_l2_state(n);
         set12(n, VMCS_ENTRY_INTR_INFO, get12(n, VMCS_ENTRY_INTR_INFO) & ~(uint64_t)INTR_INFO_VALID);
+        // An expired timer saves 0 (SDM 325462-093 Vol. 3C, 30.3.4).
+        if (get12(n, VMCS_EXIT_CONTROLS) & EXIT_SAVE_PREEMPTION_TIMER) {
+            set12(n, VMCS_PREEMPTION_TIMER,
+                  (reason & 0xffff) == EXIT_REASON_PREEMPTION_TIMER ? 0 : timer_left(n));
+        }
     }
     set12(n, VMCS_EXIT_REASON, reason);
     set12(n, VMCS_EXIT_QUALIFICATION, qual);
@@ -1735,6 +1767,9 @@ static void vmlaunch(struct vcpu *v, struct nvmx *n, bool resume) {
         *(volatile uint32_t *)(n->vmcs12 + VMCS12_LAUNCHED) = 1;
     }
     write_vmcs02(v, n, &l1);
+    if (get12(n, VMCS_PIN_CONTROLS) & PIN_PREEMPTION_TIMER) {
+        n->timer_deadline = (rdtsc() >> timer_rate) + (uint32_t)get12(n, VMCS_PREEMPTION_TIMER);
+    }
     v->redeliver = 0;
     // What the guest injects goes before the hypervisor's own deliveries.
     v->injecting = (get12(n, VMCS_ENTRY_INTR_INFO) & INTR_INFO_VALID) != 0;
@@ -2402,6 +2437,19 @@ bool nvmx_monitor_trap(struct vcpu *v, bool single_step) {
     n->pending_gpa = 0;
     n->pending_linear = 0;
     return true;
+}
+
+void nvmx_arm_timer(struct vcpu *v) {
+    struct nvmx *n = v->nvmx;
+    if (n == NULL || !n->in_l2 || !(get12(n, VMCS_PIN_CONTROLS) & PIN_PREEMPTION_TIMER)) {
+        return;
+    }
+    uint64_t pin = vmx_read(VMCS_PIN_CONTROLS) & ~(uint64_t)PIN_PREEMPTION_TIMER;
+    if (!v->stepping) {
+        pin |= PIN_PREEMPTION_TIMER;
+        vmx_write(VMCS_PREEMPTION_TIMER, timer_left(n));
+    }
+    vmx_write(VMCS_PIN_CONTROLS, pin);
 }
 
 uint64_t nvmx_ept_pointer(struct vcpu *v) {
