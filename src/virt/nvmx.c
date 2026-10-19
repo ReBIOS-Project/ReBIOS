@@ -2912,8 +2912,10 @@ bool nvmx_before_entry(struct vcpu *v) {
             exit_to_l1(v, n, EXIT_REASON_PREEMPTION_TIMER, 0, 0, 0, false);
             return false;
         }
+        // Woken for nothing it takes, it waits on.
         if (!v->nmi_pending) {
-            panic("The guest's guest left the shutdown state with nothing to wake it\n");
+            nvmx_wait(v);
+            return nvmx_before_entry(v);
         }
         __atomic_store_n(&n->inactive, ACTIVITY_ACTIVE, __ATOMIC_SEQ_CST);
         vmx_write(VMCS_GUEST_ACTIVITY_STATE, ACTIVITY_ACTIVE);
