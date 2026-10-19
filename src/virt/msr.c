@@ -108,6 +108,14 @@
 #define HWCR_IR_PERF_EN (1u << 30)
 #define HWCR_GUEST (HWCR_MC_STATUS_WR_EN | HWCR_CPB_DIS | HWCR_IR_PERF_EN)
 
+// AMD's northbridge configuration (BKDG 31116 rev. 3.62, 42301 rev. 3.14,
+// MSRC001_001F): the processor's, of which the guest may change only
+// EnableCf8ExtCfg, which Linux 7.3 sets on every family for extended
+// configuration space through CF8 and CFC (arch/x86/pci/amd_bus.c); the rest
+// sets up the northbridge for all cores.
+#define MSR_AMD_NB_CFG 0xc001001f
+#define NB_CFG_ENABLE_CF8_EXT_CFG (1ull << 46)
+
 // AMD's memory routing (APM 24593 rev. 3.45, 3.2.1, 7.9.2, and 7.9.4; PPR 55772
 // rev. 3.08, MSRC001_0058): the guest's own, from its memory map, so that none
 // of its writes routes the host's memory. SMM and SVM appear locked, as the
@@ -263,6 +271,7 @@ void msr_init(void) {
             virt_intercept_msr(MSR_DC_CFG, false, true);
         }
         virt_intercept_msr(MSR_AMD_HWCR, true, true);
+        virt_intercept_msr(MSR_AMD_NB_CFG, true, true);
         address_reserved = ~((1ull << cpu_physical_address_bits()) - 1) & ((1ull << 52) - 1);
         virt_intercept_msr(MSR_AMD_SYSCFG, true, true);
         for (uint32_t msr = MSR_AMD_IORR_BASE0; msr <= MSR_AMD_IORR_MASK1; msr++) {
@@ -515,6 +524,13 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
             *value |= HWCR_SMM_LOCK;
             return true;
         }
+        case MSR_AMD_NB_CFG: {
+            if (virt_vmx) {
+                return false;
+            }
+            *fault = !rdmsr_safe(msr, value);
+            return true;
+        }
         case MSR_IA32_HW_FEEDBACK_PTR: {
             if (!hfi) {
                 return false;
@@ -594,6 +610,16 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
             uint64_t fixed = ~(uint64_t)(HWCR_GUEST | HWCR_SMM_LOCK);
             *fault = !rdmsr_safe(msr, &hardware) || ((value ^ hardware) & fixed)
                      || !wrmsr_safe(msr, (hardware & ~(uint64_t)HWCR_GUEST) | (value & HWCR_GUEST));
+            return true;
+        }
+        case MSR_AMD_NB_CFG: {
+            if (virt_vmx) {
+                return false;
+            }
+            uint64_t hardware;
+            uint64_t fixed = ~NB_CFG_ENABLE_CF8_EXT_CFG;
+            *fault = !rdmsr_safe(msr, &hardware) || ((value ^ hardware) & fixed)
+                     || !wrmsr_safe(msr, value);
             return true;
         }
         case MSR_DC_CFG: {
