@@ -721,6 +721,11 @@ void vcpu_advance(struct vcpu *v, unsigned length) {
             next = (uint32_t)next;
         }
     }
+    // The instruction is done, so RF is clear (SDM 325462-093 Vol. 3B, 20.3.1.1).
+    uint64_t rflags = vcpu_rflags(v);
+    if (rflags & RFLAGS_RF) {
+        vcpu_set_rflags(v, rflags & ~(uint64_t)RFLAGS_RF);
+    }
     if (virt_vmx) {
         vmx_write(VMCS_GUEST_RIP, next);
         uint64_t intr = vmx_read(VMCS_GUEST_INTERRUPTIBILITY);

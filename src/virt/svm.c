@@ -318,6 +318,7 @@ static void svm_handle_io(struct vcpu *v) {
     // Reported whether or not next RIP saving is supported.
     v->vmcb->save.rip = v->vmcb->control.exitinfo2;
     v->vmcb->control.interrupt_shadow = 0;
+    v->vmcb->save.rflags &= ~(uint64_t)RFLAGS_RF;
     if (vcpu_guest_tf(v)) {
         vcpu_step_trap(v);
     }

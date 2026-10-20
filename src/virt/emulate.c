@@ -477,8 +477,10 @@ static enum emulate_result string_op(struct ctx *c) {
     bool step = vcpu_stepped(v);
 
     for (unsigned n = 0; count != 0; n++) {
+        // The rest when the instruction runs again, with RF set as an event
+        // between iterations leaves it (SDM 325462-093 Vol. 3B, 20.3.1.1).
         if (n == (step ? 1u : STRING_BATCH)) {
-            // The rest when the instruction runs again.
+            vcpu_set_rflags(v, vcpu_rflags(v) | RFLAGS_RF);
             if (step) {
                 vcpu_step_boundary(v);
             }
@@ -488,7 +490,11 @@ static enum emulate_result string_op(struct ctx *c) {
         if (!string_once(c, size, &result)) {
             // Where only part of the iterations happened, the instruction runs
             // again for the rest.
-            return n != 0 && result == EMULATE_UNSUPPORTED ? EMULATE_DONE : result;
+            if (n != 0 && result == EMULATE_UNSUPPORTED) {
+                vcpu_set_rflags(v, vcpu_rflags(v) | RFLAGS_RF);
+                return EMULATE_DONE;
+            }
+            return result;
         }
         if (uses_si) {
             v->gprs.rsi = string_step(v->gprs.rsi, delta, address_size);
