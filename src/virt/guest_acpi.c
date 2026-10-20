@@ -28,6 +28,7 @@
 #include <sys/smp.h>
 #include <virt/guest_acpi.h>
 #include <virt/guest_mem.h>
+#include <virt/hpet.h>
 #include <virt/layout.h>
 #include <virt/pci_plan.h>
 #include <virt/vacpi.h>
@@ -49,7 +50,7 @@
 
 // The tables the guest gets besides those the hypervisor generates: none
 // points the guest at host memory or at hardware the hypervisor keeps for
-// itself.
+// itself, but for the HPETs hidden from it.
 static const char *const kept[] = {
     "APIC", "HPET", "MCFG", "MSDM", "SLIC", "SPCR", "DBGP", "DBG2", "WAET", "WSMT", "VFCT", "BOOT",
 };
@@ -199,6 +200,10 @@ static uint32_t mcfg_fix(uint8_t *mcfg, uint32_t length) {
 }
 
 static bool table_kept(const uint8_t *table) {
+    if (memcmp(table, "HPET", 4) == 0 && read32(table + SDT_LENGTH) >= sizeof(struct acpi_hpet)
+        && hpet_hidden(read64(table + offsetof(struct acpi_hpet, address.address)))) {
+        return false;
+    }
     for (size_t i = 0; i < sizeof(kept) / sizeof(kept[0]); i++) {
         if (memcmp(table, kept[i], 4) == 0) {
             return true;

@@ -39,6 +39,7 @@
 #include <sys/mm.h>
 #include <virt/gpt.h>
 #include <virt/guest_mem.h>
+#include <virt/hpet.h>
 #include <virt/io.h>
 #include <virt/irq.h>
 #include <virt/layout.h>
@@ -656,6 +657,7 @@ static void emit_scopes(struct aml *a, uacpi_namespace_node *parent);
 
 static const char *const link_ids[] = {"PNP0C0F", NULL};
 static const char *const ec_ids[] = {"PNP0C09", NULL};
+static const char *const hpet_ids[] = {"PNP0103", NULL};
 static const char *const host_bridge_ids[] = {"PNP0A03", "PNP0A08", NULL};
 static const char *const motherboard_ids[] = {"PNP0C01", "PNP0C02", NULL};
 
@@ -910,7 +912,9 @@ static void emit_object(struct aml *a, uacpi_namespace_node *node, bool in_proce
     uacpi_object *obj;
     switch (type) {
         case UACPI_OBJECT_DEVICE: {
-            if (uacpi_device_matches_pnp_id(node, link_ids)) {
+            // One HPET is all an in-scope machine has.
+            if (uacpi_device_matches_pnp_id(node, link_ids)
+                || (hpet_any_hidden() && uacpi_device_matches_pnp_id(node, hpet_ids))) {
                 return;
             }
             // The hypervisor drives the embedded controller, so the guest

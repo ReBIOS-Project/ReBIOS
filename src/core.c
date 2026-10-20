@@ -35,6 +35,7 @@
 #include <sys/x86.h>
 #include <virt/a20.h>
 #include <virt/cpuid.h>
+#include <virt/hpet.h>
 #include <virt/irq.h>
 #include <virt/layout.h>
 #include <virt/msr.h>
@@ -87,6 +88,7 @@ static void bsp_main(void *arg) {
     ioapic_init();
     vioapic_init();
     irq_init();
+    hpet_init();
     vacpi_init();
     profile_init();
 
