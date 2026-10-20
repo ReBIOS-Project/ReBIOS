@@ -41,7 +41,9 @@
 
 #define ISA_IRQS 16
 #define CASCADE_IRQ 2
-#define XAPIC_MAX_ID 0xff
+// The highest APIC ID an 8-bit destination names alone, FFh being the
+// broadcast (SDM 325462-093 Vol. 3A, 13.6.2.1).
+#define XAPIC_MAX_ID 0xfe
 
 // The ISA IRQs of the devices the hypervisor provides: the PIT, the keyboard
 // controller's keyboard and mouse ports, the cascade, the RTC, and FERR#.
