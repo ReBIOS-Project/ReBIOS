@@ -20,6 +20,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <sys/cpu.h>
 #include <virt/vcpu.h>
 
 // The host's interrupts reach the guest through its virtual 8259s and I/O
@@ -61,12 +62,33 @@ uint8_t irq_extint_acknowledge(void);
 // Whether an I/O APIC entry delivers the 8259's interrupts.
 bool irq_extint_routed(void);
 
-// A guest vector the processor took: whether one of the guest's level-
-// triggered I/O APIC entries sent it here, which then waits for the guest's
-// EOI of the vector, masked at the host, its Remote IRR set.
-bool irq_mirror_taken(uint8_t vector);
+// The guest's EOI of a vector, which its level-triggered I/O APIC entries of
+// the vector wait for, masked at the host, their Remote IRR set.
 void irq_mirror_eoi(uint8_t vector);
 bool irq_remote_irr(uint32_t gsi);
+
+// A block of the hypervisor's vectors on one processor that interrupts the
+// guest programmed arrive on, so that none lands on a vector the hypervisor
+// uses: an MSI's, an MSI-X entry's, or an I/O APIC entry's.
+struct irq_slot {
+    // Where the block is, NULL if nowhere.
+    struct cpu *cpu;
+    uint8_t vector;
+    // A power of two, which the block is aligned to.
+    uint8_t count;
+    // Called on the processor that took one of the vectors, before its EOI,
+    // with the vector's index in the block.
+    void (*taken)(void *ctx, unsigned index);
+    void *ctx;
+};
+
+// Gives the slot count vectors on a processor whose APIC ID a message in
+// compatibility format can name, on cpu if it has room, freeing those the slot
+// had; false where no processor has room.
+bool irq_slot_place(struct irq_slot *s, struct cpu *cpu, unsigned count);
+void irq_slot_free(struct irq_slot *s);
+// Whether a slot holds the vector the processor took, which it then took.
+bool irq_slot_interrupt(uint8_t vector);
 
 // Takes the host's line of a GSI for the hypervisor: its interrupts call
 // handler on the boot processor, with the line masked until handler returns.

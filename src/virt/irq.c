@@ -91,10 +91,21 @@ struct route {
     bool virtual_held;
     // What a guest's edge-triggered entry last saw.
     bool virtual_edge_seen;
+    // The vector the host's entry has while it mirrors the guest's.
+    struct irq_slot slot;
 };
+
+// The vectors slots get, none of which the hypervisor uses itself.
+#define SLOT_FIRST 0x20
+#define SLOT_END 0xf0
 
 static struct route *routes;
 static uint32_t route_count;
+// Per processor, the slot each vector belongs to, and where the next search
+// for room starts, so that a vector freed is the last to be used again.
+static struct irq_slot *(*slot_table)[256];
+static uint8_t *slot_next;
+static struct spinlock slot_lock;
 static struct spinlock lock;
 static struct cpu *bsp;
 static volatile bool extint_asserted;
@@ -124,6 +135,8 @@ static void override(const struct acpi_madt_interrupt_source_override *iso) {
            r->active_low ? "low" : "high", r->level ? "level" : "edge");
 }
 
+static void mirror_taken(void *ctx, unsigned index);
+
 static void routes_init(void) {
     for (uint32_t i = 0; i < ioapic_count(); i++) {
         struct ioapic *io = ioapic_get(i);
@@ -134,6 +147,7 @@ static void routes_init(void) {
     routes = kmalloc(route_count * sizeof(*routes));
     for (uint32_t gsi = 0; gsi < route_count; gsi++) {
         routes[gsi] = (struct route){.irq = -1, .host_rte = IOAPIC_RTE_MASKED};
+        routes[gsi].slot = (struct irq_slot){.taken = mirror_taken, .ctx = &routes[gsi]};
         uint32_t pin;
         struct ioapic *io = ioapic_for_gsi(gsi, &pin);
         if (io != NULL) {
@@ -180,7 +194,7 @@ bool irq_host_vector(uint8_t vector) {
 }
 
 // What the host's entry for a GSI is to hold, and who owns it.
-static uint64_t desired(uint32_t gsi, const struct route *r, enum owner *owner) {
+static uint64_t desired(uint32_t gsi, struct route *r, enum owner *owner) {
     uint64_t rte;
     if (r->handler != NULL) {
         *owner = OWNER_HYPERVISOR;
@@ -198,13 +212,22 @@ static uint64_t desired(uint32_t gsi, const struct route *r, enum owner *owner) 
         *owner = OWNER_NONE;
         return IOAPIC_RTE_MASKED;
     }
+    // The guest's entry, on a vector of the hypervisor's, to the processor of
+    // the first vCPU it names: delivery follows the guest's entry.
     if (vioapic_rte(gsi, &rte) && !(rte & IOAPIC_RTE_MASKED)
-        && (rte & IOAPIC_RTE_DELIVERY_MASK) != IOAPIC_RTE_DELIVERY_EXTINT) {
+        && (rte & IOAPIC_RTE_DELIVERY_MASK) != IOAPIC_RTE_DELIVERY_EXTINT
+        && (r->slot.cpu != NULL
+            || irq_slot_place(&r->slot,
+                              vlapic_target((uint32_t)(rte >> IOAPIC_RTE_DEST_SHIFT),
+                                            (rte & IOAPIC_RTE_LOGICAL) != 0),
+                              1))) {
         *owner = OWNER_MIRROR;
+        uint64_t host = r->slot.vector | (uint64_t)r->slot.cpu->apic_id << IOAPIC_RTE_DEST_SHIFT
+                        | (rte & (IOAPIC_RTE_LEVEL | IOAPIC_RTE_ACTIVE_LOW));
         if (r->held) {
-            rte |= IOAPIC_RTE_MASKED;
+            host |= IOAPIC_RTE_MASKED;
         }
-        return rte;
+        return host;
     }
     // While the guest has any 8259 input unmasked, its masked inputs latch
     // requests as well.
@@ -302,6 +325,7 @@ static void update(void) {
         }
         if (owner != OWNER_MIRROR) {
             r->held = false;
+            irq_slot_free(&r->slot);
         }
         r->owner = owner;
         if (rte != r->host_rte) {
@@ -446,28 +470,28 @@ bool irq_extint_pending(struct vcpu *v) {
     return v->cpu == extint_target || vlapic_extint_open(v);
 }
 
-bool irq_mirror_taken(uint8_t vector) {
-    uint32_t self = this_cpu()->apic_id;
-    bool level = false;
+// An interrupt of a mirrored entry: level-triggered ones held masked at the
+// host until the guest's EOI, before the processor's EOI lets the line in
+// again.
+static void mirror_taken(void *ctx, unsigned index) {
+    (void)index;
+    struct route *r = ctx;
+    uint32_t gsi = (uint32_t)(r - routes);
+    uint64_t vrte = 0;
     spinlock_acquire(&lock);
-    for (uint32_t gsi = 0; gsi < route_count; gsi++) {
-        struct route *r = &routes[gsi];
-        uint64_t rte = r->host_rte;
-        if (r->owner != OWNER_MIRROR || !(rte & IOAPIC_RTE_LEVEL) || (rte & IOAPIC_RTE_MASKED)
-            || (uint8_t)rte != vector) {
-            continue;
-        }
-        // Only entries sent to this processor, where they name one.
-        if (!(rte & IOAPIC_RTE_LOGICAL) && (uint32_t)(rte >> IOAPIC_RTE_DEST_SHIFT) != self) {
-            continue;
-        }
+    bool deliver = r->owner == OWNER_MIRROR && vioapic_rte(gsi, &vrte);
+    bool level = deliver && (vrte & IOAPIC_RTE_LEVEL);
+    if (level) {
         r->held = true;
         r->host_rte |= IOAPIC_RTE_MASKED;
         ioapic_rte_write(r->io, r->pin, r->host_rte);
-        level = true;
     }
     spinlock_release(&lock);
-    return level;
+    if (deliver) {
+        vlapic_deliver_message((uint32_t)(vrte >> IOAPIC_RTE_DEST_SHIFT),
+                               (vrte & IOAPIC_RTE_LOGICAL) != 0,
+                               (uint32_t)(vrte & IOAPIC_RTE_DELIVERY_MASK), (uint8_t)vrte, level);
+    }
 }
 
 void irq_mirror_eoi(uint8_t vector) {
@@ -475,12 +499,15 @@ void irq_mirror_eoi(uint8_t vector) {
     bool released = false;
     for (uint32_t gsi = 0; gsi < route_count; gsi++) {
         struct route *r = &routes[gsi];
-        if (r->held && (uint8_t)r->host_rte == vector) {
+        uint64_t vrte;
+        if (!vioapic_rte(gsi, &vrte) || (uint8_t)vrte != vector) {
+            continue;
+        }
+        if (r->held) {
             r->held = false;
             released = true;
         }
-        uint64_t vrte;
-        if (r->virtual_held && vioapic_rte(gsi, &vrte) && (uint8_t)vrte == vector) {
+        if (r->virtual_held) {
             r->virtual_held = false;
             released = true;
         }
@@ -489,6 +516,83 @@ void irq_mirror_eoi(uint8_t vector) {
         update();
     }
     spinlock_release(&lock);
+}
+
+static void slot_release(struct irq_slot *s) {
+    if (s->cpu == NULL) {
+        return;
+    }
+    for (unsigned i = 0; i < s->count; i++) {
+        __atomic_store_n(&slot_table[s->cpu->index][s->vector + i], NULL, __ATOMIC_RELEASE);
+    }
+    s->cpu = NULL;
+}
+
+// An aligned block of count free vectors on the processor.
+static bool slot_room(struct cpu *cpu, unsigned count, uint8_t *vector) {
+    struct irq_slot **table = slot_table[cpu->index];
+    unsigned blocks = (SLOT_END - SLOT_FIRST) / count;
+    unsigned first = (slot_next[cpu->index] - SLOT_FIRST) / count;
+    for (unsigned n = 0; n < blocks; n++) {
+        unsigned base = SLOT_FIRST + (first + n) % blocks * count;
+        bool free = true;
+        for (unsigned i = 0; i < count && free; i++) {
+            free = table[base + i] == NULL;
+        }
+        if (free) {
+            *vector = (uint8_t)base;
+            slot_next[cpu->index] = (uint8_t)(base + count >= SLOT_END ? SLOT_FIRST : base + count);
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool slot_usable(struct cpu *cpu) {
+    return cpu != NULL && cpu->vcpu != NULL && cpu->apic_id <= XAPIC_MAX_ID;
+}
+
+bool irq_slot_place(struct irq_slot *s, struct cpu *cpu, unsigned count) {
+    spinlock_acquire(&slot_lock);
+    slot_release(s);
+    struct cpu *where = NULL;
+    uint8_t vector = 0;
+    if (slot_usable(cpu) && slot_room(cpu, count, &vector)) {
+        where = cpu;
+    }
+    for (uint32_t i = 0; where == NULL && i < smp_cpu_count(); i++) {
+        struct cpu *c = smp_cpu(i);
+        if (slot_usable(c) && slot_room(c, count, &vector)) {
+            where = c;
+        }
+    }
+    if (where != NULL) {
+        s->cpu = where;
+        s->vector = vector;
+        s->count = (uint8_t)count;
+        for (unsigned i = 0; i < count; i++) {
+            __atomic_store_n(&slot_table[where->index][vector + i], s, __ATOMIC_RELEASE);
+        }
+    }
+    spinlock_release(&slot_lock);
+    return where != NULL;
+}
+
+void irq_slot_free(struct irq_slot *s) {
+    spinlock_acquire(&slot_lock);
+    slot_release(s);
+    spinlock_release(&slot_lock);
+}
+
+bool irq_slot_interrupt(uint8_t vector) {
+    struct irq_slot *s =
+        __atomic_load_n(&slot_table[this_cpu()->index][vector], __ATOMIC_ACQUIRE);
+    if (s == NULL) {
+        return false;
+    }
+    s->taken(s->ctx, vector & (s->count - 1u));
+    lapic_eoi();
+    return true;
 }
 
 bool irq_remote_irr(uint32_t gsi) {
@@ -593,6 +697,9 @@ void irq_init(void) {
     routes_init();
     pic_reset();
     elcr_init();
+    slot_table = kmalloc(smp_cpu_count() * sizeof(*slot_table));
+    slot_next = kmalloc(smp_cpu_count());
+    memset(slot_next, SLOT_FIRST, smp_cpu_count());
 
     static const uint16_t ports[] = {PIC_MASTER_CMD, PIC_SLAVE_CMD, PIC_ELCR_MASTER};
     for (unsigned i = 0; i < sizeof(ports) / sizeof(ports[0]); i++) {

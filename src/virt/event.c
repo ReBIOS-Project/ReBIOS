@@ -242,11 +242,13 @@ void event_interrupt(uint8_t vector) {
         irq_host_interrupt(vector);
         return;
     }
-    // One of the guest's MSIs or I/O APIC entries, addressed to this vCPU:
-    // level-triggered entries stay masked at the host until the guest's EOI.
-    bool level = irq_mirror_taken(vector);
+    if (irq_slot_interrupt(vector)) {
+        return;
+    }
+    // An interrupt the guest programmed into something the hypervisor does
+    // not keep its own messages of, addressed to this vCPU.
     lapic_eoi();
-    vlapic_accept(v, vector, level);
+    vlapic_accept(v, vector, false);
 }
 
 static bool interruptible(struct vcpu *v) {
