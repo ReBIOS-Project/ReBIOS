@@ -1,3 +1,103 @@
+2026-10-20  Mintsuki  <mintsuki@protonmail.com>
+
+    *** Release 0.3.0 ***
+
+    Noteworthy changes compared to the previous release, 0.2.0:
+
+    New features:
+        - Nested virtualisation on Intel processors: with the new `nested`
+          setting on, the OS can use VMX itself to run virtual machines of its
+          own, e.g. with Linux's KVM, with EPT, VPID, VMCS shadowing, APIC
+          virtualisation and posted interrupts, the VMX-preemption timer,
+          page-modification logging, TSC scaling, EPTP switching, and the other
+          VMX features the processor has. It stays off by default until AMD's
+          SVM is nested as well.
+        - Let the processor's local APIC virtualisation run the OS's local
+          APICs: on Intel, TPR shadowing, APIC-access and APIC-register
+          virtualisation, virtual-interrupt delivery, posted interrupts, x2APIC
+          virtualisation, and IPI virtualisation; on AMD, AVIC and x2AVIC.
+          Local APIC accesses, such as 32-bit Windows' TPR writes, rarely stop
+          the OS anymore: Windows 10 installs in half the time it took under
+          nested KVM.
+        - AMD: use flush by ASID, VMCB clean bits, decode assists, and virtual
+          NMIs and GIF where the processor has them.
+        - Interrupts that the OS programs into devices (MSIs and MSI-X entries)
+          and into the I/O APICs arrive on vectors that ReBIOS hands out, which
+          it then delivers as the OS asked: whatever the OS writes, no device
+          interrupts ReBIOS's own vectors, and the NMIs and INITs the OS asks
+          for reach its own processors only. Where the IOMMUs can, VT-d or
+          AMD-Vi interrupt remapping carries these interrupts and blocks the
+          ones devices send otherwise, e.g. by DMA.
+        - Pass the processor's thermal and performance monitoring interrupts,
+          and Intel's hardware feedback table, to the OS, so that its scheduler
+          gets the processor's hints (Intel Thread Director).
+        - Let the OS use Intel PT where its output can go through EPT, PEBS
+          where its records can, MPX, LAM, and AMD's ERAPS, Upper Address
+          Ignore, and LBR virtualisation.
+        - Show ReBIOS's log, and any panic, on the screen with Flanterm.
+
+    Bug fixes:
+        - Map the framebuffer wherever the firmware put it: where that was
+          above 4 GiB, as for many dedicated graphics cards, the emulated VGA
+          stopped ReBIOS before showing anything (new in 0.2.0).
+        - Bounce the BIOS's NVMe transfers to buffers that are not dword
+          aligned, which the controller cannot take. FreeDOS did not boot from
+          NVMe drives.
+        - Emulated VGA: put the linear framebuffer in PCI memory that no device
+          uses rather than in the BAR of a PCI function of ReBIOS's own.
+          Windows 8 and later saw two display adapters, drawing both into the
+          same screen.
+        - Carry out hardware task switches as the processor does: their steps
+          in its order, privilege checks for the new task's data segments,
+          double faults for faults while an exception's switch runs, the stack
+          limit for its error code, the EXT bit, the T flag's debug trap, and
+          the reserved EFLAGS bits.
+        - Walk the OS's paging as the processor does where ReBIOS accesses its
+          memory: accessed and dirty flags, reserved bits, SMEP, SMAP,
+          protection keys, and LASS.
+        - Decode 32-bit real mode code (CS.D set in real mode) as 32-bit code,
+          and check every iteration of the string instructions ReBIOS carries
+          out against its segment's limit and rights.
+        - Wrap RIP at 4 GiB outside 64-bit mode after the instructions ReBIOS
+          carries out.
+        - Debuggers work across the accesses ReBIOS carries out: data and I/O
+          breakpoints on emulated memory and ports, RF as the processor keeps
+          it, branch single-stepping (BTF), and the effects of debug traps'
+          delivery on DR7 and DEBUGCTL.
+        - Raise #GP for the control register writes the processor refuses, such
+          as paging without protected mode, rather than reset, and flush the
+          OS's TLB after the ones ReBIOS carries out.
+        - Hand the OS what ReBIOS does not expect as the processor would,
+          rather than stop: unknown instructions' exits as #UD, states that
+          cannot be entered as a triple fault, code in emulated memory, and
+          interrupt delivery onto a stack in it, as in VGA memory.
+        - Keep the CPUID limit and the XD disable bit of IA32_MISC_ENABLE to
+          the OS, which could otherwise limit ReBIOS's own CPUID or break its
+          VM exits.
+        - AMD: keep the OS's memory out of the HyperTransport address range,
+          where the IOMMU and the processor give addresses special meanings.
+        - AMD: give the OS a memory configuration of its own (SYSCFG, TOP_MEM,
+          TOP_MEM2, IORRs, MMIO_CFG_BASE), keep the TSC's rate whatever its
+          P-state definitions say, and load none of its microcode.
+        - Intel: set the XSS-exiting bitmap where XSAVES is enabled.
+        - Keep device interrupts off APIC ID FFh, the broadcast.
+        - Give the OS memory with no regard to where the firmware's own memory
+          types were, so that it has no holes there.
+
+    Miscellaneous:
+        - The OS gets only the CPU features, MSRs, and XSAVE components that
+          ReBIOS knows, the model-specific MSRs by the processor model's or
+          family's tables in Intel's and AMD's manuals. Those it does not
+          support yet stay hidden, such as FRED, user interrupts, SGX, and
+          memory encryption.
+        - Hide the HPET from the OS where its timers can deliver interrupts
+          through the FSB, as messages that would go wherever the OS pointed
+          them.
+        - Performance counters count only the OS's own work.
+        - The profile names the exits of VMX instructions.
+        - Cite the newest revisions of the documents and projects that the code
+          follows.
+
 2026-10-18  Mintsuki  <mintsuki@protonmail.com>
 
     *** Release 0.2.0 ***
