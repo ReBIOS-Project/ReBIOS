@@ -52,6 +52,8 @@
 // Readable for code, writable for data.
 #define DESC_RW (1u << 1)
 #define DESC_CONFORMING (1u << 2)
+// Expand-down for data.
+#define DESC_EXPAND_DOWN (1u << 2)
 #define DESC_ACCESSED (1u << 0)
 #define DESC_G (1u << 11)
 
@@ -310,6 +312,30 @@ static void load_ldt(struct switcher *s, uint16_t selector) {
     vcpu_set_seg(s->v, SEG_LDTR, &s->ldtr);
 }
 
+// The event's error code on the new task's stack, with the checks of a push:
+// #SS(0) where the stack segment does not hold it, still part of the event's
+// delivery (Intel's and AMD's processors raise #DF(0) for a #GP there).
+static void push_error(struct switcher *s, uint32_t error, unsigned size) {
+    struct segment ss;
+    vcpu_get_seg(s->v, SEG_SS, &ss);
+    bool big = (ss.attrib & SEG_DB) != 0;
+    uint64_t rsp = vcpu_rsp(s->v);
+    uint32_t sp = big ? (uint32_t)rsp - size : (uint16_t)((uint16_t)rsp - size);
+    uint64_t low = 0;
+    uint64_t high = ss.limit;
+    if (ss.attrib & DESC_EXPAND_DOWN) {
+        low = (uint64_t)ss.limit + 1;
+        high = big ? 0xffffffff : 0xffff;
+    }
+    if (sp < low || (uint64_t)sp + size - 1 > high) {
+        fault(s, VECTOR_SS, 0);
+        return;
+    }
+    if (system_write(s, (ss.base + sp) & 0xffffffff, &error, size)) {
+        vcpu_set_rsp(s->v, big ? sp : (rsp & ~0xffffull) | sp);
+    }
+}
+
 void task_switch(struct vcpu *v, uint16_t selector, enum task_source source,
                  const struct task_event *event, unsigned length) {
     struct switcher s = {.v = v, .event = event};
@@ -472,17 +498,7 @@ void task_switch(struct vcpu *v, uint16_t selector, enum task_source source,
     vmx_task_switched(v, event != NULL && event->nmi);
 
     if (event != NULL && event->error_valid && !s.faulted) {
-        struct segment ss;
-        vcpu_get_seg(v, SEG_SS, &ss);
-        unsigned size = new32 ? 4 : 2;
-        uint64_t rsp = vcpu_rsp(v) - size;
-        if (!(ss.attrib & SEG_DB)) {
-            rsp = (vcpu_rsp(v) & ~0xffffull) | ((vcpu_rsp(v) - size) & 0xffff);
-        }
-        uint64_t sp = ss.attrib & SEG_DB ? rsp & 0xffffffff : rsp & 0xffff;
-        if (system_write(&s, ss.base + sp, &event->error, size)) {
-            vcpu_set_rsp(v, rsp);
-        }
+        push_error(&s, event->error, new32 ? 4 : 2);
     }
 
     if (new32 && (image[TSS32_TRAP] & 1)) {
