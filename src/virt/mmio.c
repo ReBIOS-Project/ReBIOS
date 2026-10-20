@@ -146,6 +146,18 @@ static bool translate(struct vcpu *v, uint64_t linear, unsigned size, bool write
     return true;
 }
 
+void mmio_phys_access(struct vcpu *v, uint64_t gpa, void *buf, unsigned len, bool write) {
+    const struct region *r = find(gpa);
+    if (r != NULL) {
+        region_access(v, r, gpa, buf, len, write);
+    } else if (write) {
+        // What is neither RAM nor emulated decodes nothing.
+        guest_phys_write(gpa, buf, len);
+    } else if (!guest_phys_read(gpa, buf, len)) {
+        memset(buf, 0xff, len);
+    }
+}
+
 static bool access(struct vcpu *v, uint64_t linear, void *buf, unsigned size, bool write) {
     uint64_t gpas[2];
     unsigned lens[2];
@@ -155,15 +167,7 @@ static bool access(struct vcpu *v, uint64_t linear, void *buf, unsigned size, bo
     }
     uint8_t *p = buf;
     for (unsigned i = 0; i < pieces; i++) {
-        const struct region *r = find(gpas[i]);
-        if (r != NULL) {
-            region_access(v, r, gpas[i], p, lens[i], write);
-        } else if (write) {
-            // What is neither RAM nor emulated decodes nothing.
-            guest_phys_write(gpas[i], p, lens[i]);
-        } else if (!guest_phys_read(gpas[i], p, lens[i])) {
-            memset(p, 0xff, lens[i]);
-        }
+        mmio_phys_access(v, gpas[i], p, lens[i], write);
         p += lens[i];
     }
     return true;

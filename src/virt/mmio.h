@@ -42,6 +42,8 @@ void mmio_register(uint64_t base, uint64_t size, const struct mmio_ops *ops, voi
 // false where the access faulted, having raised the fault.
 bool mmio_read_linear(struct vcpu *v, uint64_t linear, void *buf, unsigned size);
 bool mmio_write_linear(struct vcpu *v, uint64_t linear, const void *buf, unsigned size);
+// The same at a guest-physical address, within a page.
+void mmio_phys_access(struct vcpu *v, uint64_t gpa, void *buf, unsigned len, bool write);
 
 // An EPT violation or a nested page fault at gpa, for an access other than a
 // fetch: emulates the instruction that made it, where nothing decodes as

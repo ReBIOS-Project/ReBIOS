@@ -109,11 +109,7 @@ static bool system_read(struct switcher *s, uint64_t linear, void *buf, size_t l
         return true;
     }
     if (!s->faulted) {
-        if (pf_error != 0) {
-            vcpu_inject_page_fault(s->v, pf_linear, pf_error);
-        } else {
-            vcpu_inject_exception(s->v, 13, true, 0);
-        }
+        vcpu_inject_page_fault(s->v, pf_linear, pf_error);
         s->faulted = true;
     }
     return false;
@@ -126,11 +122,7 @@ static bool system_write(struct switcher *s, uint64_t linear, const void *buf, s
         return true;
     }
     if (!s->faulted) {
-        if (pf_error != 0) {
-            vcpu_inject_page_fault(s->v, pf_linear, pf_error);
-        } else {
-            vcpu_inject_exception(s->v, 13, true, 0);
-        }
+        vcpu_inject_page_fault(s->v, pf_linear, pf_error);
         s->faulted = true;
     }
     return false;

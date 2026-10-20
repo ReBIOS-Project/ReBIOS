@@ -23,6 +23,7 @@
 #include <sys/x86.h>
 #include <virt/gpt.h>
 #include <virt/guest_mem.h>
+#include <virt/mmio.h>
 #include <virt/nvmx.h>
 #include <virt/vcpu.h>
 #include <virt/vmx.h>
@@ -385,12 +386,7 @@ static bool system_access(struct vcpu *v, uint64_t linear, void *buf, size_t len
         if (chunk > len) {
             chunk = len;
         }
-        bool ok = write ? guest_phys_write(gpa, p, chunk) : guest_phys_read(gpa, p, chunk);
-        if (!ok) {
-            *pf_error = 0;
-            *pf_linear = linear;
-            return false;
-        }
+        mmio_phys_access(v, gpa, p, (unsigned)chunk, write);
         linear += chunk;
         p += chunk;
         len -= chunk;
