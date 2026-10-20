@@ -113,6 +113,7 @@ void page_free(void *pages, size_t count) {
 }
 
 #define PTE_P (1ull << 0)
+#define PTE_W (1ull << 1)
 #define PTE_PWT (1ull << 3)
 #define PTE_PCD (1ull << 4)
 #define PTE_PS (1ull << 7)
@@ -147,6 +148,40 @@ static void split(uint64_t *entry, uint64_t size, bool to_4k) {
         table[i] = (base + i * (size / 512)) | flags;
     }
     *entry = (uint64_t)(uintptr_t)table | (*entry & 0x7) | PTE_P;
+}
+
+static struct spinlock map_lock;
+
+static uint64_t *next_table(uint64_t *entry) {
+    if (!(*entry & PTE_P)) {
+        *entry = (uint64_t)(uintptr_t)page_alloc(1) | PTE_P | PTE_W;
+    }
+    return table_of(*entry);
+}
+
+// 2 MiB pages, as the loader maps a framebuffer, in the first 256 TiB.
+void mm_map_device(uint64_t base, uint64_t size) {
+    uint64_t *top = table_of(read_cr3());
+    if (read_cr4() & CR4_LA57) {
+        top = table_of(top[0]);
+    }
+    uint64_t end = (base + size + SIZE_2M - 1) & ~(SIZE_2M - 1);
+    if (end > 1ull << 48) {
+        printf("Cannot map device registers at %#llx\n", (unsigned long long)base);
+        return;
+    }
+    spinlock_acquire(&map_lock);
+    for (uint64_t a = base & ~(SIZE_2M - 1); a < end; a += SIZE_2M) {
+        uint64_t *pdpte = &next_table(&top[(a >> 39) & 511])[(a >> 30) & 511];
+        if (*pdpte & PTE_PS) {
+            continue;
+        }
+        uint64_t *pde = &next_table(pdpte)[(a >> 21) & 511];
+        if (!(*pde & PTE_P)) {
+            *pde = a | PTE_P | PTE_W | PTE_PS | PTE_PCD | PTE_PWT;
+        }
+    }
+    spinlock_release(&map_lock);
 }
 
 void mm_write_combining(uint64_t base, uint64_t size) {

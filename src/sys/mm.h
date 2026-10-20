@@ -35,5 +35,9 @@ void page_free(void *pages, size_t count);
 // Makes the hypervisor's accesses to [base, base + size) write-combining, as
 // for a framebuffer, through the PAT entry the host programs for it.
 void mm_write_combining(uint64_t base, uint64_t size);
+// Maps [base, base + size) for the hypervisor's accesses, uncached, wherever
+// its identity map has nothing yet, such as registers of a device above the
+// RAM it covers.
+void mm_map_device(uint64_t base, uint64_t size);
 
 #endif
