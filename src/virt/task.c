@@ -458,8 +458,10 @@ void task_switch(struct vcpu *v, uint16_t selector, enum task_source source,
     // the new task.
     struct segment new_tr = {selector, new_attrib | DESC_TYPE_BUSY, new_limit, new_base};
     vcpu_set_seg(v, SEG_TR, &new_tr);
-    if (new32 && (vcpu_cr0(v) & CR0_PG)) {
-        vmx_load_guest_cr3(cr3);
+    // As Linux 7.3's KVM has it, a CR3 whose PDPTEs PAE paging refuses stays
+    // the old task's, with #GP (emulate.c, load_state_from_tss32()).
+    if (new32 && (vcpu_cr0(v) & CR0_PG) && !vmx_load_guest_cr3(cr3, true)) {
+        fault(&s, VECTOR_GP, 0);
     }
     vcpu_set_rflags(v, new_eflags);
     vcpu_set_rip(v, new_eip);

@@ -38,6 +38,10 @@
 bool guest_phys_read(uint64_t gpa, void *buf, size_t len);
 bool guest_phys_write(uint64_t gpa, const void *buf, size_t len);
 
+// Whether PAE paging may load the PDPTE: not present, or setting no bit it
+// reserves.
+bool guest_pdpte_valid(uint64_t pdpte);
+
 // Translates through the guest's own paging, as the processor would for the
 // access. On failure, *pf_error holds the page fault error code to raise.
 bool guest_linear_to_phys(struct vcpu *v, uint64_t linear, bool write, bool fetch,

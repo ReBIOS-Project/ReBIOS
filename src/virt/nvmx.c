@@ -2124,7 +2124,7 @@ static void load_l1_host_state(struct vcpu *v, struct nvmx *n, bool nmi) {
     mode.segs[SEG_GDTR] = (struct segment){.limit = 0xffff, .base = get12(n, VMCS_HOST_GDTR_BASE)};
     mode.segs[SEG_IDTR] = (struct segment){.limit = 0xffff, .base = get12(n, VMCS_HOST_IDTR_BASE)};
     vcpu_load_mode(v, &mode);
-    vmx_load_guest_cr3(mode.cr3);
+    vmx_load_guest_cr3(mode.cr3, false);
 
     vcpu_set_rip(v, get12(n, VMCS_HOST_RIP));
     vcpu_set_rsp(v, get12(n, VMCS_HOST_RSP));

@@ -193,6 +193,10 @@ static uint64_t reserved_bits(bool wide, bool pae, unsigned level, bool large, b
     }
 }
 
+bool guest_pdpte_valid(uint64_t pdpte) {
+    return !(pdpte & PTE_P) || !(pdpte & reserved_bits(true, true, 2, false, true));
+}
+
 static uint64_t data_access(bool write, bool fetch) {
     uint64_t access = EPT_QUAL_LINEAR | EPT_QUAL_TRANSLATION;
     if (write) {

@@ -469,7 +469,8 @@ bool vmx_perf_global_saved(void);
 void vmx_async_access(uint64_t gpa);
 // Loads the guest's CR3 as a MOV to CR3 would, for what the hypervisor carries
 // out for the guest: the PDPTEs of PAE paging, and the guest's translations.
-void vmx_load_guest_cr3(uint64_t cr3);
+// Where checked, false, loading nothing, for PDPTEs the move refuses.
+bool vmx_load_guest_cr3(uint64_t cr3, bool checked);
 // PAE paging's PDPTEs from what the guest's CR3 points to, as VM entries load
 // them without EPT.
 void vmx_load_guest_pdptes(void);

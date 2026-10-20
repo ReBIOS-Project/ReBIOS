@@ -24,6 +24,7 @@
 #include <sys/fixup.h>
 #include <sys/mm.h>
 #include <sys/x86.h>
+#include <virt/cpuid.h>
 #include <virt/event.h>
 #include <virt/exit.h>
 #include <virt/gpt.h>
@@ -483,7 +484,8 @@ uint64_t vmx_cr0_mask(void) {
 }
 
 uint64_t vmx_cr4_mask(void) {
-    return cr4_fixed0 | ~cr4_fixed1;
+    // Those of features the guest does not get too, whose writes fault.
+    return cr4_fixed0 | ~cr4_fixed1 | ~cpuid_cr4_allowed();
 }
 
 uint64_t vmx_cr0_real(uint64_t guest_cr0) {
@@ -758,28 +760,53 @@ static void vmx_dump_guest(void) {
     }
 }
 
-static void load_pdptes(void) {
+// The PDPTEs PAE paging takes from what cr3 points to: where checked, false,
+// loading none, if one sets a bit it reserves, which MOV to CR0, CR3, or CR4
+// refuses with #GP(0) (SDM 325462-093 Vol. 2B, MOV to/from Control Registers).
+static bool load_pdptes(uint64_t cr3, bool checked) {
     uint64_t pdptes[4] = {0};
-    guest_phys_read(vmx_read(VMCS_GUEST_CR3) & 0xffffffe0, pdptes, sizeof(pdptes));
+    guest_phys_read(cr3 & 0xffffffe0, pdptes, sizeof(pdptes));
+    for (unsigned i = 0; checked && i < 4; i++) {
+        if (!guest_pdpte_valid(pdptes[i])) {
+            return false;
+        }
+    }
     vmx_write(VMCS_GUEST_PDPTE0, pdptes[0]);
     vmx_write(VMCS_GUEST_PDPTE1, pdptes[1]);
     vmx_write(VMCS_GUEST_PDPTE2, pdptes[2]);
     vmx_write(VMCS_GUEST_PDPTE3, pdptes[3]);
+    return true;
 }
 
-// What the processor does itself on a MOV to CR0 or CR4 that it carries out:
-// paging with EFER.LME on activates long mode, and PAE paging outside long
-// mode loads the PDPTEs CR3 points to. Returns false where the move raises
-// #GP instead.
-static bool vmx_paging_changed(uint64_t cr0, uint64_t cr4) {
+// PAE paging outside IA-32e mode, whose PDPTEs the processor holds.
+static bool pae_paging(void) {
+    return (vmx_read(VMCS_GUEST_CR0) & CR0_PG) && (vmx_read(VMCS_GUEST_CR4) & CR4_PAE)
+           && !(vmx_read(VMCS_GUEST_EFER) & EFER_LMA);
+}
+
+// The bits whose change makes MOV to CR0 or CR4 load the PDPTEs (SDM 325462-093
+// Vol. 3A, 5.4.1).
+#define PDPTE_CR0_BITS (CR0_PG | CR0_CD | CR0_NW)
+#define PDPTE_CR4_BITS (CR4_PAE | CR4_PGE | CR4_PSE | CR4_SMEP)
+
+// What the processor does itself on a MOV to CR0 or CR4 that it carries out,
+// from the old values to the new: paging with EFER.LME on activates long mode,
+// and PAE paging outside long mode loads the PDPTEs CR3 points to. Returns
+// false where the move raises #GP instead.
+static bool vmx_paging_changed(uint64_t old0, uint64_t old4, uint64_t cr0, uint64_t cr4) {
     uint64_t efer = vmx_read(VMCS_GUEST_EFER);
     bool paging = (cr0 & CR0_PG) != 0;
     bool pae = (cr4 & CR4_PAE) != 0;
-    if (paging && (efer & EFER_LME) && !pae) {
+    bool long_mode = paging && (efer & EFER_LME);
+    if (long_mode && !pae) {
+        return false;
+    }
+    bool reload = ((cr0 ^ old0) & PDPTE_CR0_BITS) || ((cr4 ^ old4) & PDPTE_CR4_BITS);
+    if (paging && pae && !long_mode && reload && !load_pdptes(vmx_read(VMCS_GUEST_CR3), true)) {
         return false;
     }
     uint64_t entry = vmx_read(VMCS_ENTRY_CONTROLS) & ~(uint64_t)ENTRY_IA32E_MODE_GUEST;
-    if (paging && (efer & EFER_LME)) {
+    if (long_mode) {
         efer |= EFER_LMA;
         entry |= ENTRY_IA32E_MODE_GUEST;
     } else {
@@ -787,9 +814,6 @@ static bool vmx_paging_changed(uint64_t cr0, uint64_t cr4) {
     }
     vmx_write(VMCS_GUEST_EFER, efer);
     vmx_write(VMCS_ENTRY_CONTROLS, entry);
-    if (paging && pae && !(efer & EFER_LMA)) {
-        load_pdptes();
-    }
     return true;
 }
 
@@ -799,19 +823,21 @@ void vmx_load_gpt_root(struct vcpu *v) {
 }
 
 void vmx_load_guest_pdptes(void) {
-    if ((vmx_read(VMCS_GUEST_CR0) & CR0_PG) && (vmx_read(VMCS_GUEST_CR4) & CR4_PAE)
-        && !(vmx_read(VMCS_GUEST_EFER) & EFER_LMA)) {
-        load_pdptes();
+    if (pae_paging()) {
+        load_pdptes(vmx_read(VMCS_GUEST_CR3), false);
     }
 }
 
-void vmx_load_guest_cr3(uint64_t cr3) {
+bool vmx_load_guest_cr3(uint64_t cr3, bool checked) {
+    if (pae_paging() && !load_pdptes(cr3, checked)) {
+        return false;
+    }
     vmx_write(VMCS_GUEST_CR3, cr3);
-    vmx_load_guest_pdptes();
     // As MOV to CR3 drops the guest's translations.
     if (vmx_vpid_usable()) {
         vmx_invvpid(2, 0, 0);
     }
+    return true;
 }
 
 void vmx_task_switched(struct vcpu *v, bool nmi) {
@@ -872,20 +898,68 @@ static void set_guest_reg(struct vcpu *v, unsigned reg, uint64_t value) {
     }
 }
 
+// Whether the processor takes CR0 and CR4 values, the old ones then the new,
+// as the guest sees them: the #GP(0) cases of MOV to CR0 and CR4 (SDM
+// 325462-093 Vol. 2B, MOV to/from Control Registers, and Vol. 3A, 2.5) as
+// Linux 7.3's KVM checks them (regs.c, kvm_set_cr0() and kvm_set_cr4()), but
+// for the PDPTEs, which vmx_paging_changed() checks.
+static bool cr_valid(uint64_t old0, uint64_t old4, uint64_t cr0, uint64_t cr4) {
+    uint64_t efer = vmx_read(VMCS_GUEST_EFER);
+    bool lma = (efer & EFER_LMA) != 0;
+    bool code64 = lma && (vmx_read(VMCS_GUEST_CS_AR) & VMX_AR_L);
+    // Reserved bits, invalid combinations, and the CR4 bits of features the
+    // guest does not get.
+    if ((cr0 >> 32) || ((cr0 & CR0_PG) && !(cr0 & CR0_PE)) || ((cr0 & CR0_NW) && !(cr0 & CR0_CD))
+        || (cr4 & ~cpuid_cr4_allowed() & ~(uint64_t)CR4_VMXE)) {
+        return false;
+    }
+    // CET needs WP.
+    if ((cr4 & CR4_CET) && !(cr0 & CR0_WP)) {
+        return false;
+    }
+    // PCIDE only in IA-32e mode with paging, and from 0 only with CR3's PCID 0.
+    if ((cr4 & CR4_PCIDE)
+        && (!lma || !(cr0 & CR0_PG)
+            || (!(old4 & CR4_PCIDE) && (vmx_read(VMCS_GUEST_CR3) & 0xfff)))) {
+        return false;
+    }
+    // IA-32e mode keeps PAE and LA57, and 64-bit code paging.
+    if (lma && (!(cr4 & CR4_PAE) || ((cr4 ^ old4) & CR4_LA57) || (code64 && !(cr0 & CR0_PG)))) {
+        return false;
+    }
+    // Activating IA-32e mode takes CS.L clear and a 32-bit TSS.
+    if ((efer & EFER_LME) && (cr0 & CR0_PG) && !(old0 & CR0_PG)) {
+        uint64_t tr_type = vmx_read(VMCS_GUEST_TR_AR) & 0xf;
+        if ((vmx_read(VMCS_GUEST_CS_AR) & VMX_AR_L) || tr_type == 1 || tr_type == 3) {
+            return false;
+        }
+    }
+    return true;
+}
+
+#define CR0_DEFINED (CR0_PE | CR0_MP | CR0_EM | CR0_TS | CR0_ET | CR0_NE | CR0_WP | CR0_AM \
+                     | CR0_NW | CR0_CD | CR0_PG)
+
 // What a write of CR0 or CR4 does, with the bits the host owns as the guest
 // believes them.
 static void cr_write(struct vcpu *v, unsigned cr, uint64_t value) {
-    uint64_t cr0 = cr == 0 ? vmx_cr0_real(value) : vmx_read(VMCS_GUEST_CR0);
-    uint64_t cr4 = cr == 4 ? vmx_cr4_real(value) : vmx_read(VMCS_GUEST_CR4);
-    // Long mode cannot do without PAE, and 64-bit code without paging.
-    if (vmx_read(VMCS_GUEST_EFER) & EFER_LMA) {
-        bool code64 = (vmx_read(VMCS_GUEST_CS_AR) & VMX_AR_L) != 0;
-        if (!(cr4 & CR4_PAE) || (code64 && !(cr0 & CR0_PG))) {
-            vcpu_inject_exception(v, 13, true, 0);
-            return;
-        }
+    uint64_t old0 = vcpu_cr0(v);
+    uint64_t old4 = vcpu_cr4(v);
+    if (!cr_valid(old0, old4, cr == 0 ? value : old0, cr == 4 ? value : old4)
+        || !nvmx_cr_allowed(v, cr, value)) {
+        vcpu_inject_exception(v, 13, true, 0);
+        return;
     }
-    if (!nvmx_cr_allowed(v, cr, value) || !vmx_paging_changed(cr0, cr4)) {
+    // CR0's reserved bits ignore writes and ET reads as 1, as Linux 7.3's KVM
+    // has them (regs.c, kvm_set_cr0()).
+    if (cr == 0) {
+        value = (value & CR0_DEFINED) | CR0_ET;
+    }
+    uint64_t real0 = vmx_read(VMCS_GUEST_CR0);
+    uint64_t real4 = vmx_read(VMCS_GUEST_CR4);
+    uint64_t cr0 = cr == 0 ? vmx_cr0_real(value) : real0;
+    uint64_t cr4 = cr == 4 ? vmx_cr4_real(value) : real4;
+    if (!vmx_paging_changed(real0, real4, cr0, cr4)) {
         vcpu_inject_exception(v, 13, true, 0);
         return;
     }
@@ -912,11 +986,19 @@ static void vmx_handle_cr_access(struct vcpu *v, uint64_t qual) {
     switch (type) {
         case CR_ACCESS_MOV_TO: {
             uint64_t value = guest_reg(v, reg);
+            // Outside 64-bit mode the move takes the register's low 32 bits.
+            if (!(vmx_read(VMCS_GUEST_EFER) & EFER_LMA)
+                || !(vmx_read(VMCS_GUEST_CS_AR) & VMX_AR_L)) {
+                value = (uint32_t)value;
+            }
             if (cr == 0 || cr == 4) {
                 cr_write(v, cr, value);
             } else if (cr == 3) {
-                vmx_load_guest_cr3(value);
-                vcpu_skip_instruction(v);
+                if (vmx_load_guest_cr3(value, true)) {
+                    vcpu_skip_instruction(v);
+                } else {
+                    vcpu_inject_exception(v, 13, true, 0);
+                }
             } else if (value >> 4) {
                 vcpu_inject_exception(v, 13, true, 0);
             } else {
