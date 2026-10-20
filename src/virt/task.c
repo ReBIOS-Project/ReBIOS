@@ -142,7 +142,12 @@ static void deliver(struct switcher *s, uint8_t vector, uint32_t error, uint64_t
     }
 }
 
+// The exceptions with selector error codes, which carry EXT where the switch
+// delivers an event from outside the program (SDM 325462-093 Vol. 3A, 7.13).
 static void fault(struct switcher *s, uint8_t vector, uint32_t error) {
+    if (s->event != NULL && s->event->external) {
+        error |= 1;
+    }
     deliver(s, vector, error, 0);
 }
 
@@ -315,7 +320,7 @@ static void load_ldt(struct switcher *s, uint16_t selector) {
 }
 
 // The event's error code on the new task's stack, with the checks of a push:
-// #SS(0) where the stack segment does not hold it, still part of the event's
+// #SS where the stack segment does not hold it, still part of the event's
 // delivery (Intel's and AMD's processors raise #DF(0) for a #GP there).
 static void push_error(struct switcher *s, uint32_t error, unsigned size) {
     struct segment ss;

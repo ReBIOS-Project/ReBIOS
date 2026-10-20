@@ -37,6 +37,8 @@ struct task_event {
     // A hardware exception, which a fault during the switch can turn into a
     // double fault.
     bool exception;
+    // From outside the program: anything but INT n, INT3, and INTO.
+    bool external;
     // INT n, INT3, INTO, and INT1, whose task resumes after them.
     bool software;
     bool nmi;

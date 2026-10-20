@@ -842,6 +842,7 @@ static void vmx_handle_task_switch(struct vcpu *v, uint64_t qual) {
         event.software = type == INTR_TYPE_SW_INTR || type == INTR_TYPE_PRIV_SW_EXCEPTION
                          || type == INTR_TYPE_SW_EXCEPTION;
         event.nmi = type == INTR_TYPE_NMI;
+        event.external = type != INTR_TYPE_SW_INTR && type != INTR_TYPE_SW_EXCEPTION;
         event.error_valid = (info & INTR_INFO_ERROR_CODE) != 0;
         if (event.error_valid) {
             event.error = (uint32_t)vmx_read(VMCS_IDT_VECTORING_ERROR);
