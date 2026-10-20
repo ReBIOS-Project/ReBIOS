@@ -26,7 +26,9 @@
 #define PF_ERROR_P (1u << 0)
 #define PF_ERROR_W (1u << 1)
 #define PF_ERROR_U (1u << 2)
+#define PF_ERROR_RSVD (1u << 3)
 #define PF_ERROR_I (1u << 4)
+#define PF_ERROR_PK (1u << 5)
 // Not a page fault: the access made an exit of the guest's guest instead,
 // which waits for the next entry.
 #define PF_ERROR_EXIT (1u << 31)
