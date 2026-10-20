@@ -1830,6 +1830,7 @@ struct l1_values {
     uint64_t pat;
     uint64_t efer;
     uint64_t bndcfgs;
+    uint64_t perf_global_ctrl;
 };
 
 // The controls VMCS02 virtualises the local APIC with: the guest's, on its
@@ -2001,10 +2002,13 @@ static void write_vmcs02(struct vcpu *v, struct nvmx *n, const struct l1_values 
     vmx_write(VMCS_GUEST_DR7, debug ? get12(n, VMCS_GUEST_DR7) : l1->dr7);
     vmx_write(VMCS_GUEST_DEBUGCTL, debug ? get12(n, VMCS_GUEST_DEBUGCTL) : l1->debugctl);
     vmx_write(VMCS_GUEST_PAT, (entry & ENTRY_LOAD_PAT) ? get12(n, VMCS_GUEST_PAT) : l1->pat);
-    // The guest has no controls for IA32_BNDCFGS: its guest runs with its
-    // value, and leaves it its own.
+    // The guest has no controls for IA32_BNDCFGS or IA32_PERF_GLOBAL_CTRL: its
+    // guest runs with its values, and leaves them its own.
     if (vmx_mpx_passthrough()) {
         vmx_write(VMCS_GUEST_BNDCFGS, l1->bndcfgs);
+    }
+    if (vmx_perf_global_switched()) {
+        vmx_write(VMCS_GUEST_PERF_GLOBAL_CTRL, l1->perf_global_ctrl);
     }
     uint64_t efer = get12(n, VMCS_GUEST_EFER);
     if (!(entry & ENTRY_LOAD_EFER)) {
@@ -2246,11 +2250,15 @@ static void exit_to_l1(struct vcpu *v, struct nvmx *n, uint32_t reason, uint64_t
     }
 
     uint64_t bndcfgs = vmx_mpx_passthrough() ? vmx_read(VMCS_GUEST_BNDCFGS) : 0;
+    uint64_t perf = vmx_perf_global_switched() ? vmx_read(VMCS_GUEST_PERF_GLOBAL_CTRL) : 0;
     vmx_vmcs_swap(v, &n->other);
     n->in_l2 = false;
     n->launching = false;
     if (vmx_mpx_passthrough()) {
         vmx_write(VMCS_GUEST_BNDCFGS, bndcfgs);
+    }
+    if (vmx_perf_global_switched()) {
+        vmx_write(VMCS_GUEST_PERF_GLOBAL_CTRL, perf);
     }
     load_l1_host_state(v, n, nmi);
     // A failure here would be a VMX abort, which shuts the processor down.
@@ -2342,6 +2350,7 @@ static void vmlaunch(struct vcpu *v, struct nvmx *n, bool resume) {
         .pat = vmx_read(VMCS_GUEST_PAT),
         .efer = vmx_read(VMCS_GUEST_EFER),
         .bndcfgs = vmx_mpx_passthrough() ? vmx_read(VMCS_GUEST_BNDCFGS) : 0,
+        .perf_global_ctrl = vmx_perf_global_switched() ? vmx_read(VMCS_GUEST_PERF_GLOBAL_CTRL) : 0,
     };
     if (!n->created) {
         vmx_vmcs_create(v, &n->other);

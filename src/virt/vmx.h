@@ -81,6 +81,7 @@
 #define VMCS_GUEST_RTIT_CTL 0x2814
 #define VMCS_HOST_PAT 0x2c00
 #define VMCS_HOST_EFER 0x2c02
+#define VMCS_HOST_PERF_GLOBAL_CTRL 0x2c04
 
 #define VMCS_PIN_CONTROLS 0x4000
 #define VMCS_PROC_CONTROLS 0x4002
@@ -246,6 +247,7 @@
 #define EXIT_CLEAR_BNDCFGS (1u << 23)
 #define EXIT_CONCEAL_VMX_FROM_PT (1u << 24)
 #define EXIT_CLEAR_RTIT_CTL (1u << 25)
+#define EXIT_SAVE_PERF_GLOBAL_CTRL (1u << 30)
 
 // VM-entry controls (SDM 325462-092 Vol. 3C, Table 27-17).
 #define ENTRY_LOAD_DEBUG_CONTROLS (1u << 2)
@@ -457,6 +459,11 @@ bool vmx_vpid_usable(void);
 // at exits and resumed at entries.
 bool vmx_pt_passthrough(void);
 bool vmx_mpx_passthrough(void);
+// Whether the guest's performance counters count only while it runs: exits
+// clear IA32_PERF_GLOBAL_CTRL and entries load the guest's, which exits save
+// where vmx_perf_global_saved().
+bool vmx_perf_global_switched(void);
+bool vmx_perf_global_saved(void);
 // An access the processor made for the guest outside of any instruction that
 // reached gpa, where the guest has no RAM.
 void vmx_async_access(uint64_t gpa);

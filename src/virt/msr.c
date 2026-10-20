@@ -220,6 +220,11 @@ static bool mpx_hidden;
 // IA32_XSS, which exists where XSAVES does.
 static bool xss;
 static bool lbr_hidden;
+// IA32_PERF_GLOBAL_CTRL where exits clear it but cannot save the guest's
+// (vmx.c): the guest's is in the VMCS for entries to load, with the
+// processor's reserved bits, which a write in the hypervisor, undone at once,
+// checks.
+static bool perf_global_kept;
 static bool pstates_read_only;
 // The tables of the processor's model-specific MSRs, where it has any.
 static const struct msr_model *model;
@@ -343,6 +348,10 @@ void msr_init(void) {
         virt_intercept_msr(MSR_AMD_SMM_CTL, true, true);
         virt_intercept_msr(MSR_AMD_SVM_KEY, true, true);
         virt_intercept_msr(MSR_AMD_SMM_KEY, true, true);
+    }
+    if (virt_vmx && vmx_perf_global_switched() && !vmx_perf_global_saved()) {
+        perf_global_kept = true;
+        virt_intercept_msr(MSR_IA32_PERF_GLOBAL_CTRL, true, true);
     }
     if (virt_vmx) {
         virt_intercept_msr(MSR_IA32_FEATURE_CONTROL, true, true);
@@ -622,6 +631,14 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
             *value |= HWCR_SMM_LOCK;
             return true;
         }
+        case MSR_IA32_PERF_GLOBAL_CTRL: {
+            if (!perf_global_kept) {
+                return false;
+            }
+            *fault = false;
+            *value = vmx_read(VMCS_GUEST_PERF_GLOBAL_CTRL);
+            return true;
+        }
         case MSR_AMD_NB_CFG: {
             if (virt_vmx) {
                 return false;
@@ -727,6 +744,17 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
             uint64_t fixed = ~NB_CFG_ENABLE_CF8_EXT_CFG;
             *fault = !rdmsr_safe(msr, &hardware) || ((value ^ hardware) & fixed)
                      || !wrmsr_safe(msr, value);
+            return true;
+        }
+        case MSR_IA32_PERF_GLOBAL_CTRL: {
+            if (!perf_global_kept) {
+                return false;
+            }
+            *fault = !wrmsr_safe(msr, value);
+            if (!*fault) {
+                wrmsr(msr, 0);
+                vmx_write(VMCS_GUEST_PERF_GLOBAL_CTRL, value);
+            }
             return true;
         }
         case MSR_DEBUGCTL: {

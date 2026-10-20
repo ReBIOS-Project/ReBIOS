@@ -58,6 +58,8 @@ static uint64_t pin_cap, proc_cap, proc2_cap, proc3_cap, exit_cap, entry_cap;
 static uint64_t ept_vpid_cap;
 static bool pt_passthrough;
 static bool mpx_passthrough;
+static bool perf_global_switched;
+static bool perf_global_saved;
 static uint64_t cr0_fixed0, cr0_fixed1, cr4_fixed0, cr4_fixed1;
 
 #define VMX_ENTER_FAILED 1
@@ -271,6 +273,16 @@ bool vmx_supported(void) {
     // again (E.5.7).
     mpx_passthrough = control_allowed(exit_cap, EXIT_CLEAR_BNDCFGS)
                       && control_allowed(entry_cap, ENTRY_LOAD_BNDCFGS);
+    // The guest's counters count only the guest: exits clear
+    // IA32_PERF_GLOBAL_CTRL, which architectural performance monitoring has
+    // from version 2 (SDM 325462-093 Vol. 3B, 22.2.2), and entries load the
+    // guest's again (SDM 325462-093 Vol. 3C, 30.5.1 and 29.3.2.1), saved by
+    // exits where they can (SDM 325462-093 Vol. 3C, 30.3.1).
+    perf_global_switched = cpuid(0, 0).eax >= 0xa && (cpuid(0xa, 0).eax & 0xff) >= 2
+                           && control_allowed(exit_cap, EXIT_LOAD_PERF_GLOBAL_CTRL)
+                           && control_allowed(entry_cap, ENTRY_LOAD_PERF_GLOBAL_CTRL);
+    perf_global_saved = perf_global_switched
+                        && control_allowed(exit_cap, EXIT_SAVE_PERF_GLOBAL_CTRL);
 
     cpu_nmi_restart((uint64_t)(uintptr_t)vmx_enter_restart,
                     (uint64_t)(uintptr_t)vmx_enter_restart_end);
@@ -338,6 +350,14 @@ bool vmx_pt_passthrough(void) {
 
 bool vmx_mpx_passthrough(void) {
     return mpx_passthrough;
+}
+
+bool vmx_perf_global_switched(void) {
+    return perf_global_switched;
+}
+
+bool vmx_perf_global_saved(void) {
+    return perf_global_saved;
 }
 
 bool vmx_vpid_usable(void) {
@@ -496,6 +516,9 @@ static void write_host_state(struct cpu *cpu) {
     vmx_write(VMCS_HOST_SYSENTER_EIP, 0);
     vmx_write(VMCS_HOST_EFER, rdmsr(MSR_EFER));
     vmx_write(VMCS_HOST_PAT, HOST_PAT);
+    if (perf_global_switched) {
+        vmx_write(VMCS_HOST_PERF_GLOBAL_CTRL, 0);
+    }
     vmx_write(VMCS_HOST_RIP, (uint64_t)(uintptr_t)vmx_exit_entry);
 }
 
@@ -535,6 +558,9 @@ void vmx_vmcs_create(struct vcpu *v, struct vmx_vmcs *vmcs) {
     }
     if (mpx_passthrough) {
         vmwrite(VMCS_GUEST_BNDCFGS, 0);
+    }
+    if (perf_global_switched) {
+        vmwrite(VMCS_GUEST_PERF_GLOBAL_CTRL, 0);
     }
     vmptrld(v->vmcs_pa);
 }
@@ -619,6 +645,11 @@ void vmx_vcpu_init(struct vcpu *v) {
         exit_want |= EXIT_CLEAR_BNDCFGS;
         entry_want |= ENTRY_LOAD_BNDCFGS;
     }
+    if (perf_global_switched) {
+        exit_want |= EXIT_LOAD_PERF_GLOBAL_CTRL
+                     | (perf_global_saved ? EXIT_SAVE_PERF_GLOBAL_CTRL : 0);
+        entry_want |= ENTRY_LOAD_PERF_GLOBAL_CTRL;
+    }
     if (vmx_vpid_usable()) {
         proc2_require |= PROC2_VPID;
     }
@@ -653,6 +684,12 @@ void vmx_vcpu_init(struct vcpu *v) {
     }
     if (mpx_passthrough) {
         vmx_write(VMCS_GUEST_BNDCFGS, 0);
+    }
+    // The guest's counters start as the firmware left them, and stop in the
+    // hypervisor from now on.
+    if (perf_global_switched) {
+        vmx_write(VMCS_GUEST_PERF_GLOBAL_CTRL, rdmsr(MSR_IA32_PERF_GLOBAL_CTRL));
+        wrmsr(MSR_IA32_PERF_GLOBAL_CTRL, 0);
     }
 
     vmx_write(VMCS_IO_BITMAP_A, virt_io_bitmap());
