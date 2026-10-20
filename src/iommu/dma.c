@@ -164,6 +164,9 @@ void dma_init(void) {
     bool usable = false;
     if (kind == IOMMU_KIND_VTD) {
         usable = vtd_probe(tables, &leaf_level_max);
+        if (usable) {
+            vtd_start();
+        }
     } else if (kind == IOMMU_KIND_AMD) {
         usable = amdvi_probe(tables, &leaf_level_max);
     }

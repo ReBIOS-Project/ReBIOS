@@ -25,6 +25,7 @@
 #include <hw/acpi.h>
 #include <hw/ioapic.h>
 #include <hw/lapic.h>
+#include <iommu/remap.h>
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
@@ -91,8 +92,10 @@ struct route {
     bool virtual_held;
     // What a guest's edge-triggered entry last saw.
     bool virtual_edge_seen;
-    // The vector the host's entry has while it mirrors the guest's.
+    // The vector the host's entry has while it mirrors the guest's, and the
+    // hypervisor's own while it has the line.
     struct irq_slot slot;
+    struct irq_slot own;
 };
 
 // The vectors slots get, none of which the hypervisor uses itself.
@@ -196,16 +199,9 @@ bool irq_host_vector(uint8_t vector) {
 // What the host's entry for a GSI is to hold, and who owns it.
 static uint64_t desired(uint32_t gsi, struct route *r, enum owner *owner) {
     uint64_t rte;
-    if (r->handler != NULL) {
+    if (r->handler != NULL && irq_slot_fixed(&r->own, bsp, VLAPIC_DEVICE_VECTOR)) {
         *owner = OWNER_HYPERVISOR;
-        rte = VLAPIC_DEVICE_VECTOR | (uint64_t)bsp->apic_id << IOAPIC_RTE_DEST_SHIFT;
-        if (r->level) {
-            rte |= IOAPIC_RTE_LEVEL;
-        }
-        if (r->active_low) {
-            rte |= IOAPIC_RTE_ACTIVE_LOW;
-        }
-        return rte;
+        return irq_slot_rte(&r->own, r->level, r->active_low);
     }
     // A line the hypervisor drives has none at the host.
     if (r->virtual_line) {
@@ -231,17 +227,12 @@ static uint64_t desired(uint32_t gsi, struct route *r, enum owner *owner) {
     }
     // While the guest has any 8259 input unmasked, its masked inputs latch
     // requests as well.
-    if (r->irq >= 0 && irq_vectors[r->irq] != 0 && pic_in_use() && bsp->apic_id <= XAPIC_MAX_ID) {
+    if (r->irq >= 0 && irq_vectors[r->irq] != 0 && pic_in_use() && bsp->apic_id <= XAPIC_MAX_ID
+        && irq_slot_fixed(&r->own, bsp, irq_vectors[r->irq])) {
         *owner = OWNER_PIC;
-        rte = irq_vectors[r->irq] | (uint64_t)bsp->apic_id << IOAPIC_RTE_DEST_SHIFT;
         // The guest's ELCR says how its 8259 senses the line, the MADT the
         // line's polarity.
-        if (pic_level_triggered((unsigned)r->irq)) {
-            rte |= IOAPIC_RTE_LEVEL;
-        }
-        if (r->active_low) {
-            rte |= IOAPIC_RTE_ACTIVE_LOW;
-        }
+        rte = irq_slot_rte(&r->own, pic_level_triggered((unsigned)r->irq), r->active_low);
         if (r->asserted) {
             rte |= IOAPIC_RTE_MASKED;
         }
@@ -522,6 +513,10 @@ static void slot_release(struct irq_slot *s) {
     if (s->cpu == NULL) {
         return;
     }
+    if (s->remapped) {
+        remap_free(s->requester, s->remap, s->count);
+        s->remapped = false;
+    }
     for (unsigned i = 0; i < s->count; i++) {
         __atomic_store_n(&slot_table[s->cpu->index][s->vector + i], NULL, __ATOMIC_RELEASE);
     }
@@ -566,16 +561,42 @@ bool irq_slot_place(struct irq_slot *s, struct cpu *cpu, unsigned count) {
             where = c;
         }
     }
+    int remap = -1;
+    if (where != NULL && remap_on() && (remap = remap_alloc(s->requester, count)) < 0) {
+        where = NULL;
+    }
     if (where != NULL) {
         s->cpu = where;
         s->vector = vector;
         s->count = (uint8_t)count;
+        s->remapped = remap >= 0;
+        s->remap = (uint16_t)remap;
         for (unsigned i = 0; i < count; i++) {
             __atomic_store_n(&slot_table[where->index][vector + i], s, __ATOMIC_RELEASE);
         }
     }
     spinlock_release(&slot_lock);
     return where != NULL;
+}
+
+bool irq_slot_fixed(struct irq_slot *s, struct cpu *cpu, uint8_t vector) {
+    if (s->cpu == cpu && s->vector == vector && s->count == 1) {
+        return true;
+    }
+    spinlock_acquire(&slot_lock);
+    if (s->remapped) {
+        remap_free(s->requester, s->remap, s->count);
+        s->remapped = false;
+    }
+    int remap = remap_on() ? remap_alloc(s->requester, 1) : -1;
+    bool ok = !remap_on() || remap >= 0;
+    s->cpu = ok ? cpu : NULL;
+    s->vector = vector;
+    s->count = 1;
+    s->remapped = remap >= 0;
+    s->remap = (uint16_t)remap;
+    spinlock_release(&slot_lock);
+    return ok;
 }
 
 void irq_slot_free(struct irq_slot *s) {
@@ -586,12 +607,25 @@ void irq_slot_free(struct irq_slot *s) {
 
 // Compatibility format, fixed and edge-triggered to the processor (SDM
 // 325462-093 Vol. 3A, 13.11).
+// Where remapped, the entries say where the vectors are.
 void irq_slot_message(struct irq_slot *s, uint32_t *address, uint32_t *data) {
+    if (s->remapped) {
+        for (unsigned i = 0; i < s->count; i++) {
+            remap_set(s->requester, s->remap + (int)i, s->cpu->apic_id, (uint8_t)(s->vector + i),
+                      false);
+        }
+        remap_message(s->requester, s->remap, address, data);
+        return;
+    }
     *address = MSI_ADDRESS_BASE | s->cpu->apic_id << MSI_ADDRESS_DEST_SHIFT;
     *data = s->vector;
 }
 
 uint64_t irq_slot_rte(struct irq_slot *s, bool level, bool active_low) {
+    if (s->remapped) {
+        remap_set(s->requester, s->remap, s->cpu->apic_id, s->vector, level);
+        return remap_rte(s->requester, s->remap, s->vector, level, active_low);
+    }
     return s->vector | (uint64_t)s->cpu->apic_id << IOAPIC_RTE_DEST_SHIFT
            | (level ? IOAPIC_RTE_LEVEL : 0) | (active_low ? IOAPIC_RTE_ACTIVE_LOW : 0);
 }

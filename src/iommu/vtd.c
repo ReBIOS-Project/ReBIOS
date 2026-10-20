@@ -22,6 +22,7 @@
 #include <iommu/vtd.h>
 #include <lib/heap.h>
 #include <lib/log.h>
+#include <lib/spinlock.h>
 #include <lib/time.h>
 #include <sys/mm.h>
 #include <sys/x86.h>
@@ -38,6 +39,7 @@
 #define REG_IQH 0x80
 #define REG_IQT 0x88
 #define REG_IQA 0x90
+#define REG_IRTA 0xb8
 
 #define CAP_PLMR (1ull << 5)
 #define CAP_PHMR (1ull << 6)
@@ -60,12 +62,16 @@
 
 #define ECAP_C (1ull << 0)
 #define ECAP_QI (1ull << 1)
+#define ECAP_IR (1ull << 3)
+#define ECAP_EIMER (1ull << 61)
 
 // The same bits report each command's state in the global status register.
 #define GCMD_TE (1u << 31)
 #define GCMD_SRTP (1u << 30)
 #define GCMD_QIE (1u << 26)
 #define GCMD_IRE (1u << 25)
+#define GCMD_SIRTP (1u << 24)
+#define GCMD_CFI (1u << 23)
 // The status bits that are not one-shot commands, and so carry over into a
 // global command write.
 #define GSTS_PERSISTENT 0x96ffffffu
@@ -84,6 +90,7 @@
 // Invalidation descriptors, of 128 bits in legacy mode.
 #define DESC_CONTEXT 0x1
 #define DESC_IOTLB 0x2
+#define DESC_IEC 0x4
 #define DESC_WAIT 0x5
 #define DESC_GLOBAL (1ull << 4)
 #define DESC_IOTLB_DW (1ull << 6)
@@ -91,6 +98,24 @@
 #define DESC_WAIT_SW (1ull << 5)
 #define DESC_WAIT_FN (1ull << 6)
 #define DESC_WAIT_DATA_SHIFT 32
+#define DESC_IEC_INDEX (1ull << 4)
+#define DESC_IEC_INDEX_SHIFT 32
+
+// The interrupt remapping table every unit shares: 2 << REMAP_SIZE entries
+// of 16 bytes (D51397-019 rev 5.20, 9.9 and the IRTA register).
+#define REMAP_SIZE 11
+#define REMAP_ENTRIES (2u << REMAP_SIZE)
+#define IRTE_P (1ull << 0)
+#define IRTE_TM (1ull << 4)
+#define IRTE_VECTOR_SHIFT 16
+#define IRTE_DEST_SHIFT 40
+// Remappable format messages (5.1.5.2) and I/O APIC entries (5.1.5.1).
+#define MSI_ADDRESS 0xfee00000u
+#define MSI_REMAPPABLE (1u << 4)
+#define MSI_SHV (1u << 3)
+#define RTE_REMAPPABLE (1ull << 48)
+#define RTE_ACTIVE_LOW (1ull << 13)
+#define RTE_LEVEL (1ull << 15)
 
 // One page of 128-bit descriptors.
 #define QUEUE_ENTRIES 256
@@ -121,6 +146,11 @@ struct vtd_unit {
 
 static struct vtd_unit *units;
 static uint32_t unit_count;
+// Over the units' invalidation queues, which any processor may fill.
+static struct spinlock queue_lock;
+static uint64_t *remap_table;
+static uint64_t remap_used[REMAP_ENTRIES / 64];
+static struct spinlock remap_lock;
 // Whether every unit snoops the processor's caches when reading the tables.
 static bool coherent = true;
 
@@ -203,9 +233,26 @@ static void invalidate_all(struct vtd_unit *u) {
     if (u->cap & CAP_DWD) {
         drain |= DESC_IOTLB_DW;
     }
+    spinlock_acquire(&queue_lock);
     queue_submit(u, DESC_CONTEXT | DESC_GLOBAL, 0);
     queue_submit(u, DESC_IOTLB | DESC_GLOBAL | drain, 0);
     queue_sync(u);
+    spinlock_release(&queue_lock);
+}
+
+// Every unit's cached copy of the entry, or of all of them where index is -1.
+static void remap_invalidate(int index) {
+    uint64_t desc = DESC_IEC;
+    if (index >= 0) {
+        desc |= DESC_IEC_INDEX | (uint64_t)index << DESC_IEC_INDEX_SHIFT;
+    }
+    tables_flush_caches();
+    spinlock_acquire(&queue_lock);
+    for (uint32_t i = 0; i < unit_count; i++) {
+        queue_submit(&units[i], desc, 0);
+        queue_sync(&units[i]);
+    }
+    spinlock_release(&queue_lock);
 }
 
 // Intel's integrated graphics of these device ID families, behind a unit of
@@ -332,14 +379,6 @@ static void unit_take_over(struct vtd_unit *u) {
 }
 
 static void unit_enable(struct vtd_unit *u, uint64_t pml4) {
-    unit_take_over(u);
-
-    u->queue = page_alloc(1);
-    u->queue_tail = 0;
-    reg_write64(u, REG_IQT, 0);
-    reg_write64(u, REG_IQA, (uint64_t)(uintptr_t)u->queue);
-    global_command(u, GCMD_QIE, true, "enable queued invalidation");
-
     // A 3-level table is the 4-level one's first 512GiB.
     uint64_t table = pml4;
     if (!u->four_levels) {
@@ -363,6 +402,107 @@ static void unit_enable(struct vtd_unit *u, uint64_t pml4) {
     global_command(u, GCMD_SRTP, true, "take the root table");
     invalidate_all(u);
     global_command(u, GCMD_TE, true, "start translating");
+}
+
+// The units the hypervisor's, with queued invalidation, and interrupt
+// remapping on where every unit has it, before any source is programmed for
+// it: compatibility format interrupts are blocked from then on, and the table
+// starts out with no entry present.
+void vtd_start(void) {
+    bool remap = true;
+    for (uint32_t i = 0; i < unit_count; i++) {
+        struct vtd_unit *u = &units[i];
+        unit_take_over(u);
+        u->queue = page_alloc(1);
+        u->queue_tail = 0;
+        reg_write64(u, REG_IQT, 0);
+        reg_write64(u, REG_IQA, (uint64_t)(uintptr_t)u->queue);
+        global_command(u, GCMD_QIE, true, "enable queued invalidation");
+        remap = remap && (u->ecap & ECAP_IR);
+        // Remapping only in x2APIC mode would need every local APIC in it.
+        if (u->ecap & ECAP_EIMER) {
+            printf("VT-d unit at %#llx remaps interrupts in x2APIC mode only\n",
+                   (unsigned long long)u->base);
+            remap = false;
+        }
+    }
+    if (!remap) {
+        printf("VT-d: interrupts are not remapped, so the guest's devices can send any\n");
+        return;
+    }
+    remap_table = page_alloc(REMAP_ENTRIES * 16 / PAGE_SIZE);
+    tables_flush_caches();
+    for (uint32_t i = 0; i < unit_count; i++) {
+        struct vtd_unit *u = &units[i];
+        reg_write64(u, REG_IRTA, (uint64_t)(uintptr_t)remap_table | REMAP_SIZE);
+        global_command(u, GCMD_SIRTP, true, "take the interrupt remapping table");
+    }
+    remap_invalidate(-1);
+    for (uint32_t i = 0; i < unit_count; i++) {
+        global_command(&units[i], GCMD_IRE, true, "remap interrupts");
+        global_command(&units[i], GCMD_CFI, false, "block compatibility format interrupts");
+    }
+}
+
+bool vtd_remap_on(void) {
+    return remap_table != NULL;
+}
+
+int vtd_remap_alloc(unsigned count) {
+    int found = -1;
+    spinlock_acquire(&remap_lock);
+    for (unsigned base = 0; found < 0 && base + count <= REMAP_ENTRIES; base++) {
+        unsigned n = 0;
+        while (n < count && !(remap_used[(base + n) / 64] & 1ull << ((base + n) % 64))) {
+            n++;
+        }
+        if (n == count) {
+            found = (int)base;
+        }
+    }
+    for (unsigned i = 0; found >= 0 && i < count; i++) {
+        remap_used[(found + i) / 64] |= 1ull << ((found + i) % 64);
+    }
+    spinlock_release(&remap_lock);
+    return found;
+}
+
+// Its entries not present first, so that nothing reaches a freed vector.
+void vtd_remap_free(int index, unsigned count) {
+    for (unsigned i = 0; i < count; i++) {
+        __atomic_store_n(&remap_table[(index + i) * 2], 0, __ATOMIC_RELEASE);
+        remap_invalidate(index + (int)i);
+    }
+    spinlock_acquire(&remap_lock);
+    for (unsigned i = 0; i < count; i++) {
+        remap_used[(index + i) / 64] &= ~(1ull << ((index + i) % 64));
+    }
+    spinlock_release(&remap_lock);
+}
+
+// Physical destination, fixed delivery, no source validation: the entries
+// only ever name the hypervisor's vectors, whatever device sends them.
+void vtd_remap_set(int index, uint32_t apic_id, uint8_t vector, bool level) {
+    uint64_t entry = IRTE_P | (level ? IRTE_TM : 0) | (uint64_t)vector << IRTE_VECTOR_SHIFT
+                     | (uint64_t)(apic_id & 0xff) << IRTE_DEST_SHIFT;
+    if (__atomic_load_n(&remap_table[index * 2], __ATOMIC_ACQUIRE) == entry) {
+        return;
+    }
+    remap_table[index * 2 + 1] = 0;
+    __atomic_store_n(&remap_table[index * 2], entry, __ATOMIC_RELEASE);
+    remap_invalidate(index);
+}
+
+void vtd_remap_message(int index, uint32_t *address, uint32_t *data) {
+    *address = MSI_ADDRESS | ((uint32_t)index & 0x7fff) << 5 | MSI_REMAPPABLE | MSI_SHV
+               | ((uint32_t)index >> 15 & 1) << 2;
+    *data = 0;
+}
+
+uint64_t vtd_remap_rte(int index, uint8_t vector, bool level, bool active_low) {
+    return vector | (uint64_t)((uint32_t)index & 0x7fff) << 49 | RTE_REMAPPABLE
+           | (uint64_t)((uint32_t)index >> 15 & 1) << 11 | (level ? RTE_LEVEL : 0)
+           | (active_low ? RTE_ACTIVE_LOW : 0);
 }
 
 void vtd_enable(uint64_t pml4) {

@@ -200,6 +200,10 @@ static struct {
     uint64_t address_limit;
 } virt;
 
+static uint16_t requester(const struct pci_function *f) {
+    return (uint16_t)(f->addr.bus << 8 | f->addr.device << 3 | f->addr.function);
+}
+
 static uint32_t all_ones(unsigned size) {
     return size == 4 ? 0xffffffffu : (1u << (8 * size)) - 1;
 }
@@ -733,7 +737,7 @@ static void msix_init(struct vfunction *vf) {
         e->data = (uint32_t)mmio_read_host(at + MSIX_ENTRY_DATA, 4);
         e->control = (uint32_t)mmio_read_host(at + MSIX_ENTRY_CONTROL, 4);
         mmio_write_host(at + MSIX_ENTRY_CONTROL, 4, e->control | MSIX_ENTRY_MASKED);
-        e->slot = (struct irq_slot){.taken = msix_taken, .ctx = e};
+        e->slot = (struct irq_slot){.taken = msix_taken, .ctx = e, .requester = requester(f)};
     }
     pci_cfg_write(f->addr, REG_COMMAND, 2, command);
     b->trap = offset;
@@ -753,7 +757,7 @@ static void msi_init(struct vfunction *vf) {
     m->address = pci_cfg_read(a, cap + MSI_ADDRESS, 4);
     m->upper = m->wide ? pci_cfg_read(a, cap + MSI_UPPER, 4) : 0;
     m->data = pci_cfg_read(a, msi_data_reg(vf), 2);
-    m->slot = (struct irq_slot){.taken = msi_taken, .ctx = vf};
+    m->slot = (struct irq_slot){.taken = msi_taken, .ctx = vf, .requester = requester(vf->f)};
 }
 
 // Resizing a BAR would move it on the host, behind the guest's back.

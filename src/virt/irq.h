@@ -76,6 +76,11 @@ struct irq_slot {
     uint8_t vector;
     // A power of two, which the block is aligned to.
     uint8_t count;
+    // Whether interrupt remapping entries [remap, remap + count) back the
+    // block, for messages carrying the requester ID requester.
+    bool remapped;
+    uint16_t remap;
+    uint16_t requester;
     // Called on the processor that took one of the vectors, before its EOI,
     // with the vector's index in the block.
     void (*taken)(void *ctx, unsigned index);
@@ -87,6 +92,9 @@ struct irq_slot {
 // had; false where no processor has room.
 bool irq_slot_place(struct irq_slot *s, struct cpu *cpu, unsigned count);
 void irq_slot_free(struct irq_slot *s);
+// A vector the hypervisor keeps for a source of its own, outside the slots':
+// false where interrupt remapping has no entry for it.
+bool irq_slot_fixed(struct irq_slot *s, struct cpu *cpu, uint8_t vector);
 // The message a source sends for the slot's first vector, which a source of
 // several puts its vector's index in the low bits of data of.
 void irq_slot_message(struct irq_slot *s, uint32_t *address, uint32_t *data);
