@@ -142,6 +142,12 @@
 #define MSR_LAST_INT_TO_IP 0x1de
 #define DEBUGCTL_LBR 1u
 
+// The assignable bandwidth monitoring configuration (APM 24593 rev. 3.45,
+// 19.4.5): SDCI allocation enforcement's bit as reserved, as the guest does not
+// get it.
+#define MSR_AMD_L3_QOS_EXT_CFG 0xc00003ff
+#define L3_QOS_EXT_CFG_SDCIAE (1u << 1)
+
 // AMD's memory routing (APM 24593 rev. 3.45, 3.2.1, 7.9.2, and 7.9.4; PPR 55772
 // rev. 3.08, MSRC001_0058): the guest's own, from its memory map, so that none
 // of its writes routes the host's memory. SMM and SVM appear locked, as the
@@ -213,6 +219,7 @@ static bool lbr_hidden;
 static bool pstates_read_only;
 // The tables of the processor's model-specific MSRs, where it has any.
 static const struct msr_model *model;
+static const struct msr_family *family_msrs;
 // Physical address bits the processor lacks, for the guest's AMD addresses.
 static uint64_t address_reserved;
 
@@ -314,6 +321,7 @@ void msr_init(void) {
             }
         }
         virt_intercept_msr(MSR_AMD_NB_CFG, true, true);
+        virt_intercept_msr(MSR_AMD_L3_QOS_EXT_CFG, false, true);
         for (uint32_t msr = MSR_AMD_CPUID_7_FEATURES; msr <= MSR_AMD_CPUID_EXT_FEATURES; msr++) {
             virt_intercept_msr(msr, true, true);
         }
@@ -358,9 +366,9 @@ static bool in_ranges(const struct msr_range *ranges, size_t count, uint32_t msr
 }
 
 bool msr_allowed(uint32_t msr) {
-    // AMD's processors keep every MSR no module handles.
     if (!virt_vmx) {
-        return true;
+        return in_ranges(msr_amd_architectural, msr_amd_architectural_count, msr)
+               || (family_msrs != NULL && in_ranges(family_msrs->ranges, family_msrs->count, msr));
     }
     if (in_ranges(msr_intel_architectural, msr_intel_architectural_count, msr)) {
         return true;
@@ -382,10 +390,20 @@ static void pass_ranges(const struct msr_range *ranges, size_t count) {
 }
 
 void msr_allowed_init(void) {
+    struct cpu_signature s = cpu_signature();
     if (!virt_vmx) {
+        // Hygon's are in none of AMD's families.
+        for (size_t i = 0; i < msr_amd_family_count; i++) {
+            if (msr_amd_families[i].family == s.family) {
+                family_msrs = &msr_amd_families[i];
+            }
+        }
+        pass_ranges(msr_amd_architectural, msr_amd_architectural_count);
+        if (family_msrs != NULL) {
+            pass_ranges(family_msrs->ranges, family_msrs->count);
+        }
         return;
     }
-    struct cpu_signature s = cpu_signature();
     for (size_t i = 0; i < msr_intel_model_count; i++) {
         if (msr_intel_models[i].family == s.family && msr_intel_models[i].model == s.model) {
             model = &msr_intel_models[i];
@@ -711,6 +729,13 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
                 return false;
             }
             *fault = (value & DEBUGCTL_LBR) || !wrmsr_safe(msr, value);
+            return true;
+        }
+        case MSR_AMD_L3_QOS_EXT_CFG: {
+            if (virt_vmx) {
+                return false;
+            }
+            *fault = (value & L3_QOS_EXT_CFG_SDCIAE) || !wrmsr_safe(msr, value);
             return true;
         }
         case MSR_DC_CFG: {

@@ -16,15 +16,19 @@
 # You should have received a copy of the GNU General Public License along
 # with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-# Usage: msr-table.py <SDM text> <output.c> [report]
+# Usage: msr-table.py <specifications> <output.c> [report]
 #
 # Generates src/virt/msr_table.c: the MSRs the guest reaches as the processor
-# has them. Those of Intel's architecture come from Table 2-2 of the Intel SDM
-# 325462-093, Vol. 4, as reviewed below; the model-specific ones from its other
-# tables, for the processors that can run the hypervisor, and only those of
-# the kinds reviewed as safe to give the guest. The text is `pdftotext -layout`
-# output of the manual. With report, it also lists every model-specific MSR it
-# leaves out.
+# has them, from the directory of cached specifications. Those of Intel's
+# architecture come from Table 2-2 of the Intel SDM 325462-093, Vol. 4, as
+# reviewed below; the model-specific ones from its other tables, for the
+# processors that can run the hypervisor, and only those of the kinds reviewed
+# as safe to give the guest. AMD's come alike from Table A-1 of APM 24593 rev.
+# 3.45 and from each family's BKDGs and PPRs. The texts are `pdftotext -layout`
+# output of the documents. With report, it also lists every model-specific MSR
+# it leaves out.
+
+import os
 
 import re
 import sys
@@ -214,6 +218,139 @@ KINDS = [
     ('architectural', r'MSR_PLATFORM_ID'),
 ]
 
+SDM = 'intel-sdm-325462-093US.txt'
+APM = 'amd-apm-40332-rev4.10.txt'
+
+# AMD's architectural MSRs the guest gets: those of APM 24593 rev. 3.45, Table
+# A-1, and those every family's documents give, as reviewed. Left out are those
+# modules of the hypervisor handle (APIC_BASE, the MTRRs, PAT, XSS's writes,
+# EFER, HWCR, SYSCFG, the IORRs, the tops of memory, VM_CR, VM_HSAVE_PA, the SMM
+# and SVM keys and controls, the x2APIC range), and those of what the guest does
+# not get: FRED, SMM, SVM's own, SEV and SNP, IBS, the watchdog timer, the LBR
+# stack, the processor name string, the MCA interrupt configuration, and the L3
+# range reservation.
+AMD_ARCH = [
+    (0x0, 0x1, 'load-store MCA address and status'),
+    (0x10, 0x10, 'TSC'),
+    (0x2a, 0x2a, 'cluster ID'),
+    (0x3b, 0x3b, 'TSC adjust'),
+    (0x48, 0x49, 'speculation control and prediction command'),
+    (0x8b, 0x8b, 'patch level'),
+    (0xe7, 0xe8, 'MPERF and APERF'),
+    (0x10b, 0x10b, 'flush command'),
+    (0x174, 0x176, 'SYSENTER'),
+    (0x179, 0x17b, 'machine check globals'),
+    (0x1d9, 0x1d9, 'debug control'),
+    (0x1db, 0x1de, 'last branch and exception records'),
+    (0x400, 0x47f, 'machine check banks'),
+    (0x6a0, 0x6a0, 'user CET'),
+    (0x6a2, 0x6a2, 'supervisor CET'),
+    (0x6a4, 0x6a8, 'shadow stack pointers and table'),
+    (0xc81, 0xc81, 'L3 QoS configuration'),
+    (0xc8d, 0xc8f, 'QoS monitoring and association'),
+    (0xc90, 0xd8f, 'L3 allocation masks'),
+    (0xc0000081, 0xc0000084, 'SYSCALL'),
+    (0xc00000e7, 0xc00000e9, 'read-only MPERF and APERF, instructions retired'),
+    (0xc0000100, 0xc0000103, 'FS, GS, and kernel GS bases, TSC_AUX'),
+    (0xc0000108, 0xc0000108, 'prefetch control'),
+    (0xc0000200, 0xc00002ff, 'L3 QoS bandwidth controls'),
+    (0xc0000300, 0xc0000303, 'global performance counter control and status'),
+    (0xc00003fd, 0xc00003ff, 'assignable bandwidth monitoring'),
+    (0xc0000400, 0xc0000401, 'bandwidth monitoring event configuration'),
+    (0xc0000408, 0xc000040a, 'MC4 thresholds'),
+    (0xc0000420, 0xc0000423, 'MCA query'),
+    (0xc0002000, 0xc00023ff, 'MCAX banks'),
+    (0xc0010000, 0xc0010007, 'legacy performance counters'),
+    (0xc0010061, 0xc0010063, 'P-state limit, control, and status'),
+    (0xc0010115, 0xc0010115, 'IGNNE'),
+    (0xc0010140, 0xc0010141, 'OS visible workarounds'),
+    (0xc0010200, 0xc001020b, 'core performance counters'),
+    (0xc0010230, 0xc0010237, 'L2I or L3 performance counters'),
+    (0xc0010240, 0xc0010247, 'northbridge or data fabric performance counters'),
+    (0xc00102b0, 0xc00102b5, 'CPPC'),
+    (0xc0011019, 0xc001101b, 'breakpoint address masks 1 to 3'),
+    (0xc0011027, 0xc0011027, 'breakpoint address mask 0'),
+]
+
+# The series APM 24593 rev. 3.45, Table A-1, lists the first members of: the
+# machine check banks (APM 24593 rev. 3.45, 9.3.2: 400h + 4i), the L3 allocation
+# masks and bandwidth controls (APM 24593 rev. 3.45, 19.4: C90h + n, C000_0200h
+# + n, and C000_0280h + n), and the MCAX banks (C000_2000h + 10h * i).
+AMD_SERIES = [(0x400, 0x47f), (0xc90, 0xd8f), (0xc0000200, 0xc00002ff), (0xc0002000, 0xc00023ff)]
+
+# The families that can run the hypervisor, with an IOMMU and nested paging,
+# and their documents: Family 10h from revision D on, whose platforms are the
+# first with an IOMMU (BKDG 31116 rev. 3.62), but neither Family 12h nor 14h.
+# Hygon's 18h has none, and gets only the architectural MSRs.
+AMD_FAMILIES = [
+    (0x10, ['amd-bkdg-fam10h-31116-rev3.62']),
+    (0x15, ['amd-bkdg-fam15h-m00h-0fh-42301-rev3.14', 'amd-bkdg-fam15h-m10h-1fh-42300-rev3.12',
+            'amd-bkdg-fam15h-m30h-3fh-49125-rev3.06', 'amd-bkdg-fam15h-m60h-6fh-50742-rev3.05',
+            'amd-bkdg-fam15h-m70h-7fh-55072-rev3.09']),
+    (0x16, ['amd-bkdg-fam16h-m00h-0fh-48751-rev3.03', 'amd-bkdg-fam16h-m30h-3fh-52740-rev3.06']),
+    (0x17, ['amd-ppr-54945-rev3.03', 'amd-ppr-55570-rev3.16', 'amd-ppr-55772-rev3.08',
+            'amd-ppr-55803-rev0.93', 'amd-ppr-55922-rev3.06', 'amd-ppr-56176-rev3.06']),
+    (0x19, ['amd-ppr-55898-rev0.50-vol%d' % i for i in range(1, 3)]
+           + ['amd-ppr-55901-rev0.47-vol%d' % i for i in range(1, 7)]
+           + ['amd-ppr-56214-rev3.05', 'amd-ppr-56569-rev3.03', 'amd-ppr-56713-rev3.05',
+              'amd-ppr-57019-rev3.00']
+           + ['amd-ppr-57228-rev0.45-vol%d' % i for i in range(1, 7)]),
+    (0x1a, ['amd-ppr-57238-rev0.49-vol%d' % i for i in range(1, 8)]
+           + ['amd-ppr-57883-rev0.51-vol%d' % i for i in range(1, 8)]
+           + ['amd-ppr-57930-rev3.00']
+           + ['amd-ppr-58264-rev0.45-vol%d' % i for i in range(1, 7)]
+           + ['amd-ppr-58655-rev0.42-vol%d' % i for i in range(1, 7)]),
+]
+
+# The kinds of model-specific MSR the guest gets, as for Intel's: power and
+# RAPL, thermal, C-states, performance monitoring, and what identifies the
+# processor; the machine check masks of the banks the guest has; and the
+# microarchitecture configurations, through which errata workarounds and
+# mitigations act. Names are those of PPRs and the abbreviations BKDGs give,
+# else BKDGs' descriptions, matched with digits folded to n.
+AMD_KINDS = [
+    ('power', r'PStateDef|RAPL_PWR_UNIT|CORE_ENERGY_STAT|PKG_ENERGY_STAT|LnRAPLPowerUnitn?'
+              r'|LnPackageEnergyStatusn?|CU_PTSC|P-[Ss]tate \[n:n\]( Registers)?'
+              r'|COFVID (Control|Status)( Register)?|SBI P-state Limit( Register)?|APML TDP Limit'
+              r'|Processor Power in TDP|Power Averaging Period|DRAM Controller Command Throttle'
+              r'|(Max )?Compute Unit Power Accumulator'
+              r'|Frequency Sensitivity Feedback Monitor (Actual Count|Reference)( n)?'
+              r'|Processor Feedback Constants( n)?'),
+    ('thermal', r'HTC'),
+    ('C-states', r'CStateBaseAddr|C-state Base Address|Interrupt Pending( and CMP-Halt Register)?'),
+    ('perfmon', r'ChLnPmc(Cfg)?|DF_PERF_CT[LR]|UMC_PerfMon(Ctl|Cntr)'),
+    ('identification', r'EBL_CR_POWERON|PATCH_LEVEL|PPIN(_CTL)?|TSC_ADJUST|BIST Results'),
+    ('machine checks', r'MCA_CTL_MASK_\w+|MCn_CTL_MASK|MCA_(ADDR|STATUS)_LS'
+                       r'|(\w+ )?Machine Check Control Mask( Registers)?'
+                       r'|Load-Store MCA (Address|Status)( Register)?'),
+    ('configuration', r'(LS|BU|CU)_CFGn?|IC_CFG|DC_CFG|TW_CFG|FP_CFG|DE_CFG|EX_CFG|LnI_CFG'
+                      r'|CU_PFTCFG|CU_CBBCFG'),
+]
+
+# The configuration MSRs AMD's other documents give, by family: DE_CFG, whose
+# LFENCE serialisation every family from 10h has and future ones are to have
+# ("Software Techniques for Managing Speculation on AMD Processors" 70586 rev.
+# 5.09.23, G-2); LS_CFG, Family 17h's speculative store bypass disable (124441
+# rev. 5.21.18); EX_CFG, which system software sets for erratum 1100 of Family
+# 17h models 00h-0Fh (revision guide 55449 rev. 1.21); and those AMD's errata
+# fixes and mitigations in Linux 7.3 set (arch/x86/kernel/cpu/amd.c, bugs.c):
+# FP_CFG's Zen 1 denormal fix, BP_CFG (C001_102E) on Zen 2 to 5, and Zen 2's
+# C001_10E3.
+AMD_EXTRA = [
+    (0xc0011029, 'DE_CFG', [0x10, 0x15, 0x16, 0x17, 0x19, 0x1a]),
+    (0xc0011020, 'LS_CFG', [0x17]),
+    (0xc0011028, 'FP_CFG', [0x17]),
+    (0xc001102c, 'EX_CFG', [0x17]),
+    (0xc001102e, 'BP_CFG', [0x17, 0x19, 0x1a]),
+    (0xc00110e3, 'SPECTRAL_CHICKEN', [0x17]),
+]
+
+# What the hypervisor's modules handle, which no table needs (msr.c): NB_CFG,
+# the configuration space window, the CPUID overrides, and the patch loader.
+AMD_HANDLED = r'NB_CFGn?|MmioCfgBaseAddr|MMIO Configuration Base Address( Register)?|PATCH_LOADER' \
+              r'|CPUID_(n_Features|PWR_THERM|Features|ExtFeatures)|(Extended )?CPUID Features.*' \
+              r'|Thermal and Power Management CPUID Features.*'
+
 ADDR = re.compile(r'^\s*Register Address: ([0-9A-F_]+)H(?:\s*[-–−]\s*([0-9A-F_]+)H)?'
                   r'(?:,\s*[0-9]+(?:\s*[-–−]\s*[0-9]+)?)?\s+(.*)$')
 HEADING = re.compile(r'^\s*Table (2-\d+)\.\s')
@@ -266,10 +403,9 @@ def label(names, lo, hi):
     return first if hi == lo else first + ' to ' + names.get(hi, hex(hi)).split()[0]
 
 
-def main():
-    sdm, output = sys.argv[1], sys.argv[2]
-    report = len(sys.argv) > 3 and sys.argv[3] == 'report'
-    lines = open(sdm, encoding='utf-8', errors='replace').read().split('\n')
+def intel(specs):
+    """Intel's part of the output, and what its report lists."""
+    lines = open(os.path.join(specs, SDM), encoding='utf-8', errors='replace').read().split('\n')
     tables = parse_tables(lines)
 
     # The architectural names, some of which only model tables list, as
@@ -308,17 +444,8 @@ def main():
                 hidden = {a for (lt, _), addrs in left_out.items() if lt == later for a in addrs}
                 assert not passed[t] & hidden, (t, later, sorted(passed[t] & hidden))
 
-    out = list(NOTICE)
-    out += ['',
-            '// Generated by tools/msr-table.py from the Intel SDM 325462-093, Vol. 4: the',
-            '// MSRs the guest reaches as the processor has them.',
-            '',
-            '#include <stddef.h>',
-            '#include <stdint.h>',
-            '#include <virt/msr_table.h>',
-            '',
-            '// SDM 325462-093 Vol. 4, Table 2-2, as reviewed.',
-            'const struct msr_range msr_intel_architectural[] = {']
+    out = ['// SDM 325462-093 Vol. 4, Table 2-2, as reviewed.',
+           'const struct msr_range msr_intel_architectural[] = {']
     for lo, hi in ranges(arch):
         out.append(f'    {{{lo:#x}, {hi:#x}}}, // {label(names, lo, hi)}')
     out += ['};',
@@ -358,14 +485,225 @@ def main():
             out.append(f'    {{{family:#x}, {model:#x}, model_tables_{i}, {len(ts)}}},')
     out += ['};',
             'const size_t msr_intel_model_count = '
-            'sizeof(msr_intel_models) / sizeof(msr_intel_models[0]);',
-            '']
-    open(output, 'w').write('\n'.join(out))
+            'sizeof(msr_intel_models) / sizeof(msr_intel_models[0]);']
+    order = sorted(left_out.items(), key=lambda x: (int(x[0][0].split('-')[1]), min(x[1])))
+    left = [f'left out: Table {t} {min(addrs):#x} {name}' for (t, name), addrs in order]
+    return out, left
 
+
+AMD_ADDR = (r'MSR([0-9A-F]{4})_([0-9A-F]*)((?:\[[0-9A-F,:. ]+\]|\[[0-9A-F]\.\.\.[0-9A-F]\])?)'
+            r'([0-9A-F]*)')
+PPR_HEADING = re.compile(r'^\s*' + AMD_ADDR + r'(?:\.\.\.MSR[0-9A-F]{4}_[0-9A-F]{4})?'
+                         r'\s*(?:\[((?:[^\[\]]|\[[^\]]*\])+)\])?'
+                         r'\s*(\(([A-Za-z0-9_]+::)+[A-Za-z0-9_\[\]]+\))?\s*$')
+BKDG_ENTRY = re.compile(AMD_ADDR + r'\s*:\s+')
+
+
+def amd_expand(hi, prefix, inner, suffix):
+    """The addresses of MSRC001_00[18,16], MSRC001_00[35:30], and MSRC001_006[4...B]."""
+    lows = [prefix + suffix]
+    if inner:
+        lows = []
+        for part in inner[1:-1].replace(' ', '').split(','):
+            if '...' in part or ':' in part:
+                a, b = part.split('...') if '...' in part else part.split(':')[::-1]
+                lows += [prefix + format(v, f'0{len(a)}X') + suffix
+                         for v in range(int(a, 16), int(b, 16) + 1)]
+            else:
+                lows.append(prefix + part + suffix)
+    return [int(hi + low, 16) for low in lows if len(low) == 4]
+
+
+def ppr_msrs(lines):
+    """A PPR's MSR headings, a namespace path wrapped to the next line taken in:
+    (address, description, name), with the name the path's last part."""
+    out = []
+    for i, line in enumerate(lines):
+        if not re.match(r'^\s*MSR[0-9A-F]{4}_', line):
+            continue
+        text = line.rstrip()
+        if i + 1 < len(lines) and re.match(r'^\s*\(([A-Za-z0-9_]+::)+', lines[i + 1]) \
+           and '(' not in text:
+            text += ' ' + lines[i + 1].strip()
+        m = PPR_HEADING.match(text)
+        if not m or not m.group(6):
+            continue
+        desc = m.group(5)
+        if desc is None:
+            # The description follows the access line.
+            for j in range(i + 1, min(i + 5, len(lines))):
+                t = lines[j].strip()
+                if t and not t.startswith(('Read', 'Write', 'Reset', '(')) and '::' not in t:
+                    desc = t
+                    break
+        name = m.group(6)[1:-1].split('::')[-1]
+        for a in amd_expand(m.group(1), m.group(2), m.group(3), m.group(4)):
+            out.append((a, (desc or '').strip(), name))
+    return out
+
+
+def bkdg_msrs(lines):
+    """A BKDG's register index, two columns of "<page> MSRxxxx_xxxx:
+    <description>": (address, description, the abbreviation it ends with)."""
+    out = []
+    for line in lines:
+        starts = list(BKDG_ENTRY.finditer(line))
+        for k, m in enumerate(starts):
+            end = starts[k + 1].start() if k + 1 < len(starts) else len(line)
+            desc = re.sub(r'\s{2,}.*', '', line[m.end():end].strip())
+            desc = re.sub(r'(\s+\d+)+$', '', desc)
+            if re.match(r'^[0-9]', desc) or desc.startswith(('Reserved', 'Updated')):
+                continue
+            short = re.search(r'\(([A-Za-z0-9_\[\]:]+)\)$', desc)
+            for a in amd_expand(m.group(1), m.group(2), m.group(3), m.group(4)):
+                out.append((a, desc, short.group(1) if short else ''))
+    return out
+
+
+def apm_table_a1(lines):
+    """The addresses Table A-1 lists."""
+    start = next(i for i, l in enumerate(lines)
+                 if l.strip() == 'Table A-1. MSRs of the AMD64 Architecture')
+    end = next(i for i in range(start, len(lines)) if lines[i].strip() == 'A.2')
+    addr = re.compile(r'^([0-9A-F]{4}(?:_[0-9A-F]{4})?)h(\+n| \+)?\s*(.*)$')
+    return {int(m.group(1).replace('_', ''), 16)
+            for m in (addr.match(l.strip()) for l in lines[start:end]) if m}
+
+
+def amd_kind(desc, name):
+    for text in (name, desc):
+        folded = re.sub(r'\d+', 'n', text)
+        for k, pattern in AMD_KINDS:
+            if folded and re.fullmatch(pattern, folded):
+                return k
+    return None
+
+
+def amd_documents(docs):
+    """Cites a family's documents, as "BKDGs 42301 rev. 3.14 and 42300 rev. 3.12"."""
+    cited = []
+    for doc in docs:
+        m = re.fullmatch(r'amd-(bkdg|ppr)-.*?(\d{5})-rev([\d.]+)(?:-vol\d+)?', doc)
+        if m.groups() not in cited:
+            cited.append(m.groups())
+    assert len({kind for kind, _, _ in cited}) == 1, docs
+    names = [f'{number} rev. {revision}' for _, number, revision in cited]
+    kind = cited[0][0].upper()
+    if len(names) == 1:
+        return f'{kind} {names[0]}'
+    listed = ', '.join(names[:-1]) + (',' if len(names) > 2 else '') + ' and ' + names[-1]
+    return f'{kind}s {listed}'
+
+
+def amd(specs):
+    """AMD's part of the output, and what its report lists."""
+    def read(name):
+        return open(os.path.join(specs, name + '.txt'), encoding='utf-8',
+                    errors='replace').read().split('\n')
+
+    table_a1 = apm_table_a1(read(APM[:-4]))
+    documented = {}
+    families = {}
+    for family, docs in AMD_FAMILIES:
+        families[family] = []
+        for doc in docs:
+            lines = read(doc)
+            msrs = bkdg_msrs(lines) if doc.startswith('amd-bkdg-') else ppr_msrs(lines)
+            families[family] += msrs
+            for a, desc, name in msrs:
+                documented.setdefault(a, name or desc)
+    arch = set()
+    series = {a for lo, hi in AMD_SERIES for a in range(lo, hi + 1)}
+    for lo, hi, _ in AMD_ARCH:
+        for a in range(lo, hi + 1):
+            assert a in table_a1 or a in series or a in documented, hex(a)
+        arch.update(range(lo, hi + 1))
+    # The rest of what APM 24593 rev. 3.45, Table A-1, its series, and the
+    # x2APIC range cover is architectural: handled, or what the guest does not
+    # get.
+    architectural = table_a1 | series | set(range(0x800, 0x900))
+
+    out = ['', '// APM 24593 rev. 3.45, Table A-1, and what every family has, as reviewed.',
+           'const struct msr_range msr_amd_architectural[] = {']
+    for lo, hi, what in AMD_ARCH:
+        out.append(f'    {{{lo:#x}, {hi:#x}}}, // {what}')
+    out += ['};',
+            'const size_t msr_amd_architectural_count =',
+            '    sizeof(msr_amd_architectural) / sizeof(msr_amd_architectural[0]);']
+    left = []
+    for family, docs in AMD_FAMILIES:
+        passed = {}
+        kinds = set()
+        left_out = {}
+        for a, desc, name in families[family]:
+            if a in arch or a in architectural:
+                continue
+            k = amd_kind(desc, name)
+            if k:
+                passed.setdefault(a, name or re.sub(r'( Registers?)?( \[\d+:\d+\])?$', '', desc))
+                kinds.add(k)
+            elif not re.fullmatch(AMD_HANDLED, re.sub(r'\d+', 'n', name or desc)) \
+                 and not re.fullmatch(AMD_HANDLED, desc):
+                left_out.setdefault(a, set()).add(name or desc)
+        for a, name, fams in AMD_EXTRA:
+            if family in fams:
+                passed.setdefault(a, name)
+                kinds.add('configuration')
+        # No document of the family may call an MSR it passes something else.
+        clash = set(passed) & set(left_out)
+        assert not clash, (hex(family), [(hex(a), left_out[a]) for a in sorted(clash)])
+        title = f'Family {family:X}h, {amd_documents(docs)}: ' + ', '.join(sorted(kinds)) + '.'
+        out += [''] + textwrap.wrap(title, 100, initial_indent='// ', subsequent_indent='// ')
+        out.append(f'static const struct msr_range family_{family:x}h[] = {{')
+        for lo, hi in ranges(passed):
+            # A range whose names do not fit goes in runs of one name.
+            line = f'    {{{lo:#x}, {hi:#x}}}, // {passed[lo]} to {passed[hi]}'
+            runs = [[lo, hi]]
+            if len(line) > 100:
+                runs = []
+                for a in range(lo, hi + 1):
+                    if runs and passed[runs[-1][0]] == passed[a]:
+                        runs[-1][1] = a
+                    else:
+                        runs.append([a, a])
+            for rlo, rhi in runs:
+                what = passed[rlo]
+                if passed[rhi] != what:
+                    what += ' to ' + passed[rhi]
+                out.append(f'    {{{rlo:#x}, {rhi:#x}}}, // {what}')
+        out.append('};')
+        left += [f'left out: Family {family:X}h {a:#x} {", ".join(sorted(n))}'
+                 for a, n in sorted(left_out.items())]
+    out += ['', '// By display family.', 'const struct msr_family msr_amd_families[] = {']
+    for family, _ in AMD_FAMILIES:
+        out.append(f'    {{{family:#x}, family_{family:x}h, '
+                   f'sizeof(family_{family:x}h) / sizeof(family_{family:x}h[0])}},')
+    out += ['};',
+            'const size_t msr_amd_family_count = '
+            'sizeof(msr_amd_families) / sizeof(msr_amd_families[0]);']
+    return out, left
+
+
+def main():
+    specs, output = sys.argv[1], sys.argv[2]
+    report = len(sys.argv) > 3 and sys.argv[3] == 'report'
+    intel_out, intel_left = intel(specs)
+    amd_out, amd_left = amd(specs)
+    out = list(NOTICE)
+    out += ['',
+            '// Generated by tools/msr-table.py from the Intel SDM 325462-093, Vol. 4, and',
+            '// from APM 24593 rev. 3.45 and the BKDGs and PPRs each family names: the MSRs',
+            '// the guest reaches as the processor has them.',
+            '',
+            '#include <stddef.h>',
+            '#include <stdint.h>',
+            '#include <virt/msr_table.h>',
+            '']
+    out += intel_out + amd_out + ['']
+    open(output, 'w').write('\n'.join(out))
     if report:
-        order = sorted(left_out.items(), key=lambda x: (int(x[0][0].split('-')[1]), min(x[1])))
-        for (t, name), addrs in order:
-            print(f'left out: Table {t} {min(addrs):#x} {name}')
+        for line in intel_left + amd_left:
+            print(line)
 
 
 main()

@@ -82,6 +82,7 @@ bool virt_init(void) {
         io_bitmap = page_alloc(3);
         msr_bitmap = page_alloc(2);
         msr_claimed = page_alloc(2);
+        memset(msr_bitmap, 0xff, 2 * PAGE_SIZE);
         gpt_init(false, svm_huge_pages());
         // Only nested paging gives the guest its own view of these.
         virt_intercept_msr(MSR_EFER, true, true);
