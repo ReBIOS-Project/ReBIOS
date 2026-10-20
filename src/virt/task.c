@@ -55,9 +55,14 @@
 #define DESC_ACCESSED (1u << 0)
 #define DESC_G (1u << 11)
 
+#define VECTOR_DF 8
 #define VECTOR_TS 10
 #define VECTOR_NP 11
 #define VECTOR_SS 12
+#define VECTOR_GP 13
+#define VECTOR_PF 14
+#define VECTOR_VE 20
+#define VECTOR_CP 21
 
 #define SELECTOR_TI (1u << 2)
 #define SELECTOR_RPL 3u
@@ -91,16 +96,50 @@ static uint32_t desc_limit(struct desc d) {
 
 struct switcher {
     struct vcpu *v;
+    const struct task_event *event;
     // Whether an exception is already on its way to the guest.
     bool faulted;
     struct segment ldtr;
 };
 
-static void fault(struct switcher *s, uint8_t vector, uint32_t error) {
-    if (!s->faulted) {
-        vcpu_inject_exception(s->v, vector, true, error);
-        s->faulted = true;
+// The exception classes of SDM 325462-093 Vol. 3A, Table 7-4.
+static bool contributory(uint8_t vector) {
+    return vector == 0 || (vector >= VECTOR_TS && vector <= VECTOR_GP) || vector == VECTOR_CP;
+}
+
+static bool page_fault_class(uint8_t vector) {
+    return vector == VECTOR_PF || vector == VECTOR_VE;
+}
+
+// An exception while the switch delivers a hardware exception, before the
+// commit point or after it, interrupts that delivery, which makes it a double
+// fault or a shutdown as SDM 325462-093 Vol. 3A, Table 7-5 says.
+static void deliver(struct switcher *s, uint8_t vector, uint32_t error, uint64_t linear) {
+    if (s->faulted) {
+        return;
     }
+    s->faulted = true;
+    const struct task_event *e = s->event;
+    if (e != NULL && e->exception) {
+        bool serious = contributory(vector) || page_fault_class(vector);
+        if (e->vector == VECTOR_DF && serious) {
+            vmx_shutdown("A double fault's task switch faulted");
+        }
+        if ((contributory(e->vector) && contributory(vector))
+            || (page_fault_class(e->vector) && serious)) {
+            vcpu_inject_exception(s->v, VECTOR_DF, true, 0);
+            return;
+        }
+    }
+    if (vector == VECTOR_PF) {
+        vcpu_inject_page_fault(s->v, linear, error);
+    } else {
+        vcpu_inject_exception(s->v, vector, true, error);
+    }
+}
+
+static void fault(struct switcher *s, uint8_t vector, uint32_t error) {
+    deliver(s, vector, error, 0);
 }
 
 static bool system_read(struct switcher *s, uint64_t linear, void *buf, size_t len) {
@@ -109,10 +148,7 @@ static bool system_read(struct switcher *s, uint64_t linear, void *buf, size_t l
     if (guest_system_read(s->v, linear, buf, len, &pf_error, &pf_linear)) {
         return true;
     }
-    if (!s->faulted) {
-        vcpu_inject_page_fault(s->v, pf_linear, pf_error);
-        s->faulted = true;
-    }
+    deliver(s, VECTOR_PF, pf_error, pf_linear);
     return false;
 }
 
@@ -122,10 +158,7 @@ static bool system_write(struct switcher *s, uint64_t linear, const void *buf, s
     if (guest_system_write(s->v, linear, buf, len, &pf_error, &pf_linear)) {
         return true;
     }
-    if (!s->faulted) {
-        vcpu_inject_page_fault(s->v, pf_linear, pf_error);
-        s->faulted = true;
-    }
+    deliver(s, VECTOR_PF, pf_error, pf_linear);
     return false;
 }
 
@@ -279,7 +312,7 @@ static void load_ldt(struct switcher *s, uint16_t selector) {
 
 void task_switch(struct vcpu *v, uint16_t selector, enum task_source source,
                  const struct task_event *event, unsigned length) {
-    struct switcher s = {.v = v};
+    struct switcher s = {.v = v, .event = event};
     struct segment tr;
     vcpu_get_seg(v, SEG_TR, &tr);
 

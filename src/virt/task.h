@@ -33,6 +33,10 @@ enum task_source {
 
 // For TASK_GATE, the event delivered through the IDT's task gate.
 struct task_event {
+    uint8_t vector;
+    // A hardware exception, which a fault during the switch can turn into a
+    // double fault.
+    bool exception;
     // INT n, INT3, INTO, and INT1, whose task resumes after them.
     bool software;
     bool nmi;

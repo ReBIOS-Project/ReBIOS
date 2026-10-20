@@ -837,6 +837,8 @@ static void vmx_handle_task_switch(struct vcpu *v, uint64_t qual) {
     if (source == TASK_GATE) {
         uint32_t info = (uint32_t)vmx_read(VMCS_IDT_VECTORING_INFO);
         uint32_t type = info & (7u << 8);
+        event.vector = (uint8_t)info;
+        event.exception = type == INTR_TYPE_HW_EXCEPTION;
         event.software = type == INTR_TYPE_SW_INTR || type == INTR_TYPE_PRIV_SW_EXCEPTION
                          || type == INTR_TYPE_SW_EXCEPTION;
         event.nmi = type == INTR_TYPE_NMI;
@@ -967,7 +969,7 @@ static void vmx_handle_io(struct vcpu *v, uint64_t qual) {
 
 // The guest got where the processor cannot go on from, as a triple fault
 // does: the machine resets, as a PC's chipset makes it.
-__attribute__((noreturn)) static void vmx_shutdown(const char *why) {
+__attribute__((noreturn)) void vmx_shutdown(const char *why) {
     printf("%s\n", why);
     vmx_dump_guest();
     power_reset(false);

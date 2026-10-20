@@ -476,6 +476,8 @@ void vmx_load_guest_pdptes(void);
 // What a task switch does besides loading the new task: CR0.TS, DR7's local
 // enables, and, for an NMI delivered through a task gate, blocking NMIs.
 void vmx_task_switched(struct vcpu *v, bool nmi);
+// Ends the guest where the processor cannot go on, as a triple fault does.
+__attribute__((noreturn)) void vmx_shutdown(const char *why);
 void vmx_write(uint32_t field, uint64_t value);
 
 #endif
