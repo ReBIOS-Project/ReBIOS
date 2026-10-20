@@ -36,7 +36,7 @@
 #define MT_WB 6
 
 // The value the host's IA32_PAT gets, so that nested paging can name every
-// memory type above. This is the layout Linux uses.
+// memory type above. This is the layout Linux 7.3 uses (pat_bp_init()).
 #define HOST_PAT 0x0407050600070106ull
 
 void gpt_init(bool ept, bool huge_pages);

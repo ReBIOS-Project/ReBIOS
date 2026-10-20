@@ -107,9 +107,10 @@ bool insn_decode(struct vcpu *v, struct insn *insn);
 // are not handled.
 bool insn_mem_linear(struct vcpu *v, const struct insn *insn, uint64_t *linear);
 // Where an instruction's ModRM memory operand is, and which of its bytes the
-// instruction reads and writes, as the Intel SDM and the AMD APM describe the
-// instruction: none where it only uses the operand's address, as CLFLUSH.
-// Returns false where the instruction has no such operand, or they do not say.
+// instruction reads and writes, as SDM 325462-093 and APM 40332 rev. 4.10
+// describe the instruction: none where it only uses the operand's address, as
+// CLFLUSH. Returns false where the instruction has no such operand, or they do
+// not say.
 bool insn_mem_operand(struct vcpu *v, const struct insn *insn, struct insn_mem *mem);
 // A string instruction's linear address: its destination at ES:rDI, or its
 // source at DS:rSI, or the segment an override names.

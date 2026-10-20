@@ -209,8 +209,8 @@ static void invalidate_all(struct vtd_unit *u) {
 }
 
 // Intel's integrated graphics of these device ID families, behind a unit of
-// their own, can hang if the translation the firmware left on stops under
-// them, so it stays on (as Linux's quirk_igfx_skip_te_disable() has it).
+// their own, can hang if the translation the firmware left on stops under them,
+// so it stays on (as Linux 7.3's quirk_igfx_skip_te_disable() has it).
 static const uint8_t keep_translating_ids[] = {
     0x45, 0x46, 0x4c, 0x4e, 0x8a, 0x98, 0x9a, 0xa7, 0x7d,
 };
@@ -250,7 +250,7 @@ bool vtd_probe(const struct iommu_tables *tables, int *leaf_level) {
     units = kmalloc(unit_count * sizeof(*units));
     int leaf = 2;
     // Sandy Bridge's units claim large pages they do not have, and go wrong
-    // when a walk's length changes under DMA in flight (as Xen's
+    // when a walk's length changes under DMA in flight (as Xen 4.22's
     // quirk_iommu_caps() has it): small pages only, then.
     struct cpu_signature s = cpu_signature();
     if (s.family == 6 && (s.model == MODEL_SANDY_BRIDGE || s.model == MODEL_SANDY_BRIDGE_X)) {

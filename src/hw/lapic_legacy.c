@@ -317,7 +317,7 @@ void lapic_legacy_init(void) {
 
     struct nmi_pin nmi = {.lint = 1, .active_low = false, .level = false};
     bool from_madt = madt_nmi_pin(apic_id, &nmi);
-    // LINT1 cannot be level-triggered (SDM 325462-092 Vol. 3A, 13.5.1).
+    // LINT1 cannot be level-triggered (SDM 325462-093 Vol. 3A, 13.5.1).
     if (nmi.lint == 1) {
         nmi.level = false;
     }

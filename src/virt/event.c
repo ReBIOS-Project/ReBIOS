@@ -53,9 +53,9 @@ void event_exit(struct vcpu *v) {
             return;
         }
         // Software interrupts and exceptions leave RIP at their instruction,
-        // which raises them again; those the guest injects into its guest
-        // have none, so the guest's guest's go in again with their length,
-        // as KVM has it.
+        // which raises them again; those the guest injects into its guest have
+        // none, so the guest's guest's go in again with their length, as Linux
+        // 7.3's KVM has it.
         unsigned type = info & EVENT_TYPE_MASK;
         if (type == INTR_TYPE_SW_INTR || type == INTR_TYPE_PRIV_SW_EXCEPTION
             || type == INTR_TYPE_SW_EXCEPTION) {

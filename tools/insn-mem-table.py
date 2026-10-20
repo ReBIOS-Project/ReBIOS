@@ -21,12 +21,12 @@
 # Generates src/virt/insn_mem_table.c: what every instruction form with a ModRM
 # memory operand does with that operand, whether it reads it, writes it, or
 # both, and how many bytes of it. The forms and their operands come from the
-# instruction pages of the Intel SDM 325462-092, Vols. 2 and 3C (opcode tables
+# instruction pages of the Intel SDM 325462-093, Vols. 2 and 3C (opcode tables
 # and operand encoding tables), and, for the instructions only AMD processors
-# have, from the encoding tables of the AMD APM 40332 rev. 4.10, Vols. 3-5.
-# Both texts are `pdftotext -layout` output of the manuals. With report, it
-# also lists what it could not parse, the sizes it corrected, where the two
-# manuals' sizes differ, and the AMD-only forms.
+# have, from the encoding tables of the AMD APM 40332 rev. 4.10, Vols. 3-5. Both
+# texts are `pdftotext -layout` output of the manuals. With report, it also
+# lists what it could not parse, the sizes it corrected, where the two manuals'
+# sizes differ, and the AMD-only forms.
 
 import re
 import sys
@@ -54,49 +54,51 @@ NOTICE = [
 FOOTER = re.compile(r'(Vol\. 2[A-D] \d+-\d+|\d+-\d+ Vol\. 3C|Vol\. 3C \d+-\d+)\s*$')
 NAME_CHARS = re.compile(r'^[A-Za-z0-9/,()\[\] .-]+$')
 HEX = re.compile(r'^[0-9A-F]{2}$')
-# The SDM's titles: "ADD\u2014Add".
+# SDM 325462-093's titles: "ADD\u2014Add".
 DASH = '\u2014'
 SIZES = {8, 16, 32, 64, 80, 128, 256, 384, 512}
 
-# Instructions the SDM gives a ModRM memory operand which they only take the
-# address of, or hint with: they read and write no data.
+# Instructions SDM 325462-093 gives a ModRM memory operand which they only take
+# the address of, or hint with: they read and write no data.
 NO_ACCESS = {
     'LEA', 'NOP', 'INVLPG', 'BNDMK', 'BNDCL', 'BNDCU', 'BNDCN', 'CLFLUSH', 'CLFLUSHOPT',
     'CLWB', 'CLDEMOTE', 'PREFETCH', 'PREFETCHW', 'PREFETCHWT1', 'PREFETCHNTA', 'PREFETCHT0',
     'PREFETCHT1', 'PREFETCHT2', 'PREFETCHIT0', 'PREFETCHIT1',
 }
 
-# Sizes the operand syntax leaves out, from the instructions' descriptions:
-# SDM 325462-092 Vol. 2B, SGDT and SIDT ("In legacy or compatibility mode, the
+# Sizes the operand syntax leaves out, from the instructions' descriptions: SDM
+# 325462-093 Vol. 2B, SGDT and SIDT ("In legacy or compatibility mode, the
 # destination operand is a 6-byte memory location ... In 64-bit mode, the
-# operand size is fixed at 8+2 bytes"), and Vol. 2A, LDDQU (a 128-bit load).
+# operand size is fixed at 8+2 bytes"), and SDM 325462-093 Vol. 2A, LDDQU (a
+# 128-bit load).
 MODE_SIZES = {'SGDT': (10, 6), 'SIDT': (10, 6)}
 FIXED_SIZES = {'LDDQU': 16}
 
-# Sizes the operand syntax gets wrong: SDM 325462-092 Vol. 2B, MOV, "REX.W +
-# 8E /r MOV Sreg, r/m64: Move lower 16 bits of r/m64 to segment register",
-# and AMD APM 40332 rev. 4.10 Vol. 4, VFMADDSD, whose encoding table has
-# "xmm3/mem128" for "a 64-bit value read from memory".
+# Sizes the operand syntax gets wrong: SDM 325462-093 Vol. 2B, MOV, "REX.W + 8E
+# /r MOV Sreg, r/m64: Move lower 16 bits of r/m64 to segment register", and AMD
+# APM 40332 rev. 4.10 Vol. 4, VFMADDSD, whose encoding table has "xmm3/mem128"
+# for "a 64-bit value read from memory".
 SYNTAX_SIZES = {('MOV', 'Sreg, r/m64'): 2, ('VFMADDSD', 'xmm1, xmm2, xmm3/m128, xmm4'): 8,
                 ('VFMADDSD', 'xmm1, xmm2, xmm3, xmm4/m128'): 8}
 
-# Stores that leave bytes of their operand alone: FXSAVE, SDM 325462-092 Vol.
-# 2A ("The processor does not write to bytes 464:511 of an FXSAVE area"),
-# whose reserved fields in the area are not written either.
+# Stores that leave bytes of their operand alone: FXSAVE, SDM 325462-093 Vol. 2A
+# ("The processor does not write to bytes 464:511 of an FXSAVE area"), whose
+# reserved fields in the area are not written either.
 UNKNOWN_WRITES = {'FXSAVE', 'FXSAVE64'}
 
-# Bit string instructions: SDM 325462-092 Vol. 2A, BT, "If the bit base
-# operand specifies a memory location ... The offset operand then selects a
-# bit position within the range -2^31 to 2^31 - 1 for a register offset".
+# Bit string instructions: SDM 325462-093 Vol. 2A, BT ("If the bit base operand
+# specifies a memory location, the operand represents the address of the byte in
+# memory that contains the bit base"), whose register offsets range from -2^31
+# to 2^31 - 1 for 32-bit operands (SDM 325462-093 Vol. 2A, Table 3-2).
 BIT_STRINGS = {'BT', 'BTC', 'BTR', 'BTS'}
 
-# Operand encoding tables of SDM 325462-092 Vol. 2 that have an instruction
-# only write the memory operand it reads: ARPL compares it first ("IF
-# DEST[RPL] < SRC[RPL]"), RCL, RCR, ROL, and ROR rotate it, as SAL, SAR,
-# SHL, and SHR shift it, with "(r, w)", SBB subtracts from it, as ADC adds to
-# it with "(r, w)", and SHLD and SHRD shift it; and those that have DIV write
-# its divisor, which it only reads, as IDIV and MUL do with "(r)", and IMUL's
-# one-operand form, which writes its product to registers.
+# Operand encoding tables of SDM 325462-093 Vol. 2 that have an instruction only
+# write the memory operand it reads: ARPL compares it first ("IF DEST[RPL] <
+# SRC[RPL]"), RCL, RCR, ROL, and ROR rotate it, as SAL, SAR, SHL, and SHR shift
+# it, with "(r, w)", SBB subtracts from it, as ADC adds to it with "(r, w)", and
+# SHLD and SHRD shift it; and those that have DIV write its divisor, which it
+# only reads, as IDIV and MUL do with "(r)", and IMUL's one-operand form, which
+# writes its product to registers.
 ACCESS = {('ARPL', 'w'): 'rw', ('RCL', 'w'): 'rw', ('RCR', 'w'): 'rw', ('ROL', 'w'): 'rw',
           ('ROR', 'w'): 'rw', ('SBB', 'w'): 'rw', ('SHLD', 'w'): 'rw', ('SHRD', 'w'): 'rw',
           ('DIV', 'w'): 'r', ('IMUL', 'rw'): 'r'}
@@ -108,7 +110,8 @@ OPERAND_ACCESS = {'LKGS': 'r'}
 # Sizes the tuple types corrected, for the report.
 CORRECTED = []
 
-# VEX forms whose W does not matter in 64-bit mode, from the SDM's footnotes.
+# VEX forms whose W does not matter in 64-bit mode, from SDM 325462-093's
+# footnotes.
 W_IGNORED = set()
 
 # Loads and stores of only the elements a vector register's mask selects.
@@ -116,8 +119,8 @@ VECTOR_MASKED = {'VMASKMOVPS', 'VMASKMOVPD', 'VPMASKMOVD', 'VPMASKMOVQ'}
 
 
 def instruction_ranges(lines):
-    # Chapter 3's instructions to the end of Vol. 2D, and the VMX instruction
-    # reference in Vol. 3C.
+    # SDM 325462-093's instructions from chapter 3 to the end of Vol. 2D, and
+    # the VMX instruction reference in Vol. 3C.
     start = next(i for i, l in enumerate(lines) if re.match(r'^\d+\.\d+\s+INSTRUCTIONS \(A-L\)\s*$', l))
     end = max(i for i, l in enumerate(lines) if re.search(r'Vol\. 2D \d+-\d+\s*$', l)) + 1
     vmx = next(i for i, l in enumerate(lines) if l.strip() == 'VMX INSTRUCTION REFERENCE' and i > end)
@@ -328,8 +331,9 @@ def parse_rows(block):
     # after the opcode's, the Op/En right after the opcode then. x87 tables
     # have no Op/En: None.
     rows = []
-    # Tables without mode columns, Vol. 3C's, take the instruction from the
-    # next line, and say in the description which modes have it.
+    # Tables without mode columns, SDM 325462-093 Vol. 3C's, take the
+    # instruction from the next line, and say in the description which modes
+    # have it.
     header = []
     for line in block:
         if starts_opcode(normalize(line)):
@@ -496,7 +500,7 @@ def mem_spec(operand):
 
 
 def tuple_size(tuple_type, l):
-    # SDM 325462-092 Vol. 2A, 2.7.5, Tables 2-34 and 2-35: the vector tuple
+    # SDM 325462-093 Vol. 2A, 2.7.5, Tables 2-36 and 2-37: the vector tuple
     # types access a fraction of the vector length, broadcasts aside.
     fractions = {'full': 8, 'fullmem': 8, 'half': 16, 'halfmem': 16, 'quarter': 32, 'quartermem': 32,
                  'eighthmem': 64}
@@ -507,10 +511,10 @@ def tuple_size(tuple_type, l):
 
 
 def tuple_scale(tuple_type, mnemonic, spec):
-    # EVEX's compressed displacement: SDM 325462-092 Vol. 2A, 2.7.5, Tables
-    # 2-34 and 2-35. Broadcasts scale by the element, as do the scalar tuples,
-    # whose memory operand is the element but for compressing and expanding
-    # forms. 0 means the operand's size.
+    # EVEX's compressed displacement: SDM 325462-093 Vol. 2A, 2.7.5, Tables 2-36
+    # and 2-37. Broadcasts scale by the element, as do the scalar tuples, whose
+    # memory operand is the element but for compressing and expanding forms. 0
+    # means the operand's size.
     t = tuple_type.replace(' ', '').lower()
     if spec[0] != 'n' or t not in ('tuple1scalar', 'tuple1fixed', 'scalar') or spec[1] <= 8:
         return 0
@@ -523,8 +527,8 @@ def tuple_scale(tuple_type, mnemonic, spec):
 def sdm_form(title, encodings, toks, syntax, op_en, modes, problems):
     key = parse_key(toks)
     mnemonic, ops = operands(syntax)
-    # Only a ModRM byte brings a memory operand. SETcc's and Vol. 3C's
-    # opcodes leave theirs out.
+    # Only a ModRM byte brings a memory operand. SETcc's and SDM 325462-093 Vol.
+    # 3C's opcodes leave theirs out.
     encoded = encodings.get(op_en, ('', []))[1] if op_en else []
     has_modrm = (any(re.match(r'^(/r|/[0-7]|!.*)$', t) for t in toks)
                  or any(re.search(r'(^|/)(r\d*|reg)/m', o) for o in ops)
@@ -596,7 +600,7 @@ def sdm_form(title, encodings, toks, syntax, op_en, modes, problems):
 def sdm_forms(path, problems):
     text = open(path, encoding='utf-8', errors='replace').read()
     lines = text.split('\n')
-    # SDM 325462-092 Vol. 2C, VPEXTRB and the like: "In 64-bit mode, VEX.W1 is
+    # SDM 325462-093 Vol. 2C, VPEXTRB and the like: "In 64-bit mode, VEX.W1 is
     # ignored for VPEXTRB".
     W_IGNORED.update(re.findall(r'In 64-bit mode, VEX\.W1 is ignored for (\w+)', text))
     forms = []
@@ -651,8 +655,8 @@ def make_form(key, mnemonic, syntax, access, spec, bcst, masked, scale, modes, s
     return f
 
 
-# The APM's encodings: legacy opcodes, or "C4 RXB.map W.vvvv.L.pp opcode" for
-# VEX and "8F RXB.map W.vvvv.L.pp opcode" for XOP.
+# APM 40332 rev. 4.10's encodings: legacy opcodes, or "C4 RXB.map W.vvvv.L.pp
+# opcode" for VEX and "8F RXB.map W.vvvv.L.pp opcode" for XOP.
 APM_ROW = re.compile(r'^\s*([A-Z][A-Z0-9]+)((?: FAR)?)\s+'
                      r'([a-z][\w/:&.]*(?:,\s?[a-z0-9][\w/:&.]*)*)\s{2,}(\S.*)$')
 APM_OPERAND = [
@@ -822,15 +826,15 @@ def merge(forms, problems):
             mode_rows = [r for r in rows if mode in r['modes']]
             if not mode_rows:
                 continue
-            # One instruction the SDM spells two ways, as XCHG's operands
+            # One instruction SDM 325462-093 spells two ways, as XCHG's operands
             # either way round, with the access only one of them gives.
             access = ''.join(sorted(set(''.join(r['access'] for r in mode_rows))))
             if k[0] == 'legacy':
                 rules = [(w, None, rule, 0, 0) for w, rule in legacy_rule(mode_rows, mode, problems)]
             else:
-                # A W1 form only 64-bit mode has: elsewhere W1 is ignored,
-                # the W0 form's (SDM 325462-092 Vol. 2A, ANDN: "VEX.W1 is
-                # ignored in non-64-bit modes").
+                # A W1 form only 64-bit mode has: elsewhere W1 is ignored, the
+                # W0 form's (SDM 325462-093 Vol. 2A, ANDN: "VEX.W1 is ignored in
+                # non-64-bit modes").
                 if mode == '32' and all(r['w'] != 1 for r in mode_rows) \
                         and any(r['w'] == 1 and r['modes'] == frozenset({'64'}) for r in rows):
                     mode_rows = [dict(r, w=None) for r in mode_rows]
@@ -896,7 +900,8 @@ def emit(entries, path):
     entries.sort(key=lambda e: (SPACES[e['space']] | e['map'], e['opcode']) + specificity(e))
     out = []
     out.extend(NOTICE + [''])
-    out.append('// Generated by tools/insn-mem-table.py from the Intel SDM 325462-092, Vols. 2 and 3C,')
+    out.append('// Generated by tools/insn-mem-table.py from the Intel SDM 325462-093, Vols. 2 '
+               'and 3C,')
     out.append('// and the AMD APM 40332 rev. 4.10, Vols. 3-5. Do not edit.')
     out.append('')
     out.append('#include <stdint.h>')
@@ -951,8 +956,8 @@ def main():
     problems = []
     sdm = sdm_forms(sys.argv[1], problems)
     apm = apm_forms(sys.argv[2])
-    # The APM adds the instructions the SDM does not have; where both have a
-    # form, the SDM's operand encoding tables say more.
+    # APM 40332 rev. 4.10 adds the instructions SDM 325462-093 does not have;
+    # where both have a form, SDM 325462-093's operand encoding tables say more.
     extra = [g for g in apm if amd_only(g) and not any(covers(f, g) for f in sdm)]
     entries = merge(sdm + extra, problems)
     emit(entries, sys.argv[3])

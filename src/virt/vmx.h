@@ -21,7 +21,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-// VMCS field encodings (SDM 325462-092 Vol. 3D, Appendix B).
+// VMCS field encodings (SDM 325462-093 Vol. 3D, Appendix B).
 #define VMCS_VPID 0x0000
 #define VMCS_POSTED_INTR_NV 0x0002
 #define VMCS_LAST_PID_POINTER_INDEX 0x0008
@@ -173,14 +173,14 @@
 #define VMCS_HOST_RSP 0x6c14
 #define VMCS_HOST_RIP 0x6c16
 
-// Pin-based controls (SDM 325462-092 Vol. 3C, Table 27-5).
+// Pin-based controls (SDM 325462-093 Vol. 3C, Table 27-5).
 #define PIN_EXT_INTR_EXITING (1u << 0)
 #define PIN_NMI_EXITING (1u << 3)
 #define PIN_VIRTUAL_NMIS (1u << 5)
 #define PIN_PREEMPTION_TIMER (1u << 6)
 #define PIN_POSTED_INTR (1u << 7)
 
-// Primary processor-based controls (SDM 325462-092 Vol. 3C, Table 27-6).
+// Primary processor-based controls (SDM 325462-093 Vol. 3C, Table 27-6).
 #define PROC_INTR_WINDOW_EXITING (1u << 2)
 #define PROC_TSC_OFFSETTING (1u << 3)
 #define PROC_HLT_EXITING (1u << 7)
@@ -204,7 +204,7 @@
 #define PROC_PAUSE_EXITING (1u << 30)
 #define PROC_SECONDARY_CONTROLS (1u << 31)
 
-// Secondary processor-based controls (SDM 325462-092 Vol. 3C, Table 27-7).
+// Secondary processor-based controls (SDM 325462-093 Vol. 3C, Table 27-7).
 #define PROC2_VIRT_APIC_ACCESSES (1u << 0)
 #define PROC2_EPT (1u << 1)
 #define PROC2_DESC_TABLE_EXITING (1u << 2)
@@ -234,7 +234,7 @@
 // Table 27-8).
 #define PROC3_IPI_VIRT (1ull << 4)
 
-// Primary VM-exit controls (SDM 325462-092 Vol. 3C, Table 27-14).
+// Primary VM-exit controls (SDM 325462-093 Vol. 3C, Table 27-14).
 #define EXIT_SAVE_DEBUG_CONTROLS (1u << 2)
 #define EXIT_HOST_ADDR_SPACE_SIZE (1u << 9)
 #define EXIT_LOAD_PERF_GLOBAL_CTRL (1u << 12)
@@ -249,7 +249,7 @@
 #define EXIT_CLEAR_RTIT_CTL (1u << 25)
 #define EXIT_SAVE_PERF_GLOBAL_CTRL (1u << 30)
 
-// VM-entry controls (SDM 325462-092 Vol. 3C, Table 27-17).
+// VM-entry controls (SDM 325462-093 Vol. 3C, Table 27-17).
 #define ENTRY_LOAD_DEBUG_CONTROLS (1u << 2)
 #define ENTRY_IA32E_MODE_GUEST (1u << 9)
 #define ENTRY_SMM (1u << 10)
@@ -260,10 +260,10 @@
 #define ENTRY_CONCEAL_VMX_FROM_PT (1u << 17)
 #define ENTRY_LOAD_RTIT_CTL (1u << 18)
 
-// Guest segment access rights (SDM 325462-092 Vol. 3C, Table 27-2).
+// Guest segment access rights (SDM 325462-093 Vol. 3C, Table 27-2).
 #define VMX_AR_L (1u << 13)
 
-// Basic exit reasons (SDM 325462-092 Vol. 3D, Appendix C).
+// Basic exit reasons (SDM 325462-093 Vol. 3D, Appendix C).
 #define EXIT_REASON_EXCEPTION_NMI 0
 #define EXIT_REASON_EXTERNAL_INTR 1
 #define EXIT_REASON_TRIPLE_FAULT 2
@@ -380,7 +380,7 @@
 #define ACTIVITY_SHUTDOWN 2
 #define ACTIVITY_WAIT_SIPI 3
 
-// Capability MSRs (SDM 325462-092 Vol. 3D, Appendix A).
+// Capability MSRs (SDM 325462-093 Vol. 3D, Appendix A).
 #define MSR_IA32_VMX_BASIC 0x480
 #define MSR_IA32_VMX_PINBASED_CTLS 0x481
 #define MSR_IA32_VMX_PROCBASED_CTLS 0x482

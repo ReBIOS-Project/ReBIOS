@@ -623,7 +623,7 @@ bool insn_mem_operand(struct vcpu *v, const struct insn *insn, struct insn_mem *
         size = f->broadcast;
         scale = size;
     }
-    // EVEX scales an 8-bit displacement: SDM 325462-092 Vol. 2A, 2.7.5.
+    // EVEX scales an 8-bit displacement: SDM 325462-093 Vol. 2A, 2.7.5.
     int64_t disp = insn->disp;
     if (evex && insn->disp_size == 1) {
         disp *= scale;
