@@ -118,6 +118,10 @@
 #define MSR_AMD_PSTATE_DEF7 0xc001006b
 #define HWCR_LOCK_TSC_TO_CURRENT_P0 (1u << 21)
 
+// AMD's node ID (BKDG 31116 rev. 3.62, MSRC001_100C), read-only: the
+// northbridge routes by what firmware wrote there.
+#define MSR_AMD_NODE_ID 0xc001100c
+
 // AMD's northbridge configuration (BKDG 31116 rev. 3.62, 42301 rev. 3.14,
 // MSRC001_001F): the processor's, of which the guest may change only
 // EnableCf8ExtCfg, which Linux 7.3 sets on every family for extended
@@ -322,6 +326,7 @@ void msr_init(void) {
         }
         virt_intercept_msr(MSR_AMD_NB_CFG, true, true);
         virt_intercept_msr(MSR_AMD_L3_QOS_EXT_CFG, false, true);
+        virt_intercept_msr(MSR_AMD_NODE_ID, false, true);
         for (uint32_t msr = MSR_AMD_CPUID_7_FEATURES; msr <= MSR_AMD_CPUID_EXT_FEATURES; msr++) {
             virt_intercept_msr(msr, true, true);
         }
@@ -729,6 +734,13 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
                 return false;
             }
             *fault = (value & DEBUGCTL_LBR) || !wrmsr_safe(msr, value);
+            return true;
+        }
+        case MSR_AMD_NODE_ID: {
+            if (virt_vmx) {
+                return false;
+            }
+            *fault = true;
             return true;
         }
         case MSR_AMD_L3_QOS_EXT_CFG: {

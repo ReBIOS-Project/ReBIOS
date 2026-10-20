@@ -319,7 +319,7 @@ AMD_KINDS = [
     ('thermal', r'HTC'),
     ('C-states', r'CStateBaseAddr|C-state Base Address|Interrupt Pending( and CMP-Halt Register)?'),
     ('perfmon', r'ChLnPmc(Cfg)?|DF_PERF_CT[LR]|UMC_PerfMon(Ctl|Cntr)'),
-    ('identification', r'EBL_CR_POWERON|PATCH_LEVEL|PPIN(_CTL)?|TSC_ADJUST|BIST Results'),
+    ('identification', r'EBL_CR_POWERON|PATCH_LEVEL|PPIN(_CTL)?|TSC_ADJUST|BIST Results|Node ID'),
     ('machine checks', r'MCA_CTL_MASK_\w+|MCn_CTL_MASK|MCA_(ADDR|STATUS)_LS'
                        r'|(\w+ )?Machine Check Control Mask( Registers)?'
                        r'|Load-Store MCA (Address|Status)( Register)?'),

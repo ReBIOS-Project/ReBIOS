@@ -1083,13 +1083,15 @@ const struct msr_range msr_amd_architectural[] = {
 const size_t msr_amd_architectural_count =
     sizeof(msr_amd_architectural) / sizeof(msr_amd_architectural[0]);
 
-// Family 10h, BKDG 31116 rev. 3.62: C-states, configuration, machine checks, power, thermal.
+// Family 10h, BKDG 31116 rev. 3.62: C-states, configuration, identification, machine checks, power,
+// thermal.
 static const struct msr_range family_10h[] = {
     {0xc001003e, 0xc001003e}, // HTC
     {0xc0010044, 0xc0010049}, // Machine Check Control Mask
     {0xc0010055, 0xc0010055}, // Interrupt Pending and CMP-Halt
     {0xc0010064, 0xc0010068}, // P-State [4:0]
     {0xc0010070, 0xc0010073}, // COFVID Control to C-state Base Address
+    {0xc001100c, 0xc001100c}, // Node ID
     {0xc0011021, 0xc0011023}, // IC_CFG to BU_CFG
     {0xc0011029, 0xc001102a}, // DE_CFG to BU_CFG2
 };
@@ -1107,6 +1109,7 @@ static const struct msr_range family_15h[] = {
     {0xc0010075, 0xc0010075}, // APML TDP Limit
     {0xc0010077, 0xc001007b}, // Processor Power in TDP to Max Compute Unit Power Accumulator
     {0xc0010280, 0xc0010280}, // CU_PTSC
+    {0xc001100c, 0xc001100c}, // Node ID
     {0xc001101c, 0xc001101c}, // LS_CFG3
     {0xc0011020, 0xc0011023}, // LS_CFG to CU_CFG
     {0xc0011028, 0xc001102d}, // FP_CFG to LS_CFG2

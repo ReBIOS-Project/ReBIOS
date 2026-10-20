@@ -348,10 +348,13 @@ static const struct last_subleaf amd_last_subleaves[] = {
 #define CPUID_80000008_EBX_LMSLE_UNSUPPORTED (1u << 20)
 // What AMD's families have of RAPL, PPIN, and memory controller counters (PPR
 // 56713 rev. 3.05, CPUID_Fn80000007_EDX, CPUID_Fn80000008_EBX, and
-// CPUID_Fn80000022_E[B,C]X), shown where the guest gets their MSRs (msr.c).
+// CPUID_Fn80000022_E[B,C]X), and of the node ID MSR (BKDG 31116 rev. 3.62,
+// CPUID Fn8000_0001_ECX), shown where the guest gets their MSRs (msr.c).
+#define CPUID_80000001_ECX_NODE_ID (1u << 19)
 #define CPUID_80000007_EDX_RAPL (1u << 14)
 #define CPUID_80000008_EBX_PPIN (1u << 23)
 #define CPUID_80000022_EBX_UMC_COUNTERS (0x3fu << 16)
+#define MSR_AMD_NODE_ID 0xc001100c
 #define MSR_AMD_RAPL_PWR_UNIT 0xc0010299
 #define MSR_AMD_PPIN_CTL 0xc00102f0
 #define MSR_AMD_UMC_PERF_CTL0 0xc0010800
@@ -665,8 +668,8 @@ struct cpuid_regs cpuid_guest(struct vcpu *v, uint32_t leaf, uint32_t subleaf) {
         }
         case 0x80000001: {
             // AMD's copy of the APIC flag, NX unless the guest's
-            // IA32_MISC_ENABLE disables it, and RDTSCP where the guest's VMCS
-            // lets it run.
+            // IA32_MISC_ENABLE disables it, RDTSCP where the guest's VMCS lets
+            // it run, and AMD's node ID MSR where the guest gets it.
             if (!virt_vmx && vlapic_enabled(v)) {
                 r.edx |= CPUID_80000001_EDX_APIC;
             }
@@ -675,6 +678,9 @@ struct cpuid_regs cpuid_guest(struct vcpu *v, uint32_t leaf, uint32_t subleaf) {
             }
             if (!vmx_runs(PROC2_RDTSCP)) {
                 r.edx &= ~CPUID_80000001_EDX_RDTSCP;
+            }
+            if (!virt_vmx && msr_allowed(MSR_AMD_NODE_ID)) {
+                r.ecx |= cpuid(leaf, 0).ecx & CPUID_80000001_ECX_NODE_ID;
             }
             break;
         }
