@@ -27,6 +27,7 @@
 #include <sys/mm.h>
 #include <sys/smp.h>
 #include <sys/x86.h>
+#include <virt/cpuid.h>
 #include <virt/event.h>
 #include <virt/exit.h>
 #include <virt/gpt.h>
@@ -418,7 +419,8 @@ void nvmx_init(void) {
     cap_cr0_fixed0 = vmx_capability(MSR_IA32_VMX_CR0_FIXED0);
     cap_cr0_fixed1 = vmx_capability(MSR_IA32_VMX_CR0_FIXED1);
     cap_cr4_fixed0 = vmx_capability(MSR_IA32_VMX_CR4_FIXED0);
-    cap_cr4_fixed1 = vmx_capability(MSR_IA32_VMX_CR4_FIXED1);
+    // Only the CR4 bits of features the guest gets may be 1 in VMX operation.
+    cap_cr4_fixed1 = vmx_capability(MSR_IA32_VMX_CR4_FIXED1) & (cpuid_cr4_allowed() | CR4_VMXE);
 
     shadowing_init(misc);
 
@@ -1949,6 +1951,13 @@ static void write_vmcs02(struct vcpu *v, struct nvmx *n, const struct l1_values 
     for (unsigned i = 0; i < ARRAY_COUNT(control_fields); i++) {
         vmx_write(control_fields[i], get12(n, control_fields[i]));
     }
+    // The CR4 bits of features the guest does not get are the hypervisor's in
+    // its guest too: their writes exit, and read as 0 where the guest's mask
+    // leaves them.
+    uint64_t hidden = ~cpuid_cr4_allowed() & ~(uint64_t)CR4_VMXE;
+    uint64_t cr4_mask = get12(n, VMCS_CR4_MASK);
+    vmx_write(VMCS_CR4_MASK, cr4_mask | hidden);
+    vmx_write(VMCS_CR4_SHADOW, get12(n, VMCS_CR4_SHADOW) & ~(hidden & ~cr4_mask));
     for (unsigned i = 0; i < cr3_targets; i++) {
         vmx_write(VMCS_CR3_TARGET0 + 2 * i, get12(n, VMCS_CR3_TARGET0 + 2 * i));
     }
@@ -2671,11 +2680,22 @@ static bool l1_wants(struct vcpu *v, const struct nvmx *n, uint32_t reason, uint
             return msr_wanted(n, proc, (uint32_t)v->gprs.rcx, reason == EXIT_REASON_WRMSR);
         }
         case EXIT_REASON_CR_ACCESS: {
-            if ((qual & 15) != 8) {
+            unsigned cr = qual & 15;
+            bool to = ((qual >> 4) & 3) == 0;
+            // MOV to CR4 exits for the guest where a bit its mask covers would
+            // differ from its read shadow (SDM 325462-093 Vol. 3C, 28.1.3), else
+            // for a bit of the hypervisor's.
+            if (cr == 4 && to) {
+                uint64_t value = guest_reg(v, (qual >> 8) & 15);
+                if (!long_mode_64(v)) {
+                    value = (uint32_t)value;
+                }
+                return ((value ^ get12(n, VMCS_CR4_SHADOW)) & get12(n, VMCS_CR4_MASK)) != 0;
+            }
+            if (cr != 8) {
                 return true;
             }
-            return (proc & (((qual >> 4) & 3) == 0 ? PROC_CR8_LOAD_EXITING
-                                                   : PROC_CR8_STORE_EXITING)) != 0;
+            return (proc & (to ? PROC_CR8_LOAD_EXITING : PROC_CR8_STORE_EXITING)) != 0;
         }
         default: {
             return true;
@@ -2841,7 +2861,12 @@ bool nvmx_l2_exit(struct vcpu *v, uint32_t reason, uint64_t qual) {
     }
     if (!l1_wants(v, n, reason & 0xffff, qual)) {
         if ((reason & 0xffff) == EXIT_REASON_CR_ACCESS) {
-            cr8_access(v, qual);
+            // A CR4 bit of a feature the guest's guest does not have either.
+            if ((qual & 15) == 4) {
+                vcpu_inject_exception(v, 13, true, 0);
+            } else {
+                cr8_access(v, qual);
+            }
             return true;
         }
         return false;
