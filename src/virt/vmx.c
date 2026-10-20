@@ -972,6 +972,14 @@ static void cr_write(struct vcpu *v, unsigned cr, uint64_t value) {
         vmx_write(VMCS_CR4_SHADOW, value);
         vmx_write(VMCS_GUEST_CR4, cr4);
     }
+    // The guest's translations go where the move would have dropped them (SDM
+    // 325462-093 Vol. 3A, 5.10.4.1), as the processor did not carry it out.
+    if (((real0 & ~cr0) & CR0_PG) || ((cr4 ^ real4) & (CR4_PGE | CR4_PAE))
+        || ((real4 & ~cr4) & CR4_PCIDE) || ((cr4 & ~real4) & CR4_SMEP)) {
+        if (vmx_vpid_usable()) {
+            vmx_invvpid(2, 0, 0);
+        }
+    }
     vcpu_skip_instruction(v);
 }
 
