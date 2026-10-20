@@ -521,12 +521,14 @@ static void msi_update(struct vfunction *vf) {
                    a.device, a.function, count);
             return;
         }
-        pci_cfg_write(a, cap + MSI_ADDRESS, 4,
-                      MSI_ADDRESS_BASE | m->slot.cpu->apic_id << MSI_ADDRESS_DEST_SHIFT);
+        uint32_t address;
+        uint32_t data;
+        irq_slot_message(&m->slot, &address, &data);
+        pci_cfg_write(a, cap + MSI_ADDRESS, 4, address);
         if (m->wide) {
             pci_cfg_write(a, cap + MSI_UPPER, 4, 0);
         }
-        pci_cfg_write(a, msi_data_reg(vf), 2, m->slot.vector);
+        pci_cfg_write(a, msi_data_reg(vf), 2, data);
     }
     pci_cfg_write(a, cap + MSI_CONTROL, 2, control | MSI_ENABLE);
 }
@@ -614,10 +616,12 @@ static void msix_sync(struct vfunction *vf, unsigned i) {
                    a.device, a.function, i);
             return;
         }
-        mmio_write_host(at + MSIX_ENTRY_ADDRESS, 4,
-                        MSI_ADDRESS_BASE | e->slot.cpu->apic_id << MSI_ADDRESS_DEST_SHIFT);
+        uint32_t address;
+        uint32_t data;
+        irq_slot_message(&e->slot, &address, &data);
+        mmio_write_host(at + MSIX_ENTRY_ADDRESS, 4, address);
         mmio_write_host(at + MSIX_ENTRY_UPPER, 4, 0);
-        mmio_write_host(at + MSIX_ENTRY_DATA, 4, e->slot.vector);
+        mmio_write_host(at + MSIX_ENTRY_DATA, 4, data);
     }
     if (!e->armed) {
         mmio_write_host(at + MSIX_ENTRY_CONTROL, 4, control & ~MSIX_ENTRY_MASKED);

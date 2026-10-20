@@ -87,6 +87,12 @@ struct irq_slot {
 // had; false where no processor has room.
 bool irq_slot_place(struct irq_slot *s, struct cpu *cpu, unsigned count);
 void irq_slot_free(struct irq_slot *s);
+// The message a source sends for the slot's first vector, which a source of
+// several puts its vector's index in the low bits of data of.
+void irq_slot_message(struct irq_slot *s, uint32_t *address, uint32_t *data);
+// An I/O APIC entry for the slot's vector, with the line's trigger mode and
+// polarity.
+uint64_t irq_slot_rte(struct irq_slot *s, bool level, bool active_low);
 // Whether a slot holds the vector the processor took, which it then took.
 bool irq_slot_interrupt(uint8_t vector);
 

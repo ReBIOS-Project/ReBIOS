@@ -222,8 +222,8 @@ static uint64_t desired(uint32_t gsi, struct route *r, enum owner *owner) {
                                             (rte & IOAPIC_RTE_LOGICAL) != 0),
                               1))) {
         *owner = OWNER_MIRROR;
-        uint64_t host = r->slot.vector | (uint64_t)r->slot.cpu->apic_id << IOAPIC_RTE_DEST_SHIFT
-                        | (rte & (IOAPIC_RTE_LEVEL | IOAPIC_RTE_ACTIVE_LOW));
+        uint64_t host = irq_slot_rte(&r->slot, (rte & IOAPIC_RTE_LEVEL) != 0,
+                                     (rte & IOAPIC_RTE_ACTIVE_LOW) != 0);
         if (r->held) {
             host |= IOAPIC_RTE_MASKED;
         }
@@ -582,6 +582,18 @@ void irq_slot_free(struct irq_slot *s) {
     spinlock_acquire(&slot_lock);
     slot_release(s);
     spinlock_release(&slot_lock);
+}
+
+// Compatibility format, fixed and edge-triggered to the processor (SDM
+// 325462-093 Vol. 3A, 13.11).
+void irq_slot_message(struct irq_slot *s, uint32_t *address, uint32_t *data) {
+    *address = MSI_ADDRESS_BASE | s->cpu->apic_id << MSI_ADDRESS_DEST_SHIFT;
+    *data = s->vector;
+}
+
+uint64_t irq_slot_rte(struct irq_slot *s, bool level, bool active_low) {
+    return s->vector | (uint64_t)s->cpu->apic_id << IOAPIC_RTE_DEST_SHIFT
+           | (level ? IOAPIC_RTE_LEVEL : 0) | (active_low ? IOAPIC_RTE_ACTIVE_LOW : 0);
 }
 
 bool irq_slot_interrupt(uint8_t vector) {
