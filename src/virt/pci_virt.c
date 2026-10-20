@@ -29,12 +29,16 @@
 #include <lib/spinlock.h>
 #include <sys/mm.h>
 #include <sys/x86.h>
+#include <hw/lapic.h>
 #include <virt/gpt.h>
+#include <virt/guest_mem.h>
 #include <virt/io.h>
+#include <virt/irq.h>
 #include <virt/layout.h>
 #include <virt/mmio.h>
 #include <virt/pci_plan.h>
 #include <virt/pci_virt.h>
+#include <virt/vlapic.h>
 
 #define CONFIG_ADDRESS 0xcf8
 #define CONFIG_DATA 0xcfc
@@ -77,6 +81,36 @@
 #define BAR_COUNT 6
 #define ROM_INDEX 6
 
+// PCI Local Bus Specification 3.0, 6.8.1: MSI's Message Control register and
+// the registers after it, where the address is 64 bits wide.
+#define MSI_CONTROL 2
+#define MSI_ENABLE 0x0001u
+#define MSI_MMC_SHIFT 1
+#define MSI_MME_SHIFT 4
+#define MSI_MME_MASK 0x0070u
+#define MSI_WIDE 0x0080u
+#define MSI_ADDRESS 4
+#define MSI_UPPER 8
+#define MSI_DATA_NARROW 8
+#define MSI_DATA_WIDE 0xc
+
+// PCI Local Bus Specification 3.0, 6.8.2: MSI-X's Message Control register,
+// where its table is, and a table entry's fields.
+#define MSIX_CONTROL 2
+#define MSIX_SIZE_MASK 0x07ffu
+#define MSIX_ENABLE 0x8000u
+#define MSIX_TABLE 4
+#define MSIX_BIR_MASK 7u
+#define MSIX_ENTRY_SIZE 16
+#define MSIX_ENTRY_ADDRESS 0
+#define MSIX_ENTRY_UPPER 4
+#define MSIX_ENTRY_DATA 8
+#define MSIX_ENTRY_CONTROL 12
+#define MSIX_ENTRY_MASKED 1u
+
+#define REG_COMMAND 4
+#define COMMAND_MEMORY 0x2u
+
 // A memory BAR or expansion ROM BAR as the guest has it.
 struct vbar {
     uint8_t kind;
@@ -88,11 +122,57 @@ struct vbar {
     bool enabled;
     // Where the guest's range maps to the host's, 0 if nowhere.
     uint64_t mapped;
+    // The pages holding [trap, trap + trap_size) of it, which the guest
+    // reaches through the hypervisor's region: an MSI-X table's.
+    uint64_t trap;
+    uint64_t trap_size;
+    int trap_region;
+};
+
+// A function's MSI as the guest programs it. The function sends a message of
+// the hypervisor's on the slot's vectors, which delivery turns back into the
+// guest's.
+struct vmsi {
+    bool wide;
+    // MSI Enable and Multiple Message Enable as the guest wrote them.
+    uint16_t control;
+    uint32_t address;
+    uint32_t upper;
+    uint32_t data;
+    // The guest's address and data for the processor that takes one.
+    uint64_t message;
+    struct irq_slot slot;
+};
+
+// An MSI-X table entry as the guest programs it, and whether its slot and the
+// hypervisor's message are live at the function, unmasked.
+struct vmsix_entry {
+    uint32_t address;
+    uint32_t upper;
+    uint32_t data;
+    uint32_t control;
+    uint64_t message;
+    bool armed;
+    struct irq_slot slot;
+};
+
+// A function's MSI-X. Its table's pages are the hypervisor's, which keeps
+// the guest's entries and gives the function messages of its own for those
+// the guest has unmasked while it has MSI-X enabled.
+struct vmsix {
+    bool enabled;
+    unsigned count;
+    // The table's host address, and that of the first page it is on.
+    uint64_t table;
+    uint64_t page;
+    struct vmsix_entry *entries;
 };
 
 struct vfunction {
     struct pci_function *f;
     bool hidden;
+    struct vmsi msi;
+    struct vmsix msix;
     // A 64-bit BAR at the index of its lower register; a ROM at ROM_INDEX.
     struct vbar bars[BAR_COUNT + 1];
     uint32_t bus_numbers;
@@ -165,9 +245,25 @@ static bool mappable(const struct vbar *b, uint64_t guest) {
            && layout_mmio_free(base, end - base);
 }
 
+static void map_pages(uint64_t guest, uint64_t host, uint64_t end) {
+    if (end > guest) {
+        gpt_map(guest, host, end - guest, GPT_RWX, MT_UC);
+    }
+}
+
+// Around the pages the guest reaches through the hypervisor, if any.
 static void map(const struct vbar *b) {
     uint64_t base = page_down(b->mapped);
-    gpt_map(base, page_down(b->host), page_up(b->mapped + b->size) - base, GPT_RWX, MT_UC);
+    uint64_t end = page_up(b->mapped + b->size);
+    uint64_t host = page_down(b->host);
+    if (b->trap_size == 0) {
+        map_pages(base, host, end);
+        return;
+    }
+    uint64_t trap_start = page_down(b->mapped + b->trap);
+    uint64_t trap_end = page_up(b->mapped + b->trap + b->trap_size);
+    map_pages(base, host, trap_start);
+    map_pages(trap_end, host + (trap_end - base), end);
 }
 
 static bool overlaps(const struct vbar *b, uint64_t base, uint64_t end) {
@@ -206,6 +302,11 @@ static void bar_update(struct vbar *b, bool is_rom) {
     if (want != 0) {
         b->mapped = want;
         map(b);
+    }
+    if (b->trap_size != 0 && b->trap_region >= 0) {
+        uint64_t trap_start = page_down(want + b->trap);
+        mmio_move(b->trap_region, want != 0 ? trap_start : 0,
+                  want != 0 ? page_up(want + b->trap + b->trap_size) - trap_start : 0);
     }
     gpt_flush();
 }
@@ -346,6 +447,311 @@ static bool is_kept(struct vfunction *vf, uint32_t reg) {
            || (is_bridge(vf) && reg == REG_BUS_NUMBERS);
 }
 
+static uint32_t msi_data_reg(const struct vfunction *vf) {
+    return vf->f->msi_cap + (vf->msi.wide ? MSI_DATA_WIDE : MSI_DATA_NARROW);
+}
+
+// Whether the guest has its own of the MSI register at reg.
+static bool msi_reg(const struct vfunction *vf, uint32_t reg) {
+    uint32_t cap = vf->f->msi_cap;
+    return cap != 0
+           && (reg == cap || reg == cap + MSI_ADDRESS || reg == msi_data_reg(vf)
+               || (vf->msi.wide && reg == cap + MSI_UPPER));
+}
+
+static uint32_t msi_read(struct vfunction *vf, uint32_t reg) {
+    uint32_t cap = vf->f->msi_cap;
+    if (reg == cap) {
+        uint32_t hardware = pci_cfg_read(vf->f->addr, reg, 4);
+        return (hardware & ~((uint32_t)(MSI_ENABLE | MSI_MME_MASK) << 16))
+               | (uint32_t)vf->msi.control << 16;
+    }
+    if (reg == cap + MSI_ADDRESS) {
+        return vf->msi.address;
+    }
+    return reg == msi_data_reg(vf) ? vf->msi.data : vf->msi.upper;
+}
+
+// What a guest's message does where it goes: an interrupt, or a write of its
+// data, as a function's message anywhere else is a memory write.
+static void deliver_message(uint32_t upper, uint32_t address, uint32_t data) {
+    if (upper == 0 && (address & MSI_ADDRESS_MASK) == MSI_ADDRESS_BASE) {
+        vlapic_deliver_msi(address, data);
+        return;
+    }
+    guest_phys_write((uint64_t)upper << 32 | address, &data, sizeof(data));
+}
+
+// A function sending a multiple message's index puts it in the data's low
+// bits (PCI Local Bus Specification 3.0, 6.8.3.4).
+static void msi_taken(void *ctx, unsigned index) {
+    struct vfunction *vf = ctx;
+    uint64_t message = __atomic_load_n(&vf->msi.message, __ATOMIC_ACQUIRE);
+    uint32_t data = ((uint32_t)message & ~(vf->msi.slot.count - 1u)) | index;
+    deliver_message(__atomic_load_n(&vf->msi.upper, __ATOMIC_RELAXED),
+                    (uint32_t)(message >> 32), data);
+}
+
+// The function's MSI after the guest changed it: off at the function while its
+// vectors move, then on with the hypervisor's message, its Multiple Message
+// Enable cut to what it can send.
+static void msi_update(struct vfunction *vf) {
+    struct vmsi *m = &vf->msi;
+    struct pci_addr a = vf->f->addr;
+    uint32_t cap = vf->f->msi_cap;
+    __atomic_store_n(&m->message, (uint64_t)m->address << 32 | (m->data & 0xffff),
+                     __ATOMIC_RELEASE);
+    uint16_t hardware = (uint16_t)pci_cfg_read(a, cap + MSI_CONTROL, 2);
+    unsigned capable = (hardware >> MSI_MMC_SHIFT) & 7;
+    unsigned enable = (m->control & MSI_MME_MASK) >> MSI_MME_SHIFT;
+    if (enable > capable) {
+        enable = capable;
+    }
+    uint16_t control = (uint16_t)((hardware & ~(MSI_ENABLE | MSI_MME_MASK)) | enable << MSI_MME_SHIFT);
+    unsigned count = 1u << enable;
+    if (!(m->control & MSI_ENABLE)) {
+        pci_cfg_write(a, cap + MSI_CONTROL, 2, control);
+        irq_slot_free(&m->slot);
+        return;
+    }
+    if (m->slot.cpu == NULL || m->slot.count != count) {
+        pci_cfg_write(a, cap + MSI_CONTROL, 2, control);
+        if (!irq_slot_place(&m->slot, vlapic_msi_target(m->address), count)) {
+            printf("PCI %04x:%02x:%02x.%x: no room for %u MSI vectors\n", a.segment, a.bus,
+                   a.device, a.function, count);
+            return;
+        }
+        pci_cfg_write(a, cap + MSI_ADDRESS, 4,
+                      MSI_ADDRESS_BASE | m->slot.cpu->apic_id << MSI_ADDRESS_DEST_SHIFT);
+        if (m->wide) {
+            pci_cfg_write(a, cap + MSI_UPPER, 4, 0);
+        }
+        pci_cfg_write(a, msi_data_reg(vf), 2, m->slot.vector);
+    }
+    pci_cfg_write(a, cap + MSI_CONTROL, 2, control | MSI_ENABLE);
+}
+
+static void msi_write(struct vfunction *vf, uint32_t reg, uint32_t value) {
+    uint32_t cap = vf->f->msi_cap;
+    if (reg == cap) {
+        vf->msi.control = (uint16_t)(value >> 16) & (MSI_ENABLE | MSI_MME_MASK);
+    } else if (reg == cap + MSI_ADDRESS) {
+        vf->msi.address = value & ~3u;
+    } else if (reg == msi_data_reg(vf)) {
+        vf->msi.data = value & 0xffff;
+    } else {
+        __atomic_store_n(&vf->msi.upper, value, __ATOMIC_RELAXED);
+    }
+    msi_update(vf);
+}
+
+static uint64_t mmio_read_host(uint64_t hpa, unsigned size) {
+    switch (size) {
+        case 1: {
+            return *(volatile uint8_t *)(uintptr_t)hpa;
+        }
+        case 2: {
+            return *(volatile uint16_t *)(uintptr_t)hpa;
+        }
+        case 4: {
+            return *(volatile uint32_t *)(uintptr_t)hpa;
+        }
+        default: {
+            return *(volatile uint64_t *)(uintptr_t)hpa;
+        }
+    }
+}
+
+static void mmio_write_host(uint64_t hpa, unsigned size, uint64_t value) {
+    switch (size) {
+        case 1: {
+            *(volatile uint8_t *)(uintptr_t)hpa = (uint8_t)value;
+            break;
+        }
+        case 2: {
+            *(volatile uint16_t *)(uintptr_t)hpa = (uint16_t)value;
+            break;
+        }
+        case 4: {
+            *(volatile uint32_t *)(uintptr_t)hpa = (uint32_t)value;
+            break;
+        }
+        default: {
+            *(volatile uint64_t *)(uintptr_t)hpa = value;
+            break;
+        }
+    }
+}
+
+static void msix_taken(void *ctx, unsigned index) {
+    (void)index;
+    struct vmsix_entry *e = ctx;
+    uint64_t message = __atomic_load_n(&e->message, __ATOMIC_ACQUIRE);
+    deliver_message(__atomic_load_n(&e->upper, __ATOMIC_RELAXED), (uint32_t)(message >> 32),
+                    (uint32_t)message);
+}
+
+// The function's entry after the guest changed it or MSI-X Enable: masked at
+// the function while it gets its vector and the hypervisor's message.
+static void msix_sync(struct vfunction *vf, unsigned i) {
+    struct vmsix *x = &vf->msix;
+    struct vmsix_entry *e = &x->entries[i];
+    uint64_t at = x->table + (uint64_t)i * MSIX_ENTRY_SIZE;
+    __atomic_store_n(&e->message, (uint64_t)e->address << 32 | e->data, __ATOMIC_RELEASE);
+    uint32_t control = (uint32_t)mmio_read_host(at + MSIX_ENTRY_CONTROL, 4);
+    if (!x->enabled || (e->control & MSIX_ENTRY_MASKED)) {
+        if (e->armed) {
+            mmio_write_host(at + MSIX_ENTRY_CONTROL, 4, control | MSIX_ENTRY_MASKED);
+            e->armed = false;
+        }
+        irq_slot_free(&e->slot);
+        return;
+    }
+    if (e->slot.cpu == NULL) {
+        struct pci_addr a = vf->f->addr;
+        if (!irq_slot_place(&e->slot, vlapic_msi_target(e->address), 1)) {
+            printf("PCI %04x:%02x:%02x.%x: no room for MSI-X entry %u\n", a.segment, a.bus,
+                   a.device, a.function, i);
+            return;
+        }
+        mmio_write_host(at + MSIX_ENTRY_ADDRESS, 4,
+                        MSI_ADDRESS_BASE | e->slot.cpu->apic_id << MSI_ADDRESS_DEST_SHIFT);
+        mmio_write_host(at + MSIX_ENTRY_UPPER, 4, 0);
+        mmio_write_host(at + MSIX_ENTRY_DATA, 4, e->slot.vector);
+    }
+    if (!e->armed) {
+        mmio_write_host(at + MSIX_ENTRY_CONTROL, 4, control & ~MSIX_ENTRY_MASKED);
+        e->armed = true;
+    }
+}
+
+// The table's pages: entries the guest's, anything else the function's.
+static uint64_t msix_read(struct vcpu *v, void *ctx, uint64_t offset, unsigned size) {
+    (void)v;
+    struct vfunction *vf = ctx;
+    struct vmsix *x = &vf->msix;
+    uint64_t hpa = x->page + offset;
+    uint64_t at = hpa - x->table;
+    if (at >= (uint64_t)x->count * MSIX_ENTRY_SIZE) {
+        return mmio_read_host(hpa, size);
+    }
+    spinlock_acquire(&virt.lock);
+    const struct vmsix_entry *e = &x->entries[at / MSIX_ENTRY_SIZE];
+    uint32_t words[4] = {e->address, e->upper, e->data, e->control};
+    spinlock_release(&virt.lock);
+    uint64_t value = 0;
+    memcpy(&value, (const uint8_t *)words + at % MSIX_ENTRY_SIZE, size);
+    return value;
+}
+
+static void msix_write(struct vcpu *v, void *ctx, uint64_t offset, unsigned size,
+                       uint64_t value) {
+    (void)v;
+    struct vfunction *vf = ctx;
+    struct vmsix *x = &vf->msix;
+    uint64_t hpa = x->page + offset;
+    uint64_t at = hpa - x->table;
+    if (at >= (uint64_t)x->count * MSIX_ENTRY_SIZE) {
+        mmio_write_host(hpa, size, value);
+        return;
+    }
+    spinlock_acquire(&virt.lock);
+    unsigned i = (unsigned)(at / MSIX_ENTRY_SIZE);
+    struct vmsix_entry *e = &x->entries[i];
+    uint32_t words[4] = {e->address, e->upper, e->data, e->control};
+    memcpy((uint8_t *)words + at % MSIX_ENTRY_SIZE, &value, size);
+    e->address = words[0] & ~3u;
+    __atomic_store_n(&e->upper, words[1], __ATOMIC_RELAXED);
+    e->data = words[2];
+    e->control = words[3];
+    msix_sync(vf, i);
+    spinlock_release(&virt.lock);
+}
+
+static const struct mmio_ops msix_ops = {msix_read, msix_write, false};
+
+// MSI-X Enable as the guest sets it: the entries it unmasked get their
+// vectors before the function may send, and lose them after it may not.
+static void msix_control(struct vfunction *vf, uint32_t value) {
+    struct vmsix *x = &vf->msix;
+    struct pci_addr a = vf->f->addr;
+    uint32_t reg = vf->f->msix_cap;
+    bool enable = (value >> 16 & MSIX_ENABLE) != 0;
+    if (enable == x->enabled) {
+        pci_cfg_write(a, reg, 4, value);
+        return;
+    }
+    x->enabled = enable;
+    if (!enable) {
+        pci_cfg_write(a, reg, 4, value);
+    }
+    for (unsigned i = 0; i < x->count; i++) {
+        msix_sync(vf, i);
+    }
+    if (enable) {
+        pci_cfg_write(a, reg, 4, value);
+    }
+}
+
+// Disabled, as after a reset, every entry masked at the function, the guest's
+// entries what the function held. Memory decoding is on meanwhile.
+static void msix_init(struct vfunction *vf) {
+    struct pci_function *f = vf->f;
+    struct vmsix *x = &vf->msix;
+    uint32_t control = pci_cfg_read(f->addr, f->msix_cap + MSIX_CONTROL, 2);
+    uint32_t table = pci_cfg_read(f->addr, f->msix_cap + MSIX_TABLE, 4);
+    unsigned bir = table & MSIX_BIR_MASK;
+    struct vbar *b = bir < BAR_COUNT ? &vf->bars[bir] : NULL;
+    x->count = (control & MSIX_SIZE_MASK) + 1;
+    uint64_t offset = table & ~MSIX_BIR_MASK;
+    if (b == NULL || b->size == 0 || offset + (uint64_t)x->count * MSIX_ENTRY_SIZE > b->size) {
+        x->count = 0;
+        return;
+    }
+    // Without a region of its own, the guest has the table as it is.
+    int region = mmio_register(0, 0, &msix_ops, vf);
+    if (region < 0) {
+        x->count = 0;
+        return;
+    }
+    pci_cfg_write(f->addr, f->msix_cap + MSIX_CONTROL, 2, control & ~MSIX_ENABLE);
+    x->table = b->host + offset;
+    x->page = page_down(x->table);
+    mm_map_device(x->page, page_up(x->table + (uint64_t)x->count * MSIX_ENTRY_SIZE) - x->page);
+    x->entries = kmalloc(x->count * sizeof(*x->entries));
+    uint32_t command = pci_cfg_read(f->addr, REG_COMMAND, 2);
+    pci_cfg_write(f->addr, REG_COMMAND, 2, command | COMMAND_MEMORY);
+    for (unsigned i = 0; i < x->count; i++) {
+        struct vmsix_entry *e = &x->entries[i];
+        uint64_t at = x->table + (uint64_t)i * MSIX_ENTRY_SIZE;
+        e->address = (uint32_t)mmio_read_host(at + MSIX_ENTRY_ADDRESS, 4);
+        e->upper = (uint32_t)mmio_read_host(at + MSIX_ENTRY_UPPER, 4);
+        e->data = (uint32_t)mmio_read_host(at + MSIX_ENTRY_DATA, 4);
+        e->control = (uint32_t)mmio_read_host(at + MSIX_ENTRY_CONTROL, 4);
+        mmio_write_host(at + MSIX_ENTRY_CONTROL, 4, e->control | MSIX_ENTRY_MASKED);
+        e->slot = (struct irq_slot){.taken = msix_taken, .ctx = e};
+    }
+    pci_cfg_write(f->addr, REG_COMMAND, 2, command);
+    b->trap = offset;
+    b->trap_size = (uint64_t)x->count * MSIX_ENTRY_SIZE;
+    b->trap_region = region;
+}
+
+static void msi_init(struct vfunction *vf) {
+    struct vmsi *m = &vf->msi;
+    struct pci_addr a = vf->f->addr;
+    uint32_t cap = vf->f->msi_cap;
+    uint16_t control = (uint16_t)pci_cfg_read(a, cap + MSI_CONTROL, 2);
+    m->wide = (control & MSI_WIDE) != 0;
+    // Disabled, as after a reset: the guest enables what it uses.
+    m->control = control & MSI_MME_MASK;
+    pci_cfg_write(a, cap + MSI_CONTROL, 2, control & ~MSI_ENABLE);
+    m->address = pci_cfg_read(a, cap + MSI_ADDRESS, 4);
+    m->upper = m->wide ? pci_cfg_read(a, cap + MSI_UPPER, 4) : 0;
+    m->data = pci_cfg_read(a, msi_data_reg(vf), 2);
+    m->slot = (struct irq_slot){.taken = msi_taken, .ctx = vf};
+}
+
 // Resizing a BAR would move it on the host, behind the guest's back.
 static bool in_rebar(const struct vfunction *vf, uint32_t offset) {
     uint32_t cap = vf->f->rebar_ext_cap;
@@ -358,6 +764,9 @@ static uint32_t function_read(struct pci_addr a, uint32_t offset, unsigned size)
         return all_ones(size);
     }
     uint32_t reg = offset & ~3u;
+    if (vf != NULL && msi_reg(vf, reg)) {
+        return (msi_read(vf, reg) >> (8 * (offset & 3))) & all_ones(size);
+    }
     if (vf == NULL || offset >= REG_HEADER_END || !is_kept(vf, reg)) {
         return pci_cfg_read(a, offset, size);
     }
@@ -370,12 +779,20 @@ static void function_write(struct pci_addr a, uint32_t offset, unsigned size, ui
         return;
     }
     uint32_t reg = offset & ~3u;
+    unsigned shift = 8 * (offset & 3);
+    uint32_t mask = all_ones(size) << shift;
+    if (vf != NULL && msi_reg(vf, reg)) {
+        msi_write(vf, reg, (msi_read(vf, reg) & ~mask) | ((value << shift) & mask));
+        return;
+    }
+    if (vf != NULL && vf->msix.count != 0 && reg == vf->f->msix_cap) {
+        msix_control(vf, (pci_cfg_read(a, reg, 4) & ~mask) | ((value << shift) & mask));
+        return;
+    }
     if (vf == NULL || offset >= REG_HEADER_END || !is_kept(vf, reg)) {
         pci_cfg_write(a, offset, size, value);
         return;
     }
-    unsigned shift = 8 * (offset & 3);
-    uint32_t mask = all_ones(size) << shift;
     kept_write(vf, reg, (kept_read(vf, reg) & ~mask) | ((value << shift) & mask));
 }
 
@@ -546,6 +963,9 @@ static void vfunction_init(struct vfunction *vf, struct pci_function *f,
     if (f->header_type != HEADER_DEVICE && f->header_type != HEADER_BRIDGE) {
         return;
     }
+    if (f->msi_cap != 0) {
+        msi_init(vf);
+    }
     for (unsigned i = 0; i < f->bar_count && i < BAR_COUNT; i++) {
         const struct pci_bar *bar = &f->bars[i];
         if ((bar->kind != PCI_BAR_MEM32 && bar->kind != PCI_BAR_MEM64) || bar->size == 0) {
@@ -568,6 +988,9 @@ static void vfunction_init(struct vfunction *vf, struct pci_function *f,
             .guest = pf->rom,
             .enabled = (pci_cfg_read(f->addr, reg, 4) & ROM_ENABLE) != 0,
         };
+    }
+    if (f->msix_cap != 0) {
+        msix_init(vf);
     }
     if (f->header_type == HEADER_BRIDGE) {
         vf->bus_numbers = pci_cfg_read(f->addr, REG_BUS_NUMBERS, 4);
