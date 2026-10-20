@@ -42,6 +42,12 @@
 #include <virt/vmx.h>
 
 #define MSR_IA32_CR_PAT 0x277
+#define MSR_DEBUGCTL 0x1d9
+
+#define DEBUGCTL_LBR (1u << 0)
+#define DEBUGCTL_BTF (1u << 1)
+#define DR6_BS (1ull << 14)
+#define DR7_GD (1u << 13)
 
 bool virt_vmx;
 
@@ -329,10 +335,27 @@ bool vcpu_can_single_step(void) {
     return !virt_vmx || vmx_monitor_trap_supported();
 }
 
+// The guest's IA32_DEBUGCTL: VMX switches it, as SVM does with LBR
+// virtualisation; without, the processor's is the guest's.
+static uint64_t guest_debugctl(struct vcpu *v) {
+    if (virt_vmx) {
+        return vmx_read(VMCS_GUEST_DEBUGCTL);
+    }
+    return svm_lbr_virtualisation ? v->vmcb->save.dbgctl : rdmsr(MSR_DEBUGCTL);
+}
+
+static void set_guest_debugctl(struct vcpu *v, uint64_t value) {
+    if (virt_vmx) {
+        vmx_write(VMCS_GUEST_DEBUGCTL, value);
+    } else if (svm_lbr_virtualisation) {
+        v->vmcb->save.dbgctl = value;
+    } else {
+        wrmsr(MSR_DEBUGCTL, value);
+    }
+}
+
 // The faults a stepped instruction may raise, which SVM intercepts so that the
 // step ends there.
-#define DR6_BS (1ull << 14)
-
 #define STEP_EXCEPTIONS (1u << 0 | 1u << 1 | 1u << 7 | 1u << 12 | 1u << 13 | 1u << 14 \
                          | 1u << 16 | 1u << 17 | 1u << 19)
 
@@ -680,13 +703,23 @@ void vcpu_debug_trap(struct vcpu *v, uint64_t dr6) {
     if (nvmx_exception(v, 1, false, 0, dr6)) {
         return;
     }
+    // Injection leaves the debug registers and IA32_DEBUGCTL alone (SDM
+    // 325462-093 Vol. 3C, 29.6.1.1), where delivering a debug exception sets
+    // DR6's bits and clears DR7.GD (Vol. 3B, 20.2.4) and DEBUGCTL's LBR and BTF
+    // (20.4.2 and 20.4.3; APM 24593 rev. 3.45, 13.1.6).
     if (virt_vmx) {
         // VMX switches DR7 but not DR6, so the processor's is the guest's.
         uint64_t value;
         asm volatile ("mov %%dr6, %0" : "=r"(value));
         asm volatile ("mov %0, %%dr6" :: "r"(value | dr6));
+        vmx_write(VMCS_GUEST_DR7, vmx_read(VMCS_GUEST_DR7) & ~(uint64_t)DR7_GD);
     } else {
         v->vmcb->save.dr6 |= dr6;
+        v->vmcb->save.dr7 &= ~(uint64_t)DR7_GD;
+    }
+    uint64_t debugctl = guest_debugctl(v);
+    if (debugctl & (DEBUGCTL_LBR | DEBUGCTL_BTF)) {
+        set_guest_debugctl(v, debugctl & ~(uint64_t)(DEBUGCTL_LBR | DEBUGCTL_BTF));
     }
     vcpu_inject_exception(v, 1, false, 0);
 }
