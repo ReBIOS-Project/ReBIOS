@@ -120,6 +120,7 @@ struct vcpu {
     bool step_tf;
     uint64_t step_dr6;
     uint32_t step_exceptions;
+    uint64_t step_debugctl;
 
     // The guest's MTRRs: the default type, the fixed ranges, and the variable
     // ranges' bases and masks.

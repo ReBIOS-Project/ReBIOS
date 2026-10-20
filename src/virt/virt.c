@@ -372,12 +372,21 @@ void vcpu_single_step(struct vcpu *v, bool on) {
         v->step_tf = (vmcb->save.rflags & RFLAGS_TF) != 0;
         v->step_dr6 = vmcb->save.dr6;
         v->step_exceptions = vmcb->control.intercept_exceptions;
+        // The guest's BTF would let the instruction run on to the next branch
+        // (APM 24593 rev. 3.45, 13.1.6.2).
+        v->step_debugctl = guest_debugctl(v);
+        if (v->step_debugctl & DEBUGCTL_BTF) {
+            set_guest_debugctl(v, v->step_debugctl & ~(uint64_t)DEBUGCTL_BTF);
+        }
         vmcb->save.rflags |= RFLAGS_TF;
         vmcb->control.intercept_exceptions |= STEP_EXCEPTIONS;
         return;
     }
     if (!v->step_tf) {
         vmcb->save.rflags &= ~(uint64_t)RFLAGS_TF;
+    }
+    if (v->step_debugctl & DEBUGCTL_BTF) {
+        set_guest_debugctl(v, v->step_debugctl);
     }
     vmcb->save.dr6 = v->step_dr6;
     vmcb->control.intercept_exceptions = v->step_exceptions;
@@ -690,11 +699,15 @@ void vcpu_load_mode(struct vcpu *v, const struct vcpu_mode *mode) {
 }
 
 bool vcpu_guest_tf(struct vcpu *v) {
-    // SVM's stepping sets TF for itself, keeping the guest's aside.
+    // SVM's stepping sets TF and clears BTF for itself, keeping the guest's
+    // aside.
     if (!virt_vmx && v->stepping) {
-        return v->step_tf;
+        return v->step_tf && !(v->step_debugctl & DEBUGCTL_BTF);
     }
-    return (vcpu_rflags(v) & RFLAGS_TF) != 0;
+    // With BTF, TF steps only branches (SDM 325462-093 Vol. 3B, 20.4.3; APM
+    // 24593 rev. 3.45, 13.1.6.2), and the hypervisor carries out none for the
+    // guest.
+    return (vcpu_rflags(v) & RFLAGS_TF) && !(guest_debugctl(v) & DEBUGCTL_BTF);
 }
 
 void vcpu_debug_trap(struct vcpu *v, uint64_t dr6) {

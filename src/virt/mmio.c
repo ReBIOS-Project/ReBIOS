@@ -431,7 +431,7 @@ void mmio_step_done(struct vcpu *v) {
         nvmx_monitor_trap(v, false);
     }
     // SVM's stepping took the trap the guest's own TF asked for.
-    if (completed && !virt_vmx && v->step_tf) {
+    if (completed && !virt_vmx && vcpu_guest_tf(v)) {
         vcpu_step_trap(v);
     }
 }
