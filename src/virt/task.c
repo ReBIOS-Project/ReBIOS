@@ -152,46 +152,86 @@ static bool desc_read(struct switcher *s, uint16_t selector, struct desc *d, uin
     return desc_linear(s, selector, linear) && system_read(s, *linear, d, sizeof(*d));
 }
 
+static bool null_selector(uint16_t selector) {
+    return (selector & ~SELECTOR_RPL) == 0 && !(selector & SELECTOR_TI);
+}
+
 // The type in a TSS descriptor's second dword, busy or available.
-static bool tss_mark(struct switcher *s, uint16_t selector, bool busy) {
+static void tss_mark(struct switcher *s, uint16_t selector, bool busy) {
     struct desc d;
     uint64_t linear;
     if (!desc_read(s, selector, &d, &linear)) {
-        return false;
+        return;
     }
     if (busy) {
         d.hi |= DESC_TYPE_BUSY << 8;
     } else {
         d.hi &= ~(DESC_TYPE_BUSY << 8);
     }
-    return system_write(s, linear + 4, &d.hi, sizeof(d.hi));
+    system_write(s, linear + 4, &d.hi, sizeof(d.hi));
+}
+
+// The LDT a TSS's LDT selector names, from the GDT, or false where it does not
+// name a present one.
+static bool ldt_lookup(struct switcher *s, uint16_t selector, struct segment *ldt) {
+    struct segment gdtr;
+    vcpu_get_seg(s->v, SEG_GDTR, &gdtr);
+    uint32_t index = selector & ~7u;
+    if ((selector & SELECTOR_TI) || (uint64_t)index + 7 > gdtr.limit) {
+        return false;
+    }
+    struct desc d;
+    if (!system_read(s, gdtr.base + index, &d, sizeof(d))) {
+        return false;
+    }
+    uint32_t attrib = desc_attrib(d);
+    if ((attrib & DESC_S) || (attrib & DESC_TYPE_MASK) != DESC_TYPE_LDT || !(attrib & DESC_P)) {
+        return false;
+    }
+    *ldt = (struct segment){selector, attrib, desc_limit(d), desc_base(d)};
+    return true;
 }
 
 static struct segment v86_segment(uint16_t selector) {
     return (struct segment){selector, 0xf3, 0xffff, (uint64_t)selector << 4};
 }
 
-// Loads a segment register of the new task with the checks of SDM 325462-093
+// Step 9 loads every selector, step 14 the descriptors (SDM 325462-093 Vol. 3A,
+// 10.3), so the registers the switch does not get to keep the new selectors
+// with their old descriptors, as Linux 7.3's KVM leaves them.
+static void set_selector(struct vcpu *v, enum seg_reg reg, uint16_t selector) {
+    struct segment seg;
+    vcpu_get_seg(v, reg, &seg);
+    seg.selector = selector;
+    vcpu_set_seg(v, reg, &seg);
+}
+
+// Loads the descriptor of a segment register with the checks of SDM 325462-093
 // Vol. 3A, Tables 7-6 and 10-1; data and non-conforming code against CPL and
 // RPL both, as Linux 7.3's KVM and other segment loads check them. They come
-// after the commit point, so a failed one raises its exception in the new task.
-static void load_seg(struct switcher *s, enum seg_reg reg, uint16_t selector, unsigned cpl) {
-    struct segment seg = {selector, SEG_UNUSABLE, 0, 0};
-    if ((selector & ~SELECTOR_RPL) == 0 && !(selector & SELECTOR_TI)) {
+// after the commit point, so the first failure raises its exception in the new
+// task, and the registers after it are left.
+static bool load_seg(struct switcher *s, enum seg_reg reg, uint16_t selector, unsigned cpl) {
+    if (s->faulted) {
+        return false;
+    }
+    if (null_selector(selector)) {
         if (reg == SEG_CS || reg == SEG_SS) {
-            fault(s, VECTOR_TS, selector & ~SELECTOR_RPL);
+            fault(s, VECTOR_TS, 0);
+            return false;
         }
+        struct segment seg = {selector, SEG_UNUSABLE, 0, 0};
         vcpu_set_seg(s->v, reg, &seg);
-        return;
+        return true;
     }
     struct desc d;
     uint64_t linear;
     if (!desc_linear(s, selector, &linear)) {
         fault(s, VECTOR_TS, selector & ~SELECTOR_RPL);
-        return;
+        return false;
     }
     if (!system_read(s, linear, &d, sizeof(d))) {
-        return;
+        return false;
     }
     uint32_t attrib = desc_attrib(d);
     unsigned type = attrib & DESC_TYPE_MASK;
@@ -210,42 +250,29 @@ static void load_seg(struct switcher *s, enum seg_reg reg, uint16_t selector, un
     }
     if (!ok) {
         fault(s, VECTOR_TS, selector & ~SELECTOR_RPL);
-        return;
+        return false;
     }
     if (!(attrib & DESC_P)) {
         fault(s, reg == SEG_SS ? VECTOR_SS : VECTOR_NP, selector & ~SELECTOR_RPL);
-        return;
+        return false;
     }
     if (!(type & DESC_ACCESSED)) {
         d.hi |= DESC_ACCESSED << 8;
         attrib |= DESC_ACCESSED;
         system_write(s, linear + 4, &d.hi, sizeof(d.hi));
     }
-    seg = (struct segment){selector, attrib, desc_limit(d), desc_base(d)};
+    struct segment seg = {selector, attrib, desc_limit(d), desc_base(d)};
     vcpu_set_seg(s->v, reg, &seg);
+    return true;
 }
 
+// LDTR first, which Table 10-1 checks before the other registers. A bad LDT
+// leaves LDTR unusable, as VMX takes no LDTR with the TI flag set.
 static void load_ldt(struct switcher *s, uint16_t selector) {
     s->ldtr = (struct segment){selector, SEG_UNUSABLE, 0, 0};
-    if ((selector & ~SELECTOR_RPL) != 0) {
-        struct desc d;
-        uint64_t linear;
-        struct segment gdtr;
-        vcpu_get_seg(s->v, SEG_GDTR, &gdtr);
-        uint32_t index = selector & ~7u;
-        uint32_t attrib = 0;
-        bool ok = !(selector & SELECTOR_TI) && (uint64_t)index + 7 <= gdtr.limit;
-        if (ok) {
-            linear = gdtr.base + index;
-            ok = system_read(s, linear, &d, sizeof(d));
-            attrib = desc_attrib(d);
-            ok = ok && !(attrib & DESC_S) && (attrib & DESC_TYPE_MASK) == DESC_TYPE_LDT;
-        }
-        if (!ok || !(attrib & DESC_P)) {
-            fault(s, VECTOR_TS, selector & ~SELECTOR_RPL);
-        } else {
-            s->ldtr = (struct segment){selector, attrib, desc_limit(d), desc_base(d)};
-        }
+    if (!null_selector(selector) && !ldt_lookup(s, selector, &s->ldtr)) {
+        s->ldtr = (struct segment){selector, SEG_UNUSABLE, 0, 0};
+        fault(s, VECTOR_TS, selector & ~SELECTOR_RPL);
     }
     vcpu_set_seg(s->v, SEG_LDTR, &s->ldtr);
 }
@@ -271,6 +298,42 @@ void task_switch(struct vcpu *v, uint16_t selector, enum task_source source,
     if (!system_read(&s, new_base, image, new32 ? TSS32_SIZE : TSS16_SIZE)) {
         return;
     }
+
+    uint32_t new_regs[8];
+    uint32_t new_eip;
+    uint32_t new_eflags;
+    uint32_t cr3 = 0;
+    uint16_t sels[6] = {0};
+    uint16_t ldt;
+    if (new32) {
+        memcpy(&cr3, image + TSS32_CR3, 4);
+        memcpy(&new_eip, image + TSS32_EIP, 4);
+        memcpy(&new_eflags, image + TSS32_EFLAGS, 4);
+        memcpy(new_regs, image + TSS32_GPRS, sizeof(new_regs));
+        for (unsigned i = 0; i < 6; i++) {
+            memcpy(&sels[i], image + TSS32_SEGS + i * 4, 2);
+        }
+        memcpy(&ldt, image + TSS32_LDT, 2);
+    } else {
+        uint16_t words[2];
+        memcpy(words, image + TSS16_IP, sizeof(words));
+        new_eip = words[0];
+        new_eflags = words[1];
+        for (unsigned i = 0; i < 8; i++) {
+            uint16_t value;
+            memcpy(&value, image + TSS16_GPRS + i * 2, 2);
+            new_regs[i] = value;
+        }
+        for (unsigned i = 0; i < 4; i++) {
+            memcpy(&sels[i], image + TSS16_SEGS + i * 2, 2);
+        }
+        memcpy(&ldt, image + TSS16_LDT, 2);
+    }
+    new_eflags = (new_eflags & EFLAGS_DEFINED) | RFLAGS_FIXED;
+    if (source == TASK_CALL || source == TASK_GATE) {
+        new_eflags |= RFLAGS_NT;
+    }
+    bool v86 = (new_eflags & RFLAGS_VM) != 0;
 
     // The old task's state, as it resumes.
     uint64_t rip = vcpu_rip(v);
@@ -319,14 +382,6 @@ void task_switch(struct vcpu *v, uint16_t selector, enum task_source source,
             return;
         }
     }
-
-    // Busy flags and the link, SDM 325462-093 Vol. 3A, Table 10-2.
-    if ((source == TASK_JMP || source == TASK_IRET) && !tss_mark(&s, tr.selector, false)) {
-        return;
-    }
-    if (source != TASK_IRET && !tss_mark(&s, selector, true)) {
-        return;
-    }
     if (source == TASK_CALL || source == TASK_GATE) {
         if (!system_write(&s, new_base, &tr.selector, sizeof(tr.selector))) {
             return;
@@ -337,43 +392,8 @@ void task_switch(struct vcpu *v, uint16_t selector, enum task_source source,
     // the new task.
     struct segment new_tr = {selector, new_attrib | DESC_TYPE_BUSY, new_limit, new_base};
     vcpu_set_seg(v, SEG_TR, &new_tr);
-
-    uint32_t new_regs[8];
-    uint32_t new_eip;
-    uint32_t new_eflags;
-    uint16_t sels[6] = {0};
-    uint16_t ldt;
-    if (new32) {
-        uint32_t cr3;
-        memcpy(&cr3, image + TSS32_CR3, 4);
-        if (vcpu_cr0(v) & CR0_PG) {
-            vmx_load_guest_cr3(cr3);
-        }
-        memcpy(&new_eip, image + TSS32_EIP, 4);
-        memcpy(&new_eflags, image + TSS32_EFLAGS, 4);
-        memcpy(new_regs, image + TSS32_GPRS, sizeof(new_regs));
-        for (unsigned i = 0; i < 6; i++) {
-            memcpy(&sels[i], image + TSS32_SEGS + i * 4, 2);
-        }
-        memcpy(&ldt, image + TSS32_LDT, 2);
-    } else {
-        uint16_t words[2];
-        memcpy(words, image + TSS16_IP, sizeof(words));
-        new_eip = words[0];
-        new_eflags = words[1];
-        for (unsigned i = 0; i < 8; i++) {
-            uint16_t value;
-            memcpy(&value, image + TSS16_GPRS + i * 2, 2);
-            new_regs[i] = value;
-        }
-        for (unsigned i = 0; i < 4; i++) {
-            memcpy(&sels[i], image + TSS16_SEGS + i * 2, 2);
-        }
-        memcpy(&ldt, image + TSS16_LDT, 2);
-    }
-    new_eflags = (new_eflags & EFLAGS_DEFINED) | RFLAGS_FIXED;
-    if (source == TASK_CALL || source == TASK_GATE) {
-        new_eflags |= RFLAGS_NT;
+    if (new32 && (vcpu_cr0(v) & CR0_PG)) {
+        vmx_load_guest_cr3(cr3);
     }
     vcpu_set_rflags(v, new_eflags);
     vcpu_set_rip(v, new_eip);
@@ -384,18 +404,32 @@ void task_switch(struct vcpu *v, uint16_t selector, enum task_source source,
             gpr[i] = new_regs[i];
         }
     }
-
+    for (unsigned i = 0; i < 6; i++) {
+        set_selector(v, tss_segs[i], sels[i]);
+    }
     load_ldt(&s, ldt);
-    if (new_eflags & RFLAGS_VM) {
+
+    // The busy flags, SDM 325462-093 Vol. 3A, Table 10-2.
+    if (source == TASK_JMP || source == TASK_IRET) {
+        tss_mark(&s, tr.selector, false);
+    }
+    if (source != TASK_IRET) {
+        tss_mark(&s, selector, true);
+    }
+
+    if (v86) {
         for (unsigned i = 0; i < 6; i++) {
             struct segment seg = v86_segment(sels[i]);
             vcpu_set_seg(v, tss_segs[i], &seg);
         }
     } else {
-        // CS's RPL is the new CPL, which SS's checks need first.
+        // CS's RPL is the new CPL, which SS's checks need first. Where CS
+        // loads but SS does not, SS gets the new CPL, which VMX takes from it.
         unsigned cpl = sels[1] & SELECTOR_RPL;
-        load_seg(&s, SEG_CS, sels[1], cpl);
-        load_seg(&s, SEG_SS, sels[2], cpl);
+        if (load_seg(&s, SEG_CS, sels[1], cpl) && !load_seg(&s, SEG_SS, sels[2], cpl)) {
+            struct segment ss = {sels[2], SEG_UNUSABLE | cpl << 5, 0, 0};
+            vcpu_set_seg(v, SEG_SS, &ss);
+        }
         load_seg(&s, SEG_DS, sels[3], cpl);
         load_seg(&s, SEG_ES, sels[0], cpl);
         load_seg(&s, SEG_FS, sels[4], cpl);
