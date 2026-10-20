@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+
 #ifndef IOMMU__REMAP_H
 #define IOMMU__REMAP_H
 
@@ -22,16 +23,20 @@
 #include <stdbool.h>
 
 // Interrupt remapping by the IOMMUs, where they all can: interrupt messages
-// then name entries of a table of the hypervisor's, and compatibility format
-// ones are blocked, whatever device sends them.
+// then name entries of tables of the hypervisor's, and other ones are blocked,
+// whatever device sends them. AMD-Vi's starts once the I/O APICs are known.
+void remap_init(void);
 bool remap_on(void);
+// The requester ID that an I/O APIC's (by its APIC ID) or an HPET's (by its
+// number) messages carry, as the firmware's tables give it, or -1.
+int32_t remap_requester(uint8_t type, uint8_t id);
 // count consecutive entries for the interrupts of a requester ID, or -1.
-int remap_alloc(uint16_t requester, unsigned count);
-void remap_free(uint16_t requester, int index, unsigned count);
+int remap_alloc(int32_t requester, unsigned count);
+void remap_free(int32_t requester, int index, unsigned count);
 // Points an entry at a vector on the processor with an APIC ID.
-void remap_set(uint16_t requester, int index, uint32_t apic_id, uint8_t vector, bool level);
+void remap_set(int32_t requester, int index, uint32_t apic_id, uint8_t vector, bool level);
 // The message, and the I/O APIC entry, that name an entry.
-void remap_message(uint16_t requester, int index, uint32_t *address, uint32_t *data);
-uint64_t remap_rte(uint16_t requester, int index, uint8_t vector, bool level, bool active_low);
+void remap_message(int32_t requester, int index, uint32_t *address, uint32_t *data);
+uint64_t remap_rte(int32_t requester, int index, uint8_t vector, bool level, bool active_low);
 
 #endif

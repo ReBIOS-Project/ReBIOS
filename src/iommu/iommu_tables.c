@@ -1112,3 +1112,13 @@ const struct iommu_device_range *iommu_range_for(uint16_t segment, uint16_t rid)
     }
     return NULL;
 }
+
+const struct iommu_special_device *iommu_special_for(uint8_t type, uint8_t id) {
+    for (uint32_t i = 0; i < tables.special_count; i++) {
+        const struct iommu_special_device *d = &tables.specials[i];
+        if (d->type == type && d->id == id) {
+            return d;
+        }
+    }
+    return NULL;
+}

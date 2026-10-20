@@ -77,10 +77,11 @@ struct irq_slot {
     // A power of two, which the block is aligned to.
     uint8_t count;
     // Whether interrupt remapping entries [remap, remap + count) back the
-    // block, for messages carrying the requester ID requester.
+    // block, for messages carrying the requester ID requester (-1 where none
+    // is known).
     bool remapped;
     uint16_t remap;
-    uint16_t requester;
+    int32_t requester;
     // Called on the processor that took one of the vectors, before its EOI,
     // with the vector's index in the block.
     void (*taken)(void *ctx, unsigned index);

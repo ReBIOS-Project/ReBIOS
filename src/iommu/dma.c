@@ -169,6 +169,9 @@ void dma_init(void) {
         }
     } else if (kind == IOMMU_KIND_AMD) {
         usable = amdvi_probe(tables, &leaf_level_max);
+        if (usable) {
+            amdvi_start();
+        }
     }
     if (!usable) {
         panic("No IOMMU can remap DMA\n");

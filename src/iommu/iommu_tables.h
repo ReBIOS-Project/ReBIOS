@@ -141,4 +141,8 @@ const struct iommu_tables *iommu_tables_parse(void);
 // found, or NULL if no unit translates it.
 const struct iommu_device_range *iommu_range_for(uint16_t segment, uint16_t rid);
 
+// The special device of a type and identity, of those iommu_tables_parse()
+// found, or NULL.
+const struct iommu_special_device *iommu_special_for(uint8_t type, uint8_t id);
+
 #endif

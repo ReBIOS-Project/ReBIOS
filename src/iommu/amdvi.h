@@ -26,13 +26,27 @@
 // largest level of leaf all of them take (0 4KiB, 1 2MiB, 2 1GiB).
 bool amdvi_probe(const struct iommu_tables *tables, int *leaf_level);
 
+// Takes the units over from the firmware, DMA and interrupts passing
+// untranslated meanwhile.
+void amdvi_start(void);
+
 // Has every unit translate all DMA through the 4-level host page table at
-// root, taking the units over from the firmware.
+// root, and, with remapping on, block the interrupts no table covers.
 void amdvi_enable(uint64_t root);
 
 // Makes the units see changes to the tables made while they translate.
 void amdvi_flush(void);
 
 void amdvi_report_faults(void);
+
+// Interrupt remapping, once the I/O APICs are known: tables per device ID, of
+// the requester IDs that interrupt messages carry.
+void amdvi_remap_start(void);
+bool amdvi_remap_on(void);
+int amdvi_remap_alloc(int32_t requester, unsigned count);
+void amdvi_remap_free(int32_t requester, int index, unsigned count);
+void amdvi_remap_set(int32_t requester, int index, uint32_t apic_id, uint8_t vector);
+void amdvi_remap_message(int index, uint32_t *address, uint32_t *data);
+uint64_t amdvi_remap_rte(int index, bool level, bool active_low);
 
 #endif

@@ -27,6 +27,7 @@
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
 #include <iommu/dma.h>
+#include <iommu/remap.h>
 #include <lib/log.h>
 #include <lib/time.h>
 #include <sys/cpu.h>
@@ -86,6 +87,7 @@ static void bsp_main(void *arg) {
     lapic_host_init(VLAPIC_SPURIOUS_VECTOR, VLAPIC_TIMER_VECTOR);
     smp_start_aps();
     ioapic_init();
+    remap_init();
     vioapic_init();
     irq_init();
     hpet_init();

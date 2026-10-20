@@ -25,6 +25,7 @@
 #include <hw/acpi.h>
 #include <hw/ioapic.h>
 #include <hw/lapic.h>
+#include <iommu/iommu_tables.h>
 #include <iommu/remap.h>
 #include <lib/heap.h>
 #include <lib/log.h>
@@ -158,6 +159,8 @@ static void routes_init(void) {
         if (io != NULL) {
             routes[gsi].io = io;
             routes[gsi].pin = pin;
+            routes[gsi].slot.requester = remap_requester(IOMMU_SPECIAL_IOAPIC, io->id);
+            routes[gsi].own.requester = routes[gsi].slot.requester;
         }
     }
     for (int irq = 0; irq < ISA_IRQS && (uint32_t)irq < route_count; irq++) {
@@ -367,7 +370,7 @@ void irq_host_interrupt(uint8_t vector) {
             r->asserted = true;
             r->host_rte |= IOAPIC_RTE_MASKED;
             ioapic_rte_write(r->io, r->pin, r->host_rte);
-            ioapic_eoi(r->io, vector);
+            ioapic_eoi(r->io, (uint8_t)r->host_rte);
         }
         level = true;
     }
@@ -465,7 +468,8 @@ bool irq_extint_pending(struct vcpu *v) {
 
 // An interrupt of a mirrored entry: level-triggered ones held masked at the
 // host until the guest's EOI, before the processor's EOI lets the line in
-// again.
+// again. That EOI reaches the entry by its vector field, which AMD-Vi's
+// remapping fills with an index instead: there the I/O APIC is told directly.
 static void mirror_taken(void *ctx, unsigned index) {
     (void)index;
     struct route *r = ctx;
@@ -478,6 +482,9 @@ static void mirror_taken(void *ctx, unsigned index) {
         r->held = true;
         r->host_rte |= IOAPIC_RTE_MASKED;
         ioapic_rte_write(r->io, r->pin, r->host_rte);
+        if ((uint8_t)r->host_rte != r->slot.vector) {
+            ioapic_eoi(r->io, (uint8_t)r->host_rte);
+        }
     }
     spinlock_release(&lock);
     if (deliver) {
@@ -671,7 +678,7 @@ void irq_device_interrupt(void) {
         // asserted until the handler has dealt with its device.
         ioapic_rte_write(r->io, r->pin, r->host_rte | IOAPIC_RTE_MASKED);
         if (r->host_rte & IOAPIC_RTE_LEVEL) {
-            ioapic_eoi(r->io, VLAPIC_DEVICE_VECTOR);
+            ioapic_eoi(r->io, (uint8_t)r->host_rte);
         }
     }
     lapic_eoi();
