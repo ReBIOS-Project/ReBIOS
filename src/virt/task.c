@@ -62,6 +62,9 @@
 #define SELECTOR_TI (1u << 2)
 #define SELECTOR_RPL 3u
 
+// The EFLAGS bits that are not reserved (SDM 325462-093 Vol. 1, Figure 3-8).
+#define EFLAGS_DEFINED 0x3f7fd5u
+
 // The segment registers in the order both TSS formats keep them.
 static const enum seg_reg tss_segs[] = {SEG_ES, SEG_CS, SEG_SS, SEG_DS, SEG_FS, SEG_GS};
 
@@ -368,7 +371,7 @@ void task_switch(struct vcpu *v, uint16_t selector, enum task_source source,
         }
         memcpy(&ldt, image + TSS16_LDT, 2);
     }
-    new_eflags |= RFLAGS_FIXED;
+    new_eflags = (new_eflags & EFLAGS_DEFINED) | RFLAGS_FIXED;
     if (source == TASK_CALL || source == TASK_GATE) {
         new_eflags |= RFLAGS_NT;
     }
