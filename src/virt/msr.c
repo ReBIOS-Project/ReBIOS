@@ -89,6 +89,17 @@
 #define PLATFORM_INFO_KNOWN 0x00ffff077480ff00ull
 #define PLATFORM_INFO_CPUID_FAULT (1ull << 31)
 
+// IA32_PERF_CAPABILITIES' fields the guest sees: those SDM 325462-093 Vol. 3B,
+// 22.8 defines (bit 18, TSX_ADDRESS, only SDM 325462-093 Vol. 4, Table 2-2
+// names), but for the performance metrics where the guest lacks
+// MSR_PERF_METRICS, and PEBS output into Intel PT where it lacks PT.
+#define CPUID_1_ECX_PDCM (1u << 15)
+#define MSR_IA32_PERF_CAPABILITIES 0x345
+#define PERF_CAPABILITIES_KNOWN 0xbffffull
+#define PERF_CAPABILITIES_PERF_METRICS (1ull << 15)
+#define PERF_CAPABILITIES_PEBS_OUTPUT_PT (1ull << 16)
+#define MSR_PERF_METRICS 0x329
+
 // AMD's microcode patch loader, which loads the patch at the linear address
 // written (Linux 7.3's MSR_AMD64_PATCH_LOADER): the guest's writes load
 // nothing, as VMX has Intel's do (SDM 325462-093 Vol. 3C, 28.3), so that the
@@ -236,6 +247,7 @@ static bool lbr_hidden;
 // processor's reserved bits, which a write in the hypervisor, undone at once,
 // checks.
 static bool perf_global_kept;
+static bool perf_capabilities;
 static bool pstates_read_only;
 // The tables of the processor's model-specific MSRs, where it has any.
 static const struct msr_model *model;
@@ -304,6 +316,15 @@ static void mpx_init(void) {
     virt_intercept_msr(MSR_IA32_BNDCFGS, true, true);
 }
 
+static void perf_capabilities_init(void) {
+    uint64_t capabilities;
+    perf_capabilities = (cpuid(1, 0).ecx & CPUID_1_ECX_PDCM)
+                        && rdmsr_safe(MSR_IA32_PERF_CAPABILITIES, &capabilities);
+    if (perf_capabilities) {
+        virt_intercept_msr(MSR_IA32_PERF_CAPABILITIES, true, false);
+    }
+}
+
 // The supervisor state components XSAVES and XRSTORS handle: only those the
 // guest gets, as XRSTORS would load PT's IA32_RTIT_CTL, for one.
 static void xss_init(void) {
@@ -365,6 +386,9 @@ void msr_init(void) {
         virt_intercept_msr(MSR_AMD_SMM_CTL, true, true);
         virt_intercept_msr(MSR_AMD_SVM_KEY, true, true);
         virt_intercept_msr(MSR_AMD_SMM_KEY, true, true);
+    }
+    if (virt_vmx) {
+        perf_capabilities_init();
     }
     if (virt_vmx && vmx_perf_global_switched() && !vmx_perf_global_saved()) {
         perf_global_kept = true;
@@ -665,6 +689,20 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
             }
             *fault = !rdmsr_safe(msr, value);
             *value = (*value & ~MISC_ENABLE_COPIED) | v->misc_enable;
+            return true;
+        }
+        case MSR_IA32_PERF_CAPABILITIES: {
+            if (!perf_capabilities) {
+                return false;
+            }
+            *fault = !rdmsr_safe(msr, value);
+            *value &= PERF_CAPABILITIES_KNOWN;
+            if (!msr_allowed(MSR_PERF_METRICS)) {
+                *value &= ~PERF_CAPABILITIES_PERF_METRICS;
+            }
+            if (pt_hidden) {
+                *value &= ~PERF_CAPABILITIES_PEBS_OUTPUT_PT;
+            }
             return true;
         }
         case MSR_AMD_HWCR: {
