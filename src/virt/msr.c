@@ -100,6 +100,21 @@
 #define PERF_CAPABILITIES_PEBS_OUTPUT_PT (1ull << 16)
 #define MSR_PERF_METRICS 0x329
 
+// PEBS writes its records to the guest's DS area, so the guest gets it only
+// where the processor's accesses to it go through EPT (SDM 325462-093 Vol. 3B,
+// 22.9.5) and exits stop the counters; elsewhere IA32_MISC_ENABLE reports it
+// unavailable, IA32_PERF_CAPABILITIES has none of its fields, and
+// IA32_PEBS_ENABLE raises #GP. Such are the processors from Ice Lake Xeon and
+// 12th generation Core on (SDM 325462-093 Vol. 3B, 22.3.9.1 and 22.9.5): those
+// of record formats 5 and later (SDM 325462-093 Vol. 3B, Tables 22-57 and
+// 22-59), and those of format 4 among them (SDM 325462-093 Vol. 3B, Tables
+// 22-51 and 22-53), by their signatures in SDM 325462-093 Vol. 4, Table 2-1.
+#define CPUID_1_EDX_DS (1u << 21)
+#define MISC_ENABLE_PEBS_UNAVAILABLE (1ull << 12)
+#define PERF_CAPABILITIES_PEBS (3ull << 6 | 0xfull << 8 | 1ull << 14 | 3ull << 16)
+#define PERF_CAPABILITIES_PEBS_FORMAT(c) (((c) >> 8) & 0xf)
+#define MSR_IA32_PEBS_ENABLE 0x3f1
+
 // AMD's microcode patch loader, which loads the patch at the linear address
 // written (Linux 7.3's MSR_AMD64_PATCH_LOADER): the guest's writes load
 // nothing, as VMX has Intel's do (SDM 325462-093 Vol. 3C, 28.3), so that the
@@ -248,6 +263,7 @@ static bool lbr_hidden;
 // checks.
 static bool perf_global_kept;
 static bool perf_capabilities;
+static bool pebs_hidden;
 static bool pstates_read_only;
 // The tables of the processor's model-specific MSRs, where it has any.
 static const struct msr_model *model;
@@ -325,6 +341,39 @@ static void perf_capabilities_init(void) {
     }
 }
 
+// Ice Lake Xeon, Sapphire and Emerald Rapids, Alder and Raptor Lake, and the
+// Gracemont N-series, all of family 6.
+static const uint8_t pebs_format_4_models[] = {
+    0x6a, 0x6c, 0x8f, 0xcf, 0x97, 0x9a, 0xb7, 0xba, 0xbf, 0xbe,
+};
+
+static bool pebs_ept_friendly(void) {
+    uint64_t capabilities;
+    if (perf_capabilities && rdmsr_safe(MSR_IA32_PERF_CAPABILITIES, &capabilities)
+        && PERF_CAPABILITIES_PEBS_FORMAT(capabilities) >= 5) {
+        return true;
+    }
+    struct cpu_signature s = cpu_signature();
+    for (size_t i = 0; i < sizeof(pebs_format_4_models); i++) {
+        if (s.family == 6 && s.model == pebs_format_4_models[i]) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void pebs_init(void) {
+    uint64_t misc;
+    if (!(cpuid(1, 0).edx & CPUID_1_EDX_DS) || !rdmsr_safe(MSR_IA32_MISC_ENABLE, &misc)
+        || (misc & MISC_ENABLE_PEBS_UNAVAILABLE)) {
+        return;
+    }
+    if (!pebs_ept_friendly() || !vmx_perf_global_switched()) {
+        pebs_hidden = true;
+        virt_intercept_msr(MSR_IA32_PEBS_ENABLE, true, true);
+    }
+}
+
 // The supervisor state components XSAVES and XRSTORS handle: only those the
 // guest gets, as XRSTORS would load PT's IA32_RTIT_CTL, for one.
 static void xss_init(void) {
@@ -389,6 +438,7 @@ void msr_init(void) {
     }
     if (virt_vmx) {
         perf_capabilities_init();
+        pebs_init();
     }
     if (virt_vmx && vmx_perf_global_switched() && !vmx_perf_global_saved()) {
         perf_global_kept = true;
@@ -632,7 +682,8 @@ static bool lbr_msr(uint32_t msr) {
 }
 
 bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
-    if ((pt_hidden && pt_msr(msr)) || (mpx_hidden && msr == MSR_IA32_BNDCFGS) || lbr_msr(msr)) {
+    if ((pt_hidden && pt_msr(msr)) || (mpx_hidden && msr == MSR_IA32_BNDCFGS) || lbr_msr(msr)
+        || (pebs_hidden && msr == MSR_IA32_PEBS_ENABLE)) {
         *fault = true;
         return true;
     }
@@ -688,7 +739,8 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
                 return false;
             }
             *fault = !rdmsr_safe(msr, value);
-            *value = (*value & ~MISC_ENABLE_COPIED) | v->misc_enable;
+            *value = (*value & ~MISC_ENABLE_COPIED) | v->misc_enable
+                     | (pebs_hidden ? MISC_ENABLE_PEBS_UNAVAILABLE : 0);
             return true;
         }
         case MSR_IA32_PERF_CAPABILITIES: {
@@ -702,6 +754,9 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
             }
             if (pt_hidden) {
                 *value &= ~PERF_CAPABILITIES_PEBS_OUTPUT_PT;
+            }
+            if (pebs_hidden) {
+                *value &= ~PERF_CAPABILITIES_PEBS;
             }
             return true;
         }
@@ -749,6 +804,7 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
 
 bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
     if ((pt_hidden && pt_msr(msr)) || (mpx_hidden && msr == MSR_IA32_BNDCFGS) || lbr_msr(msr)
+        || (pebs_hidden && msr == MSR_IA32_PEBS_ENABLE)
         || (pstates_read_only && msr >= MSR_AMD_PSTATE_DEF0 && msr <= MSR_AMD_PSTATE_DEF7)) {
         *fault = true;
         return true;
@@ -785,8 +841,9 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
                 return false;
             }
             // Bits the processor lacks are reserved.
+            uint64_t kept = MISC_ENABLE_COPIED | (pebs_hidden ? MISC_ENABLE_PEBS_UNAVAILABLE : 0);
             *fault = (value & MISC_ENABLE_COPIED & ~misc_enable_supported) != 0
-                     || !wrmsr_safe(msr, value & ~MISC_ENABLE_COPIED);
+                     || !wrmsr_safe(msr, value & ~kept);
             if (!*fault) {
                 v->misc_enable = value & MISC_ENABLE_COPIED;
             }
