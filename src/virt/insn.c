@@ -271,7 +271,10 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
     struct segment cs;
     vcpu_get_seg(v, SEG_CS, &cs);
     bool long_mode = (vcpu_efer(v) & EFER_LMA) && (cs.attrib & SEG_L);
-    bool big = !(vcpu_rflags(v) & RFLAGS_VM) && (vcpu_cr0(v) & CR0_PE) && (cs.attrib & SEG_DB);
+    // CS's descriptor gives the defaults, in real mode too, where its cached D
+    // bit outlives protected mode, as Linux 7.3's KVM decodes (emulate.c,
+    // x86_decode_insn()); V86 mode's are 16-bit.
+    bool big = !(vcpu_rflags(v) & RFLAGS_VM) && (cs.attrib & SEG_DB);
     uint64_t linear = vcpu_rip(v);
     if (!long_mode) {
         linear = (cs.base + linear) & 0xffffffff;
