@@ -643,13 +643,66 @@ bool insn_mem_operand(struct vcpu *v, const struct insn *insn, struct insn_mem *
     return true;
 }
 
-uint64_t insn_string_linear(struct vcpu *v, const struct insn *insn, bool destination) {
+#define SEG_PRESENT (1u << 7)
+#define SEG_CODE (1u << 3)
+#define SEG_EXPAND_DOWN (1u << 2)
+// Writable in a data segment, readable in a code segment.
+#define SEG_RW (1u << 1)
+
+static bool canonical(uint64_t linear, unsigned bits) {
+    uint64_t upper = linear >> (bits - 1);
+    return upper == 0 || upper == (UINT64_MAX >> (bits - 1));
+}
+
+// The checks an access of size bytes at offset ea of a segment passes (SDM
+// 325462-093 Vol. 3A, 3.3.7.1, 5.3, and 5.4), as Linux 7.3's KVM emulator
+// makes them (emulate.c, __linearize()): in 64-bit mode the address's
+// canonical form; elsewhere, compatibility mode included, the segment's
+// usability, type, and limit, an expand-down one's from above it. Where they
+// fail, #SS(0) for SS or #GP(0) is raised.
+static bool linearize(struct vcpu *v, const struct insn *insn, int reg, uint64_t ea, unsigned size,
+                      bool write, uint64_t *linear) {
+    if (insn->long_mode) {
+        uint64_t la = segment_linear(v, insn, reg, ea);
+        unsigned bits = (vcpu_cr4(v) & CR4_LA57) ? 57 : 48;
+        if (canonical(la, bits) && canonical(la + size - 1, bits)) {
+            *linear = la;
+            return true;
+        }
+    } else {
+        struct segment s;
+        vcpu_get_seg(v, reg, &s);
+        bool code = (s.attrib & SEG_CODE) != 0;
+        bool real = !(vcpu_cr0(v) & CR0_PE);
+        uint64_t limit = s.limit;
+        bool allowed = !(s.attrib & SEG_UNUSABLE) && (s.attrib & SEG_PRESENT);
+        if (write && ((code && !real) || !(s.attrib & SEG_RW))) {
+            allowed = false;
+        }
+        if (!write && code && !(s.attrib & SEG_RW)) {
+            allowed = false;
+        }
+        if (!code && (s.attrib & SEG_EXPAND_DOWN)) {
+            allowed &= ea > limit;
+            limit = (s.attrib & SEG_DB) ? 0xffffffff : 0xffff;
+        }
+        if (allowed && ea <= limit && (limit == 0xffffffff || size <= limit + 1 - ea)) {
+            *linear = (s.base + ea) & 0xffffffff;
+            return true;
+        }
+    }
+    vcpu_inject_exception(v, reg == SEG_SS ? 12 : 13, true, 0);
+    return false;
+}
+
+bool insn_string_linear(struct vcpu *v, const struct insn *insn, bool destination, unsigned size,
+                        bool write, uint64_t *linear) {
     uint64_t mask = address_mask(insn->address_size);
     if (destination) {
-        return segment_linear(v, insn, SEG_ES, v->gprs.rdi & mask);
+        return linearize(v, insn, SEG_ES, v->gprs.rdi & mask, size, write, linear);
     }
     int segment = insn->segment >= 0 ? insn->segment : SEG_DS;
-    return segment_linear(v, insn, segment, v->gprs.rsi & mask);
+    return linearize(v, insn, segment, v->gprs.rsi & mask, size, write, linear);
 }
 
 uint64_t insn_gpr(struct vcpu *v, unsigned reg) {

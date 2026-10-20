@@ -112,9 +112,11 @@ bool insn_mem_linear(struct vcpu *v, const struct insn *insn, uint64_t *linear);
 // CLFLUSH. Returns false where the instruction has no such operand, or they do
 // not say.
 bool insn_mem_operand(struct vcpu *v, const struct insn *insn, struct insn_mem *mem);
-// A string instruction's linear address: its destination at ES:rDI, or its
-// source at DS:rSI, or the segment an override names.
-uint64_t insn_string_linear(struct vcpu *v, const struct insn *insn, bool destination);
+// A string instruction's linear address for size bytes: its destination at
+// ES:rDI, or its source at DS:rSI or the segment an override names. False,
+// with #GP(0) or #SS(0) raised, where the segment does not allow the access.
+bool insn_string_linear(struct vcpu *v, const struct insn *insn, bool destination, unsigned size,
+                        bool write, uint64_t *linear);
 
 // The guest's general register, as the encoding numbers them.
 uint64_t insn_gpr(struct vcpu *v, unsigned reg);

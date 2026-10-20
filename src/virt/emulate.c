@@ -385,13 +385,25 @@ static uint64_t string_step(uint64_t reg, int64_t delta, unsigned address_size) 
 static bool string_once(struct ctx *c, unsigned size, enum emulate_result *result) {
     struct vcpu *v = c->v;
     const struct insn *insn = c->insn;
-    uint64_t src = insn_string_linear(v, insn, false);
-    uint64_t dst = insn_string_linear(v, insn, true);
+    unsigned op = insn->opcode;
+    bool from_source = (op >= 0xa4 && op <= 0xa7) || op == 0xac || op == 0xad || op == 0x6e
+                       || op == 0x6f;
+    bool to_destination = op == 0xa4 || op == 0xa5 || op == 0xaa || op == 0xab || op == 0x6c
+                          || op == 0x6d;
+    bool at_destination = to_destination || (op >= 0xa6 && op <= 0xa7) || op == 0xae || op == 0xaf;
+    uint64_t src = 0;
+    uint64_t dst = 0;
+    *result = EMULATE_FAULT;
+    // Each iteration's accesses are checked as the processor checks them, as
+    // the first may be the only one it made.
+    if ((from_source && !insn_string_linear(v, insn, false, size, false, &src))
+        || (at_destination && !insn_string_linear(v, insn, true, size, to_destination, &dst))) {
+        return false;
+    }
     uint16_t port = (uint16_t)v->gprs.rdx;
     uint64_t a;
     uint64_t b;
     uint32_t data;
-    *result = EMULATE_FAULT;
     switch (insn->opcode) {
         case 0xa4:
         case 0xa5: {
