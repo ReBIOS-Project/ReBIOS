@@ -382,6 +382,25 @@ static bool xsaves;
 static uint64_t xcr0_allowed;
 static uint64_t xss_allowed;
 static uint32_t xsave_size;
+static uint64_t cr4_allowed;
+
+// The CR4 bits of features, each by the CPUID bit that shows it: leaf 1, 7, or
+// 7.1, register EAX to EDX, and bit (SDM 325462-093 Vol. 3A, 2.5; APM 24593 rev.
+// 3.45, 3.1.3).
+static const struct {
+    uint64_t cr4;
+    uint8_t leaf;
+    uint8_t reg;
+    uint8_t bit;
+} cr4_features[] = {
+    {CR4_VME, 0, 3, 1}, {CR4_PVI, 0, 3, 1}, {CR4_TSD, 0, 3, 4}, {CR4_DE, 0, 3, 2},
+    {CR4_PSE, 0, 3, 3}, {CR4_PAE, 0, 3, 6}, {CR4_MCE, 0, 3, 7}, {CR4_PGE, 0, 3, 13},
+    {CR4_OSFXSR, 0, 3, 24}, {CR4_OSXMMEXCPT, 0, 3, 25}, {CR4_UMIP, 1, 2, 2}, {CR4_LA57, 1, 2, 16},
+    {CR4_SMXE, 0, 2, 6}, {CR4_FSGSBASE, 1, 1, 0}, {CR4_PCIDE, 0, 2, 17}, {CR4_OSXSAVE, 0, 2, 26},
+    {CR4_KL, 1, 2, 23}, {CR4_SMEP, 1, 1, 7}, {CR4_SMAP, 1, 1, 20}, {CR4_PKE, 1, 2, 3},
+    {CR4_CET, 1, 2, 7}, {CR4_CET, 1, 3, 20}, {CR4_PKS, 1, 2, 31}, {CR4_UINTR, 1, 3, 5},
+    {CR4_LASS, 2, 0, 6}, {CR4_LAM_SUP, 2, 0, 26}, {CR4_FRED, 2, 0, 17},
+};
 
 static const struct leaf_bits *find(uint32_t leaf, uint32_t subleaf) {
     const struct leaf_bits *table = virt_vmx ? intel_leaves : amd_leaves;
@@ -475,6 +494,22 @@ void cpuid_init(void) {
             }
         }
     }
+
+    static const uint32_t leaves[3][2] = {{1, 0}, {7, 0}, {7, 1}};
+    uint32_t regs[3][4];
+    for (unsigned i = 0; i < 3; i++) {
+        struct cpuid_regs r = masked(leaves[i][0], leaves[i][1]);
+        regs[i][0] = r.eax;
+        regs[i][1] = r.ebx;
+        regs[i][2] = r.ecx;
+        regs[i][3] = r.edx;
+    }
+    cr4_allowed = CR4_PCE;
+    for (size_t i = 0; i < sizeof(cr4_features) / sizeof(cr4_features[0]); i++) {
+        if ((regs[cr4_features[i].leaf][cr4_features[i].reg] >> cr4_features[i].bit) & 1) {
+            cr4_allowed |= cr4_features[i].cr4;
+        }
+    }
 }
 
 uint64_t cpuid_xcr0_allowed(void) {
@@ -483,6 +518,10 @@ uint64_t cpuid_xcr0_allowed(void) {
 
 uint64_t cpuid_xss_allowed(void) {
     return xss_allowed;
+}
+
+uint64_t cpuid_cr4_allowed(void) {
+    return cr4_allowed;
 }
 
 uint64_t cpuid_efer_allowed(struct vcpu *v) {

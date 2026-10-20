@@ -30,6 +30,10 @@ void cpuid_init(void);
 // the rest as a processor without them returns them.
 struct cpuid_regs cpuid_guest(struct vcpu *v, uint32_t leaf, uint32_t subleaf);
 
+// The CR4 bits the guest may set: those of the features its CPUID shows, and
+// PCE. VMXE is nested virtualisation's to allow.
+uint64_t cpuid_cr4_allowed(void);
+
 // The XSAVE state components the guest may enable in XCR0 and in IA32_XSS.
 uint64_t cpuid_xcr0_allowed(void);
 uint64_t cpuid_xss_allowed(void);
