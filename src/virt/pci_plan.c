@@ -305,6 +305,18 @@ static void assign(const struct pci_topology *t, struct container *containers, u
     }
 }
 
+// The lowest base from at, of size and align, that no obstacle overlaps.
+static uint64_t high_base(const struct pci_plan_range *obstacles, uint32_t count, uint64_t at,
+                          uint64_t size, uint64_t align) {
+    uint64_t base = align_up(at, align);
+    for (uint32_t i = 0; i < count; i++) {
+        if (obstacles[i].end > base && obstacles[i].base < base + size) {
+            base = align_up(obstacles[i].end, align);
+        }
+    }
+    return base;
+}
+
 const struct pci_plan *pci_plan_make(const struct pci_plan_range *obstacles, uint32_t count,
                                      uint64_t lfb_size, uint64_t high_floor) {
     const struct pci_topology *t = pci_enum_topology();
@@ -452,7 +464,7 @@ const struct pci_plan *pci_plan_make(const struct pci_plan_range *obstacles, uin
             .bus = t->root_buses[r].bus,
         };
         if (c->high_size != 0) {
-            c->high_base = align_up(high_cursor, c->high_align);
+            c->high_base = high_base(obstacles, count, high_cursor, c->high_size, c->high_align);
             c->high_placed = true;
             high_cursor = c->high_base + c->high_size;
             plan.roots[r].high = (struct pci_plan_range){c->high_base, high_cursor};

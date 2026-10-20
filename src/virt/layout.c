@@ -39,6 +39,13 @@
 #define TWO_MIB 0x200000ull
 #define ONE_GIB 0x40000000ull
 #define FOUR_GIB 0x100000000ull
+// AMD's IOMMUs give guest-physical DMA addresses from FD_0000_0000h to 1 TiB
+// special meanings where they do not ignore the HyperTransport range (AMD
+// IOMMU 48882 rev. 3.11, 2.1.2, Table 3; erratum 1155, 57095 rev. 1.05): the
+// guest has nothing there, as Xen 4.22 keeps dom0 from it and Linux 7.3's AMD
+// IOMMU driver reserves it.
+#define HT_BASE 0xfd00000000ull
+#define HT_END 0x10000000000ull
 #define VGA_BASE 0xa0000ull
 #define VGA_END 0xc0000ull
 
@@ -77,6 +84,8 @@ static struct range_list ram;
 static struct range_list takeable;
 // The guest's address space where it has no RAM for want of host memory.
 static struct range_list kept;
+// Where the guest has neither memory nor devices.
+static struct range_list holes;
 static struct {
     uint64_t base;
     uint64_t end;
@@ -337,24 +346,30 @@ static void assign_rest(const struct range_list *guest, const struct range_list 
 }
 
 // Above 4 GiB, from 4 GiB on, as much as there is around what keeps its place.
-static void add_high(struct range_list *fill, uint64_t size) {
+// Lays size bytes of RAM out from 4 GiB around what is to be avoided, into
+// ram and fill where given; returns where it ends.
+static uint64_t add_high(struct range_list *fill, uint64_t size, const struct range_list *avoid) {
     uint64_t at = FOUR_GIB;
-    for (uint32_t i = 0; i <= pinned.count && size != 0; i++) {
-        uint64_t stop = i < pinned.count ? pinned.r[i].base : UINT64_MAX;
+    for (uint32_t i = 0; i <= avoid->count && size != 0; i++) {
+        uint64_t stop = i < avoid->count ? avoid->r[i].base : UINT64_MAX;
         if (stop <= at) {
-            if (i < pinned.count && pinned.r[i].end > at) {
-                at = pinned.r[i].end;
+            if (i < avoid->count && avoid->r[i].end > at) {
+                at = avoid->r[i].end;
             }
             continue;
         }
         uint64_t len = stop - at < size ? stop - at : size;
-        list_add(&ram, at, at + len);
-        list_add(fill, at, at + len);
+        if (fill != NULL) {
+            list_add(&ram, at, at + len);
+            list_add(fill, at, at + len);
+        }
         size -= len;
-        if (i < pinned.count) {
-            at = pinned.r[i].end;
+        at += len;
+        if (size != 0 && i < avoid->count) {
+            at = avoid->r[i].end;
         }
     }
+    return at;
 }
 
 void layout_init(void) {
@@ -403,6 +418,18 @@ void layout_init(void) {
     for (uint32_t i = 0; i < identity_count; i++) {
         list_add(&pinned, identity[i].base, identity[i].end);
     }
+    list_init(&holes);
+    if (tables->kind == IOMMU_KIND_AMD) {
+        list_add(&holes, HT_BASE, HT_END);
+    }
+    struct range_list avoid;
+    list_init(&avoid);
+    for (uint32_t i = 0; i < pinned.count; i++) {
+        list_add(&avoid, pinned.r[i].base, pinned.r[i].end);
+    }
+    for (uint32_t i = 0; i < holes.count; i++) {
+        list_add(&avoid, holes.r[i].base, holes.r[i].end);
+    }
     for (uint32_t i = 0; i < h->reserved_count; i++) {
         list_remove(&free_ram, h->reserved[i].base, h->reserved[i].base + h->reserved[i].size);
     }
@@ -423,21 +450,17 @@ void layout_init(void) {
 
     // The PCI hole as high as its BARs allow, and the larger BARs above
     // whatever RAM the guest could have above 4 GiB.
-    struct pci_plan_range *obstacles = kmalloc((pinned.count + 1) * sizeof(*obstacles));
-    uint64_t pinned_high = 0;
-    uint64_t pinned_top = FOUR_GIB;
-    for (uint32_t i = 0; i < pinned.count; i++) {
-        obstacles[i] = (struct pci_plan_range){pinned.r[i].base, pinned.r[i].end};
-        if (pinned.r[i].end > FOUR_GIB) {
-            uint64_t base = pinned.r[i].base > FOUR_GIB ? pinned.r[i].base : FOUR_GIB;
-            pinned_high += pinned.r[i].end - base;
-            pinned_top = pinned.r[i].end;
-        }
+    struct pci_plan_range *obstacles = kmalloc((avoid.count + 1) * sizeof(*obstacles));
+    for (uint32_t i = 0; i < avoid.count; i++) {
+        obstacles[i] = (struct pci_plan_range){avoid.r[i].base, avoid.r[i].end};
     }
-    uint64_t high_floor = FOUR_GIB + available + pinned_high;
+    uint64_t pinned_top = FOUR_GIB;
+    if (pinned.count != 0 && pinned.r[pinned.count - 1].end > pinned_top) {
+        pinned_top = pinned.r[pinned.count - 1].end;
+    }
+    uint64_t high_floor = add_high(NULL, available, &avoid);
     high_floor = align_up(high_floor > pinned_top ? high_floor : pinned_top, ONE_GIB);
-    const struct pci_plan *plan = pci_plan_make(obstacles, pinned.count, vga_lfb_size(),
-                                                high_floor);
+    const struct pci_plan *plan = pci_plan_make(obstacles, avoid.count, vga_lfb_size(), high_floor);
     kfree(obstacles);
 
     // From 1 MiB to the PCI hole, around what must keep its address, then
@@ -455,7 +478,7 @@ void layout_init(void) {
     list_remove(&fill, 0, TWO_MIB);
     uint64_t wanted = list_total(&fill);
     if (wanted < available) {
-        add_high(&fill, available - wanted);
+        add_high(&fill, available - wanted, &avoid);
         wanted = available;
     } else if (wanted > available) {
         uint64_t sum = 0;
@@ -518,6 +541,7 @@ void layout_init(void) {
 
     kfree(fill.r);
     kfree(free_ram.r);
+    kfree(avoid.r);
 }
 
 uint64_t layout_lfb(void) {
@@ -539,8 +563,8 @@ bool layout_mmio_free(uint64_t base, uint64_t size) {
             return false;
         }
     }
-    const struct range_list *lists[] = {&ram, &pinned, &kept};
-    for (unsigned l = 0; l < 3; l++) {
+    const struct range_list *lists[] = {&ram, &pinned, &kept, &holes};
+    for (unsigned l = 0; l < sizeof(lists) / sizeof(lists[0]); l++) {
         for (uint32_t i = 0; i < lists[l]->count; i++) {
             if (base < lists[l]->r[i].end && end > lists[l]->r[i].base) {
                 return false;
@@ -738,6 +762,9 @@ bool layout_e820(struct e820_map *map) {
     }
     for (uint32_t i = 0; i < kept.count; i++) {
         ok &= e820_set(map, kept.r[i].base, kept.r[i].end - kept.r[i].base, E820_RESERVED);
+    }
+    for (uint32_t i = 0; i < holes.count; i++) {
+        ok &= e820_set(map, holes.r[i].base, holes.r[i].end - holes.r[i].base, E820_RESERVED);
     }
     const struct pci_plan *plan = pci_plan();
     if (plan != NULL && plan->ecam != 0) {
