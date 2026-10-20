@@ -674,21 +674,25 @@ bool vcpu_guest_tf(struct vcpu *v) {
     return (vcpu_rflags(v) & RFLAGS_TF) != 0;
 }
 
-void vcpu_step_trap(struct vcpu *v) {
+void vcpu_debug_trap(struct vcpu *v, uint64_t dr6) {
     // A debug exception's exit takes DR6's bits as its qualification, leaving
     // DR6 alone (SDM 325462-093 Vol. 3C, 30.2.1).
-    if (nvmx_exception(v, 1, false, 0, DR6_BS)) {
+    if (nvmx_exception(v, 1, false, 0, dr6)) {
         return;
     }
     if (virt_vmx) {
         // VMX switches DR7 but not DR6, so the processor's is the guest's.
-        uint64_t dr6;
-        asm volatile ("mov %%dr6, %0" : "=r"(dr6));
-        asm volatile ("mov %0, %%dr6" :: "r"(dr6 | DR6_BS));
+        uint64_t value;
+        asm volatile ("mov %%dr6, %0" : "=r"(value));
+        asm volatile ("mov %0, %%dr6" :: "r"(value | dr6));
     } else {
-        v->vmcb->save.dr6 |= DR6_BS;
+        v->vmcb->save.dr6 |= dr6;
     }
     vcpu_inject_exception(v, 1, false, 0);
+}
+
+void vcpu_step_trap(struct vcpu *v) {
+    vcpu_debug_trap(v, DR6_BS);
 }
 
 void vcpu_step_boundary(struct vcpu *v) {

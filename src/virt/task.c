@@ -19,7 +19,6 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <memory.h>
-#include <lib/log.h>
 #include <sys/x86.h>
 #include <virt/guest_mem.h>
 #include <virt/task.h>
@@ -71,6 +70,9 @@
 
 // The EFLAGS bits that are not reserved (SDM 325462-093 Vol. 1, Figure 3-8).
 #define EFLAGS_DEFINED 0x3f7fd5u
+
+// DR6's task switch flag (SDM 325462-093 Vol. 3B, 20.2.3).
+#define DR6_BT (1ull << 15)
 
 // The segment registers in the order both TSS formats keep them.
 static const enum seg_reg tss_segs[] = {SEG_ES, SEG_CS, SEG_SS, SEG_DS, SEG_FS, SEG_GS};
@@ -501,7 +503,9 @@ void task_switch(struct vcpu *v, uint16_t selector, enum task_source source,
         push_error(&s, event->error, new32 ? 4 : 2);
     }
 
-    if (new32 && (image[TSS32_TRAP] & 1)) {
-        printf("A task switch to TSS %#x asks for a debug trap, which is not raised\n", selector);
+    // The T flag: a debug exception after the switch, before the new task's
+    // first instruction (SDM 325462-093 Vol. 3B, 20.3.1.5).
+    if (new32 && (image[TSS32_TRAP] & 1) && !s.faulted) {
+        vcpu_debug_trap(v, DR6_BT);
     }
 }

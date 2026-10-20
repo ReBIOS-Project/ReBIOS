@@ -224,6 +224,8 @@ void vcpu_advance(struct vcpu *v, unsigned length);
 // string instruction's iteration, that the hypervisor carried out for it.
 bool vcpu_guest_tf(struct vcpu *v);
 void vcpu_step_trap(struct vcpu *v);
+// A debug trap with the given DR6 bits, as the processor raises one.
+void vcpu_debug_trap(struct vcpu *v, uint64_t dr6);
 // After an instruction, or a string instruction's iteration, the hypervisor
 // carried out: the trap the guest's TF asks for, or the MTF exit the guest asks
 // its guest to make; and whether either stops the guest after each.
