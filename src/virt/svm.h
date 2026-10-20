@@ -144,6 +144,10 @@ _Static_assert(offsetof(struct vmcb_save, rax) == 0x1f8, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_save, cr2) == 0x240, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 
+// Intercept vector 0, at offset 000h: writes of CR4 (APM 24593 rev. 3.45, Table
+// B-1).
+#define SVM_INTERCEPT_CR4_WRITE (1u << 20)
+
 // Intercept vector 3, at offset 00Ch.
 #define SVM_INTERCEPT_INTR (1u << 0)
 #define SVM_INTERCEPT_NMI (1u << 1)
@@ -171,6 +175,7 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 
 // Exit codes (APM 24593 rev. 3.45, Appendix C).
 #define SVM_EXIT_CR0_WRITE 0x10
+#define SVM_EXIT_CR4_WRITE 0x14
 #define SVM_EXIT_EXCEPTION_BASE 0x40
 #define SVM_EXIT_INTR 0x60
 #define SVM_EXIT_NMI 0x61

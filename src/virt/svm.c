@@ -25,9 +25,11 @@
 #include <sys/fixup.h>
 #include <sys/mm.h>
 #include <sys/x86.h>
+#include <virt/cpuid.h>
 #include <virt/event.h>
 #include <virt/exit.h>
 #include <virt/gpt.h>
+#include <virt/insn.h>
 #include <virt/mmio.h>
 #include <virt/profile.h>
 #include <virt/svm.h>
@@ -237,6 +239,8 @@ void svm_vcpu_init(struct vcpu *v) {
     v->vmcb_pa = (uint64_t)(uintptr_t)v->vmcb;
 
     struct vmcb_control *c = &v->vmcb->control;
+    // For the CR4 bits of features the guest does not get (cpuid.c).
+    c->intercept_cr = SVM_INTERCEPT_CR4_WRITE;
     c->intercept_misc1 = SVM_INTERCEPT_INTR | SVM_INTERCEPT_NMI | SVM_INTERCEPT_CPUID
                          | SVM_INTERCEPT_HLT | SVM_INTERCEPT_INVD | SVM_INTERCEPT_IOIO
                          | SVM_INTERCEPT_MSR | SVM_INTERCEPT_SHUTDOWN;
@@ -322,6 +326,46 @@ static void svm_handle_io(struct vcpu *v) {
     vcpu_step_boundary(v);
 }
 
+// MOV to CR4, intercepted for the bits of features the guest does not get: the
+// processor faults on what else the move refuses itself, before the intercept
+// (APM 24593 rev. 3.45, Table 15-7). Decode assists give the source register
+// (15.8.1), else the instruction does: 0F 22 /r, its ModRM.rm.
+static void svm_handle_cr4_write(struct vcpu *v) {
+    struct vmcb_control *c = &v->vmcb->control;
+    bool assisted = decode_assists && (c->exitinfo1 >> 63);
+    // Without next RIP saving, its length comes from the instruction too.
+    struct insn insn = {0};
+    if (!assisted || !svm_nrips) {
+        if (!insn_decode(v, &insn) || insn.opcode != (INSN_OPCODE_0F | 0x22)) {
+            // One the hypervisor cannot read runs again.
+            printf("Cannot decode the CR4 write at %#llx\n", (unsigned long long)v->vmcb->save.rip);
+            return;
+        }
+    }
+    unsigned reg = assisted ? c->exitinfo1 & 15 : (insn.modrm & 7) | (insn.rex & 1) << 3;
+    uint64_t value = reg == 4 ? vcpu_rsp(v) : ((uint64_t *)&v->gprs)[reg];
+    struct segment cs;
+    vcpu_get_seg(v, SEG_CS, &cs);
+    // Outside 64-bit mode the move takes the register's low 32 bits.
+    if (!(v->vmcb->save.efer & EFER_LMA) || !(cs.attrib & SEG_L)) {
+        value = (uint32_t)value;
+    }
+    if (value & ~cpuid_cr4_allowed()) {
+        vcpu_inject_exception(v, 13, true, 0);
+        return;
+    }
+    // The guest's translations go, as the move would have dropped them.
+    if (value != v->vmcb->save.cr4) {
+        v->vmcb->save.cr4 = value;
+        svm_flush_guest_tlb(v);
+    }
+    if (svm_nrips) {
+        vcpu_skip_instruction(v);
+    } else {
+        vcpu_advance(v, insn.length);
+    }
+}
+
 // The single-step trap ends a step, and so does a fault, which goes on to the
 // guest.
 static void svm_step_exception(struct vcpu *v, unsigned vector) {
@@ -379,6 +423,10 @@ static void svm_handle_exit(struct vcpu *v) {
         }
         case SVM_EXIT_CPUID: {
             exit_cpuid(v);
+            break;
+        }
+        case SVM_EXIT_CR4_WRITE: {
+            svm_handle_cr4_write(v);
             break;
         }
         case SVM_EXIT_HLT: {
