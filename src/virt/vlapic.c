@@ -526,6 +526,25 @@ static void thermal_lvt(const struct vlapic *vl) {
     lapic_write(APIC_LVT_THERMAL, host);
 }
 
+// The processor's performance monitoring interrupt, on the hypervisor's vector
+// while the guest's entry asks for an interrupt or an NMI, and its SMIs, which
+// go to the firmware, as the guest's entry has them.
+static void perf_lvt(const struct vlapic *vl) {
+    if (!lvt_present(LVT_PERF)) {
+        return;
+    }
+    uint32_t lvt = regs_get(vl, APIC_LVT_PERF);
+    uint32_t mode = lvt & LVT_DELIVERY_MASK;
+    uint32_t host = APIC_LVT_MASKED;
+    if (mode == LVT_DELIVERY_SMI) {
+        host = lvt;
+    } else if (!(lvt & APIC_LVT_MASKED)
+               && (mode == LVT_DELIVERY_FIXED || mode == LVT_DELIVERY_NMI)) {
+        host = VLAPIC_PERF_VECTOR;
+    }
+    lapic_write(APIC_LVT_PERF, host);
+}
+
 // As a local APIC in either mode reads it (SDM 325462-093 Vol. 3C, 32.1.6.2).
 static uint32_t ipiv_destination(uint32_t id, bool x2apic) {
     return x2apic ? id : (id << 8) & 0xff00;
@@ -788,6 +807,7 @@ static void reset_registers(struct vcpu *v) {
     lapic_write(APIC_TIMER_INITIAL, 0);
     timer_lvt(vl);
     thermal_lvt(vl);
+    perf_lvt(vl);
     lapic_write(APIC_TIMER_DIVIDE, 0);
     mirror_logical(vl);
     avic_recheck_soon();
@@ -938,6 +958,24 @@ void vlapic_thermal_fired(struct vcpu *v) {
     uint32_t lvt = regs_get(v->vlapic, APIC_LVT_THERMAL);
     if (lvt & APIC_LVT_MASKED) {
         return;
+    }
+    if ((lvt & LVT_DELIVERY_MASK) == LVT_DELIVERY_FIXED) {
+        vlapic_accept(v, (uint8_t)lvt, false);
+    } else if ((lvt & LVT_DELIVERY_MASK) == LVT_DELIVERY_NMI) {
+        __atomic_store_n(&v->cpu->nmi_pending, true, __ATOMIC_RELEASE);
+    }
+}
+
+void vlapic_perf_fired(struct vcpu *v) {
+    struct vlapic *vl = v->vlapic;
+    uint32_t lvt = regs_get(vl, APIC_LVT_PERF);
+    if (lvt & APIC_LVT_MASKED) {
+        return;
+    }
+    // Intel's local APICs mask the entry as they deliver the interrupt, as the
+    // processor's has (SDM 325462-093 Vol. 3A, 13.5.1); AMD's do not.
+    if (virt_vmx) {
+        regs_set(vl, APIC_LVT_PERF, lvt | APIC_LVT_MASKED);
     }
     if ((lvt & LVT_DELIVERY_MASK) == LVT_DELIVERY_FIXED) {
         vlapic_accept(v, (uint8_t)lvt, false);
@@ -1300,6 +1338,9 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
             if (i == LVT_THERMAL) {
                 thermal_lvt(vl);
             }
+            if (i == LVT_PERF) {
+                perf_lvt(vl);
+            }
             if (i == LVT_LINT0) {
                 avic_recheck_soon();
             }
@@ -1335,6 +1376,7 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
                 }
                 timer_lvt(vl);
                 thermal_lvt(vl);
+                perf_lvt(vl);
             }
             avic_recheck_soon();
             return true;
@@ -1593,6 +1635,7 @@ static bool apic_base_write(struct vcpu *v, uint64_t value) {
         id_reg(vl);
         timer_lvt(vl);
         thermal_lvt(vl);
+        perf_lvt(vl);
         lapic_write(APIC_TIMER_DIVIDE, regs_get(vl, APIC_TIMER_DIVIDE));
         mirror_logical(vl);
     }

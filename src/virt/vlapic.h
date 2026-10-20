@@ -24,6 +24,7 @@
 
 // Vectors the hypervisor takes its own interrupts on at the processor's
 // local APIC, which guests use for none of their MSIs and I/O APIC entries.
+#define VLAPIC_PERF_VECTOR 0xf8
 #define VLAPIC_THERMAL_VECTOR 0xf9
 #define VLAPIC_NESTED_POSTED_VECTOR 0xfa
 #define VLAPIC_POSTED_VECTOR 0xfb
@@ -74,6 +75,9 @@ void vlapic_timer_fired(struct vcpu *v);
 // The processor's thermal interrupt, which the vCPU's thermal entry asks for,
 // came.
 void vlapic_thermal_fired(struct vcpu *v);
+// The processor's performance monitoring interrupt, which the vCPU's entry for
+// it asks for, came.
+void vlapic_perf_fired(struct vcpu *v);
 
 // The vector of the interrupt the vCPU takes next, or -1, and taking it.
 int vlapic_pending(struct vcpu *v);

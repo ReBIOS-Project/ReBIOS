@@ -213,6 +213,11 @@ void event_interrupt(uint8_t vector) {
             vlapic_thermal_fired(v);
             return;
         }
+        case VLAPIC_PERF_VECTOR: {
+            lapic_eoi();
+            vlapic_perf_fired(v);
+            return;
+        }
         case VLAPIC_KICK_VECTOR: {
             __atomic_store_n(&cpu->kick, false, __ATOMIC_SEQ_CST);
             lapic_eoi();
