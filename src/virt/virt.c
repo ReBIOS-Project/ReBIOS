@@ -705,15 +705,27 @@ bool vcpu_stepped(struct vcpu *v) {
 }
 
 void vcpu_advance(struct vcpu *v, unsigned length) {
+    uint64_t rip = vcpu_rip(v);
+    uint64_t next = rip + length;
+    // Outside 64-bit mode RIP wraps at 4 GiB, as Linux 7.3's KVM has it (vmx.c,
+    // skip_emulated_instruction()); a 32-bit guest with a wider one is
+    // unpredictable on AMD's Family 19h (erratum 1393, 57095 rev. 1.05).
+    if ((next >> 32) != (rip >> 32)) {
+        struct segment cs;
+        vcpu_get_seg(v, SEG_CS, &cs);
+        if (!(vcpu_efer(v) & EFER_LMA) || !(cs.attrib & SEG_L)) {
+            next = (uint32_t)next;
+        }
+    }
     if (virt_vmx) {
-        vmx_write(VMCS_GUEST_RIP, vmx_read(VMCS_GUEST_RIP) + length);
+        vmx_write(VMCS_GUEST_RIP, next);
         uint64_t intr = vmx_read(VMCS_GUEST_INTERRUPTIBILITY);
         if (intr & (INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS)) {
             vmx_write(VMCS_GUEST_INTERRUPTIBILITY,
                       intr & ~(uint64_t)(INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS));
         }
     } else {
-        v->vmcb->save.rip += length;
+        v->vmcb->save.rip = next;
         v->vmcb->control.interrupt_shadow = 0;
     }
     vcpu_step_boundary(v);
