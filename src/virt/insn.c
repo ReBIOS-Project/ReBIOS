@@ -654,18 +654,35 @@ static bool canonical(uint64_t linear, unsigned bits) {
     return upper == 0 || upper == (UINT64_MAX >> (bits - 1));
 }
 
+// Whether an explicit data access to la is a LASS violation (SDM 325462-093
+// Vol. 3A, 4.3.2): in IA-32e mode, a user-mode one with bit 63 set, a
+// supervisor-mode one with it clear where SMAP is on and RFLAGS.AC off; bit 63
+// of 32-bit addresses, as in compatibility mode, is clear.
+static bool lass_violation(struct vcpu *v, const struct insn *insn, uint64_t la) {
+    if (!(vcpu_efer(v) & EFER_LMA) || !(vcpu_cr4(v) & CR4_LASS)) {
+        return false;
+    }
+    struct segment ss;
+    vcpu_get_seg(v, SEG_SS, &ss);
+    bool high = insn->long_mode && (la >> 63) != 0;
+    if (((ss.attrib >> 5) & 3) == 3) {
+        return high;
+    }
+    return !high && (vcpu_cr4(v) & CR4_SMAP) && !(vcpu_rflags(v) & RFLAGS_AC);
+}
+
 // The checks an access of size bytes at offset ea of a segment passes (SDM
-// 325462-093 Vol. 3A, 3.3.7.1, 5.3, and 5.4), as Linux 7.3's KVM emulator
-// makes them (emulate.c, __linearize()): in 64-bit mode the address's
+// 325462-093 Vol. 3A, 3.3.7.1, 4.3.2, 5.3, and 5.4), as Linux 7.3's KVM
+// emulator makes them (emulate.c, __linearize()): in 64-bit mode the address's
 // canonical form; elsewhere, compatibility mode included, the segment's
-// usability, type, and limit, an expand-down one's from above it. Where they
-// fail, #SS(0) for SS or #GP(0) is raised.
+// usability, type, and limit, an expand-down one's from above it; and LASS.
+// Where they fail, #SS(0) for SS or #GP(0) is raised.
 static bool linearize(struct vcpu *v, const struct insn *insn, int reg, uint64_t ea, unsigned size,
                       bool write, uint64_t *linear) {
     if (insn->long_mode) {
         uint64_t la = segment_linear(v, insn, reg, ea);
         unsigned bits = (vcpu_cr4(v) & CR4_LA57) ? 57 : 48;
-        if (canonical(la, bits) && canonical(la + size - 1, bits)) {
+        if (canonical(la, bits) && canonical(la + size - 1, bits) && !lass_violation(v, insn, la)) {
             *linear = la;
             return true;
         }
@@ -686,8 +703,10 @@ static bool linearize(struct vcpu *v, const struct insn *insn, int reg, uint64_t
             allowed &= ea > limit;
             limit = (s.attrib & SEG_DB) ? 0xffffffff : 0xffff;
         }
-        if (allowed && ea <= limit && (limit == 0xffffffff || size <= limit + 1 - ea)) {
-            *linear = (s.base + ea) & 0xffffffff;
+        uint64_t la = (s.base + ea) & 0xffffffff;
+        if (allowed && ea <= limit && (limit == 0xffffffff || size <= limit + 1 - ea)
+            && !lass_violation(v, insn, la)) {
+            *linear = la;
             return true;
         }
     }

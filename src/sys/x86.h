@@ -56,6 +56,7 @@
 #define CR4_PKE (1u << 22)
 #define CR4_CET (1u << 23)
 #define CR4_PKS (1u << 24)
+#define CR4_LASS (1u << 27)
 #define CR4_LAM_SUP (1u << 28)
 
 #define CR3_LAM_U57 (1ull << 61)
