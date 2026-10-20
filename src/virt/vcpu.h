@@ -141,6 +141,8 @@ struct vcpu {
     uint64_t amd_cpuid_hardware[4];
     uint64_t amd_cpuid[4];
     uint8_t amd_cpuid_present;
+    // The guest's AMD core performance event selects (msr.c).
+    uint64_t amd_perf_evt_sel[6];
 
     // What the guest believes CR0 and CR4 hold, for the bits the host owns.
     uint64_t cr0_shadow;

@@ -152,6 +152,17 @@
 #define MSR_AMD_L3_QOS_EXT_CFG 0xc00003ff
 #define L3_QOS_EXT_CFG_SDCIAE (1u << 1)
 
+// AMD's core performance event selects, whose host/guest-only field the
+// guest would set to no effect, its EFER.SVME being clear (APM 24593 rev. 3.45,
+// 13.2.1, Table 13-4): the processor's count in the guest alone, and the guest
+// sees its own values. Counters 0 to 3 have the legacy addresses too.
+#define MSR_AMD_PERF_EVT_SEL0 0xc0010000
+#define MSR_AMD_PERF_EVT_SEL3 0xc0010003
+#define MSR_AMD_PERF_CTL0 0xc0010200
+#define MSR_AMD_PERF_CTL5 0xc001020a
+#define PERF_EVT_SEL_HG_ONLY (3ull << 40)
+#define PERF_EVT_SEL_GUEST_ONLY (1ull << 40)
+
 // AMD's memory routing (APM 24593 rev. 3.45, 3.2.1, 7.9.2, and 7.9.4; PPR 55772
 // rev. 3.08, MSRC001_0058): the guest's own, from its memory map, so that none
 // of its writes routes the host's memory. SMM and SVM appear locked, as the
@@ -332,6 +343,12 @@ void msr_init(void) {
         virt_intercept_msr(MSR_AMD_NB_CFG, true, true);
         virt_intercept_msr(MSR_AMD_L3_QOS_EXT_CFG, false, true);
         virt_intercept_msr(MSR_AMD_NODE_ID, false, true);
+        for (uint32_t msr = MSR_AMD_PERF_EVT_SEL0; msr <= MSR_AMD_PERF_EVT_SEL3; msr++) {
+            virt_intercept_msr(msr, true, true);
+        }
+        for (uint32_t msr = MSR_AMD_PERF_CTL0; msr <= MSR_AMD_PERF_CTL5; msr += 2) {
+            virt_intercept_msr(msr, true, true);
+        }
         for (uint32_t msr = MSR_AMD_CPUID_7_FEATURES; msr <= MSR_AMD_CPUID_EXT_FEATURES; msr++) {
             virt_intercept_msr(msr, true, true);
         }
@@ -487,10 +504,30 @@ static void amd_memory_init(struct vcpu *v) {
     }
 }
 
+// The counter an AMD event select MSR is for, or -1.
+static int amd_perf_counter(uint32_t msr) {
+    if (msr >= MSR_AMD_PERF_EVT_SEL0 && msr <= MSR_AMD_PERF_EVT_SEL3) {
+        return (int)(msr - MSR_AMD_PERF_EVT_SEL0);
+    }
+    if (msr >= MSR_AMD_PERF_CTL0 && msr <= MSR_AMD_PERF_CTL5 && msr % 2 == 0) {
+        return (int)(msr - MSR_AMD_PERF_CTL0) / 2;
+    }
+    return -1;
+}
+
 void msr_vcpu_init(struct vcpu *v) {
     v->misc_enable = misc_enable_firmware;
     if (!virt_vmx) {
         amd_memory_init(v);
+        // As the firmware left them, from the vCPU's own processor.
+        for (unsigned i = 0; i < 6; i++) {
+            uint32_t msr = i < 4 ? MSR_AMD_PERF_EVT_SEL0 + i : MSR_AMD_PERF_CTL0 + 2 * i;
+            v->amd_perf_evt_sel[i] = 0;
+            if (rdmsr_safe(msr, &v->amd_perf_evt_sel[i])) {
+                wrmsr_safe(msr, (v->amd_perf_evt_sel[i] & ~PERF_EVT_SEL_HG_ONLY)
+                                    | PERF_EVT_SEL_GUEST_ONLY);
+            }
+        }
         // From the processor the vCPU is created on, which is its own.
         v->amd_cpuid_present = 0;
         for (unsigned i = 0; i < 4; i++) {
@@ -586,6 +623,13 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
         }
         return true;
     }
+    int counter = virt_vmx ? -1 : amd_perf_counter(msr);
+    if (counter >= 0) {
+        uint64_t hardware;
+        *fault = !rdmsr_safe(msr, &hardware);
+        *value = v->amd_perf_evt_sel[counter];
+        return true;
+    }
     switch (msr) {
         case MSR_IA32_FEATURE_CONTROL: {
             if (!virt_vmx) {
@@ -679,6 +723,14 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
         *fault = !((v->amd_cpuid_present >> i) & 1) || (value & ~v->amd_cpuid_hardware[i]);
         if (!*fault) {
             v->amd_cpuid[i] = value;
+        }
+        return true;
+    }
+    int counter = virt_vmx ? -1 : amd_perf_counter(msr);
+    if (counter >= 0) {
+        *fault = !wrmsr_safe(msr, (value & ~PERF_EVT_SEL_HG_ONLY) | PERF_EVT_SEL_GUEST_ONLY);
+        if (!*fault) {
+            v->amd_perf_evt_sel[counter] = value;
         }
         return true;
     }
