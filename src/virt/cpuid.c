@@ -20,6 +20,7 @@
 #include <stdbool.h>
 #include <sys/x86.h>
 #include <virt/cpuid.h>
+#include <virt/msr.h>
 #include <virt/nvmx.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>
@@ -345,6 +346,15 @@ static const struct last_subleaf amd_last_subleaves[] = {
 #define CPUID_80000001_EDX_RDTSCP (1u << 27)
 #define CPUID_80000001_EDX_LM (1u << 29)
 #define CPUID_80000008_EBX_LMSLE_UNSUPPORTED (1u << 20)
+// What AMD's families have of RAPL, PPIN, and memory controller counters (PPR
+// 56713 rev. 3.05, CPUID_Fn80000007_EDX, CPUID_Fn80000008_EBX, and
+// CPUID_Fn80000022_E[B,C]X), shown where the guest gets their MSRs (msr.c).
+#define CPUID_80000007_EDX_RAPL (1u << 14)
+#define CPUID_80000008_EBX_PPIN (1u << 23)
+#define CPUID_80000022_EBX_UMC_COUNTERS (0x3fu << 16)
+#define MSR_AMD_RAPL_PWR_UNIT 0xc0010299
+#define MSR_AMD_PPIN_CTL 0xc00102f0
+#define MSR_AMD_UMC_PERF_CTL0 0xc0010800
 #define CPUID_80000021_EAX_UPPER_ADDRESS_IGNORE (1u << 7)
 #define CPUID_80000021_EAX_AUTOMATIC_IBRS (1u << 8)
 
@@ -631,6 +641,26 @@ struct cpuid_regs cpuid_guest(struct vcpu *v, uint32_t leaf, uint32_t subleaf) {
         }
         case 0x80000000: {
             r.eax = last_extended;
+            break;
+        }
+        case 0x80000007: {
+            if (!virt_vmx && msr_allowed(MSR_AMD_RAPL_PWR_UNIT)) {
+                r.edx |= cpuid(leaf, 0).edx & CPUID_80000007_EDX_RAPL;
+            }
+            break;
+        }
+        case 0x80000008: {
+            if (!virt_vmx && msr_allowed(MSR_AMD_PPIN_CTL)) {
+                r.ebx |= cpuid(leaf, 0).ebx & CPUID_80000008_EBX_PPIN;
+            }
+            break;
+        }
+        case 0x80000022: {
+            if (!virt_vmx && msr_allowed(MSR_AMD_UMC_PERF_CTL0)) {
+                struct cpuid_regs h = cpuid(leaf, 0);
+                r.ebx |= h.ebx & CPUID_80000022_EBX_UMC_COUNTERS;
+                r.ecx = h.ecx;
+            }
             break;
         }
         case 0x80000001: {
