@@ -76,10 +76,10 @@ bool nvmx_exit_pending(struct vcpu *v);
 // the qualification given.
 bool nvmx_exception(struct vcpu *v, uint8_t vector, bool has_error, uint32_t error, uint64_t qual);
 // Whether the guest's guest is to make an MTF exit after each instruction, and
-// such an exit after one the hypervisor carried out, with a single-step trap
-// pending: whether there is one.
+// such an exit after one the hypervisor carried out, with the debug traps of
+// DR6's bits in dr6 pending: whether there is one.
 bool nvmx_monitor_trap_flag(struct vcpu *v);
-bool nvmx_monitor_trap(struct vcpu *v, bool single_step);
+bool nvmx_monitor_trap(struct vcpu *v, uint64_t dr6);
 // Right before an entry: VMCS02's VMX-preemption timer, from what is left of
 // the guest's, so that time the hypervisor takes counts as the guest's guest's,
 // as it would without the hypervisor; off while the hypervisor steps.

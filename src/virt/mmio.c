@@ -170,6 +170,7 @@ static bool access(struct vcpu *v, uint64_t linear, void *buf, unsigned size, bo
         mmio_phys_access(v, gpas[i], p, lens[i], write);
         p += lens[i];
     }
+    vcpu_data_access(v, linear, size, write);
     return true;
 }
 
@@ -195,10 +196,12 @@ static bool mem_ins(struct vcpu *v, uint64_t linear, uint16_t port, unsigned siz
         return false;
     }
     *value = 0xffffffff;
+    vcpu_io_access(v, port, size);
     return true;
 }
 
 static void mem_outs(struct vcpu *v, uint16_t port, unsigned size, uint32_t value) {
+    vcpu_io_access(v, port, size);
     if (io_dispatch(v, port, size, false, &value)) {
         return;
     }
@@ -428,11 +431,12 @@ void mmio_step_done(struct vcpu *v) {
     vcpu_resume_others();
     // The hypervisor's own step took the guest's MTF exit for its guest.
     if (completed) {
-        nvmx_monitor_trap(v, false);
+        nvmx_monitor_trap(v, 0);
     }
-    // SVM's stepping took the trap the guest's own TF asked for.
-    if (completed && !virt_vmx && vcpu_guest_tf(v)) {
-        vcpu_step_trap(v);
+    // SVM's stepping took the trap the guest's own TF asked for, and the
+    // breakpoints the instruction hit.
+    if (completed && !virt_vmx) {
+        vcpu_debug_traps(v, vcpu_guest_tf(v));
     }
 }
 

@@ -121,6 +121,10 @@ struct vcpu {
     uint64_t step_dr6;
     uint32_t step_exceptions;
     uint64_t step_debugctl;
+    // DR6's B0-B3 bits for the guest's breakpoints that the accesses the
+    // hypervisor carries out for it hit: a debug trap once the instruction, or
+    // its string iteration, ends.
+    uint64_t db_pending;
 
     // The guest's MTRRs: the default type, the fixed ranges, and the variable
     // ranges' bases and masks.
@@ -227,6 +231,12 @@ bool vcpu_guest_tf(struct vcpu *v);
 void vcpu_step_trap(struct vcpu *v);
 // A debug trap with the given DR6 bits, as the processor raises one.
 void vcpu_debug_trap(struct vcpu *v, uint64_t dr6);
+// Where an access the hypervisor carries out for the guest meets the guest's
+// data and I/O breakpoints.
+void vcpu_data_access(struct vcpu *v, uint64_t linear, unsigned size, bool write);
+void vcpu_io_access(struct vcpu *v, uint16_t port, unsigned size);
+// The debug trap for the breakpoints those hit, and the single step asked for.
+void vcpu_debug_traps(struct vcpu *v, bool single_step);
 // After an instruction, or a string instruction's iteration, the hypervisor
 // carried out: the trap the guest's TF asks for, or the MTF exit the guest asks
 // its guest to make; and whether either stops the guest after each.

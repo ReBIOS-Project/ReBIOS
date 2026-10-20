@@ -43,6 +43,8 @@
 
 #define MSR_IA32_CR_PAT 0x277
 #define MSR_DEBUGCTL 0x1d9
+#define MSR_DR1_ADDR_MASK 0xc0011019
+#define MSR_DR0_ADDR_MASK 0xc0011027
 
 #define DEBUGCTL_LBR (1u << 0)
 #define DEBUGCTL_BTF (1u << 1)
@@ -60,6 +62,9 @@ static uint8_t *msr_claimed;
 // virtualises too, the ICR's as well.
 static uint8_t *msr_bitmap_x2apic;
 static uint8_t *msr_bitmap_x2apic_icr;
+// How many of DR0-DR3 have AMD's address masks for data breakpoints (APM 24593
+// rev. 3.45, 13.1.7): DR0 with DataBkptExt, all four with AddrMaskExt.
+static unsigned breakpoint_masks;
 
 bool vmx_ept_huge_pages(void);
 bool vmx_monitor_trap_supported(void);
@@ -95,6 +100,8 @@ bool virt_init(void) {
         virt_intercept_msr(MSR_IA32_CR_PAT, true, true);
         virt_intercept_msr(MSR_VM_CR, true, true);
         virt_intercept_msr(MSR_VM_HSAVE_PA, true, true);
+        uint32_t features = cpuid(0x80000001, 0).ecx;
+        breakpoint_masks = features & (1u << 30) ? 4 : features & (1u << 26) ? 1 : 0;
     } else {
         return false;
     }
@@ -397,6 +404,8 @@ void vcpu_before_entry(struct vcpu *v) {
     if (log_panicked()) {
         halt_forever();
     }
+    // Breakpoints only an instruction that completes reports.
+    v->db_pending = 0;
     profile_entry(v);
     service_pause(v);
     // Before the flush below, which the display's remapping may need.
@@ -741,13 +750,88 @@ void vcpu_step_trap(struct vcpu *v) {
     vcpu_debug_trap(v, DR6_BS);
 }
 
+// Neither VMX nor SVM switches DR0-DR3: the processor's are the guest's.
+static uint64_t guest_dr(unsigned n) {
+    uint64_t value;
+    switch (n) {
+        case 0: {
+            asm volatile ("mov %%dr0, %0" : "=r"(value));
+            break;
+        }
+        case 1: {
+            asm volatile ("mov %%dr1, %0" : "=r"(value));
+            break;
+        }
+        case 2: {
+            asm volatile ("mov %%dr2, %0" : "=r"(value));
+            break;
+        }
+        default: {
+            asm volatile ("mov %%dr3, %0" : "=r"(value));
+            break;
+        }
+    }
+    return value;
+}
+
+// The enabled breakpoints of the R/W kinds in kinds (as 1 << R/W) that a byte
+// of [address, address + size) matches, as DR6's B0-B3 bits: LEN masks the
+// low bits of the address (SDM 325462-093 Vol. 3B, 20.2.4 and 20.2.5), and so
+// does an AMD address mask the bits it sets.
+static uint64_t breakpoints_hit(struct vcpu *v, uint64_t address, unsigned size, unsigned kinds) {
+    uint64_t dr7 = virt_vmx ? vmx_read(VMCS_GUEST_DR7) : v->vmcb->save.dr7;
+    if (!(dr7 & 0xff)) {
+        return 0;
+    }
+    static const unsigned lengths[4] = {1, 2, 8, 4};
+    uint64_t hits = 0;
+    for (unsigned n = 0; n < 4; n++) {
+        unsigned rw = (dr7 >> (16 + 4 * n)) & 3;
+        if (!((dr7 >> (2 * n)) & 3) || !(kinds & (1u << rw))) {
+            continue;
+        }
+        uint64_t ignored = lengths[(dr7 >> (18 + 4 * n)) & 3] - 1;
+        if (n < breakpoint_masks) {
+            ignored |= (uint32_t)rdmsr(n == 0 ? MSR_DR0_ADDR_MASK : MSR_DR1_ADDR_MASK + n - 1);
+        }
+        uint64_t dr = guest_dr(n);
+        for (unsigned i = 0; i < size; i++) {
+            if (!(((address + i) ^ dr) & ~ignored)) {
+                hits |= 1ull << n;
+                break;
+            }
+        }
+    }
+    return hits;
+}
+
+void vcpu_data_access(struct vcpu *v, uint64_t linear, unsigned size, bool write) {
+    // R/W 01 breaks on writes, 11 on reads and writes.
+    v->db_pending |= breakpoints_hit(v, linear, size, write ? 1u << 1 | 1u << 3 : 1u << 3);
+}
+
+void vcpu_io_access(struct vcpu *v, uint16_t port, unsigned size) {
+    // R/W 10 breaks on I/O where CR4.DE says so.
+    if (vcpu_cr4(v) & CR4_DE) {
+        v->db_pending |= breakpoints_hit(v, port, size, 1u << 2);
+    }
+}
+
+void vcpu_debug_traps(struct vcpu *v, bool single_step) {
+    uint64_t dr6 = v->db_pending | (single_step ? DR6_BS : 0);
+    v->db_pending = 0;
+    if (dr6 != 0) {
+        vcpu_debug_trap(v, dr6);
+    }
+}
+
 void vcpu_step_boundary(struct vcpu *v) {
-    if (nvmx_monitor_trap(v, vcpu_guest_tf(v))) {
+    uint64_t dr6 = v->db_pending | (vcpu_guest_tf(v) ? DR6_BS : 0);
+    if (nvmx_monitor_trap(v, dr6)) {
+        v->db_pending = 0;
         return;
     }
-    if (vcpu_guest_tf(v)) {
-        vcpu_step_trap(v);
-    }
+    vcpu_debug_traps(v, vcpu_guest_tf(v));
 }
 
 bool vcpu_stepped(struct vcpu *v) {
@@ -807,6 +891,8 @@ void vcpu_skip_instruction(struct vcpu *v) {
 }
 
 void vcpu_inject_exception(struct vcpu *v, uint8_t vector, bool has_error, uint32_t error) {
+    // Breakpoints not yet reported are lost (SDM 325462-093 Vol. 3B, 20.3.1.2).
+    v->db_pending = 0;
     // Real mode exceptions push no error code.
     if (!(vcpu_cr0(v) & CR0_PE)) {
         has_error = false;

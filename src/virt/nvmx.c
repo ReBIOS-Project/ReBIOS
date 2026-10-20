@@ -3196,8 +3196,10 @@ bool nvmx_monitor_trap_flag(struct vcpu *v) {
 }
 
 // The processor did not run the instruction, which would have made the exit
-// itself, leaving a single-step trap pending (SDM 325462-093 Vol. 3C, 28.5.2).
-bool nvmx_monitor_trap(struct vcpu *v, bool single_step) {
+// itself, leaving its debug traps pending (SDM 325462-093 Vol. 3C, 28.5.2): the
+// pending debug exceptions field has DR6's B0-B3 and BS where DR6 does, and bit
+// 12 for an enabled breakpoint (Table 27-4).
+bool nvmx_monitor_trap(struct vcpu *v, uint64_t dr6) {
     if (!nvmx_monitor_trap_flag(v)) {
         return false;
     }
@@ -3205,8 +3207,12 @@ bool nvmx_monitor_trap(struct vcpu *v, bool single_step) {
     if (n->pending) {
         return true;
     }
-    if (single_step) {
-        vmx_write(VMCS_GUEST_PENDING_DBG, vmx_read(VMCS_GUEST_PENDING_DBG) | PENDING_DBG_BS);
+    uint64_t pending = dr6 & (PENDING_DBG_BS | 0xf);
+    if (dr6 & 0xf) {
+        pending |= PENDING_DBG_ENABLED;
+    }
+    if (pending != 0) {
+        vmx_write(VMCS_GUEST_PENDING_DBG, vmx_read(VMCS_GUEST_PENDING_DBG) | pending);
     }
     n->pending = true;
     n->pending_reason = EXIT_REASON_MONITOR_TRAP;

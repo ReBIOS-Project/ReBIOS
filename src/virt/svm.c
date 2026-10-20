@@ -319,15 +319,17 @@ static void svm_handle_io(struct vcpu *v) {
     v->vmcb->save.rip = v->vmcb->control.exitinfo2;
     v->vmcb->control.interrupt_shadow = 0;
     v->vmcb->save.rflags &= ~(uint64_t)RFLAGS_RF;
-    if (vcpu_guest_tf(v)) {
-        vcpu_step_trap(v);
-    }
+    vcpu_step_boundary(v);
 }
 
 // The single-step trap ends a step, and so does a fault, which goes on to the
 // guest.
 static void svm_step_exception(struct vcpu *v, unsigned vector) {
     struct vmcb_control *c = &v->vmcb->control;
+    // The guest's breakpoints its instruction hit, beside the step's own trap.
+    if (vector == 1) {
+        v->db_pending |= v->vmcb->save.dr6 & 0xf;
+    }
     mmio_step_done(v);
     if (vector == 1) {
         return;

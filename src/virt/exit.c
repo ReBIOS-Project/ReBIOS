@@ -255,6 +255,7 @@ static void port_native(uint16_t port, unsigned size, bool in, uint32_t *value) 
 }
 
 static void port_access(struct vcpu *v, uint16_t port, unsigned size, bool in, uint32_t *value) {
+    vcpu_io_access(v, port, size);
     if (io_dispatch(v, port, size, in, value)) {
         return;
     }
