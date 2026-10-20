@@ -33,7 +33,7 @@
 #include <virt/profile.h>
 #include <virt/vcpu.h>
 
-#define MAX_REGIONS 32
+#define MAX_REGIONS 256
 
 // The accesses to where nothing decodes that are logged.
 #define ABSENT_REPORTS 16
@@ -49,14 +49,26 @@ static struct region regions[MAX_REGIONS];
 static unsigned region_count;
 static struct spinlock region_lock;
 
-void mmio_register(uint64_t base, uint64_t size, const struct mmio_ops *ops, void *ctx) {
+int mmio_register(uint64_t base, uint64_t size, const struct mmio_ops *ops, void *ctx) {
     spinlock_acquire(&region_lock);
+    int region = -1;
     if (region_count == MAX_REGIONS) {
-        panic("Too many emulated memory regions\n");
+        printf("Too many emulated memory regions for %#llx\n", (unsigned long long)base);
+    } else {
+        region = (int)region_count;
+        regions[region_count] = (struct region){base, size, ops, ctx};
+        __atomic_store_n(&region_count, region_count + 1, __ATOMIC_RELEASE);
     }
-    regions[region_count] = (struct region){base, size, ops, ctx};
-    __atomic_store_n(&region_count, region_count + 1, __ATOMIC_RELEASE);
     spinlock_release(&region_lock);
+    return region;
+}
+
+// A lookup meanwhile sees the region at one place or the other, or nowhere.
+void mmio_move(int region, uint64_t base, uint64_t size) {
+    struct region *r = &regions[region];
+    __atomic_store_n(&r->size, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&r->base, base, __ATOMIC_RELEASE);
+    __atomic_store_n(&r->size, size, __ATOMIC_RELEASE);
 }
 
 static uint64_t absent_read(struct vcpu *v, void *ctx, uint64_t offset, unsigned size) {
@@ -84,7 +96,8 @@ static const struct region absent = {0, UINT64_MAX, &absent_ops, NULL};
 static const struct region *find(uint64_t gpa) {
     unsigned count = __atomic_load_n(&region_count, __ATOMIC_ACQUIRE);
     for (unsigned i = 0; i < count; i++) {
-        if (gpa - regions[i].base < regions[i].size) {
+        uint64_t size = __atomic_load_n(&regions[i].size, __ATOMIC_ACQUIRE);
+        if (gpa - __atomic_load_n(&regions[i].base, __ATOMIC_ACQUIRE) < size) {
             return &regions[i];
         }
     }

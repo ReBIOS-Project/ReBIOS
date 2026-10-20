@@ -34,8 +34,11 @@ struct mmio_ops {
     bool writes_ignored;
 };
 
-// Emulates a page-aligned region, for every vCPU.
-void mmio_register(uint64_t base, uint64_t size, const struct mmio_ops *ops, void *ctx);
+// Emulates a page-aligned region, for every vCPU: its number for
+// mmio_move(), or -1 where there are too many.
+int mmio_register(uint64_t base, uint64_t size, const struct mmio_ops *ops, void *ctx);
+// Moves a region, nowhere where size is 0, as when the BAR it is part of moves.
+void mmio_move(int region, uint64_t base, uint64_t size);
 
 // Guest memory at a linear address as the guest's instructions reach it: RAM,
 // emulated regions, or nothing. Accesses are of at most 8 bytes; they return
