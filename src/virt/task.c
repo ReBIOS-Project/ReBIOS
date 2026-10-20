@@ -62,8 +62,6 @@
 #define SELECTOR_TI (1u << 2)
 #define SELECTOR_RPL 3u
 
-#define DR7_LOCAL_ENABLES 0x155u
-
 // The segment registers in the order both TSS formats keep them.
 static const enum seg_reg tss_segs[] = {SEG_ES, SEG_CS, SEG_SS, SEG_DS, SEG_FS, SEG_GS};
 
