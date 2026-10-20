@@ -1217,6 +1217,53 @@ static void deliver(struct vcpu *from, struct vcpu *to, uint32_t command) {
     }
 }
 
+struct cpu *vlapic_target(uint32_t dest, bool logical) {
+    for (uint32_t i = 0; i < smp_cpu_count(); i++) {
+        struct vcpu *to = smp_cpu(i)->vcpu;
+        if (to != NULL && matches(to->vlapic, dest, logical, false)) {
+            return to->cpu;
+        }
+    }
+    return NULL;
+}
+
+struct cpu *vlapic_msi_target(uint32_t address) {
+    return vlapic_target(address >> MSI_ADDRESS_DEST_SHIFT & 0xff,
+                         (address & MSI_ADDRESS_LOGICAL) != 0);
+}
+
+// The guest has no SMM, and a message has no 8259 to acknowledge: SMI and
+// ExtINT messages go nowhere.
+void vlapic_deliver_message(uint32_t dest, bool logical, uint32_t mode, uint8_t vector,
+                            bool level) {
+    if (mode == ICR_DELIVERY_FIXED || mode == ICR_DELIVERY_LOWEST) {
+        vlapic_deliver_external(dest, logical, vector, level, mode == ICR_DELIVERY_LOWEST);
+        return;
+    }
+    if (mode != ICR_DELIVERY_NMI && mode != ICR_DELIVERY_INIT) {
+        return;
+    }
+    for (uint32_t i = 0; i < smp_cpu_count(); i++) {
+        struct vcpu *to = smp_cpu(i)->vcpu;
+        if (to != NULL && matches(to->vlapic, dest, logical, false)) {
+            deliver(NULL, to, mode);
+        }
+    }
+}
+
+// The destination mode as the address's DM bit says and RH as lowest priority,
+// as Linux 7.3's KVM takes them (irq.c, kvm_msi_to_lapic_irq(); lapic.c,
+// kvm_lowest_prio_delivery()).
+void vlapic_deliver_msi(uint32_t address, uint32_t data) {
+    uint32_t mode = data & ICR_DELIVERY_MASK;
+    if (mode == ICR_DELIVERY_FIXED && (address & MSI_ADDRESS_REDIRECT)) {
+        mode = ICR_DELIVERY_LOWEST;
+    }
+    vlapic_deliver_message(address >> MSI_ADDRESS_DEST_SHIFT & 0xff,
+                           (address & MSI_ADDRESS_LOGICAL) != 0, mode, data & ICR_VECTOR_MASK,
+                           (data & ICR_LEVEL) != 0);
+}
+
 static bool ipi_target(struct vcpu *from, struct vcpu *to, uint32_t dest, uint32_t command) {
     switch (command & ICR_SHORTHAND_MASK) {
         case ICR_SHORTHAND_SELF: {

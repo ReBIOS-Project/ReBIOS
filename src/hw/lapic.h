@@ -67,6 +67,15 @@
 #define ICR_SHORTHAND_ALL (2u << 18)
 #define ICR_SHORTHAND_OTHERS (3u << 18)
 
+// Message-signalled interrupts' address; their data has the interrupt
+// command register's vector, delivery mode, level, and trigger mode fields
+// (SDM 325462-093 Vol. 3A, 13.11).
+#define MSI_ADDRESS_BASE 0xfee00000u
+#define MSI_ADDRESS_MASK 0xfff00000u
+#define MSI_ADDRESS_DEST_SHIFT 12
+#define MSI_ADDRESS_REDIRECT (1u << 3)
+#define MSI_ADDRESS_LOGICAL (1u << 2)
+
 // The calling processor's local APIC: whether it is in x2APIC mode, and its
 // APIC ID as CPUID reports it.
 bool lapic_x2apic(void);

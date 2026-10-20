@@ -70,6 +70,16 @@ void vlapic_accept(struct vcpu *v, uint8_t vector, bool level);
 // an 8-bit destination names, or to one of them for lowest priority.
 void vlapic_deliver_external(uint32_t dest, bool logical, uint8_t vector, bool level,
                              bool lowest);
+// An interrupt message as an I/O APIC entry or an MSI the guest programmed
+// says it, mode as the interrupt command register has it, to the vCPUs an
+// 8-bit destination names: fixed, or lowest priority, NMI, and INIT.
+void vlapic_deliver_message(uint32_t dest, bool logical, uint32_t mode, uint8_t vector,
+                            bool level);
+// A message-signalled interrupt the guest programmed, as the APIC bus takes it.
+void vlapic_deliver_msi(uint32_t address, uint32_t data);
+// The processor of the first vCPU an 8-bit destination names, or NULL.
+struct cpu *vlapic_target(uint32_t dest, bool logical);
+struct cpu *vlapic_msi_target(uint32_t address);
 // The processor's timer, which runs the vCPU's local APIC timer, fired.
 void vlapic_timer_fired(struct vcpu *v);
 // The processor's thermal interrupt, which the vCPU's thermal entry asks for,
