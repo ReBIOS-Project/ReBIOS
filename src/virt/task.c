@@ -169,8 +169,9 @@ static struct segment v86_segment(uint16_t selector) {
 }
 
 // Loads a segment register of the new task with the checks of SDM 325462-093
-// Vol. 3A, Table 10-1. They come after the commit point, so a failed one
-// raises its exception in the new task.
+// Vol. 3A, Tables 7-6 and 10-1; data and non-conforming code against CPL and
+// RPL both, as Linux 7.3's KVM and other segment loads check them. They come
+// after the commit point, so a failed one raises its exception in the new task.
 static void load_seg(struct switcher *s, enum seg_reg reg, uint16_t selector, unsigned cpl) {
     struct segment seg = {selector, SEG_UNUSABLE, 0, 0};
     if ((selector & ~SELECTOR_RPL) == 0 && !(selector & SELECTOR_TI)) {
@@ -202,7 +203,7 @@ static void load_seg(struct switcher *s, enum seg_reg reg, uint16_t selector, un
     } else {
         bool readable = !(type & DESC_CODE) || (type & DESC_RW);
         bool conforming = (type & DESC_CODE) && (type & DESC_CONFORMING);
-        ok = ok && readable && (conforming || dpl >= cpl);
+        ok = ok && readable && (conforming || (dpl >= cpl && dpl >= rpl));
     }
     if (!ok) {
         fault(s, VECTOR_TS, selector & ~SELECTOR_RPL);
