@@ -519,6 +519,11 @@ void layout_init(void) {
         if (gpa != 0) {
             stolen = (struct range){gpa, gpa + stolen_size};
             igfx_stolen_placed(gpa);
+        } else if (igfx_stolen_rmrr_dropped()) {
+            printf("No room in the guest's memory for the stolen memory: it keeps its address\n");
+            identity_add(clear_base, clear_end, EfiReservedMemoryType, efi_attribute_at(stolen_hpa));
+            list_add(&pinned, clear_base, clear_end);
+            list_remove(&ram, clear_base, clear_end);
         }
     }
     struct range_list fill;

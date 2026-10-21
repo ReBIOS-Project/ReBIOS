@@ -36,10 +36,18 @@ bool igfx_one_to_one(uint64_t *base, uint64_t *end);
 // igfx_stolen_placed() where.
 bool igfx_stolen(uint64_t *host, uint64_t *size, uint64_t *clear_base, uint64_t *clear_end);
 void igfx_stolen_placed(uint64_t gpa);
+// Whether the stolen memory's RMRR is gone: where layout_init() cannot place
+// the stolen memory, it keeps the host's addresses for it as the RMRR would.
+bool igfx_stolen_rmrr_dropped(void);
 
 // Gives the guest the OpRegion and the stolen memory at the addresses in its
 // own memory map, which the registers that give them read. After
 // pci_virt_init().
 void igfx_init(void);
+
+// Around dma_enable(): the firmware's GGTT, whose entries give host addresses,
+// keeps working while the IOMMU starts translating, then gives the guest's.
+void igfx_switch_begin(void);
+void igfx_switch_end(void);
 
 #endif

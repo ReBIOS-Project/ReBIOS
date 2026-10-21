@@ -65,6 +65,7 @@ static void bsp_main(void *arg) {
     pci_enum_scan();
     pci_enum_shrink_rebars(PCI_PLAN_LOW_BAR_MAX);
     usb_handoff();
+    igfx_scan();
     dma_init();
 
     if (!virt_init()) {
@@ -76,7 +77,6 @@ static void bsp_main(void *arg) {
     cpuid_init();
     mtrr_init();
 
-    igfx_scan();
     layout_init();
     pci_virt_init();
     igfx_init();
@@ -101,7 +101,9 @@ static void bsp_main(void *arg) {
 
     struct vcpu *v = vcpu_create(cpu);
     csm_boot_start(v);
+    igfx_switch_begin();
     dma_enable();
+    igfx_switch_end();
     log_hand_over_screen();
     vcpu_run(v);
 }

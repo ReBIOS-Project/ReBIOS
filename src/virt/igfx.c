@@ -21,7 +21,10 @@
 #include <csm/e820.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
+#include <iommu/dma.h>
+#include <iommu/iommu_tables.h>
 #include <lib/log.h>
+#include <lib/time.h>
 #include <sys/mm.h>
 #include <virt/gpt.h>
 #include <virt/igfx.h>
@@ -32,6 +35,7 @@
 #define VENDOR_INTEL 0x8086
 #define CLASS_DISPLAY 0x03
 #define IGFX_DEVICE 2
+#define IGFX_RID (IGFX_DEVICE << 3)
 
 // Linux 7.3 include/drm/intel/pci_config.h ASLS, and
 // drivers/gpu/drm/i915/display/intel_opregion.c: the header's version and
@@ -90,6 +94,23 @@
 #define MMIO_GSMBASE 0x108100u
 #define MMIO_STOLEN_RESERVED 0x1082c0u
 
+// The GGTT in GTTMMADR's second half from Gen8 on (Linux 7.3 gt/intel_ggtt.c
+// gen6_gttadr_offset(), xe xe_ggtt.c), its entries as gt/intel_gtt.h has them:
+// GEN8_PAGE_PRESENT, GEN12_GGTT_PTE_LM (an offset into the stolen memory from
+// Meteor Lake on), and GEN12_GGTT_PTE_ADDR_MASK; gen8_ggtt_invalidate()'s
+// flush through GFX_FLSH_CNTL_GEN6, which needs_wc_ggtt_mapping() asks for on
+// Gen8 to Gen10 but Gen9 LP. Broxton's and Gemini Lake's device IDs are
+// include/drm/intel/pciids.h INTEL_BXT_IDS and INTEL_GLK_IDS.
+#define GGTT_OFFSET 0x800000ull
+#define PTE_PRESENT 1ull
+#define PTE_LM (1ull << 1)
+#define PTE_ADDRESS 0x3ffffffff000ull
+#define MMIO_FLSH_CNTL 0x101008u
+#define FLSH_CNTL_EN 1u
+// A few frames, for the display to fetch the GGTT's entries anew before their
+// old addresses lead elsewhere.
+#define SETTLE_US 50000
+
 enum stolen_kind {
     STOLEN_NONE,
     // BDSM at 5Ch, the MMIO copies 32-bit: Gen9 and Gen10.
@@ -120,6 +141,9 @@ static struct {
     uint64_t dsm_size;
     uint64_t gsm_size;
     uint64_t alias;
+    // Whether the stolen memory's RMRR is gone, so that the GGTT's entries
+    // have to give the guest's addresses once the IOMMU translates.
+    bool rmrr_dropped;
 } igfx;
 
 static uint64_t page_down(uint64_t x) {
@@ -215,6 +239,20 @@ static void scan_stolen(struct pci_function *f) {
     igfx.gsm_size = gsm;
 }
 
+static bool gen9_lp(uint16_t id) {
+    static const uint16_t ids[] = {0x0a84, 0x1a84, 0x1a85, 0x5a84, 0x5a85, 0x3184, 0x3185};
+    for (unsigned i = 0; i < sizeof(ids) / sizeof(ids[0]); i++) {
+        if (id == ids[i]) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool rmrr_unneeded(uint16_t segment, uint16_t rid) {
+    return segment == 0 && rid == IGFX_RID;
+}
+
 void igfx_scan(void) {
     struct pci_function *f = pci_enum_find((struct pci_addr){0, 0, IGFX_DEVICE, 0});
     if (f == NULL || f->vendor_id != VENDOR_INTEL || f->base_class != CLASS_DISPLAY) {
@@ -227,6 +265,11 @@ void igfx_scan(void) {
     }
     scan_opregion(f);
     scan_stolen(f);
+    // With MSI-X in a BAR, its page might be one the hypervisor takes over.
+    if (igfx.kind != STOLEN_NONE && f->msix_cap == 0) {
+        igfx.rmrr_dropped = true;
+        iommu_tables_forget_reserved(rmrr_unneeded);
+    }
 }
 
 bool igfx_one_to_one(uint64_t *base, uint64_t *end) {
@@ -251,6 +294,10 @@ bool igfx_stolen(uint64_t *host, uint64_t *size, uint64_t *clear_base, uint64_t 
 
 void igfx_stolen_placed(uint64_t gpa) {
     igfx.alias = gpa;
+}
+
+bool igfx_stolen_rmrr_dropped(void) {
+    return igfx.rmrr_dropped;
 }
 
 // A host address in the data stolen memory as the guest has it: the rest of
@@ -409,13 +456,11 @@ static void init_opregion(void) {
 }
 
 static void init_stolen(void) {
-    if (!pci_virt_trap(igfx.f->addr, 0, MMIO_PAGE, PAGE_SIZE, &mmio_ops, NULL)) {
-        printf("Intel graphics: the registers of the stolen memory cannot be trapped\n");
-        igfx.alias = 0;
-        return;
-    }
     if (igfx.host_bridge != NULL) {
         pci_virt_hook(igfx.host_bridge->addr, &host_bridge_hook);
+    }
+    if (!pci_virt_trap(igfx.f->addr, 0, MMIO_PAGE, PAGE_SIZE, &mmio_ops, NULL)) {
+        printf("Intel graphics: GTTMMADR's registers of the stolen memory cannot be trapped\n");
     }
     printf("Intel graphics: the stolen memory at %#llx-%#llx is the guest's at %#llx\n",
            (unsigned long long)igfx.dsm, (unsigned long long)(igfx.dsm + igfx.dsm_size - 1),
@@ -435,4 +480,72 @@ void igfx_init(void) {
     if (igfx.guest_asls != 0 || igfx.alias != 0) {
         pci_virt_hook(igfx.f->addr, &config_hook);
     }
+}
+
+void igfx_switch_begin(void) {
+    if (!igfx.rmrr_dropped || igfx.alias == 0) {
+        return;
+    }
+    // The firmware's entries give host addresses until igfx_switch_end().
+    uint64_t base = igfx.dsm - igfx.gsm_size;
+    dma_map(base, base, igfx.gsm_size + igfx.dsm_size, GPT_R | GPT_W);
+}
+
+// The guest's own mappings of [base, end) in the IOMMU again, in runs.
+static void dma_restore(uint64_t base, uint64_t end) {
+    uint64_t run = base;
+    uint64_t run_hpa = 0;
+    uint32_t run_prot = 0;
+    for (uint64_t gpa = base; gpa <= end; gpa += PAGE_SIZE) {
+        uint64_t hpa = 0;
+        uint32_t prot = 0;
+        uint8_t memtype;
+        if (gpa < end && !gpt_translate(gpa, &hpa, &prot, &memtype)) {
+            hpa = 0;
+            prot = 0;
+        }
+        bool same = gpa < end && prot == run_prot && (prot == 0 || hpa == run_hpa + (gpa - run));
+        if (same) {
+            continue;
+        }
+        if (gpa > run) {
+            dma_map(run, run_prot != 0 ? run_hpa : 0, gpa - run, run_prot);
+        }
+        run = gpa;
+        run_hpa = hpa;
+        run_prot = prot;
+    }
+}
+
+void igfx_switch_end(void) {
+    if (!igfx.rmrr_dropped || igfx.alias == 0) {
+        return;
+    }
+    uint64_t ggtt = igfx.gttmmadr + GGTT_OFFSET;
+    mm_map_device(ggtt, igfx.gsm_size);
+    unsigned moved = 0;
+    unsigned elsewhere = 0;
+    for (uint64_t at = ggtt; at < ggtt + igfx.gsm_size; at += 8) {
+        uint64_t pte = mmio_read_host(at, 8);
+        if ((pte & PTE_PRESENT) == 0 || (igfx.kind == STOLEN_DSMBASE && (pte & PTE_LM) != 0)) {
+            continue;
+        }
+        uint64_t address = pte & PTE_ADDRESS;
+        if (address < igfx.dsm || address - igfx.dsm >= igfx.dsm_size) {
+            elsewhere++;
+            continue;
+        }
+        mmio_write_host(at, 8, (pte & ~PTE_ADDRESS) | (igfx.alias + (address - igfx.dsm)));
+        moved++;
+    }
+    (void)mmio_read_host(ggtt, 8);
+    if (igfx.kind == STOLEN_BSM && !gen9_lp(igfx.f->device_id)) {
+        mm_map_device(igfx.gttmmadr + MMIO_FLSH_CNTL - MMIO_FLSH_CNTL % PAGE_SIZE, PAGE_SIZE);
+        mmio_write_host(igfx.gttmmadr + MMIO_FLSH_CNTL, 4, FLSH_CNTL_EN);
+    }
+    time_udelay(SETTLE_US);
+    uint64_t base = igfx.dsm - igfx.gsm_size;
+    dma_restore(base, igfx.dsm + igfx.dsm_size);
+    printf("Intel graphics: %u GGTT entries moved to the guest's stolen memory, %u present "
+           "elsewhere left\n", moved, elsewhere);
 }
