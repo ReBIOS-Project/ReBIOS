@@ -18,8 +18,12 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <stdarg.h>
 #include <memory.h>
+#include <core.h>
+#include <handoff.h>
 #include <lib/log.h>
+#include <lib/printf.h>
 #include <sys/cpu.h>
 #include <sys/fixup.h>
 #include <sys/mm.h>
@@ -87,9 +91,36 @@ _Static_assert(offsetof(struct cpu, kicked) == CPU_KICKED, "CPU_KICKED is out of
 static uint64_t nmi_restart_start;
 static uint64_t nmi_restart_end;
 static void (*interrupt_handler)(uint8_t vector);
+static size_t (*guest_describer)(char *buf, size_t size);
 
 void cpu_interrupt_handler(void (*handler)(uint8_t vector)) {
     interrupt_handler = handler;
+}
+
+void cpu_guest_describer(size_t (*describe)(char *buf, size_t size)) {
+    guest_describer = describe;
+}
+
+// The x2APIC ID, else the initial APIC ID: by CPUID alone, for panics.
+static uint32_t apic_id_now(void) {
+    if (cpuid(0, 0).eax >= 0xb && (cpuid(0xb, 0).ebx & 0xffff) != 0) {
+        return cpuid(0xb, 0).edx;
+    }
+    return cpuid(1, 0).ebx >> 24;
+}
+
+__attribute__((format(printf, 4, 5)))
+static void append(char *buf, size_t size, size_t *len, const char *fmt, ...) {
+    if (*len + 1 >= size) {
+        return;
+    }
+    va_list args;
+    va_start(args, fmt);
+    int n = vsnprintf(buf + *len, size - *len, fmt, args);
+    va_end(args);
+    if (n > 0) {
+        *len += (size_t)n < size - *len ? (size_t)n : size - *len - 1;
+    }
 }
 
 unsigned cpu_physical_address_bits(void) {
@@ -169,20 +200,63 @@ void exception_handler(struct exception_frame *frame) {
         }
     }
 
-    // One panic(), as the processor may hold the log's lock.
-    panic("Host exception %s (vector %llu), error code %#llx\n"
-          "RIP %#llx CS %#llx RFLAGS %#llx RSP %#llx SS %#llx CR2 %#llx\n"
-          "RAX %#llx RBX %#llx RCX %#llx RDX %#llx\n"
-          "RSI %#llx RDI %#llx RBP %#llx R8 %#llx\n",
-          frame->vector < 32 ? exception_names[frame->vector] : "?",
-          (unsigned long long)frame->vector, (unsigned long long)frame->error_code,
-          (unsigned long long)frame->rip, (unsigned long long)frame->cs,
-          (unsigned long long)frame->rflags, (unsigned long long)frame->rsp,
-          (unsigned long long)frame->ss, (unsigned long long)read_cr2(),
-          (unsigned long long)frame->rax, (unsigned long long)frame->rbx,
-          (unsigned long long)frame->rcx, (unsigned long long)frame->rdx,
-          (unsigned long long)frame->rsi, (unsigned long long)frame->rdi,
-          (unsigned long long)frame->rbp, (unsigned long long)frame->r8);
+    // One panic(), as the processor may hold the log's lock. The stack and
+    // the CPU area it leads to may be anything, so neither is read unchecked.
+    char text[1536];
+    size_t len = 0;
+    uint32_t apic_id = apic_id_now();
+    uint64_t image;
+    uint64_t image_end;
+    asm ("leaq __image_base(%%rip), %0" : "=r"(image));
+    asm ("leaq __image_end(%%rip), %0" : "=r"(image_end));
+    uint64_t map_top = core_handoff != NULL ? core_handoff->map_top : 0;
+
+    append(text, sizeof(text), &len,
+           "Host exception %s (vector %llu), error code %#llx, APIC ID %#x\n",
+           frame->vector < 32 ? exception_names[frame->vector] : "?",
+           (unsigned long long)frame->vector, (unsigned long long)frame->error_code, apic_id);
+    if (frame->rip >= image && frame->rip < image_end) {
+        append(text, sizeof(text), &len, "RIP %#llx (ReBIOS + %#llx)",
+               (unsigned long long)frame->rip, (unsigned long long)(frame->rip - image));
+    } else {
+        append(text, sizeof(text), &len, "RIP %#llx (outside ReBIOS at %#llx)",
+               (unsigned long long)frame->rip, (unsigned long long)image);
+    }
+    append(text, sizeof(text), &len, " CS %#llx RFLAGS %#llx RSP %#llx SS %#llx\n"
+           "CR0 %#llx CR2 %#llx CR3 %#llx CR4 %#llx DR6 %#llx DR7 %#llx\n"
+           "RAX %#llx RBX %#llx RCX %#llx RDX %#llx\n"
+           "RSI %#llx RDI %#llx RBP %#llx R8 %#llx\n"
+           "R9 %#llx R10 %#llx R11 %#llx R12 %#llx\n"
+           "R13 %#llx R14 %#llx R15 %#llx\n",
+           (unsigned long long)frame->cs, (unsigned long long)frame->rflags,
+           (unsigned long long)frame->rsp, (unsigned long long)frame->ss,
+           (unsigned long long)read_cr0(), (unsigned long long)read_cr2(),
+           (unsigned long long)read_cr3(), (unsigned long long)read_cr4(),
+           (unsigned long long)read_dr6(), (unsigned long long)read_dr7(),
+           (unsigned long long)frame->rax, (unsigned long long)frame->rbx,
+           (unsigned long long)frame->rcx, (unsigned long long)frame->rdx,
+           (unsigned long long)frame->rsi, (unsigned long long)frame->rdi,
+           (unsigned long long)frame->rbp, (unsigned long long)frame->r8,
+           (unsigned long long)frame->r9, (unsigned long long)frame->r10,
+           (unsigned long long)frame->r11, (unsigned long long)frame->r12,
+           (unsigned long long)frame->r13, (unsigned long long)frame->r14,
+           (unsigned long long)frame->r15);
+    if (frame->rsp % 8 == 0 && frame->rsp >= 4096 && frame->rsp + 64 <= map_top) {
+        const uint64_t *stack = (const uint64_t *)(uintptr_t)frame->rsp;
+        append(text, sizeof(text), &len,
+               "Stack %#llx %#llx %#llx %#llx %#llx %#llx %#llx %#llx\n",
+               (unsigned long long)stack[0], (unsigned long long)stack[1],
+               (unsigned long long)stack[2], (unsigned long long)stack[3],
+               (unsigned long long)stack[4], (unsigned long long)stack[5],
+               (unsigned long long)stack[6], (unsigned long long)stack[7]);
+    }
+    struct cpu *cpu = this_cpu();
+    if (guest_describer != NULL && (uintptr_t)cpu + sizeof(*cpu) <= map_top
+        && cpu->apic_id == apic_id && len + 1 < sizeof(text)) {
+        size_t n = guest_describer(text + len, sizeof(text) - len);
+        len += n < sizeof(text) - len ? n : sizeof(text) - len - 1;
+    }
+    panic("%s", text);
 }
 
 static void idt_set(int vector, uint64_t handler, uint8_t ist) {

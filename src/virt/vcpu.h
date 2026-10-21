@@ -166,6 +166,8 @@ struct vcpu {
     // For profile.c: the exit being handled, and when it began.
     unsigned profile_slot;
     uint64_t profile_tsc;
+    // The last exit's VMX basic exit reason or SVM exit code, for panics.
+    uint32_t last_exit;
 };
 
 extern bool virt_vmx;

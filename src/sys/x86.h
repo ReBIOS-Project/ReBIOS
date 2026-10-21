@@ -233,6 +233,18 @@ static inline void write_cr4(uintptr_t value) {
     asm volatile ("mov %0, %%cr4" :: "r"(value) : "memory");
 }
 
+static inline uintptr_t read_dr6(void) {
+    uintptr_t value;
+    asm volatile ("mov %%dr6, %0" : "=r"(value));
+    return value;
+}
+
+static inline uintptr_t read_dr7(void) {
+    uintptr_t value;
+    asm volatile ("mov %%dr7, %0" : "=r"(value));
+    return value;
+}
+
 static inline void cpu_relax(void) {
     asm volatile ("pause" ::: "memory");
 }

@@ -22,6 +22,7 @@
 #include <hw/power.h>
 #include <lib/heap.h>
 #include <lib/log.h>
+#include <lib/printf.h>
 #include <lib/spinlock.h>
 #include <sys/cpu.h>
 #include <sys/mm.h>
@@ -75,6 +76,17 @@ uint64_t vmx_cr4_mask(void);
 uint64_t vmx_cr0_real(uint64_t guest_cr0);
 uint64_t vmx_cr4_real(uint64_t guest_cr4);
 
+static size_t describe_guest(char *buf, size_t size) {
+    struct vcpu *v = this_cpu()->vcpu;
+    if (v == NULL) {
+        return 0;
+    }
+    int len = snprintf(buf, size, "Its guest last exited with %s %#x, at RIP %#llx\n",
+                       virt_vmx ? "basic reason" : "code", v->last_exit,
+                       (unsigned long long)vcpu_rip(v));
+    return len < 0 ? 0 : (size_t)len;
+}
+
 bool virt_init(void) {
     struct cpuid_regs vendor = cpuid(0, 0);
     bool intel = vendor.ebx == 0x756e6547 && vendor.edx == 0x49656e69 && vendor.ecx == 0x6c65746e;
@@ -107,6 +119,7 @@ bool virt_init(void) {
     }
 
     cpu_interrupt_handler(event_interrupt);
+    cpu_guest_describer(describe_guest);
     printf("Using %s\n", virt_vmx ? "VMX" : "SVM");
     return true;
 }

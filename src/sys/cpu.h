@@ -36,6 +36,7 @@
 #ifndef __ASSEMBLER__
 
 #include <stdint.h>
+#include <stddef.h>
 #include <stdbool.h>
 
 struct tss64 {
@@ -93,6 +94,9 @@ void cpu_nmi_restart(uint64_t start, uint64_t end);
 
 // Where interrupts the host takes go.
 void cpu_interrupt_handler(void (*handler)(uint8_t vector));
+
+// What writes the line on the guest that host exception panics end with.
+void cpu_guest_describer(size_t (*describe)(char *buf, size_t size));
 
 // Halts until an interrupt or NMI, with interrupts enabled meanwhile, unless
 // an NMI arrived since kicked was cleared.

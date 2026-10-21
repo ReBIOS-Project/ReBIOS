@@ -396,7 +396,8 @@ __attribute__((noreturn)) static void svm_shutdown(struct vcpu *v, const char *w
 
 static void svm_handle_exit(struct vcpu *v) {
     struct vmcb_control *c = &v->vmcb->control;
-    profile_exit(v, (uint32_t)c->exitcode);
+    v->last_exit = (uint32_t)c->exitcode;
+    profile_exit(v, v->last_exit);
     if (v->stepping && c->exitcode >= SVM_EXIT_EXCEPTION_BASE
         && c->exitcode < SVM_EXIT_EXCEPTION_BASE + 32) {
         svm_step_exception(v, (unsigned)(c->exitcode - SVM_EXIT_EXCEPTION_BASE));
