@@ -41,6 +41,9 @@ uint64_t layout_lfb(void);
 bool layout_mmio_free(uint64_t base, uint64_t size);
 // Where the guest's RAM above 4 GiB ends: 4 GiB where it has none there.
 uint64_t layout_high_ram_end(void);
+// Whether the firmware keeps all of the host's range [base, end): no part of
+// it is memory that the guest's RAM may be backed with.
+bool layout_host_kept(uint64_t base, uint64_t end);
 // Whether [gpa, gpa + size) is all the guest's RAM.
 bool layout_ram(uint64_t gpa, uint64_t size);
 // The host address of pages pages of the guest's RAM from gpa, for the

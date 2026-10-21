@@ -39,6 +39,7 @@
 #include <virt/cpuid.h>
 #include <virt/hpet.h>
 #include <virt/irq.h>
+#include <virt/igfx.h>
 #include <virt/layout.h>
 #include <virt/msr.h>
 #include <virt/mtrr.h>
@@ -75,8 +76,10 @@ static void bsp_main(void *arg) {
     cpuid_init();
     mtrr_init();
 
+    igfx_scan();
     layout_init();
     pci_virt_init();
+    igfx_init();
     a20_init();
     vga_init();
     // The guest's boot processor gets its local APIC as a legacy BIOS hands

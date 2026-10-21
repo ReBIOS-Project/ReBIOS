@@ -29,6 +29,7 @@
 #include <lib/log.h>
 #include <sys/mm.h>
 #include <virt/gpt.h>
+#include <virt/igfx.h>
 #include <virt/layout.h>
 #include <virt/mmio.h>
 #include <virt/pci_plan.h>
@@ -404,6 +405,12 @@ void layout_init(void) {
         }
         identity_add(base, end, EfiReservedMemoryType, efi_attribute_at(base));
     }
+    // What the OpRegion that the guest shares with the host gives by address.
+    uint64_t vbt_base;
+    uint64_t vbt_end;
+    if (igfx_one_to_one(&vbt_base, &vbt_end)) {
+        identity_add(vbt_base, vbt_end, EfiReservedMemoryType, efi_attribute_at(vbt_base));
+    }
 
     // The interrupt controllers, the timers, and what the guest's ACPI
     // describes, but never the configuration space windows or the IOMMUs.
@@ -582,6 +589,18 @@ uint64_t layout_high_ram_end(void) {
         }
     }
     return end;
+}
+
+bool layout_host_kept(uint64_t base, uint64_t end) {
+    const EFI_MEMORY_DESCRIPTOR *d;
+    for (uint32_t i = 0; (d = efi_desc(i)) != NULL; i++) {
+        uint64_t start = d->PhysicalStart;
+        uint64_t stop = start + d->NumberOfPages * PAGE_SIZE;
+        if (type_is_free(d->Type) && start < end && base < stop) {
+            return false;
+        }
+    }
+    return true;
 }
 
 bool layout_ram(uint64_t gpa, uint64_t size) {
