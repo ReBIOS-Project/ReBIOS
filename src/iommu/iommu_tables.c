@@ -1122,3 +1122,29 @@ const struct iommu_special_device *iommu_special_for(uint8_t type, uint8_t id) {
     }
     return NULL;
 }
+
+void iommu_tables_forget_reserved(bool (*unneeded)(uint16_t segment, uint16_t rid)) {
+    iommu_tables_parse();
+    uint32_t kept = 0;
+    for (uint32_t i = 0; i < tables.reserved_count; i++) {
+        struct iommu_reserved_region r = tables.reserved[i];
+        bool forget = !r.exclusion && (r.readable || r.writable) && !r.all_devices;
+        for (uint32_t rid = r.first; forget && rid <= r.last_rid; rid++) {
+            forget = unneeded(r.segment, (uint16_t)rid);
+        }
+        if (!forget) {
+            tables.reserved[kept++] = r;
+            continue;
+        }
+        char devices[32];
+        int n = snprintf(devices, sizeof(devices), "%04x:%02x:%02x.%x", r.segment, r.first >> 8,
+                         (r.first >> 3) & 0x1f, r.first & 7);
+        if (r.last_rid != r.first) {
+            snprintf(devices + n, sizeof(devices) - (size_t)n, "-%02x:%02x.%x", r.last_rid >> 8,
+                     (r.last_rid >> 3) & 0x1f, r.last_rid & 7);
+        }
+        printf("IOMMU region %#llx-%#llx of %s no longer needed\n", (unsigned long long)r.base,
+               (unsigned long long)r.last, devices);
+    }
+    tables.reserved_count = kept;
+}

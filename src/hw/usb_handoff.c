@@ -21,6 +21,7 @@
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
 #include <hw/usb_handoff.h>
+#include <iommu/iommu_tables.h>
 #include <lib/log.h>
 #include <lib/time.h>
 #include <sys/mm.h>
@@ -112,6 +113,11 @@
 #define POLL_US 10
 // Bounds on capability chains a broken controller might loop.
 #define MAX_CAPABILITIES 64
+
+#define MAX_TAKEN 64
+
+static struct pci_addr taken[MAX_TAKEN];
+static uint32_t taken_count;
 
 static volatile uint32_t *reg(uint64_t base, uint64_t offset) {
     return (volatile uint32_t *)(uintptr_t)(base + offset);
@@ -318,6 +324,20 @@ static void take(const struct pci_function *f) {
                                   : " taken from the firmware and";
     printf("USB %04x:%02x:%02x.%x: %s%s %s\n", a.segment, a.bus, a.device, a.function, name,
            from, stopped ? "stopped" : "not stopped");
+    if (stopped && taken_count < MAX_TAKEN) {
+        taken[taken_count++] = a;
+    }
+}
+
+static bool unneeded(uint16_t segment, uint16_t rid) {
+    for (uint32_t i = 0; i < taken_count; i++) {
+        const struct pci_addr *a = &taken[i];
+        if (a->segment == segment && a->bus == rid >> 8 && a->device == (rid >> 3 & 0x1f)
+            && a->function == (rid & 7)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void usb_handoff(void) {
@@ -328,4 +348,5 @@ void usb_handoff(void) {
             take(f);
         }
     }
+    iommu_tables_forget_reserved(unneeded);
 }

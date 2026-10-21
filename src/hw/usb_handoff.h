@@ -19,8 +19,10 @@
 #define HW__USB_HANDOFF_H
 
 // Takes every USB controller from the firmware, whose System Management Mode
-// code may still drive it to emulate a keyboard, and stops it, so nothing the
-// firmware started runs on under the guest. Needs pci_enum_scan().
+// code may still drive it to emulate a keyboard, and stops it, so the memory
+// the firmware set aside for it need not stay where it is for the IOMMU: that
+// memory is forgotten for each controller taken. Needs pci_enum_scan(), and
+// comes before anything maps the IOMMU tables' reserved regions.
 void usb_handoff(void);
 
 #endif
