@@ -63,7 +63,9 @@ ReBIOS requires:
 
 1. **Hardware virtualisation:** Intel VT-x with EPT and unrestricted guest support, or AMD-V with nested paging.
 2. **An IOMMU:** Intel VT-d or AMD-Vi (AMD IOMMU). ReBIOS uses it to map device DMA the way the legacy OS sees memory. Without
-  one, ReBIOS says so and returns to the firmware.
+  one, ReBIOS says so and returns to the firmware. It does the same where the machine's integrated graphics malfunctions
+  under VT-d: Intel's Broadwell, and Ironlake in Arrandale processors, or in Clarkdale ones whose firmware sets up no
+  shadow GTT for VT-d.
 
 ### Secure Boot
 

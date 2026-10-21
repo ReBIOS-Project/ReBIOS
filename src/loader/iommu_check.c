@@ -23,6 +23,7 @@
 #include <lib/log.h>
 #include <loader/efi_glue.h>
 #include <loader/iommu_check.h>
+#include <loader/pci_io.h>
 
 #define RSDP_REVISION 15
 #define RSDP_RSDT 16
@@ -52,6 +53,25 @@
 #define FOUND_USABLE 2
 
 #define NOTICE_SECONDS 10
+
+#define PCI_VENDOR_INTEL 0x8086
+#define IGFX_DEVFN (2 << 3)
+#define HOST_BRIDGE_GGC 0x52
+// The memory size encodings the firmware picks when it allocates a shadow GTT
+// for remapping.
+#define GGC_MEMORY_VT_ENABLED 0x800
+
+// Integrated graphics that malfunctions under DMA remapping, which Linux 7.3
+// therefore leaves untranslated (drivers/iommu/intel/iommu.c, quirk_iommu_igfx()
+// and quirk_calpella_no_shadow_gtt()). ReBIOS cannot: the guest's memory is not
+// where the host's is, so the guest's driver would point it at the wrong memory.
+static const uint16_t broadwell_igfx[] = {
+    0x1602, 0x1606, 0x160a, 0x160b, 0x160d, 0x160e, 0x1612, 0x1616, 0x161a, 0x161b, 0x161d, 0x161e,
+    0x1622, 0x1626, 0x162a, 0x162b, 0x162d, 0x162e, 0x1632, 0x1636, 0x163a, 0x163b, 0x163d, 0x163e,
+};
+// Linux 7.3 names the QM57 and QS57 chipsets it was seen with.
+#define ARRANDALE_HOST_BRIDGE 0x0044
+static const uint16_t calpella_host_bridges[] = {0x0040, 0x0062, 0x006a};
 
 static const EFI_GUID acpi_20_guid = EFI_ACPI_20_TABLE_GUID;
 static const EFI_GUID acpi_10_guid = EFI_ACPI_10_TABLE_GUID;
@@ -196,19 +216,75 @@ static int acpi_find_iommu(void) {
     return rsdt != 0 ? sdt_find_iommu((const uint8_t *)(uintptr_t)rsdt, 4) : FOUND_NONE;
 }
 
+static bool listed(uint16_t id, const uint16_t *ids, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        if (ids[i] == id) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Whether the integrated graphics, if any, is one that remapping breaks.
+static bool igfx_broken(uint16_t *igfx_id) {
+    EFI_UINTN count;
+    struct pci_io_device *devices = pci_io_devices(&count);
+    const struct pci_io_device *igfx = NULL;
+    const struct pci_io_device *host_bridge = NULL;
+    for (EFI_UINTN i = 0; i < count; i++) {
+        const struct pci_io_device *d = &devices[i];
+        if (d->vendor_id != PCI_VENDOR_INTEL || d->address.segment != 0 || d->address.bus != 0) {
+            continue;
+        }
+        if (d->address.devfn == IGFX_DEVFN && d->base_class == PCI_CLASS_DISPLAY) {
+            igfx = d;
+        } else if (d->address.devfn == 0) {
+            host_bridge = d;
+        }
+    }
+
+    bool broken = false;
+    if (igfx != NULL) {
+        *igfx_id = igfx->device_id;
+        broken = listed(igfx->device_id, broadwell_igfx,
+                        sizeof(broadwell_igfx) / sizeof(broadwell_igfx[0]));
+        if (host_bridge != NULL && host_bridge->device_id == ARRANDALE_HOST_BRIDGE) {
+            broken = true;
+        }
+        uint16_t ggc;
+        if (host_bridge != NULL
+            && listed(host_bridge->device_id, calpella_host_bridges,
+                      sizeof(calpella_host_bridges) / sizeof(calpella_host_bridges[0]))
+            && host_bridge->io->Pci.Read(host_bridge->io, EfiPciIoWidthUint16, HOST_BRIDGE_GGC, 1,
+                                         &ggc) == EFI_SUCCESS
+            && (ggc & GGC_MEMORY_VT_ENABLED) == 0) {
+            broken = true;
+        }
+    }
+    if (devices != NULL) {
+        efi_bs->FreePool(devices);
+    }
+    return broken;
+}
+
 bool iommu_check(void) {
     int found = acpi_find_iommu();
-    if (found == FOUND_USABLE) {
+    uint16_t igfx_id;
+    if (found == FOUND_USABLE && !igfx_broken(&igfx_id)) {
         return true;
     }
 
-    const char *notice =
-        "ReBIOS needs an IOMMU (Intel VT-d or AMD-Vi), but the firmware reports none.\n"
-        "If the machine has one, enable it in the firmware setup.\n";
-    if (found == FOUND_UNUSABLE) {
-        notice = "ReBIOS cannot use the IOMMU the firmware reports.\n";
+    if (found == FOUND_USABLE) {
+        log_notice("ReBIOS cannot run with this machine's integrated graphics, %04x:%04x, which\n"
+                   "malfunctions when the IOMMU remaps its memory accesses. If another\n"
+                   "graphics card is installed, disable the integrated graphics in the\n"
+                   "firmware setup.\n", PCI_VENDOR_INTEL, igfx_id);
+    } else if (found == FOUND_UNUSABLE) {
+        log_notice("ReBIOS cannot use the IOMMU the firmware reports.\n");
+    } else {
+        log_notice("ReBIOS needs an IOMMU (Intel VT-d or AMD-Vi), but the firmware reports none.\n"
+                   "If the machine has one, enable it in the firmware setup.\n");
     }
-    log_notice("%s", notice);
     efi_bs->Stall(NOTICE_SECONDS * 1000000);
     return false;
 }
