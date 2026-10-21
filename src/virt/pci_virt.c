@@ -1259,3 +1259,33 @@ void pci_virt_hook(struct pci_addr addr, const struct pci_virt_hook *hook) {
         vf->hook = hook;
     }
 }
+
+bool pci_virt_trap(struct pci_addr addr, unsigned bar, uint64_t offset, uint64_t size,
+                   const struct mmio_ops *ops, void *ctx) {
+    struct vfunction *vf = vfunction_find(addr);
+    if (vf == NULL || bar >= BAR_COUNT) {
+        return false;
+    }
+    struct vbar *b = &vf->bars[bar];
+    if (b->size == 0 || sub_page(b) || b->trap_size != 0 || size == 0 || offset > b->size
+        || size > b->size - offset) {
+        return false;
+    }
+    int region = mmio_register(0, 0, ops, ctx);
+    if (region < 0) {
+        return false;
+    }
+    spinlock_acquire(&virt.lock);
+    b->trap = offset;
+    b->trap_size = size;
+    b->trap_region = region;
+    if (b->mapped != 0) {
+        uint64_t start = page_down(b->mapped + offset);
+        uint64_t end = page_up(b->mapped + offset + size);
+        gpt_map(start, 0, end - start, 0, 0);
+        mmio_move(region, start, end - start);
+        gpt_flush();
+    }
+    spinlock_release(&virt.lock);
+    return true;
+}
