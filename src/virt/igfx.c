@@ -111,6 +111,15 @@
 // old addresses lead elsewhere.
 #define SETTLE_US 50000
 
+// Linux 7.3 display/intel_fbc.c WaFbcTurnOffFbcWhenHyperVisorIsUsed: Skylake's
+// and Broxton's frame buffer compression stays off while VT-d translates,
+// which it always does here. FBC turns on by DPFC_CTL_EN in ILK_DPFC_CONTROL
+// (display/intel_fbc_regs.h; the one FBC of Gen9's at 43208h). The device IDs
+// are include/drm/intel/pciids.h INTEL_SKL_IDS and INTEL_BXT_IDS.
+#define FBC_PAGE 0x43000u
+#define FBC_CONTROL_TOP 0x4320bu
+#define FBC_CONTROL_EN_BYTE 0x80u
+
 enum stolen_kind {
     STOLEN_NONE,
     // BDSM at 5Ch, the MMIO copies 32-bit: Gen9 and Gen10.
@@ -213,6 +222,7 @@ static void scan_stolen(struct pci_function *f) {
     uint64_t bsm = pci_cfg_read(f->addr, REG_BSM, 4) & BSM_MASK;
     uint64_t bsm_64 = (pci_cfg_read(f->addr, REG_BSM_GEN11, 4)
                        | (uint64_t)pci_cfg_read(f->addr, REG_BSM_GEN11 + 4, 4) << 32) & BSM_MASK_64;
+    igfx.gttmmadr = bar->base;
     mm_map_device(bar->base + MMIO_PAGE, PAGE_SIZE);
     enum stolen_kind kind;
     uint64_t dsm;
@@ -233,7 +243,6 @@ static void scan_stolen(struct pci_function *f) {
         return;
     }
     igfx.kind = kind;
-    igfx.gttmmadr = bar->base;
     igfx.dsm = dsm;
     igfx.dsm_size = size;
     igfx.gsm_size = gsm;
@@ -241,6 +250,20 @@ static void scan_stolen(struct pci_function *f) {
 
 static bool gen9_lp(uint16_t id) {
     static const uint16_t ids[] = {0x0a84, 0x1a84, 0x1a85, 0x5a84, 0x5a85, 0x3184, 0x3185};
+    for (unsigned i = 0; i < sizeof(ids) / sizeof(ids[0]); i++) {
+        if (id == ids[i]) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool fbc_kept_off(uint16_t id) {
+    static const uint16_t ids[] = {
+        0x1902, 0x1906, 0x190a, 0x190b, 0x190e, 0x1912, 0x1913, 0x1915, 0x1916, 0x1917,
+        0x191a, 0x191b, 0x191d, 0x191e, 0x1921, 0x1923, 0x1926, 0x1927, 0x192a, 0x192b,
+        0x192d, 0x1932, 0x193a, 0x193b, 0x193d, 0x0a84, 0x1a84, 0x1a85, 0x5a84, 0x5a85,
+    };
     for (unsigned i = 0; i < sizeof(ids) / sizeof(ids[0]); i++) {
         if (id == ids[i]) {
             return true;
@@ -433,6 +456,35 @@ static void mmio_write(struct vcpu *v, void *ctx, uint64_t offset, unsigned size
 
 static const struct mmio_ops mmio_ops = {mmio_read, mmio_write, false};
 
+static uint64_t fbc_read(struct vcpu *v, void *ctx, uint64_t offset, unsigned size) {
+    (void)v;
+    (void)ctx;
+    return mmio_read_host(igfx.gttmmadr + FBC_PAGE + offset, size);
+}
+
+static void fbc_write(struct vcpu *v, void *ctx, uint64_t offset, unsigned size, uint64_t value) {
+    (void)v;
+    (void)ctx;
+    uint32_t reg = FBC_PAGE + (uint32_t)offset;
+    if (reg <= FBC_CONTROL_TOP && FBC_CONTROL_TOP < reg + size) {
+        value &= ~((uint64_t)FBC_CONTROL_EN_BYTE << (8 * (FBC_CONTROL_TOP - reg)));
+    }
+    mmio_write_host(igfx.gttmmadr + FBC_PAGE + offset, size, value);
+}
+
+static const struct mmio_ops fbc_ops = {fbc_read, fbc_write, false};
+
+static void init_fbc(void) {
+    mm_map_device(igfx.gttmmadr + FBC_PAGE, PAGE_SIZE);
+    if (!pci_virt_trap(igfx.f->addr, 0, FBC_PAGE, PAGE_SIZE, &fbc_ops, NULL)) {
+        printf("Intel graphics: FBC cannot be kept off\n");
+        return;
+    }
+    uint64_t top = igfx.gttmmadr + FBC_CONTROL_TOP;
+    mmio_write_host(top, 1, mmio_read_host(top, 1) & ~FBC_CONTROL_EN_BYTE);
+    printf("Intel graphics: FBC kept off, as VT-d translates\n");
+}
+
 static void init_opregion(void) {
     uint64_t offset = igfx.asls & (PAGE_SIZE - 1);
     uint64_t host = igfx.asls - offset;
@@ -476,6 +528,9 @@ void igfx_init(void) {
     }
     if (igfx.alias != 0) {
         init_stolen();
+    }
+    if (igfx.gttmmadr != 0 && fbc_kept_off(igfx.f->device_id)) {
+        init_fbc();
     }
     if (igfx.guest_asls != 0 || igfx.alias != 0) {
         pci_virt_hook(igfx.f->addr, &config_hook);
