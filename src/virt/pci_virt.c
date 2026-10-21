@@ -26,6 +26,7 @@
 #include <hw/pci_enum.h>
 #include <lib/heap.h>
 #include <lib/log.h>
+#include <lib/printf.h>
 #include <lib/spinlock.h>
 #include <sys/mm.h>
 #include <sys/x86.h>
@@ -200,6 +201,27 @@ static struct {
     uint64_t address_limit;
 } virt;
 
+// A guest page where BARs smaller than a page share it, or sit at another
+// offset than in their host pages, so that no one host page can back it: the
+// hypervisor reaches each of them for the guest.
+#define PAGE_RESIDENTS 16
+#define SHARED_PAGES 64
+
+struct resident {
+    struct vfunction *vf;
+    unsigned index;
+};
+
+struct shared_page {
+    // 0 when unused.
+    uint64_t page;
+    int region;
+    unsigned count;
+    struct resident residents[PAGE_RESIDENTS];
+};
+
+static struct shared_page shared_pages[SHARED_PAGES];
+
 static uint16_t requester(const struct pci_function *f) {
     return (uint16_t)(f->addr.bus << 8 | f->addr.device << 3 | f->addr.function);
 }
@@ -240,6 +262,10 @@ static uint64_t page_up(uint64_t x) {
     return (x + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
 }
 
+static uint64_t bar_mask(const struct vbar *b) {
+    return ~(b->size - 1);
+}
+
 // The guest's pages for the BAR at guest, which must sit at the same offset in
 // its page as the host's BAR does in the host's, as whole pages map.
 static bool mappable(const struct vbar *b, uint64_t guest) {
@@ -274,24 +300,100 @@ static bool overlaps(const struct vbar *b, uint64_t base, uint64_t end) {
     return b->mapped != 0 && page_down(b->mapped) < end && page_up(b->mapped + b->size) > base;
 }
 
+static bool sub_page(const struct vbar *b) {
+    return b->size < PAGE_SIZE;
+}
+
+static bool page_arbitrate(uint64_t page);
+
 // What else is mapped in [base, end), which an unmapping there took away.
 static void map_again(uint64_t base, uint64_t end) {
     for (uint32_t i = 0; i < virt.count; i++) {
         for (unsigned k = 0; k <= BAR_COUNT; k++) {
-            if (overlaps(&virt.functions[i].bars[k], base, end)) {
-                map(&virt.functions[i].bars[k]);
+            struct vbar *b = &virt.functions[i].bars[k];
+            if (!overlaps(b, base, end)) {
+                continue;
+            }
+            if (sub_page(b)) {
+                page_arbitrate(page_down(b->mapped));
+            } else {
+                map(b);
             }
         }
     }
+}
+
+// The lower register's address bits all ones, as the guest sizes the BAR.
+static bool sizing(const struct vbar *b) {
+    return (uint32_t)b->guest == ((uint32_t)bar_mask(b) & BAR_ADDRESS);
+}
+
+static void bar_log(const struct vbar *b, const char *what) {
+    for (uint32_t i = 0; i < virt.count; i++) {
+        const struct vfunction *vf = &virt.functions[i];
+        if (b < vf->bars || b > &vf->bars[BAR_COUNT]) {
+            continue;
+        }
+        struct pci_addr a = vf->f->addr;
+        unsigned k = (unsigned)(b - vf->bars);
+        char name[8] = "ROM";
+        if (k != ROM_INDEX) {
+            snprintf(name, sizeof(name), "BAR%u", k);
+        }
+        printf("PCI %04x:%02x:%02x.%x %s at %#llx: %s\n", a.segment, a.bus, a.device, a.function,
+               name, (unsigned long long)b->guest, what);
+        return;
+    }
+}
+
+// A BAR smaller than a page sits wherever the guest has nothing else, as the
+// hypervisor reaches it where its page cannot be the host's.
+static void sub_page_update(struct vbar *b, bool is_rom) {
+    uint64_t want = 0;
+    if (b->guest != 0 && (!is_rom || b->enabled) && !sizing(b)) {
+        uint64_t page = page_down(b->guest);
+        if (page + PAGE_SIZE <= virt.address_limit && layout_mmio_free(page, PAGE_SIZE)) {
+            want = b->guest;
+        } else {
+            bar_log(b, "in no place, as the guest has something else there");
+        }
+    }
+    if (want == b->mapped) {
+        return;
+    }
+    uint64_t old = b->mapped;
+    b->mapped = want;
+    if (want == 0 && b->trap_size != 0 && b->trap_region >= 0) {
+        mmio_move(b->trap_region, 0, 0);
+    }
+    bool reached = false;
+    if (old != 0) {
+        reached = page_arbitrate(page_down(old));
+    }
+    if (want != 0 && page_down(want) != page_down(old)) {
+        reached = page_arbitrate(page_down(want));
+    }
+    if (want != 0 && reached) {
+        bar_log(b, "reached through the hypervisor");
+    }
+    gpt_flush();
 }
 
 // Follows the guest's address and enables for the BAR. Where the guest puts it
 // somewhere it cannot map, such as at the size mask while it sizes the BAR, it
 // is in no place.
 static void bar_update(struct vbar *b, bool is_rom) {
+    if (sub_page(b)) {
+        sub_page_update(b, is_rom);
+        return;
+    }
     uint64_t want = 0;
-    if (b->guest != 0 && (!is_rom || b->enabled) && mappable(b, b->guest)) {
-        want = b->guest;
+    if (b->guest != 0 && (!is_rom || b->enabled)) {
+        if (mappable(b, b->guest)) {
+            want = b->guest;
+        } else if (!sizing(b)) {
+            bar_log(b, "in no place, as the guest has something else there");
+        }
     }
     if (want == b->mapped) {
         return;
@@ -346,10 +448,6 @@ static bool is_bridge(const struct vfunction *vf) {
 static bool window_reg(const struct vfunction *vf, uint32_t reg) {
     return is_bridge(vf) && (reg == REG_MEMORY || reg == REG_PREF || reg == REG_PREF_BASE_UPPER
                              || reg == REG_PREF_LIMIT_UPPER);
-}
-
-static uint64_t bar_mask(const struct vbar *b) {
-    return ~(b->size - 1);
 }
 
 static uint32_t window_word(uint64_t address) {
@@ -678,6 +776,137 @@ static void msix_write(struct vcpu *v, void *ctx, uint64_t offset, unsigned size
 
 static const struct mmio_ops msix_ops = {msix_read, msix_write, false};
 
+struct shared_target {
+    struct vfunction *vf;
+    uint64_t hpa;
+    bool msix;
+};
+
+// The BAR of the page an access falls in, if any, found under the lock, which
+// msix_read() and msix_write() take themselves.
+static bool shared_target(const struct shared_page *sp, uint64_t offset, unsigned size,
+                          struct shared_target *t) {
+    bool found = false;
+    spinlock_acquire(&virt.lock);
+    uint64_t gpa = sp->page + offset;
+    for (unsigned i = 0; i < sp->count && !found; i++) {
+        struct vfunction *vf = sp->residents[i].vf;
+        const struct vbar *b = &vf->bars[sp->residents[i].index];
+        if (gpa >= b->mapped && gpa + size <= b->mapped + b->size) {
+            *t = (struct shared_target){vf, b->host + (gpa - b->mapped), b->trap_size != 0};
+            found = true;
+        }
+    }
+    spinlock_release(&virt.lock);
+    return found;
+}
+
+static uint64_t shared_read(struct vcpu *v, void *ctx, uint64_t offset, unsigned size) {
+    struct shared_target t;
+    if (!shared_target(ctx, offset, size, &t)) {
+        return size == 8 ? UINT64_MAX : all_ones(size);
+    }
+    if (t.msix) {
+        return msix_read(v, t.vf, t.hpa - t.vf->msix.page, size);
+    }
+    return mmio_read_host(t.hpa, size);
+}
+
+static void shared_write(struct vcpu *v, void *ctx, uint64_t offset, unsigned size,
+                         uint64_t value) {
+    struct shared_target t;
+    if (!shared_target(ctx, offset, size, &t)) {
+        return;
+    }
+    if (t.msix) {
+        msix_write(v, t.vf, t.hpa - t.vf->msix.page, size, value);
+    } else {
+        mmio_write_host(t.hpa, size, value);
+    }
+}
+
+static const struct mmio_ops shared_ops = {shared_read, shared_write, false};
+
+static struct shared_page *shared_find(uint64_t page) {
+    for (unsigned i = 0; i < SHARED_PAGES; i++) {
+        if (shared_pages[i].page == page) {
+            return &shared_pages[i];
+        }
+    }
+    return NULL;
+}
+
+static struct shared_page *shared_take(uint64_t page) {
+    for (unsigned i = 0; i < SHARED_PAGES; i++) {
+        struct shared_page *sp = &shared_pages[i];
+        if (sp->page != 0) {
+            continue;
+        }
+        if (sp->region < 0) {
+            sp->region = mmio_register(page, PAGE_SIZE, &shared_ops, sp);
+            if (sp->region < 0) {
+                return NULL;
+            }
+        } else {
+            mmio_move(sp->region, page, PAGE_SIZE);
+        }
+        sp->page = page;
+        return sp;
+    }
+    return NULL;
+}
+
+// What the guest reaches in a page holding BARs smaller than a page: the host
+// page where one BAR alone is there, at its host offset, else each of them
+// through the hypervisor, which it returns whether it does. An MSI-X table's
+// region stands in for a host page.
+static bool page_arbitrate(uint64_t page) {
+    struct resident found[PAGE_RESIDENTS];
+    unsigned n = 0;
+    for (uint32_t i = 0; i < virt.count; i++) {
+        struct vfunction *vf = &virt.functions[i];
+        for (unsigned k = 0; k <= BAR_COUNT && n < PAGE_RESIDENTS; k++) {
+            const struct vbar *b = &vf->bars[k];
+            if (b->size != 0 && sub_page(b) && b->mapped != 0 && page_down(b->mapped) == page) {
+                found[n++] = (struct resident){vf, k};
+            }
+        }
+    }
+    struct shared_page *sp = shared_find(page);
+    struct vbar *only = n == 1 ? &found[0].vf->bars[found[0].index] : NULL;
+    bool direct = only != NULL && ((only->mapped ^ only->host) & (PAGE_SIZE - 1)) == 0;
+    gpt_map(page, 0, PAGE_SIZE, 0, 0);
+    if (n == 0 || direct) {
+        if (sp != NULL) {
+            mmio_move(sp->region, 0, 0);
+            sp->page = 0;
+        }
+        if (direct && only->trap_size != 0 && only->trap_region >= 0) {
+            mmio_move(only->trap_region, page, PAGE_SIZE);
+        } else if (direct) {
+            gpt_map(page, page_down(only->host), PAGE_SIZE, GPT_RWX, MT_UC);
+        }
+        return false;
+    }
+
+    for (unsigned i = 0; i < n; i++) {
+        struct vbar *b = &found[i].vf->bars[found[i].index];
+        if (b->trap_size != 0 && b->trap_region >= 0) {
+            mmio_move(b->trap_region, 0, 0);
+        }
+    }
+    if (sp == NULL) {
+        sp = shared_take(page);
+    }
+    if (sp == NULL) {
+        printf("PCI: no room to reach the BARs at %#llx\n", (unsigned long long)page);
+        return false;
+    }
+    memcpy(sp->residents, found, n * sizeof(found[0]));
+    sp->count = n;
+    return true;
+}
+
 // MSI-X Enable as the guest sets it: the entries it unmasked get their
 // vectors before the function may send, and lose them after it may not.
 static void msix_control(struct vfunction *vf, uint32_t value) {
@@ -986,6 +1215,10 @@ static void vfunction_init(struct vfunction *vf, struct pci_function *f,
             .host = bar->base,
             .guest = pf->bars[i],
         };
+        // The hypervisor reaches it for the guest where no one page can.
+        if (bar->size < PAGE_SIZE) {
+            mm_map_device(page_down(bar->base), PAGE_SIZE);
+        }
     }
     if (f->rom.kind == PCI_BAR_MEM32 && f->rom.size != 0) {
         uint32_t reg = f->header_type == HEADER_BRIDGE ? REG_BRIDGE_ROM : REG_ROM;
@@ -996,6 +1229,9 @@ static void vfunction_init(struct vfunction *vf, struct pci_function *f,
             .guest = pf->rom,
             .enabled = (pci_cfg_read(f->addr, reg, 4) & ROM_ENABLE) != 0,
         };
+        if (f->rom.size < PAGE_SIZE) {
+            mm_map_device(page_down(f->rom.base), PAGE_SIZE);
+        }
     }
     if (f->msix_cap != 0) {
         msix_init(vf);
@@ -1021,6 +1257,9 @@ void pci_virt_init(void) {
     unsigned bits = extended >= 0x80000008 ? cpuid(0x80000008, 0).eax & 0xff : 36;
     virt.address_limit = 1ull << bits;
 
+    for (unsigned i = 0; i < SHARED_PAGES; i++) {
+        shared_pages[i].region = -1;
+    }
     virt.count = t->function_count;
     virt.functions = kmalloc((virt.count != 0 ? virt.count : 1) * sizeof(*virt.functions));
     for (uint32_t i = 0; i < virt.count; i++) {
