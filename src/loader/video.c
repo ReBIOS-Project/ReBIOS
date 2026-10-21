@@ -25,6 +25,7 @@
 #include <lib/printf.h>
 #include <loader/cbfs.h>
 #include <loader/config.h>
+#include <loader/display.h>
 #include <loader/efi_glue.h>
 #include <loader/loader.h>
 #include <loader/pci_io.h>
@@ -650,7 +651,9 @@ void video_exit_boot_services(void) {
     EFI_UINTN count;
     bool driven = false;
 
-    if (!video->vbios_present) {
+    // The emulated VGA draws on the framebuffer the driver set up, which some
+    // drivers turn off when stopped.
+    if (!video->vbios_present || display_vga_emulated()) {
         return;
     }
     if (efi_bs->Hdr.Revision < EFI_1_10_SYSTEM_TABLE_REVISION) {

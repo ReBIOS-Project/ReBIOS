@@ -35,8 +35,8 @@ static EFI_GUID gop_guid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
 static EFI_GUID edid_active_guid = EFI_EDID_ACTIVE_PROTOCOL_GUID;
 static EFI_GUID edid_discovered_guid = EFI_EDID_DISCOVERED_PROTOCOL_GUID;
 
-// As the core's vga_init() decides.
-static bool vga_emulated(const struct handoff *h) {
+bool display_vga_emulated(void) {
+    const struct handoff *h = loader_handoff;
     const struct handoff_framebuffer *fb = &h->video.framebuffer;
     if (!fb->present || (fb->bpp != 32 && fb->bpp != 24 && fb->bpp != 16)) {
         return false;
@@ -109,7 +109,7 @@ static void collect_edid(struct handoff_video *video) {
 
 void display_collect(void) {
     struct handoff *h = loader_handoff;
-    if (!vga_emulated(h)) {
+    if (!display_vga_emulated()) {
         return;
     }
     reserve_vram(&h->video);

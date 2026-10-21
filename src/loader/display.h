@@ -18,6 +18,12 @@
 #ifndef LOADER__DISPLAY_H
 #define LOADER__DISPLAY_H
 
+#include <stdbool.h>
+
+// Whether the core will emulate the VGA, as its vga_init() decides. Needs
+// video_init().
+bool display_vga_emulated(void);
+
 // Reserves the emulated VGA's video memory, if the VGA is to be emulated, and
 // records the display's EDID. Needs video_init().
 void display_collect(void);
