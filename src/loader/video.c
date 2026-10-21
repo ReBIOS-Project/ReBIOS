@@ -533,6 +533,22 @@ static bool find_pci_device(struct handoff_pci_address address, struct pci_io_de
     return found;
 }
 
+// The VBIOS path left a 2019 iMac's panel dark, and Macs without a CSM run no
+// legacy images, so nothing vouches for those of their graphics cards.
+static bool apple_firmware(void) {
+    static const EFI_CHAR16 apple[] = u"Apple";
+    const EFI_CHAR16 *vendor = efi_st->FirmwareVendor;
+    if (vendor == NULL) {
+        return false;
+    }
+    for (size_t i = 0; apple[i] != 0; i++) {
+        if (vendor[i] != apple[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // For when no graphics output shows which card the firmware's console is on.
 static bool try_display_devices(struct vbios_choice *choice) {
     EFI_UINTN count;
@@ -610,11 +626,13 @@ void video_init(void) {
 
     bool have_user = load_user_vbios(&user);
     const struct user_vbios *user_vbios = have_user ? &user : NULL;
+    bool apple = config.vga_emulation == HANDOFF_VGA_EMULATION_AUTO && !have_user
+                 && apple_firmware();
 
     if (config.vga_specified) {
         have_dev = find_pci_device(config.vga_device, &dev);
         if (have_dev) {
-            found = try_device(&dev, user_vbios, &choice);
+            found = !apple && try_device(&dev, user_vbios, &choice);
         } else {
             printf("The configured VGA device " PCI_ADDRESS_FMT " does not exist\n",
                    PCI_ADDRESS_ARGS(config.vga_device));
@@ -623,16 +641,17 @@ void video_init(void) {
         // Another card's VBIOS would put the legacy display where the
         // firmware's is not.
         have_dev = true;
-        found = try_device(&dev, user_vbios, &choice);
+        found = !apple && try_device(&dev, user_vbios, &choice);
     } else if (have_user) {
         printf("Not using %s as the VBIOS: no VGA device is configured, and no graphics "
                "output leads to one\n", user.source);
     } else if (gop_handle == NULL) {
-        found = try_display_devices(&choice);
+        found = !apple && try_display_devices(&choice);
     }
 
     if (!found || !install_vbios(&choice)) {
-        printf("No usable VBIOS\n");
+        printf(apple ? "No VBIOS under Apple's firmware but with vga_emulation = never\n"
+                     : "No usable VBIOS\n");
         // It keeps its legacy VGA resources, for the emulated VGA to stand in
         // for.
         if (have_dev) {
