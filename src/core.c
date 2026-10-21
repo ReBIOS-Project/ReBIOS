@@ -26,6 +26,7 @@
 #include <hw/lapic_legacy.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
+#include <hw/usb_handoff.h>
 #include <iommu/dma.h>
 #include <iommu/remap.h>
 #include <lib/log.h>
@@ -62,6 +63,7 @@ static void bsp_main(void *arg) {
     pci_cfg_init();
     pci_enum_scan();
     pci_enum_shrink_rebars(PCI_PLAN_LOW_BAR_MAX);
+    usb_handoff();
     dma_init();
 
     if (!virt_init()) {
