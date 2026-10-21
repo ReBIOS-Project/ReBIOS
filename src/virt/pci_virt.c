@@ -172,6 +172,7 @@ struct vmsix {
 struct vfunction {
     struct pci_function *f;
     bool hidden;
+    const struct pci_virt_hook *hook;
     struct vmsi msi;
     struct vmsix msix;
     // A 64-bit BAR at the index of its lower register; a ROM at ROM_INDEX.
@@ -1001,6 +1002,10 @@ static uint32_t function_read(struct pci_addr a, uint32_t offset, unsigned size)
         return all_ones(size);
     }
     uint32_t reg = offset & ~3u;
+    uint32_t value;
+    if (vf != NULL && vf->hook != NULL && vf->hook->read(reg, &value)) {
+        return (value >> (8 * (offset & 3))) & all_ones(size);
+    }
     if (vf != NULL && msi_reg(vf, reg)) {
         return (msi_read(vf, reg) >> (8 * (offset & 3))) & all_ones(size);
     }
@@ -1018,6 +1023,9 @@ static void function_write(struct pci_addr a, uint32_t offset, unsigned size, ui
     uint32_t reg = offset & ~3u;
     unsigned shift = 8 * (offset & 3);
     uint32_t mask = all_ones(size) << shift;
+    if (vf != NULL && vf->hook != NULL && vf->hook->write(reg, value << shift, mask)) {
+        return;
+    }
     if (vf != NULL && msi_reg(vf, reg)) {
         msi_write(vf, reg, (msi_read(vf, reg) & ~mask) | ((value << shift) & mask));
         return;
@@ -1281,4 +1289,11 @@ void pci_virt_init(void) {
     ecam_windows(plan);
     gpt_flush();
     printf("PCI: %u of the guest's BARs mapped onto the host's\n", mapped);
+}
+
+void pci_virt_hook(struct pci_addr addr, const struct pci_virt_hook *hook) {
+    struct vfunction *vf = vfunction_find(addr);
+    if (vf != NULL) {
+        vf->hook = hook;
+    }
 }

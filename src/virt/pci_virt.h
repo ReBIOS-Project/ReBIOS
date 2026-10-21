@@ -18,11 +18,27 @@
 #ifndef VIRT__PCI_VIRT_H
 #define VIRT__PCI_VIRT_H
 
+#include <stdint.h>
+#include <stdbool.h>
+#include <hw/pci_cfg.h>
+
 // Takes the guest's configuration space accesses over, through ports CF8h and
 // CFCh and through the configuration space windows, segment 0's where the plan
 // puts it and the others' where the host has them, and gives the guest the
 // plan's BARs and bridge windows, mapped onto the host's BARs. Needs
 // layout_init().
 void pci_virt_init(void);
+
+// Registers of a function that another module keeps: read gives the dword at
+// the aligned reg, write merges the bytes of value under mask into it, and
+// each returns false for a register that is not one of its own.
+struct pci_virt_hook {
+    bool (*read)(uint32_t reg, uint32_t *value);
+    bool (*write)(uint32_t reg, uint32_t value, uint32_t mask);
+};
+
+// Hands the function's registers to hook before anything else. After
+// pci_virt_init().
+void pci_virt_hook(struct pci_addr addr, const struct pci_virt_hook *hook);
 
 #endif
