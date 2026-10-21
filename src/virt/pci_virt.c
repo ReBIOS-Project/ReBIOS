@@ -113,6 +113,14 @@
 #define COMMAND_MEMORY 0x2u
 
 // A memory BAR or expansion ROM BAR as the guest has it.
+#define BAR_TRAPS 4
+
+struct bar_trap {
+    uint64_t offset;
+    uint64_t size;
+    int region;
+};
+
 struct vbar {
     uint8_t kind;
     // The read-only type bits of its (lower) register.
@@ -123,11 +131,10 @@ struct vbar {
     bool enabled;
     // Where the guest's range maps to the host's, 0 if nowhere.
     uint64_t mapped;
-    // The pages holding [trap, trap + trap_size) of it, which the guest
-    // reaches through the hypervisor's region: an MSI-X table's.
-    uint64_t trap;
-    uint64_t trap_size;
-    int trap_region;
+    // The pages holding ranges of it that the guest reaches through the
+    // hypervisor's regions, by offset: an MSI-X table's, and other modules'.
+    struct bar_trap traps[BAR_TRAPS];
+    unsigned trap_count;
 };
 
 // A function's MSI as the guest programs it. The function sends a message of
@@ -282,19 +289,36 @@ static void map_pages(uint64_t guest, uint64_t host, uint64_t end) {
     }
 }
 
+static uint64_t trap_start(const struct vbar *b, uint64_t at, unsigned i) {
+    return page_down(at + b->traps[i].offset);
+}
+
+static uint64_t trap_end(const struct vbar *b, uint64_t at, unsigned i) {
+    return page_up(at + b->traps[i].offset + b->traps[i].size);
+}
+
 // Around the pages the guest reaches through the hypervisor, if any.
 static void map(const struct vbar *b) {
     uint64_t base = page_down(b->mapped);
     uint64_t end = page_up(b->mapped + b->size);
     uint64_t host = page_down(b->host);
-    if (b->trap_size == 0) {
-        map_pages(base, host, end);
-        return;
+    uint64_t at = base;
+    for (unsigned i = 0; i < b->trap_count; i++) {
+        map_pages(at, host + (at - base), trap_start(b, b->mapped, i));
+        if (trap_end(b, b->mapped, i) > at) {
+            at = trap_end(b, b->mapped, i);
+        }
     }
-    uint64_t trap_start = page_down(b->mapped + b->trap);
-    uint64_t trap_end = page_up(b->mapped + b->trap + b->trap_size);
-    map_pages(base, host, trap_start);
-    map_pages(trap_end, host + (trap_end - base), end);
+    map_pages(at, host + (at - base), end);
+}
+
+// Each of the hypervisor's regions to its pages of the BAR at at, or nowhere.
+static void traps_move(const struct vbar *b, uint64_t at) {
+    for (unsigned i = 0; i < b->trap_count; i++) {
+        uint64_t start = trap_start(b, at, i);
+        mmio_move(b->traps[i].region, at != 0 ? start : 0,
+                  at != 0 ? trap_end(b, at, i) - start : 0);
+    }
 }
 
 static bool overlaps(const struct vbar *b, uint64_t base, uint64_t end) {
@@ -364,8 +388,8 @@ static void sub_page_update(struct vbar *b, bool is_rom) {
     }
     uint64_t old = b->mapped;
     b->mapped = want;
-    if (want == 0 && b->trap_size != 0 && b->trap_region >= 0) {
-        mmio_move(b->trap_region, 0, 0);
+    if (want == 0 && b->trap_count != 0) {
+        mmio_move(b->traps[0].region, 0, 0);
     }
     bool reached = false;
     if (old != 0) {
@@ -410,11 +434,7 @@ static void bar_update(struct vbar *b, bool is_rom) {
         b->mapped = want;
         map(b);
     }
-    if (b->trap_size != 0 && b->trap_region >= 0) {
-        uint64_t trap_start = page_down(want + b->trap);
-        mmio_move(b->trap_region, want != 0 ? trap_start : 0,
-                  want != 0 ? page_up(want + b->trap + b->trap_size) - trap_start : 0);
-    }
+    traps_move(b, want);
     gpt_flush();
 }
 
@@ -756,7 +776,7 @@ static bool shared_target(const struct shared_page *sp, uint64_t offset, unsigne
         struct vfunction *vf = sp->residents[i].vf;
         const struct vbar *b = &vf->bars[sp->residents[i].index];
         if (gpa >= b->mapped && gpa + size <= b->mapped + b->size) {
-            *t = (struct shared_target){vf, b->host + (gpa - b->mapped), b->trap_size != 0};
+            *t = (struct shared_target){vf, b->host + (gpa - b->mapped), b->trap_count != 0};
             found = true;
         }
     }
@@ -844,8 +864,8 @@ static bool page_arbitrate(uint64_t page) {
             mmio_move(sp->region, 0, 0);
             sp->page = 0;
         }
-        if (direct && only->trap_size != 0 && only->trap_region >= 0) {
-            mmio_move(only->trap_region, page, PAGE_SIZE);
+        if (direct && only->trap_count != 0) {
+            mmio_move(only->traps[0].region, page, PAGE_SIZE);
         } else if (direct) {
             gpt_map(page, page_down(only->host), PAGE_SIZE, GPT_RWX, MT_UC);
         }
@@ -854,8 +874,8 @@ static bool page_arbitrate(uint64_t page) {
 
     for (unsigned i = 0; i < n; i++) {
         struct vbar *b = &found[i].vf->bars[found[i].index];
-        if (b->trap_size != 0 && b->trap_region >= 0) {
-            mmio_move(b->trap_region, 0, 0);
+        if (b->trap_count != 0) {
+            mmio_move(b->traps[0].region, 0, 0);
         }
     }
     if (sp == NULL) {
@@ -932,9 +952,8 @@ static void msix_init(struct vfunction *vf) {
         e->slot = (struct irq_slot){.taken = msix_taken, .ctx = e, .requester = requester(f)};
     }
     pci_cfg_write(f->addr, REG_COMMAND, 2, command);
-    b->trap = offset;
-    b->trap_size = (uint64_t)x->count * MSIX_ENTRY_SIZE;
-    b->trap_region = region;
+    b->traps[0] = (struct bar_trap){offset, (uint64_t)x->count * MSIX_ENTRY_SIZE, region};
+    b->trap_count = 1;
 }
 
 static void msi_init(struct vfunction *vf) {
@@ -1267,21 +1286,34 @@ bool pci_virt_trap(struct pci_addr addr, unsigned bar, uint64_t offset, uint64_t
         return false;
     }
     struct vbar *b = &vf->bars[bar];
-    if (b->size == 0 || sub_page(b) || b->trap_size != 0 || size == 0 || offset > b->size
+    if (b->size == 0 || sub_page(b) || b->trap_count == BAR_TRAPS || size == 0 || offset > b->size
         || size > b->size - offset) {
         return false;
+    }
+    // Pages of their own, in order.
+    unsigned at = 0;
+    for (; at < b->trap_count; at++) {
+        if (page_up(b->traps[at].offset + b->traps[at].size) > page_down(offset)
+            && b->traps[at].offset < page_up(offset + size)) {
+            return false;
+        }
+        if (b->traps[at].offset > offset) {
+            break;
+        }
     }
     int region = mmio_register(0, 0, ops, ctx);
     if (region < 0) {
         return false;
     }
     spinlock_acquire(&virt.lock);
-    b->trap = offset;
-    b->trap_size = size;
-    b->trap_region = region;
+    for (unsigned i = b->trap_count; i > at; i--) {
+        b->traps[i] = b->traps[i - 1];
+    }
+    b->traps[at] = (struct bar_trap){offset, size, region};
+    b->trap_count++;
     if (b->mapped != 0) {
-        uint64_t start = page_down(b->mapped + offset);
-        uint64_t end = page_up(b->mapped + offset + size);
+        uint64_t start = trap_start(b, b->mapped, at);
+        uint64_t end = trap_end(b, b->mapped, at);
         gpt_map(start, 0, end - start, 0, 0);
         mmio_move(region, start, end - start);
         gpt_flush();
