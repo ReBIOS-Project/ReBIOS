@@ -1061,9 +1061,10 @@ static void vmx_handle_io(struct vcpu *v, uint64_t qual) {
 // The guest got where the processor cannot go on from, as a triple fault
 // does: the machine resets, as a PC's chipset makes it.
 __attribute__((noreturn)) void vmx_shutdown(const char *why) {
+    bool shown = log_take_screen();
     printf("%s\n", why);
     vmx_dump_guest();
-    power_reset(false);
+    virt_reset(shown);
 }
 
 // An event whose delivery reached emulated memory at gpa: the hypervisor

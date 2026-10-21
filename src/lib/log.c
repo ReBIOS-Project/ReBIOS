@@ -213,3 +213,16 @@ void panic(const char *fmt, ...) {
 bool log_panicked(void) {
     return __atomic_load_n(&log_panicking, __ATOMIC_ACQUIRE);
 }
+
+bool log_take_screen(void) {
+    if (!log_console || log_screen == NULL) {
+        return false;
+    }
+    spinlock_acquire(&log_lock);
+    __atomic_store_n(&log_panicking, true, __ATOMIC_RELEASE);
+    if (log_screen != NULL && log_screen_handed_over) {
+        flanterm_full_refresh(log_screen);
+    }
+    spinlock_release(&log_lock);
+    return true;
+}

@@ -38,5 +38,9 @@ __attribute__((format(printf, 1, 2))) void printf(const char *fmt, ...);
 __attribute__((format(printf, 1, 2))) void log_notice(const char *fmt, ...);
 __attribute__((noreturn, format(printf, 1, 2))) void panic(const char *fmt, ...);
 bool log_panicked(void);
+// The guest is done for: if the log is on the screen, it is shown there again,
+// over the guest's picture, and log_panicked() stops the other processors.
+// Returns whether it is shown.
+bool log_take_screen(void);
 
 #endif

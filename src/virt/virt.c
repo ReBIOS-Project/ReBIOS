@@ -24,6 +24,7 @@
 #include <lib/log.h>
 #include <lib/printf.h>
 #include <lib/spinlock.h>
+#include <lib/time.h>
 #include <sys/cpu.h>
 #include <sys/mm.h>
 #include <sys/smp.h>
@@ -51,6 +52,8 @@
 #define DEBUGCTL_BTF (1u << 1)
 #define DR6_BS (1ull << 14)
 #define DR7_GD (1u << 13)
+
+#define RESET_HOLD_SECONDS 30
 
 bool virt_vmx;
 
@@ -85,6 +88,14 @@ static size_t describe_guest(char *buf, size_t size) {
                        virt_vmx ? "basic reason" : "code", v->last_exit,
                        (unsigned long long)vcpu_rip(v));
     return len < 0 ? 0 : (size_t)len;
+}
+
+void virt_reset(bool shown) {
+    if (shown) {
+        printf("Resetting in %u seconds\n", RESET_HOLD_SECONDS);
+        time_udelay(RESET_HOLD_SECONDS * 1000000ull);
+    }
+    power_reset(false);
 }
 
 bool virt_init(void) {

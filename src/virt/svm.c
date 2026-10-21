@@ -389,9 +389,10 @@ static void svm_step_exception(struct vcpu *v, unsigned vector) {
 // The guest got where the processor cannot go on from, as a triple fault
 // does: the machine resets, as a PC's chipset makes it.
 __attribute__((noreturn)) static void svm_shutdown(struct vcpu *v, const char *why) {
+    bool shown = log_take_screen();
     printf("%s\n", why);
     svm_dump_guest(v);
-    power_reset(false);
+    virt_reset(shown);
 }
 
 static void svm_handle_exit(struct vcpu *v) {
