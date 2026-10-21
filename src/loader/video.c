@@ -532,18 +532,16 @@ static bool find_pci_device(struct handoff_pci_address address, struct pci_io_de
     return found;
 }
 
-static bool try_other_display_devices(const struct pci_io_device *tried,
-                                      struct vbios_choice *choice) {
+// For when no graphics output shows which card the firmware's console is on.
+static bool try_display_devices(struct vbios_choice *choice) {
     EFI_UINTN count;
     struct pci_io_device *devices = pci_io_devices(&count);
     bool found = false;
 
     for (EFI_UINTN i = 0; i < count && !found; i++) {
-        if (devices[i].base_class != PCI_CLASS_DISPLAY
-            || (tried != NULL && pci_address_equal(devices[i].address, tried->address))) {
-            continue;
+        if (devices[i].base_class == PCI_CLASS_DISPLAY) {
+            found = try_device(&devices[i], NULL, choice);
         }
-        found = try_device(&devices[i], NULL, choice);
     }
 
     if (devices != NULL) {
@@ -621,14 +619,15 @@ void video_init(void) {
                    PCI_ADDRESS_ARGS(config.vga_device));
         }
     } else if (gop_handle != NULL && gop_pci_device(gop_handle, &dev)) {
+        // Another card's VBIOS would put the legacy display where the
+        // firmware's is not.
         have_dev = true;
-        found = try_device(&dev, user_vbios, &choice)
-                || try_other_display_devices(&dev, &choice);
+        found = try_device(&dev, user_vbios, &choice);
     } else if (have_user) {
         printf("Not using %s as the VBIOS: no VGA device is configured, and no graphics "
                "output leads to one\n", user.source);
-    } else {
-        found = try_other_display_devices(NULL, &choice);
+    } else if (gop_handle == NULL) {
+        found = try_display_devices(&choice);
     }
 
     if (!found || !install_vbios(&choice)) {
