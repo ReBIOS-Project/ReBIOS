@@ -650,44 +650,6 @@ static void msi_write(struct vfunction *vf, uint32_t reg, uint32_t value) {
     msi_update(vf);
 }
 
-static uint64_t mmio_read_host(uint64_t hpa, unsigned size) {
-    switch (size) {
-        case 1: {
-            return *(volatile uint8_t *)(uintptr_t)hpa;
-        }
-        case 2: {
-            return *(volatile uint16_t *)(uintptr_t)hpa;
-        }
-        case 4: {
-            return *(volatile uint32_t *)(uintptr_t)hpa;
-        }
-        default: {
-            return *(volatile uint64_t *)(uintptr_t)hpa;
-        }
-    }
-}
-
-static void mmio_write_host(uint64_t hpa, unsigned size, uint64_t value) {
-    switch (size) {
-        case 1: {
-            *(volatile uint8_t *)(uintptr_t)hpa = (uint8_t)value;
-            break;
-        }
-        case 2: {
-            *(volatile uint16_t *)(uintptr_t)hpa = (uint16_t)value;
-            break;
-        }
-        case 4: {
-            *(volatile uint32_t *)(uintptr_t)hpa = (uint32_t)value;
-            break;
-        }
-        default: {
-            *(volatile uint64_t *)(uintptr_t)hpa = value;
-            break;
-        }
-    }
-}
-
 static void msix_taken(void *ctx, unsigned index) {
     (void)index;
     struct vmsix_entry *e = ctx;

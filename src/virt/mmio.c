@@ -71,6 +71,44 @@ void mmio_move(int region, uint64_t base, uint64_t size) {
     __atomic_store_n(&r->size, size, __ATOMIC_RELEASE);
 }
 
+uint64_t mmio_read_host(uint64_t hpa, unsigned size) {
+    switch (size) {
+        case 1: {
+            return *(volatile uint8_t *)(uintptr_t)hpa;
+        }
+        case 2: {
+            return *(volatile uint16_t *)(uintptr_t)hpa;
+        }
+        case 4: {
+            return *(volatile uint32_t *)(uintptr_t)hpa;
+        }
+        default: {
+            return *(volatile uint64_t *)(uintptr_t)hpa;
+        }
+    }
+}
+
+void mmio_write_host(uint64_t hpa, unsigned size, uint64_t value) {
+    switch (size) {
+        case 1: {
+            *(volatile uint8_t *)(uintptr_t)hpa = (uint8_t)value;
+            break;
+        }
+        case 2: {
+            *(volatile uint16_t *)(uintptr_t)hpa = (uint16_t)value;
+            break;
+        }
+        case 4: {
+            *(volatile uint32_t *)(uintptr_t)hpa = (uint32_t)value;
+            break;
+        }
+        default: {
+            *(volatile uint64_t *)(uintptr_t)hpa = value;
+            break;
+        }
+    }
+}
+
 static uint64_t absent_read(struct vcpu *v, void *ctx, uint64_t offset, unsigned size) {
     (void)v;
     (void)ctx;

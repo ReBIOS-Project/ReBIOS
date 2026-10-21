@@ -40,6 +40,11 @@ int mmio_register(uint64_t base, uint64_t size, const struct mmio_ops *ops, void
 // Moves a region, nowhere where size is 0, as when the BAR it is part of moves.
 void mmio_move(int region, uint64_t base, uint64_t size);
 
+// A host register at hpa, which the hypervisor maps, as a region's access
+// reaches it: size 1, 2, 4, or 8.
+uint64_t mmio_read_host(uint64_t hpa, unsigned size);
+void mmio_write_host(uint64_t hpa, unsigned size, uint64_t value);
+
 // Guest memory at a linear address as the guest's instructions reach it: RAM,
 // emulated regions, or nothing. Accesses are of at most 8 bytes; they return
 // false where the access faulted, having raised the fault.
