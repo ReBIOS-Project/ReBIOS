@@ -26,6 +26,7 @@
 #include <virt/gpt.h>
 #include <virt/igfx.h>
 #include <virt/layout.h>
+#include <virt/mmio.h>
 #include <virt/pci_virt.h>
 
 #define VENDOR_INTEL 0x8086
@@ -50,8 +51,58 @@
 // A raw VBT larger than this is taken for garbage.
 #define RAW_VBT_MAX 0x100000u
 
+// Linux 7.3 include/drm/intel/i915_drm.h: the GMCH control register's mirror
+// with BDW_GMCH_GMS and BDW_GMCH_GGMS, decoded as arch/x86/kernel/
+// early-quirks.c gen9_stolen_size() and gt/intel_ggtt.c
+// gen8_get_total_gtt_size() do; the stolen memory's base, INTEL_BSM through
+// Gen10 and INTEL_GEN11_BSM_DW0/DW1 for Gen11 and Gen12, none from Meteor Lake
+// on. The host bridge's copies are at B0h and B4h (Intel Core Ultra Processors
+// for H-series and U-series Platforms CFG and MEM Registers 795258 version 002,
+// BDSM_0_0_0_PCI and BGSM_0_0_0_PCI).
+#define REG_GGC 0x50
+#define GGC_GGMS_SHIFT 6
+#define GGC_GGMS_MASK 0x3u
+#define GGC_GMS_SHIFT 8
+#define GGC_GMS_MASK 0xffu
+#define GMS_4M_FROM 0xf0u
+#define REG_BSM 0x5c
+#define REG_BSM_GEN11 0xc0
+#define BSM_MASK 0xfff00000u
+#define BSM_MASK_64 (~0xfffffull)
+#define REG_HOST_BDSM 0xb0
+#define REG_HOST_BGSM 0xb4
+#define HOST_BRIDGE_DEVICE 0
+
+// Gen6 and Gen7 have a 4 MiB GTTMMADR, Gen8 on 16 MiB (Linux 7.3 gt/intel_ggtt.c
+// gen6_gttmmadr_size()). Below Gen8 the stolen memory stays at its host address:
+// Linux 7.3 gem/i915_gem_stolen.c uses none there with VT-d translating.
+#define GTTMMADR_GEN8_SIZE 0x1000000ull
+
+// GTTMMADR's registers that give the stolen memory's host addresses: HSW PRM
+// Vol. 12 (12/18/2013) MBDSM and MBGSM, Linux 7.3 i915_reg.h GEN6_DSMBASE and
+// GEN6_STOLEN_RESERVED, xe regs/xe_regs.h GSMBASE and GGC. STOLEN_RESERVED's
+// base has GEN6_STOLEN_RESERVED_ADDR_MASK's bits through Gen10 (i915_gem_stolen.c
+// bdw_get_stolen_reserved() and chv_get_stolen_reserved()), and
+// GEN11_STOLEN_RESERVED_ADDR_MASK's from Gen11.
+#define MMIO_PAGE 0x108000u
+#define MMIO_GGC 0x108040u
+#define MMIO_DSMBASE 0x1080c0u
+#define MMIO_GSMBASE 0x108100u
+#define MMIO_STOLEN_RESERVED 0x1082c0u
+
+enum stolen_kind {
+    STOLEN_NONE,
+    // BDSM at 5Ch, the MMIO copies 32-bit: Gen9 and Gen10.
+    STOLEN_BSM,
+    // BDSM at C0h and C4h, the MMIO copies 64-bit: Gen11 and Gen12.
+    STOLEN_BSM_64,
+    // No BDSM in the function: from Meteor Lake on.
+    STOLEN_DSMBASE,
+};
+
 static struct {
     struct pci_function *f;
+    struct pci_function *host_bridge;
     // The host's OpRegion and the bytes from it the guest may read: a raw VBT
     // that follows it included.
     uint32_t asls;
@@ -61,6 +112,14 @@ static struct {
     // What the guest's ASLS holds, which never reaches the hardware: the
     // host's AML finds the OpRegion through the real one.
     uint32_t guest_asls;
+    enum stolen_kind kind;
+    uint64_t gttmmadr;
+    // The host's data stolen memory, the GGTT's memory below it, and the
+    // guest's address for the former, 0 until layout_init() places it.
+    uint64_t dsm;
+    uint64_t dsm_size;
+    uint64_t gsm_size;
+    uint64_t alias;
 } igfx;
 
 static uint64_t page_down(uint64_t x) {
@@ -71,12 +130,11 @@ static uint64_t page_up(uint64_t x) {
     return page_down(x + PAGE_SIZE - 1);
 }
 
-void igfx_scan(void) {
-    struct pci_function *f = pci_enum_find((struct pci_addr){0, 0, IGFX_DEVICE, 0});
-    if (f == NULL || f->vendor_id != VENDOR_INTEL || f->base_class != CLASS_DISPLAY) {
-        return;
-    }
-    igfx.f = f;
+static uint64_t read64(uint64_t hpa) {
+    return mmio_read_host(hpa, 4) | mmio_read_host(hpa + 4, 4) << 32;
+}
+
+static void scan_opregion(struct pci_function *f) {
     uint32_t asls = pci_cfg_read(f->addr, REG_ASLS, 4);
     if (asls == 0 || asls == UINT32_MAX) {
         return;
@@ -109,6 +167,68 @@ void igfx_scan(void) {
     igfx.size = end - asls;
 }
 
+static uint64_t gms_size(uint32_t ggc) {
+    uint32_t gms = (ggc >> GGC_GMS_SHIFT) & GGC_GMS_MASK;
+    if (gms < GMS_4M_FROM) {
+        return (uint64_t)gms << 25;
+    }
+    return (uint64_t)(gms - GMS_4M_FROM + 1) << 22;
+}
+
+static uint64_t ggms_size(uint32_t ggc) {
+    uint32_t ggms = (ggc >> GGC_GGMS_SHIFT) & GGC_GGMS_MASK;
+    return ggms != 0 ? 1ull << (20 + ggms) : 0;
+}
+
+static void scan_stolen(struct pci_function *f) {
+    const struct pci_bar *bar = &f->bars[0];
+    if (f->bar_count == 0 || bar->kind != PCI_BAR_MEM64 || bar->size < GTTMMADR_GEN8_SIZE) {
+        return;
+    }
+    uint32_t ggc = pci_cfg_read(f->addr, REG_GGC, 2);
+    uint64_t bsm = pci_cfg_read(f->addr, REG_BSM, 4) & BSM_MASK;
+    uint64_t bsm_64 = (pci_cfg_read(f->addr, REG_BSM_GEN11, 4)
+                       | (uint64_t)pci_cfg_read(f->addr, REG_BSM_GEN11 + 4, 4) << 32) & BSM_MASK_64;
+    mm_map_device(bar->base + MMIO_PAGE, PAGE_SIZE);
+    enum stolen_kind kind;
+    uint64_t dsm;
+    if (bsm != 0) {
+        kind = STOLEN_BSM;
+        dsm = bsm;
+    } else if (bsm_64 != 0) {
+        kind = STOLEN_BSM_64;
+        dsm = bsm_64;
+    } else {
+        kind = STOLEN_DSMBASE;
+        dsm = read64(bar->base + MMIO_DSMBASE) & BSM_MASK_64;
+        ggc = (uint32_t)mmio_read_host(bar->base + MMIO_GGC, 2);
+    }
+    uint64_t size = gms_size(ggc);
+    uint64_t gsm = ggms_size(ggc);
+    if (dsm == 0 || size == 0 || gsm > dsm) {
+        return;
+    }
+    igfx.kind = kind;
+    igfx.gttmmadr = bar->base;
+    igfx.dsm = dsm;
+    igfx.dsm_size = size;
+    igfx.gsm_size = gsm;
+}
+
+void igfx_scan(void) {
+    struct pci_function *f = pci_enum_find((struct pci_addr){0, 0, IGFX_DEVICE, 0});
+    if (f == NULL || f->vendor_id != VENDOR_INTEL || f->base_class != CLASS_DISPLAY) {
+        return;
+    }
+    igfx.f = f;
+    struct pci_function *h = pci_enum_find((struct pci_addr){0, 0, HOST_BRIDGE_DEVICE, 0});
+    if (h != NULL && h->vendor_id == VENDOR_INTEL) {
+        igfx.host_bridge = h;
+    }
+    scan_opregion(f);
+    scan_stolen(f);
+}
+
 bool igfx_one_to_one(uint64_t *base, uint64_t *end) {
     if (igfx.raw_vbt_end == 0) {
         return false;
@@ -118,28 +238,155 @@ bool igfx_one_to_one(uint64_t *base, uint64_t *end) {
     return true;
 }
 
-static bool config_read(uint32_t reg, uint32_t *value) {
-    if (reg != REG_ASLS) {
+bool igfx_stolen(uint64_t *host, uint64_t *size, uint64_t *clear_base, uint64_t *clear_end) {
+    if (igfx.kind == STOLEN_NONE) {
         return false;
     }
-    *value = igfx.guest_asls;
+    *host = igfx.dsm;
+    *size = igfx.dsm_size;
+    *clear_base = igfx.dsm - igfx.gsm_size;
+    *clear_end = igfx.dsm + igfx.dsm_size;
     return true;
 }
 
-static bool config_write(uint32_t reg, uint32_t value, uint32_t mask) {
-    if (reg != REG_ASLS) {
+void igfx_stolen_placed(uint64_t gpa) {
+    igfx.alias = gpa;
+}
+
+// A host address in the data stolen memory as the guest has it: the rest of
+// value, the register's other bits, as they are.
+static uint64_t translate(uint64_t value, uint64_t mask) {
+    uint64_t address = value & mask;
+    if (address < igfx.dsm || address - igfx.dsm >= igfx.dsm_size) {
+        return value;
+    }
+    return (value & ~mask) | (igfx.alias + (address - igfx.dsm));
+}
+
+// The GGTT's memory, as far below the guest's stolen memory as the host's is.
+static uint64_t translate_gsm(uint64_t value, uint64_t mask) {
+    if ((value & mask) != igfx.dsm - igfx.gsm_size) {
+        return value;
+    }
+    return (value & ~mask) | (igfx.alias - igfx.gsm_size);
+}
+
+static bool config_read(uint32_t reg, uint32_t *value) {
+    if (reg == REG_ASLS && igfx.guest_asls != 0) {
+        *value = igfx.guest_asls;
+        return true;
+    }
+    if (igfx.alias == 0) {
         return false;
     }
-    igfx.guest_asls = (igfx.guest_asls & ~mask) | (value & mask);
-    return true;
+    if (igfx.kind == STOLEN_BSM && reg == REG_BSM) {
+        *value = (uint32_t)translate(pci_cfg_read(igfx.f->addr, reg, 4), BSM_MASK);
+        return true;
+    }
+    if (igfx.kind == STOLEN_BSM_64 && (reg == REG_BSM_GEN11 || reg == REG_BSM_GEN11 + 4)) {
+        uint64_t bsm = pci_cfg_read(igfx.f->addr, REG_BSM_GEN11, 4)
+                       | (uint64_t)pci_cfg_read(igfx.f->addr, REG_BSM_GEN11 + 4, 4) << 32;
+        bsm = translate(bsm, BSM_MASK_64);
+        *value = (uint32_t)(reg == REG_BSM_GEN11 ? bsm : bsm >> 32);
+        return true;
+    }
+    return false;
+}
+
+// The firmware locks the stolen memory's registers: guest writes go nowhere.
+static bool config_write(uint32_t reg, uint32_t value, uint32_t mask) {
+    if (reg == REG_ASLS && igfx.guest_asls != 0) {
+        igfx.guest_asls = (igfx.guest_asls & ~mask) | (value & mask);
+        return true;
+    }
+    if (igfx.alias == 0) {
+        return false;
+    }
+    return (igfx.kind == STOLEN_BSM && reg == REG_BSM)
+           || (igfx.kind == STOLEN_BSM_64 && (reg == REG_BSM_GEN11 || reg == REG_BSM_GEN11 + 4));
 }
 
 static const struct pci_virt_hook config_hook = {config_read, config_write};
 
-void igfx_init(void) {
-    if (igfx.asls == 0) {
-        return;
+static bool host_bridge_read(uint32_t reg, uint32_t *value) {
+    if (reg == REG_HOST_BDSM) {
+        *value = (uint32_t)translate(pci_cfg_read(igfx.host_bridge->addr, reg, 4), BSM_MASK);
+        return true;
     }
+    if (reg == REG_HOST_BGSM) {
+        *value = (uint32_t)translate_gsm(pci_cfg_read(igfx.host_bridge->addr, reg, 4), BSM_MASK);
+        return true;
+    }
+    return false;
+}
+
+static bool host_bridge_write(uint32_t reg, uint32_t value, uint32_t mask) {
+    (void)value;
+    (void)mask;
+    return reg == REG_HOST_BDSM || reg == REG_HOST_BGSM;
+}
+
+static const struct pci_virt_hook host_bridge_hook = {host_bridge_read, host_bridge_write};
+
+// GTTMMADR's register at reg, which gives a host address, as the guest has it.
+static uint64_t mmio_translated(uint32_t reg) {
+    bool wide = igfx.kind != STOLEN_BSM;
+    uint64_t mask = wide ? BSM_MASK_64 : BSM_MASK;
+    uint64_t value = read64(igfx.gttmmadr + reg);
+    uint64_t low = wide ? value : (uint32_t)value;
+    switch (reg) {
+        case MMIO_DSMBASE: {
+            low = translate(low, mask);
+            break;
+        }
+        case MMIO_GSMBASE: {
+            low = translate_gsm(low, mask);
+            break;
+        }
+        default: {
+            low = translate(low, mask);
+            break;
+        }
+    }
+    return wide ? low : (value & ~0xffffffffull) | low;
+}
+
+static bool mmio_own(uint32_t reg, uint32_t *base) {
+    static const uint32_t regs[] = {MMIO_DSMBASE, MMIO_GSMBASE, MMIO_STOLEN_RESERVED};
+    for (unsigned i = 0; i < sizeof(regs) / sizeof(regs[0]); i++) {
+        if (reg >= regs[i] && reg < regs[i] + 8) {
+            *base = regs[i];
+            return true;
+        }
+    }
+    return false;
+}
+
+static uint64_t mmio_read(struct vcpu *v, void *ctx, uint64_t offset, unsigned size) {
+    (void)v;
+    (void)ctx;
+    uint32_t reg = MMIO_PAGE + (uint32_t)offset;
+    uint32_t base;
+    if (!mmio_own(reg, &base)) {
+        return mmio_read_host(igfx.gttmmadr + reg, size);
+    }
+    uint64_t value = mmio_translated(base) >> (8 * (reg - base));
+    return size == 8 ? value : value & ((1ull << (8 * size)) - 1);
+}
+
+static void mmio_write(struct vcpu *v, void *ctx, uint64_t offset, unsigned size, uint64_t value) {
+    (void)v;
+    (void)ctx;
+    uint32_t reg = MMIO_PAGE + (uint32_t)offset;
+    uint32_t base;
+    if (!mmio_own(reg, &base)) {
+        mmio_write_host(igfx.gttmmadr + reg, size, value);
+    }
+}
+
+static const struct mmio_ops mmio_ops = {mmio_read, mmio_write, false};
+
+static void init_opregion(void) {
     uint64_t offset = igfx.asls & (PAGE_SIZE - 1);
     uint64_t host = igfx.asls - offset;
     uint64_t size = page_up(offset + igfx.size);
@@ -157,7 +404,35 @@ void igfx_init(void) {
     gpt_map(alias, host, size, GPT_R | GPT_W, MT_WB);
     gpt_flush();
     igfx.guest_asls = alias + (uint32_t)offset;
-    pci_virt_hook(igfx.f->addr, &config_hook);
     printf("Intel graphics: the OpRegion at %#x is the guest's at %#x\n", igfx.asls,
            igfx.guest_asls);
+}
+
+static void init_stolen(void) {
+    if (!pci_virt_trap(igfx.f->addr, 0, MMIO_PAGE, PAGE_SIZE, &mmio_ops, NULL)) {
+        printf("Intel graphics: the registers of the stolen memory cannot be trapped\n");
+        igfx.alias = 0;
+        return;
+    }
+    if (igfx.host_bridge != NULL) {
+        pci_virt_hook(igfx.host_bridge->addr, &host_bridge_hook);
+    }
+    printf("Intel graphics: the stolen memory at %#llx-%#llx is the guest's at %#llx\n",
+           (unsigned long long)igfx.dsm, (unsigned long long)(igfx.dsm + igfx.dsm_size - 1),
+           (unsigned long long)igfx.alias);
+}
+
+void igfx_init(void) {
+    if (igfx.f == NULL) {
+        return;
+    }
+    if (igfx.asls != 0) {
+        init_opregion();
+    }
+    if (igfx.alias != 0) {
+        init_stolen();
+    }
+    if (igfx.guest_asls != 0 || igfx.alias != 0) {
+        pci_virt_hook(igfx.f->addr, &config_hook);
+    }
 }

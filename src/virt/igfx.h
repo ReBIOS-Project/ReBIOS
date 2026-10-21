@@ -30,8 +30,16 @@ void igfx_scan(void);
 // AML gives by its physical address.
 bool igfx_one_to_one(uint64_t *base, uint64_t *end);
 
-// Gives the guest the OpRegion at an address in its own memory map, which
-// its ASLS reads. After pci_virt_init().
+// The host's data stolen memory that the guest gets at an address of its own,
+// if any, and the host range the guest's own must stay clear of: the stolen
+// memory and the GGTT's below it. layout_init() places it and tells
+// igfx_stolen_placed() where.
+bool igfx_stolen(uint64_t *host, uint64_t *size, uint64_t *clear_base, uint64_t *clear_end);
+void igfx_stolen_placed(uint64_t gpa);
+
+// Gives the guest the OpRegion and the stolen memory at the addresses in its
+// own memory map, which the registers that give them read. After
+// pci_virt_init().
 void igfx_init(void);
 
 #endif

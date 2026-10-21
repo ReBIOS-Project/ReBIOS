@@ -95,6 +95,9 @@ static struct {
 static uint32_t taken_count;
 // The emulated VGA's linear framebuffer.
 static uint64_t lfb;
+// The guest's address for the host's stolen memory, and the host's.
+static struct range stolen;
+static uint64_t stolen_hpa;
 // Backs the guest's first 2 MiB.
 static uint8_t *low;
 // What absent memory reads as.
@@ -257,6 +260,34 @@ static void identity_remove(uint64_t base, uint64_t end) {
             identity[i--] = identity[--identity_count];
         }
     }
+}
+
+// The highest align-aligned size bytes in [lo, hi), or 0.
+static uint64_t fit_top(uint64_t lo, uint64_t hi, uint64_t size, uint64_t align) {
+    if (hi <= lo || hi - lo < size) {
+        return 0;
+    }
+    uint64_t base = align_down(hi - size, align);
+    return base >= lo ? base : 0;
+}
+
+// Takes the highest align-aligned size bytes clear of [avoid_base, avoid_end)
+// and of the first 2 MiB off the list, or returns 0.
+static uint64_t take_top(struct range_list *list, uint64_t size, uint64_t align,
+                         uint64_t avoid_base, uint64_t avoid_end) {
+    for (uint32_t i = list->count; i-- > 0;) {
+        uint64_t lo = list->r[i].base > TWO_MIB ? list->r[i].base : TWO_MIB;
+        uint64_t hi = list->r[i].end;
+        uint64_t base = fit_top(lo > avoid_end ? lo : avoid_end, hi, size, align);
+        if (base == 0) {
+            base = fit_top(lo, hi < avoid_base ? hi : avoid_base, size, align);
+        }
+        if (base != 0) {
+            list_remove(list, base, base + size);
+            return base;
+        }
+    }
+    return 0;
 }
 
 // Takes a size-aligned block of size bytes off the list.
@@ -477,6 +508,19 @@ void layout_init(void) {
         list_remove(&ram, pinned.r[i].base, pinned.r[i].end);
     }
     lfb = plan->lfb;
+
+    // The host's stolen memory where nothing backs RAM, clear of the host's
+    // addresses for it.
+    uint64_t stolen_size;
+    uint64_t clear_base;
+    uint64_t clear_end;
+    if (igfx_stolen(&stolen_hpa, &stolen_size, &clear_base, &clear_end)) {
+        uint64_t gpa = take_top(&ram, stolen_size, TWO_MIB, clear_base, clear_end);
+        if (gpa != 0) {
+            stolen = (struct range){gpa, gpa + stolen_size};
+            igfx_stolen_placed(gpa);
+        }
+    }
     struct range_list fill;
     list_init(&fill);
     for (uint32_t i = 0; i < ram.count; i++) {
@@ -515,6 +559,11 @@ void layout_init(void) {
     for (uint32_t i = 0; i < identity_count; i++) {
         const struct identity_range *r = &identity[i];
         gpt_map(r->base, r->base, r->end - r->base, GPT_RWX, identity_memtype(r));
+    }
+    if (stolen.end != 0) {
+        struct identity_range r = {stolen_hpa, stolen_hpa + (stolen.end - stolen.base),
+                                   EfiReservedMemoryType, efi_attribute_at(stolen_hpa)};
+        gpt_map(stolen.base, stolen_hpa, stolen.end - stolen.base, GPT_RWX, identity_memtype(&r));
     }
 
     // Low memory and the ROM area, around the VGA window, which goes to the
@@ -561,6 +610,9 @@ bool layout_mmio_free(uint64_t base, uint64_t size) {
         return false;
     }
     if (lfb != 0 && base < lfb + vga_lfb_size() && end > lfb) {
+        return false;
+    }
+    if (stolen.end != 0 && base < stolen.end && end > stolen.base) {
         return false;
     }
     const struct pci_plan *plan = pci_plan();
@@ -781,6 +833,9 @@ bool layout_e820(struct e820_map *map) {
     }
     for (uint32_t i = 0; i < kept.count; i++) {
         ok &= e820_set(map, kept.r[i].base, kept.r[i].end - kept.r[i].base, E820_RESERVED);
+    }
+    if (stolen.end != 0) {
+        ok &= e820_set(map, stolen.base, stolen.end - stolen.base, E820_RESERVED);
     }
     for (uint32_t i = 0; i < holes.count; i++) {
         ok &= e820_set(map, holes.r[i].base, holes.r[i].end - holes.r[i].base, E820_RESERVED);
