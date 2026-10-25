@@ -148,6 +148,10 @@ struct vcpu {
     uint8_t amd_cpuid_present;
     // The guest's AMD core performance event selects (msr.c).
     uint64_t amd_perf_evt_sel[6];
+    // The guest's TSC is the processor's plus this, and its IA32_TSC_ADJUST is
+    // its own (msr.c).
+    uint64_t tsc_offset;
+    uint64_t tsc_adjust;
 
     // What the guest believes CR0 and CR4 hold, for the bits the host owns.
     uint64_t cr0_shadow;

@@ -916,7 +916,6 @@ static const uint16_t control_fields[] = {
     VMCS_EXCEPTION_BITMAP, VMCS_PF_ERROR_MASK, VMCS_PF_ERROR_MATCH, VMCS_CR3_TARGET_COUNT,
     VMCS_ENTRY_INTR_INFO, VMCS_ENTRY_EXCEPTION_ERROR, VMCS_ENTRY_INSTR_LEN,
     VMCS_CR0_MASK, VMCS_CR4_MASK, VMCS_CR0_SHADOW, VMCS_CR4_SHADOW,
-    VMCS_TSC_OFFSET,
 };
 
 // The exit information VMCS12 gets from VMCS02 for exits the processor
@@ -1085,6 +1084,13 @@ static uint64_t proc2_12(const struct nvmx *n) {
         return 0;
     }
     return get12(n, VMCS_PROC_CONTROLS2);
+}
+
+// TSC scaling counts only with TSC offsetting (SDM 325462-093 Vol. 3C, 28.3,
+// RDTSC).
+static bool tsc_scaled(const struct nvmx *n) {
+    return (get12(n, VMCS_PROC_CONTROLS) & PROC_TSC_OFFSETTING)
+           && (proc2_12(n) & PROC2_TSC_SCALING);
 }
 
 static bool ept12(const struct nvmx *n) {
@@ -1929,11 +1935,14 @@ static void write_vmcs02(struct vcpu *v, struct nvmx *n, const struct l1_values 
     struct apic_controls c = {
         .pin = pin | PIN_EXT_INTR_EXITING | PIN_NMI_EXITING | PIN_VIRTUAL_NMIS,
         .proc = (proc & ~(uint64_t)PROC_IO_BITMAPS) | PROC_UNCOND_IO_EXITING | PROC_MSR_BITMAPS
-                | PROC_SECONDARY_CONTROLS,
+                | PROC_SECONDARY_CONTROLS | PROC_TSC_OFFSETTING,
         // EPT02's dirty flags are not the guest's: its walks log for it. The
         // guest's shadow VMCS is in its own format, which the hypervisor reads.
         .proc2 = (proc2 & ~(uint64_t)(PROC2_PML | PROC2_VMCS_SHADOWING)) | PROC2_EPT,
     };
+    if (!tsc_scaled(n)) {
+        c.proc2 &= ~(uint64_t)PROC2_TSC_SCALING;
+    }
     // The guest's guest's trace output goes through EPT02, into its own memory.
     if (vmx_pt_passthrough()) {
         c.proc2 |= PROC2_PT_USE_GPA;
@@ -1961,9 +1970,9 @@ static void write_vmcs02(struct vcpu *v, struct nvmx *n, const struct l1_values 
     for (unsigned i = 0; i < cr3_targets; i++) {
         vmx_write(VMCS_CR3_TARGET0 + 2 * i, get12(n, VMCS_CR3_TARGET0 + 2 * i));
     }
-    // The guest sees the processor's TSC: its guest's is that scaled and offset
-    // as the guest's VMCS has it.
-    if (proc2 & PROC2_TSC_SCALING) {
+    // The offset is nvmx_tsc_offset()'s, which vmx_run() writes before each
+    // entry.
+    if (tsc_scaled(n)) {
         vmx_write(VMCS_TSC_MULTIPLIER, get12(n, VMCS_TSC_MULTIPLIER));
     }
     if (proc2 & PROC2_PAUSE_LOOP_EXITING) {
@@ -2253,7 +2262,8 @@ static void exit_to_l1(struct vcpu *v, struct nvmx *n, uint32_t reason, uint64_t
     n->run_pending = false;
     __atomic_store_n(&n->inactive, ACTIVITY_ACTIVE, __ATOMIC_SEQ_CST);
     if (!failed) {
-        uint64_t tsc = processor && n->tsc_stored ? n->tsc_store[1] : rdtsc();
+        // The processor stores its own TSC, which the guest reads offset.
+        uint64_t tsc = (processor && n->tsc_stored ? n->tsc_store[1] : rdtsc()) + v->tsc_offset;
         store_msr_list(v, get12(n, VMCS_EXIT_MSR_STORE_ADDR), get12(n, VMCS_EXIT_MSR_STORE_COUNT),
                        tsc);
     }
@@ -2557,6 +2567,28 @@ void nvmx_instruction(struct vcpu *v, uint32_t reason) {
 
 bool nvmx_in_l2(struct vcpu *v) {
     return v->nvmx != NULL && v->nvmx->in_l2;
+}
+
+// The guest's guest reads the guest's TSC, scaled and offset as VMCS12 says
+// where it uses TSC offsetting (SDM 325462-093 Vol. 3C, 28.3, RDTSC), as Linux
+// 7.3's KVM composes them (kvm_calc_nested_tsc_offset()).
+uint64_t nvmx_tsc_offset(struct vcpu *v) {
+    struct nvmx *n = v->nvmx;
+    if (!nvmx_in_l2(v) || !(get12(n, VMCS_PROC_CONTROLS) & PROC_TSC_OFFSETTING)) {
+        return v->tsc_offset;
+    }
+    uint64_t offset = v->tsc_offset;
+    if (tsc_scaled(n)) {
+        offset = (uint64_t)(((__int128)(int64_t)offset * get12(n, VMCS_TSC_MULTIPLIER)) >> 48);
+    }
+    return offset + get12(n, VMCS_TSC_OFFSET);
+}
+
+uint64_t nvmx_tsc(struct vcpu *v, uint64_t raw) {
+    if (nvmx_in_l2(v) && tsc_scaled(v->nvmx)) {
+        raw = (uint64_t)(((unsigned __int128)raw * get12(v->nvmx, VMCS_TSC_MULTIPLIER)) >> 48);
+    }
+    return raw + nvmx_tsc_offset(v);
 }
 
 bool nvmx_holds_init(struct vcpu *v) {

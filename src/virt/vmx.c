@@ -624,11 +624,11 @@ void vmx_vcpu_init(struct vcpu *v) {
                               PIN_EXT_INTR_EXITING | PIN_NMI_EXITING | PIN_VIRTUAL_NMIS,
                               "pin-based"));
 
-    // CR8 is the virtual local APIC's TPR.
+    // CR8 is the virtual local APIC's TPR; the guest's TSC is offset (msr.c).
     vmx_write(VMCS_PROC_CONTROLS,
               adjust_controls(proc_cap, 0,
                               PROC_HLT_EXITING | PROC_IO_BITMAPS | PROC_MSR_BITMAPS
-                              | PROC_SECONDARY_CONTROLS | PROC_TPR_SHADOW,
+                              | PROC_SECONDARY_CONTROLS | PROC_TPR_SHADOW | PROC_TSC_OFFSETTING,
                               "processor-based"));
 
     // What the guest's instructions need to work as they would without VMX.
@@ -1273,6 +1273,7 @@ void vmx_run(struct vcpu *v) {
         __atomic_store_n(&v->cpu->kicked, false, __ATOMIC_SEQ_CST);
         vcpu_before_entry(v);
         nvmx_arm_timer(v);
+        vmx_write(VMCS_TSC_OFFSET, nvmx_tsc_offset(v));
         cache_flush(v->vmcs_cache);
         int result = vmx_enter(&v->gprs, v->vmx_launched);
         if (result == VMX_ENTER_KICKED) {

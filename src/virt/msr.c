@@ -61,6 +61,13 @@
 #define MSR_IA32_BNDCFGS 0xd90
 #define MSR_IA32_XSS 0xda0
 
+// SDM 325462-093 Vol. 3B, 20.17.3, and Vol. 3A, 13.5.4.1.
+#define CPUID_1_ECX_TSC_DEADLINE (1u << 24)
+#define CPUID_7_EBX_TSC_ADJUST (1u << 1)
+#define MSR_IA32_TSC 0x10
+#define MSR_IA32_TSC_ADJUST 0x3b
+#define MSR_IA32_TSC_DEADLINE 0x6e0
+
 // IA32_FEATURE_CONTROL as the guest sees it (SDM 325462-093 Vol. 4, Table
 // 2-2): locked, as vmx_cpu_init() leaves it, VMX outside SMX where the guest
 // gets VMX, and the firmware's local machine check enable; not SMX's or SGX's.
@@ -265,6 +272,15 @@ static bool perf_global_kept;
 static bool perf_capabilities;
 static bool pebs_hidden;
 static bool pstates_read_only;
+// The guest's TSC moves only by an offset of the vCPU's (vmx.c, svm.c), as the
+// processor's is the hypervisor's clock: whether the processor has
+// IA32_TSC_ADJUST and the TSC-deadline timer. That timer's deadline stays the
+// processor's TSC's whatever the offset (SDM 325462-093 Vol. 3C, 28.3, RDMSR),
+// which the guest reaches until an offset is no longer 0, and from then on
+// through the hypervisor.
+static bool tsc_adjust;
+static bool tsc_deadline;
+static bool deadline_translated;
 // The tables of the processor's model-specific MSRs, where it has any.
 static const struct msr_model *model;
 static const struct msr_family *family_msrs;
@@ -383,9 +399,41 @@ static void xss_init(void) {
     }
 }
 
+static void tsc_init(void) {
+    virt_intercept_msr(MSR_IA32_TSC, true, true);
+    if (cpuid(0, 0).eax >= 7 && (cpuid(7, 0).ebx & CPUID_7_EBX_TSC_ADJUST)) {
+        tsc_adjust = true;
+        virt_intercept_msr(MSR_IA32_TSC_ADJUST, true, true);
+    }
+    tsc_deadline = (cpuid(1, 0).ecx & CPUID_1_ECX_TSC_DEADLINE) != 0;
+}
+
+// The bitmaps change while no other vCPU runs (SDM 325462-093 Vol. 3C,
+// 27.11.4), and an armed deadline stays where the guest's TSC has it.
+static void tsc_offset_set(struct vcpu *v, uint64_t offset) {
+    if (offset == v->tsc_offset) {
+        return;
+    }
+    if (tsc_deadline && !__atomic_load_n(&deadline_translated, __ATOMIC_ACQUIRE)) {
+        vcpu_pause_others();
+        if (!deadline_translated) {
+            virt_intercept_msr(MSR_IA32_TSC_DEADLINE, true, true);
+            __atomic_store_n(&deadline_translated, true, __ATOMIC_RELEASE);
+        }
+        vcpu_resume_others();
+    }
+    uint64_t deadline = 0;
+    if (tsc_deadline && rdmsr_safe(MSR_IA32_TSC_DEADLINE, &deadline) && deadline != 0) {
+        uint64_t moved = deadline + v->tsc_offset - offset;
+        wrmsr_safe(MSR_IA32_TSC_DEADLINE, moved != 0 ? moved : 1);
+    }
+    v->tsc_offset = offset;
+}
+
 void msr_init(void) {
     // First, as the CPUID limit hides the leaves the rest reads.
     misc_enable_init();
+    tsc_init();
     hfi_init();
     pt_init();
     mpx_init();
@@ -591,6 +639,11 @@ static int amd_perf_counter(uint32_t msr) {
 
 void msr_vcpu_init(struct vcpu *v) {
     v->misc_enable = misc_enable_firmware;
+    v->tsc_offset = 0;
+    v->tsc_adjust = 0;
+    if (tsc_adjust) {
+        rdmsr_safe(MSR_IA32_TSC_ADJUST, &v->tsc_adjust);
+    }
     if (!virt_vmx) {
         amd_memory_init(v);
         // As the firmware left them, from the vCPU's own processor.
@@ -706,6 +759,26 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
         return true;
     }
     switch (msr) {
+        case MSR_IA32_TSC: {
+            *value = nvmx_tsc(v, rdtsc());
+            return true;
+        }
+        case MSR_IA32_TSC_ADJUST: {
+            if (!tsc_adjust) {
+                return false;
+            }
+            *value = v->tsc_adjust;
+            return true;
+        }
+        case MSR_IA32_TSC_DEADLINE: {
+            if (!tsc_deadline) {
+                return false;
+            }
+            uint64_t deadline = 0;
+            *fault = !rdmsr_safe(msr, &deadline);
+            *value = deadline != 0 ? deadline + v->tsc_offset : 0;
+            return true;
+        }
         case MSR_IA32_FEATURE_CONTROL: {
             if (!virt_vmx) {
                 return false;
@@ -829,6 +902,36 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
         return true;
     }
     switch (msr) {
+        // As the processor does, IA32_TSC_ADJUST moves with the TSC
+        // (SDM 325462-093 Vol. 3B, 20.17.3).
+        case MSR_IA32_TSC: {
+            uint64_t now = rdtsc();
+            v->tsc_adjust += value - (now + v->tsc_offset);
+            tsc_offset_set(v, value - now);
+            return true;
+        }
+        case MSR_IA32_TSC_ADJUST: {
+            if (!tsc_adjust) {
+                return false;
+            }
+            tsc_offset_set(v, v->tsc_offset + value - v->tsc_adjust);
+            v->tsc_adjust = value;
+            return true;
+        }
+        case MSR_IA32_TSC_DEADLINE: {
+            if (!tsc_deadline) {
+                return false;
+            }
+            // 0 disarms the timer, which a deadline does not.
+            uint64_t deadline = value - v->tsc_offset;
+            if (value == 0) {
+                deadline = 0;
+            } else if (deadline == 0) {
+                deadline = 1;
+            }
+            *fault = !wrmsr_safe(msr, deadline);
+            return true;
+        }
         case MSR_IA32_FEATURE_CONTROL: {
             if (!virt_vmx) {
                 return false;

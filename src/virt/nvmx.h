@@ -40,6 +40,10 @@ bool nvmx_cr_allowed(struct vcpu *v, unsigned cr, uint64_t value);
 
 // Whether the vCPU runs the guest's own guest, VMCS02 being its current VMCS.
 bool nvmx_in_l2(struct vcpu *v);
+// The TSC offset of the VMCS the vCPU runs on, and the TSC its guest reads
+// where the processor's is raw.
+uint64_t nvmx_tsc_offset(struct vcpu *v);
+uint64_t nvmx_tsc(struct vcpu *v, uint64_t raw);
 // An exit of the guest's guest: whether it went to the guest, else the
 // hypervisor's to handle as its own.
 bool nvmx_l2_exit(struct vcpu *v, uint32_t reason, uint64_t qual);

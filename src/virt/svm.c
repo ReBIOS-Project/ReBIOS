@@ -581,6 +581,7 @@ void svm_run(struct vcpu *v) {
     for (;;) {
         vcpu_before_entry(v);
         v->vmcb->save.rax = v->gprs.rax;
+        v->vmcb->control.tsc_offset = v->tsc_offset;
         clean_before_entry(v);
         // Before the processor looks at the guest's interrupt requests.
         __atomic_store_n(&v->in_guest, true, __ATOMIC_SEQ_CST);
