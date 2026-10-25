@@ -17,6 +17,8 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <core.h>
+#include <handoff.h>
 #include <lib/heap.h>
 #include <lib/spinlock.h>
 #include <sys/cpu.h>
@@ -235,7 +237,9 @@
 
 static bool misc_enable_copied;
 // The firmware's settings of those bits, which the guest starts with, and those
-// the processor has.
+// the processor has. The cpuid_limit setting gives the guest the limit even
+// where the processor lacks it, and then the guest can neither see nor clear
+// it.
 static uint64_t misc_enable_firmware;
 static uint64_t misc_enable_supported;
 
@@ -639,6 +643,9 @@ static int amd_perf_counter(uint32_t msr) {
 
 void msr_vcpu_init(struct vcpu *v) {
     v->misc_enable = misc_enable_firmware;
+    if (core_handoff->config.cpuid_limit) {
+        v->misc_enable |= MISC_ENABLE_LIMIT_CPUID;
+    }
     v->tsc_offset = 0;
     v->tsc_adjust = 0;
     if (tsc_adjust) {
@@ -812,7 +819,7 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
                 return false;
             }
             *fault = !rdmsr_safe(msr, value);
-            *value = (*value & ~MISC_ENABLE_COPIED) | v->misc_enable
+            *value = (*value & ~MISC_ENABLE_COPIED) | (v->misc_enable & misc_enable_supported)
                      | (pebs_hidden ? MISC_ENABLE_PEBS_UNAVAILABLE : 0);
             return true;
         }
@@ -948,7 +955,8 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
             *fault = (value & MISC_ENABLE_COPIED & ~misc_enable_supported) != 0
                      || !wrmsr_safe(msr, value & ~kept);
             if (!*fault) {
-                v->misc_enable = value & MISC_ENABLE_COPIED;
+                v->misc_enable = (value & MISC_ENABLE_COPIED)
+                                 | (v->misc_enable & ~misc_enable_supported);
             }
             return true;
         }

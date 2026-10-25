@@ -139,6 +139,9 @@ struct handoff_config {
     uint8_t profile;
     // Whether the guest gets the processor's virtualisation of its own.
     uint8_t nested;
+    // Whether the guest starts with CPUID's basic leaves limited to 2, as
+    // firmware setting IA32_MISC_ENABLE's Limit CPUID Maxval would have it.
+    uint8_t cpuid_limit;
     // Which APIC IDs the guest gets, as inclusive ranges.
     uint32_t cpu_filter;
     uint32_t cpu_range_count;
