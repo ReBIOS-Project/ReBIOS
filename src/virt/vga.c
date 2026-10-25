@@ -121,6 +121,11 @@
 #define MAX_HEIGHT 768
 #define REFRESH_NS 20000000u
 
+// The display keeps track of the guest's writes to the planes in chunks of
+// 1 << CHUNK_SHIFT bytes of plane address.
+#define CHUNK_SHIFT 6
+#define CHUNKS (PLANE_SIZE >> CHUNK_SHIFT)
+
 // The Bochs display interface's registers, at an index port and a data port,
 // with QEMU's include/hw/display/bochs-vbe.h values and semantics.
 #define DISPI_PORT 0x1ce
@@ -176,6 +181,10 @@ static struct {
     uint8_t status_toggle;
     uint8_t *planes[4];
     bool dirty;
+    // The chunks of plane address the guest wrote since the display last
+    // showed them, and whether it wrote plane 2, which holds text modes' fonts.
+    uint64_t changed[CHUNKS / 64];
+    bool font_changed;
     // The DAC takes 8 bits per primary, as the Bochs interface can select.
     bool dac8;
     bool palette_dirty;
@@ -206,6 +215,20 @@ static struct {
     bool panned;
 } vbe;
 
+// The registers and palette a frame shows the planes through.
+struct display_state {
+    uint8_t clocking;
+    uint8_t char_map;
+    uint8_t gc_misc;
+    uint8_t gc_mode;
+    uint8_t crtc[CRTC_COUNT];
+    uint8_t ac[AC_COUNT];
+    uint8_t ac_pas;
+    uint8_t pel_mask;
+    uint8_t dac8;
+    uint8_t dac[256][3];
+};
+
 // The display as last drawn, and where on the framebuffer.
 static struct {
     uint32_t *frame;
@@ -221,6 +244,10 @@ static struct {
     uint64_t last;
     uint32_t blink;
     uint32_t border;
+    // The registers and palette the frame was last made with, and which of
+    // its scan lines were made again then.
+    struct display_state state;
+    bool made[MAX_HEIGHT];
     // One scan line, with a character clock to spare for panning.
     uint32_t line[MAX_WIDTH + 2 * 9 * 2];
     // What the Bochs interface last showed: each line's hash, and the palette.
@@ -292,6 +319,11 @@ static void mem_write(uint32_t offset, uint8_t value) {
         address &= ~1u;
     }
     address &= PLANE_SIZE - 1;
+    if (planes != 0) {
+        uint32_t chunk = address >> CHUNK_SHIFT;
+        vga.changed[chunk / 64] |= 1ull << (chunk % 64);
+        vga.font_changed |= (planes & 4) != 0;
+    }
 
     uint8_t bit_mask = vga.gc[GC_BIT_MASK];
     uint8_t rotated = rotate_right(value, vga.gc[GC_ROTATE]);
@@ -1026,8 +1058,36 @@ static unsigned pel_panning(unsigned dots) {
     return pan & 7;
 }
 
-// Renders the display as the CRT controller would scan it out.
-static void make_frame(uint32_t *width_out, uint32_t *height_out, bool cursor_on, bool blink_on) {
+static void display_state(struct display_state *s) {
+    s->clocking = vga.seq[SEQ_CLOCKING];
+    s->char_map = vga.seq[SEQ_CHAR_MAP];
+    s->gc_misc = vga.gc[GC_MISC];
+    s->gc_mode = vga.gc[GC_MODE] & (GC_MODE_256 | GC_MODE_INTERLEAVE);
+    memcpy(s->crtc, vga.crtc, sizeof(s->crtc));
+    memcpy(s->ac, vga.ac, sizeof(s->ac));
+    s->ac_pas = vga.ac_index & AC_INDEX_PAS;
+    s->pel_mask = vga.pel_mask;
+    s->dac8 = vga.dac8;
+    memcpy(s->dac, vga.dac, sizeof(s->dac));
+}
+
+// Whether the guest wrote any of the bytes a scan line fetches since the
+// display last showed them.
+static bool line_changed(uint32_t columns, uint32_t ma, unsigned row_scan) {
+    for (uint32_t c = 0; c < columns; c++) {
+        uint32_t chunk = crtc_address(ma + c, row_scan) >> CHUNK_SHIFT;
+        if (vga.changed[chunk / 64] & (1ull << (chunk % 64))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Renders the display as the CRT controller would scan it out: all of it, or
+// the scan lines that fetch what the guest wrote since the last time, the
+// others staying as they were made then.
+static void make_frame(uint32_t *width_out, uint32_t *height_out, bool cursor_on, bool blink_on,
+                       bool all) {
     bool graphics = vga.gc[GC_MISC] & GC_MISC_GRAPHICS;
     unsigned dots = (graphics || (vga.seq[SEQ_CLOCKING] & SEQ_CLOCKING_8DOT)) ? 8 : 9;
     unsigned repeat = (vga.seq[SEQ_CLOCKING] & SEQ_CLOCKING_HALF) ? 2 : 1;
@@ -1045,6 +1105,7 @@ static void make_frame(uint32_t *width_out, uint32_t *height_out, bool cursor_on
 
     if (!(vga.ac_index & AC_INDEX_PAS) || (vga.seq[SEQ_CLOCKING] & SEQ_CLOCKING_OFF)) {
         memset(out.frame, 0, width * height * sizeof(uint32_t));
+        memset(out.made, all, height);
         return;
     }
 
@@ -1068,15 +1129,18 @@ static void make_frame(uint32_t *width_out, uint32_t *height_out, bool cursor_on
             row_scan = 0;
             split = true;
         }
-        // The screen below a split can be kept from panning.
-        unsigned shift = split && (vga.ac[AC_MODE] & AC_MODE_PAN_SPLIT) ? 0 : pan;
-        if (graphics) {
-            graphics_line(out.line, span, columns + 1, ma, row_scan, repeat);
-        } else {
-            text_line(out.line, span, columns + 1, ma, row_scan, dots, repeat, cursor_on,
-                      blink_on);
+        out.made[y] = all || line_changed(columns + 1, ma, row_scan);
+        if (out.made[y]) {
+            // The screen below a split can be kept from panning.
+            unsigned shift = split && (vga.ac[AC_MODE] & AC_MODE_PAN_SPLIT) ? 0 : pan;
+            if (graphics) {
+                graphics_line(out.line, span, columns + 1, ma, row_scan, repeat);
+            } else {
+                text_line(out.line, span, columns + 1, ma, row_scan, dots, repeat, cursor_on,
+                          blink_on);
+            }
+            memcpy(out.frame + y * width, out.line + shift, width * sizeof(uint32_t));
         }
-        memcpy(out.frame + y * width, out.line + shift, width * sizeof(uint32_t));
         if (!double_scan || (y & 1)) {
             if (row_scan >= max_scan) {
                 row_scan = 0;
@@ -1209,6 +1273,9 @@ static void draw(uint32_t width, uint32_t height, uint32_t border) {
     }
 
     for (uint32_t sy = 0; sy < height; sy++) {
+        if (!all && !out.made[sy]) {
+            continue;
+        }
         const uint32_t *now = out.frame + sy * width;
         uint32_t *was = out.shown + sy * width;
         uint32_t first = 0;
@@ -1446,13 +1513,23 @@ void vga_refresh(void) {
     if (!vga.dirty && blink == out.blink && out.valid) {
         return;
     }
-    out.blink = blink;
 
     uint32_t width;
     uint32_t height;
     spinlock_acquire(&vga.lock);
     vga.dirty = false;
-    make_frame(&width, &height, cursor_on, blink_on);
+    struct display_state state;
+    display_state(&state);
+    // A text mode's font and its blinking show on every line, whatever bytes
+    // it fetches.
+    bool text = !(vga.gc[GC_MISC] & GC_MISC_GRAPHICS);
+    bool all = !out.valid || memcmp(&state, &out.state, sizeof(state)) != 0
+               || (text && (vga.font_changed || blink != out.blink));
+    make_frame(&width, &height, cursor_on, blink_on, all);
+    out.state = state;
+    out.blink = blink;
+    memset(vga.changed, 0, sizeof(vga.changed));
+    vga.font_changed = false;
     uint32_t border = dac_rgb(ac_color_border());
     spinlock_release(&vga.lock);
     draw(width, height, border);
