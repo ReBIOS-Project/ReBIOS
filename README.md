@@ -306,9 +306,7 @@ ReBIOS builds in software of others, under their own licenses:
 - [SeaBIOS](https://www.seabios.org/), under the GNU LGPL, version 3: a separate program, which ReBIOS carries and runs as the
   legacy BIOS of the machine it virtualises.
 - [uACPI](https://github.com/uACPI/uACPI), by Daniil Tatianin, under the MIT license.
-- [PicoEFI](https://github.com/PicoEFI/PicoEFI) and [freestanding-c-hdrs](https://github.com/osdev0/freestanding-c-hdrs), by
-  Mintsuki and contributors, under the 0BSD license.
+- [PicoEFI](https://github.com/PicoEFI/PicoEFI), [freestanding-c-hdrs](https://github.com/osdev0/freestanding-c-hdrs), and
+  [freestanding-lgrt](https://github.com/osdev0/freestanding-lgrt), by Mintsuki and contributors, under the 0BSD license.
 - [nanoprintf](https://github.com/charlesnicholson/nanoprintf), by Charles Nicholson, under the Unlicense or the 0BSD license.
 - [Flanterm](https://github.com/Mintsuki/Flanterm), by Mintsuki and contributors, under the BSD 2-Clause license.
-- [freestanding-lgrt](https://github.com/osdev0/freestanding-lgrt), from LLVM's compiler-rt, under the Apache License 2.0
-  with LLVM exceptions.

@@ -19,6 +19,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <stdarg.h>
+#include <efi.h>
 #include <memory.h>
 #include <core.h>
 #include <handoff.h>
@@ -205,10 +206,8 @@ void exception_handler(struct exception_frame *frame) {
     char text[1536];
     size_t len = 0;
     uint32_t apic_id = apic_id_now();
-    uint64_t image;
-    uint64_t image_end;
-    asm ("leaq __image_base(%%rip), %0" : "=r"(image));
-    asm ("leaq __image_end(%%rip), %0" : "=r"(image_end));
+    uint64_t image = (uintptr_t)EfiLoadSlide;
+    uint64_t image_end = image + EfiImageSize;
     uint64_t map_top = core_handoff != NULL ? core_handoff->map_top : 0;
 
     append(text, sizeof(text), &len,

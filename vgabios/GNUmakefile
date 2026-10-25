@@ -94,7 +94,7 @@ override CPPFLAGS := \
     -I src \
     -isystem ../freestanding-c-hdrs/include \
     $(CPPFLAGS) \
-    -MMD \
+    -MD \
     -MP
 
 # Internal linker flags that should not be changed by the user.

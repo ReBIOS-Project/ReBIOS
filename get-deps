@@ -60,18 +60,18 @@ rm -f .deps-obtained
 clone_repo_commit \
     https://github.com/osdev0/freestanding-c-hdrs.git \
     freestanding-c-hdrs \
-    5b4a649b38e1d27f2b7470f593d58e907438aca5
+    5e951873194cf131d00abe4978426e5aaaf6e379
 
 clone_repo_commit \
     https://github.com/osdev0/freestanding-lgrt.git \
     freestanding-lgrt \
-    a6e79759589f9905ec08c5fdc7f10f34f668d145
+    3cb84d19dd20c54ec2d1d2f9b2ba635ce97bf749
 cp -Rpf freestanding-lgrt vgabios/
 
 clone_repo_commit \
     https://github.com/PicoEFI/PicoEFI.git \
     picoefi \
-    0515ccde7a3ac9c52e32c9c21c924a8d50d3261e
+    dc23de6c36ae9e10e5ff290d7c3dd6c04b141a7a
 
 clone_repo_commit \
     https://github.com/charlesnicholson/nanoprintf.git \
