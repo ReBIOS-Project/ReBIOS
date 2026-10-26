@@ -1,3 +1,72 @@
+2026-10-26  Mintsuki  <mintsuki@protonmail.com>
+
+    *** Release 0.4.0 ***
+
+    Noteworthy changes compared to the previous release, 0.3.0:
+
+    New features:
+        - Intel integrated graphics from Skylake on: the OS gets the GPU's
+          stolen memory at an address in its own memory map, which the GPU's
+          registers then report, and the firmware's graphics page table entries
+          move with it, as the IOMMU translates what the GPU accesses. The OS's
+          memory no longer has a hole where the firmware put the stolen memory.
+          Setting the new `igpu_stolen_remap` to `false` keeps the stolen
+          memory at the firmware's address, as before, should the screen go
+          black once the OS starts.
+        - New `cpuid_limit` setting, which starts the OS with CPUID reporting
+          no basic leaf past 2, as firmware setups' "Limit CPUID Maxval" option
+          does, for OSes that fail on processors with more, such as Windows NT
+          4.0.
+        - Panics show more of the processor's state: its APIC ID, where in
+          ReBIOS it stopped, the control registers, DR6 and DR7, the
+          general-purpose registers, the top of the stack, and the OS's last VM
+          exit.
+        - With `verbose` on, ReBIOS shows its log on the screen for 30 seconds
+          before it resets the machine because the OS triple faulted or got
+          into a state that the processor cannot run it in.
+
+    Bug fixes:
+        - Take the legacy video BIOS only from the graphics card that the
+          firmware displays on, or from the one the `vga` setting names, and
+          emulate the VGA if that card has none, rather than run another
+          card's.
+        - Keep the firmware's graphics driver running while emulating the VGA:
+          stopping it turned some screens off, such as a 2019 iMac's.
+        - Emulate the VGA by default under Apple's firmware, rather than run
+          the graphics card's video BIOS, which nothing vouches for on Macs: a
+          2019 iMac's screen went dark with it.
+        - Intel integrated graphics: give the OS the OpRegion, with the video
+          BIOS table that describes the GPU's outputs, at an address in its own
+          memory map, where the GPU's ASLS register now points. ASLS pointed at
+          the firmware's address, which in the OS's memory map is other memory,
+          so that graphics drivers found no video BIOS table (new in 0.2.0).
+        - Let the OS reach BARs smaller than a page, such as the 2 KiB ones of
+          some AHCI controllers, wherever it moves them. They could read as all
+          ones and ignore writes.
+        - Take the USB controllers from the firmware before the legacy BIOS
+          drives them, as Linux does at boot, xHCI ones included, and drop the
+          IOMMU memory reservations that only the firmware's USB code needed.
+        - Give the OS a TSC of its own, offset from the processor's, rather
+          than let it write the processor's, which ReBIOS keeps time with:
+          Windows XP zeroes it at boot. IA32_TSC_ADJUST and TSC deadlines
+          follow the OS's TSC.
+        - Intel: write IA32_MCG_CTL to the processor only as all 0s or all 1s,
+          the values Intel defines, and give the OS back the value it wrote,
+          such as Windows NT 4.0's 0xffffffff.
+        - Intel: keep frame buffer compression off on Skylake and Broxton
+          integrated graphics, as Linux does where VT-d translates the GPU's
+          accesses, which it always does under ReBIOS.
+
+    Miscellaneous:
+        - Refuse to start, with a notice, as without an IOMMU, where the
+          integrated graphics malfunctions under VT-d, as Linux knows it to:
+          Intel's Broadwell, and Ironlake in Arrandale processors, or in
+          Clarkdale ones whose firmware sets up no shadow GTT.
+        - The emulated VGA redraws only the scan lines the OS wrote to, rather
+          than whole screens.
+        - Follow the latest PicoEFI C template, and update the PicoEFI,
+          freestanding-c-hdrs, and freestanding-lgrt subprojects.
+
 2026-10-20  Mintsuki  <mintsuki@protonmail.com>
 
     *** Release 0.3.0 ***
