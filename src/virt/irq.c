@@ -50,6 +50,12 @@
 // controller's keyboard and mouse ports, the cascade, the RTC, and FERR#.
 #define HYPERVISOR_IRQS (1u << 0 | 1u << 1 | 1u << 2 | 1u << 8 | 1u << 12 | 1u << 13)
 
+// The ISA IRQs the legacy BIOS unmasks for its floppy and ATA drivers,
+// whatever the machine has (SeaBIOS 1.17.0's floppy_setup() and
+// ata_setup()), whose handlers only acknowledge them: a PCI device's level
+// interrupt there would come back at once, for good.
+#define LEGACY_BIOS_IRQS (1u << 6 | 1u << 14)
+
 // The order free ISA IRQs go to PCI in, those period BIOSes gave it first.
 static const uint8_t pci_irqs[] = {11, 10, 9, 5, 15, 14, 7, 6, 4, 3};
 #define PERIOD_PCI_IRQS 4
@@ -399,7 +405,7 @@ static void elcr_init(void) {
 }
 
 void irq_route_pci(const struct irq_pci_line *lines, uint32_t count, uint16_t isa_claimed) {
-    uint16_t taken = HYPERVISOR_IRQS | isa_claimed;
+    uint16_t taken = HYPERVISOR_IRQS | LEGACY_BIOS_IRQS | isa_claimed;
     struct acpi_fadt *fadt;
     if (uacpi_table_fadt(&fadt) == UACPI_STATUS_OK && fadt->sci_int < ISA_IRQS) {
         taken |= 1u << fadt->sci_int;
