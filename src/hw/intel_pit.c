@@ -29,8 +29,6 @@
 #define ITSSPRC 0x3300
 #define ITSSPRC_CGE8254 (1u << 2)
 
-#define P2SB_DEVICE 31
-#define P2SB_FUNCTION 1
 #define P2SB_SBREG_BAR 0x10
 #define P2SB_SBREG_BARH 0x14
 // Bits 15:8 of P2SBC, at E0h, of which bit 8 hides the device. The byte is
@@ -42,37 +40,46 @@ struct pch_family {
     uint8_t model;
     uint32_t sideband_base;
     uint8_t itss_port_id;
+    uint8_t p2sb_device;
+    uint8_t p2sb_function;
 };
 
 // By processor model, the sideband register base to assume when the P2SB's
-// BAR cannot be read, and the ITSS's port ID.
+// BAR cannot be read, the ITSS's port ID, and where on bus 0 the P2SB is.
 static const struct pch_family pch_families[] = {
+    // Apollo Lake and Gemini Lake.
+    {0x5c, 0xd0000000, 0xd0, 13, 0},
+    {0x7a, 0xd0000000, 0xd0, 13, 0},
+    // Elkhart Lake, Jasper Lake, and Alder Lake-N.
+    {0x96, 0xfd000000, 0xc4, 31, 1},
+    {0x9c, 0xfd000000, 0xc4, 31, 1},
+    {0xbe, 0xfd000000, 0xc4, 31, 1},
     // Skylake through Tiger Lake, and mobile Alder Lake and Raptor Lake.
-    {0x4e, 0xfd000000, 0xc4},
-    {0x5e, 0xfd000000, 0xc4},
-    {0x55, 0xfd000000, 0xc4},
-    {0x8e, 0xfd000000, 0xc4},
-    {0x9e, 0xfd000000, 0xc4},
-    {0xa5, 0xfd000000, 0xc4},
-    {0xa6, 0xfd000000, 0xc4},
-    {0x7e, 0xfd000000, 0xc4},
-    {0x8c, 0xfd000000, 0xc4},
-    {0x8d, 0xfd000000, 0xc4},
-    {0x9a, 0xfd000000, 0xc4},
-    {0xba, 0xfd000000, 0xc4},
+    {0x4e, 0xfd000000, 0xc4, 31, 1},
+    {0x5e, 0xfd000000, 0xc4, 31, 1},
+    {0x55, 0xfd000000, 0xc4, 31, 1},
+    {0x8e, 0xfd000000, 0xc4, 31, 1},
+    {0x9e, 0xfd000000, 0xc4, 31, 1},
+    {0xa5, 0xfd000000, 0xc4, 31, 1},
+    {0xa6, 0xfd000000, 0xc4, 31, 1},
+    {0x7e, 0xfd000000, 0xc4, 31, 1},
+    {0x8c, 0xfd000000, 0xc4, 31, 1},
+    {0x8d, 0xfd000000, 0xc4, 31, 1},
+    {0x9a, 0xfd000000, 0xc4, 31, 1},
+    {0xba, 0xfd000000, 0xc4, 31, 1},
     // Desktop Alder Lake and Raptor Lake.
-    {0x97, 0xe0000000, 0xc4},
-    {0xb7, 0xe0000000, 0xc4},
-    {0xbf, 0xe0000000, 0xc4},
+    {0x97, 0xe0000000, 0xc4, 31, 1},
+    {0xb7, 0xe0000000, 0xc4, 31, 1},
+    {0xbf, 0xe0000000, 0xc4, 31, 1},
     // Meteor Lake, Arrow Lake, and Lunar Lake.
-    {0xac, 0xe0000000, 0xca},
-    {0xaa, 0xe0000000, 0xca},
-    {0xc6, 0xe0000000, 0xca},
-    {0xc5, 0xe0000000, 0xca},
-    {0xb5, 0xe0000000, 0xca},
-    {0xbd, 0xe0000000, 0xca},
+    {0xac, 0xe0000000, 0xca, 31, 1},
+    {0xaa, 0xe0000000, 0xca, 31, 1},
+    {0xc6, 0xe0000000, 0xca, 31, 1},
+    {0xc5, 0xe0000000, 0xca, 31, 1},
+    {0xb5, 0xe0000000, 0xca, 31, 1},
+    {0xbd, 0xe0000000, 0xca, 31, 1},
     // Panther Lake.
-    {0xcc, 0xe0000000, 0x69},
+    {0xcc, 0xe0000000, 0x69, 31, 1},
 };
 
 static uint64_t pcr_address(uint64_t base, uint8_t port_id, uint32_t offset) {
@@ -80,12 +87,12 @@ static uint64_t pcr_address(uint64_t base, uint8_t port_id, uint32_t offset) {
            | ((uint64_t)((offset >> 16) & 0xf) << 24);
 }
 
-static uint64_t sideband_base(uint32_t fallback) {
+static uint64_t sideband_base(const struct pch_family *pch) {
     struct pci_addr p2sb = {
         .segment = 0,
         .bus = 0,
-        .device = P2SB_DEVICE,
-        .function = P2SB_FUNCTION,
+        .device = pch->p2sb_device,
+        .function = pch->p2sb_function,
     };
     bool hidden = pci_cfg_read(p2sb, 0, 2) == 0xffff;
     if (hidden) {
@@ -105,8 +112,8 @@ static uint64_t sideband_base(uint32_t fallback) {
 
     if (base == 0) {
         printf("8254 clock gate: P2SB BAR unavailable, assuming sideband registers at %#x\n",
-               fallback);
-        return fallback;
+               pch->sideband_base);
+        return pch->sideband_base;
     }
     printf("8254 clock gate: sideband registers at %#llx\n", (unsigned long long)base);
     return base;
@@ -148,7 +155,7 @@ void intel_pit_ungate(void) {
         return;
     }
 
-    uint64_t address = pcr_address(sideband_base(pch->sideband_base), pch->itss_port_id, ITSSPRC);
+    uint64_t address = pcr_address(sideband_base(pch), pch->itss_port_id, ITSSPRC);
     if (address > core_handoff->map_top - 4) {
         printf("8254 clock gate: ITSSPRC at %#llx is out of reach, doing nothing\n",
                (unsigned long long)address);
