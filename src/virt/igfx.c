@@ -18,7 +18,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <memory.h>
+#include <core.h>
 #include <csm/e820.h>
+#include <handoff.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
 #include <iommu/dma.h>
@@ -223,6 +225,10 @@ static void scan_stolen(struct pci_function *f) {
     uint64_t bsm_64 = (pci_cfg_read(f->addr, REG_BSM_GEN11, 4)
                        | (uint64_t)pci_cfg_read(f->addr, REG_BSM_GEN11 + 4, 4) << 32) & BSM_MASK_64;
     igfx.gttmmadr = bar->base;
+    if (!core_handoff->config.igpu_stolen_remap) {
+        printf("Intel graphics: the stolen memory stays at its host address (igpu_stolen_remap)\n");
+        return;
+    }
     mm_map_device(bar->base + MMIO_PAGE, PAGE_SIZE);
     enum stolen_kind kind;
     uint64_t dsm;

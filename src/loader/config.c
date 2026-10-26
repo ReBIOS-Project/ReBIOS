@@ -408,6 +408,7 @@ static const struct setting settings[] = {
     {.name = "profile", .apply = apply_boolean, .flag = &config.profile},
     {.name = "nested", .apply = apply_boolean, .flag = &config.nested},
     {.name = "cpuid_limit", .apply = apply_boolean, .flag = &config.cpuid_limit},
+    {.name = "igpu_stolen_remap", .apply = apply_boolean, .flag = &config.igpu_stolen_remap},
     {.name = "cpu_allowlist", .apply = apply_cpu_list, .filter = HANDOFF_CPU_FILTER_ALLOW},
     {.name = "cpu_blocklist", .apply = apply_cpu_list, .filter = HANDOFF_CPU_FILTER_BLOCK},
     {.name = "iommu_disable", .apply = apply_obsolete},
@@ -748,6 +749,7 @@ void config_load(void) {
     config.vga_scaling = HANDOFF_VGA_SCALING_STRETCH;
     config.vga_scale = 1;
     config.cpu_filter = HANDOFF_CPU_FILTER_NONE;
+    config.igpu_stolen_remap = true;
 
     if (apply_files()
         || apply_variable(rebios_variable, &rebios_variable_guid, "the ReBIOSConfig variable")
@@ -772,6 +774,7 @@ void config_to_handoff(struct handoff_config *out) {
     out->profile = config.profile;
     out->nested = config.nested;
     out->cpuid_limit = config.cpuid_limit;
+    out->igpu_stolen_remap = config.igpu_stolen_remap;
     out->cpu_filter = config.cpu_filter;
     out->cpu_range_count = config.cpu_range_count;
     for (uint32_t i = 0; i < config.cpu_range_count; i++) {

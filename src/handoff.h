@@ -142,6 +142,9 @@ struct handoff_config {
     // Whether the guest starts with CPUID's basic leaves limited to 2, as
     // firmware setting IA32_MISC_ENABLE's Limit CPUID Maxval would have it.
     uint8_t cpuid_limit;
+    // Whether Intel's integrated graphics get their stolen memory at an
+    // address of the guest's own (virt/igfx.c), else at the host's.
+    uint8_t igpu_stolen_remap;
     // Which APIC IDs the guest gets, as inclusive ranges.
     uint32_t cpu_filter;
     uint32_t cpu_range_count;
