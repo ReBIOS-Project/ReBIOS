@@ -120,6 +120,8 @@
 #define MAX_WIDTH 1024
 #define MAX_HEIGHT 768
 #define REFRESH_NS 20000000u
+// The lines of a turned display written to the framebuffer together.
+#define BAND_LINES 32
 
 // The display keeps track of the guest's writes to the planes in chunks of
 // 1 << CHUNK_SHIFT bytes of plane address.
@@ -258,6 +260,16 @@ static struct {
     uint64_t *vbe_hashes;
     uint32_t *vbe_line;
     uint32_t vbe_palette[256];
+    // One line of the display, in the framebuffer's pixel format.
+    uint32_t *fb_line;
+    // Lines of a turned display, which run down the framebuffer's columns:
+    // band_count lines of out.w pixels, from line band_y on, of which pixels
+    // band_x0 to band_x1 changed.
+    uint32_t *band;
+    uint32_t band_y;
+    uint32_t band_count;
+    uint32_t band_x0;
+    uint32_t band_x1;
 } out;
 
 static uint8_t rotate_right(uint8_t value, unsigned count) {
@@ -1189,12 +1201,20 @@ static void fb_put(uint8_t *row, uint32_t x, uint32_t pixel, uint8_t bpp) {
     }
 }
 
+void vga_screen_size(uint32_t *width, uint32_t *height) {
+    const struct handoff_framebuffer *fb = &core_handoff->video.framebuffer;
+    bool turned = fb->rotation != HANDOFF_ROTATE_0;
+    *width = turned ? fb->height : fb->width;
+    *height = turned ? fb->width : fb->height;
+}
+
 // The framebuffer's rectangle the display fills, as the configuration asks,
 // at an aspect ratio of aspect_w:aspect_h where it is to be kept.
 static void place(uint32_t width, uint32_t height, uint32_t aspect_w, uint32_t aspect_h) {
     const struct handoff *h = core_handoff;
-    uint32_t fw = h->video.framebuffer.width;
-    uint32_t fh = h->video.framebuffer.height;
+    uint32_t fw;
+    uint32_t fh;
+    vga_screen_size(&fw, &fh);
     uint64_t w = fw;
     uint64_t hgt = fh;
     switch (h->config.vga_scaling) {
@@ -1257,6 +1277,62 @@ static void fb_clear(uint32_t rgb) {
     }
 }
 
+// Writes the band of a turned display to the framebuffer, a row of the
+// framebuffer at a time, across the band's lines.
+static void screen_flush(void) {
+    const struct handoff_framebuffer *fb = &core_handoff->video.framebuffer;
+    uint8_t *base = (uint8_t *)(uintptr_t)fb->base;
+    for (uint32_t x = out.band_x0; x < out.band_x1 && out.band_count != 0; x++) {
+        uint32_t column = out.x + x;
+        const uint32_t *pixels = out.band + x;
+        if (fb->rotation == HANDOFF_ROTATE_90) {
+            uint8_t *row = base + (uint64_t)column * fb->pitch;
+            for (uint32_t i = out.band_count; i-- > 0;) {
+                uint32_t line = out.y + out.band_y + i;
+                fb_put(row, fb->width - 1 - line, pixels[(uint64_t)i * out.w], fb->bpp);
+            }
+        } else {
+            uint8_t *row = base + (uint64_t)(fb->height - 1 - column) * fb->pitch;
+            for (uint32_t i = 0; i < out.band_count; i++) {
+                uint32_t line = out.y + out.band_y + i;
+                fb_put(row, line, pixels[(uint64_t)i * out.w], fb->bpp);
+            }
+        }
+    }
+    out.band_count = 0;
+}
+
+// Shows pixels x0 to x1 of out.fb_line as the display's line y. A turned
+// display takes whole lines, as single pixels down the framebuffer's columns
+// would keep its writes from combining, and writes them in bands.
+static void screen_line(uint32_t y, uint32_t x0, uint32_t x1) {
+    const struct handoff_framebuffer *fb = &core_handoff->video.framebuffer;
+    if (fb->rotation == HANDOFF_ROTATE_0) {
+        uint8_t *row = (uint8_t *)(uintptr_t)fb->base + (uint64_t)(out.y + y) * fb->pitch;
+        for (uint32_t x = x0; x < x1; x++) {
+            fb_put(row, out.x + x, out.fb_line[x], fb->bpp);
+        }
+        return;
+    }
+    if (out.band_count != 0
+        && (y != out.band_y + out.band_count || out.band_count == BAND_LINES)) {
+        screen_flush();
+    }
+    if (out.band_count == 0) {
+        out.band_y = y;
+        out.band_x0 = x0;
+        out.band_x1 = x1;
+    }
+    if (x0 < out.band_x0) {
+        out.band_x0 = x0;
+    }
+    if (x1 > out.band_x1) {
+        out.band_x1 = x1;
+    }
+    memcpy(out.band + (uint64_t)out.band_count * out.w, out.fb_line, out.w * sizeof(uint32_t));
+    out.band_count++;
+}
+
 // Copies the lines that changed since the last time to the framebuffer.
 static void draw(uint32_t width, uint32_t height, uint32_t border) {
     const struct handoff_framebuffer *fb = &core_handoff->video.framebuffer;
@@ -1298,20 +1374,25 @@ static void draw(uint32_t width, uint32_t height, uint32_t border) {
         uint32_t y1 = (uint32_t)(((uint64_t)(sy + 1) * out.h + height - 1) / height);
         uint32_t x0 = (uint32_t)(((uint64_t)first * out.w + width - 1) / width);
         uint32_t x1 = (uint32_t)(((uint64_t)last * out.w + width - 1) / width);
-        for (uint32_t y = y0; y < y1 && y < out.h; y++) {
-            uint8_t *row = (uint8_t *)(uintptr_t)fb->base + (uint64_t)(out.y + y) * fb->pitch;
-            uint32_t source = UINT32_MAX;
-            uint32_t pixel = 0;
-            for (uint32_t x = x0; x < x1 && x < out.w; x++) {
-                uint32_t rgb = now[out.xmap[x]];
-                if (rgb != source) {
-                    source = rgb;
-                    pixel = fb_pixel(rgb);
-                }
-                fb_put(row, out.x + x, pixel, fb->bpp);
+        if (x1 > out.w) {
+            x1 = out.w;
+        }
+        bool turned = fb->rotation != HANDOFF_ROTATE_0;
+        uint32_t source = UINT32_MAX;
+        uint32_t pixel = 0;
+        for (uint32_t x = turned ? 0 : x0; x < (turned ? out.w : x1); x++) {
+            uint32_t rgb = now[out.xmap[x]];
+            if (rgb != source) {
+                source = rgb;
+                pixel = fb_pixel(rgb);
             }
+            out.fb_line[x] = pixel;
+        }
+        for (uint32_t y = y0; y < y1 && y < out.h; y++) {
+            screen_line(y, x0, x1);
         }
     }
+    screen_flush();
 }
 
 static uint32_t expand5(uint32_t v) {
@@ -1426,7 +1507,6 @@ static void vbe_refresh(void) {
     if (vbe.direct) {
         return;
     }
-    const struct handoff_framebuffer *fb = &core_handoff->video.framebuffer;
     spinlock_acquire(&vga.lock);
     uint32_t width = vbe.regs[DISPI_XRES];
     uint32_t height = vbe.regs[DISPI_YRES];
@@ -1474,20 +1554,21 @@ static void vbe_refresh(void) {
 
         uint32_t y0 = (uint32_t)(((uint64_t)sy * out.h + height - 1) / height);
         uint32_t y1 = (uint32_t)(((uint64_t)(sy + 1) * out.h + height - 1) / height);
-        for (uint32_t y = y0; y < y1 && y < out.h; y++) {
-            uint8_t *row = (uint8_t *)(uintptr_t)fb->base + (uint64_t)(out.y + y) * fb->pitch;
-            uint32_t source = UINT32_MAX;
-            uint32_t pixel = 0;
-            for (uint32_t x = 0; x < out.w; x++) {
-                uint32_t rgb = out.vbe_line[out.xmap[x]];
-                if (rgb != source) {
-                    source = rgb;
-                    pixel = fb_pixel(rgb);
-                }
-                fb_put(row, out.x + x, pixel, fb->bpp);
+        uint32_t source = UINT32_MAX;
+        uint32_t pixel = 0;
+        for (uint32_t x = 0; x < out.w; x++) {
+            uint32_t rgb = out.vbe_line[out.xmap[x]];
+            if (rgb != source) {
+                source = rgb;
+                pixel = fb_pixel(rgb);
             }
+            out.fb_line[x] = pixel;
+        }
+        for (uint32_t y = y0; y < y1 && y < out.h; y++) {
+            screen_line(y, 0, out.w);
         }
     }
+    screen_flush();
 }
 
 void vga_refresh(void) {
@@ -1559,10 +1640,12 @@ static void vbe_init(void) {
     vbe.present = true;
 
     // Bochs' 32 bpp pixels hold blue, green, and red in their first three
-    // bytes, and its scan lines are a multiple of 32 bytes.
+    // bytes, and its scan lines are a multiple of 32 bytes. A turned picture
+    // is never the framebuffer's own.
     const struct handoff_framebuffer *fb = &video->framebuffer;
     uint64_t frame = ((uint64_t)fb->pitch * fb->height + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
-    if (fb->present && fb->bpp == 32 && fb->red_size == 8 && fb->red_shift == 16
+    if (fb->present && fb->rotation == HANDOFF_ROTATE_0 && fb->bpp == 32 && fb->red_size == 8
+        && fb->red_shift == 16
         && fb->green_size == 8 && fb->green_shift == 8 && fb->blue_size == 8
         && fb->blue_shift == 0 && fb->pitch % 32 == 0 && fb->base % PAGE_SIZE == 0
         && frame <= fb->size && frame <= vbe.vram_size) {
@@ -1628,7 +1711,15 @@ bool vga_init(void) {
     size_t frame_pages = (MAX_WIDTH * MAX_HEIGHT * sizeof(uint32_t) + PAGE_SIZE - 1) / PAGE_SIZE;
     out.frame = page_alloc(frame_pages);
     out.shown = page_alloc(frame_pages);
-    out.xmap = page_alloc((fb->width * sizeof(uint32_t) + PAGE_SIZE - 1) / PAGE_SIZE);
+    uint32_t screen_width;
+    uint32_t screen_height;
+    vga_screen_size(&screen_width, &screen_height);
+    size_t line_pages = (screen_width * sizeof(uint32_t) + PAGE_SIZE - 1) / PAGE_SIZE;
+    out.xmap = page_alloc(line_pages);
+    out.fb_line = page_alloc(line_pages);
+    if (fb->rotation != HANDOFF_ROTATE_0) {
+        out.band = page_alloc(BAND_LINES * line_pages);
+    }
     mm_write_combining(fb->base, (uint64_t)fb->pitch * fb->height);
     vga.pel_mask = 0xff;
     vga.misc = MISC_COLOR;
@@ -1644,7 +1735,10 @@ bool vga_init(void) {
     vga.on = true;
 
     unsigned scaling = h->config.vga_scaling < 5 ? h->config.vga_scaling : 0;
-    printf("Emulating a VGA, %s on the %ux%u framebuffer at %#llx\n", scaling_names[scaling],
-           fb->width, fb->height, (unsigned long long)fb->base);
+    printf("Emulating a VGA, %s on the %ux%u framebuffer at %#llx%s\n", scaling_names[scaling],
+           fb->width, fb->height, (unsigned long long)fb->base,
+           fb->rotation == HANDOFF_ROTATE_90    ? ", turned clockwise"
+           : fb->rotation == HANDOFF_ROTATE_270 ? ", turned anticlockwise"
+                                                : "");
     return true;
 }

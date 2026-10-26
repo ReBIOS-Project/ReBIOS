@@ -92,7 +92,8 @@ Otherwise, as on many recent systems, and on cards whose Video BIOS is known not
 its integrated graphics but for the Vega ones), ReBIOS emulates a complete legacy VGA with its own Video BIOS, drawn on the UEFI
 framebuffer and scaled to the screen. It is not SeaVGABIOS: text modes (40 and 80 columns, 200, 350, and 400 lines, blinking,
 underline, the cursor, loadable fonts), CGA, EGA, and VGA graphics modes, and programs that program the VGA registers and video
-memory directly (e.g. pretty much all MS-DOS games, MS-DOS Editor, etc.) work as on a real VGA.
+memory directly (e.g. pretty much all MS-DOS games, MS-DOS Editor, etc.) work as on a real VGA. On the tablets and handhelds
+that Linux knows to have their screen mounted sideways, the picture is turned upright, as are ReBIOS's own messages.
 
 Its Video BIOS also offers the VESA BIOS Extensions (VBE 3.0): modes in 8, 15, 16, 24, and 32 bits per pixel up to the screen's
 resolution, through a banked window or a linear framebuffer, and the display's EDID where the firmware has it. Operating systems

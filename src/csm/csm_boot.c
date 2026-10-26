@@ -260,17 +260,24 @@ static void emulated_vbios_info(uint8_t *image, uint32_t size) {
     if (video->vram_size != 0) {
         info.flags = VGABIOS_INFO_DISPI;
     }
-    info.max_width = (uint16_t)video->framebuffer.width;
-    info.max_height = (uint16_t)video->framebuffer.height;
-    info.edid_size = (uint16_t)video->edid_size;
+    uint32_t width;
+    uint32_t height;
+    vga_screen_size(&width, &height);
+    info.max_width = (uint16_t)width;
+    info.max_height = (uint16_t)height;
     info.lfb = (uint32_t)vga_lfb();
-    memcpy(info.edid, video->edid, video->edid_size);
+    // A turned panel's own EDID describes it unturned.
+    if (video->framebuffer.rotation == HANDOFF_ROTATE_0) {
+        info.edid_size = (uint16_t)video->edid_size;
+        memcpy(info.edid, video->edid, video->edid_size);
+    }
     // Without one, guests would not know the display's resolution.
-    if (info.edid_size == 0
-        && edid_synthesize(info.edid, video->framebuffer.width, video->framebuffer.height)) {
+    if (info.edid_size == 0 && edid_synthesize(info.edid, width, height)) {
         info.edid_size = EDID_BLOCK_SIZE;
-        printf("No EDID from the firmware, so the emulated VGA's display reports %ux%u at 60 Hz\n",
-               video->framebuffer.width, video->framebuffer.height);
+        printf("%s, so the emulated VGA's display reports %ux%u at 60 Hz\n",
+               video->edid_size != 0 ? "The panel's EDID describes it unturned"
+                                     : "No EDID from the firmware",
+               width, height);
     }
     memcpy(image + at, &info, sizeof(info));
 }
