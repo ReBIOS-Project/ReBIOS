@@ -630,13 +630,18 @@ void video_init(void) {
 
     bool have_user = load_user_vbios(&user);
     const struct user_vbios *user_vbios = have_user ? &user : NULL;
-    bool apple = config.vga_emulation == HANDOFF_VGA_EMULATION_AUTO && !have_user
-                 && apple_firmware();
+    bool automatic = config.vga_emulation == HANDOFF_VGA_EMULATION_AUTO && !have_user;
+    bool apple = automatic && apple_firmware();
+    // A VBIOS draws as the panel scans, sideways on one mounted sideways, and
+    // the firmware's driver stopped for one left a Lenovo D330's panel dark.
+    bool sideways =
+        automatic && loader_handoff->video.framebuffer.rotation != HANDOFF_ROTATE_0;
+    bool skip = apple || sideways;
 
     if (config.vga_specified) {
         have_dev = find_pci_device(config.vga_device, &dev);
         if (have_dev) {
-            found = !apple && try_device(&dev, user_vbios, &choice);
+            found = !skip && try_device(&dev, user_vbios, &choice);
         } else {
             printf("The configured VGA device " PCI_ADDRESS_FMT " does not exist\n",
                    PCI_ADDRESS_ARGS(config.vga_device));
@@ -645,17 +650,18 @@ void video_init(void) {
         // Another card's VBIOS would put the legacy display where the
         // firmware's is not.
         have_dev = true;
-        found = !apple && try_device(&dev, user_vbios, &choice);
+        found = !skip && try_device(&dev, user_vbios, &choice);
     } else if (have_user) {
         printf("Not using %s as the VBIOS: no VGA device is configured, and no graphics "
                "output leads to one\n", user.source);
     } else if (gop_handle == NULL) {
-        found = !apple && try_display_devices(&choice);
+        found = !skip && try_display_devices(&choice);
     }
 
     if (!found || !install_vbios(&choice)) {
-        printf(apple ? "No VBIOS under Apple's firmware but with vga_emulation = never\n"
-                     : "No usable VBIOS\n");
+        printf(apple      ? "No VBIOS under Apple's firmware but with vga_emulation = never\n"
+               : sideways ? "No VBIOS on a panel mounted sideways but with vga_emulation = never\n"
+                          : "No usable VBIOS\n");
         // It keeps its legacy VGA resources, for the emulated VGA to stand in
         // for.
         if (have_dev) {
