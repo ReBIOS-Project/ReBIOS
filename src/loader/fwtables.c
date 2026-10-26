@@ -309,6 +309,74 @@ static uint64_t smbios3_synthesise(const struct smbios3_entry *eps3) {
     return addr;
 }
 
+// The structure table the firmware's identification strings are read from,
+// the 3.x entry point's first, as Linux 7.3's dmi_scan_machine() prefers it.
+static const uint8_t *smbios_structures(uint64_t *size) {
+    const struct smbios3_entry *eps3 = config_table_find(&smbios3_guid);
+    if (eps3 != NULL && smbios3_check(eps3) == NULL) {
+        *size = eps3->table_max_size;
+        return (const uint8_t *)(uintptr_t)eps3->table_address;
+    }
+    const struct smbios2_entry *eps2 = config_table_find(&smbios_guid);
+    if (eps2 != NULL && smbios2_check(eps2) == NULL) {
+        *size = eps2->table_length;
+        return (const uint8_t *)(uintptr_t)eps2->table_address;
+    }
+    return NULL;
+}
+
+const char *fwtables_smbios_string(uint8_t type, uint8_t offset) {
+    uint64_t max_size;
+    const uint8_t *table = smbios_structures(&max_size);
+    if (table == NULL) {
+        return NULL;
+    }
+
+    uint64_t off = 0;
+    while (max_size - off >= 4) {
+        const uint8_t *structure = table + off;
+        uint8_t length = structure[1];
+        if (length < 4 || length > max_size - off) {
+            return NULL;
+        }
+        uint64_t end = off + length;
+        while (end + 1 < max_size && (table[end] != 0 || table[end + 1] != 0)) {
+            end++;
+        }
+        if (end + 1 >= max_size) {
+            return NULL;
+        }
+
+        if (structure[0] == type) {
+            if (offset >= length) {
+                return NULL;
+            }
+            // The strings end in two NULs, the first at strings_end.
+            const char *string = (const char *)structure + length;
+            const char *strings_end = (const char *)table + end;
+            for (uint8_t s = structure[offset]; s > 1 && string < strings_end; s--) {
+                while (*string != 0) {
+                    string++;
+                }
+                string++;
+            }
+            const char *nonblank = string;
+            while (nonblank < strings_end && *nonblank == ' ') {
+                nonblank++;
+            }
+            if (structure[offset] == 0 || nonblank >= strings_end || *nonblank == 0) {
+                return "";
+            }
+            return string;
+        }
+        if (structure[0] == SMBIOS_END_OF_TABLE) {
+            return NULL;
+        }
+        off = end + 2;
+    }
+    return NULL;
+}
+
 static uint64_t smbios_find(void) {
     const struct smbios2_entry *eps2 = config_table_find(&smbios_guid);
     if (eps2 != NULL) {
