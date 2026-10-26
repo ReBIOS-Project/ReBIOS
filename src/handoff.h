@@ -42,6 +42,12 @@ struct handoff_pci_address {
     uint8_t devfn;
 };
 
+// How a picture is turned on a framebuffer whose panel is mounted turned in its
+// casing, so as to stand upright: a quarter turn clockwise or anticlockwise.
+#define HANDOFF_ROTATE_0 0
+#define HANDOFF_ROTATE_90 1
+#define HANDOFF_ROTATE_270 3
+
 // A linear framebuffer as the firmware's graphics output left it. Each colour
 // component is size bits wide, starting at bit shift of a pixel.
 struct handoff_framebuffer {
@@ -60,6 +66,8 @@ struct handoff_framebuffer {
     uint8_t reserved_size;
     uint8_t reserved_shift;
     uint8_t present;
+    // One of the HANDOFF_ROTATE_* values.
+    uint8_t rotation;
 };
 
 // An x86 legacy option ROM image, copied to hypervisor memory.

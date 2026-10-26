@@ -24,4 +24,8 @@
 // known to give them wrongly.
 void panel_fix_framebuffer(struct handoff_framebuffer *fb);
 
+// One of the HANDOFF_ROTATE_* values: how the picture is turned on a panel
+// known to be mounted turned in its casing.
+uint8_t panel_rotation(const struct handoff_framebuffer *fb);
+
 #endif

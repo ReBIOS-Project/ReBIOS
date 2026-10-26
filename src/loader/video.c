@@ -612,8 +612,10 @@ void video_find_framebuffer(void) {
     EFI_GRAPHICS_OUTPUT_PROTOCOL *gop = NULL;
     gop_handle = choose_gop(&gop);
     if (gop_handle != NULL) {
-        describe_framebuffer(gop, &loader_handoff->video.framebuffer);
-        panel_fix_framebuffer(&loader_handoff->video.framebuffer);
+        struct handoff_framebuffer *fb = &loader_handoff->video.framebuffer;
+        describe_framebuffer(gop, fb);
+        panel_fix_framebuffer(fb);
+        fb->rotation = panel_rotation(fb);
     } else {
         printf("No usable graphics output\n");
     }

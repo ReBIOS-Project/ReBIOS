@@ -42,12 +42,18 @@ void console_init(void) {
     if (!fb->present || fb->bpp != 32) {
         return;
     }
+    int rotation = FLANTERM_FB_ROTATE_0;
+    if (fb->rotation == HANDOFF_ROTATE_90) {
+        rotation = FLANTERM_FB_ROTATE_90;
+    } else if (fb->rotation == HANDOFF_ROTATE_270) {
+        rotation = FLANTERM_FB_ROTATE_270;
+    }
 
     struct flanterm_context *screen = flanterm_fb_init(
         console_alloc, console_free, (uint32_t *)(uintptr_t)fb->base, fb->width, fb->height,
         fb->pitch, fb->red_size, fb->red_shift, fb->green_size, fb->green_shift, fb->blue_size,
         fb->blue_shift, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, 0, 0, 0, 0, 0,
-        FLANTERM_FB_ROTATE_0, false);
+        rotation, false);
     if (screen != NULL) {
         log_set_screen(screen);
     }
