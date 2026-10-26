@@ -134,6 +134,8 @@ struct vcpu {
     // The guest's copies of the IA32_MISC_ENABLE bits the processor's keep
     // clear (msr.c).
     uint64_t misc_enable;
+    // The guest's IA32_MCG_CTL where the processor gets another (msr.c).
+    uint64_t mcg_ctl;
     // The guest's own AMD memory routing (msr.c): SYSCFG, the IORRs, the tops
     // of memory, and the configuration space window.
     uint64_t amd_syscfg;

@@ -70,6 +70,16 @@
 #define MSR_IA32_TSC_ADJUST 0x3b
 #define MSR_IA32_TSC_DEADLINE 0x6e0
 
+// IA32_MCG_CTL, where IA32_MCG_CAP's MCG_CTL_P says there is one: Intel defines
+// only all 0s and all 1s (SDM 325462-093 Vol. 3B, 18.3.1.3), and a processor
+// may refuse the rest, as Linux 7.3's KVM does Windows NT 4.0's
+// 0x00000000ffffffff. The guest keeps what it wrote, and the processor gets the
+// defined value meaning the same. AMD's bits each enable a bank (APM 24593 rev.
+// 3.45, 9.3.1.3), so there the guest's value is the processor's.
+#define MSR_IA32_MCG_CAP 0x179
+#define MSR_IA32_MCG_CTL 0x17b
+#define MCG_CAP_CTL_P (1ull << 8)
+
 // IA32_FEATURE_CONTROL as the guest sees it (SDM 325462-093 Vol. 4, Table
 // 2-2): locked, as vmx_cpu_init() leaves it, VMX outside SMX where the guest
 // gets VMX, and the firmware's local machine check enable; not SMX's or SGX's.
@@ -242,6 +252,7 @@ static bool misc_enable_copied;
 // it.
 static uint64_t misc_enable_firmware;
 static uint64_t misc_enable_supported;
+static bool mcg_ctl;
 
 // The hardware feedback interface's table, which the processor writes to at
 // the physical address a package's IA32_HW_FEEDBACK_PTR holds: the host
@@ -310,6 +321,14 @@ static void misc_enable_init(void) {
     misc_enable_supported |= misc_enable_firmware & MISC_ENABLE_XD_DISABLE;
     misc_enable_copied = true;
     virt_intercept_msr(MSR_IA32_MISC_ENABLE, true, true);
+}
+
+static void mcg_ctl_init(void) {
+    uint64_t cap;
+    if (virt_vmx && rdmsr_safe(MSR_IA32_MCG_CAP, &cap) && (cap & MCG_CAP_CTL_P)) {
+        mcg_ctl = true;
+        virt_intercept_msr(MSR_IA32_MCG_CTL, true, true);
+    }
 }
 
 static void hfi_init(void) {
@@ -438,6 +457,7 @@ void msr_init(void) {
     // First, as the CPUID limit hides the leaves the rest reads.
     misc_enable_init();
     tsc_init();
+    mcg_ctl_init();
     hfi_init();
     pt_init();
     mpx_init();
@@ -651,6 +671,10 @@ void msr_vcpu_init(struct vcpu *v) {
     if (tsc_adjust) {
         rdmsr_safe(MSR_IA32_TSC_ADJUST, &v->tsc_adjust);
     }
+    v->mcg_ctl = 0;
+    if (mcg_ctl) {
+        rdmsr_safe(MSR_IA32_MCG_CTL, &v->mcg_ctl);
+    }
     if (!virt_vmx) {
         amd_memory_init(v);
         // As the firmware left them, from the vCPU's own processor.
@@ -823,6 +847,13 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
                      | (pebs_hidden ? MISC_ENABLE_PEBS_UNAVAILABLE : 0);
             return true;
         }
+        case MSR_IA32_MCG_CTL: {
+            if (!mcg_ctl) {
+                return false;
+            }
+            *value = v->mcg_ctl;
+            return true;
+        }
         case MSR_IA32_PERF_CAPABILITIES: {
             if (!perf_capabilities) {
                 return false;
@@ -957,6 +988,16 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
             if (!*fault) {
                 v->misc_enable = (value & MISC_ENABLE_COPIED)
                                  | (v->misc_enable & ~misc_enable_supported);
+            }
+            return true;
+        }
+        case MSR_IA32_MCG_CTL: {
+            if (!mcg_ctl) {
+                return false;
+            }
+            *fault = !wrmsr_safe(msr, value != 0 ? ~0ull : 0);
+            if (!*fault) {
+                v->mcg_ctl = value;
             }
             return true;
         }
