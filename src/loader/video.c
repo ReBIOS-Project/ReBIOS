@@ -28,6 +28,7 @@
 #include <loader/display.h>
 #include <loader/efi_glue.h>
 #include <loader/loader.h>
+#include <loader/panel.h>
 #include <loader/pci_io.h>
 #include <loader/pci_rom.h>
 #include <loader/video.h>
@@ -612,6 +613,7 @@ void video_find_framebuffer(void) {
     gop_handle = choose_gop(&gop);
     if (gop_handle != NULL) {
         describe_framebuffer(gop, &loader_handoff->video.framebuffer);
+        panel_fix_framebuffer(&loader_handoff->video.framebuffer);
     } else {
         printf("No usable graphics output\n");
     }
