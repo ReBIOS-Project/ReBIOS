@@ -51,6 +51,7 @@ struct tss64 {
 } __attribute__((packed));
 
 struct vcpu;
+struct task;
 
 struct cpu {
     // The CPU itself, where another stack's area has the CPU running on it.
@@ -74,6 +75,8 @@ struct cpu {
     bool taking_interrupts;
     // IA32_APIC_BASE, once lapic_host_mode() set it for good, else 0.
     uint64_t apic_base;
+    // The task the CPU runs, while it runs one.
+    struct task *task;
     // The time slice of the guest's exit the CPU handles: when the exit came,
     // and when what can wait for the next one gives the CPU back.
     uint64_t slice_start;
