@@ -121,6 +121,10 @@
 #define MAX_WIDTH 1024
 #define MAX_HEIGHT 768
 #define REFRESH_NS 20000000u
+// A frame begins no sooner than this many times as long as the last one's
+// redraw took, so that large pictures on slow processors leave the guest most
+// of the boot processor's time.
+#define REDRAW_SHARE 4
 // A frame compares every line of the Bochs interface's display this often, so
 // that what the dirty flags do not show, devices' writes for instance, shows
 // all the same.
@@ -255,7 +259,11 @@ static struct {
     uint32_t h;
     uint32_t *xmap;
     bool valid;
-    uint64_t last;
+    // When the frame shown began, how long its redraw took so far, and when
+    // the next may begin.
+    uint64_t frame_start;
+    uint64_t frame_cost;
+    uint64_t next_frame;
     uint32_t blink;
     uint32_t border;
     // The registers and palette the frame was last made with, and which of
@@ -1725,27 +1733,9 @@ bool vga_redrawing(void) {
     return out.busy && this_cpu()->bsp;
 }
 
-void vga_refresh(void) {
-    if (!vga.on || !this_cpu()->bsp) {
-        return;
-    }
-    uint64_t now = time_ns();
-    if (out.busy) {
-        bool vbe_mode = vbe_on();
-        if (out.busy_vbe == vbe_mode && !(vbe_mode && vbe_mode_changed())) {
-            if (vbe_mode) {
-                vbe_lines();
-            } else {
-                draw_lines();
-            }
-            return;
-        }
-        // The guest changed modes meanwhile: start again with the new one.
-        out.busy = false;
-    } else if (now - out.last < REFRESH_NS) {
-        return;
-    }
-    out.last = now;
+// Begins showing a frame: the Bochs interface's, or the VGA's where anything
+// changed.
+static void frame_begin(uint64_t now) {
     if (vbe.present) {
         direct_update();
     }
@@ -1784,6 +1774,43 @@ void vga_refresh(void) {
     spinlock_release(&vga.lock);
     draw_start(width, height, border);
     draw_lines();
+}
+
+// Adds the time since now to the frame's redraw, and once that is done, has the
+// next frame wait REDRAW_SHARE times as long, a display's refresh at least.
+static void frame_account(uint64_t now) {
+    out.frame_cost += time_ns() - now;
+    if (!out.busy) {
+        uint64_t wait = out.frame_cost * REDRAW_SHARE;
+        out.next_frame = out.frame_start + (wait > REFRESH_NS ? wait : REFRESH_NS);
+    }
+}
+
+void vga_refresh(void) {
+    if (!vga.on || !this_cpu()->bsp) {
+        return;
+    }
+    uint64_t now = time_ns();
+    if (out.busy) {
+        bool vbe_mode = vbe_on();
+        if (out.busy_vbe == vbe_mode && !(vbe_mode && vbe_mode_changed())) {
+            if (vbe_mode) {
+                vbe_lines();
+            } else {
+                draw_lines();
+            }
+            frame_account(now);
+            return;
+        }
+        // The guest changed modes meanwhile: start again with the new one.
+        out.busy = false;
+    } else if (now < out.next_frame) {
+        return;
+    }
+    out.frame_start = now;
+    out.frame_cost = 0;
+    frame_begin(now);
+    frame_account(now);
 }
 
 bool vga_emulated(void) {
