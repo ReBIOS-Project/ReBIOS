@@ -35,6 +35,7 @@
 #include <lib/spinlock.h>
 #include <lib/time.h>
 #include <sys/cpu.h>
+#include <sys/task.h>
 #include <sys/x86.h>
 
 // Holds the table list until uacpi_initialize() moves it to the heap, at
@@ -48,8 +49,8 @@
 #define WAIT_FOREVER 0xffff
 
 // Events, semaphores created with no units, are only signalled by the SCI
-// handler (the global lock's release) or AML on another processor, neither of
-// which runs while the hypervisor waits with interrupts off. uACPI tries the
+// handler (the global lock's release) or AML, neither of which runs while the
+// hypervisor waits outside the AML task with interrupts off. uACPI tries the
 // global lock again after each wait, so waits forever on events poll instead.
 #define FOREVER_POLL_MS 1
 
@@ -67,6 +68,7 @@ struct work {
     struct work *next;
     uacpi_work_handler handler;
     uacpi_handle ctx;
+    bool bsp;
 };
 
 static bool init_done;
@@ -82,6 +84,17 @@ static struct spinlock lock;
 static struct spinlock work_lock;
 static struct work *work_head;
 static struct work *work_tail;
+
+// The work uACPI defers runs as a task, so that what the firmware's AML waits
+// for keeps no CPU from the guest for long: once the time slice of the exit
+// that runs the task is over, the task carries on at a later exit, on
+// whichever CPU. Whether it has work, which lasts until the task ran out of
+// it, whether a CPU runs it, and whether only the boot processor may.
+static struct task aml_task;
+static bool aml_started;
+static bool aml_wanted;
+static bool aml_running;
+static bool aml_bsp;
 
 uacpi_status uacpi_kernel_get_rsdp(uacpi_phys_addr *out_rsdp_address) {
     if (core_handoff->acpi_rsdp == 0) {
@@ -289,7 +302,10 @@ void uacpi_kernel_free(void *mem) {
     kfree(mem);
 }
 
+// uACPI looks at the time at each turn of an AML While loop, where the AML
+// task yields too.
 uacpi_u64 uacpi_kernel_get_nanoseconds_since_boot(void) {
+    task_yield_if_over();
     return time_ns();
 }
 
@@ -298,11 +314,13 @@ void uacpi_kernel_stall(uacpi_u8 usec) {
 }
 
 void uacpi_kernel_sleep(uacpi_u64 msec) {
-    // A second at a time, as time_udelay() overflows on long delays.
-    while (msec > 0) {
-        uint64_t step = msec < 1000 ? msec : 1000;
-        time_udelay(step * 1000);
-        msec -= step;
+    uint64_t end = time_ns() + msec * 1000000;
+    if (task_current() != NULL) {
+        task_sleep(end);
+        return;
+    }
+    while (time_ns() < end) {
+        cpu_relax();
     }
 }
 
@@ -338,7 +356,13 @@ uacpi_status uacpi_kernel_wait_for_semaphore(uacpi_handle handle, uacpi_u16 time
         if (timed_out(start, timeout)) {
             return UACPI_STATUS_TIMEOUT;
         }
-        cpu_relax();
+        if (task_current() != NULL) {
+            task_yield();
+        } else {
+            // What holds it may be the AML task, which this CPU then runs on.
+            acpi_slice();
+            cpu_relax();
+        }
     }
 }
 
@@ -347,7 +371,12 @@ void uacpi_kernel_signal_semaphore(uacpi_handle handle) {
     __atomic_fetch_add(&semaphore->units, 1, __ATOMIC_RELEASE);
 }
 
+// The AML task's mutexes stay its own on whichever CPU it carries on.
 uacpi_thread_id uacpi_kernel_get_thread_id(void) {
+    struct task *t = task_current();
+    if (t != NULL) {
+        return t;
+    }
     return this_cpu();
 }
 
@@ -431,15 +460,18 @@ void uacpi_kernel_free_work_item(uacpi_handle handle) {
     kfree(handle);
 }
 
-// Work runs when the processor that queued it releases acpi_lock(), in the
-// order it came in: GPE methods and Notify() handlers alike.
+// Work runs in the order it came in, GPE methods and Notify() handlers alike:
+// in the AML task, or before it started, when the CPU that queued it releases
+// acpi_lock(). The task runs GPE methods on the boot processor only, as Linux
+// 7.3's acpi_os_execute() does, since SMIs that AML sets off from other
+// processors corrupt memory on some machines.
 void uacpi_kernel_schedule_work(uacpi_work_type type, uacpi_handle work_item,
                                 uacpi_work_handler handler, uacpi_handle ctx) {
-    (void)type;
     struct work *w = work_item;
     w->next = NULL;
     w->handler = handler;
     w->ctx = ctx;
+    w->bsp = type == UACPI_WORK_GPE_EXECUTION;
     spinlock_acquire(&work_lock);
     if (work_tail != NULL) {
         work_tail->next = w;
@@ -448,26 +480,43 @@ void uacpi_kernel_schedule_work(uacpi_work_type type, uacpi_handle work_item,
     }
     work_tail = w;
     spinlock_release(&work_lock);
+    __atomic_store_n(&aml_wanted, true, __ATOMIC_SEQ_CST);
 }
 
+// Takes the oldest work off the queue, as a copy, since its handler may
+// schedule its item again or free it: false if there is none.
+static bool work_take(struct work *w) {
+    spinlock_acquire(&work_lock);
+    struct work *head = work_head;
+    if (head != NULL) {
+        *w = *head;
+        work_head = head->next;
+        if (work_head == NULL) {
+            work_tail = NULL;
+        }
+    }
+    spinlock_release(&work_lock);
+    return head != NULL;
+}
+
+// In the AML task, a slice at a time, and GPE methods on the boot processor,
+// which alone carries the task on meanwhile.
 static void work_run(void) {
-    for (;;) {
-        spinlock_acquire(&work_lock);
-        struct work *w = work_head;
-        if (w != NULL) {
-            work_head = w->next;
-            if (work_head == NULL) {
-                work_tail = NULL;
+    bool in_task = task_current() != NULL;
+    bool outer = __atomic_load_n(&aml_bsp, __ATOMIC_RELAXED);
+    struct work w;
+    while (work_take(&w)) {
+        if (in_task) {
+            __atomic_store_n(&aml_bsp, outer || w.bsp, __ATOMIC_RELEASE);
+            while (w.bsp && !this_cpu()->bsp) {
+                task_yield();
             }
         }
-        spinlock_release(&work_lock);
-        if (w == NULL) {
-            return;
+        w.handler(w.ctx);
+        if (in_task) {
+            __atomic_store_n(&aml_bsp, outer, __ATOMIC_RELEASE);
+            task_yield_if_over();
         }
-        // The handler may schedule its item again, or free it.
-        uacpi_work_handler handler = w->handler;
-        uacpi_handle ctx = w->ctx;
-        handler(ctx);
     }
 }
 
@@ -481,8 +530,42 @@ void acpi_lock(void) {
 }
 
 void acpi_unlock(void) {
-    work_run();
+    if (!__atomic_load_n(&aml_started, __ATOMIC_ACQUIRE)) {
+        work_run();
+    }
     spinlock_release(&lock);
+}
+
+static void aml_main(void *arg) {
+    (void)arg;
+    for (;;) {
+        work_run();
+        // Work that comes meanwhile makes aml_wanted true again.
+        __atomic_store_n(&aml_wanted, false, __ATOMIC_SEQ_CST);
+        spinlock_acquire(&work_lock);
+        bool more = work_head != NULL;
+        spinlock_release(&work_lock);
+        if (more) {
+            __atomic_store_n(&aml_wanted, true, __ATOMIC_SEQ_CST);
+        } else {
+            task_yield();
+        }
+    }
+}
+
+void acpi_slice(void) {
+    if (!acpi_working()
+        || (__atomic_load_n(&aml_bsp, __ATOMIC_ACQUIRE) && !this_cpu()->bsp)
+        || __atomic_exchange_n(&aml_running, true, __ATOMIC_ACQUIRE)) {
+        return;
+    }
+    task_run(&aml_task);
+    __atomic_store_n(&aml_running, false, __ATOMIC_RELEASE);
+}
+
+bool acpi_working(void) {
+    return __atomic_load_n(&aml_started, __ATOMIC_ACQUIRE)
+           && __atomic_load_n(&aml_wanted, __ATOMIC_ACQUIRE);
 }
 
 bool acpi_sci_irq(uint32_t *irq) {
@@ -519,6 +602,8 @@ void acpi_namespace_start(void) {
         printf("Cannot enable the ACPI GPEs: %s\n", uacpi_status_to_string(status));
     }
     acpi_unlock();
+    task_init(&aml_task, aml_main, NULL);
+    __atomic_store_n(&aml_started, true, __ATOMIC_RELEASE);
 }
 
 bool acpi_tables_ready(void) {

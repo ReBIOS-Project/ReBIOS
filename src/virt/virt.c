@@ -18,6 +18,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <memory.h>
+#include <hw/acpi.h>
 #include <hw/lapic.h>
 #include <hw/power.h>
 #include <lib/heap.h>
@@ -451,6 +452,7 @@ void vcpu_before_entry(struct vcpu *v) {
     v->db_pending = 0;
     profile_entry(v);
     service_pause(v);
+    acpi_slice();
     // Before the flush below, which the display's remapping may need.
     vga_refresh();
     nvmx_wait(v);
@@ -534,9 +536,11 @@ void vcpu_wait(struct vcpu *v, bool (*ends)(struct vcpu *v), bool spin) {
         if (log_panicked()) {
             halt_forever();
         }
+        acpi_slice();
         vga_refresh();
-        // Work under way goes on while the guest waits.
-        if (spin || vga_redrawing()) {
+        // Work under way goes on while the guest waits, the boot processor
+        // keeping the AML task going.
+        if (spin || vga_redrawing() || (cpu->bsp && acpi_working())) {
             asm volatile ("sti\n\tnop\n\tcli" ::: "memory");
             cpu_relax();
         } else {
