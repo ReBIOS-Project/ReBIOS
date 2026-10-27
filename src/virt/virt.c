@@ -55,6 +55,10 @@
 
 #define RESET_HOLD_SECONDS 30
 
+// Exits that keep a CPU from the guest for longer than this get reported.
+#define WATCHDOG_NS 5000000u
+#define WATCHDOG_REPORT_NS 1000000000ull
+
 bool virt_vmx;
 
 static uint8_t *io_bitmap;
@@ -423,6 +427,21 @@ void vcpu_single_step(struct vcpu *v, bool on) {
     vmcb->control.intercept_exceptions = v->step_exceptions;
 }
 
+// Reports, at most once a second for each CPU, an exit that kept the CPU from
+// the guest for longer than the hypervisor means to, as that delays its
+// interrupts.
+static void watchdog(struct vcpu *v) {
+    struct cpu *cpu = v->cpu;
+    uint64_t now = time_ns();
+    uint64_t held = now - cpu->slice_start;
+    if (cpu->slice_start == 0 || held < WATCHDOG_NS || now < cpu->watchdog_next) {
+        return;
+    }
+    cpu->watchdog_next = now + WATCHDOG_REPORT_NS;
+    printf("Exit %#x kept CPU %u from the guest for %llu.%03llu ms\n", v->last_exit, cpu->index,
+           (unsigned long long)(held / 1000000), (unsigned long long)(held / 1000 % 1000));
+}
+
 void vcpu_before_entry(struct vcpu *v) {
     // The guest would draw over a panic's message.
     if (log_panicked()) {
@@ -451,6 +470,7 @@ void vcpu_before_entry(struct vcpu *v) {
             svm_flush_guest_tlb(v);
         }
     }
+    watchdog(v);
     vlapic_prepare_entry(v);
     if (nvmx_before_entry(v)) {
         return;

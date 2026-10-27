@@ -75,6 +75,8 @@ struct cpu {
     // and when what can wait for the next one gives the CPU back.
     uint64_t slice_start;
     uint64_t slice_end;
+    // When the watchdog may report the CPU again.
+    uint64_t watchdog_next;
 };
 
 _Static_assert(sizeof(struct cpu) <= 0x1000, "struct cpu overlaps the IST stacks");
