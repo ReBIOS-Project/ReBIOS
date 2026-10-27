@@ -24,14 +24,15 @@
 
 // Each CPU has a naturally aligned area holding its struct cpu, its IST stacks,
 // and its stack, so that this_cpu() can find the struct from the stack pointer
-// without the help of a segment base, which SVM does not switch.
+// without the help of a segment base, which SVM does not switch. Other stacks
+// are areas of the same size, which begin with the CPU running on them.
 #define CPU_AREA_SIZE 0x10000
 #define CPU_IST_NMI_TOP 0x2000
 #define CPU_IST_DF_TOP 0x3000
 #define CPU_IST_MC_TOP 0x4000
 
 // The offset of struct cpu's kicked.
-#define CPU_KICKED 9
+#define CPU_KICKED 17
 
 #ifndef __ASSEMBLER__
 
@@ -52,6 +53,8 @@ struct tss64 {
 struct vcpu;
 
 struct cpu {
+    // The CPU itself, where another stack's area has the CPU running on it.
+    struct cpu *self;
     uint32_t index;
     uint32_t apic_id;
     bool bsp;
@@ -84,7 +87,7 @@ _Static_assert(sizeof(struct cpu) <= 0x1000, "struct cpu overlaps the IST stacks
 static inline struct cpu *this_cpu(void) {
     uintptr_t rsp;
     asm volatile ("mov %%rsp, %0" : "=r"(rsp));
-    return (struct cpu *)(rsp & ~(uintptr_t)(CPU_AREA_SIZE - 1));
+    return ((struct cpu *)(rsp & ~(uintptr_t)(CPU_AREA_SIZE - 1)))->self;
 }
 
 // Starts this CPU's time slice, at an exit; whether it is over.

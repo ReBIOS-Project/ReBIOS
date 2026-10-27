@@ -42,6 +42,7 @@ switch_stack:
 cpu_halt:
     movq %rsp, %rax
     andq $-CPU_AREA_SIZE, %rax
+    movq (%rax), %rax
     cmpb $0, CPU_KICKED(%rax)
     jne 1f
     sti

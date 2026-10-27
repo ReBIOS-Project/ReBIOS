@@ -67,6 +67,7 @@ vmx_enter:
 vmx_enter_restart:
     movq %rsp, %rax
     andq $-CPU_AREA_SIZE, %rax
+    movq (%rax), %rax
     cmpb $0, CPU_KICKED(%rax)
     jne 3f
     movq (%rsp), %rdi

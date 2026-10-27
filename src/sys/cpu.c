@@ -316,6 +316,7 @@ struct cpu *cpu_area_alloc(uint32_t index, uint32_t apic_id, bool bsp) {
     struct cpu *cpu = page_alloc_aligned(CPU_AREA_SIZE / PAGE_SIZE, CPU_AREA_SIZE);
     uint64_t base = (uint64_t)(uintptr_t)cpu;
 
+    cpu->self = cpu;
     cpu->index = index;
     cpu->apic_id = apic_id;
     cpu->bsp = bsp;
