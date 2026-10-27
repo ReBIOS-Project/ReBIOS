@@ -270,6 +270,12 @@ static struct {
     uint32_t band_count;
     uint32_t band_x0;
     uint32_t band_x1;
+    // A redraw under way, which later calls carry on with: whether it is the
+    // Bochs interface's, whether it redraws every line, and its next line.
+    bool busy;
+    bool busy_vbe;
+    bool redraw_all;
+    uint32_t next_line;
 } out;
 
 static uint8_t rotate_right(uint8_t value, unsigned count) {
@@ -1333,9 +1339,8 @@ static void screen_line(uint32_t y, uint32_t x0, uint32_t x1) {
     out.band_count++;
 }
 
-// Copies the lines that changed since the last time to the framebuffer.
-static void draw(uint32_t width, uint32_t height, uint32_t border) {
-    const struct handoff_framebuffer *fb = &core_handoff->video.framebuffer;
+// Starts showing a frame, all of it again where its size or border changed.
+static void draw_start(uint32_t width, uint32_t height, uint32_t border) {
     bool all = !out.valid || width != out.width || height != out.height || border != out.border;
     if (all) {
         out.width = width;
@@ -1347,8 +1352,26 @@ static void draw(uint32_t width, uint32_t height, uint32_t border) {
         out.valid = true;
         out.vbe_valid = false;
     }
+    out.busy = true;
+    out.busy_vbe = false;
+    out.redraw_all = all;
+    out.next_line = 0;
+}
 
-    for (uint32_t sy = 0; sy < height; sy++) {
+// Copies the frame's lines that changed since the last frame to the
+// framebuffer, from out.next_line on, until done or the CPU's time slice is
+// over.
+static void draw_lines(void) {
+    const struct handoff_framebuffer *fb = &core_handoff->video.framebuffer;
+    uint32_t width = out.width;
+    uint32_t height = out.height;
+    bool all = out.redraw_all;
+    for (uint32_t sy = out.next_line; sy < height; sy++) {
+        if (sy != out.next_line && cpu_slice_over()) {
+            out.next_line = sy;
+            screen_flush();
+            return;
+        }
         if (!all && !out.made[sy]) {
             continue;
         }
@@ -1393,6 +1416,7 @@ static void draw(uint32_t width, uint32_t height, uint32_t border) {
         }
     }
     screen_flush();
+    out.busy = false;
 }
 
 static uint32_t expand5(uint32_t v) {
@@ -1503,7 +1527,9 @@ static void direct_update(void) {
     vcpu_resume_others();
 }
 
-static void vbe_refresh(void) {
+// Starts showing the Bochs interface's display: every line where its mode or
+// 8-bit palette changed, else the lines whose bytes changed.
+static void vbe_start(void) {
     if (vbe.direct) {
         return;
     }
@@ -1538,9 +1564,38 @@ static void vbe_refresh(void) {
         out.vbe_valid = true;
         out.valid = false;
     }
+    out.busy = true;
+    out.busy_vbe = true;
+    out.redraw_all = all;
+    out.next_line = 0;
+}
+
+// Whether the guest changed the Bochs interface's mode since the redraw under
+// way started.
+static bool vbe_mode_changed(void) {
+    spinlock_acquire(&vga.lock);
+    bool changed = vbe.regs[DISPI_XRES] != out.width || vbe.regs[DISPI_YRES] != out.height
+                   || vbe.regs[DISPI_BPP] != out.vbe_bpp || vbe.line_bytes != out.vbe_line_bytes
+                   || vbe.start != out.vbe_start;
+    spinlock_release(&vga.lock);
+    return changed;
+}
+
+// Shows the Bochs interface's lines that changed, from out.next_line on,
+// until done or the CPU's time slice is over.
+static void vbe_lines(void) {
+    uint32_t width = out.width;
+    uint32_t height = out.height;
+    uint16_t bpp = out.vbe_bpp;
+    bool all = out.redraw_all;
     uint32_t bytes = (width * (bpp == 15 ? 16 : bpp) + 7) / 8;
-    for (uint32_t sy = 0; sy < height; sy++) {
-        uint64_t at = start + (uint64_t)sy * line_bytes;
+    for (uint32_t sy = out.next_line; sy < height; sy++) {
+        if (sy != out.next_line && cpu_slice_over()) {
+            out.next_line = sy;
+            screen_flush();
+            return;
+        }
+        uint64_t at = out.vbe_start + (uint64_t)sy * out.vbe_line_bytes;
         if (at + bytes > vbe.vram_size) {
             break;
         }
@@ -1569,6 +1624,11 @@ static void vbe_refresh(void) {
         }
     }
     screen_flush();
+    out.busy = false;
+}
+
+bool vga_redrawing(void) {
+    return out.busy && this_cpu()->bsp;
 }
 
 void vga_refresh(void) {
@@ -1576,7 +1636,19 @@ void vga_refresh(void) {
         return;
     }
     uint64_t now = time_ns();
-    if (now - out.last < REFRESH_NS) {
+    if (out.busy) {
+        bool vbe_mode = vbe_on();
+        if (out.busy_vbe == vbe_mode && !(vbe_mode && vbe_mode_changed())) {
+            if (vbe_mode) {
+                vbe_lines();
+            } else {
+                draw_lines();
+            }
+            return;
+        }
+        // The guest changed modes meanwhile: start again with the new one.
+        out.busy = false;
+    } else if (now - out.last < REFRESH_NS) {
         return;
     }
     out.last = now;
@@ -1584,7 +1656,10 @@ void vga_refresh(void) {
         direct_update();
     }
     if (vbe_on()) {
-        vbe_refresh();
+        vbe_start();
+        if (out.busy) {
+            vbe_lines();
+        }
         return;
     }
     uint64_t frames = now / frame_ns();
@@ -1613,7 +1688,8 @@ void vga_refresh(void) {
     vga.font_changed = false;
     uint32_t border = dac_rgb(ac_color_border());
     spinlock_release(&vga.lock);
-    draw(width, height, border);
+    draw_start(width, height, border);
+    draw_lines();
 }
 
 bool vga_emulated(void) {

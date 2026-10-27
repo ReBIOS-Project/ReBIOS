@@ -515,7 +515,8 @@ void vcpu_wait(struct vcpu *v, bool (*ends)(struct vcpu *v), bool spin) {
             halt_forever();
         }
         vga_refresh();
-        if (spin) {
+        // Work under way goes on while the guest waits.
+        if (spin || vga_redrawing()) {
             asm volatile ("sti\n\tnop\n\tcli" ::: "memory");
             cpu_relax();
         } else {
