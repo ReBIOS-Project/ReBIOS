@@ -27,6 +27,8 @@
 #define GPT_W (1u << 1)
 #define GPT_X (1u << 2)
 #define GPT_RWX (GPT_R | GPT_W | GPT_X)
+// Mapped with 4 KiB pages, whose dirty flags gpt_dirty() reads.
+#define GPT_DIRTY (1u << 3)
 
 // Memory types, with the encodings EPT and the PAT use.
 #define MT_UC 0
@@ -39,7 +41,9 @@
 // memory type above. This is the layout Linux 7.3 uses (pat_bp_init()).
 #define HOST_PAT 0x0407050600070106ull
 
-void gpt_init(bool ept, bool huge_pages);
+// dirty_flags tells whether the processor can keep dirty flags in the tables'
+// leaves, which EPT does only once enabled.
+void gpt_init(bool ept, bool huge_pages, bool dirty_flags);
 // The tables the processor walks now, which gpt_mask_a20() switches.
 uint64_t gpt_root(void);
 
@@ -62,6 +66,17 @@ bool gpt_translate_leaf(uint64_t gpa, uint64_t *hpa, uint32_t *prot, uint8_t *me
 
 // Drops cached translations, on every CPU that will next enter the guest.
 void gpt_flush(void);
+
+// Has the processor keep dirty flags where it can, from before the guest first
+// runs; whether it does.
+bool gpt_track_dirty(void);
+bool gpt_dirty_tracked(void);
+// Sets bit first + i of bits for each page i of [gpa, gpa + size), mapped with
+// GPT_DIRTY, that the guest wrote to since its dirty flag was cleared, clearing
+// the flag where clear; whether any page was written to. bits may be NULL. As
+// TLBs may keep translations that are dirty already, the other vCPUs must stay
+// out of the guest from clearing flags until gpt_flush().
+bool gpt_dirty(uint64_t gpa, uint64_t size, uint64_t *bits, uint64_t first, bool clear);
 
 // Bumped by gpt_flush(), for the vCPUs to catch up with as they enter the
 // guest.

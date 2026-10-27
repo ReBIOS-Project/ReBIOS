@@ -34,6 +34,8 @@
 #define EPT_X (1ull << 2)
 #define EPT_MEMTYPE_SHIFT 3
 #define EPT_LARGE (1ull << 7)
+// Where the EPT pointer enables it (SDM 325462-093 Vol. 3C, 31.3.5).
+#define EPT_DIRTY (1ull << 9)
 
 // Nested paging uses the AMD64 page table format, where guest accesses count as
 // user accesses.
@@ -42,6 +44,7 @@
 #define NPT_US (1ull << 2)
 #define NPT_PWT (1ull << 3)
 #define NPT_PCD (1ull << 4)
+#define NPT_DIRTY (1ull << 6)
 #define NPT_PS (1ull << 7)
 #define NPT_PAT_4K (1ull << 7)
 #define NPT_PAT_LARGE (1ull << 12)
@@ -54,6 +57,8 @@ uint64_t gpt_generation;
 
 static bool use_ept;
 static bool have_huge_pages;
+static bool can_track_dirty;
+static bool track_dirty;
 static uint64_t *root;
 // The processor's view while the guest's A20 gate is closed: below A20_LIMIT,
 // every odd MiB is the even one before it, and above it, root's own tables.
@@ -173,9 +178,10 @@ static void leaf_decode(uint64_t e, int level, uint32_t *prot, uint8_t *memtype)
     *memtype = (HOST_PAT >> (index * 8)) & 7;
 }
 
-void gpt_init(bool ept, bool huge_pages) {
+void gpt_init(bool ept, bool huge_pages, bool dirty_flags) {
     use_ept = ept;
     have_huge_pages = huge_pages;
+    can_track_dirty = dirty_flags;
     root = page_alloc(1);
 }
 
@@ -236,7 +242,7 @@ void gpt_map(uint64_t gpa, uint64_t hpa, uint64_t size, uint32_t prot, uint8_t m
 
     for (uint64_t at = 0; at < size;) {
         int level = 0;
-        for (int l = have_huge_pages ? 2 : 1; l > 0; l--) {
+        for (int l = prot & GPT_DIRTY ? 0 : have_huge_pages ? 2 : 1; l > 0; l--) {
             uint64_t ls = level_size(l);
             if (((gpa + at) & (ls - 1)) == 0 && ((hpa + at) & (ls - 1)) == 0 && size - at >= ls) {
                 level = l;
@@ -327,4 +333,66 @@ void gpt_flush(void) {
     for (uint32_t i = 0; i < smp_cpu_count(); i++) {
         vcpu_kick(smp_cpu(i));
     }
+}
+
+bool gpt_track_dirty(void) {
+    track_dirty = can_track_dirty;
+    return track_dirty;
+}
+
+bool gpt_dirty_tracked(void) {
+    return track_dirty;
+}
+
+// The entry of the 4 KiB leaf under top that maps gpa, if one does.
+static uint64_t *page_entry(uint64_t *top, uint64_t gpa) {
+    uint64_t *table = top;
+    for (int l = 3; l > 0; l--) {
+        uint64_t e = table[(gpa >> (12 + 9 * l)) & 511];
+        if (!entry_present(e) || entry_large(e, l)) {
+            return NULL;
+        }
+        table = (uint64_t *)(uintptr_t)(e & ENTRY_ADDR_MASK);
+    }
+    return &table[(gpa >> 12) & 511];
+}
+
+static bool take_dirty(uint64_t *e, bool clear) {
+    uint64_t dirty = use_ept ? EPT_DIRTY : NPT_DIRTY;
+    if (e == NULL || !(__atomic_load_n(e, __ATOMIC_RELAXED) & dirty)) {
+        return false;
+    }
+    if (clear) {
+        __atomic_fetch_and(e, ~dirty, __ATOMIC_RELAXED);
+    }
+    return true;
+}
+
+bool gpt_dirty(uint64_t gpa, uint64_t size, uint64_t *bits, uint64_t first, bool clear) {
+    if (!track_dirty) {
+        return false;
+    }
+    bool any = false;
+    spinlock_acquire(&gpt_lock);
+    for (uint64_t i = 0; i < size / PAGE_SIZE; i++) {
+        uint64_t at = gpa + i * PAGE_SIZE;
+        bool dirty = take_dirty(page_entry(root, at), clear);
+        // While the A20 gate is closed, the processor reaches an even MiB's
+        // pages through the masked view's entries for them and the MiB above.
+        if (masked_root != NULL && at < A20_LIMIT && !(at & A20_BIT)) {
+            dirty |= take_dirty(page_entry(masked_root, at), clear);
+            dirty |= take_dirty(page_entry(masked_root, at | A20_BIT), clear);
+        }
+        if (!dirty) {
+            continue;
+        }
+        any = true;
+        if (bits != NULL) {
+            bits[(first + i) / 64] |= 1ull << ((first + i) % 64);
+        } else if (!clear) {
+            break;
+        }
+    }
+    spinlock_release(&gpt_lock);
+    return any;
 }

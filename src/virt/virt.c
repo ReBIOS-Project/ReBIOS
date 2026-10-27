@@ -76,6 +76,7 @@ static uint8_t *msr_bitmap_x2apic_icr;
 static unsigned breakpoint_masks;
 
 bool vmx_ept_huge_pages(void);
+bool vmx_ept_dirty_flags(void);
 bool vmx_monitor_trap_supported(void);
 void vmx_get_seg(enum seg_reg reg, struct segment *seg);
 void vmx_set_seg(enum seg_reg reg, const struct segment *seg);
@@ -115,14 +116,16 @@ bool virt_init(void) {
         msr_claimed = page_alloc(1);
         // Only the MSRs the guest gets go to the processor (msr.c).
         memset(msr_bitmap, 0xff, PAGE_SIZE);
-        gpt_init(true, vmx_ept_huge_pages());
+        gpt_init(true, vmx_ept_huge_pages(), vmx_ept_dirty_flags());
     } else if (!intel && svm_supported()) {
         virt_vmx = false;
         io_bitmap = page_alloc(3);
         msr_bitmap = page_alloc(2);
         msr_claimed = page_alloc(2);
         memset(msr_bitmap, 0xff, 2 * PAGE_SIZE);
-        gpt_init(false, svm_huge_pages());
+        // Nested paging's tables keep dirty flags as page tables do (APM 24593
+        // rev. 3.45, 15.25.5).
+        gpt_init(false, svm_huge_pages(), true);
         // Only nested paging gives the guest its own view of these.
         virt_intercept_msr(MSR_EFER, true, true);
         virt_intercept_msr(MSR_IA32_CR_PAT, true, true);

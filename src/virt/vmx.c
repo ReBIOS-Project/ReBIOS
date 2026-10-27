@@ -44,6 +44,7 @@
 #define EPT_CAP_2M (1ull << 16)
 #define EPT_CAP_1G (1ull << 17)
 #define EPT_CAP_INVEPT (1ull << 20)
+#define EPT_CAP_DIRTY (1ull << 21)
 #define EPT_CAP_INVEPT_ALL (1ull << 26)
 #define VPID_CAP_INVVPID (1ull << 32)
 #define VPID_CAP_INVVPID_ADDRESS (1ull << 40)
@@ -53,6 +54,7 @@
 
 #define EPTP_WB 6
 #define EPTP_WALK_4 (3 << 3)
+#define EPTP_DIRTY (1 << 6)
 
 static uint64_t vmx_basic;
 static uint64_t pin_cap, proc_cap, proc2_cap, proc3_cap, exit_cap, entry_cap;
@@ -343,6 +345,10 @@ bool vmx_monitor_trap_supported(void) {
 
 bool vmx_ept_huge_pages(void) {
     return (ept_vpid_cap & EPT_CAP_1G) != 0;
+}
+
+bool vmx_ept_dirty_flags(void) {
+    return (ept_vpid_cap & EPT_CAP_DIRTY) != 0;
 }
 
 bool vmx_pt_passthrough(void) {
@@ -819,7 +825,10 @@ static bool vmx_paging_changed(uint64_t old0, uint64_t old4, uint64_t cr0, uint6
 
 void vmx_load_gpt_root(struct vcpu *v) {
     uint64_t eptp = nvmx_ept_pointer(v);
-    vmx_write(VMCS_EPT_POINTER, eptp != 0 ? eptp : gpt_root() | EPTP_WALK_4 | EPTP_WB);
+    if (eptp == 0) {
+        eptp = gpt_root() | EPTP_WALK_4 | EPTP_WB | (gpt_dirty_tracked() ? EPTP_DIRTY : 0);
+    }
+    vmx_write(VMCS_EPT_POINTER, eptp);
 }
 
 void vmx_load_guest_pdptes(void) {
