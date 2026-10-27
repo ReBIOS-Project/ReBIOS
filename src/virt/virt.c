@@ -503,6 +503,9 @@ void vcpu_wait(struct vcpu *v, bool (*ends)(struct vcpu *v), bool spin) {
     cpu->taking_interrupts = true;
     vlapic_halt(v, true);
     for (;;) {
+        // Each look at whether the wait ends starts a slice, so that the work
+        // done meanwhile holds that up no longer than an exit holds the guest.
+        cpu_slice_start();
         __atomic_store_n(&cpu->kicked, false, __ATOMIC_SEQ_CST);
         service_pause(v);
         if (ends(v)) {

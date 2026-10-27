@@ -587,6 +587,7 @@ void svm_run(struct vcpu *v) {
         __atomic_store_n(&v->in_guest, true, __ATOMIC_SEQ_CST);
         svm_enter(v->vmcb_pa, &v->gprs);
         __atomic_store_n(&v->in_guest, false, __ATOMIC_RELEASE);
+        cpu_slice_start();
         clean_after_exit(v);
         v->fetched_count = 0;
         v->gprs.rax = v->vmcb->save.rax;

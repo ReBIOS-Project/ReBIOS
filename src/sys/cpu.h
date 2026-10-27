@@ -71,6 +71,10 @@ struct cpu {
     bool taking_interrupts;
     // IA32_APIC_BASE, once lapic_host_mode() set it for good, else 0.
     uint64_t apic_base;
+    // The time slice of the guest's exit the CPU handles: when the exit came,
+    // and when what can wait for the next one gives the CPU back.
+    uint64_t slice_start;
+    uint64_t slice_end;
 };
 
 _Static_assert(sizeof(struct cpu) <= 0x1000, "struct cpu overlaps the IST stacks");
@@ -80,6 +84,10 @@ static inline struct cpu *this_cpu(void) {
     asm volatile ("mov %%rsp, %0" : "=r"(rsp));
     return (struct cpu *)(rsp & ~(uintptr_t)(CPU_AREA_SIZE - 1));
 }
+
+// Starts this CPU's time slice, at an exit; whether it is over.
+void cpu_slice_start(void);
+bool cpu_slice_over(void);
 
 struct cpu *cpu_area_alloc(uint32_t index, uint32_t apic_id, bool bsp);
 void cpu_tables_load(struct cpu *cpu, bool use_ist);

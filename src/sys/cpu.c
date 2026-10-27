@@ -25,6 +25,7 @@
 #include <handoff.h>
 #include <lib/log.h>
 #include <lib/printf.h>
+#include <lib/time.h>
 #include <sys/cpu.h>
 #include <sys/fixup.h>
 #include <sys/mm.h>
@@ -88,6 +89,10 @@ uint64_t fixup_find(uint64_t rip) {
 }
 
 _Static_assert(offsetof(struct cpu, kicked) == CPU_KICKED, "CPU_KICKED is out of date");
+
+// The longest an exit keeps the CPU from the guest for what can wait for its
+// next exits, so that the guest's interrupts come on time.
+#define CPU_SLICE_NS 1000000u
 
 static uint64_t nmi_restart_start;
 static uint64_t nmi_restart_end;
@@ -295,6 +300,16 @@ uint64_t cpu_idt_base(void) {
 
 uint64_t cpu_stack_top(struct cpu *cpu) {
     return (uint64_t)(uintptr_t)cpu + CPU_AREA_SIZE;
+}
+
+void cpu_slice_start(void) {
+    struct cpu *cpu = this_cpu();
+    cpu->slice_start = time_ns();
+    cpu->slice_end = cpu->slice_start + CPU_SLICE_NS;
+}
+
+bool cpu_slice_over(void) {
+    return time_ns() >= this_cpu()->slice_end;
 }
 
 struct cpu *cpu_area_alloc(uint32_t index, uint32_t apic_id, bool bsp) {
