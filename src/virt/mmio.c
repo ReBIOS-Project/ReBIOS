@@ -216,10 +216,15 @@ static bool access(struct vcpu *v, uint64_t linear, void *buf, unsigned size, bo
     if (!translate(v, linear, size, write, gpas, lens, &pieces)) {
         return false;
     }
+    v->mmio_retry = false;
     uint8_t *p = buf;
     for (unsigned i = 0; i < pieces; i++) {
         mmio_phys_access(v, gpas[i], p, lens[i], write);
         p += lens[i];
+    }
+    if (v->mmio_retry) {
+        v->mmio_retry = false;
+        return false;
     }
     vcpu_data_access(v, linear, size, write);
     return true;

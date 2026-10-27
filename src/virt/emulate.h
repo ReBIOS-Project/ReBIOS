@@ -36,7 +36,8 @@ struct emulate_mem {
 
 enum emulate_result {
     EMULATE_DONE,
-    // A fault was raised, and the instruction is to run again after it.
+    // A fault was raised, or a device is not done with an access, and the
+    // instruction is to run again after the guest's events.
     EMULATE_FAULT,
     // Not one of the instructions emulated here.
     EMULATE_UNSUPPORTED,

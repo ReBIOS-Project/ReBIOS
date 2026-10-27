@@ -125,6 +125,9 @@ struct vcpu {
     // hypervisor carries out for it hit: a debug trap once the instruction, or
     // its string iteration, ends.
     uint64_t db_pending;
+    // Set by an emulated device's write that it is not done with, which then
+    // runs again once the guest took its events.
+    bool mmio_retry;
 
     // The guest's MTRRs: the default type, the fixed ranges, and the variable
     // ranges' bases and masks.

@@ -20,6 +20,7 @@
 #include <stdbool.h>
 #include <uacpi/acpi.h>
 #include <uacpi/event.h>
+#include <uacpi/kernel_api.h>
 #include <uacpi/namespace.h>
 #include <uacpi/notify.h>
 #include <uacpi/resources.h>
@@ -73,6 +74,11 @@
 #define FUNCTION_CALL 1
 #define FUNCTION_ELEMENT 2
 #define FUNCTION_NOTIFICATION 3
+
+// Where the guest's call of a firmware method is.
+#define CALL_NONE 0
+#define CALL_RUNNING 1
+#define CALL_DONE 2
 
 // ObjectType() numbering, which the results use too.
 #define TYPE_NONE 0
@@ -178,6 +184,11 @@ static struct {
     bool dropping;
     uacpi_object *last;
     struct spinlock lock;
+
+    uacpi_handle call_work;
+    uint32_t call;
+    uint32_t call_index;
+    uint32_t call_argc;
 } vacpi;
 
 // Not mirrored: what only the firmware's own OSPM, the hypervisor, runs, the
@@ -1868,10 +1879,8 @@ static void mailbox_call(uint32_t index, uint32_t argc) {
     }
     uacpi_object_array array = {.objects = args, .count = argc};
     uacpi_object *ret = NULL;
-    acpi_lock();
     uacpi_status status = uacpi_eval(vacpi.methods[index].node, NULL, argc != 0 ? &array : NULL,
                                      &ret);
-    acpi_unlock();
     for (uint32_t i = 0; i < argc; i++) {
         uacpi_object_unref(args[i]);
     }
@@ -1885,6 +1894,12 @@ static void mailbox_call(uint32_t index, uint32_t argc) {
     }
     vacpi.last = ret;
     write_result(ret, status != UACPI_STATUS_OK);
+}
+
+static void call_run(uacpi_handle ctx) {
+    (void)ctx;
+    mailbox_call(vacpi.call_index, vacpi.call_argc);
+    __atomic_store_n(&vacpi.call, CALL_DONE, __ATOMIC_RELEASE);
 }
 
 static void mailbox_element(uint32_t element) {
@@ -1932,7 +1947,6 @@ static uint64_t doorbell_read(struct vcpu *v, void *ctx, uint64_t offset, unsign
 
 static void doorbell_write(struct vcpu *v, void *ctx, uint64_t offset, unsigned size,
                            uint64_t value) {
-    (void)v;
     (void)ctx;
     (void)offset;
     (void)size;
@@ -1943,7 +1957,25 @@ static void doorbell_write(struct vcpu *v, void *ctx, uint64_t offset, unsigned 
     }
     switch (header[MBX_FUNCTION / 4]) {
         case FUNCTION_CALL: {
-            mailbox_call(header[MBX_INDEX / 4], header[MBX_ARGC / 4]);
+            // The AML task runs the call on any CPU, as the guest's own OSPM
+            // would, a slice at each write of the guest's, whose MBXM keeps to
+            // one call at a time: a write that finds the call not done does
+            // not complete, so that the guest takes its interrupts and writes
+            // again.
+            uint32_t state = CALL_NONE;
+            if (__atomic_compare_exchange_n(&vacpi.call, &state, CALL_RUNNING, false,
+                                            __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
+                vacpi.call_index = header[MBX_INDEX / 4];
+                vacpi.call_argc = header[MBX_ARGC / 4];
+                uacpi_kernel_schedule_work(UACPI_WORK_NOTIFICATION, vacpi.call_work, call_run,
+                                           NULL);
+            }
+            acpi_slice();
+            state = CALL_DONE;
+            if (!__atomic_compare_exchange_n(&vacpi.call, &state, CALL_NONE, false,
+                                             __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
+                v->mmio_retry = true;
+            }
             break;
         }
         case FUNCTION_ELEMENT: {
@@ -1977,6 +2009,7 @@ static void mailbox_place(void) {
     vacpi.doorbell = vacpi.mailbox + MBX_SIZE;
     gpt_map(vacpi.doorbell, 0, DOORBELL_SIZE, 0, 0);
     gpt_flush();
+    vacpi.call_work = uacpi_kernel_create_work_item();
     mmio_register(vacpi.doorbell, DOORBELL_SIZE, &doorbell_ops, NULL);
 }
 
