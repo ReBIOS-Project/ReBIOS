@@ -30,6 +30,7 @@
 #include <virt/io.h>
 #include <virt/layout.h>
 #include <virt/mmio.h>
+#include <virt/nvmx.h>
 #include <virt/vcpu.h>
 #include <virt/vga.h>
 
@@ -120,6 +121,10 @@
 #define MAX_WIDTH 1024
 #define MAX_HEIGHT 768
 #define REFRESH_NS 20000000u
+// A frame compares every line of the Bochs interface's display this often, so
+// that what the dirty flags do not show, devices' writes for instance, shows
+// all the same.
+#define COMPARE_ALL_NS 1000000000ull
 // The lines of a turned display written to the framebuffer together.
 #define BAND_LINES 32
 
@@ -215,6 +220,13 @@ static struct {
     uint64_t direct_size;
     bool direct;
     bool panned;
+    // Whether the processor's dirty flags tell which pages of video memory the
+    // guest wrote to, and those pages: since the frame shown began, and through
+    // banks the window showed before, a bit for each.
+    bool track;
+    uint64_t *written;
+    uint64_t *written_before;
+    bool written_before_any;
 } vbe;
 
 // The registers and palette a frame shows the planes through.
@@ -260,6 +272,11 @@ static struct {
     uint64_t *vbe_hashes;
     uint32_t *vbe_line;
     uint32_t vbe_palette[256];
+    // Whether the frame shown compares every line, whether the last one went by
+    // the dirty flags, and when a frame next compares every line anyway.
+    bool vbe_compare_all;
+    bool vbe_tracked;
+    uint64_t vbe_compare_due;
     // One line of the display, in the framebuffer's pixel format.
     uint32_t *fb_line;
     // Lines of a turned display, which run down the framebuffer's columns:
@@ -443,7 +460,7 @@ static void map_vram(uint64_t gpa, uint64_t offset, uint64_t size) {
         size -= n;
     }
     if (size != 0) {
-        gpt_map(gpa, vbe.vram_phys + offset, size, GPT_RWX, MT_WB);
+        gpt_map(gpa, vbe.vram_phys + offset, size, GPT_RWX | (vbe.track ? GPT_DIRTY : 0), MT_WB);
     }
 }
 
@@ -797,6 +814,11 @@ static void window_update(void) {
     uint32_t bank = vbe_on() ? vbe.regs[DISPI_BANK] : NO_BANK;
     if (bank == vbe.window_bank) {
         return;
+    }
+    if (vbe.window_bank != NO_BANK
+        && gpt_dirty(WINDOW_BASE, PLANE_SIZE, vbe.written_before,
+                     ((uint64_t)vbe.window_bank << 16) / PAGE_SIZE, true)) {
+        __atomic_store_n(&vbe.written_before_any, true, __ATOMIC_RELAXED);
     }
     if (bank == NO_BANK) {
         gpt_map(WINDOW_BASE, 0, PLANE_SIZE, 0, 0);
@@ -1484,7 +1506,8 @@ static uint64_t line_hash(const uint8_t *p, uint32_t bytes) {
 }
 
 // The Bochs interface's display, its lines redrawn where their bytes changed,
-// as nothing traps the guest's writes to its memory.
+// as nothing traps the guest's writes to its memory: on the pages that the
+// dirty flags show written, where the processor keeps them.
 static bool direct_wanted(void) {
     const struct handoff_framebuffer *fb = &core_handoff->video.framebuffer;
     return vbe.direct_size != 0 && vbe_on() && !vbe.panned && vbe.regs[DISPI_BPP] == 32
@@ -1514,8 +1537,9 @@ static void direct_update(void) {
             memcpy(vbe.vram, fb, vbe.direct_size);
         }
         vbe.direct = want;
+        // The rest of video memory is its own either way.
         if (vbe.lfb != 0) {
-            map_vram(vbe.lfb, 0, vbe.vram_size);
+            map_vram(vbe.lfb, 0, vbe.direct_size);
         }
         if (vbe.window_bank != NO_BANK) {
             map_vram(WINDOW_BASE, (uint64_t)vbe.window_bank << 16, PLANE_SIZE);
@@ -1527,9 +1551,65 @@ static void direct_update(void) {
     vcpu_resume_others();
 }
 
+// Takes which pages of video memory, size bytes from start on, the guest wrote
+// to since the last frame, through its linear framebuffer or the window, as the
+// dirty flags have them, and through banks the window showed before. Clearing
+// the flags keeps the other vCPUs out of the guest until they flush their TLBs,
+// which may keep translations that are dirty already.
+static void vbe_take_written(uint64_t start, uint64_t size) {
+    memset(vbe.written, 0, vbe.vram_size / PAGE_SIZE / 8);
+    uint64_t first = start / PAGE_SIZE;
+    uint64_t end = (start + size + PAGE_SIZE - 1) / PAGE_SIZE;
+    if (end > vbe.vram_size / PAGE_SIZE) {
+        end = vbe.vram_size / PAGE_SIZE;
+    }
+    uint64_t lfb = vbe.lfb + first * PAGE_SIZE;
+    uint64_t lfb_size = first < end ? (end - first) * PAGE_SIZE : 0;
+    bool dirty = (vbe.lfb != 0 && gpt_dirty(lfb, lfb_size, NULL, 0, false))
+                 || gpt_dirty(WINDOW_BASE, PLANE_SIZE, NULL, 0, false);
+    if (!dirty && !__atomic_load_n(&vbe.written_before_any, __ATOMIC_RELAXED)) {
+        return;
+    }
+    // A stepping vCPU keeps the others paused itself: the next frame sees to it.
+    bool take = dirty && !this_cpu()->vcpu->stepping;
+    if (take) {
+        vcpu_pause_others();
+    }
+    spinlock_acquire(&vga.lock);
+    if (vbe.written_before_any) {
+        for (uint64_t i = 0; i < vbe.vram_size / PAGE_SIZE / 64; i++) {
+            vbe.written[i] |= vbe.written_before[i];
+            vbe.written_before[i] = 0;
+        }
+        __atomic_store_n(&vbe.written_before_any, false, __ATOMIC_RELAXED);
+    }
+    if (take && vbe.lfb != 0) {
+        gpt_dirty(lfb, lfb_size, vbe.written, first, true);
+    }
+    if (take && vbe.window_bank != NO_BANK) {
+        gpt_dirty(WINDOW_BASE, PLANE_SIZE, vbe.written,
+                  ((uint64_t)vbe.window_bank << 16) / PAGE_SIZE, true);
+    }
+    spinlock_release(&vga.lock);
+    if (take) {
+        gpt_flush();
+        vcpu_resume_others();
+    }
+}
+
+static bool vbe_written(uint64_t at, uint32_t bytes) {
+    for (uint64_t page = at / PAGE_SIZE; page <= (at + bytes - 1) / PAGE_SIZE; page++) {
+        if (vbe.written[page / 64] & (1ull << (page % 64))) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Starts showing the Bochs interface's display: every line where its mode or
-// 8-bit palette changed, else the lines whose bytes changed.
-static void vbe_start(void) {
+// 8-bit palette changed, else the lines whose bytes changed, of those on pages
+// written to where the dirty flags tell.
+static void vbe_start(uint64_t now) {
     if (vbe.direct) {
         return;
     }
@@ -1563,6 +1643,17 @@ static void vbe_start(void) {
         fb_clear(0);
         out.vbe_valid = true;
         out.valid = false;
+    }
+    // The guest's guests write to memory past the dirty flags of the
+    // hypervisor's EPT, and after them every line needs comparing once.
+    bool track = vbe.track && !nvmx_any_vmx_operation();
+    out.vbe_compare_all = !track || !out.vbe_tracked || now >= out.vbe_compare_due;
+    if (out.vbe_compare_all) {
+        out.vbe_compare_due = now + COMPARE_ALL_NS;
+    }
+    out.vbe_tracked = track;
+    if (track) {
+        vbe_take_written(start, (uint64_t)height * line_bytes);
     }
     out.busy = true;
     out.busy_vbe = true;
@@ -1598,6 +1689,9 @@ static void vbe_lines(void) {
         uint64_t at = out.vbe_start + (uint64_t)sy * out.vbe_line_bytes;
         if (at + bytes > vbe.vram_size) {
             break;
+        }
+        if (!all && !out.vbe_compare_all && !vbe_written(at, bytes)) {
+            continue;
         }
         const uint8_t *p = vbe.vram + at;
         uint64_t hash = line_hash(p, bytes);
@@ -1656,7 +1750,7 @@ void vga_refresh(void) {
         direct_update();
     }
     if (vbe_on()) {
-        vbe_start();
+        vbe_start(now);
         if (out.busy) {
             vbe_lines();
         }
@@ -1709,6 +1803,12 @@ static void vbe_init(void) {
     vbe.vram_size = video->vram_size;
     vbe.regs[DISPI_ID] = DISPI_ID5;
     vbe.window_bank = NO_BANK;
+    vbe.track = gpt_track_dirty();
+    if (vbe.track) {
+        size_t bitmap_pages = (vbe.vram_size / PAGE_SIZE / 8 + PAGE_SIZE - 1) / PAGE_SIZE;
+        vbe.written = page_alloc(bitmap_pages);
+        vbe.written_before = page_alloc(bitmap_pages);
+    }
     out.vbe_hashes = page_alloc((DISPI_MAX_YRES * sizeof(uint64_t) + PAGE_SIZE - 1) / PAGE_SIZE);
     out.vbe_line = page_alloc((DISPI_MAX_XRES * sizeof(uint32_t) + PAGE_SIZE - 1) / PAGE_SIZE);
     struct io_handler ports = {DISPI_PORT, DISPI_PORT_COUNT, dispi_ports, NULL};
@@ -1735,8 +1835,9 @@ static void vbe_init(void) {
     }
     map_vram(vbe.lfb, 0, vbe.vram_size);
     gpt_flush();
-    printf("Emulated VGA's linear framebuffer: %llu MiB at %#llx\n",
-           (unsigned long long)(vbe.vram_size >> 20), (unsigned long long)vbe.lfb);
+    printf("Emulated VGA's linear framebuffer: %llu MiB at %#llx, writes found by %s\n",
+           (unsigned long long)(vbe.vram_size >> 20), (unsigned long long)vbe.lfb,
+           vbe.track ? "dirty flags" : "comparing lines");
 }
 
 static const char *const scaling_names[] = {"stretched", "kept at 4:3", "centred", "scaled",

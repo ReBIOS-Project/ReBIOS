@@ -220,6 +220,8 @@ struct nvmx {
 };
 
 bool nvmx_enabled;
+// How many vCPUs are in VMX operation.
+static uint32_t vmxon_count;
 
 // The guest's VMX capability MSRs: the processor's allowed settings where
 // ReBIOS emulates them. Their allowed 0-settings are the processor's, so that
@@ -694,6 +696,7 @@ static void vmxon(struct vcpu *v, struct nvmx *n, uint32_t info) {
         return;
     }
     n->vmxon = true;
+    __atomic_add_fetch(&vmxon_count, 1, __ATOMIC_RELEASE);
     n->vmxon_ptr = addr;
     n->current = NO_VMCS;
     n->vmcs12 = NULL;
@@ -712,6 +715,7 @@ static void vmxoff(struct vcpu *v, struct nvmx *n) {
                   vmx_read(VMCS_PROC_CONTROLS2) & ~(uint64_t)PROC2_VMCS_SHADOWING);
     }
     n->vmxon = false;
+    __atomic_sub_fetch(&vmxon_count, 1, __ATOMIC_RELEASE);
     n->current = NO_VMCS;
     n->vmcs12 = NULL;
     ept02_drop_all(n);
@@ -2593,6 +2597,10 @@ uint64_t nvmx_tsc(struct vcpu *v, uint64_t raw) {
 
 bool nvmx_holds_init(struct vcpu *v) {
     return v->nvmx != NULL && v->nvmx->vmxon;
+}
+
+bool nvmx_any_vmx_operation(void) {
+    return __atomic_load_n(&vmxon_count, __ATOMIC_ACQUIRE) != 0;
 }
 
 // What ends the guest's guest's wait: a start-up IPI, else INIT, the

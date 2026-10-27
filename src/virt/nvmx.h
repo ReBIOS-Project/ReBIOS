@@ -54,6 +54,9 @@ bool nvmx_entry_failed(struct vcpu *v, uint32_t error);
 bool nvmx_before_entry(struct vcpu *v);
 // Whether INIT waits, as VMX operation blocks it.
 bool nvmx_holds_init(struct vcpu *v);
+// Whether any vCPU is in VMX operation, where the guest's guests reach memory
+// through the hypervisor's shadows of the guest's EPT, not its own tables.
+bool nvmx_any_vmx_operation(void);
 // Before the vCPU's entry: in the activity states the guest's guest waits in
 // here, until something ends the wait.
 void nvmx_wait(struct vcpu *v);
