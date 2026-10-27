@@ -1,3 +1,33 @@
+2026-10-27  Mintsuki  <mintsuki@protonmail.com>
+
+    *** Release 0.4.1 ***
+
+    Noteworthy changes compared to the previous release, 0.4.0:
+
+    New features:
+        - Panels mounted sideways in their casing: ReBIOS shows its log and the
+          emulated VGA's picture upright on the machines whose panel Linux
+          knows to be mounted so, such as the Lenovo IdeaPad D330-10IGM and the
+          Steam Deck, and the emulated video BIOS offers VBE modes and an EDID
+          of the upright screen's size.
+
+    Bug fixes:
+        - Correct the framebuffer's size, which some firmware gives as
+          landscape on portrait panels, as Linux does: the Lenovo IdeaPad
+          D330-10IGM and IdeaPad Duet 3 10IGL5, and the Steam Deck. ReBIOS's
+          log was garbled on them.
+        - Emulate the VGA by default on panels mounted sideways, rather than
+          run the graphics card's video BIOS, which draws sideways and turned
+          the Lenovo IdeaPad D330-10IGM's screen off.
+        - In PIC mode, keep PCI devices' interrupts off IRQs 6 and 14, which
+          the legacy BIOS unmasks for its floppy and ATA drivers on any
+          machine: a PCI device's level-triggered interrupt there flooded it,
+          and it got no further than its "Machine UUID" line.
+        - Ungate the 8254 timer on Apollo Lake, Gemini Lake, Elkhart Lake,
+          Jasper Lake, and Alder Lake-N chipsets too, whose firmware can switch
+          its clock off: the legacy BIOS then waited forever for its timer
+          interrupt after its "Machine UUID" line.
+
 2026-10-26  Mintsuki  <mintsuki@protonmail.com>
 
     *** Release 0.4.0 ***
