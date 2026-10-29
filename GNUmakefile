@@ -160,6 +160,8 @@ override LD_HAS_Z_FLAG = $(shell LC_ALL=C $(CC) $(CFLAGS) $(LDFLAGS) -Wl,-z,$(1)
 override CFLAGS += \
     -Wall \
     -Wextra \
+    -Wshadow \
+    -Wvla \
     -std=gnu11 \
     -ffreestanding \
     -fno-exceptions \

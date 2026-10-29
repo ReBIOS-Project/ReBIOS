@@ -71,6 +71,8 @@ override CFLAGS += \
     -Os \
     -Wall \
     -Wextra \
+    -Wshadow \
+    -Wvla \
     -std=gnu11 \
     -ffreestanding \
     -fno-exceptions \
