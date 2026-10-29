@@ -402,6 +402,17 @@ static bool apply_vga_scale(const struct setting *setting, struct span value) {
     return true;
 }
 
+// In the order of the HANDOFF_AVIC_* values.
+static const char *const avic_names[] = { "auto", "always", "never" };
+
+static bool apply_avic(const struct setting *setting, struct span value) {
+    if (!apply_choice(value, avic_names, 3, &config.avic)) {
+        return false;
+    }
+    printf("  %s = %s\n", setting->name, avic_names[config.avic]);
+    return true;
+}
+
 static bool apply_cpu_list(const struct setting *setting, struct span value) {
     if (config.cpu_filter != HANDOFF_CPU_FILTER_NONE
      && config.cpu_filter != setting->filter) {
@@ -456,6 +467,7 @@ static const struct setting settings[] = {
     { .name = "vga_scale", .apply = apply_vga_scale },
     { .name = "profile", .apply = apply_boolean, .flag = &config.profile },
     { .name = "nested", .apply = apply_boolean, .flag = &config.nested },
+    { .name = "avic", .apply = apply_avic },
     {
         .name = "cpuid_limit", .apply = apply_boolean,
         .flag = &config.cpuid_limit
@@ -849,6 +861,7 @@ void config_load(void) {
     config.vga_emulation = HANDOFF_VGA_EMULATION_AUTO;
     config.vga_scaling = HANDOFF_VGA_SCALING_STRETCH;
     config.vga_scale = 1;
+    config.avic = HANDOFF_AVIC_AUTO;
     config.cpu_filter = HANDOFF_CPU_FILTER_NONE;
     config.igpu_stolen_remap = true;
 
@@ -879,6 +892,7 @@ void config_to_handoff(struct handoff_config *out) {
     out->vga_scale = config.vga_scale;
     out->profile = config.profile;
     out->nested = config.nested;
+    out->avic = config.avic;
     out->cpuid_limit = config.cpuid_limit;
     out->igpu_stolen_remap = config.igpu_stolen_remap;
     out->cpu_filter = config.cpu_filter;

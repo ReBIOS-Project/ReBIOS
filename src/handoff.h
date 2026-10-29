@@ -136,6 +136,13 @@ struct handoff_block_device {
 #define HANDOFF_VGA_SCALING_MANUAL 3
 #define HANDOFF_VGA_SCALING_INTEGER 4
 
+// When AMD's AVIC runs the guest's local APICs: on the processors it serves by
+// default (virt/svm.c), on all that have it but those AMD advises against it
+// on, or never.
+#define HANDOFF_AVIC_AUTO 0
+#define HANDOFF_AVIC_ALWAYS 1
+#define HANDOFF_AVIC_NEVER 2
+
 struct handoff_config {
     uint8_t serial;
     uint8_t verbose;
@@ -149,6 +156,8 @@ struct handoff_config {
     uint8_t profile;
     // Whether the guest gets the processor's virtualisation of its own.
     uint8_t nested;
+    // One of the HANDOFF_AVIC_* values.
+    uint8_t avic;
     // Whether the guest starts with CPUID's basic leaves limited to 2, as
     // firmware setting IA32_MISC_ENABLE's Limit CPUID Maxval would have it.
     uint8_t cpuid_limit;

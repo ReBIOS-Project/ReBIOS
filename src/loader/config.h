@@ -42,6 +42,8 @@ struct config {
     uint8_t vga_scale;
     bool profile;
     bool nested;
+    // One of the HANDOFF_AVIC_* values.
+    uint8_t avic;
     bool cpuid_limit;
     bool igpu_stolen_remap;
     // NUL-terminated: "self", "auto", or a drive's device path or part of its
