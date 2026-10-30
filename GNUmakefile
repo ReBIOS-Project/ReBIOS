@@ -491,12 +491,13 @@ ifneq ($(filter dist,$(MAKECMDGOALS)),)
 endif
 
 # Create release tarballs of the committed tree, with the dependencies in them.
-# SeaBIOS's version comes from its .version file once its .git is gone.
+# There is no .git in them, so ReBIOS and SeaBIOS read .version files instead.
 .PHONY: dist
 dist:
 	rm -rf "$(DIST_OUTPUT)"
 	mkdir -p "$(DIST_OUTPUT)"
 	git archive HEAD | tar -xf - -C "$(DIST_OUTPUT)"
+	git describe --always --tags | sed 's/^v//' >"$(DIST_OUTPUT)/.version"
 	cd "$(DIST_OUTPUT)" && ./get-deps
 	git -C "$(DIST_OUTPUT)/seabios" describe --always --tags --long >"$(DIST_OUTPUT)/seabios/.version"
 	cd "$(DIST_OUTPUT)" && rm -rf .gitignore .github
@@ -524,9 +525,13 @@ uninstall:
 	rm -f "$(DESTDIR)$(PREFIX)/share/$(OUTPUT)/$(OUTPUT).efi"
 	-rmdir "$(DESTDIR)$(PREFIX)/share/$(OUTPUT)"
 
+# Our version, for SeaBIOS's banner, found as SeaBIOS finds its own: from Git,
+# or else from the .version file of a release tarball.
+override REBIOS_VERSION := $(shell if test -e .git; then git describe --always --tags --dirty 2>/dev/null | sed 's/^v//'; elif test -f .version; then head -n 1 .version; fi)
+
 # SeaBIOS is built as a CSM, but not handed our flags: it ignores CFLAGS and
 # LDFLAGS, and CPPFLAGS would replace its own.
-override SEABIOS_EXTRAVERSION := -ReBIOS
+override SEABIOS_EXTRAVERSION := -ReBIOS$(if $(REBIOS_VERSION),-$(REBIOS_VERSION))
 override define SEABIOS_CALL
 	$(MAKE) -C seabios $(1) \
 		HOSTCC="$(HOST_CC)" \
@@ -554,9 +559,15 @@ endef
 vgabios:
 	$(call VGABIOS_CALL,)
 
-# SeaBIOS build targets.
+# SeaBIOS build targets. SeaBIOS reads its version only to lay out its ROM, so
+# have it do that again when ours changes, kept in a record as the flags are.
 .PHONY: seabios
 seabios: seabios/.config
+	@mkdir -p obj
+	@if ! printf '%s\n' '$(SEABIOS_EXTRAVERSION)' | cmp -s - obj/SEABIOS_EXTRAVERSION 2>/dev/null; then \
+		rm -f seabios/out/romlayout16.lds; \
+		printf '%s\n' '$(SEABIOS_EXTRAVERSION)' > obj/SEABIOS_EXTRAVERSION; \
+	fi
 	$(call SEABIOS_CALL,)
 
 seabios/.config: GNUmakefile seabios-config
