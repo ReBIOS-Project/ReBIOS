@@ -1,3 +1,63 @@
+2026-10-31  Mintsuki  <mintsuki@protonmail.com>
+
+    *** Release 0.5.0 ***
+
+    Noteworthy changes compared to the previous release, 0.4.1:
+
+    New features:
+        - Emulate the 8254 timer on every machine, so that the OS and the
+          legacy BIOS have a working one whether or not the chipset's runs. The
+          chipset's now only sounds the speaker.
+        - Emulate the 8042 keyboard controller on every machine. PS/2 devices
+          plugged into a real 8042 keep working through it, and USB keyboards
+          and mice reach the OS and the legacy BIOS as PS/2 ones. The ACPI
+          tables show its devices where the firmware does not.
+        - Drive xHCI, EHCI, OHCI, and UHCI controllers with the Tendril library
+          until the OS takes them, with the handoff a BIOS's legacy USB support
+          has, so that an OS without a USB driver keeps its keyboard and mouse.
+        - Give the legacy BIOS the USB disks through the hypervisor, for
+          booting from them and for INT 13h, in place of SeaBIOS's own USB
+          stack.
+        - New `legacy_usb` setting, `true` by default, for driving the USB
+          controllers: with `false` they are left to the OS, and the legacy
+          BIOS has no USB.
+        - New `avic` setting for when AMD's AVIC runs the OS's local APICs:
+          `auto`, the default, on Zen 4 and later processors with x2AVIC;
+          `always`, on every processor that has it but those AMD advises
+          against it on; or `never`.
+
+    Bug fixes:
+        - Restart through ACPI's reset register, the keyboard controller, or
+          the reset control register before the firmware's reset service, as
+          Linux 7.3 does: the service of a Dell Inspiron 7700 crashes by then.
+        - Use AVIC by default only on Zen 4 and later processors with x2AVIC,
+          as Linux 7.3's KVM does: Windows hung at its logo with AVIC on a
+          Zen 3+ processor without x2AVIC, such as the Ryzen 7 7735HS.
+        - Deliver an interrupt already on its way when the OS masks its source
+          on the vector the OS programmed, not on one of ReBIOS's own, which
+          the OS has no handler for.
+        - Hold the OS up less while the emulated VGA redraws: a redraw runs a
+          millisecond at a time between the OS's own work, takes at most a
+          quarter of the boot processor's time, and, in VBE modes, looks only
+          at the lines on pages the OS wrote to.
+        - Hold the OS up less while the firmware's AML runs, for an ACPI call
+          of the OS's or for a firmware event: it too runs a millisecond at a
+          time between the OS's own work.
+
+    Miscellaneous:
+        - The OS's local APIC timers are kept in software, as the processor's
+          own timer is now the hypervisor's.
+        - The log reports VM exits that keep a processor from the OS for more
+          than 5 ms.
+        - The SeaBIOS banner shows the ReBIOS version, taken from Git or, in
+          release tarballs, from a `.version` file.
+        - Follow the latest PicoEFI C template, and update the
+          freestanding-c-hdrs subproject.
+        - `make run` gives QEMU a USB keyboard and mouse on xHCI, as the
+          template does.
+        - Update SeaBIOS to its latest upstream revision, without its USB
+          stack, and add the Tendril subproject.
+
 2026-10-27  Mintsuki  <mintsuki@protonmail.com>
 
     *** Release 0.4.1 ***
