@@ -15,14 +15,14 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <memory.h>
 
-// GCC and Clang reserve the right to generate calls to the following
-// 4 functions even if they are not directly called.
-// They must be implemented as the C specification mandates.
-// DO NOT remove or rename these functions, or stuff will eventually break!
+// GCC and Clang reserve the right to generate calls to the following 4
+// functions even if they are not directly called. They must be implemented as
+// the C specification mandates. DO NOT remove or rename these functions, or
+// stuff will eventually break!
 
 #ifdef memcpy
 #  undef memcpy

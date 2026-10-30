@@ -19,6 +19,7 @@
 #define VIRT__EVENT_H
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <virt/vcpu.h>
 
 // Notes the event whose delivery the exit cut short, before the exit is

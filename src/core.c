@@ -15,8 +15,8 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <core.h>
 #include <csm/csm_boot.h>
 #include <handoff.h>
@@ -38,8 +38,8 @@
 #include <virt/a20.h>
 #include <virt/cpuid.h>
 #include <virt/hpet.h>
-#include <virt/irq.h>
 #include <virt/igfx.h>
+#include <virt/irq.h>
 #include <virt/layout.h>
 #include <virt/msr.h>
 #include <virt/mtrr.h>
@@ -82,8 +82,8 @@ static void bsp_main(void *arg) {
     igfx_init();
     a20_init();
     vga_init();
-    // The guest's boot processor gets its local APIC as a legacy BIOS hands
-    // it over, the hypervisor the processor's.
+    // The guest's boot processor gets its local APIC as a legacy BIOS hands it
+    // over, the hypervisor the processor's.
     lapic_legacy_init();
     smp_init();
     vlapic_init();
@@ -111,13 +111,17 @@ static void bsp_main(void *arg) {
 void core_main(struct handoff *handoff) {
     core_handoff = handoff;
 
-    printf("ReBIOS core running, heap %#llx-%#llx\n",
-           (unsigned long long)handoff->heap_base,
-           (unsigned long long)(handoff->heap_base + handoff->heap_size));
+    printf(
+        "ReBIOS core running, heap %#llx-%#llx\n",
+        (unsigned long long)handoff->heap_base,
+        (unsigned long long)(handoff->heap_base + handoff->heap_size)
+    );
 
     mm_init(handoff->heap_base, handoff->heap_size);
     time_init(handoff->tsc_hz);
-    printf("TSC at %llu MHz\n", (unsigned long long)(handoff->tsc_hz / 1000000));
+    printf(
+        "TSC at %llu MHz\n", (unsigned long long)(handoff->tsc_hz / 1000000)
+    );
 
     struct cpu *bsp = cpu_area_alloc(0, 0, true);
     switch_stack(cpu_stack_top(bsp), bsp_main, handoff);

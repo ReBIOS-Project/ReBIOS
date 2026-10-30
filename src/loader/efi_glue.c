@@ -15,8 +15,9 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <efi.h>
 #include <loader/efi_glue.h>
 
@@ -26,20 +27,24 @@ EFI_BOOT_SERVICES *efi_bs;
 EFI_RUNTIME_SERVICES *efi_rt;
 bool efi_boot_services_exited;
 
-uint64_t efi_alloc_pages(uint64_t count, uint64_t max_addr) {
+uintptr_t efi_alloc_pages(size_t count, uintptr_t max_addr) {
     return efi_alloc_pages_typed(count, max_addr, EfiLoaderData);
 }
 
 // Some firmware leaves memory above 4 GiB out of the page tables the loader
 // runs on until it has its own, so that is where an address-free allocation
 // goes last.
-uint64_t efi_alloc_pages_typed(uint64_t count, uint64_t max_addr, EFI_MEMORY_TYPE type) {
+uintptr_t efi_alloc_pages_typed(
+    size_t count, uintptr_t max_addr, EFI_MEMORY_TYPE type
+) {
     EFI_PHYSICAL_ADDRESS addr = max_addr == 0 ? UINT32_MAX : max_addr;
-    if (efi_bs->AllocatePages(EfiAllocateMaxAddress, type, count, &addr) == EFI_SUCCESS) {
+    if (efi_bs->AllocatePages(EfiAllocateMaxAddress, type, count, &addr)
+     == EFI_SUCCESS) {
         return addr;
     }
-    if (max_addr != 0 || efi_bs->AllocatePages(EfiAllocateAnyPages, type, count, &addr)
-                         != EFI_SUCCESS) {
+    if (max_addr != 0
+     || efi_bs->AllocatePages(EfiAllocateAnyPages, type, count, &addr)
+     != EFI_SUCCESS) {
         return 0;
     }
     return addr;
@@ -48,10 +53,13 @@ uint64_t efi_alloc_pages_typed(uint64_t count, uint64_t max_addr, EFI_MEMORY_TYP
 EFI_HANDLE *efi_locate_handles(EFI_GUID *protocol, EFI_UINTN *count) {
     EFI_HANDLE *handles;
 
-    // LocateHandleBuffer() came with EFI 1.10, as did the protocols of interest.
-    if (efi_bs->Hdr.Revision < EFI_1_10_SYSTEM_TABLE_REVISION
-        || efi_bs->LocateHandleBuffer(EfiByProtocol, protocol, NULL, count,
-                                      &handles) != EFI_SUCCESS) {
+    // LocateHandleBuffer() came with EFI 1.10, as did the protocols of
+    // interest.
+    bool unlocated = efi_bs->Hdr.Revision < EFI_1_10_SYSTEM_TABLE_REVISION
+        || efi_bs->LocateHandleBuffer(
+            EfiByProtocol, protocol, NULL, count, &handles
+        ) != EFI_SUCCESS;
+    if (unlocated) {
         *count = 0;
         return NULL;
     }

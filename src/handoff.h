@@ -18,11 +18,12 @@
 #ifndef HANDOFF_H
 #define HANDOFF_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 // The page tables the processor runs the guest's guests with, which the
 // hypervisor builds from the guest's and its own.
-#define NESTED_HEAP_SIZE (128ull << 20)
+#define NESTED_HEAP_SIZE ((uint64_t)128 << 20)
 
 #define HANDOFF_MAX_RESERVED 16
 #define HANDOFF_MAX_PCI_ROMS 16
@@ -42,8 +43,9 @@ struct handoff_pci_address {
     uint8_t devfn;
 };
 
-// How a picture is turned on a framebuffer whose panel is mounted turned in its
-// casing, so as to stand upright: a quarter turn clockwise or anticlockwise.
+// How a picture is turned on a framebuffer whose panel is mounted turned in
+// its casing, so as to stand upright: a quarter turn clockwise or
+// anticlockwise.
 #define HANDOFF_ROTATE_0 0
 #define HANDOFF_ROTATE_90 1
 #define HANDOFF_ROTATE_270 3
@@ -65,7 +67,7 @@ struct handoff_framebuffer {
     uint8_t blue_shift;
     uint8_t reserved_size;
     uint8_t reserved_shift;
-    uint8_t present;
+    bool present;
     // One of the HANDOFF_ROTATE_* values.
     uint8_t rotation;
 };
@@ -87,9 +89,9 @@ struct handoff_pci_rom {
 struct handoff_video {
     struct handoff_framebuffer framebuffer;
     // The PCI device that owns the legacy VGA resources, if any.
-    uint8_t vga_present;
+    bool vga_present;
     // Whether that device's legacy video BIOS is in vbios.
-    uint8_t vbios_present;
+    bool vbios_present;
     uint16_t vga_vendor_id;
     uint16_t vga_device_id;
     struct handoff_pci_address vga_device;
@@ -111,7 +113,7 @@ struct handoff_block_device {
     uint8_t base_class;
     uint8_t subclass;
     // ReBIOS was loaded from this device.
-    uint8_t boot;
+    bool boot;
 };
 
 #define HANDOFF_CPU_FILTER_NONE 0
@@ -126,7 +128,7 @@ struct handoff_block_device {
 
 // How an emulated VGA's display fills the framebuffer: all of it, as much of
 // it as 4:3 allows, at one framebuffer pixel per VGA pixel, at vga_scale
-// pixels per pixel, or at the most whole pixels per pixel that fit; centred
+// pixels per pixel, or at the most whole pixels per pixel that fit; centered
 // unless stretched.
 #define HANDOFF_VGA_SCALING_STRETCH 0
 #define HANDOFF_VGA_SCALING_ASPECT 1

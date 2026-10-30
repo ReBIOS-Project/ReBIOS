@@ -18,8 +18,8 @@
 #ifndef HW__SERIAL_H
 #define HW__SERIAL_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 bool serial_init(uint16_t port, uint32_t baud);
 void serial_putc(uint16_t port, char c);

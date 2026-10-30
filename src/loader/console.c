@@ -15,18 +15,19 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stdint.h>
+#include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <flanterm.h>
 #include <flanterm_backends/fb.h>
+#include <loader/console.h>
 #include <handoff.h>
 #include <lib/log.h>
-#include <loader/console.h>
 #include <loader/loader.h>
 
 // The memory stays the hypervisor's, as the console outlives boot services.
 static void *console_alloc(size_t size) {
-    uint64_t base = loader_alloc_reserved((size + 4095) / 4096, 0);
+    uintptr_t base = loader_alloc_reserved((size + 4095) / 4096, 0);
     return base != 0 ? (void *)(uintptr_t)base : NULL;
 }
 
@@ -50,10 +51,12 @@ void console_init(void) {
     }
 
     struct flanterm_context *screen = flanterm_fb_init(
-        console_alloc, console_free, (uint32_t *)(uintptr_t)fb->base, fb->width, fb->height,
-        fb->pitch, fb->red_size, fb->red_shift, fb->green_size, fb->green_shift, fb->blue_size,
-        fb->blue_shift, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, 0, 0, 0, 0, 0,
-        rotation, false);
+        console_alloc, console_free, (uint32_t *)(uintptr_t)fb->base,
+        fb->width, fb->height, fb->pitch, fb->red_size, fb->red_shift,
+        fb->green_size, fb->green_shift, fb->blue_size, fb->blue_shift, NULL,
+        NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, 0, 0, 0, 0, 0, rotation,
+        false
+    );
     if (screen != NULL) {
         log_set_screen(screen);
     }

@@ -18,18 +18,20 @@
 #ifndef HW__PCI_HOST_H
 #define HW__PCI_HOST_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <uacpi/namespace.h>
+#include <uacpi/types.h>
 
 struct pci_host_range {
-    uint64_t base;
-    uint64_t end;
+    uintptr_t base;
+    uintptr_t end;
 };
 
 struct pci_host_window {
-    uint64_t base;
-    uint64_t end;
+    uintptr_t base;
+    uintptr_t end;
     bool prefetchable;
 };
 
@@ -39,22 +41,22 @@ struct pci_host_bridge {
     uint8_t bus;
     // The memory windows of its _CRS, as given.
     struct pci_host_window *windows;
-    uint32_t window_count;
+    size_t window_count;
 };
 
 struct pci_host {
     struct pci_host_bridge *bridges;
-    uint32_t bridge_count;
+    size_t bridge_count;
     // Sorted and page granular: memory the interrupt controllers, the HPETs,
     // interrupt messages, and the ACPI devices other than host bridges use,
     // which software finds at these addresses, but for the configuration space
     // windows and the IOMMUs.
     struct pci_host_range *claimed;
-    uint32_t claimed_count;
+    size_t claimed_count;
     // Sorted and page granular: the configuration space windows and the
     // IOMMUs' registers, which the guest must never reach at their addresses.
     struct pci_host_range *private;
-    uint32_t private_count;
+    size_t private_count;
 };
 
 // The host bridges of the ACPI namespace and the memory around them that is

@@ -38,7 +38,7 @@ uint64_t time_ns(void) {
 }
 
 void time_udelay(uint64_t us) {
-    uint64_t end = rdtsc() + (tsc_hz * us + 999999) / 1000000;
+    uintptr_t end = rdtsc() + (tsc_hz * us + 999999) / 1000000;
     while ((int64_t)(rdtsc() - end) < 0) {
         cpu_relax();
     }

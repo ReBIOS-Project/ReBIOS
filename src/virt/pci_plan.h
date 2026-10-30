@@ -18,16 +18,17 @@
 #ifndef VIRT__PCI_PLAN_H
 #define VIRT__PCI_PLAN_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 // Memory BARs up to this size go below 4 GiB, as do larger ones that cannot be
 // above it; the rest stays above.
-#define PCI_PLAN_LOW_BAR_MAX (256ull << 20)
+#define PCI_PLAN_LOW_BAR_MAX ((uint64_t)256 << 20)
 
 struct pci_plan_range {
-    uint64_t base;
-    uint64_t end;
+    uintptr_t base;
+    uintptr_t end;
 };
 
 // Where the guest first finds a function's memory, by guest-physical address:
@@ -37,9 +38,9 @@ struct pci_plan_function {
     uint64_t bars[6];
     uint64_t rom;
     // Bridges: the windows, inclusive, base above limit when closed.
-    uint64_t mem_base;
+    uintptr_t mem_base;
     uint64_t mem_limit;
-    uint64_t pref_base;
+    uintptr_t pref_base;
     uint64_t pref_limit;
 };
 
@@ -56,25 +57,27 @@ struct pci_plan {
     // In the order of the topology's functions and root buses.
     struct pci_plan_function *functions;
     struct pci_plan_root *roots;
-    uint32_t root_count;
+    size_t root_count;
     // Segment 0's configuration space window, for buses ecam_start to
     // ecam_end, at ecam (bus ecam_start's), or 0 if it has none.
-    uint64_t ecam;
+    uintptr_t ecam;
     uint8_t ecam_start;
     uint8_t ecam_end;
     // The emulated VGA's linear framebuffer on segment 0's bus 0, or 0.
-    uint64_t lfb;
+    uintptr_t lfb;
     // The guest's PCI hole starts here, and its larger BARs from high_floor.
-    uint64_t tolud;
+    uintptr_t tolud;
     uint64_t high_floor;
 };
 
-// Lays the guest's PCI memory out around obstacles, the sorted ranges below
-// 4 GiB the guest finds at their addresses, as high below 4 GiB as it goes,
-// with lfb_size bytes for the emulated VGA's linear framebuffer, and the
-// larger BARs from high_floor up. Needs pci_enum_scan() and pci_cfg_init().
-const struct pci_plan *pci_plan_make(const struct pci_plan_range *obstacles, uint32_t count,
-                                     uint64_t lfb_size, uint64_t high_floor);
+// Lays the guest's PCI memory out around obstacles, the sorted ranges below 4
+// GiB the guest finds at their addresses, as high below 4 GiB as it goes, with
+// lfb_size bytes for the emulated VGA's linear framebuffer, and the larger
+// BARs from high_floor up. Needs pci_enum_scan() and pci_cfg_init().
+const struct pci_plan *pci_plan_make(
+    const struct pci_plan_range *obstacles, size_t count, size_t lfb_size,
+    uint64_t high_floor
+);
 
 // The plan, or NULL before pci_plan_make().
 const struct pci_plan *pci_plan(void);

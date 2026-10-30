@@ -18,15 +18,16 @@
 #ifndef IOMMU__DMA_H
 #define IOMMU__DMA_H
 
+#include <stddef.h>
 #include <stdint.h>
 
-// Device DMA sees the guest's physical address space, through the IOMMU,
-// whose tables mirror every mapping gpt_map() makes. Needs acpi_init() and
+// Device DMA sees the guest's physical address space, through the IOMMU, whose
+// tables mirror every mapping gpt_map() makes. Needs acpi_init() and
 // pci_cfg_init(), and comes before any gpt_map().
 void dma_init(void);
 
 // gpt_map()'s mirror: prot as there, 0 to unmap.
-void dma_map(uint64_t gpa, uint64_t hpa, uint64_t size, uint32_t prot);
+void dma_map(uintptr_t gpa, uintptr_t hpa, size_t size, uint32_t prot);
 
 // Turns translation on, once the guest's memory is mapped and before it runs.
 void dma_enable(void);

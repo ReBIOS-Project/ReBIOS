@@ -18,8 +18,9 @@
 #ifndef IOMMU__IOMMU_TABLES_H
 #define IOMMU__IOMMU_TABLES_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #define IOMMU_KIND_NONE 0
 #define IOMMU_KIND_VTD 1
@@ -27,20 +28,20 @@
 
 // Bits of iommu_device_range.amd_settings, from an IVHD device entry's DTE
 // setting byte (AMD IOMMU 48882 rev. 3.11, Table 106).
-#define IOMMU_AMD_INIT_PASS (1u << 0)
-#define IOMMU_AMD_EINT_PASS (1u << 1)
-#define IOMMU_AMD_NMI_PASS (1u << 2)
-#define IOMMU_AMD_ATC_PERMIT (1u << 3)
+#define IOMMU_AMD_INIT_PASS ((uint32_t)1 << 0)
+#define IOMMU_AMD_EINT_PASS ((uint32_t)1 << 1)
+#define IOMMU_AMD_NMI_PASS ((uint32_t)1 << 2)
+#define IOMMU_AMD_ATC_PERMIT ((uint32_t)1 << 3)
 #define IOMMU_AMD_SYS_MGT_SHIFT 4
-#define IOMMU_AMD_SYS_MGT_MASK (3u << 4)
-#define IOMMU_AMD_LINT0_PASS (1u << 6)
-#define IOMMU_AMD_LINT1_PASS (1u << 7)
+#define IOMMU_AMD_SYS_MGT_MASK ((uint32_t)3 << 4)
+#define IOMMU_AMD_LINT0_PASS ((uint32_t)1 << 6)
+#define IOMMU_AMD_LINT1_PASS ((uint32_t)1 << 7)
 
 struct iommu_unit {
     // The register block's physical address.
-    uint64_t base;
+    uintptr_t base;
     // VT-d: the register block's size in bytes, from the DRHD's Size field.
-    uint64_t vtd_size;
+    size_t vtd_size;
     uint16_t segment;
     // VT-d: the DRHD's INCLUDE_PCI_ALL flag.
     bool include_all;
@@ -98,9 +99,9 @@ struct iommu_special_device {
 //   with that access (VT-d RMRRs, AMD IVMDs);
 // - otherwise, memory that must never be mapped for them (AMD IVMDs).
 struct iommu_reserved_region {
-    uint64_t base;
+    uintptr_t base;
     // Inclusive.
-    uint64_t last;
+    uintptr_t last;
     bool exclusion;
     bool readable;
     bool writable;
@@ -123,13 +124,13 @@ struct iommu_tables {
     // A malformed structure ended the parsing early, so units, devices, and
     // regions that the rest of the table describes are missing.
     bool truncated;
-    uint32_t unit_count;
+    size_t unit_count;
     struct iommu_unit *units;
-    uint32_t range_count;
+    size_t range_count;
     struct iommu_device_range *ranges;
-    uint32_t special_count;
+    size_t special_count;
     struct iommu_special_device *specials;
-    uint32_t reserved_count;
+    size_t reserved_count;
     struct iommu_reserved_region *reserved;
 };
 
@@ -139,14 +140,18 @@ const struct iommu_tables *iommu_tables_parse(void);
 
 // The range that applies to the requester ID, of those iommu_tables_parse()
 // found, or NULL if no unit translates it.
-const struct iommu_device_range *iommu_range_for(uint16_t segment, uint16_t rid);
+const struct iommu_device_range *iommu_range_for(
+    uint16_t segment, uint16_t rid
+);
 
 // The special device of a type and identity, of those iommu_tables_parse()
 // found, or NULL.
 const struct iommu_special_device *iommu_special_for(uint8_t type, uint8_t id);
 
-// Forgets the regions to map one to one for devices of which unneeded says,
-// of each requester ID the region covers, that it no longer needs them.
-void iommu_tables_forget_reserved(bool (*unneeded)(uint16_t segment, uint16_t rid));
+// Forgets the regions to map one to one for devices of which unneeded says, of
+// each requester ID the region covers, that it no longer needs them.
+void iommu_tables_forget_reserved(
+    bool (*unneeded)(uint16_t segment, uint16_t rid)
+);
 
 #endif

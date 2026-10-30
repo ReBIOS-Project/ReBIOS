@@ -21,8 +21,9 @@
     .text
 
     /*
-     * uint64_t alu_run(unsigned stub, uint64_t dst, uint64_t src,
-     *                  uint64_t *rflags)
+     * uint64_t alu_run(
+     *     unsigned int stub, uint64_t dst, uint64_t src, uint64_t *rflags
+     * )
      * Runs a stub on dst in RAX and src in RDX and CL, with the status flags
      * of *rflags, which it updates. The host's other flags stay its own.
      */

@@ -19,17 +19,17 @@
 #ifndef VIRT__HPET_H
 #define VIRT__HPET_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 // Hides from the guest every HPET with a timer that can deliver through the
 // FSB, whose messages would go wherever the guest pointed them: its ACPI table
-// and device go, and its registers read as absent. Other HPETs are the
-// guest's as they are. After layout_init().
+// and device go, and its registers read as absent. Other HPETs are the guest's
+// as they are. After layout_init().
 void hpet_init(void);
 
 // Whether the HPET with its registers at base is hidden, and whether any is.
-bool hpet_hidden(uint64_t base);
+bool hpet_hidden(uintptr_t base);
 bool hpet_any_hidden(void);
 
 #endif

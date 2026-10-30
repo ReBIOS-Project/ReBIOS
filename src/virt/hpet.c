@@ -16,49 +16,52 @@
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <uacpi/acpi.h>
+#include <uacpi/platform/types.h>
 #include <uacpi/status.h>
 #include <uacpi/tables.h>
-#include <memory.h>
-#include <lib/log.h>
-#include <sys/mm.h>
 #include <virt/hpet.h>
+#include <lib/log.h>
+#include <memory.h>
+#include <sys/mm.h>
 #include <virt/layout.h>
 
 // IA-PC HPET Specification 1.0a, 2.3: the capabilities and configuration
 // registers, and each timer's configuration register.
-#define HPET_SIZE 0x1000u
+#define HPET_SIZE ((uint32_t)0x1000)
 #define CAP_TIMERS_SHIFT 8
-#define CAP_TIMERS_MASK 0x1fu
-#define CONFIG 0x10u
-#define CONFIG_LEGACY_ROUTE (1u << 1)
-#define TIMER_BASE 0x100u
-#define TIMER_STRIDE 0x20u
-#define TIMER_INT_ENABLE (1u << 2)
-#define TIMER_FSB_ENABLE (1u << 14)
-#define TIMER_FSB_CAP (1u << 15)
+#define CAP_TIMERS_MASK ((uint32_t)0x1f)
+#define CONFIG ((uint32_t)0x10)
+#define CONFIG_LEGACY_ROUTE ((uint32_t)1 << 1)
+#define TIMER_BASE ((uint32_t)0x100)
+#define TIMER_STRIDE ((uint32_t)0x20)
+#define TIMER_INT_ENABLE ((uint32_t)1 << 2)
+#define TIMER_FSB_ENABLE ((uint32_t)1 << 14)
+#define TIMER_FSB_CAP ((uint32_t)1 << 15)
 #define MAX_HIDDEN 8
 
 static uint64_t hidden[MAX_HIDDEN];
-static unsigned hidden_count;
+static size_t hidden_count;
 
-static uint32_t read32(uint64_t address) {
+static uint32_t read32(uintptr_t address) {
     return *(volatile uint32_t *)(uintptr_t)address;
 }
 
-static void write32(uint64_t address, uint32_t value) {
+static void write32(uintptr_t address, uint32_t value) {
     *(volatile uint32_t *)(uintptr_t)address = value;
 }
 
-static unsigned timers(uint64_t base) {
+static unsigned int timers(uintptr_t base) {
     return ((read32(base) >> CAP_TIMERS_SHIFT) & CAP_TIMERS_MASK) + 1;
 }
 
-static bool fsb_capable(uint64_t base) {
-    for (unsigned n = 0; n < timers(base); n++) {
-        if (read32(base + TIMER_BASE + n * TIMER_STRIDE) & TIMER_FSB_CAP) {
+static bool fsb_capable(uintptr_t base) {
+    for (size_t n = 0; n < timers(base); n++) {
+        if ((read32(base + TIMER_BASE + n * TIMER_STRIDE) & TIMER_FSB_CAP)
+         != 0) {
             return true;
         }
     }
@@ -67,30 +70,35 @@ static bool fsb_capable(uint64_t base) {
 
 // Its timers interrupt no more, and the PIT and the RTC interrupt as without
 // it; the counter runs on, as firmware may time its own delays with it.
-static void hide(uint64_t base) {
-    for (unsigned n = 0; n < timers(base); n++) {
-        uint64_t config = base + TIMER_BASE + n * TIMER_STRIDE;
-        write32(config, read32(config) & ~(TIMER_INT_ENABLE | TIMER_FSB_ENABLE));
+static void hide(uintptr_t base) {
+    for (size_t n = 0; n < timers(base); n++) {
+        uintptr_t config = base + TIMER_BASE + n * TIMER_STRIDE;
+        write32(
+            config, read32(config) & ~(TIMER_INT_ENABLE | TIMER_FSB_ENABLE)
+        );
     }
     write32(base + CONFIG, read32(base + CONFIG) & ~CONFIG_LEGACY_ROUTE);
     layout_absent(base, HPET_SIZE);
     hidden[hidden_count++] = base;
-    printf("HPET at %#llx hidden from the guest, as its timers can deliver through the FSB\n",
-           (unsigned long long)base);
+    printf(
+        "HPET at %#llx hidden from the guest, as its timers can deliver "
+        "through the FSB\n",
+        (unsigned long long)base
+    );
 }
 
 void hpet_init(void) {
     struct uacpi_table table;
-    for (uacpi_size n = 0;
-         uacpi_table_find_nth_by_signature(ACPI_HPET_SIGNATURE, n, &table) == UACPI_STATUS_OK;
-         n++) {
+    for (size_t n = 0;
+         uacpi_table_find_nth_by_signature(ACPI_HPET_SIGNATURE, n, &table)
+      == UACPI_STATUS_OK; n++) {
         if (table.hdr->length >= sizeof(struct acpi_hpet)) {
             struct acpi_hpet hpet;
-            memcpy(&hpet, table.ptr, sizeof(hpet));
-            uint64_t base = hpet.address.address;
+            memcpy(&hpet, table.ptr, sizeof(struct acpi_hpet));
+            uintptr_t base = hpet.address.address;
             if (hpet.address.address_space_id == ACPI_AS_ID_SYS_MEM
-                && (base & (PAGE_SIZE - 1)) == 0 && hidden_count < MAX_HIDDEN
-                && fsb_capable(base)) {
+             && (base & (PAGE_SIZE - 1)) == 0 && hidden_count < MAX_HIDDEN
+             && fsb_capable(base)) {
                 hide(base);
             }
         }
@@ -98,8 +106,8 @@ void hpet_init(void) {
     }
 }
 
-bool hpet_hidden(uint64_t base) {
-    for (unsigned i = 0; i < hidden_count; i++) {
+bool hpet_hidden(uintptr_t base) {
+    for (size_t i = 0; i < hidden_count; i++) {
         if (hidden[i] == base) {
             return true;
         }

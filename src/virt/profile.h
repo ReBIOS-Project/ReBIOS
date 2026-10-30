@@ -18,8 +18,8 @@
 #ifndef VIRT__PROFILE_H
 #define VIRT__PROFILE_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <virt/vcpu.h>
 
 // With profile = true: counts the guest's exits by reason and the time the
@@ -35,6 +35,6 @@ void profile_exit(struct vcpu *v, uint32_t reason);
 void profile_entry(struct vcpu *v);
 void profile_io(uint16_t port);
 void profile_hypercall(uint32_t function);
-void profile_mmio(uint64_t gpa);
+void profile_mmio(uintptr_t gpa);
 
 #endif

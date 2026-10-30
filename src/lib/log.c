@@ -15,14 +15,14 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stdint.h>
-#include <stddef.h>
-#include <stdbool.h>
 #include <stdarg.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <efi.h>
 #include <flanterm.h>
-#include <hw/serial.h>
 #include <lib/log.h>
+#include <hw/serial.h>
 #include <lib/printf.h>
 #include <lib/spinlock.h>
 #include <loader/efi_glue.h>
@@ -57,7 +57,7 @@ static void con_flush(struct con_buffer *buf) {
 }
 
 static void con_put(struct con_buffer *buf, EFI_CHAR16 c) {
-    if (buf->count == sizeof(buf->chars) / sizeof(buf->chars[0]) - 1) {
+    if (buf->count == sizeof(buf->chars) / sizeof(EFI_CHAR16) - 1) {
         con_flush(buf);
     }
     buf->chars[buf->count++] = c;

@@ -18,8 +18,9 @@
 #ifndef VIRT__EMULATE_H
 #define VIRT__EMULATE_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <virt/insn.h>
 #include <virt/vcpu.h>
 
@@ -27,24 +28,29 @@
 // bytes at a linear address, which the callbacks translate; they return false
 // where the access faulted, having raised the fault.
 struct emulate_mem {
-    bool (*read)(struct vcpu *v, uint64_t linear, void *buf, unsigned size);
-    bool (*write)(struct vcpu *v, uint64_t linear, const void *buf, unsigned size);
+    bool (*read)(struct vcpu *v, uintptr_t linear, void *buf, size_t size);
+    bool (*write)(
+        struct vcpu *v, uintptr_t linear, const void *buf, size_t size
+    );
     // INS's data, for its destination: false where INS is not to be emulated.
-    bool (*ins)(struct vcpu *v, uint64_t linear, uint16_t port, unsigned size, uint32_t *value);
-    void (*outs)(struct vcpu *v, uint16_t port, unsigned size, uint32_t value);
+    bool (*ins)(
+        struct vcpu *v, uintptr_t linear, uint16_t port, size_t size,
+        uint32_t *value
+    );
+    void (*outs)(struct vcpu *v, uint16_t port, size_t size, uint32_t value);
 };
 
-enum emulate_result {
-    EMULATE_DONE,
-    // A fault was raised, or a device is not done with an access, and the
-    // instruction is to run again after the guest's events.
-    EMULATE_FAULT,
-    // Not one of the instructions emulated here.
-    EMULATE_UNSUPPORTED,
-};
+#define EMULATE_DONE 0
+// A fault was raised, or a device is not done with an access, and the
+// instruction is to run again after the guest's events.
+#define EMULATE_FAULT 1
+// Not one of the instructions emulated here.
+#define EMULATE_UNSUPPORTED 2
 
 // Emulates the decoded instruction at the guest's RIP: the common integer
 // forms with a memory operand, and the string instructions.
-enum emulate_result emulate(struct vcpu *v, const struct insn *insn, const struct emulate_mem *mem);
+int emulate(
+    struct vcpu *v, const struct insn *insn, const struct emulate_mem *mem
+);
 
 #endif

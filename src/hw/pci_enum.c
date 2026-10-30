@@ -15,20 +15,22 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stdint.h>
-#include <stddef.h>
-#include <stdbool.h>
 #include <stdarg.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <uacpi/acpi.h>
+#include <uacpi/status.h>
 #include <uacpi/tables.h>
-#include <memory.h>
+#include <hw/pci_enum.h>
 #include <core.h>
+#include <handoff.h>
 #include <hw/acpi.h>
 #include <hw/pci_cfg.h>
-#include <hw/pci_enum.h>
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/printf.h>
+#include <memory.h>
 
 #define PCI_ID 0x00
 #define PCI_COMMAND 0x04
@@ -61,25 +63,25 @@
 #define CLASS_BRIDGE 0x06
 #define SUBCLASS_HOST_BRIDGE 0x00
 
-#define COMMAND_IO (1u << 0)
-#define COMMAND_MEMORY (1u << 1)
-#define STATUS_CAPABILITIES (1u << 4)
+#define COMMAND_IO ((uint32_t)1 << 0)
+#define COMMAND_MEMORY ((uint32_t)1 << 1)
+#define STATUS_CAPABILITIES ((uint32_t)1 << 4)
 
-#define BAR_IO (1u << 0)
-#define BAR_TYPE (3u << 1)
-#define BAR_TYPE_64 (2u << 1)
-#define BAR_PREFETCHABLE (1u << 3)
-#define BAR_IO_ADDRESS 0xfffffffcu
-#define BAR_MEMORY_ADDRESS 0xfffffff0u
-#define ROM_ADDRESS 0xfffff800u
-#define UPPER_32 0xffffffff00000000ull
-#define UPPER_48 0xffffffffffff0000ull
+#define BAR_IO ((uint32_t)1 << 0)
+#define BAR_TYPE ((uint32_t)3 << 1)
+#define BAR_TYPE_64 ((uint32_t)2 << 1)
+#define BAR_PREFETCHABLE ((uint32_t)1 << 3)
+#define BAR_IO_ADDRESS ((uint32_t)0xfffffffc)
+#define BAR_MEMORY_ADDRESS ((uint32_t)0xfffffff0)
+#define ROM_ADDRESS ((uint32_t)0xfffff800)
+#define UPPER_32 ((uint64_t)0xffffffff00000000)
+#define UPPER_48 ((uint64_t)0xffffffffffff0000)
 
-#define WINDOW_WIDTH 0xfu
-#define WINDOW_IO_32 0x1u
-#define WINDOW_PREF_64 0x1u
-#define IO_GRANULE 0x1000u
-#define MEMORY_GRANULE 0x100000u
+#define WINDOW_WIDTH ((uint32_t)0xf)
+#define WINDOW_IO_32 ((uint32_t)0x1)
+#define WINDOW_PREF_64 ((uint32_t)0x1)
+#define IO_GRANULE ((uint32_t)0x1000)
+#define MEMORY_GRANULE ((uint32_t)0x100000)
 
 #define CAP_PM 0x01
 #define CAP_MSI 0x05
@@ -97,11 +99,11 @@
 #define REBAR_CAPABILITY(n) (0x04 + 8 * (n))
 #define REBAR_CONTROL(n) (0x08 + 8 * (n))
 #define REBAR_MAX_PAIRS 6
-#define REBAR_INDEX 0x7u
+#define REBAR_INDEX ((uint32_t)0x7)
 #define REBAR_PAIRS_SHIFT 5
-#define REBAR_PAIRS 0x7u
+#define REBAR_PAIRS ((uint32_t)0x7)
 #define REBAR_SIZE_SHIFT 8
-#define REBAR_SIZE 0x3fu
+#define REBAR_SIZE ((uint32_t)0x3f)
 // Size encoding n means 2^(n + 20) bytes, up to 2^63.
 #define REBAR_SIZE_BASE 20
 #define REBAR_SIZE_LAST 43
@@ -132,8 +134,8 @@ struct bar_sample {
 
 struct function_list {
     struct pci_function *items;
-    uint32_t count;
-    uint32_t capacity;
+    size_t count;
+    size_t capacity;
 };
 
 struct log_line {
@@ -156,15 +158,17 @@ static void line_flush(struct log_line *line) {
 
 // Items that would take the line past LOG_LINE_MAX go on a new one, which
 // repeats the prefix.
-__attribute__((format(printf, 2, 0))) static void line_vadd(struct log_line *line,
-                                                            const char *fmt, va_list args) {
+__attribute__((format(printf, 2, 0))) static void line_vadd(
+    struct log_line *line, const char *fmt, va_list args
+) {
     char item[LOG_ITEM_MAX];
     int n = vsnprintf(item, sizeof(item), fmt, args);
     if (n <= 0) {
         return;
     }
     size_t length = (size_t)n < sizeof(item) ? (size_t)n : sizeof(item) - 1;
-    if (line->length + length > LOG_LINE_MAX && line->length > line->prefix_length) {
+    if (line->length + length > LOG_LINE_MAX
+     && line->length > line->prefix_length) {
         line_flush(line);
     }
     if (length > LOG_LINE_MAX - line->length) {
@@ -174,8 +178,9 @@ __attribute__((format(printf, 2, 0))) static void line_vadd(struct log_line *lin
     line->length += length;
 }
 
-__attribute__((format(printf, 2, 3))) static void line_start(struct log_line *line,
-                                                             const char *fmt, ...) {
+__attribute__((format(printf, 2, 3))) static void line_start(
+    struct log_line *line, const char *fmt, ...
+) {
     line->length = 0;
     line->prefix_length = 0;
     va_list args;
@@ -185,8 +190,9 @@ __attribute__((format(printf, 2, 3))) static void line_start(struct log_line *li
     line->prefix_length = line->length;
 }
 
-__attribute__((format(printf, 2, 3))) static void line_add(struct log_line *line,
-                                                           const char *fmt, ...) {
+__attribute__((format(printf, 2, 3))) static void line_add(
+    struct log_line *line, const char *fmt, ...
+) {
     va_list args;
     va_start(args, fmt);
     line_vadd(line, fmt, args);
@@ -194,7 +200,8 @@ __attribute__((format(printf, 2, 3))) static void line_add(struct log_line *line
 }
 
 static bool is_host_bridge(const struct pci_function *f) {
-    return f->base_class == CLASS_BRIDGE && f->subclass == SUBCLASS_HOST_BRIDGE;
+    return f->base_class == CLASS_BRIDGE
+        && f->subclass == SUBCLASS_HOST_BRIDGE;
 }
 
 // Clears the bits of the command register, and returns what decode_restore()
@@ -205,23 +212,26 @@ static uint16_t decode_disable(const struct pci_function *f, uint16_t bits) {
         return 0;
     }
     uint16_t command = (uint16_t)pci_cfg_read(f->addr, PCI_COMMAND, 2);
-    if (command & bits) {
+    if ((command & bits) != 0) {
         pci_cfg_write(f->addr, PCI_COMMAND, 2, (uint16_t)(command & ~bits));
     }
     return command;
 }
 
-static void decode_restore(const struct pci_function *f, uint16_t command, uint16_t bits) {
-    if (command & bits) {
+static void decode_restore(
+    const struct pci_function *f, uint16_t command, uint16_t bits
+) {
+    if ((command & bits) != 0) {
         pci_cfg_write(f->addr, PCI_COMMAND, 2, command);
     }
 }
 
-static void bar_sample_read(struct pci_addr addr, uint8_t reg, bool last_slot,
-                            struct bar_sample *s) {
-    *s = (struct bar_sample){.reg = reg};
+static void bar_sample_read(
+    struct pci_addr addr, uint8_t reg, bool last_slot, struct bar_sample *s
+) {
+    *s = (struct bar_sample){ .reg = reg };
     s->low = pci_cfg_read(addr, reg, 4);
-    if (s->low & BAR_IO) {
+    if ((s->low & BAR_IO) != 0) {
         s->kind = PCI_BAR_IO;
         return;
     }
@@ -237,8 +247,10 @@ static void bar_sample_read(struct pci_addr addr, uint8_t reg, bool last_slot,
     }
 }
 
-static void rom_sample_read(struct pci_addr addr, uint8_t reg, struct bar_sample *s) {
-    *s = (struct bar_sample){.reg = reg, .kind = PCI_BAR_MEM32, .rom = true};
+static void rom_sample_read(
+    struct pci_addr addr, uint8_t reg, struct bar_sample *s
+) {
+    *s = (struct bar_sample){ .reg = reg, .kind = PCI_BAR_MEM32, .rom = true };
     s->low = pci_cfg_read(addr, reg, 4);
 }
 
@@ -269,11 +281,13 @@ static void bar_sample_probe(struct pci_addr addr, struct bar_sample *s) {
 // bits above the register as ones. A device that leaves upper address bits
 // unimplemented makes that meaningless, and the lowest bit it implements is
 // the size instead. Returns false if so.
-static bool bar_sample_result(const struct bar_sample *s, struct pci_bar *bar) {
-    *bar = (struct pci_bar){.reg = s->reg};
+static bool bar_sample_result(
+    const struct bar_sample *s, struct pci_bar *bar
+) {
+    *bar = (struct pci_bar){ .reg = s->reg };
     uint64_t bits;
     uint64_t above;
-    uint64_t base;
+    uintptr_t base;
     switch (s->kind) {
         case PCI_BAR_IO: {
             bits = s->readback & BAR_IO_ADDRESS;
@@ -290,7 +304,7 @@ static bool bar_sample_result(const struct bar_sample *s, struct pci_bar *bar) {
             break;
         }
         case PCI_BAR_MEM64: {
-            bits = s->readback & ~0xfull;
+            bits = s->readback & ~(uint64_t)0xf;
             above = 0;
             base = ((uint64_t)s->high << 32) | (s->low & BAR_MEMORY_ADDRESS);
             break;
@@ -304,7 +318,7 @@ static bool bar_sample_result(const struct bar_sample *s, struct pci_bar *bar) {
     }
 
     uint64_t mask = bits | above;
-    uint64_t size = ~mask + 1;
+    size_t size = ~mask + 1;
     bool contiguous = (size & (size - 1)) == 0;
     if (!contiguous) {
         size = mask & (~mask + 1);
@@ -316,32 +330,49 @@ static bool bar_sample_result(const struct bar_sample *s, struct pci_bar *bar) {
     return contiguous;
 }
 
-static void bar_record(const struct pci_function *f, const struct bar_sample *s,
-                       struct pci_bar *bar) {
+static void bar_record(
+    const struct pci_function *f, const struct bar_sample *s,
+    struct pci_bar *bar
+) {
     if (s->malformed) {
-        printf("PCI " ADDR_FMT " BAR at %#x: 64-bit BAR in the last slot, taken as "
-               "unimplemented\n", ADDR_ARGS(f->addr), s->reg);
+        printf(
+            "PCI " ADDR_FMT
+            " BAR at %#x: 64-bit BAR in the last slot, taken as "
+            "unimplemented\n",
+            ADDR_ARGS(f->addr), s->reg
+        );
     }
     if (!bar_sample_result(s, bar)) {
-        printf("PCI " ADDR_FMT " BAR at %#x: read back 0x%llx with gaps in its address bits, "
-               "sized 0x%llx from the lowest\n", ADDR_ARGS(f->addr), s->reg,
-               (unsigned long long)s->readback, (unsigned long long)bar->size);
+        printf(
+            "PCI " ADDR_FMT
+            " BAR at %#x: read back 0x%llx with gaps in its address bits, "
+            "sized 0x%llx from the lowest\n",
+            ADDR_ARGS(f->addr), s->reg, (unsigned long long)s->readback,
+            (unsigned long long)bar->size
+        );
     }
 }
 
 // Sizes the BARs in slots first to end - 1, and the expansion ROM BAR at
 // rom_reg unless it is 0, with the function's decoding off unless it is a host
 // bridge.
-static void size_bars(struct pci_function *f, unsigned first, unsigned end, uint8_t rom_reg) {
+static void size_bars(
+    struct pci_function *f, unsigned int first, unsigned int end,
+    uint8_t rom_reg
+) {
     struct bar_sample samples[6];
-    struct bar_sample rom = {.kind = PCI_BAR_NONE};
+    struct bar_sample rom = { .kind = PCI_BAR_NONE };
 
-    for (unsigned i = first; i < end; i++) {
-        bar_sample_read(f->addr, (uint8_t)(PCI_BARS + 4 * i), i + 1 == f->bar_count,
-                        &samples[i]);
+    for (size_t i = first; i < end; i++) {
+        bar_sample_read(
+            f->addr, (uint8_t)(PCI_BARS + 4 * i), i + 1 == f->bar_count,
+            &samples[i]
+        );
         if (samples[i].kind == PCI_BAR_MEM64 && i + 1 < end) {
             i++;
-            samples[i] = (struct bar_sample){.reg = (uint8_t)(PCI_BARS + 4 * i)};
+            samples[i] = (struct bar_sample){
+                .reg = (uint8_t)(PCI_BARS + 4 * i)
+            };
         }
     }
     if (rom_reg != 0) {
@@ -349,13 +380,13 @@ static void size_bars(struct pci_function *f, unsigned first, unsigned end, uint
     }
 
     uint16_t command = decode_disable(f, COMMAND_IO | COMMAND_MEMORY);
-    for (unsigned i = first; i < end; i++) {
+    for (size_t i = first; i < end; i++) {
         bar_sample_probe(f->addr, &samples[i]);
     }
     bar_sample_probe(f->addr, &rom);
     decode_restore(f, command, COMMAND_IO | COMMAND_MEMORY);
 
-    for (unsigned i = first; i < end; i++) {
+    for (size_t i = first; i < end; i++) {
         bar_record(f, &samples[i], &f->bars[i]);
     }
     if (rom_reg != 0) {
@@ -365,13 +396,14 @@ static void size_bars(struct pci_function *f, unsigned first, unsigned end, uint
 
 static void walk_capabilities(struct pci_function *f) {
     uint16_t status = (uint16_t)pci_cfg_read(f->addr, PCI_STATUS, 2);
-    if (!(status & STATUS_CAPABILITIES)) {
+    if ((status & STATUS_CAPABILITIES) == 0) {
         return;
     }
 
-    uint32_t pointer = f->header_type == HEADER_CARDBUS ? CARDBUS_CAPABILITIES : PCI_CAPABILITIES;
+    uint32_t pointer = f->header_type == HEADER_CARDBUS ? CARDBUS_CAPABILITIES
+        : PCI_CAPABILITIES;
     uint32_t offset = pci_cfg_read(f->addr, pointer, 1) & 0xfc;
-    for (unsigned i = 0; i < CAP_MAX_ENTRIES && offset >= CAP_MIN_OFFSET; i++) {
+    for (size_t i = 0; i < CAP_MAX_ENTRIES && offset >= CAP_MIN_OFFSET; i++) {
         uint32_t entry = pci_cfg_read(f->addr, offset, 2);
         uint8_t *found;
         switch (entry & 0xff) {
@@ -403,18 +435,21 @@ static void walk_capabilities(struct pci_function *f) {
     }
 
     if (f->pcie_cap != 0) {
-        uint32_t capabilities = pci_cfg_read(f->addr, f->pcie_cap + PCIE_CAPABILITIES, 2);
+        uint32_t capabilities = pci_cfg_read(
+            f->addr, f->pcie_cap + PCIE_CAPABILITIES, 2
+        );
         f->pcie_port_type = (capabilities >> 4) & 0xf;
     }
 }
 
 static void walk_extended_capabilities(struct pci_function *f) {
-    if (f->pcie_cap == 0 || pci_cfg_ecam_base(f->addr.segment, f->addr.bus) == 0) {
+    if (f->pcie_cap == 0
+     || pci_cfg_ecam_base(f->addr.segment, f->addr.bus) == 0) {
         return;
     }
 
     uint32_t offset = EXT_CAP_FIRST;
-    for (unsigned i = 0; i < EXT_CAP_MAX_ENTRIES; i++) {
+    for (size_t i = 0; i < EXT_CAP_MAX_ENTRIES; i++) {
         uint32_t header = pci_cfg_read(f->addr, offset, 4);
         if (header == 0 || header == 0xffffffff) {
             break;
@@ -471,8 +506,12 @@ static void read_bridge(struct pci_function *f) {
         f->pref_base = (uint64_t)(pref & 0xfff0) << 16;
         f->pref_limit = (pref & 0xfff00000) | (MEMORY_GRANULE - 1);
         if ((pref & WINDOW_WIDTH) == WINDOW_PREF_64) {
-            f->pref_base |= (uint64_t)pci_cfg_read(f->addr, BRIDGE_PREF_BASE_UPPER, 4) << 32;
-            f->pref_limit |= (uint64_t)pci_cfg_read(f->addr, BRIDGE_PREF_LIMIT_UPPER, 4) << 32;
+            f->pref_base
+                |= (uint64_t)pci_cfg_read(f->addr, BRIDGE_PREF_BASE_UPPER, 4)
+                << 32;
+            f->pref_limit
+                |= (uint64_t)pci_cfg_read(f->addr, BRIDGE_PREF_LIMIT_UPPER, 4)
+                << 32;
         }
     }
 
@@ -497,35 +536,46 @@ static const char *bar_kind_name(const struct pci_bar *bar) {
     }
 }
 
-static void line_add_window(struct log_line *line, const char *name, uint64_t base,
-                            uint64_t limit) {
+static void line_add_window(
+    struct log_line *line, const char *name, uintptr_t base, uint64_t limit
+) {
     if (limit < base) {
         line_add(line, " %s closed", name);
     } else {
-        line_add(line, " %s 0x%llx-0x%llx", name, (unsigned long long)base,
-                 (unsigned long long)limit);
+        line_add(
+            line, " %s 0x%llx-0x%llx", name, (unsigned long long)base,
+            (unsigned long long)limit
+        );
     }
 }
 
 static void log_function(const struct pci_function *f) {
     struct log_line line;
     line_start(&line, "PCI " ADDR_FMT, ADDR_ARGS(f->addr));
-    line_add(&line, " %04x:%04x class %02x%02x%02x type %u", f->vendor_id, f->device_id,
-             f->base_class, f->subclass, f->prog_if, f->header_type);
-    for (unsigned i = 0; i < f->bar_count; i++) {
+    line_add(
+        &line, " %04x:%04x class %02x%02x%02x type %u", f->vendor_id,
+        f->device_id, f->base_class, f->subclass, f->prog_if, f->header_type
+    );
+    for (size_t i = 0; i < f->bar_count; i++) {
         const struct pci_bar *bar = &f->bars[i];
         if (bar->size != 0) {
-            line_add(&line, " BAR%u %s 0x%llx+0x%llx", i, bar_kind_name(bar),
-                     (unsigned long long)bar->base, (unsigned long long)bar->size);
+            line_add(
+                &line, " BAR%zu %s 0x%llx+0x%llx", i, bar_kind_name(bar),
+                (unsigned long long)bar->base, (unsigned long long)bar->size
+            );
         }
     }
     if (f->rom.size != 0) {
-        line_add(&line, " ROM 0x%llx+0x%llx", (unsigned long long)f->rom.base,
-                 (unsigned long long)f->rom.size);
+        line_add(
+            &line, " ROM 0x%llx+0x%llx", (unsigned long long)f->rom.base,
+            (unsigned long long)f->rom.size
+        );
     }
     if (is_bridge(f)) {
-        line_add(&line, " pri %02x sec %02x sub %02x", f->primary_bus, f->secondary_bus,
-                 f->subordinate_bus);
+        line_add(
+            &line, " pri %02x sec %02x sub %02x", f->primary_bus,
+            f->secondary_bus, f->subordinate_bus
+        );
     }
     if (f->header_type == HEADER_BRIDGE) {
         line_add_window(&line, "io", f->io_base, f->io_limit);
@@ -537,10 +587,14 @@ static void log_function(const struct pci_function *f) {
 
 static struct pci_function *function_list_add(struct function_list *list) {
     if (list->count == list->capacity) {
-        uint32_t capacity = list->capacity == 0 ? 64 : list->capacity * 2;
-        struct pci_function *items = kmalloc(capacity * sizeof(*items));
+        size_t capacity = list->capacity == 0 ? 64 : list->capacity * 2;
+        struct pci_function *items = kmalloc(
+            capacity * sizeof(struct pci_function)
+        );
         if (list->count != 0) {
-            memcpy(items, list->items, list->count * sizeof(*items));
+            memcpy(
+                items, list->items, list->count * sizeof(struct pci_function)
+            );
         }
         kfree(list->items);
         list->items = items;
@@ -549,7 +603,9 @@ static struct pci_function *function_list_add(struct function_list *list) {
     return &list->items[list->count++];
 }
 
-static void scan_function(struct function_list *list, struct pci_addr addr, uint32_t id) {
+static void scan_function(
+    struct function_list *list, struct pci_addr addr, uint32_t id
+) {
     struct pci_function *f = function_list_add(list);
     f->addr = addr;
     f->vendor_id = (uint16_t)id;
@@ -591,8 +647,10 @@ static void scan_function(struct function_list *list, struct pci_addr addr, uint
     log_function(f);
 }
 
-static void scan_bus(struct function_list *list, uint16_t segment, uint8_t bus) {
-    for (unsigned device = 0; device < 32; device++) {
+static void scan_bus(
+    struct function_list *list, uint16_t segment, uint8_t bus
+) {
+    for (size_t device = 0; device < 32; device++) {
         struct pci_addr addr = {
             .segment = segment,
             .bus = bus,
@@ -604,10 +662,10 @@ static void scan_bus(struct function_list *list, uint16_t segment, uint8_t bus) 
             continue;
         }
         uint32_t header = pci_cfg_read(addr, PCI_HEADER_TYPE, 1);
-        unsigned functions = (header & HEADER_MULTI_FUNCTION) ? 8 : 1;
+        unsigned int functions = (header & HEADER_MULTI_FUNCTION) != 0 ? 8 : 1;
         scan_function(list, addr, id);
 
-        for (unsigned function = 1; function < functions; function++) {
+        for (size_t function = 1; function < functions; function++) {
             addr.function = (uint8_t)function;
             id = pci_cfg_read(addr, PCI_ID, 4);
             if ((id & 0xffff) != 0xffff) {
@@ -625,38 +683,49 @@ static uint32_t buses_to_scan(struct segment_buses **out) {
     const uint8_t *mcfg = NULL;
     size_t entry_count = 0;
     if (acpi_tables_ready()
-        && uacpi_table_find_by_signature(ACPI_MCFG_SIGNATURE, &table) == UACPI_STATUS_OK) {
+     && uacpi_table_find_by_signature(ACPI_MCFG_SIGNATURE, &table)
+     == UACPI_STATUS_OK) {
         mcfg = table.ptr;
         if (table.hdr->length > sizeof(struct acpi_mcfg)) {
             entry_count = (table.hdr->length - sizeof(struct acpi_mcfg))
-                          / sizeof(struct acpi_mcfg_allocation);
+                / sizeof(struct acpi_mcfg_allocation);
         }
     }
 
-    struct segment_buses *list = kmalloc((entry_count + 1) * sizeof(*list));
-    uint32_t count = 1;
+    struct segment_buses *list = kmalloc(
+        (entry_count + 1) * sizeof(struct segment_buses)
+    );
+    size_t count = 1;
     list[0].segment = 0;
     memset(list[0].buses, 0xff, sizeof(list[0].buses));
 
     for (size_t i = 0; i < entry_count; i++) {
         struct acpi_mcfg_allocation entry;
-        memcpy(&entry, mcfg + sizeof(struct acpi_mcfg) + i * sizeof(entry), sizeof(entry));
+        memcpy(
+            &entry,
+            mcfg + sizeof(struct acpi_mcfg)
+                + i * sizeof(struct acpi_mcfg_allocation),
+            sizeof(struct acpi_mcfg_allocation)
+        );
         if (entry.segment == 0) {
             continue;
         }
 
-        uint32_t j = 0;
+        size_t j = 0;
         while (j < count && list[j].segment < entry.segment) {
             j++;
         }
         if (j == count || list[j].segment != entry.segment) {
-            memmove(&list[j + 1], &list[j], (count - j) * sizeof(*list));
-            list[j] = (struct segment_buses){.segment = entry.segment};
+            memmove(
+                &list[j + 1], &list[j],
+                (count - j) * sizeof(struct segment_buses)
+            );
+            list[j] = (struct segment_buses){ .segment = entry.segment };
             count++;
         }
-        for (unsigned bus = entry.start_bus; bus <= entry.end_bus; bus++) {
+        for (size_t bus = entry.start_bus; bus <= entry.end_bus; bus++) {
             if (pci_cfg_ecam_base(entry.segment, (uint8_t)bus) != 0) {
-                list[j].buses[bus / 64] |= 1ull << (bus % 64);
+                list[j].buses[bus / 64] |= (uint64_t)1 << (bus % 64);
             }
         }
     }
@@ -671,44 +740,50 @@ static uint32_t buses_to_scan(struct segment_buses **out) {
 // A bridge whose secondary bus is not above its own bus has not been given
 // one, and must not be taken for the parent of the functions on bus 0.
 static void link_topology(void) {
-    uint32_t count = topology.function_count;
+    size_t count = topology.function_count;
     struct pci_function *functions = topology.functions;
     if (count == 0) {
         return;
     }
 
-    struct pci_function **bridges = kmalloc(256 * sizeof(*bridges));
-    struct pci_root_bus *roots = kmalloc(count * sizeof(*roots));
-    uint32_t root_count = 0;
+    struct pci_function **bridges = kmalloc(
+        256 * sizeof(struct pci_function *)
+    );
+    struct pci_root_bus *roots = kmalloc(count * sizeof(struct pci_root_bus));
+    size_t root_count = 0;
 
-    uint32_t first = 0;
+    size_t first = 0;
     while (first < count) {
         uint16_t segment = functions[first].addr.segment;
-        uint32_t end = first + 1;
+        size_t end = first + 1;
         while (end < count && functions[end].addr.segment == segment) {
             end++;
         }
 
-        memset(bridges, 0, 256 * sizeof(*bridges));
-        for (uint32_t i = first; i < end; i++) {
+        memset(bridges, 0, 256 * sizeof(struct pci_function *));
+        for (size_t i = first; i < end; i++) {
             struct pci_function *f = &functions[i];
             if (!is_bridge(f) || f->secondary_bus <= f->addr.bus) {
                 continue;
             }
             struct pci_function *other = bridges[f->secondary_bus];
             if (other != NULL) {
-                printf("PCI " ADDR_FMT ": secondary bus %02x is already behind " ADDR_FMT
-                       ", ignoring this bridge for it\n", ADDR_ARGS(f->addr),
-                       f->secondary_bus, ADDR_ARGS(other->addr));
+                printf(
+                    "PCI " ADDR_FMT ": secondary bus %02x is already behind "
+                    ADDR_FMT ", ignoring this bridge for it\n",
+                    ADDR_ARGS(f->addr), f->secondary_bus,
+                    ADDR_ARGS(other->addr)
+                );
                 continue;
             }
             bridges[f->secondary_bus] = f;
         }
 
-        for (uint32_t i = first; i < end; i++) {
+        for (size_t i = first; i < end; i++) {
             struct pci_function *f = &functions[i];
             f->parent = bridges[f->addr.bus];
-            bool first_on_bus = i == first || functions[i - 1].addr.bus != f->addr.bus;
+            bool first_on_bus = i == first
+                || functions[i - 1].addr.bus != f->addr.bus;
             if (f->parent == NULL && first_on_bus) {
                 roots[root_count].segment = segment;
                 roots[root_count].bus = f->addr.bus;
@@ -729,11 +804,12 @@ const struct pci_topology *pci_enum_scan(void) {
     }
 
     struct segment_buses *segments;
-    uint32_t segment_count = buses_to_scan(&segments);
-    struct function_list list = {.items = NULL, .count = 0, .capacity = 0};
-    for (uint32_t i = 0; i < segment_count; i++) {
-        for (unsigned bus = 0; bus < 256; bus++) {
-            if (segments[i].buses[bus / 64] & (1ull << (bus % 64))) {
+    size_t segment_count = buses_to_scan(&segments);
+    struct function_list list = { .items = NULL, .count = 0, .capacity = 0 };
+    for (size_t i = 0; i < segment_count; i++) {
+        for (size_t bus = 0; bus < 256; bus++) {
+            if ((segments[i].buses[bus / 64] & ((uint64_t)1 << (bus % 64)))
+             != 0) {
                 scan_bus(&list, segments[i].segment, (uint8_t)bus);
             }
         }
@@ -744,14 +820,18 @@ const struct pci_topology *pci_enum_scan(void) {
     topology.function_count = list.count;
     link_topology();
 
-    printf("PCI: %u functions, %u root buses\n", topology.function_count,
-           topology.root_bus_count);
+    printf(
+        "PCI: %zu functions, %zu root buses\n", topology.function_count,
+        topology.root_bus_count
+    );
     if (topology.root_bus_count != 0) {
         struct log_line line;
         line_start(&line, "PCI root buses:");
-        for (uint32_t i = 0; i < topology.root_bus_count; i++) {
-            line_add(&line, " %04x:%02x", topology.root_buses[i].segment,
-                     topology.root_buses[i].bus);
+        for (size_t i = 0; i < topology.root_bus_count; i++) {
+            line_add(
+                &line, " %04x:%02x", topology.root_buses[i].segment,
+                topology.root_buses[i].bus
+            );
         }
         line_flush(&line);
     }
@@ -765,13 +845,13 @@ const struct pci_topology *pci_enum_topology(void) {
 }
 
 static uint32_t addr_key(struct pci_addr addr) {
-    return (uint32_t)addr.segment << 16 | (uint32_t)addr.bus << 8 | (uint32_t)addr.device << 3
-           | addr.function;
+    return (uint32_t)addr.segment << 16 | (uint32_t)addr.bus << 8
+        | (uint32_t)addr.device << 3 | addr.function;
 }
 
 struct pci_function *pci_enum_find(struct pci_addr addr) {
     if (!__atomic_load_n(&scanned, __ATOMIC_ACQUIRE) || addr.device >= 32
-        || addr.function >= 8) {
+     || addr.function >= 8) {
         return NULL;
     }
 
@@ -793,13 +873,13 @@ struct pci_function *pci_enum_find(struct pci_addr addr) {
     return NULL;
 }
 
-static uint64_t rebar_size(unsigned encoding) {
-    return 1ull << (encoding + REBAR_SIZE_BASE);
+static size_t rebar_size(unsigned int encoding) {
+    return (uint64_t)1 << (encoding + REBAR_SIZE_BASE);
 }
 
-// Bit n set for each supported size encoding n: the capability register's
-// bits 31:4 are the sizes from 1 MiB to 128 TiB, and the control register's
-// bits 31:16 the larger ones that follow.
+// Bit n set for each supported size encoding n: the capability register's bits
+// 31:4 are the sizes from 1 MiB to 128 TiB, and the control register's bits
+// 31:16 the larger ones that follow.
 static uint64_t rebar_supported(uint32_t capability, uint32_t control) {
     return (uint64_t)(capability >> 4) | ((uint64_t)(control >> 16) << 28);
 }
@@ -808,12 +888,14 @@ static bool rebar_has(uint64_t supported, int encoding) {
     return (supported >> encoding) & 1;
 }
 
-static void rebar_resize(struct pci_function *f, unsigned index, uint32_t control_reg,
-                         unsigned encoding) {
+static void rebar_resize(
+    struct pci_function *f, unsigned int index, uint32_t control_reg,
+    unsigned int encoding
+) {
     struct pci_bar *bar = &f->bars[index];
     bool wide = bar->kind == PCI_BAR_MEM64;
-    uint64_t old_size = bar->size;
-    uint64_t new_size = rebar_size(encoding);
+    size_t old_size = bar->size;
+    size_t new_size = rebar_size(encoding);
 
     uint32_t low = pci_cfg_read(f->addr, bar->reg, 4);
     uint32_t high = wide ? pci_cfg_read(f->addr, bar->reg + 4, 4) : 0;
@@ -831,50 +913,73 @@ static void rebar_resize(struct pci_function *f, unsigned index, uint32_t contro
     pci_cfg_write(f->addr, bar->reg, 4, low);
     decode_restore(f, command, COMMAND_MEMORY);
 
-    unsigned now = (pci_cfg_read(f->addr, control_reg, 4) >> REBAR_SIZE_SHIFT) & REBAR_SIZE;
+    unsigned int now
+        = (pci_cfg_read(f->addr, control_reg, 4) >> REBAR_SIZE_SHIFT)
+        & REBAR_SIZE;
     if (now != encoding) {
-        printf("PCI " ADDR_FMT " BAR%u: Resizable BAR control reads size %u after writing "
-               "size %u\n", ADDR_ARGS(f->addr), index, now, encoding);
+        printf(
+            "PCI " ADDR_FMT
+            " BAR%u: Resizable BAR control reads size %u after writing size "
+            "%u\n",
+            ADDR_ARGS(f->addr), index, now, encoding
+        );
     }
     size_bars(f, index, index + 1, 0);
     if (bar->size != new_size) {
-        printf("PCI " ADDR_FMT " BAR%u: sizes to 0x%llx after resizing to 0x%llx\n",
-               ADDR_ARGS(f->addr), index, (unsigned long long)bar->size,
-               (unsigned long long)new_size);
+        printf(
+            "PCI " ADDR_FMT
+            " BAR%u: sizes to 0x%llx after resizing to 0x%llx\n",
+            ADDR_ARGS(f->addr), index, (unsigned long long)bar->size,
+            (unsigned long long)new_size
+        );
     }
-    printf("PCI " ADDR_FMT " BAR%u: Resizable BAR resized from 0x%llx to 0x%llx\n",
-           ADDR_ARGS(f->addr), index, (unsigned long long)old_size,
-           (unsigned long long)bar->size);
+    printf(
+        "PCI " ADDR_FMT
+        " BAR%u: Resizable BAR resized from 0x%llx to 0x%llx\n",
+        ADDR_ARGS(f->addr), index, (unsigned long long)old_size,
+        (unsigned long long)bar->size
+    );
 }
 
-static void rebar_shrink(struct pci_function *f, uint32_t control_reg, uint32_t capability,
-                         uint32_t control, uint64_t max_size) {
-    unsigned index = control & REBAR_INDEX;
+static void rebar_shrink(
+    struct pci_function *f, uint32_t control_reg, uint32_t capability,
+    uint32_t control, size_t max_size
+) {
+    unsigned int index = control & REBAR_INDEX;
     if (index >= f->bar_count) {
-        printf("PCI " ADDR_FMT ": Resizable BAR control for BAR%u, which the function does "
-               "not have\n", ADDR_ARGS(f->addr), index);
+        printf(
+            "PCI " ADDR_FMT
+            ": Resizable BAR control for BAR%u, which the function does not "
+            "have\n",
+            ADDR_ARGS(f->addr), index
+        );
         return;
     }
     struct pci_bar *bar = &f->bars[index];
-    if ((bar->kind != PCI_BAR_MEM32 && bar->kind != PCI_BAR_MEM64) || bar->size == 0) {
+    if ((bar->kind != PCI_BAR_MEM32 && bar->kind != PCI_BAR_MEM64)
+     || bar->size == 0) {
         return;
     }
 
-    unsigned current = (control >> REBAR_SIZE_SHIFT) & REBAR_SIZE;
+    unsigned int current = (control >> REBAR_SIZE_SHIFT) & REBAR_SIZE;
     if (current > REBAR_SIZE_LAST) {
-        printf("PCI " ADDR_FMT " BAR%u: Resizable BAR size %u is out of range, leaving it\n",
-               ADDR_ARGS(f->addr), index, current);
+        printf(
+            "PCI " ADDR_FMT
+            " BAR%u: Resizable BAR size %u is out of range, leaving it\n",
+            ADDR_ARGS(f->addr), index, current
+        );
         return;
     }
-    uint64_t current_size = rebar_size(current);
+    size_t current_size = rebar_size(current);
     if (current_size <= max_size) {
         return;
     }
 
     uint64_t supported = rebar_supported(capability, control);
     int pick = -1;
-    for (int n = REBAR_SIZE_LAST; n >= 0; n--) {
-        if (rebar_has(supported, n) && rebar_size((unsigned)n) <= max_size) {
+    for (size_t n = REBAR_SIZE_LAST + 1; n-- > 0; ) {
+        if (rebar_has(supported, n)
+         && rebar_size((unsigned int)n) <= max_size) {
             pick = n;
             break;
         }
@@ -882,58 +987,76 @@ static void rebar_shrink(struct pci_function *f, uint32_t control_reg, uint32_t 
     if (pick < 0 && supported != 0) {
         pick = __builtin_ctzll(supported);
     }
-    if (pick < 0 || rebar_size((unsigned)pick) >= current_size) {
-        printf("PCI " ADDR_FMT " BAR%u: Resizable BAR of 0x%llx supports no smaller size, "
-               "leaving it\n", ADDR_ARGS(f->addr), index, (unsigned long long)current_size);
+    if (pick < 0 || rebar_size((unsigned int)pick) >= current_size) {
+        printf(
+            "PCI " ADDR_FMT
+            " BAR%u: Resizable BAR of 0x%llx supports no smaller size, "
+            "leaving it\n",
+            ADDR_ARGS(f->addr), index, (unsigned long long)current_size
+        );
         return;
     }
 
     const struct handoff_framebuffer *fb = &core_handoff->video.framebuffer;
-    if (fb->present && fb->base >= bar->base && fb->base - bar->base < current_size) {
-        uint64_t offset = fb->base - bar->base;
-        uint64_t length = fb->size != 0 ? fb->size : 1;
-        uint64_t needed = length > UINT64_MAX - offset ? UINT64_MAX : offset + length;
+    if (fb->present && fb->base >= bar->base
+     && fb->base - bar->base < current_size) {
+        size_t offset = fb->base - bar->base;
+        size_t length = fb->size != 0 ? fb->size : 1;
+        uint64_t needed = length > UINT64_MAX - offset ? UINT64_MAX
+            : offset + length;
         int fit = -1;
-        for (int n = pick; n <= REBAR_SIZE_LAST; n++) {
-            if (rebar_has(supported, n) && rebar_size((unsigned)n) >= needed) {
+        for (size_t n = pick; n <= REBAR_SIZE_LAST; n++) {
+            if (rebar_has(supported, n)
+             && rebar_size((unsigned int)n) >= needed) {
                 fit = n;
                 break;
             }
         }
-        if (fit < 0 || rebar_size((unsigned)fit) >= current_size) {
-            printf("PCI " ADDR_FMT " BAR%u: Resizable BAR of 0x%llx holds the framebuffer at "
-                   "0x%llx+0x%llx, leaving it\n", ADDR_ARGS(f->addr), index,
-                   (unsigned long long)current_size, (unsigned long long)fb->base,
-                   (unsigned long long)fb->size);
+        if (fit < 0 || rebar_size((unsigned int)fit) >= current_size) {
+            printf(
+                "PCI " ADDR_FMT
+                " BAR%u: Resizable BAR of 0x%llx holds the framebuffer at "
+                "0x%llx+0x%llx, leaving it\n",
+                ADDR_ARGS(f->addr), index, (unsigned long long)current_size,
+                (unsigned long long)fb->base, (unsigned long long)fb->size
+            );
             return;
         }
         pick = fit;
     }
 
-    rebar_resize(f, index, control_reg, (unsigned)pick);
+    rebar_resize(f, index, control_reg, (unsigned int)pick);
 }
 
-void pci_enum_shrink_rebars(uint64_t max_size) {
+void pci_enum_shrink_rebars(size_t max_size) {
     if (!__atomic_load_n(&scanned, __ATOMIC_ACQUIRE)) {
         return;
     }
 
-    for (uint32_t i = 0; i < topology.function_count; i++) {
+    for (size_t i = 0; i < topology.function_count; i++) {
         struct pci_function *f = &topology.functions[i];
         if (f->rebar_ext_cap == 0) {
             continue;
         }
 
-        uint32_t first_control = pci_cfg_read(f->addr, f->rebar_ext_cap + REBAR_CONTROL(0), 4);
-        unsigned pairs = (first_control >> REBAR_PAIRS_SHIFT) & REBAR_PAIRS;
+        uint32_t first_control = pci_cfg_read(
+            f->addr, f->rebar_ext_cap + REBAR_CONTROL(0), 4
+        );
+        unsigned int pairs = (first_control >> REBAR_PAIRS_SHIFT)
+            & REBAR_PAIRS;
         if (pairs == 0 || pairs > REBAR_MAX_PAIRS) {
-            printf("PCI " ADDR_FMT ": Resizable BAR capability with %u BARs, ignoring it\n",
-                   ADDR_ARGS(f->addr), pairs);
+            printf(
+                "PCI " ADDR_FMT
+                ": Resizable BAR capability with %u BARs, ignoring it\n",
+                ADDR_ARGS(f->addr), pairs
+            );
             continue;
         }
-        for (unsigned n = 0; n < pairs; n++) {
+        for (size_t n = 0; n < pairs; n++) {
             uint32_t control_reg = f->rebar_ext_cap + REBAR_CONTROL(n);
-            uint32_t capability = pci_cfg_read(f->addr, f->rebar_ext_cap + REBAR_CAPABILITY(n), 4);
+            uint32_t capability = pci_cfg_read(
+                f->addr, f->rebar_ext_cap + REBAR_CAPABILITY(n), 4
+            );
             uint32_t control = pci_cfg_read(f->addr, control_reg, 4);
             rebar_shrink(f, control_reg, capability, control, max_size);
         }

@@ -18,8 +18,9 @@
 #ifndef VIRT__PCI_VIRT_H
 #define VIRT__PCI_VIRT_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <hw/pci_cfg.h>
 #include <virt/mmio.h>
 
@@ -42,12 +43,14 @@ struct pci_virt_hook {
 // pci_virt_init().
 void pci_virt_hook(struct pci_addr addr, const struct pci_virt_hook *hook);
 
-// Hands the guest's accesses to the pages holding [offset, offset + size) of
-// a memory BAR of the function to ops, wherever the guest puts the BAR, with
+// Hands the guest's accesses to the pages holding [offset, offset + size) of a
+// memory BAR of the function to ops, wherever the guest puts the BAR, with
 // offsets from the first of those pages. False where another range has any of
-// those pages, an MSI-X table's among them, where the BAR has as many ranges as
-// it can take, or where it is smaller than a page. After pci_virt_init().
-bool pci_virt_trap(struct pci_addr addr, unsigned bar, uint64_t offset, uint64_t size,
-                   const struct mmio_ops *ops, void *ctx);
+// those pages, an MSI-X table's among them, where the BAR has as many ranges
+// as it can take, or where it is smaller than a page. After pci_virt_init().
+bool pci_virt_trap(
+    struct pci_addr addr, unsigned int bar, uint64_t offset, size_t size,
+    const struct mmio_ops *ops, void *ctx
+);
 
 #endif

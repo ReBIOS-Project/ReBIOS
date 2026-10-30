@@ -15,10 +15,11 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stdint.h>
 #include <stdbool.h>
-#include <iommu/amdvi.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <iommu/dma.h>
+#include <iommu/amdvi.h>
 #include <iommu/iommu_tables.h>
 #include <iommu/vtd.h>
 #include <lib/log.h>
@@ -27,34 +28,34 @@
 #include <sys/x86.h>
 #include <virt/gpt.h>
 
-#define ENTRY_ADDR_MASK 0x000ffffffffff000ull
+#define ENTRY_ADDR_MASK ((uint64_t)0x000ffffffffff000)
 // What 4-level tables translate.
-#define DMA_ADDRESS_LIMIT (1ull << 48)
-#define LEGACY_END 0x100000ull
+#define DMA_ADDRESS_LIMIT ((uint64_t)1 << 48)
+#define LEGACY_END ((uint64_t)0x100000)
 
 // VT-d second-stage paging entries.
-#define VTD_R (1ull << 0)
-#define VTD_W (1ull << 1)
-#define VTD_PS (1ull << 7)
+#define VTD_R ((uint64_t)1 << 0)
+#define VTD_W ((uint64_t)1 << 1)
+#define VTD_PS ((uint64_t)1 << 7)
 
 // AMD-Vi host page table entries, where a directory entry names the level of
 // the table it points to, counting from 1, and a leaf names none.
-#define AMD_PR (1ull << 0)
+#define AMD_PR ((uint64_t)1 << 0)
 #define AMD_NEXT_LEVEL_SHIFT 9
-#define AMD_NEXT_LEVEL_MASK (7ull << 9)
-#define AMD_IR (1ull << 61)
-#define AMD_IW (1ull << 62)
+#define AMD_NEXT_LEVEL_MASK ((uint64_t)7 << 9)
+#define AMD_IR ((uint64_t)1 << 61)
+#define AMD_IW ((uint64_t)1 << 62)
 
 static uint32_t kind;
 // The largest level a leaf may be at: 0 for 4KiB pages only, 1 for 2MiB, 2 for
 // 1GiB, as every IOMMU takes.
-static int leaf_level_max;
+static size_t leaf_level_max;
 static uint64_t *root;
 static bool enabled;
 static struct spinlock dma_lock;
 
-static uint64_t level_size(int level) {
-    return 1ull << (12 + 9 * level);
+static size_t level_size(size_t level) {
+    return (uint64_t)1 << (12 + 9 * level);
 }
 
 static bool entry_present(uint64_t e) {
@@ -64,7 +65,7 @@ static bool entry_present(uint64_t e) {
     return (e & (VTD_R | VTD_W)) != 0;
 }
 
-static bool entry_leaf(uint64_t e, int level) {
+static bool entry_leaf(uint64_t e, size_t level) {
     if (level == 0) {
         return true;
     }
@@ -75,16 +76,17 @@ static bool entry_leaf(uint64_t e, int level) {
 }
 
 // The entry at level that points to the table below it.
-static uint64_t table_entry(uint64_t table, int level) {
+static uint64_t table_entry(uintptr_t table, size_t level) {
     if (kind == IOMMU_KIND_AMD) {
-        return table | AMD_PR | (uint64_t)level << AMD_NEXT_LEVEL_SHIFT | AMD_IR | AMD_IW;
+        return table | AMD_PR | (uint64_t)level << AMD_NEXT_LEVEL_SHIFT
+            | AMD_IR | AMD_IW;
     }
     return table | VTD_R | VTD_W;
 }
 
 // As in EPT, write access comes with read access.
-static uint64_t leaf_entry(uint64_t hpa, uint32_t prot, int level) {
-    if (!(prot & (GPT_R | GPT_W))) {
+static uint64_t leaf_entry(uintptr_t hpa, uint32_t prot, size_t level) {
+    if ((prot & (GPT_R | GPT_W)) == 0) {
         return 0;
     }
     bool write = (prot & GPT_W) != 0;
@@ -99,48 +101,51 @@ static uint32_t leaf_prot(uint64_t e) {
     return write ? GPT_R | GPT_W : GPT_R;
 }
 
-static uint64_t leaf_addr(uint64_t e, int level) {
+static uintptr_t leaf_addr(uint64_t e, size_t level) {
     return e & ENTRY_ADDR_MASK & ~(level_size(level) - 1);
 }
 
 // Returns the table that holds the entry for addr at level, creating the
 // tables on the way, and splitting large leaves into tables of the same
 // mappings.
-static uint64_t *table_for(uint64_t addr, int level) {
+static uint64_t *table_for(uintptr_t addr, size_t level) {
     uint64_t *table = root;
-    for (int l = 3; l > level; l--) {
+    for (size_t l = 3; l > level; l--) {
         uint64_t *e = &table[(addr >> (12 + 9 * l)) & 511];
         if (!entry_present(*e)) {
             uint64_t *next = page_alloc(1);
-            *e = table_entry((uint64_t)(uintptr_t)next, l);
+            *e = table_entry((uintptr_t)next, l);
         } else if (entry_leaf(*e, l)) {
-            uint64_t base = leaf_addr(*e, l);
+            uintptr_t base = leaf_addr(*e, l);
             uint32_t prot = leaf_prot(*e);
             uint64_t *next = page_alloc(1);
-            for (int i = 0; i < 512; i++) {
-                next[i] = leaf_entry(base + i * level_size(l - 1), prot, l - 1);
+            for (size_t i = 0; i < 512; i++) {
+                next[i] = leaf_entry(
+                    base + i * level_size(l - 1), prot, l - 1
+                );
             }
-            *e = table_entry((uint64_t)(uintptr_t)next, l);
+            *e = table_entry((uintptr_t)next, l);
         }
         table = (uint64_t *)(uintptr_t)(*e & ENTRY_ADDR_MASK);
     }
     return table;
 }
 
-static void map(uint64_t addr, uint64_t hpa, uint64_t size, uint32_t prot) {
+static void map(uintptr_t addr, uintptr_t hpa, size_t size, uint32_t prot) {
     while (size != 0) {
-        int level = 0;
-        for (int l = leaf_level_max; l > 0; l--) {
+        size_t level = 0;
+        for (size_t l = leaf_level_max; l > 0; l--) {
             uint64_t ls = level_size(l);
-            if ((addr & (ls - 1)) == 0 && (hpa & (ls - 1)) == 0 && size >= ls) {
+            if ((addr & (ls - 1)) == 0 && (hpa & (ls - 1)) == 0
+             && size >= ls) {
                 level = l;
                 break;
             }
         }
 
         uint64_t *table = table_for(addr, level);
-        // A leaf that replaces a table leaks the table, as the IOMMUs may still
-        // walk it until their caches are flushed.
+        // A leaf that replaces a table leaks the table, as the IOMMUs may
+        // still walk it until their caches are flushed.
         table[(addr >> (12 + 9 * level)) & 511] = leaf_entry(hpa, prot, level);
 
         addr += level_size(level);
@@ -177,12 +182,15 @@ void dma_init(void) {
         panic("No IOMMU can remap DMA\n");
     }
     if (tables->truncated) {
-        printf("Devices of the IOMMUs the tables leave out keep untranslated DMA\n");
+        printf(
+            "Devices of the IOMMUs the tables leave out keep untranslated "
+            "DMA\n"
+        );
     }
     root = page_alloc(1);
 }
 
-void dma_map(uint64_t gpa, uint64_t hpa, uint64_t size, uint32_t prot) {
+void dma_map(uintptr_t gpa, uintptr_t hpa, size_t size, uint32_t prot) {
     if (root == NULL) {
         panic("Guest memory mapped before the IOMMU tables\n");
     }
@@ -198,15 +206,17 @@ void dma_map(uint64_t gpa, uint64_t hpa, uint64_t size, uint32_t prot) {
 // devices is mapped for all, one to one, as the guest has it too, but for the
 // first MiB, the guest's own memory.
 static void reserved_regions_apply(const struct iommu_tables *tables) {
-    for (uint32_t i = 0; i < tables->reserved_count; i++) {
+    for (size_t i = 0; i < tables->reserved_count; i++) {
         const struct iommu_reserved_region *r = &tables->reserved[i];
         if (r->last >= DMA_ADDRESS_LIMIT) {
-            printf("IOMMU region %#llx-%#llx is beyond the tables' reach\n",
-                   (unsigned long long)r->base, (unsigned long long)r->last);
+            printf(
+                "IOMMU region %#llx-%#llx is beyond the tables' reach\n",
+                (unsigned long long)r->base, (unsigned long long)r->last
+            );
             continue;
         }
-        uint64_t base = r->base & ~(uint64_t)(PAGE_SIZE - 1);
-        uint64_t last = r->last | (PAGE_SIZE - 1);
+        uintptr_t base = r->base & ~(uint64_t)(PAGE_SIZE - 1);
+        uintptr_t last = r->last | (PAGE_SIZE - 1);
         if (last < LEGACY_END) {
             continue;
         }
@@ -229,9 +239,9 @@ void dma_enable(void) {
     spinlock_acquire(&dma_lock);
     reserved_regions_apply(tables);
     if (kind == IOMMU_KIND_AMD) {
-        amdvi_enable((uint64_t)(uintptr_t)root);
+        amdvi_enable((uintptr_t)root);
     } else {
-        vtd_enable((uint64_t)(uintptr_t)root);
+        vtd_enable((uintptr_t)root);
     }
     enabled = true;
     spinlock_release(&dma_lock);

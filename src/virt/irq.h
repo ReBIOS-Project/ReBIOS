@@ -18,8 +18,9 @@
 #ifndef VIRT__IRQ_H
 #define VIRT__IRQ_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <sys/cpu.h>
 #include <virt/vcpu.h>
 
@@ -44,13 +45,15 @@ struct irq_pci_line {
 // those neither ISA devices (isa_claimed, bit n for IRQ n), the SCI, nor the
 // hypervisor's own devices use, in turn, so that as few GSIs share one as can
 // be. Before the guest runs.
-void irq_route_pci(const struct irq_pci_line *lines, uint32_t count, uint16_t isa_claimed);
+void irq_route_pci(
+    const struct irq_pci_line *lines, size_t count, uint16_t isa_claimed
+);
 
 // The ISA IRQ the guest's 8259s see a GSI's interrupts on, or -1.
 int irq_isa_irq(uint32_t gsi);
 // The GSI of an ISA IRQ, as the MADT overrides it, or UINT32_MAX. Before
 // irq_route_pci() puts PCI's on ISA IRQs.
-uint32_t irq_isa_gsi(unsigned irq);
+uint32_t irq_isa_gsi(unsigned int irq);
 
 // After the guest changed an I/O APIC entry.
 void irq_gsi_changed(uint32_t gsi);
@@ -75,7 +78,7 @@ struct irq_slot {
     struct cpu *cpu;
     uint8_t vector;
     // A power of two, which the block is aligned to.
-    uint8_t count;
+    size_t count;
     // Whether interrupt remapping entries [remap, remap + count) back the
     // block, for messages carrying the requester ID requester (-1 where none
     // is known).
@@ -84,14 +87,14 @@ struct irq_slot {
     int32_t requester;
     // Called on the processor that took one of the vectors, before its EOI,
     // with the vector's index in the block.
-    void (*taken)(void *ctx, unsigned index);
+    void (*taken)(void *ctx, unsigned int index);
     void *ctx;
 };
 
 // Gives the slot count vectors on a processor whose APIC ID a message in
 // compatibility format can name, on cpu if it has room, freeing those the slot
 // had; false where no processor has room.
-bool irq_slot_place(struct irq_slot *s, struct cpu *cpu, unsigned count);
+bool irq_slot_place(struct irq_slot *s, struct cpu *cpu, size_t count);
 void irq_slot_free(struct irq_slot *s);
 // A vector the hypervisor keeps for a source of its own, outside the slots':
 // false where interrupt remapping has no entry for it.

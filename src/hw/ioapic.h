@@ -18,8 +18,9 @@
 #ifndef HW__IOAPIC_H
 #define HW__IOAPIC_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <lib/spinlock.h>
 
 #define IOAPIC_REG_ID 0x00
@@ -28,24 +29,24 @@
 #define IOAPIC_REG_REDIR(n) (0x10 + 2 * (n))
 
 // Redirection table entry fields.
-#define IOAPIC_RTE_VECTOR_MASK 0xffull
-#define IOAPIC_RTE_DELIVERY_MASK (7ull << 8)
-#define IOAPIC_RTE_DELIVERY_FIXED (0ull << 8)
-#define IOAPIC_RTE_DELIVERY_LOWEST (1ull << 8)
-#define IOAPIC_RTE_DELIVERY_EXTINT (7ull << 8)
-#define IOAPIC_RTE_LOGICAL (1ull << 11)
-#define IOAPIC_RTE_PENDING (1ull << 12)
-#define IOAPIC_RTE_ACTIVE_LOW (1ull << 13)
-#define IOAPIC_RTE_REMOTE_IRR (1ull << 14)
-#define IOAPIC_RTE_LEVEL (1ull << 15)
-#define IOAPIC_RTE_MASKED (1ull << 16)
+#define IOAPIC_RTE_VECTOR_MASK ((uint64_t)0xff)
+#define IOAPIC_RTE_DELIVERY_MASK ((uint64_t)7 << 8)
+#define IOAPIC_RTE_DELIVERY_FIXED ((uint64_t)0 << 8)
+#define IOAPIC_RTE_DELIVERY_LOWEST ((uint64_t)1 << 8)
+#define IOAPIC_RTE_DELIVERY_EXTINT ((uint64_t)7 << 8)
+#define IOAPIC_RTE_LOGICAL ((uint64_t)1 << 11)
+#define IOAPIC_RTE_PENDING ((uint64_t)1 << 12)
+#define IOAPIC_RTE_ACTIVE_LOW ((uint64_t)1 << 13)
+#define IOAPIC_RTE_REMOTE_IRR ((uint64_t)1 << 14)
+#define IOAPIC_RTE_LEVEL ((uint64_t)1 << 15)
+#define IOAPIC_RTE_MASKED ((uint64_t)1 << 16)
 #define IOAPIC_RTE_DEST_SHIFT 56
 
 // The I/O APIC versions from which the EOI register is there.
 #define IOAPIC_VERSION_EOI 0x20
 
 struct ioapic {
-    uint64_t base;
+    uintptr_t base;
     uint32_t gsi_base;
     uint32_t pins;
     // The ID the MADT gives it.
@@ -62,8 +63,8 @@ struct ioapic {
 // acpi_init().
 void ioapic_init(void);
 
-uint32_t ioapic_count(void);
-struct ioapic *ioapic_get(uint32_t index);
+size_t ioapic_count(void);
+struct ioapic *ioapic_get(size_t index);
 // The I/O APIC a GSI goes to, and its pin there, or NULL.
 struct ioapic *ioapic_for_gsi(uint32_t gsi, uint32_t *pin);
 

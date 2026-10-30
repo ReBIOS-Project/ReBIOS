@@ -18,18 +18,17 @@
 #ifndef VIRT__TASK_H
 #define VIRT__TASK_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <virt/vcpu.h>
 
 // What started a task switch, in the order VMX's exit qualification numbers
 // them.
-enum task_source {
-    TASK_CALL,
-    TASK_IRET,
-    TASK_JMP,
-    TASK_GATE,
-};
+#define TASK_CALL 0
+#define TASK_IRET 1
+#define TASK_JMP 2
+#define TASK_GATE 3
 
 // For TASK_GATE, the event delivered through the IDT's task gate.
 struct task_event {
@@ -46,11 +45,13 @@ struct task_event {
     uint32_t error;
 };
 
-// Carries out the task switch to the TSS selector names, which VMX, unlike
-// the processor outside it, leaves to the hypervisor once it has checked the
+// Carries out the task switch to the TSS selector names, which VMX, unlike the
+// processor outside it, leaves to the hypervisor once it has checked the
 // selector and the new TSS's descriptor. length is the instruction's that
 // started it, if one did; event is NULL but for TASK_GATE.
-void task_switch(struct vcpu *v, uint16_t selector, enum task_source source,
-                 const struct task_event *event, unsigned length);
+void task_switch(
+    struct vcpu *v, uint16_t selector, int source,
+    const struct task_event *event, size_t length
+);
 
 #endif

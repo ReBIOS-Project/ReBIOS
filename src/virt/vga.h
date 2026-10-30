@@ -18,8 +18,9 @@
 #ifndef VIRT__VGA_H
 #define VIRT__VGA_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 // Gives the guest a VGA of its own when it has no usable video BIOS, or the
 // configuration asks for one: its registers, its memory window, and its
@@ -30,11 +31,11 @@ bool vga_emulated(void);
 
 // The size of the linear framebuffer vga_init() is to give the guest, 0 if it
 // is to give none.
-uint64_t vga_lfb_size(void);
+size_t vga_lfb_size(void);
 
 // Where the guest finds the emulated VGA's linear framebuffer, or 0 if it has
 // none.
-uint64_t vga_lfb(void);
+uintptr_t vga_lfb(void);
 
 // The framebuffer's size as the emulated VGA's picture stands on it.
 void vga_screen_size(uint32_t *width, uint32_t *height);

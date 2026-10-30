@@ -22,10 +22,10 @@
 #define GDT_DATA 0x10
 #define GDT_TSS 0x18
 
-// Each CPU has a naturally aligned area holding its struct cpu, its IST stacks,
-// and its stack, so that this_cpu() can find the struct from the stack pointer
-// without the help of a segment base, which SVM does not switch. Other stacks
-// are areas of the same size, which begin with the CPU running on them.
+// Each CPU has a naturally aligned area holding its struct cpu, its IST
+// stacks, and its stack, so that this_cpu() can find the struct from the stack
+// pointer without the help of a segment base, which SVM does not switch. Other
+// stacks are areas of the same size, which begin with the CPU running on them.
 #define CPU_AREA_SIZE 0x10000
 #define CPU_IST_NMI_TOP 0x2000
 #define CPU_IST_DF_TOP 0x3000
@@ -36,9 +36,9 @@
 
 #ifndef __ASSEMBLER__
 
-#include <stdint.h>
-#include <stddef.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 struct tss64 {
     uint32_t reserved0;
@@ -85,7 +85,9 @@ struct cpu {
     uint64_t watchdog_next;
 };
 
-_Static_assert(sizeof(struct cpu) <= 0x1000, "struct cpu overlaps the IST stacks");
+_Static_assert(
+    sizeof(struct cpu) <= 0x1000, "struct cpu overlaps the IST stacks"
+);
 
 static inline struct cpu *this_cpu(void) {
     uintptr_t rsp;
@@ -97,16 +99,18 @@ static inline struct cpu *this_cpu(void) {
 void cpu_slice_start(void);
 bool cpu_slice_over(void);
 
-struct cpu *cpu_area_alloc(uint32_t index, uint32_t apic_id, bool bsp);
+struct cpu *cpu_area_alloc(size_t index, uint32_t apic_id, bool bsp);
 void cpu_tables_load(struct cpu *cpu, bool use_ist);
-uint64_t cpu_idt_base(void);
-uint64_t cpu_stack_top(struct cpu *cpu);
+uintptr_t cpu_idt_base(void);
+uintptr_t cpu_stack_top(struct cpu *cpu);
 
 // Runs fn on the given stack, never returning.
-__attribute__((noreturn)) void switch_stack(uint64_t stack_top, void (*fn)(void *), void *arg);
+__attribute__((noreturn)) void switch_stack(
+    uintptr_t stack_top, void (*fn)(void *), void *arg
+);
 
 // Code an NMI that reaches the host restarts from start, if it interrupts it.
-void cpu_nmi_restart(uint64_t start, uint64_t end);
+void cpu_nmi_restart(uintptr_t start, uintptr_t end);
 
 // Where interrupts the host takes go.
 void cpu_interrupt_handler(void (*handler)(uint8_t vector));
@@ -119,9 +123,9 @@ void cpu_guest_describer(size_t (*describe)(char *buf, size_t size));
 void cpu_halt(void);
 
 // MAXPHYADDR.
-unsigned cpu_physical_address_bits(void);
+unsigned int cpu_physical_address_bits(void);
 // How far an APIC ID shifts right to its package's ID.
-unsigned cpu_package_shift(void);
+unsigned int cpu_package_shift(void);
 
 #endif
 

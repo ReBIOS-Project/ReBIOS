@@ -18,9 +18,9 @@
 #ifndef VIRT__SVM_H
 #define VIRT__SVM_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdbool.h>
 
 // VMCB layout (APM 24593 rev. 3.45, Appendix B).
 struct vmcb_control {
@@ -123,16 +123,26 @@ struct vmcb {
     struct vmcb_save save;
 } __attribute__((packed));
 
-_Static_assert(offsetof(struct vmcb_control, iopm_base_pa) == 0x40, "VMCB layout");
-_Static_assert(offsetof(struct vmcb_control, guest_asid) == 0x58, "VMCB layout");
+_Static_assert(
+    offsetof(struct vmcb_control, iopm_base_pa) == 0x40, "VMCB layout"
+);
+_Static_assert(
+    offsetof(struct vmcb_control, guest_asid) == 0x58, "VMCB layout"
+);
 _Static_assert(offsetof(struct vmcb_control, exitcode) == 0x70, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_control, eventinj) == 0xa8, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_control, n_cr3) == 0xb0, "VMCB layout");
-_Static_assert(offsetof(struct vmcb_control, vmcb_clean) == 0xc0, "VMCB layout");
+_Static_assert(
+    offsetof(struct vmcb_control, vmcb_clean) == 0xc0, "VMCB layout"
+);
 _Static_assert(offsetof(struct vmcb_control, nrip) == 0xc8, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_control, insn_len) == 0xd0, "VMCB layout");
-_Static_assert(offsetof(struct vmcb_control, avic_backing_page) == 0xe0, "VMCB layout");
-_Static_assert(offsetof(struct vmcb_control, avic_physical_table) == 0xf8, "VMCB layout");
+_Static_assert(
+    offsetof(struct vmcb_control, avic_backing_page) == 0xe0, "VMCB layout"
+);
+_Static_assert(
+    offsetof(struct vmcb_control, avic_physical_table) == 0xf8, "VMCB layout"
+);
 _Static_assert(sizeof(struct vmcb_control) == 0x400, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_save, tr) == 0x90, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_save, cpl) == 0xcb, "VMCB layout");
@@ -144,34 +154,34 @@ _Static_assert(offsetof(struct vmcb_save, rax) == 0x1f8, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_save, cr2) == 0x240, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 
-// Intercept vector 0, at offset 000h: writes of CR4 (APM 24593 rev. 3.45, Table
-// B-1).
-#define SVM_INTERCEPT_CR4_WRITE (1u << 20)
+// Intercept vector 0, at offset 000h: writes of CR4 (APM 24593 rev. 3.45,
+// Table B-1).
+#define SVM_INTERCEPT_CR4_WRITE ((uint32_t)1 << 20)
 
 // Intercept vector 3, at offset 00Ch.
-#define SVM_INTERCEPT_INTR (1u << 0)
-#define SVM_INTERCEPT_NMI (1u << 1)
-#define SVM_INTERCEPT_SMI (1u << 2)
-#define SVM_INTERCEPT_INIT (1u << 3)
-#define SVM_INTERCEPT_VINTR (1u << 4)
-#define SVM_INTERCEPT_CPUID (1u << 18)
-#define SVM_INTERCEPT_RSM (1u << 19)
-#define SVM_INTERCEPT_INVD (1u << 22)
-#define SVM_INTERCEPT_HLT (1u << 24)
-#define SVM_INTERCEPT_IOIO (1u << 27)
-#define SVM_INTERCEPT_MSR (1u << 28)
-#define SVM_INTERCEPT_TASK_SWITCH (1u << 29)
-#define SVM_INTERCEPT_SHUTDOWN (1u << 31)
+#define SVM_INTERCEPT_INTR ((uint32_t)1 << 0)
+#define SVM_INTERCEPT_NMI ((uint32_t)1 << 1)
+#define SVM_INTERCEPT_SMI ((uint32_t)1 << 2)
+#define SVM_INTERCEPT_INIT ((uint32_t)1 << 3)
+#define SVM_INTERCEPT_VINTR ((uint32_t)1 << 4)
+#define SVM_INTERCEPT_CPUID ((uint32_t)1 << 18)
+#define SVM_INTERCEPT_RSM ((uint32_t)1 << 19)
+#define SVM_INTERCEPT_INVD ((uint32_t)1 << 22)
+#define SVM_INTERCEPT_HLT ((uint32_t)1 << 24)
+#define SVM_INTERCEPT_IOIO ((uint32_t)1 << 27)
+#define SVM_INTERCEPT_MSR ((uint32_t)1 << 28)
+#define SVM_INTERCEPT_TASK_SWITCH ((uint32_t)1 << 29)
+#define SVM_INTERCEPT_SHUTDOWN ((uint32_t)1 << 31)
 
 // Intercept vector 4, at offset 010h.
-#define SVM_INTERCEPT_VMRUN (1u << 0)
-#define SVM_INTERCEPT_VMMCALL (1u << 1)
-#define SVM_INTERCEPT_VMLOAD (1u << 2)
-#define SVM_INTERCEPT_VMSAVE (1u << 3)
-#define SVM_INTERCEPT_STGI (1u << 4)
-#define SVM_INTERCEPT_CLGI (1u << 5)
-#define SVM_INTERCEPT_SKINIT (1u << 6)
-#define SVM_INTERCEPT_XSETBV (1u << 13)
+#define SVM_INTERCEPT_VMRUN ((uint32_t)1 << 0)
+#define SVM_INTERCEPT_VMMCALL ((uint32_t)1 << 1)
+#define SVM_INTERCEPT_VMLOAD ((uint32_t)1 << 2)
+#define SVM_INTERCEPT_VMSAVE ((uint32_t)1 << 3)
+#define SVM_INTERCEPT_STGI ((uint32_t)1 << 4)
+#define SVM_INTERCEPT_CLGI ((uint32_t)1 << 5)
+#define SVM_INTERCEPT_SKINIT ((uint32_t)1 << 6)
+#define SVM_INTERCEPT_XSETBV ((uint32_t)1 << 13)
 
 // Exit codes (APM 24593 rev. 3.45, Appendix C).
 #define SVM_EXIT_CR0_WRITE 0x10
@@ -201,44 +211,44 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 #define SVM_EXIT_NPF 0x400
 #define SVM_EXIT_AVIC_INCOMPLETE_IPI 0x401
 #define SVM_EXIT_AVIC_NOACCEL 0x402
-#define SVM_EXIT_INVALID 0xffffffffffffffffull
+#define SVM_EXIT_INVALID ((uint64_t)0xffffffffffffffff)
 
 // Nested page fault error code: the access was a write, or a fetch.
-#define NPF_WRITE (1ull << 1)
-#define NPF_FETCH (1ull << 4)
+#define NPF_WRITE ((uint64_t)1 << 1)
+#define NPF_FETCH ((uint64_t)1 << 4)
 
 // Virtual interrupt control, at offset 060h.
-#define SVM_VINTR_IRQ (1ull << 8)
-#define SVM_VINTR_GIF (1ull << 9)
-#define SVM_VINTR_NMI (1ull << 11)
-#define SVM_VINTR_NMI_MASK (1ull << 12)
+#define SVM_VINTR_IRQ ((uint64_t)1 << 8)
+#define SVM_VINTR_GIF ((uint64_t)1 << 9)
+#define SVM_VINTR_NMI ((uint64_t)1 << 11)
+#define SVM_VINTR_NMI_MASK ((uint64_t)1 << 12)
 #define SVM_VINTR_PRIO_SHIFT 16
-#define SVM_VINTR_PRIO_MASK (0xfull << SVM_VINTR_PRIO_SHIFT)
-#define SVM_VINTR_IGN_TPR (1ull << 20)
-#define SVM_VINTR_MASKING (1ull << 24)
-#define SVM_VINTR_GIF_ENABLE (1ull << 25)
-#define SVM_VINTR_NMI_ENABLE (1ull << 26)
-#define SVM_VINTR_X2AVIC (1ull << 30)
-#define SVM_VINTR_AVIC (1ull << 31)
+#define SVM_VINTR_PRIO_MASK ((uint64_t)0xf << SVM_VINTR_PRIO_SHIFT)
+#define SVM_VINTR_IGN_TPR ((uint64_t)1 << 20)
+#define SVM_VINTR_MASKING ((uint64_t)1 << 24)
+#define SVM_VINTR_GIF_ENABLE ((uint64_t)1 << 25)
+#define SVM_VINTR_NMI_ENABLE ((uint64_t)1 << 26)
+#define SVM_VINTR_X2AVIC ((uint64_t)1 << 30)
+#define SVM_VINTR_AVIC ((uint64_t)1 << 31)
 
 // Virtualisation extensions, at offset 0B8h.
-#define SVM_VIRT_EXT_LBR (1ull << 0)
+#define SVM_VIRT_EXT_LBR ((uint64_t)1 << 0)
 
 // Event injection.
-#define SVM_EVENT_VALID (1ull << 31)
-#define SVM_EVENT_ERROR_VALID (1ull << 11)
-#define SVM_EVENT_TYPE_INTR (0ull << 8)
-#define SVM_EVENT_TYPE_NMI (2ull << 8)
-#define SVM_EVENT_TYPE_EXCEPTION (3ull << 8)
-#define SVM_EVENT_TYPE_SOFT_INT (4ull << 8)
+#define SVM_EVENT_VALID ((uint64_t)1 << 31)
+#define SVM_EVENT_ERROR_VALID ((uint64_t)1 << 11)
+#define SVM_EVENT_TYPE_INTR ((uint64_t)0 << 8)
+#define SVM_EVENT_TYPE_NMI ((uint64_t)2 << 8)
+#define SVM_EVENT_TYPE_EXCEPTION ((uint64_t)3 << 8)
+#define SVM_EVENT_TYPE_SOFT_INT ((uint64_t)4 << 8)
 
 #define MSR_DC_CFG 0xc0011022
-#define DC_CFG_ERRATUM_383 (1ull << 47)
+#define DC_CFG_ERRATUM_383 ((uint64_t)1 << 47)
 #define MSR_VM_CR 0xc0010114
 #define MSR_VM_HSAVE_PA 0xc0010117
-#define VM_CR_R_INIT (1u << 1)
-#define VM_CR_LOCK (1u << 3)
-#define VM_CR_SVMDIS (1u << 4)
+#define VM_CR_R_INIT ((uint32_t)1 << 1)
+#define VM_CR_LOCK ((uint32_t)1 << 3)
+#define VM_CR_SVMDIS ((uint32_t)1 << 4)
 
 struct vcpu;
 
@@ -248,9 +258,9 @@ extern bool svm_erratum_383;
 // Whether VMRUN and #VMEXIT switch DebugCtl and the last branch records.
 extern bool svm_lbr_virtualisation;
 extern bool svm_nrips;
-// The processor keeps the guest's NMI blocking and takes a virtual NMI when the
-// guest can (APM 24593 rev. 3.45, 15.21.10), with GIF virtualised, as Linux
-// 7.3's KVM has it.
+// The processor keeps the guest's NMI blocking and takes a virtual NMI when
+// the guest can (APM 24593 rev. 3.45, 15.21.10), with GIF virtualised, as
+// Linux 7.3's KVM has it.
 extern bool svm_vnmi;
 // The processor's AVIC (APM 24593 rev. 3.45, 15.29), where it can be used, and
 // whether it runs x2APIC mode's MSRs too (APM 24593 rev. 3.45, 15.29.10).
@@ -259,8 +269,7 @@ extern bool svm_x2avic;
 
 bool svm_supported(void);
 // The guest's translations go before its next run, as when the hypervisor
-// changes its paging state or nested page tables (APM 24593 rev. 3.45,
-// 15.16).
+// changes its paging state or nested page tables (APM 24593 rev. 3.45, 15.16).
 void svm_flush_guest_tlb(struct vcpu *v);
 bool svm_huge_pages(void);
 void svm_cpu_init(void);

@@ -18,8 +18,8 @@
 #ifndef VIRT__VIOAPIC_H
 #define VIRT__VIOAPIC_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <virt/vcpu.h>
 
 // Gives the guest I/O APICs of its own where the host's are, which the

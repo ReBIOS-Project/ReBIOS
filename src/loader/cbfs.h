@@ -18,11 +18,12 @@
 #ifndef LOADER__CBFS_H
 #define LOADER__CBFS_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 // Finds a file in the coreboot file system of the boot flash, if the machine
 // runs coreboot.
-bool cbfs_find_file(const char *name, const void **data, uint32_t *size);
+bool cbfs_find_file(const char *name, const void **data, size_t *size);
 
 #endif

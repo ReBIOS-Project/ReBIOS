@@ -16,12 +16,12 @@
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdbool.h>
+#include <iommu/remap.h>
 #include <iommu/amdvi.h>
 #include <iommu/iommu_tables.h>
-#include <iommu/remap.h>
 #include <iommu/vtd.h>
 
 // VT-d's one table serves every requester, AMD-Vi has one per device.
@@ -44,11 +44,12 @@ int32_t remap_requester(uint8_t type, uint8_t id) {
     return d != NULL ? d->rid : -1;
 }
 
-int remap_alloc(int32_t requester, unsigned count) {
-    return amd() ? amdvi_remap_alloc(requester, count) : vtd_remap_alloc(count);
+int remap_alloc(int32_t requester, size_t count) {
+    return amd() ? amdvi_remap_alloc(requester, count)
+        : vtd_remap_alloc(count);
 }
 
-void remap_free(int32_t requester, int index, unsigned count) {
+void remap_free(int32_t requester, int index, size_t count) {
     if (amd()) {
         amdvi_remap_free(requester, index, count);
     } else {
@@ -56,7 +57,9 @@ void remap_free(int32_t requester, int index, unsigned count) {
     }
 }
 
-void remap_set(int32_t requester, int index, uint32_t apic_id, uint8_t vector, bool level) {
+void remap_set(
+    int32_t requester, int index, uint32_t apic_id, uint8_t vector, bool level
+) {
     if (amd()) {
         amdvi_remap_set(requester, index, apic_id, vector);
     } else {
@@ -64,7 +67,9 @@ void remap_set(int32_t requester, int index, uint32_t apic_id, uint8_t vector, b
     }
 }
 
-void remap_message(int32_t requester, int index, uint32_t *address, uint32_t *data) {
+void remap_message(
+    int32_t requester, int index, uint32_t *address, uint32_t *data
+) {
     (void)requester;
     if (amd()) {
         amdvi_remap_message(index, address, data);
@@ -73,8 +78,10 @@ void remap_message(int32_t requester, int index, uint32_t *address, uint32_t *da
     }
 }
 
-uint64_t remap_rte(int32_t requester, int index, uint8_t vector, bool level, bool active_low) {
+uint64_t remap_rte(
+    int32_t requester, int index, uint8_t vector, bool level, bool active_low
+) {
     (void)requester;
     return amd() ? amdvi_remap_rte(index, level, active_low)
-                 : vtd_remap_rte(index, vector, level, active_low);
+        : vtd_remap_rte(index, vector, level, active_low);
 }

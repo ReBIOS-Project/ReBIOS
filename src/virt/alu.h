@@ -18,11 +18,12 @@
 #ifndef VIRT__ALU_H
 #define VIRT__ALU_H
 
+#include <stddef.h>
 #include <stdint.h>
 
-// Operations the processor runs for emulated instructions, so that results
-// and flags, undefined ones included, are exactly its own. Group 1 and group
-// 2 are in their ModRM reg field orders, and BT to BTC in group 8's from /4.
+// Operations the processor runs for emulated instructions, so that results and
+// flags, undefined ones included, are exactly its own. Group 1 and group 2 are
+// in their ModRM reg field orders, and BT to BTC in group 8's from /4.
 #define ALU_ADD 0
 #define ALU_OR 1
 #define ALU_ADC 2
@@ -49,10 +50,12 @@
 #define ALU_BTR 23
 #define ALU_BTC 24
 
-// Runs operation op, of size 1, 2, 4, or 8 bytes but for BT to BTC, on dst
-// and src, src being the count of shifts and the bit offset of bit tests,
-// with the status flags in *rflags, which it updates. Returns the result,
-// which only the low size bytes of hold.
-uint64_t alu(unsigned op, unsigned size, uint64_t dst, uint64_t src, uint64_t *rflags);
+// Runs operation op, of size 1, 2, 4, or 8 bytes but for BT to BTC, on dst and
+// src, src being the count of shifts and the bit offset of bit tests, with the
+// status flags in *rflags, which it updates. Returns the result, which only
+// the low size bytes of hold.
+uint64_t alu(
+    unsigned int op, size_t size, uint64_t dst, uint64_t src, uint64_t *rflags
+);
 
 #endif

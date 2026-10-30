@@ -18,6 +18,7 @@
 #ifndef LOADER__LOADER_H
 #define LOADER__LOADER_H
 
+#include <stddef.h>
 #include <stdint.h>
 #include <handoff.h>
 
@@ -26,6 +27,6 @@ extern struct handoff *loader_handoff;
 
 // Memory for the hypervisor, which the guest never sees. Returns 0 on failure.
 // max_addr is inclusive; 0 means anywhere.
-uint64_t loader_alloc_reserved(uint64_t pages, uint64_t max_addr);
+uint64_t loader_alloc_reserved(size_t pages, uintptr_t max_addr);
 
 #endif

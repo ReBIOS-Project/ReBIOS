@@ -18,6 +18,7 @@
 #ifndef LOADER__PANEL_H
 #define LOADER__PANEL_H
 
+#include <stdint.h>
 #include <handoff.h>
 
 // Corrects the framebuffer's size and pitch where the machine's firmware is

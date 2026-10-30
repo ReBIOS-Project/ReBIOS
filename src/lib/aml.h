@@ -18,8 +18,9 @@
 #ifndef LIB__AML_H
 #define LIB__AML_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 // The opcodes of ACPI 1.0b, Table 16-2, which every AML interpreter knows.
 // Two-byte ones carry the extended prefix in their high byte.
@@ -118,17 +119,17 @@
 // with aml_begin() and close with aml_end().
 struct aml {
     uint8_t *data;
-    uint32_t size;
-    uint32_t capacity;
+    size_t size;
+    size_t capacity;
     uint32_t open[AML_MAX_DEPTH];
-    unsigned depth;
+    size_t depth;
 };
 
 void aml_init(struct aml *a);
 void aml_free(struct aml *a);
 
 void aml_byte(struct aml *a, uint8_t value);
-void aml_bytes(struct aml *a, const void *data, uint32_t size);
+void aml_bytes(struct aml *a, const void *data, size_t size);
 void aml_word(struct aml *a, uint16_t value);
 void aml_dword(struct aml *a, uint32_t value);
 // An opcode, with the extended prefix if it has one.
@@ -141,27 +142,33 @@ void aml_end(struct aml *a);
 // each segment padded with underscores to four characters.
 void aml_name(struct aml *a, const char *path);
 // A NameString from four-character segments, rooted or relative.
-void aml_name_segs(struct aml *a, bool root, const char (*segs)[4], unsigned count);
+void aml_name_segs(
+    struct aml *a, bool root, const char (*segs)[4], size_t count
+);
 // The shortest constant for a value, which ACPI 1.0 keeps to 32 bits.
 void aml_int(struct aml *a, uint32_t value);
-void aml_string(struct aml *a, const char *s, uint32_t length);
-void aml_buffer(struct aml *a, const void *data, uint32_t size);
-void aml_local(struct aml *a, unsigned n);
-void aml_arg(struct aml *a, unsigned n);
+void aml_string(struct aml *a, const char *s, size_t length);
+void aml_buffer(struct aml *a, const void *data, size_t size);
+void aml_local(struct aml *a, unsigned int n);
+void aml_arg(struct aml *a, unsigned int n);
 
 // Name(path, Integer); Method(path, args, flags) {, closed by aml_end().
 void aml_name_int(struct aml *a, const char *path, uint32_t value);
 void aml_name_string(struct aml *a, const char *path, const char *s);
-void aml_method(struct aml *a, const char *path, unsigned args, uint8_t flags);
+void aml_method(
+    struct aml *a, const char *path, unsigned int args, uint8_t flags
+);
 // Return (Integer).
 void aml_return_int(struct aml *a, uint32_t value);
 // A NamedField of a Field: four characters and a width in bits.
 void aml_field_unit(struct aml *a, const char *name, uint32_t bits);
 
-// Fills a definition block's header, checksum included, in front of the AML
-// at table: SDT_HEADER_SIZE bytes, then the AML.
-void aml_table_header(uint8_t *table, uint32_t length, const char signature[4], uint8_t revision,
-                      const char oem_id[6], const char oem_table_id[8], uint32_t oem_revision);
+// Fills a definition block's header, checksum included, in front of the AML at
+// table: SDT_HEADER_SIZE bytes, then the AML.
+void aml_table_header(
+    uint8_t *table, size_t length, const char signature[4], uint8_t revision,
+    const char oem_id[6], const char oem_table_id[8], uint32_t oem_revision
+);
 
 #define AML_SDT_HEADER_SIZE 36
 

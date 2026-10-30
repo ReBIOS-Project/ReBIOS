@@ -18,8 +18,8 @@
 #ifndef VIRT__GUEST_ACPI_H
 #define VIRT__GUEST_ACPI_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 #define GUEST_ACPI_RSDP_SIZE 36
 

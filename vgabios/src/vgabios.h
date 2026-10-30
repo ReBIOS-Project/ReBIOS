@@ -20,12 +20,13 @@
 
 // The video BIOS of the hypervisor's VGA: real-mode code the guest runs from
 // segment C000h. It runs with DS = ES = SS, the caller's stack segment, so
-// that pointers to locals work, reads its own tables through FS = CS, which
-// is why they are __seg_fs, and reaches any other memory through GS with the
+// that pointers to locals work, reads its own tables through FS = CS, which is
+// why they are __seg_fs, and reaches any other memory through GS with the
 // helpers below.
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <vgabios_info.h>
 
 #define MODE_TEXT 0
@@ -164,8 +165,11 @@ static inline uint16_t inw(uint16_t port) {
 }
 
 static inline void pokel(uint16_t segment, uint16_t offset, uint32_t value) {
-    asm volatile ("movw %w0, %%gs\n\tmovl %1, %%gs:(%k2)"
-                  :: "r"(segment), "r"(value), "r"((uint32_t)offset) : "memory");
+    asm volatile (
+        "movw %w0, %%gs\n\t"
+        "movl %1, %%gs:(%k2)"
+        :
+        : "r"(segment), "r"(value), "r"((uint32_t)offset) : "memory");
 }
 
 static inline uint16_t code_segment(void) {
@@ -181,51 +185,87 @@ static inline uint16_t stack_segment(void) {
 }
 
 // Fills count bytes of the stack segment, which ES is, as DS is.
-static inline void local_fill(void *p, uint8_t value, uint32_t count) {
+static inline void local_fill(void *p, uint8_t value, size_t count) {
     uint32_t di = (uint32_t)(uintptr_t)p;
     asm volatile ("rep stosb" : "+D"(di), "+c"(count) : "a"(value) : "memory");
 }
 
 static inline uint8_t peekb(uint16_t segment, uint16_t offset) {
     uint8_t value;
-    asm volatile ("movw %w1, %%gs\n\tmovb %%gs:(%k2), %0"
-                  : "=q"(value) : "r"(segment), "r"((uint32_t)offset) : "memory");
+    asm volatile (
+        "movw %w1, %%gs\n\t"
+        "movb %%gs:(%k2), %0"
+        : "=q"(value)
+        : "r"(segment), "r"((uint32_t)offset)
+        : "memory"
+    );
     return value;
 }
 
 static inline uint16_t peekw(uint16_t segment, uint16_t offset) {
     uint16_t value;
-    asm volatile ("movw %w1, %%gs\n\tmovw %%gs:(%k2), %0"
-                  : "=r"(value) : "r"(segment), "r"((uint32_t)offset) : "memory");
+    asm volatile (
+        "movw %w1, %%gs\n\t"
+        "movw %%gs:(%k2), %0"
+        : "=r"(value)
+        : "r"(segment), "r"((uint32_t)offset)
+        : "memory"
+    );
     return value;
 }
 
 static inline void pokeb(uint16_t segment, uint16_t offset, uint8_t value) {
-    asm volatile ("movw %w0, %%gs\n\tmovb %1, %%gs:(%k2)"
-                  :: "r"(segment), "q"(value), "r"((uint32_t)offset) : "memory");
+    asm volatile (
+        "movw %w0, %%gs\n\t"
+        "movb %1, %%gs:(%k2)"
+        :
+        : "r"(segment), "q"(value), "r"((uint32_t)offset) : "memory");
 }
 
 static inline void pokew(uint16_t segment, uint16_t offset, uint16_t value) {
-    asm volatile ("movw %w0, %%gs\n\tmovw %1, %%gs:(%k2)"
-                  :: "r"(segment), "r"(value), "r"((uint32_t)offset) : "memory");
+    asm volatile (
+        "movw %w0, %%gs\n\t"
+        "movw %1, %%gs:(%k2)"
+        :
+        : "r"(segment), "r"(value), "r"((uint32_t)offset) : "memory");
 }
 
 // Fills count words from segment:offset.
-static inline void far_fill16(uint16_t segment, uint16_t offset, uint16_t value, uint32_t count) {
+static inline void far_fill16(
+    uint16_t segment, uint16_t offset, uint16_t value, size_t count
+) {
     uint32_t di = offset;
-    asm volatile ("pushw %%es\n\tmovw %w3, %%es\n\trep stosw\n\tpopw %%es"
-                  : "+D"(di), "+c"(count) : "a"(value), "r"(segment) : "memory");
+    asm volatile (
+        "pushw %%es\n\t"
+        "movw %w3, %%es\n\t"
+        "rep stosw\n\t"
+        "popw %%es"
+        : "+D"(di), "+c"(count)
+        : "a"(value), "r"(segment)
+        : "memory"
+    );
 }
 
 // Fills count bytes from segment:offset.
-static inline void far_fill8(uint16_t segment, uint16_t offset, uint8_t value, uint32_t count) {
+static inline void far_fill8(
+    uint16_t segment, uint16_t offset, uint8_t value, size_t count
+) {
     uint32_t di = offset;
-    asm volatile ("pushw %%es\n\tmovw %w3, %%es\n\trep stosb\n\tpopw %%es"
-                  : "+D"(di), "+c"(count) : "a"(value), "r"(segment) : "memory");
+    asm volatile (
+        "pushw %%es\n\t"
+        "movw %w3, %%es\n\t"
+        "rep stosb\n\t"
+        "popw %%es"
+        : "+D"(di), "+c"(count)
+        : "a"(value), "r"(segment)
+        : "memory"
+    );
 }
 
 // Moves count bytes within a segment, overlapping or not.
-static inline void far_move(uint16_t segment, uint16_t to, uint16_t from, uint32_t count) {
+static inline void far_move(
+    uint16_t segment, uint16_t to, uint16_t from, size_t count
+) {
     if (count == 0) {
         return;
     }
@@ -234,35 +274,72 @@ static inline void far_move(uint16_t segment, uint16_t to, uint16_t from, uint32
     if (to > from) {
         di += count - 1;
         si += count - 1;
-        asm volatile ("pushw %%ds\n\tpushw %%es\n\tmovw %w3, %%ds\n\tmovw %w3, %%es\n\t"
-                      "std\n\trep movsb\n\tcld\n\tpopw %%es\n\tpopw %%ds"
-                      : "+D"(di), "+S"(si), "+c"(count) : "r"(segment) : "memory");
+        asm volatile (
+            "pushw %%ds\n\t"
+            "pushw %%es\n\t"
+            "movw %w3, %%ds\n\t"
+            "movw %w3, %%es\n\t"
+            "std\n\t"
+            "rep movsb\n\t"
+            "cld\n\t"
+            "popw %%es\n\t"
+            "popw %%ds"
+            : "+D"(di), "+S"(si), "+c"(count)
+            : "r"(segment)
+            : "memory"
+        );
     } else {
-        asm volatile ("pushw %%ds\n\tpushw %%es\n\tmovw %w3, %%ds\n\tmovw %w3, %%es\n\t"
-                      "rep movsb\n\tpopw %%es\n\tpopw %%ds"
-                      : "+D"(di), "+S"(si), "+c"(count) : "r"(segment) : "memory");
+        asm volatile (
+            "pushw %%ds\n\t"
+            "pushw %%es\n\t"
+            "movw %w3, %%ds\n\t"
+            "movw %w3, %%es\n\t"
+            "rep movsb\n\t"
+            "popw %%es\n\t"
+            "popw %%ds"
+            : "+D"(di), "+S"(si), "+c"(count)
+            : "r"(segment)
+            : "memory"
+        );
     }
 }
 
 // Copies count bytes between segments.
-static inline void far_copy(uint16_t to_segment, uint16_t to, uint16_t from_segment, uint16_t from,
-                            uint32_t count) {
+static inline void far_copy(
+    uint16_t to_segment, uint16_t to, uint16_t from_segment, uint16_t from,
+    size_t count
+) {
     uint32_t di = to;
     uint32_t si = from;
-    asm volatile ("pushw %%ds\n\tpushw %%es\n\tmovw %w4, %%ds\n\tmovw %w3, %%es\n\t"
-                  "rep movsb\n\tpopw %%es\n\tpopw %%ds"
-                  : "+D"(di), "+S"(si), "+c"(count) : "r"(to_segment), "r"(from_segment)
-                  : "memory");
+    asm volatile (
+        "pushw %%ds\n\t"
+        "pushw %%es\n\t"
+        "movw %w4, %%ds\n\t"
+        "movw %w3, %%es\n\t"
+        "rep movsb\n\t"
+        "popw %%es\n\t"
+        "popw %%ds"
+        : "+D"(di), "+S"(si), "+c"(count)
+        : "r"(to_segment), "r"(from_segment)
+        : "memory"
+    );
 }
 
 // Copies count bytes of the ROM's own data to segment:offset.
-static inline void far_copy_rom(uint16_t segment, uint16_t offset, const __seg_fs void *from,
-                                uint32_t count) {
+static inline void far_copy_rom(
+    uint16_t segment, uint16_t offset, const __seg_fs void *from, size_t count
+) {
     uint32_t di = offset;
     uint32_t si = (uint32_t)(uintptr_t)from;
-    asm volatile ("pushw %%es\n\tmovw %w3, %%es\n\trep movsb %%fs:(%%esi), %%es:(%%edi)\n\t"
-                  "popw %%es"
-                  : "+D"(di), "+S"(si), "+c"(count) : "r"(segment) : "memory");
+    asm volatile (
+        "pushw %%es\n\t"
+        "movw %w3, %%es\n\t"
+        "rep movsb %%fs:(%%esi), %%es:(%%edi)\n\t"
+        "popw %%es"
+        : "+D"(di), "+S"(si), "+c"(count)
+        : "r"(segment)
+        : "memory"
+    );
 }
 
 #endif

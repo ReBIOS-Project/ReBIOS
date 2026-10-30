@@ -18,9 +18,9 @@
 #ifndef CSM__CSM_H
 #define CSM__CSM_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdbool.h>
 #include <handoff.h>
 
 // The structures of the Intel CSM Specification 0.98 that the hypervisor fills
@@ -78,9 +78,9 @@ struct csm_compat16_table {
     // Another extension: when it holds the value that identifies a
     // hypervisor's hypercall interface, the CSM16 may use that interface.
     uint32_t hypervisor_interface;
-    // And another: the address of a boot order list in the format of
-    // SeaBIOS's bootorder file, which the CSM16 then follows instead of the
-    // BBS table's priorities, or 0.
+    // And another: the address of a boot order list in the format of SeaBIOS's
+    // bootorder file, which the CSM16 then follows instead of the BBS table's
+    // priorities, or 0.
     uint32_t boot_order_pointer;
 } __attribute__((packed));
 
@@ -88,27 +88,59 @@ struct csm_compat16_table {
 #define CSM_COMPAT16_TABLE_SPEC_SIZE \
     offsetof(struct csm_compat16_table, extra_pci_root_list_pointer)
 
-_Static_assert(offsetof(struct csm_compat16_table, table_length) == 5, "CSM16 table layout");
-_Static_assert(offsetof(struct csm_compat16_table, compatibility16_call_segment) == 12,
-               "CSM16 table layout");
-_Static_assert(offsetof(struct csm_compat16_table, pnp_installation_check_segment) == 16,
-               "CSM16 table layout");
-_Static_assert(offsetof(struct csm_compat16_table, acpi_rsd_ptr_pointer) == 28,
-               "CSM16 table layout");
-_Static_assert(offsetof(struct csm_compat16_table, e820_pointer) == 34, "CSM16 table layout");
-_Static_assert(offsetof(struct csm_compat16_table, mp_table_ptr) == 50, "CSM16 table layout");
-_Static_assert(offsetof(struct csm_compat16_table, ibv_pointer) == 74, "CSM16 table layout");
-_Static_assert(offsetof(struct csm_compat16_table, last_pci_bus) == 82, "CSM16 table layout");
-_Static_assert(offsetof(struct csm_compat16_table, uma_address) == 83, "CSM16 table layout");
-_Static_assert(offsetof(struct csm_compat16_table, hi_permanent_memory_size) == 95,
-               "CSM16 table layout");
+_Static_assert(
+    offsetof(struct csm_compat16_table, table_length) == 5,
+    "CSM16 table layout"
+);
+_Static_assert(
+    offsetof(struct csm_compat16_table, compatibility16_call_segment) == 12,
+    "CSM16 table layout"
+);
+_Static_assert(
+    offsetof(struct csm_compat16_table, pnp_installation_check_segment) == 16,
+    "CSM16 table layout"
+);
+_Static_assert(
+    offsetof(struct csm_compat16_table, acpi_rsd_ptr_pointer) == 28,
+    "CSM16 table layout"
+);
+_Static_assert(
+    offsetof(struct csm_compat16_table, e820_pointer) == 34,
+    "CSM16 table layout"
+);
+_Static_assert(
+    offsetof(struct csm_compat16_table, mp_table_ptr) == 50,
+    "CSM16 table layout"
+);
+_Static_assert(
+    offsetof(struct csm_compat16_table, ibv_pointer) == 74,
+    "CSM16 table layout"
+);
+_Static_assert(
+    offsetof(struct csm_compat16_table, last_pci_bus) == 82,
+    "CSM16 table layout"
+);
+_Static_assert(
+    offsetof(struct csm_compat16_table, uma_address) == 83,
+    "CSM16 table layout"
+);
+_Static_assert(
+    offsetof(struct csm_compat16_table, hi_permanent_memory_size) == 95,
+    "CSM16 table layout"
+);
 _Static_assert(CSM_COMPAT16_TABLE_SPEC_SIZE == 99, "CSM16 table layout");
-_Static_assert(offsetof(struct csm_compat16_table, extra_pci_root_list_count) == 103,
-               "CSM16 table layout");
-_Static_assert(offsetof(struct csm_compat16_table, hypervisor_interface) == 104,
-               "CSM16 table layout");
-_Static_assert(offsetof(struct csm_compat16_table, boot_order_pointer) == 108,
-               "CSM16 table layout");
+_Static_assert(
+    offsetof(struct csm_compat16_table, extra_pci_root_list_count) == 103,
+    "CSM16 table layout"
+);
+_Static_assert(
+    offsetof(struct csm_compat16_table, hypervisor_interface) == 104,
+    "CSM16 table layout"
+);
+_Static_assert(
+    offsetof(struct csm_compat16_table, boot_order_pointer) == 108,
+    "CSM16 table layout"
+);
 _Static_assert(sizeof(struct csm_compat16_table) == 112, "CSM16 table layout");
 
 // EFI_COMPATIBILITY_FUNCTIONS, which the CSM16 takes in AX.
@@ -122,16 +154,16 @@ _Static_assert(sizeof(struct csm_compat16_table) == 112, "CSM16 table layout");
 #define CSM_COMPAT16_SET_KEYBOARD_LEDS 0x0007
 #define CSM_COMPAT16_INSTALL_PCI_HANDLER 0x0008
 
-// What they return in AX. CSM_STATUS_TBD is Compatibility16Boot()'s report of a
-// missing or corrupted master boot record.
+// What they return in AX. CSM_STATUS_TBD is Compatibility16Boot()'s report of
+// a missing or corrupted master boot record.
 #define CSM_STATUS_SUCCESS 0x0000
 #define CSM_STATUS_TBD 0x8000
 #define CSM_STATUS_OUT_OF_RESOURCES 0x8009
 #define CSM_STATUS_ABORTED 0x8015
 
 // Where Compatibility16GetTableAddress() allocates, in BX. 0 means either.
-#define CSM_TABLE_REGION_F0000 (1u << 0)
-#define CSM_TABLE_REGION_E0000 (1u << 1)
+#define CSM_TABLE_REGION_F0000 ((uint32_t)1 << 0)
+#define CSM_TABLE_REGION_E0000 ((uint32_t)1 << 1)
 
 // EFI_TO_COMPATIBILITY16_INIT_TABLE.
 struct csm_init_table {
@@ -148,10 +180,17 @@ struct csm_init_table {
     uint32_t low_pmm_memory_size_in_bytes;
 } __attribute__((packed));
 
-_Static_assert(offsetof(struct csm_init_table, reverse_thunk_call_segment) == 12,
-               "CSM init table layout");
-_Static_assert(offsetof(struct csm_init_table, thunk_start) == 24, "CSM init table layout");
-_Static_assert(offsetof(struct csm_init_table, low_pmm_memory) == 32, "CSM init table layout");
+_Static_assert(
+    offsetof(struct csm_init_table, reverse_thunk_call_segment) == 12,
+    "CSM init table layout"
+);
+_Static_assert(
+    offsetof(struct csm_init_table, thunk_start) == 24, "CSM init table layout"
+);
+_Static_assert(
+    offsetof(struct csm_init_table, low_pmm_memory) == 32,
+    "CSM init table layout"
+);
 _Static_assert(sizeof(struct csm_init_table) == 40, "CSM init table layout");
 
 // DEVICE_PRODUCER_SERIAL.
@@ -180,8 +219,8 @@ struct csm_device_producer_floppy {
 } __attribute__((packed));
 
 // LEGACY_DEVICE_FLAGS.
-#define CSM_LEGACY_DEVICE_A20_KYBD (1u << 0)
-#define CSM_LEGACY_DEVICE_A20_PORT92 (1u << 1)
+#define CSM_LEGACY_DEVICE_A20_KYBD ((uint32_t)1 << 0)
+#define CSM_LEGACY_DEVICE_A20_PORT92 ((uint32_t)1 << 1)
 
 // DEVICE_PRODUCER_DATA_HEADER.
 struct csm_device_producer_data_header {
@@ -193,12 +232,22 @@ struct csm_device_producer_data_header {
     uint32_t flags;
 } __attribute__((packed));
 
-_Static_assert(sizeof(struct csm_device_producer_serial) == 4, "CSM SIO data layout");
-_Static_assert(sizeof(struct csm_device_producer_parallel) == 5, "CSM SIO data layout");
-_Static_assert(sizeof(struct csm_device_producer_floppy) == 5, "CSM SIO data layout");
-_Static_assert(offsetof(struct csm_device_producer_data_header, floppy) == 31,
-               "CSM SIO data layout");
-_Static_assert(sizeof(struct csm_device_producer_data_header) == 41, "CSM SIO data layout");
+_Static_assert(
+    sizeof(struct csm_device_producer_serial) == 4, "CSM SIO data layout"
+);
+_Static_assert(
+    sizeof(struct csm_device_producer_parallel) == 5, "CSM SIO data layout"
+);
+_Static_assert(
+    sizeof(struct csm_device_producer_floppy) == 5, "CSM SIO data layout"
+);
+_Static_assert(
+    offsetof(struct csm_device_producer_data_header, floppy) == 31,
+    "CSM SIO data layout"
+);
+_Static_assert(
+    sizeof(struct csm_device_producer_data_header) == 41, "CSM SIO data layout"
+);
 
 // ATAPI_IDENTIFY.
 struct csm_atapi_identify {
@@ -218,7 +267,9 @@ struct csm_hdd_info {
     struct csm_atapi_identify identify_drive[2];
 } __attribute__((packed));
 
-_Static_assert(offsetof(struct csm_hdd_info, identify_drive) == 21, "CSM HDD info layout");
+_Static_assert(
+    offsetof(struct csm_hdd_info, identify_drive) == 21, "CSM HDD info layout"
+);
 _Static_assert(sizeof(struct csm_hdd_info) == 1045, "CSM HDD info layout");
 
 // The specification does not give these; they are the values of its reference
@@ -244,22 +295,34 @@ struct csm_boot_table {
     uint32_t smm_table;
     uint32_t os_memory_above_1mb;
     uint32_t unconventional_device_table;
-    // SeaBIOS's extension: the address, below 4 GiB, of an Intel MultiProcessor
-    // Specification 1.4 floating pointer structure, which the CSM16 copies with
-    // its configuration table into its F-segment if the two total at most
-    // 4 KiB.
+    // SeaBIOS's extension: the address, below 4 GiB, of an Intel
+    // MultiProcessor Specification 1.4 floating pointer structure, which the
+    // CSM16 copies with its configuration table into its F-segment if the two
+    // total at most 4 KiB.
     uint32_t mp_table;
 } __attribute__((packed));
 
-_Static_assert(offsetof(struct csm_boot_table, sio_data) == 16, "CSM boot table layout");
-_Static_assert(offsetof(struct csm_boot_table, number_e820_entries) == 61,
-               "CSM boot table layout");
-_Static_assert(offsetof(struct csm_boot_table, hdd_info) == 65, "CSM boot table layout");
-_Static_assert(offsetof(struct csm_boot_table, number_bbs_entries) == 8425,
-               "CSM boot table layout");
-_Static_assert(offsetof(struct csm_boot_table, unconventional_device_table) == 8441,
-               "CSM boot table layout");
-_Static_assert(offsetof(struct csm_boot_table, mp_table) == 8445, "CSM boot table layout");
+_Static_assert(
+    offsetof(struct csm_boot_table, sio_data) == 16, "CSM boot table layout"
+);
+_Static_assert(
+    offsetof(struct csm_boot_table, number_e820_entries) == 61,
+    "CSM boot table layout"
+);
+_Static_assert(
+    offsetof(struct csm_boot_table, hdd_info) == 65, "CSM boot table layout"
+);
+_Static_assert(
+    offsetof(struct csm_boot_table, number_bbs_entries) == 8425,
+    "CSM boot table layout"
+);
+_Static_assert(
+    offsetof(struct csm_boot_table, unconventional_device_table) == 8441,
+    "CSM boot table layout"
+);
+_Static_assert(
+    offsetof(struct csm_boot_table, mp_table) == 8445, "CSM boot table layout"
+);
 _Static_assert(sizeof(struct csm_boot_table) == 8449, "CSM boot table layout");
 
 // BBS_TABLE, which is one entry of the table.
@@ -291,20 +354,27 @@ struct csm_bbs_entry {
     uint32_t ibv2;
 } __attribute__((packed));
 
-_Static_assert(offsetof(struct csm_bbs_entry, class) == 14, "BBS table layout");
-_Static_assert(offsetof(struct csm_bbs_entry, status_flags) == 22, "BBS table layout");
-_Static_assert(offsetof(struct csm_bbs_entry, assigned_drive_number) == 52, "BBS table layout");
+_Static_assert(
+    offsetof(struct csm_bbs_entry, class) == 14, "BBS table layout"
+);
+_Static_assert(
+    offsetof(struct csm_bbs_entry, status_flags) == 22, "BBS table layout"
+);
+_Static_assert(
+    offsetof(struct csm_bbs_entry, assigned_drive_number) == 52,
+    "BBS table layout"
+);
 _Static_assert(offsetof(struct csm_bbs_entry, ibv2) == 65, "BBS table layout");
 _Static_assert(sizeof(struct csm_bbs_entry) == 69, "BBS table layout");
 
 // BBS_STATUS_FLAGS.
-#define CSM_BBS_STATUS_OLD_POSITION_MASK 0x000fu
-#define CSM_BBS_STATUS_ENABLED (1u << 8)
-#define CSM_BBS_STATUS_FAILED (1u << 9)
-#define CSM_BBS_STATUS_MEDIA_NONE (0u << 10)
-#define CSM_BBS_STATUS_MEDIA_UNKNOWN (1u << 10)
-#define CSM_BBS_STATUS_MEDIA_PRESENT (2u << 10)
-#define CSM_BBS_STATUS_MEDIA_MASK (3u << 10)
+#define CSM_BBS_STATUS_OLD_POSITION_MASK ((uint32_t)0x000f)
+#define CSM_BBS_STATUS_ENABLED ((uint32_t)1 << 8)
+#define CSM_BBS_STATUS_FAILED ((uint32_t)1 << 9)
+#define CSM_BBS_STATUS_MEDIA_NONE ((uint32_t)0 << 10)
+#define CSM_BBS_STATUS_MEDIA_UNKNOWN ((uint32_t)1 << 10)
+#define CSM_BBS_STATUS_MEDIA_PRESENT ((uint32_t)2 << 10)
+#define CSM_BBS_STATUS_MEDIA_MASK ((uint32_t)3 << 10)
 
 // Boot priorities, of which 0 is the highest.
 #define CSM_BBS_DO_NOT_BOOT_FROM 0xfffc
@@ -341,22 +411,28 @@ struct csm_oprom_table {
     uint16_t oprom_destination_segment;
 } __attribute__((packed));
 
-_Static_assert(offsetof(struct csm_oprom_table, number_bbs_entries) == 8,
-               "CSM option ROM table layout");
-_Static_assert(offsetof(struct csm_oprom_table, bbs_table_pointer) == 9,
-               "CSM option ROM table layout");
-_Static_assert(sizeof(struct csm_oprom_table) == 15, "CSM option ROM table layout");
+_Static_assert(
+    offsetof(struct csm_oprom_table, number_bbs_entries) == 8,
+    "CSM option ROM table layout"
+);
+_Static_assert(
+    offsetof(struct csm_oprom_table, bbs_table_pointer) == 9,
+    "CSM option ROM table layout"
+);
+_Static_assert(
+    sizeof(struct csm_oprom_table) == 15, "CSM option ROM table layout"
+);
 
 // Guest addresses and sizes.
 struct csm_init_params {
     // Memory the CSM16 allocates from, below 1 MiB and below 4 GiB.
     uint32_t low_pmm;
-    uint32_t low_pmm_size;
+    size_t low_pmm_size;
     uint32_t high_pmm;
-    uint32_t high_pmm_size;
+    size_t high_pmm_size;
     // The hypervisor's calling code and these tables.
     uint32_t thunk;
-    uint32_t thunk_size;
+    size_t thunk_size;
 };
 
 // Guest addresses, 0 for a table there is none of, and the tables' sizes.
@@ -364,12 +440,12 @@ struct csm_boot_params {
     uint32_t rsdp;
     // An SMBIOS 2.x entry point, and the length of its structure table.
     uint32_t smbios_entry;
-    uint32_t smbios_table_length;
-    uint32_t bbs_table;
-    uint32_t bbs_entry_count;
+    size_t smbios_table_length;
+    uintptr_t bbs_table;
+    size_t bbs_entry_count;
     // An MP floating pointer structure.
     uint32_t mp_floating_pointer;
-    uint32_t e820_entry_count;
+    size_t e820_entry_count;
 };
 
 struct csm_oprom_params {
@@ -379,32 +455,42 @@ struct csm_oprom_params {
     uint16_t segment;
     // Of the ROM's device, in segment 0.
     struct handoff_pci_address address;
-    uint32_t bbs_table;
-    uint32_t bbs_entry_count;
+    uintptr_t bbs_table;
+    size_t bbs_entry_count;
 };
 
 // Finds the CSM16 table in a CSM16 image, as the specification says the
 // firmware does. Returns NULL if there is none. The image's guest address must
 // be 16-byte aligned. The extension fields are only valid if table_length is
 // at least sizeof(struct csm_compat16_table).
-struct csm_compat16_table *csm_find_compat16_table(void *image, uint64_t size);
+struct csm_compat16_table *csm_find_compat16_table(void *image, size_t size);
 
 // Recomputes the CSM16 table's checksum after its fields were changed.
 void csm_compat16_table_checksum(struct csm_compat16_table *table);
 
 // Copies an ACPI RSDP into the CSM16 image, where the CSM16 table's
 // AcpiRsdPtrPointer says it goes.
-bool csm_copy_rsdp(void *image, uint64_t image_guest_base, uint64_t image_size,
-                   const struct csm_compat16_table *table, const void *rsdp);
+bool csm_copy_rsdp(
+    void *image, uintptr_t image_guest_base, size_t image_size,
+    const struct csm_compat16_table *table, const void *rsdp
+);
 
-void csm_fill_init_table(struct csm_init_table *table, const struct csm_init_params *params);
-void csm_fill_boot_table(struct csm_boot_table *table, const struct csm_boot_params *params);
+void csm_fill_init_table(
+    struct csm_init_table *table, const struct csm_init_params *params
+);
+void csm_fill_boot_table(
+    struct csm_boot_table *table, const struct csm_boot_params *params
+);
 
 // Fills a BBS table from the firmware's block devices. Returns the number of
 // entries used.
-uint32_t csm_fill_bbs_table(struct csm_bbs_entry *table, uint32_t max_entries,
-                            const struct handoff_block_device *devices, uint32_t device_count);
+size_t csm_fill_bbs_table(
+    struct csm_bbs_entry *table, size_t max_entries,
+    const struct handoff_block_device *devices, size_t device_count
+);
 
-void csm_fill_oprom_table(struct csm_oprom_table *table, const struct csm_oprom_params *params);
+void csm_fill_oprom_table(
+    struct csm_oprom_table *table, const struct csm_oprom_params *params
+);
 
 #endif

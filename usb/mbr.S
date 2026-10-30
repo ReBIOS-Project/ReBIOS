@@ -79,7 +79,8 @@ skip_bpb:
     .fill 6, 1, 0
 
 message:
-    .ascii "This is a ReBIOS USB stick: boot it as a UEFI device to run ReBIOS,\r\n"
+    .ascii "This is a ReBIOS USB stick: boot it as a UEFI device to run "
+    .ascii "ReBIOS,\r\n"
     .asciz "which then boots the computer's other drives.\r\n"
 
     // One partition, from 1 MiB to the end of the 8 MiB image, with its CHS

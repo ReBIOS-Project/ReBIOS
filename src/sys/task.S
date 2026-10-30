@@ -18,10 +18,10 @@
     .text
 
     /*
-     * void task_swap(uint64_t *save_rsp, uint64_t rsp)
+     * void task_swap(uintptr_t *save_rsp, uintptr_t rsp)
      * Leaves the callee-saved registers on this stack, and its pointer in
-     * *save_rsp, then carries on from rsp, as another task_swap() left it.
-     * A call keeps nothing else: the hypervisor has no x87 or vector state.
+     * *save_rsp, then carries on from rsp, as another task_swap() left it. A
+     * call keeps nothing else: the hypervisor has no x87 or vector state.
      */
     .globl task_swap
     .type task_swap, @function

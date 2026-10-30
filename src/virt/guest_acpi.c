@@ -15,18 +15,18 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stdint.h>
-#include <stddef.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <uacpi/acpi.h>
-#include <memory.h>
+#include <virt/guest_acpi.h>
 #include <core.h>
 #include <csm/e820.h>
 #include <handoff.h>
 #include <lib/heap.h>
 #include <lib/log.h>
+#include <memory.h>
 #include <sys/smp.h>
-#include <virt/guest_acpi.h>
 #include <virt/guest_mem.h>
 #include <virt/hpet.h>
 #include <virt/layout.h>
@@ -52,36 +52,37 @@
 // points the guest at host memory or at hardware the hypervisor keeps for
 // itself, but for the HPETs hidden from it.
 static const char *const kept[] = {
-    "APIC", "HPET", "MCFG", "MSDM", "SLIC", "SPCR", "DBGP", "DBG2", "WAET", "WSMT", "VFCT", "BOOT",
+    "APIC", "HPET", "MCFG", "MSDM", "SLIC", "SPCR", "DBGP", "DBG2", "WAET",
+    "WSMT", "VFCT", "BOOT",
 };
 
 // A table of the guest's, and where it goes among them.
 struct piece {
     const uint8_t *src;
-    uint32_t length;
-    uint32_t offset;
+    size_t length;
+    size_t offset;
 };
 
 static uint32_t read32(const uint8_t *p) {
     uint32_t value;
-    memcpy(&value, p, sizeof(value));
+    memcpy(&value, p, sizeof(uint32_t));
     return value;
 }
 
 static uint64_t read64(const uint8_t *p) {
     uint64_t value;
-    memcpy(&value, p, sizeof(value));
+    memcpy(&value, p, sizeof(uint64_t));
     return value;
 }
 
 static void write32(uint8_t *p, uint32_t value) {
-    memcpy(p, &value, sizeof(value));
+    memcpy(p, &value, sizeof(uint32_t));
 }
 
-static void checksum_set(uint8_t *p, uint32_t size, uint32_t at) {
+static void checksum_set(uint8_t *p, size_t size, uint32_t at) {
     uint8_t sum = 0;
     p[at] = 0;
-    for (uint32_t i = 0; i < size; i++) {
+    for (size_t i = 0; i < size; i++) {
         sum += p[i];
     }
     p[at] = (uint8_t)-sum;
@@ -92,13 +93,13 @@ static uint32_t align_up(uint32_t x, uint32_t align) {
 }
 
 // The table at addr, if it lies within the memory the hypervisor maps.
-static const uint8_t *host_table(uint64_t addr) {
-    uint64_t top = core_handoff->map_top;
+static const uint8_t *host_table(uintptr_t addr) {
+    uintptr_t top = core_handoff->map_top;
     if (addr == 0 || addr >= top || top - addr < SDT_HEADER_SIZE) {
         return NULL;
     }
     const uint8_t *table = (const void *)(uintptr_t)addr;
-    uint32_t length = read32(table + SDT_LENGTH);
+    size_t length = read32(table + SDT_LENGTH);
     if (length < SDT_HEADER_SIZE || top - addr < length) {
         return NULL;
     }
@@ -110,7 +111,7 @@ static const uint8_t *host_rsdp(void) {
 }
 
 // The firmware's XSDT, or its RSDT if it has none, with the size of entries.
-static const uint8_t *host_root(const uint8_t *rsdp, uint32_t *entry_size) {
+static const uint8_t *host_root(const uint8_t *rsdp, size_t *entry_size) {
     if (rsdp[RSDP_REVISION] >= 2) {
         const uint8_t *xsdt = host_table(read64(rsdp + RSDP_XSDT));
         if (xsdt != NULL) {
@@ -122,25 +123,26 @@ static const uint8_t *host_root(const uint8_t *rsdp, uint32_t *entry_size) {
     return host_table(read32(rsdp + RSDP_RSDT));
 }
 
-static uint64_t root_entry(const uint8_t *root, uint32_t entry_size, uint32_t i) {
+static uint64_t root_entry(const uint8_t *root, size_t entry_size, size_t i) {
     const uint8_t *entry = root + SDT_HEADER_SIZE + i * entry_size;
     return entry_size == 8 ? read64(entry) : read32(entry);
 }
 
-static uint32_t root_count(const uint8_t *root, uint32_t entry_size) {
+static size_t root_count(const uint8_t *root, size_t entry_size) {
     return (read32(root + SDT_LENGTH) - SDT_HEADER_SIZE) / entry_size;
 }
 
 // Marks the processors the guest does not get as unusable in a copy of the
 // MADT, leaving every structure in place.
-static void madt_hide_cpus(uint8_t *madt, uint32_t length) {
+static void madt_hide_cpus(uint8_t *madt, size_t length) {
     const uint32_t usable = ACPI_PIC_ENABLED | ACPI_PIC_ONLINE_CAPABLE;
     bool changed = false;
-    uint32_t offset = sizeof(struct acpi_madt);
+    size_t offset = sizeof(struct acpi_madt);
     while (offset + sizeof(struct acpi_entry_hdr) <= length) {
         uint8_t *entry = madt + offset;
-        uint8_t entry_length = entry[1];
-        if (entry_length < sizeof(struct acpi_entry_hdr) || entry_length > length - offset) {
+        size_t entry_length = entry[1];
+        if (entry_length < sizeof(struct acpi_entry_hdr)
+         || entry_length > length - offset) {
             break;
         }
         offset += entry_length;
@@ -148,11 +150,11 @@ static void madt_hide_cpus(uint8_t *madt, uint32_t length) {
         uint32_t id;
         uint8_t *flags;
         if (entry[0] == ACPI_MADT_ENTRY_TYPE_LAPIC
-            && entry_length >= sizeof(struct acpi_madt_lapic)) {
+         && entry_length >= sizeof(struct acpi_madt_lapic)) {
             id = entry[offsetof(struct acpi_madt_lapic, id)];
             flags = entry + offsetof(struct acpi_madt_lapic, flags);
         } else if (entry[0] == ACPI_MADT_ENTRY_TYPE_LOCAL_X2APIC
-                   && entry_length >= sizeof(struct acpi_madt_x2apic)) {
+                && entry_length >= sizeof(struct acpi_madt_x2apic)) {
             id = read32(entry + offsetof(struct acpi_madt_x2apic, id));
             flags = entry + offsetof(struct acpi_madt_x2apic, flags);
         } else {
@@ -172,13 +174,14 @@ static void madt_hide_cpus(uint8_t *madt, uint32_t length) {
 // The guest's configuration space windows: segment 0's where the PCI plan put
 // it, and the others' where the host has them, if the guest's memory leaves
 // them clear. Returns the new length.
-static uint32_t mcfg_fix(uint8_t *mcfg, uint32_t length) {
+static uint32_t mcfg_fix(uint8_t *mcfg, size_t length) {
     const struct pci_plan *plan = pci_plan();
     uint32_t out = sizeof(struct acpi_mcfg);
     uint32_t entry = sizeof(struct acpi_mcfg_allocation);
-    for (uint32_t off = out; off <= length && length - off >= entry; off += entry) {
+    for (size_t off = out; off <= length && length - off >= entry;
+         off += entry) {
         struct acpi_mcfg_allocation e;
-        memcpy(&e, mcfg + off, sizeof(e));
+        memcpy(&e, mcfg + off, sizeof(struct acpi_mcfg_allocation));
         if (e.segment == 0) {
             if (plan == NULL || plan->ecam == 0) {
                 continue;
@@ -186,13 +189,18 @@ static uint32_t mcfg_fix(uint8_t *mcfg, uint32_t length) {
             e.address = plan->ecam - ((uint64_t)plan->ecam_start << 20);
             e.start_bus = plan->ecam_start;
             e.end_bus = plan->ecam_end;
-        } else if (e.start_bus > e.end_bus
-                   || !layout_mmio_free(e.address + ((uint64_t)e.start_bus << 20),
-                                        ((uint64_t)e.end_bus - e.start_bus + 1) << 20)) {
-            continue;
+        } else {
+            bool taken = e.start_bus > e.end_bus
+                || !layout_mmio_free(
+                    e.address + ((uint64_t)e.start_bus << 20),
+                    ((uint64_t)e.end_bus - e.start_bus + 1) << 20
+                );
+            if (taken) {
+                continue;
+            }
         }
-        memcpy(mcfg + out, &e, sizeof(e));
-        out += sizeof(e);
+        memcpy(mcfg + out, &e, sizeof(struct acpi_mcfg_allocation));
+        out += sizeof(struct acpi_mcfg_allocation);
     }
     write32(mcfg + SDT_LENGTH, out);
     checksum_set(mcfg, out, SDT_CHECKSUM);
@@ -200,11 +208,15 @@ static uint32_t mcfg_fix(uint8_t *mcfg, uint32_t length) {
 }
 
 static bool table_kept(const uint8_t *table) {
-    if (memcmp(table, "HPET", 4) == 0 && read32(table + SDT_LENGTH) >= sizeof(struct acpi_hpet)
-        && hpet_hidden(read64(table + offsetof(struct acpi_hpet, address.address)))) {
+    bool hidden_hpet = memcmp(table, "HPET", 4) == 0
+        && read32(table + SDT_LENGTH) >= sizeof(struct acpi_hpet)
+        && hpet_hidden(
+            read64(table + offsetof(struct acpi_hpet, address.address))
+        );
+    if (hidden_hpet) {
         return false;
     }
-    for (size_t i = 0; i < sizeof(kept) / sizeof(kept[0]); i++) {
+    for (size_t i = 0; i < sizeof(kept) / sizeof(char *); i++) {
         if (memcmp(table, kept[i], 4) == 0) {
             return true;
         }
@@ -213,39 +225,41 @@ static bool table_kept(const uint8_t *table) {
 }
 
 bool guest_acpi_build(uint8_t rsdp[GUEST_ACPI_RSDP_SIZE]) {
-    uint32_t dsdt_length;
+    size_t dsdt_length;
     uint8_t *dsdt = vacpi_dsdt(&dsdt_length);
     if (dsdt == NULL) {
         return false;
     }
     const uint8_t *host = host_rsdp();
-    uint32_t entry_size = 4;
+    size_t entry_size = 4;
     const uint8_t *root = host != NULL ? host_root(host, &entry_size) : NULL;
-    uint32_t count = root != NULL ? root_count(root, entry_size) : 0;
+    size_t count = root != NULL ? root_count(root, entry_size) : 0;
 
     // The FADT, the copies, then the DSDT, which only the FADT lists.
-    struct piece *pieces = kmalloc((count + 2) * sizeof(*pieces));
+    struct piece *pieces = kmalloc((count + 2) * sizeof(struct piece));
     uint32_t tables = 0;
-    pieces[tables++] = (struct piece){NULL, VACPI_FADT_SIZE, 0};
-    for (uint32_t i = 0; i < count; i++) {
+    pieces[tables++] = (struct piece){ NULL, VACPI_FADT_SIZE, 0 };
+    for (size_t i = 0; i < count; i++) {
         const uint8_t *table = host_table(root_entry(root, entry_size, i));
         if (table != NULL && table_kept(table)) {
-            pieces[tables++] = (struct piece){table, read32(table + SDT_LENGTH), 0};
+            pieces[tables++] = (struct piece){
+                table, read32(table + SDT_LENGTH), 0
+            };
         }
     }
     uint32_t dsdt_piece = tables;
-    pieces[dsdt_piece] = (struct piece){dsdt, dsdt_length, 0};
+    pieces[dsdt_piece] = (struct piece){ dsdt, dsdt_length, 0 };
 
-    uint32_t offset = 0;
-    for (uint32_t i = 0; i <= dsdt_piece; i++) {
+    size_t offset = 0;
+    for (size_t i = 0; i <= dsdt_piece; i++) {
         pieces[i].offset = offset;
         offset = align_up(offset + pieces[i].length, TABLE_ALIGN);
     }
-    uint32_t rsdt_offset = offset;
-    uint32_t rsdt_length = SDT_HEADER_SIZE + tables * 4;
-    uint32_t total = align_up(offset + rsdt_length, TABLE_ALIGN);
+    size_t rsdt_offset = offset;
+    size_t rsdt_length = SDT_HEADER_SIZE + tables * 4;
+    size_t total = align_up(offset + rsdt_length, TABLE_ALIGN);
 
-    uint32_t base = layout_take(total, TABLE_ALIGN, E820_ACPI);
+    uintptr_t base = layout_take(total, TABLE_ALIGN, E820_ACPI);
     // The OS keeps what it shares with itself across reclaiming the tables.
     uint32_t facs = layout_take(VACPI_FACS_SIZE, FACS_ALIGN, E820_NVS);
     if (base == 0 || facs == 0) {
@@ -256,31 +270,34 @@ bool guest_acpi_build(uint8_t rsdp[GUEST_ACPI_RSDP_SIZE]) {
     }
 
     uint8_t *copy = kmalloc(total);
-    for (uint32_t i = 1; i <= dsdt_piece; i++) {
+    for (size_t i = 1; i <= dsdt_piece; i++) {
         memcpy(copy + pieces[i].offset, pieces[i].src, pieces[i].length);
     }
-    for (uint32_t i = 1; i < tables; i++) {
+    for (size_t i = 1; i < tables; i++) {
         uint8_t *table = copy + pieces[i].offset;
         if (memcmp(table, "APIC", 4) == 0) {
             madt_hide_cpus(table, pieces[i].length);
         } else if (memcmp(table, "MCFG", 4) == 0
-                   && pieces[i].length >= sizeof(struct acpi_mcfg)) {
+                && pieces[i].length >= sizeof(struct acpi_mcfg)) {
             pieces[i].length = mcfg_fix(table, pieces[i].length);
         }
     }
     vacpi_fadt(copy, facs, base + pieces[dsdt_piece].offset);
 
-    const uint8_t *rsdt_header = host != NULL ? host_table(read32(host + RSDP_RSDT)) : NULL;
+    const uint8_t *rsdt_header = host != NULL
+        ? host_table(read32(host + RSDP_RSDT)) : NULL;
     uint8_t *rsdt = copy + rsdt_offset;
     if (rsdt_header != NULL || root != NULL) {
-        memcpy(rsdt, rsdt_header != NULL ? rsdt_header : root, SDT_HEADER_SIZE);
+        memcpy(
+            rsdt, rsdt_header != NULL ? rsdt_header : root, SDT_HEADER_SIZE
+        );
     } else {
         memcpy(rsdt + 10, "REBIOSREBIOS  ", 14);
     }
     memcpy(rsdt, "RSDT", 4);
     write32(rsdt + SDT_LENGTH, rsdt_length);
     rsdt[SDT_REVISION] = 1;
-    for (uint32_t i = 0; i < tables; i++) {
+    for (size_t i = 0; i < tables; i++) {
         write32(rsdt + SDT_HEADER_SIZE + i * 4, base + pieces[i].offset);
     }
     checksum_set(rsdt, rsdt_length, SDT_CHECKSUM);
@@ -295,10 +312,15 @@ bool guest_acpi_build(uint8_t rsdp[GUEST_ACPI_RSDP_SIZE]) {
 
     memset(rsdp, 0, GUEST_ACPI_RSDP_SIZE);
     memcpy(rsdp, "RSD PTR ", 8);
-    memcpy(rsdp + RSDP_OEM_ID, host != NULL ? host + RSDP_OEM_ID : (const uint8_t *)"REBIOS", 6);
+    memcpy(
+        rsdp + RSDP_OEM_ID,
+        host != NULL ? host + RSDP_OEM_ID : (const uint8_t *)"REBIOS", 6
+    );
     write32(rsdp + RSDP_RSDT, base + rsdt_offset);
     checksum_set(rsdp, RSDP_V1_SIZE, RSDP_CHECKSUM);
-    printf("Guest ACPI tables at %#x, %u bytes, %u listed, FACS at %#x\n", base, total, tables,
-           facs);
+    printf(
+        "Guest ACPI tables at %#llx, %zu bytes, %u listed, FACS at %#x\n",
+        (unsigned long long)base, total, tables, facs
+    );
     return true;
 }

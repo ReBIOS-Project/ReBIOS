@@ -25,800 +25,804 @@
 
 // SDM 325462-093 Vol. 4, Table 2-2, as reviewed.
 const struct msr_range msr_intel_architectural[] = {
-    {0x0, 0x1}, // IA32_P5_MC_ADDR to IA32_P5_MC_TYPE
-    {0x6, 0x6}, // IA32_MONITOR_FILTER_SIZE
-    {0x10, 0x10}, // IA32_TIME_STAMP_COUNTER
-    {0x17, 0x17}, // IA32_PLATFORM_ID
-    {0x3b, 0x3b}, // IA32_TSC_ADJUST
-    {0x48, 0x49}, // IA32_SPEC_CTRL to IA32_PRED_CMD
-    {0x4e, 0x4f}, // IA32_PPIN_CTL to IA32_PPIN
-    {0x79, 0x79}, // IA32_BIOS_UPDT_TRIG
-    {0x8b, 0x8b}, // IA32_BIOS_SIGN_ID
-    {0xbc, 0xbc}, // IA32_MISC_PACKAGE_CTLS
-    {0xbf, 0xbf}, // IA32_PBOPT_CTRL
-    {0xc1, 0xca}, // IA32_PMC0 to IA32_PMC9
-    {0xcf, 0xcf}, // IA32_CORE_CAPABILITIES
-    {0xe1, 0xe1}, // IA32_UMWAIT_CONTROL
-    {0xe7, 0xe8}, // IA32_MPERF to IA32_APERF
-    {0x10b, 0x10b}, // IA32_FLUSH_CMD
-    {0x10f, 0x10f}, // IA32_TSX_FORCE_ABORT
-    {0x122, 0x123}, // IA32_TSX_CTRL to IA32_MCU_OPT_CTRL
-    {0x174, 0x176}, // IA32_SYSENTER_CS to IA32_SYSENTER_EIP
-    {0x179, 0x17b}, // IA32_MCG_CAP to IA32_MCG_CTL
-    {0x186, 0x18f}, // IA32_PERFEVTSEL0 to IA32_PERFEVTSEL9
-    {0x195, 0x195}, // IA32_OVERCLOCKING_STATUS
-    {0x198, 0x19c}, // IA32_PERF_STATUS to IA32_THERM_STATUS
-    {0x1a0, 0x1a0}, // IA32_MISC_ENABLE
-    {0x1b0, 0x1b2}, // IA32_ENERGY_PERF_BIAS to IA32_PACKAGE_THERM_INTERRUPT
-    {0x1c4, 0x1c5}, // IA32_XFD to IA32_XFD_ERR
-    {0x1d9, 0x1d9}, // IA32_DEBUGCTL
-    {0x277, 0x277}, // IA32_PAT
-    {0x280, 0x29f}, // IA32_MC0_CTL2 to IA32_MC31_CTL2
-    {0x309, 0x30f}, // IA32_FIXED_CTR0 to IA32_FIXED_CTR6
-    {0x345, 0x345}, // IA32_PERF_CAPABILITIES
-    {0x38d, 0x392}, // IA32_FIXED_CTR_CTRL to IA32_PERF_GLOBAL_INUSE
-    {0x3f1, 0x3f1}, // IA32_PEBS_ENABLE
-    {0x400, 0x47f}, // IA32_MC0_CTL to IA32_MC31_MISC
-    {0x4c1, 0x4ca}, // IA32_A_PMC0 to IA32_A_PMC9
-    {0x4d0, 0x4d0}, // IA32_MCG_EXT_CTL
-    {0x560, 0x561}, // IA32_RTIT_OUTPUT_BASE to IA32_RTIT_OUTPUT_MASK_PTRS
-    {0x568, 0x572}, // IA32_RTIT_TRIGGER0_CFG to IA32_RTIT_CR3_MATCH
-    {0x580, 0x587}, // IA32_RTIT_ADDR0_A to IA32_RTIT_ADDR3_B
-    {0x600, 0x600}, // IA32_DS_AREA
-    {0x6a0, 0x6a0}, // IA32_U_CET
-    {0x6a2, 0x6a2}, // IA32_S_CET
-    {0x6a4, 0x6a8}, // IA32_PL0_SSP to IA32_INTERRUPT_SSP_TABLE_ADDR
-    {0x6e0, 0x6e1}, // IA32_TSC_DEADLINE to IA32_PKRS
-    {0x770, 0x777}, // IA32_PM_ENABLE to IA32_HWP_STATUS
-    {0x990, 0x991}, // IA32_COPY_STATUS4 to IA32_IWKEYBACKUP_STATUS5
-    {0xc81, 0xc83}, // IA32_L3_QOS_CFG to IA32_L3_IO_QOS_CFG
-    {0xc88, 0xc89}, // IA32_RESOURCE_PRIORITY to IA32_RESOURCE_PRIORITY_PKG
-    {0xc8d, 0xd92}, // IA32_QM_EVTSEL to IA32_COPY_PLATFORM_TO_LOCAL5
-    {0xda0, 0xda0}, // IA32_XSS
-    {0xdb0, 0xdb2}, // IA32_PKG_HDC_CTL to IA32_THREAD_STALL
-    {0xe00, 0xe01}, // IA32_QOS_CORE_BW_THRTL_0 to IA32_QOS_CORE_BW_THRTL_1
-    {0x17d0, 0x17d2}, // IA32_HW_FEEDBACK_PTR to IA32_THREAD_FEEDBACK_CHAR
-    {0x17d4, 0x17d4}, // IA32_HW_FEEDBACK_THREAD_CONFIG
-    {0x17da, 0x17da}, // IA32_HRESET_ENABLE
-    {0x1900, 0x1901}, // IA32_PMC_GP0_CTR to IA32_PMC_GP0_CFG_A
-    {0x1904, 0x1905}, // IA32_PMC_GP1_CTR to IA32_PMC_GP1_CFG_A
-    {0x1908, 0x190a}, // IA32_PMC_GP2_CTR to IA32_PMC_GP2_CFG_B
-    {0x190c, 0x190e}, // IA32_PMC_GP3_CTR to IA32_PMC_GP3_CFG_B
-    {0x1910, 0x1912}, // IA32_PMC_GP4_CTR to IA32_PMC_GP4_CFG_B
-    {0x1914, 0x1916}, // IA32_PMC_GP5_CTR to IA32_PMC_GP5_CFG_B
-    {0x1918, 0x191a}, // IA32_PMC_GP6_CTR to IA32_PMC_GP6_CFG_B
-    {0x191c, 0x191e}, // IA32_PMC_GP7_CTR to IA32_PMC_GP7_CFG_B
-    {0x1920, 0x1922}, // IA32_PMC_GP8_CTR to IA32_PMC_GP8_CFG_B
-    {0x1924, 0x1926}, // IA32_PMC_GP9_CTR to IA32_PMC_GP9_CFG_B
-    {0x1980, 0x1980}, // IA32_PMC_FX0_CTR
-    {0x1982, 0x1982}, // IA32_PMC_FX0_CFG_B
-    {0x1984, 0x1984}, // IA32_PMC_FX1_CTR
-    {0x1986, 0x1986}, // IA32_PMC_FX1_CFG_B
-    {0x1988, 0x1988}, // IA32_PMC_FX2_CTR
-    {0x198a, 0x198a}, // IA32_PMC_FX2_CFG_B
-    {0x198c, 0x198c}, // IA32_PMC_FX3_CTR
-    {0x198e, 0x198e}, // IA32_PMC_FX3_CFG_B
-    {0x1990, 0x1990}, // IA32_PMC_FX4_CTR
-    {0x1994, 0x1994}, // IA32_PMC_FX5_CTR
-    {0x1998, 0x1998}, // IA32_PMC_FX6_CTR
-    {0x1b01, 0x1b01}, // IA32_UARCH_MISC_CTL
-    {0xc0000080, 0xc0000084}, // IA32_EFER to IA32_FMASK
-    {0xc0000100, 0xc0000103}, // IA32_FS_BASE to IA32_TSC_AUX
+    { 0x0, 0x1 }, // IA32_P5_MC_ADDR to IA32_P5_MC_TYPE
+    { 0x6, 0x6 }, // IA32_MONITOR_FILTER_SIZE
+    { 0x10, 0x10 }, // IA32_TIME_STAMP_COUNTER
+    { 0x17, 0x17 }, // IA32_PLATFORM_ID
+    { 0x3b, 0x3b }, // IA32_TSC_ADJUST
+    { 0x48, 0x49 }, // IA32_SPEC_CTRL to IA32_PRED_CMD
+    { 0x4e, 0x4f }, // IA32_PPIN_CTL to IA32_PPIN
+    { 0x79, 0x79 }, // IA32_BIOS_UPDT_TRIG
+    { 0x8b, 0x8b }, // IA32_BIOS_SIGN_ID
+    { 0xbc, 0xbc }, // IA32_MISC_PACKAGE_CTLS
+    { 0xbf, 0xbf }, // IA32_PBOPT_CTRL
+    { 0xc1, 0xca }, // IA32_PMC0 to IA32_PMC9
+    { 0xcf, 0xcf }, // IA32_CORE_CAPABILITIES
+    { 0xe1, 0xe1 }, // IA32_UMWAIT_CONTROL
+    { 0xe7, 0xe8 }, // IA32_MPERF to IA32_APERF
+    { 0x10b, 0x10b }, // IA32_FLUSH_CMD
+    { 0x10f, 0x10f }, // IA32_TSX_FORCE_ABORT
+    { 0x122, 0x123 }, // IA32_TSX_CTRL to IA32_MCU_OPT_CTRL
+    { 0x174, 0x176 }, // IA32_SYSENTER_CS to IA32_SYSENTER_EIP
+    { 0x179, 0x17b }, // IA32_MCG_CAP to IA32_MCG_CTL
+    { 0x186, 0x18f }, // IA32_PERFEVTSEL0 to IA32_PERFEVTSEL9
+    { 0x195, 0x195 }, // IA32_OVERCLOCKING_STATUS
+    { 0x198, 0x19c }, // IA32_PERF_STATUS to IA32_THERM_STATUS
+    { 0x1a0, 0x1a0 }, // IA32_MISC_ENABLE
+    { 0x1b0, 0x1b2 }, // IA32_ENERGY_PERF_BIAS to IA32_PACKAGE_THERM_INTERRUPT
+    { 0x1c4, 0x1c5 }, // IA32_XFD to IA32_XFD_ERR
+    { 0x1d9, 0x1d9 }, // IA32_DEBUGCTL
+    { 0x277, 0x277 }, // IA32_PAT
+    { 0x280, 0x29f }, // IA32_MC0_CTL2 to IA32_MC31_CTL2
+    { 0x309, 0x30f }, // IA32_FIXED_CTR0 to IA32_FIXED_CTR6
+    { 0x345, 0x345 }, // IA32_PERF_CAPABILITIES
+    { 0x38d, 0x392 }, // IA32_FIXED_CTR_CTRL to IA32_PERF_GLOBAL_INUSE
+    { 0x3f1, 0x3f1 }, // IA32_PEBS_ENABLE
+    { 0x400, 0x47f }, // IA32_MC0_CTL to IA32_MC31_MISC
+    { 0x4c1, 0x4ca }, // IA32_A_PMC0 to IA32_A_PMC9
+    { 0x4d0, 0x4d0 }, // IA32_MCG_EXT_CTL
+    { 0x560, 0x561 }, // IA32_RTIT_OUTPUT_BASE to IA32_RTIT_OUTPUT_MASK_PTRS
+    { 0x568, 0x572 }, // IA32_RTIT_TRIGGER0_CFG to IA32_RTIT_CR3_MATCH
+    { 0x580, 0x587 }, // IA32_RTIT_ADDR0_A to IA32_RTIT_ADDR3_B
+    { 0x600, 0x600 }, // IA32_DS_AREA
+    { 0x6a0, 0x6a0 }, // IA32_U_CET
+    { 0x6a2, 0x6a2 }, // IA32_S_CET
+    { 0x6a4, 0x6a8 }, // IA32_PL0_SSP to IA32_INTERRUPT_SSP_TABLE_ADDR
+    { 0x6e0, 0x6e1 }, // IA32_TSC_DEADLINE to IA32_PKRS
+    { 0x770, 0x777 }, // IA32_PM_ENABLE to IA32_HWP_STATUS
+    { 0x990, 0x991 }, // IA32_COPY_STATUS4 to IA32_IWKEYBACKUP_STATUS5
+    { 0xc81, 0xc83 }, // IA32_L3_QOS_CFG to IA32_L3_IO_QOS_CFG
+    { 0xc88, 0xc89 }, // IA32_RESOURCE_PRIORITY to IA32_RESOURCE_PRIORITY_PKG
+    { 0xc8d, 0xd92 }, // IA32_QM_EVTSEL to IA32_COPY_PLATFORM_TO_LOCAL5
+    { 0xda0, 0xda0 }, // IA32_XSS
+    { 0xdb0, 0xdb2 }, // IA32_PKG_HDC_CTL to IA32_THREAD_STALL
+    { 0xe00, 0xe01 }, // IA32_QOS_CORE_BW_THRTL_0 to IA32_QOS_CORE_BW_THRTL_1
+    { 0x17d0, 0x17d2 }, // IA32_HW_FEEDBACK_PTR to IA32_THREAD_FEEDBACK_CHAR
+    { 0x17d4, 0x17d4 }, // IA32_HW_FEEDBACK_THREAD_CONFIG
+    { 0x17da, 0x17da }, // IA32_HRESET_ENABLE
+    { 0x1900, 0x1901 }, // IA32_PMC_GP0_CTR to IA32_PMC_GP0_CFG_A
+    { 0x1904, 0x1905 }, // IA32_PMC_GP1_CTR to IA32_PMC_GP1_CFG_A
+    { 0x1908, 0x190a }, // IA32_PMC_GP2_CTR to IA32_PMC_GP2_CFG_B
+    { 0x190c, 0x190e }, // IA32_PMC_GP3_CTR to IA32_PMC_GP3_CFG_B
+    { 0x1910, 0x1912 }, // IA32_PMC_GP4_CTR to IA32_PMC_GP4_CFG_B
+    { 0x1914, 0x1916 }, // IA32_PMC_GP5_CTR to IA32_PMC_GP5_CFG_B
+    { 0x1918, 0x191a }, // IA32_PMC_GP6_CTR to IA32_PMC_GP6_CFG_B
+    { 0x191c, 0x191e }, // IA32_PMC_GP7_CTR to IA32_PMC_GP7_CFG_B
+    { 0x1920, 0x1922 }, // IA32_PMC_GP8_CTR to IA32_PMC_GP8_CFG_B
+    { 0x1924, 0x1926 }, // IA32_PMC_GP9_CTR to IA32_PMC_GP9_CFG_B
+    { 0x1980, 0x1980 }, // IA32_PMC_FX0_CTR
+    { 0x1982, 0x1982 }, // IA32_PMC_FX0_CFG_B
+    { 0x1984, 0x1984 }, // IA32_PMC_FX1_CTR
+    { 0x1986, 0x1986 }, // IA32_PMC_FX1_CFG_B
+    { 0x1988, 0x1988 }, // IA32_PMC_FX2_CTR
+    { 0x198a, 0x198a }, // IA32_PMC_FX2_CFG_B
+    { 0x198c, 0x198c }, // IA32_PMC_FX3_CTR
+    { 0x198e, 0x198e }, // IA32_PMC_FX3_CFG_B
+    { 0x1990, 0x1990 }, // IA32_PMC_FX4_CTR
+    { 0x1994, 0x1994 }, // IA32_PMC_FX5_CTR
+    { 0x1998, 0x1998 }, // IA32_PMC_FX6_CTR
+    { 0x1b01, 0x1b01 }, // IA32_UARCH_MISC_CTL
+    { 0xc0000080, 0xc0000084 }, // IA32_EFER to IA32_FMASK
+    { 0xc0000100, 0xc0000103 }, // IA32_FS_BASE to IA32_TSC_AUX
 };
 const size_t msr_intel_architectural_count =
-    sizeof(msr_intel_architectural) / sizeof(msr_intel_architectural[0]);
+    sizeof(msr_intel_architectural) / sizeof(struct msr_range);
 
 // SDM 325462-093 Vol. 4, Table 2-6: C-states, perfmon, thermal.
 static const struct msr_range ranges_2_6[] = {
-    {0x34, 0x34}, // MSR_SMI_COUNT
-    {0xe4, 0xe4}, // MSR_PMG_IO_CAPTURE_BASE
-    {0x1a2, 0x1a2}, // MSR_TEMPERATURE_TARGET
-    {0x1a6, 0x1a7}, // MSR_OFFCORE_RSP_0 to MSR_OFFCORE_RSP_1
-    {0x1dd, 0x1de}, // MSR_LER_FROM_LIP to MSR_LER_TO_LIP
-    {0x3fd, 0x3fd}, // MSR_CORE_C6_RESIDENCY
-    {0x660, 0x660}, // MSR_CORE_C1_RESIDENCY
+    { 0x34, 0x34 }, // MSR_SMI_COUNT
+    { 0xe4, 0xe4 }, // MSR_PMG_IO_CAPTURE_BASE
+    { 0x1a2, 0x1a2 }, // MSR_TEMPERATURE_TARGET
+    { 0x1a6, 0x1a7 }, // MSR_OFFCORE_RSP_0 to MSR_OFFCORE_RSP_1
+    { 0x1dd, 0x1de }, // MSR_LER_FROM_LIP to MSR_LER_TO_LIP
+    { 0x3fd, 0x3fd }, // MSR_CORE_C6_RESIDENCY
+    { 0x660, 0x660 }, // MSR_CORE_C1_RESIDENCY
 };
 static const struct msr_ranges table_2_6 = {
-    ranges_2_6, sizeof(ranges_2_6) / sizeof(ranges_2_6[0]),
+    ranges_2_6, sizeof(ranges_2_6) / sizeof(struct msr_range),
 };
 
-// SDM 325462-093 Vol. 4, Table 2-12: C-states, architectural, perfmon, power, turbo.
+// SDM 325462-093 Vol. 4, Table 2-12: C-states, architectural, perfmon, power,
+// turbo.
 static const struct msr_range ranges_2_12[] = {
-    {0x17, 0x17}, // MSR_PLATFORM_ID
-    {0xce, 0xce}, // MSR_PLATFORM_INFO
-    {0xe2, 0xe2}, // MSR_PKG_CST_CONFIG_CONTROL
-    {0x1aa, 0x1aa}, // MSR_MISC_PWR_MGMT
-    {0x1ad, 0x1ae}, // MSR_TURBO_RATIO_LIMIT to MSR_TURBO_GROUP_CORECNT
-    {0x1c8, 0x1c9}, // MSR_LBR_SELECT to MSR_LASTBRANCH_TOS
-    {0x1fc, 0x1fc}, // MSR_POWER_CTL
-    {0x3f8, 0x3f9}, // MSR_PKG_C3_RESIDENCY to MSR_PKG_C6_RESIDENCY
-    {0x3fc, 0x3fc}, // MSR_CORE_C3_RESIDENCY
-    {0x606, 0x606}, // MSR_RAPL_POWER_UNIT
-    {0x60a, 0x60d}, // MSR_PKGC3_IRTL to MSR_PKG_C2_RESIDENCY
-    {0x610, 0x611}, // MSR_PKG_POWER_LIMIT to MSR_PKG_ENERGY_STATUS
-    {0x613, 0x614}, // MSR_PKG_PERF_STATUS to MSR_PKG_POWER_INFO
-    {0x618, 0x619}, // MSR_DRAM_POWER_LIMIT to MSR_DRAM_ENERGY_STATUS
-    {0x61b, 0x61c}, // MSR_DRAM_PERF_STATUS to MSR_DRAM_POWER_INFO
-    {0x632, 0x632}, // MSR_PKG_C10_RESIDENCY
-    {0x639, 0x639}, // MSR_PP0_ENERGY_STATUS
-    {0x641, 0x641}, // MSR_PP1_ENERGY_STATUS
-    {0x64c, 0x64c}, // MSR_TURBO_ACTIVATION_RATIO
-    {0x64f, 0x64f}, // MSR_CORE_PERF_LIMIT_REASONS
-    {0x680, 0x69f}, // MSR_LASTBRANCH_0_FROM_IP to MSR_LASTBRANCH_31_FROM_IP
-    {0x6c0, 0x6df}, // MSR_LASTBRANCH_0_TO_IP to MSR_LASTBRANCH_31_TO_IP
+    { 0x17, 0x17 }, // MSR_PLATFORM_ID
+    { 0xce, 0xce }, // MSR_PLATFORM_INFO
+    { 0xe2, 0xe2 }, // MSR_PKG_CST_CONFIG_CONTROL
+    { 0x1aa, 0x1aa }, // MSR_MISC_PWR_MGMT
+    { 0x1ad, 0x1ae }, // MSR_TURBO_RATIO_LIMIT to MSR_TURBO_GROUP_CORECNT
+    { 0x1c8, 0x1c9 }, // MSR_LBR_SELECT to MSR_LASTBRANCH_TOS
+    { 0x1fc, 0x1fc }, // MSR_POWER_CTL
+    { 0x3f8, 0x3f9 }, // MSR_PKG_C3_RESIDENCY to MSR_PKG_C6_RESIDENCY
+    { 0x3fc, 0x3fc }, // MSR_CORE_C3_RESIDENCY
+    { 0x606, 0x606 }, // MSR_RAPL_POWER_UNIT
+    { 0x60a, 0x60d }, // MSR_PKGC3_IRTL to MSR_PKG_C2_RESIDENCY
+    { 0x610, 0x611 }, // MSR_PKG_POWER_LIMIT to MSR_PKG_ENERGY_STATUS
+    { 0x613, 0x614 }, // MSR_PKG_PERF_STATUS to MSR_PKG_POWER_INFO
+    { 0x618, 0x619 }, // MSR_DRAM_POWER_LIMIT to MSR_DRAM_ENERGY_STATUS
+    { 0x61b, 0x61c }, // MSR_DRAM_PERF_STATUS to MSR_DRAM_POWER_INFO
+    { 0x632, 0x632 }, // MSR_PKG_C10_RESIDENCY
+    { 0x639, 0x639 }, // MSR_PP0_ENERGY_STATUS
+    { 0x641, 0x641 }, // MSR_PP1_ENERGY_STATUS
+    { 0x64c, 0x64c }, // MSR_TURBO_ACTIVATION_RATIO
+    { 0x64f, 0x64f }, // MSR_CORE_PERF_LIMIT_REASONS
+    { 0x680, 0x69f }, // MSR_LASTBRANCH_0_FROM_IP to MSR_LASTBRANCH_31_FROM_IP
+    { 0x6c0, 0x6df }, // MSR_LASTBRANCH_0_TO_IP to MSR_LASTBRANCH_31_TO_IP
 };
 static const struct msr_ranges table_2_12 = {
-    ranges_2_12, sizeof(ranges_2_12) / sizeof(ranges_2_12[0]),
+    ranges_2_12, sizeof(ranges_2_12) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-13: perfmon.
 static const struct msr_range ranges_2_13[] = {
-    {0x680, 0x680}, // MSR_LASTBRANCH_0_FROM_IP
-    {0x6c0, 0x6c0}, // MSR_LASTBRANCH_0_TO_IP
-    {0xdc0, 0xddf}, // MSR_LASTBRANCH_INFO_0 to MSR_LASTBRANCH_INFO_31
+    { 0x680, 0x680 }, // MSR_LASTBRANCH_0_FROM_IP
+    { 0x6c0, 0x6c0 }, // MSR_LASTBRANCH_0_TO_IP
+    { 0xdc0, 0xddf }, // MSR_LASTBRANCH_INFO_0 to MSR_LASTBRANCH_INFO_31
 };
 static const struct msr_ranges table_2_13 = {
-    ranges_2_13, sizeof(ranges_2_13) / sizeof(ranges_2_13[0]),
+    ranges_2_13, sizeof(ranges_2_13) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-14: bus locks.
 static const struct msr_range ranges_2_14[] = {
-    {0x33, 0x33}, // MSR_MEMORY_CTRL
+    { 0x33, 0x33 }, // MSR_MEMORY_CTRL
 };
 static const struct msr_ranges table_2_14 = {
-    ranges_2_14, sizeof(ranges_2_14) / sizeof(ranges_2_14[0]),
+    ranges_2_14, sizeof(ranges_2_14) / sizeof(struct msr_range),
 };
 
-// SDM 325462-093 Vol. 4, Table 2-15: C-states, architectural, perfmon, power, thermal, turbo.
+// SDM 325462-093 Vol. 4, Table 2-15: C-states, architectural, perfmon, power,
+// thermal, turbo.
 static const struct msr_range ranges_2_15[] = {
-    {0x17, 0x17}, // IA32_PLATFORM_ID
-    {0x34, 0x34}, // MSR_SMI_COUNT
-    {0xce, 0xce}, // MSR_PLATFORM_INFO
-    {0xe2, 0xe2}, // MSR_PKG_CST_CONFIG_CONTROL
-    {0xe4, 0xe4}, // MSR_PMG_IO_CAPTURE_BASE
-    {0x1a2, 0x1a2}, // MSR_TEMPERATURE_TARGET
-    {0x1a6, 0x1a6}, // MSR_OFFCORE_RSP_0
-    {0x1aa, 0x1aa}, // MSR_MISC_PWR_MGMT
-    {0x1ac, 0x1ad}, // MSR_TURBO_POWER_CURRENT_LIMIT to MSR_TURBO_RATIO_LIMIT
-    {0x1c8, 0x1c9}, // MSR_LBR_SELECT to MSR_LASTBRANCH_TOS
-    {0x1dd, 0x1de}, // MSR_LER_FROM_LIP to MSR_LER_TO_LIP
-    {0x1fc, 0x1fc}, // MSR_POWER_CTL
-    {0x38e, 0x38e}, // IA32_PERF_GLOBAL_STATUS
-    {0x390, 0x390}, // IA32_PERF_GLOBAL_OVF_CTRL
-    {0x3f6, 0x3f6}, // MSR_PEBS_LD_LAT
-    {0x3f8, 0x3fa}, // MSR_PKG_C3_RESIDENCY to MSR_PKG_C7_RESIDENCY
-    {0x3fc, 0x3fd}, // MSR_CORE_C3_RESIDENCY to MSR_CORE_C6_RESIDENCY
-    {0x680, 0x68f}, // MSR_LASTBRANCH_0_FROM_IP to MSR_LASTBRANCH_15_FROM_IP
-    {0x6c0, 0x6cf}, // MSR_LASTBRANCH_0_TO_IP to MSR_LASTBRANCH_15_TO_IP
+    { 0x17, 0x17 }, // IA32_PLATFORM_ID
+    { 0x34, 0x34 }, // MSR_SMI_COUNT
+    { 0xce, 0xce }, // MSR_PLATFORM_INFO
+    { 0xe2, 0xe2 }, // MSR_PKG_CST_CONFIG_CONTROL
+    { 0xe4, 0xe4 }, // MSR_PMG_IO_CAPTURE_BASE
+    { 0x1a2, 0x1a2 }, // MSR_TEMPERATURE_TARGET
+    { 0x1a6, 0x1a6 }, // MSR_OFFCORE_RSP_0
+    { 0x1aa, 0x1aa }, // MSR_MISC_PWR_MGMT
+    { 0x1ac, 0x1ad }, // MSR_TURBO_POWER_CURRENT_LIMIT to MSR_TURBO_RATIO_LIMIT
+    { 0x1c8, 0x1c9 }, // MSR_LBR_SELECT to MSR_LASTBRANCH_TOS
+    { 0x1dd, 0x1de }, // MSR_LER_FROM_LIP to MSR_LER_TO_LIP
+    { 0x1fc, 0x1fc }, // MSR_POWER_CTL
+    { 0x38e, 0x38e }, // IA32_PERF_GLOBAL_STATUS
+    { 0x390, 0x390 }, // IA32_PERF_GLOBAL_OVF_CTRL
+    { 0x3f6, 0x3f6 }, // MSR_PEBS_LD_LAT
+    { 0x3f8, 0x3fa }, // MSR_PKG_C3_RESIDENCY to MSR_PKG_C7_RESIDENCY
+    { 0x3fc, 0x3fd }, // MSR_CORE_C3_RESIDENCY to MSR_CORE_C6_RESIDENCY
+    { 0x680, 0x68f }, // MSR_LASTBRANCH_0_FROM_IP to MSR_LASTBRANCH_15_FROM_IP
+    { 0x6c0, 0x6cf }, // MSR_LASTBRANCH_0_TO_IP to MSR_LASTBRANCH_15_TO_IP
 };
 static const struct msr_ranges table_2_15 = {
-    ranges_2_15, sizeof(ranges_2_15) / sizeof(ranges_2_15[0]),
+    ranges_2_15, sizeof(ranges_2_15) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-16: perfmon, turbo.
 static const struct msr_range ranges_2_16[] = {
-    {0x1ad, 0x1ad}, // MSR_TURBO_RATIO_LIMIT
-    {0x391, 0x396}, // MSR_UNCORE_PERF_GLOBAL_CTRL to MSR_UNCORE_ADDR_OPCODE_MATCH
-    {0x3b0, 0x3b7}, // MSR_UNCORE_PMC0 to MSR_UNCORE_PMC7
-    {0x3c0, 0x3c7}, // MSR_UNCORE_PERFEVTSEL0 to MSR_UNCORE_PERFEVTSEL7
+    { 0x1ad, 0x1ad }, // MSR_TURBO_RATIO_LIMIT
+    { 0x391, 0x396 }, // MSR_UNCORE_PERF_GLOBAL_CTRL to MSR_UNCORE_ADDR_OPCODE_MATCH
+    { 0x3b0, 0x3b7 }, // MSR_UNCORE_PMC0 to MSR_UNCORE_PMC7
+    { 0x3c0, 0x3c7 }, // MSR_UNCORE_PERFEVTSEL0 to MSR_UNCORE_PERFEVTSEL7
 };
 static const struct msr_ranges table_2_16 = {
-    ranges_2_16, sizeof(ranges_2_16) / sizeof(ranges_2_16[0]),
+    ranges_2_16, sizeof(ranges_2_16) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-18: perfmon, turbo.
 static const struct msr_range ranges_2_18[] = {
-    {0x1a7, 0x1a7}, // MSR_OFFCORE_RSP_1
-    {0x1ad, 0x1ad}, // MSR_TURBO_RATIO_LIMIT
+    { 0x1a7, 0x1a7 }, // MSR_OFFCORE_RSP_1
+    { 0x1ad, 0x1ad }, // MSR_TURBO_RATIO_LIMIT
 };
 static const struct msr_ranges table_2_18 = {
-    ranges_2_18, sizeof(ranges_2_18) / sizeof(ranges_2_18[0]),
+    ranges_2_18, sizeof(ranges_2_18) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-19: perfmon, turbo.
 static const struct msr_range ranges_2_19[] = {
-    {0x1a7, 0x1a7}, // MSR_OFFCORE_RSP_1
-    {0x1ad, 0x1ad}, // MSR_TURBO_RATIO_LIMIT
-    {0xf40, 0xf42}, // MSR_C8_PMON_BOX_CTRL to MSR_C8_PMON_BOX_OVF_CTRL
-    {0xf50, 0xf5b}, // MSR_C8_PMON_EVNT_SEL0 to MSR_C8_PMON_CTR5
-    {0xfc0, 0xfc2}, // MSR_C9_PMON_BOX_CTRL to MSR_C9_PMON_BOX_OVF_CTRL
-    {0xfd0, 0xfdb}, // MSR_C9_PMON_EVNT_SEL0 to MSR_C9_PMON_CTR5
+    { 0x1a7, 0x1a7 }, // MSR_OFFCORE_RSP_1
+    { 0x1ad, 0x1ad }, // MSR_TURBO_RATIO_LIMIT
+    { 0xf40, 0xf42 }, // MSR_C8_PMON_BOX_CTRL to MSR_C8_PMON_BOX_OVF_CTRL
+    { 0xf50, 0xf5b }, // MSR_C8_PMON_EVNT_SEL0 to MSR_C8_PMON_CTR5
+    { 0xfc0, 0xfc2 }, // MSR_C9_PMON_BOX_CTRL to MSR_C9_PMON_BOX_OVF_CTRL
+    { 0xfd0, 0xfdb }, // MSR_C9_PMON_EVNT_SEL0 to MSR_C9_PMON_CTR5
 };
 static const struct msr_ranges table_2_19 = {
-    ranges_2_19, sizeof(ranges_2_19) / sizeof(ranges_2_19[0]),
+    ranges_2_19, sizeof(ranges_2_19) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-20: C-states, perfmon, power, thermal, turbo.
 static const struct msr_range ranges_2_20[] = {
-    {0x34, 0x34}, // MSR_SMI_COUNT
-    {0xce, 0xce}, // MSR_PLATFORM_INFO
-    {0xe2, 0xe2}, // MSR_PKG_CST_CONFIG_CONTROL
-    {0xe4, 0xe4}, // MSR_PMG_IO_CAPTURE_BASE
-    {0x198, 0x198}, // IA32_PERF_STATUS
-    {0x1a2, 0x1a2}, // MSR_TEMPERATURE_TARGET
-    {0x1a6, 0x1a7}, // MSR_OFFCORE_RSP_0 to MSR_OFFCORE_RSP_1
-    {0x1aa, 0x1aa}, // MSR_MISC_PWR_MGMT
-    {0x1c8, 0x1c9}, // MSR_LBR_SELECT to MSR_LASTBRANCH_TOS
-    {0x1dd, 0x1de}, // MSR_LER_FROM_LIP to MSR_LER_TO_LIP
-    {0x1fc, 0x1fc}, // MSR_POWER_CTL
-    {0x3f6, 0x3f6}, // MSR_PEBS_LD_LAT
-    {0x3f8, 0x3fa}, // MSR_PKG_C3_RESIDENCY to MSR_PKG_C7_RESIDENCY
-    {0x3fc, 0x3fe}, // MSR_CORE_C3_RESIDENCY to MSR_CORE_C7_RESIDENCY
-    {0x606, 0x606}, // MSR_RAPL_POWER_UNIT
-    {0x60a, 0x60b}, // MSR_PKGC3_IRTL to MSR_PKGC6_IRTL
-    {0x60d, 0x60d}, // MSR_PKG_C2_RESIDENCY
-    {0x610, 0x611}, // MSR_PKG_POWER_LIMIT to MSR_PKG_ENERGY_STATUS
-    {0x614, 0x614}, // MSR_PKG_POWER_INFO
-    {0x638, 0x638}, // MSR_PP0_POWER_LIMIT
-    {0x680, 0x68f}, // MSR_LASTBRANCH_0_FROM_IP to MSR_LASTBRANCH_15_FROM_IP
-    {0x6c0, 0x6cf}, // MSR_LASTBRANCH_0_TO_IP to MSR_LASTBRANCH_15_TO_IP
+    { 0x34, 0x34 }, // MSR_SMI_COUNT
+    { 0xce, 0xce }, // MSR_PLATFORM_INFO
+    { 0xe2, 0xe2 }, // MSR_PKG_CST_CONFIG_CONTROL
+    { 0xe4, 0xe4 }, // MSR_PMG_IO_CAPTURE_BASE
+    { 0x198, 0x198 }, // IA32_PERF_STATUS
+    { 0x1a2, 0x1a2 }, // MSR_TEMPERATURE_TARGET
+    { 0x1a6, 0x1a7 }, // MSR_OFFCORE_RSP_0 to MSR_OFFCORE_RSP_1
+    { 0x1aa, 0x1aa }, // MSR_MISC_PWR_MGMT
+    { 0x1c8, 0x1c9 }, // MSR_LBR_SELECT to MSR_LASTBRANCH_TOS
+    { 0x1dd, 0x1de }, // MSR_LER_FROM_LIP to MSR_LER_TO_LIP
+    { 0x1fc, 0x1fc }, // MSR_POWER_CTL
+    { 0x3f6, 0x3f6 }, // MSR_PEBS_LD_LAT
+    { 0x3f8, 0x3fa }, // MSR_PKG_C3_RESIDENCY to MSR_PKG_C7_RESIDENCY
+    { 0x3fc, 0x3fe }, // MSR_CORE_C3_RESIDENCY to MSR_CORE_C7_RESIDENCY
+    { 0x606, 0x606 }, // MSR_RAPL_POWER_UNIT
+    { 0x60a, 0x60b }, // MSR_PKGC3_IRTL to MSR_PKGC6_IRTL
+    { 0x60d, 0x60d }, // MSR_PKG_C2_RESIDENCY
+    { 0x610, 0x611 }, // MSR_PKG_POWER_LIMIT to MSR_PKG_ENERGY_STATUS
+    { 0x614, 0x614 }, // MSR_PKG_POWER_INFO
+    { 0x638, 0x638 }, // MSR_PP0_POWER_LIMIT
+    { 0x680, 0x68f }, // MSR_LASTBRANCH_0_FROM_IP to MSR_LASTBRANCH_15_FROM_IP
+    { 0x6c0, 0x6cf }, // MSR_LASTBRANCH_0_TO_IP to MSR_LASTBRANCH_15_TO_IP
 };
 static const struct msr_ranges table_2_20 = {
-    ranges_2_20, sizeof(ranges_2_20) / sizeof(ranges_2_20[0]),
+    ranges_2_20, sizeof(ranges_2_20) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-21: C-states, power, turbo.
 static const struct msr_range ranges_2_21[] = {
-    {0x1ad, 0x1ad}, // MSR_TURBO_RATIO_LIMIT
-    {0x60c, 0x60c}, // MSR_PKGC7_IRTL
-    {0x639, 0x63a}, // MSR_PP0_ENERGY_STATUS to MSR_PP0_POLICY
-    {0x640, 0x642}, // MSR_PP1_POWER_LIMIT to MSR_PP1_POLICY
+    { 0x1ad, 0x1ad }, // MSR_TURBO_RATIO_LIMIT
+    { 0x60c, 0x60c }, // MSR_PKGC7_IRTL
+    { 0x639, 0x63a }, // MSR_PP0_ENERGY_STATUS to MSR_PP0_POLICY
+    { 0x640, 0x642 }, // MSR_PP1_POWER_LIMIT to MSR_PP1_POLICY
 };
 static const struct msr_ranges table_2_21 = {
-    ranges_2_21, sizeof(ranges_2_21) / sizeof(ranges_2_21[0]),
+    ranges_2_21, sizeof(ranges_2_21) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-22: perfmon.
 static const struct msr_range ranges_2_22[] = {
-    {0x391, 0x392}, // MSR_UNC_PERF_GLOBAL_CTRL to MSR_UNC_PERF_GLOBAL_STATUS
-    {0x394, 0x396}, // MSR_UNC_PERF_FIXED_CTRL to MSR_UNC_CBO_CONFIG
-    {0x3b0, 0x3b3}, // MSR_UNC_ARB_PERFCTR0 to MSR_UNC_ARB_PERFEVTSEL1
-    {0x700, 0x703}, // MSR_UNC_CBO_0_PERFEVTSEL0 to MSR_UNC_CBO_0_PERFEVTSEL3
-    {0x705, 0x709}, // MSR_UNC_CBO_0_UNIT_STATUS to MSR_UNC_CBO_0_PERFCTR3
-    {0x710, 0x713}, // MSR_UNC_CBO_1_PERFEVTSEL0 to MSR_UNC_CBO_1_PERFEVTSEL3
-    {0x715, 0x719}, // MSR_UNC_CBO_1_UNIT_STATUS to MSR_UNC_CBO_1_PERFCTR3
-    {0x720, 0x723}, // MSR_UNC_CBO_2_PERFEVTSEL0 to MSR_UNC_CBO_2_PERFEVTSEL3
-    {0x725, 0x729}, // MSR_UNC_CBO_2_UNIT_STATUS to MSR_UNC_CBO_3_PERFCTR3
-    {0x730, 0x733}, // MSR_UNC_CBO_3_PERFEVTSEL0 to MSR_UNC_CBO_3_PERFEVTSEL3
-    {0x735, 0x739}, // MSR_UNC_CBO_3_UNIT_STATUS to MSR_UNC_CBO_3_PERFCTR3
-    {0x740, 0x743}, // MSR_UNC_CBO_4_PERFEVTSEL0 to MSR_UNC_CBO_4_PERFEVTSEL3
-    {0x745, 0x749}, // MSR_UNC_CBO_4_UNIT_STATUS to MSR_UNC_CBO_4_PERFCTR3
+    { 0x391, 0x392 }, // MSR_UNC_PERF_GLOBAL_CTRL to MSR_UNC_PERF_GLOBAL_STATUS
+    { 0x394, 0x396 }, // MSR_UNC_PERF_FIXED_CTRL to MSR_UNC_CBO_CONFIG
+    { 0x3b0, 0x3b3 }, // MSR_UNC_ARB_PERFCTR0 to MSR_UNC_ARB_PERFEVTSEL1
+    { 0x700, 0x703 }, // MSR_UNC_CBO_0_PERFEVTSEL0 to MSR_UNC_CBO_0_PERFEVTSEL3
+    { 0x705, 0x709 }, // MSR_UNC_CBO_0_UNIT_STATUS to MSR_UNC_CBO_0_PERFCTR3
+    { 0x710, 0x713 }, // MSR_UNC_CBO_1_PERFEVTSEL0 to MSR_UNC_CBO_1_PERFEVTSEL3
+    { 0x715, 0x719 }, // MSR_UNC_CBO_1_UNIT_STATUS to MSR_UNC_CBO_1_PERFCTR3
+    { 0x720, 0x723 }, // MSR_UNC_CBO_2_PERFEVTSEL0 to MSR_UNC_CBO_2_PERFEVTSEL3
+    { 0x725, 0x729 }, // MSR_UNC_CBO_2_UNIT_STATUS to MSR_UNC_CBO_3_PERFCTR3
+    { 0x730, 0x733 }, // MSR_UNC_CBO_3_PERFEVTSEL0 to MSR_UNC_CBO_3_PERFEVTSEL3
+    { 0x735, 0x739 }, // MSR_UNC_CBO_3_UNIT_STATUS to MSR_UNC_CBO_3_PERFCTR3
+    { 0x740, 0x743 }, // MSR_UNC_CBO_4_PERFEVTSEL0 to MSR_UNC_CBO_4_PERFEVTSEL3
+    { 0x745, 0x749 }, // MSR_UNC_CBO_4_UNIT_STATUS to MSR_UNC_CBO_4_PERFCTR3
 };
 static const struct msr_ranges table_2_22 = {
-    ranges_2_22, sizeof(ranges_2_22) / sizeof(ranges_2_22[0]),
+    ranges_2_22, sizeof(ranges_2_22) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-23: perfmon, power, turbo.
 static const struct msr_range ranges_2_23[] = {
-    {0x1ad, 0x1ad}, // MSR_TURBO_RATIO_LIMIT
-    {0x39c, 0x39c}, // MSR_PEBS_NUM_ALT
-    {0x613, 0x613}, // MSR_PKG_PERF_STATUS
-    {0x618, 0x619}, // MSR_DRAM_POWER_LIMIT to MSR_DRAM_ENERGY_STATUS
-    {0x61b, 0x61c}, // MSR_DRAM_PERF_STATUS to MSR_DRAM_POWER_INFO
-    {0x639, 0x639}, // MSR_PP0_ENERGY_STATUS
+    { 0x1ad, 0x1ad }, // MSR_TURBO_RATIO_LIMIT
+    { 0x39c, 0x39c }, // MSR_PEBS_NUM_ALT
+    { 0x613, 0x613 }, // MSR_PKG_PERF_STATUS
+    { 0x618, 0x619 }, // MSR_DRAM_POWER_LIMIT to MSR_DRAM_ENERGY_STATUS
+    { 0x61b, 0x61c }, // MSR_DRAM_PERF_STATUS to MSR_DRAM_POWER_INFO
+    { 0x639, 0x639 }, // MSR_PP0_ENERGY_STATUS
 };
 static const struct msr_ranges table_2_23 = {
-    ranges_2_23, sizeof(ranges_2_23) / sizeof(ranges_2_23[0]),
+    ranges_2_23, sizeof(ranges_2_23) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-24: perfmon.
 static const struct msr_range ranges_2_24[] = {
-    {0xc08, 0xc09}, // MSR_U_PMON_UCLK_FIXED_CTL to MSR_U_PMON_UCLK_FIXED_CTR
-    {0xc10, 0xc11}, // MSR_U_PMON_EVNTSEL0 to MSR_U_PMON_EVNTSEL1
-    {0xc16, 0xc17}, // MSR_U_PMON_CTR0 to MSR_U_PMON_CTR1
-    {0xc24, 0xc24}, // MSR_PCU_PMON_BOX_CTL
-    {0xc30, 0xc34}, // MSR_PCU_PMON_EVNTSEL0 to MSR_PCU_PMON_BOX_FILTER
-    {0xc36, 0xc39}, // MSR_PCU_PMON_CTR0 to MSR_PCU_PMON_CTR3
-    {0xd04, 0xd04}, // MSR_C0_PMON_BOX_CTL
-    {0xd10, 0xd14}, // MSR_C0_PMON_EVNTSEL0 to MSR_C0_PMON_BOX_FILTER
-    {0xd16, 0xd19}, // MSR_C0_PMON_CTR0 to MSR_C0_PMON_CTR3
-    {0xd24, 0xd24}, // MSR_C1_PMON_BOX_CTL
-    {0xd30, 0xd34}, // MSR_C1_PMON_EVNTSEL0 to MSR_C1_PMON_BOX_FILTER
-    {0xd36, 0xd39}, // MSR_C1_PMON_CTR0 to MSR_C1_PMON_CTR3
-    {0xd44, 0xd44}, // MSR_C2_PMON_BOX_CTL
-    {0xd50, 0xd54}, // MSR_C2_PMON_EVNTSEL0 to MSR_C2_PMON_BOX_FILTER
-    {0xd56, 0xd59}, // MSR_C2_PMON_CTR0 to MSR_C2_PMON_CTR3
-    {0xd64, 0xd64}, // MSR_C3_PMON_BOX_CTL
-    {0xd70, 0xd74}, // MSR_C3_PMON_EVNTSEL0 to MSR_C3_PMON_BOX_FILTER
-    {0xd76, 0xd79}, // MSR_C3_PMON_CTR0 to MSR_C3_PMON_CTR3
-    {0xd84, 0xd84}, // MSR_C4_PMON_BOX_CTL
-    {0xd90, 0xd94}, // MSR_C4_PMON_EVNTSEL0 to MSR_C4_PMON_BOX_FILTER
-    {0xd96, 0xd99}, // MSR_C4_PMON_CTR0 to MSR_C4_PMON_CTR3
-    {0xda4, 0xda4}, // MSR_C5_PMON_BOX_CTL
-    {0xdb0, 0xdb4}, // MSR_C5_PMON_EVNTSEL0 to MSR_C5_PMON_BOX_FILTER
-    {0xdb6, 0xdb9}, // MSR_C5_PMON_CTR0 to MSR_C5_PMON_CTR3
-    {0xdc4, 0xdc4}, // MSR_C6_PMON_BOX_CTL
-    {0xdd0, 0xdd4}, // MSR_C6_PMON_EVNTSEL0 to MSR_C6_PMON_BOX_FILTER
-    {0xdd6, 0xdd9}, // MSR_C6_PMON_CTR0 to MSR_C6_PMON_CTR3
-    {0xde4, 0xde4}, // MSR_C7_PMON_BOX_CTL
-    {0xdf0, 0xdf4}, // MSR_C7_PMON_EVNTSEL0 to MSR_C7_PMON_BOX_FILTER
-    {0xdf6, 0xdf9}, // MSR_C7_PMON_CTR0 to MSR_C7_PMON_CTR3
+    { 0xc08, 0xc09 }, // MSR_U_PMON_UCLK_FIXED_CTL to MSR_U_PMON_UCLK_FIXED_CTR
+    { 0xc10, 0xc11 }, // MSR_U_PMON_EVNTSEL0 to MSR_U_PMON_EVNTSEL1
+    { 0xc16, 0xc17 }, // MSR_U_PMON_CTR0 to MSR_U_PMON_CTR1
+    { 0xc24, 0xc24 }, // MSR_PCU_PMON_BOX_CTL
+    { 0xc30, 0xc34 }, // MSR_PCU_PMON_EVNTSEL0 to MSR_PCU_PMON_BOX_FILTER
+    { 0xc36, 0xc39 }, // MSR_PCU_PMON_CTR0 to MSR_PCU_PMON_CTR3
+    { 0xd04, 0xd04 }, // MSR_C0_PMON_BOX_CTL
+    { 0xd10, 0xd14 }, // MSR_C0_PMON_EVNTSEL0 to MSR_C0_PMON_BOX_FILTER
+    { 0xd16, 0xd19 }, // MSR_C0_PMON_CTR0 to MSR_C0_PMON_CTR3
+    { 0xd24, 0xd24 }, // MSR_C1_PMON_BOX_CTL
+    { 0xd30, 0xd34 }, // MSR_C1_PMON_EVNTSEL0 to MSR_C1_PMON_BOX_FILTER
+    { 0xd36, 0xd39 }, // MSR_C1_PMON_CTR0 to MSR_C1_PMON_CTR3
+    { 0xd44, 0xd44 }, // MSR_C2_PMON_BOX_CTL
+    { 0xd50, 0xd54 }, // MSR_C2_PMON_EVNTSEL0 to MSR_C2_PMON_BOX_FILTER
+    { 0xd56, 0xd59 }, // MSR_C2_PMON_CTR0 to MSR_C2_PMON_CTR3
+    { 0xd64, 0xd64 }, // MSR_C3_PMON_BOX_CTL
+    { 0xd70, 0xd74 }, // MSR_C3_PMON_EVNTSEL0 to MSR_C3_PMON_BOX_FILTER
+    { 0xd76, 0xd79 }, // MSR_C3_PMON_CTR0 to MSR_C3_PMON_CTR3
+    { 0xd84, 0xd84 }, // MSR_C4_PMON_BOX_CTL
+    { 0xd90, 0xd94 }, // MSR_C4_PMON_EVNTSEL0 to MSR_C4_PMON_BOX_FILTER
+    { 0xd96, 0xd99 }, // MSR_C4_PMON_CTR0 to MSR_C4_PMON_CTR3
+    { 0xda4, 0xda4 }, // MSR_C5_PMON_BOX_CTL
+    { 0xdb0, 0xdb4 }, // MSR_C5_PMON_EVNTSEL0 to MSR_C5_PMON_BOX_FILTER
+    { 0xdb6, 0xdb9 }, // MSR_C5_PMON_CTR0 to MSR_C5_PMON_CTR3
+    { 0xdc4, 0xdc4 }, // MSR_C6_PMON_BOX_CTL
+    { 0xdd0, 0xdd4 }, // MSR_C6_PMON_EVNTSEL0 to MSR_C6_PMON_BOX_FILTER
+    { 0xdd6, 0xdd9 }, // MSR_C6_PMON_CTR0 to MSR_C6_PMON_CTR3
+    { 0xde4, 0xde4 }, // MSR_C7_PMON_BOX_CTL
+    { 0xdf0, 0xdf4 }, // MSR_C7_PMON_EVNTSEL0 to MSR_C7_PMON_BOX_FILTER
+    { 0xdf6, 0xdf9 }, // MSR_C7_PMON_CTR0 to MSR_C7_PMON_CTR3
 };
 static const struct msr_ranges table_2_24 = {
-    ranges_2_24, sizeof(ranges_2_24) / sizeof(ranges_2_24[0]),
+    ranges_2_24, sizeof(ranges_2_24) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-25: C-states, power, turbo.
 static const struct msr_range ranges_2_25[] = {
-    {0xce, 0xce}, // MSR_PLATFORM_INFO
-    {0xe2, 0xe2}, // MSR_PKG_CST_CONFIG_CONTROL
-    {0x639, 0x639}, // MSR_PP0_ENERGY_STATUS
-    {0x648, 0x64c}, // MSR_CONFIG_TDP_NOMINAL to MSR_TURBO_ACTIVATION_RATIO
+    { 0xce, 0xce }, // MSR_PLATFORM_INFO
+    { 0xe2, 0xe2 }, // MSR_PKG_CST_CONFIG_CONTROL
+    { 0x639, 0x639 }, // MSR_PP0_ENERGY_STATUS
+    { 0x648, 0x64c }, // MSR_CONFIG_TDP_NOMINAL to MSR_TURBO_ACTIVATION_RATIO
 };
 static const struct msr_ranges table_2_25 = {
-    ranges_2_25, sizeof(ranges_2_25) / sizeof(ranges_2_25[0]),
+    ranges_2_25, sizeof(ranges_2_25) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-26: C-states, power, thermal, turbo.
 static const struct msr_range ranges_2_26[] = {
-    {0xce, 0xce}, // MSR_PLATFORM_INFO
-    {0xe2, 0xe2}, // MSR_PKG_CST_CONFIG_CONTROL
-    {0x1a2, 0x1a2}, // MSR_TEMPERATURE_TARGET
-    {0x1ae, 0x1ae}, // MSR_TURBO_RATIO_LIMIT1
-    {0x613, 0x613}, // MSR_PKG_PERF_STATUS
-    {0x618, 0x619}, // MSR_DRAM_POWER_LIMIT to MSR_DRAM_ENERGY_STATUS
-    {0x61b, 0x61c}, // MSR_DRAM_PERF_STATUS to MSR_DRAM_POWER_INFO
-    {0x639, 0x639}, // MSR_PP0_ENERGY_STATUS
+    { 0xce, 0xce }, // MSR_PLATFORM_INFO
+    { 0xe2, 0xe2 }, // MSR_PKG_CST_CONFIG_CONTROL
+    { 0x1a2, 0x1a2 }, // MSR_TEMPERATURE_TARGET
+    { 0x1ae, 0x1ae }, // MSR_TURBO_RATIO_LIMIT1
+    { 0x613, 0x613 }, // MSR_PKG_PERF_STATUS
+    { 0x618, 0x619 }, // MSR_DRAM_POWER_LIMIT to MSR_DRAM_ENERGY_STATUS
+    { 0x61b, 0x61c }, // MSR_DRAM_PERF_STATUS to MSR_DRAM_POWER_INFO
+    { 0x639, 0x639 }, // MSR_PP0_ENERGY_STATUS
 };
 static const struct msr_ranges table_2_26 = {
-    ranges_2_26, sizeof(ranges_2_26) / sizeof(ranges_2_26[0]),
+    ranges_2_26, sizeof(ranges_2_26) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-27: turbo.
 static const struct msr_range ranges_2_27[] = {
-    {0x1ae, 0x1ae}, // MSR_TURBO_RATIO_LIMIT1
+    { 0x1ae, 0x1ae }, // MSR_TURBO_RATIO_LIMIT1
 };
 static const struct msr_ranges table_2_27 = {
-    ranges_2_27, sizeof(ranges_2_27) / sizeof(ranges_2_27[0]),
+    ranges_2_27, sizeof(ranges_2_27) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-28: perfmon.
 static const struct msr_range ranges_2_28[] = {
-    {0xc00, 0xc01}, // MSR_PMON_GLOBAL_CTL to MSR_PMON_GLOBAL_STATUS
-    {0xc06, 0xc06}, // MSR_PMON_GLOBAL_CONFIG
-    {0xc15, 0xc15}, // MSR_U_PMON_BOX_STATUS
-    {0xc35, 0xc35}, // MSR_PCU_PMON_BOX_STATUS
-    {0xd1a, 0xd1a}, // MSR_C0_PMON_BOX_FILTER1
-    {0xd3a, 0xd3a}, // MSR_C1_PMON_BOX_FILTER1
-    {0xd5a, 0xd5a}, // MSR_C2_PMON_BOX_FILTER1
-    {0xd7a, 0xd7a}, // MSR_C3_PMON_BOX_FILTER1
-    {0xd9a, 0xd9a}, // MSR_C4_PMON_BOX_FILTER1
-    {0xdba, 0xdba}, // MSR_C5_PMON_BOX_FILTER1
-    {0xdda, 0xdda}, // MSR_C6_PMON_BOX_FILTER1
-    {0xdfa, 0xdfa}, // MSR_C7_PMON_BOX_FILTER1
-    {0xe04, 0xe04}, // MSR_C8_PMON_BOX_CTL
-    {0xe10, 0xe14}, // MSR_C8_PMON_EVNTSEL0 to MSR_C8_PMON_BOX_FILTER
-    {0xe16, 0xe1a}, // MSR_C8_PMON_CTR0 to MSR_C8_PMON_BOX_FILTER1
-    {0xe24, 0xe24}, // MSR_C9_PMON_BOX_CTL
-    {0xe30, 0xe34}, // MSR_C9_PMON_EVNTSEL0 to MSR_C9_PMON_BOX_FILTER
-    {0xe36, 0xe3a}, // MSR_C9_PMON_CTR0 to MSR_C9_PMON_BOX_FILTER1
-    {0xe44, 0xe44}, // MSR_C10_PMON_BOX_CTL
-    {0xe50, 0xe54}, // MSR_C10_PMON_EVNTSEL0 to MSR_C10_PMON_BOX_FILTER
-    {0xe56, 0xe5a}, // MSR_C10_PMON_CTR0 to MSR_C10_PMON_BOX_FILTER1
-    {0xe64, 0xe64}, // MSR_C11_PMON_BOX_CTL
-    {0xe70, 0xe74}, // MSR_C11_PMON_EVNTSEL0 to MSR_C11_PMON_BOX_FILTER
-    {0xe76, 0xe7a}, // MSR_C11_PMON_CTR0 to MSR_C11_PMON_BOX_FILTER1
-    {0xe84, 0xe84}, // MSR_C12_PMON_BOX_CTL
-    {0xe90, 0xe94}, // MSR_C12_PMON_EVNTSEL0 to MSR_C12_PMON_BOX_FILTER
-    {0xe96, 0xe9a}, // MSR_C12_PMON_CTR0 to MSR_C12_PMON_BOX_FILTER1
-    {0xea4, 0xea4}, // MSR_C13_PMON_BOX_CTL
-    {0xeb0, 0xeb4}, // MSR_C13_PMON_EVNTSEL0 to MSR_C13_PMON_BOX_FILTER
-    {0xeb6, 0xeba}, // MSR_C13_PMON_CTR0 to MSR_C13_PMON_BOX_FILTER1
-    {0xec4, 0xec4}, // MSR_C14_PMON_BOX_CTL
-    {0xed0, 0xed4}, // MSR_C14_PMON_EVNTSEL0 to MSR_C14_PMON_BOX_FILTER
-    {0xed6, 0xeda}, // MSR_C14_PMON_CTR0 to MSR_C14_PMON_BOX_FILTER1
+    { 0xc00, 0xc01 }, // MSR_PMON_GLOBAL_CTL to MSR_PMON_GLOBAL_STATUS
+    { 0xc06, 0xc06 }, // MSR_PMON_GLOBAL_CONFIG
+    { 0xc15, 0xc15 }, // MSR_U_PMON_BOX_STATUS
+    { 0xc35, 0xc35 }, // MSR_PCU_PMON_BOX_STATUS
+    { 0xd1a, 0xd1a }, // MSR_C0_PMON_BOX_FILTER1
+    { 0xd3a, 0xd3a }, // MSR_C1_PMON_BOX_FILTER1
+    { 0xd5a, 0xd5a }, // MSR_C2_PMON_BOX_FILTER1
+    { 0xd7a, 0xd7a }, // MSR_C3_PMON_BOX_FILTER1
+    { 0xd9a, 0xd9a }, // MSR_C4_PMON_BOX_FILTER1
+    { 0xdba, 0xdba }, // MSR_C5_PMON_BOX_FILTER1
+    { 0xdda, 0xdda }, // MSR_C6_PMON_BOX_FILTER1
+    { 0xdfa, 0xdfa }, // MSR_C7_PMON_BOX_FILTER1
+    { 0xe04, 0xe04 }, // MSR_C8_PMON_BOX_CTL
+    { 0xe10, 0xe14 }, // MSR_C8_PMON_EVNTSEL0 to MSR_C8_PMON_BOX_FILTER
+    { 0xe16, 0xe1a }, // MSR_C8_PMON_CTR0 to MSR_C8_PMON_BOX_FILTER1
+    { 0xe24, 0xe24 }, // MSR_C9_PMON_BOX_CTL
+    { 0xe30, 0xe34 }, // MSR_C9_PMON_EVNTSEL0 to MSR_C9_PMON_BOX_FILTER
+    { 0xe36, 0xe3a }, // MSR_C9_PMON_CTR0 to MSR_C9_PMON_BOX_FILTER1
+    { 0xe44, 0xe44 }, // MSR_C10_PMON_BOX_CTL
+    { 0xe50, 0xe54 }, // MSR_C10_PMON_EVNTSEL0 to MSR_C10_PMON_BOX_FILTER
+    { 0xe56, 0xe5a }, // MSR_C10_PMON_CTR0 to MSR_C10_PMON_BOX_FILTER1
+    { 0xe64, 0xe64 }, // MSR_C11_PMON_BOX_CTL
+    { 0xe70, 0xe74 }, // MSR_C11_PMON_EVNTSEL0 to MSR_C11_PMON_BOX_FILTER
+    { 0xe76, 0xe7a }, // MSR_C11_PMON_CTR0 to MSR_C11_PMON_BOX_FILTER1
+    { 0xe84, 0xe84 }, // MSR_C12_PMON_BOX_CTL
+    { 0xe90, 0xe94 }, // MSR_C12_PMON_EVNTSEL0 to MSR_C12_PMON_BOX_FILTER
+    { 0xe96, 0xe9a }, // MSR_C12_PMON_CTR0 to MSR_C12_PMON_BOX_FILTER1
+    { 0xea4, 0xea4 }, // MSR_C13_PMON_BOX_CTL
+    { 0xeb0, 0xeb4 }, // MSR_C13_PMON_EVNTSEL0 to MSR_C13_PMON_BOX_FILTER
+    { 0xeb6, 0xeba }, // MSR_C13_PMON_CTR0 to MSR_C13_PMON_BOX_FILTER1
+    { 0xec4, 0xec4 }, // MSR_C14_PMON_BOX_CTL
+    { 0xed0, 0xed4 }, // MSR_C14_PMON_EVNTSEL0 to MSR_C14_PMON_BOX_FILTER
+    { 0xed6, 0xeda }, // MSR_C14_PMON_CTR0 to MSR_C14_PMON_BOX_FILTER1
 };
 static const struct msr_ranges table_2_28 = {
-    ranges_2_28, sizeof(ranges_2_28) / sizeof(ranges_2_28[0]),
+    ranges_2_28, sizeof(ranges_2_28) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-29: C-states, perfmon, power, turbo.
 static const struct msr_range ranges_2_29[] = {
-    {0xce, 0xce}, // MSR_PLATFORM_INFO
-    {0x1c8, 0x1c8}, // MSR_LBR_SELECT
-    {0x60b, 0x60c}, // MSR_PKGC_IRTL1 to MSR_PKGC_IRTL2
-    {0x613, 0x613}, // MSR_PKG_PERF_STATUS
-    {0x619, 0x619}, // MSR_DRAM_ENERGY_STATUS
-    {0x61b, 0x61b}, // MSR_DRAM_PERF_STATUS
-    {0x648, 0x64c}, // MSR_CONFIG_TDP_NOMINAL to MSR_TURBO_ACTIVATION_RATIO
+    { 0xce, 0xce }, // MSR_PLATFORM_INFO
+    { 0x1c8, 0x1c8 }, // MSR_LBR_SELECT
+    { 0x60b, 0x60c }, // MSR_PKGC_IRTL1 to MSR_PKGC_IRTL2
+    { 0x613, 0x613 }, // MSR_PKG_PERF_STATUS
+    { 0x619, 0x619 }, // MSR_DRAM_ENERGY_STATUS
+    { 0x61b, 0x61b }, // MSR_DRAM_PERF_STATUS
+    { 0x648, 0x64c }, // MSR_CONFIG_TDP_NOMINAL to MSR_TURBO_ACTIVATION_RATIO
 };
 static const struct msr_ranges table_2_29 = {
-    ranges_2_29, sizeof(ranges_2_29) / sizeof(ranges_2_29[0]),
+    ranges_2_29, sizeof(ranges_2_29) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-30: C-states, perfmon, power, turbo.
 static const struct msr_range ranges_2_30[] = {
-    {0xe2, 0xe2}, // MSR_PKG_CST_CONFIG_CONTROL
-    {0x1ad, 0x1ad}, // MSR_TURBO_RATIO_LIMIT
-    {0x391, 0x392}, // MSR_UNC_PERF_GLOBAL_CTRL to MSR_UNC_PERF_GLOBAL_STATUS
-    {0x394, 0x396}, // MSR_UNC_PERF_FIXED_CTRL to MSR_UNC_CBO_CONFIG
-    {0x3b0, 0x3b3}, // MSR_UNC_ARB_PERFCTR0 to MSR_UNC_ARB_PERFEVTSEL1
-    {0x606, 0x606}, // MSR_RAPL_POWER_UNIT
-    {0x639, 0x639}, // MSR_PP0_ENERGY_STATUS
-    {0x640, 0x642}, // MSR_PP1_POWER_LIMIT to MSR_PP1_POLICY
-    {0x690, 0x690}, // MSR_CORE_PERF_LIMIT_REASONS
-    {0x6b0, 0x6b1}, // MSR_GRAPHICS_PERF_LIMIT_REASONS to MSR_RING_PERF_LIMIT_REASONS
-    {0x700, 0x701}, // MSR_UNC_CBO_0_PERFEVTSEL0 to MSR_UNC_CBO_0_PERFEVTSEL1
-    {0x706, 0x707}, // MSR_UNC_CBO_0_PERFCTR0 to MSR_UNC_CBO_0_PERFCTR1
-    {0x710, 0x711}, // MSR_UNC_CBO_1_PERFEVTSEL0 to MSR_UNC_CBO_1_PERFEVTSEL1
-    {0x716, 0x717}, // MSR_UNC_CBO_1_PERFCTR0 to MSR_UNC_CBO_1_PERFCTR1
-    {0x720, 0x721}, // MSR_UNC_CBO_2_PERFEVTSEL0 to MSR_UNC_CBO_2_PERFEVTSEL1
-    {0x726, 0x727}, // MSR_UNC_CBO_2_PERFCTR0 to MSR_UNC_CBO_2_PERFCTR1
-    {0x730, 0x731}, // MSR_UNC_CBO_3_PERFEVTSEL0 to MSR_UNC_CBO_3_PERFEVTSEL1
-    {0x736, 0x737}, // MSR_UNC_CBO_3_PERFCTR0 to MSR_UNC_CBO_3_PERFCTR1
+    { 0xe2, 0xe2 }, // MSR_PKG_CST_CONFIG_CONTROL
+    { 0x1ad, 0x1ad }, // MSR_TURBO_RATIO_LIMIT
+    { 0x391, 0x392 }, // MSR_UNC_PERF_GLOBAL_CTRL to MSR_UNC_PERF_GLOBAL_STATUS
+    { 0x394, 0x396 }, // MSR_UNC_PERF_FIXED_CTRL to MSR_UNC_CBO_CONFIG
+    { 0x3b0, 0x3b3 }, // MSR_UNC_ARB_PERFCTR0 to MSR_UNC_ARB_PERFEVTSEL1
+    { 0x606, 0x606 }, // MSR_RAPL_POWER_UNIT
+    { 0x639, 0x639 }, // MSR_PP0_ENERGY_STATUS
+    { 0x640, 0x642 }, // MSR_PP1_POWER_LIMIT to MSR_PP1_POLICY
+    { 0x690, 0x690 }, // MSR_CORE_PERF_LIMIT_REASONS
+    { 0x6b0, 0x6b1 }, // MSR_GRAPHICS_PERF_LIMIT_REASONS to MSR_RING_PERF_LIMIT_REASONS
+    { 0x700, 0x701 }, // MSR_UNC_CBO_0_PERFEVTSEL0 to MSR_UNC_CBO_0_PERFEVTSEL1
+    { 0x706, 0x707 }, // MSR_UNC_CBO_0_PERFCTR0 to MSR_UNC_CBO_0_PERFCTR1
+    { 0x710, 0x711 }, // MSR_UNC_CBO_1_PERFEVTSEL0 to MSR_UNC_CBO_1_PERFEVTSEL1
+    { 0x716, 0x717 }, // MSR_UNC_CBO_1_PERFCTR0 to MSR_UNC_CBO_1_PERFCTR1
+    { 0x720, 0x721 }, // MSR_UNC_CBO_2_PERFEVTSEL0 to MSR_UNC_CBO_2_PERFEVTSEL1
+    { 0x726, 0x727 }, // MSR_UNC_CBO_2_PERFCTR0 to MSR_UNC_CBO_2_PERFCTR1
+    { 0x730, 0x731 }, // MSR_UNC_CBO_3_PERFEVTSEL0 to MSR_UNC_CBO_3_PERFEVTSEL1
+    { 0x736, 0x737 }, // MSR_UNC_CBO_3_PERFCTR0 to MSR_UNC_CBO_3_PERFCTR1
 };
 static const struct msr_ranges table_2_30 = {
-    ranges_2_30, sizeof(ranges_2_30) / sizeof(ranges_2_30[0]),
+    ranges_2_30, sizeof(ranges_2_30) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-31: C-states.
 static const struct msr_range ranges_2_31[] = {
-    {0xe2, 0xe2}, // MSR_PKG_CST_CONFIG_CONTROL
-    {0x630, 0x632}, // MSR_PKG_C8_RESIDENCY to MSR_PKG_C10_RESIDENCY
+    { 0xe2, 0xe2 }, // MSR_PKG_CST_CONFIG_CONTROL
+    { 0x630, 0x632 }, // MSR_PKG_C8_RESIDENCY to MSR_PKG_C10_RESIDENCY
 };
 static const struct msr_ranges table_2_31 = {
-    ranges_2_31, sizeof(ranges_2_31) / sizeof(ranges_2_31[0]),
+    ranges_2_31, sizeof(ranges_2_31) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-32: C-states, power, turbo.
 static const struct msr_range ranges_2_32[] = {
-    {0xe2, 0xe2}, // MSR_PKG_CST_CONFIG_CONTROL
-    {0x1ad, 0x1af}, // MSR_TURBO_RATIO_LIMIT to MSR_TURBO_RATIO_LIMIT2
-    {0x606, 0x606}, // MSR_RAPL_POWER_UNIT
-    {0x618, 0x619}, // MSR_DRAM_POWER_LIMIT to MSR_DRAM_ENERGY_STATUS
-    {0x61b, 0x61c}, // MSR_DRAM_PERF_STATUS to MSR_DRAM_POWER_INFO
-    {0x620, 0x620}, // MSR_UNCORE_RATIO_LIMIT
-    {0x639, 0x639}, // MSR_PP0_ENERGY_STATUS
-    {0x690, 0x690}, // MSR_CORE_PERF_LIMIT_REASONS
+    { 0xe2, 0xe2 }, // MSR_PKG_CST_CONFIG_CONTROL
+    { 0x1ad, 0x1af }, // MSR_TURBO_RATIO_LIMIT to MSR_TURBO_RATIO_LIMIT2
+    { 0x606, 0x606 }, // MSR_RAPL_POWER_UNIT
+    { 0x618, 0x619 }, // MSR_DRAM_POWER_LIMIT to MSR_DRAM_ENERGY_STATUS
+    { 0x61b, 0x61c }, // MSR_DRAM_PERF_STATUS to MSR_DRAM_POWER_INFO
+    { 0x620, 0x620 }, // MSR_UNCORE_RATIO_LIMIT
+    { 0x639, 0x639 }, // MSR_PP0_ENERGY_STATUS
+    { 0x690, 0x690 }, // MSR_CORE_PERF_LIMIT_REASONS
 };
 static const struct msr_ranges table_2_32 = {
-    ranges_2_32, sizeof(ranges_2_32) / sizeof(ranges_2_32[0]),
+    ranges_2_32, sizeof(ranges_2_32) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-33: perfmon.
 static const struct msr_range ranges_2_33[] = {
-    {0x700, 0x706}, // MSR_PMON_GLOBAL_CTL to MSR_U_PMON_EVNTSEL1
-    {0x708, 0x70a}, // MSR_U_PMON_BOX_STATUS to MSR_U_PMON_CTR1
-    {0x710, 0x71a}, // MSR_PCU_PMON_BOX_CTL to MSR_PCU_PMON_CTR3
-    {0x720, 0x747}, // MSR_S0_PMON_BOX_CTL to MSR_S3_PMON_CTR3
-    {0xe00, 0xe0b}, // MSR_C0_PMON_BOX_CTL to MSR_C0_PMON_CTR3
-    {0xe10, 0xe1b}, // MSR_C1_PMON_BOX_CTL to MSR_C1_PMON_CTR3
-    {0xe20, 0xe2b}, // MSR_C2_PMON_BOX_CTL to MSR_C2_PMON_CTR3
-    {0xe30, 0xe3b}, // MSR_C3_PMON_BOX_CTL to MSR_C3_PMON_CTR3
-    {0xe40, 0xe4b}, // MSR_C4_PMON_BOX_CTL to MSR_C4_PMON_CTR3
-    {0xe50, 0xe5b}, // MSR_C5_PMON_BOX_CTL to MSR_C5_PMON_CTR3
-    {0xe60, 0xe6b}, // MSR_C6_PMON_BOX_CTL to MSR_C6_PMON_CTR3
-    {0xe70, 0xe7b}, // MSR_C7_PMON_BOX_CTL to MSR_C7_PMON_CTR3
-    {0xe80, 0xe8b}, // MSR_C8_PMON_BOX_CTL to MSR_C8_PMON_CTR3
-    {0xe90, 0xe9b}, // MSR_C9_PMON_BOX_CTL to MSR_C9_PMON_CTR3
-    {0xea0, 0xeab}, // MSR_C10_PMON_BOX_CTL to MSR_C10_PMON_CTR3
-    {0xeb0, 0xebb}, // MSR_C11_PMON_BOX_CTL to MSR_C11_PMON_CTR3
-    {0xec0, 0xecb}, // MSR_C12_PMON_BOX_CTL to MSR_C12_PMON_CTR3
-    {0xed0, 0xedb}, // MSR_C13_PMON_BOX_CTL to MSR_C13_PMON_CTR3
-    {0xee0, 0xeeb}, // MSR_C14_PMON_BOX_CTL to MSR_C14_PMON_CTR3
-    {0xef0, 0xefb}, // MSR_C15_PMON_BOX_CTL to MSR_C15_PMON_CTR3
-    {0xf00, 0xf0b}, // MSR_C16_PMON_BOX_CTL to MSR_C16_PMON_CTR3
-    {0xf10, 0xf1b}, // MSR_C17_PMON_BOX_CTL to MSR_C17_PMON_CTR3
+    { 0x700, 0x706 }, // MSR_PMON_GLOBAL_CTL to MSR_U_PMON_EVNTSEL1
+    { 0x708, 0x70a }, // MSR_U_PMON_BOX_STATUS to MSR_U_PMON_CTR1
+    { 0x710, 0x71a }, // MSR_PCU_PMON_BOX_CTL to MSR_PCU_PMON_CTR3
+    { 0x720, 0x747 }, // MSR_S0_PMON_BOX_CTL to MSR_S3_PMON_CTR3
+    { 0xe00, 0xe0b }, // MSR_C0_PMON_BOX_CTL to MSR_C0_PMON_CTR3
+    { 0xe10, 0xe1b }, // MSR_C1_PMON_BOX_CTL to MSR_C1_PMON_CTR3
+    { 0xe20, 0xe2b }, // MSR_C2_PMON_BOX_CTL to MSR_C2_PMON_CTR3
+    { 0xe30, 0xe3b }, // MSR_C3_PMON_BOX_CTL to MSR_C3_PMON_CTR3
+    { 0xe40, 0xe4b }, // MSR_C4_PMON_BOX_CTL to MSR_C4_PMON_CTR3
+    { 0xe50, 0xe5b }, // MSR_C5_PMON_BOX_CTL to MSR_C5_PMON_CTR3
+    { 0xe60, 0xe6b }, // MSR_C6_PMON_BOX_CTL to MSR_C6_PMON_CTR3
+    { 0xe70, 0xe7b }, // MSR_C7_PMON_BOX_CTL to MSR_C7_PMON_CTR3
+    { 0xe80, 0xe8b }, // MSR_C8_PMON_BOX_CTL to MSR_C8_PMON_CTR3
+    { 0xe90, 0xe9b }, // MSR_C9_PMON_BOX_CTL to MSR_C9_PMON_CTR3
+    { 0xea0, 0xeab }, // MSR_C10_PMON_BOX_CTL to MSR_C10_PMON_CTR3
+    { 0xeb0, 0xebb }, // MSR_C11_PMON_BOX_CTL to MSR_C11_PMON_CTR3
+    { 0xec0, 0xecb }, // MSR_C12_PMON_BOX_CTL to MSR_C12_PMON_CTR3
+    { 0xed0, 0xedb }, // MSR_C13_PMON_BOX_CTL to MSR_C13_PMON_CTR3
+    { 0xee0, 0xeeb }, // MSR_C14_PMON_BOX_CTL to MSR_C14_PMON_CTR3
+    { 0xef0, 0xefb }, // MSR_C15_PMON_BOX_CTL to MSR_C15_PMON_CTR3
+    { 0xf00, 0xf0b }, // MSR_C16_PMON_BOX_CTL to MSR_C16_PMON_CTR3
+    { 0xf10, 0xf1b }, // MSR_C17_PMON_BOX_CTL to MSR_C17_PMON_CTR3
 };
 static const struct msr_ranges table_2_33 = {
-    ranges_2_33, sizeof(ranges_2_33) / sizeof(ranges_2_33[0]),
+    ranges_2_33, sizeof(ranges_2_33) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-34: turbo.
 static const struct msr_range ranges_2_34[] = {
-    {0x620, 0x620}, // MSR_UNCORE_RATIO_LIMIT
+    { 0x620, 0x620 }, // MSR_UNCORE_RATIO_LIMIT
 };
 static const struct msr_ranges table_2_34 = {
-    ranges_2_34, sizeof(ranges_2_34) / sizeof(ranges_2_34[0]),
+    ranges_2_34, sizeof(ranges_2_34) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-35: C-states, power, turbo.
 static const struct msr_range ranges_2_35[] = {
-    {0xe2, 0xe2}, // MSR_PKG_CST_CONFIG_CONTROL
-    {0x1ad, 0x1ad}, // MSR_TURBO_RATIO_LIMIT
-    {0x639, 0x639}, // MSR_PP0_ENERGY_STATUS
+    { 0xe2, 0xe2 }, // MSR_PKG_CST_CONFIG_CONTROL
+    { 0x1ad, 0x1ad }, // MSR_TURBO_RATIO_LIMIT
+    { 0x639, 0x639 }, // MSR_PP0_ENERGY_STATUS
 };
 static const struct msr_ranges table_2_35 = {
-    ranges_2_35, sizeof(ranges_2_35) / sizeof(ranges_2_35[0]),
+    ranges_2_35, sizeof(ranges_2_35) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-36: C-states, power, thermal, turbo.
 static const struct msr_range ranges_2_36[] = {
-    {0xce, 0xce}, // MSR_PLATFORM_INFO
-    {0xe2, 0xe2}, // MSR_PKG_CST_CONFIG_CONTROL
-    {0x1a2, 0x1a2}, // MSR_TEMPERATURE_TARGET
-    {0x1ad, 0x1ae}, // MSR_TURBO_RATIO_LIMIT to MSR_TURBO_RATIO_LIMIT1
-    {0x606, 0x606}, // MSR_RAPL_POWER_UNIT
-    {0x618, 0x619}, // MSR_DRAM_POWER_LIMIT to MSR_DRAM_ENERGY_STATUS
-    {0x61b, 0x61c}, // MSR_DRAM_PERF_STATUS to MSR_DRAM_POWER_INFO
-    {0x620, 0x620}, // MSR_UNCORE_RATIO_LIMIT
-    {0x639, 0x639}, // MSR_PP0_ENERGY_STATUS
-    {0x690, 0x690}, // MSR_CORE_PERF_LIMIT_REASONS
+    { 0xce, 0xce }, // MSR_PLATFORM_INFO
+    { 0xe2, 0xe2 }, // MSR_PKG_CST_CONFIG_CONTROL
+    { 0x1a2, 0x1a2 }, // MSR_TEMPERATURE_TARGET
+    { 0x1ad, 0x1ae }, // MSR_TURBO_RATIO_LIMIT to MSR_TURBO_RATIO_LIMIT1
+    { 0x606, 0x606 }, // MSR_RAPL_POWER_UNIT
+    { 0x618, 0x619 }, // MSR_DRAM_POWER_LIMIT to MSR_DRAM_ENERGY_STATUS
+    { 0x61b, 0x61c }, // MSR_DRAM_PERF_STATUS to MSR_DRAM_POWER_INFO
+    { 0x620, 0x620 }, // MSR_UNCORE_RATIO_LIMIT
+    { 0x639, 0x639 }, // MSR_PP0_ENERGY_STATUS
+    { 0x690, 0x690 }, // MSR_CORE_PERF_LIMIT_REASONS
 };
 static const struct msr_ranges table_2_36 = {
-    ranges_2_36, sizeof(ranges_2_36) / sizeof(ranges_2_36[0]),
+    ranges_2_36, sizeof(ranges_2_36) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-37: turbo.
 static const struct msr_range ranges_2_37[] = {
-    {0x1ac, 0x1ac}, // MSR_TURBO_RATIO_LIMIT3
+    { 0x1ac, 0x1ac }, // MSR_TURBO_RATIO_LIMIT3
 };
 static const struct msr_ranges table_2_37 = {
-    ranges_2_37, sizeof(ranges_2_37) / sizeof(ranges_2_37[0]),
+    ranges_2_37, sizeof(ranges_2_37) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-38: turbo.
 static const struct msr_range ranges_2_38[] = {
-    {0x1ac, 0x1ac}, // MSR_TURBO_RATIO_LIMIT3
+    { 0x1ac, 0x1ac }, // MSR_TURBO_RATIO_LIMIT3
 };
 static const struct msr_ranges table_2_38 = {
-    ranges_2_38, sizeof(ranges_2_38) / sizeof(ranges_2_38[0]),
+    ranges_2_38, sizeof(ranges_2_38) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-39: C-states, perfmon, power, turbo.
 static const struct msr_range ranges_2_39[] = {
-    {0x1ad, 0x1ad}, // MSR_TURBO_RATIO_LIMIT
-    {0x1c9, 0x1c9}, // MSR_LASTBRANCH_TOS
-    {0x1fc, 0x1fc}, // MSR_POWER_CTL
-    {0x3f7, 0x3f7}, // MSR_PEBS_FRONTEND
-    {0x639, 0x639}, // MSR_PP0_ENERGY_STATUS
-    {0x64d, 0x64f}, // MSR_PLATFORM_ENERGY_COUNTER to MSR_CORE_PERF_LIMIT_REASONS
-    {0x652, 0x653}, // MSR_PKG_HDC_CONFIG to MSR_CORE_HDC_RESIDENCY
-    {0x655, 0x656}, // MSR_PKG_HDC_SHALLOW_RESIDENCY to MSR_PKG_HDC_DEEP_RESIDENCY
-    {0x658, 0x65c}, // MSR_WEIGHTED_CORE_C0 to MSR_PLATFORM_POWER_LIMIT
-    {0x690, 0x69f}, // MSR_LASTBRANCH_16_FROM_IP to MSR_LASTBRANCH_31_FROM_IP
-    {0x6b0, 0x6b1}, // MSR_GRAPHICS_PERF_LIMIT_REASONS to MSR_RING_PERF_LIMIT_REASONS
-    {0x6d0, 0x6df}, // MSR_LASTBRANCH_16_TO_IP to MSR_LASTBRANCH_31_TO_IP
-    {0xdc0, 0xddf}, // MSR_LBR_INFO_0 to MSR_LBR_INFO_31
+    { 0x1ad, 0x1ad }, // MSR_TURBO_RATIO_LIMIT
+    { 0x1c9, 0x1c9 }, // MSR_LASTBRANCH_TOS
+    { 0x1fc, 0x1fc }, // MSR_POWER_CTL
+    { 0x3f7, 0x3f7 }, // MSR_PEBS_FRONTEND
+    { 0x639, 0x639 }, // MSR_PP0_ENERGY_STATUS
+    { 0x64d, 0x64f }, // MSR_PLATFORM_ENERGY_COUNTER to MSR_CORE_PERF_LIMIT_REASONS
+    { 0x652, 0x653 }, // MSR_PKG_HDC_CONFIG to MSR_CORE_HDC_RESIDENCY
+    { 0x655, 0x656 }, // MSR_PKG_HDC_SHALLOW_RESIDENCY to MSR_PKG_HDC_DEEP_RESIDENCY
+    { 0x658, 0x65c }, // MSR_WEIGHTED_CORE_C0 to MSR_PLATFORM_POWER_LIMIT
+    { 0x690, 0x69f }, // MSR_LASTBRANCH_16_FROM_IP to MSR_LASTBRANCH_31_FROM_IP
+    { 0x6b0, 0x6b1 }, // MSR_GRAPHICS_PERF_LIMIT_REASONS to MSR_RING_PERF_LIMIT_REASONS
+    { 0x6d0, 0x6df }, // MSR_LASTBRANCH_16_TO_IP to MSR_LASTBRANCH_31_TO_IP
+    { 0xdc0, 0xddf }, // MSR_LBR_INFO_0 to MSR_LBR_INFO_31
 };
 static const struct msr_ranges table_2_39 = {
-    ranges_2_39, sizeof(ranges_2_39) / sizeof(ranges_2_39[0]),
+    ranges_2_39, sizeof(ranges_2_39) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-40: perfmon.
 static const struct msr_range ranges_2_40[] = {
-    {0x394, 0x396}, // MSR_UNC_PERF_FIXED_CTRL to MSR_UNC_CBO_CONFIG
-    {0x3b0, 0x3b3}, // MSR_UNC_ARB_PERFCTR0 to MSR_UNC_ARB_PERFEVTSEL1
-    {0x700, 0x701}, // MSR_UNC_CBO_0_PERFEVTSEL0 to MSR_UNC_CBO_0_PERFEVTSEL1
-    {0x706, 0x707}, // MSR_UNC_CBO_0_PERFCTR0 to MSR_UNC_CBO_0_PERFCTR1
-    {0x710, 0x711}, // MSR_UNC_CBO_1_PERFEVTSEL0 to MSR_UNC_CBO_1_PERFEVTSEL1
-    {0x716, 0x717}, // MSR_UNC_CBO_1_PERFCTR0 to MSR_UNC_CBO_1_PERFCTR1
-    {0x720, 0x721}, // MSR_UNC_CBO_2_PERFEVTSEL0 to MSR_UNC_CBO_2_PERFEVTSEL1
-    {0x726, 0x727}, // MSR_UNC_CBO_2_PERFCTR0 to MSR_UNC_CBO_2_PERFCTR1
-    {0x730, 0x731}, // MSR_UNC_CBO_3_PERFEVTSEL0 to MSR_UNC_CBO_3_PERFEVTSEL1
-    {0x736, 0x737}, // MSR_UNC_CBO_3_PERFCTR0 to MSR_UNC_CBO_3_PERFCTR1
-    {0xe01, 0xe02}, // MSR_UNC_PERF_GLOBAL_CTRL to MSR_UNC_PERF_GLOBAL_STATUS
+    { 0x394, 0x396 }, // MSR_UNC_PERF_FIXED_CTRL to MSR_UNC_CBO_CONFIG
+    { 0x3b0, 0x3b3 }, // MSR_UNC_ARB_PERFCTR0 to MSR_UNC_ARB_PERFEVTSEL1
+    { 0x700, 0x701 }, // MSR_UNC_CBO_0_PERFEVTSEL0 to MSR_UNC_CBO_0_PERFEVTSEL1
+    { 0x706, 0x707 }, // MSR_UNC_CBO_0_PERFCTR0 to MSR_UNC_CBO_0_PERFCTR1
+    { 0x710, 0x711 }, // MSR_UNC_CBO_1_PERFEVTSEL0 to MSR_UNC_CBO_1_PERFEVTSEL1
+    { 0x716, 0x717 }, // MSR_UNC_CBO_1_PERFCTR0 to MSR_UNC_CBO_1_PERFCTR1
+    { 0x720, 0x721 }, // MSR_UNC_CBO_2_PERFEVTSEL0 to MSR_UNC_CBO_2_PERFEVTSEL1
+    { 0x726, 0x727 }, // MSR_UNC_CBO_2_PERFCTR0 to MSR_UNC_CBO_2_PERFCTR1
+    { 0x730, 0x731 }, // MSR_UNC_CBO_3_PERFEVTSEL0 to MSR_UNC_CBO_3_PERFEVTSEL1
+    { 0x736, 0x737 }, // MSR_UNC_CBO_3_PERFCTR0 to MSR_UNC_CBO_3_PERFCTR1
+    { 0xe01, 0xe02 }, // MSR_UNC_PERF_GLOBAL_CTRL to MSR_UNC_PERF_GLOBAL_STATUS
 };
 static const struct msr_ranges table_2_40 = {
-    ranges_2_40, sizeof(ranges_2_40) / sizeof(ranges_2_40[0]),
+    ranges_2_40, sizeof(ranges_2_40) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-41: turbo.
 static const struct msr_range ranges_2_41[] = {
-    {0x620, 0x620}, // MSR_RING_RATIO_LIMIT
+    { 0x620, 0x620 }, // MSR_RING_RATIO_LIMIT
 };
 static const struct msr_ranges table_2_41 = {
-    ranges_2_41, sizeof(ranges_2_41) / sizeof(ranges_2_41[0]),
+    ranges_2_41, sizeof(ranges_2_41) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-42: C-states, turbo.
 static const struct msr_range ranges_2_42[] = {
-    {0x3f8, 0x3f8}, // MSR_PKG_C3_RESIDENCY
-    {0x620, 0x620}, // MSR_RING_RATIO_LIMIT
-    {0x660, 0x660}, // MSR_CORE_C1_RESIDENCY
-    {0x662, 0x662}, // MSR_CORE_C3_RESIDENCY
+    { 0x3f8, 0x3f8 }, // MSR_PKG_C3_RESIDENCY
+    { 0x620, 0x620 }, // MSR_RING_RATIO_LIMIT
+    { 0x660, 0x660 }, // MSR_CORE_C1_RESIDENCY
+    { 0x662, 0x662 }, // MSR_CORE_C3_RESIDENCY
 };
 static const struct msr_ranges table_2_42 = {
-    ranges_2_42, sizeof(ranges_2_42) / sizeof(ranges_2_42[0]),
+    ranges_2_42, sizeof(ranges_2_42) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-43: perfmon.
 static const struct msr_range ranges_2_43[] = {
-    {0x394, 0x396}, // MSR_UNC_PERF_FIXED_CTRL to MSR_UNC_CBO_CONFIG
-    {0x3b0, 0x3b3}, // MSR_UNC_ARB_PERFCTR0 to MSR_UNC_ARB_PERFEVTSEL1
-    {0x700, 0x703}, // MSR_UNC_CBO_0_PERFEVTSEL0 to MSR_UNC_CBO_0_PERFCTR1
-    {0x708, 0x70b}, // MSR_UNC_CBO_1_PERFEVTSEL0 to MSR_UNC_CBO_1_PERFCTR1
-    {0x710, 0x713}, // MSR_UNC_CBO_2_PERFEVTSEL0 to MSR_UNC_CBO_2_PERFCTR1
-    {0x718, 0x71b}, // MSR_UNC_CBO_3_PERFEVTSEL0 to MSR_UNC_CBO_3_PERFCTR1
-    {0x720, 0x723}, // MSR_UNC_CBO_4_PERFEVTSEL0 to MSR_UNC_CBO_4_PERFCTR1
-    {0x728, 0x72b}, // MSR_UNC_CBO_5_PERFEVTSEL0 to MSR_UNC_CBO_5_PERFCTR1
-    {0x730, 0x733}, // MSR_UNC_CBO_6_PERFEVTSEL0 to MSR_UNC_CBO_6_PERFCTR1
-    {0x738, 0x73b}, // MSR_UNC_CBO_7_PERFEVTSEL0 to MSR_UNC_CBO_7_PERFCTR1
-    {0xe01, 0xe02}, // MSR_UNC_PERF_GLOBAL_CTRL to MSR_UNC_PERF_GLOBAL_STATUS
+    { 0x394, 0x396 }, // MSR_UNC_PERF_FIXED_CTRL to MSR_UNC_CBO_CONFIG
+    { 0x3b0, 0x3b3 }, // MSR_UNC_ARB_PERFCTR0 to MSR_UNC_ARB_PERFEVTSEL1
+    { 0x700, 0x703 }, // MSR_UNC_CBO_0_PERFEVTSEL0 to MSR_UNC_CBO_0_PERFCTR1
+    { 0x708, 0x70b }, // MSR_UNC_CBO_1_PERFEVTSEL0 to MSR_UNC_CBO_1_PERFCTR1
+    { 0x710, 0x713 }, // MSR_UNC_CBO_2_PERFEVTSEL0 to MSR_UNC_CBO_2_PERFCTR1
+    { 0x718, 0x71b }, // MSR_UNC_CBO_3_PERFEVTSEL0 to MSR_UNC_CBO_3_PERFCTR1
+    { 0x720, 0x723 }, // MSR_UNC_CBO_4_PERFEVTSEL0 to MSR_UNC_CBO_4_PERFCTR1
+    { 0x728, 0x72b }, // MSR_UNC_CBO_5_PERFEVTSEL0 to MSR_UNC_CBO_5_PERFCTR1
+    { 0x730, 0x733 }, // MSR_UNC_CBO_6_PERFEVTSEL0 to MSR_UNC_CBO_6_PERFCTR1
+    { 0x738, 0x73b }, // MSR_UNC_CBO_7_PERFEVTSEL0 to MSR_UNC_CBO_7_PERFCTR1
+    { 0xe01, 0xe02 }, // MSR_UNC_PERF_GLOBAL_CTRL to MSR_UNC_PERF_GLOBAL_STATUS
 };
 static const struct msr_ranges table_2_43 = {
-    ranges_2_43, sizeof(ranges_2_43) / sizeof(ranges_2_43[0]),
+    ranges_2_43, sizeof(ranges_2_43) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-44: bus locks, perfmon.
 static const struct msr_range ranges_2_44[] = {
-    {0x33, 0x33}, // MSR_MEMORY_CTRL
-    {0x329, 0x329}, // MSR_PERF_METRICS
-    {0x3f2, 0x3f2}, // MSR_PEBS_DATA_CFG
+    { 0x33, 0x33 }, // MSR_MEMORY_CTRL
+    { 0x329, 0x329 }, // MSR_PERF_METRICS
+    { 0x3f2, 0x3f2 }, // MSR_PEBS_DATA_CFG
 };
 static const struct msr_ranges table_2_44 = {
-    ranges_2_44, sizeof(ranges_2_44) / sizeof(ranges_2_44[0]),
+    ranges_2_44, sizeof(ranges_2_44) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-45: power.
 static const struct msr_range ranges_2_45[] = {
-    {0x601, 0x601}, // MSR_VR_CURRENT_CONFIG
+    { 0x601, 0x601 }, // MSR_VR_CURRENT_CONFIG
 };
 static const struct msr_ranges table_2_45 = {
-    ranges_2_45, sizeof(ranges_2_45) / sizeof(ranges_2_45[0]),
+    ranges_2_45, sizeof(ranges_2_45) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-46: C-states, bus locks, turbo.
 static const struct msr_range ranges_2_46[] = {
-    {0x33, 0x33}, // MSR_MEMORY_CTRL
-    {0x1ad, 0x1ad}, // MSR_PRIMARY_TURBO_RATIO_LIMIT
-    {0x650, 0x650}, // MSR_SECONDARY_TURBO_RATIO_LIMIT
-    {0x664, 0x664}, // MSR_MC6_RESIDENCY_COUNTER
+    { 0x33, 0x33 }, // MSR_MEMORY_CTRL
+    { 0x1ad, 0x1ad }, // MSR_PRIMARY_TURBO_RATIO_LIMIT
+    { 0x650, 0x650 }, // MSR_SECONDARY_TURBO_RATIO_LIMIT
+    { 0x664, 0x664 }, // MSR_MC6_RESIDENCY_COUNTER
 };
 static const struct msr_ranges table_2_46 = {
-    ranges_2_46, sizeof(ranges_2_46) / sizeof(ranges_2_46[0]),
+    ranges_2_46, sizeof(ranges_2_46) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-47: perfmon.
 static const struct msr_range ranges_2_47[] = {
-    {0x3f7, 0x3f7}, // MSR_PEBS_FRONTEND
+    { 0x3f7, 0x3f7 }, // MSR_PEBS_FRONTEND
 };
 static const struct msr_ranges table_2_47 = {
-    ranges_2_47, sizeof(ranges_2_47) / sizeof(ranges_2_47[0]),
+    ranges_2_47, sizeof(ranges_2_47) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-48: perfmon.
 static const struct msr_range ranges_2_48[] = {
-    {0x1309, 0x130b}, // MSR_RELOAD_FIXED_CTRx to MSR_RELOAD_FIXED_CTRx
-    {0x14c1, 0x14c6}, // MSR_RELOAD_PMCx to MSR_RELOAD_PMCx
+    { 0x1309, 0x130b }, // MSR_RELOAD_FIXED_CTRx to MSR_RELOAD_FIXED_CTRx
+    { 0x14c1, 0x14c6 }, // MSR_RELOAD_PMCx to MSR_RELOAD_PMCx
 };
 static const struct msr_ranges table_2_48 = {
-    ranges_2_48, sizeof(ranges_2_48) / sizeof(ranges_2_48[0]),
+    ranges_2_48, sizeof(ranges_2_48) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-49: perfmon.
 static const struct msr_range ranges_2_49[] = {
-    {0x396, 0x396}, // MSR_UNC_CBO_CONFIG
-    {0x2000, 0x2003}, // MSR_UNC_CBO_0_PERFEVTSEL0 to MSR_UNC_CBO_0_PERFCTR1
-    {0x2008, 0x200b}, // MSR_UNC_CBO_1_PERFEVTSEL0 to MSR_UNC_CBO_1_PERFCTR1
-    {0x2010, 0x2013}, // MSR_UNC_CBO_2_PERFEVTSEL0 to MSR_UNC_CBO_2_PERFCTR1
-    {0x2018, 0x201b}, // MSR_UNC_CBO_3_PERFEVTSEL0 to MSR_UNC_CBO_3_PERFCTR1
-    {0x2020, 0x2023}, // MSR_UNC_CBO_4_PERFEVTSEL0 to MSR_UNC_CBO_4_PERFCTR1
-    {0x2028, 0x202b}, // MSR_UNC_CBO_5_PERFEVTSEL0 to MSR_UNC_CBO_5_PERFCTR1
-    {0x2030, 0x2033}, // MSR_UNC_CBO_6_PERFEVTSEL0 to MSR_UNC_CBO_6_PERFCTR1
-    {0x2038, 0x203b}, // MSR_UNC_CBO_7_PERFEVTSEL0 to MSR_UNC_CBO_7_PERFCTR1
-    {0x2040, 0x2043}, // MSR_UNC_CBO_8_PERFEVTSEL0 to MSR_UNC_CBO_8_PERFCTR1
-    {0x2048, 0x204b}, // MSR_UNC_CBO_9_PERFEVTSEL0 to MSR_UNC_CBO_9_PERFCTR1
-    {0x2fd0, 0x2fd5}, // MSR_UNC_ARB_0_PERFEVTSEL0 to MSR_UNC_ARB_0_PERF_CTRL
-    {0x2fd8, 0x2fdf}, // MSR_UNC_ARB_1_PERFEVTSEL0 to MSR_UNC_PERF_FIXED_CTR
-    {0x2ff0, 0x2ff0}, // MSR_UNC_PERF_GLOBAL_CTRL
-    {0x2ff2, 0x2ff2}, // MSR_UNC_PERF_GLOBAL_STATUS
+    { 0x396, 0x396 }, // MSR_UNC_CBO_CONFIG
+    { 0x2000, 0x2003 }, // MSR_UNC_CBO_0_PERFEVTSEL0 to MSR_UNC_CBO_0_PERFCTR1
+    { 0x2008, 0x200b }, // MSR_UNC_CBO_1_PERFEVTSEL0 to MSR_UNC_CBO_1_PERFCTR1
+    { 0x2010, 0x2013 }, // MSR_UNC_CBO_2_PERFEVTSEL0 to MSR_UNC_CBO_2_PERFCTR1
+    { 0x2018, 0x201b }, // MSR_UNC_CBO_3_PERFEVTSEL0 to MSR_UNC_CBO_3_PERFCTR1
+    { 0x2020, 0x2023 }, // MSR_UNC_CBO_4_PERFEVTSEL0 to MSR_UNC_CBO_4_PERFCTR1
+    { 0x2028, 0x202b }, // MSR_UNC_CBO_5_PERFEVTSEL0 to MSR_UNC_CBO_5_PERFCTR1
+    { 0x2030, 0x2033 }, // MSR_UNC_CBO_6_PERFEVTSEL0 to MSR_UNC_CBO_6_PERFCTR1
+    { 0x2038, 0x203b }, // MSR_UNC_CBO_7_PERFEVTSEL0 to MSR_UNC_CBO_7_PERFCTR1
+    { 0x2040, 0x2043 }, // MSR_UNC_CBO_8_PERFEVTSEL0 to MSR_UNC_CBO_8_PERFCTR1
+    { 0x2048, 0x204b }, // MSR_UNC_CBO_9_PERFEVTSEL0 to MSR_UNC_CBO_9_PERFCTR1
+    { 0x2fd0, 0x2fd5 }, // MSR_UNC_ARB_0_PERFEVTSEL0 to MSR_UNC_ARB_0_PERF_CTRL
+    { 0x2fd8, 0x2fdf }, // MSR_UNC_ARB_1_PERFEVTSEL0 to MSR_UNC_PERF_FIXED_CTR
+    { 0x2ff0, 0x2ff0 }, // MSR_UNC_PERF_GLOBAL_CTRL
+    { 0x2ff2, 0x2ff2 }, // MSR_UNC_PERF_GLOBAL_STATUS
 };
 static const struct msr_ranges table_2_49 = {
-    ranges_2_49, sizeof(ranges_2_49) / sizeof(ranges_2_49[0]),
+    ranges_2_49, sizeof(ranges_2_49) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-50: C-states, power, thermal, turbo.
 static const struct msr_range ranges_2_50[] = {
-    {0xce, 0xce}, // MSR_PLATFORM_INFO
-    {0xe2, 0xe2}, // MSR_PKG_CST_CONFIG_CONTROL
-    {0x1a2, 0x1a2}, // MSR_TEMPERATURE_TARGET
-    {0x1ad, 0x1ae}, // MSR_TURBO_RATIO_LIMIT to MSR_TURBO_RATIO_LIMIT_CORES
-    {0x606, 0x606}, // MSR_RAPL_POWER_UNIT
-    {0x618, 0x619}, // MSR_DRAM_POWER_LIMIT to MSR_DRAM_ENERGY_STATUS
-    {0x61b, 0x61c}, // MSR_DRAM_PERF_STATUS to MSR_DRAM_POWER_INFO
-    {0x620, 0x620}, // MSR_UNCORE_RATIO_LIMIT
-    {0x639, 0x639}, // MSR_PP0_ENERGY_STATUS
+    { 0xce, 0xce }, // MSR_PLATFORM_INFO
+    { 0xe2, 0xe2 }, // MSR_PKG_CST_CONFIG_CONTROL
+    { 0x1a2, 0x1a2 }, // MSR_TEMPERATURE_TARGET
+    { 0x1ad, 0x1ae }, // MSR_TURBO_RATIO_LIMIT to MSR_TURBO_RATIO_LIMIT_CORES
+    { 0x606, 0x606 }, // MSR_RAPL_POWER_UNIT
+    { 0x618, 0x619 }, // MSR_DRAM_POWER_LIMIT to MSR_DRAM_ENERGY_STATUS
+    { 0x61b, 0x61c }, // MSR_DRAM_PERF_STATUS to MSR_DRAM_POWER_INFO
+    { 0x620, 0x620 }, // MSR_UNCORE_RATIO_LIMIT
+    { 0x639, 0x639 }, // MSR_PP0_ENERGY_STATUS
 };
 static const struct msr_ranges table_2_50 = {
-    ranges_2_50, sizeof(ranges_2_50) / sizeof(ranges_2_50[0]),
+    ranges_2_50, sizeof(ranges_2_50) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-51: power.
 static const struct msr_range ranges_2_51[] = {
-    {0x612, 0x612}, // MSR_PACKAGE_ENERGY_TIME_STATUS
-    {0x618, 0x619}, // MSR_DRAM_POWER_LIMIT to MSR_DRAM_ENERGY_STATUS
-    {0x61b, 0x61c}, // MSR_DRAM_PERF_STATUS to MSR_DRAM_POWER_INFO
+    { 0x612, 0x612 }, // MSR_PACKAGE_ENERGY_TIME_STATUS
+    { 0x618, 0x619 }, // MSR_DRAM_POWER_LIMIT to MSR_DRAM_ENERGY_STATUS
+    { 0x61b, 0x61c }, // MSR_DRAM_PERF_STATUS to MSR_DRAM_POWER_INFO
 };
 static const struct msr_ranges table_2_51 = {
-    ranges_2_51, sizeof(ranges_2_51) / sizeof(ranges_2_51[0]),
+    ranges_2_51, sizeof(ranges_2_51) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-52: bus locks, perfmon, power, turbo.
 static const struct msr_range ranges_2_52[] = {
-    {0x33, 0x33}, // MSR_MEMORY_CTRL
-    {0x1ad, 0x1ae}, // MSR_PRIMARY_TURBO_RATIO_LIMIT to MSR_TURBO_RATIO_LIMIT_CORES
-    {0x619, 0x619}, // MSR_DRAM_ENERGY_STATUS
-    {0x64d, 0x64d}, // MSR_PLATFORM_ENERGY_STATUS
-    {0x65c, 0x65c}, // MSR_PLATFORM_POWER_LIMIT
-    {0x665, 0x666}, // MSR_PLATFORM_POWER_INFO to MSR_PLATFORM_RAPL_SOCKET_PERF_STATUS
-    {0xc70, 0xc77}, // MSR_B1_PMON_EVNT_SEL0 to MSR_B1_PMON_CTR3
-    {0xc82, 0xc82}, // MSR_W_PMON_BOX_OVF_CTRL
+    { 0x33, 0x33 }, // MSR_MEMORY_CTRL
+    { 0x1ad, 0x1ae }, // MSR_PRIMARY_TURBO_RATIO_LIMIT to MSR_TURBO_RATIO_LIMIT_CORES
+    { 0x619, 0x619 }, // MSR_DRAM_ENERGY_STATUS
+    { 0x64d, 0x64d }, // MSR_PLATFORM_ENERGY_STATUS
+    { 0x65c, 0x65c }, // MSR_PLATFORM_POWER_LIMIT
+    { 0x665, 0x666 }, // MSR_PLATFORM_POWER_INFO to MSR_PLATFORM_RAPL_SOCKET_PERF_STATUS
+    { 0xc70, 0xc77 }, // MSR_B1_PMON_EVNT_SEL0 to MSR_B1_PMON_CTR3
+    { 0xc82, 0xc82 }, // MSR_W_PMON_BOX_OVF_CTRL
 };
 static const struct msr_ranges table_2_52 = {
-    ranges_2_52, sizeof(ranges_2_52) / sizeof(ranges_2_52[0]),
+    ranges_2_52, sizeof(ranges_2_52) / sizeof(struct msr_range),
 };
 
-// SDM 325462-093 Vol. 4, Table 2-53: C-states, CPUID faulting, bus locks, perfmon, power, thermal,
-// turbo.
+// SDM 325462-093 Vol. 4, Table 2-53: C-states, CPUID faulting, bus locks,
+// perfmon, power, thermal, turbo.
 static const struct msr_range ranges_2_53[] = {
-    {0x33, 0x33}, // MSR_MEMORY_CTRL
-    {0xe2, 0xe2}, // MSR_PKG_CST_CONFIG_CONTROL
-    {0xe4, 0xe4}, // MSR_IO_CAPTURE_BASE
-    {0x140, 0x140}, // MSR_FEATURE_ENABLES
-    {0x1a2, 0x1a2}, // MSR_TEMPERATURE_TARGET
-    {0x1a6, 0x1a7}, // MSR_OFFCORE_RSP_0 to MSR_OFFCORE_RSP_1
-    {0x1aa, 0x1aa}, // MSR_MISC_PWR_MGMT
-    {0x1ad, 0x1ad}, // MSR_PRIMARY_TURBO_RATIO_LIMIT
-    {0x1fc, 0x1fc}, // MSR_POWER_CTL
-    {0x601, 0x601}, // MSR_VR_CURRENT_CONFIG
-    {0x620, 0x620}, // MSR_UNCORE_RATIO_LIMIT
-    {0x638, 0x638}, // MSR_PP0_POWER_LIMIT
-    {0x64f, 0x650}, // MSR_CORE_PERF_LIMIT_REASONS to MSR_SECONDARY_TURBO_RATIO_LIMIT
-    {0x65c, 0x65c}, // MSR_PLATFORM_POWER_LIMIT
-    {0x6b1, 0x6b1}, // MSR_RING_PERF_LIMIT_REASONS
+    { 0x33, 0x33 }, // MSR_MEMORY_CTRL
+    { 0xe2, 0xe2 }, // MSR_PKG_CST_CONFIG_CONTROL
+    { 0xe4, 0xe4 }, // MSR_IO_CAPTURE_BASE
+    { 0x140, 0x140 }, // MSR_FEATURE_ENABLES
+    { 0x1a2, 0x1a2 }, // MSR_TEMPERATURE_TARGET
+    { 0x1a6, 0x1a7 }, // MSR_OFFCORE_RSP_0 to MSR_OFFCORE_RSP_1
+    { 0x1aa, 0x1aa }, // MSR_MISC_PWR_MGMT
+    { 0x1ad, 0x1ad }, // MSR_PRIMARY_TURBO_RATIO_LIMIT
+    { 0x1fc, 0x1fc }, // MSR_POWER_CTL
+    { 0x601, 0x601 }, // MSR_VR_CURRENT_CONFIG
+    { 0x620, 0x620 }, // MSR_UNCORE_RATIO_LIMIT
+    { 0x638, 0x638 }, // MSR_PP0_POWER_LIMIT
+    { 0x64f, 0x650 }, // MSR_CORE_PERF_LIMIT_REASONS to MSR_SECONDARY_TURBO_RATIO_LIMIT
+    { 0x65c, 0x65c }, // MSR_PLATFORM_POWER_LIMIT
+    { 0x6b1, 0x6b1 }, // MSR_RING_PERF_LIMIT_REASONS
 };
 static const struct msr_ranges table_2_53 = {
-    ranges_2_53, sizeof(ranges_2_53) / sizeof(ranges_2_53[0]),
+    ranges_2_53, sizeof(ranges_2_53) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-54: perfmon.
 static const struct msr_range ranges_2_54[] = {
-    {0x329, 0x329}, // MSR_PERF_METRICS
+    { 0x329, 0x329 }, // MSR_PERF_METRICS
 };
 static const struct msr_ranges table_2_54 = {
-    ranges_2_54, sizeof(ranges_2_54) / sizeof(ranges_2_54[0]),
+    ranges_2_54, sizeof(ranges_2_54) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-55: perfmon.
 static const struct msr_range ranges_2_55[] = {
-    {0x1309, 0x130b}, // MSR_RELOAD_FIXED_CTRx to MSR_RELOAD_FIXED_CTRx
-    {0x14c1, 0x14c8}, // MSR_RELOAD_PMCx to MSR_RELOAD_PMCx
+    { 0x1309, 0x130b }, // MSR_RELOAD_FIXED_CTRx to MSR_RELOAD_FIXED_CTRx
+    { 0x14c1, 0x14c8 }, // MSR_RELOAD_PMCx to MSR_RELOAD_PMCx
 };
 static const struct msr_ranges table_2_55 = {
-    ranges_2_55, sizeof(ranges_2_55) / sizeof(ranges_2_55[0]),
+    ranges_2_55, sizeof(ranges_2_55) / sizeof(struct msr_range),
 };
 
-// SDM 325462-093 Vol. 4, Table 2-56: C-states, CPUID faulting, bus locks, perfmon.
+// SDM 325462-093 Vol. 4, Table 2-56: C-states, CPUID faulting, bus locks,
+// perfmon.
 static const struct msr_range ranges_2_56[] = {
-    {0x33, 0x34}, // MSR_MEMORY_CONTROL to MSR_SMI_COUNT
-    {0x140, 0x140}, // MSR_FEATURE_ENABLES
-    {0x664, 0x664}, // MSR_MC6_RESIDENCY
+    { 0x33, 0x34 }, // MSR_MEMORY_CONTROL to MSR_SMI_COUNT
+    { 0x140, 0x140 }, // MSR_FEATURE_ENABLES
+    { 0x664, 0x664 }, // MSR_MC6_RESIDENCY
 };
 static const struct msr_ranges table_2_56 = {
-    ranges_2_56, sizeof(ranges_2_56) / sizeof(ranges_2_56[0]),
+    ranges_2_56, sizeof(ranges_2_56) / sizeof(struct msr_range),
 };
 
-// SDM 325462-093 Vol. 4, Table 2-57: C-states, CPUID faulting, bus locks, perfmon, turbo.
+// SDM 325462-093 Vol. 4, Table 2-57: C-states, CPUID faulting, bus locks,
+// perfmon, turbo.
 static const struct msr_range ranges_2_57[] = {
-    {0x33, 0x34}, // MSR_MEMORY_CONTROL to MSR_SMI_COUNT
-    {0xce, 0xce}, // MSR_PLATFORM_INFO
-    {0x140, 0x140}, // MSR_FEATURE_ENABLES
-    {0x3f9, 0x3fa}, // MSR_PKG_C6_RESIDENCY to MSR_PKG_C7_RESIDENCY
-    {0x3fc, 0x3fe}, // MSR_CORE_C3_RESIDENCY to MSR_CORE_C7_RESIDENCY
-    {0x664, 0x664}, // MSR_MC6_RESIDENCY
+    { 0x33, 0x34 }, // MSR_MEMORY_CONTROL to MSR_SMI_COUNT
+    { 0xce, 0xce }, // MSR_PLATFORM_INFO
+    { 0x140, 0x140 }, // MSR_FEATURE_ENABLES
+    { 0x3f9, 0x3fa }, // MSR_PKG_C6_RESIDENCY to MSR_PKG_C7_RESIDENCY
+    { 0x3fc, 0x3fe }, // MSR_CORE_C3_RESIDENCY to MSR_CORE_C7_RESIDENCY
+    { 0x664, 0x664 }, // MSR_MC6_RESIDENCY
 };
 static const struct msr_ranges table_2_57 = {
-    ranges_2_57, sizeof(ranges_2_57) / sizeof(ranges_2_57[0]),
+    ranges_2_57, sizeof(ranges_2_57) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-58: C-states, power, turbo.
 static const struct msr_range ranges_2_58[] = {
-    {0x601, 0x601}, // MSR_PKG_POWER_LIMIT_4
-    {0x630, 0x632}, // MSR_PKG_C8_RESIDENCY to MSR_PKG_C10_RESIDENCY
-    {0x651, 0x651}, // MSR_SECONDARY_TURBO_RATIO_LIMIT_CORES
-    {0x658, 0x65b}, // MSR_WEIGHTED_CORE_C0 to MSR_CORE_GFXE_OVERLAP_C0
+    { 0x601, 0x601 }, // MSR_PKG_POWER_LIMIT_4
+    { 0x630, 0x632 }, // MSR_PKG_C8_RESIDENCY to MSR_PKG_C10_RESIDENCY
+    { 0x651, 0x651 }, // MSR_SECONDARY_TURBO_RATIO_LIMIT_CORES
+    { 0x658, 0x65b }, // MSR_WEIGHTED_CORE_C0 to MSR_CORE_GFXE_OVERLAP_C0
 };
 static const struct msr_ranges table_2_58 = {
-    ranges_2_58, sizeof(ranges_2_58) / sizeof(ranges_2_58[0]),
+    ranges_2_58, sizeof(ranges_2_58) / sizeof(struct msr_range),
 };
 
 // SDM 325462-093 Vol. 4, Table 2-59: perfmon.
 static const struct msr_range ranges_2_59[] = {
-    {0x329, 0x329}, // MSR_PERF_METRICS
+    { 0x329, 0x329 }, // MSR_PERF_METRICS
 };
 static const struct msr_ranges table_2_59 = {
-    ranges_2_59, sizeof(ranges_2_59) / sizeof(ranges_2_59[0]),
+    ranges_2_59, sizeof(ranges_2_59) / sizeof(struct msr_range),
 };
 
 // 06_25H, 06_2CH: SDM 325462-093 Vol. 4, Tables 2-15, 2-16, 2-18.
@@ -858,7 +862,8 @@ static const struct msr_ranges *const model_tables_6[] = {
 
 // 06_45H: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-22, 2-29, 2-30, 2-31.
 static const struct msr_ranges *const model_tables_7[] = {
-    &table_2_20, &table_2_21, &table_2_22, &table_2_29, &table_2_30, &table_2_31,
+    &table_2_20, &table_2_21, &table_2_22, &table_2_29, &table_2_30,
+    &table_2_31,
 };
 
 // 06_3FH: SDM 325462-093 Vol. 4, Tables 2-20, 2-29, 2-32, 2-33.
@@ -866,10 +871,11 @@ static const struct msr_ranges *const model_tables_8[] = {
     &table_2_20, &table_2_29, &table_2_32, &table_2_33,
 };
 
-// 06_3DH, 06_47H: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-22, 2-25, 2-29, 2-30, 2-34, 2-35.
+// 06_3DH, 06_47H: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-22, 2-25, 2-29,
+// 2-30, 2-34, 2-35.
 static const struct msr_ranges *const model_tables_9[] = {
-    &table_2_20, &table_2_21, &table_2_22, &table_2_25, &table_2_29, &table_2_30, &table_2_34,
-    &table_2_35,
+    &table_2_20, &table_2_21, &table_2_22, &table_2_25, &table_2_29,
+    &table_2_30, &table_2_34, &table_2_35,
 };
 
 // 06_56H: SDM 325462-093 Vol. 4, Tables 2-20, 2-29, 2-34, 2-36, 2-37.
@@ -879,85 +885,107 @@ static const struct msr_ranges *const model_tables_10[] = {
 
 // 06_4FH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-29, 2-34, 2-36, 2-38.
 static const struct msr_ranges *const model_tables_11[] = {
-    &table_2_20, &table_2_21, &table_2_29, &table_2_34, &table_2_36, &table_2_38,
+    &table_2_20, &table_2_21, &table_2_29, &table_2_34, &table_2_36,
+    &table_2_38,
 };
 
-// 06_4EH, 06_5EH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35, 2-39, 2-40.
+// 06_4EH, 06_5EH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35,
+// 2-39, 2-40.
 static const struct msr_ranges *const model_tables_12[] = {
-    &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35, &table_2_39, &table_2_40,
+    &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35,
+    &table_2_39, &table_2_40,
 };
 
-// 06_8EH, 06_9EH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35, 2-39, 2-40, 2-41.
+// 06_8EH, 06_9EH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35,
+// 2-39, 2-40, 2-41.
 static const struct msr_ranges *const model_tables_13[] = {
-    &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35, &table_2_39, &table_2_40,
-    &table_2_41,
+    &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35,
+    &table_2_39, &table_2_40, &table_2_41,
 };
 
-// 06_66H: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35, 2-39, 2-40, 2-42, 2-43.
+// 06_66H: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35, 2-39,
+// 2-40, 2-42, 2-43.
 static const struct msr_ranges *const model_tables_14[] = {
-    &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35, &table_2_39, &table_2_40,
-    &table_2_42, &table_2_43,
+    &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35,
+    &table_2_39, &table_2_40, &table_2_42, &table_2_43,
 };
 
-// 06_A5H, 06_A6H, 06_A7H, 06_B5H, 06_C5H, 06_C6H: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25,
-// 2-29, 2-35, 2-39.
+// 06_A5H, 06_A6H, 06_A7H, 06_B5H, 06_C5H, 06_C6H: SDM 325462-093 Vol. 4,
+// Tables 2-20, 2-21, 2-25, 2-29, 2-35, 2-39.
 static const struct msr_ranges *const model_tables_15[] = {
-    &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35, &table_2_39,
+    &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35,
+    &table_2_39,
 };
 
-// 06_7EH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35, 2-39, 2-44.
+// 06_7EH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35, 2-39,
+// 2-44.
 static const struct msr_ranges *const model_tables_16[] = {
-    &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35, &table_2_39, &table_2_44,
+    &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35,
+    &table_2_39, &table_2_44,
 };
 
-// 06_8CH, 06_8DH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35, 2-39, 2-44, 2-45.
+// 06_8CH, 06_8DH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35,
+// 2-39, 2-44, 2-45.
 static const struct msr_ranges *const model_tables_17[] = {
-    &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35, &table_2_39, &table_2_44,
-    &table_2_45,
+    &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35,
+    &table_2_39, &table_2_44, &table_2_45,
 };
 
-// 06_97H, 06_9AH, 06_B7H, 06_BAH, 06_BFH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29,
-// 2-35, 2-39, 2-44, 2-45, 2-46, 2-47, 2-48, 2-49.
+// 06_97H, 06_9AH, 06_B7H, 06_BAH, 06_BFH: SDM 325462-093 Vol. 4, Tables 2-20,
+// 2-21, 2-25, 2-29, 2-35, 2-39, 2-44, 2-45, 2-46, 2-47, 2-48, 2-49.
 static const struct msr_ranges *const model_tables_18[] = {
-    &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35, &table_2_39, &table_2_44,
-    &table_2_45, &table_2_46, &table_2_47, &table_2_48, &table_2_49,
+    &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35,
+    &table_2_39, &table_2_44, &table_2_45, &table_2_46, &table_2_47,
+    &table_2_48, &table_2_49,
 };
 
-// 06_55H: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35, 2-39, 2-50.
+// 06_55H: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35, 2-39,
+// 2-50.
 static const struct msr_ranges *const model_tables_19[] = {
-    &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35, &table_2_39, &table_2_50,
+    &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35,
+    &table_2_39, &table_2_50,
 };
 
-// 06_6AH, 06_6CH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35, 2-39, 2-51.
+// 06_6AH, 06_6CH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35,
+// 2-39, 2-51.
 static const struct msr_ranges *const model_tables_20[] = {
-    &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35, &table_2_39, &table_2_51,
+    &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35,
+    &table_2_39, &table_2_51,
 };
 
-// 06_8FH, 06_CFH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35, 2-39, 2-52.
+// 06_8FH, 06_CFH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35,
+// 2-39, 2-52.
 static const struct msr_ranges *const model_tables_21[] = {
-    &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35, &table_2_39, &table_2_52,
+    &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35,
+    &table_2_39, &table_2_52,
 };
 
-// 06_AAH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35, 2-39, 2-53, 2-54, 2-55.
+// 06_AAH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35, 2-39,
+// 2-53, 2-54, 2-55.
 static const struct msr_ranges *const model_tables_22[] = {
-    &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35, &table_2_39, &table_2_53,
-    &table_2_54, &table_2_55,
+    &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35,
+    &table_2_39, &table_2_53, &table_2_54, &table_2_55,
 };
 
-// 06_ADH, 06_AEH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35, 2-39, 2-56.
+// 06_ADH, 06_AEH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35,
+// 2-39, 2-56.
 static const struct msr_ranges *const model_tables_23[] = {
-    &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35, &table_2_39, &table_2_56,
+    &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35,
+    &table_2_39, &table_2_56,
 };
 
-// 06_AFH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35, 2-39, 2-57.
+// 06_AFH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35, 2-39,
+// 2-57.
 static const struct msr_ranges *const model_tables_24[] = {
-    &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35, &table_2_39, &table_2_57,
+    &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35,
+    &table_2_39, &table_2_57,
 };
 
-// 06_BDH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35, 2-39, 2-58, 2-59.
+// 06_BDH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35, 2-39,
+// 2-58, 2-59.
 static const struct msr_ranges *const model_tables_25[] = {
-    &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35, &table_2_39, &table_2_58,
-    &table_2_59,
+    &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35,
+    &table_2_39, &table_2_58, &table_2_59,
 };
 
 // 06_5CH, 06_5FH: SDM 325462-093 Vol. 4, Tables 2-6, 2-12.
@@ -982,223 +1010,227 @@ static const struct msr_ranges *const model_tables_29[] = {
 
 // By display family and model.
 const struct msr_model msr_intel_models[] = {
-    {0x6, 0x25, model_tables_0, 3},
-    {0x6, 0x2c, model_tables_0, 3},
-    {0x6, 0x2f, model_tables_1, 3},
-    {0x6, 0x2a, model_tables_2, 3},
-    {0x6, 0x2d, model_tables_3, 3},
-    {0x6, 0x3a, model_tables_4, 4},
-    {0x6, 0x3e, model_tables_5, 5},
-    {0x6, 0x3c, model_tables_6, 5},
-    {0x6, 0x46, model_tables_6, 5},
-    {0x6, 0x45, model_tables_7, 6},
-    {0x6, 0x3f, model_tables_8, 4},
-    {0x6, 0x3d, model_tables_9, 8},
-    {0x6, 0x47, model_tables_9, 8},
-    {0x6, 0x56, model_tables_10, 5},
-    {0x6, 0x4f, model_tables_11, 6},
-    {0x6, 0x4e, model_tables_12, 7},
-    {0x6, 0x5e, model_tables_12, 7},
-    {0x6, 0x8e, model_tables_13, 8},
-    {0x6, 0x9e, model_tables_13, 8},
-    {0x6, 0x66, model_tables_14, 9},
-    {0x6, 0xa5, model_tables_15, 6},
-    {0x6, 0xa6, model_tables_15, 6},
-    {0x6, 0xa7, model_tables_15, 6},
-    {0x6, 0xb5, model_tables_15, 6},
-    {0x6, 0xc5, model_tables_15, 6},
-    {0x6, 0xc6, model_tables_15, 6},
-    {0x6, 0x7e, model_tables_16, 7},
-    {0x6, 0x8c, model_tables_17, 8},
-    {0x6, 0x8d, model_tables_17, 8},
-    {0x6, 0x97, model_tables_18, 12},
-    {0x6, 0x9a, model_tables_18, 12},
-    {0x6, 0xb7, model_tables_18, 12},
-    {0x6, 0xba, model_tables_18, 12},
-    {0x6, 0xbf, model_tables_18, 12},
-    {0x6, 0x55, model_tables_19, 7},
-    {0x6, 0x6a, model_tables_20, 7},
-    {0x6, 0x6c, model_tables_20, 7},
-    {0x6, 0x8f, model_tables_21, 7},
-    {0x6, 0xcf, model_tables_21, 7},
-    {0x6, 0xaa, model_tables_22, 9},
-    {0x6, 0xad, model_tables_23, 7},
-    {0x6, 0xae, model_tables_23, 7},
-    {0x6, 0xaf, model_tables_24, 7},
-    {0x6, 0xbd, model_tables_25, 8},
-    {0x6, 0x5c, model_tables_26, 2},
-    {0x6, 0x5f, model_tables_26, 2},
-    {0x6, 0x7a, model_tables_27, 3},
-    {0x6, 0x86, model_tables_28, 4},
-    {0x6, 0x96, model_tables_28, 4},
-    {0x6, 0x9c, model_tables_28, 4},
-    {0x6, 0xb6, model_tables_29, 1},
-    {0x6, 0xbe, model_tables_29, 1},
+    { 0x6, 0x25, model_tables_0, 3 },
+    { 0x6, 0x2c, model_tables_0, 3 },
+    { 0x6, 0x2f, model_tables_1, 3 },
+    { 0x6, 0x2a, model_tables_2, 3 },
+    { 0x6, 0x2d, model_tables_3, 3 },
+    { 0x6, 0x3a, model_tables_4, 4 },
+    { 0x6, 0x3e, model_tables_5, 5 },
+    { 0x6, 0x3c, model_tables_6, 5 },
+    { 0x6, 0x46, model_tables_6, 5 },
+    { 0x6, 0x45, model_tables_7, 6 },
+    { 0x6, 0x3f, model_tables_8, 4 },
+    { 0x6, 0x3d, model_tables_9, 8 },
+    { 0x6, 0x47, model_tables_9, 8 },
+    { 0x6, 0x56, model_tables_10, 5 },
+    { 0x6, 0x4f, model_tables_11, 6 },
+    { 0x6, 0x4e, model_tables_12, 7 },
+    { 0x6, 0x5e, model_tables_12, 7 },
+    { 0x6, 0x8e, model_tables_13, 8 },
+    { 0x6, 0x9e, model_tables_13, 8 },
+    { 0x6, 0x66, model_tables_14, 9 },
+    { 0x6, 0xa5, model_tables_15, 6 },
+    { 0x6, 0xa6, model_tables_15, 6 },
+    { 0x6, 0xa7, model_tables_15, 6 },
+    { 0x6, 0xb5, model_tables_15, 6 },
+    { 0x6, 0xc5, model_tables_15, 6 },
+    { 0x6, 0xc6, model_tables_15, 6 },
+    { 0x6, 0x7e, model_tables_16, 7 },
+    { 0x6, 0x8c, model_tables_17, 8 },
+    { 0x6, 0x8d, model_tables_17, 8 },
+    { 0x6, 0x97, model_tables_18, 12 },
+    { 0x6, 0x9a, model_tables_18, 12 },
+    { 0x6, 0xb7, model_tables_18, 12 },
+    { 0x6, 0xba, model_tables_18, 12 },
+    { 0x6, 0xbf, model_tables_18, 12 },
+    { 0x6, 0x55, model_tables_19, 7 },
+    { 0x6, 0x6a, model_tables_20, 7 },
+    { 0x6, 0x6c, model_tables_20, 7 },
+    { 0x6, 0x8f, model_tables_21, 7 },
+    { 0x6, 0xcf, model_tables_21, 7 },
+    { 0x6, 0xaa, model_tables_22, 9 },
+    { 0x6, 0xad, model_tables_23, 7 },
+    { 0x6, 0xae, model_tables_23, 7 },
+    { 0x6, 0xaf, model_tables_24, 7 },
+    { 0x6, 0xbd, model_tables_25, 8 },
+    { 0x6, 0x5c, model_tables_26, 2 },
+    { 0x6, 0x5f, model_tables_26, 2 },
+    { 0x6, 0x7a, model_tables_27, 3 },
+    { 0x6, 0x86, model_tables_28, 4 },
+    { 0x6, 0x96, model_tables_28, 4 },
+    { 0x6, 0x9c, model_tables_28, 4 },
+    { 0x6, 0xb6, model_tables_29, 1 },
+    { 0x6, 0xbe, model_tables_29, 1 },
 };
-const size_t msr_intel_model_count = sizeof(msr_intel_models) / sizeof(msr_intel_models[0]);
+const size_t msr_intel_model_count = sizeof(msr_intel_models)
+    / sizeof(struct msr_model);
 
 // APM 24593 rev. 3.45, Table A-1, and what every family has, as reviewed.
 const struct msr_range msr_amd_architectural[] = {
-    {0x0, 0x1}, // load-store MCA address and status
-    {0x10, 0x10}, // TSC
-    {0x2a, 0x2a}, // cluster ID
-    {0x3b, 0x3b}, // TSC adjust
-    {0x48, 0x49}, // speculation control and prediction command
-    {0x8b, 0x8b}, // patch level
-    {0xe7, 0xe8}, // MPERF and APERF
-    {0x10b, 0x10b}, // flush command
-    {0x174, 0x176}, // SYSENTER
-    {0x179, 0x17b}, // machine check globals
-    {0x1d9, 0x1d9}, // debug control
-    {0x1db, 0x1de}, // last branch and exception records
-    {0x400, 0x47f}, // machine check banks
-    {0x6a0, 0x6a0}, // user CET
-    {0x6a2, 0x6a2}, // supervisor CET
-    {0x6a4, 0x6a8}, // shadow stack pointers and table
-    {0xc81, 0xc81}, // L3 QoS configuration
-    {0xc8d, 0xc8f}, // QoS monitoring and association
-    {0xc90, 0xd8f}, // L3 allocation masks
-    {0xc0000081, 0xc0000084}, // SYSCALL
-    {0xc00000e7, 0xc00000e9}, // read-only MPERF and APERF, instructions retired
-    {0xc0000100, 0xc0000103}, // FS, GS, and kernel GS bases, TSC_AUX
-    {0xc0000108, 0xc0000108}, // prefetch control
-    {0xc0000200, 0xc00002ff}, // L3 QoS bandwidth controls
-    {0xc0000300, 0xc0000303}, // global performance counter control and status
-    {0xc00003fd, 0xc00003ff}, // assignable bandwidth monitoring
-    {0xc0000400, 0xc0000401}, // bandwidth monitoring event configuration
-    {0xc0000408, 0xc000040a}, // MC4 thresholds
-    {0xc0000420, 0xc0000423}, // MCA query
-    {0xc0002000, 0xc00023ff}, // MCAX banks
-    {0xc0010000, 0xc0010007}, // legacy performance counters
-    {0xc0010061, 0xc0010063}, // P-state limit, control, and status
-    {0xc0010115, 0xc0010115}, // IGNNE
-    {0xc0010140, 0xc0010141}, // OS visible workarounds
-    {0xc0010200, 0xc001020b}, // core performance counters
-    {0xc0010230, 0xc0010237}, // L2I or L3 performance counters
-    {0xc0010240, 0xc0010247}, // northbridge or data fabric performance counters
-    {0xc00102b0, 0xc00102b5}, // CPPC
-    {0xc0011019, 0xc001101b}, // breakpoint address masks 1 to 3
-    {0xc0011027, 0xc0011027}, // breakpoint address mask 0
+    { 0x0, 0x1 }, // load-store MCA address and status
+    { 0x10, 0x10 }, // TSC
+    { 0x2a, 0x2a }, // cluster ID
+    { 0x3b, 0x3b }, // TSC adjust
+    { 0x48, 0x49 }, // speculation control and prediction command
+    { 0x8b, 0x8b }, // patch level
+    { 0xe7, 0xe8 }, // MPERF and APERF
+    { 0x10b, 0x10b }, // flush command
+    { 0x174, 0x176 }, // SYSENTER
+    { 0x179, 0x17b }, // machine check globals
+    { 0x1d9, 0x1d9 }, // debug control
+    { 0x1db, 0x1de }, // last branch and exception records
+    { 0x400, 0x47f }, // machine check banks
+    { 0x6a0, 0x6a0 }, // user CET
+    { 0x6a2, 0x6a2 }, // supervisor CET
+    { 0x6a4, 0x6a8 }, // shadow stack pointers and table
+    { 0xc81, 0xc81 }, // L3 QoS configuration
+    { 0xc8d, 0xc8f }, // QoS monitoring and association
+    { 0xc90, 0xd8f }, // L3 allocation masks
+    { 0xc0000081, 0xc0000084 }, // SYSCALL
+    { 0xc00000e7, 0xc00000e9 }, // read-only MPERF and APERF, instructions retired
+    { 0xc0000100, 0xc0000103 }, // FS, GS, and kernel GS bases, TSC_AUX
+    { 0xc0000108, 0xc0000108 }, // prefetch control
+    { 0xc0000200, 0xc00002ff }, // L3 QoS bandwidth controls
+    { 0xc0000300, 0xc0000303 }, // global performance counter control and status
+    { 0xc00003fd, 0xc00003ff }, // assignable bandwidth monitoring
+    { 0xc0000400, 0xc0000401 }, // bandwidth monitoring event configuration
+    { 0xc0000408, 0xc000040a }, // MC4 thresholds
+    { 0xc0000420, 0xc0000423 }, // MCA query
+    { 0xc0002000, 0xc00023ff }, // MCAX banks
+    { 0xc0010000, 0xc0010007 }, // legacy performance counters
+    { 0xc0010061, 0xc0010063 }, // P-state limit, control, and status
+    { 0xc0010115, 0xc0010115 }, // IGNNE
+    { 0xc0010140, 0xc0010141 }, // OS visible workarounds
+    { 0xc0010200, 0xc001020b }, // core performance counters
+    { 0xc0010230, 0xc0010237 }, // L2I or L3 performance counters
+    { 0xc0010240, 0xc0010247 }, // northbridge or data fabric performance counters
+    { 0xc00102b0, 0xc00102b5 }, // CPPC
+    { 0xc0011019, 0xc001101b }, // breakpoint address masks 1 to 3
+    { 0xc0011027, 0xc0011027 }, // breakpoint address mask 0
 };
 const size_t msr_amd_architectural_count =
-    sizeof(msr_amd_architectural) / sizeof(msr_amd_architectural[0]);
+    sizeof(msr_amd_architectural) / sizeof(struct msr_range);
 
-// Family 10h, BKDG 31116 rev. 3.62: C-states, configuration, identification, machine checks, power,
-// thermal.
-static const struct msr_range family_10h[] = {
-    {0xc001003e, 0xc001003e}, // HTC
-    {0xc0010044, 0xc0010049}, // Machine Check Control Mask
-    {0xc0010055, 0xc0010055}, // Interrupt Pending and CMP-Halt
-    {0xc0010064, 0xc0010068}, // P-State [4:0]
-    {0xc0010070, 0xc0010073}, // COFVID Control to C-state Base Address
-    {0xc001100c, 0xc001100c}, // Node ID
-    {0xc0011021, 0xc0011023}, // IC_CFG to BU_CFG
-    {0xc0011029, 0xc001102a}, // DE_CFG to BU_CFG2
-};
-
-// Family 15h, BKDGs 42301 rev. 3.14, 42300 rev. 3.12, 49125 rev. 3.06, 50742 rev. 3.05, and 55072
-// rev. 3.09: C-states, configuration, identification, machine checks, power, thermal.
-static const struct msr_range family_15h[] = {
-    {0xc001003e, 0xc001003e}, // HTC
-    {0xc0010044, 0xc0010046}, // MC0_CTL_MASK to MC2_CTL_MASK
-    {0xc0010048, 0xc001004a}, // MC4_CTL_MASK to MC6_CTL_MASK
-    {0xc0010055, 0xc0010055}, // Interrupt Pending
-    {0xc0010060, 0xc0010060}, // BIST Results
-    {0xc0010064, 0xc001006b}, // P-state
-    {0xc0010070, 0xc0010073}, // COFVID Control to C-state Base Address
-    {0xc0010075, 0xc0010075}, // APML TDP Limit
-    {0xc0010077, 0xc001007b}, // Processor Power in TDP to Max Compute Unit Power Accumulator
-    {0xc0010280, 0xc0010280}, // CU_PTSC
-    {0xc001100c, 0xc001100c}, // Node ID
-    {0xc001101c, 0xc001101c}, // LS_CFG3
-    {0xc0011020, 0xc0011023}, // LS_CFG to CU_CFG
-    {0xc0011028, 0xc001102d}, // FP_CFG to LS_CFG2
-    {0xc001102f, 0xc001102f}, // CU_PFTCFG
-    {0xc0011090, 0xc0011090}, // Processor Feedback Constants
-    {0xc00110a1, 0xc00110a1}, // CU_CBBCFG
-};
-
-// Family 16h, BKDGs 48751 rev. 3.03 and 52740 rev. 3.06: C-states, configuration, identification,
+// Family 10h, BKDG 31116 rev. 3.62: C-states, configuration, identification,
 // machine checks, power, thermal.
+static const struct msr_range family_10h[] = {
+    { 0xc001003e, 0xc001003e }, // HTC
+    { 0xc0010044, 0xc0010049 }, // Machine Check Control Mask
+    { 0xc0010055, 0xc0010055 }, // Interrupt Pending and CMP-Halt
+    { 0xc0010064, 0xc0010068 }, // P-State [4:0]
+    { 0xc0010070, 0xc0010073 }, // COFVID Control to C-state Base Address
+    { 0xc001100c, 0xc001100c }, // Node ID
+    { 0xc0011021, 0xc0011023 }, // IC_CFG to BU_CFG
+    { 0xc0011029, 0xc001102a }, // DE_CFG to BU_CFG2
+};
+
+// Family 15h, BKDGs 42301 rev. 3.14, 42300 rev. 3.12, 49125 rev. 3.06, 50742
+// rev. 3.05, and 55072 rev. 3.09: C-states, configuration, identification,
+// machine checks, power, thermal.
+static const struct msr_range family_15h[] = {
+    { 0xc001003e, 0xc001003e }, // HTC
+    { 0xc0010044, 0xc0010046 }, // MC0_CTL_MASK to MC2_CTL_MASK
+    { 0xc0010048, 0xc001004a }, // MC4_CTL_MASK to MC6_CTL_MASK
+    { 0xc0010055, 0xc0010055 }, // Interrupt Pending
+    { 0xc0010060, 0xc0010060 }, // BIST Results
+    { 0xc0010064, 0xc001006b }, // P-state
+    { 0xc0010070, 0xc0010073 }, // COFVID Control to C-state Base Address
+    { 0xc0010075, 0xc0010075 }, // APML TDP Limit
+    { 0xc0010077, 0xc001007b }, // Processor Power in TDP to Max Compute Unit Power Accumulator
+    { 0xc0010280, 0xc0010280 }, // CU_PTSC
+    { 0xc001100c, 0xc001100c }, // Node ID
+    { 0xc001101c, 0xc001101c }, // LS_CFG3
+    { 0xc0011020, 0xc0011023 }, // LS_CFG to CU_CFG
+    { 0xc0011028, 0xc001102d }, // FP_CFG to LS_CFG2
+    { 0xc001102f, 0xc001102f }, // CU_PFTCFG
+    { 0xc0011090, 0xc0011090 }, // Processor Feedback Constants
+    { 0xc00110a1, 0xc00110a1 }, // CU_CBBCFG
+};
+
+// Family 16h, BKDGs 48751 rev. 3.03 and 52740 rev. 3.06: C-states,
+// configuration, identification, machine checks, power, thermal.
 static const struct msr_range family_16h[] = {
-    {0xc001003e, 0xc001003e}, // HTC
-    {0xc0010044, 0xc0010046}, // DC Machine Check Control Mask to BU Machine Check Control Mask
-    {0xc0010048, 0xc0010049}, // NB Machine Check Control Mask to FR Machine Check Control Mask
-    {0xc0010055, 0xc0010055}, // Interrupt Pending
-    {0xc0010060, 0xc0010060}, // BIST Results
-    {0xc0010064, 0xc001006b}, // P-state
-    {0xc0010070, 0xc0010071}, // COFVID Control to COFVID Status
-    {0xc0010073, 0xc0010073}, // C-state Base Address
-    {0xc001007a, 0xc001007a}, // Compute Unit Power Accumulator
-    {0xc001007b, 0xc001007b}, // Max Compute Unit Power Accumulator
-    {0xc0010080, 0xc0010080}, // Frequency Sensitivity Feedback Monitor Actual Count
-    {0xc0010081, 0xc0010081}, // Frequency Sensitivity Feedback Monitor Reference
-    {0xc0010280, 0xc0010280}, // CU_PTSC
-    {0xc0011020, 0xc0011023}, // LS_CFG to BU_CFG
-    {0xc0011028, 0xc001102a}, // FP_CFG to BU_CFG2
-    {0xc0011090, 0xc0011090}, // Processor Feedback Constants
-    {0xc00110a0, 0xc00110a0}, // L2I_CFG
+    { 0xc001003e, 0xc001003e }, // HTC
+    { 0xc0010044, 0xc0010046 }, // DC Machine Check Control Mask to BU Machine Check Control Mask
+    { 0xc0010048, 0xc0010049 }, // NB Machine Check Control Mask to FR Machine Check Control Mask
+    { 0xc0010055, 0xc0010055 }, // Interrupt Pending
+    { 0xc0010060, 0xc0010060 }, // BIST Results
+    { 0xc0010064, 0xc001006b }, // P-state
+    { 0xc0010070, 0xc0010071 }, // COFVID Control to COFVID Status
+    { 0xc0010073, 0xc0010073 }, // C-state Base Address
+    { 0xc001007a, 0xc001007a }, // Compute Unit Power Accumulator
+    { 0xc001007b, 0xc001007b }, // Max Compute Unit Power Accumulator
+    { 0xc0010080, 0xc0010080 }, // Frequency Sensitivity Feedback Monitor Actual Count
+    { 0xc0010081, 0xc0010081 }, // Frequency Sensitivity Feedback Monitor Reference
+    { 0xc0010280, 0xc0010280 }, // CU_PTSC
+    { 0xc0011020, 0xc0011023 }, // LS_CFG to BU_CFG
+    { 0xc0011028, 0xc001102a }, // FP_CFG to BU_CFG2
+    { 0xc0011090, 0xc0011090 }, // Processor Feedback Constants
+    { 0xc00110a0, 0xc00110a0 }, // L2I_CFG
 };
 
-// Family 17h, PPRs 54945 rev. 3.03, 55570 rev. 3.16, 55772 rev. 3.08, 55803 rev. 0.93, 55922 rev.
-// 3.06, and 56176 rev. 3.06: C-states, configuration, identification, machine checks, perfmon,
-// power.
+// Family 17h, PPRs 54945 rev. 3.03, 55570 rev. 3.16, 55772 rev. 3.08, 55803
+// rev. 0.93, 55922 rev. 3.06, and 56176 rev. 3.06: C-states, configuration,
+// identification, machine checks, perfmon, power.
 static const struct msr_range family_17h[] = {
-    {0xc0010064, 0xc001006b}, // PStateDef
-    {0xc0010073, 0xc0010073}, // CStateBaseAddr
-    {0xc0010238, 0xc001023b}, // ChL3PmcCfg to ChL3Pmc
-    {0xc0010299, 0xc001029b}, // RAPL_PWR_UNIT to PKG_ENERGY_STAT
-    {0xc00102f0, 0xc00102f1}, // PPIN_CTL to PPIN
-    {0xc0010400, 0xc0010403}, // MCA_CTL_MASK_LS to MCA_CTL_MASK_DE
-    {0xc0010405, 0xc001041b}, // MCA_CTL_MASK_EX to MCA_CTL_MASK_PIE
-    {0xc0011020, 0xc0011020}, // LS_CFG
-    {0xc0011023, 0xc0011023}, // TW_CFG
-    {0xc0011028, 0xc0011029}, // FP_CFG to DE_CFG
-    {0xc001102c, 0xc001102c}, // EX_CFG
-    {0xc001102e, 0xc001102e}, // BP_CFG
-    {0xc00110e3, 0xc00110e3}, // SPECTRAL_CHICKEN
+    { 0xc0010064, 0xc001006b }, // PStateDef
+    { 0xc0010073, 0xc0010073 }, // CStateBaseAddr
+    { 0xc0010238, 0xc001023b }, // ChL3PmcCfg to ChL3Pmc
+    { 0xc0010299, 0xc001029b }, // RAPL_PWR_UNIT to PKG_ENERGY_STAT
+    { 0xc00102f0, 0xc00102f1 }, // PPIN_CTL to PPIN
+    { 0xc0010400, 0xc0010403 }, // MCA_CTL_MASK_LS to MCA_CTL_MASK_DE
+    { 0xc0010405, 0xc001041b }, // MCA_CTL_MASK_EX to MCA_CTL_MASK_PIE
+    { 0xc0011020, 0xc0011020 }, // LS_CFG
+    { 0xc0011023, 0xc0011023 }, // TW_CFG
+    { 0xc0011028, 0xc0011029 }, // FP_CFG to DE_CFG
+    { 0xc001102c, 0xc001102c }, // EX_CFG
+    { 0xc001102e, 0xc001102e }, // BP_CFG
+    { 0xc00110e3, 0xc00110e3 }, // SPECTRAL_CHICKEN
 };
 
-// Family 19h, PPRs 55898 rev. 0.50, 55901 rev. 0.47, 56214 rev. 3.05, 56569 rev. 3.03, 56713 rev.
-// 3.05, 57019 rev. 3.00, and 57228 rev. 0.45: C-states, configuration, identification, machine
-// checks, perfmon, power.
+// Family 19h, PPRs 55898 rev. 0.50, 55901 rev. 0.47, 56214 rev. 3.05, 56569
+// rev. 3.03, 56713 rev. 3.05, 57019 rev. 3.00, and 57228 rev. 0.45: C-states,
+// configuration, identification, machine checks, perfmon, power.
 static const struct msr_range family_19h[] = {
-    {0xc0010064, 0xc001006b}, // PStateDef
-    {0xc0010073, 0xc0010073}, // CStateBaseAddr
-    {0xc0010238, 0xc001023b}, // ChL3PmcCfg to ChL3Pmc
-    {0xc0010248, 0xc001025f}, // DF_PERF_CTL to DF_PERF_CTR
-    {0xc0010299, 0xc001029b}, // RAPL_PWR_UNIT to PKG_ENERGY_STAT
-    {0xc00102f0, 0xc00102f1}, // PPIN_CTL to PPIN
-    {0xc0010400, 0xc0010403}, // MCA_CTL_MASK_LS to MCA_CTL_MASK_DE
-    {0xc0010405, 0xc001041f}, // MCA_CTL_MASK_EX to MCA_CTL_MASK_KPX_SERDES
-    {0xc0010800, 0xc001087f}, // UMC_PerfMonCtl to UMC_PerfMonCntr
-    {0xc0011029, 0xc0011029}, // DE_CFG
-    {0xc001102e, 0xc001102e}, // BP_CFG
+    { 0xc0010064, 0xc001006b }, // PStateDef
+    { 0xc0010073, 0xc0010073 }, // CStateBaseAddr
+    { 0xc0010238, 0xc001023b }, // ChL3PmcCfg to ChL3Pmc
+    { 0xc0010248, 0xc001025f }, // DF_PERF_CTL to DF_PERF_CTR
+    { 0xc0010299, 0xc001029b }, // RAPL_PWR_UNIT to PKG_ENERGY_STAT
+    { 0xc00102f0, 0xc00102f1 }, // PPIN_CTL to PPIN
+    { 0xc0010400, 0xc0010403 }, // MCA_CTL_MASK_LS to MCA_CTL_MASK_DE
+    { 0xc0010405, 0xc001041f }, // MCA_CTL_MASK_EX to MCA_CTL_MASK_KPX_SERDES
+    { 0xc0010800, 0xc001087f }, // UMC_PerfMonCtl to UMC_PerfMonCntr
+    { 0xc0011029, 0xc0011029 }, // DE_CFG
+    { 0xc001102e, 0xc001102e }, // BP_CFG
 };
 
-// Family 1Ah, PPRs 57238 rev. 0.49, 57883 rev. 0.51, 57930 rev. 3.00, 58264 rev. 0.45, and 58655
-// rev. 0.42: C-states, configuration, identification, machine checks, perfmon, power.
+// Family 1Ah, PPRs 57238 rev. 0.49, 57883 rev. 0.51, 57930 rev. 3.00, 58264
+// rev. 0.45, and 58655 rev. 0.42: C-states, configuration, identification,
+// machine checks, perfmon, power.
 static const struct msr_range family_1ah[] = {
-    {0xc0010064, 0xc001006b}, // PStateDef
-    {0xc0010073, 0xc0010073}, // CStateBaseAddr
-    {0xc0010238, 0xc001023b}, // ChL3PmcCfg to ChL3Pmc
-    {0xc0010248, 0xc001025f}, // DF_PERF_CTL to DF_PERF_CTR
-    {0xc0010299, 0xc001029b}, // L3RAPLPowerUnit0 to L3PackageEnergyStatus
-    {0xc00102f0, 0xc00102f1}, // PPIN_CTL to PPIN
-    {0xc0010400, 0xc0010403}, // MCA_CTL_MASK_LS to MCA_CTL_MASK_DE
-    {0xc0010405, 0xc001041f}, // MCA_CTL_MASK_EX to MCA_CTL_MASK_KPX_SERDES
-    {0xc0010800, 0xc001087f}, // UMC_PerfMonCtl to UMC_PerfMonCntr
-    {0xc0011029, 0xc0011029}, // DE_CFG
-    {0xc001102e, 0xc001102e}, // BP_CFG
+    { 0xc0010064, 0xc001006b }, // PStateDef
+    { 0xc0010073, 0xc0010073 }, // CStateBaseAddr
+    { 0xc0010238, 0xc001023b }, // ChL3PmcCfg to ChL3Pmc
+    { 0xc0010248, 0xc001025f }, // DF_PERF_CTL to DF_PERF_CTR
+    { 0xc0010299, 0xc001029b }, // L3RAPLPowerUnit0 to L3PackageEnergyStatus
+    { 0xc00102f0, 0xc00102f1 }, // PPIN_CTL to PPIN
+    { 0xc0010400, 0xc0010403 }, // MCA_CTL_MASK_LS to MCA_CTL_MASK_DE
+    { 0xc0010405, 0xc001041f }, // MCA_CTL_MASK_EX to MCA_CTL_MASK_KPX_SERDES
+    { 0xc0010800, 0xc001087f }, // UMC_PerfMonCtl to UMC_PerfMonCntr
+    { 0xc0011029, 0xc0011029 }, // DE_CFG
+    { 0xc001102e, 0xc001102e }, // BP_CFG
 };
 
 // By display family.
 const struct msr_family msr_amd_families[] = {
-    {0x10, family_10h, sizeof(family_10h) / sizeof(family_10h[0])},
-    {0x15, family_15h, sizeof(family_15h) / sizeof(family_15h[0])},
-    {0x16, family_16h, sizeof(family_16h) / sizeof(family_16h[0])},
-    {0x17, family_17h, sizeof(family_17h) / sizeof(family_17h[0])},
-    {0x19, family_19h, sizeof(family_19h) / sizeof(family_19h[0])},
-    {0x1a, family_1ah, sizeof(family_1ah) / sizeof(family_1ah[0])},
+    { 0x10, family_10h, sizeof(family_10h) / sizeof(struct msr_range) },
+    { 0x15, family_15h, sizeof(family_15h) / sizeof(struct msr_range) },
+    { 0x16, family_16h, sizeof(family_16h) / sizeof(struct msr_range) },
+    { 0x17, family_17h, sizeof(family_17h) / sizeof(struct msr_range) },
+    { 0x19, family_19h, sizeof(family_19h) / sizeof(struct msr_range) },
+    { 0x1a, family_1ah, sizeof(family_1ah) / sizeof(struct msr_range) },
 };
-const size_t msr_amd_family_count = sizeof(msr_amd_families) / sizeof(msr_amd_families[0]);
+const size_t msr_amd_family_count = sizeof(msr_amd_families)
+    / sizeof(struct msr_family);

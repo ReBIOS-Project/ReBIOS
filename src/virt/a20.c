@@ -15,12 +15,12 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stdint.h>
-#include <stddef.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <virt/a20.h>
 #include <lib/spinlock.h>
 #include <sys/x86.h>
-#include <virt/a20.h>
 #include <virt/gpt.h>
 #include <virt/io.h>
 
@@ -38,11 +38,9 @@
 // In the output port and the system control port alike.
 #define A20_BIT 0x02
 
-enum pending {
-    PENDING_NONE,
-    PENDING_READ_OUTPUT,
-    PENDING_WRITE_OUTPUT,
-};
+#define PENDING_NONE 0
+#define PENDING_READ_OUTPUT 1
+#define PENDING_WRITE_OUTPUT 2
 
 static struct spinlock lock;
 // The chipset ORs the two into the gate (PIIX4 datasheet 290562-001, Port 92h
@@ -50,7 +48,7 @@ static struct spinlock lock;
 static bool port92_open;
 static bool kbc_open = true;
 static bool gate_open = true;
-static enum pending pending;
+static int pending;
 
 static void update_gate(void) {
     bool want_open = port92_open || kbc_open;
@@ -62,10 +60,11 @@ static void update_gate(void) {
 }
 
 // The rest of an access wider than the port goes to the hardware as it is.
-static void pass_rest(uint16_t port, unsigned size, bool in, uint32_t *value) {
-    for (unsigned i = 1; i < size; i++) {
+static void pass_rest(uint16_t port, size_t size, bool in, uint32_t *value) {
+    for (size_t i = 1; i < size; i++) {
         if (in) {
-            *value = (*value & ~(0xffu << (8 * i))) | (uint32_t)inb((uint16_t)(port + i)) << (8 * i);
+            *value = (*value & ~((uint32_t)0xff << (8 * i)))
+                | (uint32_t)inb((uint16_t)(port + i)) << (8 * i);
         } else {
             outb((uint16_t)(port + i), (uint8_t)(*value >> (8 * i)));
         }
@@ -76,8 +75,10 @@ static uint8_t with_a20(uint8_t value, bool open) {
     return (uint8_t)((value & ~A20_BIT) | (open ? A20_BIT : 0));
 }
 
-static void system_control_a(struct vcpu *v, void *ctx, uint16_t offset, unsigned size, bool in,
-                             uint32_t *value) {
+static void system_control_a(
+    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in,
+    uint32_t *value
+) {
     (void)v;
     (void)ctx;
     (void)offset;
@@ -93,8 +94,10 @@ static void system_control_a(struct vcpu *v, void *ctx, uint16_t offset, unsigne
     spinlock_release(&lock);
 }
 
-static void kbc_command(struct vcpu *v, void *ctx, uint16_t offset, unsigned size, bool in,
-                        uint32_t *value) {
+static void kbc_command(
+    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in,
+    uint32_t *value
+) {
     (void)v;
     (void)ctx;
     (void)offset;
@@ -122,8 +125,10 @@ static void kbc_command(struct vcpu *v, void *ctx, uint16_t offset, unsigned siz
     spinlock_release(&lock);
 }
 
-static void kbc_data(struct vcpu *v, void *ctx, uint16_t offset, unsigned size, bool in,
-                     uint32_t *value) {
+static void kbc_data(
+    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in,
+    uint32_t *value
+) {
     (void)v;
     (void)ctx;
     (void)offset;
@@ -154,10 +159,12 @@ void a20_init(void) {
     // the hardware has it.
     port92_open = (inb(SYSTEM_CONTROL_A) & A20_BIT) != 0;
 
-    struct io_handler system_control = {SYSTEM_CONTROL_A, 1, system_control_a, NULL};
+    struct io_handler system_control = {
+        SYSTEM_CONTROL_A, 1, system_control_a, NULL
+    };
     io_register(&system_control);
-    struct io_handler command = {KBC_COMMAND, 1, kbc_command, NULL};
+    struct io_handler command = { KBC_COMMAND, 1, kbc_command, NULL };
     io_register(&command);
-    struct io_handler data = {KBC_DATA, 1, kbc_data, NULL};
+    struct io_handler data = { KBC_DATA, 1, kbc_data, NULL };
     io_register(&data);
 }

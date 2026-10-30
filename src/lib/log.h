@@ -18,14 +18,14 @@
 #ifndef LIB__LOG_H
 #define LIB__LOG_H
 
-#include <stdint.h>
-#include <stdbool.h>
 #include <stdarg.h>
+#include <stdbool.h>
+#include <stdint.h>
 
 struct flanterm_context;
 
-// Until this is called, the log is kept, to be written out here. A serial
-// port of 0 means none.
+// Until this is called, the log is kept, to be written out here. A serial port
+// of 0 means none.
 void log_init(uint16_t serial_port, uint32_t serial_baud, bool console);
 // What the log shows goes to this console from now on, rather than the
 // firmware's, as it lasts beyond ExitBootServices().
@@ -36,7 +36,9 @@ void vprintf(const char *fmt, va_list args);
 __attribute__((format(printf, 1, 2))) void printf(const char *fmt, ...);
 // Like printf(), but shown whatever the configuration.
 __attribute__((format(printf, 1, 2))) void log_notice(const char *fmt, ...);
-__attribute__((noreturn, format(printf, 1, 2))) void panic(const char *fmt, ...);
+__attribute__((noreturn, format(printf, 1, 2))) void panic(
+    const char *fmt, ...
+);
 bool log_panicked(void);
 // The guest is done for: if the log is on the screen, it is shown there again,
 // over the guest's picture, and log_panicked() stops the other processors.

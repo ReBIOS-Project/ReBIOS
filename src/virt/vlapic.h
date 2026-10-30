@@ -18,12 +18,12 @@
 #ifndef VIRT__VLAPIC_H
 #define VIRT__VLAPIC_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <virt/vcpu.h>
 
-// Vectors the hypervisor takes its own interrupts on at the processor's
-// local APIC, which guests use for none of their MSIs and I/O APIC entries.
+// Vectors the hypervisor takes its own interrupts on at the processor's local
+// APIC, which guests use for none of their MSIs and I/O APIC entries.
 #define VLAPIC_PERF_VECTOR 0xf8
 #define VLAPIC_THERMAL_VECTOR 0xf9
 #define VLAPIC_NESTED_POSTED_VECTOR 0xfa
@@ -33,9 +33,9 @@
 #define VLAPIC_TIMER_VECTOR 0xfe
 #define VLAPIC_SPURIOUS_VECTOR 0xff
 
-// Each vCPU's local APIC is emulated, on the processor's, which the
-// hypervisor keeps for itself: x2APIC mode where the processor has it, xAPIC
-// mode always. Needs virt_init().
+// Each vCPU's local APIC is emulated, on the processor's, which the hypervisor
+// keeps for itself: x2APIC mode where the processor has it, xAPIC mode always.
+// Needs virt_init().
 void vlapic_init(void);
 
 // A vCPU's local APIC: the boot processor's as a legacy BIOS hands it over,
@@ -59,23 +59,26 @@ uint64_t vlapic_page(struct vcpu *v);
 uint32_t vlapic_cr8(struct vcpu *v);
 void vlapic_set_cr8(struct vcpu *v, uint32_t value);
 // The page VMX virtualises the local APIC's page on, or 0.
-uint64_t vlapic_access_address(void);
+uintptr_t vlapic_access_address(void);
 // Whether host memory is the page the processor virtualises the local APIC's
 // page on, which only VMCS01's controls give a meaning.
-bool vlapic_access_page(uint64_t hpa);
+bool vlapic_access_page(uintptr_t hpa);
 
 // A fixed interrupt for the vCPU, from any processor.
 void vlapic_accept(struct vcpu *v, uint8_t vector, bool level);
 // An interrupt the hypervisor sends as an I/O APIC entry would, to the vCPUs
 // an 8-bit destination names, or to one of them for lowest priority.
-void vlapic_deliver_external(uint32_t dest, bool logical, uint8_t vector, bool level,
-                             bool lowest);
+void vlapic_deliver_external(
+    uint32_t dest, bool logical, uint8_t vector, bool level, bool lowest
+);
 // An interrupt message as an I/O APIC entry or an MSI the guest programmed
 // says it, mode as the interrupt command register has it, to the vCPUs an
 // 8-bit destination names: fixed, or lowest priority, NMI, and INIT.
-void vlapic_deliver_message(uint32_t dest, bool logical, uint32_t mode, uint8_t vector,
-                            bool level);
-// A message-signalled interrupt the guest programmed, as the APIC bus takes it.
+void vlapic_deliver_message(
+    uint32_t dest, bool logical, uint32_t mode, uint8_t vector, bool level
+);
+// A message-signalled interrupt the guest programmed, as the APIC bus takes
+// it.
 void vlapic_deliver_msi(uint32_t address, uint32_t data);
 // The processor of the first vCPU an 8-bit destination names, or NULL.
 struct cpu *vlapic_target(uint32_t dest, bool logical);
@@ -95,8 +98,8 @@ void vlapic_take(struct vcpu *v, uint8_t vector);
 // Taking it and ending it at once, as posted-interrupt processing does with
 // its notification (SDM 325462-093 Vol. 3C, 32.6).
 void vlapic_dismiss(struct vcpu *v, uint8_t vector);
-// The priority class of a requested interrupt that only the TPR holds back,
-// or -1.
+// The priority class of a requested interrupt that only the TPR holds back, or
+// -1.
 int vlapic_tpr_held(struct vcpu *v);
 // Whether the 8259's interrupts reach the vCPU through LINT0.
 bool vlapic_extint_open(struct vcpu *v);

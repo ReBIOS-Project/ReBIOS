@@ -18,8 +18,8 @@
 #ifndef LOADER__OPROM_H
 #define LOADER__OPROM_H
 
-// Fills loader_handoff->pci_roms and pci_rom_count. Needs video_init() to
-// have run.
+// Fills loader_handoff->pci_roms and pci_rom_count. Needs video_init() to have
+// run.
 void oprom_collect(void);
 
 #endif

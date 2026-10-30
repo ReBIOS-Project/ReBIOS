@@ -18,10 +18,11 @@
 #ifndef CSM__PIR_H
 #define CSM__PIR_H
 
+#include <stddef.h>
 #include <stdint.h>
 
-// Writes the guest's PCI IRQ routing table to buf. Returns its length, or 0
-// if no PCI device interrupts on an ISA IRQ or buf is too small.
-uint32_t pir_build(void *buf, uint32_t size);
+// Writes the guest's PCI IRQ routing table to buf. Returns its length, or 0 if
+// no PCI device interrupts on an ISA IRQ or buf is too small.
+uint32_t pir_build(void *buf, size_t size);
 
 #endif

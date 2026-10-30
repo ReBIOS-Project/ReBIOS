@@ -18,8 +18,9 @@
 #ifndef CSM__E820_H
 #define CSM__E820_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #define E820_RAM 1
 #define E820_RESERVED 2
@@ -39,7 +40,7 @@ struct e820_entry {
 } __attribute__((packed));
 
 struct e820_map {
-    uint32_t count;
+    size_t count;
     struct e820_entry entries[E820_MAX_ENTRIES];
 };
 
@@ -57,15 +58,19 @@ struct e820_cmos {
 
 void e820_init(struct e820_map *map);
 
-// Makes [base, base + size) of the type, whatever was there. Type 0 makes it
-// a hole. Returns false, leaving the map unchanged, if the result would need
+// Makes [base, base + size) of the type, whatever was there. Type 0 makes it a
+// hole. Returns false, leaving the map unchanged, if the result would need
 // more than E820_MAX_ENTRIES entries.
-bool e820_set(struct e820_map *map, uint64_t base, uint64_t size, uint32_t type);
+bool e820_set(
+    struct e820_map *map, uintptr_t base, size_t size, uint32_t type
+);
 
-// Sets every range of a UEFI memory map, as it stands after ExitBootServices(),
-// to the corresponding E820 type.
-bool e820_set_efi_map(struct e820_map *map, const void *efi_mmap, uint64_t mmap_size,
-                      uint64_t desc_size);
+// Sets every range of a UEFI memory map, as it stands after
+// ExitBootServices(), to the corresponding E820 type.
+bool e820_set_efi_map(
+    struct e820_map *map, const void *efi_mmap, size_t mmap_size,
+    size_t desc_size
+);
 
 // Replaces the first MiB with base memory, a 1 KiB extended BIOS data area,
 // and a 64 KiB system BIOS, as in the example address map of ACPI 6.6, 15.5.

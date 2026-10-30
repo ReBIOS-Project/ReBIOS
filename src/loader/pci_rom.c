@@ -15,9 +15,9 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stdint.h>
-#include <stddef.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <loader/pci_rom.h>
 
 // Offsets into an image's ROM header.
@@ -45,14 +45,15 @@ static uint16_t read16(const uint8_t *p) {
 
 // Looks for the device in the 0-terminated list of device IDs that a PCI data
 // structure of revision 3 or later may point to, which must lie in the image.
-static bool device_listed(const uint8_t *image, uint64_t image_size, uint64_t pcir,
-                          uint16_t device_id) {
+static bool device_listed(
+    const uint8_t *image, size_t image_size, uint64_t pcir, uint16_t device_id
+) {
     uint16_t list = read16(image + pcir + PCIR_DEVICE_LIST);
     if (list == 0) {
         return false;
     }
 
-    for (uint64_t off = pcir + list; off + 2 <= image_size; off += 2) {
+    for (size_t off = pcir + list; off + 2 <= image_size; off += 2) {
         uint16_t id = read16(image + off);
         if (id == 0) {
             return false;
@@ -64,17 +65,19 @@ static bool device_listed(const uint8_t *image, uint64_t image_size, uint64_t pc
     return false;
 }
 
-bool pci_rom_find_legacy_image(const void *rom, uint64_t rom_size, uint16_t vendor_id,
-                               uint16_t device_id, const void **image, uint32_t *size) {
+bool pci_rom_find_legacy_image(
+    const void *rom, size_t rom_size, uint16_t vendor_id, uint16_t device_id,
+    const void **image, size_t *size
+) {
     const uint8_t *found = NULL;
-    uint32_t found_size = 0;
+    size_t found_size = 0;
     bool found_revision_3 = false;
 
     if (rom == NULL) {
         return false;
     }
 
-    for (uint64_t off = 0; rom_size - off >= ROM_HEADER_SIZE;) {
+    for (size_t off = 0; rom_size - off >= ROM_HEADER_SIZE; ) {
         const uint8_t *img = (const uint8_t *)rom + off;
         uint64_t left = rom_size - off;
 
@@ -87,28 +90,31 @@ bool pci_rom_find_legacy_image(const void *rom, uint64_t rom_size, uint16_t vend
             break;
         }
         const uint8_t *data = img + pcir;
-        if (data[0] != 'P' || data[1] != 'C' || data[2] != 'I' || data[3] != 'R') {
+        if (data[0] != 'P' || data[1] != 'C' || data[2] != 'I'
+         || data[3] != 'R') {
             break;
         }
 
-        // The image must hold its own headers, so that it is never empty,
-        // and fit in the ROM.
-        uint64_t img_size = (uint64_t)read16(data + PCIR_IMAGE_LENGTH) * IMAGE_LENGTH_UNIT;
+        // The image must hold its own headers, so that it is never empty, and
+        // fit in the ROM.
+        size_t img_size = (uint64_t)read16(data + PCIR_IMAGE_LENGTH)
+            * IMAGE_LENGTH_UNIT;
         if (img_size < pcir + PCIR_SIZE || img_size > left) {
             break;
         }
 
         bool revision_3 = data[PCIR_REVISION] >= 3;
-        if (data[PCIR_CODE_TYPE] == CODE_TYPE_PC_AT && read16(data + PCIR_VENDOR_ID) == vendor_id
-            && (read16(data + PCIR_DEVICE_ID) == device_id
-                || (revision_3 && device_listed(img, img_size, pcir, device_id)))
-            && (found == NULL || (revision_3 && !found_revision_3))) {
+        if (data[PCIR_CODE_TYPE] == CODE_TYPE_PC_AT
+         && read16(data + PCIR_VENDOR_ID) == vendor_id
+         && (read16(data + PCIR_DEVICE_ID) == device_id
+          || (revision_3 && device_listed(img, img_size, pcir, device_id)))
+         && (found == NULL || (revision_3 && !found_revision_3))) {
             found = img;
             found_size = (uint32_t)img_size;
             found_revision_3 = revision_3;
         }
 
-        if (data[PCIR_INDICATOR] & PCIR_INDICATOR_LAST) {
+        if ((data[PCIR_INDICATOR] & PCIR_INDICATOR_LAST) != 0) {
             break;
         }
         off += img_size;

@@ -15,12 +15,13 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stdint.h>
-#include <stddef.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <uacpi/acpi.h>
+#include <uacpi/status.h>
 #include <uacpi/tables.h>
-#include <memory.h>
+#include <sys/smp.h>
 #include <core.h>
 #include <handoff.h>
 #include <hw/acpi.h>
@@ -29,15 +30,15 @@
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/time.h>
+#include <memory.h>
 #include <sys/cpu.h>
-#include <sys/smp.h>
 #include <sys/x86.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>
 #include <virt/vlapic.h>
 
 // How long the processors get to start, emulated ones included.
-#define AP_START_TIMEOUT_NS 2000000000ull
+#define AP_START_TIMEOUT_NS ((uint64_t)2000000000)
 #define INIT_DELAY_US 10000
 #define SIPI_DELAY_US 200
 
@@ -62,29 +63,33 @@ struct ap_boot_params {
     uint64_t stack_offset;
     uint64_t entry;
 };
-_Static_assert(sizeof(struct ap_boot_params) == 56, "ap_boot.S has PARAM_SIZE 56");
+_Static_assert(
+    sizeof(struct ap_boot_params) == 56, "ap_boot.S has PARAM_SIZE 56"
+);
 
 struct ap_boot_entry {
     uint32_t apic_id;
     uint32_t reserved;
     uint64_t cpu;
 };
-_Static_assert(sizeof(struct ap_boot_entry) == 16, "ap_boot.S has ENTRY_SIZE 16");
+_Static_assert(
+    sizeof(struct ap_boot_entry) == 16, "ap_boot.S has ENTRY_SIZE 16"
+);
 
 static struct cpu **cpus;
-static uint32_t cpu_count;
+static size_t cpu_count;
 static uint32_t aps_started;
 
-uint32_t smp_cpu_count(void) {
+size_t smp_cpu_count(void) {
     return cpu_count;
 }
 
-struct cpu *smp_cpu(uint32_t index) {
+struct cpu *smp_cpu(size_t index) {
     return index < cpu_count ? cpus[index] : NULL;
 }
 
 struct cpu *smp_cpu_by_apic_id(uint32_t apic_id) {
-    for (uint32_t i = 0; i < cpu_count; i++) {
+    for (size_t i = 0; i < cpu_count; i++) {
         if (cpus[i]->apic_id == apic_id) {
             return cpus[i];
         }
@@ -102,8 +107,9 @@ bool smp_guest_cpu(uint32_t apic_id) {
         return true;
     }
     bool listed = false;
-    for (uint32_t i = 0; i < c->cpu_range_count; i++) {
-        if (apic_id >= c->cpu_ranges[i].first && apic_id <= c->cpu_ranges[i].last) {
+    for (size_t i = 0; i < c->cpu_range_count; i++) {
+        if (apic_id >= c->cpu_ranges[i].first
+         && apic_id <= c->cpu_ranges[i].last) {
             listed = true;
         }
     }
@@ -123,8 +129,8 @@ static void ap_main(struct cpu *cpu) {
     vcpu_run(v);
 }
 
-static void add_id(uint32_t *ids, uint32_t *count, uint32_t id) {
-    for (uint32_t i = 0; i < *count; i++) {
+static void add_id(uint32_t *ids, size_t *count, uint32_t id) {
+    for (size_t i = 0; i < *count; i++) {
         if (ids[i] == id) {
             return;
         }
@@ -137,35 +143,40 @@ static uint32_t madt_aps(uint32_t **ids_out) {
     *ids_out = NULL;
     struct uacpi_table table;
     if (!acpi_tables_ready()
-        || uacpi_table_find_by_signature(ACPI_MADT_SIGNATURE, &table) != UACPI_STATUS_OK) {
+     || uacpi_table_find_by_signature(ACPI_MADT_SIGNATURE, &table)
+     != UACPI_STATUS_OK) {
         printf("No MADT, so no other processors\n");
         return 0;
     }
     const uint8_t *madt = table.ptr;
-    uint32_t length = table.hdr->length;
+    size_t length = table.hdr->length;
     uint32_t self = lapic_cpu_apic_id();
 
     // At most one processor per entry.
-    uint32_t *ids = kmalloc(length / sizeof(struct acpi_entry_hdr) * sizeof(*ids));
-    uint32_t count = 0;
-    uint32_t offset = sizeof(struct acpi_madt);
+    uint32_t *ids = kmalloc(
+        length / sizeof(struct acpi_entry_hdr) * sizeof(uint32_t)
+    );
+    size_t count = 0;
+    size_t offset = sizeof(struct acpi_madt);
     while (offset + sizeof(struct acpi_entry_hdr) <= length) {
         uint8_t type = madt[offset];
-        uint8_t entry_length = madt[offset + 1];
-        if (entry_length < sizeof(struct acpi_entry_hdr) || length - offset < entry_length) {
+        size_t entry_length = madt[offset + 1];
+        if (entry_length < sizeof(struct acpi_entry_hdr)
+         || length - offset < entry_length) {
             break;
         }
-        if (type == ACPI_MADT_ENTRY_TYPE_LAPIC && entry_length >= sizeof(struct acpi_madt_lapic)) {
+        if (type == ACPI_MADT_ENTRY_TYPE_LAPIC
+         && entry_length >= sizeof(struct acpi_madt_lapic)) {
             struct acpi_madt_lapic entry;
-            memcpy(&entry, madt + offset, sizeof(entry));
-            if ((entry.flags & ACPI_PIC_ENABLED) && entry.id != self) {
+            memcpy(&entry, madt + offset, sizeof(struct acpi_madt_lapic));
+            if ((entry.flags & ACPI_PIC_ENABLED) != 0 && entry.id != self) {
                 add_id(ids, &count, entry.id);
             }
         } else if (type == ACPI_MADT_ENTRY_TYPE_LOCAL_X2APIC
-                   && entry_length >= sizeof(struct acpi_madt_x2apic)) {
+                && entry_length >= sizeof(struct acpi_madt_x2apic)) {
             struct acpi_madt_x2apic entry;
-            memcpy(&entry, madt + offset, sizeof(entry));
-            if ((entry.flags & ACPI_PIC_ENABLED) && entry.id != self) {
+            memcpy(&entry, madt + offset, sizeof(struct acpi_madt_x2apic));
+            if ((entry.flags & ACPI_PIC_ENABLED) != 0 && entry.id != self) {
                 add_id(ids, &count, entry.id);
             }
         }
@@ -178,7 +189,7 @@ static uint32_t madt_aps(uint32_t **ids_out) {
 
 static void patch32(uint8_t *page, const uint8_t *field, uint64_t value) {
     uint32_t v = (uint32_t)value;
-    memcpy(page + (field - ap_boot_start), &v, sizeof(v));
+    memcpy(page + (field - ap_boot_start), &v, sizeof(uint32_t));
 }
 
 void smp_init(void) {
@@ -187,14 +198,18 @@ void smp_init(void) {
     bsp->online = true;
 
     uint32_t *ids;
-    uint32_t count = madt_aps(&ids);
+    size_t count = madt_aps(&ids);
     if (count != 0 && core_handoff->ap_boot == 0) {
-        printf("Not starting the %u other processors without a page below 1 MiB\n", count);
+        printf(
+            "Not starting the %zu other processors without a page below 1 "
+            "MiB\n",
+            count
+        );
         count = 0;
     }
-    cpus = kmalloc((count + 1) * sizeof(*cpus));
+    cpus = kmalloc((count + 1) * sizeof(struct cpu *));
     cpus[0] = bsp;
-    for (uint32_t i = 0; i < count; i++) {
+    for (size_t i = 0; i < count; i++) {
         cpus[i + 1] = cpu_area_alloc(i + 1, ids[i], false);
     }
     kfree(ids);
@@ -202,19 +217,23 @@ void smp_init(void) {
 }
 
 void smp_start_aps(void) {
-    uint32_t count = cpu_count - 1;
+    size_t count = cpu_count - 1;
     if (count == 0) {
         return;
     }
-    uint64_t page = core_handoff->ap_boot;
-    if (read_cr3() >= (1ull << 32)) {
+    uintptr_t page = core_handoff->ap_boot;
+    if (read_cr3() >= ((uint64_t)1 << 32)) {
         panic("The page tables are beyond the other processors' reach\n");
     }
 
-    struct ap_boot_entry *table = kmalloc(count * sizeof(*table));
-    for (uint32_t i = 0; i < count; i++) {
+    struct ap_boot_entry *table = kmalloc(
+        count * sizeof(struct ap_boot_entry)
+    );
+    for (size_t i = 0; i < count; i++) {
         struct cpu *cpu = cpus[i + 1];
-        table[i] = (struct ap_boot_entry){cpu->apic_id, 0, (uint64_t)(uintptr_t)cpu};
+        table[i] = (struct ap_boot_entry){
+            cpu->apic_id, 0, (uint64_t)(uintptr_t)cpu
+        };
     }
 
     uint8_t *code = (uint8_t *)(uintptr_t)page;
@@ -231,7 +250,10 @@ void smp_start_aps(void) {
         .stack_offset = CPU_AREA_SIZE,
         .entry = (uint64_t)(uintptr_t)ap_main,
     };
-    memcpy(code + (ap_boot_params - ap_boot_start), &params, sizeof(params));
+    memcpy(
+        code + (ap_boot_params - ap_boot_start), &params,
+        sizeof(struct ap_boot_params)
+    );
     __atomic_thread_fence(__ATOMIC_SEQ_CST);
 
     // All at once: each processor finds its own area.
@@ -243,12 +265,15 @@ void smp_start_aps(void) {
     lapic_send_ipi(0, ICR_SHORTHAND_OTHERS | ICR_DELIVERY_STARTUP | vector);
 
     uint64_t deadline = time_ns() + AP_START_TIMEOUT_NS;
-    while (__atomic_load_n(&aps_started, __ATOMIC_ACQUIRE) < count && time_ns() < deadline) {
+    while (__atomic_load_n(&aps_started, __ATOMIC_ACQUIRE) < count
+        && time_ns() < deadline) {
         cpu_relax();
     }
-    printf("Started %u of %u other processors\n", __atomic_load_n(&aps_started, __ATOMIC_ACQUIRE),
-           count);
-    for (uint32_t i = 1; i <= count; i++) {
+    printf(
+        "Started %u of %zu other processors\n",
+        __atomic_load_n(&aps_started, __ATOMIC_ACQUIRE), count
+    );
+    for (size_t i = 1; i <= count; i++) {
         if (!__atomic_load_n(&cpus[i]->online, __ATOMIC_ACQUIRE)) {
             printf("Processor %#x did not start\n", cpus[i]->apic_id);
         } else if (!smp_guest_cpu(cpus[i]->apic_id)) {

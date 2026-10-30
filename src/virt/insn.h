@@ -19,11 +19,13 @@
 #define VIRT__INSN_H
 
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <virt/vcpu.h>
 
 #define INSN_MAX_LENGTH 15
-// The opcodes of instructions outside the one-byte map: the legacy 0F map's
-// as INSN_OPCODE_0F | the opcode byte, others' as INSN_OPCODE_OTHER.
+// The opcodes of instructions outside the one-byte map: the legacy 0F map's as
+// INSN_OPCODE_0F | the opcode byte, others' as INSN_OPCODE_OTHER.
 #define INSN_OPCODE_0F 0xf00
 #define INSN_OPCODE_OTHER 0x100
 
@@ -46,11 +48,11 @@
 #define INSN_MEM_MASKED 0x04
 
 struct insn {
-    unsigned length;
-    unsigned opcode;
+    size_t length;
+    unsigned int opcode;
     // In bytes.
-    unsigned operand_size;
-    unsigned address_size;
+    size_t operand_size;
+    size_t address_size;
     // Whether the code is 64-bit.
     bool long_mode;
     // An F2 or F3 prefix, and the last of them: F2 is REPNE, F3 REP or REPE.
@@ -69,10 +71,10 @@ struct insn {
     uint8_t sib;
     // Sign-extended, disp_size bytes of it encoded.
     int64_t disp;
-    unsigned disp_size;
+    size_t disp_size;
     // As it is encoded, imm_size bytes of it.
     uint64_t imm;
-    unsigned imm_size;
+    size_t imm_size;
     // The opcode space and the opcode byte in it.
     uint8_t space;
     uint8_t opcode_byte;
@@ -86,16 +88,16 @@ struct insn {
 };
 
 struct insn_mem {
-    uint64_t linear;
-    unsigned size;
+    uintptr_t linear;
+    size_t size;
     // INSN_MEM_*.
-    unsigned access;
+    unsigned int access;
 };
 
 // The length of the instruction at the guest's CS:RIP, for intercepted
 // instructions that only need skipping, on processors that do not report it.
 // Returns 0 if it cannot be read or is not one of those instructions.
-unsigned insn_length_intercepted(struct vcpu *v);
+unsigned int insn_length_intercepted(struct vcpu *v);
 
 // Decodes any instruction at the guest's CS:RIP: its length, sizes, prefixes,
 // and ModRM operand. Returns false if it cannot be read or is not a valid
@@ -105,21 +107,27 @@ bool insn_decode(struct vcpu *v, struct insn *insn);
 // The linear address of a decoded instruction's ModRM memory operand, or of
 // MOV's offset operand: false where it has neither. VEX, EVEX, and XOP forms
 // are not handled.
-bool insn_mem_linear(struct vcpu *v, const struct insn *insn, uint64_t *linear);
+bool insn_mem_linear(
+    struct vcpu *v, const struct insn *insn, uint64_t *linear
+);
 // Where an instruction's ModRM memory operand is, and which of its bytes the
 // instruction reads and writes, as SDM 325462-093 and APM 40332 rev. 4.10
 // describe the instruction: none where it only uses the operand's address, as
 // CLFLUSH. Returns false where the instruction has no such operand, or they do
 // not say.
-bool insn_mem_operand(struct vcpu *v, const struct insn *insn, struct insn_mem *mem);
+bool insn_mem_operand(
+    struct vcpu *v, const struct insn *insn, struct insn_mem *mem
+);
 // A string instruction's linear address for size bytes: its destination at
 // ES:rDI, or its source at DS:rSI or the segment an override names. False,
 // with #GP(0) or #SS(0) raised, where the segment does not allow the access.
-bool insn_string_linear(struct vcpu *v, const struct insn *insn, bool destination, unsigned size,
-                        bool write, uint64_t *linear);
+bool insn_string_linear(
+    struct vcpu *v, const struct insn *insn, bool destination, size_t size,
+    bool write, uint64_t *linear
+);
 
 // The guest's general register, as the encoding numbers them.
-uint64_t insn_gpr(struct vcpu *v, unsigned reg);
-void insn_set_gpr(struct vcpu *v, unsigned reg, uint64_t value);
+uint64_t insn_gpr(struct vcpu *v, unsigned int reg);
+void insn_set_gpr(struct vcpu *v, unsigned int reg, uint64_t value);
 
 #endif

@@ -15,10 +15,6 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stddef.h>
-#include <stdarg.h>
-#include <lib/printf.h>
-
 #define NANOPRINTF_USE_FIELD_WIDTH_FORMAT_SPECIFIERS 1
 #define NANOPRINTF_USE_PRECISION_FORMAT_SPECIFIERS 1
 #define NANOPRINTF_USE_FLOAT_FORMAT_SPECIFIERS 0
@@ -29,9 +25,14 @@
 #define NANOPRINTF_USE_ALT_FORM_FLAG 1
 #define NANOPRINTF_VISIBILITY_STATIC
 #define NANOPRINTF_IMPLEMENTATION
+#include <stdarg.h>
+#include <stddef.h>
 #include <nanoprintf.h>
+#include <lib/printf.h>
 
-int format(void (*putc)(int c, void *ctx), void *ctx, const char *fmt, va_list args) {
+int format(
+    void (*putc)(int c, void *ctx), void *ctx, const char *fmt, va_list args
+) {
     return npf_vpprintf(putc, ctx, fmt, args);
 }
 

@@ -18,8 +18,9 @@
 #ifndef HW__PCI_CFG_H
 #define HW__PCI_CFG_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 struct pci_addr {
     uint16_t segment;
@@ -34,10 +35,12 @@ void pci_cfg_init(void);
 
 // size is 1, 2, or 4, and offset a multiple of it. Reads from a function that
 // cannot be reached return all ones, and writes to it are dropped.
-uint32_t pci_cfg_read(struct pci_addr addr, uint32_t offset, unsigned size);
-void pci_cfg_write(struct pci_addr addr, uint32_t offset, unsigned size, uint32_t value);
+uint32_t pci_cfg_read(struct pci_addr addr, uint32_t offset, size_t size);
+void pci_cfg_write(
+    struct pci_addr addr, uint32_t offset, size_t size, uint32_t value
+);
 
 // The configuration space window covering the segment and bus, or 0.
-uint64_t pci_cfg_ecam_base(uint16_t segment, uint8_t bus);
+uintptr_t pci_cfg_ecam_base(uint16_t segment, uint8_t bus);
 
 #endif

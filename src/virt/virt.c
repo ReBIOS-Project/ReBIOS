@@ -15,9 +15,10 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stdint.h>
 #include <stdbool.h>
-#include <memory.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <virt/virt.h>
 #include <hw/acpi.h>
 #include <hw/lapic.h>
 #include <hw/power.h>
@@ -26,6 +27,7 @@
 #include <lib/printf.h>
 #include <lib/spinlock.h>
 #include <lib/time.h>
+#include <memory.h>
 #include <sys/cpu.h>
 #include <sys/mm.h>
 #include <sys/smp.h>
@@ -40,7 +42,6 @@
 #include <virt/svm.h>
 #include <virt/vcpu.h>
 #include <virt/vga.h>
-#include <virt/virt.h>
 #include <virt/vlapic.h>
 #include <virt/vmx.h>
 
@@ -49,16 +50,16 @@
 #define MSR_DR1_ADDR_MASK 0xc0011019
 #define MSR_DR0_ADDR_MASK 0xc0011027
 
-#define DEBUGCTL_LBR (1u << 0)
-#define DEBUGCTL_BTF (1u << 1)
-#define DR6_BS (1ull << 14)
-#define DR7_GD (1u << 13)
+#define DEBUGCTL_LBR ((uint32_t)1 << 0)
+#define DEBUGCTL_BTF ((uint32_t)1 << 1)
+#define DR6_BS ((uint64_t)1 << 14)
+#define DR7_GD ((uint32_t)1 << 13)
 
 #define RESET_HOLD_SECONDS 30
 
 // Exits that keep a CPU from the guest for longer than this get reported.
-#define WATCHDOG_NS 5000000u
-#define WATCHDOG_REPORT_NS 1000000000ull
+#define WATCHDOG_NS ((uint32_t)5000000)
+#define WATCHDOG_REPORT_NS ((uint64_t)1000000000)
 
 bool virt_vmx;
 
@@ -73,40 +74,33 @@ static uint8_t *msr_bitmap_x2apic;
 static uint8_t *msr_bitmap_x2apic_icr;
 // How many of DR0-DR3 have AMD's address masks for data breakpoints (APM 24593
 // rev. 3.45, 13.1.7): DR0 with DataBkptExt, all four with AddrMaskExt.
-static unsigned breakpoint_masks;
-
-bool vmx_ept_huge_pages(void);
-bool vmx_ept_dirty_flags(void);
-bool vmx_monitor_trap_supported(void);
-void vmx_get_seg(enum seg_reg reg, struct segment *seg);
-void vmx_set_seg(enum seg_reg reg, const struct segment *seg);
-uint64_t vmx_cr0_mask(void);
-uint64_t vmx_cr4_mask(void);
-uint64_t vmx_cr0_real(uint64_t guest_cr0);
-uint64_t vmx_cr4_real(uint64_t guest_cr4);
+static unsigned int breakpoint_masks;
 
 static size_t describe_guest(char *buf, size_t size) {
     struct vcpu *v = this_cpu()->vcpu;
     if (v == NULL) {
         return 0;
     }
-    int len = snprintf(buf, size, "Its guest last exited with %s %#x, at RIP %#llx\n",
-                       virt_vmx ? "basic reason" : "code", v->last_exit,
-                       (unsigned long long)vcpu_rip(v));
+    int len = snprintf(
+        buf, size, "Its guest last exited with %s %#x, at RIP %#llx\n",
+        virt_vmx ? "basic reason" : "code", v->last_exit,
+        (unsigned long long)vcpu_rip(v)
+    );
     return len < 0 ? 0 : (size_t)len;
 }
 
 void virt_reset(bool shown) {
     if (shown) {
         printf("Resetting in %u seconds\n", RESET_HOLD_SECONDS);
-        time_udelay(RESET_HOLD_SECONDS * 1000000ull);
+        time_udelay(RESET_HOLD_SECONDS * (uint64_t)1000000);
     }
     power_reset(false);
 }
 
 bool virt_init(void) {
     struct cpuid_regs vendor = cpuid(0, 0);
-    bool intel = vendor.ebx == 0x756e6547 && vendor.edx == 0x49656e69 && vendor.ecx == 0x6c65746e;
+    bool intel = vendor.ebx == 0x756e6547 && vendor.edx == 0x49656e69
+        && vendor.ecx == 0x6c65746e;
 
     if (intel && vmx_supported()) {
         virt_vmx = true;
@@ -132,7 +126,8 @@ bool virt_init(void) {
         virt_intercept_msr(MSR_VM_CR, true, true);
         virt_intercept_msr(MSR_VM_HSAVE_PA, true, true);
         uint32_t features = cpuid(0x80000001, 0).ecx;
-        breakpoint_masks = features & (1u << 30) ? 4 : features & (1u << 26) ? 1 : 0;
+        breakpoint_masks = (features & ((uint32_t)1 << 30)) != 0 ? 4
+            : (features & ((uint32_t)1 << 26)) != 0 ? 1 : 0;
     } else {
         return false;
     }
@@ -144,12 +139,13 @@ bool virt_init(void) {
 }
 
 void virt_cpu_init(void) {
-    // The host needs none of the protections the firmware may have turned
-    // on, and control-flow enforcement would need shadow stacks it lacks.
+    // The host needs none of the protections the firmware may have turned on,
+    // and control-flow enforcement would need shadow stacks it lacks.
     uintptr_t cr4 = read_cr4();
-    cr4 &= ~(uintptr_t)(CR4_CET | CR4_SMEP | CR4_SMAP | CR4_PKE | CR4_UMIP | CR4_PCIDE);
+    cr4 &= ~(uintptr_t)(CR4_CET | CR4_SMEP | CR4_SMAP | CR4_PKE | CR4_UMIP
+        | CR4_PCIDE);
     // The host executes XSETBV for the guest.
-    if (cpuid(1, 0).ecx & (1u << 26)) {
+    if ((cpuid(1, 0).ecx & ((uint32_t)1 << 26)) != 0) {
         cr4 |= CR4_OSXSAVE;
     }
     write_cr4(cr4);
@@ -164,25 +160,25 @@ void virt_cpu_init(void) {
     msr_cpu_init();
 }
 
-uint64_t virt_io_bitmap(void) {
-    return (uint64_t)(uintptr_t)io_bitmap;
+uintptr_t virt_io_bitmap(void) {
+    return (uintptr_t)io_bitmap;
 }
 
-uint64_t virt_msr_bitmap(void) {
-    return (uint64_t)(uintptr_t)msr_bitmap;
+uintptr_t virt_msr_bitmap(void) {
+    return (uintptr_t)msr_bitmap;
 }
 
-uint64_t virt_msr_bitmap_x2apic(void) {
-    return (uint64_t)(uintptr_t)msr_bitmap_x2apic;
+uintptr_t virt_msr_bitmap_x2apic(void) {
+    return (uintptr_t)msr_bitmap_x2apic;
 }
 
-uint64_t virt_msr_bitmap_x2apic_icr(void) {
-    return (uint64_t)(uintptr_t)msr_bitmap_x2apic_icr;
+uintptr_t virt_msr_bitmap_x2apic_icr(void) {
+    return (uintptr_t)msr_bitmap_x2apic_icr;
 }
 
-void virt_intercept_io(uint16_t port, unsigned count, bool intercept) {
-    for (unsigned i = 0; i < count; i++) {
-        unsigned p = port + i;
+void virt_intercept_io(uint16_t port, size_t count, bool intercept) {
+    for (size_t i = 0; i < count; i++) {
+        unsigned int p = port + i;
         if (intercept) {
             io_bitmap[p / 8] |= 1 << (p % 8);
         } else {
@@ -191,7 +187,7 @@ void virt_intercept_io(uint16_t port, unsigned count, bool intercept) {
     }
 }
 
-static void bitmap_set(uint8_t *bitmap, unsigned bit, bool set) {
+static void bitmap_set(uint8_t *bitmap, unsigned int bit, bool set) {
     if (set) {
         bitmap[bit / 8] |= 1 << (bit % 8);
     } else {
@@ -202,9 +198,9 @@ static void bitmap_set(uint8_t *bitmap, unsigned bit, bool set) {
 // Where an MSR's read and write bits are: VMX's read bitmaps for the low MSRs
 // and the high ones, then their write bitmaps; SVM's two bits per MSR, in
 // three ranges. Others always exit.
-static bool msr_bits(uint32_t msr, unsigned *read, unsigned *write) {
+static bool msr_bits(uint32_t msr, unsigned int *read, unsigned int *write) {
     if (virt_vmx) {
-        unsigned base;
+        size_t base;
         if (msr <= 0x1fff) {
             base = 0;
         } else if (msr >= 0xc0000000 && msr <= 0xc0001fff) {
@@ -216,7 +212,7 @@ static bool msr_bits(uint32_t msr, unsigned *read, unsigned *write) {
         *write = *read + 0x800 * 8;
         return true;
     }
-    unsigned offset;
+    size_t offset;
     if (msr <= 0x1fff) {
         offset = 0;
     } else if (msr >= 0xc0000000 && msr <= 0xc0001fff) {
@@ -232,12 +228,12 @@ static bool msr_bits(uint32_t msr, unsigned *read, unsigned *write) {
 }
 
 void virt_intercept_msr(uint32_t msr, bool read, bool write) {
-    unsigned bits[2];
+    unsigned int bits[2];
     if (!msr_bits(msr, &bits[0], &bits[1])) {
         return;
     }
-    bool chosen[2] = {read, write};
-    for (unsigned i = 0; i < 2; i++) {
+    bool chosen[2] = { read, write };
+    for (size_t i = 0; i < 2; i++) {
         if (!chosen[i]) {
             continue;
         }
@@ -253,14 +249,14 @@ void virt_intercept_msr(uint32_t msr, bool read, bool write) {
 }
 
 void virt_pass_msr(uint32_t msr) {
-    unsigned bits[2];
+    unsigned int bits[2];
     if (!msr_bits(msr, &bits[0], &bits[1])) {
         return;
     }
     // The x2APIC registers' bits in the x2APIC bitmaps are the local APIC's.
     bool x2apic_register = msr >= 0x800 && msr <= 0x8ff;
-    for (unsigned i = 0; i < 2; i++) {
-        if (msr_claimed[bits[i] / 8] & (1 << (bits[i] % 8))) {
+    for (size_t i = 0; i < 2; i++) {
+        if ((msr_claimed[bits[i] / 8] & (1 << (bits[i] % 8))) != 0) {
             continue;
         }
         bitmap_set(msr_bitmap, bits[i], false);
@@ -274,12 +270,12 @@ void virt_pass_msr(uint32_t msr) {
 }
 
 void virt_x2apic_msr_passed(uint32_t msr, bool read, bool write) {
-    unsigned pages = virt_vmx ? 1 : 2;
+    size_t pages = virt_vmx ? 1 : 2;
     if (msr_bitmap_x2apic == NULL) {
         msr_bitmap_x2apic = page_alloc(pages);
         memcpy(msr_bitmap_x2apic, msr_bitmap, pages * PAGE_SIZE);
     }
-    unsigned read_bit, write_bit;
+    unsigned int read_bit, write_bit;
     if (!msr_bits(msr, &read_bit, &write_bit)) {
         return;
     }
@@ -292,10 +288,10 @@ void virt_x2apic_msr_passed(uint32_t msr, bool read, bool write) {
 }
 
 void virt_x2apic_icr_passed(uint32_t msr) {
-    unsigned pages = virt_vmx ? 1 : 2;
+    size_t pages = virt_vmx ? 1 : 2;
     msr_bitmap_x2apic_icr = page_alloc(pages);
     memcpy(msr_bitmap_x2apic_icr, msr_bitmap_x2apic, pages * PAGE_SIZE);
-    unsigned read_bit, write_bit;
+    unsigned int read_bit, write_bit;
     if (msr_bits(msr, &read_bit, &write_bit)) {
         bitmap_set(msr_bitmap_x2apic_icr, read_bit, false);
         bitmap_set(msr_bitmap_x2apic_icr, write_bit, false);
@@ -303,7 +299,7 @@ void virt_x2apic_icr_passed(uint32_t msr) {
 }
 
 struct vcpu *vcpu_create(struct cpu *cpu) {
-    struct vcpu *v = kmalloc(sizeof(*v));
+    struct vcpu *v = kmalloc(sizeof(struct vcpu));
     v->cpu = cpu;
     v->sipi = VCPU_SIPI_RUNNING;
     cpu->vcpu = v;
@@ -328,7 +324,8 @@ static uint32_t world_acks;
 static void service_pause(struct vcpu *v) {
     for (;;) {
         uint64_t epoch = __atomic_load_n(&world_epoch, __ATOMIC_ACQUIRE);
-        if (!(epoch & 1) || __atomic_load_n(&world_owner, __ATOMIC_ACQUIRE) == v->cpu) {
+        if ((epoch & 1) == 0
+         || __atomic_load_n(&world_owner, __ATOMIC_ACQUIRE) == v->cpu) {
             return;
         }
         __atomic_add_fetch(&world_acks, 1, __ATOMIC_ACQ_REL);
@@ -350,11 +347,12 @@ void vcpu_pause_others(void) {
     __atomic_add_fetch(&world_epoch, 1, __ATOMIC_SEQ_CST);
     // Those waiting for a start-up IPI stay out of the guest anyway.
     uint32_t expected = 0;
-    for (uint32_t i = 0; i < smp_cpu_count(); i++) {
+    for (size_t i = 0; i < smp_cpu_count(); i++) {
         struct cpu *cpu = smp_cpu(i);
         struct vcpu *v = cpu->vcpu;
-        if (cpu != self && __atomic_load_n(&cpu->online, __ATOMIC_ACQUIRE) && v != NULL
-            && __atomic_load_n(&v->sipi, __ATOMIC_ACQUIRE) != VCPU_SIPI_WAITING) {
+        if (cpu != self && __atomic_load_n(&cpu->online, __ATOMIC_ACQUIRE)
+         && v != NULL
+         && __atomic_load_n(&v->sipi, __ATOMIC_ACQUIRE) != VCPU_SIPI_WAITING) {
             expected++;
             vcpu_kick(cpu);
         }
@@ -395,14 +393,19 @@ static void set_guest_debugctl(struct vcpu *v, uint64_t value) {
 
 // The faults a stepped instruction may raise, which SVM intercepts so that the
 // step ends there.
-#define STEP_EXCEPTIONS (1u << 0 | 1u << 1 | 1u << 7 | 1u << 12 | 1u << 13 | 1u << 14 \
-                         | 1u << 16 | 1u << 17 | 1u << 19)
+#define STEP_EXCEPTIONS \
+    ((uint32_t)1 << 0 | (uint32_t)1 << 1 | (uint32_t)1 << 7 \
+        | (uint32_t)1 << 12 | (uint32_t)1 << 13 | (uint32_t)1 << 14 \
+        | (uint32_t)1 << 16 | (uint32_t)1 << 17 | (uint32_t)1 << 19)
 
 void vcpu_single_step(struct vcpu *v, bool on) {
     if (virt_vmx) {
         uint64_t controls = vmx_read(VMCS_PROC_CONTROLS);
-        vmx_write(VMCS_PROC_CONTROLS, on ? controls | PROC_MONITOR_TRAP_FLAG
-                                         : controls & ~(uint64_t)PROC_MONITOR_TRAP_FLAG);
+        vmx_write(
+            VMCS_PROC_CONTROLS,
+            on ? controls | PROC_MONITOR_TRAP_FLAG
+                : controls & ~(uint64_t)PROC_MONITOR_TRAP_FLAG
+        );
         return;
     }
     // SVM has no monitor trap flag: a single-step #DB instead.
@@ -414,7 +417,7 @@ void vcpu_single_step(struct vcpu *v, bool on) {
         // The guest's BTF would let the instruction run on to the next branch
         // (APM 24593 rev. 3.45, 13.1.6.2).
         v->step_debugctl = guest_debugctl(v);
-        if (v->step_debugctl & DEBUGCTL_BTF) {
+        if ((v->step_debugctl & DEBUGCTL_BTF) != 0) {
             set_guest_debugctl(v, v->step_debugctl & ~(uint64_t)DEBUGCTL_BTF);
         }
         vmcb->save.rflags |= RFLAGS_TF;
@@ -424,7 +427,7 @@ void vcpu_single_step(struct vcpu *v, bool on) {
     if (!v->step_tf) {
         vmcb->save.rflags &= ~(uint64_t)RFLAGS_TF;
     }
-    if (v->step_debugctl & DEBUGCTL_BTF) {
+    if ((v->step_debugctl & DEBUGCTL_BTF) != 0) {
         set_guest_debugctl(v, v->step_debugctl);
     }
     vmcb->save.dr6 = v->step_dr6;
@@ -438,12 +441,16 @@ static void watchdog(struct vcpu *v) {
     struct cpu *cpu = v->cpu;
     uint64_t now = time_ns();
     uint64_t held = now - cpu->slice_start;
-    if (cpu->slice_start == 0 || held < WATCHDOG_NS || now < cpu->watchdog_next) {
+    if (cpu->slice_start == 0 || held < WATCHDOG_NS
+     || now < cpu->watchdog_next) {
         return;
     }
     cpu->watchdog_next = now + WATCHDOG_REPORT_NS;
-    printf("Exit %#x kept CPU %u from the guest for %llu.%03llu ms\n", v->last_exit, cpu->index,
-           (unsigned long long)(held / 1000000), (unsigned long long)(held / 1000 % 1000));
+    printf(
+        "Exit %#x kept CPU %u from the guest for %llu.%03llu ms\n",
+        v->last_exit, cpu->index, (unsigned long long)(held / 1000000),
+        (unsigned long long)(held / 1000 % 1000)
+    );
 }
 
 void vcpu_before_entry(struct vcpu *v) {
@@ -460,7 +467,8 @@ void vcpu_before_entry(struct vcpu *v) {
     vga_refresh();
     nvmx_wait(v);
     // VMX operation blocks INIT, which its guest's exits take.
-    if (!nvmx_holds_init(v) && __atomic_exchange_n(&v->cpu->init_pending, false, __ATOMIC_ACQUIRE)) {
+    if (!nvmx_holds_init(v)
+     && __atomic_exchange_n(&v->cpu->init_pending, false, __ATOMIC_ACQUIRE)) {
         vcpu_init_signal(v);
     }
     uint64_t generation = __atomic_load_n(&gpt_generation, __ATOMIC_ACQUIRE);
@@ -490,12 +498,14 @@ void vcpu_before_entry(struct vcpu *v) {
 }
 
 void vcpu_kick(struct cpu *cpu) {
-    if (cpu == this_cpu() || !__atomic_load_n(&cpu->online, __ATOMIC_ACQUIRE)) {
+    if (cpu == this_cpu()
+     || !__atomic_load_n(&cpu->online, __ATOMIC_ACQUIRE)) {
         return;
     }
     // One waiting for a start-up IPI catches up before it enters the guest.
     struct vcpu *v = cpu->vcpu;
-    if (v == NULL || __atomic_load_n(&v->sipi, __ATOMIC_ACQUIRE) == VCPU_SIPI_WAITING) {
+    if (v == NULL
+     || __atomic_load_n(&v->sipi, __ATOMIC_ACQUIRE) == VCPU_SIPI_WAITING) {
         return;
     }
     vcpu_wake(cpu);
@@ -504,7 +514,8 @@ void vcpu_kick(struct cpu *cpu) {
 // Interrupts always make the guest exit, and one pending at an entry makes it
 // exit at once, as one ends a halt.
 void vcpu_wake(struct cpu *cpu) {
-    if (cpu == this_cpu() || !__atomic_load_n(&cpu->online, __ATOMIC_ACQUIRE)) {
+    if (cpu == this_cpu()
+     || !__atomic_load_n(&cpu->online, __ATOMIC_ACQUIRE)) {
         return;
     }
     if (!__atomic_exchange_n(&cpu->kick, true, __ATOMIC_ACQ_REL)) {
@@ -523,7 +534,7 @@ void vcpu_wait(struct vcpu *v, bool (*ends)(struct vcpu *v), bool spin) {
     struct cpu *cpu = v->cpu;
     // SVM's host takes interrupts and NMIs only with GIF set.
     if (!virt_vmx) {
-        asm volatile ("stgi" ::: "memory");
+        asm volatile ("stgi" :: : "memory");
     }
     cpu->taking_interrupts = true;
     vlapic_halt(v, true);
@@ -544,7 +555,7 @@ void vcpu_wait(struct vcpu *v, bool (*ends)(struct vcpu *v), bool spin) {
         // Work under way goes on while the guest waits, the boot processor
         // keeping the AML task going.
         if (spin || vga_redrawing() || (cpu->bsp && acpi_working())) {
-            asm volatile ("sti\n\tnop\n\tcli" ::: "memory");
+            asm volatile ("sti\n\tnop\n\tcli" :: : "memory");
             cpu_relax();
         } else {
             cpu_halt();
@@ -553,7 +564,7 @@ void vcpu_wait(struct vcpu *v, bool (*ends)(struct vcpu *v), bool spin) {
     vlapic_halt(v, false);
     cpu->taking_interrupts = false;
     if (!virt_vmx) {
-        asm volatile ("clgi" ::: "memory");
+        asm volatile ("clgi" :: : "memory");
     }
 }
 
@@ -573,7 +584,7 @@ uint64_t vcpu_rip(struct vcpu *v) {
     return virt_vmx ? vmx_read(VMCS_GUEST_RIP) : v->vmcb->save.rip;
 }
 
-void vcpu_set_rip(struct vcpu *v, uint64_t rip) {
+void vcpu_set_rip(struct vcpu *v, uintptr_t rip) {
     if (virt_vmx) {
         vmx_write(VMCS_GUEST_RIP, rip);
     } else {
@@ -585,7 +596,7 @@ uint64_t vcpu_rsp(struct vcpu *v) {
     return virt_vmx ? vmx_read(VMCS_GUEST_RSP) : v->vmcb->save.rsp;
 }
 
-void vcpu_set_rsp(struct vcpu *v, uint64_t rsp) {
+void vcpu_set_rsp(struct vcpu *v, uintptr_t rsp) {
     if (virt_vmx) {
         vmx_write(VMCS_GUEST_RSP, rsp);
     } else {
@@ -627,25 +638,27 @@ uint64_t vcpu_cr4(struct vcpu *v) {
 
 // User addresses clear bit 63 (SDM 325462-093 Vol. 3A, 4.4.1). Upper Address
 // Ignore takes bits 63:57 of DS and ES accesses for bit 56's.
-uint64_t vcpu_untagged(struct vcpu *v, enum seg_reg reg, uint64_t linear) {
-    if (!virt_vmx && (reg == SEG_DS || reg == SEG_ES) && (vcpu_efer(v) & EFER_UAIE)) {
+uint64_t vcpu_untagged(struct vcpu *v, size_t reg, uintptr_t linear) {
+    if (!virt_vmx && (reg == SEG_DS || reg == SEG_ES)
+     && (vcpu_efer(v) & EFER_UAIE) != 0) {
         return (uint64_t)((int64_t)(linear << 7) >> 7);
     }
     int bit;
-    if (linear >> 63) {
-        if (!(vcpu_cr4(v) & CR4_LAM_SUP)) {
+    if (linear >> 63 != 0) {
+        if ((vcpu_cr4(v) & CR4_LAM_SUP) == 0) {
             return linear;
         }
-        bit = (vcpu_cr4(v) & CR4_LA57) ? 56 : 47;
-    } else if (vcpu_cr3(v) & CR3_LAM_U57) {
+        bit = (vcpu_cr4(v) & CR4_LA57) != 0 ? 56 : 47;
+    } else if ((vcpu_cr3(v) & CR3_LAM_U57) != 0) {
         bit = 56;
-    } else if (vcpu_cr3(v) & CR3_LAM_U48) {
+    } else if ((vcpu_cr3(v) & CR3_LAM_U48) != 0) {
         bit = 47;
     } else {
         return linear;
     }
-    uint64_t metadata = ((1ull << 63) - 1) & ~((2ull << bit) - 1);
-    return (linear >> bit & 1) ? linear | metadata : linear & ~metadata;
+    uint64_t metadata = (((uint64_t)1 << 63) - 1)
+        & ~(((uint64_t)2 << bit) - 1);
+    return (linear >> bit & 1) != 0 ? linear | metadata : linear & ~metadata;
 }
 
 uint64_t vcpu_efer(struct vcpu *v) {
@@ -655,7 +668,7 @@ uint64_t vcpu_efer(struct vcpu *v) {
     return v->vmcb->save.efer & ~(uint64_t)EFER_SVME;
 }
 
-static struct vmcb_seg *svm_seg(struct vcpu *v, enum seg_reg reg) {
+static struct vmcb_seg *svm_seg(struct vcpu *v, size_t reg) {
     struct vmcb_save *s = &v->vmcb->save;
     switch (reg) {
         case SEG_ES: {
@@ -691,7 +704,7 @@ static struct vmcb_seg *svm_seg(struct vcpu *v, enum seg_reg reg) {
     }
 }
 
-void vcpu_get_seg(struct vcpu *v, enum seg_reg reg, struct segment *seg) {
+void vcpu_get_seg(struct vcpu *v, size_t reg, struct segment *seg) {
     if (virt_vmx) {
         vmx_get_seg(reg, seg);
         return;
@@ -703,14 +716,14 @@ void vcpu_get_seg(struct vcpu *v, enum seg_reg reg, struct segment *seg) {
     seg->base = s->base;
 }
 
-void vcpu_set_seg(struct vcpu *v, enum seg_reg reg, const struct segment *seg) {
+void vcpu_set_seg(struct vcpu *v, size_t reg, const struct segment *seg) {
     if (virt_vmx) {
         vmx_set_seg(reg, seg);
         return;
     }
     struct vmcb_seg *s = svm_seg(v, reg);
     s->selector = seg->selector;
-    s->attrib = (seg->attrib & SEG_UNUSABLE) ? 0 : seg->attrib;
+    s->attrib = (seg->attrib & SEG_UNUSABLE) != 0 ? 0 : seg->attrib;
     s->limit = seg->limit;
     s->base = seg->base;
     if (reg == SEG_SS) {
@@ -724,13 +737,13 @@ void vcpu_save_mode(struct vcpu *v, struct vcpu_mode *mode) {
     mode->cr4 = vcpu_cr4(v);
     mode->efer = vcpu_efer(v);
     mode->rflags = vcpu_rflags(v);
-    for (int reg = SEG_ES; reg <= SEG_IDTR; reg++) {
+    for (size_t reg = SEG_ES; reg <= SEG_IDTR; reg++) {
         vcpu_get_seg(v, reg, &mode->segs[reg]);
     }
 }
 
 void vcpu_load_mode(struct vcpu *v, const struct vcpu_mode *mode) {
-    for (int reg = SEG_ES; reg <= SEG_IDTR; reg++) {
+    for (size_t reg = SEG_ES; reg <= SEG_IDTR; reg++) {
         vcpu_set_seg(v, reg, &mode->segs[reg]);
     }
     vcpu_set_rflags(v, mode->rflags);
@@ -744,8 +757,9 @@ void vcpu_load_mode(struct vcpu *v, const struct vcpu_mode *mode) {
         vmx_write(VMCS_GUEST_CR4, vmx_cr4_real(mode->cr4));
         vmx_write(VMCS_GUEST_CR3, mode->cr3);
         vmx_write(VMCS_GUEST_EFER, mode->efer);
-        uint64_t entry = vmx_read(VMCS_ENTRY_CONTROLS) & ~(uint64_t)ENTRY_IA32E_MODE_GUEST;
-        if (mode->efer & EFER_LMA) {
+        uint64_t entry = vmx_read(VMCS_ENTRY_CONTROLS)
+            & ~(uint64_t)ENTRY_IA32E_MODE_GUEST;
+        if ((mode->efer & EFER_LMA) != 0) {
             entry |= ENTRY_IA32E_MODE_GUEST;
         }
         vmx_write(VMCS_ENTRY_CONTROLS, entry);
@@ -766,12 +780,13 @@ bool vcpu_guest_tf(struct vcpu *v) {
     // SVM's stepping sets TF and clears BTF for itself, keeping the guest's
     // aside.
     if (!virt_vmx && v->stepping) {
-        return v->step_tf && !(v->step_debugctl & DEBUGCTL_BTF);
+        return v->step_tf && (v->step_debugctl & DEBUGCTL_BTF) == 0;
     }
     // With BTF, TF steps only branches (SDM 325462-093 Vol. 3B, 20.4.3; APM
     // 24593 rev. 3.45, 13.1.6.2), and the hypervisor carries out none for the
     // guest.
-    return (vcpu_rflags(v) & RFLAGS_TF) && !(guest_debugctl(v) & DEBUGCTL_BTF);
+    return (vcpu_rflags(v) & RFLAGS_TF) != 0
+        && (guest_debugctl(v) & DEBUGCTL_BTF) == 0;
 }
 
 void vcpu_debug_trap(struct vcpu *v, uint64_t dr6) {
@@ -782,21 +797,25 @@ void vcpu_debug_trap(struct vcpu *v, uint64_t dr6) {
     }
     // Injection leaves the debug registers and IA32_DEBUGCTL alone (SDM
     // 325462-093 Vol. 3C, 29.6.1.1), where delivering a debug exception sets
-    // DR6's bits and clears DR7.GD (Vol. 3B, 20.2.4) and DEBUGCTL's LBR and BTF
-    // (20.4.2 and 20.4.3; APM 24593 rev. 3.45, 13.1.6).
+    // DR6's bits and clears DR7.GD (Vol. 3B, 20.2.4) and DEBUGCTL's LBR and
+    // BTF (20.4.2 and 20.4.3; APM 24593 rev. 3.45, 13.1.6).
     if (virt_vmx) {
         // VMX switches DR7 but not DR6, so the processor's is the guest's.
         uint64_t value;
         asm volatile ("mov %%dr6, %0" : "=r"(value));
         asm volatile ("mov %0, %%dr6" :: "r"(value | dr6));
-        vmx_write(VMCS_GUEST_DR7, vmx_read(VMCS_GUEST_DR7) & ~(uint64_t)DR7_GD);
+        vmx_write(
+            VMCS_GUEST_DR7, vmx_read(VMCS_GUEST_DR7) & ~(uint64_t)DR7_GD
+        );
     } else {
         v->vmcb->save.dr6 |= dr6;
         v->vmcb->save.dr7 &= ~(uint64_t)DR7_GD;
     }
     uint64_t debugctl = guest_debugctl(v);
-    if (debugctl & (DEBUGCTL_LBR | DEBUGCTL_BTF)) {
-        set_guest_debugctl(v, debugctl & ~(uint64_t)(DEBUGCTL_LBR | DEBUGCTL_BTF));
+    if ((debugctl & (DEBUGCTL_LBR | DEBUGCTL_BTF)) != 0) {
+        set_guest_debugctl(
+            v, debugctl & ~(uint64_t)(DEBUGCTL_LBR | DEBUGCTL_BTF)
+        );
     }
     vcpu_inject_exception(v, 1, false, 0);
 }
@@ -806,7 +825,7 @@ void vcpu_step_trap(struct vcpu *v) {
 }
 
 // Neither VMX nor SVM switches DR0-DR3: the processor's are the guest's.
-static uint64_t guest_dr(unsigned n) {
+static uint64_t guest_dr(size_t n) {
     uint64_t value;
     switch (n) {
         case 0: {
@@ -830,29 +849,34 @@ static uint64_t guest_dr(unsigned n) {
 }
 
 // The enabled breakpoints of the R/W kinds in kinds (as 1 << R/W) that a byte
-// of [address, address + size) matches, as DR6's B0-B3 bits: LEN masks the
-// low bits of the address (SDM 325462-093 Vol. 3B, 20.2.4 and 20.2.5), and so
-// does an AMD address mask the bits it sets.
-static uint64_t breakpoints_hit(struct vcpu *v, uint64_t address, unsigned size, unsigned kinds) {
+// of [address, address + size) matches, as DR6's B0-B3 bits: LEN masks the low
+// bits of the address (SDM 325462-093 Vol. 3B, 20.2.4 and 20.2.5), and so does
+// an AMD address mask the bits it sets.
+static uint64_t breakpoints_hit(
+    struct vcpu *v, uintptr_t address, size_t size, unsigned int kinds
+) {
     uint64_t dr7 = virt_vmx ? vmx_read(VMCS_GUEST_DR7) : v->vmcb->save.dr7;
-    if (!(dr7 & 0xff)) {
+    if ((dr7 & 0xff) == 0) {
         return 0;
     }
-    static const unsigned lengths[4] = {1, 2, 8, 4};
+    static const unsigned int lengths[4] = { 1, 2, 8, 4 };
     uint64_t hits = 0;
-    for (unsigned n = 0; n < 4; n++) {
-        unsigned rw = (dr7 >> (16 + 4 * n)) & 3;
-        if (!((dr7 >> (2 * n)) & 3) || !(kinds & (1u << rw))) {
+    for (size_t n = 0; n < 4; n++) {
+        unsigned int rw = (dr7 >> (16 + 4 * n)) & 3;
+        if (((dr7 >> (2 * n)) & 3) == 0
+         || (kinds & ((uint32_t)1 << rw)) == 0) {
             continue;
         }
         uint64_t ignored = lengths[(dr7 >> (18 + 4 * n)) & 3] - 1;
         if (n < breakpoint_masks) {
-            ignored |= (uint32_t)rdmsr(n == 0 ? MSR_DR0_ADDR_MASK : MSR_DR1_ADDR_MASK + n - 1);
+            ignored |= (uint32_t)rdmsr(
+                n == 0 ? MSR_DR0_ADDR_MASK : MSR_DR1_ADDR_MASK + n - 1
+            );
         }
         uint64_t dr = guest_dr(n);
-        for (unsigned i = 0; i < size; i++) {
-            if (!(((address + i) ^ dr) & ~ignored)) {
-                hits |= 1ull << n;
+        for (size_t i = 0; i < size; i++) {
+            if ((((address + i) ^ dr) & ~ignored) == 0) {
+                hits |= (uint64_t)1 << n;
                 break;
             }
         }
@@ -860,15 +884,20 @@ static uint64_t breakpoints_hit(struct vcpu *v, uint64_t address, unsigned size,
     return hits;
 }
 
-void vcpu_data_access(struct vcpu *v, uint64_t linear, unsigned size, bool write) {
+void vcpu_data_access(
+    struct vcpu *v, uintptr_t linear, size_t size, bool write
+) {
     // R/W 01 breaks on writes, 11 on reads and writes.
-    v->db_pending |= breakpoints_hit(v, linear, size, write ? 1u << 1 | 1u << 3 : 1u << 3);
+    v->db_pending |= breakpoints_hit(
+        v, linear, size,
+        write ? (uint32_t)1 << 1 | (uint32_t)1 << 3 : (uint32_t)1 << 3
+    );
 }
 
-void vcpu_io_access(struct vcpu *v, uint16_t port, unsigned size) {
+void vcpu_io_access(struct vcpu *v, uint16_t port, size_t size) {
     // R/W 10 breaks on I/O where CR4.DE says so.
-    if (vcpu_cr4(v) & CR4_DE) {
-        v->db_pending |= breakpoints_hit(v, port, size, 1u << 2);
+    if ((vcpu_cr4(v) & CR4_DE) != 0) {
+        v->db_pending |= breakpoints_hit(v, port, size, (uint32_t)1 << 2);
     }
 }
 
@@ -893,30 +922,35 @@ bool vcpu_stepped(struct vcpu *v) {
     return vcpu_guest_tf(v) || nvmx_monitor_trap_flag(v);
 }
 
-void vcpu_advance(struct vcpu *v, unsigned length) {
-    uint64_t rip = vcpu_rip(v);
+void vcpu_advance(struct vcpu *v, size_t length) {
+    uintptr_t rip = vcpu_rip(v);
     uint64_t next = rip + length;
-    // Outside 64-bit mode RIP wraps at 4 GiB, as Linux 7.3's KVM has it (vmx.c,
-    // skip_emulated_instruction()); a 32-bit guest with a wider one is
+    // Outside 64-bit mode RIP wraps at 4 GiB, as Linux 7.3's KVM has it
+    // (vmx.c, skip_emulated_instruction()); a 32-bit guest with a wider one is
     // unpredictable on AMD's Family 19h (erratum 1393, 57095 rev. 1.05).
     if ((next >> 32) != (rip >> 32)) {
         struct segment cs;
         vcpu_get_seg(v, SEG_CS, &cs);
-        if (!(vcpu_efer(v) & EFER_LMA) || !(cs.attrib & SEG_L)) {
+        if ((vcpu_efer(v) & EFER_LMA) == 0 || (cs.attrib & SEG_L) == 0) {
             next = (uint32_t)next;
         }
     }
-    // The instruction is done, so RF is clear (SDM 325462-093 Vol. 3B, 20.3.1.1).
+    // The instruction is done, so RF is clear (SDM 325462-093 Vol. 3B,
+    // 20.3.1.1).
     uint64_t rflags = vcpu_rflags(v);
-    if (rflags & RFLAGS_RF) {
+    if ((rflags & RFLAGS_RF) != 0) {
         vcpu_set_rflags(v, rflags & ~(uint64_t)RFLAGS_RF);
     }
     if (virt_vmx) {
         vmx_write(VMCS_GUEST_RIP, next);
         uint64_t intr = vmx_read(VMCS_GUEST_INTERRUPTIBILITY);
-        if (intr & (INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS)) {
-            vmx_write(VMCS_GUEST_INTERRUPTIBILITY,
-                      intr & ~(uint64_t)(INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS));
+        if ((intr & (INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS)) != 0) {
+            vmx_write(
+                VMCS_GUEST_INTERRUPTIBILITY,
+                intr
+                    & ~(uint64_t)(INTERRUPTIBILITY_STI
+                        | INTERRUPTIBILITY_MOV_SS)
+            );
         }
     } else {
         v->vmcb->save.rip = next;
@@ -927,29 +961,36 @@ void vcpu_advance(struct vcpu *v, unsigned length) {
 
 void vcpu_skip_instruction(struct vcpu *v) {
     if (virt_vmx) {
-        vcpu_advance(v, (unsigned)vmx_read(VMCS_EXIT_INSTR_LEN));
+        vcpu_advance(v, (unsigned int)vmx_read(VMCS_EXIT_INSTR_LEN));
         return;
     }
     if (svm_nrips) {
-        vcpu_advance(v, (unsigned)(v->vmcb->control.nrip - v->vmcb->save.rip));
+        vcpu_advance(
+            v, (unsigned int)(v->vmcb->control.nrip - v->vmcb->save.rip)
+        );
         return;
     }
     // One the hypervisor cannot read, as where another processor just changed
     // its mapping, runs again.
-    unsigned len = insn_length_intercepted(v);
+    size_t len = insn_length_intercepted(v);
     if (len == 0) {
-        printf("Cannot decode the intercepted instruction at %#llx\n",
-               (unsigned long long)v->vmcb->save.rip);
+        printf(
+            "Cannot decode the intercepted instruction at %#llx\n",
+            (unsigned long long)v->vmcb->save.rip
+        );
         return;
     }
     vcpu_advance(v, len);
 }
 
-void vcpu_inject_exception(struct vcpu *v, uint8_t vector, bool has_error, uint32_t error) {
-    // Breakpoints not yet reported are lost (SDM 325462-093 Vol. 3B, 20.3.1.2).
+void vcpu_inject_exception(
+    struct vcpu *v, uint8_t vector, bool has_error, uint32_t error
+) {
+    // Breakpoints not yet reported are lost (SDM 325462-093 Vol. 3B,
+    // 20.3.1.2).
     v->db_pending = 0;
     // Real mode exceptions push no error code.
-    if (!(vcpu_cr0(v) & CR0_PE)) {
+    if ((vcpu_cr0(v) & CR0_PE) == 0) {
         has_error = false;
     }
     if (nvmx_exception(v, vector, has_error, error, 0)) {
@@ -974,13 +1015,14 @@ void vcpu_inject_exception(struct vcpu *v, uint8_t vector, bool has_error, uint3
     v->vmcb->control.eventinj = event;
 }
 
-void vcpu_inject_page_fault(struct vcpu *v, uint64_t linear, uint32_t error) {
+void vcpu_inject_page_fault(struct vcpu *v, uintptr_t linear, uint32_t error) {
     // A page fault's exit takes the address as its qualification, leaving CR2
     // alone (SDM 325462-093 Vol. 3C, 30.2.1).
     if (nvmx_exception(v, 14, true, error, linear)) {
         return;
     }
-    // VMX leaves CR2 as it is for the guest, and the host takes no page faults.
+    // VMX leaves CR2 as it is for the guest, and the host takes no page
+    // faults.
     if (virt_vmx) {
         write_cr2(linear);
     } else {
@@ -995,7 +1037,7 @@ void vcpu_wait_for_sipi(struct vcpu *v) {
     vcpu_set_real_mode(v, 0, 0);
     struct cpu *cpu = v->cpu;
     if (!virt_vmx) {
-        asm volatile ("stgi" ::: "memory");
+        asm volatile ("stgi" :: : "memory");
     }
     cpu->taking_interrupts = true;
     __atomic_store_n(&v->sipi, VCPU_SIPI_WAITING, __ATOMIC_RELEASE);
@@ -1009,7 +1051,7 @@ void vcpu_wait_for_sipi(struct vcpu *v) {
     }
     cpu->taking_interrupts = false;
     if (!virt_vmx) {
-        asm volatile ("clgi" ::: "memory");
+        asm volatile ("clgi" :: : "memory");
     }
     vcpu_startup(v, (uint8_t)vector);
 }
@@ -1034,11 +1076,11 @@ void vcpu_startup(struct vcpu *v, uint8_t vector) {
 }
 
 void vcpu_set_real_mode(struct vcpu *v, uint16_t cs, uint16_t ip) {
-    struct segment code = {cs, 0x9b, 0xffff, (uint64_t)cs << 4};
-    struct segment data = {0, 0x93, 0xffff, 0};
-    struct segment ldtr = {0, 0x82, 0xffff, 0};
-    struct segment tr = {0, 0x8b, 0xffff, 0};
-    struct segment table = {0, 0, 0xffff, 0};
+    struct segment code = { cs, 0x9b, 0xffff, (uint64_t)cs << 4 };
+    struct segment data = { 0, 0x93, 0xffff, 0 };
+    struct segment ldtr = { 0, 0x82, 0xffff, 0 };
+    struct segment tr = { 0, 0x8b, 0xffff, 0 };
+    struct segment table = { 0, 0, 0xffff, 0 };
 
     vcpu_set_seg(v, SEG_CS, &code);
     vcpu_set_seg(v, SEG_DS, &data);
@@ -1054,7 +1096,7 @@ void vcpu_set_real_mode(struct vcpu *v, uint16_t cs, uint16_t ip) {
     vcpu_set_rip(v, ip);
     vcpu_set_rsp(v, 0);
     vcpu_set_rflags(v, RFLAGS_FIXED);
-    v->gprs = (struct gprs){0};
+    v->gprs = (struct gprs){ 0 };
     v->redeliver = 0;
 
     v->cr0_shadow = CR0_ET;
@@ -1066,8 +1108,10 @@ void vcpu_set_real_mode(struct vcpu *v, uint16_t cs, uint16_t ip) {
         vmx_write(VMCS_GUEST_CR4, vmx_cr4_real(v->cr4_shadow));
         vmx_write(VMCS_GUEST_CR3, 0);
         vmx_write(VMCS_GUEST_EFER, 0);
-        vmx_write(VMCS_ENTRY_CONTROLS,
-                  vmx_read(VMCS_ENTRY_CONTROLS) & ~(uint64_t)ENTRY_IA32E_MODE_GUEST);
+        vmx_write(
+            VMCS_ENTRY_CONTROLS,
+            vmx_read(VMCS_ENTRY_CONTROLS) & ~(uint64_t)ENTRY_IA32E_MODE_GUEST
+        );
         vmx_write(VMCS_GUEST_INTERRUPTIBILITY, 0);
         vmx_write(VMCS_GUEST_ACTIVITY_STATE, ACTIVITY_ACTIVE);
         return;

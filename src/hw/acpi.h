@@ -18,8 +18,8 @@
 #ifndef HW__ACPI_H
 #define HW__ACPI_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 // Sets up table access, switches the platform to ACPI mode, then loads the
 // namespace, without initialising any device. Returns false if there is no
@@ -34,9 +34,9 @@ bool acpi_tables_ready(void);
 void acpi_lock(void);
 void acpi_unlock(void);
 
-// Initialises the namespace where the hypervisor runs the firmware's ACPI,
-// its embedded controller first, then enables the GPEs that have methods.
-// Needs irq_init().
+// Initialises the namespace where the hypervisor runs the firmware's ACPI, its
+// embedded controller first, then enables the GPEs that have methods. Needs
+// irq_init().
 void acpi_namespace_start(void);
 
 // Runs the deferred work's task until this CPU's time slice is over, unless it

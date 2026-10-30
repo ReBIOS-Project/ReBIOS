@@ -18,13 +18,16 @@
 #ifndef LOADER__PCI_ROM_H
 #define LOADER__PCI_ROM_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 // Finds the x86 PC-AT image meant for the device in a PCI expansion ROM,
 // returning where it starts in rom, and its size. Returns false if there is
 // none, or the ROM is malformed.
-bool pci_rom_find_legacy_image(const void *rom, uint64_t rom_size, uint16_t vendor_id,
-                               uint16_t device_id, const void **image, uint32_t *size);
+bool pci_rom_find_legacy_image(
+    const void *rom, size_t rom_size, uint16_t vendor_id, uint16_t device_id,
+    const void **image, size_t *size
+);
 
 #endif

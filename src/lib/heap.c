@@ -15,11 +15,11 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stdint.h>
 #include <stddef.h>
-#include <memory.h>
+#include <stdint.h>
 #include <lib/heap.h>
 #include <lib/spinlock.h>
+#include <memory.h>
 #include <sys/mm.h>
 
 // Blocks of up to 2KiB come from per-size free lists, refilled a page at a
@@ -29,7 +29,7 @@
 #define MIN_CLASS_SHIFT 5
 #define MAX_CLASS_SHIFT 11
 #define CLASS_COUNT (MAX_CLASS_SHIFT - MIN_CLASS_SHIFT + 1)
-#define LARGE_MARK 0xffffffffffffffffull
+#define LARGE_MARK ((uint64_t)0xffffffffffffffff)
 
 struct free_block {
     struct free_block *next;
@@ -37,15 +37,15 @@ struct free_block {
 
 struct header {
     uint64_t class_or_mark;
-    uint64_t pages;
+    size_t pages;
 };
 
 static struct free_block *free_lists[CLASS_COUNT];
 static struct spinlock heap_lock;
 
 static int size_class(size_t total) {
-    for (int c = 0; c < CLASS_COUNT; c++) {
-        if (total <= (1ull << (MIN_CLASS_SHIFT + c))) {
+    for (size_t c = 0; c < CLASS_COUNT; c++) {
+        if (total <= ((uint64_t)1 << (MIN_CLASS_SHIFT + c))) {
             return c;
         }
     }
@@ -64,7 +64,7 @@ void *kmalloc(size_t size) {
         return (uint8_t *)h + HEADER_SIZE;
     }
 
-    size_t block = 1ull << (MIN_CLASS_SHIFT + c);
+    size_t block = (uint64_t)1 << (MIN_CLASS_SHIFT + c);
     spinlock_acquire(&heap_lock);
     if (free_lists[c] == NULL) {
         uint8_t *page = page_alloc(1);

@@ -18,8 +18,9 @@
 #ifndef LOADER__EFI_GLUE_H
 #define LOADER__EFI_GLUE_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <efi.h>
 
 extern EFI_HANDLE efi_image_handle;
@@ -29,8 +30,10 @@ extern EFI_RUNTIME_SERVICES *efi_rt;
 extern bool efi_boot_services_exited;
 
 // Returns 0 on failure. max_addr is inclusive; 0 means anywhere.
-uint64_t efi_alloc_pages(uint64_t count, uint64_t max_addr);
-uint64_t efi_alloc_pages_typed(uint64_t count, uint64_t max_addr, EFI_MEMORY_TYPE type);
+uintptr_t efi_alloc_pages(size_t count, uintptr_t max_addr);
+uintptr_t efi_alloc_pages_typed(
+    size_t count, uintptr_t max_addr, EFI_MEMORY_TYPE type
+);
 
 // Returns the handles with the protocol, in handle order, in pool memory to
 // free with FreePool(), or NULL if there are none.

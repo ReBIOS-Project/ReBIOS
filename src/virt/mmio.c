@@ -15,12 +15,14 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stdint.h>
 #include <stdbool.h>
-#include <memory.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <virt/mmio.h>
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
+#include <memory.h>
 #include <sys/mm.h>
 #include <sys/x86.h>
 #include <virt/emulate.h>
@@ -28,7 +30,6 @@
 #include <virt/guest_mem.h>
 #include <virt/insn.h>
 #include <virt/io.h>
-#include <virt/mmio.h>
 #include <virt/nvmx.h>
 #include <virt/profile.h>
 #include <virt/vcpu.h>
@@ -39,24 +40,29 @@
 #define ABSENT_REPORTS 16
 
 struct region {
-    uint64_t base;
-    uint64_t size;
+    uintptr_t base;
+    size_t size;
     const struct mmio_ops *ops;
     void *ctx;
 };
 
 static struct region regions[MAX_REGIONS];
-static unsigned region_count;
+static size_t region_count;
 static struct spinlock region_lock;
 
-int mmio_register(uint64_t base, uint64_t size, const struct mmio_ops *ops, void *ctx) {
+int mmio_register(
+    uintptr_t base, size_t size, const struct mmio_ops *ops, void *ctx
+) {
     spinlock_acquire(&region_lock);
     int region = -1;
     if (region_count == MAX_REGIONS) {
-        printf("Too many emulated memory regions for %#llx\n", (unsigned long long)base);
+        printf(
+            "Too many emulated memory regions for %#llx\n",
+            (unsigned long long)base
+        );
     } else {
         region = (int)region_count;
-        regions[region_count] = (struct region){base, size, ops, ctx};
+        regions[region_count] = (struct region){ base, size, ops, ctx };
         __atomic_store_n(&region_count, region_count + 1, __ATOMIC_RELEASE);
     }
     spinlock_release(&region_lock);
@@ -64,14 +70,14 @@ int mmio_register(uint64_t base, uint64_t size, const struct mmio_ops *ops, void
 }
 
 // A lookup meanwhile sees the region at one place or the other, or nowhere.
-void mmio_move(int region, uint64_t base, uint64_t size) {
+void mmio_move(int region, uintptr_t base, size_t size) {
     struct region *r = &regions[region];
     __atomic_store_n(&r->size, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&r->base, base, __ATOMIC_RELEASE);
     __atomic_store_n(&r->size, size, __ATOMIC_RELEASE);
 }
 
-uint64_t mmio_read_host(uint64_t hpa, unsigned size) {
+uint64_t mmio_read_host(uintptr_t hpa, size_t size) {
     switch (size) {
         case 1: {
             return *(volatile uint8_t *)(uintptr_t)hpa;
@@ -88,7 +94,7 @@ uint64_t mmio_read_host(uint64_t hpa, unsigned size) {
     }
 }
 
-void mmio_write_host(uint64_t hpa, unsigned size, uint64_t value) {
+void mmio_write_host(uintptr_t hpa, size_t size, uint64_t value) {
     switch (size) {
         case 1: {
             *(volatile uint8_t *)(uintptr_t)hpa = (uint8_t)value;
@@ -109,15 +115,18 @@ void mmio_write_host(uint64_t hpa, unsigned size, uint64_t value) {
     }
 }
 
-static uint64_t absent_read(struct vcpu *v, void *ctx, uint64_t offset, unsigned size) {
+static uint64_t absent_read(
+    struct vcpu *v, void *ctx, uint64_t offset, size_t size
+) {
     (void)v;
     (void)ctx;
     (void)offset;
-    return size == 8 ? UINT64_MAX : (1ull << (size * 8)) - 1;
+    return size == 8 ? UINT64_MAX : ((uint64_t)1 << (size * 8)) - 1;
 }
 
-static void absent_write(struct vcpu *v, void *ctx, uint64_t offset, unsigned size,
-                         uint64_t value) {
+static void absent_write(
+    struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value
+) {
     (void)v;
     (void)ctx;
     (void)offset;
@@ -125,21 +134,21 @@ static void absent_write(struct vcpu *v, void *ctx, uint64_t offset, unsigned si
     (void)value;
 }
 
-static const struct mmio_ops absent_ops = {absent_read, absent_write, true};
+static const struct mmio_ops absent_ops = { absent_read, absent_write, true };
 
 // What the guest reaches where it has neither memory nor a device, as a PC
 // does where nothing decodes: such as the addresses an OS moves a BAR to.
-static const struct region absent = {0, UINT64_MAX, &absent_ops, NULL};
+static const struct region absent = { 0, UINT64_MAX, &absent_ops, NULL };
 
-static const struct region *find(uint64_t gpa) {
-    unsigned count = __atomic_load_n(&region_count, __ATOMIC_ACQUIRE);
-    for (unsigned i = 0; i < count; i++) {
-        uint64_t size = __atomic_load_n(&regions[i].size, __ATOMIC_ACQUIRE);
+static const struct region *find(uintptr_t gpa) {
+    size_t count = __atomic_load_n(&region_count, __ATOMIC_ACQUIRE);
+    for (size_t i = 0; i < count; i++) {
+        size_t size = __atomic_load_n(&regions[i].size, __ATOMIC_ACQUIRE);
         if (gpa - __atomic_load_n(&regions[i].base, __ATOMIC_ACQUIRE) < size) {
             return &regions[i];
         }
     }
-    uint64_t hpa;
+    uintptr_t hpa;
     uint32_t prot;
     if (!gpt_translate(gpa & ~(uint64_t)(PAGE_SIZE - 1), &hpa, &prot, NULL)) {
         return &absent;
@@ -148,11 +157,13 @@ static const struct region *find(uint64_t gpa) {
 }
 
 // In naturally aligned pieces of up to 8 bytes.
-static void region_access(struct vcpu *v, const struct region *r, uint64_t gpa, uint8_t *buf,
-                          unsigned len, bool write) {
+static void region_access(
+    struct vcpu *v, const struct region *r, uintptr_t gpa, uint8_t *buf,
+    size_t len, bool write
+) {
     while (len != 0) {
         uint64_t offset = gpa - r->base;
-        unsigned size = 8;
+        size_t size = 8;
         while (size > len || (offset & (size - 1)) != 0) {
             size >>= 1;
         }
@@ -172,19 +183,21 @@ static void region_access(struct vcpu *v, const struct region *r, uint64_t gpa, 
 
 // Translates every page an access touches before any part happens, so that a
 // fault leaves none of it done.
-static bool translate(struct vcpu *v, uint64_t linear, unsigned size, bool write, uint64_t *gpas,
-                      unsigned *lens, unsigned *pieces) {
+static bool translate(
+    struct vcpu *v, uintptr_t linear, size_t size, bool write, uint64_t *gpas,
+    unsigned int *lens, unsigned int *pieces
+) {
     *pieces = 0;
     while (size != 0) {
-        uint64_t gpa;
+        uintptr_t gpa;
         uint32_t pf_error;
         if (!guest_linear_to_phys(v, linear, write, false, &gpa, &pf_error)) {
-            if (!(pf_error & PF_ERROR_EXIT)) {
+            if ((pf_error & PF_ERROR_EXIT) == 0) {
                 vcpu_inject_page_fault(v, linear, pf_error);
             }
             return false;
         }
-        unsigned chunk = PAGE_SIZE - (linear & (PAGE_SIZE - 1));
+        unsigned int chunk = PAGE_SIZE - (linear & (PAGE_SIZE - 1));
         if (chunk > size) {
             chunk = size;
         }
@@ -197,7 +210,9 @@ static bool translate(struct vcpu *v, uint64_t linear, unsigned size, bool write
     return true;
 }
 
-void mmio_phys_access(struct vcpu *v, uint64_t gpa, void *buf, unsigned len, bool write) {
+void mmio_phys_access(
+    struct vcpu *v, uintptr_t gpa, void *buf, size_t len, bool write
+) {
     const struct region *r = find(gpa);
     if (r != NULL) {
         region_access(v, r, gpa, buf, len, write);
@@ -209,16 +224,18 @@ void mmio_phys_access(struct vcpu *v, uint64_t gpa, void *buf, unsigned len, boo
     }
 }
 
-static bool access(struct vcpu *v, uint64_t linear, void *buf, unsigned size, bool write) {
+static bool access(
+    struct vcpu *v, uintptr_t linear, void *buf, size_t size, bool write
+) {
     uint64_t gpas[2];
-    unsigned lens[2];
-    unsigned pieces;
+    unsigned int lens[2];
+    unsigned int pieces;
     if (!translate(v, linear, size, write, gpas, lens, &pieces)) {
         return false;
     }
     v->mmio_retry = false;
     uint8_t *p = buf;
-    for (unsigned i = 0; i < pieces; i++) {
+    for (size_t i = 0; i < pieces; i++) {
         mmio_phys_access(v, gpas[i], p, lens[i], write);
         p += lens[i];
     }
@@ -230,20 +247,26 @@ static bool access(struct vcpu *v, uint64_t linear, void *buf, unsigned size, bo
     return true;
 }
 
-bool mmio_read_linear(struct vcpu *v, uint64_t linear, void *buf, unsigned size) {
+bool mmio_read_linear(
+    struct vcpu *v, uintptr_t linear, void *buf, size_t size
+) {
     return access(v, linear, buf, size, false);
 }
 
-bool mmio_write_linear(struct vcpu *v, uint64_t linear, const void *buf, unsigned size) {
+bool mmio_write_linear(
+    struct vcpu *v, uintptr_t linear, const void *buf, size_t size
+) {
     return access(v, linear, (void *)buf, size, true);
 }
 
-static bool mem_ins(struct vcpu *v, uint64_t linear, uint16_t port, unsigned size,
-                    uint32_t *value) {
+static bool mem_ins(
+    struct vcpu *v, uintptr_t linear, uint16_t port, size_t size,
+    uint32_t *value
+) {
     (void)port;
     uint64_t gpas[2];
-    unsigned lens[2];
-    unsigned pieces;
+    unsigned int lens[2];
+    unsigned int pieces;
     if (!translate(v, linear, size, true, gpas, lens, &pieces)) {
         return false;
     }
@@ -256,7 +279,9 @@ static bool mem_ins(struct vcpu *v, uint64_t linear, uint16_t port, unsigned siz
     return true;
 }
 
-static void mem_outs(struct vcpu *v, uint16_t port, unsigned size, uint32_t value) {
+static void mem_outs(
+    struct vcpu *v, uint16_t port, size_t size, uint32_t value
+) {
     vcpu_io_access(v, port, size);
     if (io_dispatch(v, port, size, false, &value)) {
         return;
@@ -277,55 +302,56 @@ static void mem_outs(struct vcpu *v, uint16_t port, unsigned size, uint32_t valu
     }
 }
 
-static const struct emulate_mem guest_mem = {mmio_read_linear, mmio_write_linear, mem_ins,
-                                             mem_outs};
+static const struct emulate_mem guest_mem = {
+    mmio_read_linear, mmio_write_linear, mem_ins, mem_outs
+};
 
 // The pages a single-stepped instruction runs against, and of them the bytes
-// SDM 325462-093 and APM 40332 rev. 4.10 say it reads or writes: those are what
-// their regions read as, and come back as writes; other bytes it changes come
-// back too.
+// SDM 325462-093 and APM 40332 rev. 4.10 say it reads or writes: those are
+// what their regions read as, and come back as writes; other bytes it changes
+// come back too.
 #define MAX_STEP_PAGES 4
 // Masked stores are vector stores.
 #define MAX_MASKED 64
 
 struct step_page {
-    uint64_t gpa;
+    uintptr_t gpa;
     const struct region *r;
     uint8_t *scratch;
     uint8_t *before;
     // The operand's bytes in the page, if any.
-    unsigned start;
-    unsigned end;
+    size_t start;
+    size_t end;
     uint8_t first[MAX_MASKED];
     bool mapped;
-    uint64_t hpa;
+    uintptr_t hpa;
     uint32_t prot;
     uint8_t memtype;
 };
 
 struct mmio_step {
-    unsigned count;
+    size_t count;
     struct step_page pages[MAX_STEP_PAGES];
     // Whether the operand is known, and what it is.
     bool known;
     struct insn_mem mem;
-    uint64_t rip;
-    uint64_t next_rip;
+    uintptr_t rip;
+    uintptr_t next_rip;
     // A masked store runs twice.
     bool second;
 };
 
 // Maps a scratch page in place of the region's page at gpa. The operand's
-// bytes in it hold what the region reads as, where the instruction reads
-// them; others nothing in particular.
-static struct step_page *step_map(struct vcpu *v, uint64_t gpa, unsigned len) {
+// bytes in it hold what the region reads as, where the instruction reads them;
+// others nothing in particular.
+static struct step_page *step_map(struct vcpu *v, uintptr_t gpa, size_t len) {
     struct mmio_step *s = v->step;
-    uint64_t page = gpa & ~(uint64_t)(PAGE_SIZE - 1);
+    uintptr_t page = gpa & ~(uint64_t)(PAGE_SIZE - 1);
     const struct region *r = find(page);
     if (r == NULL || s->count == MAX_STEP_PAGES) {
         return NULL;
     }
-    for (unsigned i = 0; i < s->count; i++) {
+    for (size_t i = 0; i < s->count; i++) {
         if (s->pages[i].gpa == page) {
             return NULL;
         }
@@ -341,13 +367,15 @@ static struct step_page *step_map(struct vcpu *v, uint64_t gpa, unsigned len) {
     p->end = p->start + len;
     if (len == 0) {
         // Not the operand: all of what the region reads as.
-        for (uint64_t offset = 0; offset < PAGE_SIZE; offset += 8) {
-            uint64_t value = r->ops->read(v, r->ctx, page + offset - r->base, 8);
+        for (size_t offset = 0; offset < PAGE_SIZE; offset += 8) {
+            uint64_t value = r->ops->read(
+                v, r->ctx, page + offset - r->base, 8
+            );
             memcpy(p->scratch + offset, &value, 8);
         }
     } else {
         memset(p->scratch, 0xff, PAGE_SIZE);
-        if (s->mem.access & INSN_MEM_READ) {
+        if ((s->mem.access & INSN_MEM_READ) != 0) {
             region_access(v, r, gpa, p->scratch + p->start, len, false);
         } else {
             memset(p->scratch + p->start, 0, len);
@@ -355,7 +383,7 @@ static struct step_page *step_map(struct vcpu *v, uint64_t gpa, unsigned len) {
     }
     memcpy(p->before, p->scratch, PAGE_SIZE);
     p->mapped = gpt_translate(page, &p->hpa, &p->prot, &p->memtype);
-    gpt_map(page, (uint64_t)(uintptr_t)p->scratch, PAGE_SIZE, GPT_RWX, MT_WB);
+    gpt_map(page, (uintptr_t)p->scratch, PAGE_SIZE, GPT_RWX, MT_WB);
     gpt_flush();
     return p;
 }
@@ -363,16 +391,20 @@ static struct step_page *step_map(struct vcpu *v, uint64_t gpa, unsigned len) {
 // The guest runs the instruction itself, with every other vCPU out of the
 // guest, as the pages are theirs too; one the decoder does not know, insn
 // NULL, against the whole page.
-static void step_begin(struct vcpu *v, uint64_t gpa, const struct insn *insn) {
+static void step_begin(
+    struct vcpu *v, uintptr_t gpa, const struct insn *insn
+) {
     if (v->step == NULL) {
-        v->step = kmalloc(sizeof(*v->step));
-        memset(v->step, 0, sizeof(*v->step));
+        v->step = kmalloc(sizeof(struct mmio_step));
+        memset(v->step, 0, sizeof(struct mmio_step));
     }
     struct mmio_step *s = v->step;
     s->count = 0;
     s->second = false;
-    s->known = insn != NULL && insn_mem_operand(v, insn, &s->mem) && s->mem.size <= PAGE_SIZE
-               && (!(s->mem.access & INSN_MEM_MASKED) || s->mem.size <= MAX_MASKED);
+    s->known = insn != NULL && insn_mem_operand(v, insn, &s->mem)
+        && s->mem.size <= PAGE_SIZE
+        && ((s->mem.access & INSN_MEM_MASKED) == 0
+            || s->mem.size <= MAX_MASKED);
     if (s->known && s->mem.size == 0) {
         // It only takes the operand's address, as CLFLUSH: nothing for the
         // device.
@@ -380,8 +412,11 @@ static void step_begin(struct vcpu *v, uint64_t gpa, const struct insn *insn) {
         return;
     }
     if (!vcpu_can_single_step()) {
-        printf("The instruction at %#llx that reached emulated memory at %#llx cannot be "
-               "emulated, skipped\n", (unsigned long long)vcpu_rip(v), (unsigned long long)gpa);
+        printf(
+            "The instruction at %#llx that reached emulated memory at %#llx "
+            "cannot be emulated, skipped\n",
+            (unsigned long long)vcpu_rip(v), (unsigned long long)gpa
+        );
         if (insn != NULL) {
             vcpu_advance(v, insn->length);
         } else {
@@ -390,17 +425,20 @@ static void step_begin(struct vcpu *v, uint64_t gpa, const struct insn *insn) {
         return;
     }
     uint64_t gpas[2];
-    unsigned lens[2];
-    unsigned pieces = 0;
+    unsigned int lens[2];
+    unsigned int pieces = 0;
     if (s->known) {
-        if (!translate(v, s->mem.linear, s->mem.size, (s->mem.access & INSN_MEM_WRITE) != 0, gpas, lens,
-                       &pieces)) {
+        bool translated = translate(
+            v, s->mem.linear, s->mem.size,
+            (s->mem.access & INSN_MEM_WRITE) != 0, gpas, lens, &pieces
+        );
+        if (!translated) {
             return;
         }
-        // The fault may be another access of the instruction's, as
-        // MOVDIR64B's to its destination.
+        // The fault may be another access of the instruction's, as MOVDIR64B's
+        // to its destination.
         bool operand = false;
-        for (unsigned i = 0; i < pieces; i++) {
+        for (size_t i = 0; i < pieces; i++) {
             operand |= (gpas[i] ^ gpa) < PAGE_SIZE;
         }
         if (!operand) {
@@ -409,7 +447,7 @@ static void step_begin(struct vcpu *v, uint64_t gpa, const struct insn *insn) {
         }
     }
     vcpu_pause_others();
-    for (unsigned i = 0; i < pieces; i++) {
+    for (size_t i = 0; i < pieces; i++) {
         step_map(v, gpas[i], lens[i]);
     }
     if (!s->known) {
@@ -422,18 +460,22 @@ static void step_begin(struct vcpu *v, uint64_t gpa, const struct insn *insn) {
     vcpu_single_step(v, true);
 }
 
-// Writes back the runs of bytes in [start, end) that changed, or that a
-// masked store's two runs wrote alike.
-static void write_runs(struct vcpu *v, struct step_page *p, unsigned start, unsigned end, bool masked) {
-    for (unsigned at = start; at < end;) {
-        bool written = masked ? p->first[at - p->start] == p->scratch[at] : p->scratch[at] != p->before[at];
+// Writes back the runs of bytes in [start, end) that changed, or that a masked
+// store's two runs wrote alike.
+static void write_runs(
+    struct vcpu *v, struct step_page *p, size_t start, size_t end, bool masked
+) {
+    for (size_t at = start; at < end; ) {
+        bool written = masked ? p->first[at - p->start] == p->scratch[at]
+            : p->scratch[at] != p->before[at];
         if (!written) {
             at++;
             continue;
         }
-        unsigned stop = at + 1;
-        while (stop < end && (masked ? p->first[stop - p->start] == p->scratch[stop]
-                                     : p->scratch[stop] != p->before[stop])) {
+        unsigned int stop = at + 1;
+        while (stop < end
+            && (masked ? p->first[stop - p->start] == p->scratch[stop]
+              : p->scratch[stop] != p->before[stop])) {
             stop++;
         }
         region_access(v, p->r, p->gpa + at, p->scratch + at, stop - at, true);
@@ -445,13 +487,13 @@ void mmio_step_done(struct vcpu *v) {
     struct mmio_step *s = v->step;
     // A step can end in a fault or an event instead, with nothing written.
     bool completed = vcpu_rip(v) == s->next_rip;
-    bool writes = s->known && (s->mem.access & INSN_MEM_WRITE);
-    bool masked = writes && (s->mem.access & INSN_MEM_MASKED);
+    bool writes = s->known && (s->mem.access & INSN_MEM_WRITE) != 0;
+    bool masked = writes && (s->mem.access & INSN_MEM_MASKED) != 0;
     if (masked && completed && !s->second) {
-        // A masked store writes only the elements its mask selects, which
-        // may hold what they did: it runs again over other values, and
-        // writes its elements alike.
-        for (unsigned i = 0; i < s->count; i++) {
+        // A masked store writes only the elements its mask selects, which may
+        // hold what they did: it runs again over other values, and writes its
+        // elements alike.
+        for (size_t i = 0; i < s->count; i++) {
             struct step_page *p = &s->pages[i];
             memcpy(p->first, p->scratch + p->start, p->end - p->start);
             memset(p->scratch + p->start, 0xff, p->end - p->start);
@@ -460,14 +502,17 @@ void mmio_step_done(struct vcpu *v) {
         s->second = true;
         return;
     }
-    for (unsigned i = 0; i < s->count; i++) {
+    for (size_t i = 0; i < s->count; i++) {
         struct step_page *p = &s->pages[i];
         if (completed && writes && p->end != p->start) {
             if (masked) {
                 write_runs(v, p, p->start, p->end, true);
             } else {
                 // All of them, alike or not.
-                region_access(v, p->r, p->gpa + p->start, p->scratch + p->start, p->end - p->start, true);
+                region_access(
+                    v, p->r, p->gpa + p->start, p->scratch + p->start,
+                    p->end - p->start, true
+                );
             }
             write_runs(v, p, 0, p->start, false);
             write_runs(v, p, p->end, PAGE_SIZE, false);
@@ -496,11 +541,11 @@ void mmio_step_done(struct vcpu *v) {
     }
 }
 
-// Ends a step that cannot go on, its writes dropped: past its instruction where
-// that is known, else with #UD.
+// Ends a step that cannot go on, its writes dropped: past its instruction
+// where that is known, else with #UD.
 static void step_abort(struct vcpu *v) {
     struct mmio_step *s = v->step;
-    for (unsigned i = 0; i < s->count; i++) {
+    for (size_t i = 0; i < s->count; i++) {
         struct step_page *p = &s->pages[i];
         if (p->mapped) {
             gpt_map(p->gpa, p->hpa, PAGE_SIZE, p->prot, p->memtype);
@@ -521,7 +566,7 @@ static void step_abort(struct vcpu *v) {
 }
 
 // A data access, or a fetch, to emulated memory.
-static bool fault(struct vcpu *v, uint64_t gpa, bool fetch) {
+static bool fault(struct vcpu *v, uintptr_t gpa, bool fetch) {
     gpa = gpt_cpu_gpa(gpa);
     const struct region *r = find(gpa);
     if (r == NULL) {
@@ -529,18 +574,24 @@ static bool fault(struct vcpu *v, uint64_t gpa, bool fetch) {
     }
     profile_mmio(gpa);
     if (r == &absent) {
-        static unsigned reported;
-        if (__atomic_fetch_add(&reported, 1, __ATOMIC_RELAXED) < ABSENT_REPORTS) {
-            printf("The guest reached %#llx, where nothing decodes, from %#llx\n",
-                   (unsigned long long)gpa, (unsigned long long)vcpu_rip(v));
+        static unsigned int reported;
+        if (__atomic_fetch_add(&reported, 1, __ATOMIC_RELAXED)
+          < ABSENT_REPORTS) {
+            printf(
+                "The guest reached %#llx, where nothing decodes, from %#llx\n",
+                (unsigned long long)gpa, (unsigned long long)vcpu_rip(v)
+            );
         }
     }
     if (v->stepping) {
         // The stepped instruction reaches another page, and runs again; one
         // that reaches more than a step can map is left out.
         if (step_map(v, gpa, 0) == NULL && find(gpa) != NULL) {
-            printf("The instruction at %#llx reaches more emulated memory than can be stepped, "
-                   "skipped\n", (unsigned long long)vcpu_rip(v));
+            printf(
+                "The instruction at %#llx reaches more emulated memory than "
+                "can be stepped, skipped\n",
+                (unsigned long long)vcpu_rip(v)
+            );
             step_abort(v);
         }
         return true;
@@ -564,10 +615,10 @@ static bool fault(struct vcpu *v, uint64_t gpa, bool fetch) {
     return true;
 }
 
-bool mmio_fault(struct vcpu *v, uint64_t gpa) {
+bool mmio_fault(struct vcpu *v, uintptr_t gpa) {
     return fault(v, gpa, false);
 }
 
-bool mmio_fetch(struct vcpu *v, uint64_t gpa) {
+bool mmio_fetch(struct vcpu *v, uintptr_t gpa) {
     return fault(v, gpa, true);
 }

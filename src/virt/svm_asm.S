@@ -34,7 +34,7 @@
     .text
 
     /*
-     * void svm_enter(uint64_t vmcb_pa, struct gprs *gprs)
+     * void svm_enter(uintptr_t vmcb_pa, struct gprs *gprs)
      *
      * Runs the guest until its next #VMEXIT, with the state VMLOAD and VMSAVE
      * cover loaded from and saved to the VMCB, as nothing the host does relies
@@ -68,8 +68,8 @@ svm_enter:
     movq GPR_RSI(%rsi), %rsi
 
     /*
-     * With V_INTR_MASKING, the host's IF at VMRUN gates physical interrupts
-     * in the guest; GIF holds them off in the host meanwhile.
+     * With V_INTR_MASKING, the host's IF at VMRUN gates physical interrupts in
+     * the guest; GIF holds them off in the host meanwhile.
      */
     clgi
     sti

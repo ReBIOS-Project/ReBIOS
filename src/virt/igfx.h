@@ -18,24 +18,26 @@
 #ifndef VIRT__IGFX_H
 #define VIRT__IGFX_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 // Finds Intel's integrated graphics function and the OpRegion its ASLS
 // register gives. After pci_enum_scan(), before layout_init().
 void igfx_scan(void);
 
-// The host range the guest needs at its own address, if any: the raw VBT of
-// an OpRegion 2.0, which the OpRegion that the guest shares with the host's
-// AML gives by its physical address.
+// The host range the guest needs at its own address, if any: the raw VBT of an
+// OpRegion 2.0, which the OpRegion that the guest shares with the host's AML
+// gives by its physical address.
 bool igfx_one_to_one(uint64_t *base, uint64_t *end);
 
 // The host's data stolen memory that the guest gets at an address of its own,
 // if any, and the host range the guest's own must stay clear of: the stolen
 // memory and the GGTT's below it. layout_init() places it and tells
 // igfx_stolen_placed() where.
-bool igfx_stolen(uint64_t *host, uint64_t *size, uint64_t *clear_base, uint64_t *clear_end);
-void igfx_stolen_placed(uint64_t gpa);
+bool igfx_stolen(
+    uint64_t *host, uint64_t *size, uint64_t *clear_base, uint64_t *clear_end
+);
+void igfx_stolen_placed(uintptr_t gpa);
 // Whether the stolen memory's RMRR is gone: where layout_init() cannot place
 // the stolen memory, it keeps the host's addresses for it as the RMRR would.
 bool igfx_stolen_rmrr_dropped(void);

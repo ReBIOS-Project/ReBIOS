@@ -18,13 +18,13 @@
 #ifndef VIRT__EDID_H
 #define VIRT__EDID_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 #define EDID_BLOCK_SIZE 128
 
-// An EDID base block (E-EDID A2, EDID 1.4) for the emulated VGA's display,
-// for when the firmware has none: width by height pixels at 60 Hz, as its
+// An EDID base block (E-EDID A2, EDID 1.4) for the emulated VGA's display, for
+// when the firmware has none: width by height pixels at 60 Hz, as its
 // preferred timing. Returns false if a detailed timing cannot describe that.
 bool edid_synthesize(uint8_t *edid, uint32_t width, uint32_t height);
 

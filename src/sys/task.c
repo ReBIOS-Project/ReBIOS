@@ -15,16 +15,16 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stdint.h>
-#include <stddef.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <sys/task.h>
 #include <lib/log.h>
 #include <lib/time.h>
 #include <sys/cpu.h>
 #include <sys/mm.h>
-#include <sys/task.h>
 
-void task_swap(uint64_t *save_rsp, uint64_t rsp);
+void task_swap(uintptr_t *save_rsp, uintptr_t rsp);
 void task_entry(void);
 void task_main(struct task *t);
 
@@ -37,7 +37,9 @@ void task_main(struct task *t) {
 }
 
 void task_init(struct task *t, void (*fn)(void *arg), void *arg) {
-    uint8_t *area = page_alloc_aligned(CPU_AREA_SIZE / PAGE_SIZE, CPU_AREA_SIZE);
+    uint8_t *area = page_alloc_aligned(
+        CPU_AREA_SIZE / PAGE_SIZE, CPU_AREA_SIZE
+    );
     t->area = (struct cpu **)area;
     t->fn = fn;
     t->arg = arg;
@@ -50,10 +52,10 @@ void task_init(struct task *t, void (*fn)(void *arg), void *arg) {
     *--top = (uint64_t)(uintptr_t)task_entry;
     *--top = 0;
     *--top = (uint64_t)(uintptr_t)t;
-    for (int i = 0; i < 4; i++) {
+    for (size_t i = 0; i < 4; i++) {
         *--top = 0;
     }
-    t->rsp = (uint64_t)(uintptr_t)top;
+    t->rsp = (uintptr_t)top;
 }
 
 bool task_run(struct task *t) {

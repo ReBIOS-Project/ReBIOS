@@ -18,8 +18,9 @@
 #ifndef VIRT__VCPU_H
 #define VIRT__VCPU_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <virt/mtrr.h>
 
 // Indexed by the register numbers used in instruction encodings. The RSP slot
@@ -29,30 +30,28 @@ struct gprs {
     uint64_t r8, r9, r10, r11, r12, r13, r14, r15;
 };
 
-enum seg_reg {
-    SEG_ES,
-    SEG_CS,
-    SEG_SS,
-    SEG_DS,
-    SEG_FS,
-    SEG_GS,
-    SEG_LDTR,
-    SEG_TR,
-    SEG_GDTR,
-    SEG_IDTR,
-};
+#define SEG_ES 0
+#define SEG_CS 1
+#define SEG_SS 2
+#define SEG_DS 3
+#define SEG_FS 4
+#define SEG_GS 5
+#define SEG_LDTR 6
+#define SEG_TR 7
+#define SEG_GDTR 8
+#define SEG_IDTR 9
 
 // Attributes are in the VMCB's packed form: descriptor bits 47:40 in bits 7:0
 // and descriptor bits 55:52 in bits 11:8, plus SEG_UNUSABLE.
-#define SEG_L (1u << 9)
-#define SEG_DB (1u << 10)
-#define SEG_UNUSABLE (1u << 16)
+#define SEG_L ((uint32_t)1 << 9)
+#define SEG_DB ((uint32_t)1 << 10)
+#define SEG_UNUSABLE ((uint32_t)1 << 16)
 
 struct segment {
     uint16_t selector;
     uint32_t attrib;
     uint32_t limit;
-    uint64_t base;
+    uintptr_t base;
 };
 
 // The processor's operating mode, short of the general registers.
@@ -83,13 +82,13 @@ struct vcpu {
 
     // VMX.
     void *vmcs;
-    uint64_t vmcs_pa;
+    uintptr_t vmcs_pa;
     bool vmx_launched;
     struct vmcs_cache *vmcs_cache;
 
     // SVM.
     struct vmcb *vmcb;
-    uint64_t vmcb_pa;
+    uintptr_t vmcb_pa;
     // The VMCB as the last exit left it, for its clean bits.
     uint8_t *vmcb_seen;
     // Whether the vCPU is in the guest or entering it, for AVIC's doorbells.
@@ -97,7 +96,7 @@ struct vcpu {
     // The instruction bytes the processor fetched for the exit at hand, at
     // fetched_rip, if fetched_count is not 0.
     uint8_t fetched[15];
-    uint8_t fetched_count;
+    size_t fetched_count;
     uint64_t fetched_rip;
     // The gpt_generation the vCPU's TLB is current with.
     uint64_t gpt_generation;
@@ -107,14 +106,14 @@ struct vcpu {
     // format VMX's interruption information and SVM's events share.
     uint32_t redeliver;
     uint32_t redeliver_error;
-    uint32_t redeliver_length;
+    size_t redeliver_length;
     // Whether vcpu_inject_exception() set up an event for the coming entry.
     bool injecting;
     bool nmi_pending;
     struct vlapic *vlapic;
     struct nvmx *nvmx;
-    // Whether the guest runs one instruction against emulated memory's
-    // values, which mmio.c sets up, and what SVM's stepping changed.
+    // Whether the guest runs one instruction against emulated memory's values,
+    // which mmio.c sets up, and what SVM's stepping changed.
     bool stepping;
     struct mmio_step *step;
     bool step_tf;
@@ -173,7 +172,7 @@ struct vcpu {
     struct vcpu_mode call32_flat;
     struct vcpu_mode call32_saved;
     // For profile.c: the exit being handled, and when it began.
-    unsigned profile_slot;
+    unsigned int profile_slot;
     uint64_t profile_tsc;
     // The last exit's VMX basic exit reason or SVM exit code, for panics.
     uint32_t last_exit;
@@ -213,9 +212,9 @@ bool vcpu_can_single_step(void);
 void vcpu_single_step(struct vcpu *v, bool on);
 
 uint64_t vcpu_rip(struct vcpu *v);
-void vcpu_set_rip(struct vcpu *v, uint64_t rip);
+void vcpu_set_rip(struct vcpu *v, uintptr_t rip);
 uint64_t vcpu_rsp(struct vcpu *v);
-void vcpu_set_rsp(struct vcpu *v, uint64_t rsp);
+void vcpu_set_rsp(struct vcpu *v, uintptr_t rsp);
 uint64_t vcpu_rflags(struct vcpu *v);
 void vcpu_set_rflags(struct vcpu *v, uint64_t rflags);
 uint64_t vcpu_cr0(struct vcpu *v);
@@ -225,9 +224,9 @@ uint64_t vcpu_efer(struct vcpu *v);
 // A 64-bit mode data access's linear address through a segment, without the
 // metadata LAM masks (SDM 325462-093 Vol. 3A, 4.4.2) or the bits Upper Address
 // Ignore leaves out (APM 24593 rev. 3.45, 5.10.2).
-uint64_t vcpu_untagged(struct vcpu *v, enum seg_reg reg, uint64_t linear);
-void vcpu_get_seg(struct vcpu *v, enum seg_reg reg, struct segment *seg);
-void vcpu_set_seg(struct vcpu *v, enum seg_reg reg, const struct segment *seg);
+uint64_t vcpu_untagged(struct vcpu *v, size_t reg, uintptr_t linear);
+void vcpu_get_seg(struct vcpu *v, size_t reg, struct segment *seg);
+void vcpu_set_seg(struct vcpu *v, size_t reg, const struct segment *seg);
 void vcpu_save_mode(struct vcpu *v, struct vcpu_mode *mode);
 void vcpu_load_mode(struct vcpu *v, const struct vcpu_mode *mode);
 
@@ -235,7 +234,7 @@ void vcpu_load_mode(struct vcpu *v, const struct vcpu_mode *mode);
 void vcpu_skip_instruction(struct vcpu *v);
 // Moves past length bytes of instruction, as completing it does, with the
 // single-step trap the guest's TF asks for.
-void vcpu_advance(struct vcpu *v, unsigned length);
+void vcpu_advance(struct vcpu *v, size_t length);
 // Whether the guest single-steps, and its trap after an instruction, or a
 // string instruction's iteration, that the hypervisor carried out for it.
 bool vcpu_guest_tf(struct vcpu *v);
@@ -244,17 +243,21 @@ void vcpu_step_trap(struct vcpu *v);
 void vcpu_debug_trap(struct vcpu *v, uint64_t dr6);
 // Where an access the hypervisor carries out for the guest meets the guest's
 // data and I/O breakpoints.
-void vcpu_data_access(struct vcpu *v, uint64_t linear, unsigned size, bool write);
-void vcpu_io_access(struct vcpu *v, uint16_t port, unsigned size);
+void vcpu_data_access(
+    struct vcpu *v, uintptr_t linear, size_t size, bool write
+);
+void vcpu_io_access(struct vcpu *v, uint16_t port, size_t size);
 // The debug trap for the breakpoints those hit, and the single step asked for.
 void vcpu_debug_traps(struct vcpu *v, bool single_step);
 // After an instruction, or a string instruction's iteration, the hypervisor
-// carried out: the trap the guest's TF asks for, or the MTF exit the guest asks
-// its guest to make; and whether either stops the guest after each.
+// carried out: the trap the guest's TF asks for, or the MTF exit the guest
+// asks its guest to make; and whether either stops the guest after each.
 void vcpu_step_boundary(struct vcpu *v);
 bool vcpu_stepped(struct vcpu *v);
-void vcpu_inject_exception(struct vcpu *v, uint8_t vector, bool has_error, uint32_t error);
-void vcpu_inject_page_fault(struct vcpu *v, uint64_t linear, uint32_t error);
+void vcpu_inject_exception(
+    struct vcpu *v, uint8_t vector, bool has_error, uint32_t error
+);
+void vcpu_inject_page_fault(struct vcpu *v, uintptr_t linear, uint32_t error);
 
 // Puts the vCPU in the state the processor has after INIT, in real mode at
 // cs:ip, as for a start-up IPI or the reset vector.

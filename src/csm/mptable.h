@@ -18,12 +18,13 @@
 #ifndef CSM__MPTABLE_H
 #define CSM__MPTABLE_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 // Writes the guest's MP table to buf: an MP floating pointer structure, then
 // the MP configuration table it points to, as they will be at guest-physical
 // address guest. Returns the length written, or 0 if there is no I/O APIC or
 // buf is too small.
-uint32_t mptable_build(void *buf, uint32_t size, uint32_t guest);
+uint32_t mptable_build(void *buf, size_t size, uint32_t guest);
 
 #endif

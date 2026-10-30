@@ -18,8 +18,9 @@
 #ifndef HW__ACPI_IRQ_H
 #define HW__ACPI_IRQ_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <hw/pci_cfg.h>
 
 struct acpi_irq_pci_route {
@@ -32,10 +33,10 @@ struct acpi_irq_pci_route {
 };
 
 // The GSIs the PCI functions pci_enum_scan() finds interrupt on in APIC mode,
-// as the ACPI namespace has them: one route per function with an interrupt
-// pin the namespace routes, in the topology's order. Needs irq_init(). Looks
-// them up once; later calls return the same routes.
-const struct acpi_irq_pci_route *acpi_irq_pci_routes(uint32_t *count);
+// as the ACPI namespace has them: one route per function with an interrupt pin
+// the namespace routes, in the topology's order. Needs irq_init(). Looks them
+// up once; later calls return the same routes.
+const struct acpi_irq_pci_route *acpi_irq_pci_routes(size_t *count);
 
 // The ISA IRQs that the devices the ACPI namespace describes as present and
 // enabled use, by their current resources: bit n for IRQ n.

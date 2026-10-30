@@ -15,12 +15,13 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <virt/insn.h>
 #include <memory.h>
 #include <sys/x86.h>
 #include <virt/guest_mem.h>
-#include <virt/insn.h>
 #include <virt/insn_mem_table.h>
 #include <virt/vcpu.h>
 
@@ -45,11 +46,12 @@ static bool is_legacy_prefix(uint8_t b) {
     }
 }
 
-unsigned insn_length_intercepted(struct vcpu *v) {
+unsigned int insn_length_intercepted(struct vcpu *v) {
     struct segment cs;
     vcpu_get_seg(v, SEG_CS, &cs);
-    bool long_mode = (vcpu_efer(v) & EFER_LMA) && (cs.attrib & SEG_L);
-    uint64_t linear = vcpu_rip(v);
+    bool long_mode = (vcpu_efer(v) & EFER_LMA) != 0
+        && (cs.attrib & SEG_L) != 0;
+    uintptr_t linear = vcpu_rip(v);
     if (!long_mode) {
         linear = (cs.base + linear) & 0xffffffff;
     }
@@ -57,13 +59,14 @@ unsigned insn_length_intercepted(struct vcpu *v) {
     uint8_t bytes[15];
     if (!guest_linear_read(v, linear, bytes, sizeof(bytes), true)) {
         // The instruction may end before a page that is not mapped.
-        unsigned avail = 4096 - (linear & 4095);
-        if (avail >= sizeof(bytes) || !guest_linear_read(v, linear, bytes, avail, true)) {
+        unsigned int avail = 4096 - (linear & 4095);
+        if (avail >= sizeof(bytes)
+         || !guest_linear_read(v, linear, bytes, avail, true)) {
             return 0;
         }
     }
 
-    unsigned i = 0;
+    size_t i = 0;
     while (i < sizeof(bytes) && is_legacy_prefix(bytes[i])) {
         i++;
     }
@@ -90,7 +93,8 @@ unsigned insn_length_intercepted(struct vcpu *v) {
         }
         case 0x01: {
             uint8_t modrm = bytes[i + 2];
-            if (modrm == 0xc1 || modrm == 0xd1 || (modrm >= 0xd8 && modrm <= 0xdf)) {
+            if (modrm == 0xc1 || modrm == 0xd1
+             || (modrm >= 0xd8 && modrm <= 0xdf)) {
                 return i + 3;
             }
             return 0;
@@ -188,7 +192,9 @@ static const uint8_t two_byte[256] = {
 #define MAP_0F38 2
 #define MAP_0F3A 3
 
-static unsigned imm_size(unsigned kind, const struct insn *insn, bool long_mode) {
+static size_t imm_size(
+    unsigned int kind, const struct insn *insn, bool long_mode
+) {
     switch (kind) {
         case IMM_B: {
             return 1;
@@ -220,28 +226,30 @@ static unsigned imm_size(unsigned kind, const struct insn *insn, bool long_mode)
     }
 }
 
-static int64_t read_signed(const uint8_t *bytes, unsigned size) {
+static int64_t read_signed(const uint8_t *bytes, size_t size) {
     uint64_t value = 0;
-    for (unsigned n = 0; n < size; n++) {
+    for (size_t n = 0; n < size; n++) {
         value |= (uint64_t)bytes[n] << (n * 8);
     }
-    unsigned shift = 64 - size * 8;
+    unsigned int shift = 64 - size * 8;
     return (int64_t)(value << shift) >> shift;
 }
 
 // Decodes a ModRM byte at bytes[i] and what it brings with it: returns their
 // size, the ModRM byte included.
-static unsigned decode_modrm(const uint8_t *bytes, unsigned i, struct insn *insn) {
+static unsigned int decode_modrm(
+    const uint8_t *bytes, size_t i, struct insn *insn
+) {
     uint8_t modrm = bytes[i];
-    unsigned mod = modrm >> 6;
-    unsigned rm = modrm & 7;
+    unsigned int mod = modrm >> 6;
+    unsigned int rm = modrm & 7;
     insn->has_modrm = true;
     insn->modrm = modrm;
     if (mod == 3) {
         return 1;
     }
-    unsigned size = 1;
-    unsigned disp_size;
+    size_t size = 1;
+    size_t disp_size;
     if (insn->address_size == 2) {
         disp_size = mod == 1 ? 1 : mod == 2 || rm == 6 ? 2 : 0;
     } else {
@@ -250,7 +258,8 @@ static unsigned decode_modrm(const uint8_t *bytes, unsigned i, struct insn *insn
             insn->sib = bytes[i + 1];
             size++;
         }
-        bool no_base = mod == 0 && (rm == 5 || (rm == 4 && (insn->sib & 7) == 5));
+        bool no_base = mod == 0
+            && (rm == 5 || (rm == 4 && (insn->sib & 7) == 5));
         disp_size = mod == 1 ? 1 : mod == 2 || no_base ? 4 : 0;
     }
     insn->disp_size = disp_size;
@@ -270,37 +279,39 @@ static void vex_rex(struct insn *insn, uint8_t rxb, bool w, bool long_mode) {
 bool insn_decode(struct vcpu *v, struct insn *insn) {
     struct segment cs;
     vcpu_get_seg(v, SEG_CS, &cs);
-    bool long_mode = (vcpu_efer(v) & EFER_LMA) && (cs.attrib & SEG_L);
+    bool long_mode = (vcpu_efer(v) & EFER_LMA) != 0
+        && (cs.attrib & SEG_L) != 0;
     // CS's descriptor gives the defaults, in real mode too, where its cached D
     // bit outlives protected mode, as Linux 7.3's KVM decodes (emulate.c,
     // x86_decode_insn()); V86 mode's are 16-bit.
-    bool big = !(vcpu_rflags(v) & RFLAGS_VM) && (cs.attrib & SEG_DB);
-    uint64_t linear = vcpu_rip(v);
+    bool big = (vcpu_rflags(v) & RFLAGS_VM) == 0 && (cs.attrib & SEG_DB) != 0;
+    uintptr_t linear = vcpu_rip(v);
     if (!long_mode) {
         linear = (cs.base + linear) & 0xffffffff;
     }
 
     // Zeroes past what can be read make the decoding stop short, as the
     // instruction then cannot be complete.
-    uint8_t bytes[INSN_MAX_LENGTH + 4] = {0};
+    uint8_t bytes[INSN_MAX_LENGTH + 4] = { 0 };
     if (v->fetched_count == INSN_MAX_LENGTH && v->fetched_rip == vcpu_rip(v)) {
         memcpy(bytes, v->fetched, INSN_MAX_LENGTH);
     } else if (!guest_linear_read(v, linear, bytes, INSN_MAX_LENGTH, true)) {
-        unsigned avail = 4096 - (linear & 4095);
-        if (avail >= INSN_MAX_LENGTH || !guest_linear_read(v, linear, bytes, avail, true)) {
+        unsigned int avail = 4096 - (linear & 4095);
+        if (avail >= INSN_MAX_LENGTH
+         || !guest_linear_read(v, linear, bytes, avail, true)) {
             return false;
         }
     }
 
-    unsigned operand = long_mode || big ? 4 : 2;
-    unsigned address = long_mode ? 8 : big ? 4 : 2;
+    unsigned int operand = long_mode || big ? 4 : 2;
+    size_t address = long_mode ? 8 : big ? 4 : 2;
     bool operand_prefix = false;
     bool address_prefix = false;
     bool rex_w = false;
     uint8_t rex = 0;
-    *insn = (struct insn){.long_mode = long_mode, .segment = -1};
+    *insn = (struct insn){ .long_mode = long_mode, .segment = -1 };
 
-    unsigned i = 0;
+    size_t i = 0;
     for (;;) {
         uint8_t b = bytes[i];
         if (is_legacy_prefix(b)) {
@@ -312,9 +323,11 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
                 insn->rep_prefix = b;
             }
             // In 64-bit mode, only FS and GS overrides have an effect.
-            int segment = b == 0x26 ? SEG_ES : b == 0x2e ? SEG_CS : b == 0x36 ? SEG_SS
-                          : b == 0x3e ? SEG_DS : b == 0x64 ? SEG_FS : b == 0x65 ? SEG_GS : -1;
-            if (segment >= 0 && (!long_mode || segment == SEG_FS || segment == SEG_GS)) {
+            int segment = b == 0x26 ? SEG_ES : b == 0x2e ? SEG_CS : b == 0x36
+                ? SEG_SS : b == 0x3e ? SEG_DS : b == 0x64 ? SEG_FS : b == 0x65
+                ? SEG_GS : -1;
+            if (segment >= 0
+             && (!long_mode || segment == SEG_FS || segment == SEG_GS)) {
                 insn->segment = segment;
             }
             // A REX prefix only counts right before the opcode.
@@ -345,15 +358,16 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
     insn->rex = rex;
     insn->w = rex_w;
     if (insn->rep) {
-        insn->prefix = insn->rep_prefix == 0xf2 ? INSN_PREFIX_F2 : INSN_PREFIX_F3;
+        insn->prefix = insn->rep_prefix == 0xf2 ? INSN_PREFIX_F2
+            : INSN_PREFIX_F3;
     } else if (operand_prefix) {
         insn->prefix = INSN_PREFIX_66;
     }
 
-    unsigned map = MAP_ONE;
+    unsigned int map = MAP_ONE;
     uint8_t op = bytes[i];
-    // VEX, EVEX, and XOP take the place of LES, LDS, BOUND, and POP Ev
-    // where a ModRM byte could not follow.
+    // VEX, EVEX, and XOP take the place of LES, LDS, BOUND, and POP Ev where a
+    // ModRM byte could not follow.
     bool vex = long_mode || (bytes[i + 1] & 0xc0) == 0xc0;
     bool vex_like = false;
     if (op == 0xc5 && vex) {
@@ -387,9 +401,9 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
         i += 4;
         vex_like = true;
     } else if (op == 0x8f && (bytes[i + 1] & 0x1f) >= 8) {
-        // XOP, laid out as VEX's three bytes: map 8 takes an 8-bit
-        // immediate, map 10 a 32-bit one.
-        unsigned xop_map = bytes[i + 1] & 0x1f;
+        // XOP, laid out as VEX's three bytes: map 8 takes an 8-bit immediate,
+        // map 10 a 32-bit one.
+        unsigned int xop_map = bytes[i + 1] & 0x1f;
         vex_rex(insn, bytes[i + 1], bytes[i + 2] >> 7, long_mode);
         insn->vector_length = (bytes[i + 2] >> 2) & 1;
         insn->prefix = bytes[i + 2] & 3;
@@ -439,21 +453,22 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
         entry = OP_MODRM;
         insn->opcode = INSN_OPCODE_OTHER;
     }
-    if (entry & OP_SPECIAL) {
+    if ((entry & OP_SPECIAL) != 0) {
         return false;
     }
 
     insn->vex = vex_like;
-    unsigned imm = entry & OP_IMM_MASK;
-    if (entry & OP_MODRM) {
+    unsigned int imm = entry & OP_IMM_MASK;
+    if ((entry & OP_MODRM) != 0) {
         // TEST in group 3 is the only member with an immediate.
-        if (map == MAP_ONE && (op == 0xf6 || op == 0xf7) && ((bytes[i] >> 3) & 7) < 2) {
+        if (map == MAP_ONE && (op == 0xf6 || op == 0xf7)
+         && ((bytes[i] >> 3) & 7) < 2) {
             imm = op == 0xf6 ? IMM_B : IMM_Z;
         }
         i += decode_modrm(bytes, i, insn);
     }
     insn->imm_size = imm_size(imm, insn, long_mode);
-    for (unsigned n = 0; n < insn->imm_size && n < sizeof(insn->imm); n++) {
+    for (size_t n = 0; n < insn->imm_size && n < sizeof(uint64_t); n++) {
         insn->imm |= (uint64_t)bytes[i + n] << (n * 8);
     }
     i += insn->imm_size;
@@ -464,57 +479,65 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
 #define REX_B 0x01
 #define REX_X 0x02
 
-static uint64_t address_mask(unsigned size) {
-    return size == 8 ? UINT64_MAX : (1ull << (size * 8)) - 1;
+static uint64_t address_mask(size_t size) {
+    return size == 8 ? UINT64_MAX : ((uint64_t)1 << (size * 8)) - 1;
 }
 
 // Outside 64-bit mode the linear address space wraps at 4 GiB, and in it only
 // FS and GS have bases.
-static uint64_t segment_linear(struct vcpu *v, const struct insn *insn, int reg, uint64_t ea) {
+static uintptr_t segment_linear(
+    struct vcpu *v, const struct insn *insn, int reg, uintptr_t ea
+) {
     struct segment segment;
     if (insn->long_mode) {
         if (reg != SEG_FS && reg != SEG_GS) {
-            return vcpu_untagged(v, (enum seg_reg)reg, ea);
+            return vcpu_untagged(v, (size_t)reg, ea);
         }
         vcpu_get_seg(v, reg, &segment);
-        return vcpu_untagged(v, (enum seg_reg)reg, segment.base + ea);
+        return vcpu_untagged(v, (size_t)reg, segment.base + ea);
     }
     vcpu_get_seg(v, reg, &segment);
     return (segment.base + ea) & 0xffffffff;
 }
 
-static bool mem_linear(struct vcpu *v, const struct insn *insn, int64_t disp, uint64_t *linear) {
+static bool mem_linear(
+    struct vcpu *v, const struct insn *insn, int64_t disp, uint64_t *linear
+) {
     int segment = SEG_DS;
-    uint64_t ea;
+    uintptr_t ea;
     if (insn->opcode >= 0xa0 && insn->opcode <= 0xa3) {
         ea = insn->imm;
     } else if (!insn->has_modrm || insn->modrm >> 6 == 3) {
         return false;
     } else if (insn->address_size == 2) {
-        unsigned mod = insn->modrm >> 6;
-        unsigned rm = insn->modrm & 7;
+        unsigned int mod = insn->modrm >> 6;
+        unsigned int rm = insn->modrm & 7;
         uint64_t bx = insn_gpr(v, 3);
         uint64_t bp = insn_gpr(v, 5);
         uint64_t si = insn_gpr(v, 6);
         uint64_t di = insn_gpr(v, 7);
-        static const uint8_t base_is_bp = 1u << 2 | 1u << 3 | 1u << 6;
-        uint64_t sums[8] = {bx + si, bx + di, bp + si, bp + di, si, di, bp, bx};
+        static const uint8_t base_is_bp = (uint32_t)1 << 2 | (uint32_t)1 << 3
+            | (uint32_t)1 << 6;
+        uint64_t sums[8] = {
+            bx + si, bx + di, bp + si, bp + di, si, di, bp, bx
+        };
         ea = (uint64_t)disp;
         if (rm != 6 || mod != 0) {
             ea += sums[rm];
-            if ((base_is_bp >> rm) & 1) {
+            if (((base_is_bp >> rm) & 1) != 0) {
                 segment = SEG_SS;
             }
         }
         ea &= 0xffff;
     } else {
-        unsigned mod = insn->modrm >> 6;
-        unsigned rm = insn->modrm & 7;
+        unsigned int mod = insn->modrm >> 6;
+        unsigned int rm = insn->modrm & 7;
         ea = (uint64_t)disp;
-        unsigned base = rm;
+        unsigned int base = rm;
         if (insn->has_sib) {
             base = insn->sib & 7;
-            unsigned index = ((insn->sib >> 3) & 7) | ((insn->rex & REX_X) ? 8 : 0);
+            unsigned int index = ((insn->sib >> 3) & 7)
+                | ((insn->rex & REX_X) != 0 ? 8 : 0);
             if (index != 4) {
                 ea += insn_gpr(v, index) << (insn->sib >> 6);
             }
@@ -525,7 +548,7 @@ static bool mem_linear(struct vcpu *v, const struct insn *insn, int64_t disp, ui
                 ea += vcpu_rip(v) + insn->length;
             }
         } else {
-            ea += insn_gpr(v, base | ((insn->rex & REX_B) ? 8 : 0));
+            ea += insn_gpr(v, base | ((insn->rex & REX_B) != 0 ? 8 : 0));
             if (base == 4 || base == 5) {
                 segment = SEG_SS;
             }
@@ -539,7 +562,9 @@ static bool mem_linear(struct vcpu *v, const struct insn *insn, int64_t disp, ui
     return true;
 }
 
-bool insn_mem_linear(struct vcpu *v, const struct insn *insn, uint64_t *linear) {
+bool insn_mem_linear(
+    struct vcpu *v, const struct insn *insn, uint64_t *linear
+) {
     if (insn->vex) {
         return false;
     }
@@ -548,34 +573,39 @@ bool insn_mem_linear(struct vcpu *v, const struct insn *insn, uint64_t *linear) 
 
 // The first form of the instruction's opcode it matches, if any.
 static const struct insn_mem_form *mem_form(const struct insn *insn) {
-    unsigned key = (unsigned)insn->space << 8 | insn->opcode_byte;
-    unsigned low = 0;
-    unsigned high = insn_mem_form_count;
+    unsigned int key = (unsigned int)insn->space << 8 | insn->opcode_byte;
+    unsigned int low = 0;
+    unsigned int high = insn_mem_form_count;
     while (low < high) {
-        unsigned mid = (low + high) / 2;
-        if (((unsigned)insn_mem_forms[mid].space << 8 | insn_mem_forms[mid].opcode) < key) {
+        unsigned int mid = (low + high) / 2;
+        if (((unsigned int)insn_mem_forms[mid].space << 8
+           | insn_mem_forms[mid].opcode) < key) {
             low = mid + 1;
         } else {
             high = mid;
         }
     }
-    unsigned reg = (insn->modrm >> 3) & 7;
-    unsigned mode = insn->long_mode ? INSN_MODE_64 : INSN_MODE_OTHER;
-    for (unsigned i = low; i < insn_mem_form_count; i++) {
+    unsigned int reg = (insn->modrm >> 3) & 7;
+    unsigned int mode = insn->long_mode ? INSN_MODE_64 : INSN_MODE_OTHER;
+    for (size_t i = low; i < insn_mem_form_count; i++) {
         const struct insn_mem_form *f = &insn_mem_forms[i];
-        if (((unsigned)f->space << 8 | f->opcode) != key) {
+        if (((unsigned int)f->space << 8 | f->opcode) != key) {
             break;
         }
         if ((f->prefix == INSN_PREFIX_ANY || f->prefix == insn->prefix)
-            && (f->reg == INSN_REG_ANY || f->reg == reg) && (f->w == INSN_W_ANY || f->w == insn->w)
-            && (f->l == INSN_L_ANY || f->l == insn->vector_length) && (f->modes & mode) != 0) {
+         && (f->reg == INSN_REG_ANY || f->reg == reg)
+         && (f->w == INSN_W_ANY || f->w == insn->w)
+         && (f->l == INSN_L_ANY || f->l == insn->vector_length)
+         && (f->modes & mode) != 0) {
             return f;
         }
     }
     return NULL;
 }
 
-static unsigned mem_size(const struct insn *insn, const struct insn_mem_form *f) {
+static size_t mem_size(
+    const struct insn *insn, const struct insn_mem_form *f
+) {
     switch (f->size_kind) {
         case INSN_SIZE_FIXED: {
             return f->size;
@@ -587,7 +617,8 @@ static unsigned mem_size(const struct insn *insn, const struct insn_mem_form *f)
             return insn->operand_size;
         }
         case INSN_SIZE_STACK: {
-            return insn->long_mode && insn->operand_size == 4 ? 8 : insn->operand_size;
+            return insn->long_mode && insn->operand_size == 4 ? 8
+                : insn->operand_size;
         }
         case INSN_SIZE_FAR: {
             return insn->operand_size + 2;
@@ -607,7 +638,9 @@ static unsigned mem_size(const struct insn *insn, const struct insn_mem_form *f)
     }
 }
 
-bool insn_mem_operand(struct vcpu *v, const struct insn *insn, struct insn_mem *mem) {
+bool insn_mem_operand(
+    struct vcpu *v, const struct insn *insn, struct insn_mem *mem
+) {
     if (!insn->has_modrm || insn->modrm >> 6 == 3) {
         return false;
     }
@@ -616,12 +649,12 @@ bool insn_mem_operand(struct vcpu *v, const struct insn *insn, struct insn_mem *
         return false;
     }
     if (f->size_kind == INSN_SIZE_NONE) {
-        *mem = (struct insn_mem){0};
+        *mem = (struct insn_mem){ 0 };
         return true;
     }
     bool evex = (insn->space & 0xf0) == INSN_SPACE_EVEX;
-    unsigned size = mem_size(insn, f);
-    unsigned scale = f->disp8_scale != 0 ? f->disp8_scale : size;
+    size_t size = mem_size(insn, f);
+    unsigned int scale = f->disp8_scale != 0 ? f->disp8_scale : size;
     if (evex && insn->evex_b && f->broadcast != 0) {
         size = f->broadcast;
         scale = size;
@@ -643,13 +676,13 @@ bool insn_mem_operand(struct vcpu *v, const struct insn *insn, struct insn_mem *
     return true;
 }
 
-#define SEG_PRESENT (1u << 7)
-#define SEG_CODE (1u << 3)
-#define SEG_EXPAND_DOWN (1u << 2)
+#define SEG_PRESENT ((uint32_t)1 << 7)
+#define SEG_CODE ((uint32_t)1 << 3)
+#define SEG_EXPAND_DOWN ((uint32_t)1 << 2)
 // Writable in a data segment, readable in a code segment.
-#define SEG_RW (1u << 1)
+#define SEG_RW ((uint32_t)1 << 1)
 
-static bool canonical(uint64_t linear, unsigned bits) {
+static bool canonical(uintptr_t linear, unsigned int bits) {
     uint64_t upper = linear >> (bits - 1);
     return upper == 0 || upper == (UINT64_MAX >> (bits - 1));
 }
@@ -658,8 +691,10 @@ static bool canonical(uint64_t linear, unsigned bits) {
 // Vol. 3A, 4.3.2): in IA-32e mode, a user-mode one with bit 63 set, a
 // supervisor-mode one with it clear where SMAP is on and RFLAGS.AC off; bit 63
 // of 32-bit addresses, as in compatibility mode, is clear.
-static bool lass_violation(struct vcpu *v, const struct insn *insn, uint64_t la) {
-    if (!(vcpu_efer(v) & EFER_LMA) || !(vcpu_cr4(v) & CR4_LASS)) {
+static bool lass_violation(
+    struct vcpu *v, const struct insn *insn, uint64_t la
+) {
+    if ((vcpu_efer(v) & EFER_LMA) == 0 || (vcpu_cr4(v) & CR4_LASS) == 0) {
         return false;
     }
     struct segment ss;
@@ -668,7 +703,8 @@ static bool lass_violation(struct vcpu *v, const struct insn *insn, uint64_t la)
     if (((ss.attrib >> 5) & 3) == 3) {
         return high;
     }
-    return !high && (vcpu_cr4(v) & CR4_SMAP) && !(vcpu_rflags(v) & RFLAGS_AC);
+    return !high && (vcpu_cr4(v) & CR4_SMAP) != 0
+        && (vcpu_rflags(v) & RFLAGS_AC) == 0;
 }
 
 // The checks an access of size bytes at offset ea of a segment passes (SDM
@@ -677,12 +713,15 @@ static bool lass_violation(struct vcpu *v, const struct insn *insn, uint64_t la)
 // canonical form; elsewhere, compatibility mode included, the segment's
 // usability, type, and limit, an expand-down one's from above it; and LASS.
 // Where they fail, #SS(0) for SS or #GP(0) is raised.
-static bool linearize(struct vcpu *v, const struct insn *insn, int reg, uint64_t ea, unsigned size,
-                      bool write, uint64_t *linear) {
+static bool linearize(
+    struct vcpu *v, const struct insn *insn, int reg, uintptr_t ea,
+    size_t size, bool write, uint64_t *linear
+) {
     if (insn->long_mode) {
-        uint64_t la = segment_linear(v, insn, reg, ea);
-        unsigned bits = (vcpu_cr4(v) & CR4_LA57) ? 57 : 48;
-        if (canonical(la, bits) && canonical(la + size - 1, bits) && !lass_violation(v, insn, la)) {
+        uintptr_t la = segment_linear(v, insn, reg, ea);
+        unsigned int bits = (vcpu_cr4(v) & CR4_LA57) != 0 ? 57 : 48;
+        if (canonical(la, bits) && canonical(la + size - 1, bits)
+         && !lass_violation(v, insn, la)) {
             *linear = la;
             return true;
         }
@@ -690,22 +729,24 @@ static bool linearize(struct vcpu *v, const struct insn *insn, int reg, uint64_t
         struct segment s;
         vcpu_get_seg(v, reg, &s);
         bool code = (s.attrib & SEG_CODE) != 0;
-        bool real = !(vcpu_cr0(v) & CR0_PE);
+        bool real = (vcpu_cr0(v) & CR0_PE) == 0;
         uint64_t limit = s.limit;
-        bool allowed = !(s.attrib & SEG_UNUSABLE) && (s.attrib & SEG_PRESENT);
-        if (write && ((code && !real) || !(s.attrib & SEG_RW))) {
+        bool allowed = (s.attrib & SEG_UNUSABLE) == 0
+            && (s.attrib & SEG_PRESENT) != 0;
+        if (write && ((code && !real) || (s.attrib & SEG_RW) == 0)) {
             allowed = false;
         }
-        if (!write && code && !(s.attrib & SEG_RW)) {
+        if (!write && code && (s.attrib & SEG_RW) == 0) {
             allowed = false;
         }
-        if (!code && (s.attrib & SEG_EXPAND_DOWN)) {
+        if (!code && (s.attrib & SEG_EXPAND_DOWN) != 0) {
             allowed &= ea > limit;
-            limit = (s.attrib & SEG_DB) ? 0xffffffff : 0xffff;
+            limit = (s.attrib & SEG_DB) != 0 ? 0xffffffff : 0xffff;
         }
         uint64_t la = (s.base + ea) & 0xffffffff;
-        if (allowed && ea <= limit && (limit == 0xffffffff || size <= limit + 1 - ea)
-            && !lass_violation(v, insn, la)) {
+        if (allowed && ea <= limit
+         && (limit == 0xffffffff || size <= limit + 1 - ea)
+         && !lass_violation(v, insn, la)) {
             *linear = la;
             return true;
         }
@@ -714,24 +755,30 @@ static bool linearize(struct vcpu *v, const struct insn *insn, int reg, uint64_t
     return false;
 }
 
-bool insn_string_linear(struct vcpu *v, const struct insn *insn, bool destination, unsigned size,
-                        bool write, uint64_t *linear) {
+bool insn_string_linear(
+    struct vcpu *v, const struct insn *insn, bool destination, size_t size,
+    bool write, uint64_t *linear
+) {
     uint64_t mask = address_mask(insn->address_size);
     if (destination) {
-        return linearize(v, insn, SEG_ES, v->gprs.rdi & mask, size, write, linear);
+        return linearize(
+            v, insn, SEG_ES, v->gprs.rdi & mask, size, write, linear
+        );
     }
     int segment = insn->segment >= 0 ? insn->segment : SEG_DS;
-    return linearize(v, insn, segment, v->gprs.rsi & mask, size, write, linear);
+    return linearize(
+        v, insn, segment, v->gprs.rsi & mask, size, write, linear
+    );
 }
 
-uint64_t insn_gpr(struct vcpu *v, unsigned reg) {
+uint64_t insn_gpr(struct vcpu *v, unsigned int reg) {
     if (reg == 4) {
         return vcpu_rsp(v);
     }
     return ((uint64_t *)&v->gprs)[reg];
 }
 
-void insn_set_gpr(struct vcpu *v, unsigned reg, uint64_t value) {
+void insn_set_gpr(struct vcpu *v, unsigned int reg, uint64_t value) {
     if (reg == 4) {
         vcpu_set_rsp(v, value);
         return;

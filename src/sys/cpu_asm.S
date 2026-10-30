@@ -19,7 +19,7 @@
 
     .text
 
-    /* void switch_stack(uint64_t stack_top, void (*fn)(void *), void *arg) */
+    /* void switch_stack(uintptr_t stack_top, void (*fn)(void *), void *arg) */
     .globl switch_stack
     .type switch_stack, @function
 switch_stack:
@@ -156,6 +156,7 @@ exception_common:
     .balign 4
     .globl exception_stubs
 exception_stubs:
-    .irp vector, 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31
+    .irp vector, 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22, \
+        23,24,25,26,27,28,29,30,31
     .long exc_stub_\vector - exception_stubs
     .endr

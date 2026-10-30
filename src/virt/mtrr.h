@@ -18,8 +18,8 @@
 #ifndef VIRT__MTRR_H
 #define VIRT__MTRR_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 #define MTRR_FIXED_COUNT 11
 #define MTRR_VARIABLE_COUNT 8
@@ -27,10 +27,10 @@
 struct vcpu;
 
 // The guest gets MTRRs of its own, which describe its memory, not the host's,
-// and which nothing applies to guest-physical addresses: SDM 325462-093 Vol. 3C,
-// 31.3.7.2, "The MTRRs have no effect on the memory type used for an access to a
-// guest-physical address", and APM 40332 rev. 4.10, 15.25.8, "there is no
-// hardware support for guest MTRRs". Needs virt_init().
+// and which nothing applies to guest-physical addresses: SDM 325462-093 Vol.
+// 3C, 31.3.7.2, "The MTRRs have no effect on the memory type used for an
+// access to a guest-physical address", and APM 40332 rev. 4.10, 15.25.8,
+// "there is no hardware support for guest MTRRs". Needs virt_init().
 void mtrr_init(void);
 
 // Write-back, as a BIOS leaves them, but for the VGA window and the PCI hole.

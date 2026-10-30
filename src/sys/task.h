@@ -18,16 +18,16 @@
 #ifndef SYS__TASK_H
 #define SYS__TASK_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <sys/cpu.h>
 
 // Work on a stack of its own, which a CPU runs until the work yields, and any
 // CPU then carries on with.
 struct task {
     // The task's stack pointer while it waits, and its runner's while it runs.
-    uint64_t rsp;
-    uint64_t runner_rsp;
+    uintptr_t rsp;
+    uintptr_t runner_rsp;
     // Its stack's area, which begins with the CPU running it.
     struct cpu **area;
     void (*fn)(void *arg);

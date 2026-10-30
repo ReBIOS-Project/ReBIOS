@@ -22,8 +22,7 @@ struct vcpu;
 
 // Lays out the guest's legacy BIOS, SeaBIOS built as a CSM16, and sets the
 // vCPU up to call into it, as the Intel CSM Specification 0.98's firmware side
-// would:
-// initialisation, the option ROMs, then the boot.
+// would: initialisation, the option ROMs, then the boot.
 void csm_boot_start(struct vcpu *v);
 
 // Takes the guest's return from a CSM16 call, and sets up the next one.

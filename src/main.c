@@ -15,11 +15,10 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stdint.h>
-#include <stddef.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <efi.h>
-#include <memory.h>
 #include <core.h>
 #include <handoff.h>
 #include <lib/log.h>
@@ -35,29 +34,31 @@
 #include <loader/oprom.h>
 #include <loader/paging.h>
 #include <loader/video.h>
+#include <memory.h>
 #include <sys/x86.h>
 
-#define CORE_HEAP_SIZE (64ull << 20)
+#define CORE_HEAP_SIZE ((uint64_t)64 << 20)
 
 struct handoff *loader_handoff;
 
 static EFI_GUID loaded_image_guid = EFI_LOADED_IMAGE_PROTOCOL_GUID;
 
-static uint64_t page_count(uint64_t size) {
+static size_t page_count(size_t size) {
     return (size + 4095) / 4096;
 }
 
-static void reserve(uint64_t base, uint64_t pages) {
+static void reserve(uintptr_t base, size_t pages) {
     if (loader_handoff->reserved_count == HANDOFF_MAX_RESERVED) {
         panic("Too many hypervisor memory ranges\n");
     }
     loader_handoff->reserved[loader_handoff->reserved_count].base = base;
-    loader_handoff->reserved[loader_handoff->reserved_count].size = pages * 4096;
+    loader_handoff->reserved[loader_handoff->reserved_count].size = pages
+        * 4096;
     loader_handoff->reserved_count++;
 }
 
-uint64_t loader_alloc_reserved(uint64_t pages, uint64_t max_addr) {
-    uint64_t base = efi_alloc_pages(pages, max_addr);
+uint64_t loader_alloc_reserved(size_t pages, uintptr_t max_addr) {
+    uintptr_t base = efi_alloc_pages(pages, max_addr);
     if (base != 0) {
         reserve(base, pages);
     }
@@ -67,7 +68,7 @@ uint64_t loader_alloc_reserved(uint64_t pages, uint64_t max_addr) {
 // Timed against the firmware's delay service, whatever the TSC's frequency
 // enumeration says, which not every processor provides.
 static uint64_t measure_tsc_hz(void) {
-    uint64_t start = rdtsc();
+    uintptr_t start = rdtsc();
     efi_bs->Stall(20000);
     return (rdtsc() - start) * 50;
 }
@@ -77,36 +78,40 @@ static uint64_t measure_tsc_hz(void) {
 // recorded as reserved once final, so that it is not counted twice.
 static bool exit_boot_services(void) {
     EFI_UINTN map_key;
-    EFI_UINTN desc_size;
+    size_t desc_size;
     EFI_UINT32 desc_version;
-    uint64_t buf = 0;
-    uint64_t buf_size = 0;
+    uintptr_t buf = 0;
+    size_t buf_size = 0;
 
     // Room for the buffer's own entry.
     if (loader_handoff->reserved_count == HANDOFF_MAX_RESERVED) {
         return false;
     }
 
-    for (int attempt = 0; attempt < 16; attempt++) {
-        EFI_UINTN size = buf_size;
-        EFI_STATUS status = efi_bs->GetMemoryMap(&size, (EFI_MEMORY_DESCRIPTOR *)(uintptr_t)buf,
-                                                 &map_key, &desc_size, &desc_version);
+    for (size_t attempt = 0; attempt < 16; attempt++) {
+        size_t size = buf_size;
+        EFI_STATUS status = efi_bs->GetMemoryMap(
+            &size, (EFI_MEMORY_DESCRIPTOR *)(uintptr_t)buf, &map_key,
+            &desc_size, &desc_version
+        );
         if (status == EFI_BUFFER_TOO_SMALL) {
             if (buf != 0) {
                 efi_bs->FreePages(buf, page_count(buf_size));
             }
-            buf_size = (size + 16 * desc_size + 4095) & ~4095ull;
+            buf_size = (size + 16 * desc_size + 4095) & ~(uint64_t)4095;
             buf = efi_alloc_pages(page_count(buf_size), 0);
             if (buf == 0) {
                 return false;
             }
             continue;
         }
-        if (status != EFI_SUCCESS || desc_size < sizeof(EFI_MEMORY_DESCRIPTOR)) {
+        if (status != EFI_SUCCESS
+         || desc_size < sizeof(EFI_MEMORY_DESCRIPTOR)) {
             return false;
         }
 
-        if (efi_bs->ExitBootServices(efi_image_handle, map_key) == EFI_SUCCESS) {
+        if (efi_bs->ExitBootServices(efi_image_handle, map_key)
+         == EFI_SUCCESS) {
             efi_boot_services_exited = true;
             reserve(buf, page_count(buf_size));
             loader_handoff->efi_mmap = buf;
@@ -120,26 +125,29 @@ static bool exit_boot_services(void) {
     return false;
 }
 
-static uint64_t memory_map_top(void) {
-    EFI_UINTN size = 0;
+static uintptr_t memory_map_top(void) {
+    size_t size = 0;
     EFI_UINTN map_key;
-    EFI_UINTN desc_size;
+    size_t desc_size;
     EFI_UINT32 desc_version;
-    uint64_t top = 1ull << 32;
+    uintptr_t top = (uint64_t)1 << 32;
 
     efi_bs->GetMemoryMap(&size, NULL, &map_key, &desc_size, &desc_version);
     size += 16 * desc_size;
-    uint64_t pages = page_count(size);
-    uint64_t buf = efi_alloc_pages(pages, 0);
+    size_t pages = page_count(size);
+    uintptr_t buf = efi_alloc_pages(pages, 0);
     if (buf == 0) {
         return top;
     }
-    if (efi_bs->GetMemoryMap(&size, (EFI_MEMORY_DESCRIPTOR *)(uintptr_t)buf, &map_key,
-                             &desc_size, &desc_version) == EFI_SUCCESS
-        && desc_size >= sizeof(EFI_MEMORY_DESCRIPTOR)) {
-        for (EFI_UINTN off = 0; off + desc_size <= size; off += desc_size) {
-            EFI_MEMORY_DESCRIPTOR *desc = (EFI_MEMORY_DESCRIPTOR *)(uintptr_t)(buf + off);
-            uint64_t end = desc->PhysicalStart + desc->NumberOfPages * 4096;
+    EFI_STATUS status = efi_bs->GetMemoryMap(
+        &size, (EFI_MEMORY_DESCRIPTOR *)(uintptr_t)buf, &map_key, &desc_size,
+        &desc_version
+    );
+    if (status == EFI_SUCCESS && desc_size >= sizeof(EFI_MEMORY_DESCRIPTOR)) {
+        for (size_t off = 0; off + desc_size <= size; off += desc_size) {
+            EFI_MEMORY_DESCRIPTOR *desc
+                = (EFI_MEMORY_DESCRIPTOR *)(uintptr_t)(buf + off);
+            uintptr_t end = desc->PhysicalStart + desc->NumberOfPages * 4096;
             if (end > top) {
                 top = end;
             }
@@ -160,17 +168,22 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     printf("ReBIOS\n");
     config_load();
 
-    uint64_t handoff_addr = efi_alloc_pages(page_count(sizeof(struct handoff)), 0);
+    uintptr_t handoff_addr = efi_alloc_pages(
+        page_count(sizeof(struct handoff)), 0
+    );
     if (handoff_addr == 0) {
         panic("Cannot allocate the handoff\n");
     }
     loader_handoff = (struct handoff *)(uintptr_t)handoff_addr;
-    memset(loader_handoff, 0, sizeof(*loader_handoff));
+    memset(loader_handoff, 0, sizeof(struct handoff));
     reserve(handoff_addr, page_count(sizeof(struct handoff)));
 
     video_find_framebuffer();
     console_init();
-    log_init(config.serial ? config.serial_port : 0, config.serial_baud, config.verbose);
+    log_init(
+        config.serial ? config.serial_port : 0, config.serial_baud,
+        config.verbose
+    );
 
     if (!iommu_check()) {
         return EFI_UNSUPPORTED;
@@ -178,15 +191,17 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
 
     // The core runs from this image, which stays where the firmware put it.
     EFI_LOADED_IMAGE_PROTOCOL *image;
-    if (efi_bs->HandleProtocol(image_handle, &loaded_image_guid, (EFI_VOID **)&image)
-        != EFI_SUCCESS) {
+    EFI_STATUS status = efi_bs->HandleProtocol(
+        image_handle, &loaded_image_guid, (EFI_VOID **)&image
+    );
+    if (status != EFI_SUCCESS) {
         panic("Cannot find where ReBIOS is loaded\n");
     }
     reserve((uintptr_t)image->ImageBase, page_count(image->ImageSize));
 
-    uint64_t map_top = memory_map_top();
-    uint64_t table_pages;
-    uint64_t pml4 = paging_build_identity_map(&map_top, &table_pages);
+    uintptr_t map_top = memory_map_top();
+    size_t table_pages;
+    uintptr_t pml4 = paging_build_identity_map(&map_top, &table_pages);
     if (pml4 == 0) {
         panic("Cannot build the core's page tables\n");
     }
@@ -195,7 +210,7 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     // Long mode on the firmware's terms: under 5-level paging, the tables are
     // reached through a PML5 of one entry, as LA57 cannot change in long mode.
     uint64_t cr3 = pml4;
-    if (read_cr4() & CR4_LA57) {
+    if ((read_cr4() & CR4_LA57) != 0) {
         cr3 = loader_alloc_reserved(1, UINT32_MAX);
         if (cr3 == 0) {
             panic("Cannot allocate a PML5\n");
@@ -210,7 +225,7 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
         printf("No page below 1 MiB to start the other processors in\n");
     }
 
-    uint64_t heap_size = CORE_HEAP_SIZE + (config.nested ? NESTED_HEAP_SIZE : 0);
+    size_t heap_size = CORE_HEAP_SIZE + (config.nested ? NESTED_HEAP_SIZE : 0);
     uint64_t heap = loader_alloc_reserved(page_count(heap_size), 0);
     if (heap == 0) {
         panic("Cannot allocate the core's heap\n");
@@ -232,7 +247,7 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     video_init();
     // Firmware may put the framebuffer above all memory.
     const struct handoff_framebuffer *fb = &loader_handoff->video.framebuffer;
-    uint64_t fb_size = (uint64_t)fb->pitch * fb->height;
+    size_t fb_size = (uint64_t)fb->pitch * fb->height;
     if (fb->size > fb_size) {
         fb_size = fb->size;
     }
@@ -249,7 +264,8 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
         panic("Cannot exit boot services\n");
     }
 
-    // The new tables identity map this code and its stack, like the firmware's.
+    // The new tables identity map this code and its stack, like the
+    // firmware's.
     cli();
     write_cr3(cr3);
     core_main(loader_handoff);

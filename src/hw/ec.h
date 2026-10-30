@@ -20,8 +20,8 @@
 
 // Drives the first embedded controller of the ACPI namespace for the AML the
 // hypervisor runs: its address space, and its queries, which run the _Qxx
-// methods. With the namespace loaded and not yet initialised, so that _REG
-// and _INI find it, and the caller holding acpi_lock().
+// methods. With the namespace loaded and not yet initialised, so that _REG and
+// _INI find it, and the caller holding acpi_lock().
 void ec_init(void);
 
 #endif

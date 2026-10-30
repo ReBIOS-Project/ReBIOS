@@ -15,16 +15,17 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stdint.h>
-#include <stddef.h>
-#include <stdbool.h>
 #include <stdarg.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <efi.h>
-#include <memory.h>
+#include <loader/config.h>
+#include <handoff.h>
 #include <lib/log.h>
 #include <lib/printf.h>
-#include <loader/config.h>
 #include <loader/efi_glue.h>
+#include <memory.h>
 
 #define CONFIG_MAX_SIZE 65536
 
@@ -32,7 +33,8 @@
 #define QUOTE_MAX 80
 #define QUOTE_FMT "\"%.*s%s\""
 #define QUOTE_ARGS(s) \
-    (int)((s).len > QUOTE_MAX ? QUOTE_MAX : (s).len), (s).ptr, (s).len > QUOTE_MAX ? "..." : ""
+    (int)((s).len > QUOTE_MAX ? QUOTE_MAX : (s).len), (s).ptr, \
+        (s).len > QUOTE_MAX ? "..." : ""
 
 struct config config;
 
@@ -49,29 +51,31 @@ struct setting {
     uint32_t filter;
 };
 
-static unsigned current_line;
+static unsigned int current_line;
 
 static EFI_GUID loaded_image_guid = EFI_LOADED_IMAGE_PROTOCOL_GUID;
 static EFI_GUID simple_file_system_guid = EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID;
 static EFI_GUID file_info_guid = EFI_FILE_INFO_ID;
 
-static const char *const file_names[] = {"rebios.ini", "csmwrap.ini"};
+static const char *const file_names[] = { "rebios.ini", "csmwrap.ini" };
 
 static EFI_CHAR16 rebios_variable[] = u"ReBIOSConfig";
 static EFI_GUID rebios_variable_guid = {
-    0xd559b78d, 0x5494, 0x4c9e, {0xb7, 0xf7, 0xe4, 0x92, 0xb0, 0x94, 0x64, 0x48}
+    0xd559b78d, 0x5494, 0x4c9e,
+    { 0xb7, 0xf7, 0xe4, 0x92, 0xb0, 0x94, 0x64, 0x48 }
 };
 static EFI_CHAR16 csmwrap_variable[] = u"CSMWrapConfig";
 static EFI_GUID csmwrap_variable_guid = {
-    0x2910aadb, 0xf7ca, 0x42b5, {0x8c, 0xe2, 0xd6, 0x2d, 0x6a, 0x69, 0xb5, 0xee}
+    0x2910aadb, 0xf7ca, 0x42b5,
+    { 0x8c, 0xe2, 0xd6, 0x2d, 0x6a, 0x69, 0xb5, 0xee }
 };
 
 static struct span span_before(struct span s, size_t i) {
-    return (struct span){s.ptr, i};
+    return (struct span){ s.ptr, i };
 }
 
 static struct span span_after(struct span s, size_t i) {
-    return (struct span){s.ptr + i + 1, s.len - i - 1};
+    return (struct span){ s.ptr + i + 1, s.len - i - 1 };
 }
 
 // Returns s.len if c is not found.
@@ -131,12 +135,12 @@ static int digit_value(char c) {
 
 static bool parse_boolean(struct span s, bool *out) {
     if (equals_ignoring_case(s, "true") || equals_ignoring_case(s, "yes")
-        || equals_ignoring_case(s, "1")) {
+     || equals_ignoring_case(s, "1")) {
         *out = true;
         return true;
     }
     if (equals_ignoring_case(s, "false") || equals_ignoring_case(s, "no")
-        || equals_ignoring_case(s, "0")) {
+     || equals_ignoring_case(s, "0")) {
         *out = false;
         return true;
     }
@@ -145,7 +149,8 @@ static bool parse_boolean(struct span s, bool *out) {
 
 static bool parse_integer(struct span s, uint32_t *out) {
     uint32_t base = 10;
-    if (s.len >= 2 && s.ptr[0] == '0' && (s.ptr[1] == 'x' || s.ptr[1] == 'X')) {
+    if (s.len >= 2 && s.ptr[0] == '0'
+     && (s.ptr[1] == 'x' || s.ptr[1] == 'X')) {
         base = 16;
         s = span_after(s, 1);
     }
@@ -168,8 +173,11 @@ static bool parse_integer(struct span s, uint32_t *out) {
     return true;
 }
 
-// Parses one or more hexadecimal digits at *pos, making a value of at most max.
-static bool parse_hex_field(struct span s, size_t *pos, uint32_t max, uint32_t *out) {
+// Parses one or more hexadecimal digits at *pos, making a value of at most
+// max.
+static bool parse_hex_field(
+    struct span s, size_t *pos, uint32_t max, uint32_t *out
+) {
     size_t start = *pos;
     uint32_t value = 0;
     while (*pos < s.len && digit_value(s.ptr[*pos]) >= 0) {
@@ -197,8 +205,8 @@ static bool parse_pci_address(struct span s, struct handoff_pci_address *out) {
     uint32_t device;
     uint32_t function;
     if (!parse_hex_field(s, &pos, 0xff, &bus) || !skip_char(s, &pos, ':')
-        || !parse_hex_field(s, &pos, 0x1f, &device) || !skip_char(s, &pos, '.')
-        || !parse_hex_field(s, &pos, 7, &function) || pos != s.len) {
+     || !parse_hex_field(s, &pos, 0x1f, &device) || !skip_char(s, &pos, '.')
+     || !parse_hex_field(s, &pos, 7, &function) || pos != s.len) {
         return false;
     }
     out->segment = 0;
@@ -207,9 +215,12 @@ static bool parse_pci_address(struct span s, struct handoff_pci_address *out) {
     return true;
 }
 
-static bool parse_cpu_range(struct span entry, uint32_t *first, uint32_t *last) {
+static bool parse_cpu_range(
+    struct span entry, uint32_t *first, uint32_t *last
+) {
     size_t dash = find_char(entry, '-');
-    if (!parse_integer(trim(span_before(entry, dash), is_space_or_tab), first)) {
+    struct span start = trim(span_before(entry, dash), is_space_or_tab);
+    if (!parse_integer(start, first)) {
         return false;
     }
     if (dash == entry.len) {
@@ -222,7 +233,9 @@ static bool parse_cpu_range(struct span entry, uint32_t *first, uint32_t *last) 
     return *first <= *last;
 }
 
-static bool parse_cpu_list(struct span s, typeof(config.cpu_ranges[0]) *ranges, uint32_t *count) {
+static bool parse_cpu_list(
+    struct span s, typeof(config.cpu_ranges[0]) *ranges, size_t *count
+) {
     *count = 0;
     if (s.len == 0) {
         return true;
@@ -232,7 +245,10 @@ static bool parse_cpu_list(struct span s, typeof(config.cpu_ranges[0]) *ranges, 
         if (*count == HANDOFF_MAX_CPU_RANGES) {
             return false;
         }
-        if (!parse_cpu_range(span_before(s, comma), &ranges[*count].first, &ranges[*count].last)) {
+        bool parsed = parse_cpu_range(
+            span_before(s, comma), &ranges[*count].first, &ranges[*count].last
+        );
+        if (!parsed) {
             return false;
         }
         (*count)++;
@@ -245,7 +261,9 @@ static bool parse_cpu_list(struct span s, typeof(config.cpu_ranges[0]) *ranges, 
 
 // Lines are logged whole, as the firmware may mirror its console on the log's
 // serial port, where the two copies of separate calls would interleave.
-static __attribute__((format(printf, 1, 2))) void ignore_line(const char *fmt, ...) {
+static __attribute__((format(printf, 1, 2))) void ignore_line(
+    const char *fmt, ...
+) {
     char reason[256];
     va_list args;
     va_start(args, fmt);
@@ -264,7 +282,9 @@ static bool apply_boolean(const struct setting *setting, struct span value) {
     return true;
 }
 
-static bool apply_serial_port(const struct setting *setting, struct span value) {
+static bool apply_serial_port(
+    const struct setting *setting, struct span value
+) {
     uint32_t port;
     if (!parse_integer(value, &port) || port > 0xffff) {
         return false;
@@ -274,7 +294,9 @@ static bool apply_serial_port(const struct setting *setting, struct span value) 
     return true;
 }
 
-static bool apply_serial_baud(const struct setting *setting, struct span value) {
+static bool apply_serial_baud(
+    const struct setting *setting, struct span value
+) {
     uint32_t baud;
     if (!parse_integer(value, &baud) || baud == 0) {
         return false;
@@ -285,20 +307,30 @@ static bool apply_serial_baud(const struct setting *setting, struct span value) 
 }
 
 static bool apply_vgabios(const struct setting *setting, struct span value) {
-    size_t len = value.len < CONFIG_VGABIOS_MAX ? value.len : CONFIG_VGABIOS_MAX - 1;
+    size_t len = value.len < CONFIG_VGABIOS_MAX ? value.len
+        : CONFIG_VGABIOS_MAX - 1;
     memset(config.vgabios, 0, sizeof(config.vgabios));
     for (size_t i = 0; i < len; i++) {
         config.vgabios[i] = (unsigned char)value.ptr[i];
     }
-    printf("  %s = %.*s%s\n", setting->name, (int)len, value.ptr, len == 0 ? "(none)" : "");
+    printf(
+        "  %s = %.*s%s\n", setting->name, (int)len, value.ptr,
+        len == 0 ? "(none)" : ""
+    );
     return true;
 }
 
-static bool apply_boot_drive(const struct setting *setting, struct span value) {
-    size_t len = value.len < CONFIG_BOOT_DRIVE_MAX ? value.len : CONFIG_BOOT_DRIVE_MAX - 1;
+static bool apply_boot_drive(
+    const struct setting *setting, struct span value
+) {
+    size_t len = value.len < CONFIG_BOOT_DRIVE_MAX ? value.len
+        : CONFIG_BOOT_DRIVE_MAX - 1;
     memset(config.boot_drive, 0, sizeof(config.boot_drive));
     memcpy(config.boot_drive, value.ptr, len);
-    printf("  %s = %.*s%s\n", setting->name, (int)len, value.ptr, len == 0 ? "(self)" : "");
+    printf(
+        "  %s = %.*s%s\n", setting->name, (int)len, value.ptr,
+        len == 0 ? "(self)" : ""
+    );
     return true;
 }
 
@@ -309,14 +341,17 @@ static bool apply_vga(const struct setting *setting, struct span value) {
     }
     config.vga_specified = true;
     config.vga_device = address;
-    printf("  %s = %02x:%02x.%x\n", setting->name, address.bus, address.devfn >> 3,
-           address.devfn & 7);
+    printf(
+        "  %s = %02x:%02x.%x\n", setting->name, address.bus,
+        address.devfn >> 3, address.devfn & 7
+    );
     return true;
 }
 
-static bool apply_choice(struct span value, const char *const *names, unsigned count,
-                         uint8_t *out) {
-    for (unsigned i = 0; i < count; i++) {
+static bool apply_choice(
+    struct span value, const char *const *names, size_t count, uint8_t *out
+) {
+    for (size_t i = 0; i < count; i++) {
         if (equals_ignoring_case(value, names[i])) {
             *out = (uint8_t)i;
             return true;
@@ -326,25 +361,34 @@ static bool apply_choice(struct span value, const char *const *names, unsigned c
 }
 
 // In the order of the HANDOFF_VGA_EMULATION_* values.
-static const char *const vga_emulation_names[] = {"auto", "always", "never"};
+static const char *const vga_emulation_names[] = { "auto", "always", "never" };
 
-static bool apply_vga_emulation(const struct setting *setting, struct span value) {
+static bool apply_vga_emulation(
+    const struct setting *setting, struct span value
+) {
     if (!apply_choice(value, vga_emulation_names, 3, &config.vga_emulation)) {
         return false;
     }
-    printf("  %s = %s\n", setting->name, vga_emulation_names[config.vga_emulation]);
+    printf(
+        "  %s = %s\n", setting->name, vga_emulation_names[config.vga_emulation]
+    );
     return true;
 }
 
 // In the order of the HANDOFF_VGA_SCALING_* values.
-static const char *const vga_scaling_names[] = {"stretch", "aspect", "center", "manual",
-                                                "integer"};
+static const char *const vga_scaling_names[] = {
+    "stretch", "aspect", "center", "manual", "integer"
+};
 
-static bool apply_vga_scaling(const struct setting *setting, struct span value) {
+static bool apply_vga_scaling(
+    const struct setting *setting, struct span value
+) {
     if (!apply_choice(value, vga_scaling_names, 5, &config.vga_scaling)) {
         return false;
     }
-    printf("  %s = %s\n", setting->name, vga_scaling_names[config.vga_scaling]);
+    printf(
+        "  %s = %s\n", setting->name, vga_scaling_names[config.vga_scaling]
+    );
     return true;
 }
 
@@ -359,13 +403,14 @@ static bool apply_vga_scale(const struct setting *setting, struct span value) {
 }
 
 static bool apply_cpu_list(const struct setting *setting, struct span value) {
-    if (config.cpu_filter != HANDOFF_CPU_FILTER_NONE && config.cpu_filter != setting->filter) {
+    if (config.cpu_filter != HANDOFF_CPU_FILTER_NONE
+     && config.cpu_filter != setting->filter) {
         ignore_line("cpu_allowlist and cpu_blocklist are mutually exclusive");
         return true;
     }
 
     typeof(config.cpu_ranges) ranges;
-    uint32_t count;
+    size_t count;
     if (!parse_cpu_list(value, ranges, &count)) {
         return false;
     }
@@ -377,11 +422,15 @@ static bool apply_cpu_list(const struct setting *setting, struct span value) {
     char list[HANDOFF_MAX_CPU_RANGES * sizeof("4294967295-4294967295, ")];
     size_t len = 0;
     list[0] = 0;
-    for (uint32_t i = 0; i < count; i++) {
-        len += (size_t)snprintf(list + len, sizeof(list) - len, "%s%u", i == 0 ? "" : ", ",
-                                ranges[i].first);
+    for (size_t i = 0; i < count; i++) {
+        len += (size_t)snprintf(
+            list + len, sizeof(list) - len, "%s%u", i == 0 ? "" : ", ",
+            ranges[i].first
+        );
         if (ranges[i].last != ranges[i].first) {
-            len += (size_t)snprintf(list + len, sizeof(list) - len, "-%u", ranges[i].last);
+            len += (size_t)snprintf(
+                list + len, sizeof(list) - len, "-%u", ranges[i].last
+            );
         }
     }
     printf("  %s = %s\n", setting->name, count == 0 ? "(none)" : list);
@@ -395,24 +444,36 @@ static bool apply_obsolete(const struct setting *setting, struct span value) {
 }
 
 static const struct setting settings[] = {
-    {.name = "serial", .apply = apply_boolean, .flag = &config.serial},
-    {.name = "serial_port", .apply = apply_serial_port},
-    {.name = "serial_baud", .apply = apply_serial_baud},
-    {.name = "verbose", .apply = apply_boolean, .flag = &config.verbose},
-    {.name = "boot_drive", .apply = apply_boot_drive},
-    {.name = "vgabios", .apply = apply_vgabios},
-    {.name = "vga", .apply = apply_vga},
-    {.name = "vga_emulation", .apply = apply_vga_emulation},
-    {.name = "vga_scaling", .apply = apply_vga_scaling},
-    {.name = "vga_scale", .apply = apply_vga_scale},
-    {.name = "profile", .apply = apply_boolean, .flag = &config.profile},
-    {.name = "nested", .apply = apply_boolean, .flag = &config.nested},
-    {.name = "cpuid_limit", .apply = apply_boolean, .flag = &config.cpuid_limit},
-    {.name = "igpu_stolen_remap", .apply = apply_boolean, .flag = &config.igpu_stolen_remap},
-    {.name = "cpu_allowlist", .apply = apply_cpu_list, .filter = HANDOFF_CPU_FILTER_ALLOW},
-    {.name = "cpu_blocklist", .apply = apply_cpu_list, .filter = HANDOFF_CPU_FILTER_BLOCK},
-    {.name = "iommu_disable", .apply = apply_obsolete},
-    {.name = "system_thread", .apply = apply_obsolete},
+    { .name = "serial", .apply = apply_boolean, .flag = &config.serial },
+    { .name = "serial_port", .apply = apply_serial_port },
+    { .name = "serial_baud", .apply = apply_serial_baud },
+    { .name = "verbose", .apply = apply_boolean, .flag = &config.verbose },
+    { .name = "boot_drive", .apply = apply_boot_drive },
+    { .name = "vgabios", .apply = apply_vgabios },
+    { .name = "vga", .apply = apply_vga },
+    { .name = "vga_emulation", .apply = apply_vga_emulation },
+    { .name = "vga_scaling", .apply = apply_vga_scaling },
+    { .name = "vga_scale", .apply = apply_vga_scale },
+    { .name = "profile", .apply = apply_boolean, .flag = &config.profile },
+    { .name = "nested", .apply = apply_boolean, .flag = &config.nested },
+    {
+        .name = "cpuid_limit", .apply = apply_boolean,
+        .flag = &config.cpuid_limit
+    },
+    {
+        .name = "igpu_stolen_remap", .apply = apply_boolean,
+        .flag = &config.igpu_stolen_remap
+    },
+    {
+        .name = "cpu_allowlist", .apply = apply_cpu_list,
+        .filter = HANDOFF_CPU_FILTER_ALLOW
+    },
+    {
+        .name = "cpu_blocklist", .apply = apply_cpu_list,
+        .filter = HANDOFF_CPU_FILTER_BLOCK
+    },
+    { .name = "iommu_disable", .apply = apply_obsolete },
+    { .name = "system_thread", .apply = apply_obsolete },
 };
 
 static void apply_line(struct span line) {
@@ -433,12 +494,15 @@ static void apply_line(struct span line) {
         return;
     }
 
-    for (size_t i = 0; i < sizeof(settings) / sizeof(settings[0]); i++) {
+    for (size_t i = 0; i < sizeof(settings) / sizeof(struct setting); i++) {
         if (!equals_ignoring_case(key, settings[i].name)) {
             continue;
         }
         if (!settings[i].apply(&settings[i], value)) {
-            ignore_line("invalid value " QUOTE_FMT " for %s", QUOTE_ARGS(value), settings[i].name);
+            ignore_line(
+                "invalid value " QUOTE_FMT " for %s", QUOTE_ARGS(value),
+                settings[i].name
+            );
         }
         return;
     }
@@ -453,7 +517,7 @@ static void apply_text(const char *text, size_t size, const char *source) {
         len++;
     }
 
-    struct span rest = {text, len};
+    struct span rest = { text, len };
     current_line = 0;
     while (rest.len > 0) {
         size_t newline = find_char(rest, '\n');
@@ -466,7 +530,7 @@ static void apply_text(const char *text, size_t size, const char *source) {
     }
 }
 
-static void *pool_alloc(EFI_UINTN size) {
+static void *pool_alloc(size_t size) {
     void *buf;
     if (efi_bs->AllocatePool(EfiLoaderData, size, &buf) != EFI_SUCCESS) {
         return NULL;
@@ -479,22 +543,26 @@ static uint16_t read_u16(const uint8_t *p) {
     return (uint16_t)(p[0] | p[1] << 8);
 }
 
-static uint16_t node_length(const uint8_t *node) {
+static size_t node_length(const uint8_t *node) {
     return read_u16(node + 2);
 }
 
 static bool is_file_path_node(const uint8_t *node) {
-    return node[0] == EFI_MEDIA_DEVICE_PATH && node[1] == EFI_MEDIA_FILEPATH_DP;
+    return node[0] == EFI_MEDIA_DEVICE_PATH
+        && node[1] == EFI_MEDIA_FILEPATH_DP;
 }
 
 // The room for the path name in a file path node, in characters.
 static size_t node_path_chars(const uint8_t *node) {
-    return (node_length(node) - EFI_SIZE_OF_FILEPATH_DEVICE_PATH) / sizeof(EFI_CHAR16);
+    return (node_length(node) - EFI_SIZE_OF_FILEPATH_DEVICE_PATH)
+        / sizeof(EFI_CHAR16);
 }
 
 // The absolute path of name in the directory of the image's file path, in a
 // pool allocation, or NULL if that directory is unknown.
-static EFI_CHAR16 *sibling_path(const EFI_DEVICE_PATH_PROTOCOL *image_path, const char *name) {
+static EFI_CHAR16 *sibling_path(
+    const EFI_DEVICE_PATH_PROTOCOL *image_path, const char *name
+) {
     if (image_path == NULL) {
         return NULL;
     }
@@ -520,7 +588,9 @@ static EFI_CHAR16 *sibling_path(const EFI_DEVICE_PATH_PROTOCOL *image_path, cons
         name_len++;
     }
     // A leading separator, the image's path, the name, and a NUL.
-    EFI_CHAR16 *path = pool_alloc((path_chars + name_len + 2) * sizeof(EFI_CHAR16));
+    EFI_CHAR16 *path = pool_alloc(
+        (path_chars + name_len + 2) * sizeof(EFI_CHAR16)
+    );
     if (path == NULL) {
         return NULL;
     }
@@ -536,7 +606,9 @@ static EFI_CHAR16 *sibling_path(const EFI_DEVICE_PATH_PROTOCOL *image_path, cons
             continue;
         }
         for (size_t i = 0; i < node_path_chars(node); i++) {
-            EFI_CHAR16 c = read_u16(node + EFI_SIZE_OF_FILEPATH_DEVICE_PATH + i * 2);
+            EFI_CHAR16 c = read_u16(
+                node + EFI_SIZE_OF_FILEPATH_DEVICE_PATH + i * 2
+            );
             if (c == 0) {
                 break;
             }
@@ -567,18 +639,22 @@ static void path_to_ascii(char *out, size_t size, const EFI_CHAR16 *path) {
 }
 
 // Returns the contents of a file fit to apply in a pool allocation, or NULL.
-static char *read_file(EFI_FILE_PROTOCOL *file, const char *source, size_t *size) {
+static char *read_file(
+    EFI_FILE_PROTOCOL *file, const char *source, size_t *size
+) {
     union {
         EFI_FILE_INFO info;
         uint8_t bytes[EFI_SIZE_OF_EFI_FILE_INFO + 256 * sizeof(EFI_CHAR16)];
     } buf;
-    EFI_UINTN buf_size = sizeof(buf);
+    size_t buf_size = sizeof(buf);
     EFI_STATUS status = file->GetInfo(file, &file_info_guid, &buf_size, &buf);
     if (status != EFI_SUCCESS) {
-        printf("Skipping %s, error %#llx\n", source, (unsigned long long)status);
+        printf(
+            "Skipping %s, error %#llx\n", source, (unsigned long long)status
+        );
         return NULL;
     }
-    if (buf.info.Attribute & EFI_FILE_DIRECTORY) {
+    if ((buf.info.Attribute & EFI_FILE_DIRECTORY) != 0) {
         printf("Skipping %s, a directory\n", source);
         return NULL;
     }
@@ -590,7 +666,7 @@ static char *read_file(EFI_FILE_PROTOCOL *file, const char *source, size_t *size
         return NULL;
     }
 
-    EFI_UINTN file_size = (EFI_UINTN)buf.info.FileSize;
+    size_t file_size = (EFI_UINTN)buf.info.FileSize;
     char *text = pool_alloc(file_size);
     if (text == NULL) {
         printf("Skipping %s, out of memory\n", source);
@@ -601,7 +677,10 @@ static char *read_file(EFI_FILE_PROTOCOL *file, const char *source, size_t *size
         EFI_UINTN chunk = file_size - done;
         status = file->Read(file, &chunk, text + done);
         if (status != EFI_SUCCESS) {
-            printf("Skipping %s, error %#llx\n", source, (unsigned long long)status);
+            printf(
+                "Skipping %s, error %#llx\n", source,
+                (unsigned long long)status
+            );
             efi_bs->FreePool(text);
             return NULL;
         }
@@ -628,7 +707,9 @@ static bool apply_file(EFI_FILE_PROTOCOL *root, EFI_CHAR16 *path) {
         return false;
     }
     if (status != EFI_SUCCESS) {
-        printf("Skipping %s, error %#llx\n", source, (unsigned long long)status);
+        printf(
+            "Skipping %s, error %#llx\n", source, (unsigned long long)status
+        );
         return false;
     }
     size_t size;
@@ -642,14 +723,17 @@ static bool apply_file(EFI_FILE_PROTOCOL *root, EFI_CHAR16 *path) {
     return true;
 }
 
-static bool apply_files_on_volume(EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *volume,
-                                  const EFI_DEVICE_PATH_PROTOCOL *image_path) {
+static bool apply_files_on_volume(
+    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *volume,
+    const EFI_DEVICE_PATH_PROTOCOL *image_path
+) {
     EFI_FILE_PROTOCOL *root;
     if (volume->OpenVolume(volume, &root) != EFI_SUCCESS) {
         return false;
     }
     bool applied = false;
-    for (size_t i = 0; i < sizeof(file_names) / sizeof(file_names[0]) && !applied; i++) {
+    for (size_t i = 0; i < sizeof(file_names) / sizeof(char *) && !applied;
+         i++) {
         EFI_CHAR16 *path = sibling_path(image_path, file_names[i]);
         if (path == NULL) {
             break;
@@ -667,8 +751,10 @@ static void *open_protocol(EFI_HANDLE handle, EFI_GUID *guid) {
     if (handle == NULL) {
         return NULL;
     }
-    EFI_STATUS status = efi_bs->OpenProtocol(handle, guid, &protocol, efi_image_handle, NULL,
-                                             EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL);
+    EFI_STATUS status = efi_bs->OpenProtocol(
+        handle, guid, &protocol, efi_image_handle, NULL,
+        EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL
+    );
     return status == EFI_SUCCESS ? protocol : NULL;
 }
 
@@ -677,12 +763,16 @@ static void close_protocol(EFI_HANDLE handle, EFI_GUID *guid) {
 }
 
 static bool apply_files(void) {
-    EFI_LOADED_IMAGE_PROTOCOL *image = open_protocol(efi_image_handle, &loaded_image_guid);
+    EFI_LOADED_IMAGE_PROTOCOL *image = open_protocol(
+        efi_image_handle, &loaded_image_guid
+    );
     if (image == NULL) {
         return false;
     }
     EFI_HANDLE device = image->DeviceHandle;
-    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *volume = open_protocol(device, &simple_file_system_guid);
+    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *volume = open_protocol(
+        device, &simple_file_system_guid
+    );
     bool applied = false;
     if (volume != NULL) {
         applied = apply_files_on_volume(volume, image->FilePath);
@@ -692,15 +782,22 @@ static bool apply_files(void) {
     return applied;
 }
 
-// Returns the contents of a variable fit to apply in a pool allocation, or NULL.
-static char *read_variable(EFI_CHAR16 *name, EFI_GUID *guid, const char *source, size_t *size) {
-    EFI_UINTN data_size = 0;
-    EFI_STATUS status = efi_rt->GetVariable(name, guid, NULL, &data_size, NULL);
+// Returns the contents of a variable fit to apply in a pool allocation, or
+// NULL.
+static char *read_variable(
+    EFI_CHAR16 *name, EFI_GUID *guid, const char *source, size_t *size
+) {
+    size_t data_size = 0;
+    EFI_STATUS status = efi_rt->GetVariable(
+        name, guid, NULL, &data_size, NULL
+    );
     if (status == EFI_NOT_FOUND) {
         return NULL;
     }
     if (status != EFI_BUFFER_TOO_SMALL && status != EFI_SUCCESS) {
-        printf("Skipping %s, error %#llx\n", source, (unsigned long long)status);
+        printf(
+            "Skipping %s, error %#llx\n", source, (unsigned long long)status
+        );
         return NULL;
     }
     if (data_size > CONFIG_MAX_SIZE) {
@@ -718,7 +815,9 @@ static char *read_variable(EFI_CHAR16 *name, EFI_GUID *guid, const char *source,
     }
     status = efi_rt->GetVariable(name, guid, NULL, &data_size, text);
     if (status != EFI_SUCCESS) {
-        printf("Skipping %s, error %#llx\n", source, (unsigned long long)status);
+        printf(
+            "Skipping %s, error %#llx\n", source, (unsigned long long)status
+        );
         efi_bs->FreePool(text);
         return NULL;
     }
@@ -730,7 +829,9 @@ static char *read_variable(EFI_CHAR16 *name, EFI_GUID *guid, const char *source,
     return text;
 }
 
-static bool apply_variable(EFI_CHAR16 *name, EFI_GUID *guid, const char *source) {
+static bool apply_variable(
+    EFI_CHAR16 *name, EFI_GUID *guid, const char *source
+) {
     size_t size;
     char *text = read_variable(name, guid, source, &size);
     if (text == NULL) {
@@ -742,7 +843,7 @@ static bool apply_variable(EFI_CHAR16 *name, EFI_GUID *guid, const char *source)
 }
 
 void config_load(void) {
-    memset(&config, 0, sizeof(config));
+    memset(&config, 0, sizeof(struct config));
     config.serial_port = 0x3f8;
     config.serial_baud = 115200;
     config.vga_emulation = HANDOFF_VGA_EMULATION_AUTO;
@@ -751,17 +852,22 @@ void config_load(void) {
     config.cpu_filter = HANDOFF_CPU_FILTER_NONE;
     config.igpu_stolen_remap = true;
 
-    if (apply_files()
-        || apply_variable(rebios_variable, &rebios_variable_guid, "the ReBIOSConfig variable")
-        || apply_variable(csmwrap_variable, &csmwrap_variable_guid,
-                          "the CSMWrapConfig variable")) {
+    bool applied = apply_files()
+        || apply_variable(
+            rebios_variable, &rebios_variable_guid, "the ReBIOSConfig variable"
+        )
+        || apply_variable(
+            csmwrap_variable, &csmwrap_variable_guid,
+            "the CSMWrapConfig variable"
+        );
+    if (applied) {
         return;
     }
     printf("No configuration found, using the defaults\n");
 }
 
 void config_to_handoff(struct handoff_config *out) {
-    memset(out, 0, sizeof(*out));
+    memset(out, 0, sizeof(struct handoff_config));
     out->serial = config.serial;
     out->verbose = config.verbose;
     out->vga_specified = config.vga_specified;
@@ -777,7 +883,7 @@ void config_to_handoff(struct handoff_config *out) {
     out->igpu_stolen_remap = config.igpu_stolen_remap;
     out->cpu_filter = config.cpu_filter;
     out->cpu_range_count = config.cpu_range_count;
-    for (uint32_t i = 0; i < config.cpu_range_count; i++) {
+    for (size_t i = 0; i < config.cpu_range_count; i++) {
         out->cpu_ranges[i].first = config.cpu_ranges[i].first;
         out->cpu_ranges[i].last = config.cpu_ranges[i].last;
     }

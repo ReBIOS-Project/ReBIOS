@@ -18,8 +18,8 @@
 #ifndef VIRT__NVMX_H
 #define VIRT__NVMX_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 struct vcpu;
 
@@ -36,7 +36,7 @@ bool nvmx_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault);
 bool nvmx_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault);
 // Whether the guest may write a value to CR0 or CR4, as VMX operation and the
 // VMX it gets have it.
-bool nvmx_cr_allowed(struct vcpu *v, unsigned cr, uint64_t value);
+bool nvmx_cr_allowed(struct vcpu *v, unsigned int cr, uint64_t value);
 
 // Whether the vCPU runs the guest's own guest, VMCS02 being its current VMCS.
 bool nvmx_in_l2(struct vcpu *v);
@@ -63,9 +63,9 @@ void nvmx_wait(struct vcpu *v);
 // A start-up IPI for the vCPU, from any processor: whether its guest's guest
 // waited for one, for the vCPU to wake for.
 bool nvmx_sipi(struct vcpu *v, uint8_t vector);
-// A fixed, edge-triggered interrupt for the guest, from any processor:
-// whether it is the notification of its guest's posted interrupts instead,
-// for the vCPU's processor to process with VLAPIC_NESTED_POSTED_VECTOR.
+// A fixed, edge-triggered interrupt for the guest, from any processor: whether
+// it is the notification of its guest's posted interrupts instead, for the
+// vCPU's processor to process with VLAPIC_NESTED_POSTED_VECTOR.
 bool nvmx_posted_notification(struct vcpu *v, uint8_t vector);
 
 // Whether the vCPU runs the guest's guest through the guest's EPT, which then
@@ -74,22 +74,27 @@ bool nvmx_ept_active(struct vcpu *v);
 // An address of the guest's guest through the guest's EPT, for an access the
 // way an EPT violation's qualification gives one; false where that is an exit
 // instead, which waits for the next entry.
-bool nvmx_ept_translate(struct vcpu *v, uint64_t gpa, uint64_t access, uint64_t linear,
-                        uint64_t *out);
+bool nvmx_ept_translate(
+    struct vcpu *v, uintptr_t gpa, uint64_t access, uintptr_t linear,
+    uint64_t *out
+);
 // Whether such an exit waits.
 bool nvmx_exit_pending(struct vcpu *v);
 // An exception that what the hypervisor carries out for the guest's guest
 // raises: whether the guest's exception bitmap makes it an exit instead, with
 // the qualification given.
-bool nvmx_exception(struct vcpu *v, uint8_t vector, bool has_error, uint32_t error, uint64_t qual);
+bool nvmx_exception(
+    struct vcpu *v, uint8_t vector, bool has_error, uint32_t error,
+    uint64_t qual
+);
 // Whether the guest's guest is to make an MTF exit after each instruction, and
 // such an exit after one the hypervisor carried out, with the debug traps of
 // DR6's bits in dr6 pending: whether there is one.
 bool nvmx_monitor_trap_flag(struct vcpu *v);
 bool nvmx_monitor_trap(struct vcpu *v, uint64_t dr6);
 // Right before an entry: VMCS02's VMX-preemption timer, from what is left of
-// the guest's, so that time the hypervisor takes counts as the guest's guest's,
-// as it would without the hypervisor; off while the hypervisor steps.
+// the guest's, so that time the hypervisor takes counts as the guest's
+// guest's, as it would without the hypervisor; off while the hypervisor steps.
 void nvmx_arm_timer(struct vcpu *v);
 // The EPTP of VMCS02's shadow of the guest's EPT, or 0 where the vCPU runs on
 // the hypervisor's EPT.

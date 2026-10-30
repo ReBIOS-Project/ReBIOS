@@ -15,20 +15,23 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <efi.h>
 #include <uacpi/sleep.h>
+#include <uacpi/status.h>
 #include <uacpi/uacpi.h>
+#include <hw/power.h>
 #include <core.h>
 #include <hw/acpi.h>
-#include <hw/power.h>
 #include <lib/log.h>
 #include <sys/x86.h>
 
 // Returns only if the firmware fails to.
 static void firmware_reset(EFI_RESET_TYPE type) {
-    EFI_RUNTIME_SERVICES *rt = (EFI_RUNTIME_SERVICES *)(uintptr_t)core_handoff->efi_rt;
+    EFI_RUNTIME_SERVICES *rt
+        = (EFI_RUNTIME_SERVICES *)(uintptr_t)core_handoff->efi_rt;
     rt->ResetSystem(type, EFI_SUCCESS, 0, NULL);
 }
 
@@ -39,12 +42,12 @@ void power_reset(bool warm) {
         uacpi_reboot();
     }
 
-    // The reset control register at CF9h, then the keyboard controller's
-    // reset line, then a triple fault.
+    // The reset control register at CF9h, then the keyboard controller's reset
+    // line, then a triple fault.
     outb(0xcf9, 0x02);
     outb(0xcf9, 0x06);
-    for (int i = 0; i < 100000; i++) {
-        if (!(inb(0x64) & 2)) {
+    for (size_t i = 0; i < 100000; i++) {
+        if ((inb(0x64) & 2) == 0) {
             break;
         }
         cpu_relax();
@@ -53,7 +56,7 @@ void power_reset(bool warm) {
     struct {
         uint16_t limit;
         uint64_t base;
-    } __attribute__((packed)) null_idt = {0, 0};
+    } __attribute__((packed)) null_idt = { 0, 0 };
     asm volatile ("lidt %0\n\tint3" :: "m"(null_idt));
     halt_forever();
 }

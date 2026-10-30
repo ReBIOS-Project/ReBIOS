@@ -15,17 +15,18 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stdint.h>
 #include <stdbool.h>
-#include <memory.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <virt/exit.h>
 #include <csm/csm_boot.h>
 #include <hw/power.h>
 #include <lib/log.h>
+#include <memory.h>
 #include <sys/fixup.h>
 #include <sys/x86.h>
 #include <virt/cpuid.h>
 #include <virt/emulate.h>
-#include <virt/exit.h>
 #include <virt/guest_mem.h>
 #include <virt/hypercall.h>
 #include <virt/insn.h>
@@ -43,7 +44,9 @@
 #define MSR_IA32_CR_PAT 0x277
 
 void exit_cpuid(struct vcpu *v) {
-    struct cpuid_regs r = cpuid_guest(v, (uint32_t)v->gprs.rax, (uint32_t)v->gprs.rcx);
+    struct cpuid_regs r = cpuid_guest(
+        v, (uint32_t)v->gprs.rax, (uint32_t)v->gprs.rcx
+    );
     v->gprs.rax = r.eax;
     v->gprs.rbx = r.ebx;
     v->gprs.rcx = r.ecx;
@@ -118,14 +121,14 @@ void exit_hypercall(struct vcpu *v) {
 }
 
 void exit_invalid_opcode(struct vcpu *v) {
-    static const uint8_t vmcall[] = {0x0f, 0x01, 0xc1};
+    static const uint8_t vmcall[] = { 0x0f, 0x01, 0xc1 };
     struct segment cs;
     uint8_t insn[sizeof(vmcall)];
 
     vcpu_get_seg(v, SEG_CS, &cs);
-    uint64_t rip = vcpu_rip(v);
+    uintptr_t rip = vcpu_rip(v);
     if (guest_linear_read(v, cs.base + rip, insn, sizeof(insn), true)
-        && memcmp(insn, vmcall, sizeof(vmcall)) == 0) {
+     && memcmp(insn, vmcall, sizeof(vmcall)) == 0) {
         if (hypercall(v)) {
             vcpu_set_rip(v, rip + sizeof(vmcall));
         }
@@ -136,8 +139,9 @@ void exit_invalid_opcode(struct vcpu *v) {
 
 bool exit_msr_read(struct vcpu *v, uint32_t msr, uint64_t *value) {
     bool fault;
-    if (vlapic_rdmsr(v, msr, value, &fault) || mtrr_rdmsr(v, msr, value, &fault)
-        || msr_rdmsr(v, msr, value, &fault) || nvmx_rdmsr(v, msr, value, &fault)) {
+    if (vlapic_rdmsr(v, msr, value, &fault)
+     || mtrr_rdmsr(v, msr, value, &fault) || msr_rdmsr(v, msr, value, &fault)
+     || nvmx_rdmsr(v, msr, value, &fault)) {
         return !fault;
     }
     if (!virt_vmx && msr == MSR_EFER) {
@@ -174,21 +178,23 @@ void exit_rdmsr(struct vcpu *v) {
 
 bool exit_msr_write(struct vcpu *v, uint32_t msr, uint64_t value) {
     bool fault;
-    if (vlapic_wrmsr(v, msr, value, &fault) || mtrr_wrmsr(v, msr, value, &fault)
-        || msr_wrmsr(v, msr, value, &fault) || nvmx_wrmsr(v, msr, value, &fault)) {
+    if (vlapic_wrmsr(v, msr, value, &fault)
+     || mtrr_wrmsr(v, msr, value, &fault) || msr_wrmsr(v, msr, value, &fault)
+     || nvmx_wrmsr(v, msr, value, &fault)) {
         return !fault;
     }
     if (!virt_vmx && msr == MSR_EFER) {
-        if (value & ~cpuid_efer_allowed(v)) {
+        if ((value & ~cpuid_efer_allowed(v)) != 0) {
             return false;
         }
         uint64_t old = v->vmcb->save.efer;
-        v->vmcb->save.efer = (value & ~(uint64_t)EFER_LMA) | (old & EFER_LMA) | EFER_SVME;
+        v->vmcb->save.efer = (value & ~(uint64_t)EFER_LMA) | (old & EFER_LMA)
+            | EFER_SVME;
         // The processor would have flushed them for the guest's own write.
         svm_flush_guest_tlb(v);
     } else if (!virt_vmx && msr == MSR_IA32_CR_PAT) {
         // Each entry must name one of the types 0, 1, 4, 5, 6, or 7.
-        for (int i = 0; i < 8; i++) {
+        for (size_t i = 0; i < 8; i++) {
             uint8_t type = value >> (i * 8);
             if (type > 7 || type == 2 || type == 3) {
                 return false;
@@ -204,7 +210,8 @@ bool exit_msr_write(struct vcpu *v, uint32_t msr, uint64_t value) {
 }
 
 void exit_wrmsr(struct vcpu *v) {
-    uint64_t value = ((uint64_t)(uint32_t)v->gprs.rdx << 32) | (uint32_t)v->gprs.rax;
+    uint64_t value = ((uint64_t)(uint32_t)v->gprs.rdx << 32)
+        | (uint32_t)v->gprs.rax;
     if (!exit_msr_write(v, (uint32_t)v->gprs.rcx, value)) {
         vcpu_inject_exception(v, 13, true, 0);
         return;
@@ -214,10 +221,12 @@ void exit_wrmsr(struct vcpu *v) {
 
 void exit_xsetbv(struct vcpu *v) {
     uint32_t index = (uint32_t)v->gprs.rcx;
-    uint64_t value = ((uint64_t)(uint32_t)v->gprs.rdx << 32) | (uint32_t)v->gprs.rax;
+    uint64_t value = ((uint64_t)(uint32_t)v->gprs.rdx << 32)
+        | (uint32_t)v->gprs.rax;
 
     // Only the state components the guest gets.
-    if ((index == 0 && (value & ~cpuid_xcr0_allowed())) || !xsetbv_safe(index, value)) {
+    if ((index == 0 && (value & ~cpuid_xcr0_allowed()) != 0)
+     || !xsetbv_safe(index, value)) {
         vcpu_inject_exception(v, 13, true, 0);
         return;
     }
@@ -225,7 +234,7 @@ void exit_xsetbv(struct vcpu *v) {
 }
 
 // The guest's guest's accesses all exit, those to ports nobody traps too.
-static void port_native(uint16_t port, unsigned size, bool in, uint32_t *value) {
+static void port_native(uint16_t port, size_t size, bool in, uint32_t *value) {
     switch (size) {
         case 1: {
             if (in) {
@@ -254,7 +263,9 @@ static void port_native(uint16_t port, unsigned size, bool in, uint32_t *value) 
     }
 }
 
-static void port_access(struct vcpu *v, uint16_t port, unsigned size, bool in, uint32_t *value) {
+static void port_access(
+    struct vcpu *v, uint16_t port, size_t size, bool in, uint32_t *value
+) {
     vcpu_io_access(v, port, size);
     if (io_dispatch(v, port, size, in, value)) {
         return;
@@ -269,24 +280,31 @@ static void port_access(struct vcpu *v, uint16_t port, unsigned size, bool in, u
     }
 }
 
-void exit_io(struct vcpu *v, uint16_t port, unsigned size, bool in, uint32_t *value) {
+void exit_io(
+    struct vcpu *v, uint16_t port, size_t size, bool in, uint32_t *value
+) {
     profile_io(port);
     port_access(v, port, size, in, value);
 }
 
-static bool string_ins(struct vcpu *v, uint64_t linear, uint16_t port, unsigned size,
-                       uint32_t *value) {
+static bool string_ins(
+    struct vcpu *v, uintptr_t linear, uint16_t port, size_t size,
+    uint32_t *value
+) {
     (void)linear;
     port_access(v, port, size, true, value);
     return true;
 }
 
-static void string_outs(struct vcpu *v, uint16_t port, unsigned size, uint32_t value) {
+static void string_outs(
+    struct vcpu *v, uint16_t port, size_t size, uint32_t value
+) {
     port_access(v, port, size, false, &value);
 }
 
-static const struct emulate_mem string_mem = {mmio_read_linear, mmio_write_linear, string_ins,
-                                              string_outs};
+static const struct emulate_mem string_mem = {
+    mmio_read_linear, mmio_write_linear, string_ins, string_outs
+};
 
 void exit_string_io(struct vcpu *v, uint16_t port) {
     profile_io(port);
@@ -295,8 +313,11 @@ void exit_string_io(struct vcpu *v, uint16_t port) {
     struct insn insn;
     if (!insn_decode(v, &insn)) {
         if (!nvmx_exit_pending(v)) {
-            printf("Cannot decode the instruction at %#llx that reached trapped port %#x\n",
-                   (unsigned long long)vcpu_rip(v), port);
+            printf(
+                "Cannot decode the instruction at %#llx that reached trapped "
+                "port %#x\n",
+                (unsigned long long)vcpu_rip(v), port
+            );
         }
         return;
     }

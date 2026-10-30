@@ -39,7 +39,7 @@
     .text
 
     /*
-     * int vmx_enter(struct gprs *gprs, int launched)
+     * int vmx_enter(struct gprs *gprs, bool launched)
      *
      * Returns 0 after a VM exit, with the guest's registers in *gprs, 1 if the
      * VM entry failed, or 2 if an NMI reached the host before it.
@@ -60,8 +60,8 @@ vmx_enter:
     vmwrite %rsp, %rax
 
     /*
-     * The host's NMI handler restarts an NMI that arrives from here to the
-     * VM entry here, as the kick it may be would be left unseen otherwise.
+     * The host's NMI handler restarts an NMI that arrives from here to the VM
+     * entry here, as the kick it may be would be left unseen otherwise.
      */
     .globl vmx_enter_restart
 vmx_enter_restart:
@@ -72,7 +72,7 @@ vmx_enter_restart:
     jne 3f
     movq (%rsp), %rdi
     /* The moves below leave the flags alone. */
-    cmpl $0, 8(%rsp)
+    cmpb $0, 8(%rsp)
 
     movq GPR_RAX(%rdi), %rax
     movq GPR_RCX(%rdi), %rcx

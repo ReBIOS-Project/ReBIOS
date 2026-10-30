@@ -18,8 +18,9 @@
 #ifndef LOADER__CONFIG_H
 #define LOADER__CONFIG_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <efi.h>
 #include <handoff.h>
 
@@ -48,7 +49,7 @@ struct config {
     char boot_drive[CONFIG_BOOT_DRIVE_MAX];
     // One of the HANDOFF_CPU_FILTER_* values.
     uint32_t cpu_filter;
-    uint32_t cpu_range_count;
+    size_t cpu_range_count;
     struct {
         uint32_t first;
         uint32_t last;

@@ -18,8 +18,9 @@
 #ifndef HW__PCI_ENUM_H
 #define HW__PCI_ENUM_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <hw/pci_cfg.h>
 
 #define PCI_BAR_NONE 0
@@ -35,8 +36,8 @@ struct pci_bar {
     // Configuration space offset of its (lower) register.
     uint8_t reg;
     // As the firmware programmed it, and its size; size 0 means unimplemented.
-    uint64_t base;
-    uint64_t size;
+    uintptr_t base;
+    size_t size;
 };
 
 struct pci_function {
@@ -65,7 +66,7 @@ struct pci_function {
     uint8_t pcie_port_type;
 
     // 6 BARs for header type 0, 2 for header type 1, none for type 2.
-    uint8_t bar_count;
+    size_t bar_count;
     struct pci_bar bars[6];
     // The expansion ROM BAR, kind PCI_BAR_MEM32 if implemented.
     struct pci_bar rom;
@@ -78,9 +79,9 @@ struct pci_function {
     // closed. The prefetchable window is 64-bit when the bridge says so.
     uint32_t io_base;
     uint32_t io_limit;
-    uint32_t mem_base;
+    uintptr_t mem_base;
     uint32_t mem_limit;
-    uint64_t pref_base;
+    uintptr_t pref_base;
     uint64_t pref_limit;
     uint16_t bridge_control;
 
@@ -95,15 +96,15 @@ struct pci_root_bus {
 
 struct pci_topology {
     // Sorted by segment, bus, device, and function.
-    uint32_t function_count;
+    size_t function_count;
     struct pci_function *functions;
     // Sorted by segment and bus.
-    uint32_t root_bus_count;
+    size_t root_bus_count;
     struct pci_root_bus *root_buses;
 };
 
-// Scans every reachable function. Needs pci_cfg_init(). Runs once; later
-// calls return the same topology.
+// Scans every reachable function. Needs pci_cfg_init(). Runs once; later calls
+// return the same topology.
 const struct pci_topology *pci_enum_scan(void);
 
 // The topology, or NULL before pci_enum_scan().
@@ -112,6 +113,6 @@ const struct pci_topology *pci_enum_topology(void);
 struct pci_function *pci_enum_find(struct pci_addr addr);
 
 // Shrinks each Resizable BAR above max_size, and records its new size.
-void pci_enum_shrink_rebars(uint64_t max_size);
+void pci_enum_shrink_rebars(size_t max_size);
 
 #endif

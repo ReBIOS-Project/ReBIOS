@@ -351,8 +351,8 @@ AMD_HANDLED = r'NB_CFGn?|MmioCfgBaseAddr|MMIO Configuration Base Address( Regist
               r'|CPUID_(n_Features|PWR_THERM|Features|ExtFeatures)|(Extended )?CPUID Features.*' \
               r'|Thermal and Power Management CPUID Features.*'
 
-ADDR = re.compile(r'^\s*Register Address: ([0-9A-F_]+)H(?:\s*[-–−]\s*([0-9A-F_]+)H)?'
-                  r'(?:,\s*[0-9]+(?:\s*[-–−]\s*[0-9]+)?)?\s+(.*)$')
+ADDR = re.compile(r'^\s*Register Address: ([0-9A-F_]+)H(?:\s*[-\u2013\u2212]\s*([0-9A-F_]+)H)?'
+                  r'(?:,\s*[0-9]+(?:\s*[-\u2013\u2212]\s*[0-9]+)?)?\s+(.*)$')
 HEADING = re.compile(r'^\s*Table (2-\d+)\.\s')
 
 
@@ -447,10 +447,10 @@ def intel(specs):
     out = ['// SDM 325462-093 Vol. 4, Table 2-2, as reviewed.',
            'const struct msr_range msr_intel_architectural[] = {']
     for lo, hi in ranges(arch):
-        out.append(f'    {{{lo:#x}, {hi:#x}}}, // {label(names, lo, hi)}')
+        out.append(f'    {{ {lo:#x}, {hi:#x} }}, // {label(names, lo, hi)}')
     out += ['};',
             'const size_t msr_intel_architectural_count =',
-            '    sizeof(msr_intel_architectural) / sizeof(msr_intel_architectural[0]);']
+            '    sizeof(msr_intel_architectural) / sizeof(struct msr_range);']
     # Tables that give the guest nothing more are left out.
     used = [t for t in used if passed[t]]
     models = [(signatures, [t for t in ts if passed[t]]) for signatures, ts in MODELS]
@@ -462,30 +462,32 @@ def intel(specs):
                 tnames.setdefault(a, name)
         name = t.replace('-', '_')
         title = f'SDM 325462-093 Vol. 4, Table {t}: ' + ', '.join(kinds) + '.'
-        out += [''] + textwrap.wrap(title, 100, initial_indent='// ', subsequent_indent='// ')
+        out += [''] + textwrap.wrap(title, 79, initial_indent='// ', subsequent_indent='// ',
+                                break_long_words=False, break_on_hyphens=False)
         out.append(f'static const struct msr_range ranges_{name}[] = {{')
         for lo, hi in ranges(passed[t]):
-            out.append(f'    {{{lo:#x}, {hi:#x}}}, // {label(tnames, lo, hi)}')
+            out.append(f'    {{ {lo:#x}, {hi:#x} }}, // {label(tnames, lo, hi)}')
         out += ['};',
                 f'static const struct msr_ranges table_{name} = {{',
-                f'    ranges_{name}, sizeof(ranges_{name}) / sizeof(ranges_{name}[0]),',
+                f'    ranges_{name}, sizeof(ranges_{name}) / sizeof(struct msr_range),',
                 '};']
     for i, (signatures, ts) in enumerate(models):
         heading = (', '.join(sig + 'H' for sig in signatures) + ': SDM 325462-093 Vol. 4, Tables '
                    + ', '.join(ts) + '.')
-        out += [''] + textwrap.wrap(heading, 100, initial_indent='// ', subsequent_indent='// ')
+        out += [''] + textwrap.wrap(heading, 79, initial_indent='// ', subsequent_indent='// ',
+                                break_long_words=False, break_on_hyphens=False)
         out.append(f'static const struct msr_ranges *const model_tables_{i}[] = {{')
-        out += textwrap.wrap(', '.join('&table_' + t.replace('-', '_') for t in ts) + ',', 100,
+        out += textwrap.wrap(', '.join('&table_' + t.replace('-', '_') for t in ts) + ',', 79,
                              initial_indent='    ', subsequent_indent='    ')
         out.append('};')
     out += ['', '// By display family and model.', 'const struct msr_model msr_intel_models[] = {']
     for i, (signatures, ts) in enumerate(models):
         for sig in signatures:
             family, model = (int(x, 16) for x in sig.split('_'))
-            out.append(f'    {{{family:#x}, {model:#x}, model_tables_{i}, {len(ts)}}},')
+            out.append(f'    {{ {family:#x}, {model:#x}, model_tables_{i}, {len(ts)} }},')
     out += ['};',
-            'const size_t msr_intel_model_count = '
-            'sizeof(msr_intel_models) / sizeof(msr_intel_models[0]);']
+            'const size_t msr_intel_model_count = sizeof(msr_intel_models)',
+            '    / sizeof(struct msr_model);']
     order = sorted(left_out.items(), key=lambda x: (int(x[0][0].split('-')[1]), min(x[1])))
     left = [f'left out: Table {t} {min(addrs):#x} {name}' for (t, name), addrs in order]
     return out, left
@@ -626,10 +628,10 @@ def amd(specs):
     out = ['', '// APM 24593 rev. 3.45, Table A-1, and what every family has, as reviewed.',
            'const struct msr_range msr_amd_architectural[] = {']
     for lo, hi, what in AMD_ARCH:
-        out.append(f'    {{{lo:#x}, {hi:#x}}}, // {what}')
+        out.append(f'    {{ {lo:#x}, {hi:#x} }}, // {what}')
     out += ['};',
             'const size_t msr_amd_architectural_count =',
-            '    sizeof(msr_amd_architectural) / sizeof(msr_amd_architectural[0]);']
+            '    sizeof(msr_amd_architectural) / sizeof(struct msr_range);']
     left = []
     for family, docs in AMD_FAMILIES:
         passed = {}
@@ -653,11 +655,12 @@ def amd(specs):
         clash = set(passed) & set(left_out)
         assert not clash, (hex(family), [(hex(a), left_out[a]) for a in sorted(clash)])
         title = f'Family {family:X}h, {amd_documents(docs)}: ' + ', '.join(sorted(kinds)) + '.'
-        out += [''] + textwrap.wrap(title, 100, initial_indent='// ', subsequent_indent='// ')
+        out += [''] + textwrap.wrap(title, 79, initial_indent='// ', subsequent_indent='// ',
+                                break_long_words=False, break_on_hyphens=False)
         out.append(f'static const struct msr_range family_{family:x}h[] = {{')
         for lo, hi in ranges(passed):
             # A range whose names do not fit goes in runs of one name.
-            line = f'    {{{lo:#x}, {hi:#x}}}, // {passed[lo]} to {passed[hi]}'
+            line = f'    {{ {lo:#x}, {hi:#x} }}, // {passed[lo]} to {passed[hi]}'
             runs = [[lo, hi]]
             if len(line) > 100:
                 runs = []
@@ -670,17 +673,17 @@ def amd(specs):
                 what = passed[rlo]
                 if passed[rhi] != what:
                     what += ' to ' + passed[rhi]
-                out.append(f'    {{{rlo:#x}, {rhi:#x}}}, // {what}')
+                out.append(f'    {{ {rlo:#x}, {rhi:#x} }}, // {what}')
         out.append('};')
         left += [f'left out: Family {family:X}h {a:#x} {", ".join(sorted(n))}'
                  for a, n in sorted(left_out.items())]
     out += ['', '// By display family.', 'const struct msr_family msr_amd_families[] = {']
     for family, _ in AMD_FAMILIES:
-        out.append(f'    {{{family:#x}, family_{family:x}h, '
-                   f'sizeof(family_{family:x}h) / sizeof(family_{family:x}h[0])}},')
+        out.append(f'    {{ {family:#x}, family_{family:x}h, '
+                   f'sizeof(family_{family:x}h) / sizeof(struct msr_range) }},')
     out += ['};',
-            'const size_t msr_amd_family_count = '
-            'sizeof(msr_amd_families) / sizeof(msr_amd_families[0]);']
+            'const size_t msr_amd_family_count = sizeof(msr_amd_families)',
+            '    / sizeof(struct msr_family);']
     return out, left
 
 

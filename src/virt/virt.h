@@ -18,8 +18,9 @@
 #ifndef VIRT__VIRT_H
 #define VIRT__VIRT_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 // Picks VMX or SVM and sets up what all vCPUs share. Returns false if neither
 // is usable on this processor.
@@ -29,9 +30,9 @@ bool virt_init(void);
 void virt_cpu_init(void);
 
 // The intercept bitmaps every vCPU shares, in the vendor's format.
-uint64_t virt_io_bitmap(void);
-uint64_t virt_msr_bitmap(void);
-void virt_intercept_io(uint16_t port, unsigned count, bool intercept);
+uintptr_t virt_io_bitmap(void);
+uintptr_t virt_msr_bitmap(void);
+void virt_intercept_io(uint16_t port, size_t count, bool intercept);
 // Makes the guest's reads, writes, or both of an MSR exit, for a module to
 // handle them, whatever virt_pass_msr() says; the others follow that.
 void virt_intercept_msr(uint32_t msr, bool read, bool write);
@@ -40,11 +41,11 @@ void virt_intercept_msr(uint32_t msr, bool read, bool write);
 void virt_pass_msr(uint32_t msr);
 // The MSR bitmap for vCPUs whose x2APIC the processor virtualises, made by the
 // first of these calls, which pass reads or writes of an x2APIC MSR.
-uint64_t virt_msr_bitmap_x2apic(void);
+uintptr_t virt_msr_bitmap_x2apic(void);
 void virt_x2apic_msr_passed(uint32_t msr, bool read, bool write);
 // The same, for vCPUs whose IPIs it virtualises too, made once that one is
 // done by passing the ICR's MSR as well.
-uint64_t virt_msr_bitmap_x2apic_icr(void);
+uintptr_t virt_msr_bitmap_x2apic_icr(void);
 void virt_x2apic_icr_passed(uint32_t msr);
 
 // The reset a triple fault makes on a PC, held a while first if the log is on

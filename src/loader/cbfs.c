@@ -15,16 +15,16 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stdint.h>
-#include <stddef.h>
 #include <stdbool.h>
-#include <lib/log.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <loader/cbfs.h>
+#include <lib/log.h>
 
-#define FLASH_TOP 0x100000000ull
+#define FLASH_TOP ((uint64_t)0x100000000)
 // x86 chipsets decode the top 16MiB below 4GiB for the boot flash, so reads
 // there cannot reach device registers, unlike reads further down.
-#define FLASH_WINDOW (16ull << 20)
+#define FLASH_WINDOW ((uint64_t)16 << 20)
 
 #define MASTER_HEADER_POINTER (FLASH_TOP - 4)
 #define MASTER_HEADER_MAGIC 0x4f524243
@@ -51,18 +51,19 @@
 #define ATTRIBUTE_TAG_COMPRESSION 0x42435a4c
 #define COMPRESSION_ATTRIBUTE_SIZE 16
 
-static uint8_t flash_read8(uint64_t addr) {
+static uint8_t flash_read8(uintptr_t addr) {
     return *(volatile const uint8_t *)(uintptr_t)addr;
 }
 
-static uint32_t flash_read_be32(uint64_t addr) {
-    return (uint32_t)flash_read8(addr) << 24 | (uint32_t)flash_read8(addr + 1) << 16
-           | (uint32_t)flash_read8(addr + 2) << 8 | flash_read8(addr + 3);
+static uint32_t flash_read_be32(uintptr_t addr) {
+    return (uint32_t)flash_read8(addr) << 24
+        | (uint32_t)flash_read8(addr + 1) << 16
+        | (uint32_t)flash_read8(addr + 2) << 8 | flash_read8(addr + 3);
 }
 
 static bool file_magic_matches(uint64_t file) {
     const char *magic = FILE_MAGIC;
-    for (int i = 0; i < FILE_MAGIC_SIZE; i++) {
+    for (size_t i = 0; i < FILE_MAGIC_SIZE; i++) {
         if (flash_read8(file + i) != (uint8_t)magic[i]) {
             return false;
         }
@@ -71,8 +72,8 @@ static bool file_magic_matches(uint64_t file) {
 }
 
 // The name must be terminated within the space it is given.
-static bool name_matches(uint64_t addr, uint64_t space, const char *name) {
-    for (uint64_t i = 0; i < space; i++) {
+static bool name_matches(uintptr_t addr, uint64_t space, const char *name) {
+    for (size_t i = 0; i < space; i++) {
         uint8_t c = flash_read8(addr + i);
         if (c != (uint8_t)name[i]) {
             return false;
@@ -93,12 +94,13 @@ static bool file_compressed(uint64_t file, uint64_t attribute, uint64_t data) {
 
     while (attribute + ATTRIBUTE_HEADER_SIZE <= data) {
         uint32_t tag = flash_read_be32(file + attribute);
-        uint64_t size = flash_read_be32(file + attribute + 4);
+        size_t size = flash_read_be32(file + attribute + 4);
         if (tag == ATTRIBUTE_TAG_UNUSED || tag == ATTRIBUTE_TAG_UNUSED2
-            || size < ATTRIBUTE_HEADER_SIZE || attribute + size > data) {
+         || size < ATTRIBUTE_HEADER_SIZE || attribute + size > data) {
             break;
         }
-        if (tag == ATTRIBUTE_TAG_COMPRESSION && size >= COMPRESSION_ATTRIBUTE_SIZE) {
+        if (tag == ATTRIBUTE_TAG_COMPRESSION
+         && size >= COMPRESSION_ATTRIBUTE_SIZE) {
             return flash_read_be32(file + attribute + 8) != 0;
         }
         attribute += size;
@@ -106,50 +108,62 @@ static bool file_compressed(uint64_t file, uint64_t attribute, uint64_t data) {
     return false;
 }
 
-bool cbfs_find_file(const char *name, const void **data, uint32_t *size) {
-    uint32_t pointer = *(volatile const uint32_t *)(uintptr_t)MASTER_HEADER_POINTER;
+bool cbfs_find_file(const char *name, const void **data, size_t *size) {
+    uint32_t pointer
+        = *(volatile const uint32_t *)(uintptr_t)MASTER_HEADER_POINTER;
     if (pointer % 4 != 0) {
         return false;
     }
 
     // Whether the pointer is the header's address or its negative offset from
     // 4GiB, sign-extending it and adding 4GiB yields the address.
-    uint64_t header = FLASH_TOP + (uint64_t)(int64_t)(int32_t)pointer;
-    if (header < FLASH_TOP - FLASH_WINDOW || header > FLASH_TOP - MASTER_HEADER_SIZE
-        || flash_read_be32(header) != MASTER_HEADER_MAGIC) {
+    uintptr_t header = FLASH_TOP + (uint64_t)(int64_t)(int32_t)pointer;
+    if (header < FLASH_TOP - FLASH_WINDOW
+     || header > FLASH_TOP - MASTER_HEADER_SIZE
+     || flash_read_be32(header) != MASTER_HEADER_MAGIC) {
         return false;
     }
 
-    uint64_t rom_size = flash_read_be32(header + MASTER_HEADER_ROMSIZE);
+    size_t rom_size = flash_read_be32(header + MASTER_HEADER_ROMSIZE);
     uint64_t align = flash_read_be32(header + MASTER_HEADER_ALIGN);
-    uint64_t offset = flash_read_be32(header + MASTER_HEADER_OFFSET);
+    size_t offset = flash_read_be32(header + MASTER_HEADER_OFFSET);
     uint64_t rom = FLASH_TOP - rom_size;
     if (align == 0) {
         align = DEFAULT_ALIGN;
     }
-    if (header < rom || offset >= rom_size || rom + offset < FLASH_TOP - FLASH_WINDOW) {
-        printf("Ignoring the unusable CBFS master header at %#llx\n", (unsigned long long)header);
+    if (header < rom || offset >= rom_size
+     || rom + offset < FLASH_TOP - FLASH_WINDOW) {
+        printf(
+            "Ignoring the unusable CBFS master header at %#llx\n",
+            (unsigned long long)header
+        );
         return false;
     }
 
     uint64_t file = rom + offset;
     while (file + FILE_HEADER_SIZE <= FLASH_TOP && file_magic_matches(file)) {
-        uint64_t len = flash_read_be32(file + FILE_HEADER_LEN);
+        size_t len = flash_read_be32(file + FILE_HEADER_LEN);
         uint32_t type = flash_read_be32(file + FILE_HEADER_TYPE);
         uint64_t attributes = flash_read_be32(file + FILE_HEADER_ATTRIBUTES);
-        uint64_t data_offset = flash_read_be32(file + FILE_HEADER_DATA);
-        uint64_t name_end = attributes != 0 ? attributes : data_offset;
+        size_t data_offset = flash_read_be32(file + FILE_HEADER_DATA);
+        uintptr_t name_end = attributes != 0 ? attributes : data_offset;
 
         // Data overlapping the header would also keep the walk from advancing.
         if (data_offset < FILE_HEADER_SIZE || name_end < FILE_HEADER_SIZE
-            || name_end > data_offset || file + data_offset + len > FLASH_TOP) {
+         || name_end > data_offset || file + data_offset + len > FLASH_TOP) {
             break;
         }
 
-        if (type != FILE_TYPE_DELETED && type != FILE_TYPE_NULL
-            && name_matches(file + FILE_HEADER_SIZE, name_end - FILE_HEADER_SIZE, name)) {
+        bool matched = type != FILE_TYPE_DELETED && type != FILE_TYPE_NULL
+            && name_matches(
+                file + FILE_HEADER_SIZE, name_end - FILE_HEADER_SIZE, name
+            );
+        if (matched) {
             if (file_compressed(file, attributes, data_offset)) {
-                printf("The CBFS file %s is compressed, which is not supported\n", name);
+                printf(
+                    "The CBFS file %s is compressed, which is not supported\n",
+                    name
+                );
                 return false;
             }
             *data = (const void *)(uintptr_t)(file + data_offset);
@@ -157,7 +171,7 @@ bool cbfs_find_file(const char *name, const void **data, uint32_t *size) {
             return true;
         }
 
-        uint64_t end = file + data_offset + len - rom;
+        size_t end = file + data_offset + len - rom;
         file = rom + (end + align - 1) / align * align;
     }
 

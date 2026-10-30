@@ -15,11 +15,11 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stdint.h>
-#include <stddef.h>
 #include <stdbool.h>
-#include <sys/x86.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <virt/mtrr.h>
+#include <sys/x86.h>
 #include <virt/pci_plan.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>
@@ -37,22 +37,22 @@
 
 // SDM 325462-093 Vol. 3A, 14.11.1 and 14.11.2: the variable ranges' count,
 // fixed ranges, and write-combining; the default type's register.
-#define MTRRCAP_FIX (1u << 8)
-#define MTRRCAP_WC (1u << 10)
-#define DEF_TYPE_FE (1u << 10)
-#define DEF_TYPE_E (1u << 11)
+#define MTRRCAP_FIX ((uint32_t)1 << 8)
+#define MTRRCAP_WC ((uint32_t)1 << 10)
+#define DEF_TYPE_FE ((uint32_t)1 << 10)
+#define DEF_TYPE_E ((uint32_t)1 << 11)
 #define DEF_TYPE_RESERVED (~(uint64_t)0xcff)
-#define PHYSBASE_RESERVED_LOW 0xf00ull
-#define PHYSMASK_VALID (1ull << 11)
-#define PHYSMASK_RESERVED_LOW 0x7ffull
+#define PHYSBASE_RESERVED_LOW ((uint64_t)0xf00)
+#define PHYSMASK_VALID ((uint64_t)1 << 11)
+#define PHYSMASK_RESERVED_LOW ((uint64_t)0x7ff)
 
 #define TYPE_UC 0
 #define TYPE_WB 6
-#define FIXED_WB 0x0606060606060606ull
+#define FIXED_WB ((uint64_t)0x0606060606060606)
 #define FIXED_UC 0
 
 #define FIXED_VGA 2
-#define FOUR_GIB 0x100000000ull
+#define FOUR_GIB ((uint64_t)0x100000000)
 
 // Bits MAXPHYADDR-1:12.
 static uint64_t address_mask;
@@ -83,41 +83,43 @@ static int fixed_index(uint32_t msr) {
 }
 
 void mtrr_init(void) {
-    unsigned bits = cpuid(0x80000000, 0).eax >= 0x80000008 ? cpuid(0x80000008, 0).eax & 0xff : 36;
-    address_mask = ((1ull << bits) - 1) & ~0xfffull;
+    unsigned int bits = cpuid(0x80000000, 0).eax >= 0x80000008
+        ? cpuid(0x80000008, 0).eax & 0xff : 36;
+    address_mask = (((uint64_t)1 << bits) - 1) & ~(uint64_t)0xfff;
     virt_intercept_msr(MSR_MTRRCAP, true, true);
     virt_intercept_msr(MSR_DEF_TYPE, true, true);
     // Those beyond the guest's count too, which the host may have.
-    for (uint32_t msr = MSR_PHYSBASE0; msr < MSR_VARIABLE_END; msr++) {
+    for (size_t msr = MSR_PHYSBASE0; msr < MSR_VARIABLE_END; msr++) {
         virt_intercept_msr(msr, true, true);
     }
     virt_intercept_msr(MSR_FIX64K_00000, true, true);
     virt_intercept_msr(MSR_FIX16K_80000, true, true);
     virt_intercept_msr(MSR_FIX16K_A0000, true, true);
-    for (uint32_t msr = MSR_FIX4K_C0000; msr <= MSR_FIX4K_F8000; msr++) {
+    for (size_t msr = MSR_FIX4K_C0000; msr <= MSR_FIX4K_F8000; msr++) {
         virt_intercept_msr(msr, true, true);
     }
 }
 
 void mtrr_vcpu_init(struct vcpu *v) {
     v->mtrr_def_type = DEF_TYPE_E | DEF_TYPE_FE | TYPE_WB;
-    for (unsigned i = 0; i < MTRR_FIXED_COUNT; i++) {
+    for (size_t i = 0; i < MTRR_FIXED_COUNT; i++) {
         v->mtrr_fixed[i] = FIXED_WB;
     }
     v->mtrr_fixed[FIXED_VGA] = FIXED_UC;
-    for (unsigned i = 0; i < 2 * MTRR_VARIABLE_COUNT; i++) {
+    for (size_t i = 0; i < 2 * MTRR_VARIABLE_COUNT; i++) {
         v->mtrr_variable[i] = 0;
     }
     // The PCI hole in the largest aligned pieces that fit.
     const struct pci_plan *plan = pci_plan();
-    uint64_t base = plan != NULL ? plan->tolud : FOUR_GIB;
-    for (unsigned n = 0; base < FOUR_GIB && n < MTRR_VARIABLE_COUNT; n++) {
-        uint64_t size = base & -base;
+    uintptr_t base = plan != NULL ? plan->tolud : FOUR_GIB;
+    for (size_t n = 0; base < FOUR_GIB && n < MTRR_VARIABLE_COUNT; n++) {
+        size_t size = base & -base;
         while (base + size > FOUR_GIB) {
             size >>= 1;
         }
         v->mtrr_variable[2 * n] = base | TYPE_UC;
-        v->mtrr_variable[2 * n + 1] = (~(size - 1) & address_mask) | PHYSMASK_VALID;
+        v->mtrr_variable[2 * n + 1] = (~(size - 1) & address_mask)
+            | PHYSMASK_VALID;
         base += size;
     }
 }
@@ -132,7 +134,7 @@ bool mtrr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
     } else if (fixed >= 0) {
         *value = v->mtrr_fixed[fixed];
     } else if (msr >= MSR_PHYSBASE0 && msr < MSR_VARIABLE_END) {
-        uint32_t i = msr - MSR_PHYSBASE0;
+        size_t i = msr - MSR_PHYSBASE0;
         if (i < 2 * MTRR_VARIABLE_COUNT) {
             *value = v->mtrr_variable[i];
         } else {
@@ -150,13 +152,13 @@ bool mtrr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
     if (msr == MSR_MTRRCAP) {
         *fault = true;
     } else if (msr == MSR_DEF_TYPE) {
-        if ((value & DEF_TYPE_RESERVED) || !type_valid((uint8_t)value)) {
+        if ((value & DEF_TYPE_RESERVED) != 0 || !type_valid((uint8_t)value)) {
             *fault = true;
         } else {
             v->mtrr_def_type = value;
         }
     } else if (fixed >= 0) {
-        for (unsigned b = 0; b < 8; b++) {
+        for (size_t b = 0; b < 8; b++) {
             if (!type_valid((uint8_t)(value >> (8 * b)))) {
                 *fault = true;
             }
@@ -165,12 +167,13 @@ bool mtrr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
             v->mtrr_fixed[fixed] = value;
         }
     } else if (msr >= MSR_PHYSBASE0 && msr < MSR_VARIABLE_END) {
-        uint32_t i = msr - MSR_PHYSBASE0;
+        size_t i = msr - MSR_PHYSBASE0;
         bool is_mask = i % 2 != 0;
-        uint64_t reserved = is_mask ? PHYSMASK_RESERVED_LOW | ~(address_mask | PHYSMASK_VALID)
-                                    : PHYSBASE_RESERVED_LOW | ~(address_mask | 0xff);
-        if (i >= 2 * MTRR_VARIABLE_COUNT || (value & reserved)
-            || (!is_mask && !type_valid((uint8_t)value))) {
+        uint64_t reserved = is_mask
+            ? PHYSMASK_RESERVED_LOW | ~(address_mask | PHYSMASK_VALID)
+            : PHYSBASE_RESERVED_LOW | ~(address_mask | 0xff);
+        if (i >= 2 * MTRR_VARIABLE_COUNT || (value & reserved) != 0
+         || (!is_mask && !type_valid((uint8_t)value))) {
             *fault = true;
         } else {
             v->mtrr_variable[i] = value;

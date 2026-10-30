@@ -18,8 +18,8 @@
 #ifndef LOADER__PCI_IO_H
 #define LOADER__PCI_IO_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <efi.h>
 #include <handoff.h>
 
@@ -46,15 +46,19 @@ struct pci_io_device {
 struct pci_io_device *pci_io_devices(EFI_UINTN *count);
 
 // Finds the PCI function a device path leads to.
-bool pci_io_device_on_path(EFI_DEVICE_PATH_PROTOCOL *path, struct pci_io_device *dev);
+bool pci_io_device_on_path(
+    EFI_DEVICE_PATH_PROTOCOL *path, struct pci_io_device *dev
+);
 
-static inline bool pci_address_equal(struct handoff_pci_address a,
-                                     struct handoff_pci_address b) {
+static inline bool pci_address_equal(
+    struct handoff_pci_address a, struct handoff_pci_address b
+) {
     return a.segment == b.segment && a.bus == b.bus && a.devfn == b.devfn;
 }
 
-static inline int pci_address_compare(struct handoff_pci_address a,
-                                      struct handoff_pci_address b) {
+static inline int pci_address_compare(
+    struct handoff_pci_address a, struct handoff_pci_address b
+) {
     uint32_t ka = (uint32_t)a.segment << 16 | (uint32_t)a.bus << 8 | a.devfn;
     uint32_t kb = (uint32_t)b.segment << 16 | (uint32_t)b.bus << 8 | b.devfn;
     return ka < kb ? -1 : ka > kb;

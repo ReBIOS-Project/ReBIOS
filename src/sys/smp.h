@@ -18,8 +18,9 @@
 #ifndef SYS__SMP_H
 #define SYS__SMP_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <sys/cpu.h>
 
 // Finds the processors the MADT lists, and gives each its area. Needs
@@ -30,8 +31,8 @@ void smp_init(void);
 void smp_start_aps(void);
 
 // The processors found, the boot processor first, started or not.
-uint32_t smp_cpu_count(void);
-struct cpu *smp_cpu(uint32_t index);
+size_t smp_cpu_count(void);
+struct cpu *smp_cpu(size_t index);
 struct cpu *smp_cpu_by_apic_id(uint32_t apic_id);
 
 // Whether the guest gets the processor with the APIC ID, as the configuration

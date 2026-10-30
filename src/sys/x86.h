@@ -18,52 +18,52 @@
 #ifndef SYS__X86_H
 #define SYS__X86_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 
-#define CR0_PE (1u << 0)
-#define CR0_MP (1u << 1)
-#define CR0_EM (1u << 2)
-#define CR0_TS (1u << 3)
-#define CR0_ET (1u << 4)
-#define CR0_NE (1u << 5)
-#define CR0_WP (1u << 16)
-#define CR0_AM (1u << 18)
-#define CR0_NW (1u << 29)
-#define CR0_CD (1u << 30)
-#define CR0_PG (1u << 31)
+#define CR0_PE ((uint32_t)1 << 0)
+#define CR0_MP ((uint32_t)1 << 1)
+#define CR0_EM ((uint32_t)1 << 2)
+#define CR0_TS ((uint32_t)1 << 3)
+#define CR0_ET ((uint32_t)1 << 4)
+#define CR0_NE ((uint32_t)1 << 5)
+#define CR0_WP ((uint32_t)1 << 16)
+#define CR0_AM ((uint32_t)1 << 18)
+#define CR0_NW ((uint32_t)1 << 29)
+#define CR0_CD ((uint32_t)1 << 30)
+#define CR0_PG ((uint32_t)1 << 31)
 
-#define CR4_VME (1u << 0)
-#define CR4_PVI (1u << 1)
-#define CR4_TSD (1u << 2)
-#define CR4_DE (1u << 3)
-#define CR4_PSE (1u << 4)
-#define CR4_PAE (1u << 5)
-#define CR4_MCE (1u << 6)
-#define CR4_PGE (1u << 7)
-#define CR4_PCE (1u << 8)
-#define CR4_OSFXSR (1u << 9)
-#define CR4_OSXMMEXCPT (1u << 10)
-#define CR4_UMIP (1u << 11)
-#define CR4_LA57 (1u << 12)
-#define CR4_VMXE (1u << 13)
-#define CR4_SMXE (1u << 14)
-#define CR4_FSGSBASE (1u << 16)
-#define CR4_PCIDE (1u << 17)
-#define CR4_OSXSAVE (1u << 18)
-#define CR4_KL (1u << 19)
-#define CR4_SMEP (1u << 20)
-#define CR4_SMAP (1u << 21)
-#define CR4_PKE (1u << 22)
-#define CR4_CET (1u << 23)
-#define CR4_PKS (1u << 24)
-#define CR4_UINTR (1u << 25)
-#define CR4_LASS (1u << 27)
-#define CR4_LAM_SUP (1u << 28)
-#define CR4_FRED (1ull << 32)
+#define CR4_VME ((uint32_t)1 << 0)
+#define CR4_PVI ((uint32_t)1 << 1)
+#define CR4_TSD ((uint32_t)1 << 2)
+#define CR4_DE ((uint32_t)1 << 3)
+#define CR4_PSE ((uint32_t)1 << 4)
+#define CR4_PAE ((uint32_t)1 << 5)
+#define CR4_MCE ((uint32_t)1 << 6)
+#define CR4_PGE ((uint32_t)1 << 7)
+#define CR4_PCE ((uint32_t)1 << 8)
+#define CR4_OSFXSR ((uint32_t)1 << 9)
+#define CR4_OSXMMEXCPT ((uint32_t)1 << 10)
+#define CR4_UMIP ((uint32_t)1 << 11)
+#define CR4_LA57 ((uint32_t)1 << 12)
+#define CR4_VMXE ((uint32_t)1 << 13)
+#define CR4_SMXE ((uint32_t)1 << 14)
+#define CR4_FSGSBASE ((uint32_t)1 << 16)
+#define CR4_PCIDE ((uint32_t)1 << 17)
+#define CR4_OSXSAVE ((uint32_t)1 << 18)
+#define CR4_KL ((uint32_t)1 << 19)
+#define CR4_SMEP ((uint32_t)1 << 20)
+#define CR4_SMAP ((uint32_t)1 << 21)
+#define CR4_PKE ((uint32_t)1 << 22)
+#define CR4_CET ((uint32_t)1 << 23)
+#define CR4_PKS ((uint32_t)1 << 24)
+#define CR4_UINTR ((uint32_t)1 << 25)
+#define CR4_LASS ((uint32_t)1 << 27)
+#define CR4_LAM_SUP ((uint32_t)1 << 28)
+#define CR4_FRED ((uint64_t)1 << 32)
 
-#define CR3_LAM_U57 (1ull << 61)
-#define CR3_LAM_U48 (1ull << 62)
+#define CR3_LAM_U57 ((uint64_t)1 << 61)
+#define CR3_LAM_U48 ((uint64_t)1 << 62)
 
 #define MSR_IA32_APIC_BASE 0x1b
 #define MSR_IA32_FEATURE_CONTROL 0x3a
@@ -74,42 +74,42 @@
 #define MSR_EFER 0xc0000080
 
 // SDM 325462-093 Vol. 4, Tables 2-2 and 2-3.
-#define MISC_ENABLE_LIMIT_CPUID (1ull << 22)
-#define MISC_ENABLE_XD_DISABLE (1ull << 34)
+#define MISC_ENABLE_LIMIT_CPUID ((uint64_t)1 << 22)
+#define MISC_ENABLE_XD_DISABLE ((uint64_t)1 << 34)
 
 // SDM 325462-093 Vol. 3C, Tables 36-6 and 36-7.
-#define RTIT_CTL_TRACEEN (1u << 0)
-#define RTIT_STATUS_ERROR (1u << 4)
+#define RTIT_CTL_TRACEEN ((uint32_t)1 << 0)
+#define RTIT_STATUS_ERROR ((uint32_t)1 << 4)
 
-#define EFER_SCE (1u << 0)
-#define EFER_LME (1u << 8)
-#define EFER_LMA (1u << 10)
-#define EFER_NXE (1u << 11)
-#define EFER_SVME (1u << 12)
-#define EFER_LMSLE (1u << 13)
-#define EFER_FFXSR (1u << 14)
-#define EFER_TCE (1u << 15)
-#define EFER_UAIE (1u << 20)
-#define EFER_AIBRSE (1u << 21)
+#define EFER_SCE ((uint32_t)1 << 0)
+#define EFER_LME ((uint32_t)1 << 8)
+#define EFER_LMA ((uint32_t)1 << 10)
+#define EFER_NXE ((uint32_t)1 << 11)
+#define EFER_SVME ((uint32_t)1 << 12)
+#define EFER_LMSLE ((uint32_t)1 << 13)
+#define EFER_FFXSR ((uint32_t)1 << 14)
+#define EFER_TCE ((uint32_t)1 << 15)
+#define EFER_UAIE ((uint32_t)1 << 20)
+#define EFER_AIBRSE ((uint32_t)1 << 21)
 
-#define RFLAGS_CF (1u << 0)
-#define RFLAGS_FIXED (1u << 1)
-#define RFLAGS_PF (1u << 2)
-#define RFLAGS_AF (1u << 4)
-#define RFLAGS_ZF (1u << 6)
-#define RFLAGS_SF (1u << 7)
-#define RFLAGS_TF (1u << 8)
-#define RFLAGS_IF (1u << 9)
-#define RFLAGS_DF (1u << 10)
-#define RFLAGS_OF (1u << 11)
-#define RFLAGS_IOPL (3u << 12)
-#define RFLAGS_NT (1u << 14)
-#define RFLAGS_RF (1u << 16)
-#define RFLAGS_VM (1u << 17)
-#define RFLAGS_AC (1u << 18)
-#define RFLAGS_VIF (1u << 19)
-#define RFLAGS_VIP (1u << 20)
-#define RFLAGS_ID (1u << 21)
+#define RFLAGS_CF ((uint32_t)1 << 0)
+#define RFLAGS_FIXED ((uint32_t)1 << 1)
+#define RFLAGS_PF ((uint32_t)1 << 2)
+#define RFLAGS_AF ((uint32_t)1 << 4)
+#define RFLAGS_ZF ((uint32_t)1 << 6)
+#define RFLAGS_SF ((uint32_t)1 << 7)
+#define RFLAGS_TF ((uint32_t)1 << 8)
+#define RFLAGS_IF ((uint32_t)1 << 9)
+#define RFLAGS_DF ((uint32_t)1 << 10)
+#define RFLAGS_OF ((uint32_t)1 << 11)
+#define RFLAGS_IOPL ((uint32_t)3 << 12)
+#define RFLAGS_NT ((uint32_t)1 << 14)
+#define RFLAGS_RF ((uint32_t)1 << 16)
+#define RFLAGS_VM ((uint32_t)1 << 17)
+#define RFLAGS_AC ((uint32_t)1 << 18)
+#define RFLAGS_VIF ((uint32_t)1 << 19)
+#define RFLAGS_VIP ((uint32_t)1 << 20)
+#define RFLAGS_ID ((uint32_t)1 << 21)
 
 struct cpuid_regs {
     uint32_t eax;
@@ -120,9 +120,11 @@ struct cpuid_regs {
 
 static inline struct cpuid_regs cpuid(uint32_t leaf, uint32_t subleaf) {
     struct cpuid_regs r;
-    asm volatile ("cpuid"
-                  : "=a"(r.eax), "=b"(r.ebx), "=c"(r.ecx), "=d"(r.edx)
-                  : "a"(leaf), "c"(subleaf));
+    asm volatile (
+        "cpuid"
+        : "=a"(r.eax), "=b"(r.ebx), "=c"(r.ecx), "=d"(r.edx)
+        : "a"(leaf), "c"(subleaf)
+    );
     return r;
 }
 
@@ -136,7 +138,7 @@ struct cpu_signature {
 
 static inline struct cpu_signature cpu_signature(void) {
     uint32_t eax = cpuid(1, 0).eax;
-    struct cpu_signature s = {(eax >> 8) & 0xf, (eax >> 4) & 0xf, eax & 0xf};
+    struct cpu_signature s = { (eax >> 8) & 0xf, (eax >> 4) & 0xf, eax & 0xf };
     if (s.family == 6 || s.family == 0xf) {
         s.model |= ((eax >> 16) & 0xf) << 4;
     }
@@ -153,8 +155,11 @@ static inline uint64_t rdmsr(uint32_t msr) {
 }
 
 static inline void wrmsr(uint32_t msr, uint64_t value) {
-    asm volatile ("wrmsr" :: "c"(msr), "a"((uint32_t)value), "d"((uint32_t)(value >> 32))
-                  : "memory");
+    asm volatile (
+        "wrmsr"
+        :
+        : "c"(msr), "a"((uint32_t)value), "d"((uint32_t)(value >> 32))
+            : "memory");
 }
 
 static inline uint64_t rdtsc(void) {
@@ -246,23 +251,23 @@ static inline uintptr_t read_dr7(void) {
 }
 
 static inline void cpu_relax(void) {
-    asm volatile ("pause" ::: "memory");
+    asm volatile ("pause" :: : "memory");
 }
 
 static inline void cli(void) {
-    asm volatile ("cli" ::: "memory");
+    asm volatile ("cli" :: : "memory");
 }
 
 static inline void sti(void) {
-    asm volatile ("sti" ::: "memory");
+    asm volatile ("sti" :: : "memory");
 }
 
 static inline void hlt(void) {
-    asm volatile ("hlt" ::: "memory");
+    asm volatile ("hlt" :: : "memory");
 }
 
 static inline void wbinvd(void) {
-    asm volatile ("wbinvd" ::: "memory");
+    asm volatile ("wbinvd" :: : "memory");
 }
 
 static inline void invlpg(uintptr_t addr) {

@@ -15,8 +15,8 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-// The ROM's header and its entry points, which set up what the C code
-// expects (vgabios.h) and call it with 32-bit returns, as -m16 code has.
+// The ROM's header and its entry points, which set up what the C code expects
+// (vgabios.h) and call it with 32-bit returns, as -m16 code has.
     .code16
 
     .section .header, "ax"

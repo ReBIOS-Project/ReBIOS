@@ -18,6 +18,7 @@
 #ifndef VIRT__INSN_MEM_TABLE_H
 #define VIRT__INSN_MEM_TABLE_H
 
+#include <stddef.h>
 #include <stdint.h>
 #include <virt/insn.h>
 
@@ -29,13 +30,13 @@
 #define INSN_MODE_64 0x01
 #define INSN_MODE_OTHER 0x02
 
-// How large a memory operand is: size bytes; size bytes at a vector length
-// of 128 bits, doubling with each step of L; the operand size; the operand
-// size, 64 bits by default in 64-bit mode (PUSH and POP); a far pointer, a
-// selector after an offset of the operand size; BOUND's two bounds of the
-// operand size; the x87 environment and state, 14 and 94 bytes with a 16-bit
-// operand size, else 28 and 108; nothing, as only its address is used; or
-// anything anywhere (XSAVE, gathers and scatters, AMX tiles).
+// How large a memory operand is: size bytes; size bytes at a vector length of
+// 128 bits, doubling with each step of L; the operand size; the operand size,
+// 64 bits by default in 64-bit mode (PUSH and POP); a far pointer, a selector
+// after an offset of the operand size; BOUND's two bounds of the operand size;
+// the x87 environment and state, 14 and 94 bytes with a 16-bit operand size,
+// else 28 and 108; nothing, as only its address is used; or anything anywhere
+// (XSAVE, gathers and scatters, AMX tiles).
 #define INSN_SIZE_FIXED 0
 #define INSN_SIZE_VECTOR 1
 #define INSN_SIZE_OPERAND 2
@@ -68,6 +69,6 @@ struct insn_mem_form {
 };
 
 extern const struct insn_mem_form insn_mem_forms[];
-extern const unsigned insn_mem_form_count;
+extern const size_t insn_mem_form_count;
 
 #endif

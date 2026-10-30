@@ -15,13 +15,13 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stdint.h>
-#include <stddef.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <efi.h>
+#include <loader/pci_io.h>
 #include <lib/log.h>
 #include <loader/efi_glue.h>
-#include <loader/pci_io.h>
 
 static EFI_GUID pci_io_guid = EFI_PCI_IO_PROTOCOL_GUID;
 
@@ -30,9 +30,11 @@ static bool pci_io_device_get(EFI_HANDLE handle, struct pci_io_device *dev) {
     EFI_UINTN segment, bus, device, function;
     uint32_t header[4];
 
-    if (efi_bs->HandleProtocol(handle, &pci_io_guid, (void **)&io) != EFI_SUCCESS || io == NULL
-        || io->GetLocation(io, &segment, &bus, &device, &function) != EFI_SUCCESS
-        || io->Pci.Read(io, EfiPciIoWidthUint32, 0, 4, header) != EFI_SUCCESS) {
+    if (efi_bs->HandleProtocol(handle, &pci_io_guid, (void **)&io)
+     != EFI_SUCCESS
+     || io == NULL
+     || io->GetLocation(io, &segment, &bus, &device, &function) != EFI_SUCCESS
+     || io->Pci.Read(io, EfiPciIoWidthUint32, 0, 4, header) != EFI_SUCCESS) {
         return false;
     }
 
@@ -50,7 +52,7 @@ static bool pci_io_device_get(EFI_HANDLE handle, struct pci_io_device *dev) {
 }
 
 struct pci_io_device *pci_io_devices(EFI_UINTN *count) {
-    EFI_UINTN handle_count;
+    size_t handle_count;
     EFI_HANDLE *handles = efi_locate_handles(&pci_io_guid, &handle_count);
     struct pci_io_device *devices = NULL;
 
@@ -59,12 +61,15 @@ struct pci_io_device *pci_io_devices(EFI_UINTN *count) {
         return NULL;
     }
 
-    if (efi_bs->AllocatePool(EfiLoaderData, handle_count * sizeof(*devices),
-                             (void **)&devices) != EFI_SUCCESS) {
+    EFI_STATUS status = efi_bs->AllocatePool(
+        EfiLoaderData, handle_count * sizeof(struct pci_io_device),
+        (void **)&devices
+    );
+    if (status != EFI_SUCCESS) {
         printf("Cannot allocate memory to list the PCI devices\n");
         devices = NULL;
     } else {
-        for (EFI_UINTN i = 0; i < handle_count; i++) {
+        for (size_t i = 0; i < handle_count; i++) {
             if (pci_io_device_get(handles[i], &devices[*count])) {
                 (*count)++;
             }
@@ -79,11 +84,14 @@ struct pci_io_device *pci_io_devices(EFI_UINTN *count) {
     return devices;
 }
 
-bool pci_io_device_on_path(EFI_DEVICE_PATH_PROTOCOL *path, struct pci_io_device *dev) {
+bool pci_io_device_on_path(
+    EFI_DEVICE_PATH_PROTOCOL *path, struct pci_io_device *dev
+) {
     EFI_DEVICE_PATH_PROTOCOL *rest = path;
     EFI_HANDLE handle;
 
-    if (efi_bs->LocateDevicePath(&pci_io_guid, &rest, &handle) != EFI_SUCCESS) {
+    if (efi_bs->LocateDevicePath(&pci_io_guid, &rest, &handle)
+     != EFI_SUCCESS) {
         return false;
     }
     return pci_io_device_get(handle, dev);

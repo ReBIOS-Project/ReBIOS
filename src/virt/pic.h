@@ -18,8 +18,8 @@
 #ifndef VIRT__PIC_H
 #define VIRT__PIC_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 // A cascaded pair of 8259A interrupt controllers with the PC's edge/level
 // control registers, as a model the caller serialises.
@@ -36,22 +36,22 @@ void pic_write(uint16_t port, uint8_t value);
 uint8_t pic_read(uint16_t port);
 
 // The level of an IRQ line.
-void pic_set_irq(unsigned irq, bool level);
-// An edge on an IRQ line, which stays high until acknowledged, as the
-// 8259A needs.
-void pic_pulse_irq(unsigned irq);
+void pic_set_irq(unsigned int irq, bool level);
+// An edge on an IRQ line, which stays high until acknowledged, as the 8259A
+// needs.
+void pic_pulse_irq(unsigned int irq);
 
-// Whether the master's INT output is asserted, and the interrupt
-// acknowledge that answers it: the vector, IRQ 7's when nothing requests.
+// Whether the master's INT output is asserted, and the interrupt acknowledge
+// that answers it: the vector, IRQ 7's when nothing requests.
 bool pic_output(void);
 uint8_t pic_acknowledge(void);
 
-bool pic_masked(unsigned irq);
-bool pic_in_service(unsigned irq);
+bool pic_masked(unsigned int irq);
+bool pic_in_service(unsigned int irq);
 // Whether the input was acknowledged since its line last rose.
-bool pic_acknowledged(unsigned irq);
+bool pic_acknowledged(unsigned int irq);
 // Whether the ELCR makes an input level-triggered.
-bool pic_level_triggered(unsigned irq);
+bool pic_level_triggered(unsigned int irq);
 // Whether software has unmasked any of the master's inputs since it last
 // masked them all.
 bool pic_in_use(void);

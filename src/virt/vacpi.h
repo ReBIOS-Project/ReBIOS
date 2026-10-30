@@ -18,6 +18,7 @@
 #ifndef VIRT__VACPI_H
 #define VIRT__VACPI_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #define VACPI_FADT_SIZE 116
@@ -30,10 +31,10 @@
 void vacpi_init(void);
 
 // The guest's DSDT, generated from the firmware's namespace in ACPI 1.0 AML,
-// and the device its methods call the firmware's through, which this places
-// in guest memory. Needs the guest's PCI interrupt routing, irq_route_pci().
+// and the device its methods call the firmware's through, which this places in
+// guest memory. Needs the guest's PCI interrupt routing, irq_route_pci().
 // Returns the table, which the caller frees, and its length, or NULL.
-uint8_t *vacpi_dsdt(uint32_t *length);
+uint8_t *vacpi_dsdt(size_t *length);
 
 // A revision 1 FADT and a FACS for the guest's tables.
 void vacpi_fadt(uint8_t fadt[VACPI_FADT_SIZE], uint32_t facs, uint32_t dsdt);

@@ -15,8 +15,9 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <hw/serial.h>
 #include <sys/x86.h>
 
@@ -64,8 +65,8 @@ bool serial_init(uint16_t port, uint32_t baud) {
 
 void serial_putc(uint16_t port, char c) {
     // Bounded, so that a port that stops draining cannot hang the caller.
-    for (int i = 0; i < 100000; i++) {
-        if (inb(port + UART_LSR) & UART_LSR_THRE) {
+    for (size_t i = 0; i < 100000; i++) {
+        if ((inb(port + UART_LSR) & UART_LSR_THRE) != 0) {
             break;
         }
         cpu_relax();

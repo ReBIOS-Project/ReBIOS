@@ -18,8 +18,9 @@
 #ifndef VIRT__VMX_H
 #define VIRT__VMX_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 // VMCS field encodings (SDM 325462-093 Vol. 3D, Appendix B).
 #define VMCS_VPID 0x0000
@@ -174,94 +175,94 @@
 #define VMCS_HOST_RIP 0x6c16
 
 // Pin-based controls (SDM 325462-093 Vol. 3C, Table 27-5).
-#define PIN_EXT_INTR_EXITING (1u << 0)
-#define PIN_NMI_EXITING (1u << 3)
-#define PIN_VIRTUAL_NMIS (1u << 5)
-#define PIN_PREEMPTION_TIMER (1u << 6)
-#define PIN_POSTED_INTR (1u << 7)
+#define PIN_EXT_INTR_EXITING ((uint32_t)1 << 0)
+#define PIN_NMI_EXITING ((uint32_t)1 << 3)
+#define PIN_VIRTUAL_NMIS ((uint32_t)1 << 5)
+#define PIN_PREEMPTION_TIMER ((uint32_t)1 << 6)
+#define PIN_POSTED_INTR ((uint32_t)1 << 7)
 
 // Primary processor-based controls (SDM 325462-093 Vol. 3C, Table 27-6).
-#define PROC_INTR_WINDOW_EXITING (1u << 2)
-#define PROC_TSC_OFFSETTING (1u << 3)
-#define PROC_HLT_EXITING (1u << 7)
-#define PROC_INVLPG_EXITING (1u << 9)
-#define PROC_MWAIT_EXITING (1u << 10)
-#define PROC_RDPMC_EXITING (1u << 11)
-#define PROC_RDTSC_EXITING (1u << 12)
-#define PROC_CR3_LOAD_EXITING (1u << 15)
-#define PROC_CR3_STORE_EXITING (1u << 16)
-#define PROC_TERTIARY_CONTROLS (1u << 17)
-#define PROC_CR8_LOAD_EXITING (1u << 19)
-#define PROC_CR8_STORE_EXITING (1u << 20)
-#define PROC_TPR_SHADOW (1u << 21)
-#define PROC_NMI_WINDOW_EXITING (1u << 22)
-#define PROC_MOV_DR_EXITING (1u << 23)
-#define PROC_UNCOND_IO_EXITING (1u << 24)
-#define PROC_IO_BITMAPS (1u << 25)
-#define PROC_MONITOR_TRAP_FLAG (1u << 27)
-#define PROC_MSR_BITMAPS (1u << 28)
-#define PROC_MONITOR_EXITING (1u << 29)
-#define PROC_PAUSE_EXITING (1u << 30)
-#define PROC_SECONDARY_CONTROLS (1u << 31)
+#define PROC_INTR_WINDOW_EXITING ((uint32_t)1 << 2)
+#define PROC_TSC_OFFSETTING ((uint32_t)1 << 3)
+#define PROC_HLT_EXITING ((uint32_t)1 << 7)
+#define PROC_INVLPG_EXITING ((uint32_t)1 << 9)
+#define PROC_MWAIT_EXITING ((uint32_t)1 << 10)
+#define PROC_RDPMC_EXITING ((uint32_t)1 << 11)
+#define PROC_RDTSC_EXITING ((uint32_t)1 << 12)
+#define PROC_CR3_LOAD_EXITING ((uint32_t)1 << 15)
+#define PROC_CR3_STORE_EXITING ((uint32_t)1 << 16)
+#define PROC_TERTIARY_CONTROLS ((uint32_t)1 << 17)
+#define PROC_CR8_LOAD_EXITING ((uint32_t)1 << 19)
+#define PROC_CR8_STORE_EXITING ((uint32_t)1 << 20)
+#define PROC_TPR_SHADOW ((uint32_t)1 << 21)
+#define PROC_NMI_WINDOW_EXITING ((uint32_t)1 << 22)
+#define PROC_MOV_DR_EXITING ((uint32_t)1 << 23)
+#define PROC_UNCOND_IO_EXITING ((uint32_t)1 << 24)
+#define PROC_IO_BITMAPS ((uint32_t)1 << 25)
+#define PROC_MONITOR_TRAP_FLAG ((uint32_t)1 << 27)
+#define PROC_MSR_BITMAPS ((uint32_t)1 << 28)
+#define PROC_MONITOR_EXITING ((uint32_t)1 << 29)
+#define PROC_PAUSE_EXITING ((uint32_t)1 << 30)
+#define PROC_SECONDARY_CONTROLS ((uint32_t)1 << 31)
 
 // Secondary processor-based controls (SDM 325462-093 Vol. 3C, Table 27-7).
-#define PROC2_VIRT_APIC_ACCESSES (1u << 0)
-#define PROC2_EPT (1u << 1)
-#define PROC2_DESC_TABLE_EXITING (1u << 2)
-#define PROC2_RDTSCP (1u << 3)
-#define PROC2_VIRT_X2APIC (1u << 4)
-#define PROC2_VPID (1u << 5)
-#define PROC2_WBINVD_EXITING (1u << 6)
-#define PROC2_UNRESTRICTED_GUEST (1u << 7)
-#define PROC2_APIC_REG_VIRT (1u << 8)
-#define PROC2_VIRT_INTR_DELIVERY (1u << 9)
-#define PROC2_PAUSE_LOOP_EXITING (1u << 10)
-#define PROC2_RDRAND_EXITING (1u << 11)
-#define PROC2_INVPCID (1u << 12)
-#define PROC2_VMFUNC (1u << 13)
-#define PROC2_VMCS_SHADOWING (1u << 14)
-#define PROC2_RDSEED_EXITING (1u << 16)
-#define PROC2_PML (1u << 17)
-#define PROC2_EPT_VE (1u << 18)
-#define PROC2_CONCEAL_VMX_FROM_PT (1u << 19)
-#define PROC2_XSAVES (1u << 20)
-#define PROC2_MBEC (1u << 22)
-#define PROC2_PT_USE_GPA (1u << 24)
-#define PROC2_TSC_SCALING (1u << 25)
-#define PROC2_USER_WAIT_PAUSE (1u << 26)
+#define PROC2_VIRT_APIC_ACCESSES ((uint32_t)1 << 0)
+#define PROC2_EPT ((uint32_t)1 << 1)
+#define PROC2_DESC_TABLE_EXITING ((uint32_t)1 << 2)
+#define PROC2_RDTSCP ((uint32_t)1 << 3)
+#define PROC2_VIRT_X2APIC ((uint32_t)1 << 4)
+#define PROC2_VPID ((uint32_t)1 << 5)
+#define PROC2_WBINVD_EXITING ((uint32_t)1 << 6)
+#define PROC2_UNRESTRICTED_GUEST ((uint32_t)1 << 7)
+#define PROC2_APIC_REG_VIRT ((uint32_t)1 << 8)
+#define PROC2_VIRT_INTR_DELIVERY ((uint32_t)1 << 9)
+#define PROC2_PAUSE_LOOP_EXITING ((uint32_t)1 << 10)
+#define PROC2_RDRAND_EXITING ((uint32_t)1 << 11)
+#define PROC2_INVPCID ((uint32_t)1 << 12)
+#define PROC2_VMFUNC ((uint32_t)1 << 13)
+#define PROC2_VMCS_SHADOWING ((uint32_t)1 << 14)
+#define PROC2_RDSEED_EXITING ((uint32_t)1 << 16)
+#define PROC2_PML ((uint32_t)1 << 17)
+#define PROC2_EPT_VE ((uint32_t)1 << 18)
+#define PROC2_CONCEAL_VMX_FROM_PT ((uint32_t)1 << 19)
+#define PROC2_XSAVES ((uint32_t)1 << 20)
+#define PROC2_MBEC ((uint32_t)1 << 22)
+#define PROC2_PT_USE_GPA ((uint32_t)1 << 24)
+#define PROC2_TSC_SCALING ((uint32_t)1 << 25)
+#define PROC2_USER_WAIT_PAUSE ((uint32_t)1 << 26)
 
 // Tertiary processor-based VM-execution controls (SDM 325462-093 Vol. 3C,
 // Table 27-8).
-#define PROC3_IPI_VIRT (1ull << 4)
+#define PROC3_IPI_VIRT ((uint64_t)1 << 4)
 
 // Primary VM-exit controls (SDM 325462-093 Vol. 3C, Table 27-14).
-#define EXIT_SAVE_DEBUG_CONTROLS (1u << 2)
-#define EXIT_HOST_ADDR_SPACE_SIZE (1u << 9)
-#define EXIT_LOAD_PERF_GLOBAL_CTRL (1u << 12)
-#define EXIT_ACK_INTR_ON_EXIT (1u << 15)
-#define EXIT_SAVE_PAT (1u << 18)
-#define EXIT_LOAD_PAT (1u << 19)
-#define EXIT_SAVE_EFER (1u << 20)
-#define EXIT_LOAD_EFER (1u << 21)
-#define EXIT_SAVE_PREEMPTION_TIMER (1u << 22)
-#define EXIT_CLEAR_BNDCFGS (1u << 23)
-#define EXIT_CONCEAL_VMX_FROM_PT (1u << 24)
-#define EXIT_CLEAR_RTIT_CTL (1u << 25)
-#define EXIT_SAVE_PERF_GLOBAL_CTRL (1u << 30)
+#define EXIT_SAVE_DEBUG_CONTROLS ((uint32_t)1 << 2)
+#define EXIT_HOST_ADDR_SPACE_SIZE ((uint32_t)1 << 9)
+#define EXIT_LOAD_PERF_GLOBAL_CTRL ((uint32_t)1 << 12)
+#define EXIT_ACK_INTR_ON_EXIT ((uint32_t)1 << 15)
+#define EXIT_SAVE_PAT ((uint32_t)1 << 18)
+#define EXIT_LOAD_PAT ((uint32_t)1 << 19)
+#define EXIT_SAVE_EFER ((uint32_t)1 << 20)
+#define EXIT_LOAD_EFER ((uint32_t)1 << 21)
+#define EXIT_SAVE_PREEMPTION_TIMER ((uint32_t)1 << 22)
+#define EXIT_CLEAR_BNDCFGS ((uint32_t)1 << 23)
+#define EXIT_CONCEAL_VMX_FROM_PT ((uint32_t)1 << 24)
+#define EXIT_CLEAR_RTIT_CTL ((uint32_t)1 << 25)
+#define EXIT_SAVE_PERF_GLOBAL_CTRL ((uint32_t)1 << 30)
 
 // VM-entry controls (SDM 325462-093 Vol. 3C, Table 27-17).
-#define ENTRY_LOAD_DEBUG_CONTROLS (1u << 2)
-#define ENTRY_IA32E_MODE_GUEST (1u << 9)
-#define ENTRY_SMM (1u << 10)
-#define ENTRY_LOAD_PERF_GLOBAL_CTRL (1u << 13)
-#define ENTRY_LOAD_PAT (1u << 14)
-#define ENTRY_LOAD_EFER (1u << 15)
-#define ENTRY_LOAD_BNDCFGS (1u << 16)
-#define ENTRY_CONCEAL_VMX_FROM_PT (1u << 17)
-#define ENTRY_LOAD_RTIT_CTL (1u << 18)
+#define ENTRY_LOAD_DEBUG_CONTROLS ((uint32_t)1 << 2)
+#define ENTRY_IA32E_MODE_GUEST ((uint32_t)1 << 9)
+#define ENTRY_SMM ((uint32_t)1 << 10)
+#define ENTRY_LOAD_PERF_GLOBAL_CTRL ((uint32_t)1 << 13)
+#define ENTRY_LOAD_PAT ((uint32_t)1 << 14)
+#define ENTRY_LOAD_EFER ((uint32_t)1 << 15)
+#define ENTRY_LOAD_BNDCFGS ((uint32_t)1 << 16)
+#define ENTRY_CONCEAL_VMX_FROM_PT ((uint32_t)1 << 17)
+#define ENTRY_LOAD_RTIT_CTL ((uint32_t)1 << 18)
 
 // Guest segment access rights (SDM 325462-093 Vol. 3C, Table 27-2).
-#define VMX_AR_L (1u << 13)
+#define VMX_AR_L ((uint32_t)1 << 13)
 
 // Basic exit reasons (SDM 325462-093 Vol. 3D, Appendix C).
 #define EXIT_REASON_EXCEPTION_NMI 0
@@ -326,28 +327,28 @@
 #define EXIT_REASON_XSAVES 63
 #define EXIT_REASON_XRSTORS 64
 
-#define EXIT_REASON_ENTRY_FAILURE (1u << 31)
+#define EXIT_REASON_ENTRY_FAILURE ((uint32_t)1 << 31)
 
 // EPT violation exit qualification (SDM 325462-093 Vol. 3C, Table 30-7): the
 // access, the rights the EPT entries gave (bits 6:3), whether the guest-linear
 // address is known and was translated rather than a paging-structure entry's,
 // what paging gave the linear address, IRET's NMI unblocking, and whether the
 // processor made the access outside of any instruction.
-#define EPT_QUAL_READ (1ull << 0)
-#define EPT_QUAL_WRITE (1ull << 1)
-#define EPT_QUAL_FETCH (1ull << 2)
+#define EPT_QUAL_READ ((uint64_t)1 << 0)
+#define EPT_QUAL_WRITE ((uint64_t)1 << 1)
+#define EPT_QUAL_FETCH ((uint64_t)1 << 2)
 #define EPT_QUAL_RIGHTS_SHIFT 3
-#define EPT_QUAL_LINEAR (1ull << 7)
-#define EPT_QUAL_TRANSLATION (1ull << 8)
-#define EPT_QUAL_USER (1ull << 9)
-#define EPT_QUAL_WRITABLE (1ull << 10)
-#define EPT_QUAL_XD (1ull << 11)
-#define EPT_QUAL_NMI_UNBLOCKED (1ull << 12)
-#define EPT_QUAL_ASYNC (1ull << 16)
+#define EPT_QUAL_LINEAR ((uint64_t)1 << 7)
+#define EPT_QUAL_TRANSLATION ((uint64_t)1 << 8)
+#define EPT_QUAL_USER ((uint64_t)1 << 9)
+#define EPT_QUAL_WRITABLE ((uint64_t)1 << 10)
+#define EPT_QUAL_XD ((uint64_t)1 << 11)
+#define EPT_QUAL_NMI_UNBLOCKED ((uint64_t)1 << 12)
+#define EPT_QUAL_ASYNC ((uint64_t)1 << 16)
 
 // APIC-access exit qualification: the page offset, and the access type (SDM
 // 325462-093 Vol. 3C, Table 30-6).
-#define APIC_ACCESS_OFFSET_MASK 0xfffull
+#define APIC_ACCESS_OFFSET_MASK ((uint64_t)0xfff)
 #define APIC_ACCESS_TYPE(qual) (((qual) >> 12) & 0xf)
 #define APIC_ACCESS_DATA_READ 0
 #define APIC_ACCESS_DATA_WRITE 1
@@ -355,24 +356,24 @@
 #define APIC_ACCESS_PHYSICAL_ASYNC 11
 
 // Event injection and exit interruption information fields.
-#define INTR_INFO_VALID (1u << 31)
-#define INTR_INFO_ERROR_CODE (1u << 11)
-#define INTR_TYPE_EXT_INTR (0u << 8)
-#define INTR_TYPE_NMI (2u << 8)
-#define INTR_TYPE_HW_EXCEPTION (3u << 8)
-#define INTR_TYPE_SW_INTR (4u << 8)
-#define INTR_TYPE_PRIV_SW_EXCEPTION (5u << 8)
-#define INTR_TYPE_SW_EXCEPTION (6u << 8)
+#define INTR_INFO_VALID ((uint32_t)1 << 31)
+#define INTR_INFO_ERROR_CODE ((uint32_t)1 << 11)
+#define INTR_TYPE_EXT_INTR ((uint32_t)0 << 8)
+#define INTR_TYPE_NMI ((uint32_t)2 << 8)
+#define INTR_TYPE_HW_EXCEPTION ((uint32_t)3 << 8)
+#define INTR_TYPE_SW_INTR ((uint32_t)4 << 8)
+#define INTR_TYPE_PRIV_SW_EXCEPTION ((uint32_t)5 << 8)
+#define INTR_TYPE_SW_EXCEPTION ((uint32_t)6 << 8)
 
 // Guest interruptibility state.
-#define INTERRUPTIBILITY_STI (1u << 0)
-#define INTERRUPTIBILITY_MOV_SS (1u << 1)
-#define INTERRUPTIBILITY_SMI (1u << 2)
-#define INTERRUPTIBILITY_NMI (1u << 3)
+#define INTERRUPTIBILITY_STI ((uint32_t)1 << 0)
+#define INTERRUPTIBILITY_MOV_SS ((uint32_t)1 << 1)
+#define INTERRUPTIBILITY_SMI ((uint32_t)1 << 2)
+#define INTERRUPTIBILITY_NMI ((uint32_t)1 << 3)
 
 // Guest pending debug exceptions.
-#define PENDING_DBG_ENABLED (1ull << 12)
-#define PENDING_DBG_BS (1ull << 14)
+#define PENDING_DBG_ENABLED ((uint64_t)1 << 12)
+#define PENDING_DBG_BS ((uint64_t)1 << 14)
 
 // Guest activity states.
 #define ACTIVITY_ACTIVE 0
@@ -403,18 +404,19 @@
 
 // IA32_VMX_MISC: Intel PT can run in VMX operation (SDM 325462-093 Vol. 3D,
 // A.6).
-#define VMX_MISC_PT (1ull << 14)
+#define VMX_MISC_PT ((uint64_t)1 << 14)
 
-#define FEATURE_CONTROL_LOCK (1u << 0)
-#define FEATURE_CONTROL_VMX_OUTSIDE_SMX (1u << 2)
+#define FEATURE_CONTROL_LOCK ((uint32_t)1 << 0)
+#define FEATURE_CONTROL_VMX_OUTSIDE_SMX ((uint32_t)1 << 2)
 
+struct segment;
 struct vcpu;
 struct vmcs_cache;
 
 // A VMCS of the vCPU's but its current one, as the vCPU keeps that.
 struct vmx_vmcs {
     void *vmcs;
-    uint64_t pa;
+    uintptr_t pa;
     bool launched;
     struct vmcs_cache *cache;
 };
@@ -437,7 +439,7 @@ void vmx_vmcs_create(struct vcpu *v, struct vmx_vmcs *vmcs);
 // A shadow VMCS (SDM 325462-093 Vol. 3C, 27.10), cleared: its address.
 uint64_t vmx_shadow_vmcs_create(void);
 // Accesses to a VMCS other than the vCPU's, which is current again after.
-void vmx_other_vmcs(struct vcpu *v, uint64_t pa);
+void vmx_other_vmcs(struct vcpu *v, uintptr_t pa);
 uint64_t vmx_other_read(uint32_t field);
 void vmx_other_write(uint32_t field, uint64_t value);
 void vmx_own_vmcs(struct vcpu *v);
@@ -446,13 +448,23 @@ void vmx_vmcs_swap(struct vcpu *v, struct vmx_vmcs *other);
 
 uint64_t vmx_read(uint32_t field);
 
+bool vmx_ept_huge_pages(void);
+bool vmx_ept_dirty_flags(void);
+bool vmx_monitor_trap_supported(void);
+void vmx_get_seg(size_t reg, struct segment *seg);
+void vmx_set_seg(size_t reg, const struct segment *seg);
+uint64_t vmx_cr0_mask(void);
+uint64_t vmx_cr4_mask(void);
+uint64_t vmx_cr0_real(uint64_t guest_cr0);
+uint64_t vmx_cr4_real(uint64_t guest_cr4);
+
 // The EPT the vCPU's current VMCS takes: the hypervisor's, or the shadow of
 // the guest's EPT that runs its guest's guest.
 void vmx_load_gpt_root(struct vcpu *v);
 // INVEPT of every EPTP, and INVVPID of the type, or of all VPIDs but 0 where
 // the processor lacks that type.
 void vmx_invept_all(void);
-void vmx_invvpid(unsigned type, uint16_t vpid, uint64_t address);
+void vmx_invvpid(unsigned int type, uint16_t vpid, uintptr_t address);
 // Whether the hypervisor tags the guest's translations with VPIDs.
 bool vmx_vpid_usable(void);
 // Whether the guest gets Intel PT: its output through EPT, its tracing stopped
@@ -466,7 +478,7 @@ bool vmx_perf_global_switched(void);
 bool vmx_perf_global_saved(void);
 // An access the processor made for the guest outside of any instruction that
 // reached gpa, where the guest has no RAM.
-void vmx_async_access(uint64_t gpa);
+void vmx_async_access(uintptr_t gpa);
 // Loads the guest's CR3 as a MOV to CR3 would, for what the hypervisor carries
 // out for the guest: the PDPTEs of PAE paging, and the guest's translations.
 // Where checked, false, loading nothing, for PDPTEs the move refuses.

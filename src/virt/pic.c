@@ -15,8 +15,9 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <virt/pic.h>
 
 #define ICW1 0x10
@@ -39,16 +40,14 @@
 #define ELCR_MASTER_WRITABLE 0xf8
 #define ELCR_SLAVE_WRITABLE 0xde
 
-enum {
-    OCW2_ROTATE_AEOI_CLEAR,
-    OCW2_EOI,
-    OCW2_NOP,
-    OCW2_SPECIFIC_EOI,
-    OCW2_ROTATE_AEOI_SET,
-    OCW2_ROTATE_EOI,
-    OCW2_SET_PRIORITY,
-    OCW2_ROTATE_SPECIFIC_EOI,
-};
+#define OCW2_ROTATE_AEOI_CLEAR 0
+#define OCW2_EOI 1
+#define OCW2_NOP 2
+#define OCW2_SPECIFIC_EOI 3
+#define OCW2_ROTATE_AEOI_SET 4
+#define OCW2_ROTATE_EOI 5
+#define OCW2_SET_PRIORITY 6
+#define OCW2_ROTATE_SPECIFIC_EOI 7
 
 struct chip {
     uint8_t isr;
@@ -87,15 +86,15 @@ static uint8_t irr(const struct chip *c) {
     return c->lines & (c->elcr | c->edges);
 }
 
-static unsigned priority(const struct chip *c, unsigned irq) {
+static unsigned int priority(const struct chip *c, unsigned int irq) {
     return (irq - c->lowest - 1) & 7;
 }
 
 // The input of highest priority among bits, or -1.
 static int highest(const struct chip *c, uint8_t bits) {
-    for (unsigned p = 0; p < 8; p++) {
-        unsigned irq = (c->lowest + 1 + p) & 7;
-        if (bits & (1u << irq)) {
+    for (size_t p = 0; p < 8; p++) {
+        unsigned int irq = (c->lowest + 1 + p) & 7;
+        if ((bits & ((uint32_t)1 << irq)) != 0) {
             return (int)irq;
         }
     }
@@ -112,21 +111,22 @@ static int request(const struct chip *c) {
     if (c->special_mask) {
         in_service &= ~c->imr;
     }
-    // In the special fully nested mode, the slave in service does not lock
-    // the slave's further requests out.
+    // In the special fully nested mode, the slave in service does not lock the
+    // slave's further requests out.
     if (c == &chips[0] && c->special_nested && irq == CASCADE_IRQ) {
-        in_service &= ~(1u << CASCADE_IRQ);
+        in_service &= ~((uint32_t)1 << CASCADE_IRQ);
     }
     int current = highest(c, in_service);
-    if (current >= 0 && priority(c, (unsigned)current) <= priority(c, (unsigned)irq)) {
+    if (current >= 0
+     && priority(c, (unsigned int)current) <= priority(c, (unsigned int)irq)) {
         return -1;
     }
     return irq;
 }
 
-static void set_line(struct chip *c, unsigned irq, bool level) {
-    uint8_t mask = 1u << irq;
-    if (level && !(c->lines & mask)) {
+static void set_line(struct chip *c, unsigned int irq, bool level) {
+    uint8_t mask = (uint32_t)1 << irq;
+    if (level && (c->lines & mask) == 0) {
         c->edges |= mask;
         c->acked &= ~mask;
     }
@@ -137,11 +137,11 @@ static void update(void) {
     set_line(&chips[0], CASCADE_IRQ, request(&chips[1]) >= 0);
 }
 
-static void acknowledge(struct chip *c, unsigned irq) {
-    uint8_t mask = 1u << irq;
+static void acknowledge(struct chip *c, unsigned int irq) {
+    uint8_t mask = (uint32_t)1 << irq;
     c->edges &= ~mask;
     c->acked |= mask;
-    if (c->pulses & mask) {
+    if ((c->pulses & mask) != 0) {
         c->pulses &= ~mask;
         c->lines &= ~mask;
     }
@@ -153,15 +153,15 @@ static void acknowledge(struct chip *c, unsigned irq) {
 }
 
 void pic_reset(void) {
-    for (unsigned i = 0; i < 2; i++) {
-        chips[i] = (struct chip){.imr = 0xff, .lowest = 7};
+    for (size_t i = 0; i < 2; i++) {
+        chips[i] = (struct chip){ .imr = 0xff, .lowest = 7 };
     }
     chips[0].elcr_writable = ELCR_MASTER_WRITABLE;
     chips[1].elcr_writable = ELCR_SLAVE_WRITABLE;
 }
 
 static void command(struct chip *c, uint8_t value) {
-    if (value & ICW1) {
+    if ((value & ICW1) != 0) {
         c->init_step = 2;
         c->icw4 = value & ICW1_IC4;
         c->single = value & ICW1_SNGL;
@@ -180,20 +180,20 @@ static void command(struct chip *c, uint8_t value) {
         }
         return;
     }
-    if (value & OCW3) {
-        if (value & OCW3_P) {
+    if ((value & OCW3) != 0) {
+        if ((value & OCW3_P) != 0) {
             c->poll = true;
         }
-        if (value & OCW3_RR) {
+        if ((value & OCW3_RR) != 0) {
             c->read_isr = value & OCW3_RIS;
         }
-        if (value & OCW3_ESMM) {
+        if ((value & OCW3_ESMM) != 0) {
             c->special_mask = value & OCW3_SMM;
         }
         return;
     }
 
-    unsigned level = value & 7;
+    size_t level = value & 7;
     switch (value >> 5) {
         case OCW2_ROTATE_AEOI_CLEAR: {
             c->rotate_auto_eoi = false;
@@ -208,7 +208,7 @@ static void command(struct chip *c, uint8_t value) {
             // A masked IS bit stays set in the special mask mode.
             int irq = highest(c, c->special_mask ? c->isr & ~c->imr : c->isr);
             if (irq >= 0) {
-                c->isr &= ~(1u << irq);
+                c->isr &= ~((uint32_t)1 << irq);
                 if (value >> 5 == OCW2_ROTATE_EOI) {
                     c->lowest = (uint8_t)irq;
                 }
@@ -217,7 +217,7 @@ static void command(struct chip *c, uint8_t value) {
         }
         case OCW2_SPECIFIC_EOI:
         case OCW2_ROTATE_SPECIFIC_EOI: {
-            c->isr &= ~(1u << level);
+            c->isr &= ~((uint32_t)1 << level);
             if (value >> 5 == OCW2_ROTATE_SPECIFIC_EOI) {
                 c->lowest = (uint8_t)level;
             }
@@ -297,7 +297,7 @@ uint8_t pic_read(uint16_t port) {
                 c->poll = false;
                 int irq = request(c);
                 if (irq >= 0) {
-                    acknowledge(c, (unsigned)irq);
+                    acknowledge(c, (unsigned int)irq);
                     value = POLL_INTERRUPT | (uint8_t)irq;
                 }
             } else {
@@ -323,14 +323,14 @@ uint8_t pic_read(uint16_t port) {
     return value;
 }
 
-void pic_set_irq(unsigned irq, bool level) {
+void pic_set_irq(unsigned int irq, bool level) {
     set_line(&chips[irq >> 3], irq & 7, level);
     update();
 }
 
-void pic_pulse_irq(unsigned irq) {
+void pic_pulse_irq(unsigned int irq) {
     struct chip *c = &chips[irq >> 3];
-    uint8_t mask = 1u << (irq & 7);
+    uint8_t mask = (uint32_t)1 << (irq & 7);
     c->lines |= mask;
     c->edges |= mask;
     c->pulses |= mask;
@@ -351,13 +351,13 @@ uint8_t pic_acknowledge(void) {
         // Nothing requests any more: the default IRQ 7, with no IS bit.
         vector = master->base + DEFAULT_IRQ;
     } else {
-        acknowledge(master, (unsigned)irq);
+        acknowledge(master, (unsigned int)irq);
         if (irq == CASCADE_IRQ) {
             int slave_irq = request(slave);
             if (slave_irq < 0) {
                 vector = slave->base + DEFAULT_IRQ;
             } else {
-                acknowledge(slave, (unsigned)slave_irq);
+                acknowledge(slave, (unsigned int)slave_irq);
                 vector = slave->base + (uint8_t)slave_irq;
             }
         } else {
@@ -368,22 +368,22 @@ uint8_t pic_acknowledge(void) {
     return vector;
 }
 
-bool pic_masked(unsigned irq) {
-    if (irq >= 8 && (chips[0].imr & (1u << CASCADE_IRQ))) {
+bool pic_masked(unsigned int irq) {
+    if (irq >= 8 && (chips[0].imr & ((uint32_t)1 << CASCADE_IRQ)) != 0) {
         return true;
     }
     return (chips[irq >> 3].imr >> (irq & 7)) & 1;
 }
 
-bool pic_in_service(unsigned irq) {
+bool pic_in_service(unsigned int irq) {
     return (chips[irq >> 3].isr >> (irq & 7)) & 1;
 }
 
-bool pic_acknowledged(unsigned irq) {
+bool pic_acknowledged(unsigned int irq) {
     return (chips[irq >> 3].acked >> (irq & 7)) & 1;
 }
 
-bool pic_level_triggered(unsigned irq) {
+bool pic_level_triggered(unsigned int irq) {
     return (chips[irq >> 3].elcr >> (irq & 7)) & 1;
 }
 

@@ -18,11 +18,15 @@
 #ifndef LIB__PRINTF_H
 #define LIB__PRINTF_H
 
-#include <stddef.h>
 #include <stdarg.h>
+#include <stddef.h>
 
-int format(void (*putc)(int c, void *ctx), void *ctx, const char *fmt, va_list args);
+int format(
+    void (*putc)(int c, void *ctx), void *ctx, const char *fmt, va_list args
+);
 int vsnprintf(char *buf, size_t size, const char *fmt, va_list args);
-__attribute__((format(printf, 3, 4))) int snprintf(char *buf, size_t size, const char *fmt, ...);
+__attribute__((format(printf, 3, 4))) int snprintf(
+    char *buf, size_t size, const char *fmt, ...
+);
 
 #endif

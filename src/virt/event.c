@@ -15,13 +15,14 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <virt/event.h>
 #include <hw/lapic.h>
 #include <lib/log.h>
 #include <sys/cpu.h>
 #include <sys/x86.h>
-#include <virt/event.h>
 #include <virt/irq.h>
 #include <virt/mmio.h>
 #include <virt/nvmx.h>
@@ -31,14 +32,14 @@
 #include <virt/vmx.h>
 
 // The fields VMX's interruption information and SVM's events share.
-#define EVENT_VECTOR_MASK 0xffu
-#define EVENT_TYPE_MASK (7u << 8)
-#define EVENT_TYPE_EXTERNAL (0u << 8)
-#define EVENT_TYPE_NMI (2u << 8)
-#define EVENT_TYPE_EXCEPTION (3u << 8)
-#define EVENT_TYPE_SOFTWARE (4u << 8)
-#define EVENT_ERROR_VALID (1u << 11)
-#define EVENT_VALID (1u << 31)
+#define EVENT_VECTOR_MASK ((uint32_t)0xff)
+#define EVENT_TYPE_MASK ((uint32_t)7 << 8)
+#define EVENT_TYPE_EXTERNAL ((uint32_t)0 << 8)
+#define EVENT_TYPE_NMI ((uint32_t)2 << 8)
+#define EVENT_TYPE_EXCEPTION ((uint32_t)3 << 8)
+#define EVENT_TYPE_SOFTWARE ((uint32_t)4 << 8)
+#define EVENT_ERROR_VALID ((uint32_t)1 << 11)
+#define EVENT_VALID ((uint32_t)1 << 31)
 
 #define VECTOR_NMI 2
 #define VECTOR_BP 3
@@ -49,39 +50,42 @@ void event_exit(struct vcpu *v) {
     uint32_t error = 0;
     if (virt_vmx) {
         info = (uint32_t)vmx_read(VMCS_IDT_VECTORING_INFO);
-        if (!(info & INTR_INFO_VALID)) {
+        if ((info & INTR_INFO_VALID) == 0) {
             return;
         }
         // Software interrupts and exceptions leave RIP at their instruction,
         // which raises them again; those the guest injects into its guest have
         // none, so the guest's guest's go in again with their length, as Linux
         // 7.3's KVM has it.
-        unsigned type = info & EVENT_TYPE_MASK;
+        unsigned int type = info & EVENT_TYPE_MASK;
         if (type == INTR_TYPE_SW_INTR || type == INTR_TYPE_PRIV_SW_EXCEPTION
-            || type == INTR_TYPE_SW_EXCEPTION) {
+         || type == INTR_TYPE_SW_EXCEPTION) {
             if (!nvmx_in_l2(v)) {
                 return;
             }
             v->redeliver_length = (uint32_t)vmx_read(VMCS_EXIT_INSTR_LEN);
         }
-        if (info & INTR_INFO_ERROR_CODE) {
+        if ((info & INTR_INFO_ERROR_CODE) != 0) {
             error = (uint32_t)vmx_read(VMCS_IDT_VECTORING_ERROR);
         }
     } else {
         uint64_t exitintinfo = v->vmcb->control.exitintinfo;
-        if (!(exitintinfo & SVM_EVENT_VALID)) {
+        if ((exitintinfo & SVM_EVENT_VALID) == 0) {
             return;
         }
         info = (uint32_t)exitintinfo;
-        unsigned vector = info & EVENT_VECTOR_MASK;
-        unsigned type = info & EVENT_TYPE_MASK;
+        unsigned int vector = info & EVENT_VECTOR_MASK;
+        unsigned int type = info & EVENT_TYPE_MASK;
         if (type == EVENT_TYPE_SOFTWARE
-            || (type == EVENT_TYPE_EXCEPTION && (vector == VECTOR_BP || vector == VECTOR_OF))) {
+         || (type == EVENT_TYPE_EXCEPTION
+          && (vector == VECTOR_BP || vector == VECTOR_OF))) {
             return;
         }
         error = (uint32_t)(exitintinfo >> 32);
     }
-    v->redeliver = info & (EVENT_VALID | EVENT_ERROR_VALID | EVENT_TYPE_MASK | EVENT_VECTOR_MASK);
+    v->redeliver = info
+        & (EVENT_VALID | EVENT_ERROR_VALID | EVENT_TYPE_MASK
+            | EVENT_VECTOR_MASK);
     v->redeliver_error = error;
 }
 
@@ -91,11 +95,11 @@ void event_nmi(struct vcpu *v) {
 
 void event_cancel(struct vcpu *v) {
     uint32_t info = (uint32_t)vmx_read(VMCS_ENTRY_INTR_INFO);
-    if (!(info & INTR_INFO_VALID)) {
+    if ((info & INTR_INFO_VALID) == 0) {
         return;
     }
     v->redeliver = info;
-    if (info & INTR_INFO_ERROR_CODE) {
+    if ((info & INTR_INFO_ERROR_CODE) != 0) {
         v->redeliver_error = (uint32_t)vmx_read(VMCS_ENTRY_EXCEPTION_ERROR);
     }
     vmx_write(VMCS_ENTRY_INTR_INFO, 0);
@@ -106,29 +110,36 @@ bool event_cut_short(struct vcpu *v) {
 }
 
 bool event_deliver_real_mode(struct vcpu *v) {
-    unsigned type = v->redeliver & EVENT_TYPE_MASK;
-    if (!(v->redeliver & EVENT_VALID) || (vcpu_cr0(v) & CR0_PE)
-        || (type != EVENT_TYPE_EXTERNAL && type != EVENT_TYPE_EXCEPTION)) {
+    unsigned int type = v->redeliver & EVENT_TYPE_MASK;
+    if ((v->redeliver & EVENT_VALID) == 0 || (vcpu_cr0(v) & CR0_PE) != 0
+     || (type != EVENT_TYPE_EXTERNAL && type != EVENT_TYPE_EXCEPTION)) {
         return false;
     }
     // SDM 325462-093 Vol. 3B, 23.1.4: FLAGS, CS, and IP pushed, the handler
     // from the interrupt table IDTR points to, and no error code.
-    unsigned vector = v->redeliver & EVENT_VECTOR_MASK;
+    unsigned int vector = v->redeliver & EVENT_VECTOR_MASK;
     struct segment idtr, ss, cs;
     vcpu_get_seg(v, SEG_IDTR, &idtr);
     vcpu_get_seg(v, SEG_SS, &ss);
     vcpu_get_seg(v, SEG_CS, &cs);
     uint32_t handler;
-    if (vector * 4 + 3 > idtr.limit || !mmio_read_linear(v, idtr.base + vector * 4, &handler, 4)) {
+    if (vector * 4 + 3 > idtr.limit
+     || !mmio_read_linear(v, idtr.base + vector * 4, &handler, 4)) {
         return false;
     }
     uint64_t rflags = vcpu_rflags(v);
-    uint16_t frame[3] = {(uint16_t)vcpu_rip(v), cs.selector, (uint16_t)rflags};
-    uint64_t sp_mask = (ss.attrib & SEG_DB) ? 0xffffffffull : 0xffffull;
-    uint64_t rsp = vcpu_rsp(v);
+    uint16_t frame[3] = {
+        (uint16_t)vcpu_rip(v), cs.selector, (uint16_t)rflags
+    };
+    uint64_t sp_mask = (ss.attrib & SEG_DB) != 0 ? (uint64_t)0xffffffff
+        : (uint64_t)0xffff;
+    uintptr_t rsp = vcpu_rsp(v);
     uint64_t sp = (rsp - sizeof(frame)) & sp_mask;
-    for (unsigned i = 0; i < 3; i++) {
-        if (!mmio_write_linear(v, ss.base + ((sp + 2 * i) & sp_mask), &frame[i], 2)) {
+    for (size_t i = 0; i < 3; i++) {
+        bool written = mmio_write_linear(
+            v, ss.base + ((sp + 2 * i) & sp_mask), &frame[i], 2
+        );
+        if (!written) {
             return false;
         }
     }
@@ -137,14 +148,16 @@ bool event_deliver_real_mode(struct vcpu *v) {
     cs.base = (uint64_t)cs.selector << 4;
     vcpu_set_seg(v, SEG_CS, &cs);
     vcpu_set_rip(v, handler & 0xffff);
-    vcpu_set_rflags(v, rflags & ~(uint64_t)(RFLAGS_IF | RFLAGS_TF | RFLAGS_RF | RFLAGS_AC));
+    vcpu_set_rflags(
+        v, rflags & ~(uint64_t)(RFLAGS_IF | RFLAGS_TF | RFLAGS_RF | RFLAGS_AC)
+    );
     v->redeliver = 0;
     return true;
 }
 
 static void inject(struct vcpu *v, uint32_t info, uint32_t error) {
     if (virt_vmx) {
-        if (info & EVENT_ERROR_VALID) {
+        if ((info & EVENT_ERROR_VALID) != 0) {
             vmx_write(VMCS_ENTRY_EXCEPTION_ERROR, error);
         }
         vmx_write(VMCS_ENTRY_INTR_INFO, info);
@@ -155,18 +168,23 @@ static void inject(struct vcpu *v, uint32_t info, uint32_t error) {
 
 static void set_proc_control(uint32_t control, bool on) {
     uint64_t controls = vmx_read(VMCS_PROC_CONTROLS);
-    vmx_write(VMCS_PROC_CONTROLS, on ? controls | control : controls & ~(uint64_t)control);
+    vmx_write(
+        VMCS_PROC_CONTROLS,
+        on ? controls | control : controls & ~(uint64_t)control
+    );
 }
 
 // SVM shows nothing of the guest's NMI blocking without its NMI
-// virtualisation, which not every processor has; an NMI goes in when the
-// next entry injects nothing else.
+// virtualisation, which not every processor has; an NMI goes in when the next
+// entry injects nothing else.
 static bool nmi_blocked(void) {
     if (!virt_vmx) {
         return false;
     }
     uint64_t intr = vmx_read(VMCS_GUEST_INTERRUPTIBILITY);
-    return (intr & (INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS | INTERRUPTIBILITY_NMI)) != 0;
+    return (intr
+        & (INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS
+            | INTERRUPTIBILITY_NMI)) != 0;
 }
 
 // Returns whether it injected one.
@@ -245,19 +263,20 @@ void event_interrupt(uint8_t vector) {
     if (irq_slot_interrupt(vector)) {
         return;
     }
-    // An interrupt the guest programmed into something the hypervisor does
-    // not keep its own messages of, addressed to this vCPU.
+    // An interrupt the guest programmed into something the hypervisor does not
+    // keep its own messages of, addressed to this vCPU.
     lapic_eoi();
     vlapic_accept(v, vector, false);
 }
 
 static bool interruptible(struct vcpu *v) {
     if (virt_vmx) {
-        return (vmx_read(VMCS_GUEST_RFLAGS) & RFLAGS_IF)
-               && !(vmx_read(VMCS_GUEST_INTERRUPTIBILITY)
-                    & (INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS));
+        return (vmx_read(VMCS_GUEST_RFLAGS) & RFLAGS_IF) != 0
+            && (vmx_read(VMCS_GUEST_INTERRUPTIBILITY)
+                & (INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS)) == 0;
     }
-    return (v->vmcb->save.rflags & RFLAGS_IF) && !(v->vmcb->control.interrupt_shadow & 1);
+    return (v->vmcb->save.rflags & RFLAGS_IF) != 0
+        && (v->vmcb->control.interrupt_shadow & 1) == 0;
 }
 
 #define WINDOW_OFF (-1)
@@ -275,7 +294,8 @@ static void interrupt_window(struct vcpu *v, int class) {
     c->intercept_misc1 &= ~SVM_INTERCEPT_VINTR;
     if (class != WINDOW_OFF) {
         c->vintr |= SVM_VINTR_IRQ;
-        c->vintr |= class == WINDOW_ANY ? SVM_VINTR_IGN_TPR : (uint64_t)class << SVM_VINTR_PRIO_SHIFT;
+        c->vintr |= class == WINDOW_ANY ? SVM_VINTR_IGN_TPR
+            : (uint64_t)class << SVM_VINTR_PRIO_SHIFT;
         c->intercept_misc1 |= SVM_INTERCEPT_VINTR;
     }
 }
@@ -284,22 +304,25 @@ static bool interrupt_pending(struct vcpu *v) {
     return irq_extint_pending(v) || vlapic_pending(v) >= 0;
 }
 
-// What only an exit once the guest takes interrupts can deliver: the
-// processor delivers the local APIC's itself where it virtualises them.
+// What only an exit once the guest takes interrupts can deliver: the processor
+// delivers the local APIC's itself where it virtualises them.
 static bool window_needed(struct vcpu *v) {
-    return irq_extint_pending(v) || (!vlapic_virtual_delivery(v) && vlapic_pending(v) >= 0);
+    return irq_extint_pending(v)
+        || (!vlapic_virtual_delivery(v) && vlapic_pending(v) >= 0);
 }
 
 bool event_halt_ends(struct vcpu *v) {
     struct cpu *cpu = v->cpu;
-    if (v->nmi_pending || cpu->nmi_pending || cpu->init_pending || v->injecting) {
+    if (v->nmi_pending || cpu->nmi_pending || cpu->init_pending
+     || v->injecting) {
         return true;
     }
     if (!virt_vmx && svm_vnmi
-        && (v->vmcb->control.vintr & (SVM_VINTR_NMI | SVM_VINTR_NMI_MASK)) == SVM_VINTR_NMI) {
+     && (v->vmcb->control.vintr & (SVM_VINTR_NMI | SVM_VINTR_NMI_MASK))
+     == SVM_VINTR_NMI) {
         return true;
     }
-    return (vcpu_rflags(v) & RFLAGS_IF) && interrupt_pending(v);
+    return (vcpu_rflags(v) & RFLAGS_IF) != 0 && interrupt_pending(v);
 }
 
 static void deliver_interrupt(struct vcpu *v) {
@@ -307,7 +330,9 @@ static void deliver_interrupt(struct vcpu *v) {
     bool virtual_delivery = vlapic_virtual_delivery(v);
     int vector = extint || virtual_delivery ? -1 : vlapic_pending(v);
     if (!extint && vector < 0) {
-        interrupt_window(v, virtual_delivery ? WINDOW_OFF : vlapic_tpr_held(v));
+        interrupt_window(
+            v, virtual_delivery ? WINDOW_OFF : vlapic_tpr_held(v)
+        );
         return;
     }
     if (!interruptible(v)) {
@@ -347,19 +372,22 @@ static void entry(struct vcpu *v, bool nmis, bool interrupts) {
     if (v->injecting) {
         // What the exit's handler injected comes first: only exits that
         // instructions cause inject, and those never cut a delivery short.
-        if (v->redeliver & EVENT_VALID) {
-            printf("Dropping event %#x for one the exit raised\n", v->redeliver);
+        if ((v->redeliver & EVENT_VALID) != 0) {
+            printf(
+                "Dropping event %#x for one the exit raised\n", v->redeliver
+            );
         }
         v->redeliver = 0;
         v->injecting = false;
         windows_after(v, nmis, interrupts);
         return;
     }
-    if (v->redeliver & EVENT_VALID) {
+    if ((v->redeliver & EVENT_VALID) != 0) {
         inject(v, v->redeliver, v->redeliver_error);
-        unsigned type = v->redeliver & EVENT_TYPE_MASK;
-        if (virt_vmx && (type == INTR_TYPE_SW_INTR || type == INTR_TYPE_PRIV_SW_EXCEPTION
-                         || type == INTR_TYPE_SW_EXCEPTION)) {
+        unsigned int type = v->redeliver & EVENT_TYPE_MASK;
+        if (virt_vmx
+         && (type == INTR_TYPE_SW_INTR || type == INTR_TYPE_PRIV_SW_EXCEPTION
+          || type == INTR_TYPE_SW_EXCEPTION)) {
             vmx_write(VMCS_ENTRY_INSTR_LEN, v->redeliver_length);
         }
         v->redeliver = 0;
@@ -369,7 +397,9 @@ static void entry(struct vcpu *v, bool nmis, bool interrupts) {
     // A debug trap the processor left pending, as a monitor trap flag exit
     // does, would be lost to an injected event (SDM 325462-093 Vol. 3C,
     // 29.7.3), and goes before interrupts and their windows.
-    if (virt_vmx && (vmx_read(VMCS_GUEST_PENDING_DBG) & (PENDING_DBG_ENABLED | PENDING_DBG_BS))) {
+    if (virt_vmx
+     && (vmx_read(VMCS_GUEST_PENDING_DBG)
+       & (PENDING_DBG_ENABLED | PENDING_DBG_BS)) != 0) {
         windows_after(v, nmis, interrupts);
         return;
     }

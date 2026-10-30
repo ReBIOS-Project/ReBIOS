@@ -18,48 +18,60 @@
 #ifndef VIRT__MMIO_H
 #define VIRT__MMIO_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <virt/vcpu.h>
 
-// A device the hypervisor emulates at guest-physical addresses, which it
-// keeps unmapped, or mapped without the access it emulates.
+// A device the hypervisor emulates at guest-physical addresses, which it keeps
+// unmapped, or mapped without the access it emulates.
 struct mmio_ops {
     // Accesses of 1, 2, 4, or 8 bytes, naturally aligned, offset into the
     // region. Reads have no side effects.
-    uint64_t (*read)(struct vcpu *v, void *ctx, uint64_t offset, unsigned size);
-    void (*write)(struct vcpu *v, void *ctx, uint64_t offset, unsigned size, uint64_t value);
+    uint64_t (*read)(struct vcpu *v, void *ctx, uint64_t offset, size_t size);
+    void (*write)(
+        struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value
+    );
     // Whether writes go nowhere, so that INS may be emulated into it: the
     // processor may have read the port already.
     bool writes_ignored;
 };
 
-// Emulates a page-aligned region, for every vCPU: its number for
-// mmio_move(), or -1 where there are too many.
-int mmio_register(uint64_t base, uint64_t size, const struct mmio_ops *ops, void *ctx);
-// Moves a region, nowhere where size is 0, as when the BAR it is part of moves.
-void mmio_move(int region, uint64_t base, uint64_t size);
+// Emulates a page-aligned region, for every vCPU: its number for mmio_move(),
+// or -1 where there are too many.
+int mmio_register(
+    uintptr_t base, size_t size, const struct mmio_ops *ops, void *ctx
+);
+// Moves a region, nowhere where size is 0, as when the BAR it is part of
+// moves.
+void mmio_move(int region, uintptr_t base, size_t size);
 
 // A host register at hpa, which the hypervisor maps, as a region's access
 // reaches it: size 1, 2, 4, or 8.
-uint64_t mmio_read_host(uint64_t hpa, unsigned size);
-void mmio_write_host(uint64_t hpa, unsigned size, uint64_t value);
+uint64_t mmio_read_host(uintptr_t hpa, size_t size);
+void mmio_write_host(uintptr_t hpa, size_t size, uint64_t value);
 
 // Guest memory at a linear address as the guest's instructions reach it: RAM,
 // emulated regions, or nothing. Accesses are of at most 8 bytes; they return
 // false where the access faulted, having raised the fault.
-bool mmio_read_linear(struct vcpu *v, uint64_t linear, void *buf, unsigned size);
-bool mmio_write_linear(struct vcpu *v, uint64_t linear, const void *buf, unsigned size);
+bool mmio_read_linear(
+    struct vcpu *v, uintptr_t linear, void *buf, size_t size
+);
+bool mmio_write_linear(
+    struct vcpu *v, uintptr_t linear, const void *buf, size_t size
+);
 // The same at a guest-physical address, within a page.
-void mmio_phys_access(struct vcpu *v, uint64_t gpa, void *buf, unsigned len, bool write);
+void mmio_phys_access(
+    struct vcpu *v, uintptr_t gpa, void *buf, size_t len, bool write
+);
 
 // An EPT violation or a nested page fault at gpa, for an access other than a
 // fetch: emulates the instruction that made it, where nothing decodes as
 // memory that is not there. Returns false where gpa is mapped after all, as
 // another vCPU may just have mapped it: the guest then runs the access again.
-bool mmio_fault(struct vcpu *v, uint64_t gpa);
+bool mmio_fault(struct vcpu *v, uintptr_t gpa);
 // One for a fetch, of code there: runs it a step at a time.
-bool mmio_fetch(struct vcpu *v, uint64_t gpa);
+bool mmio_fetch(struct vcpu *v, uintptr_t gpa);
 
 // The end of a single-step mmio_fault() set up for an instruction it does not
 // emulate itself: the step's monitor trap, single-step trap, or fault.

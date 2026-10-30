@@ -15,18 +15,18 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stdint.h>
-#include <stddef.h>
-#include <stdbool.h>
 #include <stdarg.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <efi.h>
-#include <memory.h>
+#include <sys/cpu.h>
 #include <core.h>
 #include <handoff.h>
 #include <lib/log.h>
 #include <lib/printf.h>
 #include <lib/time.h>
-#include <sys/cpu.h>
+#include <memory.h>
 #include <sys/fixup.h>
 #include <sys/mm.h>
 #include <sys/x86.h>
@@ -79,23 +79,26 @@ struct fixup {
 extern const struct fixup __start_fixup_table[];
 extern const struct fixup __stop_fixup_table[];
 
-uint64_t fixup_find(uint64_t rip) {
-    for (const struct fixup *f = __start_fixup_table; f < __stop_fixup_table; f++) {
-        if ((uint64_t)(uintptr_t)&f->insn + f->insn == rip) {
-            return (uint64_t)(uintptr_t)&f->resume + f->resume;
+uintptr_t fixup_find(uintptr_t rip) {
+    for (const struct fixup *f = __start_fixup_table; f < __stop_fixup_table;
+         f++) {
+        if ((uintptr_t)&f->insn + f->insn == rip) {
+            return (uintptr_t)&f->resume + f->resume;
         }
     }
     return 0;
 }
 
-_Static_assert(offsetof(struct cpu, kicked) == CPU_KICKED, "CPU_KICKED is out of date");
+_Static_assert(
+    offsetof(struct cpu, kicked) == CPU_KICKED, "CPU_KICKED is out of date"
+);
 
 // The longest an exit keeps the CPU from the guest for what can wait for its
 // next exits, so that the guest's interrupts come on time.
-#define CPU_SLICE_NS 1000000u
+#define CPU_SLICE_NS ((uint32_t)1000000)
 
-static uint64_t nmi_restart_start;
-static uint64_t nmi_restart_end;
+static uintptr_t nmi_restart_start;
+static uintptr_t nmi_restart_end;
 static void (*interrupt_handler)(uint8_t vector);
 static size_t (*guest_describer)(char *buf, size_t size);
 
@@ -129,22 +132,22 @@ static void append(char *buf, size_t size, size_t *len, const char *fmt, ...) {
     }
 }
 
-unsigned cpu_physical_address_bits(void) {
+unsigned int cpu_physical_address_bits(void) {
     return cpuid(0x80000008, 0).eax & 0xff;
 }
 
-unsigned cpu_package_shift(void) {
+unsigned int cpu_package_shift(void) {
     // Leaf 1Fh's domains, else leaf 0Bh's, each there where its first subleaf
     // counts processors, the last one's shift reaching the package (SDM
     // 325462-093 Vol. 1, Tables 21-31 and 21-70).
     uint32_t max = cpuid(0, 0).eax;
-    static const uint32_t leaves[] = {0x1f, 0xb};
-    for (unsigned i = 0; i < sizeof(leaves) / sizeof(leaves[0]); i++) {
+    static const uint32_t leaves[] = { 0x1f, 0xb };
+    for (size_t i = 0; i < sizeof(leaves) / sizeof(uint32_t); i++) {
         if (max < leaves[i] || (cpuid(leaves[i], 0).ebx & 0xffff) == 0) {
             continue;
         }
-        unsigned shift = 0;
-        for (uint32_t subleaf = 0;; subleaf++) {
+        unsigned int shift = 0;
+        for (size_t subleaf = 0; ; subleaf++) {
             struct cpuid_regs r = cpuid(leaves[i], subleaf);
             if ((r.ebx & 0xffff) == 0) {
                 return shift;
@@ -154,14 +157,14 @@ unsigned cpu_package_shift(void) {
     }
     // Leaf 1's count of IDs in the package, a power of two.
     uint32_t ids = (cpuid(1, 0).ebx >> 16) & 0xff;
-    unsigned shift = 0;
-    while ((1u << shift) < ids) {
+    unsigned int shift = 0;
+    while (((uint32_t)1 << shift) < ids) {
         shift++;
     }
     return shift;
 }
 
-void cpu_nmi_restart(uint64_t start, uint64_t end) {
+void cpu_nmi_restart(uintptr_t start, uintptr_t end) {
     nmi_restart_start = start;
     nmi_restart_end = end;
 }
@@ -177,8 +180,9 @@ void exception_handler(struct exception_frame *frame) {
         if (frame->rip >= nmi_restart_start && frame->rip < nmi_restart_end) {
             frame->rip = nmi_restart_start;
         }
-        uint64_t halt = (uint64_t)(uintptr_t)cpu_halt;
-        if (frame->rip >= halt && frame->rip < (uint64_t)(uintptr_t)cpu_halt_restart_end) {
+        uintptr_t halt = (uintptr_t)cpu_halt;
+        if (frame->rip >= halt
+         && frame->rip < (uintptr_t)cpu_halt_restart_end) {
             frame->rip = halt;
         }
         return;
@@ -190,80 +194,99 @@ void exception_handler(struct exception_frame *frame) {
     }
     // Vectors 16 to 31 are interrupts only where the host takes interrupts.
     if (frame->vector >= 32
-        || (frame->vector >= 16 && frame->vector != 18 && this_cpu()->taking_interrupts)) {
+     || (frame->vector >= 16 && frame->vector != 18
+      && this_cpu()->taking_interrupts)) {
         if (interrupt_handler == NULL) {
-            panic("Host interrupt %llu with no handler\n", (unsigned long long)frame->vector);
+            panic(
+                "Host interrupt %llu with no handler\n",
+                (unsigned long long)frame->vector
+            );
         }
         interrupt_handler((uint8_t)frame->vector);
         return;
     }
 
     if (frame->vector == 13 || frame->vector == 6) {
-        uint64_t resume = fixup_find(frame->rip);
+        uintptr_t resume = fixup_find(frame->rip);
         if (resume != 0) {
             frame->rip = resume;
             return;
         }
     }
 
-    // One panic(), as the processor may hold the log's lock. The stack and
-    // the CPU area it leads to may be anything, so neither is read unchecked.
+    // One panic(), as the processor may hold the log's lock. The stack and the
+    // CPU area it leads to may be anything, so neither is read unchecked.
     char text[1536];
     size_t len = 0;
     uint32_t apic_id = apic_id_now();
     uint64_t image = (uintptr_t)EfiLoadSlide;
-    uint64_t image_end = image + EfiImageSize;
-    uint64_t map_top = core_handoff != NULL ? core_handoff->map_top : 0;
+    uintptr_t image_end = image + EfiImageSize;
+    uintptr_t map_top = core_handoff != NULL ? core_handoff->map_top : 0;
 
-    append(text, sizeof(text), &len,
-           "Host exception %s (vector %llu), error code %#llx, APIC ID %#x\n",
-           frame->vector < 32 ? exception_names[frame->vector] : "?",
-           (unsigned long long)frame->vector, (unsigned long long)frame->error_code, apic_id);
+    append(
+        text, sizeof(text), &len,
+        "Host exception %s (vector %llu), error code %#llx, APIC ID %#x\n",
+        frame->vector < 32 ? exception_names[frame->vector] : "?",
+        (unsigned long long)frame->vector,
+        (unsigned long long)frame->error_code, apic_id
+    );
     if (frame->rip >= image && frame->rip < image_end) {
-        append(text, sizeof(text), &len, "RIP %#llx (ReBIOS + %#llx)",
-               (unsigned long long)frame->rip, (unsigned long long)(frame->rip - image));
+        append(
+            text, sizeof(text), &len, "RIP %#llx (ReBIOS + %#llx)",
+            (unsigned long long)frame->rip,
+            (unsigned long long)(frame->rip - image)
+        );
     } else {
-        append(text, sizeof(text), &len, "RIP %#llx (outside ReBIOS at %#llx)",
-               (unsigned long long)frame->rip, (unsigned long long)image);
+        append(
+            text, sizeof(text), &len, "RIP %#llx (outside ReBIOS at %#llx)",
+            (unsigned long long)frame->rip, (unsigned long long)image
+        );
     }
-    append(text, sizeof(text), &len, " CS %#llx RFLAGS %#llx RSP %#llx SS %#llx\n"
-           "CR0 %#llx CR2 %#llx CR3 %#llx CR4 %#llx DR6 %#llx DR7 %#llx\n"
-           "RAX %#llx RBX %#llx RCX %#llx RDX %#llx\n"
-           "RSI %#llx RDI %#llx RBP %#llx R8 %#llx\n"
-           "R9 %#llx R10 %#llx R11 %#llx R12 %#llx\n"
-           "R13 %#llx R14 %#llx R15 %#llx\n",
-           (unsigned long long)frame->cs, (unsigned long long)frame->rflags,
-           (unsigned long long)frame->rsp, (unsigned long long)frame->ss,
-           (unsigned long long)read_cr0(), (unsigned long long)read_cr2(),
-           (unsigned long long)read_cr3(), (unsigned long long)read_cr4(),
-           (unsigned long long)read_dr6(), (unsigned long long)read_dr7(),
-           (unsigned long long)frame->rax, (unsigned long long)frame->rbx,
-           (unsigned long long)frame->rcx, (unsigned long long)frame->rdx,
-           (unsigned long long)frame->rsi, (unsigned long long)frame->rdi,
-           (unsigned long long)frame->rbp, (unsigned long long)frame->r8,
-           (unsigned long long)frame->r9, (unsigned long long)frame->r10,
-           (unsigned long long)frame->r11, (unsigned long long)frame->r12,
-           (unsigned long long)frame->r13, (unsigned long long)frame->r14,
-           (unsigned long long)frame->r15);
-    if (frame->rsp % 8 == 0 && frame->rsp >= 4096 && frame->rsp + 64 <= map_top) {
+    append(
+        text, sizeof(text), &len,
+        " CS %#llx RFLAGS %#llx RSP %#llx SS %#llx\n"
+        "CR0 %#llx CR2 %#llx CR3 %#llx CR4 %#llx DR6 %#llx DR7 %#llx\n"
+        "RAX %#llx RBX %#llx RCX %#llx RDX %#llx\n"
+        "RSI %#llx RDI %#llx RBP %#llx R8 %#llx\n"
+        "R9 %#llx R10 %#llx R11 %#llx R12 %#llx\n"
+        "R13 %#llx R14 %#llx R15 %#llx\n",
+        (unsigned long long)frame->cs, (unsigned long long)frame->rflags,
+        (unsigned long long)frame->rsp, (unsigned long long)frame->ss,
+        (unsigned long long)read_cr0(), (unsigned long long)read_cr2(),
+        (unsigned long long)read_cr3(), (unsigned long long)read_cr4(),
+        (unsigned long long)read_dr6(), (unsigned long long)read_dr7(),
+        (unsigned long long)frame->rax, (unsigned long long)frame->rbx,
+        (unsigned long long)frame->rcx, (unsigned long long)frame->rdx,
+        (unsigned long long)frame->rsi, (unsigned long long)frame->rdi,
+        (unsigned long long)frame->rbp, (unsigned long long)frame->r8,
+        (unsigned long long)frame->r9, (unsigned long long)frame->r10,
+        (unsigned long long)frame->r11, (unsigned long long)frame->r12,
+        (unsigned long long)frame->r13, (unsigned long long)frame->r14,
+        (unsigned long long)frame->r15
+    );
+    if (frame->rsp % 8 == 0 && frame->rsp >= 4096
+     && frame->rsp + 64 <= map_top) {
         const uint64_t *stack = (const uint64_t *)(uintptr_t)frame->rsp;
-        append(text, sizeof(text), &len,
-               "Stack %#llx %#llx %#llx %#llx %#llx %#llx %#llx %#llx\n",
-               (unsigned long long)stack[0], (unsigned long long)stack[1],
-               (unsigned long long)stack[2], (unsigned long long)stack[3],
-               (unsigned long long)stack[4], (unsigned long long)stack[5],
-               (unsigned long long)stack[6], (unsigned long long)stack[7]);
+        append(
+            text, sizeof(text), &len,
+            "Stack %#llx %#llx %#llx %#llx %#llx %#llx %#llx %#llx\n",
+            (unsigned long long)stack[0], (unsigned long long)stack[1],
+            (unsigned long long)stack[2], (unsigned long long)stack[3],
+            (unsigned long long)stack[4], (unsigned long long)stack[5],
+            (unsigned long long)stack[6], (unsigned long long)stack[7]
+        );
     }
     struct cpu *cpu = this_cpu();
-    if (guest_describer != NULL && (uintptr_t)cpu + sizeof(*cpu) <= map_top
-        && cpu->apic_id == apic_id && len + 1 < sizeof(text)) {
+    if (guest_describer != NULL
+     && (uintptr_t)cpu + sizeof(struct cpu) <= map_top
+     && cpu->apic_id == apic_id && len + 1 < sizeof(text)) {
         size_t n = guest_describer(text + len, sizeof(text) - len);
         len += n < sizeof(text) - len ? n : sizeof(text) - len - 1;
     }
     panic("%s", text);
 }
 
-static void idt_set(int vector, uint64_t handler, uint8_t ist) {
+static void idt_set(int vector, uintptr_t handler, uint8_t ist) {
     idt[vector].offset_low = handler & 0xffff;
     idt[vector].selector = GDT_CODE;
     idt[vector].ist = ist;
@@ -275,7 +298,7 @@ static void idt_set(int vector, uint64_t handler, uint8_t ist) {
 }
 
 static void idt_build(bool use_ist) {
-    for (int i = 0; i < 32; i++) {
+    for (size_t i = 0; i < 32; i++) {
         uint8_t ist = 0;
         if (use_ist) {
             if (i == 2) {
@@ -286,20 +309,22 @@ static void idt_build(bool use_ist) {
                 ist = 3;
             }
         }
-        idt_set(i, (uint64_t)(uintptr_t)exception_stubs + exception_stubs[i], ist);
+        idt_set(i, (uintptr_t)exception_stubs + exception_stubs[i], ist);
     }
-    for (int i = 32; i < 256; i++) {
-        idt_set(i, (uint64_t)(uintptr_t)interrupt_stubs + (i - 32) * INTERRUPT_STUB_SIZE, 0);
+    for (size_t i = 32; i < 256; i++) {
+        idt_set(
+            i, (uintptr_t)interrupt_stubs + (i - 32) * INTERRUPT_STUB_SIZE, 0
+        );
     }
     idt_built = true;
 }
 
-uint64_t cpu_idt_base(void) {
-    return (uint64_t)(uintptr_t)idt;
+uintptr_t cpu_idt_base(void) {
+    return (uintptr_t)idt;
 }
 
-uint64_t cpu_stack_top(struct cpu *cpu) {
-    return (uint64_t)(uintptr_t)cpu + CPU_AREA_SIZE;
+uintptr_t cpu_stack_top(struct cpu *cpu) {
+    return (uintptr_t)cpu + CPU_AREA_SIZE;
 }
 
 void cpu_slice_start(void) {
@@ -312,9 +337,11 @@ bool cpu_slice_over(void) {
     return time_ns() >= this_cpu()->slice_end;
 }
 
-struct cpu *cpu_area_alloc(uint32_t index, uint32_t apic_id, bool bsp) {
-    struct cpu *cpu = page_alloc_aligned(CPU_AREA_SIZE / PAGE_SIZE, CPU_AREA_SIZE);
-    uint64_t base = (uint64_t)(uintptr_t)cpu;
+struct cpu *cpu_area_alloc(size_t index, uint32_t apic_id, bool bsp) {
+    struct cpu *cpu = page_alloc_aligned(
+        CPU_AREA_SIZE / PAGE_SIZE, CPU_AREA_SIZE
+    );
+    uintptr_t base = (uintptr_t)cpu;
 
     cpu->self = cpu;
     cpu->index = index;
@@ -325,17 +352,18 @@ struct cpu *cpu_area_alloc(uint32_t index, uint32_t apic_id, bool bsp) {
     cpu->gdt[1] = 0x00af9b000000ffff;
     cpu->gdt[2] = 0x00cf93000000ffff;
 
-    uint64_t tss = (uint64_t)(uintptr_t)&cpu->tss;
-    uint64_t limit = sizeof(cpu->tss) - 1;
+    uintptr_t tss = (uintptr_t)&cpu->tss;
+    uint64_t limit = sizeof(struct tss64) - 1;
     // Present, DPL 0, available 64-bit TSS.
-    cpu->gdt[3] = (limit & 0xffff) | ((tss & 0xffffff) << 16) | (0x89ull << 40)
-                  | ((limit & 0xf0000) << 32) | ((tss >> 24 & 0xff) << 56);
+    cpu->gdt[3] = (limit & 0xffff) | ((tss & 0xffffff) << 16)
+        | ((uint64_t)0x89 << 40) | ((limit & 0xf0000) << 32)
+        | ((tss >> 24 & 0xff) << 56);
     cpu->gdt[4] = tss >> 32;
 
     cpu->tss.ist[0] = base + CPU_IST_NMI_TOP;
     cpu->tss.ist[1] = base + CPU_IST_DF_TOP;
     cpu->tss.ist[2] = base + CPU_IST_MC_TOP;
-    cpu->tss.iomap_base = sizeof(cpu->tss);
+    cpu->tss.iomap_base = sizeof(struct tss64);
 
     return cpu;
 }
@@ -345,8 +373,10 @@ void cpu_tables_load(struct cpu *cpu, bool use_ist) {
         idt_build(use_ist);
     }
 
-    struct table_ptr gdtr = {sizeof(cpu->gdt) - 1, (uint64_t)(uintptr_t)cpu->gdt};
-    struct table_ptr idtr = {sizeof(idt) - 1, (uint64_t)(uintptr_t)idt};
+    struct table_ptr gdtr = {
+        sizeof(cpu->gdt) - 1, (uint64_t)(uintptr_t)cpu->gdt
+    };
+    struct table_ptr idtr = { sizeof(idt) - 1, (uint64_t)(uintptr_t)idt };
 
     asm volatile (
         "lgdt %0\n\t"
@@ -365,9 +395,9 @@ void cpu_tables_load(struct cpu *cpu, bool use_ist) {
         "movl %%eax, %%gs\n\t"
         :
         : "m"(gdtr), "m"(idtr), "i"(GDT_CODE), "i"(GDT_DATA)
-        : "rax", "memory");
+            : "rax", "memory");
 
     // Busy TSS descriptors cannot be loaded, and this one may be reloaded.
-    cpu->gdt[3] &= ~(0x2ull << 40);
+    cpu->gdt[3] &= ~((uint64_t)0x2 << 40);
     asm volatile ("ltr %w0" :: "r"(GDT_TSS) : "memory");
 }
