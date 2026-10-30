@@ -119,6 +119,8 @@ static size_t route_count;
 // for room starts, so that a vector freed is the last to be used again.
 static struct irq_slot *(*slot_table)[256];
 static uint8_t *slot_next;
+// The slot that last had each vector, for the message it may still bring.
+static struct irq_slot *(*slot_retired)[256];
 static struct spinlock slot_lock;
 static struct spinlock lock;
 static struct cpu *bsp;
@@ -580,6 +582,9 @@ static void slot_release(struct irq_slot *s) {
     }
     for (size_t i = 0; i < s->count; i++) {
         __atomic_store_n(
+            &slot_retired[s->cpu->index][s->vector + i], s, __ATOMIC_RELEASE
+        );
+        __atomic_store_n(
             &slot_table[s->cpu->index][s->vector + i], NULL, __ATOMIC_RELEASE
         );
     }
@@ -701,9 +706,16 @@ uint64_t irq_slot_rte(struct irq_slot *s, bool level, bool active_low) {
 }
 
 bool irq_slot_interrupt(uint8_t vector) {
+    size_t cpu = this_cpu()->index;
     struct irq_slot *s = __atomic_load_n(
-        &slot_table[this_cpu()->index][vector], __ATOMIC_ACQUIRE
+        &slot_table[cpu][vector], __ATOMIC_ACQUIRE
     );
+    // A function may have sent its message just before the guest masked it.
+    if (s == NULL) {
+        s = __atomic_exchange_n(
+            &slot_retired[cpu][vector], NULL, __ATOMIC_ACQUIRE
+        );
+    }
     if (s == NULL) {
         return false;
     }
@@ -824,6 +836,7 @@ void irq_init(void) {
     pic_reset();
     elcr_init();
     slot_table = kmalloc(smp_cpu_count() * sizeof(*slot_table));
+    slot_retired = kmalloc(smp_cpu_count() * sizeof(*slot_retired));
     slot_next = kmalloc(smp_cpu_count());
     memset(slot_next, SLOT_FIRST, smp_cpu_count());
 
