@@ -477,6 +477,10 @@ static const struct setting settings[] = {
         .flag = &config.igpu_stolen_remap
     },
     {
+        .name = "legacy_usb", .apply = apply_boolean,
+        .flag = &config.legacy_usb
+    },
+    {
         .name = "cpu_allowlist", .apply = apply_cpu_list,
         .filter = HANDOFF_CPU_FILTER_ALLOW
     },
@@ -864,6 +868,7 @@ void config_load(void) {
     config.avic = HANDOFF_AVIC_AUTO;
     config.cpu_filter = HANDOFF_CPU_FILTER_NONE;
     config.igpu_stolen_remap = true;
+    config.legacy_usb = true;
 
     bool applied = apply_files()
         || apply_variable(
@@ -895,6 +900,7 @@ void config_to_handoff(struct handoff_config *out) {
     out->avic = config.avic;
     out->cpuid_limit = config.cpuid_limit;
     out->igpu_stolen_remap = config.igpu_stolen_remap;
+    out->legacy_usb = config.legacy_usb;
     out->cpu_filter = config.cpu_filter;
     out->cpu_range_count = config.cpu_range_count;
     for (size_t i = 0; i < config.cpu_range_count; i++) {

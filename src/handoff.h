@@ -164,6 +164,9 @@ struct handoff_config {
     // Whether Intel's integrated graphics get their stolen memory at an
     // address of the guest's own (virt/igfx.c), else at the host's.
     uint8_t igpu_stolen_remap;
+    // Whether the hypervisor has the USB controllers until the OS takes them
+    // (virt/usb.c), else the OS has them from the start.
+    uint8_t legacy_usb;
     // Which APIC IDs the guest gets, as inclusive ranges.
     uint32_t cpu_filter;
     uint32_t cpu_range_count;

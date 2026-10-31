@@ -22,6 +22,8 @@
 #include <tendril/hid.h>
 #include <tendril/tendril.h>
 #include <virt/usb.h>
+#include <core.h>
+#include <handoff.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
 #include <lib/heap.h>
@@ -522,6 +524,9 @@ static void tick_fired(void *ctx) {
 }
 
 void usb_init(void) {
+    if (core_handoff->config.legacy_usb == 0) {
+        return;
+    }
     const struct pci_topology *t = pci_enum_topology();
     for (size_t i = 0; t != NULL && i < t->function_count; i++) {
         const struct pci_function *f = &t->functions[i];
