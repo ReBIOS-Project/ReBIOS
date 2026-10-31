@@ -41,6 +41,7 @@
 #include <virt/nvmx.h>
 #include <virt/profile.h>
 #include <virt/svm.h>
+#include <virt/usb.h>
 #include <virt/vcpu.h>
 #include <virt/vga.h>
 #include <virt/vlapic.h>
@@ -486,6 +487,7 @@ void vcpu_before_entry(struct vcpu *v) {
     }
     watchdog(v);
     if (v->cpu->bsp) {
+        usb_slice(false);
         hv_timer_run();
     }
     vlapic_timer_program(v);
@@ -551,6 +553,7 @@ void vcpu_wait(struct vcpu *v, bool (*ends)(struct vcpu *v), bool spin) {
         __atomic_store_n(&cpu->kicked, false, __ATOMIC_SEQ_CST);
         service_pause(v);
         if (cpu->bsp) {
+            usb_slice(true);
             hv_timer_run();
         }
         vlapic_timer_program(v);
@@ -563,8 +566,9 @@ void vcpu_wait(struct vcpu *v, bool (*ends)(struct vcpu *v), bool spin) {
         acpi_slice();
         vga_refresh();
         // Work under way goes on while the guest waits, the boot processor
-        // keeping the AML task going.
-        if (spin || vga_redrawing() || (cpu->bsp && acpi_working())) {
+        // keeping the AML and USB tasks going.
+        if (spin || vga_redrawing()
+         || (cpu->bsp && (acpi_working() || usb_working()))) {
             asm volatile ("sti\n\tnop\n\tcli" :: : "memory");
             cpu_relax();
         } else {
@@ -1059,6 +1063,7 @@ void vcpu_wait_for_sipi(struct vcpu *v) {
             break;
         }
         if (cpu->bsp) {
+            usb_slice(true);
             hv_timer_run();
         }
         vlapic_timer_program(v);

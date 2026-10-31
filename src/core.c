@@ -49,6 +49,7 @@
 #include <virt/pci_virt.h>
 #include <virt/pit.h>
 #include <virt/profile.h>
+#include <virt/usb.h>
 #include <virt/vacpi.h>
 #include <virt/vcpu.h>
 #include <virt/vga.h>
@@ -84,6 +85,7 @@ static void bsp_main(void *arg) {
     igfx_init();
     a20_init();
     vga_init();
+    usb_init();
     // The guest's boot processor gets its local APIC as a legacy BIOS hands it
     // over, the hypervisor the processor's.
     lapic_legacy_init();
@@ -108,6 +110,7 @@ static void bsp_main(void *arg) {
     igfx_switch_begin();
     dma_enable();
     igfx_switch_end();
+    usb_start();
     log_hand_over_screen();
     vcpu_run(v);
 }
