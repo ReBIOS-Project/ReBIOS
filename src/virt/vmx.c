@@ -1179,6 +1179,10 @@ static void vmx_handle_io(struct vcpu *v, uint64_t qual) {
 
     uint32_t value = (uint32_t)v->gprs.rax;
     exit_io(v, port, size, in, &value);
+    if (v->io_retry) {
+        v->io_retry = false;
+        return;
+    }
     if (in) {
         uint64_t mask = size == 4 ? (uint64_t)0xffffffff
             : ((uint64_t)1 << (size * 8)) - 1;

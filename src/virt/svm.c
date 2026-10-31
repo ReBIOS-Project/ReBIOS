@@ -338,6 +338,10 @@ static void svm_handle_io(struct vcpu *v) {
 
     uint32_t value = (uint32_t)v->gprs.rax;
     exit_io(v, port, size, in, &value);
+    if (v->io_retry) {
+        v->io_retry = false;
+        return;
+    }
     if (in) {
         if (size == 4) {
             v->gprs.rax = value;

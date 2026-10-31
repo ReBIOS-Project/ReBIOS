@@ -127,6 +127,9 @@ struct vcpu {
     // Set by an emulated device's write that it is not done with, which then
     // runs again once the guest took its events.
     bool mmio_retry;
+    // A port's handler says the same of the access it was given, which is not
+    // to happen yet.
+    bool io_retry;
 
     // The guest's MTRRs: the default type, the fixed ranges, and the variable
     // ranges' bases and masks.

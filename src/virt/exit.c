@@ -325,4 +325,5 @@ void exit_string_io(struct vcpu *v, uint16_t port) {
     if (insn.opcode >= 0x6c && insn.opcode <= 0x6f) {
         emulate(v, &insn, &string_mem);
     }
+    v->io_retry = false;
 }
