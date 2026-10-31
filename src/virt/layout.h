@@ -62,6 +62,10 @@ void *layout_low(uintptr_t gpa);
 // 4 GiB, at an align boundary, for memory the guest's memory map shows as
 // e820_type. Returns 0 if there is no room.
 uint32_t layout_take(size_t size, uint32_t align, uint32_t e820_type);
+// Reserves memory of the guest for the hypervisor's own use, which devices
+// reach at the address returned and the hypervisor at *hpa, contiguously, or
+// returns 0. After layout_init(), before the guest starts.
+uint32_t layout_take_reserved(size_t size, uint32_t align, uintptr_t *hpa);
 
 // Makes [gpa, gpa + size), page aligned, read as all ones and ignore writes,
 // as addresses nothing decodes do.

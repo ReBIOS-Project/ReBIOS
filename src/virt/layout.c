@@ -794,6 +794,19 @@ void *layout_low(uintptr_t gpa) {
     return low + gpa;
 }
 
+uint32_t layout_take_reserved(size_t size, uint32_t align, uintptr_t *hpa) {
+    uint32_t gpa = layout_take(size, align, E820_RESERVED);
+    if (gpa == 0) {
+        return 0;
+    }
+    size_t pages = align_up(size, PAGE_SIZE) / PAGE_SIZE;
+    if (!contiguous(gpa, pages, hpa)) {
+        *hpa = (uintptr_t)page_alloc(pages);
+        map_ram(gpa, *hpa, pages * PAGE_SIZE);
+    }
+    return gpa;
+}
+
 uint32_t layout_take(size_t size, uint32_t align, uint32_t e820_type) {
     // Whole pages, as the memory map and the page tables have them.
     size = (uint32_t)align_up(size, PAGE_SIZE);
