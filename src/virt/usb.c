@@ -36,6 +36,7 @@
 #include <virt/kbc.h>
 #include <virt/layout.h>
 #include <virt/usb_controller.h>
+#include <virt/usb_disk.h>
 #include <virt/vcpu.h>
 
 // USB legacy support, as a BIOS's is to a PC: the hypervisor has the machine's
@@ -431,6 +432,7 @@ static void controller_take(struct usb_controller *c) {
 static void usb_main(void *arg) {
     (void)arg;
     tendril_hid_register(&hid_callbacks, 0);
+    usb_disk_register();
     for (;;) {
         uint64_t next = UINT64_MAX;
         bool ready = true;
@@ -453,6 +455,7 @@ static void usb_main(void *arg) {
                 ready = ready && tendril_hc_ready(c->hc);
             }
         }
+        usb_disk_work();
         leds_follow();
         __atomic_store_n(&all_ready, ready, __ATOMIC_RELEASE);
         uint64_t poll = time_ns()

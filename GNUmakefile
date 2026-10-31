@@ -405,7 +405,7 @@ obj/flanterm/src/flanterm_backends/fb.c.o: override CPPFLAGS += \
 # Only Tendril and what uses it see its headers.
 obj/tendril/%: override CPPFLAGS += \
     -I tendril/include
-obj/src/virt/usb.c.o obj/src/virt/usb_legacy.c.o: override CPPFLAGS += \
+obj/src/virt/usb.c.o obj/src/virt/usb_disk.c.o obj/src/virt/usb_legacy.c.o: override CPPFLAGS += \
     -I tendril/include
 
 # Only the CSM boot code sees the video BIOS's interface to the hypervisor.

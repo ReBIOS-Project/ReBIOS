@@ -37,6 +37,7 @@
 #include <virt/nvmx.h>
 #include <virt/profile.h>
 #include <virt/svm.h>
+#include <virt/usb_disk.h>
 #include <virt/vcpu.h>
 #include <virt/vlapic.h>
 #include <virt/vmx.h>
@@ -105,6 +106,10 @@ static bool hypercall(struct vcpu *v) {
             vcpu_load_mode(v, &v->call32_saved);
             vcpu_set_rip(v, ebx);
             return false;
+        }
+        case HYPERCALL_USB_DISK: {
+            usb_disk_call(ebx);
+            return true;
         }
         default: {
             break;
