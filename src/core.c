@@ -46,6 +46,7 @@
 #include <virt/nvmx.h>
 #include <virt/pci_plan.h>
 #include <virt/pci_virt.h>
+#include <virt/pit.h>
 #include <virt/profile.h>
 #include <virt/vacpi.h>
 #include <virt/vcpu.h>
@@ -95,6 +96,7 @@ static void bsp_main(void *arg) {
     remap_init();
     vioapic_init();
     irq_init();
+    pit_init();
     hpet_init();
     vacpi_init();
     profile_init();

@@ -37,11 +37,13 @@
 #include <sys/x86.h>
 #include <virt/io.h>
 #include <virt/pic.h>
+#include <virt/pit.h>
 #include <virt/vcpu.h>
 #include <virt/vioapic.h>
 #include <virt/vlapic.h>
 
 #define ISA_IRQS 16
+#define IRQ_TIMER 0
 #define CASCADE_IRQ 2
 // The highest APIC ID an 8-bit destination names alone, FFh being the
 // broadcast (SDM 325462-093 Vol. 3A, 13.6.2.1).
@@ -788,9 +790,36 @@ void irq_virtual_line(uint32_t gsi, bool asserted) {
     kick_after_update();
 }
 
+void irq_isa_pulse(unsigned int irq) {
+    spinlock_acquire(&lock);
+    uint32_t gsi = irq_isa_gsi(irq);
+    uint64_t vrte = 0;
+    bool apic = gsi != UINT32_MAX && vioapic_rte(gsi, &vrte)
+        && (vrte & IOAPIC_RTE_MASKED) == 0
+        && (vrte & IOAPIC_RTE_DELIVERY_MASK) != IOAPIC_RTE_DELIVERY_EXTINT;
+    if (!apic) {
+        pic_pulse_irq(irq);
+        __atomic_store_n(&extint_asserted, pic_output(), __ATOMIC_RELEASE);
+    }
+    spinlock_release(&lock);
+    if (apic) {
+        vlapic_deliver_message(
+            (uint32_t)(vrte >> IOAPIC_RTE_DEST_SHIFT),
+            (vrte & IOAPIC_RTE_LOGICAL) != 0,
+            (uint32_t)(vrte & IOAPIC_RTE_DELIVERY_MASK), (uint8_t)vrte, false
+        );
+    } else {
+        kick_after_update();
+    }
+}
+
 uint8_t irq_extint_acknowledge(void) {
     spinlock_acquire(&lock);
+    bool ticking = pic_in_service(IRQ_TIMER);
     uint8_t vector = pic_acknowledge();
+    if (!ticking && pic_in_service(IRQ_TIMER)) {
+        pit_tick_begun();
+    }
     __atomic_store_n(&extint_asserted, pic_output(), __ATOMIC_RELEASE);
     spinlock_release(&lock);
     return vector;
@@ -809,7 +838,11 @@ static void pic_access(
             *value = (*value & ~((uint32_t)0xff << (8 * i)))
                 | (uint32_t)pic_read(port) << (8 * i);
         } else {
+            bool ticking = pic_in_service(IRQ_TIMER);
             pic_write(port, (uint8_t)(*value >> (8 * i)));
+            if (ticking && !pic_in_service(IRQ_TIMER)) {
+                pit_tick_ended();
+            }
         }
     }
     update();

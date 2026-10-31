@@ -114,6 +114,11 @@ void irq_take_host_line(uint32_t gsi, void (*handler)(void *ctx), void *ctx);
 // An interrupt on VLAPIC_DEVICE_VECTOR.
 void irq_device_interrupt(void);
 
+// An edge of an ISA device the hypervisor provides, which reaches the guest's
+// I/O APIC entry for the IRQ, while unmasked, else its 8259 input. The host's
+// line stays, for what else may drive it.
+void irq_isa_pulse(unsigned int irq);
+
 // The level of a line the hypervisor drives for the guest on a GSI, which
 // reaches the guest's I/O APIC entry or 8259 input for the GSI as a device's
 // level-triggered line would.

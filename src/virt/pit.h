@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: GPL-2.0-only
+//
+// This file is part of ReBIOS.
+// Copyright (C) 2026 Mintsuki and contributors
+//
+// ReBIOS is free software: you can redistribute it and/or modify it under the
+// terms of the GNU General Public License version 2 as published by the Free
+// Software Foundation.
+//
+// ReBIOS is distributed in the hope that it will be useful, but WITHOUT ANY
+// WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+// FOR A PARTICULAR PURPOSE. See the GNU General Public License for more
+// details.
+//
+// You should have received a copy of the GNU General Public License along
+// with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
+
+#ifndef VIRT__PIT_H
+#define VIRT__PIT_H
+
+// Gives the guest an 8254 of its own, and the timer bits of port 61h.
+void pit_init(void);
+
+// The guest's 8259 took counter 0's interrupt, and has ended it.
+void pit_tick_begun(void);
+void pit_tick_ended(void);
+
+#endif

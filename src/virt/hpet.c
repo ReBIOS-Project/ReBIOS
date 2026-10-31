@@ -35,6 +35,7 @@
 #define CAP_TIMERS_SHIFT 8
 #define CAP_TIMERS_MASK ((uint32_t)0x1f)
 #define CONFIG ((uint32_t)0x10)
+#define CONFIG_ENABLE ((uint32_t)1 << 0)
 #define CONFIG_LEGACY_ROUTE ((uint32_t)1 << 1)
 #define TIMER_BASE ((uint32_t)0x100)
 #define TIMER_STRIDE ((uint32_t)0x20)
@@ -45,6 +46,8 @@
 
 static uint64_t hidden[MAX_HIDDEN];
 static size_t hidden_count;
+// Where the guest's is: the first it gets, the only one a PC has.
+static uintptr_t guest_base;
 
 static uint32_t read32(uintptr_t address) {
     return *(volatile uint32_t *)(uintptr_t)address;
@@ -100,6 +103,9 @@ void hpet_init(void) {
              && (base & (PAGE_SIZE - 1)) == 0 && hidden_count < MAX_HIDDEN
              && fsb_capable(base)) {
                 hide(base);
+            } else if (hpet.address.address_space_id == ACPI_AS_ID_SYS_MEM
+                    && guest_base == 0) {
+                guest_base = base;
             }
         }
         uacpi_table_unref(&table);
@@ -117,4 +123,9 @@ bool hpet_hidden(uintptr_t base) {
 
 bool hpet_any_hidden(void) {
     return hidden_count != 0;
+}
+
+bool hpet_replaces_pit(void) {
+    uint32_t route = CONFIG_ENABLE | CONFIG_LEGACY_ROUTE;
+    return guest_base != 0 && (read32(guest_base + CONFIG) & route) == route;
 }
