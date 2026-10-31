@@ -47,6 +47,8 @@ struct task *task_current(void);
 // task again, or, for a sleep, until it does so once time_ns() reaches until.
 void task_yield(void);
 void task_sleep(uint64_t until);
+// Ends its sleep, from anywhere.
+void task_wake(struct task *t);
 // From a task, yields where this CPU's time slice is over, returning whether
 // it did; elsewhere, returns false.
 bool task_yield_if_over(void);

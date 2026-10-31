@@ -94,6 +94,10 @@ void task_sleep(uint64_t until) {
     task_swap(&t->rsp, t->runner_rsp);
 }
 
+void task_wake(struct task *t) {
+    __atomic_store_n(&t->wake, 0, __ATOMIC_RELEASE);
+}
+
 bool task_yield_if_over(void) {
     if (this_cpu()->task == NULL || !cpu_slice_over()) {
         return false;
