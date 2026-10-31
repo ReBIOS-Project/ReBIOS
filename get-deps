@@ -89,6 +89,11 @@ clone_repo_commit \
     c0edecef62bcac6ce3f783540099190bafadadda
 
 clone_repo_commit \
+    https://github.com/Mintsuki/Tendril.git \
+    tendril \
+    ff16825d1eecb46904832ca18ef9712d39e2e659
+
+clone_repo_commit \
     https://github.com/ReBIOS-Project/seabios.git \
     seabios \
     c306a857e36fff7da9254bc414bfc43738c005d0

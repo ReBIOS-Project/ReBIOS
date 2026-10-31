@@ -341,7 +341,7 @@ endif
 
 # Use "find" to glob all *.c, *.S, and *.asm files in the tree and obtain the
 # object and header dependency file names.
-override SRCFILES := $(shell find -L src freestanding-lgrt/src picoefi/x86_64 flanterm/src uACPI/source -type f 2>/dev/null | LC_ALL=C sort)
+override SRCFILES := $(shell find -L src freestanding-lgrt/src picoefi/x86_64 flanterm/src uACPI/source tendril/src -type f 2>/dev/null | LC_ALL=C sort)
 override CFILES := $(filter %.c,$(SRCFILES))
 override ASFILES := $(filter %.S,$(SRCFILES))
 override NASMFILES := $(filter %.asm,$(SRCFILES))
@@ -401,6 +401,10 @@ obj/src/lib/log.c.o obj/src/loader/console.c.o: override CPPFLAGS += \
 # Flanterm's memory comes from the console.
 obj/flanterm/src/flanterm_backends/fb.c.o: override CPPFLAGS += \
     -DFLANTERM_FB_DISABLE_BUMP_ALLOC
+
+# Only Tendril sees its headers.
+obj/tendril/%: override CPPFLAGS += \
+    -I tendril/include
 
 # Only the CSM boot code sees the video BIOS's interface to the hypervisor.
 obj/src/csm/csm_boot.c.o: override CPPFLAGS += \
@@ -481,7 +485,7 @@ clean:
 # Remove everything built and generated including downloaded dependencies.
 .PHONY: distclean
 distclean: clean
-	rm -rf .deps-obtained .cache compile_commands.json freestanding-c-hdrs freestanding-lgrt picoefi nanoprintf flanterm uACPI seabios vgabios/freestanding-lgrt edk2-ovmf-bins edk2-ovmf-bins.tar.gz
+	rm -rf .deps-obtained .cache compile_commands.json freestanding-c-hdrs freestanding-lgrt picoefi nanoprintf flanterm uACPI tendril seabios vgabios/freestanding-lgrt edk2-ovmf-bins edk2-ovmf-bins.tar.gz
 
 # Release tarballs are named after the commit's tag, without its "v", or else
 # after its abbreviated hash, and their files are dated as the commit is.
@@ -501,7 +505,7 @@ dist:
 	cd "$(DIST_OUTPUT)" && ./get-deps
 	git -C "$(DIST_OUTPUT)/seabios" describe --always --tags --long >"$(DIST_OUTPUT)/seabios/.version"
 	cd "$(DIST_OUTPUT)" && rm -rf .gitignore .github
-	cd "$(DIST_OUTPUT)" && for d in freestanding-c-hdrs freestanding-lgrt picoefi nanoprintf flanterm uACPI seabios vgabios/freestanding-lgrt; do rm -rf "$$d/.git" "$$d/.github" "$$d/.gitignore"; done
+	cd "$(DIST_OUTPUT)" && for d in freestanding-c-hdrs freestanding-lgrt picoefi nanoprintf flanterm uACPI tendril seabios vgabios/freestanding-lgrt; do rm -rf "$$d/.git" "$$d/.github" "$$d/.gitignore"; done
 	rm -rf "$(DIST_OUTPUT)/nanoprintf/tests" "$(DIST_OUTPUT)/uACPI/tests"
 	find "$(DIST_OUTPUT)" -type f -perm -100 -exec chmod 755 '{}' +
 	find "$(DIST_OUTPUT)" -type f ! -perm -100 -exec chmod 644 '{}' +

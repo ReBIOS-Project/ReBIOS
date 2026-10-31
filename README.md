@@ -369,6 +369,7 @@ project-related discussion, or to otherwise chat with likeminded people.
     formatted output.
 *   **[Flanterm](https://github.com/Mintsuki/Flanterm)** for the console ReBIOS
     shows its output on.
+*   **[Tendril](https://github.com/Mintsuki/Tendril)** for driving USB.
 *   **[QEMU](https://www.qemu.org/)**, whose VGA BIOS the emulated VGA's fonts
     (public domain fonts from Joseph Gil's fntcol16 collection) and mode
     register values were taken from.
@@ -397,3 +398,6 @@ ReBIOS builds in software of others, under their own licenses:
   Nicholson, under the Unlicense or the 0BSD license.
 - [Flanterm](https://github.com/Mintsuki/Flanterm), by Mintsuki and
   contributors, under the BSD 2-Clause license.
+- [Tendril](https://github.com/Mintsuki/Tendril), by Mintsuki and contributors,
+  under the BSD 2-Clause license, with the notices of what it draws on in its
+  `3RDPARTY.md`.
