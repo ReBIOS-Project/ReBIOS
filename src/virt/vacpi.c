@@ -33,6 +33,7 @@
 #include <virt/vacpi.h>
 #include <csm/e820.h>
 #include <hw/acpi.h>
+#include <hw/pci_cfg.h>
 #include <hw/pci_host.h>
 #include <hw/power.h>
 #include <lib/aml.h>
@@ -108,6 +109,12 @@
 #define QUEUE_SIZE 128
 #define MAX_PATH_DEPTH 32
 #define MAX_PACKAGE 255
+
+#define PS2_PORT_FIRST 0x60
+#define PS2_PORT_LAST 0x64
+
+#define PCI_CLASS 0x0a
+#define PCI_CLASS_ISA_BRIDGE 0x0601
 
 // The FADT's fields, ACPI 1.0b, Table 5-6.
 #define FADT_FIRMWARE_CTRL 36
@@ -1505,6 +1512,141 @@ static void emit_rcal(struct aml *a) {
     aml_end(a);
 }
 
+// What Linux 7.3's i8042 driver takes for the 8042's devices.
+static const char *const keyboard_ids[] = {
+    "PNP0300", "PNP0301", "PNP0302", "PNP0303", "PNP0304", "PNP0305",
+    "PNP0306", "PNP0309", "PNP030A", "PNP030B", "PNP0320", "PNP0343",
+    "PNP0344", "PNP0345", "CPQA0D7", NULL
+};
+static const char *const mouse_ids[] = {
+    "AUI0200", "FJC6000", "FJC6001", "PNP0F03", "PNP0F0B", "PNP0F0E",
+    "PNP0F12", "PNP0F13", "PNP0F19", "PNP0F1C", "SYN0801", NULL
+};
+
+static uacpi_iteration_decision device_shown(
+    void *user, uacpi_namespace_node *node, uacpi_u32 depth
+) {
+    (void)node;
+    (void)depth;
+    *(bool *)user = true;
+    return UACPI_ITERATION_DECISION_BREAK;
+}
+
+static bool firmware_shows(const char *const *ids) {
+    bool shown = false;
+    uacpi_find_devices_at(uacpi_namespace_root(), ids, device_shown, &shown);
+    return shown;
+}
+
+static void emit_ps2_device(
+    struct aml *a, const char *name, const char *id, const uint8_t *crs,
+    size_t crs_size
+) {
+    aml_begin(a, AML_DEVICE);
+    aml_name(a, name);
+    aml_name_int(a, "_HID", eisa_id(id));
+    aml_op(a, AML_NAME);
+    aml_name(a, "_CRS");
+    aml_buffer(a, crs, crs_size);
+    aml_end(a);
+}
+
+static uacpi_iteration_decision window_has_ps2_ports(
+    void *user, uacpi_resource *r
+) {
+    uint64_t minimum = UINT64_MAX;
+    uint64_t maximum = 0;
+    if (r->type == UACPI_RESOURCE_TYPE_ADDRESS16
+     && r->address16.common.type == UACPI_RANGE_IO) {
+        minimum = r->address16.minimum;
+        maximum = r->address16.maximum;
+    } else if (r->type == UACPI_RESOURCE_TYPE_ADDRESS32
+            && r->address32.common.type == UACPI_RANGE_IO) {
+        minimum = r->address32.minimum;
+        maximum = r->address32.maximum;
+    } else if (r->type == UACPI_RESOURCE_TYPE_ADDRESS64
+            && r->address64.common.type == UACPI_RANGE_IO) {
+        minimum = r->address64.minimum;
+        maximum = r->address64.maximum;
+    }
+    if (minimum > PS2_PORT_FIRST || maximum < PS2_PORT_LAST) {
+        return UACPI_ITERATION_DECISION_CONTINUE;
+    }
+    *(bool *)user = true;
+    return UACPI_ITERATION_DECISION_BREAK;
+}
+
+static uacpi_namespace_node *isa_bridge_below(
+    const struct pci_host_bridge *bridge
+) {
+    uacpi_namespace_node *iter = NULL;
+    uacpi_object_type_bits devices = UACPI_OBJECT_DEVICE_BIT;
+    while (uacpi_namespace_node_next_typed(bridge->node, &iter, devices)
+        == UACPI_STATUS_OK) {
+        uint64_t adr;
+        if (uacpi_eval_simple_integer(iter, "_ADR", &adr) != UACPI_STATUS_OK) {
+            continue;
+        }
+        struct pci_addr addr = {
+            bridge->segment, bridge->bus, (uint8_t)(adr >> 16), (uint8_t)adr
+        };
+        if (pci_cfg_read(addr, PCI_CLASS, 2) == PCI_CLASS_ISA_BRIDGE) {
+            return iter;
+        }
+    }
+    return NULL;
+}
+
+// Where firmware has them: a host bridge's window gives its ports to what is
+// below it alone, so Windows 7 starts no device with those ports beside it.
+static bool ps2_parent(struct path *out) {
+    const struct pci_host *host = pci_host_scan();
+    for (size_t i = 0; i < host->bridge_count; i++) {
+        const struct pci_host_bridge *bridge = &host->bridges[i];
+        bool routes = false;
+        uacpi_for_each_device_resource(
+            bridge->node, "_CRS", window_has_ps2_ports, &routes
+        );
+        if (routes) {
+            uacpi_namespace_node *isa = isa_bridge_below(bridge);
+            return guest_path(isa != NULL ? isa : bridge->node, out);
+        }
+    }
+    return false;
+}
+
+// An OS looks in the namespace for the 8042's devices, which the guest has
+// whatever the firmware says of the machine's.
+static void emit_ps2_devices(struct aml *a) {
+    // IO (Decode16, 0x60, 0x60, 1, 1), IO (Decode16, 0x64, 0x64, 1, 1),
+    // IRQNoFlags () { 1 }
+    static const uint8_t keyboard_crs[] = {
+        0x47, 0x01, 0x60, 0x00, 0x60, 0x00, 0x01, 0x01,
+        0x47, 0x01, 0x64, 0x00, 0x64, 0x00, 0x01, 0x01,
+        0x22, 0x02, 0x00, RES_END_TAG, 0x00
+    };
+    // IRQNoFlags () { 12 }
+    static const uint8_t mouse_crs[] = {
+        0x22, 0x00, 0x10, RES_END_TAG, 0x00
+    };
+    struct path parent;
+    aml_begin(a, AML_SCOPE);
+    if (ps2_parent(&parent)) {
+        emit_path(a, &parent);
+    } else {
+        aml_name(a, "\\_SB");
+    }
+    if (!firmware_shows(keyboard_ids)) {
+        emit_ps2_device(
+            a, "RBKB", "PNP0303", keyboard_crs, sizeof(keyboard_crs)
+        );
+    }
+    if (!firmware_shows(mouse_ids)) {
+        emit_ps2_device(a, "RBMS", "PNP0F13", mouse_crs, sizeof(mouse_crs));
+    }
+    aml_end(a);
+}
+
 static void emit_mailbox_device(struct aml *a) {
     aml_begin(a, AML_SCOPE);
     aml_name(a, "\\_SB");
@@ -1762,6 +1904,7 @@ uint8_t *vacpi_dsdt(size_t *length) {
     );
     emit_mailbox_device(&a);
     emit_root(&a);
+    emit_ps2_devices(&a);
     emit_links(&a);
     emit_sleep_and_events(&a);
     acpi_unlock();
