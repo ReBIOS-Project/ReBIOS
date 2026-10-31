@@ -4,3 +4,4 @@ CONFIG_NO_VGABIOS=y
 # CONFIG_VGAHOOKS is not set
 # CONFIG_TCGBIOS is not set
 # CONFIG_DEBUG_SERIAL is not set
+# CONFIG_USB is not set
