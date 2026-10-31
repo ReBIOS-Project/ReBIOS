@@ -26,7 +26,10 @@
 #include <core.h>
 #include <hw/acpi.h>
 #include <lib/log.h>
+#include <lib/time.h>
 #include <sys/x86.h>
+
+#define RESET_WAIT_US 100000
 
 // Returns only if the firmware fails to.
 static void firmware_reset(EFI_RESET_TYPE type) {
@@ -35,24 +38,30 @@ static void firmware_reset(EFI_RESET_TYPE type) {
     rt->ResetSystem(type, EFI_SUCCESS, 0, NULL);
 }
 
+// ACPI's reset register, then the keyboard controller's reset line, as Linux
+// 7.3 restarts, then the reset control register at CF9h. The firmware's
+// service comes after them, as a Dell Inspiron 7700's jumps to address 2 by
+// now.
 void power_reset(bool warm) {
     printf("Resetting the machine\n");
-    firmware_reset(warm ? EfiResetWarm : EfiResetCold);
     if (acpi_init()) {
         uacpi_reboot();
+        time_udelay(RESET_WAIT_US);
     }
-
-    // The reset control register at CF9h, then the keyboard controller's reset
-    // line, then a triple fault.
+    if (inb(0x64) != 0xff) {
+        for (size_t i = 0; i < 100000; i++) {
+            if ((inb(0x64) & 2) == 0) {
+                break;
+            }
+            cpu_relax();
+        }
+        outb(0x64, 0xfe);
+        time_udelay(RESET_WAIT_US);
+    }
     outb(0xcf9, 0x02);
     outb(0xcf9, 0x06);
-    for (size_t i = 0; i < 100000; i++) {
-        if ((inb(0x64) & 2) == 0) {
-            break;
-        }
-        cpu_relax();
-    }
-    outb(0x64, 0xfe);
+    time_udelay(RESET_WAIT_US);
+    firmware_reset(warm ? EfiResetWarm : EfiResetCold);
     struct {
         uint16_t limit;
         uint64_t base;
