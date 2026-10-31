@@ -330,7 +330,20 @@ uintptr_t cpu_stack_top(struct cpu *cpu) {
 void cpu_slice_start(void) {
     struct cpu *cpu = this_cpu();
     cpu->slice_start = time_ns();
+    cpu->slice_start_tsc = rdtsc();
     cpu->slice_end = cpu->slice_start + CPU_SLICE_NS;
+}
+
+void cpu_slice_end(void) {
+    struct cpu *cpu = this_cpu();
+    uint64_t now = rdtsc();
+    cpu->root_tsc += now - cpu->slice_start_tsc;
+    cpu->slice_start_tsc = now;
+}
+
+uint64_t cpu_root_time(void) {
+    struct cpu *cpu = this_cpu();
+    return cpu->root_tsc + (rdtsc() - cpu->slice_start_tsc);
 }
 
 bool cpu_slice_over(void) {

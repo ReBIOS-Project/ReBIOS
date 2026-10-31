@@ -80,6 +80,9 @@ struct cpu {
     // The time slice of the guest's exit the CPU handles: when the exit came,
     // and when what can wait for the next one gives the CPU back.
     uint64_t slice_start;
+    uint64_t slice_start_tsc;
+    // By the TSC, how long this CPU has kept the guest waiting at exits.
+    uint64_t root_tsc;
     uint64_t slice_end;
     // When the watchdog may report the CPU again.
     uint64_t watchdog_next;
@@ -98,6 +101,10 @@ static inline struct cpu *this_cpu(void) {
 // Starts this CPU's time slice, at an exit; whether it is over.
 void cpu_slice_start(void);
 bool cpu_slice_over(void);
+// Ends it, on the way into the guest.
+void cpu_slice_end(void);
+// How long this CPU has kept the guest waiting so far, by the TSC.
+uint64_t cpu_root_time(void);
 
 struct cpu *cpu_area_alloc(size_t index, uint32_t apic_id, bool bsp);
 void cpu_tables_load(struct cpu *cpu, bool use_ist);

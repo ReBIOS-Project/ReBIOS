@@ -83,8 +83,18 @@ void vlapic_deliver_msi(uint32_t address, uint32_t data);
 // The processor of the first vCPU an 8-bit destination names, or NULL.
 struct cpu *vlapic_target(uint32_t dest, bool logical);
 struct cpu *vlapic_msi_target(uint32_t address);
-// The processor's timer, which runs the vCPU's local APIC timer, fired.
+// The processor's timer, which is the hypervisor's, fired.
 void vlapic_timer_fired(struct vcpu *v);
+// Carries out what is due on the vCPU's local APIC timer, and arms the
+// processor's for what comes next of that and, on the boot processor, of the
+// hypervisor's own timers.
+void vlapic_timer_program(struct vcpu *v);
+// The IA32_TSC_DEADLINE MSR, as the guest's TSC has it.
+uint64_t vlapic_tsc_deadline(struct vcpu *v);
+void vlapic_tsc_deadline_set(struct vcpu *v, uint64_t deadline);
+// The vCPU's TSC offset changed, under the deadline where the guest's TSC has
+// it.
+void vlapic_tsc_offset_changed(struct vcpu *v);
 // The processor's thermal interrupt, which the vCPU's thermal entry asks for,
 // came.
 void vlapic_thermal_fired(struct vcpu *v);

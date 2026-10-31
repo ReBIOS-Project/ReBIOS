@@ -31,6 +31,7 @@
 #include <sys/smp.h>
 #include <sys/x86.h>
 #include <virt/gpt.h>
+#include <virt/hv_timer.h>
 #include <virt/insn.h>
 #include <virt/irq.h>
 #include <virt/mmio.h>
@@ -70,6 +71,10 @@
 #define XAPIC_BROADCAST ((uint32_t)0xff)
 #define X2APIC_BROADCAST ((uint32_t)0xffffffff)
 #define TIMER_DIVIDE_WRITABLE ((uint32_t)0xb)
+#define LVT_TIMER_MODE_MASK ((uint32_t)3 << 17)
+#define LVT_TIMER_PERIODIC ((uint32_t)1 << 17)
+#define LVT_TIMER_TSC_DEADLINE ((uint32_t)2 << 17)
+#define CPUID_1_ECX_TSC_DEADLINE ((uint32_t)1 << 24)
 
 #define MSR_AVIC_DOORBELL 0xc001011b
 // The physical APIC ID table's entries and the logical one's (APM 24593 rev.
@@ -148,6 +153,15 @@ struct vlapic {
     int avic;
     // Whether VMX virtualises the vCPU's IPIs.
     bool ipiv;
+    // When the guest's timer next expires by the processor's TSC, or 0: the
+    // processor's timer is the hypervisor's, which has its own uses for it.
+    uint64_t timer_deadline;
+    // The deadline as the guest's TSC has it, in TSC-deadline mode.
+    uint64_t timer_guest_deadline;
+    // What the processor's timer is armed for.
+    uint64_t timer_armed;
+    // Until when a deadline that passed during an exit waits.
+    uint64_t timer_held_until;
 };
 
 static uint32_t regs_get(const struct vlapic *vl, uint32_t offset) {
@@ -171,6 +185,7 @@ static void regs_and(struct vlapic *vl, uint32_t offset, uint32_t bits) {
 }
 
 static uint32_t host_version;
+static bool tsc_deadline_mode;
 
 // The Max LVT Entry of the version register each LVT entry needs (SDM
 // 325462-093 Vol. 3A, 13.4.8): those beyond it are not there.
@@ -303,6 +318,7 @@ bool vlapic_access_page(uintptr_t hpa) {
 }
 
 void vlapic_init(void) {
+    tsc_deadline_mode = (cpuid(1, 0).ecx & CPUID_1_ECX_TSC_DEADLINE) != 0;
     host_version = lapic_read(APIC_VERSION);
     legacy_svr = lapic_read(APIC_SVR);
     legacy_lint0 = lapic_read(APIC_LVT_LINT0);
@@ -531,13 +547,70 @@ static void mirror_logical(const struct vlapic *vl) {
     }
 }
 
-// The timer the processor runs for the guest: the guest's registers, but for
-// the vector, which is the hypervisor's.
-static void timer_lvt(const struct vlapic *vl) {
-    lapic_write(
-        APIC_LVT_TIMER,
-        (regs_get(vl, APIC_LVT_TIMER) & ~(uint32_t)0xff) | VLAPIC_TIMER_VECTOR
+static uint32_t timer_mode(const struct vlapic *vl) {
+    return regs_get(vl, APIC_LVT_TIMER) & LVT_TIMER_MODE_MASK;
+}
+
+// The divide configuration register's bits 3, 1, and 0 (SDM 325462-093 Vol.
+// 3A, Figure 13-10): 2 to the power of their value plus 1, and 1 for 111b.
+static uint32_t timer_divisor(const struct vlapic *vl) {
+    uint32_t config = regs_get(vl, APIC_TIMER_DIVIDE);
+    uint32_t shift = ((config & 3) | ((config & 8) >> 1)) + 1;
+    return (uint32_t)1 << (shift & 7);
+}
+
+static uint64_t timer_span(const struct vlapic *vl) {
+    return lapic_timer_to_tsc(
+        (uint64_t)regs_get(vl, APIC_TIMER_INITIAL) * timer_divisor(vl)
     );
+}
+
+static void timer_stop(struct vlapic *vl) {
+    vl->timer_deadline = 0;
+    vl->timer_guest_deadline = 0;
+}
+
+static void timer_expire(struct vcpu *v, uint64_t now) {
+    struct vlapic *vl = v->vlapic;
+    uint32_t lvt = regs_get(vl, APIC_LVT_TIMER);
+    if ((lvt & APIC_LVT_MASKED) == 0) {
+        vlapic_accept(v, (uint8_t)lvt, false);
+    }
+    uint64_t span = timer_span(vl);
+    if ((lvt & LVT_TIMER_MODE_MASK) != LVT_TIMER_PERIODIC || span == 0) {
+        timer_stop(vl);
+        return;
+    }
+    // Periods the hypervisor missed are gone, as interrupts in service take no
+    // more of the same.
+    vl->timer_deadline += span;
+    if (vl->timer_deadline <= now) {
+        vl->timer_deadline = now + span - (now - vl->timer_deadline) % span;
+    }
+}
+
+static uint32_t timer_current(const struct vlapic *vl) {
+    if (timer_mode(vl) == LVT_TIMER_TSC_DEADLINE || vl->timer_deadline == 0) {
+        return 0;
+    }
+    uint64_t now = rdtsc();
+    if (vl->timer_deadline <= now) {
+        return 0;
+    }
+    uint64_t left = lapic_timer_from_tsc(vl->timer_deadline - now)
+        / timer_divisor(vl);
+    uint32_t initial = regs_get(vl, APIC_TIMER_INITIAL);
+    return left < initial ? (uint32_t)left : initial;
+}
+
+// Leaving or entering TSC-deadline mode disarms the timer (SDM 325462-093 Vol.
+// 3A, 13.5.4.1), and, as in Linux 7.3's KVM, clears the initial count.
+static void timer_mode_changed(struct vlapic *vl, uint32_t old_mode) {
+    if ((old_mode == LVT_TIMER_TSC_DEADLINE)
+     != (timer_mode(vl) == LVT_TIMER_TSC_DEADLINE)) {
+        regs_set(vl, APIC_TIMER_INITIAL, 0);
+        timer_stop(vl);
+    }
 }
 
 // The processor's thermal interrupt, on the hypervisor's vector while the
@@ -846,11 +919,9 @@ static void reset_registers(struct vcpu *v) {
     }
     regs_set(vl, APIC_TIMER_INITIAL, 0);
     regs_set(vl, APIC_TIMER_DIVIDE, 0);
-    lapic_write(APIC_TIMER_INITIAL, 0);
-    timer_lvt(vl);
+    timer_stop(vl);
     thermal_lvt(vl);
     perf_lvt(vl);
-    lapic_write(APIC_TIMER_DIVIDE, 0);
     mirror_logical(vl);
     avic_recheck_soon();
 }
@@ -1025,10 +1096,67 @@ void vlapic_accept(struct vcpu *v, uint8_t vector, bool level) {
 }
 
 void vlapic_timer_fired(struct vcpu *v) {
+    v->vlapic->timer_armed = 0;
+}
+
+// As an SMI's time goes unnoticed, so does an exit's: a deadline that passes
+// during one is due once the guest has had as long as the exit took, and no
+// timer fires sooner, so that one shorter than an exit cannot starve the guest.
+void vlapic_timer_program(struct vcpu *v) {
     struct vlapic *vl = v->vlapic;
-    uint32_t lvt = regs_get(vl, APIC_LVT_TIMER);
-    if ((lvt & APIC_LVT_MASKED) == 0) {
-        vlapic_accept(v, (uint8_t)lvt, false);
+    uint64_t now = rdtsc();
+    uint64_t start = v->cpu->slice_start_tsc;
+    uint64_t earliest = start != 0 ? now + (now - start) : now;
+    if (vl->timer_deadline != 0 && vl->timer_deadline <= now) {
+        if (vl->timer_deadline > start
+         && vl->timer_held_until < vl->timer_deadline) {
+            vl->timer_held_until = earliest;
+        }
+        if (now >= vl->timer_held_until) {
+            timer_expire(v, now);
+        }
+    }
+    uint64_t next = vl->timer_deadline;
+    if (v->cpu->bsp) {
+        uint64_t own = hv_timer_next();
+        if (own != 0 && (next == 0 || own < next)) {
+            next = own;
+        }
+    }
+    if (next != 0 && next < earliest) {
+        next = earliest;
+    }
+    if (next != vl->timer_armed) {
+        vl->timer_armed = next;
+        lapic_timer_arm(next);
+    }
+}
+
+uint64_t vlapic_tsc_deadline(struct vcpu *v) {
+    struct vlapic *vl = v->vlapic;
+    return timer_mode(vl) == LVT_TIMER_TSC_DEADLINE
+        && vl->timer_deadline != 0 ? vl->timer_guest_deadline : 0;
+}
+
+void vlapic_tsc_deadline_set(struct vcpu *v, uint64_t deadline) {
+    struct vlapic *vl = v->vlapic;
+    if (timer_mode(vl) != LVT_TIMER_TSC_DEADLINE) {
+        return;
+    }
+    if (deadline == 0) {
+        timer_stop(vl);
+        return;
+    }
+    vl->timer_guest_deadline = deadline;
+    // 0 is no deadline at all.
+    uint64_t own = deadline - v->tsc_offset;
+    vl->timer_deadline = own != 0 ? own : 1;
+}
+
+void vlapic_tsc_offset_changed(struct vcpu *v) {
+    uint64_t deadline = vlapic_tsc_deadline(v);
+    if (deadline != 0) {
+        vlapic_tsc_deadline_set(v, deadline);
     }
 }
 
@@ -1445,7 +1573,7 @@ static bool reg_read(struct vcpu *v, uint32_t reg, uint32_t *value) {
             return true;
         }
         case APIC_TIMER_CURRENT: {
-            *value = lapic_read(APIC_TIMER_CURRENT);
+            *value = timer_current(vl);
             return true;
         }
         default: {
@@ -1484,9 +1612,13 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
             if (!sw_enabled(vl)) {
                 value |= APIC_LVT_MASKED;
             }
+            uint32_t old_mode = timer_mode(vl);
+            if (i == LVT_TIMER && !tsc_deadline_mode) {
+                value &= ~LVT_TIMER_TSC_DEADLINE;
+            }
             regs_set(vl, reg, value);
             if (i == LVT_TIMER) {
-                timer_lvt(vl);
+                timer_mode_changed(vl, old_mode);
             }
             if (i == LVT_THERMAL) {
                 thermal_lvt(vl);
@@ -1530,7 +1662,6 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
                         );
                     }
                 }
-                timer_lvt(vl);
                 thermal_lvt(vl);
                 perf_lvt(vl);
             }
@@ -1545,13 +1676,23 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
             return !x2 || value == 0;
         }
         case APIC_TIMER_INITIAL: {
-            regs_set(vl, APIC_TIMER_INITIAL, value);
-            lapic_write(APIC_TIMER_INITIAL, value);
+            // The IA32_TSC_DEADLINE MSR runs that mode (SDM 325462-093 Vol.
+            // 3A, 13.5.4.1).
+            if (timer_mode(vl) != LVT_TIMER_TSC_DEADLINE) {
+                regs_set(vl, APIC_TIMER_INITIAL, value);
+                vl->timer_deadline = value != 0 ? rdtsc() + timer_span(vl) : 0;
+            }
             return true;
         }
         case APIC_TIMER_DIVIDE: {
+            uint32_t old_divisor = timer_divisor(vl);
             regs_set(vl, APIC_TIMER_DIVIDE, value & TIMER_DIVIDE_WRITABLE);
-            lapic_write(APIC_TIMER_DIVIDE, value & TIMER_DIVIDE_WRITABLE);
+            uint64_t now = rdtsc();
+            if (timer_mode(vl) != LVT_TIMER_TSC_DEADLINE
+             && vl->timer_deadline > now) {
+                vl->timer_deadline = now + (vl->timer_deadline - now)
+                    * timer_divisor(vl) / old_divisor;
+            }
             return true;
         }
         default: {
@@ -1800,6 +1941,8 @@ static bool apic_base_write(struct vcpu *v, uint64_t value) {
     }
     if (extd != was_x2 || !was_en) {
         lapic_host_mode(extd);
+        // The way there may have taken the timer's count with it.
+        vl->timer_armed = 0;
         ipiv_recheck_soon();
         if (!was_en) {
             reset_registers(v);
@@ -1811,10 +1954,8 @@ static bool apic_base_write(struct vcpu *v, uint64_t value) {
             regs_set(vl, x2apic_icr_high(), 0);
         }
         id_reg(vl);
-        timer_lvt(vl);
         thermal_lvt(vl);
         perf_lvt(vl);
-        lapic_write(APIC_TIMER_DIVIDE, regs_get(vl, APIC_TIMER_DIVIDE));
         mirror_logical(vl);
     }
     if (!extd) {

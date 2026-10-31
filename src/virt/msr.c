@@ -36,6 +36,7 @@
 #include <virt/svm.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>
+#include <virt/vlapic.h>
 #include <virt/vmx.h>
 
 // SDM 325462-093 Vol. 1, Tables 21-16, 21-19, 21-23, and 21-35.
@@ -292,13 +293,10 @@ static bool pebs_hidden;
 static bool pstates_read_only;
 // The guest's TSC moves only by an offset of the vCPU's (vmx.c, svm.c), as the
 // processor's is the hypervisor's clock: whether the processor has
-// IA32_TSC_ADJUST and the TSC-deadline timer. That timer's deadline stays the
-// processor's TSC's whatever the offset (SDM 325462-093 Vol. 3C, 28.3, RDMSR),
-// which the guest reaches until an offset is no longer 0, and from then on
-// through the hypervisor.
+// IA32_TSC_ADJUST and the TSC-deadline timer, which the virtual local APIC
+// runs on the hypervisor's own.
 static bool tsc_adjust;
 static bool tsc_deadline;
-static bool deadline_translated;
 // The tables of the processor's model-specific MSRs, where it has any.
 static const struct msr_model *model;
 static const struct msr_family *family_msrs;
@@ -443,30 +441,16 @@ static void tsc_init(void) {
         virt_intercept_msr(MSR_IA32_TSC_ADJUST, true, true);
     }
     tsc_deadline = (cpuid(1, 0).ecx & CPUID_1_ECX_TSC_DEADLINE) != 0;
+    if (tsc_deadline) {
+        virt_intercept_msr(MSR_IA32_TSC_DEADLINE, true, true);
+    }
 }
 
-// The bitmaps change while no other vCPU runs (SDM 325462-093 Vol. 3C,
-// 27.11.4), and an armed deadline stays where the guest's TSC has it.
 static void tsc_offset_set(struct vcpu *v, uint64_t offset) {
-    if (offset == v->tsc_offset) {
-        return;
+    if (offset != v->tsc_offset) {
+        v->tsc_offset = offset;
+        vlapic_tsc_offset_changed(v);
     }
-    if (tsc_deadline
-     && !__atomic_load_n(&deadline_translated, __ATOMIC_ACQUIRE)) {
-        vcpu_pause_others();
-        if (!deadline_translated) {
-            virt_intercept_msr(MSR_IA32_TSC_DEADLINE, true, true);
-            __atomic_store_n(&deadline_translated, true, __ATOMIC_RELEASE);
-        }
-        vcpu_resume_others();
-    }
-    uint64_t deadline = 0;
-    if (tsc_deadline && rdmsr_safe(MSR_IA32_TSC_DEADLINE, &deadline)
-     && deadline != 0) {
-        uint64_t moved = deadline + v->tsc_offset - offset;
-        wrmsr_safe(MSR_IA32_TSC_DEADLINE, moved != 0 ? moved : 1);
-    }
-    v->tsc_offset = offset;
 }
 
 void msr_init(void) {
@@ -861,9 +845,7 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
             if (!tsc_deadline) {
                 return false;
             }
-            uint64_t deadline = 0;
-            *fault = !rdmsr_safe(msr, &deadline);
-            *value = deadline != 0 ? deadline + v->tsc_offset : 0;
+            *value = vlapic_tsc_deadline(v);
             return true;
         }
         case MSR_IA32_FEATURE_CONTROL: {
@@ -1023,14 +1005,7 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
             if (!tsc_deadline) {
                 return false;
             }
-            // 0 disarms the timer, which a deadline does not.
-            uint64_t deadline = value - v->tsc_offset;
-            if (value == 0) {
-                deadline = 0;
-            } else if (deadline == 0) {
-                deadline = 1;
-            }
-            *fault = !wrmsr_safe(msr, deadline);
+            vlapic_tsc_deadline_set(v, value);
             return true;
         }
         case MSR_IA32_FEATURE_CONTROL: {

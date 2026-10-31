@@ -94,9 +94,15 @@ void lapic_send_ipi(uint32_t dest, uint32_t command);
 void lapic_eoi(void);
 
 // Takes the calling processor's local APIC for the hypervisor, in xAPIC mode
-// where it can be: enabled with the spurious vector, the timer masked on its
+// where it can be: enabled with the spurious vector, the timer disarmed on its
 // vector, LINT0 masked, nothing in service, LINT1 as it was.
 void lapic_host_init(uint8_t spurious_vector, uint8_t timer_vector);
+// Arms the calling processor's timer for when the TSC reaches tsc, or disarms
+// it for 0. It may fire a little early where it has no TSC-deadline mode.
+void lapic_timer_arm(uint64_t tsc);
+// How many TSC ticks that many ticks of the timer's clock last, and back.
+uint64_t lapic_timer_to_tsc(uint64_t ticks);
+uint64_t lapic_timer_from_tsc(uint64_t tsc);
 // Switches the calling processor's local APIC to x2APIC mode or, where it can
 // be, xAPIC mode, keeping what the hypervisor set. Returns whether it is in
 // x2APIC mode.

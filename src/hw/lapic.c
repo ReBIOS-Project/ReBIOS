@@ -43,6 +43,17 @@
 
 #define IPI_TIMEOUT_NS ((uint64_t)100000000)
 
+#define MSR_IA32_TSC_DEADLINE 0x6e0
+#define CPUID_1_ECX_TSC_DEADLINE ((uint32_t)1 << 24)
+#define LVT_TIMER_TSC_DEADLINE ((uint32_t)1 << 18)
+// The divide configuration register's value for dividing by 1.
+#define TIMER_DIVIDE_BY_1 0xb
+#define TIMER_MEASURE_US 5000
+
+static bool timer_tsc_deadline;
+// The rate of the timer's clock, measured once, as not every processor says.
+static uint64_t timer_hz;
+
 // RDMSR is an exit when the hypervisor itself runs nested.
 static uint64_t apic_base(void) {
     uintptr_t base = this_cpu()->apic_base;
@@ -192,13 +203,69 @@ bool lapic_host_mode(bool x2apic) {
     return x2apic;
 }
 
+uint64_t lapic_timer_to_tsc(uint64_t ticks) {
+    uint64_t hz = time_tsc_hz();
+    // Split, so that the product cannot overflow.
+    return ticks / timer_hz * hz + ticks % timer_hz * hz / timer_hz;
+}
+
+uint64_t lapic_timer_from_tsc(uint64_t tsc) {
+    uint64_t hz = time_tsc_hz();
+    return tsc / hz * timer_hz + tsc % hz * timer_hz / hz;
+}
+
+static void timer_measure(uint8_t timer_vector) {
+    lapic_write(APIC_LVT_TIMER, APIC_LVT_MASKED | timer_vector);
+    lapic_write(APIC_TIMER_INITIAL, UINT32_MAX);
+    uint64_t start = rdtsc();
+    time_udelay(TIMER_MEASURE_US);
+    uint32_t left = lapic_read(APIC_TIMER_CURRENT);
+    uint64_t elapsed = rdtsc() - start;
+    lapic_write(APIC_TIMER_INITIAL, 0);
+    timer_hz = (UINT32_MAX - left) * time_tsc_hz() / elapsed;
+    timer_tsc_deadline = (cpuid(1, 0).ecx & CPUID_1_ECX_TSC_DEADLINE) != 0;
+    printf(
+        "Local APIC timer at %llu MHz%s\n",
+        (unsigned long long)(timer_hz / 1000000),
+        timer_tsc_deadline ? ", with a TSC-deadline mode" : ""
+    );
+}
+
+void lapic_timer_arm(uint64_t tsc) {
+    if (timer_tsc_deadline) {
+        wrmsr(MSR_IA32_TSC_DEADLINE, tsc);
+        return;
+    }
+    if (tsc == 0) {
+        lapic_write(APIC_TIMER_INITIAL, 0);
+        return;
+    }
+    uint64_t now = rdtsc();
+    uint64_t ticks = tsc > now ? lapic_timer_from_tsc(tsc - now) + 1 : 1;
+    lapic_write(
+        APIC_TIMER_INITIAL, ticks < UINT32_MAX ? (uint32_t)ticks : UINT32_MAX
+    );
+}
+
 void lapic_host_init(uint8_t spurious_vector, uint8_t timer_vector) {
     lapic_host_mode(false);
     lapic_write(APIC_TPR, 0);
     lapic_write(APIC_SVR, APIC_SVR_ENABLED | spurious_vector);
     lapic_write(APIC_LVT_LINT0, APIC_LVT_MASKED);
     lapic_write(APIC_TIMER_INITIAL, 0);
-    lapic_write(APIC_LVT_TIMER, APIC_LVT_MASKED | timer_vector);
+    lapic_write(APIC_TIMER_DIVIDE, TIMER_DIVIDE_BY_1);
+    if (timer_hz == 0) {
+        timer_measure(timer_vector);
+    }
+    if (timer_tsc_deadline) {
+        wrmsr(MSR_IA32_TSC_DEADLINE, 0);
+    }
+    lapic_write(
+        APIC_LVT_TIMER,
+        timer_vector | (timer_tsc_deadline ? LVT_TIMER_TSC_DEADLINE : 0)
+    );
+    // Before any WRMSR to the deadline (SDM 325462-093 Vol. 3A, 13.5.4.1).
+    asm volatile ("mfence" :: : "memory");
     // In-service interrupts end one EOI each, highest first.
     for (size_t n = 0; n < 256; n++) {
         bool in_service = false;

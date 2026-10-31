@@ -34,6 +34,7 @@
 #include <sys/x86.h>
 #include <virt/event.h>
 #include <virt/gpt.h>
+#include <virt/hv_timer.h>
 #include <virt/insn.h>
 #include <virt/msr.h>
 #include <virt/mtrr.h>
@@ -484,6 +485,11 @@ void vcpu_before_entry(struct vcpu *v) {
         }
     }
     watchdog(v);
+    if (v->cpu->bsp) {
+        hv_timer_run();
+    }
+    vlapic_timer_program(v);
+    cpu_slice_end();
     vlapic_prepare_entry(v);
     if (nvmx_before_entry(v)) {
         return;
@@ -544,6 +550,10 @@ void vcpu_wait(struct vcpu *v, bool (*ends)(struct vcpu *v), bool spin) {
         cpu_slice_start();
         __atomic_store_n(&cpu->kicked, false, __ATOMIC_SEQ_CST);
         service_pause(v);
+        if (cpu->bsp) {
+            hv_timer_run();
+        }
+        vlapic_timer_program(v);
         if (ends(v)) {
             break;
         }
@@ -1043,10 +1053,15 @@ void vcpu_wait_for_sipi(struct vcpu *v) {
     __atomic_store_n(&v->sipi, VCPU_SIPI_WAITING, __ATOMIC_RELEASE);
     int32_t vector;
     for (;;) {
+        cpu_slice_start();
         __atomic_store_n(&cpu->kicked, false, __ATOMIC_SEQ_CST);
         if ((vector = __atomic_load_n(&v->sipi, __ATOMIC_ACQUIRE)) >= 0) {
             break;
         }
+        if (cpu->bsp) {
+            hv_timer_run();
+        }
+        vlapic_timer_program(v);
         cpu_halt();
     }
     cpu->taking_interrupts = false;
