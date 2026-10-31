@@ -217,8 +217,9 @@ No! At least not in the sense of it being a full-screened emulator window.
 ReBIOS uses the CPU's hardware virtualisation to run the legacy OS *natively*
 on the system: its code runs on the real CPU, and it drives the real disks, USB
 controllers, network cards, and so on. ReBIOS only steps in for what modern
-UEFI class 3 systems no longer have: the legacy interrupt controllers, a VGA
-when the video card has no legacy Video BIOS, and the like.
+UEFI class 3 systems no longer have: the legacy interrupt controllers, the 8254
+timer, the keyboard controller, a VGA when the video card has no legacy Video
+BIOS, and the like.
 
 ### I booted a multi-core capable OS with CSMWrap and was missing a logical processor (thread), what about ReBIOS?
 
@@ -280,6 +281,15 @@ it adds back of the legacy PC:
   chipset lacks the 8259s or locks x2APIC mode on, and ReBIOS itself routes PCI
   interrupts to free ISA IRQs for PIC mode, whatever the firmware's PIC mode
   wiring.
+- **A legacy timer and keyboard controller on any machine.** The 8254 and the
+  8042 the OS sees are virtual, so it does not matter whether the chipset has
+  them, or has them working: real ones only back the speaker and the PS/2
+  devices actually plugged in.
+- **USB as a BIOS's legacy support has it.** ReBIOS drives the USB controllers
+  itself, with [Tendril](https://github.com/Mintsuki/Tendril), until the OS asks
+  for them, as a BIOS's legacy USB support does: USB keyboards and mice reach
+  legacy OSes as PS/2 ones, and SeaBIOS boots from USB disks. An OS without a
+  USB driver keeps its keyboard, whichever USB controller it is on.
 - **A PC's memory map.** The OS gets memory from 1 MiB up to 4 GiB as
   contiguous as the firmware's reserved ranges allow, wherever the machine's
   memory actually is; its own copy of the SMBIOS tables; the option ROMs and
