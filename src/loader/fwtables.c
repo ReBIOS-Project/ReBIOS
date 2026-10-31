@@ -365,7 +365,11 @@ static const uint8_t *smbios_structures(uint64_t *size) {
     return NULL;
 }
 
-const char *fwtables_smbios_string(uint8_t type, uint8_t offset) {
+// The firmware's first SMBIOS structure of type, and the first of the two NULs
+// its strings end in.
+static const uint8_t *smbios_structure(
+    uint8_t type, const char **strings_end
+) {
     size_t max_size;
     const uint8_t *table = smbios_structures(&max_size);
     if (table == NULL) {
@@ -389,28 +393,8 @@ const char *fwtables_smbios_string(uint8_t type, uint8_t offset) {
         }
 
         if (structure[0] == type) {
-            if (offset >= length) {
-                return NULL;
-            }
-            // The strings end in two NULs, the first at strings_end.
-            const char *string = (const char *)structure + length;
-            const char *strings_end = (const char *)table + end;
-            for (size_t s = structure[offset]; s > 1 && string < strings_end;
-                 s--) {
-                while (*string != 0) {
-                    string++;
-                }
-                string++;
-            }
-            const char *nonblank = string;
-            while (nonblank < strings_end && *nonblank == ' ') {
-                nonblank++;
-            }
-            if (structure[offset] == 0 || nonblank >= strings_end
-             || *nonblank == 0) {
-                return "";
-            }
-            return string;
+            *strings_end = (const char *)table + end;
+            return structure;
         }
         if (structure[0] == SMBIOS_END_OF_TABLE) {
             return NULL;
@@ -418,6 +402,40 @@ const char *fwtables_smbios_string(uint8_t type, uint8_t offset) {
         off = end + 2;
     }
     return NULL;
+}
+
+const char *fwtables_smbios_string(uint8_t type, uint8_t offset) {
+    const char *strings_end;
+    const uint8_t *structure = smbios_structure(type, &strings_end);
+    if (structure == NULL || offset >= structure[1]) {
+        return NULL;
+    }
+
+    const char *string = (const char *)structure + structure[1];
+    for (size_t s = structure[offset]; s > 1 && string < strings_end; s--) {
+        while (*string != 0) {
+            string++;
+        }
+        string++;
+    }
+    const char *nonblank = string;
+    while (nonblank < strings_end && *nonblank == ' ') {
+        nonblank++;
+    }
+    if (structure[offset] == 0 || nonblank >= strings_end || *nonblank == 0) {
+        return "";
+    }
+    return string;
+}
+
+bool fwtables_smbios_byte(uint8_t type, uint8_t offset, uint8_t *value) {
+    const char *strings_end;
+    const uint8_t *structure = smbios_structure(type, &strings_end);
+    if (structure == NULL || offset >= structure[1]) {
+        return false;
+    }
+    *value = structure[offset];
+    return true;
 }
 
 static uint64_t smbios_find(void) {

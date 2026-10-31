@@ -18,6 +18,7 @@
 #ifndef LOADER__FWTABLES_H
 #define LOADER__FWTABLES_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 // Fills loader_handoff->acpi_rsdp and smbios_entry.
@@ -27,5 +28,9 @@ void fwtables_collect(void);
 // Linux 7.3's DMI code reads it (drivers/firmware/dmi_scan.c): "" for no
 // string or only spaces, NULL where there is no such structure or field.
 const char *fwtables_smbios_string(uint8_t type, uint8_t offset);
+
+// Gets the byte at offset in the firmware's first SMBIOS structure of type, if
+// there is such a structure and field.
+bool fwtables_smbios_byte(uint8_t type, uint8_t offset, uint8_t *value);
 
 #endif
