@@ -18,11 +18,21 @@
 #ifndef HW__USB_HANDOFF_H
 #define HW__USB_HANDOFF_H
 
+#include <stddef.h>
+#include <stdint.h>
+#include <hw/pci_cfg.h>
+
 // Takes every USB controller from the firmware, whose System Management Mode
 // code may still drive it to emulate a keyboard, and stops it, so the memory
 // the firmware set aside for it need not stay where it is for the IOMMU: that
 // memory is forgotten for each controller taken. Needs pci_enum_scan(), and
 // comes before anything maps the IOMMU tables' reserved regions.
 void usb_handoff(void);
+
+// Where a controller's USB legacy support capability is, or 0: an xHCI
+// controller's in its registers at base, an EHCI controller's in its
+// configuration space.
+uint32_t usb_xhci_legacy_cap(uintptr_t base, size_t size);
+uint32_t usb_ehci_legacy_cap(struct pci_addr a, uintptr_t base);
 
 #endif

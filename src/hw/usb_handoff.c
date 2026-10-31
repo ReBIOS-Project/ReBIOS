@@ -161,29 +161,51 @@ struct release {
     bool forced;
 };
 
-// xHCI 1.2, 4.22.1.
-static bool xhci_take(uintptr_t base, size_t size, struct release *r) {
+uint32_t usb_xhci_legacy_cap(uintptr_t base, size_t size) {
     uint64_t at = (uint64_t)(*reg(base, XHCI_HCCPARAMS1) >> 16) * 4;
     for (size_t n = 0; at != 0 && at + 8 <= size && n < MAX_CAPABILITIES;
          n++) {
         uint32_t cap = *reg(base, at);
         if ((cap & 0xff) == XHCI_CAP_LEGACY) {
-            if ((cap & XHCI_LEGSUP_BIOS) != 0) {
-                r->owned = true;
-                *reg(base, at) = cap | XHCI_LEGSUP_OS;
-                if (!reg_wait(base, at, XHCI_LEGSUP_BIOS, 0, RELEASE_US)) {
-                    r->forced = true;
-                    *reg(base, at) = (cap | XHCI_LEGSUP_OS)
-                        & ~XHCI_LEGSUP_BIOS;
-                }
-            }
-            uint32_t control = *reg(base, at + XHCI_LEGCTLSTS);
-            *reg(base, at + XHCI_LEGCTLSTS) = (control & XHCI_LEGCTLSTS_RSVDP)
-                | XHCI_LEGCTLSTS_EVENTS;
-            break;
+            return (uint32_t)at;
         }
         uint32_t next = cap >> 8 & 0xff;
         at = next != 0 ? at + next * 4 : 0;
+    }
+    return 0;
+}
+
+uint32_t usb_ehci_legacy_cap(struct pci_addr a, uintptr_t base) {
+    uint32_t at = *reg(base, EHCI_HCCPARAMS) >> 8 & 0xff;
+    for (size_t n = 0; at >= EHCI_EECP_MIN && n < MAX_CAPABILITIES; n++) {
+        uint32_t cap = pci_cfg_read(a, at, 4);
+        if ((cap & 0xff) == EHCI_CAP_LEGACY) {
+            return at;
+        }
+        if ((cap & 0xff) == 0) {
+            break;
+        }
+        at = cap >> 8 & 0xff;
+    }
+    return 0;
+}
+
+// xHCI 1.2, 4.22.1.
+static bool xhci_take(uintptr_t base, size_t size, struct release *r) {
+    uint32_t at = usb_xhci_legacy_cap(base, size);
+    if (at != 0) {
+        uint32_t cap = *reg(base, at);
+        if ((cap & XHCI_LEGSUP_BIOS) != 0) {
+            r->owned = true;
+            *reg(base, at) = cap | XHCI_LEGSUP_OS;
+            if (!reg_wait(base, at, XHCI_LEGSUP_BIOS, 0, RELEASE_US)) {
+                r->forced = true;
+                *reg(base, at) = (cap | XHCI_LEGSUP_OS) & ~XHCI_LEGSUP_BIOS;
+            }
+        }
+        uint32_t control = *reg(base, at + XHCI_LEGCTLSTS);
+        *reg(base, at + XHCI_LEGCTLSTS) = (control & XHCI_LEGCTLSTS_RSVDP)
+            | XHCI_LEGCTLSTS_EVENTS;
     }
 
     uintptr_t op = base + (*reg(base, XHCI_CAPLENGTH) & 0xff);
