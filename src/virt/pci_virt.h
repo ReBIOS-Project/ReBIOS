@@ -54,5 +54,8 @@ bool pci_virt_trap(
     struct pci_addr addr, unsigned int bar, uint64_t offset, size_t size,
     const struct mmio_ops *ops, void *ctx
 );
+// Gives the guest the pages of the range at offset back, mapped as the rest of
+// the BAR is.
+void pci_virt_untrap(struct pci_addr addr, unsigned int bar, uint64_t offset);
 
 #endif

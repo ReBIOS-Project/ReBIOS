@@ -1446,3 +1446,28 @@ bool pci_virt_trap(
     spinlock_release(&virt.lock);
     return true;
 }
+
+void pci_virt_untrap(struct pci_addr addr, unsigned int bar, uint64_t offset) {
+    struct vfunction *vf = vfunction_find(addr);
+    if (vf == NULL || bar >= BAR_COUNT) {
+        return;
+    }
+    struct vbar *b = &vf->bars[bar];
+    spinlock_acquire(&virt.lock);
+    for (size_t at = 0; at < b->trap_count; at++) {
+        if (b->traps[at].offset != offset) {
+            continue;
+        }
+        mmio_move(b->traps[at].region, 0, 0);
+        b->trap_count--;
+        for (size_t i = at; i < b->trap_count; i++) {
+            b->traps[i] = b->traps[i + 1];
+        }
+        if (b->mapped != 0) {
+            map(b);
+            gpt_flush();
+        }
+        break;
+    }
+    spinlock_release(&virt.lock);
+}
