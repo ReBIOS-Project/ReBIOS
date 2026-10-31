@@ -34,9 +34,12 @@ QEMUFLAGS := -m 2G
 QEMU_MACHINE := -M q35 -accel kvm
 QEMU_CPU := -cpu host
 # And an IOMMU, here without the interrupt remapping KVM's in-kernel irqchip
-# cannot take. Legacy OSes want the PS/2 keyboard and mouse, so no USB ones.
+# cannot take.
 QEMU_DEVICES := \
-    -device intel-iommu,intremap=off
+    -device intel-iommu,intremap=off \
+    -device qemu-xhci \
+    -device usb-kbd \
+    -device usb-mouse
 
 override QEMUFLAGS := \
     $(QEMU_MACHINE) \
