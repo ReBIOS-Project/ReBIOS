@@ -99,13 +99,6 @@ struct disk_info {
 #define NVME_MODEL_LENGTH 40
 #define NVME_TIMEOUT_100NS 10000000
 
-// xHCI 1.2, 5.3.6 and 7.2: the extended capabilities' pointer in HCCPARAMS1,
-// and the Supported Protocol capability's major revision and its range of root
-// hub ports.
-#define XHCI_HCCPARAMS1 0x10
-#define XHCI_CAP_SUPPORTED_PROTOCOL 2
-#define XHCI_CAP_MAX 64
-#define PCI_CLASS_SERIAL_USB_XHCI 0x0c0330
 #define PCI_BASE_CLASS_STORAGE 0x01
 #define PCI_CLASS_SERIAL_USB 0x0c03
 
@@ -345,51 +338,6 @@ static uint32_t pci_class(EFI_PCI_IO_PROTOCOL *pci_io) {
     return value >> 8;
 }
 
-static bool xhci_read(
-    EFI_PCI_IO_PROTOCOL *pci_io, uint32_t offset, uint32_t *value
-) {
-    return pci_io->Mem.Read(pci_io, EfiPciIoWidthUint32, 0, offset, 1, value)
-        == EFI_SUCCESS;
-}
-
-// SeaBIOS numbers an xHCI root hub port by its place among the ports of its
-// USB revision, as the Supported Protocol capabilities give them, the last
-// capability of a revision counting (SeaBIOS src/hw/usb-xhci.c,
-// xhci_hub_portmap()).
-static uint32_t xhci_port(EFI_PCI_IO_PROTOCOL *pci_io, uint32_t port) {
-    uint32_t hccparams1;
-    if (!xhci_read(pci_io, XHCI_HCCPARAMS1, &hccparams1)) {
-        return port + 1;
-    }
-    uint32_t start[4] = { 0 };
-    uint32_t count[4] = { 0 };
-    uint32_t offset = (hccparams1 >> 16) * 4;
-    for (size_t i = 0; offset != 0 && i < XHCI_CAP_MAX; i++) {
-        uint32_t header;
-        if (!xhci_read(pci_io, offset, &header)) {
-            break;
-        }
-        uint32_t major = header >> 24;
-        uint32_t ports;
-        if ((header & 0xff) == XHCI_CAP_SUPPORTED_PROTOCOL
-         && (major == 2 || major == 3)
-         && xhci_read(pci_io, offset + 8, &ports)) {
-            start[major] = ports & 0xff;
-            count[major] = (ports >> 8) & 0xff;
-        }
-        uint32_t next = (header >> 8) & 0xff;
-        offset = next != 0 ? offset + next * 4 : 0;
-    }
-    uint32_t mapped = port + 1;
-    for (size_t major = 3; major >= 2; major--) {
-        if (port + 1 >= start[major]
-         && port + 1 < start[major] + count[major]) {
-            mapped = port + 2 - start[major];
-        }
-    }
-    return mapped;
-}
-
 // The drive's name as SeaBIOS's bootorder file has it (SeaBIOS src/boot.c,
 // build_pci_path() and the bootprio_find_*() functions), or false where
 // SeaBIOS could not boot it.
@@ -496,15 +444,12 @@ static bool seabios_name(
             node = EfiNextDevicePathNode(node);
             break;
         }
+        // The hypervisor's USB stack gives the same names (virt/usb_disk.c).
         case EFI_MSG_USB_DP: {
-            bool xhci = pci_class(controller_io) == PCI_CLASS_SERIAL_USB_XHCI;
-            for (bool root = true;
-                 node->Type == EFI_MESSAGING_DEVICE_PATH
-              && node->SubType == EFI_MSG_USB_DP; root = false) {
+            while (node->Type == EFI_MESSAGING_DEVICE_PATH
+                && node->SubType == EFI_MSG_USB_DP) {
                 uint32_t port
-                    = ((EFI_USB_DEVICE_PATH *)node)->ParentPortNumber;
-                port = root && xhci ? xhci_port(controller_io, port)
-                    : port + 1;
+                    = ((EFI_USB_DEVICE_PATH *)node)->ParentPortNumber + 1;
                 node = EfiNextDevicePathNode(node);
                 bool last = node->Type != EFI_MESSAGING_DEVICE_PATH
                     || node->SubType != EFI_MSG_USB_DP;
