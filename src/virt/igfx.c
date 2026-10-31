@@ -365,7 +365,8 @@ static uint64_t translate_gsm(uint64_t value, uint64_t mask) {
     return (value & ~mask) | (igfx.alias - igfx.gsm_size);
 }
 
-static bool config_read(uint32_t reg, uint32_t *value) {
+static bool config_read(void *ctx, uint32_t reg, uint32_t *value) {
+    (void)ctx;
     if (reg == REG_ASLS && igfx.guest_asls != 0) {
         *value = igfx.guest_asls;
         return true;
@@ -391,7 +392,10 @@ static bool config_read(uint32_t reg, uint32_t *value) {
 }
 
 // The firmware locks the stolen memory's registers: guest writes go nowhere.
-static bool config_write(uint32_t reg, uint32_t value, uint32_t mask) {
+static bool config_write(
+    void *ctx, uint32_t reg, uint32_t value, uint32_t mask
+) {
+    (void)ctx;
     if (reg == REG_ASLS && igfx.guest_asls != 0) {
         igfx.guest_asls = (igfx.guest_asls & ~mask) | (value & mask);
         return true;
@@ -406,7 +410,8 @@ static bool config_write(uint32_t reg, uint32_t value, uint32_t mask) {
 
 static const struct pci_virt_hook config_hook = { config_read, config_write };
 
-static bool host_bridge_read(uint32_t reg, uint32_t *value) {
+static bool host_bridge_read(void *ctx, uint32_t reg, uint32_t *value) {
+    (void)ctx;
     if (reg == REG_HOST_BDSM) {
         *value = (uint32_t)translate(
             pci_cfg_read(igfx.host_bridge->addr, reg, 4), BSM_MASK
@@ -422,7 +427,10 @@ static bool host_bridge_read(uint32_t reg, uint32_t *value) {
     return false;
 }
 
-static bool host_bridge_write(uint32_t reg, uint32_t value, uint32_t mask) {
+static bool host_bridge_write(
+    void *ctx, uint32_t reg, uint32_t value, uint32_t mask
+) {
+    (void)ctx;
     (void)value;
     (void)mask;
     return reg == REG_HOST_BDSM || reg == REG_HOST_BGSM;
@@ -561,7 +569,7 @@ static void init_opregion(void) {
 
 static void init_stolen(void) {
     if (igfx.host_bridge != NULL) {
-        pci_virt_hook(igfx.host_bridge->addr, &host_bridge_hook);
+        pci_virt_hook(igfx.host_bridge->addr, &host_bridge_hook, NULL);
     }
     bool trapped = pci_virt_trap(
         igfx.f->addr, 0, MMIO_PAGE, PAGE_SIZE, &mmio_ops, NULL
@@ -595,7 +603,7 @@ void igfx_init(void) {
         init_fbc();
     }
     if (igfx.guest_asls != 0 || igfx.alias != 0) {
-        pci_virt_hook(igfx.f->addr, &config_hook);
+        pci_virt_hook(igfx.f->addr, &config_hook, NULL);
     }
 }
 

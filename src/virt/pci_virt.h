@@ -35,13 +35,15 @@ void pci_virt_init(void);
 // the aligned reg, write merges the bytes of value under mask into it, and
 // each returns false for a register that is not one of its own.
 struct pci_virt_hook {
-    bool (*read)(uint32_t reg, uint32_t *value);
-    bool (*write)(uint32_t reg, uint32_t value, uint32_t mask);
+    bool (*read)(void *ctx, uint32_t reg, uint32_t *value);
+    bool (*write)(void *ctx, uint32_t reg, uint32_t value, uint32_t mask);
 };
 
-// Hands the function's registers to hook before anything else. After
-// pci_virt_init().
-void pci_virt_hook(struct pci_addr addr, const struct pci_virt_hook *hook);
+// Hands the function's registers to hook before anything else, or no longer
+// for NULL. After pci_virt_init().
+void pci_virt_hook(
+    struct pci_addr addr, const struct pci_virt_hook *hook, void *ctx
+);
 
 // Hands the guest's accesses to the pages holding [offset, offset + size) of a
 // memory BAR of the function to ops, wherever the guest puts the BAR, with
