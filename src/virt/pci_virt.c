@@ -136,6 +136,10 @@ struct vbar {
     // hypervisor's regions, by offset: an MSI-X table's, and other modules'.
     struct bar_trap traps[BAR_TRAPS];
     size_t trap_count;
+    // Those of one smaller than a page reach the page's other residents too,
+    // so it has only this, for the whole of it.
+    const struct mmio_ops *sub_page_ops;
+    void *sub_page_ctx;
 };
 
 // A function's MSI as the guest programs it. The function sends a message of
@@ -808,6 +812,9 @@ struct shared_target {
     struct vfunction *vf;
     uintptr_t hpa;
     bool msix;
+    const struct mmio_ops *ops;
+    void *ctx;
+    uint64_t offset;
 };
 
 // The BAR of the page an access falls in, if any, found under the lock, which
@@ -824,7 +831,8 @@ static bool shared_target(
         const struct vbar *b = &vf->bars[sp->residents[i].index];
         if (gpa >= b->mapped && gpa + size <= b->mapped + b->size) {
             *t = (struct shared_target){
-                vf, b->host + (gpa - b->mapped), b->trap_count != 0
+                vf, b->host + (gpa - b->mapped), b->trap_count != 0,
+                b->sub_page_ops, b->sub_page_ctx, gpa - b->mapped
             };
             found = true;
         }
@@ -840,6 +848,9 @@ static uint64_t shared_read(
     if (!shared_target(ctx, offset, size, &t)) {
         return size == 8 ? UINT64_MAX : all_ones(size);
     }
+    if (t.ops != NULL) {
+        return t.ops->read(v, t.ctx, t.offset, size);
+    }
     if (t.msix) {
         return msix_read(v, t.vf, t.hpa - t.vf->msix.page, size);
     }
@@ -853,7 +864,9 @@ static void shared_write(
     if (!shared_target(ctx, offset, size, &t)) {
         return;
     }
-    if (t.msix) {
+    if (t.ops != NULL) {
+        t.ops->write(v, t.ctx, t.offset, size, value);
+    } else if (t.msix) {
         msix_write(v, t.vf, t.hpa - t.vf->msix.page, size, value);
     } else {
         mmio_write_host(t.hpa, size, value);
@@ -910,7 +923,7 @@ static bool page_arbitrate(uintptr_t page) {
     }
     struct shared_page *sp = shared_find(page);
     struct vbar *only = n == 1 ? &found[0].vf->bars[found[0].index] : NULL;
-    bool direct = only != NULL
+    bool direct = only != NULL && only->sub_page_ops == NULL
         && ((only->mapped ^ only->host) & (PAGE_SIZE - 1)) == 0;
     gpt_map(page, 0, PAGE_SIZE, 0, 0);
     if (n == 0 || direct) {
@@ -1410,9 +1423,23 @@ bool pci_virt_trap(
         return false;
     }
     struct vbar *b = &vf->bars[bar];
-    if (b->size == 0 || sub_page(b) || b->trap_count == BAR_TRAPS || size == 0
+    if (b->size == 0 || b->trap_count == BAR_TRAPS || size == 0
      || offset > b->size || size > b->size - offset) {
         return false;
+    }
+    if (sub_page(b)) {
+        if (size != b->size || b->trap_count != 0 || b->sub_page_ops != NULL) {
+            return false;
+        }
+        spinlock_acquire(&virt.lock);
+        b->sub_page_ctx = ctx;
+        b->sub_page_ops = ops;
+        if (b->mapped != 0) {
+            page_arbitrate(page_down(b->mapped));
+            gpt_flush();
+        }
+        spinlock_release(&virt.lock);
+        return true;
     }
     // Pages of their own, in order.
     unsigned int at = 0;
@@ -1454,6 +1481,13 @@ void pci_virt_untrap(struct pci_addr addr, unsigned int bar, uint64_t offset) {
     }
     struct vbar *b = &vf->bars[bar];
     spinlock_acquire(&virt.lock);
+    if (sub_page(b)) {
+        b->sub_page_ops = NULL;
+        if (b->mapped != 0) {
+            page_arbitrate(page_down(b->mapped));
+            gpt_flush();
+        }
+    }
     for (size_t at = 0; at < b->trap_count; at++) {
         if (b->traps[at].offset != offset) {
             continue;

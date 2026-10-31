@@ -48,8 +48,9 @@ void pci_virt_hook(
 // Hands the guest's accesses to the pages holding [offset, offset + size) of a
 // memory BAR of the function to ops, wherever the guest puts the BAR, with
 // offsets from the first of those pages. False where another range has any of
-// those pages, an MSI-X table's among them, where the BAR has as many ranges
-// as it can take, or where it is smaller than a page. After pci_virt_init().
+// those pages, an MSI-X table's among them, or where the BAR has as many
+// ranges as it can take. The range of a BAR smaller than a page is all of it.
+// After pci_virt_init().
 bool pci_virt_trap(
     struct pci_addr addr, unsigned int bar, uint64_t offset, size_t size,
     const struct mmio_ops *ops, void *ctx
