@@ -18,10 +18,14 @@
 #ifndef VIRT__A20_H
 #define VIRT__A20_H
 
+#include <stdbool.h>
+
 // The guest's A20 gate: the A20 bits of the system control port and of the
 // keyboard controller's output port are the guest's own, the host's gate stays
 // open, and while both of the guest's are clear, the processor sees every odd
 // MiB below 4 GiB as the even one before it. Needs virt_init().
 void a20_init(void);
+// The keyboard controller's A20 line, from its output port.
+void a20_kbc_set(bool open);
 
 #endif

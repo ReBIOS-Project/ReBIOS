@@ -118,6 +118,9 @@ void irq_device_interrupt(void);
 // I/O APIC entry for the IRQ, while unmasked, else its 8259 input. The host's
 // line stays, for what else may drive it.
 void irq_isa_pulse(unsigned int irq);
+// A change of the level of such a device's line: its 8259 input has the level,
+// and a rise reaches the I/O APIC entry for the IRQ, while unmasked.
+void irq_isa_set(unsigned int irq, bool level);
 
 // The level of a line the hypervisor drives for the guest on a GSI, which
 // reaches the guest's I/O APIC entry or 8259 input for the GSI as a device's

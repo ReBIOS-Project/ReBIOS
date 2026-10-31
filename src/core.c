@@ -40,6 +40,7 @@
 #include <virt/hpet.h>
 #include <virt/igfx.h>
 #include <virt/irq.h>
+#include <virt/kbc.h>
 #include <virt/layout.h>
 #include <virt/msr.h>
 #include <virt/mtrr.h>
@@ -96,6 +97,7 @@ static void bsp_main(void *arg) {
     remap_init();
     vioapic_init();
     irq_init();
+    kbc_init();
     pit_init();
     hpet_init();
     vacpi_init();

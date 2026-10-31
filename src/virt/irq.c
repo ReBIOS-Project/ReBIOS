@@ -790,27 +790,48 @@ void irq_virtual_line(uint32_t gsi, bool asserted) {
     kick_after_update();
 }
 
+static bool isa_apic_entry(unsigned int irq, uint64_t *vrte) {
+    uint32_t gsi = irq_isa_gsi(irq);
+    return gsi != UINT32_MAX && vioapic_rte(gsi, vrte)
+        && (*vrte & IOAPIC_RTE_MASKED) == 0
+        && (*vrte & IOAPIC_RTE_DELIVERY_MASK) != IOAPIC_RTE_DELIVERY_EXTINT;
+}
+
+static void isa_apic_deliver(uint64_t vrte) {
+    vlapic_deliver_message(
+        (uint32_t)(vrte >> IOAPIC_RTE_DEST_SHIFT),
+        (vrte & IOAPIC_RTE_LOGICAL) != 0,
+        (uint32_t)(vrte & IOAPIC_RTE_DELIVERY_MASK), (uint8_t)vrte, false
+    );
+}
+
 void irq_isa_pulse(unsigned int irq) {
     spinlock_acquire(&lock);
-    uint32_t gsi = irq_isa_gsi(irq);
     uint64_t vrte = 0;
-    bool apic = gsi != UINT32_MAX && vioapic_rte(gsi, &vrte)
-        && (vrte & IOAPIC_RTE_MASKED) == 0
-        && (vrte & IOAPIC_RTE_DELIVERY_MASK) != IOAPIC_RTE_DELIVERY_EXTINT;
+    bool apic = isa_apic_entry(irq, &vrte);
     if (!apic) {
         pic_pulse_irq(irq);
         __atomic_store_n(&extint_asserted, pic_output(), __ATOMIC_RELEASE);
     }
     spinlock_release(&lock);
     if (apic) {
-        vlapic_deliver_message(
-            (uint32_t)(vrte >> IOAPIC_RTE_DEST_SHIFT),
-            (vrte & IOAPIC_RTE_LOGICAL) != 0,
-            (uint32_t)(vrte & IOAPIC_RTE_DELIVERY_MASK), (uint8_t)vrte, false
-        );
+        isa_apic_deliver(vrte);
     } else {
         kick_after_update();
     }
+}
+
+void irq_isa_set(unsigned int irq, bool level) {
+    spinlock_acquire(&lock);
+    uint64_t vrte = 0;
+    bool apic = isa_apic_entry(irq, &vrte);
+    pic_set_irq(irq, level);
+    __atomic_store_n(&extint_asserted, pic_output(), __ATOMIC_RELEASE);
+    spinlock_release(&lock);
+    if (apic && level) {
+        isa_apic_deliver(vrte);
+    }
+    kick_after_update();
 }
 
 uint8_t irq_extint_acknowledge(void) {
