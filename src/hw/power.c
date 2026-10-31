@@ -21,7 +21,6 @@
 #include <efi.h>
 #include <uacpi/sleep.h>
 #include <uacpi/status.h>
-#include <uacpi/uacpi.h>
 #include <hw/power.h>
 #include <core.h>
 #include <hw/acpi.h>
@@ -70,20 +69,19 @@ void power_reset(bool warm) {
     halt_forever();
 }
 
+// ACPI's S5, as Linux 7.3 powers off. The firmware's service comes after it,
+// for the reason it does in power_reset().
 void power_off(void) {
     printf("Powering the machine off\n");
-    firmware_reset(EfiResetShutdown);
     if (acpi_init()) {
-        // Sleep states need the namespace initialised, which runs the _INI
-        // methods otherwise left to the guest, which is done with by now.
-        uacpi_status status = uacpi_namespace_initialize();
-        if (status == UACPI_STATUS_OK) {
-            status = uacpi_prepare_for_sleep_state(UACPI_SLEEP_STATE_S5);
-        }
+        uacpi_status status = uacpi_prepare_for_sleep_state(
+            UACPI_SLEEP_STATE_S5
+        );
         if (status == UACPI_STATUS_OK) {
             status = uacpi_enter_sleep_state(UACPI_SLEEP_STATE_S5);
         }
         printf("Cannot enter ACPI S5: %s\n", uacpi_status_to_string(status));
     }
+    firmware_reset(EfiResetShutdown);
     panic("Cannot power the machine off\n");
 }
