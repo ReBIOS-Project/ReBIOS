@@ -50,6 +50,10 @@ bool pci_io_device_on_path(
     EFI_DEVICE_PATH_PROTOCOL *path, struct pci_io_device *dev
 );
 
+// Whether a port above the function says it leads to a slot, as those above a
+// card's own bridges do.
+bool pci_io_device_in_slot(const struct pci_io_device *dev);
+
 static inline bool pci_address_equal(
     struct handoff_pci_address a, struct handoff_pci_address b
 ) {
