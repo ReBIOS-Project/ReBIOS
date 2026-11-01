@@ -108,19 +108,19 @@ to disable **Above 4G Decoding** and there *should* be no need to disable
 
 ### Video Card Considerations
 
-If the video card has a legacy Video BIOS, ReBIOS has SeaBIOS run it, providing
-a pretty much native-like experience.
+If a video card in a slot has a legacy Video BIOS, ReBIOS has SeaBIOS run it,
+providing a pretty much native-like experience. Graphics in the processor or
+soldered to the board only get that if they came out before 2018, or with
+`vga_emulation = never`: ReBIOS knows them by lists of their PCI IDs.
 
-Otherwise, as on many recent systems, and on cards whose Video BIOS is known
-not to work in this setting (AMD's RDNA cards, and its integrated graphics but
-for the Vega ones), ReBIOS emulates a complete legacy VGA with its own Video
-BIOS, drawn on the UEFI framebuffer and scaled to the screen. It is not
-SeaVGABIOS: text modes (40 and 80 columns, 200, 350, and 400 lines, blinking,
-underline, the cursor, loadable fonts), CGA, EGA, and VGA graphics modes, and
-programs that program the VGA registers and video memory directly (e.g. pretty
-much all MS-DOS games, MS-DOS Editor, etc.) work as on a real VGA. On the
-tablets and handhelds that Linux knows to have their screen mounted sideways,
-the picture is turned upright, as are ReBIOS's own messages.
+Otherwise, ReBIOS emulates a complete legacy VGA with its own Video BIOS, drawn
+on the UEFI framebuffer and scaled to the screen. It is not SeaVGABIOS: text
+modes (40 and 80 columns, 200, 350, and 400 lines, blinking, underline, the
+cursor, loadable fonts), CGA, EGA, and VGA graphics modes, and programs that
+program the VGA registers and video memory directly (e.g. pretty much all
+MS-DOS games, MS-DOS Editor, etc.) work as on a real VGA. On the tablets and
+handhelds that Linux knows to have their screen mounted sideways, the picture
+is turned upright, as are ReBIOS's own messages.
 
 Its Video BIOS also offers the VESA BIOS Extensions (VBE 3.0): modes in 8, 15,
 16, 24, and 32 bits per pixel up to the screen's resolution, through a banked
@@ -172,7 +172,7 @@ printf '\x07\x00\x00\x00%s' "$(cat rebios.ini)" > /sys/firmware/efi/efivars/ReBI
 | `boot_drive` | `self`/`auto`/drive | `self` | The drive SeaBIOS boots first, the others following in the `auto` order. `self`: the drive ReBIOS was started from, if it has a legacy boot sector. `auto`: drives with something to boot (a legacy boot sector, or a bootable CD or DVD) before those without, internal drives before CDs and DVDs before external (USB) drives, and the drive ReBIOS was started from last; the [ReBIOS USB stick](#the-rebios-usb-stick)'s setting. Anything else names a drive by its UEFI device path (e.g. `PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x1,0xFFFF,0x0)`), or else by part of its model name (e.g. `Samsung SSD 860`), case aside, as ReBIOS lists them when `verbose` is on |
 | `vgabios` | string | *(empty)* | Path to a custom VBIOS file on the partition ReBIOS was started from (e.g. `\EFI\ReBIOS\vgabios.bin`). When empty, the card's built-in OpROM is used, and, failing that, the emulated VGA. If vgabios is set to `cbfs`, vgabios.bin is loaded from coreboot's CBFS. If you set it to `cbfs:filename` you can use a custom CBFS filename |
 | `vga` | PCI address | *(empty)* | PCI address of the VGA card to use (e.g. `00:02.0`). Format: `BB:DD.F` (hex). When empty, the card the firmware displays on is used, or, if it displays on none, the first card with a VBIOS |
-| `vga_emulation` | `auto`/`always`/`never` | `auto` | When to emulate a VGA: when the card has no usable Video BIOS (or, without `vgabios`, when the firmware is Apple's or the screen is mounted sideways), always (even if it has one), or never (a card without a usable Video BIOS then gets none) |
+| `vga_emulation` | `auto`/`always`/`never` | `auto` | When to emulate a VGA: when the graphics have no usable Video BIOS (or, without `vgabios`, when the firmware is Apple's, the screen is mounted sideways, or the graphics are in the processor or soldered to the board and came out from 2018 on), always (even if they have one), or never (a Video BIOS then runs in those cases too, and graphics without one get none) |
 | `vga_scaling` | `stretch`/`aspect`/`integer`/`center`/`manual` | `stretch` | How the emulated VGA fills the screen: all of it; as much of it as 4:3 allows, as a VGA monitor shows every mode; the largest whole number of screen pixels per VGA pixel that fits; one screen pixel per VGA pixel; or `vga_scale` screen pixels per VGA pixel. All but `stretch` center the picture |
 | `vga_scale` | int | `1` | The scale factor for `vga_scaling = manual`, from 1 to 16 |
 | `profile` | bool | `false` | Log, every 10 seconds, how often the OS made ReBIOS step in and why: VM exits per second and the time taken by reason, and the emulated I/O ports and memory pages behind them. A debugging aid |

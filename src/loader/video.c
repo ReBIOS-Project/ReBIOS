@@ -27,6 +27,8 @@
 #include <loader/config.h>
 #include <loader/display.h>
 #include <loader/efi_glue.h>
+#include <loader/fwtables.h>
+#include <loader/gpu_lists.h>
 #include <loader/loader.h>
 #include <loader/panel.h>
 #include <loader/pci_io.h>
@@ -38,7 +40,16 @@
 #define CBFS_SETTING_PREFIX "cbfs:"
 #define CBFS_DEFAULT_NAME "vgabios.bin"
 
-#define AMD_VENDOR_ID 0x1002
+// SMBIOS DSP0134 3.9.0, Tables 16 and 90.
+#define SMBIOS_CHASSIS 3
+#define SMBIOS_CHASSIS_TYPE 0x05
+#define SMBIOS_CHASSIS_TYPE_MASK 0x7f
+#define SMBIOS_PORTABLE_BATTERY 22
+
+// ACPI 6.6, 5.2.9.
+#define FADT_PROFILE_MOBILE 2
+#define FADT_PROFILE_APPLIANCE 6
+#define FADT_PROFILE_TABLET 8
 
 // What a stopped graphics driver may turn off, and the VBIOS needs.
 #define VGA_DECODE_ATTRIBUTES \
@@ -56,10 +67,12 @@ static EFI_GUID loaded_image_guid = EFI_LOADED_IMAGE_PROTOCOL_GUID;
 static EFI_GUID file_system_guid = EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID;
 static EFI_GUID file_info_guid = EFI_FILE_INFO_ID;
 
-// AMD integrated Vega graphics, whose VBIOS works unlike that of the other
-// integrated graphics.
-static const uint16_t amd_working_igpus[] = {
-    0x15d8, 0x15dd, 0x15e7, 0x1636, 0x1638, 0x164c
+// SMBIOS DSP0134 3.9.0, Table 17: Portable, Laptop, Notebook, Hand Held, All
+// in One, Sub Notebook, Tablet, Convertible, Detachable, IoT Gateway, Embedded
+// PC, Mini PC, and Stick PC.
+static const uint8_t slotless_chassis[] = {
+    0x08, 0x09, 0x0a, 0x0b, 0x0d, 0x0e, 0x1e, 0x1f, 0x20, 0x21, 0x22, 0x23,
+    0x24
 };
 
 // A VBIOS image the configuration names.
@@ -421,25 +434,51 @@ static bool load_user_vbios(struct user_vbios *vbios) {
     return true;
 }
 
-// AMD's RDNA generations, and its integrated graphics but for the Vega ones.
-static bool vbios_known_broken(uint16_t vendor_id, uint16_t device_id) {
-    if (vendor_id != AMD_VENDOR_ID) {
+static bool gpu_listed(
+    const struct gpu_id *list, size_t count, const struct pci_io_device *dev
+) {
+    for (size_t i = 0; i < count; i++) {
+        const struct gpu_id *id = &list[i];
+        if (id->vendor == dev->vendor_id && id->first <= dev->device_id
+         && id->last >= dev->device_id
+         && (id->revision == GPU_ANY_REVISION
+          || id->revision == dev->revision)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// For GPUs the lists do not know: firmware can say a slot is behind the port
+// to a GPU soldered to the board, so all it says of the machine has to agree.
+static bool slotted_card(const struct pci_io_device *dev) {
+    uint8_t value = 0;
+    if (fwtables_smbios_byte(SMBIOS_PORTABLE_BATTERY, 0, &value)) {
         return false;
     }
-    if (device_id >= 0x7300 && device_id <= 0x75ff) {
-        return true;
-    }
-    bool integrated = (device_id >= 0x1400 && device_id <= 0x16ff)
-        || (device_id >= 0x1900 && device_id <= 0x19ff);
-    if (!integrated) {
+    value = 0;
+    fwtables_fadt_pm_profile(&value);
+    if (value == FADT_PROFILE_MOBILE || value == FADT_PROFILE_APPLIANCE
+     || value == FADT_PROFILE_TABLET) {
         return false;
     }
-    for (size_t i = 0; i < sizeof(amd_working_igpus) / sizeof(uint16_t); i++) {
-        if (device_id == amd_working_igpus[i]) {
+    value = 0;
+    fwtables_smbios_byte(SMBIOS_CHASSIS, SMBIOS_CHASSIS_TYPE, &value);
+    value &= SMBIOS_CHASSIS_TYPE_MASK;
+    for (size_t i = 0; i < sizeof(slotless_chassis) / sizeof(uint8_t); i++) {
+        if (value == slotless_chassis[i]) {
             return false;
         }
     }
-    return true;
+    return pci_io_device_in_slot(dev);
+}
+
+static bool vbios_trusted(const struct pci_io_device *dev) {
+    if (gpu_listed(vbios_blocklist, vbios_blocklist_count, dev)) {
+        return false;
+    }
+    return gpu_listed(vbios_allowlist, vbios_allowlist_count, dev)
+        || slotted_card(dev);
 }
 
 // The aliased variant of the I/O decoding is preferred, as legacy software
@@ -544,11 +583,14 @@ static bool try_device(
     if (user != NULL) {
         image = user->image;
         size = user->size;
-    } else if (vbios_known_broken(dev->vendor_id, dev->device_id)) {
+    } else if (config.vga_emulation != HANDOFF_VGA_EMULATION_NEVER
+            && !vbios_trusted(dev)) {
         printf(
             "Skipping the VBIOS of " PCI_ADDRESS_FMT
-            " (%04x:%04x), known to be broken\n",
-            PCI_ADDRESS_ARGS(dev->address), dev->vendor_id, dev->device_id
+            " (%04x:%04x, revision %02x), not of a card in a slot or graphics "
+            "from before 2018, but with vga_emulation = never\n",
+            PCI_ADDRESS_ARGS(dev->address), dev->vendor_id, dev->device_id,
+            dev->revision
         );
         return false;
     } else {
