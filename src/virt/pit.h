@@ -32,5 +32,9 @@ void pit_tick_ended(void);
 // has, which the guest taking interrupts again tells.
 bool pit_tick_returning(const struct cpu *cpu);
 void pit_tick_returned(void);
+// An edge of IRQ 0 came from the host's line, as the HPET's legacy replacement
+// route sends them, with IRQ 0 in service or not: true if it waits as the
+// 8254's would, and this module delivers it.
+bool pit_tick_held(bool in_service);
 
 #endif

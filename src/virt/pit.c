@@ -115,6 +115,8 @@ static uint64_t tick_begun;
 static const struct cpu *tick_cpu;
 static bool tick_returning;
 static uint64_t tick_held_until;
+// An edge from the host's line waits with the 8254's.
+static bool host_edge;
 static uint8_t nmi_written;
 static uint64_t boot_tsc;
 
@@ -274,13 +276,33 @@ void pit_tick_returned(void) {
         tick_begun = 0;
         __atomic_store_n(&tick_returning, false, __ATOMIC_RELAXED);
         uint64_t next = 0;
-        if (counter_0_edge != 0) {
+        if (host_edge) {
+            next = tick_held_until;
+        } else if (counter_0_edge != 0) {
             uint64_t edge = channels[0].start + ticks_to_tsc(counter_0_edge);
             next = edge > tick_held_until ? edge : tick_held_until;
         }
         hv_timer_set(&tick, next);
     }
     spinlock_release(&lock);
+}
+
+bool pit_tick_held(bool in_service) {
+    if (!cpu_exits_slow()) {
+        return false;
+    }
+    spinlock_acquire(&lock);
+    bool wait = in_service || tick_returning;
+    bool held = wait || rdtsc() < tick_held_until;
+    if (held) {
+        host_edge = true;
+        // Otherwise, the handler's return sets the timer.
+        if (!wait) {
+            hv_timer_set(&tick, tick_held_until);
+        }
+    }
+    spinlock_release(&lock);
+    return held;
 }
 
 static void tick_fired(void *ctx) {
@@ -302,8 +324,10 @@ static void tick_fired(void *ctx) {
     bool edge = counter_0_edge != 0 && c->running
         && counted(c, now) >= counter_0_edge;
     schedule_counter_0(now);
+    bool waited = host_edge;
+    host_edge = false;
     spinlock_release(&lock);
-    if (edge && !hpet_replaces_pit()) {
+    if (waited || (edge && !hpet_replaces_pit())) {
         irq_isa_pulse(IRQ_TIMER);
     }
 }

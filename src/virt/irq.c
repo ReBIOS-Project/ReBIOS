@@ -424,6 +424,9 @@ void irq_host_interrupt(uint8_t vector) {
         }
         level = true;
     }
+    if (edge && irq == IRQ_TIMER && pit_tick_held(pic_in_service(IRQ_TIMER))) {
+        edge = false;
+    }
     if (edge) {
         pic_pulse_irq((unsigned int)irq);
     }
