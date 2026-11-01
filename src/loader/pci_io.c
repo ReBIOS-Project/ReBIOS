@@ -63,6 +63,7 @@ static bool pci_io_device_get(EFI_HANDLE handle, struct pci_io_device *dev) {
     dev->address.devfn = (uint8_t)(device << 3 | function);
     dev->vendor_id = (uint16_t)header[0];
     dev->device_id = (uint16_t)(header[0] >> 16);
+    dev->revision = (uint8_t)header[2];
     dev->prog_if = (uint8_t)(header[2] >> 8);
     dev->subclass = (uint8_t)(header[2] >> 16);
     dev->base_class = (uint8_t)(header[2] >> 24);

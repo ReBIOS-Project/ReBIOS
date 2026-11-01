@@ -36,6 +36,7 @@ struct pci_io_device {
     struct handoff_pci_address address;
     uint16_t vendor_id;
     uint16_t device_id;
+    uint8_t revision;
     uint8_t base_class;
     uint8_t subclass;
     uint8_t prog_if;
