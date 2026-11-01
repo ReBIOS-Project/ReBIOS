@@ -1452,7 +1452,7 @@ void vmx_run(struct vcpu *v) {
             vmx_dump_guest();
             panic("Cannot enter the guest\n");
         }
-        cpu_slice_start();
+        cpu_guest_exited();
         cache_exited(v->vmcs_cache);
         // Only a VM entry that loaded the guest state and MSRs launches the
         // VMCS (SDM 325462-093 Vol. 3C, chapter 29).

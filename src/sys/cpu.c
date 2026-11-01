@@ -96,6 +96,10 @@ _Static_assert(
 // The longest an exit keeps the CPU from the guest for what can wait for its
 // next exits, so that the guest's interrupts come on time.
 #define CPU_SLICE_NS ((uint32_t)1000000)
+// A trip into the guest and back takes a processor running the hypervisor
+// itself a few microseconds at most: at 1/50000 of a second, something else
+// runs it.
+#define SLOW_EXITS_PER_SECOND 50000
 
 static uintptr_t nmi_restart_start;
 static uintptr_t nmi_restart_end;
@@ -339,11 +343,25 @@ void cpu_slice_end(void) {
     uint64_t now = rdtsc();
     cpu->root_tsc += now - cpu->slice_start_tsc;
     cpu->slice_start_tsc = now;
+    cpu->entry_tsc = now;
 }
 
 uint64_t cpu_root_time(void) {
     struct cpu *cpu = this_cpu();
     return cpu->root_tsc + (rdtsc() - cpu->slice_start_tsc);
+}
+
+void cpu_guest_exited(void) {
+    cpu_slice_start();
+    struct cpu *cpu = this_cpu();
+    uint64_t took = cpu->slice_start_tsc - cpu->entry_tsc;
+    if (cpu->shortest_exit == 0 || took < cpu->shortest_exit) {
+        cpu->shortest_exit = took;
+    }
+}
+
+bool cpu_exits_slow(void) {
+    return this_cpu()->shortest_exit >= time_tsc_hz() / SLOW_EXITS_PER_SECOND;
 }
 
 bool cpu_slice_over(void) {

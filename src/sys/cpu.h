@@ -84,6 +84,10 @@ struct cpu {
     // By the TSC, how long this CPU has kept the guest waiting at exits.
     uint64_t root_tsc;
     uint64_t slice_end;
+    // By the TSC, when the CPU last went into the guest, and the shortest it
+    // has taken to come back, or 0.
+    uint64_t entry_tsc;
+    uint64_t shortest_exit;
     // When the watchdog may report the CPU again.
     uint64_t watchdog_next;
 };
@@ -105,6 +109,11 @@ bool cpu_slice_over(void);
 void cpu_slice_end(void);
 // How long this CPU has kept the guest waiting so far, by the TSC.
 uint64_t cpu_root_time(void);
+// At an exit: starts the slice, and notes how long the trip took.
+void cpu_guest_exited(void);
+// Whether exits take this CPU far longer than a processor running the
+// hypervisor itself would take, as they do under another hypervisor.
+bool cpu_exits_slow(void);
 
 struct cpu *cpu_area_alloc(size_t index, uint32_t apic_id, bool bsp);
 void cpu_tables_load(struct cpu *cpu, bool use_ist);
