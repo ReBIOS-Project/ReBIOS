@@ -49,6 +49,11 @@ _Static_assert(sizeof(struct rsdp) == 36, "RSDP layout");
 // checksum on through whatever follows it.
 #define RSDP_MAX_SIZE 4096
 
+#define ACPI_TABLE_LENGTH 4
+#define ACPI_TABLE_HEADER_SIZE 36
+// ACPI 6.6, 5.2.9.
+#define FADT_PREFERRED_PM_PROFILE 45
+
 struct smbios2_entry {
     char anchor[4];
     uint8_t checksum;
@@ -426,6 +431,44 @@ const char *fwtables_smbios_string(uint8_t type, uint8_t offset) {
         return "";
     }
     return string;
+}
+
+bool fwtables_fadt_pm_profile(uint8_t *profile) {
+    const struct rsdp *rsdp = (const struct rsdp *)(uintptr_t)
+        loader_handoff->acpi_rsdp;
+    if (rsdp == NULL) {
+        return false;
+    }
+    bool xsdt = rsdp->revision >= 2 && rsdp->xsdt_address != 0;
+    size_t entry_size = xsdt ? sizeof(uint64_t) : sizeof(uint32_t);
+    uintptr_t root_address = xsdt ? rsdp->xsdt_address : rsdp->rsdt_address;
+    const uint8_t *root = (const uint8_t *)root_address;
+    if (root == NULL) {
+        return false;
+    }
+
+    uint32_t length;
+    memcpy(&length, root + ACPI_TABLE_LENGTH, sizeof(uint32_t));
+    if (length < ACPI_TABLE_HEADER_SIZE || byte_sum(root, length) != 0) {
+        return false;
+    }
+    for (size_t off = ACPI_TABLE_HEADER_SIZE; off + entry_size <= length;
+         off += entry_size) {
+        uintptr_t address = 0;
+        memcpy(&address, root + off, entry_size);
+        const uint8_t *table = (const uint8_t *)address;
+        if (table == NULL || memcmp(table, "FACP", 4) != 0) {
+            continue;
+        }
+        uint32_t table_length;
+        memcpy(&table_length, table + ACPI_TABLE_LENGTH, sizeof(uint32_t));
+        if (table_length <= FADT_PREFERRED_PM_PROFILE) {
+            return false;
+        }
+        *profile = table[FADT_PREFERRED_PM_PROFILE];
+        return true;
+    }
+    return false;
 }
 
 bool fwtables_smbios_byte(uint8_t type, uint8_t offset, uint8_t *value) {

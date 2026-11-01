@@ -29,6 +29,9 @@ void fwtables_collect(void);
 // string or only spaces, NULL where there is no such structure or field.
 const char *fwtables_smbios_string(uint8_t type, uint8_t offset);
 
+// Gets the FADT's preferred power management profile, if there is one.
+bool fwtables_fadt_pm_profile(uint8_t *profile);
+
 // Gets the byte at offset in the firmware's first SMBIOS structure of type, if
 // there is such a structure and field.
 bool fwtables_smbios_byte(uint8_t type, uint8_t offset, uint8_t *value);
