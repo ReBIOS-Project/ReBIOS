@@ -40,8 +40,17 @@
 #define ELEMENT_BAR 0
 #define ELEMENT_ROM 1
 #define ELEMENT_LOW_WINDOW 2
-#define ELEMENT_HIGH_WINDOW 3
-#define ELEMENT_LFB 4
+#define ELEMENT_PREF_WINDOW 3
+#define ELEMENT_HIGH_WINDOW 4
+#define ELEMENT_LFB 5
+
+// Where in a root bus or bridge an element goes: its memory window, or its one
+// prefetchable window, below or above 4 GiB. A root bus has one region for
+// each side of 4 GiB, so no SIDE_PREF.
+#define SIDE_MEMORY 0
+#define SIDE_PREF 1
+#define SIDE_HIGH 2
+#define SIDES 3
 
 #define NO_CONTAINER UINT32_MAX
 // Below this, the top of the guest's RAM is where its PCI memory starts at the
@@ -57,26 +66,22 @@ struct element {
     uint32_t function;
     uint8_t kind;
     uint8_t bar;
-    bool high;
+    size_t side;
     size_t size;
     uint64_t align;
     // From the start of the region or window it is in.
     size_t offset;
 };
 
-// A root bus's or a bridge's elements, below and above 4 GiB.
+// A root bus's or a bridge's elements, by side.
 struct container {
     struct element *elements;
     size_t count;
     size_t capacity;
-    size_t low_size;
-    uint64_t low_align;
-    size_t high_size;
-    uint64_t high_align;
-    uintptr_t low_base;
-    uintptr_t high_base;
-    bool low_placed;
-    bool high_placed;
+    size_t size[SIDES];
+    uint64_t align[SIDES];
+    uintptr_t base[SIDES];
+    bool placed[SIDES];
 };
 
 struct gap {
@@ -118,9 +123,7 @@ static bool goes_before(const struct element *a, const struct element *b) {
 
 // The container's elements of one side, largest alignment first, one after the
 // other: none then needs padding but for the alignment of what follows.
-static void pack(
-    struct container *c, bool high, uint64_t *size, uint64_t *align
-) {
+static void pack(struct container *c, size_t side) {
     for (size_t i = 1; i < c->count; i++) {
         struct element e = c->elements[i];
         size_t j = i;
@@ -134,7 +137,7 @@ static void pack(
     uint64_t max_align = 0;
     for (size_t i = 0; i < c->count; i++) {
         struct element *e = &c->elements[i];
-        if (e->high != high) {
+        if (e->side != side) {
             continue;
         }
         offset = align_up(offset, e->align);
@@ -144,8 +147,27 @@ static void pack(
             max_align = e->align;
         }
     }
-    *size = offset;
-    *align = max_align;
+    c->size[side] = offset;
+    c->align[side] = max_align;
+}
+
+// A window in a bridge's parent for what the bridge has on one side.
+static void window_add(
+    struct container *parent, struct container *c, size_t function,
+    uint8_t kind, size_t side_inside, size_t side
+) {
+    if (c->size[side_inside] == 0) {
+        return;
+    }
+    uint64_t align = c->align[side_inside] > WINDOW_GRANULE
+        ? c->align[side_inside] : WINDOW_GRANULE;
+    element_add(
+        parent,
+        (struct element){
+            function, kind, 0, side,
+            align_up(c->size[side_inside], WINDOW_GRANULE), align, 0
+        }
+    );
 }
 
 static bool is_bridge(const struct pci_function *f) {
@@ -189,6 +211,22 @@ static bool path_reaches_high(
     return true;
 }
 
+// Whether what is prefetchable below 4 GiB can be in the bridge's prefetchable
+// window, as firmware puts it: the bridge and those above it need to have one,
+// which reads as 0 where they do not, and not need it above 4 GiB.
+static bool pref_window_low(
+    const struct pci_topology *t, const struct pci_function *bridge,
+    const bool *high_windows
+) {
+    for (const struct pci_function *b = bridge; b != NULL; b = b->parent) {
+        if (high_windows[b - t->functions]
+         || pci_cfg_read(b->addr, BRIDGE_PREF, 4) == 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // Whether the host bridge of the function's root bus forwards [base,
 // base + size) to it, as it does for what the firmware assigned, and not for
 // what a sizing left in a register it never assigned. Without host bridges
@@ -212,6 +250,11 @@ static bool routed(const struct pci_function *f, uintptr_t base, size_t size) {
         return false;
     }
     return true;
+}
+
+static bool bar_high(const struct pci_function *f, const struct pci_bar *bar) {
+    return bar->size > PCI_PLAN_LOW_BAR_MAX && bar->kind == PCI_BAR_MEM64
+        && path_reaches_high(f, bar->prefetchable);
 }
 
 // A BAR smaller than a page gets a page of its own, at the same offset in it
@@ -286,10 +329,10 @@ static void assign(
     struct container *c = &containers[index];
     for (size_t i = 0; i < c->count; i++) {
         const struct element *e = &c->elements[i];
-        if (e->high ? !c->high_placed : !c->low_placed) {
+        if (!c->placed[e->side]) {
             continue;
         }
-        uintptr_t base = (e->high ? c->high_base : c->low_base) + e->offset;
+        uintptr_t base = c->base[e->side] + e->offset;
         if (e->kind == ELEMENT_LFB) {
             plan.lfb = base;
             continue;
@@ -309,15 +352,17 @@ static void assign(
             case ELEMENT_LOW_WINDOW: {
                 pf->mem_base = base;
                 pf->mem_limit = base + e->size - 1;
-                containers[e->function].low_base = base;
-                containers[e->function].low_placed = true;
+                containers[e->function].base[SIDE_MEMORY] = base;
+                containers[e->function].placed[SIDE_MEMORY] = true;
                 break;
             }
             default: {
+                size_t side = e->kind == ELEMENT_PREF_WINDOW ? SIDE_PREF
+                    : SIDE_HIGH;
                 pf->pref_base = base;
                 pf->pref_limit = base + e->size - 1;
-                containers[e->function].high_base = base;
-                containers[e->function].high_placed = true;
+                containers[e->function].base[side] = base;
+                containers[e->function].placed[side] = true;
                 break;
             }
         }
@@ -381,31 +426,54 @@ const struct pci_plan *pci_plan_make(
         }
     }
 
+    // The bridges with something above 4 GiB behind them.
+    bool *high_windows = kmalloc((n != 0 ? n : 1) * sizeof(bool));
+    for (size_t i = 0; i < n; i++) {
+        high_windows[i] = false;
+    }
+    for (size_t i = 0; i < n; i++) {
+        const struct pci_function *f = &t->functions[i];
+        for (size_t b = 0; b < f->bar_count && b < 6; b++) {
+            if (!bar_high(f, &f->bars[b])) {
+                continue;
+            }
+            for (const struct pci_function *up = f->parent; up != NULL;
+                 up = up->parent) {
+                high_windows[up - t->functions] = true;
+            }
+        }
+    }
+
     for (size_t i = 0; i < n; i++) {
         const struct pci_function *f = &t->functions[i];
         if (parents[i] == NO_CONTAINER) {
             continue;
         }
         struct container *c = &containers[parents[i]];
+        bool pref_low = f->parent != NULL
+            && pref_window_low(t, f->parent, high_windows);
         for (size_t b = 0; b < f->bar_count && b < 6; b++) {
             const struct pci_bar *bar = &f->bars[b];
             if ((bar->kind != PCI_BAR_MEM32 && bar->kind != PCI_BAR_MEM64)
              || bar->size == 0 || bar->base == 0) {
                 continue;
             }
-            bool high = bar->size > PCI_PLAN_LOW_BAR_MAX
-                && bar->kind == PCI_BAR_MEM64
-                && path_reaches_high(f, bar->prefetchable);
+            size_t side = bar_high(f, bar) ? SIDE_HIGH
+                : bar->prefetchable && pref_low ? SIDE_PREF
+                : SIDE_MEMORY;
             size_t size = element_size(bar->size);
             element_add(
-                c, (struct element){ i, ELEMENT_BAR, b, high, size, size, 0 }
+                c, (struct element){ i, ELEMENT_BAR, b, side, size, size, 0 }
             );
         }
         if (f->rom.kind == PCI_BAR_MEM32 && f->rom.size != 0
          && f->rom.base != 0 && routed(f, f->rom.base, f->rom.size)) {
             size_t size = element_size(f->rom.size);
             element_add(
-                c, (struct element){ i, ELEMENT_ROM, 0, false, size, size, 0 }
+                c,
+                (struct element){
+                    i, ELEMENT_ROM, 0, SIDE_MEMORY, size, size, 0
+                }
             );
         }
     }
@@ -416,7 +484,7 @@ const struct pci_plan *pci_plan_make(
             element_add(
                 &containers[n + r],
                 (struct element){
-                    0, ELEMENT_LFB, 0, false, lfb_size, 2 * ONE_MIB, 0
+                    0, ELEMENT_LFB, 0, SIDE_MEMORY, lfb_size, 2 * ONE_MIB, 0
                 }
             );
         }
@@ -440,31 +508,15 @@ const struct pci_plan *pci_plan_make(
     for (size_t k = 0; k < bridges; k++) {
         size_t i = order[k];
         struct container *c = &containers[i];
-        pack(c, false, &c->low_size, &c->low_align);
-        pack(c, true, &c->high_size, &c->high_align);
+        pack(c, SIDE_MEMORY);
+        pack(c, SIDE_PREF);
+        pack(c, SIDE_HIGH);
         struct container *parent = &containers[parents[i]];
-        if (c->low_size != 0) {
-            uint64_t align = c->low_align > WINDOW_GRANULE ? c->low_align
-                : WINDOW_GRANULE;
-            element_add(
-                parent,
-                (struct element){
-                    i, ELEMENT_LOW_WINDOW, 0, false,
-                    align_up(c->low_size, WINDOW_GRANULE), align, 0
-                }
-            );
-        }
-        if (c->high_size != 0) {
-            uint64_t align = c->high_align > WINDOW_GRANULE ? c->high_align
-                : WINDOW_GRANULE;
-            element_add(
-                parent,
-                (struct element){
-                    i, ELEMENT_HIGH_WINDOW, 0, true,
-                    align_up(c->high_size, WINDOW_GRANULE), align, 0
-                }
-            );
-        }
+        size_t pref_side = t->functions[i].parent != NULL ? SIDE_PREF
+            : SIDE_MEMORY;
+        window_add(parent, c, i, ELEMENT_LOW_WINDOW, SIDE_MEMORY, SIDE_MEMORY);
+        window_add(parent, c, i, ELEMENT_PREF_WINDOW, SIDE_PREF, pref_side);
+        window_add(parent, c, i, ELEMENT_HIGH_WINDOW, SIDE_HIGH, SIDE_HIGH);
     }
 
     // The guest's PCI hole: what the obstacles leave below the platform's
@@ -505,24 +557,26 @@ const struct pci_plan *pci_plan_make(
     uint32_t placed = 0;
     for (size_t r = 0; r < roots; r++) {
         struct container *c = &containers[n + r];
-        pack(c, false, &c->low_size, &c->low_align);
-        pack(c, true, &c->high_size, &c->high_align);
+        pack(c, SIDE_MEMORY);
+        pack(c, SIDE_HIGH);
         plan.roots[r] = (struct pci_plan_root){
             .segment = t->root_buses[r].segment,
             .bus = t->root_buses[r].bus,
         };
-        if (c->high_size != 0) {
-            c->high_base = high_base(
-                obstacles, count, high_cursor, c->high_size, c->high_align
+        if (c->size[SIDE_HIGH] != 0) {
+            c->base[SIDE_HIGH] = high_base(
+                obstacles, count, high_cursor, c->size[SIDE_HIGH],
+                c->align[SIDE_HIGH]
             );
-            c->high_placed = true;
-            high_cursor = c->high_base + c->high_size;
+            c->placed[SIDE_HIGH] = true;
+            high_cursor = c->base[SIDE_HIGH] + c->size[SIDE_HIGH];
             plan.roots[r].high = (struct pci_plan_range){
-                c->high_base, high_cursor
+                c->base[SIDE_HIGH], high_cursor
             };
         }
-        piece_size[r] = align_up(c->low_size, ONE_MIB);
-        piece_align[r] = c->low_align > ONE_MIB ? c->low_align : ONE_MIB;
+        piece_size[r] = align_up(c->size[SIDE_MEMORY], ONE_MIB);
+        piece_align[r] = c->align[SIDE_MEMORY] > ONE_MIB
+            ? c->align[SIDE_MEMORY] : ONE_MIB;
     }
     piece_size[roots] = ecam_present ? ecam_size : 0;
     piece_align[roots] = ONE_MIB;
@@ -567,8 +621,8 @@ const struct pci_plan *pci_plan_make(
             plan.ecam_start = ecam_start;
             plan.ecam_end = ecam_end;
         } else {
-            containers[n + p].low_base = at;
-            containers[n + p].low_placed = true;
+            containers[n + p].base[SIDE_MEMORY] = at;
+            containers[n + p].placed[SIDE_MEMORY] = true;
             plan.roots[p].low = (struct pci_plan_range){
                 at, at + piece_size[p]
             };
@@ -596,6 +650,7 @@ const struct pci_plan *pci_plan_make(
         kfree(containers[i].elements);
     }
     kfree(containers);
+    kfree(high_windows);
     kfree(parents);
     kfree(order);
     kfree(depths);
