@@ -1,3 +1,36 @@
+2026-11-02  Mintsuki  <mintsuki@protonmail.com>
+
+    *** Release 0.5.1 ***
+
+    Noteworthy changes compared to the previous release, 0.5.0:
+
+    New features:
+        - `vga_emulation = never` now runs a video BIOS wherever there is one,
+          even on graphics whose video BIOS ReBIOS would skip by default.
+
+    Bug fixes:
+        - Decide by lists of PCI IDs whose video BIOS to run by default, as
+          those of recent integrated graphics can hang the machine. Cards in
+          slots, now including AMD's RDNA ones, and graphics in the processor
+          or soldered to the board that came out before 2018 run theirs. Those
+          from 2018 on, now including AMD's Vega ones, get the emulated VGA.
+          Graphics on neither list count as a card in a slot only if the
+          machine has no battery, neither its ACPI power profile nor its SMBIOS
+          chassis type rules slots out, and a PCI Express port above them has a
+          slot.
+        - Power off through ACPI's S5 state before the firmware's service, as
+          Linux 7.3 does and as restarts already did: the service of a Dell
+          Inspiron 7700 crashes by then.
+        - Keep small prefetchable BARs in their bridge's prefetchable window,
+          as firmware does, wherever that window is below 4 GiB, instead of in
+          its memory window.
+        - Where VM exits are slow, as under another hypervisor, hold the next
+          timer tick through the 8259 until the OS has had as long as the last
+          one took, for the 8254's ticks and for those of the HPET's legacy
+          replacement route. A tick could otherwise come before what the last
+          one interrupted ran again, over and over, which stalled Linux's boot.
+          Elsewhere, ticks follow the counter alone.
+
 2026-10-31  Mintsuki  <mintsuki@protonmail.com>
 
     *** Release 0.5.0 ***
