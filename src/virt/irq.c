@@ -805,6 +805,15 @@ static void isa_apic_deliver(uint64_t vrte) {
     );
 }
 
+bool irq_tick_in_service(void) {
+    uint64_t vrte = 0;
+    spinlock_acquire(&lock);
+    bool in_service = !isa_apic_entry(IRQ_TIMER, &vrte)
+        && pic_in_service(IRQ_TIMER);
+    spinlock_release(&lock);
+    return in_service;
+}
+
 void irq_isa_pulse(unsigned int irq) {
     spinlock_acquire(&lock);
     uint64_t vrte = 0;

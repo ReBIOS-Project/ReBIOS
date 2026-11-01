@@ -81,8 +81,6 @@ struct cpu {
     // and when what can wait for the next one gives the CPU back.
     uint64_t slice_start;
     uint64_t slice_start_tsc;
-    // By the TSC, how long this CPU has kept the guest waiting at exits.
-    uint64_t root_tsc;
     uint64_t slice_end;
     // By the TSC, when the CPU last went into the guest, and the shortest it
     // has taken to come back, or 0.
@@ -107,8 +105,6 @@ void cpu_slice_start(void);
 bool cpu_slice_over(void);
 // Ends it, on the way into the guest.
 void cpu_slice_end(void);
-// How long this CPU has kept the guest waiting so far, by the TSC.
-uint64_t cpu_root_time(void);
 // At an exit: starts the slice, and notes how long the trip took.
 void cpu_guest_exited(void);
 // Whether exits take this CPU far longer than a processor running the

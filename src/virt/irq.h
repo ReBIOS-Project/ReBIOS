@@ -64,6 +64,8 @@ bool irq_extint_pending(struct vcpu *v);
 uint8_t irq_extint_acknowledge(void);
 // Whether an I/O APIC entry delivers the 8259's interrupts.
 bool irq_extint_routed(void);
+// Whether IRQ 0 goes through the 8259 and is in service there.
+bool irq_tick_in_service(void);
 
 // The guest's EOI of a vector, which its level-triggered I/O APIC entries of
 // the vector wait for, masked at the host, their Remote IRR set.

@@ -38,6 +38,9 @@ void event_entry_for(struct vcpu *v, bool nmis, bool interrupts);
 // An NMI that made the guest exit.
 void event_nmi(struct vcpu *v);
 
+// Whether the guest can take an interrupt now.
+bool event_interruptible(struct vcpu *v);
+
 // Whether something ends a HLT: an NMI, an INIT, or an interrupt the guest
 // takes.
 bool event_halt_ends(struct vcpu *v);

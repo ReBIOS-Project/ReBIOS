@@ -45,6 +45,9 @@ struct vcpu;
 #define CHANNELS 3
 #define CHANNEL_SPEAKER 2
 #define IRQ_TIMER 0
+// How often a held tick's timer looks again, for a guest that leaves a tick in
+// service and moves on to an I/O APIC.
+#define TICK_RECHECK_HZ 64
 
 #define SELECT_SHIFT 6
 #define SELECT_READ_BACK 3
@@ -106,7 +109,11 @@ static struct spinlock lock;
 static struct channel channels[CHANNELS];
 static uint64_t counter_0_edge;
 static struct hv_timer tick;
+// Where exits are slow: when the 8259 took the tick in service, on which CPU,
+// whether its handler has yet to return, and until when the next tick is held.
 static uint64_t tick_begun;
+static const struct cpu *tick_cpu;
+static bool tick_returning;
 static uint64_t tick_held_until;
 static uint8_t nmi_written;
 static uint64_t boot_tsc;
@@ -229,26 +236,65 @@ static void schedule_counter_0(uint64_t now) {
     hv_timer_set(&tick, edge != 0 ? c->start + ticks_to_tsc(edge) : 0);
 }
 
-// What the hypervisor took over the last tick, the guest gets before the next
-// one, as its handling must not leave it none when exits are slow: a virtual
-// machine's or an emulator's. By a real processor's it is too short to notice.
+// Under another hypervisor, the exits of a tick's handler can take longer than
+// the counter's period. The next tick would then come as the handler returns,
+// before what it interrupted gets to run an instruction, and so on for good.
+// So there, none comes from when the 8259 takes one in service until the guest
+// takes interrupts again, and then none until the guest has had as long again.
+// A processor's own exits leave its ticks to the counter.
 void pit_tick_begun(void) {
-    __atomic_store_n(&tick_begun, cpu_root_time(), __ATOMIC_RELAXED);
+    if (cpu_exits_slow()) {
+        spinlock_acquire(&lock);
+        tick_begun = rdtsc();
+        __atomic_store_n(&tick_cpu, this_cpu(), __ATOMIC_RELAXED);
+        __atomic_store_n(&tick_returning, false, __ATOMIC_RELAXED);
+        hv_timer_set(&tick, tick_begun + time_tsc_hz() / TICK_RECHECK_HZ);
+        spinlock_release(&lock);
+    }
 }
 
 void pit_tick_ended(void) {
-    uint64_t taken = cpu_root_time()
-        - __atomic_load_n(&tick_begun, __ATOMIC_RELAXED);
-    __atomic_store_n(&tick_held_until, rdtsc() + taken, __ATOMIC_RELAXED);
+    spinlock_acquire(&lock);
+    if (tick_begun != 0) {
+        __atomic_store_n(&tick_returning, true, __ATOMIC_RELAXED);
+    }
+    spinlock_release(&lock);
+}
+
+bool pit_tick_returning(const struct cpu *cpu) {
+    return __atomic_load_n(&tick_returning, __ATOMIC_RELAXED)
+        && __atomic_load_n(&tick_cpu, __ATOMIC_RELAXED) == cpu;
+}
+
+void pit_tick_returned(void) {
+    spinlock_acquire(&lock);
+    if (tick_returning) {
+        uint64_t now = rdtsc();
+        tick_held_until = now + (now - tick_begun);
+        tick_begun = 0;
+        __atomic_store_n(&tick_returning, false, __ATOMIC_RELAXED);
+        uint64_t next = 0;
+        if (counter_0_edge != 0) {
+            uint64_t edge = channels[0].start + ticks_to_tsc(counter_0_edge);
+            next = edge > tick_held_until ? edge : tick_held_until;
+        }
+        hv_timer_set(&tick, next);
+    }
+    spinlock_release(&lock);
 }
 
 static void tick_fired(void *ctx) {
     (void)ctx;
+    bool in_service = cpu_exits_slow() && irq_tick_in_service();
     uint64_t now = rdtsc();
     spinlock_acquire(&lock);
-    uint64_t held_until = __atomic_load_n(&tick_held_until, __ATOMIC_RELAXED);
-    if (now < held_until) {
-        hv_timer_set(&tick, held_until);
+    if (in_service || tick_returning) {
+        hv_timer_set(&tick, now + time_tsc_hz() / TICK_RECHECK_HZ);
+        spinlock_release(&lock);
+        return;
+    }
+    if (now < tick_held_until) {
+        hv_timer_set(&tick, tick_held_until);
         spinlock_release(&lock);
         return;
     }

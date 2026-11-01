@@ -26,6 +26,7 @@
 #include <virt/irq.h>
 #include <virt/mmio.h>
 #include <virt/nvmx.h>
+#include <virt/pit.h>
 #include <virt/svm.h>
 #include <virt/vcpu.h>
 #include <virt/vlapic.h>
@@ -269,7 +270,7 @@ void event_interrupt(uint8_t vector) {
     vlapic_accept(v, vector, false);
 }
 
-static bool interruptible(struct vcpu *v) {
+bool event_interruptible(struct vcpu *v) {
     if (virt_vmx) {
         return (vmx_read(VMCS_GUEST_RFLAGS) & RFLAGS_IF) != 0
             && (vmx_read(VMCS_GUEST_INTERRUPTIBILITY)
@@ -308,7 +309,8 @@ static bool interrupt_pending(struct vcpu *v) {
 // delivers the local APIC's itself where it virtualises them.
 static bool window_needed(struct vcpu *v) {
     return irq_extint_pending(v)
-        || (!vlapic_virtual_delivery(v) && vlapic_pending(v) >= 0);
+        || (!vlapic_virtual_delivery(v) && vlapic_pending(v) >= 0)
+        || pit_tick_returning(v->cpu);
 }
 
 bool event_halt_ends(struct vcpu *v) {
@@ -330,12 +332,11 @@ static void deliver_interrupt(struct vcpu *v) {
     bool virtual_delivery = vlapic_virtual_delivery(v);
     int vector = extint || virtual_delivery ? -1 : vlapic_pending(v);
     if (!extint && vector < 0) {
-        interrupt_window(
-            v, virtual_delivery ? WINDOW_OFF : vlapic_tpr_held(v)
-        );
+        int class = virtual_delivery ? WINDOW_OFF : vlapic_tpr_held(v);
+        interrupt_window(v, pit_tick_returning(v->cpu) ? WINDOW_ANY : class);
         return;
     }
-    if (!interruptible(v)) {
+    if (!event_interruptible(v)) {
         interrupt_window(v, WINDOW_ANY);
         return;
     }

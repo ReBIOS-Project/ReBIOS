@@ -39,6 +39,7 @@
 #include <virt/msr.h>
 #include <virt/mtrr.h>
 #include <virt/nvmx.h>
+#include <virt/pit.h>
 #include <virt/profile.h>
 #include <virt/svm.h>
 #include <virt/usb.h>
@@ -436,6 +437,12 @@ void vcpu_single_step(struct vcpu *v, bool on) {
     vmcb->control.intercept_exceptions = v->step_exceptions;
 }
 
+static void tick_return_check(struct vcpu *v) {
+    if (pit_tick_returning(v->cpu) && event_interruptible(v)) {
+        pit_tick_returned();
+    }
+}
+
 // Reports, at most once a second for each CPU, an exit that kept the CPU from
 // the guest for longer than the hypervisor means to, as that delays its
 // interrupts.
@@ -486,6 +493,7 @@ void vcpu_before_entry(struct vcpu *v) {
         }
     }
     watchdog(v);
+    tick_return_check(v);
     if (v->cpu->bsp) {
         usb_slice(false);
         hv_timer_run();
@@ -552,6 +560,7 @@ void vcpu_wait(struct vcpu *v, bool (*ends)(struct vcpu *v), bool spin) {
         cpu_slice_start();
         __atomic_store_n(&cpu->kicked, false, __ATOMIC_SEQ_CST);
         service_pause(v);
+        tick_return_check(v);
         if (cpu->bsp) {
             usb_slice(true);
             hv_timer_run();

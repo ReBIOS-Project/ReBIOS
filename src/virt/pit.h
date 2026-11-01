@@ -18,11 +18,19 @@
 #ifndef VIRT__PIT_H
 #define VIRT__PIT_H
 
+#include <stdbool.h>
+
+struct cpu;
+
 // Gives the guest an 8254 of its own, and the timer bits of port 61h.
 void pit_init(void);
 
 // The guest's 8259 took counter 0's interrupt, and has ended it.
 void pit_tick_begun(void);
 void pit_tick_ended(void);
+// Whether that interrupt's handler has yet to return on that CPU, and that it
+// has, which the guest taking interrupts again tells.
+bool pit_tick_returning(const struct cpu *cpu);
+void pit_tick_returned(void);
 
 #endif
