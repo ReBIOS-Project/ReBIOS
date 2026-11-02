@@ -38,5 +38,11 @@ jobs:
       - name: Build ReBIOS and its USB stick image (GNU, default)
         run: make usb -j$(nproc) CFLAGS='-g -O2 -pipe -Werror' && make clean
 
+      - name: Build ReBIOS and its USB stick image (GNU, gold)
+        run: make usb -j$(nproc) LDFLAGS=-fuse-ld=gold CFLAGS='-g -O2 -pipe -Werror' && make clean
+
       - name: Build ReBIOS and its USB stick image (LLVM)
         run: make usb -j$(nproc) TOOLCHAIN=llvm CFLAGS='-g -O2 -pipe -Werror' && make clean
+
+      - name: Build ReBIOS and its USB stick image (LLVM, gold)
+        run: make usb -j$(nproc) TOOLCHAIN=llvm LDFLAGS=-fuse-ld=gold CFLAGS='-g -O2 -pipe -Werror' && make clean
