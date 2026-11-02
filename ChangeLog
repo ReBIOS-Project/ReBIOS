@@ -1,3 +1,44 @@
+2026-11-03  Mintsuki  <mintsuki@protonmail.com>
+
+    *** Release 0.5.2 ***
+
+    Noteworthy changes compared to the previous release, 0.5.1:
+
+    New features:
+        - All of ReBIOS, SeaBIOS included, now builds with Clang, LLD, and
+          LLVM's tools with `TOOLCHAIN=llvm`, and with gold: a `-fuse-ld=`
+          option in `LDFLAGS` now picks SeaBIOS's linker too.
+        - The emulated VGA's video BIOS is now a small 8086 program in a 13 KiB
+          ROM, down from 32 KiB, with the rest in the hypervisor instead of in
+          16-bit C. The usual text calls run in the ROM, and in true real mode
+          everything else takes a single VM exit, so both are much faster.
+          Under V86, some calls, such as AX=4F01h, now take more VM exits than
+          before.
+
+    Bug fixes:
+        - Give Windows x64, which runs a video BIOS in an x86 emulator, the
+          right VBE modes: the old video BIOS listed them twice there, and with
+          Clang not at all, which kept an installed Windows 7 at 16 colours.
+        - Put the emulated VGA's linear framebuffer in the memory of the bridge
+          above the VGA's card: an installed Windows 7 stayed at 16 colours on
+          a card behind a bridge, as AMD's integrated graphics are.
+        - Keep Windows Vista from crashing at boot (STOP 0x7E) when a driver
+          gives a forwarded ACPI method an empty string, which ReBIOS's ACPI
+          tables stored in their mailbox.
+        - Date the BIOS 12/31/99, so that Windows 98 SE's Setup installs ACPI
+          by itself: with an earlier date it did so only with `/p j`, and else
+          found no PCI bus.
+        - Add INT 10h AH=1Ch, which the video BIOS's functionality table
+          already claimed.
+
+    Miscellaneous:
+        - The `SEABIOS_OBJDUMP` and `VGABIOS_*` make variables are gone, as
+          nothing uses them any more.
+        - `make clean` no longer needs a compiler for SeaBIOS.
+        - Update SeaBIOS for building with Clang, LLD, and gold, and for the
+          BIOS date, with a `CONFIG_BIOS_DATE` option. CI checks the gold
+          builds too.
+
 2026-11-02  Mintsuki  <mintsuki@protonmail.com>
 
     *** Release 0.5.1 ***
