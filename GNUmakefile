@@ -73,22 +73,25 @@ ifeq ($(TOOLCHAIN),llvm)
     CC := clang
 endif
 
-# User controllable toolchain prefix for SeaBIOS, which only builds with GCC
-# and GNU binutils, so the "llvm" toolchain falls back to the host's.
-ifeq ($(TOOLCHAIN),llvm)
-    SEABIOS_TOOLCHAIN_PREFIX :=
-else
-    SEABIOS_TOOLCHAIN_PREFIX := $(TOOLCHAIN_PREFIX)
-endif
+# User controllable toolchain prefix for SeaBIOS.
+SEABIOS_TOOLCHAIN_PREFIX := $(TOOLCHAIN_PREFIX)
 
 # User controllable commands for building SeaBIOS.
 SEABIOS_CC := $(SEABIOS_TOOLCHAIN_PREFIX)gcc
 SEABIOS_LD := $(SEABIOS_TOOLCHAIN_PREFIX)ld
+ifeq ($(TOOLCHAIN),llvm)
+    SEABIOS_CC := clang -target x86_64-unknown-none-elf
+    SEABIOS_LD := ld.lld
+endif
 SEABIOS_OBJCOPY := $(SEABIOS_TOOLCHAIN_PREFIX)objcopy
 SEABIOS_STRIP := $(SEABIOS_TOOLCHAIN_PREFIX)strip
 
-# User controllable host C compiler, which builds SeaBIOS's tools.
+# User controllable host C compiler, which builds SeaBIOS's tools. It is given
+# the linker when compiling too, which Clang would warn of.
 HOST_CC := cc
+ifeq ($(TOOLCHAIN),llvm)
+    HOST_CC := clang -fuse-ld=lld -Qunused-arguments
+endif
 
 # User controllable C flags.
 CFLAGS := -g -O2 -pipe
@@ -525,9 +528,15 @@ endef
 
 # SeaBIOS build targets. SeaBIOS reads its version only to lay out its ROM, so
 # have it do that again when ours changes, kept in a record as the flags are.
+# It does not track its tools, so have it start over when they change.
+override SEABIOS_TOOLS := $(SEABIOS_CC) $(SEABIOS_LD) $(SEABIOS_OBJCOPY) $(SEABIOS_STRIP)
 .PHONY: seabios
 seabios: seabios/.config
 	@mkdir -p obj
+	@if ! printf '%s\n' '$(SEABIOS_TOOLS)' | cmp -s - obj/SEABIOS_TOOLS 2>/dev/null; then \
+		rm -rf seabios/out; \
+		printf '%s\n' '$(SEABIOS_TOOLS)' > obj/SEABIOS_TOOLS; \
+	fi
 	@if ! printf '%s\n' '$(SEABIOS_EXTRAVERSION)' | cmp -s - obj/SEABIOS_EXTRAVERSION 2>/dev/null; then \
 		rm -f seabios/out/romlayout16.lds; \
 		printf '%s\n' '$(SEABIOS_EXTRAVERSION)' > obj/SEABIOS_EXTRAVERSION; \
