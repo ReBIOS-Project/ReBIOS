@@ -73,15 +73,24 @@ ifeq ($(TOOLCHAIN),llvm)
     CC := clang
 endif
 
+# The linker that LDFLAGS picks, if any, which links SeaBIOS too.
+override FUSE_LD := $(lastword $(filter -fuse-ld=%,$(CFLAGS) $(LDFLAGS)))
+
 # User controllable toolchain prefix for SeaBIOS.
 SEABIOS_TOOLCHAIN_PREFIX := $(TOOLCHAIN_PREFIX)
 
-# User controllable commands for building SeaBIOS.
+# User controllable commands for building SeaBIOS. -fuse-ld names a linker the
+# way a compiler driver finds it: a path, or the suffix of "ld".
 SEABIOS_CC := $(SEABIOS_TOOLCHAIN_PREFIX)gcc
-SEABIOS_LD := $(SEABIOS_TOOLCHAIN_PREFIX)ld
 ifeq ($(TOOLCHAIN),llvm)
     SEABIOS_CC := clang -target x86_64-unknown-none-elf
-    SEABIOS_LD := ld.lld
+endif
+ifneq ($(findstring /,$(FUSE_LD)),)
+    SEABIOS_LD := $(patsubst -fuse-ld=%,%,$(FUSE_LD))
+else ifeq ($(TOOLCHAIN),llvm)
+    SEABIOS_LD := ld.$(if $(FUSE_LD),$(patsubst -fuse-ld=%,%,$(FUSE_LD)),lld)
+else
+    SEABIOS_LD := $(SEABIOS_TOOLCHAIN_PREFIX)ld$(patsubst -fuse-ld=%,.%,$(FUSE_LD))
 endif
 SEABIOS_OBJCOPY := $(SEABIOS_TOOLCHAIN_PREFIX)objcopy
 SEABIOS_STRIP := $(SEABIOS_TOOLCHAIN_PREFIX)strip
@@ -90,7 +99,7 @@ SEABIOS_STRIP := $(SEABIOS_TOOLCHAIN_PREFIX)strip
 # the linker when compiling too, which Clang would warn of.
 HOST_CC := cc
 ifeq ($(TOOLCHAIN),llvm)
-    HOST_CC := clang -fuse-ld=lld -Qunused-arguments
+    HOST_CC := clang $(or $(FUSE_LD),-fuse-ld=lld) -Qunused-arguments
 endif
 
 # User controllable C flags.
