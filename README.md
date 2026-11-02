@@ -311,9 +311,9 @@ it adds back of the legacy PC:
 
 ## Building
 
-Building requires GCC, GNU binutils, `python3`, and `git`, used to fetch the
-dependencies (see `get-deps`). `curl` is used to download the EDK2 OVMF
-firmware images for `make run`.
+Building requires `python3`, `git`, used to fetch the dependencies (see
+`get-deps`), and either GCC and GNU binutils or Clang, LLD, and LLVM's tools.
+`curl` is used to download the EDK2 OVMF firmware images for `make run`.
 
 ```sh
 ./get-deps
@@ -331,15 +331,23 @@ the dependencies, and do not build.
 Assembly files with the `*.S` extension are built using the same toolchain as
 the C sources. Only `*.asm` files, of which ReBIOS ships none, require `nasm`.
 
-The `TOOLCHAIN_PREFIX` make variable can be used to set the toolchain. For
-example:
+The `TOOLCHAIN` and `TOOLCHAIN_PREFIX` make variables can be used to set the
+toolchain. `TOOLCHAIN` can be set to `llvm` to use Clang, LLD, and LLVM's
+tools. For example:
+
+```sh
+make TOOLCHAIN=llvm
+```
+
+or:
 
 ```sh
 make TOOLCHAIN_PREFIX=x86_64-elf-
 ```
 
-The program is linked through the compiler driver, using its default linker. A
-different linker can be picked by adding a `-fuse-ld=` option to `LDFLAGS`.
+The program is linked through the compiler driver, using its default linker
+for GCC and LLD for Clang. A different linker, such as gold, can be picked by
+adding a `-fuse-ld=` option to `LDFLAGS`, which goes for SeaBIOS too.
 
 Link-time optimisation can be enabled by adding `-flto` to `CFLAGS`:
 
@@ -347,7 +355,7 @@ Link-time optimisation can be enabled by adding `-flto` to `CFLAGS`:
 make CFLAGS='-g -O2 -pipe -flto'
 ```
 
-SeaBIOS is built with the GNU tools named by `SEABIOS_TOOLCHAIN_PREFIX`, which
+SeaBIOS is built with the tools named by `SEABIOS_TOOLCHAIN_PREFIX`, which
 follows `TOOLCHAIN_PREFIX`, or by `SEABIOS_CC`, `SEABIOS_LD`,
 `SEABIOS_OBJCOPY`, and `SEABIOS_STRIP` individually. `HOST_CC` builds its
 configuration tools.
