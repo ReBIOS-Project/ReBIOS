@@ -456,7 +456,7 @@ run: all edk2-ovmf-bins
 # Remove object files and the final executable.
 .PHONY: clean
 clean:
-	if test -f seabios/.config; then $(call SEABIOS_CALL,clean); fi
+	rm -rf seabios/out
 	rm -rf bin obj
 
 # Remove everything built and generated including downloaded dependencies.
