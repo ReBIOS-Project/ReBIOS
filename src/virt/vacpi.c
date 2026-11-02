@@ -1335,10 +1335,29 @@ static void emit_puta(struct aml *a) {
         aml_op(a, AML_STORE);
         aml_op(a, AML_SIZE_OF);
         aml_arg(a, 1);
+        aml_local(a, 1);
+        // A driver's empty string has no data, not even its terminator:
+        // Windows Vista's interpreter counts it as one less than none, and
+        // faults on storing it to a field.
+        aml_begin(a, AML_IF);
+        aml_op(a, AML_LEQUAL);
+        aml_local(a, 1);
+        aml_int(a, UINT32_MAX);
+        aml_op(a, AML_STORE);
+        aml_int(a, 0);
+        aml_local(a, 1);
+        aml_end(a);
+        aml_op(a, AML_STORE);
+        aml_local(a, 1);
         aml_name(a, length);
+        aml_begin(a, AML_IF);
+        aml_op(a, AML_LGREATER);
+        aml_local(a, 1);
+        aml_int(a, 0);
         aml_op(a, AML_STORE);
         aml_arg(a, 1);
         aml_name(a, data);
+        aml_end(a);
         aml_end(a);
         if_local_equals(a, 0, TYPE_PACKAGE);
         aml_op(a, AML_STORE);
