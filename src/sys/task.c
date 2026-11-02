@@ -36,13 +36,8 @@ void task_main(struct task *t) {
     }
 }
 
-void task_init(struct task *t, void (*fn)(void *arg), void *arg) {
-    uint8_t *area = page_alloc_aligned(
-        CPU_AREA_SIZE / PAGE_SIZE, CPU_AREA_SIZE
-    );
-    t->area = (struct cpu **)area;
-    t->fn = fn;
-    t->arg = arg;
+void task_restart(struct task *t) {
+    uint8_t *area = (uint8_t *)t->area;
     t->wake = 0;
     t->done = false;
     // What task_swap() takes off the stack: the callee-saved registers, %rbx
@@ -56,6 +51,13 @@ void task_init(struct task *t, void (*fn)(void *arg), void *arg) {
         *--top = 0;
     }
     t->rsp = (uintptr_t)top;
+}
+
+void task_init(struct task *t, void (*fn)(void *arg), void *arg) {
+    t->area = page_alloc_aligned(CPU_AREA_SIZE / PAGE_SIZE, CPU_AREA_SIZE);
+    t->fn = fn;
+    t->arg = arg;
+    task_restart(t);
 }
 
 bool task_run(struct task *t) {

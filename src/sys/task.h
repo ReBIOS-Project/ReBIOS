@@ -38,6 +38,8 @@ struct task {
 };
 
 void task_init(struct task *t, void (*fn)(void *arg), void *arg);
+// Has the task start over, whatever it was doing.
+void task_restart(struct task *t);
 // Runs the task on this CPU until it yields, unless it sleeps: false once its
 // function returned.
 bool task_run(struct task *t);
