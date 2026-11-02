@@ -19,6 +19,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <virt/pci_plan.h>
+#include <core.h>
+#include <handoff.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
 #include <hw/pci_host.h>
@@ -383,6 +385,28 @@ static uintptr_t high_base(
     return base;
 }
 
+// The container of the root bus or bridge the display's VGA device is on, or
+// else of segment 0's bus 0.
+static size_t vga_container(
+    const struct pci_topology *t, const uint32_t *parents
+) {
+    const struct handoff_pci_address *vga = &core_handoff->video.vga_device;
+    for (size_t i = 0; i < t->function_count; i++) {
+        const struct pci_addr addr = t->functions[i].addr;
+        if (addr.segment == vga->segment && addr.bus == vga->bus
+         && addr.device == vga->devfn >> 3 && addr.function == (vga->devfn & 7)
+         && parents[i] != NO_CONTAINER) {
+            return parents[i];
+        }
+    }
+    for (size_t r = 0; r < t->root_bus_count; r++) {
+        if (t->root_buses[r].segment == 0 && t->root_buses[r].bus == 0) {
+            return t->function_count + r;
+        }
+    }
+    return NO_CONTAINER;
+}
+
 const struct pci_plan *pci_plan_make(
     const struct pci_plan_range *obstacles, size_t count, size_t lfb_size,
     uint64_t high_floor
@@ -477,17 +501,18 @@ const struct pci_plan *pci_plan_make(
             );
         }
     }
-    // In a root bus's window: an installed Windows 7 keeps to 16 colours with
-    // the linear framebuffer in reserved memory.
-    for (size_t r = 0; r < roots && lfb_size != 0; r++) {
-        if (t->root_buses[r].segment == 0 && t->root_buses[r].bus == 0) {
-            element_add(
-                &containers[n + r],
-                (struct element){
-                    0, ELEMENT_LFB, 0, SIDE_MEMORY, lfb_size, 2 * ONE_MIB, 0
-                }
-            );
-        }
+    // In the memory of what the VGA's card is on: an installed Windows 7 keeps
+    // to 16 colours with the linear framebuffer in reserved memory, and on a
+    // root bus's when the card is behind a bridge.
+    size_t lfb_container = lfb_size != 0 ? vga_container(t, parents)
+        : NO_CONTAINER;
+    if (lfb_container != NO_CONTAINER) {
+        element_add(
+            &containers[lfb_container],
+            (struct element){
+                0, ELEMENT_LFB, 0, SIDE_MEMORY, lfb_size, 2 * ONE_MIB, 0
+            }
+        );
     }
 
     // The deepest bridges first, so that each window holds its bridges'.
