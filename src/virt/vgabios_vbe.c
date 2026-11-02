@@ -653,6 +653,17 @@ static void vbe_state(struct vgabios_regs *r) {
     r->ax = STATUS_SUCCESS;
 }
 
+void vbe_vga_state(struct vgabios_regs *r) {
+    struct vgabios_regs call = *r;
+    call.dl = r->al;
+    call.cx = r->cx & 7;
+    vbe_state(&call);
+    if (call.ax == STATUS_SUCCESS) {
+        r->bx = call.bx;
+        r->al = 0x1c;
+    }
+}
+
 static bool vbe_mode_on(void) {
     return (dispi_read(DISPI_ENABLE) & DISPI_ENABLED) != 0;
 }

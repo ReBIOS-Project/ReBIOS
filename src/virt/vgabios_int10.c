@@ -1430,6 +1430,10 @@ void vgabios_int10(struct vgabios_regs *r) {
             }
             break;
         }
+        case 0x1c: {
+            vbe_vga_state(r);
+            break;
+        }
         case 0x4f: {
             vbe_int10(r);
             break;

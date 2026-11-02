@@ -160,6 +160,8 @@ void vgabios_load_palette_256(void);
 // The VBE functions, INT 10h AH=4Fh, and the window function they give a far
 // pointer to, which far calls reach with the registers of AX=4F05h.
 void vbe_int10(struct vgabios_regs *r);
+// INT 10h AH=1Ch, the VGA's own form of VBE's state functions.
+void vbe_vga_state(struct vgabios_regs *r);
 // Turns the Bochs display interface off, for a VGA mode.
 void vbe_disable(void);
 
