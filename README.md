@@ -349,8 +349,8 @@ make CFLAGS='-g -O2 -pipe -flto'
 
 SeaBIOS is built with the GNU tools named by `SEABIOS_TOOLCHAIN_PREFIX`, which
 follows `TOOLCHAIN_PREFIX`, or by `SEABIOS_CC`, `SEABIOS_LD`,
-`SEABIOS_OBJCOPY`, `SEABIOS_OBJDUMP`, and `SEABIOS_STRIP` individually.
-`HOST_CC` builds its configuration tools.
+`SEABIOS_OBJCOPY`, and `SEABIOS_STRIP` individually. `HOST_CC` builds its
+configuration tools.
 
 The Video BIOS is built likewise, with the GNU tools named by
 `VGABIOS_TOOLCHAIN_PREFIX`, or by `VGABIOS_CC` and `VGABIOS_OBJCOPY`, and with
