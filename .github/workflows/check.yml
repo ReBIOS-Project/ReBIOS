@@ -36,7 +36,7 @@ jobs:
         run: ./get-deps
 
       - name: Build ReBIOS and its USB stick image (GNU, default)
-        run: make usb -j$(nproc) CFLAGS='-g -O2 -pipe -Werror' VGABIOS_CFLAGS='-g -O2 -pipe -Werror' && make clean
+        run: make usb -j$(nproc) CFLAGS='-g -O2 -pipe -Werror' && make clean
 
       - name: Build ReBIOS and its USB stick image (LLVM)
-        run: make usb -j$(nproc) TOOLCHAIN=llvm CFLAGS='-g -O2 -pipe -Werror' VGABIOS_CFLAGS='-g -O2 -pipe -Werror' && make clean
+        run: make usb -j$(nproc) TOOLCHAIN=llvm CFLAGS='-g -O2 -pipe -Werror' && make clean

@@ -35,8 +35,6 @@
 #include <lib/printf.h>
 #include <memory.h>
 #include <sys/mm.h>
-#include <vgabios_info.h>
-#include <virt/edid.h>
 #include <virt/guest_acpi.h>
 #include <virt/guest_mem.h>
 #include <virt/hypercall.h>
@@ -45,6 +43,7 @@
 #include <virt/pci_plan.h>
 #include <virt/vcpu.h>
 #include <virt/vga.h>
+#include <virt/vgabios.h>
 #include <virt/virt.h>
 
 extern const uint8_t seabios_csm[];
@@ -270,46 +269,6 @@ static void update_bbs(struct vcpu *v) {
     csm_call(v, CSM_COMPAT16_UPDATE_BBS, BOOT_TABLE);
 }
 
-extern const uint8_t vgabios_image[];
-extern const uint8_t vgabios_image_end[];
-
-// What the emulated VGA's video BIOS learns of the display it drives
-// (vgabios/src/vgabios_info.h).
-static void emulated_vbios_info(uint8_t *image, size_t size) {
-    const struct handoff_video *video = &core_handoff->video;
-    uint16_t at = (uint16_t)(image[VGABIOS_INFO_POINTER]
-        | image[VGABIOS_INFO_POINTER + 1] << 8);
-    if (at + sizeof(struct vgabios_info) > size) {
-        return;
-    }
-    struct vgabios_info info = { 0 };
-    if (video->vram_size != 0) {
-        info.flags = VGABIOS_INFO_DISPI;
-    }
-    uint32_t width;
-    uint32_t height;
-    vga_screen_size(&width, &height);
-    info.max_width = (uint16_t)width;
-    info.max_height = (uint16_t)height;
-    info.lfb = (uint32_t)vga_lfb();
-    // A turned panel's own EDID describes it unturned.
-    if (video->framebuffer.rotation == HANDOFF_ROTATE_0) {
-        info.edid_size = (uint16_t)video->edid_size;
-        memcpy(info.edid, video->edid, video->edid_size);
-    }
-    // Without one, guests would not know the display's resolution.
-    if (info.edid_size == 0 && edid_synthesize(info.edid, width, height)) {
-        info.edid_size = EDID_BLOCK_SIZE;
-        printf(
-            "%s, so the emulated VGA's display reports %ux%u at 60 Hz\n",
-            video->edid_size != 0 ? "The panel's EDID describes it unturned"
-                : "No EDID from the firmware",
-            width, height
-        );
-    }
-    memcpy(image + at, &info, sizeof(struct vgabios_info));
-}
-
 // The emulated VGA's video BIOS as an option ROM: padded to the size its
 // header gives, with the checksum that makes its bytes add up to 0. It is the
 // host's VGA device's, where there is one.
@@ -319,12 +278,9 @@ static const struct handoff_pci_rom *emulated_vbios(void) {
         return &rom;
     }
     const struct handoff *h = core_handoff;
-    size_t length = (uint32_t)(vgabios_image_end - vgabios_image);
-    size_t size = vgabios_image[2] * (uint32_t)512;
+    size_t size = VGABIOS_ROM_SIZE;
     uint8_t *image = page_alloc((size + PAGE_SIZE - 1) / PAGE_SIZE);
-    memset(image, 0, size);
-    memcpy(image, vgabios_image, length < size ? length : size);
-    emulated_vbios_info(image, size);
+    vgabios_rom_fill(image);
     uint8_t sum = 0;
     for (size_t i = 0; i + 1 < size; i++) {
         sum = (uint8_t)(sum + image[i]);

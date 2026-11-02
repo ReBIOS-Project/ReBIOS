@@ -10,11 +10,8 @@
 /uACPI
 /tendril
 /seabios
-/vgabios/freestanding-lgrt
 /edk2-ovmf-bins
 /edk2-ovmf-bins.tar.gz
 /bin
 /obj
-/vgabios/bin
-/vgabios/obj
 /rebios-*

@@ -87,24 +87,6 @@ SEABIOS_LD := $(SEABIOS_TOOLCHAIN_PREFIX)ld
 SEABIOS_OBJCOPY := $(SEABIOS_TOOLCHAIN_PREFIX)objcopy
 SEABIOS_STRIP := $(SEABIOS_TOOLCHAIN_PREFIX)strip
 
-# User controllable toolchain prefix for the video BIOS, which only builds with
-# GCC and GNU binutils too, so the "llvm" toolchain falls back to the host's.
-ifeq ($(TOOLCHAIN),llvm)
-    VGABIOS_TOOLCHAIN_PREFIX :=
-else
-    VGABIOS_TOOLCHAIN_PREFIX := $(TOOLCHAIN_PREFIX)
-endif
-
-# User controllable commands for building the video BIOS.
-VGABIOS_CC := $(VGABIOS_TOOLCHAIN_PREFIX)gcc
-VGABIOS_OBJCOPY := $(VGABIOS_TOOLCHAIN_PREFIX)objcopy
-
-# User controllable flags for the video BIOS, 16-bit code that is not built
-# with CFLAGS, CPPFLAGS, and LDFLAGS.
-VGABIOS_CFLAGS := -g -O2 -pipe
-VGABIOS_CPPFLAGS :=
-VGABIOS_LDFLAGS :=
-
 # User controllable host C compiler, which builds SeaBIOS's tools.
 HOST_CC := cc
 
@@ -351,11 +333,10 @@ override OBJ := $(addprefix obj/,$(CFILES:.c=.c.o) $(ASFILES:.S=.S.o) $(NASMFILE
 override HEADER_DEPS := $(addprefix obj/,$(CFILES:.c=.c.d) $(ASFILES:.S=.S.d) $(NASMFILES:.asm=.asm.d))
 
 # Default target. This must come first, before header dependencies.
-# SeaBIOS and the video BIOS go first, as the core carries them.
+# SeaBIOS goes first, as the core carries it.
 .PHONY: all
 all:
 	$(MAKE) seabios
-	$(MAKE) vgabios
 	$(MAKE) bin/$(OUTPUT).efi
 
 # Include header dependencies.
@@ -410,15 +391,8 @@ obj/tendril/%: override CPPFLAGS += \
 obj/src/virt/usb.c.o obj/src/virt/usb_disk.c.o obj/src/virt/usb_legacy.c.o: override CPPFLAGS += \
     -I tendril/include
 
-# Only the CSM boot code sees the video BIOS's interface to the hypervisor.
-obj/src/csm/csm_boot.c.o: override CPPFLAGS += \
-    -I vgabios/src
-
 # The core carries SeaBIOS.
 obj/src/csm/seabios_blob.S.o: seabios/out/Csm16.bin
-
-# And the video BIOS of the VGA it emulates.
-obj/src/virt/vgabios_blob.S.o: vgabios/bin/vgabios.bin
 
 # Compilation rules for *.c files.
 obj/%.c.o: %.c GNUmakefile obj/CC obj/CFLAGS obj/CPPFLAGS
@@ -483,13 +457,12 @@ run: all edk2-ovmf-bins
 .PHONY: clean
 clean:
 	if test -f seabios/.config; then $(call SEABIOS_CALL,clean); fi
-	$(call VGABIOS_CALL,clean)
 	rm -rf bin obj
 
 # Remove everything built and generated including downloaded dependencies.
 .PHONY: distclean
 distclean: clean
-	rm -rf .deps-obtained .cache compile_commands.json freestanding-c-hdrs freestanding-lgrt picoefi nanoprintf flanterm uACPI tendril seabios vgabios/freestanding-lgrt edk2-ovmf-bins edk2-ovmf-bins.tar.gz
+	rm -rf .deps-obtained .cache compile_commands.json freestanding-c-hdrs freestanding-lgrt picoefi nanoprintf flanterm uACPI tendril seabios edk2-ovmf-bins edk2-ovmf-bins.tar.gz
 
 # Release tarballs are named after the commit's tag, without its "v", or else
 # after its abbreviated hash, and their files are dated as the commit is.
@@ -509,7 +482,7 @@ dist:
 	cd "$(DIST_OUTPUT)" && ./get-deps
 	git -C "$(DIST_OUTPUT)/seabios" describe --always --tags --long >"$(DIST_OUTPUT)/seabios/.version"
 	cd "$(DIST_OUTPUT)" && rm -rf .gitignore .github
-	cd "$(DIST_OUTPUT)" && for d in freestanding-c-hdrs freestanding-lgrt picoefi nanoprintf flanterm uACPI tendril seabios vgabios/freestanding-lgrt; do rm -rf "$$d/.git" "$$d/.github" "$$d/.gitignore"; done
+	cd "$(DIST_OUTPUT)" && for d in freestanding-c-hdrs freestanding-lgrt picoefi nanoprintf flanterm uACPI tendril seabios; do rm -rf "$$d/.git" "$$d/.github" "$$d/.gitignore"; done
 	rm -rf "$(DIST_OUTPUT)/nanoprintf/tests" "$(DIST_OUTPUT)/uACPI/tests"
 	find "$(DIST_OUTPUT)" -type f -perm -100 -exec chmod 755 '{}' +
 	find "$(DIST_OUTPUT)" -type f ! -perm -100 -exec chmod 644 '{}' +
@@ -549,22 +522,6 @@ override define SEABIOS_CALL
 		STRIP="$(SEABIOS_STRIP)" \
 		EXTRAVERSION="$(SEABIOS_EXTRAVERSION)"
 endef
-
-# The emulated VGA's video BIOS, which its own makefile builds. Our command
-# line's flags would reach it too, so it is handed its own.
-override define VGABIOS_CALL
-	$(MAKE) -C vgabios $(1) \
-		CC="$(VGABIOS_CC)" \
-		OBJCOPY="$(VGABIOS_OBJCOPY)" \
-		CFLAGS="$(VGABIOS_CFLAGS)" \
-		CPPFLAGS="$(VGABIOS_CPPFLAGS)" \
-		LDFLAGS="$(VGABIOS_LDFLAGS)"
-endef
-
-# Video BIOS build targets.
-.PHONY: vgabios
-vgabios:
-	$(call VGABIOS_CALL,)
 
 # SeaBIOS build targets. SeaBIOS reads its version only to lay out its ROM, so
 # have it do that again when ours changes, kept in a record as the flags are.

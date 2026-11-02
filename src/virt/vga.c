@@ -33,6 +33,7 @@
 #include <virt/mmio.h>
 #include <virt/nvmx.h>
 #include <virt/vcpu.h>
+#include <virt/vgabios.h>
 
 #define WINDOW_BASE 0xa0000
 #define WINDOW_SIZE 0x20000
@@ -140,7 +141,7 @@
 // The Bochs display interface's registers, at an index port and a data port,
 // with QEMU's include/hw/display/bochs-vbe.h values and semantics.
 #define DISPI_PORT 0x1ce
-#define DISPI_PORT_COUNT 3
+#define DISPI_PORT_COUNT 2
 #define DISPI_ID 0x0
 #define DISPI_XRES 0x1
 #define DISPI_YRES 0x2
@@ -947,6 +948,19 @@ static void dispi_write(uint16_t index, uint16_t value) {
         }
     }
     vga.dirty = true;
+}
+
+uint16_t vga_dispi_read(uint16_t index) {
+    spinlock_acquire(&vga.lock);
+    uint16_t value = dispi_read(index);
+    spinlock_release(&vga.lock);
+    return value;
+}
+
+void vga_dispi_write(uint16_t index, uint16_t value) {
+    spinlock_acquire(&vga.lock);
+    dispi_write(index, value);
+    spinlock_release(&vga.lock);
 }
 
 static void dispi_ports(
@@ -2049,6 +2063,8 @@ bool vga_init(void) {
     vga.pel_mask = 0xff;
     vga.misc = MISC_COLOR;
 
+    // The video BIOS has ports among the VGA's, which its come before.
+    vgabios_init();
     struct io_handler ports = { PORT_BASE, PORT_COUNT, ports_access, NULL };
     io_register(&ports);
     mmio_register(WINDOW_BASE, WINDOW_SIZE, &window_ops, NULL);

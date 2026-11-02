@@ -352,12 +352,6 @@ follows `TOOLCHAIN_PREFIX`, or by `SEABIOS_CC`, `SEABIOS_LD`,
 `SEABIOS_OBJCOPY`, and `SEABIOS_STRIP` individually. `HOST_CC` builds its
 configuration tools.
 
-The Video BIOS is built likewise, with the GNU tools named by
-`VGABIOS_TOOLCHAIN_PREFIX`, or by `VGABIOS_CC` and `VGABIOS_OBJCOPY`, and with
-the flags `VGABIOS_CFLAGS` (by default `-g -O2 -pipe`), `VGABIOS_CPPFLAGS`, and
-`VGABIOS_LDFLAGS` rather than `CFLAGS`, `CPPFLAGS`, and `LDFLAGS`. It is always
-built with `-Os`, as it has to fit in 32 KiB.
-
 ## Contributing
 
 Contributions are welcome! Whether it's reporting bugs, suggesting features,

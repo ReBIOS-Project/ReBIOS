@@ -29,6 +29,10 @@
 bool vga_init(void);
 bool vga_emulated(void);
 
+// The registers of the Bochs display interface, for the video BIOS.
+uint16_t vga_dispi_read(uint16_t index);
+void vga_dispi_write(uint16_t index, uint16_t value);
+
 // The size of the linear framebuffer vga_init() is to give the guest, 0 if it
 // is to give none.
 size_t vga_lfb_size(void);
