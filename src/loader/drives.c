@@ -382,7 +382,6 @@ static bool seabios_name(
     EFI_UINTN controller_bus;
     bool unlocated
         = !pci_location(path, first_pci_end, &root_io, &segment, &root_bus)
-        || segment != 0
         || !pci_location(
             path, offset, &controller_io, &controller_segment, &controller_bus
         );
@@ -394,8 +393,12 @@ static bool seabios_name(
         && node->SubType == EFI_MSG_USB_DP;
     out[0] = 0;
     append(out, size, "/pci@i0cf8");
-    if (root_bus != 0) {
-        append(out, size, ",%x", (unsigned int)root_bus);
+    // The core has the legacy BIOS find another root bus's devices behind the
+    // port it gives the root bus, and puts that port in the name instead.
+    if (segment != 0 || root_bus != 0) {
+        append(
+            out, size, ",%x:%x", (unsigned int)segment, (unsigned int)root_bus
+        );
     }
     for (size_t i = 0; i < depth; i++) {
         const char *kind = i + 1 < depth ? "pci-bridge" : usb ? "usb" : "*";

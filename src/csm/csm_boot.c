@@ -447,27 +447,131 @@ static void pci_interrupts(void) {
     }
 }
 
+#define PCI_DOMAIN "/pci@i0cf8"
+#define PCI_DOMAIN_LENGTH 10
+
+static bool hex_value(char c, unsigned int *digit) {
+    if (c >= '0' && c <= '9') {
+        *digit = (unsigned int)(c - '0');
+    } else if (c >= 'a' && c <= 'f') {
+        *digit = (unsigned int)(c - 'a' + 10);
+    } else {
+        return false;
+    }
+    return true;
+}
+
+// A hexadecimal number at *at, which moves past it.
+static bool hex_number(
+    const char *line, size_t length, size_t *at, uint32_t *n
+) {
+    unsigned int digit;
+    *n = 0;
+    size_t first = *at;
+    while (*at < length && *at - first < 8 && hex_value(line[*at], &digit)) {
+        *n = *n << 4 | digit;
+        (*at)++;
+    }
+    return *at != first;
+}
+
+// The legacy BIOS's name for the root bus whose numbers are at *at, which
+// moves past them: that of the guest's bus 0, or of the port in the bus's
+// place. Returns the name's length, or -1 where the guest has not the bus.
+static int root_name(
+    const char *line, size_t length, size_t *at, char *name, size_t size
+) {
+    uint32_t segment;
+    uint32_t bus;
+    if (!hex_number(line, length, at, &segment) || *at >= length
+     || line[*at] != ':') {
+        return -1;
+    }
+    (*at)++;
+    const struct pci_plan *plan = pci_plan();
+    if (!hex_number(line, length, at, &bus) || plan == NULL) {
+        return -1;
+    }
+    for (size_t r = 0; r < plan->root_count; r++) {
+        const struct pci_plan_root *root = &plan->roots[r];
+        if (root->segment != segment || root->bus != bus) {
+            continue;
+        }
+        if (r == plan->primary) {
+            return snprintf(name, size, PCI_DOMAIN);
+        }
+        for (size_t k = 0; k < plan->port_count; k++) {
+            const struct pci_plan_port *port = &plan->ports[k];
+            if (port->root == r && port->function == 0) {
+                return snprintf(
+                    name, size, PCI_DOMAIN "/pci-bridge@%x", port->device
+                );
+            }
+            if (port->root == r) {
+                return snprintf(
+                    name, size, PCI_DOMAIN "/pci-bridge@%x,%x", port->device,
+                    port->function
+                );
+            }
+        }
+    }
+    return -1;
+}
+
+// A line of the loader's boot order list as the guest has the PCI buses: the
+// loader puts the numbers of a root bus other than segment 0's bus 0 after
+// "/pci@i0cf8,". Returns the line's length, or 0 where it does not fit or the
+// guest has not the root bus.
+static size_t boot_order_line(
+    const char *line, size_t length, char *out, size_t size
+) {
+    char prefix[32];
+    int prefix_length = 0;
+    size_t at = PCI_DOMAIN_LENGTH + 1;
+    if (length > at && memcmp(line, PCI_DOMAIN ",", at) == 0) {
+        prefix_length = root_name(line, length, &at, prefix, sizeof(prefix));
+        if (prefix_length <= 0 || (size_t)prefix_length >= sizeof(prefix)) {
+            return 0;
+        }
+    } else {
+        at = 0;
+    }
+    size_t total = (size_t)prefix_length + (length - at);
+    if (total >= size) {
+        return 0;
+    }
+    memcpy(out, prefix, (size_t)prefix_length);
+    memcpy(out + prefix_length, line + at, length - at);
+    return total;
+}
+
 // The CSM16 copies the list while it initialises. A list too long for the
 // tables loses its last lines.
 static void boot_order(void) {
     const char *list = core_handoff->boot_order;
+    char *to = layout_low(BOOT_ORDER);
     size_t room = TABLES_END - BOOT_ORDER - 1;
-    size_t length = 0;
-    while (length < HANDOFF_MAX_BOOT_ORDER && list[length] != 0) {
-        length++;
+    size_t used = 0;
+    size_t at = 0;
+    while (at < HANDOFF_MAX_BOOT_ORDER && list[at] != 0) {
+        size_t end = at;
+        while (end < HANDOFF_MAX_BOOT_ORDER && list[end] != 0
+            && list[end] != '\n') {
+            end++;
+        }
+        size_t n = boot_order_line(
+            list + at, end - at, to + used, room - used
+        );
+        if (n != 0 && used + n + 1 <= room) {
+            used += n;
+            to[used++] = '\n';
+        }
+        at = end < HANDOFF_MAX_BOOT_ORDER && list[end] == '\n' ? end + 1 : end;
     }
-    if (length == 0) {
+    if (used == 0) {
         return;
     }
-    if (length > room) {
-        length = room;
-        while (length > 0 && list[length] != '\n') {
-            length--;
-        }
-    }
-    char *to = layout_low(BOOT_ORDER);
-    memcpy(to, list, length);
-    to[length] = 0;
+    to[used] = 0;
     csm.compat16->boot_order_pointer = BOOT_ORDER;
 }
 
