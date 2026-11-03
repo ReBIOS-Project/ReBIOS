@@ -662,15 +662,12 @@ static void amd_memory_init(struct vcpu *v) {
         v->amd_iorr[i] = 0;
     }
     v->amd_mmio_cfg_base = 0;
-    if (plan != NULL && plan->ecam != 0
-     && plan->ecam >= (uint64_t)plan->ecam_start << 20) {
+    if (plan != NULL && plan->ecam != 0) {
         uint64_t range = 0;
-        while (((uint32_t)1 << range) <= plan->ecam_end) {
+        while (((uint32_t)1 << range) <= plan->bus_end) {
             range++;
         }
-        v->amd_mmio_cfg_base
-            = (plan->ecam - ((uint64_t)plan->ecam_start << 20)) | range << 2
-            | MMIO_CFG_ENABLE;
+        v->amd_mmio_cfg_base = plan->ecam | range << 2 | MMIO_CFG_ENABLE;
     }
 }
 

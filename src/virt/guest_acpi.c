@@ -171,34 +171,19 @@ static void madt_hide_cpus(uint8_t *madt, size_t length) {
     }
 }
 
-// The guest's configuration space windows: segment 0's where the PCI plan put
-// it, and the others' where the host has them, if the guest's memory leaves
-// them clear. Returns the new length.
+// The guest's configuration space window, where the PCI plan put it, in the
+// place of the firmware's first. Returns the new length.
 static uint32_t mcfg_fix(uint8_t *mcfg, size_t length) {
     const struct pci_plan *plan = pci_plan();
     uint32_t out = sizeof(struct acpi_mcfg);
-    uint32_t entry = sizeof(struct acpi_mcfg_allocation);
-    for (size_t off = out; off <= length && length - off >= entry;
-         off += entry) {
+    if (plan != NULL && plan->ecam != 0
+     && length >= out + sizeof(struct acpi_mcfg_allocation)) {
         struct acpi_mcfg_allocation e;
-        memcpy(&e, mcfg + off, sizeof(struct acpi_mcfg_allocation));
-        if (e.segment == 0) {
-            if (plan == NULL || plan->ecam == 0) {
-                continue;
-            }
-            e.address = plan->ecam - ((uint64_t)plan->ecam_start << 20);
-            e.start_bus = plan->ecam_start;
-            e.end_bus = plan->ecam_end;
-        } else {
-            bool taken = e.start_bus > e.end_bus
-                || !layout_mmio_free(
-                    e.address + ((uint64_t)e.start_bus << 20),
-                    ((uint64_t)e.end_bus - e.start_bus + 1) << 20
-                );
-            if (taken) {
-                continue;
-            }
-        }
+        memcpy(&e, mcfg + out, sizeof(struct acpi_mcfg_allocation));
+        e.address = plan->ecam;
+        e.segment = 0;
+        e.start_bus = 0;
+        e.end_bus = plan->bus_end;
         memcpy(mcfg + out, &e, sizeof(struct acpi_mcfg_allocation));
         out += sizeof(struct acpi_mcfg_allocation);
     }

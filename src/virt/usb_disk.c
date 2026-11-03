@@ -27,6 +27,7 @@
 #include <memory.h>
 #include <virt/guest_mem.h>
 #include <virt/hypercall.h>
+#include <virt/pci_plan.h>
 #include <virt/usb.h>
 #include <virt/usb_controller.h>
 
@@ -179,8 +180,13 @@ static uint32_t disk_info(const struct usb_disk *d, uint32_t gpa) {
     if (tendril_msc_removable(lun)) {
         info.flags |= HYPERCALL_USB_DISK_REMOVABLE;
     }
-    info.bdf = (uint32_t)c->f->addr.bus << 8
-        | (uint32_t)c->f->addr.device << 3 | c->f->addr.function;
+    // As the guest numbers its buses: that of a controller it does not have is
+    // no device's.
+    int bus = pci_plan_guest_bus(c->f->addr.segment, c->f->addr.bus);
+    info.bdf = bus >= 0
+        ? (uint32_t)bus << 8 | (uint32_t)c->f->addr.device << 3
+            | c->f->addr.function
+        : UINT16_MAX;
     disk_path(lun, info.path, sizeof(info.path));
     snprintf(
         info.description, sizeof(info.description), "USB %s %s",

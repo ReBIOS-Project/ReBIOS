@@ -24,6 +24,7 @@
 #include <lib/log.h>
 #include <memory.h>
 #include <virt/irq.h>
+#include <virt/pci_plan.h>
 
 // The structures of the Microsoft PCI IRQ Routing Table Specification 1.0.
 
@@ -69,17 +70,17 @@ _Static_assert(
 );
 _Static_assert(sizeof(struct pir_slot) == 16, "$PIR slot entry layout");
 
-// Fills the slot entry of the device whose routes start at routes[*index], and
-// moves *index past them, as the routes of a device follow each other. Returns
-// whether any of its pins is on an ISA IRQ.
+// Fills the slot entry of the device whose routes start at routes[*index], on
+// the guest's bus, and moves *index past them, as the routes of a device
+// follow each other. Returns whether any of its pins is on an ISA IRQ.
 static bool slot_fill(
     const struct acpi_irq_pci_route *routes, size_t count, size_t *index,
-    struct pir_slot *slot
+    uint8_t bus, struct pir_slot *slot
 ) {
     const struct pci_addr first = routes[*index].addr;
     // Slot number 0, built in, as which devices sit in slots is not known.
     *slot = (struct pir_slot){
-        .bus = first.bus, .devfn = (uint8_t)(first.device << 3)
+        .bus = bus, .devfn = (uint8_t)(first.device << 3)
     };
     bool any = false;
     for (; *index < count; (*index)++) {
@@ -111,9 +112,11 @@ uint32_t pir_build(void *buf, size_t size) {
     size_t slots = 0;
     for (size_t i = 0; i < count; ) {
         struct pir_slot slot;
-        if (routes[i].addr.segment != 0) {
+        const struct pci_addr a = routes[i].addr;
+        int bus = pci_plan_guest_bus(a.segment, a.bus);
+        if (bus < 0) {
             i++;
-        } else if (slot_fill(routes, count, &i, &slot)) {
+        } else if (slot_fill(routes, count, &i, (uint8_t)bus, &slot)) {
             slots++;
         }
     }
@@ -137,9 +140,11 @@ uint32_t pir_build(void *buf, size_t size) {
     uint16_t exclusive = 0;
     for (size_t i = 0; i < count; ) {
         struct pir_slot slot;
-        if (routes[i].addr.segment != 0) {
+        const struct pci_addr a = routes[i].addr;
+        int bus = pci_plan_guest_bus(a.segment, a.bus);
+        if (bus < 0) {
             i++;
-        } else if (slot_fill(routes, count, &i, &slot)) {
+        } else if (slot_fill(routes, count, &i, (uint8_t)bus, &slot)) {
             for (size_t pin = 0; pin < PIR_PINS; pin++) {
                 exclusive |= slot.pins[pin].bitmap;
             }

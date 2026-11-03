@@ -692,7 +692,7 @@ bool layout_mmio_free(uintptr_t base, size_t size) {
     const struct pci_plan *plan = pci_plan();
     if (plan != NULL && plan->ecam != 0) {
         uintptr_t ecam_end = plan->ecam
-            + (((uint64_t)plan->ecam_end - plan->ecam_start + 1) << 20);
+            + (((uint64_t)plan->bus_end + 1) << 20);
         if (base < ecam_end && end > plan->ecam) {
             return false;
         }
@@ -952,8 +952,7 @@ bool layout_e820(struct e820_map *map) {
     const struct pci_plan *plan = pci_plan();
     if (plan != NULL && plan->ecam != 0) {
         ok &= e820_set(
-            map, plan->ecam,
-            ((uint64_t)plan->ecam_end - plan->ecam_start + 1) << 20,
+            map, plan->ecam, ((uint64_t)plan->bus_end + 1) << 20,
             E820_RESERVED
         );
     }

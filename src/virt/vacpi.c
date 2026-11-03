@@ -157,6 +157,14 @@ struct path {
     size_t count;
 };
 
+// A host bridge of the firmware's that the guest has as a device below its one
+// host bridge, at its port's address.
+struct merged {
+    uacpi_namespace_node *node;
+    char name[4];
+    uint32_t adr;
+};
+
 static struct {
     bool active;
     uintptr_t mailbox;
@@ -187,6 +195,13 @@ static struct {
     size_t hidden_count;
     uint32_t hidden_capacity;
     uint16_t links;
+    // The host bridge of the guest's bus 0, and the firmware's others: below
+    // it, or left out with what is below them where they have no port.
+    uacpi_namespace_node *primary;
+    struct merged *merged;
+    size_t merged_count;
+    uacpi_namespace_node **dropped;
+    size_t dropped_count;
 
     struct notification queue[QUEUE_SIZE];
     uint32_t queue_head;
@@ -225,6 +240,11 @@ static const char *const constant_methods[] = {
     "_PR0", "_PR1", "_PR2", "_PR3", "_PRE", "_AL0", "_AL1", "_AL2", "_AL3",
     "_AL4", "_AL5", "_AL6", "_AL7", "_AL8", "_AL9", "_PSL", "_TZD", "_EDL",
     "_CCA", NULL,
+};
+// What a host bridge has that the device the guest has in its place does not.
+static const char *const left_out_merged[] = {
+    "_HID", "_CID", "_UID", "_ADR", "_SEG", "_BBN", "_CRS", "_PRS", "_SRS",
+    "_DIS", "_CBA", "_OSC", NULL,
 };
 // Methods that return packages whose shape does not change, which their stubs,
 // as ACPI 1.0 cannot make packages of a size known only at run time, build to
@@ -277,8 +297,27 @@ static bool is_hidden(uacpi_namespace_node *node) {
     return false;
 }
 
+static const struct merged *merged_of(uacpi_namespace_node *node) {
+    for (size_t i = 0; i < vacpi.merged_count; i++) {
+        if (vacpi.merged[i].node == node) {
+            return &vacpi.merged[i];
+        }
+    }
+    return NULL;
+}
+
+static bool is_dropped(uacpi_namespace_node *node) {
+    for (size_t i = 0; i < vacpi.dropped_count; i++) {
+        if (vacpi.dropped[i] == node) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Where a node is in the guest's namespace: its hidden ancestors' children sit
-// in their parents'. False for hidden nodes themselves.
+// in their parents', and host bridges the guest has below its own are there.
+// False for hidden nodes themselves, and for what the guest does not have.
 static bool guest_path(uacpi_namespace_node *node, struct path *out) {
     if (is_hidden(node)) {
         return false;
@@ -286,15 +325,20 @@ static bool guest_path(uacpi_namespace_node *node, struct path *out) {
     char rev[MAX_PATH_DEPTH][4];
     size_t count = 0;
     uacpi_namespace_node *root = uacpi_namespace_root();
-    for (uacpi_namespace_node *n = node; n != NULL && n != root;
-         n = uacpi_namespace_node_parent(n)) {
-        if (is_hidden(n)) {
-            continue;
-        }
-        if (count == MAX_PATH_DEPTH) {
+    uacpi_namespace_node *n = node;
+    while (n != NULL && n != root) {
+        if (is_dropped(n)) {
             return false;
         }
-        memcpy(rev[count++], uacpi_namespace_node_name(n).text, 4);
+        const struct merged *m = merged_of(n);
+        if (!is_hidden(n)) {
+            if (count == MAX_PATH_DEPTH) {
+                return false;
+            }
+            uacpi_object_name name = uacpi_namespace_node_name(n);
+            memcpy(rev[count++], m != NULL ? m->name : name.text, 4);
+        }
+        n = m != NULL ? vacpi.primary : uacpi_namespace_node_parent(n);
     }
     for (size_t i = 0; i < count; i++) {
         memcpy(out->segs[i], rev[count - 1 - i], 4);
@@ -521,6 +565,27 @@ static bool shape_usable(uacpi_object *obj) {
 
 static bool crs_replaced(uacpi_namespace_node *device);
 
+// What the guest has in the place of an object of the firmware's, if anything
+// else: nothing for the identity of a host bridge below its own, and bus 0 of
+// segment 0 for its own. Returns whether it is something else.
+static bool emit_replaced(
+    struct aml *a, uacpi_namespace_node *node, const char name[4]
+) {
+    uacpi_namespace_node *parent = uacpi_namespace_node_parent(node);
+    if (merged_of(parent) != NULL && name_in(name, left_out_merged)) {
+        return true;
+    }
+    bool numbers = memcmp(name, "_SEG", 4) == 0
+        || memcmp(name, "_BBN", 4) == 0;
+    if (vacpi.primary == NULL || parent != vacpi.primary || !numbers) {
+        return false;
+    }
+    aml_op(a, AML_NAME);
+    emit_seg(a, name);
+    aml_int(a, 0);
+    return true;
+}
+
 static void emit_method(
     struct aml *a, uacpi_namespace_node *node, const char name[4],
     bool in_processor
@@ -529,6 +594,9 @@ static void emit_method(
      || (in_processor && name_in(name, left_out_processor))
      || (memcmp(name, "_CRS", 4) == 0
       && crs_replaced(uacpi_namespace_node_parent(node))) != 0) {
+        return;
+    }
+    if (emit_replaced(a, node, name)) {
         return;
     }
     uacpi_namespace_node_info *info;
@@ -605,6 +673,9 @@ static void emit_name(
     if (name_in(name, left_out_names)
      || (memcmp(name, "_CRS", 4) == 0
       && crs_replaced(uacpi_namespace_node_parent(node))) != 0) {
+        return;
+    }
+    if (emit_replaced(a, node, name)) {
         return;
     }
     uacpi_object *obj;
@@ -729,12 +800,21 @@ static const char *const motherboard_ids[] = { "PNP0C01", "PNP0C02", NULL };
 #define RES_QWORD_ADDRESS 0x8a
 #define RES_EXTENDED_ADDRESS 0x8b
 #define ADDRESS_MEMORY 0
+#define ADDRESS_IO 1
+#define ADDRESS_BUS 2
 // A producer's fixed window, readable and writable, uncached or cacheable.
 #define ADDRESS_FIXED_PRODUCER 0x0c
 #define MEMORY_RW 0x01
 #define MEMORY_CACHEABLE 0x02
 #define CRS_MAX 2048
+#define CRS_RANGES 64
+#define WINDOW_SIZE_MAX 46
 #define ONE_MIB ((uint64_t)0x100000)
+
+// How the guest's _CRS of a device keeps the firmware's.
+#define CRS_MOTHERBOARD 0
+#define CRS_HOST_BRIDGE 1
+#define CRS_MERGED 2
 
 static uint64_t le(const uint8_t *p, size_t bytes) {
     uint64_t value = 0;
@@ -755,6 +835,67 @@ static size_t resource_size(const uint8_t *p, uint32_t left) {
         return 1 + (p[0] & (uint32_t)7);
     }
     return left < 3 ? left + 1 : 3 + (uint32_t)le(p + 1, 2);
+}
+
+// Where an address space descriptor of size bytes has its minimum, maximum,
+// and length fields, each of width bytes, if it is one of the type: ACPI 6.6,
+// 6.4.3.5.
+static bool address_fields(
+    const uint8_t *p, size_t size, uint8_t type, size_t *min, size_t *max,
+    size_t *length, size_t *width
+) {
+    switch (p[0]) {
+        case RES_WORD_ADDRESS: {
+            *min = 8;
+            *max = 10;
+            *length = 14;
+            *width = 2;
+            break;
+        }
+        case RES_DWORD_ADDRESS: {
+            *min = 10;
+            *max = 14;
+            *length = 22;
+            *width = 4;
+            break;
+        }
+        case RES_QWORD_ADDRESS: {
+            *min = 14;
+            *max = 22;
+            *length = 38;
+            *width = 8;
+            break;
+        }
+        case RES_EXTENDED_ADDRESS: {
+            *min = 16;
+            *max = 24;
+            *length = 40;
+            *width = 8;
+            break;
+        }
+        default: {
+            return false;
+        }
+    }
+    return size >= *length + *width && p[3] == type;
+}
+
+// The range an address space descriptor of size bytes and of the type
+// describes, if it is one.
+static bool address_range(
+    const uint8_t *p, size_t size, uint8_t type, uint64_t *base, uint64_t *end
+) {
+    size_t min;
+    size_t max;
+    size_t length;
+    size_t width;
+    if (!address_fields(p, size, type, &min, &max, &length, &width)) {
+        return false;
+    }
+    *base = le(p + min, width);
+    *end = le(p + length, width) != 0 ? *base + le(p + length, width)
+        : le(p + max, width) + 1;
+    return true;
 }
 
 // The memory a descriptor of size bytes describes, if any.
@@ -792,44 +933,8 @@ static bool resource_memory(
             max = min + length;
             break;
         }
-        case RES_WORD_ADDRESS: {
-            if (size < 16 || p[3] != ADDRESS_MEMORY) {
-                return false;
-            }
-            min = le(p + 8, 2);
-            max = le(p + 10, 2);
-            length = le(p + 14, 2);
-            break;
-        }
-        case RES_DWORD_ADDRESS: {
-            if (size < 26 || p[3] != ADDRESS_MEMORY) {
-                return false;
-            }
-            min = le(p + 10, 4);
-            max = le(p + 14, 4);
-            length = le(p + 22, 4);
-            break;
-        }
-        case RES_QWORD_ADDRESS: {
-            if (size < 46 || p[3] != ADDRESS_MEMORY) {
-                return false;
-            }
-            min = le(p + 14, 8);
-            max = le(p + 22, 8);
-            length = le(p + 38, 8);
-            break;
-        }
-        case RES_EXTENDED_ADDRESS: {
-            if (size < 56 || p[3] != ADDRESS_MEMORY) {
-                return false;
-            }
-            min = le(p + 16, 8);
-            max = le(p + 24, 8);
-            length = le(p + 40, 8);
-            break;
-        }
         default: {
-            return false;
+            return address_range(p, size, ADDRESS_MEMORY, base, end);
         }
     }
     *base = min;
@@ -872,48 +977,81 @@ static bool overlaps_private(uintptr_t base, uintptr_t end) {
     return false;
 }
 
-static const struct pci_plan_root *plan_root(uacpi_namespace_node *bridge) {
-    const struct pci_host *host = pci_host_scan();
-    const struct pci_plan *plan = pci_plan();
-    for (size_t i = 0; i < host->bridge_count && plan != NULL; i++) {
-        if (host->bridges[i].node != bridge) {
-            continue;
-        }
-        for (size_t r = 0; r < plan->root_count; r++) {
-            if (plan->roots[r].segment == host->bridges[i].segment
-             && plan->roots[r].bus == host->bridges[i].bus) {
-                return &plan->roots[r];
-            }
-        }
-    }
-    return NULL;
-}
-
 static bool crs_replaced(uacpi_namespace_node *device) {
     return uacpi_device_matches_pnp_id(device, host_bridge_ids)
         || uacpi_device_matches_pnp_id(device, motherboard_ids);
 }
 
-// The guest's _CRS of a host bridge or a motherboard device, from the
-// firmware's: a host bridge's windows are its root bus's in the guest's PCI
-// plan, but for the legacy ones below 1 MiB, and a motherboard device never
-// claims the configuration space windows and the IOMMUs, which the guest has
-// not at their addresses.
-static void emit_crs(struct aml *a, uacpi_namespace_node *device) {
+// A _CRS being made, and the memory and I/O its descriptors describe, so that
+// none from another host bridge repeats them.
+struct crs {
+    uint8_t *out;
+    size_t size;
+    size_t capacity;
+    uint64_t bases[CRS_RANGES];
+    uint64_t ends[CRS_RANGES];
+    bool io[CRS_RANGES];
+    size_t count;
+};
+
+static bool crs_repeats(
+    const struct crs *c, bool io, uint64_t base, uint64_t end
+) {
+    for (size_t i = 0; i < c->count; i++) {
+        if (c->io[i] == io && base < c->ends[i] && end > c->bases[i]) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void crs_note(struct crs *c, bool io, uint64_t base, uint64_t end) {
+    if (c->count < CRS_RANGES) {
+        c->bases[c->count] = base;
+        c->ends[c->count] = end;
+        c->io[c->count] = io;
+        c->count++;
+    }
+}
+
+// The guest's bus 0 has every bus number up to the last the guest has.
+static void bus_range_widen(uint8_t *p, size_t size) {
+    const struct pci_plan *plan = pci_plan();
+    size_t min;
+    size_t max;
+    size_t length;
+    size_t width;
+    if (plan == NULL
+     || !address_fields(p, size, ADDRESS_BUS, &min, &max, &length, &width)) {
+        return;
+    }
+    uint64_t last = le(p + max, width);
+    if (plan->bus_end > last) {
+        last = plan->bus_end;
+    }
+    put_le(p + min, 0, width);
+    put_le(p + max, last, width);
+    put_le(p + length, last + 1, width);
+}
+
+// What the guest's _CRS keeps of the device's: everything but a host bridge's
+// memory windows above 1 MiB, which are the guest's PCI plan's, or a
+// motherboard device's claims of the configuration space windows and the
+// IOMMUs, which the guest has not at their addresses. Of a host bridge below
+// the guest's, only its I/O windows and those below 1 MiB that the guest's has
+// not already. False if the device has no _CRS.
+static bool crs_copy(struct crs *c, uacpi_namespace_node *device, int kind) {
     uacpi_object *obj;
     if (uacpi_eval(device, "_CRS", NULL, &obj) != UACPI_STATUS_OK
      || obj == NULL) {
-        return;
+        return false;
     }
     uacpi_data_view view;
     if (uacpi_object_get_type(obj) != UACPI_OBJECT_BUFFER
      || uacpi_object_get_buffer(obj, &view) != UACPI_STATUS_OK) {
         uacpi_object_unref(obj);
-        return;
+        return false;
     }
-    bool bridge = uacpi_device_matches_pnp_id(device, host_bridge_ids);
-    uint8_t *out = kmalloc(CRS_MAX);
-    size_t size = 0;
     const uint8_t *in = view.const_bytes;
     uint32_t left = (uint32_t)view.length;
     while (left != 0 && in[0] != RES_END_TAG) {
@@ -921,33 +1059,160 @@ static void emit_crs(struct aml *a, uacpi_namespace_node *device) {
         if (n > left) {
             break;
         }
-        uintptr_t base;
-        uintptr_t end;
-        bool keep = true;
+        uint64_t base;
+        uint64_t end;
+        bool keep = kind != CRS_MERGED;
+        bool io = false;
+        bool ranged = true;
         if (resource_memory(in, n, &base, &end)) {
-            keep = bridge ? end <= ONE_MIB : !overlaps_private(base, end);
+            keep = kind == CRS_MOTHERBOARD ? !overlaps_private(base, end)
+                : end <= ONE_MIB;
+        } else if (address_range(in, n, ADDRESS_IO, &base, &end)) {
+            keep = true;
+            io = true;
+        } else {
+            ranged = false;
         }
-        if (keep && size + n <= CRS_MAX - 2 * 46 - 2) {
-            memcpy(out + size, in, n);
-            size += n;
+        if (kind == CRS_MERGED && ranged && crs_repeats(c, io, base, end)) {
+            keep = false;
+        }
+        if (keep && c->size + n <= c->capacity) {
+            memcpy(c->out + c->size, in, n);
+            if (kind == CRS_HOST_BRIDGE && device == vacpi.primary) {
+                bus_range_widen(c->out + c->size, n);
+            }
+            c->size += n;
+            if (ranged && kind != CRS_MOTHERBOARD) {
+                crs_note(c, io, base, end);
+            }
         }
         in += n;
         left -= n;
     }
     uacpi_object_unref(obj);
-    const struct pci_plan_root *root = bridge ? plan_root(device) : NULL;
-    if (root != NULL && root->low.end != root->low.base) {
-        size += put_window(out + size, root->low.base, root->low.end, false);
+    return true;
+}
+
+// The guest's _CRS of a host bridge or a motherboard device, from the
+// firmware's. The guest's one host bridge has the windows of every root bus in
+// the guest's PCI plan, and the other host bridges' I/O.
+static void emit_crs(struct aml *a, uacpi_namespace_node *device) {
+    const struct pci_plan *plan = pci_plan();
+    bool bridge = uacpi_device_matches_pnp_id(device, host_bridge_ids);
+    bool primary = bridge && plan != NULL && device == vacpi.primary;
+    size_t roots = primary ? plan->root_count : 0;
+    size_t merged = primary ? vacpi.merged_count : 0;
+    struct crs c = { .capacity = CRS_MAX * (1 + merged) };
+    c.out = kmalloc(c.capacity + 3 * WINDOW_SIZE_MAX * roots + 2);
+    if (!crs_copy(&c, device, bridge ? CRS_HOST_BRIDGE : CRS_MOTHERBOARD)) {
+        kfree(c.out);
+        return;
     }
-    if (root != NULL && root->high.end != root->high.base) {
-        size += put_window(out + size, root->high.base, root->high.end, true);
+    for (size_t i = 0; i < merged; i++) {
+        crs_copy(&c, vacpi.merged[i].node, CRS_MERGED);
     }
-    out[size++] = RES_END_TAG;
-    out[size++] = 0;
+    for (size_t r = 0; r < roots; r++) {
+        const struct pci_plan_root *root = &plan->roots[r];
+        const struct pci_plan_range *ranges[3] = {
+            &root->low, &root->pref, &root->high
+        };
+        for (size_t k = 0; k < 3; k++) {
+            if (ranges[k]->end != ranges[k]->base) {
+                c.size += put_window(
+                    c.out + c.size, ranges[k]->base, ranges[k]->end, k == 2
+                );
+            }
+        }
+    }
+    c.out[c.size++] = RES_END_TAG;
+    c.out[c.size++] = 0;
     aml_op(a, AML_NAME);
     emit_seg(a, "_CRS");
-    aml_buffer(a, out, size);
-    kfree(out);
+    aml_buffer(a, c.out, c.size);
+    kfree(c.out);
+}
+
+static bool child_named(uacpi_namespace_node *parent, const char *name) {
+    uacpi_namespace_node *child;
+    return uacpi_namespace_node_find(parent, name, &child) == UACPI_STATUS_OK;
+}
+
+static bool merged_name_free(const char name[4]) {
+    char text[5];
+    memcpy(text, name, 4);
+    text[4] = '\0';
+    if (child_named(vacpi.primary, text)) {
+        return false;
+    }
+    for (size_t i = 0; i < vacpi.merged_count; i++) {
+        if (memcmp(vacpi.merged[i].name, name, 4) == 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void bridge_log(uacpi_namespace_node *node, const char *what) {
+    const char *path = uacpi_namespace_node_generate_absolute_path(node);
+    printf("Guest ACPI: host bridge %s %s\n", path != NULL ? path : "?", what);
+    if (path != NULL) {
+        uacpi_free_absolute_path(path);
+    }
+}
+
+// The firmware's host bridges but the guest's are devices below it at their
+// ports' addresses, under names its other children do not have, or are not the
+// guest's at all where they have no port.
+static void bridges_merge(void) {
+    static const char hex[] = "0123456789ABCDEF";
+    const struct pci_host *host = pci_host_scan();
+    const struct pci_plan *plan = pci_plan();
+    size_t count = host->bridge_count != 0 ? host->bridge_count : 1;
+    vacpi.merged = kmalloc(count * sizeof(struct merged));
+    vacpi.dropped = kmalloc(count * sizeof(uacpi_namespace_node *));
+    if (plan == NULL || plan->root_count == 0) {
+        return;
+    }
+    const struct pci_plan_root *primary = &plan->roots[plan->primary];
+    for (size_t i = 0; i < host->bridge_count; i++) {
+        const struct pci_host_bridge *hb = &host->bridges[i];
+        if (hb->segment == primary->segment && hb->bus == primary->bus) {
+            vacpi.primary = hb->node;
+        }
+    }
+    for (size_t i = 0; i < host->bridge_count; i++) {
+        const struct pci_host_bridge *hb = &host->bridges[i];
+        const struct pci_plan_port *port = NULL;
+        for (size_t k = 0; k < plan->port_count; k++) {
+            const struct pci_plan_root *r = &plan->roots[plan->ports[k].root];
+            if (r->segment == hb->segment && r->bus == hb->bus) {
+                port = &plan->ports[k];
+            }
+        }
+        if (hb->node == vacpi.primary) {
+            continue;
+        }
+        if (port == NULL || vacpi.primary == NULL) {
+            vacpi.dropped[vacpi.dropped_count++] = hb->node;
+            bridge_log(hb->node, "left out, as the guest has not its bus");
+            continue;
+        }
+        struct merged *m = &vacpi.merged[vacpi.merged_count];
+        *m = (struct merged){
+            .node = hb->node,
+            .adr = (uint32_t)port->device << 16 | port->function,
+        };
+        uacpi_object_name name = uacpi_namespace_node_name(hb->node);
+        memcpy(m->name, name.text, 4);
+        for (size_t n = 0; n < 256 && !merged_name_free(m->name); n++) {
+            m->name[0] = 'R';
+            m->name[1] = 'P';
+            m->name[2] = hex[n >> 4];
+            m->name[3] = hex[n & 0xf];
+        }
+        vacpi.merged_count++;
+        bridge_log(hb->node, "below the guest's, at its port");
+    }
 }
 
 // The devices the guest does not get, known before anything refers to them.
@@ -963,9 +1228,37 @@ static uacpi_iteration_decision hide_found(
     return UACPI_ITERATION_DECISION_CONTINUE;
 }
 
-static bool child_named(uacpi_namespace_node *parent, const char *name) {
-    uacpi_namespace_node *child;
-    return uacpi_namespace_node_find(parent, name, &child) == UACPI_STATUS_OK;
+// A device of the firmware's below the guest's host bridge where a port is,
+// which the guest has instead.
+static bool at_port(uacpi_namespace_node *node) {
+    if (vacpi.primary == NULL
+     || uacpi_namespace_node_parent(node) != vacpi.primary) {
+        return false;
+    }
+    uint64_t adr;
+    if (uacpi_eval_simple_integer(node, "_ADR", &adr) != UACPI_STATUS_OK) {
+        return false;
+    }
+    for (size_t i = 0; i < vacpi.merged_count; i++) {
+        if (vacpi.merged[i].adr == adr) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void emit_merged(struct aml *a, const struct merged *m) {
+    target_add(m->node);
+    aml_begin(a, AML_DEVICE);
+    emit_seg(a, m->name);
+    aml_op(a, AML_NAME);
+    emit_seg(a, "_ADR");
+    aml_int(a, m->adr);
+    emit_children(a, m->node, false);
+    if (child_named(m->node, "_PRT")) {
+        emit_prt(a, m->node);
+    }
+    aml_end(a);
 }
 
 static void emit_object(
@@ -994,10 +1287,19 @@ static void emit_object(
                 emit_scopes(a, node);
                 return;
             }
+            // The other host bridges are below the guest's, if anywhere.
+            if (merged_of(node) != NULL || is_dropped(node) || at_port(node)) {
+                return;
+            }
             target_add(node);
             aml_begin(a, AML_DEVICE);
             emit_seg(a, name.text);
             emit_children(a, node, false);
+            if (node == vacpi.primary) {
+                for (size_t i = 0; i < vacpi.merged_count; i++) {
+                    emit_merged(a, &vacpi.merged[i]);
+                }
+            }
             if (crs_replaced(node) && child_named(node, "_CRS")) {
                 emit_crs(a, node);
             }
@@ -1686,10 +1988,7 @@ static void emit_mailbox_device(struct aml *a) {
     const struct pci_plan *plan = pci_plan();
     if (plan != NULL && plan->ecam != 0) {
         put_le(crs + 16, plan->ecam, 4);
-        put_le(
-            crs + 20, ((uint64_t)plan->ecam_end - plan->ecam_start + 1) << 20,
-            4
-        );
+        put_le(crs + 20, ((uint64_t)plan->bus_end + 1) << 20, 4);
         crs_size += 12;
     }
     crs[crs_size] = RES_END_TAG;
@@ -1921,6 +2220,7 @@ uint8_t *vacpi_dsdt(size_t *length) {
         uacpi_namespace_root(), hide_found, NULL, UACPI_OBJECT_DEVICE_BIT,
         UACPI_MAX_DEPTH_ANY, NULL
     );
+    bridges_merge();
     emit_mailbox_device(&a);
     emit_root(&a);
     emit_ps2_devices(&a);

@@ -32,6 +32,7 @@
 #include <sys/cpu.h>
 #include <sys/smp.h>
 #include <sys/x86.h>
+#include <virt/pci_plan.h>
 
 // The structures and values of the Intel MultiProcessor Specification 1.4,
 // chapter 4.
@@ -170,7 +171,7 @@ struct mp_input {
     uint32_t cpu_signature;
     uint32_t cpu_features;
     uint8_t apic_version;
-    // Bit n % 64 of word n / 64 for each PCI bus n of segment 0.
+    // Bit n % 64 of word n / 64 for each PCI bus n of the guest's.
     uint64_t pci_buses[PCI_BUSES / 64];
     bool isa;
     uint8_t isa_bus;
@@ -232,8 +233,10 @@ static bool pci_bus_has(const struct mp_input *in, unsigned int bus) {
 static void pci_buses_find(struct mp_input *in) {
     const struct pci_topology *topology = pci_enum_scan();
     for (size_t i = 0; i < topology->root_bus_count; i++) {
-        if (topology->root_buses[i].segment == 0) {
-            pci_bus_add(in, topology->root_buses[i].bus);
+        const struct pci_root_bus *rb = &topology->root_buses[i];
+        int bus = pci_plan_guest_bus(rb->segment, rb->bus);
+        if (bus >= 0) {
+            pci_bus_add(in, (uint8_t)bus);
         }
     }
     for (size_t i = 0; i < topology->function_count; i++) {
@@ -242,8 +245,12 @@ static void pci_buses_find(struct mp_input *in) {
             || f->header_type == PCI_HEADER_CARDBUS;
         // A bridge whose secondary bus is not above its own has not been given
         // one.
-        if (f->addr.segment == 0 && bridge && f->secondary_bus > f->addr.bus) {
-            pci_bus_add(in, f->secondary_bus);
+        if (!bridge || f->secondary_bus <= f->addr.bus) {
+            continue;
+        }
+        int bus = pci_plan_guest_bus(f->addr.segment, f->secondary_bus);
+        if (bus >= 0) {
+            pci_bus_add(in, (uint8_t)bus);
         }
     }
 
@@ -417,7 +424,8 @@ static bool pci_entry_made(const struct mp_input *in, size_t i) {
     for (size_t j = 0; j < i; j++) {
         const struct acpi_irq_pci_route *other = &in->routes[j];
         uint32_t pin;
-        if (other->addr.segment == 0 && other->addr.bus == route->addr.bus
+        if (other->addr.segment == route->addr.segment
+         && other->addr.bus == route->addr.bus
          && other->addr.device == route->addr.device
          && other->pin == route->pin
          && ioapic_for_gsi(other->gsi, &pin) != NULL) {
@@ -453,14 +461,15 @@ static void io_interrupts_emit(
 
     for (size_t i = 0; i < in->route_count; i++) {
         const struct acpi_irq_pci_route *route = &in->routes[i];
-        if (route->addr.segment != 0 || pci_entry_made(in, i)) {
+        int bus = pci_plan_guest_bus(route->addr.segment, route->addr.bus);
+        if (bus < 0 || pci_entry_made(in, i)) {
             continue;
         }
         uint16_t flags = (route->active_low ? MP_ACTIVE_LOW : MP_ACTIVE_HIGH)
             | (route->level ? MP_LEVEL : MP_EDGE);
         // MultiProcessor Specification 1.4, Table D-1.
         uint8_t irq = (uint8_t)(route->addr.device << 2 | (route->pin - 1));
-        io_interrupt_emit(w, MP_INT, flags, route->addr.bus, irq, route->gsi);
+        io_interrupt_emit(w, MP_INT, flags, (uint8_t)bus, irq, route->gsi);
     }
 }
 

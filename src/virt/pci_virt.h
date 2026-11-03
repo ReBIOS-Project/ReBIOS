@@ -25,10 +25,9 @@
 #include <virt/mmio.h>
 
 // Takes the guest's configuration space accesses over, through ports CF8h and
-// CFCh and through the configuration space windows, segment 0's where the plan
-// puts it and the others' where the host has them, and gives the guest the
-// plan's BARs and bridge windows, mapped onto the host's BARs. Needs
-// layout_init().
+// CFCh and through the configuration space window where the plan puts it,
+// gives the guest the plan's buses, ports, BARs, and bridge windows, the BARs
+// mapped onto the host's. Needs layout_init().
 void pci_virt_init(void);
 
 // Registers of a function that another module keeps: read gives the dword at

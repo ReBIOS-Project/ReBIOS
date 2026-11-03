@@ -482,7 +482,8 @@ void csm_fill_boot_table(
     struct csm_boot_table *table, const struct csm_boot_params *params
 );
 
-// Fills a BBS table from the firmware's block devices. Returns the number of
+// Fills a BBS table from the firmware's block devices, at the guest's PCI
+// addresses, leaving out those outside segment 0. Returns the number of
 // entries used.
 size_t csm_fill_bbs_table(
     struct csm_bbs_entry *table, size_t max_entries,

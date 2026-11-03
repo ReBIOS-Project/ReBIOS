@@ -68,9 +68,7 @@ extern const uint8_t csm_thunk_end[];
 #define MP_TABLE 0xd000
 #define PIR_TABLE 0xe000
 #define LEGACY_TABLE_SIZE 0x1000
-#define EXTRA_PCI_ROOT_LIST 0xf000
-#define EXTRA_PCI_ROOTS_MAX 255
-#define BOOT_ORDER 0xf100
+#define BOOT_ORDER 0xf000
 #define TABLES_END 0x10000
 #define LOW_PMM_BASE 0x10000
 #define LOW_PMM_SIZE 0x80000
@@ -109,12 +107,8 @@ _Static_assert(
     "boot table overlaps the MP table"
 );
 _Static_assert(
-    PIR_TABLE + LEGACY_TABLE_SIZE <= EXTRA_PCI_ROOT_LIST,
-    "PCI IRQ routing table overlaps the extra PCI root bus list"
-);
-_Static_assert(
-    EXTRA_PCI_ROOT_LIST + EXTRA_PCI_ROOTS_MAX <= TABLES_END,
-    "extra PCI root bus list overlaps the low PMM memory"
+    PIR_TABLE + LEGACY_TABLE_SIZE <= BOOT_ORDER,
+    "PCI IRQ routing table overlaps the boot order list"
 );
 
 #define STAGE_INITIALIZE 0
@@ -316,10 +310,11 @@ static void next_rom(struct vcpu *v) {
             rom = &h->pci_roms[csm.roms_done - (video ? 1 : 0)];
         }
 
-        if (rom->address.segment != 0) {
+        int bus = pci_plan_guest_bus(rom->address.segment, rom->address.bus);
+        if (bus < 0) {
             printf(
-                "Not running the option ROM of %04x:%02x:%02x.%x, outside "
-                "segment 0\n",
+                "Not running the option ROM of %04x:%02x:%02x.%x, which the "
+                "guest does not have\n",
                 rom->address.segment, rom->address.bus,
                 rom->address.devfn >> 3, rom->address.devfn & 7
             );
@@ -347,6 +342,8 @@ static void next_rom(struct vcpu *v) {
             .bbs_table = BBS_TABLE,
             .bbs_entry_count = csm.bbs_count,
         };
+        params.address.segment = 0;
+        params.address.bus = (uint8_t)bus;
         csm_fill_oprom_table(layout_low(OPROM_TABLE), &params);
         printf(
             "Running the option ROM of %02x:%02x.%x (%04x:%04x) at %#llx\n",
@@ -474,36 +471,6 @@ static void boot_order(void) {
     csm.compat16->boot_order_pointer = BOOT_ORDER;
 }
 
-// The CSM16 scans the hierarchy of bus 0 itself, and the other root buses of
-// segment 0 only from this list, while it initialises.
-static void extra_pci_roots(void) {
-    uint8_t *list = layout_low(EXTRA_PCI_ROOT_LIST);
-    size_t count = 0;
-    const struct pci_topology *topology = pci_enum_topology();
-    for (size_t i = 0; topology != NULL && i < topology->root_bus_count; i++) {
-        const struct pci_root_bus *rb = &topology->root_buses[i];
-        if (rb->segment == 0 && rb->bus != 0 && count < EXTRA_PCI_ROOTS_MAX) {
-            list[count++] = rb->bus;
-        }
-    }
-    csm.compat16->extra_pci_root_list_pointer = EXTRA_PCI_ROOT_LIST;
-    csm.compat16->extra_pci_root_list_count = (uint8_t)count;
-
-    if (count == 0) {
-        printf("Extra PCI root buses for the legacy BIOS: none\n");
-    }
-    for (size_t first = 0; first < count; first += 16) {
-        char text[16 * 3 + 1];
-        size_t length = 0;
-        for (size_t i = first; i < count && i < first + 16; i++) {
-            length += (size_t)snprintf(
-                text + length, sizeof(text) - length, " %02x", list[i]
-            );
-        }
-        printf("Extra PCI root buses for the legacy BIOS:%s\n", text);
-    }
-}
-
 void csm_boot_start(struct vcpu *v) {
     const struct handoff *h = core_handoff;
 
@@ -553,16 +520,13 @@ void csm_boot_start(struct vcpu *v) {
     size_t e820_count = e820_build();
     csm.compat16->e820_pointer = E820_TABLE;
     csm.compat16->e820_length = e820_count * sizeof(struct e820_entry);
-    // Where bus 0's would be, as the legacy BIOS takes it.
     const struct pci_plan *plan = pci_plan();
     if (plan != NULL && plan->ecam != 0) {
-        uint64_t bus0 = plan->ecam - ((uint64_t)plan->ecam_start << 20);
-        csm.compat16->pci_express_base = (uint32_t)bus0;
+        csm.compat16->pci_express_base = (uint32_t)plan->ecam;
     }
     if (csm.compat16->table_length
      >= offsetof(struct csm_compat16_table, boot_order_pointer)) {
         csm.compat16->hypervisor_interface = HYPERCALL_INTERFACE;
-        extra_pci_roots();
     } else {
         printf("The legacy BIOS predates the hypervisor's interface\n");
     }
@@ -598,10 +562,23 @@ void csm_boot_start(struct vcpu *v) {
     };
     csm_fill_init_table(layout_low(INIT_TABLE), &init);
 
+    // At the guest's PCI addresses, which are all in segment 0.
+    struct handoff_block_device *devices = kmalloc(
+        (h->block_device_count != 0 ? h->block_device_count : 1)
+            * sizeof(struct handoff_block_device)
+    );
+    for (size_t i = 0; i < h->block_device_count; i++) {
+        devices[i] = h->block_devices[i];
+        struct handoff_pci_address *a = &devices[i].address;
+        int bus = pci_plan_guest_bus(a->segment, a->bus);
+        a->segment = bus >= 0 ? 0 : UINT16_MAX;
+        a->bus = bus >= 0 ? (uint8_t)bus : 0;
+    }
     csm.bbs_count = csm_fill_bbs_table(
-        layout_low(BBS_TABLE), CSM_BBS_MAX_ENTRIES, h->block_devices,
+        layout_low(BBS_TABLE), CSM_BBS_MAX_ENTRIES, devices,
         h->block_device_count
     );
+    kfree(devices);
     struct csm_boot_params boot = {
         .rsdp = acpi ? csm.compat16->acpi_rsd_ptr_pointer : 0,
         .smbios_entry = smbios,

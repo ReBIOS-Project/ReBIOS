@@ -18,11 +18,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <uacpi/acpi.h>
-#include <uacpi/status.h>
-#include <uacpi/tables.h>
 #include <virt/pci_virt.h>
-#include <hw/acpi.h>
 #include <hw/lapic.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
@@ -40,6 +36,7 @@
 #include <virt/layout.h>
 #include <virt/mmio.h>
 #include <virt/pci_plan.h>
+#include <virt/pci_port.h>
 #include <virt/vlapic.h>
 
 #define CONFIG_ADDRESS 0xcf8
@@ -196,11 +193,6 @@ struct vfunction {
     uintptr_t pref_base;
     uintptr_t pref_limit;
     bool pref_64;
-};
-
-struct ecam_window {
-    uint16_t segment;
-    uint8_t start;
 };
 
 static struct {
@@ -1118,6 +1110,40 @@ static void function_write(
     );
 }
 
+// The guest's bus numbers are the PCI plan's: a port of the plan's, or a
+// function of the host's, or nothing.
+static uint32_t guest_read(
+    uint8_t bus, uint8_t device, uint8_t function, uint32_t offset,
+    size_t size
+) {
+    int port = bus == 0 ? pci_port_at(device, function) : -1;
+    if (port >= 0) {
+        return pci_port_read((size_t)port, offset, size);
+    }
+    const struct pci_plan_bus *b = &pci_plan()->buses[bus];
+    if (!b->present) {
+        return all_ones(size);
+    }
+    struct pci_addr a = { b->segment, b->bus, device, function };
+    return function_read(a, offset, size);
+}
+
+static void guest_write(
+    uint8_t bus, uint8_t device, uint8_t function, uint32_t offset,
+    size_t size, uint32_t value
+) {
+    int port = bus == 0 ? pci_port_at(device, function) : -1;
+    if (port >= 0) {
+        pci_port_write((size_t)port, offset, size, value);
+        return;
+    }
+    const struct pci_plan_bus *b = &pci_plan()->buses[bus];
+    if (b->present) {
+        struct pci_addr a = { b->segment, b->bus, device, function };
+        function_write(a, offset, size, value);
+    }
+}
+
 static void port_native(uint16_t port, size_t size, bool in, uint32_t *value) {
     switch (size) {
         case 1: {
@@ -1175,25 +1201,26 @@ static void config_ports(
         spinlock_release(&virt.lock);
         return;
     }
-    struct pci_addr a = {
-        0, (uint8_t)(address >> 16), (address >> 11) & 0x1f, (address >> 8) & 7
-    };
+    uint8_t bus = (uint8_t)(address >> 16);
+    uint8_t device = (address >> 11) & 0x1f;
+    uint8_t function = (address >> 8) & 7;
     // Bits 27:24 extend the register number where the chipset allows it.
     uint32_t reg = (address & 0xfc) | ((address >> 16) & 0xf00);
     if (byte % size == 0) {
         if (in) {
-            *value = function_read(a, reg + byte, size);
+            *value = guest_read(bus, device, function, reg + byte, size);
         } else {
-            function_write(a, reg + byte, size, *value);
+            guest_write(bus, device, function, reg + byte, size, *value);
         }
     } else {
         uint32_t result = 0;
         for (size_t i = 0; i < size; i++) {
+            uint32_t at = reg + byte + (uint32_t)i;
             if (in) {
-                result |= function_read(a, reg + byte + i, 1) << (8 * i);
+                result |= guest_read(bus, device, function, at, 1) << (8 * i);
             } else {
-                function_write(
-                    a, reg + byte + i, 1, (*value >> (8 * i)) & 0xff
+                guest_write(
+                    bus, device, function, at, 1, (*value >> (8 * i)) & 0xff
                 );
             }
         }
@@ -1204,29 +1231,38 @@ static void config_ports(
     spinlock_release(&virt.lock);
 }
 
-static struct pci_addr ecam_addr(
-    const struct ecam_window *w, uint64_t offset, uint32_t *reg
-) {
-    *reg = (uint32_t)(offset % FUNCTION_SIZE);
-    return (struct pci_addr){
-        w->segment, (uint8_t)(w->start + offset / BUS_SIZE),
-        (uint8_t)((offset >> 15) & 0x1f), (uint8_t)((offset >> 12) & 7)
-    };
+static uint32_t ecam_reg(uint64_t offset) {
+    return (uint32_t)(offset % FUNCTION_SIZE);
+}
+
+static uint8_t ecam_bus(uint64_t offset) {
+    return (uint8_t)(offset / BUS_SIZE);
+}
+
+static uint8_t ecam_device(uint64_t offset) {
+    return (uint8_t)((offset >> 15) & 0x1f);
+}
+
+static uint8_t ecam_function(uint64_t offset) {
+    return (uint8_t)((offset >> 12) & 7);
 }
 
 static uint64_t ecam_read(
     struct vcpu *v, void *ctx, uint64_t offset, size_t size
 ) {
     (void)v;
-    uint32_t reg;
-    struct pci_addr a = ecam_addr(ctx, offset, &reg);
+    (void)ctx;
+    uint8_t bus = ecam_bus(offset);
+    uint8_t device = ecam_device(offset);
+    uint8_t function = ecam_function(offset);
+    uint32_t reg = ecam_reg(offset);
     spinlock_acquire(&virt.lock);
     uint64_t value;
     if (size == 8) {
-        value = function_read(a, reg, 4)
-            | (uint64_t)function_read(a, reg + 4, 4) << 32;
+        value = guest_read(bus, device, function, reg, 4)
+            | (uint64_t)guest_read(bus, device, function, reg + 4, 4) << 32;
     } else {
-        value = function_read(a, reg, size);
+        value = guest_read(bus, device, function, reg, size);
     }
     spinlock_release(&virt.lock);
     return value;
@@ -1236,68 +1272,39 @@ static void ecam_write(
     struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value
 ) {
     (void)v;
-    uint32_t reg;
-    struct pci_addr a = ecam_addr(ctx, offset, &reg);
+    (void)ctx;
+    uint8_t bus = ecam_bus(offset);
+    uint8_t device = ecam_device(offset);
+    uint8_t function = ecam_function(offset);
+    uint32_t reg = ecam_reg(offset);
     spinlock_acquire(&virt.lock);
     if (size == 8) {
-        function_write(a, reg, 4, (uint32_t)value);
-        function_write(a, reg + 4, 4, (uint32_t)(value >> 32));
+        guest_write(bus, device, function, reg, 4, (uint32_t)value);
+        guest_write(
+            bus, device, function, reg + 4, 4, (uint32_t)(value >> 32)
+        );
     } else {
-        function_write(a, reg, size, (uint32_t)value);
+        guest_write(bus, device, function, reg, size, (uint32_t)value);
     }
     spinlock_release(&virt.lock);
 }
 
 static const struct mmio_ops ecam_ops = { ecam_read, ecam_write, false };
 
-static void ecam_trap(
-    uint16_t segment, uint8_t start, uint8_t end, uintptr_t base
+// A bridge's bus numbers as the guest has them, where they are assigned.
+static uint32_t guest_bus_numbers(
+    const struct pci_function *f, uint32_t value
 ) {
-    struct ecam_window *w = kmalloc(sizeof(struct ecam_window));
-    *w = (struct ecam_window){ segment, start };
-    size_t size = ((uint64_t)end - start + 1) * BUS_SIZE;
-    mmio_register(base, size, &ecam_ops, w);
-    gpt_map(base, 0, size, 0, 0);
-}
-
-// Segment 0's window is where the plan put it, the others' where the host has
-// them, for 64-bit guests: at addresses the guest's RAM keeps clear of.
-static void ecam_windows(const struct pci_plan *plan) {
-    if (plan->ecam != 0) {
-        ecam_trap(0, plan->ecam_start, plan->ecam_end, plan->ecam);
+    if (f->secondary_bus <= f->addr.bus) {
+        return value;
     }
-    struct uacpi_table table;
-    if (!acpi_tables_ready()
-     || uacpi_table_find_by_signature(ACPI_MCFG_SIGNATURE, &table)
-     != UACPI_STATUS_OK) {
-        return;
+    uint32_t out = value & ~BUS_NUMBERS_VIRTUAL;
+    for (size_t i = 0; i < 3; i++) {
+        uint8_t host = (uint8_t)(value >> (8 * i));
+        int guest = pci_plan_guest_bus(f->addr.segment, host);
+        out |= (uint32_t)(guest >= 0 ? (uint8_t)guest : host) << (8 * i);
     }
-    size_t length = table.hdr->length;
-    for (size_t off = sizeof(struct acpi_mcfg);
-         off <= length && length - off >= sizeof(struct acpi_mcfg_allocation);
-         off += sizeof(struct acpi_mcfg_allocation)) {
-        struct acpi_mcfg_allocation entry;
-        memcpy(
-            &entry, (const uint8_t *)table.ptr + off,
-            sizeof(struct acpi_mcfg_allocation)
-        );
-        uintptr_t base = entry.address + ((uint64_t)entry.start_bus << 20);
-        size_t size = ((uint64_t)entry.end_bus - entry.start_bus + 1)
-            * BUS_SIZE;
-        if (entry.segment == 0 || entry.start_bus > entry.end_bus) {
-            continue;
-        }
-        if (layout_mmio_free(base, size)) {
-            ecam_trap(entry.segment, entry.start_bus, entry.end_bus, base);
-        } else {
-            printf(
-                "PCI segment %04x: its configuration space window at 0x%llx "
-                "is in the guest's memory, so the guest cannot reach it\n",
-                entry.segment, (unsigned long long)base
-            );
-        }
-    }
-    uacpi_table_unref(&table);
+    return out;
 }
 
 static void vfunction_init(
@@ -1350,7 +1357,9 @@ static void vfunction_init(
         msix_init(vf);
     }
     if (f->header_type == HEADER_BRIDGE) {
-        vf->bus_numbers = pci_cfg_read(f->addr, REG_BUS_NUMBERS, 4);
+        vf->bus_numbers = guest_bus_numbers(
+            f, pci_cfg_read(f->addr, REG_BUS_NUMBERS, 4)
+        );
         vf->mem_base = pf->mem_base;
         vf->mem_limit = pf->mem_limit;
         vf->pref_base = pf->pref_base;
@@ -1367,6 +1376,7 @@ void pci_virt_init(void) {
         return;
     }
     virt.on = true;
+    pci_port_init();
     uint32_t extended = cpuid(0x80000000, 0).eax;
     unsigned int bits = extended >= 0x80000008
         ? cpuid(0x80000008, 0).eax & 0xff : 36;
@@ -1399,7 +1409,11 @@ void pci_virt_init(void) {
         CONFIG_ADDRESS, CONFIG_PORTS, config_ports, NULL
     };
     io_register(&ports);
-    ecam_windows(plan);
+    if (plan->ecam != 0) {
+        size_t size = ((size_t)plan->bus_end + 1) * BUS_SIZE;
+        mmio_register(plan->ecam, size, &ecam_ops, NULL);
+        gpt_map(plan->ecam, 0, size, 0, 0);
+    }
     gpt_flush();
     printf("PCI: %u of the guest's BARs mapped onto the host's\n", mapped);
 }
