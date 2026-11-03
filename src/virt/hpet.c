@@ -125,6 +125,14 @@ bool hpet_any_hidden(void) {
     return hidden_count != 0;
 }
 
+bool hpet_block_id(uintptr_t base, uint32_t *id) {
+    if ((base & (PAGE_SIZE - 1)) != 0) {
+        return false;
+    }
+    *id = read32(base);
+    return true;
+}
+
 bool hpet_replaces_pit(void) {
     uint32_t route = CONFIG_ENABLE | CONFIG_LEGACY_ROUTE;
     return guest_base != 0 && (read32(guest_base + CONFIG) & route) == route;

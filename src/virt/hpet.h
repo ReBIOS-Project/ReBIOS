@@ -31,6 +31,11 @@ void hpet_init(void);
 // Whether the HPET with its registers at base is hidden, and whether any is.
 bool hpet_hidden(uintptr_t base);
 bool hpet_any_hidden(void);
+// The low half of the capabilities and ID register of the HPET with its
+// registers at base, which its ACPI table calls its event timer block ID
+// (IA-PC HPET Specification 1.0a, 3.2.4, Table 3): false for a base that is
+// not page aligned, which the hypervisor does not read.
+bool hpet_block_id(uintptr_t base, uint32_t *id);
 // Whether the guest's HPET has taken IRQ 0, so that the 8254 interrupts nothing
 // (IA-PC HPET Specification 1.0a, 2.4.2.1).
 bool hpet_replaces_pit(void);

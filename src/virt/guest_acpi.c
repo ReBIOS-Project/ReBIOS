@@ -50,12 +50,11 @@
 #define TABLE_ALIGN 16
 #define FACS_ALIGN 64
 
-// The tables the guest gets besides those the hypervisor generates: none
-// points the guest at host memory or at hardware the hypervisor keeps for
-// itself, but for the HPETs hidden from it.
+// The tables the guest gets as the firmware has them, besides those the
+// hypervisor generates: none points the guest at host memory or at hardware
+// the hypervisor keeps for itself.
 static const char *const kept[] = {
-    "HPET", "MSDM", "SLIC", "SPCR", "DBGP", "DBG2", "WAET", "WSMT", "VFCT",
-    "BOOT",
+    "MSDM", "SLIC", "SPCR", "DBGP", "DBG2", "WAET", "WSMT", "VFCT", "BOOT",
 };
 
 // A table of the guest's, and where it goes among them, from the firmware's
@@ -270,6 +269,31 @@ static uint8_t *mcfg_make(const uint8_t *mcfg, size_t *length) {
     return made;
 }
 
+// The guest's HPET where the firmware's table puts it, with the event timer
+// block ID its registers give, under the table's header: none for an HPET
+// hidden from the guest.
+static uint8_t *hpet_make(const uint8_t *hpet, size_t *length) {
+    struct acpi_hpet table;
+    if (*length < sizeof(struct acpi_hpet)) {
+        return NULL;
+    }
+    memcpy(&table, hpet, sizeof(struct acpi_hpet));
+    if (hpet_hidden(table.address.address)) {
+        return NULL;
+    }
+    uint32_t id;
+    if (table.address.address_space_id == ACPI_AS_ID_SYS_MEM
+     && hpet_block_id(table.address.address, &id)) {
+        table.block_id = id;
+    }
+    table.hdr.length = sizeof(struct acpi_hpet);
+    uint8_t *made = kmalloc(sizeof(struct acpi_hpet));
+    memcpy(made, &table, sizeof(struct acpi_hpet));
+    checksum_set(made, sizeof(struct acpi_hpet), SDT_CHECKSUM);
+    *length = sizeof(struct acpi_hpet);
+    return made;
+}
+
 // The guest's version of a table that the hypervisor makes rather than
 // copies, in *made, NULL where the guest has none: false for other tables.
 static bool table_made(const uint8_t *table, uint8_t **made, size_t *length) {
@@ -281,18 +305,14 @@ static bool table_made(const uint8_t *table, uint8_t **made, size_t *length) {
         *made = mcfg_make(table, length);
         return true;
     }
+    if (memcmp(table, "HPET", 4) == 0) {
+        *made = hpet_make(table, length);
+        return true;
+    }
     return false;
 }
 
 static bool table_kept(const uint8_t *table) {
-    bool hidden_hpet = memcmp(table, "HPET", 4) == 0
-        && read32(table + SDT_LENGTH) >= sizeof(struct acpi_hpet)
-        && hpet_hidden(
-            read64(table + offsetof(struct acpi_hpet, address.address))
-        );
-    if (hidden_hpet) {
-        return false;
-    }
     for (size_t i = 0; i < sizeof(kept) / sizeof(char *); i++) {
         if (memcmp(table, kept[i], 4) == 0) {
             return true;
