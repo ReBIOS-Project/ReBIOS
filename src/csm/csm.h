@@ -69,24 +69,19 @@ struct csm_compat16_table {
     uint32_t uma_size;
     uint32_t hi_permanent_memory_address;
     uint32_t hi_permanent_memory_size;
-    // SeaBIOS's extension, there only if table_length covers it. A non-zero
-    // pointer is the address of that many bus numbers, possibly none, those of
-    // all the segment 0 root buses but bus 0, so that the CSM16 does not scan
-    // for root buses itself.
-    uint32_t extra_pci_root_list_pointer;
-    uint8_t extra_pci_root_list_count;
-    // Another extension: when it holds the value that identifies a
-    // hypervisor's hypercall interface, the CSM16 may use that interface.
+    // The extensions of ReBIOS's SeaBIOS, there only if table_length covers
+    // them. When it holds the value that identifies a hypervisor's hypercall
+    // interface, the CSM16 may use that interface.
     uint32_t hypervisor_interface;
-    // And another: the address of a boot order list in the format of SeaBIOS's
-    // bootorder file, which the CSM16 then follows instead of the BBS table's
+    // The address of a boot order list in the format of SeaBIOS's bootorder
+    // file, which the CSM16 then follows instead of the BBS table's
     // priorities, or 0.
     uint32_t boot_order_pointer;
 } __attribute__((packed));
 
-// The size of the specification's table, without SeaBIOS's extension.
+// The size of the specification's table, without the extensions.
 #define CSM_COMPAT16_TABLE_SPEC_SIZE \
-    offsetof(struct csm_compat16_table, extra_pci_root_list_pointer)
+    offsetof(struct csm_compat16_table, hypervisor_interface)
 
 _Static_assert(
     offsetof(struct csm_compat16_table, table_length) == 5,
@@ -130,18 +125,10 @@ _Static_assert(
 );
 _Static_assert(CSM_COMPAT16_TABLE_SPEC_SIZE == 99, "CSM16 table layout");
 _Static_assert(
-    offsetof(struct csm_compat16_table, extra_pci_root_list_count) == 103,
+    offsetof(struct csm_compat16_table, boot_order_pointer) == 103,
     "CSM16 table layout"
 );
-_Static_assert(
-    offsetof(struct csm_compat16_table, hypervisor_interface) == 104,
-    "CSM16 table layout"
-);
-_Static_assert(
-    offsetof(struct csm_compat16_table, boot_order_pointer) == 108,
-    "CSM16 table layout"
-);
-_Static_assert(sizeof(struct csm_compat16_table) == 112, "CSM16 table layout");
+_Static_assert(sizeof(struct csm_compat16_table) == 107, "CSM16 table layout");
 
 // EFI_COMPATIBILITY_FUNCTIONS, which the CSM16 takes in AX.
 #define CSM_COMPAT16_INITIALIZE_YOURSELF 0x0000
