@@ -33,6 +33,9 @@
 #define VLAPIC_TIMER_VECTOR 0xfe
 #define VLAPIC_SPURIOUS_VECTOR 0xff
 
+// Where the guest's local APICs are until it moves them, as on a PC.
+#define VLAPIC_DEFAULT_BASE ((uint64_t)0xfee00000)
+
 // Each vCPU's local APIC is emulated, on the processor's, which the hypervisor
 // keeps for itself: x2APIC mode where the processor has it, xAPIC mode always.
 // Needs virt_init().

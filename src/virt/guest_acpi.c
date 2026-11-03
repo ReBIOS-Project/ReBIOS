@@ -23,6 +23,7 @@
 #include <core.h>
 #include <csm/e820.h>
 #include <handoff.h>
+#include <hw/ioapic.h>
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <memory.h>
@@ -32,6 +33,7 @@
 #include <virt/layout.h>
 #include <virt/pci_plan.h>
 #include <virt/vacpi.h>
+#include <virt/vlapic.h>
 
 #define RSDP_CHECKSUM 8
 #define RSDP_OEM_ID 9
@@ -52,8 +54,8 @@
 // points the guest at host memory or at hardware the hypervisor keeps for
 // itself, but for the HPETs hidden from it.
 static const char *const kept[] = {
-    "APIC", "HPET", "MSDM", "SLIC", "SPCR", "DBGP", "DBG2", "WAET", "WSMT",
-    "VFCT", "BOOT",
+    "HPET", "MSDM", "SLIC", "SPCR", "DBGP", "DBG2", "WAET", "WSMT", "VFCT",
+    "BOOT",
 };
 
 // A table of the guest's, and where it goes among them, from the firmware's
@@ -134,43 +136,111 @@ static size_t root_count(const uint8_t *root, size_t entry_size) {
     return (read32(root + SDT_LENGTH) - SDT_HEADER_SIZE) / entry_size;
 }
 
-// Marks the processors the guest does not get as unusable in a copy of the
-// MADT, leaving every structure in place.
-static void madt_hide_cpus(uint8_t *madt, size_t length) {
+static bool ioapic_given(uint32_t address) {
+    for (size_t i = 0; i < ioapic_count(); i++) {
+        if (ioapic_get(i)->base == address) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Whether the guest's machine has what an entry of the firmware's MADT
+// describes, of the kinds the hypervisor knows: the processors' local APICs,
+// the I/O APICs the hypervisor gives the guest, and the interrupt routes. Its
+// local APICs are where a PC's are, which no override changes.
+static bool madt_entry_kept(const uint8_t *entry, size_t length) {
+    switch (entry[0]) {
+        case ACPI_MADT_ENTRY_TYPE_LAPIC: {
+            return length >= sizeof(struct acpi_madt_lapic);
+        }
+        case ACPI_MADT_ENTRY_TYPE_LOCAL_X2APIC: {
+            return length >= sizeof(struct acpi_madt_x2apic);
+        }
+        case ACPI_MADT_ENTRY_TYPE_IOAPIC: {
+            return length >= sizeof(struct acpi_madt_ioapic)
+                && ioapic_given(
+                    read32(entry + offsetof(struct acpi_madt_ioapic, address))
+                );
+        }
+        case ACPI_MADT_ENTRY_TYPE_INTERRUPT_SOURCE_OVERRIDE: {
+            return length
+                >= sizeof(struct acpi_madt_interrupt_source_override);
+        }
+        case ACPI_MADT_ENTRY_TYPE_NMI_SOURCE: {
+            return length >= sizeof(struct acpi_madt_nmi_source);
+        }
+        case ACPI_MADT_ENTRY_TYPE_LAPIC_NMI: {
+            return length >= sizeof(struct acpi_madt_lapic_nmi);
+        }
+        case ACPI_MADT_ENTRY_TYPE_LOCAL_X2APIC_NMI: {
+            return length >= sizeof(struct acpi_madt_x2apic_nmi);
+        }
+        default: {
+            return false;
+        }
+    }
+}
+
+// Leaves the local APIC of a processor the guest does not get unusable, where
+// the namespace still has its processor.
+static void processor_hide(uint8_t *entry) {
     const uint32_t usable = ACPI_PIC_ENABLED | ACPI_PIC_ONLINE_CAPABLE;
-    bool changed = false;
+    uint32_t id;
+    uint8_t *flags;
+    if (entry[0] == ACPI_MADT_ENTRY_TYPE_LAPIC) {
+        id = entry[offsetof(struct acpi_madt_lapic, id)];
+        flags = entry + offsetof(struct acpi_madt_lapic, flags);
+    } else if (entry[0] == ACPI_MADT_ENTRY_TYPE_LOCAL_X2APIC) {
+        id = read32(entry + offsetof(struct acpi_madt_x2apic, id));
+        flags = entry + offsetof(struct acpi_madt_x2apic, flags);
+    } else {
+        return;
+    }
+    if ((read32(flags) & usable) != 0 && !smp_guest_cpu(id)) {
+        write32(flags, read32(flags) & ~usable);
+        printf("Hiding processor %#x from the guest\n", id);
+    }
+}
+
+// The guest's interrupt controllers, under the firmware's table's header: the
+// 8259 pair the hypervisor always gives, local APICs where a PC's are, and the
+// firmware's entries that madt_entry_kept() keeps, in its order.
+static uint8_t *madt_make(const uint8_t *madt, size_t *length) {
+    size_t host_length = *length;
+    if (host_length < sizeof(struct acpi_madt)) {
+        return NULL;
+    }
+    uint8_t *made = kmalloc(host_length);
+    memcpy(made, madt, SDT_HEADER_SIZE);
+    write32(
+        made + offsetof(struct acpi_madt, local_interrupt_controller_address),
+        (uint32_t)VLAPIC_DEFAULT_BASE
+    );
+    write32(
+        made + offsetof(struct acpi_madt, flags),
+        read32(madt + offsetof(struct acpi_madt, flags)) | ACPI_PCAT_COMPAT
+    );
+    size_t out = sizeof(struct acpi_madt);
     size_t offset = sizeof(struct acpi_madt);
-    while (offset + sizeof(struct acpi_entry_hdr) <= length) {
-        uint8_t *entry = madt + offset;
+    while (offset + sizeof(struct acpi_entry_hdr) <= host_length) {
+        const uint8_t *entry = madt + offset;
         size_t entry_length = entry[1];
         if (entry_length < sizeof(struct acpi_entry_hdr)
-         || entry_length > length - offset) {
+         || entry_length > host_length - offset) {
             break;
         }
         offset += entry_length;
-
-        uint32_t id;
-        uint8_t *flags;
-        if (entry[0] == ACPI_MADT_ENTRY_TYPE_LAPIC
-         && entry_length >= sizeof(struct acpi_madt_lapic)) {
-            id = entry[offsetof(struct acpi_madt_lapic, id)];
-            flags = entry + offsetof(struct acpi_madt_lapic, flags);
-        } else if (entry[0] == ACPI_MADT_ENTRY_TYPE_LOCAL_X2APIC
-                && entry_length >= sizeof(struct acpi_madt_x2apic)) {
-            id = read32(entry + offsetof(struct acpi_madt_x2apic, id));
-            flags = entry + offsetof(struct acpi_madt_x2apic, flags);
-        } else {
-            continue;
-        }
-        if ((read32(flags) & usable) != 0 && !smp_guest_cpu(id)) {
-            write32(flags, read32(flags) & ~usable);
-            printf("Hiding processor %#x from the guest\n", id);
-            changed = true;
+        if (madt_entry_kept(entry, entry_length)) {
+            memcpy(made + out, entry, entry_length);
+            processor_hide(made + out);
+            out += entry_length;
         }
     }
-    if (changed) {
-        checksum_set(madt, length, SDT_CHECKSUM);
-    }
+    write32(made + SDT_LENGTH, (uint32_t)out);
+    checksum_set(made, out, SDT_CHECKSUM);
+    *length = out;
+    return made;
 }
 
 // The guest's configuration space window, where the PCI plan put it, for the
@@ -203,6 +273,10 @@ static uint8_t *mcfg_make(const uint8_t *mcfg, size_t *length) {
 // The guest's version of a table that the hypervisor makes rather than
 // copies, in *made, NULL where the guest has none: false for other tables.
 static bool table_made(const uint8_t *table, uint8_t **made, size_t *length) {
+    if (memcmp(table, "APIC", 4) == 0) {
+        *made = madt_make(table, length);
+        return true;
+    }
     if (memcmp(table, "MCFG", 4) == 0) {
         *made = mcfg_make(table, length);
         return true;
@@ -287,12 +361,6 @@ bool guest_acpi_build(uint8_t rsdp[GUEST_ACPI_RSDP_SIZE]) {
         kfree(pieces);
         kfree(dsdt);
         return false;
-    }
-    for (size_t i = 1; i < tables; i++) {
-        uint8_t *table = copy + pieces[i].offset;
-        if (memcmp(table, "APIC", 4) == 0) {
-            madt_hide_cpus(table, pieces[i].length);
-        }
     }
     vacpi_fadt(copy, facs, base + pieces[dsdt_piece].offset);
 

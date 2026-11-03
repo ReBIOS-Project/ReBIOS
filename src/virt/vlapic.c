@@ -51,7 +51,6 @@
 #define APIC_BASE_EXTD ((uint64_t)1 << 10)
 #define APIC_BASE_EN ((uint64_t)1 << 11)
 #define APIC_BASE_ADDRESS ((uint64_t)0x000ffffffffff000)
-#define APIC_DEFAULT_BASE ((uint64_t)0xfee00000)
 
 #define APIC_APR 0x90
 #define APIC_PPR 0xa0
@@ -366,7 +365,7 @@ void vlapic_init(void) {
         avic_logical_table = page_alloc(1);
         avic_supported = true;
     }
-    trap_page(APIC_DEFAULT_BASE);
+    trap_page(VLAPIC_DEFAULT_BASE);
     virt_intercept_msr(MSR_IA32_APIC_BASE, true, true);
     virt_intercept_msr(MSR_IA32_XAPIC_DISABLE_STATUS, true, true);
     for (size_t msr = MSR_X2APIC_FIRST; msr <= MSR_X2APIC_LAST; msr++) {
@@ -934,7 +933,7 @@ void vlapic_reset(struct vcpu *v) {
 void vlapic_create(struct vcpu *v) {
     struct vlapic *vl = kmalloc(sizeof(struct vlapic));
     *vl = (struct vlapic){
-        .base = APIC_DEFAULT_BASE | APIC_BASE_EN
+        .base = VLAPIC_DEFAULT_BASE | APIC_BASE_EN
             | (v->cpu->bsp ? APIC_BASE_BSP : 0),
         .id = v->cpu->apic_id,
     };
