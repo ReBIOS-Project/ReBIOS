@@ -97,6 +97,12 @@
 // Arguments CALL takes besides the method's index and argument count.
 #define CALL_ARGS 5
 
+// The errors and the masked capabilities in the first DWORD of an _OSC's
+// result, ACPI 6.6, 6.2.12.
+#define OSC_ERRORS 0x0000000e
+#define OSC_MASKED 0x00000010
+#define OSC_DWORDS_MAX 16
+
 // The PM1 and GPE bits the guest sees: power button, and GPE 0 for the
 // notifications the firmware's AML sends, ACPI 1.0b, 4.7.3.
 #define PM1_PWRBTN 0x0100
@@ -2426,22 +2432,105 @@ static uacpi_object *slot_object(size_t slot) {
     }
 }
 
-static void mailbox_call(size_t index, uint32_t argc) {
-    if (index >= vacpi.method_count || argc > MBX_SLOT_COUNT) {
-        write_result(NULL, 1);
-        return;
-    }
+// Evaluates a method with the arguments in the slots, made anew for each
+// evaluation, as the method may change them.
+static uacpi_status eval_slots(
+    uacpi_namespace_node *node, uint32_t argc, uacpi_object **ret
+) {
     uacpi_object *args[MBX_SLOT_COUNT];
     for (size_t i = 0; i < argc; i++) {
         args[i] = slot_object(i);
     }
     uacpi_object_array array = { .objects = args, .count = argc };
-    uacpi_object *ret = NULL;
     uacpi_status status = uacpi_eval(
-        vacpi.methods[index].node, NULL, argc != 0 ? &array : NULL, &ret
+        node, NULL, argc != 0 ? &array : NULL, ret
     );
     for (size_t i = 0; i < argc; i++) {
         uacpi_object_unref(args[i]);
+    }
+    return status;
+}
+
+// The DWORDs of an _OSC's result, false where it is not a buffer of at least
+// count of them.
+static bool osc_dwords(uacpi_object *obj, uint32_t *dwords, size_t count) {
+    uacpi_data_view view;
+    if (obj == NULL || uacpi_object_get_type(obj) != UACPI_OBJECT_BUFFER
+     || uacpi_object_get_string_or_buffer(obj, &view) != UACPI_STATUS_OK
+     || view.length < count * 4) {
+        return false;
+    }
+    memcpy(dwords, view.const_bytes, count * 4);
+    return true;
+}
+
+static bool is_primary_osc(uacpi_namespace_node *node) {
+    uacpi_object_name name = uacpi_namespace_node_name(node);
+    return vacpi.merged_count != 0 && memcmp(name.text, "_OSC", 4) == 0
+        && uacpi_namespace_node_parent(node) == vacpi.primary;
+}
+
+// The guest's one host bridge stands for all of the firmware's, so its _OSC
+// lets the guest take control only of what all of theirs do: the set bits of
+// the DWORDs after the first, whose errors and masked capabilities it
+// returns (ACPI 6.6, 6.2.12). One without an _OSC, or with an _OSC that
+// fails, lets it take nothing. False where the result cannot be made.
+static bool osc_merge(uacpi_object **ret, uint32_t argc) {
+    uint32_t granted[OSC_DWORDS_MAX];
+    uacpi_data_view view;
+    if (*ret == NULL || uacpi_object_get_type(*ret) != UACPI_OBJECT_BUFFER
+     || uacpi_object_get_string_or_buffer(*ret, &view) != UACPI_STATUS_OK
+     || view.length < 8 || view.length > sizeof(granted)
+     || view.length % 4 != 0) {
+        return true;
+    }
+    size_t count = view.length / 4;
+    memcpy(granted, view.const_bytes, count * 4);
+    if ((granted[0] & OSC_ERRORS) != 0) {
+        return true;
+    }
+    uint32_t primary[OSC_DWORDS_MAX];
+    memcpy(primary, granted, count * 4);
+    for (size_t i = 0; i < vacpi.merged_count; i++) {
+        uint32_t other[OSC_DWORDS_MAX];
+        uacpi_namespace_node *osc;
+        uacpi_status found = uacpi_namespace_node_find(
+            vacpi.merged[i].node, "_OSC", &osc
+        );
+        uacpi_object *result = NULL;
+        bool usable = found == UACPI_STATUS_OK
+            && eval_slots(osc, argc, &result) == UACPI_STATUS_OK
+            && osc_dwords(result, other, count)
+            && (other[0] & OSC_ERRORS) == 0;
+        uacpi_object_unref(result);
+        for (size_t d = 1; d < count; d++) {
+            granted[d] &= usable ? other[d] : 0;
+        }
+    }
+    for (size_t d = 1; d < count; d++) {
+        if (granted[d] != primary[d]) {
+            granted[0] |= OSC_MASKED;
+        }
+    }
+    uacpi_object_unref(*ret);
+    uacpi_data_view out = {
+        .const_bytes = (const uint8_t *)granted, .length = count * 4
+    };
+    *ret = uacpi_object_create_buffer(out);
+    return *ret != NULL;
+}
+
+static void mailbox_call(size_t index, uint32_t argc) {
+    if (index >= vacpi.method_count || argc > MBX_SLOT_COUNT) {
+        write_result(NULL, 1);
+        return;
+    }
+    uacpi_namespace_node *node = vacpi.methods[index].node;
+    uacpi_object *ret = NULL;
+    uacpi_status status = eval_slots(node, argc, &ret);
+    if (status == UACPI_STATUS_OK && is_primary_osc(node)
+     && !osc_merge(&ret, argc)) {
+        status = UACPI_STATUS_OUT_OF_MEMORY;
     }
     if (status != UACPI_STATUS_OK) {
         const char *path = uacpi_namespace_node_generate_absolute_path(
@@ -2592,6 +2681,11 @@ static uacpi_status notify(
     uacpi_handle ctx, uacpi_namespace_node *node, uacpi_u64 value
 ) {
     (void)ctx;
+    // The guest has the _OSC of the host bridges below its own in its own,
+    // which 8 has the OS evaluate again, ACPI 6.6, 6.2.12.
+    if (value == 8 && merged_of(node) != NULL) {
+        node = vacpi.primary;
+    }
     uint32_t target = UINT32_MAX;
     for (size_t i = 0; i < vacpi.target_count; i++) {
         if (vacpi.targets[i] == node) {
