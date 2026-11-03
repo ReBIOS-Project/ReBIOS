@@ -52,15 +52,17 @@
 // points the guest at host memory or at hardware the hypervisor keeps for
 // itself, but for the HPETs hidden from it.
 static const char *const kept[] = {
-    "APIC", "HPET", "MCFG", "MSDM", "SLIC", "SPCR", "DBGP", "DBG2", "WAET",
-    "WSMT", "VFCT", "BOOT",
+    "APIC", "HPET", "MSDM", "SLIC", "SPCR", "DBGP", "DBG2", "WAET", "WSMT",
+    "VFCT", "BOOT",
 };
 
-// A table of the guest's, and where it goes among them.
+// A table of the guest's, and where it goes among them, from the firmware's
+// or made, then freed.
 struct piece {
     const uint8_t *src;
     size_t length;
     size_t offset;
+    uint8_t *made;
 };
 
 static uint32_t read32(const uint8_t *p) {
@@ -171,25 +173,41 @@ static void madt_hide_cpus(uint8_t *madt, size_t length) {
     }
 }
 
-// The guest's configuration space window, where the PCI plan put it, in the
-// place of the firmware's first. Returns the new length.
-static uint32_t mcfg_fix(uint8_t *mcfg, size_t length) {
+// The guest's configuration space window, where the PCI plan put it, for the
+// guest's one segment, under the firmware's table's header: none where the
+// guest has none.
+static uint8_t *mcfg_make(const uint8_t *mcfg, size_t *length) {
     const struct pci_plan *plan = pci_plan();
-    uint32_t out = sizeof(struct acpi_mcfg);
-    if (plan != NULL && plan->ecam != 0
-     && length >= out + sizeof(struct acpi_mcfg_allocation)) {
-        struct acpi_mcfg_allocation e;
-        memcpy(&e, mcfg + out, sizeof(struct acpi_mcfg_allocation));
-        e.address = plan->ecam;
-        e.segment = 0;
-        e.start_bus = 0;
-        e.end_bus = plan->bus_end;
-        memcpy(mcfg + out, &e, sizeof(struct acpi_mcfg_allocation));
-        out += sizeof(struct acpi_mcfg_allocation);
+    if (plan == NULL || plan->ecam == 0) {
+        return NULL;
     }
-    write32(mcfg + SDT_LENGTH, out);
-    checksum_set(mcfg, out, SDT_CHECKSUM);
-    return out;
+    size_t size = sizeof(struct acpi_mcfg)
+        + sizeof(struct acpi_mcfg_allocation);
+    uint8_t *made = kmalloc(size);
+    memset(made, 0, size);
+    memcpy(made, mcfg, SDT_HEADER_SIZE);
+    struct acpi_mcfg_allocation entry = {
+        .address = plan->ecam, .segment = 0, .start_bus = 0,
+        .end_bus = plan->bus_end
+    };
+    memcpy(
+        made + sizeof(struct acpi_mcfg), &entry,
+        sizeof(struct acpi_mcfg_allocation)
+    );
+    write32(made + SDT_LENGTH, (uint32_t)size);
+    checksum_set(made, size, SDT_CHECKSUM);
+    *length = size;
+    return made;
+}
+
+// The guest's version of a table that the hypervisor makes rather than
+// copies, in *made, NULL where the guest has none: false for other tables.
+static bool table_made(const uint8_t *table, uint8_t **made, size_t *length) {
+    if (memcmp(table, "MCFG", 4) == 0) {
+        *made = mcfg_make(table, length);
+        return true;
+    }
+    return false;
 }
 
 static bool table_kept(const uint8_t *table) {
@@ -220,20 +238,27 @@ bool guest_acpi_build(uint8_t rsdp[GUEST_ACPI_RSDP_SIZE]) {
     const uint8_t *root = host != NULL ? host_root(host, &entry_size) : NULL;
     size_t count = root != NULL ? root_count(root, entry_size) : 0;
 
-    // The FADT, the copies, then the DSDT, which only the FADT lists.
+    // The FADT, the other tables, then the DSDT, which only the FADT lists.
     struct piece *pieces = kmalloc((count + 2) * sizeof(struct piece));
     uint32_t tables = 0;
-    pieces[tables++] = (struct piece){ NULL, VACPI_FADT_SIZE, 0 };
+    pieces[tables++] = (struct piece){ NULL, VACPI_FADT_SIZE, 0, NULL };
     for (size_t i = 0; i < count; i++) {
         const uint8_t *table = host_table(root_entry(root, entry_size, i));
-        if (table != NULL && table_kept(table)) {
-            pieces[tables++] = (struct piece){
-                table, read32(table + SDT_LENGTH), 0
-            };
+        if (table == NULL) {
+            continue;
+        }
+        size_t length = read32(table + SDT_LENGTH);
+        uint8_t *made = NULL;
+        if (table_made(table, &made, &length)) {
+            if (made != NULL) {
+                pieces[tables++] = (struct piece){ made, length, 0, made };
+            }
+        } else if (table_kept(table)) {
+            pieces[tables++] = (struct piece){ table, length, 0, NULL };
         }
     }
     uint32_t dsdt_piece = tables;
-    pieces[dsdt_piece] = (struct piece){ dsdt, dsdt_length, 0 };
+    pieces[dsdt_piece] = (struct piece){ dsdt, dsdt_length, 0, NULL };
 
     size_t offset = 0;
     for (size_t i = 0; i <= dsdt_piece; i++) {
@@ -247,24 +272,26 @@ bool guest_acpi_build(uint8_t rsdp[GUEST_ACPI_RSDP_SIZE]) {
     uintptr_t base = layout_take(total, TABLE_ALIGN, E820_ACPI);
     // The OS keeps what it shares with itself across reclaiming the tables.
     uint32_t facs = layout_take(VACPI_FACS_SIZE, FACS_ALIGN, E820_NVS);
-    if (base == 0 || facs == 0) {
+    uint8_t *copy = NULL;
+    if (base != 0 && facs != 0) {
+        copy = kmalloc(total);
+        for (size_t i = 1; i <= dsdt_piece; i++) {
+            memcpy(copy + pieces[i].offset, pieces[i].src, pieces[i].length);
+        }
+    }
+    for (size_t i = 1; i < tables; i++) {
+        kfree(pieces[i].made);
+    }
+    if (copy == NULL) {
         printf("No room in the guest's memory for its ACPI tables\n");
         kfree(pieces);
         kfree(dsdt);
         return false;
     }
-
-    uint8_t *copy = kmalloc(total);
-    for (size_t i = 1; i <= dsdt_piece; i++) {
-        memcpy(copy + pieces[i].offset, pieces[i].src, pieces[i].length);
-    }
     for (size_t i = 1; i < tables; i++) {
         uint8_t *table = copy + pieces[i].offset;
         if (memcmp(table, "APIC", 4) == 0) {
             madt_hide_cpus(table, pieces[i].length);
-        } else if (memcmp(table, "MCFG", 4) == 0
-                && pieces[i].length >= sizeof(struct acpi_mcfg)) {
-            pieces[i].length = mcfg_fix(table, pieces[i].length);
         }
     }
     vacpi_fadt(copy, facs, base + pieces[dsdt_piece].offset);
