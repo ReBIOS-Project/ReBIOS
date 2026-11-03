@@ -290,6 +290,10 @@ it adds back of the legacy PC:
   for them, as a BIOS's legacy USB support does: USB keyboards and mice reach
   legacy OSes as PS/2 ones, and SeaBIOS boots from USB disks. An OS without a
   USB driver keeps its keyboard, whichever USB controller it is on.
+- **One PCI host bridge.** On machines with several PCI host bridges or PCI
+  segments, the OS sees one host bridge, with the other root buses behind
+  ports on its bus 0, so OSes that know only one host bridge, or only segment
+  0, still find every device.
 - **A PC's memory map.** The OS gets memory from 1 MiB up to 4 GiB as
   contiguous as the firmware's reserved ranges allow, wherever the machine's
   memory actually is; its own copy of the SMBIOS tables; the option ROMs and
