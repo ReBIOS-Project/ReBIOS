@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -112,8 +113,8 @@ static struct hv_timer tick;
 // Where exits are slow: when the 8259 took the tick in service, on which CPU,
 // whether its handler has yet to return, and until when the next tick is held.
 static uint64_t tick_begun;
-static const struct cpu *tick_cpu;
-static bool tick_returning;
+static _Atomic(const struct cpu *) tick_cpu;
+static _Atomic(bool) tick_returning;
 static uint64_t tick_held_until;
 // An edge from the host's line waits with the 8254's.
 static bool host_edge;
@@ -144,13 +145,12 @@ static uint32_t highest(const struct channel *c) {
 }
 
 static uint32_t from_bcd(uint32_t value) {
-    return ((value >> 12) & 0xf) * 1000 + ((value >> 8) & 0xf) * 100
-        + ((value >> 4) & 0xf) * 10 + (value & 0xf);
+    return ((value >> 12) & 0xf) * 1000 + ((value >> 8) & 0xf) * 100 + ((value >> 4) & 0xf) * 10
+         + (value & 0xf);
 }
 
 static uint32_t to_bcd(uint32_t value) {
-    return value / 1000 % 10 << 12 | value / 100 % 10 << 8
-        | value / 10 % 10 << 4 | value % 10;
+    return value / 1000 % 10 << 12 | value / 100 % 10 << 8 | value / 10 % 10 << 4 | value % 10;
 }
 
 // Mode 3 counts by two, from an odd count by one first while OUT is high, and
@@ -248,8 +248,8 @@ void pit_tick_begun(void) {
     if (cpu_exits_slow()) {
         spinlock_acquire(&lock);
         tick_begun = rdtsc();
-        __atomic_store_n(&tick_cpu, this_cpu(), __ATOMIC_RELAXED);
-        __atomic_store_n(&tick_returning, false, __ATOMIC_RELAXED);
+        atomic_store_explicit(&tick_cpu, this_cpu(), memory_order_relaxed);
+        atomic_store_explicit(&tick_returning, false, memory_order_relaxed);
         hv_timer_set(&tick, tick_begun + time_tsc_hz() / TICK_RECHECK_HZ);
         spinlock_release(&lock);
     }
@@ -258,23 +258,23 @@ void pit_tick_begun(void) {
 void pit_tick_ended(void) {
     spinlock_acquire(&lock);
     if (tick_begun != 0) {
-        __atomic_store_n(&tick_returning, true, __ATOMIC_RELAXED);
+        atomic_store_explicit(&tick_returning, true, memory_order_relaxed);
     }
     spinlock_release(&lock);
 }
 
 bool pit_tick_returning(const struct cpu *cpu) {
-    return __atomic_load_n(&tick_returning, __ATOMIC_RELAXED)
-        && __atomic_load_n(&tick_cpu, __ATOMIC_RELAXED) == cpu;
+    return atomic_load_explicit(&tick_returning, memory_order_relaxed)
+        && atomic_load_explicit(&tick_cpu, memory_order_relaxed) == cpu;
 }
 
 void pit_tick_returned(void) {
     spinlock_acquire(&lock);
-    if (tick_returning) {
+    if (atomic_load_explicit(&tick_returning, memory_order_relaxed)) {
         uint64_t now = rdtsc();
         tick_held_until = now + (now - tick_begun);
         tick_begun = 0;
-        __atomic_store_n(&tick_returning, false, __ATOMIC_RELAXED);
+        atomic_store_explicit(&tick_returning, false, memory_order_relaxed);
         uint64_t next = 0;
         if (host_edge) {
             next = tick_held_until;
@@ -292,7 +292,7 @@ bool pit_tick_held(bool in_service) {
         return false;
     }
     spinlock_acquire(&lock);
-    bool wait = in_service || tick_returning;
+    bool wait = in_service || atomic_load_explicit(&tick_returning, memory_order_relaxed);
     bool held = wait || rdtsc() < tick_held_until;
     if (held) {
         host_edge = true;
@@ -310,7 +310,7 @@ static void tick_fired(void *ctx) {
     bool in_service = cpu_exits_slow() && irq_tick_in_service();
     uint64_t now = rdtsc();
     spinlock_acquire(&lock);
-    if (in_service || tick_returning) {
+    if (in_service || atomic_load_explicit(&tick_returning, memory_order_relaxed)) {
         hv_timer_set(&tick, now + time_tsc_hz() / TICK_RECHECK_HZ);
         spinlock_release(&lock);
         return;
@@ -321,8 +321,7 @@ static void tick_fired(void *ctx) {
         return;
     }
     struct channel *c = &channels[0];
-    bool edge = counter_0_edge != 0 && c->running
-        && counted(c, now) >= counter_0_edge;
+    bool edge = counter_0_edge != 0 && c->running && counted(c, now) >= counter_0_edge;
     schedule_counter_0(now);
     bool waited = host_edge;
     host_edge = false;
@@ -369,11 +368,10 @@ static void latch_status(struct channel *c, uint64_t now) {
     if (c->status_latched) {
         return;
     }
-    bool null_count = !c->loaded
-        || (c->running && ticks_since(c->start, now) == 0);
+    bool null_count = !c->loaded || (c->running && ticks_since(c->start, now) == 0);
     c->status = (uint8_t)((out_level(c, now) ? STATUS_OUT : 0)
-        | (null_count ? STATUS_NULL_COUNT : 0) | c->access << ACCESS_SHIFT
-        | c->mode << MODE_SHIFT | (c->bcd ? CONTROL_BCD : 0));
+                        | (null_count ? STATUS_NULL_COUNT : 0) | c->access << ACCESS_SHIFT
+                        | c->mode << MODE_SHIFT | (c->bcd ? CONTROL_BCD : 0));
     c->status_latched = true;
 }
 
@@ -467,13 +465,11 @@ static uint8_t counter_read(size_t index) {
     } else if (state == ACCESS_WORD_HIGH) {
         c->read_state = ACCESS_WORD;
     }
-    return (uint8_t)(state == ACCESS_HIGH || state == ACCESS_WORD_HIGH
-        ? count >> 8 : count);
+    return (uint8_t)(state == ACCESS_HIGH || state == ACCESS_WORD_HIGH ? count >> 8 : count);
 }
 
 static void counters_access(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in,
-    uint32_t *value
+    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
 ) {
     (void)v;
     (void)ctx;
@@ -487,8 +483,7 @@ static void counters_access(
             } else if (port > OFFSET_CONTROL) {
                 byte = inb((uint16_t)(PORT_COUNTER_FIRST + port));
             }
-            *value = (*value & ~((uint32_t)0xff << (8 * i)))
-                | (uint32_t)byte << (8 * i);
+            *value = (*value & ~((uint32_t)0xff << (8 * i))) | (uint32_t)byte << (8 * i);
             continue;
         }
         uint8_t byte = (uint8_t)(*value >> (8 * i));
@@ -545,8 +540,7 @@ static void speaker_gate(bool gate) {
 }
 
 static void nmi_status_access(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in,
-    uint32_t *value
+    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
 ) {
     (void)v;
     (void)ctx;
@@ -556,11 +550,11 @@ static void nmi_status_access(
     if (in) {
         // The chipset's own status bits, where it has any.
         uint8_t real = inb(PORT_NMI_STATUS);
-        uint8_t byte = (uint8_t)(nmi_written
-            | (real != 0xff ? real & NMI_STATUS_BITS : 0)
-            | (ticks_since(boot_tsc, now) / REFRESH_TICKS % 2 != 0
-                ? NMI_REFRESH : 0)
-            | (out_level(&channels[CHANNEL_SPEAKER], now) ? NMI_OUT2 : 0));
+        uint8_t chipset = real != 0xff ? real & NMI_STATUS_BITS : 0;
+        bool refresh = ticks_since(boot_tsc, now) / REFRESH_TICKS % 2 != 0;
+        bool out2 = out_level(&channels[CHANNEL_SPEAKER], now);
+        uint8_t byte = (uint8_t)(nmi_written | chipset | (refresh ? NMI_REFRESH : 0)
+                               | (out2 ? NMI_OUT2 : 0));
         *value = (*value & ~(uint32_t)0xff) | byte;
     } else {
         nmi_written = (uint8_t)*value & NMI_WRITABLE;
@@ -571,8 +565,7 @@ static void nmi_status_access(
     for (size_t i = 1; i < size; i++) {
         uint16_t port = (uint16_t)(PORT_NMI_STATUS + i);
         if (in) {
-            *value = (*value & ~((uint32_t)0xff << (8 * i)))
-                | (uint32_t)inb(port) << (8 * i);
+            *value = (*value & ~((uint32_t)0xff << (8 * i))) | (uint32_t)inb(port) << (8 * i);
         } else {
             outb(port, (uint8_t)(*value >> (8 * i)));
         }
@@ -599,12 +592,8 @@ void pit_init(void) {
     tick.fired = tick_fired;
     hv_timer_add(&tick);
 
-    struct io_handler counters = {
-        PORT_COUNTER_FIRST, PORT_COUNT, counters_access, NULL
-    };
+    struct io_handler counters = { PORT_COUNTER_FIRST, PORT_COUNT, counters_access, NULL };
     io_register(&counters);
-    struct io_handler nmi_status = {
-        PORT_NMI_STATUS, 1, nmi_status_access, NULL
-    };
+    struct io_handler nmi_status = { PORT_NMI_STATUS, 1, nmi_status_access, NULL };
     io_register(&nmi_status);
 }

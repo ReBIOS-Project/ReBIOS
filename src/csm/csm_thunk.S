@@ -17,19 +17,17 @@
 
 #include <virt/hypercall.h>
 
-    /*
-     * The real-mode code through which the guest calls the CSM16, run with CS
-     * at its start. The hypervisor sets up each call's registers and far
-     * pointer; the call's AX and BX come back to it through a hypercall, which
-     * on SVM is patched to VMMCALL.
-     */
-    .section .rodata
-    .globl csm_thunk_start
-    .globl csm_thunk_hypercall
-    .globl csm_thunk_halt
-    .globl csm_thunk_entry
-    .globl csm_thunk_end
-    .code16
+// The real-mode code through which the guest calls the CSM16, run with CS at
+// its start. The hypervisor sets up each call's registers and far pointer; the
+// call's AX and BX come back to it through a hypercall, which on SVM is
+// patched to VMMCALL.
+.section .rodata
+.globl csm_thunk_start
+.globl csm_thunk_hypercall
+.globl csm_thunk_halt
+.globl csm_thunk_entry
+.globl csm_thunk_end
+.code16
 csm_thunk_start:
     lcallw *%cs:(csm_thunk_entry - csm_thunk_start)
     movl %eax, %esi
@@ -41,9 +39,9 @@ csm_thunk_halt:
     cli
     hlt
     jmp csm_thunk_halt
-    .balign 4
+.balign 4
 csm_thunk_entry:
-    .word 0
-    .word 0
+.word 0
+.word 0
 csm_thunk_end:
-    .code64
+.code64

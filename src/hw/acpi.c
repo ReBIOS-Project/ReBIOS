@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -65,7 +66,7 @@ struct io_range {
 };
 
 struct semaphore {
-    uint64_t units;
+    _Atomic(uint64_t) units;
     bool event;
 };
 
@@ -96,10 +97,10 @@ static struct work *work_tail;
 // whichever CPU. Whether it has work, which lasts until the task ran out of
 // it, whether a CPU runs it, and whether only the boot processor may.
 static struct task aml_task;
-static bool aml_started;
-static bool aml_wanted;
-static bool aml_running;
-static bool aml_bsp;
+static _Atomic(bool) aml_started;
+static _Atomic(bool) aml_wanted;
+static _Atomic(bool) aml_running;
+static _Atomic(bool) aml_bsp;
 
 uacpi_status uacpi_kernel_get_rsdp(uacpi_phys_addr *out_rsdp_address) {
     if (core_handoff->acpi_rsdp == 0) {
@@ -151,9 +152,7 @@ void uacpi_kernel_log(uacpi_log_level level, const uacpi_char *message) {
     printf("uACPI %s: %s%s", name, message, newline ? "" : "\n");
 }
 
-uacpi_status uacpi_kernel_pci_device_open(
-    uacpi_pci_address address, uacpi_handle *out_handle
-) {
+uacpi_status uacpi_kernel_pci_device_open(uacpi_pci_address address, uacpi_handle *out_handle) {
     struct pci_addr *addr = kmalloc(sizeof(struct pci_addr));
     addr->segment = address.segment;
     addr->bus = address.bus;
@@ -189,54 +188,40 @@ static uacpi_status pci_write(
     return UACPI_STATUS_OK;
 }
 
-uacpi_status uacpi_kernel_pci_read8(
-    uacpi_handle device, uacpi_size offset, uacpi_u8 *value
-) {
+uacpi_status uacpi_kernel_pci_read8(uacpi_handle device, uacpi_size offset, uacpi_u8 *value) {
     uint32_t v = 0;
     uacpi_status status = pci_read(device, offset, 1, &v);
     *value = (uacpi_u8)v;
     return status;
 }
 
-uacpi_status uacpi_kernel_pci_read16(
-    uacpi_handle device, uacpi_size offset, uacpi_u16 *value
-) {
+uacpi_status uacpi_kernel_pci_read16(uacpi_handle device, uacpi_size offset, uacpi_u16 *value) {
     uint32_t v = 0;
     uacpi_status status = pci_read(device, offset, 2, &v);
     *value = (uacpi_u16)v;
     return status;
 }
 
-uacpi_status uacpi_kernel_pci_read32(
-    uacpi_handle device, uacpi_size offset, uacpi_u32 *value
-) {
+uacpi_status uacpi_kernel_pci_read32(uacpi_handle device, uacpi_size offset, uacpi_u32 *value) {
     uint32_t v = 0;
     uacpi_status status = pci_read(device, offset, 4, &v);
     *value = v;
     return status;
 }
 
-uacpi_status uacpi_kernel_pci_write8(
-    uacpi_handle device, uacpi_size offset, uacpi_u8 value
-) {
+uacpi_status uacpi_kernel_pci_write8(uacpi_handle device, uacpi_size offset, uacpi_u8 value) {
     return pci_write(device, offset, 1, value);
 }
 
-uacpi_status uacpi_kernel_pci_write16(
-    uacpi_handle device, uacpi_size offset, uacpi_u16 value
-) {
+uacpi_status uacpi_kernel_pci_write16(uacpi_handle device, uacpi_size offset, uacpi_u16 value) {
     return pci_write(device, offset, 2, value);
 }
 
-uacpi_status uacpi_kernel_pci_write32(
-    uacpi_handle device, uacpi_size offset, uacpi_u32 value
-) {
+uacpi_status uacpi_kernel_pci_write32(uacpi_handle device, uacpi_size offset, uacpi_u32 value) {
     return pci_write(device, offset, 4, value);
 }
 
-uacpi_status uacpi_kernel_io_map(
-    uacpi_io_addr base, uacpi_size len, uacpi_handle *out_handle
-) {
+uacpi_status uacpi_kernel_io_map(uacpi_io_addr base, uacpi_size len, uacpi_handle *out_handle) {
     if (base > 0xffff || len > 0x10000 - base) {
         return UACPI_STATUS_INVALID_ARGUMENT;
     }
@@ -251,9 +236,7 @@ void uacpi_kernel_io_unmap(uacpi_handle handle) {
     kfree(handle);
 }
 
-static bool io_port(
-    uacpi_handle handle, uacpi_size offset, size_t size, uint16_t *port
-) {
+static bool io_port(uacpi_handle handle, uacpi_size offset, size_t size, uint16_t *port) {
     const struct io_range *range = handle;
     if (offset > range->length || range->length - offset < size) {
         return false;
@@ -262,9 +245,7 @@ static bool io_port(
     return true;
 }
 
-uacpi_status uacpi_kernel_io_read8(
-    uacpi_handle handle, uacpi_size offset, uacpi_u8 *out_value
-) {
+uacpi_status uacpi_kernel_io_read8(uacpi_handle handle, uacpi_size offset, uacpi_u8 *out_value) {
     uint16_t port;
     if (!io_port(handle, offset, 1, &port)) {
         return UACPI_STATUS_INVALID_ARGUMENT;
@@ -273,9 +254,7 @@ uacpi_status uacpi_kernel_io_read8(
     return UACPI_STATUS_OK;
 }
 
-uacpi_status uacpi_kernel_io_read16(
-    uacpi_handle handle, uacpi_size offset, uacpi_u16 *out_value
-) {
+uacpi_status uacpi_kernel_io_read16(uacpi_handle handle, uacpi_size offset, uacpi_u16 *out_value) {
     uint16_t port;
     if (!io_port(handle, offset, 2, &port)) {
         return UACPI_STATUS_INVALID_ARGUMENT;
@@ -284,9 +263,7 @@ uacpi_status uacpi_kernel_io_read16(
     return UACPI_STATUS_OK;
 }
 
-uacpi_status uacpi_kernel_io_read32(
-    uacpi_handle handle, uacpi_size offset, uacpi_u32 *out_value
-) {
+uacpi_status uacpi_kernel_io_read32(uacpi_handle handle, uacpi_size offset, uacpi_u32 *out_value) {
     uint16_t port;
     if (!io_port(handle, offset, 4, &port)) {
         return UACPI_STATUS_INVALID_ARGUMENT;
@@ -295,9 +272,7 @@ uacpi_status uacpi_kernel_io_read32(
     return UACPI_STATUS_OK;
 }
 
-uacpi_status uacpi_kernel_io_write8(
-    uacpi_handle handle, uacpi_size offset, uacpi_u8 in_value
-) {
+uacpi_status uacpi_kernel_io_write8(uacpi_handle handle, uacpi_size offset, uacpi_u8 in_value) {
     uint16_t port;
     if (!io_port(handle, offset, 1, &port)) {
         return UACPI_STATUS_INVALID_ARGUMENT;
@@ -306,9 +281,7 @@ uacpi_status uacpi_kernel_io_write8(
     return UACPI_STATUS_OK;
 }
 
-uacpi_status uacpi_kernel_io_write16(
-    uacpi_handle handle, uacpi_size offset, uacpi_u16 in_value
-) {
+uacpi_status uacpi_kernel_io_write16(uacpi_handle handle, uacpi_size offset, uacpi_u16 in_value) {
     uint16_t port;
     if (!io_port(handle, offset, 2, &port)) {
         return UACPI_STATUS_INVALID_ARGUMENT;
@@ -317,9 +290,7 @@ uacpi_status uacpi_kernel_io_write16(
     return UACPI_STATUS_OK;
 }
 
-uacpi_status uacpi_kernel_io_write32(
-    uacpi_handle handle, uacpi_size offset, uacpi_u32 in_value
-) {
+uacpi_status uacpi_kernel_io_write32(uacpi_handle handle, uacpi_size offset, uacpi_u32 in_value) {
     uint16_t port;
     if (!io_port(handle, offset, 4, &port)) {
         return UACPI_STATUS_INVALID_ARGUMENT;
@@ -362,13 +333,12 @@ void uacpi_kernel_sleep(uacpi_u64 msec) {
 }
 
 static bool timed_out(uint64_t start_ns, uacpi_u16 timeout_ms) {
-    return timeout_ms != WAIT_FOREVER
-        && time_ns() - start_ns >= (uint64_t)timeout_ms * 1000000;
+    return timeout_ms != WAIT_FOREVER && time_ns() - start_ns >= (uint64_t)timeout_ms * 1000000;
 }
 
 uacpi_handle uacpi_kernel_create_semaphore(uacpi_u32 initial_units) {
     struct semaphore *semaphore = kmalloc(sizeof(struct semaphore));
-    semaphore->units = initial_units;
+    atomic_init(&semaphore->units, initial_units);
     semaphore->event = initial_units == 0;
     return semaphore;
 }
@@ -377,20 +347,17 @@ void uacpi_kernel_free_semaphore(uacpi_handle handle) {
     kfree(handle);
 }
 
-uacpi_status uacpi_kernel_wait_for_semaphore(
-    uacpi_handle handle, uacpi_u16 timeout
-) {
+uacpi_status uacpi_kernel_wait_for_semaphore(uacpi_handle handle, uacpi_u16 timeout) {
     struct semaphore *semaphore = handle;
     if (timeout == WAIT_FOREVER && semaphore->event) {
         timeout = FOREVER_POLL_MS;
     }
     uintptr_t start = time_ns();
     for (;;) {
-        uint64_t units = __atomic_load_n(&semaphore->units, __ATOMIC_RELAXED);
+        uint64_t units = atomic_load_explicit(&semaphore->units, memory_order_relaxed);
         while (units != 0) {
-            bool taken = __atomic_compare_exchange_n(
-                &semaphore->units, &units, units - 1, false, __ATOMIC_ACQUIRE,
-                __ATOMIC_RELAXED
+            bool taken = atomic_compare_exchange_strong_explicit(
+                &semaphore->units, &units, units - 1, memory_order_acquire, memory_order_relaxed
             );
             if (taken) {
                 return UACPI_STATUS_OK;
@@ -411,7 +378,7 @@ uacpi_status uacpi_kernel_wait_for_semaphore(
 
 void uacpi_kernel_signal_semaphore(uacpi_handle handle) {
     struct semaphore *semaphore = handle;
-    __atomic_fetch_add(&semaphore->units, 1, __ATOMIC_RELEASE);
+    atomic_fetch_add_explicit(&semaphore->units, 1, memory_order_release);
 }
 
 // The AML task's mutexes stay its own on whichever CPU it carries on.
@@ -425,7 +392,13 @@ uacpi_thread_id uacpi_kernel_get_thread_id(void) {
 
 static uint64_t read_rflags(void) {
     uint64_t rflags;
-    asm volatile ("pushfq\n\tpopq %0" : "=r"(rflags) :: "memory");
+    asm volatile (
+        "pushfq\n\t"
+        "popq %0"
+        : "=r"(rflags)
+        :
+        : "memory"
+    );
     return rflags;
 }
 
@@ -457,9 +430,7 @@ void uacpi_kernel_unlock_spinlock(uacpi_handle handle, uacpi_cpu_flags flags) {
     spinlock_release(handle);
 }
 
-uacpi_status uacpi_kernel_handle_firmware_request(
-    uacpi_firmware_request *request
-) {
+uacpi_status uacpi_kernel_handle_firmware_request(uacpi_firmware_request *request) {
     switch (request->type) {
         case UACPI_FIRMWARE_REQUEST_TYPE_BREAKPOINT: {
             printf("AML breakpoint\n");
@@ -467,9 +438,8 @@ uacpi_status uacpi_kernel_handle_firmware_request(
         }
         case UACPI_FIRMWARE_REQUEST_TYPE_FATAL: {
             printf(
-                "AML fatal error, type %#x, code %#x, argument %#llx\n",
-                request->fatal.type, request->fatal.code,
-                (unsigned long long)request->fatal.arg
+                "AML fatal error, type %#x, code %#x, argument %#llx\n", request->fatal.type,
+                request->fatal.code, (unsigned long long)request->fatal.arg
             );
             break;
         }
@@ -483,8 +453,7 @@ uacpi_status uacpi_kernel_handle_firmware_request(
 
 // Kept for acpi_sci_interrupt(), whose caller connects the SCI.
 uacpi_status uacpi_kernel_install_interrupt_handler(
-    uacpi_u32 irq, uacpi_interrupt_handler handler, uacpi_handle ctx,
-    uacpi_handle *out_irq_handle
+    uacpi_u32 irq, uacpi_interrupt_handler handler, uacpi_handle ctx, uacpi_handle *out_irq_handle
 ) {
     sci_irq = irq;
     sci_handler = handler;
@@ -516,8 +485,7 @@ void uacpi_kernel_free_work_item(uacpi_handle handle) {
 // 7.3's acpi_os_execute() does, since SMIs that AML sets off from other
 // processors corrupt memory on some machines.
 void uacpi_kernel_schedule_work(
-    uacpi_work_type type, uacpi_handle work_item, uacpi_work_handler handler,
-    uacpi_handle ctx
+    uacpi_work_type type, uacpi_handle work_item, uacpi_work_handler handler, uacpi_handle ctx
 ) {
     struct work *w = work_item;
     w->next = NULL;
@@ -532,7 +500,7 @@ void uacpi_kernel_schedule_work(
     }
     work_tail = w;
     spinlock_release(&work_lock);
-    __atomic_store_n(&aml_wanted, true, __ATOMIC_SEQ_CST);
+    atomic_store_explicit(&aml_wanted, true, memory_order_seq_cst);
 }
 
 // Takes the oldest work off the queue, as a copy, since its handler may
@@ -555,18 +523,18 @@ static bool work_take(struct work *w) {
 // which alone carries the task on meanwhile.
 static void work_run(void) {
     bool in_task = task_current() != NULL;
-    bool outer = __atomic_load_n(&aml_bsp, __ATOMIC_RELAXED);
+    bool outer = atomic_load_explicit(&aml_bsp, memory_order_relaxed);
     struct work w;
     while (work_take(&w)) {
         if (in_task) {
-            __atomic_store_n(&aml_bsp, outer || w.bsp, __ATOMIC_RELEASE);
+            atomic_store_explicit(&aml_bsp, outer || w.bsp, memory_order_release);
             while (w.bsp && !this_cpu()->bsp) {
                 task_yield();
             }
         }
         w.handler(w.ctx);
         if (in_task) {
-            __atomic_store_n(&aml_bsp, outer, __ATOMIC_RELEASE);
+            atomic_store_explicit(&aml_bsp, outer, memory_order_release);
             task_yield_if_over();
         }
     }
@@ -582,7 +550,7 @@ void acpi_lock(void) {
 }
 
 void acpi_unlock(void) {
-    if (!__atomic_load_n(&aml_started, __ATOMIC_ACQUIRE)) {
+    if (!atomic_load_explicit(&aml_started, memory_order_acquire)) {
         work_run();
     }
     spinlock_release(&lock);
@@ -593,12 +561,12 @@ static void aml_main(void *arg) {
     for (;;) {
         work_run();
         // Work that comes meanwhile makes aml_wanted true again.
-        __atomic_store_n(&aml_wanted, false, __ATOMIC_SEQ_CST);
+        atomic_store_explicit(&aml_wanted, false, memory_order_seq_cst);
         spinlock_acquire(&work_lock);
         bool more = work_head != NULL;
         spinlock_release(&work_lock);
         if (more) {
-            __atomic_store_n(&aml_wanted, true, __ATOMIC_SEQ_CST);
+            atomic_store_explicit(&aml_wanted, true, memory_order_seq_cst);
         } else {
             task_yield();
         }
@@ -606,18 +574,18 @@ static void aml_main(void *arg) {
 }
 
 void acpi_slice(void) {
-    if (!acpi_working()
-     || (__atomic_load_n(&aml_bsp, __ATOMIC_ACQUIRE) && !this_cpu()->bsp)
-     || __atomic_exchange_n(&aml_running, true, __ATOMIC_ACQUIRE)) {
+    bool elsewhere = atomic_load_explicit(&aml_bsp, memory_order_acquire) && !this_cpu()->bsp;
+    if (!acpi_working() || elsewhere
+     || atomic_exchange_explicit(&aml_running, true, memory_order_acquire)) {
         return;
     }
     task_run(&aml_task);
-    __atomic_store_n(&aml_running, false, __ATOMIC_RELEASE);
+    atomic_store_explicit(&aml_running, false, memory_order_release);
 }
 
 bool acpi_working(void) {
-    return __atomic_load_n(&aml_started, __ATOMIC_ACQUIRE)
-        && __atomic_load_n(&aml_wanted, __ATOMIC_ACQUIRE);
+    return atomic_load_explicit(&aml_started, memory_order_acquire)
+        && atomic_load_explicit(&aml_wanted, memory_order_acquire);
 }
 
 bool acpi_sci_irq(uint32_t *irq) {
@@ -642,28 +610,20 @@ void acpi_namespace_start(void) {
     ec_init();
     uacpi_status status = uacpi_namespace_initialize();
     if (status != UACPI_STATUS_OK) {
-        printf(
-            "Cannot initialise the ACPI namespace: %s\n",
-            uacpi_status_to_string(status)
-        );
+        printf("Cannot initialise the ACPI namespace: %s\n", uacpi_status_to_string(status));
     }
     // Again, should _INI have undone it.
     status = uacpi_set_interrupt_model(UACPI_INTERRUPT_MODEL_IOAPIC);
     if (status != UACPI_STATUS_OK) {
-        printf(
-            "Cannot put the firmware in APIC mode: %s\n",
-            uacpi_status_to_string(status)
-        );
+        printf("Cannot put the firmware in APIC mode: %s\n", uacpi_status_to_string(status));
     }
     status = uacpi_finalize_gpe_initialization();
     if (status != UACPI_STATUS_OK) {
-        printf(
-            "Cannot enable the ACPI GPEs: %s\n", uacpi_status_to_string(status)
-        );
+        printf("Cannot enable the ACPI GPEs: %s\n", uacpi_status_to_string(status));
     }
     acpi_unlock();
     task_init(&aml_task, aml_main, NULL);
-    __atomic_store_n(&aml_started, true, __ATOMIC_RELEASE);
+    atomic_store_explicit(&aml_started, true, memory_order_release);
 }
 
 bool acpi_tables_ready(void) {
@@ -682,14 +642,9 @@ bool acpi_init(void) {
     }
 
     void *buffer = kmalloc(EARLY_TABLE_BUFFER_SIZE);
-    uacpi_status status = uacpi_setup_early_table_access(
-        buffer, EARLY_TABLE_BUFFER_SIZE
-    );
+    uacpi_status status = uacpi_setup_early_table_access(buffer, EARLY_TABLE_BUFFER_SIZE);
     if (status != UACPI_STATUS_OK) {
-        printf(
-            "Cannot access the ACPI tables: %s\n",
-            uacpi_status_to_string(status)
-        );
+        printf("Cannot access the ACPI tables: %s\n", uacpi_status_to_string(status));
         kfree(buffer);
         return false;
     }
@@ -697,29 +652,19 @@ bool acpi_init(void) {
 
     status = uacpi_initialize(0);
     if (status != UACPI_STATUS_OK) {
-        printf(
-            "Cannot initialise uACPI: %s\n", uacpi_status_to_string(status)
-        );
+        printf("Cannot initialise uACPI: %s\n", uacpi_status_to_string(status));
     } else {
         status = uacpi_namespace_load();
         if (status != UACPI_STATUS_OK) {
-            printf(
-                "Cannot load the ACPI namespace: %s\n",
-                uacpi_status_to_string(status)
-            );
+            printf("Cannot load the ACPI namespace: %s\n", uacpi_status_to_string(status));
         }
     }
 
     if (status != UACPI_STATUS_OK) {
         // uACPI drops all of its state on failure, its tables included.
-        status = uacpi_setup_early_table_access(
-            buffer, EARLY_TABLE_BUFFER_SIZE
-        );
+        status = uacpi_setup_early_table_access(buffer, EARLY_TABLE_BUFFER_SIZE);
         if (status != UACPI_STATUS_OK) {
-            printf(
-                "Cannot access the ACPI tables again: %s\n",
-                uacpi_status_to_string(status)
-            );
+            printf("Cannot access the ACPI tables again: %s\n", uacpi_status_to_string(status));
             tables_ok = false;
             kfree(buffer);
         }

@@ -19,13 +19,14 @@
 #define HW__POWER_H
 
 #include <stdbool.h>
+#include <stdnoreturn.h>
 
 // Through the firmware's reset service when the core can call it, else ACPI,
 // else the legacy reset mechanisms.
-__attribute__((noreturn)) void power_reset(bool warm);
+noreturn void power_reset(bool warm);
 
 // Through the firmware's reset service when the core can call it, else ACPI's
 // S5 sleep state.
-__attribute__((noreturn)) void power_off(void);
+noreturn void power_off(void);
 
 #endif

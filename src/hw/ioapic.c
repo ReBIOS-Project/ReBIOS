@@ -78,8 +78,7 @@ struct ioapic *ioapic_get(size_t index) {
 
 struct ioapic *ioapic_for_gsi(uint32_t gsi, uint32_t *pin) {
     for (size_t i = 0; i < count; i++) {
-        if (gsi >= ioapics[i].gsi_base
-         && gsi - ioapics[i].gsi_base < ioapics[i].pins) {
+        if (gsi >= ioapics[i].gsi_base && gsi - ioapics[i].gsi_base < ioapics[i].pins) {
             *pin = gsi - ioapics[i].gsi_base;
             return &ioapics[i];
         }
@@ -90,17 +89,14 @@ struct ioapic *ioapic_for_gsi(uint32_t gsi, uint32_t *pin) {
 static void add(const struct acpi_madt_ioapic *entry) {
     uintptr_t base = entry->address;
     if (base + IOAPIC_PAGE_SIZE > core_handoff->map_top) {
-        printf(
-            "I/O APIC %u at %#llx is out of reach\n", entry->id,
-            (unsigned long long)base
-        );
+        printf("I/O APIC %u at %#llx is out of reach\n", entry->id, (unsigned long long)base);
         return;
     }
     struct ioapic *io = &ioapics[count];
     *io = (struct ioapic){
         .base = base,
         .gsi_base = entry->gsi_base,
-        .id = entry->id,
+        .id = entry->id
     };
     io->id_reg = reg_read(io, IOAPIC_REG_ID);
     io->version = reg_read(io, IOAPIC_REG_VERSION);
@@ -112,24 +108,20 @@ static void add(const struct acpi_madt_ioapic *entry) {
     for (size_t i = 0; i < io->pins; i++) {
         uint32_t low = reg_read(io, IOAPIC_REG_REDIR(i));
         if ((low & IOAPIC_RTE_MASKED) == 0) {
-            reg_write(
-                io, IOAPIC_REG_REDIR(i), low | (uint32_t)IOAPIC_RTE_MASKED
-            );
+            reg_write(io, IOAPIC_REG_REDIR(i), low | (uint32_t)IOAPIC_RTE_MASKED);
             masked++;
         }
     }
     printf(
         "I/O APIC %u at %#llx, GSIs %u-%u: masked %u entries\n", entry->id,
-        (unsigned long long)base, entry->gsi_base,
-        entry->gsi_base + io->pins - 1, masked
+        (unsigned long long)base, entry->gsi_base, entry->gsi_base + io->pins - 1, masked
     );
 }
 
 void ioapic_init(void) {
     struct uacpi_table table;
     if (!acpi_tables_ready()
-     || uacpi_table_find_by_signature(ACPI_MADT_SIGNATURE, &table)
-     != UACPI_STATUS_OK) {
+     || uacpi_table_find_by_signature(ACPI_MADT_SIGNATURE, &table) != UACPI_STATUS_OK) {
         printf("No MADT, so no I/O APICs\n");
         return;
     }
@@ -137,14 +129,10 @@ void ioapic_init(void) {
     const uint8_t *madt = table.ptr;
     size_t length = table.hdr->length;
     // At most one I/O APIC per entry.
-    ioapics = kmalloc(
-        length / sizeof(struct acpi_madt_ioapic) * sizeof(struct ioapic)
-    );
-    for (size_t off = sizeof(struct acpi_madt);
-         off + sizeof(struct acpi_entry_hdr) <= length; ) {
+    ioapics = kmalloc(length / sizeof(struct acpi_madt_ioapic) * sizeof(struct ioapic));
+    for (size_t off = sizeof(struct acpi_madt); off + sizeof(struct acpi_entry_hdr) <= length; ) {
         const struct acpi_entry_hdr *hdr = (const void *)(madt + off);
-        if (hdr->length < sizeof(struct acpi_entry_hdr)
-         || hdr->length > length - off) {
+        if (hdr->length < sizeof(struct acpi_entry_hdr) || hdr->length > length - off) {
             break;
         }
         if (hdr->type == ACPI_MADT_ENTRY_TYPE_IOAPIC

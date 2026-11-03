@@ -32,7 +32,7 @@ static uint64_t next_search;
 static struct spinlock mm_lock;
 
 static bool page_used(size_t i) {
-    return (heap_bitmap[i / 64] >> (i % 64)) & 1;
+    return ((heap_bitmap[i / 64] >> (i % 64)) & 1) != 0;
 }
 
 static void page_mark(size_t i, bool used) {
@@ -142,7 +142,7 @@ static void split(uint64_t *entry, size_t size, bool to_4k) {
     uintptr_t base = *entry & PTE_ADDRESS & ~(size - 1);
     uint64_t flags = *entry & PTE_LARGE_FLAGS;
     if (to_4k) {
-        bool pat = *entry & PTE_PAT_LARGE;
+        bool pat = (*entry & PTE_PAT_LARGE) != 0;
         flags = (flags & ~PTE_PS) | (pat ? PTE_PAT_4K : 0);
     }
     for (size_t i = 0; i < 512; i++) {
@@ -168,9 +168,7 @@ void mm_map_device(uintptr_t base, size_t size) {
     }
     uintptr_t end = (base + size + SIZE_2M - 1) & ~(SIZE_2M - 1);
     if (end > (uint64_t)1 << 48) {
-        printf(
-            "Cannot map device registers at %#llx\n", (unsigned long long)base
-        );
+        printf("Cannot map device registers at %#llx\n", (unsigned long long)base);
         return;
     }
     spinlock_acquire(&map_lock);

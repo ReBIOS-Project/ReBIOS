@@ -123,7 +123,7 @@ static const uint8_t functionality[16] = {
     // What INT 10h AH=1Bh points to: modes 0-7, 0Dh-13h, 200, 350, and 400
     // scan lines, 8 character blocks, 2 at once, and the usual functions.
     0xff, 0xe0, 0x0f, 0x00, 0x00, 0x00, 0x00, 0x07, 0x08, 0x02, 0xff, 0x0e,
-    0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00
 };
 
 struct vgabios_display vgabios_display;
@@ -142,8 +142,8 @@ static void slice_end(void) {
 
 // Hands words to the ROM, and takes others from it, until the call goes on.
 static void exchange(
-    const uint16_t *head, size_t head_count, const uint8_t *data,
-    size_t data_words, uint16_t *into, size_t into_count
+    const uint16_t *head, size_t head_count, const uint8_t *data, size_t data_words,
+    uint16_t *into, size_t into_count
 ) {
     struct call *c = current;
     c->head = head;
@@ -159,9 +159,7 @@ static uintptr_t linear(uint16_t segment, uint16_t offset) {
     return ((uintptr_t)segment << 4) + offset;
 }
 
-static uint32_t direct_port(
-    uint16_t port, size_t size, bool in, uint32_t out
-) {
+static uint32_t direct_port(uint16_t port, size_t size, bool in, uint32_t out) {
     uint32_t value = out;
     if (!io_dispatch(current->v, port, size, in, &value)) {
         return 0xffffffff;
@@ -171,17 +169,13 @@ static uint32_t direct_port(
 
 static uint16_t direct_read(uint16_t segment, uint16_t offset, size_t size) {
     uint16_t value = 0;
-    if (!mmio_read_linear(
-        current->v, linear(segment, offset), &value, size
-    )) {
+    if (!mmio_read_linear(current->v, linear(segment, offset), &value, size)) {
         return ALL_ONES;
     }
     return value;
 }
 
-static void direct_write(
-    uint16_t segment, uint16_t offset, uint16_t value, size_t size
-) {
+static void direct_write(uint16_t segment, uint16_t offset, uint16_t value, size_t size) {
     mmio_write_linear(current->v, linear(segment, offset), &value, size);
 }
 
@@ -241,9 +235,7 @@ void bios_out_block(uint16_t port, const uint8_t *bytes, size_t count) {
 void bios_dac_from_rom(uint16_t offset, size_t count) {
     if (current->direct) {
         for (size_t i = 0; i < (size_t)256 * 3; i++) {
-            direct_port(
-                VGA_DAC_DATA, 1, false, i < count ? rom_image[offset + i] : 0
-            );
+            direct_port(VGA_DAC_DATA, 1, false, i < count ? rom_image[offset + i] : 0);
             slice_end();
         }
         return;
@@ -302,9 +294,7 @@ void pokeb(uint16_t segment, uint16_t offset, uint8_t value) {
         uint16_t head[2] = { (uint16_t)(OP_BDA_WRITE8 | offset << 8), value };
         exchange(head, 2, NULL, 0, NULL, 0);
     } else {
-        uint16_t head[3] = {
-            (uint16_t)(OP_WRITE8 | value << 8), segment, offset
-        };
+        uint16_t head[3] = { (uint16_t)(OP_WRITE8 | value << 8), segment, offset };
         exchange(head, 3, NULL, 0, NULL, 0);
     }
 }
@@ -323,29 +313,20 @@ void pokew(uint16_t segment, uint16_t offset, uint16_t value) {
     }
 }
 
-void poke_block(
-    uint16_t segment, uint16_t offset, const void *bytes, size_t count
-) {
+void poke_block(uint16_t segment, uint16_t offset, const void *bytes, size_t count) {
     const uint8_t *p = bytes;
     if (current->direct) {
         for (size_t i = 0; i + 2 <= count; i += 2) {
-            direct_write(
-                segment, (uint16_t)(offset + i),
-                (uint16_t)(p[i] | p[i + 1] << 8), 2
-            );
+            direct_write(segment, (uint16_t)(offset + i), (uint16_t)(p[i] | p[i + 1] << 8), 2);
             slice_end();
         }
         return;
     }
-    uint16_t head[4] = {
-        OP_WRITE_BLOCK, segment, offset, (uint16_t)(count / 2)
-    };
+    uint16_t head[4] = { OP_WRITE_BLOCK, segment, offset, (uint16_t)(count / 2) };
     exchange(head, 4, p, count / 2, NULL, 0);
 }
 
-void far_fill8(
-    uint16_t segment, uint16_t offset, uint8_t value, size_t count
-) {
+void far_fill8(uint16_t segment, uint16_t offset, uint8_t value, size_t count) {
     if (count == 0) {
         return;
     }
@@ -356,15 +337,11 @@ void far_fill8(
         }
         return;
     }
-    uint16_t head[4] = {
-        (uint16_t)(OP_FILL8 | value << 8), segment, offset, (uint16_t)count
-    };
+    uint16_t head[4] = { (uint16_t)(OP_FILL8 | value << 8), segment, offset, (uint16_t)count };
     exchange(head, 4, NULL, 0, NULL, 0);
 }
 
-void far_fill16(
-    uint16_t segment, uint16_t offset, uint16_t value, size_t count
-) {
+void far_fill16(uint16_t segment, uint16_t offset, uint16_t value, size_t count) {
     if (count == 0) {
         return;
     }
@@ -375,9 +352,7 @@ void far_fill16(
         }
         return;
     }
-    uint16_t head[5] = {
-        OP_FILL16, segment, offset, (uint16_t)count, value
-    };
+    uint16_t head[5] = { OP_FILL16, segment, offset, (uint16_t)count, value };
     exchange(head, 5, NULL, 0, NULL, 0);
 }
 
@@ -390,8 +365,7 @@ void far_move(uint16_t segment, uint16_t to, uint16_t from, size_t count) {
         for (size_t i = 0; i < count; i++) {
             size_t at = backwards ? count - 1 - i : i;
             direct_write(
-                segment, (uint16_t)(to + at),
-                direct_read(segment, (uint16_t)(from + at), 1), 1
+                segment, (uint16_t)(to + at), direct_read(segment, (uint16_t)(from + at), 1), 1
             );
             slice_end();
         }
@@ -406,8 +380,8 @@ void far_move(uint16_t segment, uint16_t to, uint16_t from, size_t count) {
 }
 
 void far_font(
-    uint16_t to_segment, uint16_t to, uint16_t from_segment, uint16_t from,
-    uint8_t height, size_t count
+    uint16_t to_segment, uint16_t to, uint16_t from_segment, uint16_t from, uint8_t height,
+    size_t count
 ) {
     if (count == 0) {
         return;
@@ -417,8 +391,7 @@ void far_font(
             for (size_t i = 0; i < height; i++) {
                 uint16_t source = (uint16_t)(from + c * height + i);
                 direct_write(
-                    to_segment, (uint16_t)(to + c * 32 + i),
-                    peekb(from_segment, source), 1
+                    to_segment, (uint16_t)(to + c * 32 + i), peekb(from_segment, source), 1
                 );
             }
             slice_end();
@@ -426,8 +399,7 @@ void far_font(
         return;
     }
     uint16_t head[6] = {
-        (uint16_t)(OP_FONT | height << 8), to_segment, to, from_segment, from,
-        (uint16_t)count
+        (uint16_t)(OP_FONT | height << 8), to_segment, to, from_segment, from, (uint16_t)count
     };
     exchange(head, 6, NULL, 0, NULL, 0);
 }
@@ -477,9 +449,7 @@ static void frame_load(struct call *c) {
 }
 
 // What the call changed, back in the registers the ROM saved.
-static void registers_give(
-    struct call *c, const struct vgabios_regs *before
-) {
+static void registers_give(struct call *c, const struct vgabios_regs *before) {
     static const uint8_t offsets[REGISTER_COUNT] = {
         FRAME_AX, FRAME_BX, FRAME_CX, FRAME_DX, FRAME_DI, FRAME_BP, FRAME_ES
     };
@@ -494,9 +464,7 @@ static void registers_give(
         if (c->direct) {
             mmio_write_linear(c->v, c->frame + offsets[i], &now[i], 2);
         } else {
-            uint16_t head[2] = {
-                (uint16_t)(OP_SET_REGISTER | offsets[i] << 8), now[i]
-            };
+            uint16_t head[2] = { (uint16_t)(OP_SET_REGISTER | offsets[i] << 8), now[i] };
             exchange(head, 2, NULL, 0, NULL, 0);
         }
     }
@@ -579,8 +547,9 @@ static uint16_t call_begin(struct vcpu *v, bool vga_ports) {
     c->direct = real_mode_rom(v);
     c->init = init_knocked;
     init_knocked = false;
-    uint16_t port = vga_ports ? PORT_VGA + PORT_VGA_CALL_OFFSET
-        : (uint16_t)(PORT_ALLOCATE + 1 + (c - calls));
+    uint16_t port = vga_ports
+                  ? PORT_VGA + PORT_VGA_CALL_OFFSET
+                  : (uint16_t)(PORT_ALLOCATE + 1 + (c - calls));
     if (!c->direct) {
         return port;
     }
@@ -621,9 +590,7 @@ static uint16_t call_word(struct call *c, struct vcpu *v) {
     return OP_NOTHING;
 }
 
-static uint32_t allocate_access(
-    struct vcpu *v, bool vga_ports, bool in, uint16_t word
-) {
+static uint32_t allocate_access(struct vcpu *v, bool vga_ports, bool in, uint16_t word) {
     if (in) {
         if (knocks == 0) {
             return 0xffffffff;
@@ -638,9 +605,7 @@ static uint32_t allocate_access(
     return 0xffffffff;
 }
 
-static uint32_t call_access(
-    struct call *c, struct vcpu *v, bool in, uint16_t word
-) {
+static uint32_t call_access(struct call *c, struct vcpu *v, bool in, uint16_t word) {
     if (!c->busy) {
         return 0xffffffff;
     }
@@ -655,8 +620,7 @@ static uint32_t call_access(
 }
 
 static void ports_access(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in,
-    uint32_t *value
+    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
 ) {
     (void)ctx;
     uint32_t result = 0xffffffff;
@@ -665,9 +629,7 @@ static void ports_access(
         if (offset == 0) {
             result = allocate_access(v, false, in, (uint16_t)*value);
         } else {
-            result = call_access(
-                &calls[offset - 1], v, in, (uint16_t)*value
-            );
+            result = call_access(&calls[offset - 1], v, in, (uint16_t)*value);
         }
         spinlock_release(&lock);
     }
@@ -677,8 +639,7 @@ static void ports_access(
 }
 
 static void vga_ports_access(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in,
-    uint32_t *value
+    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
 ) {
     (void)ctx;
     uint32_t result = 0xffffffff;
@@ -697,13 +658,9 @@ static void vga_ports_access(
 }
 
 void vgabios_init(void) {
-    struct io_handler ports = {
-        PORT_ALLOCATE, PORT_COUNT, ports_access, NULL
-    };
+    struct io_handler ports = { PORT_ALLOCATE, PORT_COUNT, ports_access, NULL };
     io_register(&ports);
-    struct io_handler vga_ports = {
-        PORT_VGA, PORT_VGA_COUNT, vga_ports_access, NULL
-    };
+    struct io_handler vga_ports = { PORT_VGA, PORT_VGA_COUNT, vga_ports_access, NULL };
     io_register(&vga_ports);
 }
 
@@ -733,11 +690,11 @@ static void display_fill(void) {
     // Without one, guests would not know the display's resolution.
     if (d->edid_size == 0 && edid_synthesize(d->edid, width, height)) {
         d->edid_size = EDID_BLOCK_SIZE;
+        const char *reason = video->edid_size != 0
+                           ? "The panel's EDID describes it unturned"
+                           : "No EDID from the firmware";
         printf(
-            "%s, so the emulated VGA's display reports %ux%u at 60 Hz\n",
-            video->edid_size != 0 ? "The panel's EDID describes it unturned"
-                : "No EDID from the firmware",
-            width, height
+            "%s, so the emulated VGA's display reports %ux%u at 60 Hz\n", reason, width, height
         );
     }
 }
@@ -754,9 +711,7 @@ void vgabios_rom_fill(uint8_t *image) {
     memcpy(rom_image + ROM_FONT8, vgabios_font8, sizeof(vgabios_font8));
     memcpy(rom_image + ROM_FONT14, vgabios_font14, sizeof(vgabios_font14));
     memcpy(rom_image + ROM_FONT16, vgabios_font16, sizeof(vgabios_font16));
-    memcpy(
-        rom_image + ROM_FUNCTIONALITY, functionality, sizeof(functionality)
-    );
+    memcpy(rom_image + ROM_FUNCTIONALITY, functionality, sizeof(functionality));
     rom_string(ROM_OEM_STRING, "ReBIOS VBE");
     rom_string(ROM_VENDOR_NAME, "ReBIOS");
     rom_string(ROM_PRODUCT_NAME, "ReBIOS VGA");
@@ -767,7 +722,7 @@ void vgabios_rom_fill(uint8_t *image) {
         if (at + bytes > VGABIOS_ROM_SIZE) {
             panic("The video BIOS's palettes are larger than their room\n");
         }
-        memcpy(rom_image + at, vgabios_palettes[i].colors, bytes);
+        memcpy(rom_image + at, vgabios_palettes[i].colours, bytes);
     }
     memcpy(image, rom_image, VGABIOS_ROM_SIZE);
 }

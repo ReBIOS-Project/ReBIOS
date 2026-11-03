@@ -47,23 +47,17 @@ struct pci_io_device {
 struct pci_io_device *pci_io_devices(EFI_UINTN *count);
 
 // Finds the PCI function a device path leads to.
-bool pci_io_device_on_path(
-    EFI_DEVICE_PATH_PROTOCOL *path, struct pci_io_device *dev
-);
+bool pci_io_device_on_path(EFI_DEVICE_PATH_PROTOCOL *path, struct pci_io_device *dev);
 
 // Whether a port above the function says it leads to a slot, as those above a
 // card's own bridges do.
 bool pci_io_device_in_slot(const struct pci_io_device *dev);
 
-static inline bool pci_address_equal(
-    struct handoff_pci_address a, struct handoff_pci_address b
-) {
+static inline bool pci_address_equal(struct handoff_pci_address a, struct handoff_pci_address b) {
     return a.segment == b.segment && a.bus == b.bus && a.devfn == b.devfn;
 }
 
-static inline int pci_address_compare(
-    struct handoff_pci_address a, struct handoff_pci_address b
-) {
+static inline int pci_address_compare(struct handoff_pci_address a, struct handoff_pci_address b) {
     uint32_t ka = (uint32_t)a.segment << 16 | (uint32_t)a.bus << 8 | a.devfn;
     uint32_t kb = (uint32_t)b.segment << 16 | (uint32_t)b.bus << 8 | b.devfn;
     return ka < kb ? -1 : ka > kb;

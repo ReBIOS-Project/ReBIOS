@@ -28,8 +28,14 @@
 # lists what it could not parse, the sizes it corrected, where the two manuals'
 # sizes differ, and the AMD-only forms.
 
+import os
 import re
 import sys
+
+# c_layout.py sits beside the generators, which leave no bytecode in the tree.
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from c_layout import finish
 
 # The notice each generated file starts with.
 NOTICE = [
@@ -116,6 +122,16 @@ W_IGNORED = set()
 
 # Loads and stores of only the elements a vector register's mask selects.
 VECTOR_MASKED = {'VMASKMOVPS', 'VMASKMOVPD', 'VPMASKMOVD', 'VPMASKMOVQ'}
+
+
+def count_decl(name, array, kind):
+    """The declaration of an array's count, on one line where it fits in 99
+    columns, else broken before its division, lined up under its value."""
+    head = f'const size_t {name} = '
+    line = f'{head}sizeof({array}) / sizeof({kind});'
+    if len(line) <= 99:
+        return [line]
+    return [f'{head}sizeof({array})', ' ' * (len(head) - 2) + f'/ sizeof({kind});']
 
 
 def instruction_ranges(lines):
@@ -274,7 +290,7 @@ MODE = re.compile(r'^(V|I|N\.?E\.?|NE|VV|Valid|Invalid)\d?(/(V|I|N\.?E?\.?)\d?)?
 OP_EN = re.compile(r'^[A-Z][A-Z0-9-]{0,9}$')
 
 
-def normalize(text):
+def normalise(text):
     text = text.strip()
     # Lowercase opcode bytes and prefixes, as in "66 0f 38 21 /r" and "66
     # REX.w 0F 38 F6 /r".
@@ -336,7 +352,7 @@ def parse_rows(block):
     # have it.
     header = []
     for line in block:
-        if starts_opcode(normalize(line)):
+        if starts_opcode(normalise(line)):
             break
         header.append(line)
     no_modes = not re.search(r'Mode|64', ' '.join(header))
@@ -345,13 +361,13 @@ def parse_rows(block):
     i = 0
     while i < len(block):
         line = block[i]
-        if not starts_opcode(normalize(line)):
+        if not starts_opcode(normalise(line)):
             m = SUPERSCRIPT.match(line)
             if m:
                 pending += m.group(1)
             i += 1
             continue
-        text = normalize(line)
+        text = normalise(line)
         toks = opcode_tokens(text)
         rest = text.split(None, len(toks))
         rest = rest[len(toks)] if len(rest) > len(toks) else ''
@@ -364,7 +380,7 @@ def parse_rows(block):
             j = i + 1
             syntax = ''
             description = ' '.join(fields[1:])
-            while j < len(block) and block[j].strip() and not starts_opcode(normalize(block[j])):
+            while j < len(block) and block[j].strip() and not starts_opcode(normalise(block[j])):
                 cells = re.split(r'\s{2,}', block[j].strip())
                 if len(block[j]) - len(block[j].lstrip()) < 8:
                     syntax += ' ' + cells[0]
@@ -396,7 +412,7 @@ def parse_rows(block):
                 modes = parse_modes(fields[1:])
             column = line.find(' ' + op_en + ' ', len(line) - len(line.lstrip()) + 1) + 1
             syntax = fields[0] if fields[0].endswith('-') else ''
-            while j < len(block) and block[j].strip() and not starts_opcode(normalize(block[j])):
+            while j < len(block) and block[j].strip() and not starts_opcode(normalise(block[j])):
                 first = re.split(r'\s{2,}', block[j].strip())[0]
                 if not syntax and first.split() and all(OPCODE_TOKEN.match(t) for t in first.split()):
                     # The opcode continues, as in "!(11):rrr:bbb".
@@ -422,7 +438,7 @@ def parse_rows(block):
                 op_en = second
                 modes = parse_modes(cells[1:3])
             # Long operands continue on the next line.
-            while j < len(block) and block[j].strip() and not starts_opcode(normalize(block[j])):
+            while j < len(block) and block[j].strip() and not starts_opcode(normalise(block[j])):
                 more = re.split(r'\s{2,}', block[j].strip())[0]
                 if more.startswith(','):
                     syntax += more
@@ -948,9 +964,8 @@ def emit(entries, path):
             size if kind in ('S_FIXED', 'S_VECTOR') else 0, e['bcst'], e['scale'], e['syntax']))
     out.append('};')
     out.append('')
-    out.append('const size_t insn_mem_form_count = sizeof(insn_mem_forms)')
-    out.append('    / sizeof(struct insn_mem_form);')
-    open(path, 'w').write('\n'.join(out) + '\n')
+    out += count_decl('insn_mem_form_count', 'insn_mem_forms', 'struct insn_mem_form')
+    open(path, 'w').write(finish('\n'.join(out) + '\n'))
 
 
 def main():

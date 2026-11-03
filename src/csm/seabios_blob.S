@@ -15,10 +15,10 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-    .section .rodata.seabios_csm, "a"
-    .balign 16
-    .globl seabios_csm
+.section .rodata.seabios_csm, "a"
+.balign 16
+.globl seabios_csm
 seabios_csm:
-    .incbin "seabios/out/Csm16.bin"
-    .globl seabios_csm_end
+.incbin "seabios/out/Csm16.bin"
+.globl seabios_csm_end
 seabios_csm_end:

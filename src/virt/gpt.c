@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -54,7 +55,7 @@
 #define A20_BIT ((uint64_t)0x100000)
 #define A20_LIMIT ((uint64_t)0x100000000)
 
-uint64_t gpt_generation;
+_Atomic(uint64_t) gpt_generation;
 
 static bool use_ept;
 static bool have_huge_pages;
@@ -65,7 +66,7 @@ static uint64_t *root;
 // every odd MiB is the even one before it, and above it, root's own tables.
 // Built when first needed.
 static uint64_t *masked_root;
-static bool masked;
+static _Atomic(bool) masked;
 static struct spinlock gpt_lock;
 
 static size_t level_size(size_t level) {
@@ -93,9 +94,7 @@ static uint64_t table_entry(uintptr_t table) {
     return table | NPT_P | NPT_RW | NPT_US;
 }
 
-static uint64_t leaf_entry(
-    uintptr_t hpa, uint32_t prot, uint8_t memtype, size_t level
-) {
+static uint64_t leaf_entry(uintptr_t hpa, uint32_t prot, uint8_t memtype, size_t level) {
     if (prot == 0) {
         return 0;
     }
@@ -156,9 +155,7 @@ static uintptr_t leaf_addr(uint64_t e, size_t level) {
 }
 
 // The access rights and memory type of a leaf, to split it into smaller ones.
-static void leaf_decode(
-    uint64_t e, size_t level, uint32_t *prot, uint8_t *memtype
-) {
+static void leaf_decode(uint64_t e, size_t level, uint32_t *prot, uint8_t *memtype) {
     if (use_ept) {
         *prot = 0;
         if ((e & EPT_R) != 0) {
@@ -179,8 +176,8 @@ static void leaf_decode(
         *prot |= GPT_W;
     }
     uint64_t pat = level > 0 ? NPT_PAT_LARGE : NPT_PAT_4K;
-    unsigned int index = ((e & pat) != 0 ? 4 : 0)
-        | ((e & NPT_PCD) != 0 ? 2 : 0) | ((e & NPT_PWT) != 0 ? 1 : 0);
+    uint8_t index = ((e & pat) != 0 ? 4 : 0) | ((e & NPT_PCD) != 0 ? 2 : 0)
+                  | ((e & NPT_PWT) != 0 ? 1 : 0);
     *memtype = (HOST_PAT >> (index * 8)) & 7;
 }
 
@@ -192,8 +189,7 @@ void gpt_init(bool ept, bool huge_pages, bool dirty_flags) {
 }
 
 uintptr_t gpt_root(void) {
-    return (uintptr_t)(__atomic_load_n(&masked, __ATOMIC_ACQUIRE) ? masked_root
-        : root);
+    return (uintptr_t)(atomic_load_explicit(&masked, memory_order_acquire) ? masked_root : root);
 }
 
 // Returns the table under top that holds the entry for gpa at level, creating
@@ -213,9 +209,7 @@ static uint64_t *table_for(uint64_t *top, uintptr_t gpa, size_t level) {
             uintptr_t base = leaf_addr(*e, l);
             uint64_t *next = page_alloc(1);
             for (size_t i = 0; i < 512; i++) {
-                next[i] = leaf_entry(
-                    base + i * level_size(l - 1), prot, memtype, l - 1
-                );
+                next[i] = leaf_entry(base + i * level_size(l - 1), prot, memtype, l - 1);
             }
             *e = table_entry((uintptr_t)next);
         }
@@ -244,20 +238,16 @@ static void share_upper(void) {
     }
 }
 
-void gpt_map(
-    uintptr_t gpa, uintptr_t hpa, size_t size, uint32_t prot, uint8_t memtype
-) {
+void gpt_map(uintptr_t gpa, uintptr_t hpa, size_t size, uint32_t prot, uint8_t memtype) {
     dma_map(gpa, hpa, size, prot);
 
     spinlock_acquire(&gpt_lock);
 
     for (size_t at = 0; at < size; ) {
         size_t level = 0;
-        for (size_t l = (prot & GPT_DIRTY) != 0 ? 0 : have_huge_pages ? 2 : 1;
-             l > 0; l--) {
+        for (size_t l = (prot & GPT_DIRTY) != 0 ? 0 : have_huge_pages ? 2 : 1; l > 0; l--) {
             uint64_t ls = level_size(l);
-            if (((gpa + at) & (ls - 1)) == 0 && ((hpa + at) & (ls - 1)) == 0
-             && size - at >= ls) {
+            if (((gpa + at) & (ls - 1)) == 0 && ((hpa + at) & (ls - 1)) == 0 && size - at >= ls) {
                 level = l;
                 break;
             }
@@ -266,15 +256,12 @@ void gpt_map(
         uint64_t *table = table_for(root, gpa + at, level);
         // A leaf that replaces a table leaks the table, as other CPUs may
         // still walk it until their next flush.
-        table[((gpa + at) >> (12 + 9 * level)) & 511] = leaf_entry(
-            hpa + at, prot, memtype, level
-        );
+        table[((gpa + at) >> (12 + 9 * level)) & 511] = leaf_entry(hpa + at, prot, memtype, level);
         at += level_size(level);
     }
 
     if (masked_root != NULL) {
-        for (size_t at = 0; at < size && gpa + at < A20_LIMIT;
-             at += PAGE_SIZE) {
+        for (size_t at = 0; at < size && gpa + at < A20_LIMIT; at += PAGE_SIZE) {
             if (((gpa + at) & A20_BIT) == 0) {
                 mirror(gpa + at, leaf_entry(hpa + at, prot, memtype, 0));
             }
@@ -303,21 +290,20 @@ void gpt_mask_a20(bool on) {
         }
         share_upper();
     }
-    __atomic_store_n(&masked, on, __ATOMIC_RELEASE);
+    atomic_store_explicit(&masked, on, memory_order_release);
     spinlock_release(&gpt_lock);
     gpt_flush();
 }
 
 uintptr_t gpt_cpu_gpa(uintptr_t gpa) {
-    if (gpa < A20_LIMIT && __atomic_load_n(&masked, __ATOMIC_ACQUIRE)) {
+    if (gpa < A20_LIMIT && atomic_load_explicit(&masked, memory_order_acquire)) {
         return gpa & ~A20_BIT;
     }
     return gpa;
 }
 
 bool gpt_translate_leaf(
-    uintptr_t gpa, uint64_t *hpa, uint32_t *prot, uint8_t *memtype,
-    size_t *level
+    uintptr_t gpa, uint64_t *hpa, uint32_t *prot, uint8_t *memtype, size_t *level
 ) {
     uint64_t *table = root;
     for (size_t l = 4; l-- > 0; ) {
@@ -342,14 +328,12 @@ bool gpt_translate_leaf(
     return false;
 }
 
-bool gpt_translate(
-    uintptr_t gpa, uint64_t *hpa, uint32_t *prot, uint8_t *memtype
-) {
+bool gpt_translate(uintptr_t gpa, uint64_t *hpa, uint32_t *prot, uint8_t *memtype) {
     return gpt_translate_leaf(gpa, hpa, prot, memtype, NULL);
 }
 
 void gpt_flush(void) {
-    __atomic_add_fetch(&gpt_generation, 1, __ATOMIC_SEQ_CST);
+    atomic_fetch_add_explicit(&gpt_generation, 1, memory_order_seq_cst);
     for (size_t i = 0; i < smp_cpu_count(); i++) {
         vcpu_kick(smp_cpu(i));
     }
@@ -379,18 +363,17 @@ static uint64_t *page_entry(uint64_t *top, uintptr_t gpa) {
 
 static bool take_dirty(uint64_t *e, bool clear) {
     uint64_t dirty = use_ept ? EPT_DIRTY : NPT_DIRTY;
-    if (e == NULL || (__atomic_load_n(e, __ATOMIC_RELAXED) & dirty) == 0) {
+    if (e == NULL
+     || (atomic_load_explicit((_Atomic(uint64_t) *)e, memory_order_relaxed) & dirty) == 0) {
         return false;
     }
     if (clear) {
-        __atomic_fetch_and(e, ~dirty, __ATOMIC_RELAXED);
+        atomic_fetch_and_explicit((_Atomic(uint64_t) *)e, ~dirty, memory_order_relaxed);
     }
     return true;
 }
 
-bool gpt_dirty(
-    uintptr_t gpa, size_t size, uint64_t *bits, uintptr_t first, bool clear
-) {
+bool gpt_dirty(uintptr_t gpa, size_t size, uint64_t *bits, uintptr_t first, bool clear) {
     if (!track_dirty) {
         return false;
     }

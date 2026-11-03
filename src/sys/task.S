@@ -15,16 +15,14 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-    .text
+.text
 
-    /*
-     * void task_swap(uintptr_t *save_rsp, uintptr_t rsp)
-     * Leaves the callee-saved registers on this stack, and its pointer in
-     * *save_rsp, then carries on from rsp, as another task_swap() left it. A
-     * call keeps nothing else: the hypervisor has no x87 or vector state.
-     */
-    .globl task_swap
-    .type task_swap, @function
+// task_swap(save_rsp, rsp) leaves the callee-saved registers on this stack,
+// and its pointer in *save_rsp, then carries on from rsp, as another
+// task_swap() left it. A call keeps nothing else: the hypervisor has no x87 or
+// vector state.
+.globl task_swap
+.type task_swap, %function
 task_swap:
     pushq %rbp
     pushq %rbx
@@ -40,14 +38,14 @@ task_swap:
     popq %r12
     popq %rbx
     popq %rbp
-    ret
-    .size task_swap, . - task_swap
+    retq
+.size task_swap, . - task_swap
 
-    /* Where a task starts, with itself in %rbx. */
-    .globl task_entry
-    .type task_entry, @function
+// Where a task starts, with itself in %rbx.
+.globl task_entry
+.type task_entry, %function
 task_entry:
     movq %rbx, %rdi
-    call task_main
+    callq task_main
     ud2
-    .size task_entry, . - task_entry
+.size task_entry, . - task_entry

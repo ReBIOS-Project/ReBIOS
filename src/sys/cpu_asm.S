@@ -17,100 +17,102 @@
 
 #include <sys/cpu.h>
 
-    .text
+.text
 
-    /* void switch_stack(uintptr_t stack_top, void (*fn)(void *), void *arg) */
-    .globl switch_stack
-    .type switch_stack, @function
+// switch_stack(stack_top, fn, arg) calls fn(arg) on the stack that ends at
+// stack_top, never to come back.
+.globl switch_stack
+.type switch_stack, %function
 switch_stack:
     movq %rdi, %rsp
     xorl %ebp, %ebp
     movq %rdx, %rdi
-    /* Keep the ABI's stack alignment for fn, as if it had been called. */
+    // Keep the ABI's stack alignment for fn, as if it had been called.
     pushq $0
     jmpq *%rsi
-    .size switch_stack, . - switch_stack
+.size switch_stack, . - switch_stack
 
-    /*
-     * void cpu_halt(void)
-     * The host's NMI handler restarts an NMI that arrives before the HLT, as
-     * it would halt with the NMI's work left undone otherwise.
-     */
-    .globl cpu_halt
-    .globl cpu_halt_restart_end
-    .type cpu_halt, @function
+// cpu_halt() halts until an interrupt, unless the processor has been kicked.
+// The host's NMI handler restarts an NMI that arrives before the HLT, as it
+// would halt with the NMI's work left undone otherwise.
+.globl cpu_halt
+.globl cpu_halt_restart_end
+.type cpu_halt, %function
 cpu_halt:
     movq %rsp, %rax
     andq $-CPU_AREA_SIZE, %rax
     movq (%rax), %rax
     cmpb $0, CPU_KICKED(%rax)
-    jne 1f
+    jne .Lkicked
     sti
     hlt
 cpu_halt_restart_end:
-1:
+.Lkicked:
     cli
-    ret
-    .size cpu_halt, . - cpu_halt
+    retq
+.size cpu_halt, . - cpu_halt
 
-    /* Exception entry stubs: a dummy error code where the CPU pushes none. */
-.macro EXC_STUB vector, has_error
-    .balign 16
+// Exception entry stubs: a dummy error code where the CPU pushes none.
+.macro exc_stub vector, has_error
+.balign 16
 exc_stub_\vector:
-    .if \has_error == 0
+.if \has_error == 0
     pushq $0
-    .endif
+.endif
     pushq $\vector
     jmp exception_common
 .endm
 
-EXC_STUB 0, 0
-EXC_STUB 1, 0
-EXC_STUB 2, 0
-EXC_STUB 3, 0
-EXC_STUB 4, 0
-EXC_STUB 5, 0
-EXC_STUB 6, 0
-EXC_STUB 7, 0
-EXC_STUB 8, 1
-EXC_STUB 9, 0
-EXC_STUB 10, 1
-EXC_STUB 11, 1
-EXC_STUB 12, 1
-EXC_STUB 13, 1
-EXC_STUB 14, 1
-EXC_STUB 15, 0
-EXC_STUB 16, 0
-/* #AC, #CP, and #VC never happen in the host: these are interrupts. */
-EXC_STUB 17, 0
-EXC_STUB 18, 0
-EXC_STUB 19, 0
-EXC_STUB 20, 0
-EXC_STUB 21, 0
-EXC_STUB 22, 0
-EXC_STUB 23, 0
-EXC_STUB 24, 0
-EXC_STUB 25, 0
-EXC_STUB 26, 0
-EXC_STUB 27, 0
-EXC_STUB 28, 0
-EXC_STUB 29, 0
-EXC_STUB 30, 1
-EXC_STUB 31, 0
+    exc_stub 0, 0
+    exc_stub 1, 0
+    exc_stub 2, 0
+    exc_stub 3, 0
+    exc_stub 4, 0
+    exc_stub 5, 0
+    exc_stub 6, 0
+    exc_stub 7, 0
+    exc_stub 8, 1
+    exc_stub 9, 0
+    exc_stub 10, 1
+    exc_stub 11, 1
+    exc_stub 12, 1
+    exc_stub 13, 1
+    exc_stub 14, 1
+    exc_stub 15, 0
+    exc_stub 16, 0
+    // #AC, #CP, and #VC never happen in the host: these are interrupts.
+    exc_stub 17, 0
+    exc_stub 18, 0
+    exc_stub 19, 0
+    exc_stub 20, 0
+    exc_stub 21, 0
+    exc_stub 22, 0
+    exc_stub 23, 0
+    exc_stub 24, 0
+    exc_stub 25, 0
+    exc_stub 26, 0
+    exc_stub 27, 0
+    exc_stub 28, 0
+    exc_stub 29, 0
+    exc_stub 30, 1
+    exc_stub 31, 0
 
-    /* Interrupt stubs for vectors 32 to 255, 16 bytes apart. */
-    .balign 16
-    .globl interrupt_stubs
+// Interrupt stubs for vectors 32 to 255, 16 bytes apart.
+.balign 16
+.globl interrupt_stubs
+.type interrupt_stubs, %function
 interrupt_stubs:
-    .set vector, 32
-    .rept 224
-    .balign 16
+.set vector, 32
+.rept 224
+.balign 16
     pushq $0
     pushq $vector
     jmp exception_common
-    .set vector, vector + 1
-    .endr
+.set vector, vector + 1
+.endr
+.size interrupt_stubs, . - interrupt_stubs
 
+.type exception_common, %function
 exception_common:
     pushq %rax
     pushq %rbx
@@ -129,10 +131,10 @@ exception_common:
     pushq %r15
     cld
     movq %rsp, %rdi
-    /* The frame is not 16-byte aligned in general. */
+    // The frame is not 16-byte aligned in general.
     movq %rsp, %rbx
     andq $-16, %rsp
-    call exception_handler
+    callq exception_handler
     movq %rbx, %rsp
     popq %r15
     popq %r14
@@ -151,12 +153,13 @@ exception_common:
     popq %rax
     addq $16, %rsp
     iretq
+.size exception_common, . - exception_common
 
-    .section .rodata
-    .balign 4
-    .globl exception_stubs
+.section .rodata
+.balign 4
+.globl exception_stubs
 exception_stubs:
-    .irp vector, 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22, \
-        23,24,25,26,27,28,29,30,31
-    .long exc_stub_\vector - exception_stubs
-    .endr
+.irp vector, 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22, \
+    23,24,25,26,27,28,29,30,31
+.long exc_stub_\vector - exception_stubs
+.endr

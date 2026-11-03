@@ -45,11 +45,9 @@ void amdvi_report_faults(void);
 void amdvi_remap_start(void);
 bool amdvi_remap_on(void);
 int amdvi_remap_alloc(int32_t requester, size_t count);
-void amdvi_remap_free(int32_t requester, int index, size_t count);
-void amdvi_remap_set(
-    int32_t requester, int index, uint32_t apic_id, uint8_t vector
-);
-void amdvi_remap_message(int index, uint32_t *address, uint32_t *data);
-uint64_t amdvi_remap_rte(int index, bool level, bool active_low);
+void amdvi_remap_free(int32_t requester, uint16_t index, size_t count);
+void amdvi_remap_set(int32_t requester, uint16_t index, uint32_t apic_id, uint8_t vector);
+void amdvi_remap_message(uint16_t index, uint32_t *address, uint32_t *data);
+uint64_t amdvi_remap_rte(uint16_t index, bool level, bool active_low);
 
 #endif

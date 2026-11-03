@@ -24,9 +24,9 @@
 // keeps to the 8086's simplest instructions, as those emulators have been seen
 // to get others wrong. This is data to the hypervisor.
 
-    .section .rodata.vgabios_stub, "a"
-    .code16
-    .arch i8086
+.section .rodata.vgabios_stub, "a"
+.code16
+.arch i8086
 
 #define PORT_ALLOCATE 0x1d0
 #define PORT_VGA_ALLOCATE 0x3de
@@ -52,20 +52,20 @@
 #define FRAME_CX 4
 #define FRAME_DX 6
 
-    .globl vgabios_stub
+.globl vgabios_stub
 vgabios_stub:
-    .byte 0x55, 0xaa
-    // The ROM's size in 512-byte blocks, which the hypervisor fills in.
-    .byte 0
-    // The initialisation entry point, which the BIOS calls far at offset 3.
-    .byte 0xe9
-    .word init_entry - (. + 2)
-    // Software looks for an IBM video BIOS by this signature.
-    .org 0x1e
-    .ascii "IBM"
+.byte 0x55, 0xaa
+// The ROM's size in 512-byte blocks, which the hypervisor fills in.
+.byte 0
+// The initialisation entry point, which the BIOS calls far at offset 3.
+.byte 0xe9
+.word init_entry - (. + 2)
+// Software looks for an IBM video BIOS by this signature.
+.org 0x1e
+.ascii "IBM"
 
 // The registers vgabios.c's FRAME_ offsets find.
-.macro SAVE
+.macro save
     pushw %es
     pushw %ds
     pushw %bp
@@ -79,7 +79,7 @@ vgabios_stub:
     cld
 .endm
 
-.macro RESTORE
+.macro restore
     popw %ax
     popw %bx
     popw %cx
@@ -92,15 +92,15 @@ vgabios_stub:
 .endm
 
 init_entry:
-    SAVE
+    save
     movw $KNOCK_INIT, %ax
     callw knock
-    RESTORE
+    restore
     lretw
 
-    .globl vgabios_stub_int10
+.globl vgabios_stub_int10
 vgabios_stub_int10:
-    SAVE
+    save
     cmpb $0x10, %ah
     jae door
     movb %ah, %bl
@@ -113,7 +113,7 @@ vgabios_stub_int10:
 door:
     callw run
 finish:
-    RESTORE
+    restore
     iretw
 
 to_door:
@@ -134,37 +134,37 @@ teletype:
     cmpb $7, %al
     je to_finish
     cmpb $8, %al
-    je 1f
+    je .Lteletype_2
     cmpb $10, %al
-    je 2f
+    je .Lteletype_3
     cmpb $13, %al
-    je 3f
+    je .Lteletype_4
     incb %dl
     cmpb BDA_COLUMNS, %dl
-    jb 5f
+    jb .Lteletype_1
     xorb %dl, %dl
     incb %dh
-5:
+.Lteletype_1:
     callw on_screen
     jnc to_door
     callw text_offset
     movb FRAME_AX(%bp), %al
     stosb
-    jmp 6f
-1:
+    jmp .Lteletype_6
+.Lteletype_2:
     testb %dl, %dl
-    jz 4f
+    jz .Lteletype_5
     decb %dl
-    jmp 4f
-2:
+    jmp .Lteletype_5
+.Lteletype_3:
     incb %dh
-    jmp 4f
-3:
+    jmp .Lteletype_5
+.Lteletype_4:
     xorb %dl, %dl
-4:
+.Lteletype_5:
     callw on_screen
     jnc to_door
-6:
+.Lteletype_6:
     movw %dx, BDA_CURSOR(%bx)
     movw %dx, %ax
     jmp cursor_shown
@@ -244,12 +244,12 @@ write_char:
     jc to_door
     movb FRAME_AX(%bp), %al
     movw FRAME_CX(%bp), %cx
-    jcxz 2f
-1:
+    jcxz .Lwrite_char_2
+.Lwrite_char_1:
     stosb
     incw %di
-    loop 1b
-2:
+    loop .Lwrite_char_1
+.Lwrite_char_2:
     jmp finish
 
 // AH=0Ch, in mode 13h.
@@ -288,12 +288,12 @@ pixel_place:
 // text mode.
 text_cell:
     callw text_segment
-    jc 1f
+    jc .Ltext_cell_1
     movb FRAME_BH(%bp), %al
     callw page_cursor
     callw text_offset
     clc
-1:
+.Ltext_cell_1:
     retw
 
 // ES at the text of the current mode, carry set if it has none.
@@ -302,15 +302,15 @@ text_segment:
     andb $0x7f, %al
     movw $0xb800, %si
     cmpb $4, %al
-    jb 1f
+    jb .Ltext_segment_1
     movw $0xb000, %si
     cmpb $7, %al
     stc
-    jne 2f
-1:
+    jne .Ltext_segment_2
+.Ltext_segment_1:
     movw %si, %es
     clc
-2:
+.Ltext_segment_2:
     retw
 
 // For the page in AL: DI that page, BX twice that, and CX its cursor.
@@ -347,30 +347,30 @@ on_screen:
 
 // By AH, what is done here, up to the last the table has.
 calls_here:
-    .word door - vgabios_stub
-    .word door - vgabios_stub
-    .word set_cursor - vgabios_stub
-    .word get_cursor - vgabios_stub
-    .word door - vgabios_stub
-    .word door - vgabios_stub
-    .word door - vgabios_stub
-    .word door - vgabios_stub
-    .word read_char - vgabios_stub
-    .word write_char_attribute - vgabios_stub
-    .word write_char - vgabios_stub
-    .word door - vgabios_stub
-    .word write_pixel - vgabios_stub
-    .word read_pixel - vgabios_stub
-    .word teletype - vgabios_stub
-    .word get_mode - vgabios_stub
+.word door - vgabios_stub
+.word door - vgabios_stub
+.word set_cursor - vgabios_stub
+.word get_cursor - vgabios_stub
+.word door - vgabios_stub
+.word door - vgabios_stub
+.word door - vgabios_stub
+.word door - vgabios_stub
+.word read_char - vgabios_stub
+.word write_char_attribute - vgabios_stub
+.word write_char - vgabios_stub
+.word door - vgabios_stub
+.word write_pixel - vgabios_stub
+.word read_pixel - vgabios_stub
+.word teletype - vgabios_stub
+.word get_mode - vgabios_stub
 
 // VBE's window function, which takes AX=4F05h's registers but for AX.
-    .globl vgabios_stub_window
+.globl vgabios_stub_window
 vgabios_stub_window:
-    SAVE
+    save
     movw $0x4f05, (%bp)
     callw run
-    RESTORE
+    restore
     lretw
 
 // A call gets a port of its own, so that one interrupted by another, as a
@@ -385,12 +385,12 @@ knock:
     outw %ax, %dx
     inw %dx, %ax
     cmpw $0xffff, %ax
-    jne 1f
+    jne .Lknock_1
     movw %si, %ax
     movw $PORT_VGA_ALLOCATE, %dx
     outw %ax, %dx
     inw %dx, %ax
-1:
+.Lknock_1:
     testw %ax, %ax
     jz op_done
     cmpw $0xffff, %ax
@@ -423,16 +423,16 @@ vga_indexed:
     andb $0x1f, %al
     movw $0x3d4, %dx
     cmpb $0x40, %bl
-    jb 1f
+    jb .Lvga_indexed_1
     movw $0x3b4, %dx
     cmpb $0x60, %bl
-    jb 1f
+    jb .Lvga_indexed_1
     andb $0x0f, %al
     movw $0x3c4, %dx
     cmpb $0x70, %bl
-    jb 1f
+    jb .Lvga_indexed_1
     movw $0x3ce, %dx
-1:
+.Lvga_indexed_1:
     outw %ax, %dx
     movw %si, %dx
     jmp next
@@ -446,12 +446,12 @@ vga_port:
     addw $VGA_PORTS, %ax
     movw %ax, %dx
     cmpb $0xc0, %cl
-    jae 1f
+    jae .Lvga_port_1
     inb %dx, %al
     movw %si, %dx
     outw %ax, %dx
     jmp next
-1:
+.Lvga_port_1:
     movb %bl, %al
     outb %al, %dx
     movw %si, %dx
@@ -598,9 +598,9 @@ op_copy:
     inw %dx, %ax
     movw %ax, %cx
     testb %bl, %bl
-    jz 1f
+    jz .Lop_copy_1
     std
-1:
+.Lop_copy_1:
     rep movsb
     cld
     jmp next
@@ -619,13 +619,13 @@ op_font:
     inw %dx, %ax
     movw %ax, %si
     inw %dx, %ax
-1:
+.Lop_font_1:
     movw %bx, %cx
     rep movsb
     addw $32, %di
     subw %bx, %di
     decw %ax
-    jnz 1b
+    jnz .Lop_font_1
     jmp next
 
 // Bytes to a port, two in each word from the hypervisor, the count being of
@@ -635,7 +635,7 @@ op_out_block:
     movw %ax, %bx
     inw %dx, %ax
     movw %ax, %cx
-1:
+.Lop_out_block_1:
     inw %dx, %ax
     movw %dx, %si
     movw %bx, %dx
@@ -644,7 +644,7 @@ op_out_block:
     outb %al, %dx
     movw %si, %dx
     decw %cx
-    jnz 1b
+    jnz .Lop_out_block_1
     jmp next
 
 // Words from the hypervisor to memory, the count being of words.
@@ -655,11 +655,11 @@ op_write_block:
     movw %ax, %di
     inw %dx, %ax
     movw %ax, %cx
-1:
+.Lop_write_block_1:
     inw %dx, %ax
     stosw
     decw %cx
-    jnz 1b
+    jnz .Lop_write_block_1
     jmp next
 
 // Words from memory to the hypervisor, the count being of words.
@@ -670,11 +670,11 @@ op_read_block:
     movw %ax, %si
     inw %dx, %ax
     movw %ax, %cx
-1:
+.Lop_read_block_1:
     lodsw
     outw %ax, %dx
     decw %cx
-    jnz 1b
+    jnz .Lop_read_block_1
     jmp next
 
 // The DAC's colours from the ROM, at the first word's offset, of the second's
@@ -688,52 +688,52 @@ op_dac_rom:
     movw $0x3c9, %dx
     movw $768, %di
     subw %cx, %di
-1:
+.Lop_dac_rom_1:
     movb %cs:(%si), %al
     incw %si
     outb %al, %dx
-    loop 1b
+    loop .Lop_dac_rom_1
     xorb %al, %al
     movw %di, %cx
-    jcxz 3f
-2:
+    jcxz .Lop_dac_rom_3
+.Lop_dac_rom_2:
     outb %al, %dx
-    loop 2b
-3:
+    loop .Lop_dac_rom_2
+.Lop_dac_rom_3:
     movw %bx, %dx
     jmp next
 
 // The upper half of ECX, for the one call with a 32-bit register, which only
 // comes from callers on a 386 or later: movl %ecx, %eax, then shrl $16, %eax.
 op_ecx_high:
-    .byte 0x66, 0x89, 0xc8
-    .byte 0x66, 0xc1, 0xe8, 0x10
+.byte 0x66, 0x89, 0xc8
+.byte 0x66, 0xc1, 0xe8, 0x10
     outw %ax, %dx
     jmp next
 
 // In vgabios.c's order of OP_ values.
 operations:
-    .word op_done - vgabios_stub
-    .word next - vgabios_stub
-    .word op_registers - vgabios_stub
-    .word op_set_register - vgabios_stub
-    .word op_bda_read8 - vgabios_stub
-    .word op_bda_read16 - vgabios_stub
-    .word op_bda_write8 - vgabios_stub
-    .word op_bda_write16 - vgabios_stub
-    .word op_read8 - vgabios_stub
-    .word op_read16 - vgabios_stub
-    .word op_write8 - vgabios_stub
-    .word op_write16 - vgabios_stub
-    .word op_fill8 - vgabios_stub
-    .word op_fill16 - vgabios_stub
-    .word op_copy - vgabios_stub
-    .word op_font - vgabios_stub
-    .word op_out_block - vgabios_stub
-    .word op_write_block - vgabios_stub
-    .word op_read_block - vgabios_stub
-    .word op_ecx_high - vgabios_stub
-    .word op_dac_rom - vgabios_stub
+.word op_done - vgabios_stub
+.word next - vgabios_stub
+.word op_registers - vgabios_stub
+.word op_set_register - vgabios_stub
+.word op_bda_read8 - vgabios_stub
+.word op_bda_read16 - vgabios_stub
+.word op_bda_write8 - vgabios_stub
+.word op_bda_write16 - vgabios_stub
+.word op_read8 - vgabios_stub
+.word op_read16 - vgabios_stub
+.word op_write8 - vgabios_stub
+.word op_write16 - vgabios_stub
+.word op_fill8 - vgabios_stub
+.word op_fill16 - vgabios_stub
+.word op_copy - vgabios_stub
+.word op_font - vgabios_stub
+.word op_out_block - vgabios_stub
+.word op_write_block - vgabios_stub
+.word op_read_block - vgabios_stub
+.word op_ecx_high - vgabios_stub
+.word op_dac_rom - vgabios_stub
 
-    .globl vgabios_stub_end
+.globl vgabios_stub_end
 vgabios_stub_end:

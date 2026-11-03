@@ -119,16 +119,13 @@ void core_main(struct handoff *handoff) {
     core_handoff = handoff;
 
     printf(
-        "ReBIOS core running, heap %#llx-%#llx\n",
-        (unsigned long long)handoff->heap_base,
+        "ReBIOS core running, heap %#llx-%#llx\n", (unsigned long long)handoff->heap_base,
         (unsigned long long)(handoff->heap_base + handoff->heap_size)
     );
 
     mm_init(handoff->heap_base, handoff->heap_size);
     time_init(handoff->tsc_hz);
-    printf(
-        "TSC at %llu MHz\n", (unsigned long long)(handoff->tsc_hz / 1000000)
-    );
+    printf("TSC at %llu MHz\n", (unsigned long long)(handoff->tsc_hz / 1000000));
 
     struct cpu *bsp = cpu_area_alloc(0, 0, true);
     switch_stack(cpu_stack_top(bsp), bsp_main, handoff);

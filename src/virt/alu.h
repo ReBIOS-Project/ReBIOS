@@ -54,8 +54,6 @@
 // src, src being the count of shifts and the bit offset of bit tests, with the
 // status flags in *rflags, which it updates. Returns the result, which only
 // the low size bytes of hold.
-uint64_t alu(
-    unsigned int op, size_t size, uint64_t dst, uint64_t src, uint64_t *rflags
-);
+uint64_t alu(unsigned int op, size_t size, uint64_t dst, uint64_t src, uint64_t *rflags);
 
 #endif

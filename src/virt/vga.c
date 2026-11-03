@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -133,8 +134,8 @@
 // The lines of a turned display written to the framebuffer together.
 #define BAND_LINES 32
 
-// The display keeps track of the guest's writes to the planes in chunks of
-// 1 << CHUNK_SHIFT bytes of plane address.
+// The display tracks the guest's writes to the planes in chunks of plane
+// address, 1 << CHUNK_SHIFT bytes each.
 #define CHUNK_SHIFT 6
 #define CHUNKS (PLANE_SIZE >> CHUNK_SHIFT)
 
@@ -232,7 +233,7 @@ static struct {
     bool track;
     uint64_t *written;
     uint64_t *written_before;
-    bool written_before_any;
+    _Atomic(bool) written_before_any;
 } vbe;
 
 // The registers and palette a frame shows the planes through.
@@ -377,16 +378,14 @@ static void mem_write(uint32_t offset, uint8_t value) {
             continue;
         }
         uint8_t latch = vga.latch[p];
-        uint8_t set_reset = (vga.gc[GC_SET_RESET] & ((uint32_t)1 << p)) != 0
-            ? 0xff : 0x00;
+        uint8_t set_reset = (vga.gc[GC_SET_RESET] & ((uint32_t)1 << p)) != 0 ? 0xff : 0x00;
         uint8_t result;
         switch (vga.gc[GC_MODE] & 3) {
             case 0: {
-                uint8_t v
-                    = (vga.gc[GC_ENABLE_SET_RESET] & ((uint32_t)1 << p)) != 0
-                    ? set_reset : rotated;
-                result = (uint8_t)((logic(v, latch) & bit_mask)
-                    | (latch & ~bit_mask));
+                uint8_t v = (vga.gc[GC_ENABLE_SET_RESET] & ((uint32_t)1 << p)) != 0
+                          ? set_reset
+                          : rotated;
+                result = (uint8_t)((logic(v, latch) & bit_mask) | (latch & ~bit_mask));
                 break;
             }
             case 1: {
@@ -395,14 +394,12 @@ static void mem_write(uint32_t offset, uint8_t value) {
             }
             case 2: {
                 uint8_t v = (value & ((uint32_t)1 << p)) != 0 ? 0xff : 0x00;
-                result = (uint8_t)((logic(v, latch) & bit_mask)
-                    | (latch & ~bit_mask));
+                result = (uint8_t)((logic(v, latch) & bit_mask) | (latch & ~bit_mask));
                 break;
             }
             default: {
                 uint8_t mask = rotated & bit_mask;
-                result = (uint8_t)((logic(set_reset, latch) & mask)
-                    | (latch & ~mask));
+                result = (uint8_t)((logic(set_reset, latch) & mask) | (latch & ~mask));
                 break;
             }
         }
@@ -439,8 +436,7 @@ static uint8_t mem_read(uint32_t offset) {
     for (size_t p = 0; p < 4; p++) {
         if ((vga.gc[GC_DONT_CARE] & ((uint32_t)1 << p)) != 0) {
             differ |= vga.latch[p]
-                ^ ((vga.gc[GC_COLOR_COMPARE] & ((uint32_t)1 << p)) != 0 ? 0xff
-                    : 0x00);
+                    ^ ((vga.gc[GC_COLOR_COMPARE] & ((uint32_t)1 << p)) != 0 ? 0xff : 0x00);
         }
     }
     return (uint8_t)~differ;
@@ -453,8 +449,7 @@ static bool vbe_on(void) {
 // Video memory as the guest reaches it now.
 static uint8_t *vram_at(size_t offset) {
     if (vbe.direct && offset < vbe.direct_size) {
-        return (uint8_t *)(uintptr_t)core_handoff->video.framebuffer.base
-            + offset;
+        return (uint8_t *)(uintptr_t)core_handoff->video.framebuffer.base + offset;
     }
     return vbe.vram + offset;
 }
@@ -472,21 +467,14 @@ static void vram_clear(size_t size) {
 // them now.
 static void map_vram(uintptr_t gpa, size_t offset, size_t size) {
     if (vbe.direct && offset < vbe.direct_size) {
-        size_t n = vbe.direct_size - offset < size ? vbe.direct_size - offset
-            : size;
-        gpt_map(
-            gpa, core_handoff->video.framebuffer.base + offset, n, GPT_RWX,
-            MT_WC
-        );
+        size_t n = vbe.direct_size - offset < size ? vbe.direct_size - offset : size;
+        gpt_map(gpa, core_handoff->video.framebuffer.base + offset, n, GPT_RWX, MT_WC);
         gpa += n;
         offset += n;
         size -= n;
     }
     if (size != 0) {
-        gpt_map(
-            gpa, vbe.vram_phys + offset, size,
-            GPT_RWX | (vbe.track ? GPT_DIRTY : 0), MT_WB
-        );
+        gpt_map(gpa, vbe.vram_phys + offset, size, GPT_RWX | (vbe.track ? GPT_DIRTY : 0), MT_WB);
     }
 }
 
@@ -497,9 +485,7 @@ static uint8_t *vbe_window_byte(uint32_t offset) {
     return offset < PLANE_SIZE && at < vbe.vram_size ? vram_at(at) : NULL;
 }
 
-static uint64_t window_read(
-    struct vcpu *v, void *ctx, uint64_t offset, size_t size
-) {
+static uint64_t window_read(struct vcpu *v, void *ctx, uint64_t offset, size_t size) {
     (void)v;
     (void)ctx;
     uint64_t value = 0;
@@ -518,9 +504,7 @@ static uint64_t window_read(
     return value;
 }
 
-static void window_write(
-    struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value
-) {
+static void window_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value) {
     (void)v;
     (void)ctx;
     spinlock_acquire(&vga.lock);
@@ -543,19 +527,18 @@ static const struct mmio_ops window_ops = { window_read, window_write, false };
 // The CRT controller's registers answer at 3Bxh or 3Dxh, as the miscellaneous
 // output register selects.
 static bool port_decoded(uint16_t port) {
-    bool color = vga.misc & MISC_COLOR;
+    bool colour = (vga.misc & MISC_COLOR) != 0;
     if (port < 0x3c0) {
-        return !color;
+        return !colour;
     }
     if (port >= 0x3d0) {
-        return color;
+        return colour;
     }
     return true;
 }
 
 static uint64_t frame_ns(void) {
-    return (vga.misc & MISC_LINES) == MISC_LINES_480 ? FRAME_NS_60
-        : FRAME_NS_70;
+    return (vga.misc & MISC_LINES) == MISC_LINES_480 ? FRAME_NS_60 : FRAME_NS_70;
 }
 
 static uint8_t input_status1(void) {
@@ -645,8 +628,7 @@ static void port_write(uint16_t port, uint8_t value) {
                 uint8_t index = vga.ac_index & 0x1f;
                 // The palette takes writes only while the display does not
                 // read it.
-                if (index < AC_COUNT
-                 && (index >= 0x10 || (vga.ac_index & AC_INDEX_PAS) == 0)) {
+                if (index < AC_COUNT && (index >= 0x10 || (vga.ac_index & AC_INDEX_PAS) == 0)) {
                     vga.ac[index] = value;
                 }
             }
@@ -721,11 +703,9 @@ static void port_write(uint16_t port, uint8_t value) {
             }
             // Protection leaves registers 0-7 alone, but the line compare bit
             // of the overflow register.
-            if ((vga.crtc[CRTC_VRE] & CRTC_VRE_PROTECT) != 0
-             && index <= CRTC_OVERFLOW) {
+            if ((vga.crtc[CRTC_VRE] & CRTC_VRE_PROTECT) != 0 && index <= CRTC_OVERFLOW) {
                 if (index == CRTC_OVERFLOW) {
-                    vga.crtc[index] = (uint8_t)((vga.crtc[index] & ~0x10)
-                        | (value & 0x10));
+                    vga.crtc[index] = (uint8_t)((vga.crtc[index] & ~0x10) | (value & 0x10));
                 }
                 break;
             }
@@ -745,8 +725,7 @@ static void port_write(uint16_t port, uint8_t value) {
 }
 
 static void ports_access(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in,
-    uint32_t *value
+    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
 ) {
     (void)v;
     (void)ctx;
@@ -828,8 +807,7 @@ static void dispi_fixup(void) {
     if (r[DISPI_Y_OFFSET] > DISPI_MAX_YRES) {
         r[DISPI_Y_OFFSET] = DISPI_MAX_YRES;
     }
-    size_t start = (uint64_t)r[DISPI_X_OFFSET] * bits / 8
-        + (uint64_t)r[DISPI_Y_OFFSET] * line;
+    size_t start = (uint64_t)r[DISPI_X_OFFSET] * bits / 8 + (uint64_t)r[DISPI_Y_OFFSET] * line;
     uint64_t shown = (uint64_t)r[DISPI_YRES] * line;
     if (start + shown > vbe.vram_size) {
         r[DISPI_Y_OFFSET] = 0;
@@ -852,12 +830,12 @@ static void window_update(void) {
         return;
     }
     bool written = vbe.window_bank != NO_BANK
-        && gpt_dirty(
-            WINDOW_BASE, PLANE_SIZE, vbe.written_before,
-            ((uint64_t)vbe.window_bank << 16) / PAGE_SIZE, true
-        );
+                && gpt_dirty(
+                       WINDOW_BASE, PLANE_SIZE, vbe.written_before,
+                       ((uint64_t)vbe.window_bank << 16) / PAGE_SIZE, true
+                   );
     if (written) {
-        __atomic_store_n(&vbe.written_before_any, true, __ATOMIC_RELAXED);
+        atomic_store_explicit(&vbe.written_before_any, true, memory_order_relaxed);
     }
     if (bank == NO_BANK) {
         gpt_map(WINDOW_BASE, 0, PLANE_SIZE, 0, 0);
@@ -923,8 +901,7 @@ static void dispi_write(uint16_t index, uint16_t value) {
             break;
         }
         case DISPI_ENABLE: {
-            if ((value & DISPI_ENABLED) != 0
-             && (r[DISPI_ENABLE] & DISPI_ENABLED) == 0) {
+            if ((value & DISPI_ENABLED) != 0 && (r[DISPI_ENABLE] & DISPI_ENABLED) == 0) {
                 r[DISPI_VIRT_WIDTH] = 0;
                 r[DISPI_X_OFFSET] = 0;
                 r[DISPI_Y_OFFSET] = 0;
@@ -937,7 +914,7 @@ static void dispi_write(uint16_t index, uint16_t value) {
             } else {
                 r[DISPI_BANK] = 0;
             }
-            vga.dac8 = value & DISPI_8BIT_DAC;
+            vga.dac8 = (value & DISPI_8BIT_DAC) != 0;
             vga.palette_dirty = true;
             r[DISPI_ENABLE] = value;
             window_update();
@@ -964,8 +941,7 @@ void vga_dispi_write(uint16_t index, uint16_t value) {
 }
 
 static void dispi_ports(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in,
-    uint32_t *value
+    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
 ) {
     (void)v;
     (void)ctx;
@@ -999,8 +975,8 @@ static uint32_t dac_rgb(uint8_t index) {
 }
 
 // A 4-bit colour through the attribute controller's palette, as a DAC index.
-static uint8_t ac_color(uint8_t color) {
-    uint8_t p = vga.ac[color & 0x0f];
+static uint8_t ac_colour(uint8_t colour) {
+    uint8_t p = vga.ac[colour & 0x0f];
     uint8_t select = vga.ac[AC_COLOR_SELECT];
     if ((vga.ac[AC_MODE] & AC_MODE_P54) != 0) {
         p = (uint8_t)((p & 0x0f) | ((select & 0x03) << 4));
@@ -1010,9 +986,8 @@ static uint8_t ac_color(uint8_t color) {
 
 // The overscan colour register's DAC index, as the colour select register
 // extends it.
-static uint8_t ac_color_border(void) {
-    return (uint8_t)((vga.ac[0x11] & 0x3f)
-        | ((vga.ac[AC_COLOR_SELECT] & 0x0c) << 4));
+static uint8_t ac_colour_border(void) {
+    return (uint8_t)((vga.ac[0x11] & 0x3f) | ((vga.ac[AC_COLOR_SELECT] & 0x0c) << 4));
 }
 
 // Where the CRT controller fetches a character clock's bytes from.
@@ -1022,7 +997,8 @@ static uint32_t crtc_address(uint32_t ma, unsigned int row_scan) {
         a = (ma << 2) | ((ma >> 14) & 3);
     } else if ((vga.crtc[CRTC_MODE] & CRTC_MODE_BYTE) == 0) {
         uint32_t bit = (vga.crtc[CRTC_MODE] & CRTC_MODE_WRAP15) != 0
-            ? (ma >> 15) & 1 : (ma >> 13) & 1;
+                     ? (ma >> 15) & 1
+                     : (ma >> 13) & 1;
         a = (ma << 1) | bit;
     } else {
         a = ma;
@@ -1048,35 +1024,31 @@ static uint32_t font_base(uint8_t attribute) {
     return (map & 3) * (uint32_t)0x4000 + (map >> 2) * (uint32_t)0x2000;
 }
 
-static void put(
-    uint32_t *line, uint32_t *x, uint32_t width, uint32_t rgb, size_t count
-) {
+static void put(uint32_t *line, uint32_t *x, uint32_t width, uint32_t rgb, size_t count) {
     for (size_t i = 0; i < count && *x < width; i++) {
         line[(*x)++] = rgb;
     }
 }
 
 static void text_line(
-    uint32_t *line, uint32_t width, uint32_t columns, uint32_t ma,
-    unsigned int row_scan, unsigned int dots, unsigned int repeat,
-    bool cursor_on, bool blink_on
+    uint32_t *line, uint32_t width, uint32_t columns, uint32_t ma, unsigned int row_scan,
+    unsigned int dots, unsigned int repeat, bool cursor_on, bool blink_on
 ) {
-    uint32_t cursor = (uint32_t)vga.crtc[CRTC_CURSOR_HIGH] << 8
-        | vga.crtc[CRTC_CURSOR_LOW];
+    uint32_t cursor = (uint32_t)vga.crtc[CRTC_CURSOR_HIGH] << 8 | vga.crtc[CRTC_CURSOR_LOW];
     unsigned int cursor_start = vga.crtc[CRTC_CURSOR_START] & 0x1f;
     unsigned int cursor_end = vga.crtc[CRTC_CURSOR_END] & 0x1f;
-    bool cursor_row = (vga.crtc[CRTC_CURSOR_START] & CRTC_CURSOR_OFF) == 0
-        && cursor_on && row_scan >= cursor_start && row_scan <= cursor_end;
-    bool underline_row = row_scan
-        == (vga.crtc[CRTC_UNDERLINE] & (uint32_t)0x1f);
-    bool blink = vga.ac[AC_MODE] & AC_MODE_BLINK;
+    bool cursor_row = (vga.crtc[CRTC_CURSOR_START] & CRTC_CURSOR_OFF) == 0 && cursor_on
+                   && row_scan >= cursor_start && row_scan <= cursor_end;
+    bool underline_row = row_scan == (vga.crtc[CRTC_UNDERLINE] & (uint32_t)0x1f);
+    bool blink = (vga.ac[AC_MODE] & AC_MODE_BLINK) != 0;
     uint32_t x = 0;
     for (size_t c = 0; c < columns; c++) {
         uint32_t a = crtc_address(ma + c, row_scan);
         uint8_t ch = vga.planes[0][a];
         uint8_t attribute = vga.planes[1][a];
-        uint8_t glyph = vga.planes[2][(font_base(attribute) + ch * (uint32_t)32
-            + row_scan) & (PLANE_SIZE - 1)];
+        uint8_t glyph = vga.planes[2][
+            (font_base(attribute) + ch * (uint32_t)32 + row_scan) & (PLANE_SIZE - 1)
+        ];
         uint8_t fg = attribute & 0x0f;
         uint8_t bg = attribute >> 4;
         // The underline of a monochrome display's attributes, which colour
@@ -1098,17 +1070,17 @@ static void text_line(
             glyph = 0xff;
             whole = true;
         }
-        uint32_t fg_rgb = dac_rgb(ac_color(fg));
-        uint32_t bg_rgb = dac_rgb(ac_color(bg));
+        uint32_t fg_rgb = dac_rgb(ac_colour(fg));
+        uint32_t bg_rgb = dac_rgb(ac_colour(bg));
         for (size_t k = 0; k < dots; k++) {
             bool on;
             if (k < 8) {
-                on = (glyph >> (7 - k)) & 1;
+                on = ((glyph >> (7 - k)) & 1) != 0;
             } else {
                 // Line graphics characters continue into the ninth column.
                 on = whole
-                    || ((vga.ac[AC_MODE] & AC_MODE_LINE_GRAPHICS) != 0
-                        && ch >= 0xc0 && ch <= 0xdf && (glyph & 1) != 0);
+                  || ((vga.ac[AC_MODE] & AC_MODE_LINE_GRAPHICS) != 0 && ch >= 0xc0 && ch <= 0xdf
+                   && (glyph & 1) != 0);
             }
             put(line, &x, width, on ? fg_rgb : bg_rgb, repeat);
         }
@@ -1119,18 +1091,15 @@ static void text_line(
 }
 
 static void graphics_line(
-    uint32_t *line, uint32_t width, uint32_t columns, uint32_t ma,
-    unsigned int row_scan, unsigned int repeat
+    uint32_t *line, uint32_t width, uint32_t columns, uint32_t ma, unsigned int row_scan,
+    unsigned int repeat
 ) {
     uint8_t mode = vga.gc[GC_MODE];
     uint8_t enable = vga.ac[AC_PLANE_ENABLE] & 0x0f;
     uint32_t x = 0;
     for (size_t c = 0; c < columns; c++) {
         uint32_t a = crtc_address(ma + c, row_scan);
-        uint8_t b[4] = {
-            vga.planes[0][a], vga.planes[1][a], vga.planes[2][a],
-            vga.planes[3][a]
-        };
+        uint8_t b[4] = { vga.planes[0][a], vga.planes[1][a], vga.planes[2][a], vga.planes[3][a] };
         if ((mode & GC_MODE_256) != 0) {
             for (size_t k = 0; k < 4; k++) {
                 put(line, &x, width, dac_rgb(b[k]), 2 * repeat);
@@ -1140,22 +1109,16 @@ static void graphics_line(
                 unsigned int shift = 6 - 2 * (k & 3);
                 uint8_t low = k < 4 ? b[0] : b[1];
                 uint8_t high = k < 4 ? b[2] : b[3];
-                uint8_t color = (uint8_t)(((low >> shift) & 3)
-                    | (((high >> shift) & 3) << 2));
-                put(
-                    line, &x, width, dac_rgb(ac_color(color & enable)), repeat
-                );
+                uint8_t colour = (uint8_t)(((low >> shift) & 3) | (((high >> shift) & 3) << 2));
+                put(line, &x, width, dac_rgb(ac_colour(colour & enable)), repeat);
             }
         } else {
             for (size_t k = 0; k < 8; k++) {
                 unsigned int shift = 7 - k;
-                uint8_t color = (uint8_t)(((b[0] >> shift) & 1)
-                    | (((b[1] >> shift) & 1) << 1)
-                    | (((b[2] >> shift) & 1) << 2)
-                    | (((b[3] >> shift) & 1) << 3));
-                put(
-                    line, &x, width, dac_rgb(ac_color(color & enable)), repeat
-                );
+                uint8_t colour = (uint8_t)(((b[0] >> shift) & 1) | (((b[1] >> shift) & 1) << 1)
+                                         | (((b[2] >> shift) & 1) << 2)
+                                         | (((b[3] >> shift) & 1) << 3));
+                put(line, &x, width, dac_rgb(ac_colour(colour & enable)), repeat);
             }
         }
     }
@@ -1188,9 +1151,7 @@ static void display_state(struct display_state *s) {
 
 // Whether the guest wrote any of the bytes a scan line fetches since the
 // display last showed them.
-static bool line_changed(
-    uint32_t columns, uint32_t ma, unsigned int row_scan
-) {
+static bool line_changed(uint32_t columns, uint32_t ma, unsigned int row_scan) {
     for (size_t c = 0; c < columns; c++) {
         uint32_t chunk = crtc_address(ma + c, row_scan) >> CHUNK_SHIFT;
         if ((vga.changed[chunk / 64] & ((uint64_t)1 << (chunk % 64))) != 0) {
@@ -1204,19 +1165,15 @@ static bool line_changed(
 // the scan lines that fetch what the guest wrote since the last time, the
 // others staying as they were made then.
 static void make_frame(
-    uint32_t *width_out, uint32_t *height_out, bool cursor_on, bool blink_on,
-    bool all
+    uint32_t *width_out, uint32_t *height_out, bool cursor_on, bool blink_on, bool all
 ) {
-    bool graphics = vga.gc[GC_MISC] & GC_MISC_GRAPHICS;
-    unsigned int dots
-        = (graphics || (vga.seq[SEQ_CLOCKING] & SEQ_CLOCKING_8DOT) != 0) ? 8
-        : 9;
-    unsigned int repeat = (vga.seq[SEQ_CLOCKING] & SEQ_CLOCKING_HALF) != 0 ? 2
-        : 1;
+    bool graphics = (vga.gc[GC_MISC] & GC_MISC_GRAPHICS) != 0;
+    unsigned int dots = (graphics || (vga.seq[SEQ_CLOCKING] & SEQ_CLOCKING_8DOT) != 0) ? 8 : 9;
+    unsigned int repeat = (vga.seq[SEQ_CLOCKING] & SEQ_CLOCKING_HALF) != 0 ? 2 : 1;
     uint32_t width = (vga.crtc[CRTC_HDE] + (uint32_t)1) * dots * repeat;
-    uint32_t height = (vga.crtc[CRTC_VDE]
-        | ((vga.crtc[CRTC_OVERFLOW] & (uint32_t)0x02) << 7)
-        | ((vga.crtc[CRTC_OVERFLOW] & (uint32_t)0x40) << 3)) + (uint32_t)1;
+    uint32_t overflow = vga.crtc[CRTC_OVERFLOW];
+    uint32_t vde = vga.crtc[CRTC_VDE] | ((overflow & 0x02) << 7) | ((overflow & 0x40) << 3);
+    uint32_t height = vde + 1;
     if (width > MAX_WIDTH) {
         width = MAX_WIDTH;
     }
@@ -1226,23 +1183,21 @@ static void make_frame(
     *width_out = width;
     *height_out = height;
 
-    if ((vga.ac_index & AC_INDEX_PAS) == 0
-     || (vga.seq[SEQ_CLOCKING] & SEQ_CLOCKING_OFF) != 0) {
+    if ((vga.ac_index & AC_INDEX_PAS) == 0 || (vga.seq[SEQ_CLOCKING] & SEQ_CLOCKING_OFF) != 0) {
         memset(out.frame, 0, width * height * sizeof(uint32_t));
         memset(out.made, all, height);
         return;
     }
 
     unsigned int max_scan = vga.crtc[CRTC_MAX_SCAN] & 0x1f;
-    bool double_scan = vga.crtc[CRTC_MAX_SCAN] & CRTC_DOUBLE_SCAN;
+    bool double_scan = (vga.crtc[CRTC_MAX_SCAN] & CRTC_DOUBLE_SCAN) != 0;
     uint32_t line_compare = vga.crtc[CRTC_LINE_COMPARE]
-        | ((vga.crtc[CRTC_OVERFLOW] & (uint32_t)0x10) << 4)
-        | ((vga.crtc[CRTC_MAX_SCAN] & (uint32_t)0x40) << 3);
+                          | ((vga.crtc[CRTC_OVERFLOW] & (uint32_t)0x10) << 4)
+                          | ((vga.crtc[CRTC_MAX_SCAN] & (uint32_t)0x40) << 3);
     // The start address, with the CRT controller's byte panning, and the first
     // row's first scan line.
-    uint32_t ma
-        = ((uint32_t)vga.crtc[CRTC_START_HIGH] << 8 | vga.crtc[CRTC_START_LOW])
-        + ((vga.crtc[CRTC_PRESET] >> 5) & (uint32_t)3);
+    uint32_t ma = ((uint32_t)vga.crtc[CRTC_START_HIGH] << 8 | vga.crtc[CRTC_START_LOW])
+                + ((vga.crtc[CRTC_PRESET] >> 5) & (uint32_t)3);
     uint32_t row_step = vga.crtc[CRTC_OFFSET] * (uint32_t)2;
     unsigned int row_scan = vga.crtc[CRTC_PRESET] & (uint32_t)0x1f;
     uint32_t columns = vga.crtc[CRTC_HDE] + (uint32_t)1;
@@ -1258,23 +1213,15 @@ static void make_frame(
         out.made[y] = all || line_changed(columns + 1, ma, row_scan);
         if (out.made[y]) {
             // The screen below a split can be kept from panning.
-            unsigned int shift
-                = split && (vga.ac[AC_MODE] & AC_MODE_PAN_SPLIT) != 0 ? 0
-                : pan;
+            unsigned int shift = split && (vga.ac[AC_MODE] & AC_MODE_PAN_SPLIT) != 0 ? 0 : pan;
             if (graphics) {
-                graphics_line(
-                    out.line, span, columns + 1, ma, row_scan, repeat
-                );
+                graphics_line(out.line, span, columns + 1, ma, row_scan, repeat);
             } else {
                 text_line(
-                    out.line, span, columns + 1, ma, row_scan, dots, repeat,
-                    cursor_on, blink_on
+                    out.line, span, columns + 1, ma, row_scan, dots, repeat, cursor_on, blink_on
                 );
             }
-            memcpy(
-                out.frame + y * width, out.line + shift,
-                width * sizeof(uint32_t)
-            );
+            memcpy(out.frame + y * width, out.line + shift, width * sizeof(uint32_t));
         }
         if (!double_scan || (y & 1) != 0) {
             if (row_scan >= max_scan) {
@@ -1300,8 +1247,8 @@ static uint32_t channel(uint32_t value, size_t size, uint8_t shift) {
 static uint32_t fb_pixel(uint32_t rgb) {
     const struct handoff_framebuffer *fb = &core_handoff->video.framebuffer;
     return channel((rgb >> 16) & 0xff, fb->red_size, fb->red_shift)
-        | channel((rgb >> 8) & 0xff, fb->green_size, fb->green_shift)
-        | channel(rgb & 0xff, fb->blue_size, fb->blue_shift);
+         | channel((rgb >> 8) & 0xff, fb->green_size, fb->green_shift)
+         | channel(rgb & 0xff, fb->blue_size, fb->blue_shift);
 }
 
 static void fb_put(uint8_t *row, uint32_t x, uint32_t pixel, uint8_t bpp) {
@@ -1333,9 +1280,7 @@ void vga_screen_size(uint32_t *width, uint32_t *height) {
 
 // The framebuffer's rectangle the display fills, as the configuration asks, at
 // an aspect ratio of aspect_w:aspect_h where it is to be kept.
-static void place(
-    uint32_t width, uint32_t height, uint32_t aspect_w, uint32_t aspect_h
-) {
+static void place(uint32_t width, uint32_t height, uint32_t aspect_w, uint32_t aspect_h) {
     const struct handoff *h = core_handoff;
     uint32_t fw;
     uint32_t fh;
@@ -1357,15 +1302,13 @@ static void place(
             break;
         }
         case HANDOFF_VGA_SCALING_MANUAL: {
-            unsigned int scale = h->config.vga_scale != 0 ? h->config.vga_scale
-                : 1;
+            unsigned int scale = h->config.vga_scale != 0 ? h->config.vga_scale : 1;
             w = (uint64_t)width * scale;
             hgt = (uint64_t)height * scale;
             break;
         }
         case HANDOFF_VGA_SCALING_INTEGER: {
-            uint32_t scale = fw / width < fh / height ? fw / width
-                : fh / height;
+            uint32_t scale = fw / width < fh / height ? fw / width : fh / height;
             if (scale == 0) {
                 scale = 1;
             }
@@ -1397,8 +1340,7 @@ static void fb_clear(uint32_t rgb) {
     const struct handoff_framebuffer *fb = &core_handoff->video.framebuffer;
     uint32_t black = fb_pixel(rgb);
     for (size_t y = 0; y < fb->height; y++) {
-        uint8_t *row = (uint8_t *)(uintptr_t)fb->base
-            + (uint64_t)y * fb->pitch;
+        uint8_t *row = (uint8_t *)(uintptr_t)fb->base + (uint64_t)y * fb->pitch;
         for (size_t x = 0; x < fb->width; x++) {
             fb_put(row, x, black, fb->bpp);
         }
@@ -1417,14 +1359,10 @@ static void screen_flush(void) {
             uint8_t *row = base + (uint64_t)column * fb->pitch;
             for (size_t i = out.band_count; i-- > 0; ) {
                 uint32_t line = out.y + out.band_y + i;
-                fb_put(
-                    row, fb->width - 1 - line, pixels[(uint64_t)i * out.w],
-                    fb->bpp
-                );
+                fb_put(row, fb->width - 1 - line, pixels[(uint64_t)i * out.w], fb->bpp);
             }
         } else {
-            uint8_t *row = base
-                + (uint64_t)(fb->height - 1 - column) * fb->pitch;
+            uint8_t *row = base + (uint64_t)(fb->height - 1 - column) * fb->pitch;
             for (size_t i = 0; i < out.band_count; i++) {
                 uint32_t line = out.y + out.band_y + i;
                 fb_put(row, line, pixels[(uint64_t)i * out.w], fb->bpp);
@@ -1440,8 +1378,7 @@ static void screen_flush(void) {
 static void screen_line(uint32_t y, uint32_t x0, uint32_t x1) {
     const struct handoff_framebuffer *fb = &core_handoff->video.framebuffer;
     if (fb->rotation == HANDOFF_ROTATE_0) {
-        uint8_t *row = (uint8_t *)(uintptr_t)fb->base
-            + (uint64_t)(out.y + y) * fb->pitch;
+        uint8_t *row = (uint8_t *)(uintptr_t)fb->base + (uint64_t)(out.y + y) * fb->pitch;
         for (size_t x = x0; x < x1; x++) {
             fb_put(row, out.x + x, out.fb_line[x], fb->bpp);
         }
@@ -1462,17 +1399,13 @@ static void screen_line(uint32_t y, uint32_t x0, uint32_t x1) {
     if (x1 > out.band_x1) {
         out.band_x1 = x1;
     }
-    memcpy(
-        out.band + (uint64_t)out.band_count * out.w, out.fb_line,
-        out.w * sizeof(uint32_t)
-    );
+    memcpy(out.band + (uint64_t)out.band_count * out.w, out.fb_line, out.w * sizeof(uint32_t));
     out.band_count++;
 }
 
 // Starts showing a frame, all of it again where its size or border changed.
 static void draw_start(uint32_t width, uint32_t height, uint32_t border) {
-    bool all = !out.valid || width != out.width || height != out.height
-        || border != out.border;
+    bool all = !out.valid || width != out.width || height != out.height || border != out.border;
     if (all) {
         out.width = width;
         out.height = height;
@@ -1525,10 +1458,8 @@ static void draw_lines(void) {
 
         // The destination rows and columns these source pixels cover.
         uint32_t y0 = (uint32_t)(((uint64_t)sy * out.h + height - 1) / height);
-        uint32_t y1 = (uint32_t)(((uint64_t)(sy + 1) * out.h + height - 1)
-            / height);
-        uint32_t x0 = (uint32_t)(((uint64_t)first * out.w + width - 1)
-            / width);
+        uint32_t y1 = (uint32_t)(((uint64_t)(sy + 1) * out.h + height - 1) / height);
+        uint32_t x0 = (uint32_t)(((uint64_t)first * out.w + width - 1) / width);
         uint32_t x1 = (uint32_t)(((uint64_t)last * out.w + width - 1) / width);
         if (x1 > out.w) {
             x1 = out.w;
@@ -1556,9 +1487,7 @@ static uint32_t expand5(uint32_t v) {
     return (v << 3) | (v >> 2);
 }
 
-static void vbe_convert(
-    const uint8_t *p, uint32_t width, unsigned int bpp, uint32_t *rgb
-) {
+static void vbe_convert(const uint8_t *p, uint32_t width, unsigned int bpp, uint32_t *rgb) {
     switch (bpp) {
         case 8: {
             for (size_t x = 0; x < width; x++) {
@@ -1569,8 +1498,8 @@ static void vbe_convert(
         case 15: {
             for (size_t x = 0; x < width; x++) {
                 uint32_t v = p[2 * x] | (uint32_t)p[2 * x + 1] << 8;
-                rgb[x] = expand5((v >> 10) & 31) << 16
-                    | expand5((v >> 5) & 31) << 8 | expand5(v & 31);
+                rgb[x] = expand5((v >> 10) & 31) << 16 | expand5((v >> 5) & 31) << 8
+                       | expand5(v & 31);
             }
             break;
         }
@@ -1578,8 +1507,7 @@ static void vbe_convert(
             for (size_t x = 0; x < width; x++) {
                 uint32_t v = p[2 * x] | (uint32_t)p[2 * x + 1] << 8;
                 uint32_t g = (v >> 5) & 63;
-                rgb[x] = expand5(v >> 11) << 16 | ((g << 2) | (g >> 4)) << 8
-                    | expand5(v & 31);
+                rgb[x] = expand5(v >> 11) << 16 | ((g << 2) | (g >> 4)) << 8 | expand5(v & 31);
             }
             break;
         }
@@ -1624,10 +1552,9 @@ static uint64_t line_hash(const uint8_t *p, size_t bytes) {
 // dirty flags show written, where the processor keeps them.
 static bool direct_wanted(void) {
     const struct handoff_framebuffer *fb = &core_handoff->video.framebuffer;
-    return vbe.direct_size != 0 && vbe_on() && !vbe.panned
-        && vbe.regs[DISPI_BPP] == 32 && vbe.regs[DISPI_XRES] == fb->width
-        && vbe.regs[DISPI_YRES] == fb->height && vbe.line_bytes == fb->pitch
-        && vbe.start == 0;
+    return vbe.direct_size != 0 && vbe_on() && !vbe.panned && vbe.regs[DISPI_BPP] == 32
+        && vbe.regs[DISPI_XRES] == fb->width && vbe.regs[DISPI_YRES] == fb->height
+        && vbe.line_bytes == fb->pitch && vbe.start == 0;
 }
 
 // Moves the start of video memory into the firmware's framebuffer or back as
@@ -1645,8 +1572,7 @@ static void direct_update(void) {
     spinlock_acquire(&vga.lock);
     want = direct_wanted();
     if (want != vbe.direct) {
-        uint8_t *fb
-            = (uint8_t *)(uintptr_t)core_handoff->video.framebuffer.base;
+        uint8_t *fb = (uint8_t *)(uintptr_t)core_handoff->video.framebuffer.base;
         if (want) {
             memcpy(fb, vbe.vram, vbe.direct_size);
         } else {
@@ -1682,9 +1608,8 @@ static void vbe_take_written(uintptr_t start, size_t size) {
     uintptr_t lfb = vbe.lfb + first * PAGE_SIZE;
     size_t lfb_size = first < end ? (end - first) * PAGE_SIZE : 0;
     bool dirty = (vbe.lfb != 0 && gpt_dirty(lfb, lfb_size, NULL, 0, false))
-        || gpt_dirty(WINDOW_BASE, PLANE_SIZE, NULL, 0, false);
-    if (!dirty
-     && !__atomic_load_n(&vbe.written_before_any, __ATOMIC_RELAXED)) {
+              || gpt_dirty(WINDOW_BASE, PLANE_SIZE, NULL, 0, false);
+    if (!dirty && !atomic_load_explicit(&vbe.written_before_any, memory_order_relaxed)) {
         return;
     }
     // A stepping vCPU keeps the others paused itself: the next frame sees to
@@ -1694,20 +1619,20 @@ static void vbe_take_written(uintptr_t start, size_t size) {
         vcpu_pause_others();
     }
     spinlock_acquire(&vga.lock);
-    if (vbe.written_before_any) {
+    if (atomic_load_explicit(&vbe.written_before_any, memory_order_relaxed)) {
         for (size_t i = 0; i < vbe.vram_size / PAGE_SIZE / 64; i++) {
             vbe.written[i] |= vbe.written_before[i];
             vbe.written_before[i] = 0;
         }
-        __atomic_store_n(&vbe.written_before_any, false, __ATOMIC_RELAXED);
+        atomic_store_explicit(&vbe.written_before_any, false, memory_order_relaxed);
     }
     if (take && vbe.lfb != 0) {
         gpt_dirty(lfb, lfb_size, vbe.written, first, true);
     }
     if (take && vbe.window_bank != NO_BANK) {
         gpt_dirty(
-            WINDOW_BASE, PLANE_SIZE, vbe.written,
-            ((uint64_t)vbe.window_bank << 16) / PAGE_SIZE, true
+            WINDOW_BASE, PLANE_SIZE, vbe.written, ((uint64_t)vbe.window_bank << 16) / PAGE_SIZE,
+            true
         );
     }
     spinlock_release(&vga.lock);
@@ -1718,8 +1643,7 @@ static void vbe_take_written(uintptr_t start, size_t size) {
 }
 
 static bool vbe_written(uint64_t at, size_t bytes) {
-    for (size_t page = at / PAGE_SIZE; page <= (at + bytes - 1) / PAGE_SIZE;
-         page++) {
+    for (size_t page = at / PAGE_SIZE; page <= (at + bytes - 1) / PAGE_SIZE; page++) {
         if ((vbe.written[page / 64] & ((uint64_t)1 << (page % 64))) != 0) {
             return true;
         }
@@ -1750,9 +1674,8 @@ static void vbe_start(uint64_t now) {
     }
     spinlock_release(&vga.lock);
 
-    bool all = !out.vbe_valid || width != out.width || height != out.height
-        || bpp != out.vbe_bpp || line_bytes != out.vbe_line_bytes
-        || start != out.vbe_start || (bpp == 8 && palette);
+    bool all = !out.vbe_valid || width != out.width || height != out.height || bpp != out.vbe_bpp
+            || line_bytes != out.vbe_line_bytes || start != out.vbe_start || (bpp == 8 && palette);
     if (all) {
         out.width = width;
         out.height = height;
@@ -1768,8 +1691,7 @@ static void vbe_start(uint64_t now) {
     // The guest's guests write to memory past the dirty flags of the
     // hypervisor's EPT, and after them every line needs comparing once.
     bool track = vbe.track && !nvmx_any_vmx_operation();
-    out.vbe_compare_all = !track || !out.vbe_tracked
-        || now >= out.vbe_compare_due;
+    out.vbe_compare_all = !track || !out.vbe_tracked || now >= out.vbe_compare_due;
     if (out.vbe_compare_all) {
         out.vbe_compare_due = now + COMPARE_ALL_NS;
     }
@@ -1787,10 +1709,9 @@ static void vbe_start(uint64_t now) {
 // way started.
 static bool vbe_mode_changed(void) {
     spinlock_acquire(&vga.lock);
-    bool changed = vbe.regs[DISPI_XRES] != out.width
-        || vbe.regs[DISPI_YRES] != out.height
-        || vbe.regs[DISPI_BPP] != out.vbe_bpp
-        || vbe.line_bytes != out.vbe_line_bytes || vbe.start != out.vbe_start;
+    bool changed = vbe.regs[DISPI_XRES] != out.width || vbe.regs[DISPI_YRES] != out.height
+                || vbe.regs[DISPI_BPP] != out.vbe_bpp || vbe.line_bytes != out.vbe_line_bytes
+                || vbe.start != out.vbe_start;
     spinlock_release(&vga.lock);
     return changed;
 }
@@ -1825,8 +1746,7 @@ static void vbe_lines(void) {
         vbe_convert(p, width, bpp, out.vbe_line);
 
         uint32_t y0 = (uint32_t)(((uint64_t)sy * out.h + height - 1) / height);
-        uint32_t y1 = (uint32_t)(((uint64_t)(sy + 1) * out.h + height - 1)
-            / height);
+        uint32_t y1 = (uint32_t)(((uint64_t)(sy + 1) * out.h + height - 1) / height);
         uint32_t source = UINT32_MAX;
         uint32_t pixel = 0;
         for (size_t x = 0; x < out.w; x++) {
@@ -1866,7 +1786,7 @@ static void frame_begin(uint64_t now) {
     bool cursor_on = ((frames >> CURSOR_FRAMES_SHIFT) & 1) == 0;
     bool blink_on = ((frames >> BLINK_FRAMES_SHIFT) & 1) == 0;
     uint32_t blink = (cursor_on ? (uint32_t)1 : (uint32_t)0)
-        | (blink_on ? (uint32_t)2 : (uint32_t)0);
+                   | (blink_on ? (uint32_t)2 : (uint32_t)0);
     if (!vga.dirty && blink == out.blink && out.valid) {
         return;
     }
@@ -1880,15 +1800,14 @@ static void frame_begin(uint64_t now) {
     // A text mode's font and its blinking show on every line, whatever bytes
     // it fetches.
     bool text = (vga.gc[GC_MISC] & GC_MISC_GRAPHICS) == 0;
-    bool all = !out.valid
-        || memcmp(&state, &out.state, sizeof(struct display_state)) != 0
-        || (text && (vga.font_changed || blink != out.blink));
+    bool all = !out.valid || memcmp(&state, &out.state, sizeof(struct display_state)) != 0
+            || (text && (vga.font_changed || blink != out.blink));
     make_frame(&width, &height, cursor_on, blink_on, all);
     out.state = state;
     out.blink = blink;
     memset(vga.changed, 0, sizeof(vga.changed));
     vga.font_changed = false;
-    uint32_t border = dac_rgb(ac_color_border());
+    uint32_t border = dac_rgb(ac_colour_border());
     spinlock_release(&vga.lock);
     draw_start(width, height, border);
     draw_lines();
@@ -1901,8 +1820,7 @@ static void frame_account(uint64_t now) {
     out.frame_cost += time_ns() - now;
     if (!out.busy) {
         uint64_t wait = out.frame_cost * REDRAW_SHARE;
-        out.next_frame = out.frame_start
-            + (wait > REFRESH_NS ? wait : REFRESH_NS);
+        out.next_frame = out.frame_start + (wait > REFRESH_NS ? wait : REFRESH_NS);
     }
 }
 
@@ -1952,20 +1870,13 @@ static void vbe_init(void) {
     vbe.window_bank = NO_BANK;
     vbe.track = gpt_track_dirty();
     if (vbe.track) {
-        size_t bitmap_pages = (vbe.vram_size / PAGE_SIZE / 8 + PAGE_SIZE - 1)
-            / PAGE_SIZE;
+        size_t bitmap_pages = (vbe.vram_size / PAGE_SIZE / 8 + PAGE_SIZE - 1) / PAGE_SIZE;
         vbe.written = page_alloc(bitmap_pages);
         vbe.written_before = page_alloc(bitmap_pages);
     }
-    out.vbe_hashes = page_alloc(
-        (DISPI_MAX_YRES * sizeof(uint64_t) + PAGE_SIZE - 1) / PAGE_SIZE
-    );
-    out.vbe_line = page_alloc(
-        (DISPI_MAX_XRES * sizeof(uint32_t) + PAGE_SIZE - 1) / PAGE_SIZE
-    );
-    struct io_handler ports = {
-        DISPI_PORT, DISPI_PORT_COUNT, dispi_ports, NULL
-    };
+    out.vbe_hashes = page_alloc((DISPI_MAX_YRES * sizeof(uint64_t) + PAGE_SIZE - 1) / PAGE_SIZE);
+    out.vbe_line = page_alloc((DISPI_MAX_XRES * sizeof(uint32_t) + PAGE_SIZE - 1) / PAGE_SIZE);
+    struct io_handler ports = { DISPI_PORT, DISPI_PORT_COUNT, dispi_ports, NULL };
     io_register(&ports);
     vbe.present = true;
 
@@ -1974,12 +1885,11 @@ static void vbe_init(void) {
     // is never the framebuffer's own.
     const struct handoff_framebuffer *fb = &video->framebuffer;
     uint64_t frame = ((uint64_t)fb->pitch * fb->height + PAGE_SIZE - 1)
-        & ~(uint64_t)(PAGE_SIZE - 1);
-    if (fb->present && fb->rotation == HANDOFF_ROTATE_0 && fb->bpp == 32
-     && fb->red_size == 8 && fb->red_shift == 16 && fb->green_size == 8
-     && fb->green_shift == 8 && fb->blue_size == 8 && fb->blue_shift == 0
-     && fb->pitch % 32 == 0 && fb->base % PAGE_SIZE == 0 && frame <= fb->size
-     && frame <= vbe.vram_size) {
+                   & ~(uint64_t)(PAGE_SIZE - 1);
+    if (fb->present && fb->rotation == HANDOFF_ROTATE_0 && fb->bpp == 32 && fb->red_size == 8
+     && fb->red_shift == 16 && fb->green_size == 8 && fb->green_shift == 8 && fb->blue_size == 8
+     && fb->blue_shift == 0 && fb->pitch % 32 == 0 && fb->base % PAGE_SIZE == 0
+     && frame <= fb->size && frame <= vbe.vram_size) {
         vbe.direct_size = frame;
     }
 
@@ -1991,8 +1901,7 @@ static void vbe_init(void) {
     map_vram(vbe.lfb, 0, vbe.vram_size);
     gpt_flush();
     printf(
-        "Emulated VGA's linear framebuffer: %llu MiB at %#llx, writes found "
-        "by %s\n",
+        "Emulated VGA's linear framebuffer: %llu MiB at %#llx, writes found by %s\n",
         (unsigned long long)(vbe.vram_size >> 20), (unsigned long long)vbe.lfb,
         vbe.track ? "dirty flags" : "comparing lines"
     );
@@ -2044,16 +1953,13 @@ bool vga_init(void) {
         vga.planes[p] = page_alloc(PLANE_SIZE / PAGE_SIZE);
         memset(vga.planes[p], 0, PLANE_SIZE);
     }
-    size_t frame_pages
-        = (MAX_WIDTH * MAX_HEIGHT * sizeof(uint32_t) + PAGE_SIZE - 1)
-        / PAGE_SIZE;
+    size_t frame_pages = (MAX_WIDTH * MAX_HEIGHT * sizeof(uint32_t) + PAGE_SIZE - 1) / PAGE_SIZE;
     out.frame = page_alloc(frame_pages);
     out.shown = page_alloc(frame_pages);
     uint32_t screen_width;
     uint32_t screen_height;
     vga_screen_size(&screen_width, &screen_height);
-    size_t line_pages = (screen_width * sizeof(uint32_t) + PAGE_SIZE - 1)
-        / PAGE_SIZE;
+    size_t line_pages = (screen_width * sizeof(uint32_t) + PAGE_SIZE - 1) / PAGE_SIZE;
     out.xmap = page_alloc(line_pages);
     out.fb_line = page_alloc(line_pages);
     if (fb->rotation != HANDOFF_ROTATE_0) {
@@ -2075,15 +1981,21 @@ bool vga_init(void) {
     }
     vga.on = true;
 
-    unsigned int scaling = h->config.vga_scaling < 5 ? h->config.vga_scaling
-        : 0;
+    unsigned int scaling = h->config.vga_scaling < 5 ? h->config.vga_scaling : 0;
+    const char *orientation = "";
+    switch (fb->rotation) {
+        case HANDOFF_ROTATE_90: {
+            orientation = ", turned clockwise";
+            break;
+        }
+        case HANDOFF_ROTATE_270: {
+            orientation = ", turned anticlockwise";
+            break;
+        }
+    }
     printf(
-        "Emulating a VGA, %s on the %ux%u framebuffer at %#llx%s\n",
-        scaling_names[scaling], fb->width, fb->height,
-        (unsigned long long)fb->base,
-        fb->rotation == HANDOFF_ROTATE_90 ? ", turned clockwise"
-            : fb->rotation == HANDOFF_ROTATE_270 ? ", turned anticlockwise"
-            : ""
+        "Emulating a VGA, %s on the %ux%u framebuffer at %#llx%s\n", scaling_names[scaling],
+        fb->width, fb->height, (unsigned long long)fb->base, orientation
     );
     return true;
 }

@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -78,15 +79,12 @@ void event_exit(struct vcpu *v) {
         unsigned int vector = info & EVENT_VECTOR_MASK;
         unsigned int type = info & EVENT_TYPE_MASK;
         if (type == EVENT_TYPE_SOFTWARE
-         || (type == EVENT_TYPE_EXCEPTION
-          && (vector == VECTOR_BP || vector == VECTOR_OF))) {
+         || (type == EVENT_TYPE_EXCEPTION && (vector == VECTOR_BP || vector == VECTOR_OF))) {
             return;
         }
         error = (uint32_t)(exitintinfo >> 32);
     }
-    v->redeliver = info
-        & (EVENT_VALID | EVENT_ERROR_VALID | EVENT_TYPE_MASK
-            | EVENT_VECTOR_MASK);
+    v->redeliver = info & (EVENT_VALID | EVENT_ERROR_VALID | EVENT_TYPE_MASK | EVENT_VECTOR_MASK);
     v->redeliver_error = error;
 }
 
@@ -124,22 +122,16 @@ bool event_deliver_real_mode(struct vcpu *v) {
     vcpu_get_seg(v, SEG_SS, &ss);
     vcpu_get_seg(v, SEG_CS, &cs);
     uint32_t handler;
-    if (vector * 4 + 3 > idtr.limit
-     || !mmio_read_linear(v, idtr.base + vector * 4, &handler, 4)) {
+    if (vector * 4 + 3 > idtr.limit || !mmio_read_linear(v, idtr.base + vector * 4, &handler, 4)) {
         return false;
     }
     uint64_t rflags = vcpu_rflags(v);
-    uint16_t frame[3] = {
-        (uint16_t)vcpu_rip(v), cs.selector, (uint16_t)rflags
-    };
-    uint64_t sp_mask = (ss.attrib & SEG_DB) != 0 ? (uint64_t)0xffffffff
-        : (uint64_t)0xffff;
+    uint16_t frame[3] = { (uint16_t)vcpu_rip(v), cs.selector, (uint16_t)rflags };
+    uint64_t sp_mask = (ss.attrib & SEG_DB) != 0 ? (uint64_t)0xffffffff : (uint64_t)0xffff;
     uintptr_t rsp = vcpu_rsp(v);
     uint64_t sp = (rsp - sizeof(frame)) & sp_mask;
     for (size_t i = 0; i < 3; i++) {
-        bool written = mmio_write_linear(
-            v, ss.base + ((sp + 2 * i) & sp_mask), &frame[i], 2
-        );
+        bool written = mmio_write_linear(v, ss.base + ((sp + 2 * i) & sp_mask), &frame[i], 2);
         if (!written) {
             return false;
         }
@@ -149,9 +141,7 @@ bool event_deliver_real_mode(struct vcpu *v) {
     cs.base = (uint64_t)cs.selector << 4;
     vcpu_set_seg(v, SEG_CS, &cs);
     vcpu_set_rip(v, handler & 0xffff);
-    vcpu_set_rflags(
-        v, rflags & ~(uint64_t)(RFLAGS_IF | RFLAGS_TF | RFLAGS_RF | RFLAGS_AC)
-    );
+    vcpu_set_rflags(v, rflags & ~(uint64_t)(RFLAGS_IF | RFLAGS_TF | RFLAGS_RF | RFLAGS_AC));
     v->redeliver = 0;
     return true;
 }
@@ -169,10 +159,7 @@ static void inject(struct vcpu *v, uint32_t info, uint32_t error) {
 
 static void set_proc_control(uint32_t control, bool on) {
     uint64_t controls = vmx_read(VMCS_PROC_CONTROLS);
-    vmx_write(
-        VMCS_PROC_CONTROLS,
-        on ? controls | control : controls & ~(uint64_t)control
-    );
+    vmx_write(VMCS_PROC_CONTROLS, on ? controls | control : controls & ~(uint64_t)control);
 }
 
 // SVM shows nothing of the guest's NMI blocking without its NMI
@@ -183,14 +170,12 @@ static bool nmi_blocked(void) {
         return false;
     }
     uint64_t intr = vmx_read(VMCS_GUEST_INTERRUPTIBILITY);
-    return (intr
-        & (INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS
-            | INTERRUPTIBILITY_NMI)) != 0;
+    return (intr & (INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS | INTERRUPTIBILITY_NMI)) != 0;
 }
 
 // Returns whether it injected one.
 static bool deliver_nmi(struct vcpu *v) {
-    if (__atomic_exchange_n(&v->cpu->nmi_pending, false, __ATOMIC_ACQUIRE)) {
+    if (atomic_exchange_explicit(&v->cpu->nmi_pending, false, memory_order_acquire)) {
         v->nmi_pending = true;
     }
     if (!v->nmi_pending) {
@@ -238,7 +223,7 @@ void event_interrupt(uint8_t vector) {
             return;
         }
         case VLAPIC_KICK_VECTOR: {
-            __atomic_store_n(&cpu->kick, false, __ATOMIC_SEQ_CST);
+            atomic_store_explicit(&cpu->kick, false, memory_order_seq_cst);
             lapic_eoi();
             return;
         }
@@ -272,12 +257,13 @@ void event_interrupt(uint8_t vector) {
 
 bool event_interruptible(struct vcpu *v) {
     if (virt_vmx) {
-        return (vmx_read(VMCS_GUEST_RFLAGS) & RFLAGS_IF) != 0
-            && (vmx_read(VMCS_GUEST_INTERRUPTIBILITY)
-                & (INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS)) == 0;
+        if ((vmx_read(VMCS_GUEST_RFLAGS) & RFLAGS_IF) == 0) {
+            return false;
+        }
+        uint64_t blocking = vmx_read(VMCS_GUEST_INTERRUPTIBILITY);
+        return (blocking & (INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS)) == 0;
     }
-    return (v->vmcb->save.rflags & RFLAGS_IF) != 0
-        && (v->vmcb->control.interrupt_shadow & 1) == 0;
+    return (v->vmcb->save.rflags & RFLAGS_IF) != 0 && (v->vmcb->control.interrupt_shadow & 1) == 0;
 }
 
 #define WINDOW_OFF (-1)
@@ -295,8 +281,9 @@ static void interrupt_window(struct vcpu *v, int class) {
     c->intercept_misc1 &= ~SVM_INTERCEPT_VINTR;
     if (class != WINDOW_OFF) {
         c->vintr |= SVM_VINTR_IRQ;
-        c->vintr |= class == WINDOW_ANY ? SVM_VINTR_IGN_TPR
-            : (uint64_t)class << SVM_VINTR_PRIO_SHIFT;
+        c->vintr |= class == WINDOW_ANY
+                  ? SVM_VINTR_IGN_TPR
+                  : (uint64_t)class << SVM_VINTR_PRIO_SHIFT;
         c->intercept_misc1 |= SVM_INTERCEPT_VINTR;
     }
 }
@@ -308,20 +295,18 @@ static bool interrupt_pending(struct vcpu *v) {
 // What only an exit once the guest takes interrupts can deliver: the processor
 // delivers the local APIC's itself where it virtualises them.
 static bool window_needed(struct vcpu *v) {
-    return irq_extint_pending(v)
-        || (!vlapic_virtual_delivery(v) && vlapic_pending(v) >= 0)
+    return irq_extint_pending(v) || (!vlapic_virtual_delivery(v) && vlapic_pending(v) >= 0)
         || pit_tick_returning(v->cpu);
 }
 
 bool event_halt_ends(struct vcpu *v) {
     struct cpu *cpu = v->cpu;
-    if (v->nmi_pending || cpu->nmi_pending || cpu->init_pending
-     || v->injecting) {
+    if (v->nmi_pending || atomic_load_explicit(&cpu->nmi_pending, memory_order_acquire)
+     || atomic_load_explicit(&cpu->init_pending, memory_order_acquire) || v->injecting) {
         return true;
     }
     if (!virt_vmx && svm_vnmi
-     && (v->vmcb->control.vintr & (SVM_VINTR_NMI | SVM_VINTR_NMI_MASK))
-     == SVM_VINTR_NMI) {
+     && (v->vmcb->control.vintr & (SVM_VINTR_NMI | SVM_VINTR_NMI_MASK)) == SVM_VINTR_NMI) {
         return true;
     }
     return (vcpu_rflags(v) & RFLAGS_IF) != 0 && interrupt_pending(v);
@@ -361,7 +346,8 @@ void event_hold(struct vcpu *v) {
 
 // The windows for what is pending, once the guest has taken what goes first.
 static void windows_after(struct vcpu *v, bool nmis, bool interrupts) {
-    if (virt_vmx && nmis && (v->nmi_pending || v->cpu->nmi_pending)) {
+    if (virt_vmx && nmis
+     && (v->nmi_pending || atomic_load_explicit(&v->cpu->nmi_pending, memory_order_acquire))) {
         set_proc_control(PROC_NMI_WINDOW_EXITING, true);
     }
     if (interrupts && window_needed(v)) {
@@ -374,9 +360,7 @@ static void entry(struct vcpu *v, bool nmis, bool interrupts) {
         // What the exit's handler injected comes first: only exits that
         // instructions cause inject, and those never cut a delivery short.
         if ((v->redeliver & EVENT_VALID) != 0) {
-            printf(
-                "Dropping event %#x for one the exit raised\n", v->redeliver
-            );
+            printf("Dropping event %#x for one the exit raised\n", v->redeliver);
         }
         v->redeliver = 0;
         v->injecting = false;
@@ -399,8 +383,7 @@ static void entry(struct vcpu *v, bool nmis, bool interrupts) {
     // does, would be lost to an injected event (SDM 325462-093 Vol. 3C,
     // 29.7.3), and goes before interrupts and their windows.
     if (virt_vmx
-     && (vmx_read(VMCS_GUEST_PENDING_DBG)
-       & (PENDING_DBG_ENABLED | PENDING_DBG_BS)) != 0) {
+     && (vmx_read(VMCS_GUEST_PENDING_DBG) & (PENDING_DBG_ENABLED | PENDING_DBG_BS)) != 0) {
         windows_after(v, nmis, interrupts);
         return;
     }

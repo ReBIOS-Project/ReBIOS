@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -78,10 +79,10 @@
 static struct usb_controller controllers[MAX_CONTROLLERS];
 static size_t controller_count;
 static struct task task;
-static bool started;
+static _Atomic(bool) started;
 static struct hv_timer tick;
 static uint64_t tick_wake;
-static bool all_ready;
+static _Atomic(bool) all_ready;
 // The task did not get to the end of its work in its last slice.
 static bool mid_work;
 
@@ -134,9 +135,7 @@ void tendril_glue_free(void *ptr, size_t size) {
     kfree(ptr);
 }
 
-void *tendril_glue_dma_alloc(
-    void *ctx, size_t size, size_t align, bool dma32, uint64_t *dma
-) {
+void *tendril_glue_dma_alloc(void *ctx, size_t size, size_t align, bool dma32, uint64_t *dma) {
     // All of it is below 4 GiB.
     (void)ctx;
     (void)dma32;
@@ -155,9 +154,7 @@ void tendril_glue_dma_free(void *ctx, void *ptr, size_t size) {
 
 // Anything else the library bounces: the IOMMU has device addresses only for
 // the guest's memory, which the guest's addresses are.
-size_t tendril_glue_dma_map(
-    void *ctx, void *ptr, size_t size, int dir, uint64_t *dma
-) {
+size_t tendril_glue_dma_map(void *ctx, void *ptr, size_t size, int dir, uint64_t *dma) {
     (void)ctx;
     (void)dir;
     uint8_t *p = ptr;
@@ -169,9 +166,7 @@ size_t tendril_glue_dma_map(
     return size;
 }
 
-void tendril_glue_dma_unmap(
-    void *ctx, void *ptr, size_t size, int dir, uint64_t dma
-) {
+void tendril_glue_dma_unmap(void *ctx, void *ptr, size_t size, int dir, uint64_t dma) {
     (void)ctx;
     (void)ptr;
     (void)size;
@@ -180,7 +175,7 @@ void tendril_glue_dma_unmap(
 }
 
 void tendril_glue_dma_barrier(void) {
-    asm volatile ("mfence" :: : "memory");
+    asm volatile ("mfence" ::: "memory");
 }
 
 // Registers can be slow, and the library has nothing under way that minds the
@@ -205,7 +200,7 @@ uint32_t tendril_glue_read32(void *ctx, uint32_t offset) {
 
 void tendril_glue_write16(void *ctx, uint32_t offset, uint16_t value) {
     struct usb_controller *c = ctx;
-    asm volatile ("" :: : "memory");
+    asm volatile ("" ::: "memory");
     if (c->mmio == NULL) {
         outw((uint16_t)(c->port + offset), value);
     } else {
@@ -215,7 +210,7 @@ void tendril_glue_write16(void *ctx, uint32_t offset, uint16_t value) {
 
 void tendril_glue_write32(void *ctx, uint32_t offset, uint32_t value) {
     struct usb_controller *c = ctx;
-    asm volatile ("" :: : "memory");
+    asm volatile ("" ::: "memory");
     if (c->mmio == NULL) {
         outl((uint16_t)(c->port + offset), value);
     } else {
@@ -254,8 +249,7 @@ void tendril_glue_pci_write32(void *ctx, uint16_t offset, uint32_t value) {
 }
 
 bool tendril_glue_pci_find_read8(
-    void *ctx, uint16_t vendor, uint16_t device, uint16_t offset,
-    uint8_t *value
+    void *ctx, uint16_t vendor, uint16_t device, uint16_t offset, uint8_t *value
 ) {
     (void)ctx;
     const struct pci_topology *t = pci_enum_topology();
@@ -325,9 +319,7 @@ static void hid_detach(struct tendril_hid *hid) {
     hid_devices--;
 }
 
-static void hid_key(
-    struct tendril_hid *hid, uint16_t key, bool pressed, uint8_t modifiers
-) {
+static void hid_key(struct tendril_hid *hid, uint16_t key, bool pressed, uint8_t modifiers) {
     struct usb_hid *h = tendril_hid_user(hid);
     if (key / 8 < sizeof(h->held)) {
         uint8_t bit = (uint8_t)(1 << (key % 8));
@@ -348,9 +340,7 @@ static int32_t absolute_counts(int32_t value, int32_t min, int32_t max) {
     return (int32_t)(((int64_t)value - min) * ABSOLUTE_SPAN / span);
 }
 
-static void hid_pointer(
-    struct tendril_hid *hid, const struct tendril_hid_pointer_event *event
-) {
+static void hid_pointer(struct tendril_hid *hid, const struct tendril_hid_pointer_event *event) {
     int32_t dx = event->dx;
     int32_t dy = event->dy;
     if (event->absolute) {
@@ -396,7 +386,7 @@ static void controller_let_go(struct usb_controller *c) {
             pci_cfg_write(c->f->addr, INTEL_XUSB2PR, 4, 0);
         }
     }
-    __atomic_store_n(&c->state, USB_STATE_RELEASED, __ATOMIC_RELEASE);
+    atomic_store_explicit(&c->state, USB_STATE_RELEASED, memory_order_release);
     usb_legacy_disown(c);
     // An OS without xHCI's driver wants the ports its EHCI driver can reach,
     // as a BIOS's setting that leaves them to the OS gives it.
@@ -406,8 +396,7 @@ static void controller_let_go(struct usb_controller *c) {
     for (size_t i = 0; i < controller_count; i++) {
         struct usb_controller *x = &controllers[i];
         if (x->hc != NULL
-         && (tendril_hc_quirks(x->hc)
-           & TENDRIL_HC_QUIRK_INTEL_PORT_ROUTING) != 0) {
+         && (tendril_hc_quirks(x->hc) & TENDRIL_HC_QUIRK_INTEL_PORT_ROUTING) != 0) {
             x->ports_to_ehci = true;
             usb_release(x);
         }
@@ -421,14 +410,13 @@ static void controller_take(struct usb_controller *c) {
     int status = tendril_hc_add(&config, &c->hc);
     if (status != TENDRIL_OK) {
         printf(
-            "USB: controller %02x:%02x.%x stays the guest's: %s\n",
-            c->f->addr.bus, c->f->addr.device, c->f->addr.function,
-            tendril_status_str(status)
+            "USB: controller %02x:%02x.%x stays the guest's: %s\n", c->f->addr.bus,
+            c->f->addr.device, c->f->addr.function, tendril_status_str(status)
         );
         controller_let_go(c);
         return;
     }
-    __atomic_store_n(&c->state, USB_STATE_OWNED, __ATOMIC_RELEASE);
+    atomic_store_explicit(&c->state, USB_STATE_OWNED, memory_order_release);
 }
 
 static void usb_main(void *arg) {
@@ -440,11 +428,11 @@ static void usb_main(void *arg) {
         bool ready = true;
         for (size_t i = 0; i < controller_count; i++) {
             struct usb_controller *c = &controllers[i];
-            int state = __atomic_load_n(&c->state, __ATOMIC_ACQUIRE);
+            int state = atomic_load_explicit(&c->state, memory_order_acquire);
             if (state == USB_STATE_RELEASED) {
                 continue;
             }
-            if (__atomic_load_n(&c->release_wanted, __ATOMIC_ACQUIRE)) {
+            if (atomic_load_explicit(&c->release_wanted, memory_order_acquire)) {
                 controller_let_go(c);
                 continue;
             }
@@ -459,15 +447,15 @@ static void usb_main(void *arg) {
         }
         usb_disk_work();
         leds_follow();
-        __atomic_store_n(&all_ready, ready, __ATOMIC_RELEASE);
-        uint64_t poll = time_ns()
-            + (hid_devices != 0 || !ready ? POLL_NS : POLL_IDLE_NS);
+        atomic_store_explicit(&all_ready, ready, memory_order_release);
+        uint64_t poll = time_ns() + (hid_devices != 0 || !ready ? POLL_NS : POLL_IDLE_NS);
         task_sleep(next < poll ? next : poll);
     }
 }
 
 bool usb_ready(void) {
-    return !started || __atomic_load_n(&all_ready, __ATOMIC_ACQUIRE);
+    return !atomic_load_explicit(&started, memory_order_relaxed)
+        || atomic_load_explicit(&all_ready, memory_order_acquire);
 }
 
 void usb_kick(void) {
@@ -476,7 +464,7 @@ void usb_kick(void) {
 }
 
 void usb_release(struct usb_controller *c) {
-    if (!__atomic_exchange_n(&c->release_wanted, true, __ATOMIC_ACQ_REL)) {
+    if (!atomic_exchange_explicit(&c->release_wanted, true, memory_order_acq_rel)) {
         usb_kick();
     }
 }
@@ -531,10 +519,9 @@ void usb_init(void) {
     for (size_t i = 0; t != NULL && i < t->function_count; i++) {
         const struct pci_function *f = &t->functions[i];
         int type;
-        uint32_t class_code = (uint32_t)f->base_class << 16
-            | (uint32_t)f->subclass << 8 | f->prog_if;
-        if (f->base_class == PCI_CLASS_SERIAL_BUS
-         && f->subclass == PCI_SUBCLASS_USB
+        uint32_t class_code = (uint32_t)f->base_class << 16 | (uint32_t)f->subclass << 8
+                            | f->prog_if;
+        if (f->base_class == PCI_CLASS_SERIAL_BUS && f->subclass == PCI_SUBCLASS_USB
          && tendril_pci_hc_type(class_code, &type)) {
             controller_add(f, type);
         }
@@ -559,10 +546,10 @@ void usb_init(void) {
         struct usb_controller *c = &controllers[i];
         if (!usb_legacy_own(c)) {
             printf(
-                "USB: controller %02x:%02x.%x stays the guest's\n",
-                c->f->addr.bus, c->f->addr.device, c->f->addr.function
+                "USB: controller %02x:%02x.%x stays the guest's\n", c->f->addr.bus,
+                c->f->addr.device, c->f->addr.function
             );
-            c->state = USB_STATE_RELEASED;
+            atomic_store_explicit(&c->state, USB_STATE_RELEASED, memory_order_relaxed);
         }
     }
     tick.fired = tick_fired;
@@ -574,30 +561,28 @@ void usb_start(void) {
         return;
     }
     task_init(&task, usb_main, NULL);
-    __atomic_store_n(&started, true, __ATOMIC_RELEASE);
+    atomic_store_explicit(&started, true, memory_order_release);
 }
 
 void usb_slice(bool guest_waiting) {
-    if (!__atomic_load_n(&started, __ATOMIC_ACQUIRE)) {
+    if (!atomic_load_explicit(&started, memory_order_acquire)) {
         return;
     }
     if (guest_waiting && mid_work) {
         task_wake(&task);
     }
     uint64_t before = time_ns();
-    if (__atomic_load_n(&task.wake, __ATOMIC_ACQUIRE) <= before) {
+    if (atomic_load_explicit(&task.wake, memory_order_acquire) <= before) {
         task_run(&task);
-        mid_work = __atomic_load_n(&task.wake, __ATOMIC_ACQUIRE) <= time_ns();
+        mid_work = atomic_load_explicit(&task.wake, memory_order_acquire) <= time_ns();
         if (mid_work) {
-            __atomic_store_n(
-                &task.wake, time_ns() + WORK_GAP_NS, __ATOMIC_RELEASE
-            );
+            atomic_store_explicit(&task.wake, time_ns() + WORK_GAP_NS, memory_order_release);
         }
     }
     // A timer brings the next one, as the guest may not.
     uint64_t now = time_ns();
-    uint64_t wake = __atomic_load_n(&task.wake, __ATOMIC_ACQUIRE);
-    uint64_t armed = __atomic_load_n(&tick.deadline, __ATOMIC_ACQUIRE);
+    uint64_t wake = atomic_load_explicit(&task.wake, memory_order_acquire);
+    uint64_t armed = atomic_load_explicit(&tick.deadline, memory_order_acquire);
     if (wake > now && wake == tick_wake && armed != 0) {
         return;
     }
@@ -607,7 +592,6 @@ void usb_slice(bool guest_waiting) {
 }
 
 bool usb_working(void) {
-    return __atomic_load_n(&started, __ATOMIC_ACQUIRE)
-        && (mid_work
-         || __atomic_load_n(&task.wake, __ATOMIC_ACQUIRE) <= time_ns());
+    return atomic_load_explicit(&started, memory_order_acquire)
+        && (mid_work || atomic_load_explicit(&task.wake, memory_order_acquire) <= time_ns());
 }

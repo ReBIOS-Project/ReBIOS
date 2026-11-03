@@ -16,6 +16,7 @@
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -66,7 +67,7 @@ static const char *exception_names[32] = {
     "#DE", "#DB", "NMI", "#BP", "#OF", "#BR", "#UD", "#NM",
     "#DF", "#MF(9)", "#TS", "#NP", "#SS", "#GP", "#PF", "(15)",
     "#MF", "#AC", "#MC", "#XM", "#VE", "#CP", "(22)", "(23)",
-    "(24)", "(25)", "(26)", "(27)", "#HV", "#VC", "#SX", "(31)",
+    "(24)", "(25)", "(26)", "(27)", "#HV", "#VC", "#SX", "(31)"
 };
 
 void exception_handler(struct exception_frame *frame);
@@ -80,8 +81,7 @@ extern const struct fixup __start_fixup_table[];
 extern const struct fixup __stop_fixup_table[];
 
 uintptr_t fixup_find(uintptr_t rip) {
-    for (const struct fixup *f = __start_fixup_table; f < __stop_fixup_table;
-         f++) {
+    for (const struct fixup *f = __start_fixup_table; f < __stop_fixup_table; f++) {
         if ((uintptr_t)&f->insn + f->insn == rip) {
             return (uintptr_t)&f->resume + f->resume;
         }
@@ -89,9 +89,7 @@ uintptr_t fixup_find(uintptr_t rip) {
     return 0;
 }
 
-_Static_assert(
-    offsetof(struct cpu, kicked) == CPU_KICKED, "CPU_KICKED is out of date"
-);
+_Static_assert(offsetof(struct cpu, kicked) == CPU_KICKED, "CPU_KICKED is out of date");
 
 // The longest an exit keeps the CPU from the guest for what can wait for its
 // next exits, so that the guest's interrupts come on time.
@@ -122,8 +120,9 @@ static uint32_t apic_id_now(void) {
     return cpuid(1, 0).ebx >> 24;
 }
 
-__attribute__((format(printf, 4, 5)))
-static void append(char *buf, size_t size, size_t *len, const char *fmt, ...) {
+__attribute__((format(printf, 4, 5))) static void append(
+    char *buf, size_t size, size_t *len, const char *fmt, ...
+) {
     if (*len + 1 >= size) {
         return;
     }
@@ -179,32 +178,27 @@ void exception_handler(struct exception_frame *frame) {
     if (frame->vector == 2) {
         struct cpu *cpu = this_cpu();
         // The guest's, which arrived while the host ran.
-        cpu->nmi_pending = true;
-        cpu->kicked = true;
+        atomic_store_explicit(&cpu->nmi_pending, true, memory_order_release);
+        atomic_store_explicit(&cpu->kicked, true, memory_order_release);
         if (frame->rip >= nmi_restart_start && frame->rip < nmi_restart_end) {
             frame->rip = nmi_restart_start;
         }
         uintptr_t halt = (uintptr_t)cpu_halt;
-        if (frame->rip >= halt
-         && frame->rip < (uintptr_t)cpu_halt_restart_end) {
+        if (frame->rip >= halt && frame->rip < (uintptr_t)cpu_halt_restart_end) {
             frame->rip = halt;
         }
         return;
     }
     if (frame->vector == 30) {
         // An INIT that SVM redirected, meant for the guest.
-        this_cpu()->init_pending = true;
+        atomic_store_explicit(&this_cpu()->init_pending, true, memory_order_release);
         return;
     }
     // Vectors 16 to 31 are interrupts only where the host takes interrupts.
-    if (frame->vector >= 32
-     || (frame->vector >= 16 && frame->vector != 18
-      && this_cpu()->taking_interrupts)) {
+    bool taking = atomic_load_explicit(&this_cpu()->taking_interrupts, memory_order_relaxed);
+    if (frame->vector >= 32 || (frame->vector >= 16 && frame->vector != 18 && taking)) {
         if (interrupt_handler == NULL) {
-            panic(
-                "Host interrupt %llu with no handler\n",
-                (unsigned long long)frame->vector
-            );
+            panic("Host interrupt %llu with no handler\n", (unsigned long long)frame->vector);
         }
         interrupt_handler((uint8_t)frame->vector);
         return;
@@ -231,13 +225,11 @@ void exception_handler(struct exception_frame *frame) {
         text, sizeof(text), &len,
         "Host exception %s (vector %llu), error code %#llx, APIC ID %#x\n",
         frame->vector < 32 ? exception_names[frame->vector] : "?",
-        (unsigned long long)frame->vector,
-        (unsigned long long)frame->error_code, apic_id
+        (unsigned long long)frame->vector, (unsigned long long)frame->error_code, apic_id
     );
     if (frame->rip >= image && frame->rip < image_end) {
         append(
-            text, sizeof(text), &len, "RIP %#llx (ReBIOS + %#llx)",
-            (unsigned long long)frame->rip,
+            text, sizeof(text), &len, "RIP %#llx (ReBIOS + %#llx)", (unsigned long long)frame->rip,
             (unsigned long long)(frame->rip - image)
         );
     } else {
@@ -253,27 +245,24 @@ void exception_handler(struct exception_frame *frame) {
         "RAX %#llx RBX %#llx RCX %#llx RDX %#llx\n"
         "RSI %#llx RDI %#llx RBP %#llx R8 %#llx\n"
         "R9 %#llx R10 %#llx R11 %#llx R12 %#llx\n"
-        "R13 %#llx R14 %#llx R15 %#llx\n",
-        (unsigned long long)frame->cs, (unsigned long long)frame->rflags,
-        (unsigned long long)frame->rsp, (unsigned long long)frame->ss,
-        (unsigned long long)read_cr0(), (unsigned long long)read_cr2(),
-        (unsigned long long)read_cr3(), (unsigned long long)read_cr4(),
-        (unsigned long long)read_dr6(), (unsigned long long)read_dr7(),
-        (unsigned long long)frame->rax, (unsigned long long)frame->rbx,
-        (unsigned long long)frame->rcx, (unsigned long long)frame->rdx,
-        (unsigned long long)frame->rsi, (unsigned long long)frame->rdi,
-        (unsigned long long)frame->rbp, (unsigned long long)frame->r8,
-        (unsigned long long)frame->r9, (unsigned long long)frame->r10,
-        (unsigned long long)frame->r11, (unsigned long long)frame->r12,
-        (unsigned long long)frame->r13, (unsigned long long)frame->r14,
-        (unsigned long long)frame->r15
+        "R13 %#llx R14 %#llx R15 %#llx\n", (unsigned long long)frame->cs,
+        (unsigned long long)frame->rflags, (unsigned long long)frame->rsp,
+        (unsigned long long)frame->ss, (unsigned long long)read_cr0(),
+        (unsigned long long)read_cr2(), (unsigned long long)read_cr3(),
+        (unsigned long long)read_cr4(), (unsigned long long)read_dr6(),
+        (unsigned long long)read_dr7(), (unsigned long long)frame->rax,
+        (unsigned long long)frame->rbx, (unsigned long long)frame->rcx,
+        (unsigned long long)frame->rdx, (unsigned long long)frame->rsi,
+        (unsigned long long)frame->rdi, (unsigned long long)frame->rbp,
+        (unsigned long long)frame->r8, (unsigned long long)frame->r9,
+        (unsigned long long)frame->r10, (unsigned long long)frame->r11,
+        (unsigned long long)frame->r12, (unsigned long long)frame->r13,
+        (unsigned long long)frame->r14, (unsigned long long)frame->r15
     );
-    if (frame->rsp % 8 == 0 && frame->rsp >= 4096
-     && frame->rsp + 64 <= map_top) {
+    if (frame->rsp % 8 == 0 && frame->rsp >= 4096 && frame->rsp + 64 <= map_top) {
         const uint64_t *stack = (const uint64_t *)(uintptr_t)frame->rsp;
         append(
-            text, sizeof(text), &len,
-            "Stack %#llx %#llx %#llx %#llx %#llx %#llx %#llx %#llx\n",
+            text, sizeof(text), &len, "Stack %#llx %#llx %#llx %#llx %#llx %#llx %#llx %#llx\n",
             (unsigned long long)stack[0], (unsigned long long)stack[1],
             (unsigned long long)stack[2], (unsigned long long)stack[3],
             (unsigned long long)stack[4], (unsigned long long)stack[5],
@@ -281,8 +270,7 @@ void exception_handler(struct exception_frame *frame) {
         );
     }
     struct cpu *cpu = this_cpu();
-    if (guest_describer != NULL
-     && (uintptr_t)cpu + sizeof(struct cpu) <= map_top
+    if (guest_describer != NULL && (uintptr_t)cpu + sizeof(struct cpu) <= map_top
      && cpu->apic_id == apic_id && len + 1 < sizeof(text)) {
         size_t n = guest_describer(text + len, sizeof(text) - len);
         len += n < sizeof(text) - len ? n : sizeof(text) - len - 1;
@@ -316,9 +304,7 @@ static void idt_build(bool use_ist) {
         idt_set(i, (uintptr_t)exception_stubs + exception_stubs[i], ist);
     }
     for (size_t i = 32; i < 256; i++) {
-        idt_set(
-            i, (uintptr_t)interrupt_stubs + (i - 32) * INTERRUPT_STUB_SIZE, 0
-        );
+        idt_set(i, (uintptr_t)interrupt_stubs + (i - 32) * INTERRUPT_STUB_SIZE, 0);
     }
     idt_built = true;
 }
@@ -360,9 +346,7 @@ bool cpu_slice_over(void) {
 }
 
 struct cpu *cpu_area_alloc(size_t index, uint32_t apic_id, bool bsp) {
-    struct cpu *cpu = page_alloc_aligned(
-        CPU_AREA_SIZE / PAGE_SIZE, CPU_AREA_SIZE
-    );
+    struct cpu *cpu = page_alloc_aligned(CPU_AREA_SIZE / PAGE_SIZE, CPU_AREA_SIZE);
     uintptr_t base = (uintptr_t)cpu;
 
     cpu->self = cpu;
@@ -377,9 +361,8 @@ struct cpu *cpu_area_alloc(size_t index, uint32_t apic_id, bool bsp) {
     uintptr_t tss = (uintptr_t)&cpu->tss;
     uint64_t limit = sizeof(struct tss64) - 1;
     // Present, DPL 0, available 64-bit TSS.
-    cpu->gdt[3] = (limit & 0xffff) | ((tss & 0xffffff) << 16)
-        | ((uint64_t)0x89 << 40) | ((limit & 0xf0000) << 32)
-        | ((tss >> 24 & 0xff) << 56);
+    cpu->gdt[3] = (limit & 0xffff) | ((tss & 0xffffff) << 16) | ((uint64_t)0x89 << 40)
+                | ((limit & 0xf0000) << 32) | ((tss >> 24 & 0xff) << 56);
     cpu->gdt[4] = tss >> 32;
 
     cpu->tss.ist[0] = base + CPU_IST_NMI_TOP;
@@ -395,18 +378,16 @@ void cpu_tables_load(struct cpu *cpu, bool use_ist) {
         idt_build(use_ist);
     }
 
-    struct table_ptr gdtr = {
-        sizeof(cpu->gdt) - 1, (uint64_t)(uintptr_t)cpu->gdt
-    };
+    struct table_ptr gdtr = { sizeof(cpu->gdt) - 1, (uint64_t)(uintptr_t)cpu->gdt };
     struct table_ptr idtr = { sizeof(idt) - 1, (uint64_t)(uintptr_t)idt };
 
     asm volatile (
-        "lgdt %0\n\t"
-        "lidt %1\n\t"
+        "lgdtq %0\n\t"
+        "lidtq %1\n\t"
         "pushq %2\n\t"
         "leaq 1f(%%rip), %%rax\n\t"
         "pushq %%rax\n\t"
-        "lretq\n"
+        "lretq\n\t"
         "1:\n\t"
         "movl %3, %%eax\n\t"
         "movl %%eax, %%ds\n\t"
@@ -414,12 +395,13 @@ void cpu_tables_load(struct cpu *cpu, bool use_ist) {
         "movl %%eax, %%ss\n\t"
         "xorl %%eax, %%eax\n\t"
         "movl %%eax, %%fs\n\t"
-        "movl %%eax, %%gs\n\t"
+        "movl %%eax, %%gs"
         :
         : "m"(gdtr), "m"(idtr), "i"(GDT_CODE), "i"(GDT_DATA)
-            : "rax", "memory");
+        : "rax", "memory"
+    );
 
     // Busy TSS descriptors cannot be loaded, and this one may be reloaded.
     cpu->gdt[3] &= ~((uint64_t)0x2 << 40);
-    asm volatile ("ltr %w0" :: "r"(GDT_TSS) : "memory");
+    asm volatile ("ltrw %w0" :: "r"(GDT_TSS) : "memory");
 }

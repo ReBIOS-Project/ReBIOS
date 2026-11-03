@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -84,9 +85,7 @@
 #define DTE_INT_CTL_REMAP ((uint64_t)2 << 60)
 #define DTE_LINT0_PASS ((uint64_t)1 << 62)
 #define DTE_LINT1_PASS ((uint64_t)1 << 63)
-#define DTE_PASS \
-    (DTE_INIT_PASS | DTE_EINT_PASS | DTE_NMI_PASS | DTE_LINT0_PASS \
-        | DTE_LINT1_PASS)
+#define DTE_PASS (DTE_INIT_PASS | DTE_EINT_PASS | DTE_NMI_PASS | DTE_LINT0_PASS | DTE_LINT1_PASS)
 #define DOMAIN_ID ((uint64_t)1)
 
 // A device's interrupt remapping table: 512 entries in the basic format, as
@@ -122,7 +121,7 @@ struct amdvi_unit {
     uint32_t *commands;
     uint32_t command_tail;
     uint32_t *events;
-    uint64_t wait_done;
+    _Atomic(uint64_t) wait_done;
 };
 
 // A table in a page of its own: its entries, the ones in use, and the device
@@ -132,12 +131,9 @@ struct remap_table {
     uint32_t entries[REMAP_ENTRIES];
     uint64_t used[REMAP_ENTRIES / 64];
     uint32_t user_count;
-    uint16_t users[(PAGE_SIZE - REMAP_ENTRIES * 4 - REMAP_ENTRIES / 8 - 4)
-        / 2];
+    uint16_t users[(PAGE_SIZE - REMAP_ENTRIES * 4 - REMAP_ENTRIES / 8 - 4) / 2];
 };
-_Static_assert(
-    sizeof(struct remap_table) <= PAGE_SIZE, "a remapping table takes a page"
-);
+_Static_assert(sizeof(struct remap_table) <= PAGE_SIZE, "a remapping table takes a page");
 
 static struct amdvi_unit *units;
 static size_t unit_count;
@@ -166,9 +162,7 @@ static void erratum_746(struct pci_addr a) {
     pci_cfg_write(a, L2_CONFIG_INDEX, 4, L2_L2B_CK_GATE_CONTROL);
     uint32_t value = pci_cfg_read(a, L2_CONFIG_DATA, 4);
     if ((value & CK_GATE_L2B_MISC_DISABLE) == 0) {
-        pci_cfg_write(
-            a, L2_CONFIG_INDEX, 4, L2_L2B_CK_GATE_CONTROL | L2_CONFIG_WRITE
-        );
+        pci_cfg_write(a, L2_CONFIG_INDEX, 4, L2_L2B_CK_GATE_CONTROL | L2_CONFIG_WRITE);
         pci_cfg_write(a, L2_CONFIG_DATA, 4, value | CK_GATE_L2B_MISC_DISABLE);
         pci_cfg_write(a, L2_CONFIG_INDEX, 4, L2_L2B_CK_GATE_CONTROL);
         printf("Working around AMD erratum 746\n");
@@ -180,10 +174,8 @@ static uint64_t reg_read(const struct amdvi_unit *u, uint32_t reg) {
 }
 
 // Fenced, as a write may hand the unit tables or commands just written.
-static void reg_write(
-    const struct amdvi_unit *u, uint32_t reg, uint64_t value
-) {
-    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+static void reg_write(const struct amdvi_unit *u, uint32_t reg, uint64_t value) {
+    atomic_thread_fence(memory_order_seq_cst);
     *(volatile uint64_t *)(uintptr_t)(u->base + reg) = value;
 }
 
@@ -192,13 +184,9 @@ static void command_submit(
 ) {
     uint32_t next = (u->command_tail + 1) % LOG_ENTRIES;
     uint64_t deadline = time_ns() + TIMEOUT_NS;
-    while (((reg_read(u, REG_COMMAND_HEAD) >> 4) & (LOG_ENTRIES - 1))
-        == next) {
+    while (((reg_read(u, REG_COMMAND_HEAD) >> 4) & (LOG_ENTRIES - 1)) == next) {
         if (time_ns() > deadline) {
-            panic(
-                "AMD-Vi unit at %#llx does not process commands\n",
-                (unsigned long long)u->base
-            );
+            panic("AMD-Vi unit at %#llx does not process commands\n", (unsigned long long)u->base);
         }
         cpu_relax();
     }
@@ -213,7 +201,7 @@ static void command_submit(
 
 // Waits for everything submitted so far to complete.
 static void command_sync(struct amdvi_unit *u) {
-    __atomic_store_n(&u->wait_done, 0, __ATOMIC_RELAXED);
+    atomic_store_explicit(&u->wait_done, 0, memory_order_relaxed);
     uintptr_t store = (uintptr_t)&u->wait_done;
     command_submit(
         u, (uint32_t)store | CMD_WAIT_STORE,
@@ -221,11 +209,10 @@ static void command_sync(struct amdvi_unit *u) {
     );
 
     uint64_t deadline = time_ns() + TIMEOUT_NS;
-    while (__atomic_load_n(&u->wait_done, __ATOMIC_ACQUIRE) != 1) {
+    while (atomic_load_explicit(&u->wait_done, memory_order_acquire) != 1) {
         if (time_ns() > deadline) {
             panic(
-                "AMD-Vi unit at %#llx does not complete commands\n",
-                (unsigned long long)u->base
+                "AMD-Vi unit at %#llx does not complete commands\n", (unsigned long long)u->base
             );
         }
         cpu_relax();
@@ -237,8 +224,7 @@ static void invalidate_pages(struct amdvi_unit *u) {
     spinlock_acquire(&command_lock);
     command_submit(
         u, 0, CMD_INVALIDATE_IOMMU_PAGES << CMD_SHIFT | (uint32_t)DOMAIN_ID,
-        (uint32_t)0xfffff000 | CMD_PAGES_PDE | CMD_PAGES_SIZE,
-        (uint32_t)0x7fffffff
+        (uint32_t)0xfffff000 | CMD_PAGES_PDE | CMD_PAGES_SIZE, (uint32_t)0x7fffffff
     );
     command_sync(u);
     spinlock_release(&command_lock);
@@ -248,12 +234,8 @@ static void invalidate_pages(struct amdvi_unit *u) {
 static void invalidate_device(uint16_t id) {
     spinlock_acquire(&command_lock);
     for (size_t i = 0; i < unit_count; i++) {
-        command_submit(
-            &units[i], id, CMD_INVALIDATE_DEVTAB_ENTRY << CMD_SHIFT, 0, 0
-        );
-        command_submit(
-            &units[i], id, CMD_INVALIDATE_INTERRUPT_TABLE << CMD_SHIFT, 0, 0
-        );
+        command_submit(&units[i], id, CMD_INVALIDATE_DEVTAB_ENTRY << CMD_SHIFT, 0, 0);
+        command_submit(&units[i], id, CMD_INVALIDATE_INTERRUPT_TABLE << CMD_SHIFT, 0, 0);
         command_sync(&units[i]);
     }
     spinlock_release(&command_lock);
@@ -287,14 +269,12 @@ bool amdvi_probe(const struct iommu_tables *tables, size_t *leaf_level) {
         uint16_t rid = t->amd_rid;
         erratum_746(
             (struct pci_addr){
-                t->segment, (uint8_t)(rid >> 8), (uint8_t)(rid >> 3 & 0x1f),
-                (uint8_t)(rid & 7)
+                t->segment, (uint8_t)(rid >> 8), (uint8_t)(rid >> 3 & 0x1f), (uint8_t)(rid & 7)
             }
         );
         printf(
             "AMD-Vi unit %zu at %#llx: features %#llx, control %#llx\n", i,
-            (unsigned long long)u->base,
-            (unsigned long long)reg_read(u, REG_FEATURES),
+            (unsigned long long)u->base, (unsigned long long)reg_read(u, REG_FEATURES),
             (unsigned long long)reg_read(u, REG_CONTROL)
         );
     }
@@ -327,8 +307,7 @@ static uint64_t pass_bits(uint8_t settings) {
 }
 
 static void device_settings(uint32_t id, uint8_t settings) {
-    uint64_t sys_mgt = (settings & IOMMU_AMD_SYS_MGT_MASK)
-        >> IOMMU_AMD_SYS_MGT_SHIFT;
+    uint64_t sys_mgt = (settings & IOMMU_AMD_SYS_MGT_MASK) >> IOMMU_AMD_SYS_MGT_SHIFT;
     device_table[id * 4 + 1] = DOMAIN_ID | sys_mgt << DTE_SYS_MGT_SHIFT;
     device_table[id * 4 + 2] = pass_bits(settings);
 }
@@ -347,9 +326,7 @@ static void device_table_build(const struct iommu_tables *tables) {
         }
     }
     for (size_t i = 0; i < tables->special_count; i++) {
-        device_settings(
-            tables->specials[i].rid, tables->specials[i].amd_settings
-        );
+        device_settings(tables->specials[i].rid, tables->specials[i].amd_settings);
     }
 }
 
@@ -359,13 +336,9 @@ static void unit_enable(struct amdvi_unit *u) {
     uint64_t control = reg_read(u, REG_CONTROL) & ~CONTROL_TAKEN;
     reg_write(u, REG_CONTROL, control);
     uint64_t deadline = time_ns() + TIMEOUT_NS;
-    while ((reg_read(u, REG_STATUS)
-          & (STATUS_COMMAND_BUFFER_RUN | STATUS_EVENT_LOG_RUN)) != 0) {
+    while ((reg_read(u, REG_STATUS) & (STATUS_COMMAND_BUFFER_RUN | STATUS_EVENT_LOG_RUN)) != 0) {
         if (time_ns() > deadline) {
-            panic(
-                "AMD-Vi unit at %#llx does not stop\n",
-                (unsigned long long)u->base
-            );
+            panic("AMD-Vi unit at %#llx does not stop\n", (unsigned long long)u->base);
         }
         cpu_relax();
     }
@@ -374,25 +347,16 @@ static void unit_enable(struct amdvi_unit *u) {
     u->command_tail = 0;
     u->events = page_alloc(1);
     reg_write(u, REG_EXCLUSION_BASE, 0);
-    reg_write(
-        u, REG_DEVICE_TABLE,
-        (uint64_t)(uintptr_t)device_table | DEVICE_TABLE_SIZE
-    );
-    reg_write(
-        u, REG_COMMAND_BUFFER,
-        (uint64_t)(uintptr_t)u->commands | LOG_LENGTH_256
-    );
+    reg_write(u, REG_DEVICE_TABLE, (uint64_t)(uintptr_t)device_table | DEVICE_TABLE_SIZE);
+    reg_write(u, REG_COMMAND_BUFFER, (uint64_t)(uintptr_t)u->commands | LOG_LENGTH_256);
     reg_write(u, REG_COMMAND_HEAD, 0);
     reg_write(u, REG_COMMAND_TAIL, 0);
-    reg_write(
-        u, REG_EVENT_LOG, (uint64_t)(uintptr_t)u->events | LOG_LENGTH_256
-    );
+    reg_write(u, REG_EVENT_LOG, (uint64_t)(uintptr_t)u->events | LOG_LENGTH_256);
     reg_write(u, REG_EVENT_HEAD, 0);
     reg_write(u, REG_EVENT_TAIL, 0);
     reg_write(u, REG_STATUS, STATUS_EVENT_OVERFLOW);
 
-    control |= CONTROL_COHERENT | CONTROL_COMMAND_BUFFER_EN
-        | CONTROL_EVENT_LOG_EN;
+    control |= CONTROL_COHERENT | CONTROL_COMMAND_BUFFER_EN | CONTROL_EVENT_LOG_EN;
     reg_write(u, REG_CONTROL, control);
     reg_write(u, REG_CONTROL, control | CONTROL_IOMMU_EN);
     invalidate_all(u);
@@ -409,8 +373,7 @@ void amdvi_start(void) {
 // are only those their pass bits let through.
 void amdvi_enable(uintptr_t root) {
     for (size_t id = 0; id < DEVICE_IDS; id++) {
-        device_table[id * 4] = root | DTE_V | DTE_TV | DTE_MODE_4_LEVELS
-            | DTE_IR | DTE_IW;
+        device_table[id * 4] = root | DTE_V | DTE_TV | DTE_MODE_4_LEVELS | DTE_IR | DTE_IW;
         if (remap_enabled) {
             device_table[id * 4 + 2] |= DTE_IV;
         }
@@ -427,9 +390,8 @@ void amdvi_remap_start(void) {
         uint8_t id = ioapic_get(i)->id;
         if (iommu_special_for(IOMMU_SPECIAL_IOAPIC, id) == NULL) {
             printf(
-                "AMD-Vi: interrupts are not remapped, as the IVRS gives I/O "
-                "APIC %u no device ID\n",
-                id
+                "AMD-Vi: interrupts are not remapped, as the IVRS gives I/O APIC %u no device "
+                "ID\n", id
             );
             return;
         }
@@ -472,18 +434,13 @@ static unsigned int aliases(uint16_t id, uint16_t *ids) {
         alias_add(ids, &n, range->alias);
     }
     const struct pci_function *f = pci_enum_find(
-        (struct pci_addr){
-            0, (uint8_t)(id >> 8), (uint8_t)(id >> 3 & 0x1f), (uint8_t)(id & 7)
-        }
+        (struct pci_addr){ 0, (uint8_t)(id >> 8), (uint8_t)(id >> 3 & 0x1f), (uint8_t)(id & 7) }
     );
-    if (f != NULL && f->pcie_cap != 0 && f->pcie_port_type == PCIE_ROOT_PORT
-     && erratum_1063()) {
+    if (f != NULL && f->pcie_cap != 0 && f->pcie_port_type == PCIE_ROOT_PORT && erratum_1063()) {
         alias_add(ids, &n, 0);
     }
-    for (const struct pci_function *b = f != NULL ? f->parent : NULL;
-         b != NULL; b = b->parent) {
-        uint16_t own = (uint16_t)(b->addr.bus << 8 | b->addr.device << 3
-            | b->addr.function);
+    for (const struct pci_function *b = f != NULL ? f->parent : NULL; b != NULL; b = b->parent) {
+        uint16_t own = (uint16_t)(b->addr.bus << 8 | b->addr.device << 3 | b->addr.function);
         uint16_t secondary = (uint16_t)(b->secondary_bus << 8);
         if (b->pcie_cap == 0) {
             alias_add(ids, &n, own);
@@ -498,8 +455,8 @@ static unsigned int aliases(uint16_t id, uint16_t *ids) {
 }
 
 static struct remap_table *table_of(uint16_t id) {
-    uint64_t dte = __atomic_load_n(
-        &device_table[id * 4 + 2], __ATOMIC_RELAXED
+    uint64_t dte = atomic_load_explicit(
+        (_Atomic(uint64_t) *)&device_table[id * 4 + 2], memory_order_relaxed
     );
     if ((dte & DTE_INT_CTL_MASK) != DTE_INT_CTL_REMAP) {
         return NULL;
@@ -513,8 +470,7 @@ static void invalidate_table(const struct remap_table *t) {
     for (size_t i = 0; i < unit_count; i++) {
         for (size_t j = 0; j < t->user_count; j++) {
             command_submit(
-                &units[i], t->users[j],
-                CMD_INVALIDATE_INTERRUPT_TABLE << CMD_SHIFT, 0, 0
+                &units[i], t->users[j], CMD_INVALIDATE_INTERRUPT_TABLE << CMD_SHIFT, 0, 0
             );
         }
         command_sync(&units[i]);
@@ -524,22 +480,14 @@ static void invalidate_table(const struct remap_table *t) {
 
 static void table_install(uint16_t id, struct remap_table *t) {
     if (t->user_count == sizeof(t->users) / sizeof(uint16_t)) {
-        printf(
-            "AMD-Vi: no room for device ID %04x in an interrupt remapping "
-            "table\n",
-            id
-        );
+        printf("AMD-Vi: no room for device ID %04x in an interrupt remapping table\n", id);
         return;
     }
     t->users[t->user_count++] = id;
     uint64_t *dte = &device_table[id * 4 + 2];
-    __atomic_store_n(
-        dte,
-        (*dte & DTE_PASS) | DTE_IV
-            | (uint64_t)REMAP_LOG2 << DTE_INT_TAB_LEN_SHIFT
-            | (uint64_t)(uintptr_t)t | DTE_INT_CTL_REMAP,
-        __ATOMIC_RELEASE
-    );
+    uint64_t value = (*dte & DTE_PASS) | DTE_IV | (uint64_t)REMAP_LOG2 << DTE_INT_TAB_LEN_SHIFT
+                   | (uint64_t)(uintptr_t)t | DTE_INT_CTL_REMAP;
+    atomic_store_explicit((_Atomic(uint64_t) *)dte, value, memory_order_release);
     invalidate_device(id);
 }
 
@@ -562,9 +510,8 @@ static struct remap_table *table_for(uint16_t id) {
         }
         if (had != NULL) {
             printf(
-                "AMD-Vi: device ID %04x moves to the interrupt remapping "
-                "table of %04x\n",
-                ids[i], id
+                "AMD-Vi: device ID %04x moves to the interrupt remapping table of %04x\n", ids[i],
+                id
             );
         }
         table_install(ids[i], t);
@@ -580,12 +527,9 @@ int amdvi_remap_alloc(int32_t requester, size_t count) {
     spinlock_acquire(&remap_lock);
     struct remap_table *t = table_for((uint16_t)requester);
     int found = -1;
-    for (size_t base = 0; found < 0 && base + count <= REMAP_ENTRIES;
-         base += count) {
+    for (size_t base = 0; found < 0 && base + count <= REMAP_ENTRIES; base += count) {
         size_t n = 0;
-        while (n < count
-            && (t->used[(base + n) / 64] & (uint64_t)1 << ((base + n) % 64))
-            == 0) {
+        while (n < count && (t->used[(base + n) / 64] & (uint64_t)1 << ((base + n) % 64)) == 0) {
             n++;
         }
         if (n == count) {
@@ -599,12 +543,14 @@ int amdvi_remap_alloc(int32_t requester, size_t count) {
     return found;
 }
 
-void amdvi_remap_free(int32_t requester, int index, size_t count) {
+void amdvi_remap_free(int32_t requester, uint16_t index, size_t count) {
     spinlock_acquire(&remap_lock);
     struct remap_table *t = table_of((uint16_t)requester);
     if (t != NULL) {
         for (size_t i = 0; i < count; i++) {
-            __atomic_store_n(&t->entries[index + i], 0, __ATOMIC_RELEASE);
+            atomic_store_explicit(
+                (_Atomic(uint32_t) *)&t->entries[index + i], 0, memory_order_release
+            );
             t->used[(index + i) / 64] &= ~((uint64_t)1 << ((index + i) % 64));
         }
         invalidate_table(t);
@@ -613,22 +559,20 @@ void amdvi_remap_free(int32_t requester, int index, size_t count) {
 }
 
 // Fixed delivery, physical destination.
-void amdvi_remap_set(
-    int32_t requester, int index, uint32_t apic_id, uint8_t vector
-) {
+void amdvi_remap_set(int32_t requester, uint16_t index, uint32_t apic_id, uint8_t vector) {
     uint32_t entry = IRTE_REMAP_EN | (apic_id & 0xff) << IRTE_DEST_SHIFT
-        | (uint32_t)vector << IRTE_VECTOR_SHIFT;
+                   | (uint32_t)vector << IRTE_VECTOR_SHIFT;
     spinlock_acquire(&remap_lock);
     struct remap_table *t = table_of((uint16_t)requester);
-    if (t != NULL
-     && __atomic_load_n(&t->entries[index], __ATOMIC_RELAXED) != entry) {
-        __atomic_store_n(&t->entries[index], entry, __ATOMIC_RELEASE);
+    _Atomic(uint32_t) *slot = t != NULL ? (_Atomic(uint32_t) *)&t->entries[index] : NULL;
+    if (slot != NULL && atomic_load_explicit(slot, memory_order_relaxed) != entry) {
+        atomic_store_explicit(slot, entry, memory_order_release);
         invalidate_table(t);
     }
     spinlock_release(&remap_lock);
 }
 
-void amdvi_remap_message(int index, uint32_t *address, uint32_t *data) {
+void amdvi_remap_message(uint16_t index, uint32_t *address, uint32_t *data) {
     *address = MSI_ADDRESS;
     *data = (uint32_t)index;
 }
@@ -636,9 +580,9 @@ void amdvi_remap_message(int index, uint32_t *address, uint32_t *data) {
 // An I/O APIC's message data is its entry's low 16 bits, so the index goes in
 // the vector field and the delivery mode's low bit, fixed and arbitrated being
 // remapped alike.
-uint64_t amdvi_remap_rte(int index, bool level, bool active_low) {
+uint64_t amdvi_remap_rte(uint16_t index, bool level, bool active_low) {
     return ((uint64_t)index & (REMAP_ENTRIES - 1)) | (level ? RTE_LEVEL : 0)
-        | (active_low ? RTE_ACTIVE_LOW : 0);
+         | (active_low ? RTE_ACTIVE_LOW : 0);
 }
 
 void amdvi_flush(void) {
@@ -664,10 +608,9 @@ void amdvi_report_faults(void) {
             }
             uint32_t source = event[0] & 0xffff;
             printf(
-                "AMD-Vi unit %zu: event %#x from %02x:%02x.%x: %08x %08x %08x "
-                "%08x\n",
-                i, event[1] >> CMD_SHIFT, source >> 8, (source >> 3) & 0x1f,
-                source & 7, event[0], event[1], event[2], event[3]
+                "AMD-Vi unit %zu: event %#x from %02x:%02x.%x: %08x %08x %08x %08x\n", i,
+                event[1] >> CMD_SHIFT, source >> 8, (source >> 3) & 0x1f, source & 7, event[0],
+                event[1], event[2], event[3]
             );
             for (size_t j = 0; j < 4; j++) {
                 event[j] = 0;

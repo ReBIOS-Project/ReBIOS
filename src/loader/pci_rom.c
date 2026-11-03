@@ -66,8 +66,8 @@ static bool device_listed(
 }
 
 bool pci_rom_find_legacy_image(
-    const void *rom, size_t rom_size, uint16_t vendor_id, uint16_t device_id,
-    const void **image, size_t *size
+    const void *rom, size_t rom_size, uint16_t vendor_id, uint16_t device_id, const void **image,
+    size_t *size
 ) {
     const uint8_t *found = NULL;
     size_t found_size = 0;
@@ -90,22 +90,19 @@ bool pci_rom_find_legacy_image(
             break;
         }
         const uint8_t *data = img + pcir;
-        if (data[0] != 'P' || data[1] != 'C' || data[2] != 'I'
-         || data[3] != 'R') {
+        if (data[0] != 'P' || data[1] != 'C' || data[2] != 'I' || data[3] != 'R') {
             break;
         }
 
         // The image must hold its own headers, so that it is never empty, and
         // fit in the ROM.
-        size_t img_size = (uint64_t)read16(data + PCIR_IMAGE_LENGTH)
-            * IMAGE_LENGTH_UNIT;
+        size_t img_size = (uint64_t)read16(data + PCIR_IMAGE_LENGTH) * IMAGE_LENGTH_UNIT;
         if (img_size < pcir + PCIR_SIZE || img_size > left) {
             break;
         }
 
         bool revision_3 = data[PCIR_REVISION] >= 3;
-        if (data[PCIR_CODE_TYPE] == CODE_TYPE_PC_AT
-         && read16(data + PCIR_VENDOR_ID) == vendor_id
+        if (data[PCIR_CODE_TYPE] == CODE_TYPE_PC_AT && read16(data + PCIR_VENDOR_ID) == vendor_id
          && (read16(data + PCIR_DEVICE_ID) == device_id
           || (revision_3 && device_listed(img, img_size, pcir, device_id)))
          && (found == NULL || (revision_3 && !found_revision_3))) {

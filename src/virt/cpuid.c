@@ -212,7 +212,7 @@ static const struct leaf_bits intel_leaves[] = {
     // EDX invariant TSC.
     { 0x80000007, SUBLEAF_ALL, { 0x00000000, 0x00000000, 0x00000000, 0x00000100 } },
     // EAX physical bits, linear bits; EBX WBNOINVD.
-    { 0x80000008, SUBLEAF_ALL, { 0x0000ffff, 0x00000200, 0x00000000, 0x00000000 } },
+    { 0x80000008, SUBLEAF_ALL, { 0x0000ffff, 0x00000200, 0x00000000, 0x00000000 } }
 };
 
 // APM 24594 rev. 3.38, Appendix E.
@@ -324,7 +324,7 @@ static const struct leaf_bits amd_leaves[] = {
     // EAX shift, asymmetric, heterogeneous, efficiency ranking; EBX
     // processors, efficiency rank, native model, core type; ECX level, type;
     // EDX extended APIC ID.
-    { 0x80000026, SUBLEAF_ALL, { 0xe000001f, 0xffffffff, 0x0000ffff, 0xffffffff } },
+    { 0x80000026, SUBLEAF_ALL, { 0xe000001f, 0xffffffff, 0x0000ffff, 0xffffffff } }
 };
 
 // The last leaves the tables have.
@@ -342,11 +342,11 @@ struct last_subleaf {
 
 static const struct last_subleaf intel_last_subleaves[] = {
     { 0x7, 2 }, { 0x14, 1 }, { 0x17, 3 }, { 0x1d, 1 }, { 0x20, 0 },
-    { 0x24, 1 },
+    { 0x24, 1 }
 };
 
 static const struct last_subleaf amd_last_subleaves[] = {
-    { 0x7, 1 },
+    { 0x7, 1 }
 };
 
 #define CPUID_1_ECX_VMX ((uint32_t)1 << 5)
@@ -448,13 +448,14 @@ static const struct {
     { CR4_UINTR, 1, 3, 5 },
     { CR4_LASS, 2, 0, 6 },
     { CR4_LAM_SUP, 2, 0, 26 },
-    { CR4_FRED, 2, 0, 17 },
+    { CR4_FRED, 2, 0, 17 }
 };
 
 static const struct leaf_bits *find(uint32_t leaf, uint32_t subleaf) {
     const struct leaf_bits *table = virt_vmx ? intel_leaves : amd_leaves;
-    size_t count = virt_vmx ? sizeof(intel_leaves) / sizeof(struct leaf_bits)
-        : sizeof(amd_leaves) / sizeof(struct leaf_bits);
+    size_t count = virt_vmx
+                 ? sizeof(intel_leaves) / sizeof(struct leaf_bits)
+                 : sizeof(amd_leaves) / sizeof(struct leaf_bits);
     const struct leaf_bits *any = NULL;
     for (size_t i = 0; i < count; i++) {
         if (table[i].leaf == leaf && table[i].subleaf == subleaf) {
@@ -470,8 +471,7 @@ static const struct leaf_bits *find(uint32_t leaf, uint32_t subleaf) {
 static struct cpuid_regs masked(uint32_t leaf, uint32_t subleaf) {
     const struct leaf_bits *bits = find(leaf, subleaf);
     if (bits == NULL
-     || (leaf < 0x80000000 ? leaf > processor_last_basic
-       : leaf > processor_last_extended)) {
+     || (leaf < 0x80000000 ? leaf > processor_last_basic : leaf > processor_last_extended)) {
         return (struct cpuid_regs){ 0 };
     }
     struct cpuid_regs r = cpuid(leaf, subleaf);
@@ -487,11 +487,10 @@ static uint32_t min32(uint32_t a, uint32_t b) {
 }
 
 static uint32_t last_subleaf(uint32_t leaf, uint32_t eax) {
-    const struct last_subleaf *table = virt_vmx ? intel_last_subleaves
-        : amd_last_subleaves;
+    const struct last_subleaf *table = virt_vmx ? intel_last_subleaves : amd_last_subleaves;
     size_t count = virt_vmx
-        ? sizeof(intel_last_subleaves) / sizeof(struct last_subleaf)
-        : sizeof(amd_last_subleaves) / sizeof(struct last_subleaf);
+                 ? sizeof(intel_last_subleaves) / sizeof(struct last_subleaf)
+                 : sizeof(amd_last_subleaves) / sizeof(struct last_subleaf);
     for (size_t i = 0; i < count; i++) {
         if (table[i].leaf == leaf) {
             return min32(eax, table[i].last);
@@ -518,12 +517,9 @@ static bool vmx_runs(uint32_t control) {
 void cpuid_init(void) {
     processor_last_basic = cpuid(0, 0).eax;
     processor_last_extended = cpuid(0x80000000, 0).eax;
-    last_basic = min32(
-        processor_last_basic, virt_vmx ? INTEL_LAST_BASIC : AMD_LAST_BASIC
-    );
+    last_basic = min32(processor_last_basic, virt_vmx ? INTEL_LAST_BASIC : AMD_LAST_BASIC);
     last_extended = min32(
-        processor_last_extended,
-        virt_vmx ? INTEL_LAST_EXTENDED : AMD_LAST_EXTENDED
+        processor_last_extended, virt_vmx ? INTEL_LAST_EXTENDED : AMD_LAST_EXTENDED
     );
 
     struct cpuid_regs user = masked(0xd, 0);
@@ -532,8 +528,7 @@ void cpuid_init(void) {
     if (!mpx()) {
         xcr0_allowed &= ~(uint64_t)XSAVE_MPX;
     }
-    xsaves = (supervisor.eax & CPUID_D_1_EAX_XSAVES) != 0
-        && vmx_runs(PROC2_XSAVES);
+    xsaves = (supervisor.eax & CPUID_D_1_EAX_XSAVES) != 0 && vmx_runs(PROC2_XSAVES);
     if (xsaves) {
         xss_allowed = supervisor.ecx | (uint64_t)supervisor.edx << 32;
         if (!pt()) {
@@ -562,10 +557,8 @@ void cpuid_init(void) {
         regs[i][3] = r.edx;
     }
     cr4_allowed = CR4_PCE;
-    for (size_t i = 0; i < sizeof(cr4_features) / sizeof(cr4_features[0]);
-         i++) {
-        if (((regs[cr4_features[i].leaf][cr4_features[i].reg]
-           >> cr4_features[i].bit) & 1) != 0) {
+    for (size_t i = 0; i < sizeof(cr4_features) / sizeof(cr4_features[0]); i++) {
+        if (((regs[cr4_features[i].leaf][cr4_features[i].reg] >> cr4_features[i].bit) & 1) != 0) {
             cr4_allowed |= cr4_features[i].cr4;
         }
     }
@@ -602,8 +595,7 @@ uint64_t cpuid_efer_allowed(struct vcpu *v) {
         efer |= EFER_TCE;
     }
     if (!virt_vmx) {
-        if ((cpuid_guest(v, 0x80000008, 0).ebx
-           & CPUID_80000008_EBX_LMSLE_UNSUPPORTED) == 0) {
+        if ((cpuid_guest(v, 0x80000008, 0).ebx & CPUID_80000008_EBX_LMSLE_UNSUPPORTED) == 0) {
             efer |= EFER_LMSLE;
         }
         uint32_t features = cpuid_guest(v, 0x80000021, 0).eax;
@@ -620,13 +612,12 @@ uint64_t cpuid_efer_allowed(struct vcpu *v) {
 // The bits the guest cleared through AMD's CPUID override MSRs (msr.c), each
 // the high half then the low half of two registers (PPR 55772 rev. 3.08,
 // MSRC001_1002 to MSRC001_1005), which hide even what reflects its state.
-static void amd_overrides(
-    struct vcpu *v, uint32_t leaf, uint32_t subleaf, struct cpuid_regs *r
-) {
+static void amd_overrides(struct vcpu *v, uint32_t leaf, uint32_t subleaf, struct cpuid_regs *r) {
     uint64_t cleared[4];
     for (size_t i = 0; i < 4; i++) {
         cleared[i] = ((v->amd_cpuid_present >> i) & 1) != 0
-            ? v->amd_cpuid_hardware[i] & ~v->amd_cpuid[i] : 0;
+                   ? v->amd_cpuid_hardware[i] & ~v->amd_cpuid[i]
+                   : 0;
     }
     if (leaf == 7 && subleaf == 0) {
         r->eax &= ~(uint32_t)(cleared[0] >> 32);
@@ -642,15 +633,12 @@ static void amd_overrides(
     }
 }
 
-struct cpuid_regs cpuid_guest(
-    struct vcpu *v, uint32_t leaf, uint32_t subleaf
-) {
+struct cpuid_regs cpuid_guest(struct vcpu *v, uint32_t leaf, uint32_t subleaf) {
     // Leaves past the last read on Intel's processors as the last basic one
     // (SDM 325462-093 Vol. 1, 21.1.3), which the guest's CPUID limit (msr.c)
     // makes leaf 2; APM 24594 rev. 3.38 leaves them undefined, and they read
     // as zeros.
-    uint32_t basic = (v->misc_enable & MISC_ENABLE_LIMIT_CPUID) != 0 ? 2
-        : last_basic;
+    uint32_t basic = (v->misc_enable & MISC_ENABLE_LIMIT_CPUID) != 0 ? 2 : last_basic;
     if (leaf < 0x80000000 ? leaf > basic : leaf > last_extended) {
         if (!virt_vmx) {
             return (struct cpuid_regs){ 0 };
@@ -673,8 +661,7 @@ struct cpuid_regs cpuid_guest(
             if (nvmx_enabled) {
                 r.ecx |= cpuid(1, 0).ecx & CPUID_1_ECX_VMX;
             }
-            if ((vcpu_cr4(v) & CR4_OSXSAVE) != 0
-             && (r.ecx & CPUID_1_ECX_XSAVE) != 0) {
+            if ((vcpu_cr4(v) & CR4_OSXSAVE) != 0 && (r.ecx & CPUID_1_ECX_XSAVE) != 0) {
                 r.ecx |= CPUID_1_ECX_OSXSAVE;
             }
             if (vlapic_enabled(v)) {
@@ -686,8 +673,7 @@ struct cpuid_regs cpuid_guest(
             if (subleaf != 0) {
                 break;
             }
-            if ((vcpu_cr4(v) & CR4_PKE) != 0
-             && (r.ecx & CPUID_7_ECX_PKU) != 0) {
+            if ((vcpu_cr4(v) & CR4_PKE) != 0 && (r.ecx & CPUID_7_ECX_PKU) != 0) {
                 r.ecx |= CPUID_7_ECX_OSPKE;
             }
             if (!vmx_runs(PROC2_INVPCID)) {
@@ -722,8 +708,7 @@ struct cpuid_regs cpuid_guest(
                 r.ecx = (uint32_t)xss_allowed;
                 r.edx = (uint32_t)(xss_allowed >> 32);
             } else if (subleaf <= XSAVE_LAST_COMPONENT
-                    && ((xcr0_allowed | xss_allowed)
-                      & ((uint64_t)1 << subleaf)) != 0) {
+                    && ((xcr0_allowed | xss_allowed) & ((uint64_t)1 << subleaf)) != 0) {
                 r = cpuid(0xd, subleaf);
                 r.ecx &= XSAVE_COMPONENT_FLAGS;
                 r.edx = 0;
@@ -744,9 +729,7 @@ struct cpuid_regs cpuid_guest(
             // Architectural PEBS is not the guest's yet.
             if (subleaf == 0) {
                 r.eax &= ~CPUID_PERFMON_EXT_PEBS;
-            } else if (subleaf < 32
-                    && (CPUID_PERFMON_EXT_PEBS & ((uint32_t)1 << subleaf))
-                    != 0) {
+            } else if (subleaf < 32 && (CPUID_PERFMON_EXT_PEBS & ((uint32_t)1 << subleaf)) != 0) {
                 r = (struct cpuid_regs){ 0 };
             }
             break;

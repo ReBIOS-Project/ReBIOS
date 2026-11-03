@@ -51,10 +51,9 @@ void console_init(void) {
     }
 
     struct flanterm_context *screen = flanterm_fb_init(
-        console_alloc, console_free, (uint32_t *)(uintptr_t)fb->base,
-        fb->width, fb->height, fb->pitch, fb->red_size, fb->red_shift,
-        fb->green_size, fb->green_shift, fb->blue_size, fb->blue_shift, NULL,
-        NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, 0, 0, 0, 0, 0, rotation,
+        console_alloc, console_free, (uint32_t *)(uintptr_t)fb->base, fb->width, fb->height,
+        fb->pitch, fb->red_size, fb->red_shift, fb->green_size, fb->green_shift, fb->blue_size,
+        fb->blue_shift, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, 0, 0, 0, 0, 0, rotation,
         false
     );
     if (screen != NULL) {

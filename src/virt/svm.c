@@ -15,9 +15,11 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdnoreturn.h>
 #include <virt/svm.h>
 #include <core.h>
 #include <handoff.h>
@@ -125,12 +127,12 @@ static const struct {
     { VMCB_AT(save.dbgctl), 40, CLEAN_LBR },
     { VMCB_AT(control.avic_apic_bar), 8, CLEAN_AVIC },
     { VMCB_AT(control.avic_backing_page), 8, CLEAN_AVIC },
-    { VMCB_AT(control.avic_logical_table), 16, CLEAN_AVIC },
+    { VMCB_AT(control.avic_logical_table), 16, CLEAN_AVIC }
 };
 
 #define CLEAN_TRACKED \
-    (CLEAN_I | CLEAN_IOPM | CLEAN_ASID | CLEAN_NP | CLEAN_CRX | CLEAN_DRX \
-        | CLEAN_DT | CLEAN_SEG | CLEAN_LBR | CLEAN_AVIC)
+    (CLEAN_I | CLEAN_IOPM | CLEAN_ASID | CLEAN_NP | CLEAN_CRX | CLEAN_DRX | CLEAN_DT | CLEAN_SEG \
+   | CLEAN_LBR | CLEAN_AVIC)
 
 // Erratum 383 (Revision Guide for AMD Family 10h Processors 41322 rev. 3.92):
 // page size changes under nested paging can leave duplicate TLB entries, which
@@ -143,10 +145,9 @@ static bool erratum_383_present(void) {
     if ((cpuid(0x80000001, 0).ecx & CPUID_80000001_ECX_OSVW) != 0) {
         size_t length;
         uint64_t status;
-        if (rdmsr_safe(MSR_OSVW_ID_LENGTH, &length)
-         && length > OSVW_ERRATUM_383
+        if (rdmsr_safe(MSR_OSVW_ID_LENGTH, &length) && length > OSVW_ERRATUM_383
          && rdmsr_safe(MSR_OSVW_STATUS, &status)) {
-            return (status >> OSVW_ERRATUM_383) & 1;
+            return ((status >> OSVW_ERRATUM_383) & 1) != 0;
         }
     }
     struct cpu_signature s = cpu_signature();
@@ -164,10 +165,7 @@ static void svm_machine_check(struct vcpu *v) {
             wrmsr(MSR_MC0_STATUS + 4 * (uint32_t)i, 0);
         }
         wrmsr(MSR_MCG_STATUS, rdmsr(MSR_MCG_STATUS) & ~MCG_STATUS_MCIP);
-        printf(
-            "AMD erratum 383: a TLB multimatch machine check lost the guest's "
-            "state\n"
-        );
+        printf("AMD erratum 383: a TLB multimatch machine check lost the guest's state\n");
         power_reset(false);
     }
     // As the guest would have taken it without the intercept.
@@ -199,7 +197,7 @@ bool svm_supported(void) {
     vmcb_clean_bits = (features & SVM_FEATURE_VMCB_CLEAN) != 0;
     decode_assists = (features & SVM_FEATURE_DECODE_ASSISTS) != 0;
     svm_vnmi = (features & (SVM_FEATURE_VNMI | SVM_FEATURE_VGIF))
-        == (SVM_FEATURE_VNMI | SVM_FEATURE_VGIF);
+            == (SVM_FEATURE_VNMI | SVM_FEATURE_VGIF);
     // Unless the avic setting says otherwise, AVIC serves only from Zen 4 on,
     // with x2AVIC, as Linux 7.3's KVM has it by default
     // (arch/x86/kvm/svm/avic.c, avic_want_avic_enabled(), with
@@ -209,18 +207,17 @@ bool svm_supported(void) {
     // against it (56323 rev. 1.03 and 55449 rev. 1.21, erratum 1235).
     struct cpu_signature signature = cpu_signature();
     bool zen4 = signature.family == 0x19
-        && ((signature.model >= 0x10 && signature.model <= 0x1f)
-            || (signature.model >= 0x60 && signature.model <= 0xaf));
+             && ((signature.model >= 0x10 && signature.model <= 0x1f)
+              || (signature.model >= 0x60 && signature.model <= 0xaf));
     uint8_t setting = core_handoff->config.avic;
     svm_avic = (features & SVM_FEATURE_AVIC) != 0 && signature.family != 0x17
-        && signature.family != 0x18
-        && (setting == HANDOFF_AVIC_ALWAYS
-            || (setting == HANDOFF_AVIC_AUTO
-                && (features & SVM_FEATURE_X2AVIC) != 0
-                && (zen4 || signature.family >= 0x1a)));
+            && signature.family != 0x18
+            && (setting == HANDOFF_AVIC_ALWAYS
+             || (setting == HANDOFF_AVIC_AUTO && (features & SVM_FEATURE_X2AVIC) != 0
+              && (zen4 || signature.family >= 0x1a)));
     svm_x2avic = svm_avic && (features & SVM_FEATURE_X2AVIC) != 0;
     eraps = cpuid(0x80000000, 0).eax >= 0x80000021
-        && (cpuid(0x80000021, 0).eax & CPUID_80000021_EAX_ERAPS) != 0;
+         && (cpuid(0x80000021, 0).eax & CPUID_80000021_EAX_ERAPS) != 0;
     return true;
 }
 
@@ -261,19 +258,18 @@ void svm_vcpu_init(struct vcpu *v) {
     struct vmcb_control *c = &v->vmcb->control;
     // For the CR4 bits of features the guest does not get (cpuid.c).
     c->intercept_cr = SVM_INTERCEPT_CR4_WRITE;
-    c->intercept_misc1 = SVM_INTERCEPT_INTR | SVM_INTERCEPT_NMI
-        | SVM_INTERCEPT_CPUID | SVM_INTERCEPT_HLT | SVM_INTERCEPT_INVD
-        | SVM_INTERCEPT_IOIO | SVM_INTERCEPT_MSR | SVM_INTERCEPT_SHUTDOWN;
+    c->intercept_misc1 = SVM_INTERCEPT_INTR | SVM_INTERCEPT_NMI | SVM_INTERCEPT_CPUID
+                       | SVM_INTERCEPT_HLT | SVM_INTERCEPT_INVD | SVM_INTERCEPT_IOIO
+                       | SVM_INTERCEPT_MSR | SVM_INTERCEPT_SHUTDOWN;
     // Physical interrupts exit whatever the guest's IF, and CR8 is the virtual
     // local APIC's TPR.
     c->vintr = SVM_VINTR_MASKING;
     if (svm_vnmi) {
-        c->vintr |= SVM_VINTR_GIF_ENABLE | SVM_VINTR_GIF
-            | SVM_VINTR_NMI_ENABLE;
+        c->vintr |= SVM_VINTR_GIF_ENABLE | SVM_VINTR_GIF | SVM_VINTR_NMI_ENABLE;
     }
-    c->intercept_misc2 = SVM_INTERCEPT_VMRUN | SVM_INTERCEPT_VMMCALL
-        | SVM_INTERCEPT_VMLOAD | SVM_INTERCEPT_VMSAVE | SVM_INTERCEPT_STGI
-        | SVM_INTERCEPT_CLGI | SVM_INTERCEPT_SKINIT;
+    c->intercept_misc2 = SVM_INTERCEPT_VMRUN | SVM_INTERCEPT_VMMCALL | SVM_INTERCEPT_VMLOAD
+                       | SVM_INTERCEPT_VMSAVE | SVM_INTERCEPT_STGI | SVM_INTERCEPT_CLGI
+                       | SVM_INTERCEPT_SKINIT;
     // The legacy BIOS's VMCALL hypercalls raise #UD here, and INITs #SX.
     c->intercept_exceptions = (uint32_t)1 << 6 | (uint32_t)1 << 30;
     if (svm_erratum_383) {
@@ -307,14 +303,12 @@ void svm_vcpu_init(struct vcpu *v) {
 static void svm_dump_guest(struct vcpu *v) {
     struct vmcb_save *s = &v->vmcb->save;
     printf(
-        "Guest RIP %#llx RSP %#llx RFLAGS %#llx CPL %u\n",
-        (unsigned long long)s->rip, (unsigned long long)s->rsp,
-        (unsigned long long)s->rflags, s->cpl
+        "Guest RIP %#llx RSP %#llx RFLAGS %#llx CPL %u\n", (unsigned long long)s->rip,
+        (unsigned long long)s->rsp, (unsigned long long)s->rflags, s->cpl
     );
     printf(
-        "Guest CR0 %#llx CR3 %#llx CR4 %#llx EFER %#llx\n",
-        (unsigned long long)s->cr0, (unsigned long long)s->cr3,
-        (unsigned long long)s->cr4, (unsigned long long)s->efer
+        "Guest CR0 %#llx CR3 %#llx CR4 %#llx EFER %#llx\n", (unsigned long long)s->cr0,
+        (unsigned long long)s->cr3, (unsigned long long)s->cr4, (unsigned long long)s->efer
     );
     printf(
         "Guest CS sel %#x base %#llx limit %#x attrib %#x\n", s->cs.selector,
@@ -324,8 +318,8 @@ static void svm_dump_guest(struct vcpu *v) {
 
 static void svm_handle_io(struct vcpu *v) {
     uint64_t info = v->vmcb->control.exitinfo1;
-    bool in = info & 1;
-    bool string = (info >> 2) & 1;
+    bool in = (info & 1) != 0;
+    bool string = ((info >> 2) & 1) != 0;
     size_t size = (info >> 4) & 7;
     uint16_t port = info >> 16;
 
@@ -370,14 +364,12 @@ static void svm_handle_cr4_write(struct vcpu *v) {
         if (!insn_decode(v, &insn) || insn.opcode != (INSN_OPCODE_0F | 0x22)) {
             // One the hypervisor cannot read runs again.
             printf(
-                "Cannot decode the CR4 write at %#llx\n",
-                (unsigned long long)v->vmcb->save.rip
+                "Cannot decode the CR4 write at %#llx\n", (unsigned long long)v->vmcb->save.rip
             );
             return;
         }
     }
-    unsigned int reg = assisted ? c->exitinfo1 & 15
-        : (insn.modrm & 7) | (insn.rex & 1) << 3;
+    unsigned int reg = assisted ? c->exitinfo1 & 15 : (insn.modrm & 7) | (insn.rex & 1) << 3;
     uint64_t value = reg == 4 ? vcpu_rsp(v) : ((uint64_t *)&v->gprs)[reg];
     struct segment cs;
     vcpu_get_seg(v, SEG_CS, &cs);
@@ -413,22 +405,17 @@ static void svm_step_exception(struct vcpu *v, unsigned int vector) {
     if (vector == 1) {
         return;
     }
-    bool has_error = vector == 8 || (vector >= 10 && vector <= 14)
-        || vector == 17 || vector == 21;
+    bool has_error = vector == 8 || (vector >= 10 && vector <= 14) || vector == 17 || vector == 21;
     if (vector == 14) {
         vcpu_inject_page_fault(v, c->exitinfo2, (uint32_t)c->exitinfo1);
     } else {
-        vcpu_inject_exception(
-            v, (uint8_t)vector, has_error, (uint32_t)c->exitinfo1
-        );
+        vcpu_inject_exception(v, (uint8_t)vector, has_error, (uint32_t)c->exitinfo1);
     }
 }
 
 // The guest got where the processor cannot go on from, as a triple fault does:
 // the machine resets, as a PC's chipset makes it.
-__attribute__((noreturn)) static void svm_shutdown(
-    struct vcpu *v, const char *why
-) {
+static noreturn void svm_shutdown(struct vcpu *v, const char *why) {
     bool shown = log_take_screen();
     printf("%s\n", why);
     svm_dump_guest(v);
@@ -441,9 +428,7 @@ static void svm_handle_exit(struct vcpu *v) {
     profile_exit(v, v->last_exit);
     if (v->stepping && c->exitcode >= SVM_EXIT_EXCEPTION_BASE
      && c->exitcode < SVM_EXIT_EXCEPTION_BASE + 32) {
-        svm_step_exception(
-            v, (unsigned int)(c->exitcode - SVM_EXIT_EXCEPTION_BASE)
-        );
+        svm_step_exception(v, (unsigned int)(c->exitcode - SVM_EXIT_EXCEPTION_BASE));
         return;
     }
 
@@ -451,9 +436,18 @@ static void svm_handle_exit(struct vcpu *v) {
         case SVM_EXIT_INTR: {
             // Held while the host runs with GIF clear; the host's handlers
             // take them.
-            v->cpu->taking_interrupts = true;
-            asm volatile ("stgi\n\tsti\n\tnop\n\tcli\n\tclgi" :: : "memory");
-            v->cpu->taking_interrupts = false;
+            atomic_store_explicit(&v->cpu->taking_interrupts, true, memory_order_relaxed);
+            asm volatile (
+                "stgi\n\t"
+                "sti\n\t"
+                "nop\n\t"
+                "cli\n\t"
+                "clgi"
+                :
+                :
+                : "memory"
+            );
+            atomic_store_explicit(&v->cpu->taking_interrupts, false, memory_order_relaxed);
             break;
         }
         case SVM_EXIT_VINTR: {
@@ -462,7 +456,14 @@ static void svm_handle_exit(struct vcpu *v) {
         case SVM_EXIT_NMI: {
             // Held while the host runs with GIF clear; the host's handler
             // takes it.
-            asm volatile ("stgi\n\tnop\n\tclgi" :: : "memory");
+            asm volatile (
+                "stgi\n\t"
+                "nop\n\t"
+                "clgi"
+                :
+                :
+                : "memory"
+            );
             break;
         }
         case SVM_EXIT_CPUID: {
@@ -565,30 +566,21 @@ static void svm_handle_exit(struct vcpu *v) {
             // An exception the hypervisor did not ask for is the guest's after
             // all; other intercepts, of instructions, #UD.
             uint64_t code = c->exitcode;
-            if (code >= SVM_EXIT_EXCEPTION_BASE
-             && code < SVM_EXIT_EXCEPTION_BASE + 32) {
-                unsigned int vector = (unsigned int)(
-                    code - SVM_EXIT_EXCEPTION_BASE
-                );
+            if (code >= SVM_EXIT_EXCEPTION_BASE && code < SVM_EXIT_EXCEPTION_BASE + 32) {
+                unsigned int vector = (unsigned int)(code - SVM_EXIT_EXCEPTION_BASE);
                 if (vector == 14) {
-                    vcpu_inject_page_fault(
-                        v, c->exitinfo2, (uint32_t)c->exitinfo1
-                    );
+                    vcpu_inject_page_fault(v, c->exitinfo2, (uint32_t)c->exitinfo1);
                 } else {
-                    bool has_error = vector == 8
-                        || (vector >= 10 && vector <= 14) || vector == 17
-                        || vector == 21;
-                    vcpu_inject_exception(
-                        v, (uint8_t)vector, has_error, (uint32_t)c->exitinfo1
-                    );
+                    bool has_error = vector == 8 || (vector >= 10 && vector <= 14) || vector == 17
+                                  || vector == 21;
+                    vcpu_inject_exception(v, (uint8_t)vector, has_error, (uint32_t)c->exitinfo1);
                 }
                 break;
             }
-            static unsigned int reported;
-            if (__atomic_fetch_add(&reported, 1, __ATOMIC_RELAXED) < 8) {
+            static _Atomic(unsigned int) reported;
+            if (atomic_fetch_add_explicit(&reported, 1, memory_order_relaxed) < 8) {
                 printf(
-                    "Unexpected #VMEXIT, code %#llx, info %#llx %#llx: #UD "
-                    "for the guest\n",
+                    "Unexpected #VMEXIT, code %#llx, info %#llx %#llx: #UD for the guest\n",
                     (unsigned long long)code, (unsigned long long)c->exitinfo1,
                     (unsigned long long)c->exitinfo2
                 );
@@ -609,8 +601,7 @@ static void clean_before_entry(struct vcpu *v) {
     }
     const uint8_t *now = (const uint8_t *)v->vmcb;
     uint32_t clean = CLEAN_TRACKED;
-    for (size_t i = 0; i < sizeof(clean_ranges) / sizeof(clean_ranges[0]);
-         i++) {
+    for (size_t i = 0; i < sizeof(clean_ranges) / sizeof(clean_ranges[0]); i++) {
         uint16_t at = clean_ranges[i].offset;
         if (memcmp(now + at, v->vmcb_seen + at, clean_ranges[i].size) != 0) {
             clean &= ~clean_ranges[i].bit;
@@ -627,8 +618,7 @@ static void clean_after_exit(struct vcpu *v) {
         v->vmcb_seen = page_alloc(1);
     }
     const uint8_t *now = (const uint8_t *)v->vmcb;
-    for (size_t i = 0; i < sizeof(clean_ranges) / sizeof(clean_ranges[0]);
-         i++) {
+    for (size_t i = 0; i < sizeof(clean_ranges) / sizeof(clean_ranges[0]); i++) {
         uint16_t at = clean_ranges[i].offset;
         memcpy(v->vmcb_seen + at, now + at, clean_ranges[i].size);
     }
@@ -641,9 +631,9 @@ void svm_run(struct vcpu *v) {
         v->vmcb->control.tsc_offset = v->tsc_offset;
         clean_before_entry(v);
         // Before the processor looks at the guest's interrupt requests.
-        __atomic_store_n(&v->in_guest, true, __ATOMIC_SEQ_CST);
+        atomic_store_explicit(&v->in_guest, true, memory_order_seq_cst);
         svm_enter(v->vmcb_pa, &v->gprs);
-        __atomic_store_n(&v->in_guest, false, __ATOMIC_RELEASE);
+        atomic_store_explicit(&v->in_guest, false, memory_order_release);
         cpu_guest_exited();
         clean_after_exit(v);
         v->fetched_count = 0;

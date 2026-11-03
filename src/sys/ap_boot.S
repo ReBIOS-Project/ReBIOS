@@ -15,42 +15,42 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-    /* Where the other processors start, copied to a page below 1 MiB. It runs
-       from wherever that page is, with the page's base in EBP, enters long
-       mode on the hypervisor's page tables, and calls the entry point on the
-       stack of the processor's area, which it finds by APIC ID. The far
-       pointers and the GDTR's base are filled in for the page. */
+// Where the other processors start, copied to a page below 1 MiB. It runs from
+// wherever that page is, with the page's base in EBP, enters long mode on the
+// hypervisor's page tables, and calls the entry point on the stack of the
+// processor's area, which it finds by APIC ID. The far pointers and the GDTR's
+// base are filled in for the page.
 
-    /* Offsets into ap_boot_params, struct ap_boot_params in smp.c. */
-    .set PARAM_CR3, 0
-    .set PARAM_CR4, 8
-    .set PARAM_EFER, 16
-    .set PARAM_TABLE, 24
-    .set PARAM_COUNT, 32
-    .set PARAM_STACK_OFFSET, 40
-    .set PARAM_ENTRY, 48
-    .set PARAM_SIZE, 56
+// Offsets into ap_boot_params, struct ap_boot_params in smp.c.
+.set PARAM_CR3, 0
+.set PARAM_CR4, 8
+.set PARAM_EFER, 16
+.set PARAM_TABLE, 24
+.set PARAM_COUNT, 32
+.set PARAM_STACK_OFFSET, 40
+.set PARAM_ENTRY, 48
+.set PARAM_SIZE, 56
 
-    /* struct ap_boot_entry in smp.c. */
-    .set ENTRY_APIC_ID, 0
-    .set ENTRY_CPU, 8
-    .set ENTRY_SIZE, 16
+// struct ap_boot_entry in smp.c.
+.set ENTRY_APIC_ID, 0
+.set ENTRY_CPU, 8
+.set ENTRY_SIZE, 16
 
-    .set PARAMS, ap_boot_params - ap_boot_start
+.set PARAMS, ap_boot_params - ap_boot_start
 
-    .section .rodata
-    .balign 16
-    .globl ap_boot_start
-    .globl ap_boot_gdt
-    .globl ap_boot_gdtr
-    .globl ap_boot_pm32
-    .globl ap_boot_pm32_ptr
-    .globl ap_boot_lm64
-    .globl ap_boot_lm64_ptr
-    .globl ap_boot_params
-    .globl ap_boot_end
+.section .rodata
+.balign 16
+.globl ap_boot_start
+.globl ap_boot_gdt
+.globl ap_boot_gdtr
+.globl ap_boot_pm32
+.globl ap_boot_pm32_ptr
+.globl ap_boot_lm64
+.globl ap_boot_lm64_ptr
+.globl ap_boot_params
+.globl ap_boot_end
 
-    .code16
+.code16
 ap_boot_start:
     cli
     cld
@@ -64,34 +64,34 @@ ap_boot_start:
     movl %eax, %cr0
     ljmpl *(ap_boot_pm32_ptr - ap_boot_start)
 
-    .code32
+.code32
 ap_boot_pm32:
     movl $0x10, %eax
     movl %eax, %ds
     movl %eax, %es
     movl %eax, %ss
-    /* Intel's firmware may limit CPUID's leaves, which the APIC ID lookup
-       reads, or disable the XD bit, which EFER.NXE needs: IA32_MISC_ENABLE
-       bits 22 and 34, which the hypervisor keeps clear (virt/msr.c). */
+    // Intel's firmware may limit CPUID's leaves, which the APIC ID lookup
+    // reads, or disable the XD bit, which EFER.NXE needs: IA32_MISC_ENABLE
+    // bits 22 and 34, which the hypervisor keeps clear (virt/msr.c).
     xorl %eax, %eax
     cpuid
     cmpl $0x756e6547, %ebx
-    jne 1f
+    jne .Lap_boot_pm32_2
     cmpl $0x49656e69, %edx
-    jne 1f
+    jne .Lap_boot_pm32_2
     cmpl $0x6c65746e, %ecx
-    jne 1f
+    jne .Lap_boot_pm32_2
     movl $0x1a0, %ecx
     rdmsr
     testl $(1 << 22), %eax
-    jnz 2f
+    jnz .Lap_boot_pm32_1
     testl $(1 << 2), %edx
-    jz 1f
-2:
+    jz .Lap_boot_pm32_2
+.Lap_boot_pm32_1:
     andl $~(1 << 22), %eax
     andl $~(1 << 2), %edx
     wrmsr
-1:
+.Lap_boot_pm32_2:
     movl PARAMS + PARAM_CR4(%ebp), %eax
     movl %eax, %cr4
     movl PARAMS + PARAM_CR3(%ebp), %eax
@@ -105,69 +105,69 @@ ap_boot_pm32:
     movl %eax, %cr0
     ljmpl *(ap_boot_lm64_ptr - ap_boot_start)(%ebp)
 
-    .code64
+.code64
 ap_boot_lm64:
-    /* The upper half is not defined after the switch. */
+    // The upper half is not defined after the switch.
     movl %ebp, %ebp
 
-    /* The APIC ID: leaf 0Bh's x2APIC ID where there is one, else leaf 1's. */
+    // The APIC ID: leaf 0Bh's x2APIC ID where there is one, else leaf 1's.
     xorl %eax, %eax
     cpuid
     cmpl $0xb, %eax
-    jb 1f
+    jb .Lap_boot_lm64_1
     movl $0xb, %eax
     xorl %ecx, %ecx
     cpuid
     testl %ebx, %ebx
-    jz 1f
+    jz .Lap_boot_lm64_1
     movl %edx, %esi
-    jmp 2f
-1:
+    jmp .Lap_boot_lm64_2
+.Lap_boot_lm64_1:
     movl $1, %eax
     cpuid
     shrl $24, %ebx
     movl %ebx, %esi
-2:
+.Lap_boot_lm64_2:
     movq PARAMS + PARAM_TABLE(%rbp), %rdi
     movl PARAMS + PARAM_COUNT(%rbp), %ecx
-3:
+.Lap_boot_lm64_3:
     testl %ecx, %ecx
-    jz 9f
+    jz .Lap_boot_lm64_5
     cmpl %esi, ENTRY_APIC_ID(%rdi)
-    je 4f
+    je .Lap_boot_lm64_4
     addq $ENTRY_SIZE, %rdi
     decl %ecx
-    jmp 3b
-4:
+    jmp .Lap_boot_lm64_3
+.Lap_boot_lm64_4:
     movq ENTRY_CPU(%rdi), %rdi
     movq %rdi, %rsp
     addq PARAMS + PARAM_STACK_OFFSET(%rbp), %rsp
-    /* As if called, for the ABI's stack alignment. */
+    // As if called, for the ABI's stack alignment.
     pushq $0
     jmpq *PARAMS + PARAM_ENTRY(%rbp)
 
-    /* A processor the hypervisor has no area for. */
-9:
+// A processor the hypervisor has no area for.
+.Lap_boot_lm64_5:
     cli
     hlt
-    jmp 9b
+    jmp .Lap_boot_lm64_5
 
-    .balign 8
+.balign 8
 ap_boot_gdt:
-    .quad 0
-    .quad 0x00cf9a000000ffff
-    .quad 0x00cf92000000ffff
-    .quad 0x00af9a000000ffff
+.quad 0
+.quad 0x00cf9a000000ffff
+.quad 0x00cf92000000ffff
+.quad 0x00af9a000000ffff
 ap_boot_gdtr:
-    .word 4 * 8 - 1
-    .long 0
+.word 4 * 8 - 1
+.long 0
 ap_boot_pm32_ptr:
-    .long 0
-    .word 0x08
+.long 0
+.word 0x08
 ap_boot_lm64_ptr:
-    .long 0
-    .word 0x18
-    .balign 8
+.long 0
+.word 0x18
+.balign 8
 ap_boot_params:
-    .fill PARAM_SIZE, 1, 0
+.fill PARAM_SIZE, 1, 0
 ap_boot_end:

@@ -34,7 +34,7 @@
 #define QUOTE_FMT "\"%.*s%s\""
 #define QUOTE_ARGS(s) \
     (int)((s).len > QUOTE_MAX ? QUOTE_MAX : (s).len), (s).ptr, \
-        (s).len > QUOTE_MAX ? "..." : ""
+    (s).len > QUOTE_MAX ? "..." : ""
 
 struct config config;
 
@@ -61,13 +61,11 @@ static const char *const file_names[] = { "rebios.ini", "csmwrap.ini" };
 
 static EFI_CHAR16 rebios_variable[] = u"ReBIOSConfig";
 static EFI_GUID rebios_variable_guid = {
-    0xd559b78d, 0x5494, 0x4c9e,
-    { 0xb7, 0xf7, 0xe4, 0x92, 0xb0, 0x94, 0x64, 0x48 }
+    0xd559b78d, 0x5494, 0x4c9e, { 0xb7, 0xf7, 0xe4, 0x92, 0xb0, 0x94, 0x64, 0x48 }
 };
 static EFI_CHAR16 csmwrap_variable[] = u"CSMWrapConfig";
 static EFI_GUID csmwrap_variable_guid = {
-    0x2910aadb, 0xf7ca, 0x42b5,
-    { 0x8c, 0xe2, 0xd6, 0x2d, 0x6a, 0x69, 0xb5, 0xee }
+    0x2910aadb, 0xf7ca, 0x42b5, { 0x8c, 0xe2, 0xd6, 0x2d, 0x6a, 0x69, 0xb5, 0xee }
 };
 
 static struct span span_before(struct span s, size_t i) {
@@ -149,8 +147,7 @@ static bool parse_boolean(struct span s, bool *out) {
 
 static bool parse_integer(struct span s, uint32_t *out) {
     uint32_t base = 10;
-    if (s.len >= 2 && s.ptr[0] == '0'
-     && (s.ptr[1] == 'x' || s.ptr[1] == 'X')) {
+    if (s.len >= 2 && s.ptr[0] == '0' && (s.ptr[1] == 'x' || s.ptr[1] == 'X')) {
         base = 16;
         s = span_after(s, 1);
     }
@@ -175,9 +172,7 @@ static bool parse_integer(struct span s, uint32_t *out) {
 
 // Parses one or more hexadecimal digits at *pos, making a value of at most
 // max.
-static bool parse_hex_field(
-    struct span s, size_t *pos, uint32_t max, uint32_t *out
-) {
+static bool parse_hex_field(struct span s, size_t *pos, uint32_t max, uint32_t *out) {
     size_t start = *pos;
     uint32_t value = 0;
     while (*pos < s.len && digit_value(s.ptr[*pos]) >= 0) {
@@ -215,9 +210,7 @@ static bool parse_pci_address(struct span s, struct handoff_pci_address *out) {
     return true;
 }
 
-static bool parse_cpu_range(
-    struct span entry, uint32_t *first, uint32_t *last
-) {
+static bool parse_cpu_range(struct span entry, uint32_t *first, uint32_t *last) {
     size_t dash = find_char(entry, '-');
     struct span start = trim(span_before(entry, dash), is_space_or_tab);
     if (!parse_integer(start, first)) {
@@ -233,9 +226,7 @@ static bool parse_cpu_range(
     return *first <= *last;
 }
 
-static bool parse_cpu_list(
-    struct span s, typeof(config.cpu_ranges[0]) *ranges, size_t *count
-) {
+static bool parse_cpu_list(struct span s, typeof(config.cpu_ranges[0]) *ranges, size_t *count) {
     *count = 0;
     if (s.len == 0) {
         return true;
@@ -261,9 +252,7 @@ static bool parse_cpu_list(
 
 // Lines are logged whole, as the firmware may mirror its console on the log's
 // serial port, where the two copies of separate calls would interleave.
-static __attribute__((format(printf, 1, 2))) void ignore_line(
-    const char *fmt, ...
-) {
+__attribute__((format(printf, 1, 2))) static void ignore_line(const char *fmt, ...) {
     char reason[256];
     va_list args;
     va_start(args, fmt);
@@ -282,9 +271,7 @@ static bool apply_boolean(const struct setting *setting, struct span value) {
     return true;
 }
 
-static bool apply_serial_port(
-    const struct setting *setting, struct span value
-) {
+static bool apply_serial_port(const struct setting *setting, struct span value) {
     uint32_t port;
     if (!parse_integer(value, &port) || port > 0xffff) {
         return false;
@@ -294,9 +281,7 @@ static bool apply_serial_port(
     return true;
 }
 
-static bool apply_serial_baud(
-    const struct setting *setting, struct span value
-) {
+static bool apply_serial_baud(const struct setting *setting, struct span value) {
     uint32_t baud;
     if (!parse_integer(value, &baud) || baud == 0) {
         return false;
@@ -307,30 +292,20 @@ static bool apply_serial_baud(
 }
 
 static bool apply_vgabios(const struct setting *setting, struct span value) {
-    size_t len = value.len < CONFIG_VGABIOS_MAX ? value.len
-        : CONFIG_VGABIOS_MAX - 1;
+    size_t len = value.len < CONFIG_VGABIOS_MAX ? value.len : CONFIG_VGABIOS_MAX - 1;
     memset(config.vgabios, 0, sizeof(config.vgabios));
     for (size_t i = 0; i < len; i++) {
         config.vgabios[i] = (unsigned char)value.ptr[i];
     }
-    printf(
-        "  %s = %.*s%s\n", setting->name, (int)len, value.ptr,
-        len == 0 ? "(none)" : ""
-    );
+    printf("  %s = %.*s%s\n", setting->name, (int)len, value.ptr, len == 0 ? "(none)" : "");
     return true;
 }
 
-static bool apply_boot_drive(
-    const struct setting *setting, struct span value
-) {
-    size_t len = value.len < CONFIG_BOOT_DRIVE_MAX ? value.len
-        : CONFIG_BOOT_DRIVE_MAX - 1;
+static bool apply_boot_drive(const struct setting *setting, struct span value) {
+    size_t len = value.len < CONFIG_BOOT_DRIVE_MAX ? value.len : CONFIG_BOOT_DRIVE_MAX - 1;
     memset(config.boot_drive, 0, sizeof(config.boot_drive));
     memcpy(config.boot_drive, value.ptr, len);
-    printf(
-        "  %s = %.*s%s\n", setting->name, (int)len, value.ptr,
-        len == 0 ? "(self)" : ""
-    );
+    printf("  %s = %.*s%s\n", setting->name, (int)len, value.ptr, len == 0 ? "(self)" : "");
     return true;
 }
 
@@ -342,15 +317,12 @@ static bool apply_vga(const struct setting *setting, struct span value) {
     config.vga_specified = true;
     config.vga_device = address;
     printf(
-        "  %s = %02x:%02x.%x\n", setting->name, address.bus,
-        address.devfn >> 3, address.devfn & 7
+        "  %s = %02x:%02x.%x\n", setting->name, address.bus, address.devfn >> 3, address.devfn & 7
     );
     return true;
 }
 
-static bool apply_choice(
-    struct span value, const char *const *names, size_t count, uint8_t *out
-) {
+static bool apply_choice(struct span value, const char *const *names, size_t count, uint8_t *out) {
     for (size_t i = 0; i < count; i++) {
         if (equals_ignoring_case(value, names[i])) {
             *out = (uint8_t)i;
@@ -363,15 +335,11 @@ static bool apply_choice(
 // In the order of the HANDOFF_VGA_EMULATION_* values.
 static const char *const vga_emulation_names[] = { "auto", "always", "never" };
 
-static bool apply_vga_emulation(
-    const struct setting *setting, struct span value
-) {
+static bool apply_vga_emulation(const struct setting *setting, struct span value) {
     if (!apply_choice(value, vga_emulation_names, 3, &config.vga_emulation)) {
         return false;
     }
-    printf(
-        "  %s = %s\n", setting->name, vga_emulation_names[config.vga_emulation]
-    );
+    printf("  %s = %s\n", setting->name, vga_emulation_names[config.vga_emulation]);
     return true;
 }
 
@@ -380,15 +348,11 @@ static const char *const vga_scaling_names[] = {
     "stretch", "aspect", "center", "manual", "integer"
 };
 
-static bool apply_vga_scaling(
-    const struct setting *setting, struct span value
-) {
+static bool apply_vga_scaling(const struct setting *setting, struct span value) {
     if (!apply_choice(value, vga_scaling_names, 5, &config.vga_scaling)) {
         return false;
     }
-    printf(
-        "  %s = %s\n", setting->name, vga_scaling_names[config.vga_scaling]
-    );
+    printf("  %s = %s\n", setting->name, vga_scaling_names[config.vga_scaling]);
     return true;
 }
 
@@ -414,8 +378,7 @@ static bool apply_avic(const struct setting *setting, struct span value) {
 }
 
 static bool apply_cpu_list(const struct setting *setting, struct span value) {
-    if (config.cpu_filter != HANDOFF_CPU_FILTER_NONE
-     && config.cpu_filter != setting->filter) {
+    if (config.cpu_filter != HANDOFF_CPU_FILTER_NONE && config.cpu_filter != setting->filter) {
         ignore_line("cpu_allowlist and cpu_blocklist are mutually exclusive");
         return true;
     }
@@ -435,13 +398,10 @@ static bool apply_cpu_list(const struct setting *setting, struct span value) {
     list[0] = 0;
     for (size_t i = 0; i < count; i++) {
         len += (size_t)snprintf(
-            list + len, sizeof(list) - len, "%s%u", i == 0 ? "" : ", ",
-            ranges[i].first
+            list + len, sizeof(list) - len, "%s%u", i == 0 ? "" : ", ", ranges[i].first
         );
         if (ranges[i].last != ranges[i].first) {
-            len += (size_t)snprintf(
-                list + len, sizeof(list) - len, "-%u", ranges[i].last
-            );
+            len += (size_t)snprintf(list + len, sizeof(list) - len, "-%u", ranges[i].last);
         }
     }
     printf("  %s = %s\n", setting->name, count == 0 ? "(none)" : list);
@@ -468,28 +428,13 @@ static const struct setting settings[] = {
     { .name = "profile", .apply = apply_boolean, .flag = &config.profile },
     { .name = "nested", .apply = apply_boolean, .flag = &config.nested },
     { .name = "avic", .apply = apply_avic },
-    {
-        .name = "cpuid_limit", .apply = apply_boolean,
-        .flag = &config.cpuid_limit
-    },
-    {
-        .name = "igpu_stolen_remap", .apply = apply_boolean,
-        .flag = &config.igpu_stolen_remap
-    },
-    {
-        .name = "legacy_usb", .apply = apply_boolean,
-        .flag = &config.legacy_usb
-    },
-    {
-        .name = "cpu_allowlist", .apply = apply_cpu_list,
-        .filter = HANDOFF_CPU_FILTER_ALLOW
-    },
-    {
-        .name = "cpu_blocklist", .apply = apply_cpu_list,
-        .filter = HANDOFF_CPU_FILTER_BLOCK
-    },
+    { .name = "cpuid_limit", .apply = apply_boolean, .flag = &config.cpuid_limit },
+    { .name = "igpu_stolen_remap", .apply = apply_boolean, .flag = &config.igpu_stolen_remap },
+    { .name = "legacy_usb", .apply = apply_boolean, .flag = &config.legacy_usb },
+    { .name = "cpu_allowlist", .apply = apply_cpu_list, .filter = HANDOFF_CPU_FILTER_ALLOW },
+    { .name = "cpu_blocklist", .apply = apply_cpu_list, .filter = HANDOFF_CPU_FILTER_BLOCK },
     { .name = "iommu_disable", .apply = apply_obsolete },
-    { .name = "system_thread", .apply = apply_obsolete },
+    { .name = "system_thread", .apply = apply_obsolete }
 };
 
 static void apply_line(struct span line) {
@@ -515,10 +460,7 @@ static void apply_line(struct span line) {
             continue;
         }
         if (!settings[i].apply(&settings[i], value)) {
-            ignore_line(
-                "invalid value " QUOTE_FMT " for %s", QUOTE_ARGS(value),
-                settings[i].name
-            );
+            ignore_line("invalid value " QUOTE_FMT " for %s", QUOTE_ARGS(value), settings[i].name);
         }
         return;
     }
@@ -564,21 +506,17 @@ static size_t node_length(const uint8_t *node) {
 }
 
 static bool is_file_path_node(const uint8_t *node) {
-    return node[0] == EFI_MEDIA_DEVICE_PATH
-        && node[1] == EFI_MEDIA_FILEPATH_DP;
+    return node[0] == EFI_MEDIA_DEVICE_PATH && node[1] == EFI_MEDIA_FILEPATH_DP;
 }
 
 // The room for the path name in a file path node, in characters.
 static size_t node_path_chars(const uint8_t *node) {
-    return (node_length(node) - EFI_SIZE_OF_FILEPATH_DEVICE_PATH)
-        / sizeof(EFI_CHAR16);
+    return (node_length(node) - EFI_SIZE_OF_FILEPATH_DEVICE_PATH) / sizeof(EFI_CHAR16);
 }
 
 // The absolute path of name in the directory of the image's file path, in a
 // pool allocation, or NULL if that directory is unknown.
-static EFI_CHAR16 *sibling_path(
-    const EFI_DEVICE_PATH_PROTOCOL *image_path, const char *name
-) {
+static EFI_CHAR16 *sibling_path(const EFI_DEVICE_PATH_PROTOCOL *image_path, const char *name) {
     if (image_path == NULL) {
         return NULL;
     }
@@ -604,9 +542,7 @@ static EFI_CHAR16 *sibling_path(
         name_len++;
     }
     // A leading separator, the image's path, the name, and a NUL.
-    EFI_CHAR16 *path = pool_alloc(
-        (path_chars + name_len + 2) * sizeof(EFI_CHAR16)
-    );
+    EFI_CHAR16 *path = pool_alloc((path_chars + name_len + 2) * sizeof(EFI_CHAR16));
     if (path == NULL) {
         return NULL;
     }
@@ -622,9 +558,7 @@ static EFI_CHAR16 *sibling_path(
             continue;
         }
         for (size_t i = 0; i < node_path_chars(node); i++) {
-            EFI_CHAR16 c = read_u16(
-                node + EFI_SIZE_OF_FILEPATH_DEVICE_PATH + i * 2
-            );
+            EFI_CHAR16 c = read_u16(node + EFI_SIZE_OF_FILEPATH_DEVICE_PATH + i * 2);
             if (c == 0) {
                 break;
             }
@@ -655,9 +589,7 @@ static void path_to_ascii(char *out, size_t size, const EFI_CHAR16 *path) {
 }
 
 // Returns the contents of a file fit to apply in a pool allocation, or NULL.
-static char *read_file(
-    EFI_FILE_PROTOCOL *file, const char *source, size_t *size
-) {
+static char *read_file(EFI_FILE_PROTOCOL *file, const char *source, size_t *size) {
     union {
         EFI_FILE_INFO info;
         uint8_t bytes[EFI_SIZE_OF_EFI_FILE_INFO + 256 * sizeof(EFI_CHAR16)];
@@ -665,9 +597,7 @@ static char *read_file(
     size_t buf_size = sizeof(buf);
     EFI_STATUS status = file->GetInfo(file, &file_info_guid, &buf_size, &buf);
     if (status != EFI_SUCCESS) {
-        printf(
-            "Skipping %s, error %#llx\n", source, (unsigned long long)status
-        );
+        printf("Skipping %s, error %#llx\n", source, (unsigned long long)status);
         return NULL;
     }
     if ((buf.info.Attribute & EFI_FILE_DIRECTORY) != 0) {
@@ -693,10 +623,7 @@ static char *read_file(
         EFI_UINTN chunk = file_size - done;
         status = file->Read(file, &chunk, text + done);
         if (status != EFI_SUCCESS) {
-            printf(
-                "Skipping %s, error %#llx\n", source,
-                (unsigned long long)status
-            );
+            printf("Skipping %s, error %#llx\n", source, (unsigned long long)status);
             efi_bs->FreePool(text);
             return NULL;
         }
@@ -723,9 +650,7 @@ static bool apply_file(EFI_FILE_PROTOCOL *root, EFI_CHAR16 *path) {
         return false;
     }
     if (status != EFI_SUCCESS) {
-        printf(
-            "Skipping %s, error %#llx\n", source, (unsigned long long)status
-        );
+        printf("Skipping %s, error %#llx\n", source, (unsigned long long)status);
         return false;
     }
     size_t size;
@@ -740,16 +665,14 @@ static bool apply_file(EFI_FILE_PROTOCOL *root, EFI_CHAR16 *path) {
 }
 
 static bool apply_files_on_volume(
-    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *volume,
-    const EFI_DEVICE_PATH_PROTOCOL *image_path
+    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *volume, const EFI_DEVICE_PATH_PROTOCOL *image_path
 ) {
     EFI_FILE_PROTOCOL *root;
     if (volume->OpenVolume(volume, &root) != EFI_SUCCESS) {
         return false;
     }
     bool applied = false;
-    for (size_t i = 0; i < sizeof(file_names) / sizeof(char *) && !applied;
-         i++) {
+    for (size_t i = 0; i < sizeof(file_names) / sizeof(char *) && !applied; i++) {
         EFI_CHAR16 *path = sibling_path(image_path, file_names[i]);
         if (path == NULL) {
             break;
@@ -768,8 +691,7 @@ static void *open_protocol(EFI_HANDLE handle, EFI_GUID *guid) {
         return NULL;
     }
     EFI_STATUS status = efi_bs->OpenProtocol(
-        handle, guid, &protocol, efi_image_handle, NULL,
-        EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL
+        handle, guid, &protocol, efi_image_handle, NULL, EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL
     );
     return status == EFI_SUCCESS ? protocol : NULL;
 }
@@ -779,16 +701,12 @@ static void close_protocol(EFI_HANDLE handle, EFI_GUID *guid) {
 }
 
 static bool apply_files(void) {
-    EFI_LOADED_IMAGE_PROTOCOL *image = open_protocol(
-        efi_image_handle, &loaded_image_guid
-    );
+    EFI_LOADED_IMAGE_PROTOCOL *image = open_protocol(efi_image_handle, &loaded_image_guid);
     if (image == NULL) {
         return false;
     }
     EFI_HANDLE device = image->DeviceHandle;
-    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *volume = open_protocol(
-        device, &simple_file_system_guid
-    );
+    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *volume = open_protocol(device, &simple_file_system_guid);
     bool applied = false;
     if (volume != NULL) {
         applied = apply_files_on_volume(volume, image->FilePath);
@@ -800,20 +718,14 @@ static bool apply_files(void) {
 
 // Returns the contents of a variable fit to apply in a pool allocation, or
 // NULL.
-static char *read_variable(
-    EFI_CHAR16 *name, EFI_GUID *guid, const char *source, size_t *size
-) {
+static char *read_variable(EFI_CHAR16 *name, EFI_GUID *guid, const char *source, size_t *size) {
     size_t data_size = 0;
-    EFI_STATUS status = efi_rt->GetVariable(
-        name, guid, NULL, &data_size, NULL
-    );
+    EFI_STATUS status = efi_rt->GetVariable(name, guid, NULL, &data_size, NULL);
     if (status == EFI_NOT_FOUND) {
         return NULL;
     }
     if (status != EFI_BUFFER_TOO_SMALL && status != EFI_SUCCESS) {
-        printf(
-            "Skipping %s, error %#llx\n", source, (unsigned long long)status
-        );
+        printf("Skipping %s, error %#llx\n", source, (unsigned long long)status);
         return NULL;
     }
     if (data_size > CONFIG_MAX_SIZE) {
@@ -831,9 +743,7 @@ static char *read_variable(
     }
     status = efi_rt->GetVariable(name, guid, NULL, &data_size, text);
     if (status != EFI_SUCCESS) {
-        printf(
-            "Skipping %s, error %#llx\n", source, (unsigned long long)status
-        );
+        printf("Skipping %s, error %#llx\n", source, (unsigned long long)status);
         efi_bs->FreePool(text);
         return NULL;
     }
@@ -845,9 +755,7 @@ static char *read_variable(
     return text;
 }
 
-static bool apply_variable(
-    EFI_CHAR16 *name, EFI_GUID *guid, const char *source
-) {
+static bool apply_variable(EFI_CHAR16 *name, EFI_GUID *guid, const char *source) {
     size_t size;
     char *text = read_variable(name, guid, source, &size);
     if (text == NULL) {
@@ -871,13 +779,12 @@ void config_load(void) {
     config.legacy_usb = true;
 
     bool applied = apply_files()
-        || apply_variable(
-            rebios_variable, &rebios_variable_guid, "the ReBIOSConfig variable"
-        )
-        || apply_variable(
-            csmwrap_variable, &csmwrap_variable_guid,
-            "the CSMWrapConfig variable"
-        );
+                || apply_variable(
+                       rebios_variable, &rebios_variable_guid, "the ReBIOSConfig variable"
+                   )
+                || apply_variable(
+                       csmwrap_variable, &csmwrap_variable_guid, "the CSMWrapConfig variable"
+                   );
     if (applied) {
         return;
     }

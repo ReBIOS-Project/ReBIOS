@@ -21,6 +21,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdnoreturn.h>
 
 // VMCB layout (APM 24593 rev. 3.45, Appendix B).
 struct vmcb_control {
@@ -123,26 +124,16 @@ struct vmcb {
     struct vmcb_save save;
 } __attribute__((packed));
 
-_Static_assert(
-    offsetof(struct vmcb_control, iopm_base_pa) == 0x40, "VMCB layout"
-);
-_Static_assert(
-    offsetof(struct vmcb_control, guest_asid) == 0x58, "VMCB layout"
-);
+_Static_assert(offsetof(struct vmcb_control, iopm_base_pa) == 0x40, "VMCB layout");
+_Static_assert(offsetof(struct vmcb_control, guest_asid) == 0x58, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_control, exitcode) == 0x70, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_control, eventinj) == 0xa8, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_control, n_cr3) == 0xb0, "VMCB layout");
-_Static_assert(
-    offsetof(struct vmcb_control, vmcb_clean) == 0xc0, "VMCB layout"
-);
+_Static_assert(offsetof(struct vmcb_control, vmcb_clean) == 0xc0, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_control, nrip) == 0xc8, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_control, insn_len) == 0xd0, "VMCB layout");
-_Static_assert(
-    offsetof(struct vmcb_control, avic_backing_page) == 0xe0, "VMCB layout"
-);
-_Static_assert(
-    offsetof(struct vmcb_control, avic_physical_table) == 0xf8, "VMCB layout"
-);
+_Static_assert(offsetof(struct vmcb_control, avic_backing_page) == 0xe0, "VMCB layout");
+_Static_assert(offsetof(struct vmcb_control, avic_physical_table) == 0xf8, "VMCB layout");
 _Static_assert(sizeof(struct vmcb_control) == 0x400, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_save, tr) == 0x90, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_save, cpl) == 0xcb, "VMCB layout");
@@ -274,6 +265,6 @@ void svm_flush_guest_tlb(struct vcpu *v);
 bool svm_huge_pages(void);
 void svm_cpu_init(void);
 void svm_vcpu_init(struct vcpu *v);
-__attribute__((noreturn)) void svm_run(struct vcpu *v);
+noreturn void svm_run(struct vcpu *v);
 
 #endif

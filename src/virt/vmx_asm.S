@@ -17,7 +17,7 @@
 
 #include <sys/cpu.h>
 
-/* Offsets into struct gprs. */
+// Offsets into struct gprs.
 #define GPR_RAX 0
 #define GPR_RCX 8
 #define GPR_RDX 16
@@ -36,16 +36,13 @@
 
 #define VMCS_HOST_RSP 0x6c14
 
-    .text
+.text
 
-    /*
-     * int vmx_enter(struct gprs *gprs, bool launched)
-     *
-     * Returns 0 after a VM exit, with the guest's registers in *gprs, 1 if the
-     * VM entry failed, or 2 if an NMI reached the host before it.
-     */
-    .globl vmx_enter
-    .type vmx_enter, @function
+// vmx_enter(gprs, launched) returns 0 after a VM exit, with the guest's
+// registers in *gprs, 1 if the VM entry failed, or 2 if an NMI reached the
+// host before it.
+.globl vmx_enter
+.type vmx_enter, %function
 vmx_enter:
     pushq %rbp
     pushq %rbx
@@ -54,24 +51,22 @@ vmx_enter:
     pushq %r14
     pushq %r15
     pushq %rsi
-    /* Where vmx_exit_entry finds it, at the host RSP. */
+    // Where vmx_exit_entry finds it, at the host RSP.
     pushq %rdi
     movq $VMCS_HOST_RSP, %rax
-    vmwrite %rsp, %rax
+    vmwriteq %rsp, %rax
 
-    /*
-     * The host's NMI handler restarts an NMI that arrives from here to the VM
-     * entry here, as the kick it may be would be left unseen otherwise.
-     */
-    .globl vmx_enter_restart
+// The host's NMI handler restarts an NMI that arrives from here to the VM
+// entry here, as the kick it may be would be left unseen otherwise.
+.globl vmx_enter_restart
 vmx_enter_restart:
     movq %rsp, %rax
     andq $-CPU_AREA_SIZE, %rax
     movq (%rax), %rax
     cmpb $0, CPU_KICKED(%rax)
-    jne 3f
+    jne .Lvmx_enter_restart_end_2
     movq (%rsp), %rdi
-    /* The moves below leave the flags alone. */
+    // The moves below leave the flags alone.
     cmpb $0, 8(%rsp)
 
     movq GPR_RAX(%rdi), %rax
@@ -90,19 +85,19 @@ vmx_enter_restart:
     movq GPR_R15(%rdi), %r15
     movq GPR_RDI(%rdi), %rdi
 
-    jne 1f
+    jne .Lvmx_enter_restart_1
     vmlaunch
-    jmp 2f
-1:
+    jmp .Lvmx_enter_restart_end_1
+.Lvmx_enter_restart_1:
     vmresume
-    .globl vmx_enter_restart_end
+.globl vmx_enter_restart_end
 vmx_enter_restart_end:
-2:
+.Lvmx_enter_restart_end_1:
     movl $1, %eax
-    jmp 4f
-3:
+    jmp .Lvmx_enter_restart_end_3
+.Lvmx_enter_restart_end_2:
     movl $2, %eax
-4:
+.Lvmx_enter_restart_end_3:
     addq $16, %rsp
     popq %r15
     popq %r14
@@ -110,11 +105,11 @@ vmx_enter_restart_end:
     popq %r12
     popq %rbx
     popq %rbp
-    ret
-    .size vmx_enter, . - vmx_enter
+    retq
+.size vmx_enter, . - vmx_enter
 
-    .globl vmx_exit_entry
-    .type vmx_exit_entry, @function
+.globl vmx_exit_entry
+.type vmx_exit_entry, %function
 vmx_exit_entry:
     pushq %rdi
     movq 8(%rsp), %rdi
@@ -142,5 +137,5 @@ vmx_exit_entry:
     popq %rbx
     popq %rbp
     xorl %eax, %eax
-    ret
-    .size vmx_exit_entry, . - vmx_exit_entry
+    retq
+.size vmx_exit_entry, . - vmx_exit_entry

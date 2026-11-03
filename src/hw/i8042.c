@@ -126,14 +126,12 @@ static bool identify(bool aux) {
         return false;
     }
     // The identity's bytes, however many this device has.
-    while (wait_output(&reply, CONTROLLER_TIMEOUT_US)) {
-    }
+    while (wait_output(&reply, CONTROLLER_TIMEOUT_US)) {}
     return true;
 }
 
 void i8042_init(void) {
-    if (!flush() || !command(COMMAND_KBD_DISABLE)
-     || !command(COMMAND_AUX_DISABLE) || !flush()
+    if (!flush() || !command(COMMAND_KBD_DISABLE) || !command(COMMAND_AUX_DISABLE) || !flush()
      || !command(COMMAND_READ_CCB)) {
         printf("No keyboard controller\n");
         return;
@@ -157,19 +155,19 @@ void i8042_init(void) {
 
     command(COMMAND_AUX_ENABLE);
     uint8_t test;
-    bool test_passed = command(COMMAND_AUX_TEST)
-        && wait_output(&test, CONTROLLER_TIMEOUT_US) && test == 0;
+    bool test_passed = command(COMMAND_AUX_TEST) && wait_output(&test, CONTROLLER_TIMEOUT_US)
+                    && test == 0;
     aux_device = test_passed && identify(true);
     flush();
 
     uint8_t on = CCB_SYSTEM | (keyboard ? CCB_KBD_INTERRUPT : CCB_KBD_DISABLED)
-        | (aux_device ? CCB_AUX_INTERRUPT : CCB_AUX_DISABLED);
+               | (aux_device ? CCB_AUX_INTERRUPT : CCB_AUX_DISABLED);
     if (command(COMMAND_WRITE_CCB) && wait_input_empty()) {
         outb(PORT_DATA, on);
     }
     printf(
-        "Keyboard controller, %s keyboard, %s mouse\n",
-        keyboard ? "with a" : "with no", aux_device ? "a" : "no"
+        "Keyboard controller, %s keyboard, %s mouse\n", keyboard ? "with a" : "with no",
+        aux_device ? "a" : "no"
     );
 }
 

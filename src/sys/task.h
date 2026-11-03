@@ -33,7 +33,7 @@ struct task {
     void (*fn)(void *arg);
     void *arg;
     // The time a sleep of the task lasts until.
-    uint64_t wake;
+    _Atomic(uint64_t) wake;
     bool done;
 };
 

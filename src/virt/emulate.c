@@ -69,28 +69,20 @@ static uint64_t reg_get(struct ctx *c, unsigned int reg, size_t size) {
     return insn_gpr(c->v, reg) & size_mask(size);
 }
 
-static void reg_set(
-    struct ctx *c, unsigned int reg, size_t size, uint64_t value
-) {
+static void reg_set(struct ctx *c, unsigned int reg, size_t size, uint64_t value) {
     if (high_byte(c->insn, reg, size)) {
         uint64_t old = insn_gpr(c->v, reg - 4);
-        insn_set_gpr(
-            c->v, reg - 4, (old & ~(uint64_t)0xff00) | (value & 0xff) << 8
-        );
+        insn_set_gpr(c->v, reg - 4, (old & ~(uint64_t)0xff00) | (value & 0xff) << 8);
     } else if (size == 4) {
         // 32-bit results are zero-extended.
         insn_set_gpr(c->v, reg, value & 0xffffffff);
     } else {
         uint64_t mask = size_mask(size);
-        insn_set_gpr(
-            c->v, reg, (insn_gpr(c->v, reg) & ~mask) | (value & mask)
-        );
+        insn_set_gpr(c->v, reg, (insn_gpr(c->v, reg) & ~mask) | (value & mask));
     }
 }
 
-static bool mem_read(
-    struct ctx *c, uintptr_t linear, size_t size, uint64_t *value
-) {
+static bool mem_read(struct ctx *c, uintptr_t linear, size_t size, uint64_t *value) {
     uint64_t buf = 0;
     if (!c->mem->read(c->v, linear, &buf, size)) {
         return false;
@@ -99,9 +91,7 @@ static bool mem_read(
     return true;
 }
 
-static bool mem_write(
-    struct ctx *c, uintptr_t linear, size_t size, uint64_t value
-) {
+static bool mem_write(struct ctx *c, uintptr_t linear, size_t size, uint64_t value) {
     return c->mem->write(c->v, linear, &value, size);
 }
 
@@ -154,9 +144,7 @@ static bool condition(uint64_t rflags, unsigned int cc) {
 }
 
 // Memory op= src: the flags are only the guest's once the write is done.
-static int alu_mem(
-    struct ctx *c, unsigned int op, size_t size, uintptr_t linear, uint64_t src
-) {
+static int alu_mem(struct ctx *c, unsigned int op, size_t size, uintptr_t linear, uint64_t src) {
     uint64_t value;
     if (!mem_read(c, linear, size, &value)) {
         return EMULATE_FAULT;
@@ -172,9 +160,7 @@ static int alu_mem(
 }
 
 // The ALU's ModRM forms: memory op= register, or register op= memory.
-static int alu_modrm(
-    struct ctx *c, unsigned int op, bool to_reg, size_t size, uintptr_t linear
-) {
+static int alu_modrm(struct ctx *c, unsigned int op, bool to_reg, size_t size, uintptr_t linear) {
     unsigned int reg = modrm_reg(c->insn);
     if (!to_reg) {
         return alu_mem(c, op, size, linear, reg_get(c, reg, size));
@@ -196,9 +182,7 @@ static int alu_modrm(
 static int bit_test_reg(struct ctx *c, unsigned int op, uintptr_t linear) {
     size_t size = c->insn->operand_size;
     unsigned int shift = size == 2 ? 4 : size == 4 ? 5 : 6;
-    int64_t offset = (int64_t)sign_extend(
-        reg_get(c, modrm_reg(c->insn), size), size
-    );
+    int64_t offset = (int64_t)sign_extend(reg_get(c, modrm_reg(c->insn), size), size);
     linear += (uint64_t)((offset >> shift) * (int64_t)size);
     if (!c->insn->long_mode) {
         linear &= 0xffffffff;
@@ -206,9 +190,7 @@ static int bit_test_reg(struct ctx *c, unsigned int op, uintptr_t linear) {
     return alu_mem(c, op, size, linear, (uint64_t)offset & (size * 8 - 1));
 }
 
-static int load(
-    struct ctx *c, unsigned int reg, size_t size, uintptr_t linear
-) {
+static int load(struct ctx *c, unsigned int reg, size_t size, uintptr_t linear) {
     uint64_t value;
     if (!mem_read(c, linear, size, &value)) {
         return EMULATE_FAULT;
@@ -217,15 +199,11 @@ static int load(
     return EMULATE_DONE;
 }
 
-static int store(
-    struct ctx *c, size_t size, uintptr_t linear, uint64_t value
-) {
+static int store(struct ctx *c, size_t size, uintptr_t linear, uint64_t value) {
     return mem_write(c, linear, size, value) ? EMULATE_DONE : EMULATE_FAULT;
 }
 
-static int extend(
-    struct ctx *c, unsigned int from, bool sign, uintptr_t linear
-) {
+static int extend(struct ctx *c, unsigned int from, bool sign, uintptr_t linear) {
     uint64_t value;
     if (!mem_read(c, linear, from, &value)) {
         return EMULATE_FAULT;
@@ -245,8 +223,7 @@ static int exchange(struct ctx *c, size_t size, uintptr_t linear, bool add) {
     }
     uint64_t src = reg_get(c, reg, size);
     uint64_t rflags = vcpu_rflags(c->v);
-    uint64_t result = add
-        ? alu(ALU_ADD, size, value, src, &rflags) & size_mask(size) : src;
+    uint64_t result = add ? alu(ALU_ADD, size, value, src, &rflags) & size_mask(size) : src;
     if (!mem_write(c, linear, size, result)) {
         return EMULATE_FAULT;
     }
@@ -268,15 +245,11 @@ static int memory_op(struct ctx *c, uintptr_t linear) {
         case 0x81:
         case 0x82:
         case 0x83: {
-            return alu_mem(
-                c, group(insn), op == 0x82 ? 1 : size, linear, imm(insn)
-            );
+            return alu_mem(c, group(insn), op == 0x82 ? 1 : size, linear, imm(insn));
         }
         case 0x84:
         case 0x85: {
-            return alu_mem(
-                c, ALU_TEST, size, linear, reg_get(c, modrm_reg(insn), size)
-            );
+            return alu_mem(c, ALU_TEST, size, linear, reg_get(c, modrm_reg(insn), size));
         }
         case 0x86:
         case 0x87: {
@@ -324,9 +297,7 @@ static int memory_op(struct ctx *c, uintptr_t linear) {
         }
         case 0xd2:
         case 0xd3: {
-            return alu_mem(
-                c, ALU_ROL + group(insn), size, linear, c->v->gprs.rcx & 0xff
-            );
+            return alu_mem(c, ALU_ROL + group(insn), size, linear, c->v->gprs.rcx & 0xff);
         }
         case 0xc6:
         case 0xc7: {
@@ -358,9 +329,7 @@ static int memory_op(struct ctx *c, uintptr_t linear) {
             if (group(insn) > 1) {
                 return EMULATE_UNSUPPORTED;
             }
-            return alu_mem(
-                c, group(insn) == 0 ? ALU_INC : ALU_DEC, size, linear, 0
-            );
+            return alu_mem(c, group(insn) == 0 ? ALU_INC : ALU_DEC, size, linear, 0);
         }
         case INSN_OPCODE_0F | 0xa3:
         case INSN_OPCODE_0F | 0xab:
@@ -374,8 +343,7 @@ static int memory_op(struct ctx *c, uintptr_t linear) {
             }
             unsigned int bits = insn->operand_size * 8;
             return alu_mem(
-                c, ALU_BT + group(insn) - 4, insn->operand_size, linear,
-                insn->imm & (bits - 1)
+                c, ALU_BT + group(insn) - 4, insn->operand_size, linear, insn->imm & (bits - 1)
             );
         }
         case INSN_OPCODE_0F | 0xb6:
@@ -388,9 +356,7 @@ static int memory_op(struct ctx *c, uintptr_t linear) {
         }
         case INSN_OPCODE_0F | 0xc0:
         case INSN_OPCODE_0F | 0xc1: {
-            return exchange(
-                c, (op & 1) != 0 ? insn->operand_size : 1, linear, true
-            );
+            return exchange(c, (op & 1) != 0 ? insn->operand_size : 1, linear, true);
         }
         default: {
             break;
@@ -420,20 +386,18 @@ static bool string_once(struct ctx *c, size_t size, int *result) {
     struct vcpu *v = c->v;
     const struct insn *insn = c->insn;
     unsigned int op = insn->opcode;
-    bool from_source = (op >= 0xa4 && op <= 0xa7) || op == 0xac || op == 0xad
-        || op == 0x6e || op == 0x6f;
-    bool to_destination = op == 0xa4 || op == 0xa5 || op == 0xaa || op == 0xab
-        || op == 0x6c || op == 0x6d;
-    bool at_destination = to_destination || (op >= 0xa6 && op <= 0xa7)
-        || op == 0xae || op == 0xaf;
+    bool from_source = (op >= 0xa4 && op <= 0xa7) || op == 0xac || op == 0xad || op == 0x6e
+                    || op == 0x6f;
+    bool to_destination = op == 0xa4 || op == 0xa5 || op == 0xaa || op == 0xab || op == 0x6c
+                       || op == 0x6d;
+    bool at_destination = to_destination || (op >= 0xa6 && op <= 0xa7) || op == 0xae || op == 0xaf;
     uintptr_t src = 0;
     uintptr_t dst = 0;
     *result = EMULATE_FAULT;
     // Each iteration's accesses are checked as the processor checks them, as
     // the first may be the only one it made.
     if ((from_source && !insn_string_linear(v, insn, false, size, false, &src))
-     || (at_destination
-      && !insn_string_linear(v, insn, true, size, to_destination, &dst))) {
+     || (at_destination && !insn_string_linear(v, insn, true, size, to_destination, &dst))) {
         return false;
     }
     uint16_t port = (uint16_t)v->gprs.rdx;
@@ -501,17 +465,14 @@ static int string_op(struct ctx *c) {
     unsigned int op = insn->opcode;
     bool io = op >= 0x6c && op <= 0x6f;
     // Port I/O is at most 32 bits wide.
-    size_t size = (op & 1) == 0 ? 1 : io && insn->operand_size == 8 ? 4
-        : insn->operand_size;
-    int64_t delta = (vcpu_rflags(v) & RFLAGS_DF) != 0 ? -(int64_t)size
-        : (int64_t)size;
-    bool uses_si = op == 0xa4 || op == 0xa5 || op == 0xa6 || op == 0xa7
-        || op == 0xac || op == 0xad || op == 0x6e || op == 0x6f;
+    size_t size = (op & 1) == 0 ? 1 : io && insn->operand_size == 8 ? 4 : insn->operand_size;
+    int64_t delta = (vcpu_rflags(v) & RFLAGS_DF) != 0 ? -(int64_t)size : (int64_t)size;
+    bool uses_si = op == 0xa4 || op == 0xa5 || op == 0xa6 || op == 0xa7 || op == 0xac || op == 0xad
+                || op == 0x6e || op == 0x6f;
     bool uses_di = op != 0xac && op != 0xad && op != 0x6e && op != 0x6f;
     bool compares = op == 0xa6 || op == 0xa7 || op == 0xae || op == 0xaf;
     size_t address_size = insn->address_size;
-    uint64_t mask = address_size == 8 ? UINT64_MAX
-        : ((uint64_t)1 << (address_size * 8)) - 1;
+    uint64_t mask = address_size == 8 ? UINT64_MAX : ((uint64_t)1 << (address_size * 8)) - 1;
     size_t count = insn->rep ? v->gprs.rcx & mask : 1;
     bool step = vcpu_stepped(v);
 
@@ -558,16 +519,13 @@ static int string_op(struct ctx *c) {
     return EMULATE_DONE;
 }
 
-int emulate(
-    struct vcpu *v, const struct insn *insn, const struct emulate_mem *mem
-) {
+int emulate(struct vcpu *v, const struct insn *insn, const struct emulate_mem *mem) {
     struct ctx c = { v, insn, mem };
     if (insn->vex) {
         return EMULATE_UNSUPPORTED;
     }
     unsigned int op = insn->opcode;
-    if ((op >= 0x6c && op <= 0x6f) || (op >= 0xa4 && op <= 0xa7)
-     || (op >= 0xaa && op <= 0xaf)) {
+    if ((op >= 0x6c && op <= 0x6f) || (op >= 0xa4 && op <= 0xa7) || (op >= 0xaa && op <= 0xaf)) {
         return string_op(&c);
     }
     uintptr_t linear;

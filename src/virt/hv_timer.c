@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -37,16 +38,14 @@ void hv_timer_add(struct hv_timer *timer) {
 }
 
 void hv_timer_set(struct hv_timer *timer, uint64_t tsc) {
-    __atomic_store_n(&timer->deadline, tsc, __ATOMIC_RELEASE);
+    atomic_store_explicit(&timer->deadline, tsc, memory_order_release);
     vcpu_kick(smp_cpu(0));
 }
 
 uint64_t hv_timer_next(void) {
     uint64_t next = 0;
     for (size_t i = 0; i < timer_count; i++) {
-        uint64_t deadline = __atomic_load_n(
-            &timers[i]->deadline, __ATOMIC_ACQUIRE
-        );
+        uint64_t deadline = atomic_load_explicit(&timers[i]->deadline, memory_order_acquire);
         if (deadline != 0 && (next == 0 || deadline < next)) {
             next = deadline;
         }
@@ -58,16 +57,13 @@ void hv_timer_run(void) {
     uint64_t now = rdtsc();
     for (size_t i = 0; i < timer_count; i++) {
         struct hv_timer *timer = timers[i];
-        uint64_t deadline = __atomic_load_n(
-            &timer->deadline, __ATOMIC_ACQUIRE
-        );
+        uint64_t deadline = atomic_load_explicit(&timer->deadline, memory_order_acquire);
         if (deadline == 0 || deadline > now) {
             continue;
         }
         // One set meanwhile, from another processor, stands.
-        bool due = __atomic_compare_exchange_n(
-            &timer->deadline, &deadline, 0, false, __ATOMIC_ACQ_REL,
-            __ATOMIC_RELAXED
+        bool due = atomic_compare_exchange_strong_explicit(
+            &timer->deadline, &deadline, 0, memory_order_acq_rel, memory_order_relaxed
         );
         if (due) {
             timer->fired(timer->ctx);

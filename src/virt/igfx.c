@@ -189,11 +189,9 @@ static void scan_opregion(struct pci_function *f) {
     memcpy(&rvds, op + ASLE_RVDS, sizeof(uint32_t));
     uint8_t major = op[HEADER_OVER_MAJOR];
     uint8_t minor = op[HEADER_OVER_MINOR];
-    if (major >= 2 && (mboxes & MBOX_ASLE) != 0 && rvda != 0 && rvds != 0
-     && rvds <= RAW_VBT_MAX) {
+    if (major >= 2 && (mboxes & MBOX_ASLE) != 0 && rvda != 0 && rvds != 0 && rvds <= RAW_VBT_MAX) {
         if (major > 2 || minor >= 1) {
-            if (rvda >= OPREGION_SIZE && rvda <= RAW_VBT_MAX
-             && asls + rvda + rvds > end) {
+            if (rvda >= OPREGION_SIZE && rvda <= RAW_VBT_MAX && asls + rvda + rvds > end) {
                 end = asls + rvda + rvds;
             }
         } else {
@@ -220,20 +218,18 @@ static size_t ggms_size(uint32_t ggc) {
 
 static void scan_stolen(struct pci_function *f) {
     const struct pci_bar *bar = &f->bars[0];
-    if (f->bar_count == 0 || bar->kind != PCI_BAR_MEM64
-     || bar->size < GTTMMADR_GEN8_SIZE) {
+    if (f->bar_count == 0 || bar->kind != PCI_BAR_MEM64 || bar->size < GTTMMADR_GEN8_SIZE) {
         return;
     }
     uint32_t ggc = pci_cfg_read(f->addr, REG_GGC, 2);
     uint64_t bsm = pci_cfg_read(f->addr, REG_BSM, 4) & BSM_MASK;
-    uint64_t bsm_64 = (pci_cfg_read(f->addr, REG_BSM_GEN11, 4)
-        | (uint64_t)pci_cfg_read(f->addr, REG_BSM_GEN11 + 4, 4) << 32)
-        & BSM_MASK_64;
+    uint64_t bsm_low = pci_cfg_read(f->addr, REG_BSM_GEN11, 4);
+    uint64_t bsm_high = pci_cfg_read(f->addr, REG_BSM_GEN11 + 4, 4);
+    uint64_t bsm_64 = (bsm_low | bsm_high << 32) & BSM_MASK_64;
     igfx.gttmmadr = bar->base;
     if (core_handoff->config.igpu_stolen_remap == 0) {
         printf(
-            "Intel graphics: the stolen memory stays at its host address "
-            "(igpu_stolen_remap)\n"
+            "Intel graphics: the stolen memory stays at its host address (igpu_stolen_remap)\n"
         );
         return;
     }
@@ -263,9 +259,7 @@ static void scan_stolen(struct pci_function *f) {
 }
 
 static bool gen9_lp(uint16_t id) {
-    static const uint16_t ids[] = {
-        0x0a84, 0x1a84, 0x1a85, 0x5a84, 0x5a85, 0x3184, 0x3185
-    };
+    static const uint16_t ids[] = { 0x0a84, 0x1a84, 0x1a85, 0x5a84, 0x5a85, 0x3184, 0x3185 };
     for (size_t i = 0; i < sizeof(ids) / sizeof(uint16_t); i++) {
         if (id == ids[i]) {
             return true;
@@ -279,7 +273,7 @@ static bool fbc_kept_off(uint16_t id) {
         0x1902, 0x1906, 0x190a, 0x190b, 0x190e, 0x1912, 0x1913, 0x1915, 0x1916,
         0x1917, 0x191a, 0x191b, 0x191d, 0x191e, 0x1921, 0x1923, 0x1926, 0x1927,
         0x192a, 0x192b, 0x192d, 0x1932, 0x193a, 0x193b, 0x193d, 0x0a84, 0x1a84,
-        0x1a85, 0x5a84, 0x5a85,
+        0x1a85, 0x5a84, 0x5a85
     };
     for (size_t i = 0; i < sizeof(ids) / sizeof(uint16_t); i++) {
         if (id == ids[i]) {
@@ -294,17 +288,12 @@ static bool rmrr_unneeded(uint16_t segment, uint16_t rid) {
 }
 
 void igfx_scan(void) {
-    struct pci_function *f = pci_enum_find(
-        (struct pci_addr){ 0, 0, IGFX_DEVICE, 0 }
-    );
-    if (f == NULL || f->vendor_id != VENDOR_INTEL
-     || f->base_class != CLASS_DISPLAY) {
+    struct pci_function *f = pci_enum_find((struct pci_addr){ 0, 0, IGFX_DEVICE, 0 });
+    if (f == NULL || f->vendor_id != VENDOR_INTEL || f->base_class != CLASS_DISPLAY) {
         return;
     }
     igfx.f = f;
-    struct pci_function *h = pci_enum_find(
-        (struct pci_addr){ 0, 0, HOST_BRIDGE_DEVICE, 0 }
-    );
+    struct pci_function *h = pci_enum_find((struct pci_addr){ 0, 0, HOST_BRIDGE_DEVICE, 0 });
     if (h != NULL && h->vendor_id == VENDOR_INTEL) {
         igfx.host_bridge = h;
     }
@@ -326,9 +315,7 @@ bool igfx_one_to_one(uint64_t *base, uint64_t *end) {
     return true;
 }
 
-bool igfx_stolen(
-    uint64_t *host, uint64_t *size, uint64_t *clear_base, uint64_t *clear_end
-) {
+bool igfx_stolen(uint64_t *host, uint64_t *size, uint64_t *clear_base, uint64_t *clear_end) {
     if (igfx.kind == STOLEN_NONE) {
         return false;
     }
@@ -375,15 +362,12 @@ static bool config_read(void *ctx, uint32_t reg, uint32_t *value) {
         return false;
     }
     if (igfx.kind == STOLEN_BSM && reg == REG_BSM) {
-        *value = (uint32_t)translate(
-            pci_cfg_read(igfx.f->addr, reg, 4), BSM_MASK
-        );
+        *value = (uint32_t)translate(pci_cfg_read(igfx.f->addr, reg, 4), BSM_MASK);
         return true;
     }
-    if (igfx.kind == STOLEN_BSM_64
-     && (reg == REG_BSM_GEN11 || reg == REG_BSM_GEN11 + 4)) {
+    if (igfx.kind == STOLEN_BSM_64 && (reg == REG_BSM_GEN11 || reg == REG_BSM_GEN11 + 4)) {
         uint64_t bsm = pci_cfg_read(igfx.f->addr, REG_BSM_GEN11, 4)
-            | (uint64_t)pci_cfg_read(igfx.f->addr, REG_BSM_GEN11 + 4, 4) << 32;
+                     | (uint64_t)pci_cfg_read(igfx.f->addr, REG_BSM_GEN11 + 4, 4) << 32;
         bsm = translate(bsm, BSM_MASK_64);
         *value = (uint32_t)(reg == REG_BSM_GEN11 ? bsm : bsm >> 32);
         return true;
@@ -392,9 +376,7 @@ static bool config_read(void *ctx, uint32_t reg, uint32_t *value) {
 }
 
 // The firmware locks the stolen memory's registers: guest writes go nowhere.
-static bool config_write(
-    void *ctx, uint32_t reg, uint32_t value, uint32_t mask
-) {
+static bool config_write(void *ctx, uint32_t reg, uint32_t value, uint32_t mask) {
     (void)ctx;
     if (reg == REG_ASLS && igfx.guest_asls != 0) {
         igfx.guest_asls = (igfx.guest_asls & ~mask) | (value & mask);
@@ -404,8 +386,7 @@ static bool config_write(
         return false;
     }
     return (igfx.kind == STOLEN_BSM && reg == REG_BSM)
-        || (igfx.kind == STOLEN_BSM_64
-            && (reg == REG_BSM_GEN11 || reg == REG_BSM_GEN11 + 4));
+        || (igfx.kind == STOLEN_BSM_64 && (reg == REG_BSM_GEN11 || reg == REG_BSM_GEN11 + 4));
 }
 
 static const struct pci_virt_hook config_hook = { config_read, config_write };
@@ -413,32 +394,24 @@ static const struct pci_virt_hook config_hook = { config_read, config_write };
 static bool host_bridge_read(void *ctx, uint32_t reg, uint32_t *value) {
     (void)ctx;
     if (reg == REG_HOST_BDSM) {
-        *value = (uint32_t)translate(
-            pci_cfg_read(igfx.host_bridge->addr, reg, 4), BSM_MASK
-        );
+        *value = (uint32_t)translate(pci_cfg_read(igfx.host_bridge->addr, reg, 4), BSM_MASK);
         return true;
     }
     if (reg == REG_HOST_BGSM) {
-        *value = (uint32_t)translate_gsm(
-            pci_cfg_read(igfx.host_bridge->addr, reg, 4), BSM_MASK
-        );
+        *value = (uint32_t)translate_gsm(pci_cfg_read(igfx.host_bridge->addr, reg, 4), BSM_MASK);
         return true;
     }
     return false;
 }
 
-static bool host_bridge_write(
-    void *ctx, uint32_t reg, uint32_t value, uint32_t mask
-) {
+static bool host_bridge_write(void *ctx, uint32_t reg, uint32_t value, uint32_t mask) {
     (void)ctx;
     (void)value;
     (void)mask;
     return reg == REG_HOST_BDSM || reg == REG_HOST_BGSM;
 }
 
-static const struct pci_virt_hook host_bridge_hook = {
-    host_bridge_read, host_bridge_write
-};
+static const struct pci_virt_hook host_bridge_hook = { host_bridge_read, host_bridge_write };
 
 // GTTMMADR's register at reg, which gives a host address, as the guest has it.
 static uint64_t mmio_translated(uint32_t reg) {
@@ -464,9 +437,7 @@ static uint64_t mmio_translated(uint32_t reg) {
 }
 
 static bool mmio_own(uint32_t reg, uint32_t *base) {
-    static const uint32_t regs[] = {
-        MMIO_DSMBASE, MMIO_GSMBASE, MMIO_STOLEN_RESERVED
-    };
+    static const uint32_t regs[] = { MMIO_DSMBASE, MMIO_GSMBASE, MMIO_STOLEN_RESERVED };
     for (size_t i = 0; i < sizeof(regs) / sizeof(uint32_t); i++) {
         if (reg >= regs[i] && reg < regs[i] + 8) {
             *base = regs[i];
@@ -476,9 +447,7 @@ static bool mmio_own(uint32_t reg, uint32_t *base) {
     return false;
 }
 
-static uint64_t mmio_read(
-    struct vcpu *v, void *ctx, uint64_t offset, size_t size
-) {
+static uint64_t mmio_read(struct vcpu *v, void *ctx, uint64_t offset, size_t size) {
     (void)v;
     (void)ctx;
     uint32_t reg = MMIO_PAGE + (uint32_t)offset;
@@ -490,9 +459,7 @@ static uint64_t mmio_read(
     return size == 8 ? value : value & (((uint64_t)1 << (8 * size)) - 1);
 }
 
-static void mmio_write(
-    struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value
-) {
+static void mmio_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value) {
     (void)v;
     (void)ctx;
     uint32_t reg = MMIO_PAGE + (uint32_t)offset;
@@ -504,23 +471,18 @@ static void mmio_write(
 
 static const struct mmio_ops mmio_ops = { mmio_read, mmio_write, false };
 
-static uint64_t fbc_read(
-    struct vcpu *v, void *ctx, uint64_t offset, size_t size
-) {
+static uint64_t fbc_read(struct vcpu *v, void *ctx, uint64_t offset, size_t size) {
     (void)v;
     (void)ctx;
     return mmio_read_host(igfx.gttmmadr + FBC_PAGE + offset, size);
 }
 
-static void fbc_write(
-    struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value
-) {
+static void fbc_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value) {
     (void)v;
     (void)ctx;
     uint32_t reg = FBC_PAGE + (uint32_t)offset;
     if (reg <= FBC_CONTROL_TOP && FBC_CONTROL_TOP < reg + size) {
-        value &= ~((uint64_t)FBC_CONTROL_EN_BYTE
-            << (8 * (FBC_CONTROL_TOP - reg)));
+        value &= ~((uint64_t)FBC_CONTROL_EN_BYTE << (8 * (FBC_CONTROL_TOP - reg)));
     }
     mmio_write_host(igfx.gttmmadr + FBC_PAGE + offset, size, value);
 }
@@ -545,25 +507,21 @@ static void init_opregion(void) {
     // Pages that back guest RAM elsewhere would be the guest's twice.
     if (!layout_host_kept(host, host + size)) {
         printf(
-            "Intel graphics: the OpRegion at %#x is in memory the guest may "
-            "have as RAM\n",
+            "Intel graphics: the OpRegion at %#x is in memory the guest may have as RAM\n",
             igfx.asls
         );
         return;
     }
     uint32_t alias = layout_take((uint32_t)size, PAGE_SIZE, E820_NVS);
     if (alias == 0) {
-        printf(
-            "Intel graphics: no room in the guest's memory for the OpRegion\n"
-        );
+        printf("Intel graphics: no room in the guest's memory for the OpRegion\n");
         return;
     }
     gpt_map(alias, host, size, GPT_R | GPT_W, MT_WB);
     gpt_flush();
     igfx.guest_asls = alias + (uint32_t)offset;
     printf(
-        "Intel graphics: the OpRegion at %#x is the guest's at %#x\n",
-        igfx.asls, igfx.guest_asls
+        "Intel graphics: the OpRegion at %#x is the guest's at %#x\n", igfx.asls, igfx.guest_asls
     );
 }
 
@@ -571,20 +529,13 @@ static void init_stolen(void) {
     if (igfx.host_bridge != NULL) {
         pci_virt_hook(igfx.host_bridge->addr, &host_bridge_hook, NULL);
     }
-    bool trapped = pci_virt_trap(
-        igfx.f->addr, 0, MMIO_PAGE, PAGE_SIZE, &mmio_ops, NULL
-    );
+    bool trapped = pci_virt_trap(igfx.f->addr, 0, MMIO_PAGE, PAGE_SIZE, &mmio_ops, NULL);
     if (!trapped) {
-        printf(
-            "Intel graphics: GTTMMADR's registers of the stolen memory cannot "
-            "be trapped\n"
-        );
+        printf("Intel graphics: GTTMMADR's registers of the stolen memory cannot be trapped\n");
     }
     printf(
-        "Intel graphics: the stolen memory at %#llx-%#llx is the guest's at "
-        "%#llx\n",
-        (unsigned long long)igfx.dsm,
-        (unsigned long long)(igfx.dsm + igfx.dsm_size - 1),
+        "Intel graphics: the stolen memory at %#llx-%#llx is the guest's at %#llx\n",
+        (unsigned long long)igfx.dsm, (unsigned long long)(igfx.dsm + igfx.dsm_size - 1),
         (unsigned long long)igfx.alias
     );
 }
@@ -629,8 +580,7 @@ static void dma_restore(uintptr_t base, uintptr_t end) {
             hpa = 0;
             prot = 0;
         }
-        bool same = gpa < end && prot == run_prot
-            && (prot == 0 || hpa == run_hpa + (gpa - run));
+        bool same = gpa < end && prot == run_prot && (prot == 0 || hpa == run_hpa + (gpa - run));
         if (same) {
             continue;
         }
@@ -653,8 +603,7 @@ void igfx_switch_end(void) {
     unsigned int elsewhere = 0;
     for (uintptr_t at = ggtt; at < ggtt + igfx.gsm_size; at += 8) {
         uint64_t pte = mmio_read_host(at, 8);
-        if ((pte & PTE_PRESENT) == 0
-         || (igfx.kind == STOLEN_DSMBASE && (pte & PTE_LM) != 0)) {
+        if ((pte & PTE_PRESENT) == 0 || (igfx.kind == STOLEN_DSMBASE && (pte & PTE_LM) != 0)) {
             continue;
         }
         uintptr_t address = pte & PTE_ADDRESS;
@@ -662,25 +611,19 @@ void igfx_switch_end(void) {
             elsewhere++;
             continue;
         }
-        mmio_write_host(
-            at, 8, (pte & ~PTE_ADDRESS) | (igfx.alias + (address - igfx.dsm))
-        );
+        mmio_write_host(at, 8, (pte & ~PTE_ADDRESS) | (igfx.alias + (address - igfx.dsm)));
         moved++;
     }
     (void)mmio_read_host(ggtt, 8);
     if (igfx.kind == STOLEN_BSM && !gen9_lp(igfx.f->device_id)) {
-        mm_map_device(
-            igfx.gttmmadr + MMIO_FLSH_CNTL - MMIO_FLSH_CNTL % PAGE_SIZE,
-            PAGE_SIZE
-        );
+        mm_map_device(igfx.gttmmadr + MMIO_FLSH_CNTL - MMIO_FLSH_CNTL % PAGE_SIZE, PAGE_SIZE);
         mmio_write_host(igfx.gttmmadr + MMIO_FLSH_CNTL, 4, FLSH_CNTL_EN);
     }
     time_udelay(SETTLE_US);
     uintptr_t base = igfx.dsm - igfx.gsm_size;
     dma_restore(base, igfx.dsm + igfx.dsm_size);
     printf(
-        "Intel graphics: %u GGTT entries moved to the guest's stolen memory, "
-        "%u present elsewhere left\n",
-        moved, elsewhere
+        "Intel graphics: %u GGTT entries moved to the guest's stolen memory, %u present elsewhere "
+        "left\n", moved, elsewhere
     );
 }

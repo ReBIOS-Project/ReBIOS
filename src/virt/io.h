@@ -29,8 +29,7 @@ struct io_handler {
     size_t count;
     // offset is from base. value is in and out.
     void (*access)(
-        struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in,
-        uint32_t *value
+        struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
     );
     void *ctx;
 };
@@ -38,8 +37,6 @@ struct io_handler {
 // Traps the ports and routes them to the handler, for every vCPU.
 void io_register(const struct io_handler *handler);
 
-bool io_dispatch(
-    struct vcpu *v, uint16_t port, size_t size, bool in, uint32_t *value
-);
+bool io_dispatch(struct vcpu *v, uint16_t port, size_t size, bool in, uint32_t *value);
 
 #endif

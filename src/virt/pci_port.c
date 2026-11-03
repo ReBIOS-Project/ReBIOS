@@ -133,15 +133,12 @@ static uint32_t window_word(uintptr_t address) {
     return (uint32_t)(address >> 16) & MEMORY_WINDOW;
 }
 
-static size_t root_of(
-    const struct pci_topology *t, const struct pci_function *f
-) {
+static size_t root_of(const struct pci_topology *t, const struct pci_function *f) {
     while (f->parent != NULL) {
         f = f->parent;
     }
     for (size_t r = 0; r < t->root_bus_count; r++) {
-        if (t->root_buses[r].segment == f->addr.segment
-         && t->root_buses[r].bus == f->addr.bus) {
+        if (t->root_buses[r].segment == f->addr.segment && t->root_buses[r].bus == f->addr.bus) {
             return r;
         }
     }
@@ -158,15 +155,12 @@ struct below {
     uint32_t width;
 };
 
-static struct below below_port(
-    const struct pci_topology *t, const struct pci_root_bus *rb
-) {
+static struct below below_port(const struct pci_topology *t, const struct pci_root_bus *rb) {
     struct below b = { DEVCAP_PAYLOAD, 0, 1, 1 };
     bool any = false;
     for (size_t i = 0; i < t->function_count; i++) {
         const struct pci_function *f = &t->functions[i];
-        if (f->addr.segment != rb->segment || f->addr.bus != rb->bus
-         || f->pcie_cap == 0) {
+        if (f->addr.segment != rb->segment || f->addr.bus != rb->bus || f->pcie_cap == 0) {
             continue;
         }
         uint32_t devcap = pci_cfg_read(f->addr, f->pcie_cap + PCIE_DEVCAP, 4);
@@ -198,17 +192,14 @@ static struct below below_port(
 
 // Whether the display's VGA device is behind the port, and the VGA 16-bit
 // decode of the bridge above it there, where it has one.
-static bool vga_below(
-    const struct pci_topology *t, size_t root, bool *decode_16
-) {
+static bool vga_below(const struct pci_topology *t, size_t root, bool *decode_16) {
     const struct handoff_video *video = &core_handoff->video;
     *decode_16 = true;
     if (!video->vga_present) {
         return false;
     }
     struct pci_addr a = {
-        video->vga_device.segment, video->vga_device.bus,
-        (uint8_t)(video->vga_device.devfn >> 3),
+        video->vga_device.segment, video->vga_device.bus, (uint8_t)(video->vga_device.devfn >> 3),
         (uint8_t)(video->vga_device.devfn & 7)
     };
     const struct pci_function *f = pci_enum_find(a);
@@ -247,8 +238,7 @@ static uint16_t vendor_id(const struct pci_topology *t, size_t primary) {
 }
 
 static void port_build(
-    struct port *p, const struct pci_plan_port *pp, bool multi,
-    uint16_t vendor
+    struct port *p, const struct pci_plan_port *pp, bool multi, uint16_t vendor
 ) {
     const struct pci_topology *t = pci_enum_topology();
     uint8_t *c = p->config;
@@ -258,17 +248,10 @@ static void port_build(
     put(c, REG_VENDOR, 2, vendor);
     put(c, REG_DEVICE, 2, PORT_DEVICE_ID);
     put(c, REG_STATUS, 2, STATUS_CAPABILITIES);
-    uint32_t class = CLASS_BRIDGE_PCI
-        | (isa_below(t, pp->root) ? CLASS_SUBTRACTIVE : 0);
+    uint32_t class = CLASS_BRIDGE_PCI | (isa_below(t, pp->root) ? CLASS_SUBTRACTIVE : 0);
     put(c, REG_CLASS_REVISION, 4, class << 8);
-    put(
-        c, REG_HEADER_TYPE, 1,
-        HEADER_BRIDGE | (multi ? HEADER_MULTI_FUNCTION : 0)
-    );
-    put(
-        c, REG_BUS_NUMBERS, 3,
-        (uint32_t)pp->secondary << 8 | (uint32_t)pp->subordinate << 16
-    );
+    put(c, REG_HEADER_TYPE, 1, HEADER_BRIDGE | (multi ? HEADER_MULTI_FUNCTION : 0));
+    put(c, REG_BUS_NUMBERS, 3, (uint32_t)pp->secondary << 8 | (uint32_t)pp->subordinate << 16);
     put(c, REG_IO_BASE, 1, (pp->io_base >> 8) & IO_WINDOW);
     put(c, REG_IO_LIMIT, 1, (pp->io_limit >> 8) & IO_WINDOW);
     put(c, REG_MEMORY_BASE, 2, window_word(pp->mem_base));
@@ -281,8 +264,7 @@ static void port_build(
     bool decode_16;
     if (vga_below(t, pp->root, &decode_16)) {
         put(
-            c, REG_BRIDGE_CONTROL, 2,
-            BRIDGE_CONTROL_VGA | (decode_16 ? BRIDGE_CONTROL_VGA_16 : 0)
+            c, REG_BRIDGE_CONTROL, 2, BRIDGE_CONTROL_VGA | (decode_16 ? BRIDGE_CONTROL_VGA_16 : 0)
         );
     }
 
@@ -294,17 +276,11 @@ static void port_build(
     put(
         c, CAP_PCIE + PCIE_DEVCTL, 2,
         DEVCTL_RELAX_EN | b.payload << DEVCTL_PAYLOAD_SHIFT | DEVCTL_NOSNOOP_EN
-            | DEVCTL_READRQ_512B
+      | DEVCTL_READRQ_512B
     );
-    put(
-        c, CAP_PCIE + PCIE_LNKCAP, 4,
-        b.speed | b.width << LNKCAP_MLW_SHIFT | LNKCAP_ASPM_OPTCOMP
-    );
+    put(c, CAP_PCIE + PCIE_LNKCAP, 4, b.speed | b.width << LNKCAP_MLW_SHIFT | LNKCAP_ASPM_OPTCOMP);
     put(c, CAP_PCIE + PCIE_LNKSTA, 2, b.speed | b.width << LNKCAP_MLW_SHIFT);
-    put(
-        c, CAP_PCIE + PCIE_LNKCAP2, 4,
-        (((uint32_t)1 << b.speed) - 1) << 1
-    );
+    put(c, CAP_PCIE + PCIE_LNKCAP2, 4, (((uint32_t)1 << b.speed) - 1) << 1);
     put(c, CAP_PCIE + PCIE_LNKCTL2, 2, b.speed);
     put(c, CAP_PM, 1, CAP_ID_PM);
     put(c, CAP_PM + PM_PMC, 2, PMC_VERSION);
@@ -342,8 +318,7 @@ void pci_port_init(void) {
         const struct pci_plan_port *pp = &plan->ports[k];
         bool multi = false;
         for (size_t j = 0; j < port_count && pp->function == 0; j++) {
-            multi |= plan->ports[j].device == pp->device
-                && plan->ports[j].function != 0;
+            multi |= plan->ports[j].device == pp->device && plan->ports[j].function != 0;
         }
         port_build(&ports[k], pp, multi, vendor);
     }
@@ -352,8 +327,7 @@ void pci_port_init(void) {
 int pci_port_at(uint8_t device, uint8_t function) {
     const struct pci_plan *plan = pci_plan();
     for (size_t k = 0; k < port_count; k++) {
-        if (plan->ports[k].device == device
-         && plan->ports[k].function == function) {
+        if (plan->ports[k].device == device && plan->ports[k].function == function) {
             return (int)k;
         }
     }
@@ -372,9 +346,7 @@ uint32_t pci_port_read(size_t port, uint32_t offset, size_t size) {
     return value;
 }
 
-void pci_port_write(
-    size_t port, uint32_t offset, size_t size, uint32_t value
-) {
+void pci_port_write(size_t port, uint32_t offset, size_t size, uint32_t value) {
     struct port *p = &ports[port];
     for (size_t i = 0; i < size; i++) {
         uint32_t at = offset + (uint32_t)i;
@@ -388,7 +360,6 @@ void pci_port_write(
         if (at == CAP_PM + PM_CTRL && state != 0 && state != PM_D3HOT) {
             continue;
         }
-        p->config[at] = (uint8_t)((p->config[at] & ~p->writable[at])
-            | (byte & p->writable[at]));
+        p->config[at] = (uint8_t)((p->config[at] & ~p->writable[at]) | (byte & p->writable[at]));
     }
 }

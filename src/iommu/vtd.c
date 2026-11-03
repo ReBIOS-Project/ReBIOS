@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -142,7 +143,7 @@ struct vtd_unit {
     uint64_t *context_table;
     uint64_t *queue;
     uint32_t queue_tail;
-    uint32_t wait_done;
+    _Atomic(uint32_t) wait_done;
 };
 
 static struct vtd_unit *units;
@@ -164,38 +165,27 @@ static uint64_t reg_read64(const struct vtd_unit *u, uint32_t reg) {
 }
 
 // Fenced, as a write may hand the unit tables or descriptors just written.
-static void reg_write32(
-    const struct vtd_unit *u, uint32_t reg, uint32_t value
-) {
-    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+static void reg_write32(const struct vtd_unit *u, uint32_t reg, uint32_t value) {
+    atomic_thread_fence(memory_order_seq_cst);
     *(volatile uint32_t *)(uintptr_t)(u->base + reg) = value;
 }
 
-static void reg_write64(
-    const struct vtd_unit *u, uint32_t reg, uint64_t value
-) {
-    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+static void reg_write64(const struct vtd_unit *u, uint32_t reg, uint64_t value) {
+    atomic_thread_fence(memory_order_seq_cst);
     *(volatile uint64_t *)(uintptr_t)(u->base + reg) = value;
 }
 
-static void wait_status(
-    const struct vtd_unit *u, uint32_t bit, bool set, const char *what
-) {
+static void wait_status(const struct vtd_unit *u, uint32_t bit, bool set, const char *what) {
     uint64_t deadline = time_ns() + TIMEOUT_NS;
     while (((reg_read32(u, REG_GSTS) & bit) != 0) != set) {
         if (time_ns() > deadline) {
-            panic(
-                "VT-d unit at %#llx does not %s\n",
-                (unsigned long long)u->base, what
-            );
+            panic("VT-d unit at %#llx does not %s\n", (unsigned long long)u->base, what);
         }
         cpu_relax();
     }
 }
 
-static void global_command(
-    const struct vtd_unit *u, uint32_t bit, bool set, const char *what
-) {
+static void global_command(const struct vtd_unit *u, uint32_t bit, bool set, const char *what) {
     uint32_t status = reg_read32(u, REG_GSTS) & GSTS_PERSISTENT;
     reg_write32(u, REG_GCMD, set ? status | bit : status & ~bit);
     wait_status(u, bit, set, what);
@@ -218,28 +208,24 @@ static void queue_submit(struct vtd_unit *u, uint64_t low, uint64_t high) {
 
 // Waits for everything submitted so far to complete.
 static void queue_sync(struct vtd_unit *u) {
-    __atomic_store_n(&u->wait_done, 0, __ATOMIC_RELAXED);
+    atomic_store_explicit(&u->wait_done, 0, memory_order_relaxed);
     queue_submit(
-        u,
-        DESC_WAIT | DESC_WAIT_SW | DESC_WAIT_FN
-            | (uint64_t)1 << DESC_WAIT_DATA_SHIFT,
+        u, DESC_WAIT | DESC_WAIT_SW | DESC_WAIT_FN | (uint64_t)1 << DESC_WAIT_DATA_SHIFT,
         (uint64_t)(uintptr_t)&u->wait_done
     );
 
     uint64_t deadline = time_ns() + TIMEOUT_NS;
-    while (__atomic_load_n(&u->wait_done, __ATOMIC_ACQUIRE) != 1) {
+    while (atomic_load_explicit(&u->wait_done, memory_order_acquire) != 1) {
         uint32_t status = reg_read32(u, REG_FSTS);
         if ((status & (FSTS_IQE | FSTS_ITE)) != 0) {
             panic(
-                "VT-d unit at %#llx rejects an invalidation, fault status "
-                "%#x\n",
+                "VT-d unit at %#llx rejects an invalidation, fault status %#x\n",
                 (unsigned long long)u->base, status
             );
         }
         if (time_ns() > deadline) {
             panic(
-                "VT-d unit at %#llx does not complete invalidations\n",
-                (unsigned long long)u->base
+                "VT-d unit at %#llx does not complete invalidations\n", (unsigned long long)u->base
             );
         }
         cpu_relax();
@@ -261,12 +247,9 @@ static void invalidate_all(struct vtd_unit *u) {
     spinlock_release(&queue_lock);
 }
 
-// Every unit's cached copy of the entry, or of all of them where index is -1.
-static void remap_invalidate(int index) {
-    uint64_t desc = DESC_IEC;
-    if (index >= 0) {
-        desc |= DESC_IEC_INDEX | (uint64_t)index << DESC_IEC_INDEX_SHIFT;
-    }
+// Every unit's cached copies of the entries that an interrupt entry cache
+// invalidation descriptor names.
+static void remap_invalidate_desc(uint64_t desc) {
     tables_flush_caches();
     spinlock_acquire(&queue_lock);
     for (size_t i = 0; i < unit_count; i++) {
@@ -276,16 +259,22 @@ static void remap_invalidate(int index) {
     spinlock_release(&queue_lock);
 }
 
+static void remap_invalidate(uint16_t index) {
+    remap_invalidate_desc(DESC_IEC | DESC_IEC_INDEX | (uint64_t)index << DESC_IEC_INDEX_SHIFT);
+}
+
+static void remap_invalidate_all(void) {
+    remap_invalidate_desc(DESC_IEC);
+}
+
 // Intel's integrated graphics of these device ID families, behind a unit of
 // their own, can hang if the translation the firmware left on stops under
 // them, so it stays on (as Linux 7.3's quirk_igfx_skip_te_disable() has it).
 static const uint8_t keep_translating_ids[] = {
-    0x45, 0x46, 0x4c, 0x4e, 0x8a, 0x98, 0x9a, 0xa7, 0x7d,
+    0x45, 0x46, 0x4c, 0x4e, 0x8a, 0x98, 0x9a, 0xa7, 0x7d
 };
 
-static bool keep_translating(
-    const struct iommu_tables *tables, uint32_t index, uint64_t cap
-) {
+static bool keep_translating(const struct iommu_tables *tables, uint32_t index, uint64_t cap) {
     if (tables->units[index].include_all || (cap & (CAP_DRD | CAP_DWD)) == 0) {
         return false;
     }
@@ -297,8 +286,7 @@ static bool keep_translating(
         }
         for (size_t rid = r->first; rid <= r->last; rid++) {
             struct pci_addr a = {
-                r->segment, (uint8_t)(rid >> 8), (uint8_t)(rid >> 3 & 0x1f),
-                (uint8_t)(rid & 7)
+                r->segment, (uint8_t)(rid >> 8), (uint8_t)(rid >> 3 & 0x1f), (uint8_t)(rid & 7)
             };
             uint32_t id = pci_cfg_read(a, 0, 4);
             if (id == UINT32_MAX) {
@@ -308,8 +296,7 @@ static bool keep_translating(
                 return false;
             }
             for (size_t j = 0; j < sizeof(keep_translating_ids); j++) {
-                if ((id & 0xffff) == PCI_VENDOR_INTEL
-                 && id >> 24 == keep_translating_ids[j]) {
+                if ((id & 0xffff) == PCI_VENDOR_INTEL && id >> 24 == keep_translating_ids[j]) {
                     listed = true;
                 }
             }
@@ -326,8 +313,7 @@ bool vtd_probe(const struct iommu_tables *tables, size_t *leaf_level) {
     // when a walk's length changes under DMA in flight (as Xen 4.22's
     // quirk_iommu_caps() has it): small pages only, then.
     struct cpu_signature s = cpu_signature();
-    if (s.family == 6
-     && (s.model == MODEL_SANDY_BRIDGE || s.model == MODEL_SANDY_BRIDGE_X)) {
+    if (s.family == 6 && (s.model == MODEL_SANDY_BRIDGE || s.model == MODEL_SANDY_BRIDGE_X)) {
         leaf = 0;
     }
 
@@ -340,11 +326,9 @@ bool vtd_probe(const struct iommu_tables *tables, size_t *leaf_level) {
         uint32_t sagaw = (u->cap >> CAP_SAGAW_SHIFT) & 0x1f;
         uint32_t sslps = (u->cap >> CAP_SSLPS_SHIFT) & 0xf;
         printf(
-            "VT-d unit %zu at %#llx: version %u.%u, capabilities %#llx, "
-            "extended %#llx\n",
-            i, (unsigned long long)u->base, (version >> 4) & 0xf,
-            version & 0xf, (unsigned long long)u->cap,
-            (unsigned long long)u->ecap
+            "VT-d unit %zu at %#llx: version %u.%u, capabilities %#llx, extended %#llx\n", i,
+            (unsigned long long)u->base, (version >> 4) & 0xf, version & 0xf,
+            (unsigned long long)u->cap, (unsigned long long)u->ecap
         );
 
         if ((u->ecap & ECAP_QI) == 0) {
@@ -354,15 +338,10 @@ bool vtd_probe(const struct iommu_tables *tables, size_t *leaf_level) {
         if ((sagaw & CAP_SAGAW_48) != 0) {
             u->four_levels = true;
         } else if ((sagaw & CAP_SAGAW_39) == 0) {
-            printf(
-                "VT-d unit %zu takes neither 3-level nor 4-level second-stage "
-                "tables\n",
-                i
-            );
+            printf("VT-d unit %zu takes neither 3-level nor 4-level second-stage tables\n", i);
             return false;
         }
-        size_t unit_leaf = (sslps & CAP_SSLPS_1G) != 0 ? 2
-            : (sslps & CAP_SSLPS_2M) != 0 ? 1 : 0;
+        size_t unit_leaf = (sslps & CAP_SSLPS_1G) != 0 ? 2 : (sslps & CAP_SSLPS_2M) != 0 ? 1 : 0;
         if (unit_leaf < leaf) {
             leaf = unit_leaf;
         }
@@ -382,8 +361,7 @@ static void unit_take_over(struct vtd_unit *u) {
     uint32_t status = reg_read32(u, REG_GSTS);
     if ((status & GCMD_TE) != 0 && u->keep_translating) {
         printf(
-            "VT-d unit at %#llx goes on translating for the graphics behind "
-            "it\n",
+            "VT-d unit at %#llx goes on translating for the graphics behind it\n",
             (unsigned long long)u->base
         );
     } else if ((status & GCMD_TE) != 0) {
@@ -397,8 +375,7 @@ static void unit_take_over(struct vtd_unit *u) {
         while (reg_read64(u, REG_IQH) != reg_read64(u, REG_IQT)) {
             if (time_ns() > deadline) {
                 panic(
-                    "VT-d unit at %#llx does not drain the firmware's "
-                    "invalidations\n",
+                    "VT-d unit at %#llx does not drain the firmware's invalidations\n",
                     (unsigned long long)u->base
                 );
             }
@@ -406,8 +383,7 @@ static void unit_take_over(struct vtd_unit *u) {
         }
         global_command(u, GCMD_QIE, false, "disable queued invalidation");
     }
-    if ((u->cap & (CAP_PLMR | CAP_PHMR)) != 0
-     && (reg_read32(u, REG_PMEN) & PMEN_EPM) != 0) {
+    if ((u->cap & (CAP_PLMR | CAP_PHMR)) != 0 && (reg_read32(u, REG_PMEN) & PMEN_EPM) != 0) {
         reg_write32(u, REG_PMEN, 0);
         uint64_t deadline = time_ns() + TIMEOUT_NS;
         while ((reg_read32(u, REG_PMEN) & PMEN_PRS) != 0) {
@@ -434,9 +410,8 @@ static void unit_enable(struct vtd_unit *u, uintptr_t pml4) {
     u->context_table = page_alloc(1);
     for (size_t i = 0; i < 256; i++) {
         u->context_table[i * 2] = table | CONTEXT_P;
-        u->context_table[i * 2 + 1]
-            = (u->four_levels ? CONTEXT_AW_48 : CONTEXT_AW_39)
-            | DOMAIN_ID << CONTEXT_DID_SHIFT;
+        u->context_table[i * 2 + 1] = (u->four_levels ? CONTEXT_AW_48 : CONTEXT_AW_39)
+                                    | DOMAIN_ID << CONTEXT_DID_SHIFT;
     }
     u->root_table = page_alloc(1);
     for (size_t i = 0; i < 256; i++) {
@@ -475,29 +450,20 @@ void vtd_start(void) {
         }
     }
     if (!remap) {
-        printf(
-            "VT-d: interrupts are not remapped, so the guest's devices can "
-            "send any\n"
-        );
+        printf("VT-d: interrupts are not remapped, so the guest's devices can send any\n");
         return;
     }
     remap_table = page_alloc(REMAP_ENTRIES * 16 / PAGE_SIZE);
     tables_flush_caches();
     for (size_t i = 0; i < unit_count; i++) {
         struct vtd_unit *u = &units[i];
-        reg_write64(
-            u, REG_IRTA, (uint64_t)(uintptr_t)remap_table | REMAP_SIZE
-        );
-        global_command(
-            u, GCMD_SIRTP, true, "take the interrupt remapping table"
-        );
+        reg_write64(u, REG_IRTA, (uint64_t)(uintptr_t)remap_table | REMAP_SIZE);
+        global_command(u, GCMD_SIRTP, true, "take the interrupt remapping table");
     }
-    remap_invalidate(-1);
+    remap_invalidate_all();
     for (size_t i = 0; i < unit_count; i++) {
         global_command(&units[i], GCMD_IRE, true, "remap interrupts");
-        global_command(
-            &units[i], GCMD_CFI, false, "block compatibility format interrupts"
-        );
+        global_command(&units[i], GCMD_CFI, false, "block compatibility format interrupts");
     }
 }
 
@@ -511,8 +477,7 @@ int vtd_remap_alloc(size_t count) {
     for (size_t base = 0; found < 0 && base + count <= REMAP_ENTRIES; base++) {
         size_t n = 0;
         while (n < count
-            && (remap_used[(base + n) / 64] & (uint64_t)1 << ((base + n) % 64))
-            == 0) {
+            && (remap_used[(base + n) / 64] & (uint64_t)1 << ((base + n) % 64)) == 0) {
             n++;
         }
         if (n == count) {
@@ -527,10 +492,12 @@ int vtd_remap_alloc(size_t count) {
 }
 
 // Its entries not present first, so that nothing reaches a freed vector.
-void vtd_remap_free(int index, size_t count) {
+void vtd_remap_free(uint16_t index, size_t count) {
     for (size_t i = 0; i < count; i++) {
-        __atomic_store_n(&remap_table[(index + i) * 2], 0, __ATOMIC_RELEASE);
-        remap_invalidate(index + (int)i);
+        atomic_store_explicit(
+            (_Atomic(uint64_t) *)&remap_table[(index + i) * 2], 0, memory_order_release
+        );
+        remap_invalidate((uint16_t)(index + i));
     }
     spinlock_acquire(&remap_lock);
     for (size_t i = 0; i < count; i++) {
@@ -541,30 +508,28 @@ void vtd_remap_free(int index, size_t count) {
 
 // Physical destination, fixed delivery, no source validation: the entries only
 // ever name the hypervisor's vectors, whatever device sends them.
-void vtd_remap_set(int index, uint32_t apic_id, uint8_t vector, bool level) {
-    uint64_t entry = IRTE_P | (level ? IRTE_TM : 0)
-        | (uint64_t)vector << IRTE_VECTOR_SHIFT
-        | (uint64_t)(apic_id & 0xff) << IRTE_DEST_SHIFT;
-    if (__atomic_load_n(&remap_table[index * 2], __ATOMIC_ACQUIRE) == entry) {
+void vtd_remap_set(uint16_t index, uint32_t apic_id, uint8_t vector, bool level) {
+    uint64_t entry = IRTE_P | (level ? IRTE_TM : 0) | (uint64_t)vector << IRTE_VECTOR_SHIFT
+                   | (uint64_t)(apic_id & 0xff) << IRTE_DEST_SHIFT;
+    _Atomic(uint64_t) *low = (_Atomic(uint64_t) *)&remap_table[index * 2];
+    if (atomic_load_explicit(low, memory_order_acquire) == entry) {
         return;
     }
     remap_table[index * 2 + 1] = 0;
-    __atomic_store_n(&remap_table[index * 2], entry, __ATOMIC_RELEASE);
+    atomic_store_explicit(low, entry, memory_order_release);
     remap_invalidate(index);
 }
 
-void vtd_remap_message(int index, uint32_t *address, uint32_t *data) {
-    *address = MSI_ADDRESS | ((uint32_t)index & 0x7fff) << 5 | MSI_REMAPPABLE
-        | MSI_SHV | ((uint32_t)index >> 15 & 1) << 2;
+void vtd_remap_message(uint16_t index, uint32_t *address, uint32_t *data) {
+    *address = MSI_ADDRESS | ((uint32_t)index & 0x7fff) << 5 | MSI_REMAPPABLE | MSI_SHV
+             | ((uint32_t)index >> 15 & 1) << 2;
     *data = 0;
 }
 
-uint64_t vtd_remap_rte(
-    int index, uint8_t vector, bool level, bool active_low
-) {
+uint64_t vtd_remap_rte(uint16_t index, uint8_t vector, bool level, bool active_low) {
     return vector | (uint64_t)((uint32_t)index & 0x7fff) << 49 | RTE_REMAPPABLE
-        | (uint64_t)((uint32_t)index >> 15 & 1) << 11 | (level ? RTE_LEVEL : 0)
-        | (active_low ? RTE_ACTIVE_LOW : 0);
+         | (uint64_t)((uint32_t)index >> 15 & 1) << 11 | (level ? RTE_LEVEL : 0)
+         | (active_low ? RTE_ACTIVE_LOW : 0);
 }
 
 void vtd_enable(uintptr_t pml4) {
@@ -597,11 +562,9 @@ void vtd_report_faults(void) {
             uint64_t low = reg_read64(u, record);
             uint32_t source = high & 0xffff;
             printf(
-                "VT-d unit %zu: DMA fault from %02x:%02x.%x at %#llx, reason "
-                "%#x\n",
-                i, source >> 8, (source >> 3) & 0x1f, source & 7,
-                (unsigned long long)(low & ~(uint64_t)0xfff),
-                (unsigned int)((high >> 32) & 0xff)
+                "VT-d unit %zu: DMA fault from %02x:%02x.%x at %#llx, reason %#x\n", i,
+                source >> 8, (source >> 3) & 0x1f, source & 7,
+                (unsigned long long)(low & ~(uint64_t)0xfff), (unsigned int)((high >> 32) & 0xff)
             );
             reg_write64(u, record + 8, FAULT_F);
         }

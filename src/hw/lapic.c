@@ -61,8 +61,7 @@ static uint64_t apic_base(void) {
 }
 
 static volatile uint32_t *xapic_reg(uint32_t reg) {
-    return (volatile uint32_t *)(uintptr_t)((apic_base() & APIC_BASE_ADDRESS)
-        + reg);
+    return (volatile uint32_t *)(uintptr_t)((apic_base() & APIC_BASE_ADDRESS) + reg);
 }
 
 uint32_t lapic_read(uint32_t reg) {
@@ -82,8 +81,7 @@ void lapic_write(uint32_t reg, uint32_t value) {
 
 bool lapic_x2apic(void) {
     uintptr_t base = apic_base();
-    return (base & (APIC_BASE_EN | APIC_BASE_EXTD))
-        == (APIC_BASE_EN | APIC_BASE_EXTD);
+    return (base & (APIC_BASE_EN | APIC_BASE_EXTD)) == (APIC_BASE_EN | APIC_BASE_EXTD);
 }
 
 uint32_t lapic_cpu_apic_id(void) {
@@ -122,10 +120,7 @@ void lapic_send_ipi(uint32_t dest, uint32_t command) {
     uint64_t deadline = time_ns() + IPI_TIMEOUT_NS;
     while ((*xapic_reg(APIC_ICR_LOW) & ICR_PENDING) != 0) {
         if (time_ns() > deadline) {
-            printf(
-                "Local APIC %#x: an earlier IPI is still pending\n",
-                lapic_cpu_apic_id()
-            );
+            printf("Local APIC %#x: an earlier IPI is still pending\n", lapic_cpu_apic_id());
             break;
         }
         cpu_relax();
@@ -134,10 +129,7 @@ void lapic_send_ipi(uint32_t dest, uint32_t command) {
     *xapic_reg(APIC_ICR_LOW) = command;
     while ((*xapic_reg(APIC_ICR_LOW) & ICR_PENDING) != 0) {
         if (time_ns() > deadline) {
-            printf(
-                "Local APIC %#x: IPI %#x not taken\n", lapic_cpu_apic_id(),
-                command
-            );
+            printf("Local APIC %#x: IPI %#x not taken\n", lapic_cpu_apic_id(), command);
             return;
         }
         cpu_relax();
@@ -178,7 +170,7 @@ static bool host_mode(bool x2apic) {
     static const uint32_t kept[] = {
         APIC_SVR, APIC_TPR, APIC_LVT_TIMER, APIC_LVT_THERMAL, APIC_LVT_PERF,
         APIC_LVT_LINT0, APIC_LVT_LINT1, APIC_LVT_ERROR, APIC_TIMER_DIVIDE,
-        APIC_LVT_CMCI,
+        APIC_LVT_CMCI
     };
     size_t count = sizeof(kept) / sizeof(uint32_t);
     if (max_entry() < LVT_CMCI_MIN_MAX_ENTRY) {
@@ -225,8 +217,7 @@ static void timer_measure(uint8_t timer_vector) {
     timer_hz = (UINT32_MAX - left) * time_tsc_hz() / elapsed;
     timer_tsc_deadline = (cpuid(1, 0).ecx & CPUID_1_ECX_TSC_DEADLINE) != 0;
     printf(
-        "Local APIC timer at %llu MHz%s\n",
-        (unsigned long long)(timer_hz / 1000000),
+        "Local APIC timer at %llu MHz%s\n", (unsigned long long)(timer_hz / 1000000),
         timer_tsc_deadline ? ", with a TSC-deadline mode" : ""
     );
 }
@@ -242,9 +233,7 @@ void lapic_timer_arm(uint64_t tsc) {
     }
     uint64_t now = rdtsc();
     uint64_t ticks = tsc > now ? lapic_timer_from_tsc(tsc - now) + 1 : 1;
-    lapic_write(
-        APIC_TIMER_INITIAL, ticks < UINT32_MAX ? (uint32_t)ticks : UINT32_MAX
-    );
+    lapic_write(APIC_TIMER_INITIAL, ticks < UINT32_MAX ? (uint32_t)ticks : UINT32_MAX);
 }
 
 void lapic_host_init(uint8_t spurious_vector, uint8_t timer_vector) {
@@ -260,12 +249,9 @@ void lapic_host_init(uint8_t spurious_vector, uint8_t timer_vector) {
     if (timer_tsc_deadline) {
         wrmsr(MSR_IA32_TSC_DEADLINE, 0);
     }
-    lapic_write(
-        APIC_LVT_TIMER,
-        timer_vector | (timer_tsc_deadline ? LVT_TIMER_TSC_DEADLINE : 0)
-    );
+    lapic_write(APIC_LVT_TIMER, timer_vector | (timer_tsc_deadline ? LVT_TIMER_TSC_DEADLINE : 0));
     // Before any WRMSR to the deadline (SDM 325462-093 Vol. 3A, 13.5.4.1).
-    asm volatile ("mfence" :: : "memory");
+    asm volatile ("mfence" ::: "memory");
     // In-service interrupts end one EOI each, highest first.
     for (size_t n = 0; n < 256; n++) {
         bool in_service = false;

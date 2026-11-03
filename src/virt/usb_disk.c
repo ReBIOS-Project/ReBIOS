@@ -149,8 +149,8 @@ static void disk_path(struct tendril_msc_lun *lun, char *out, size_t size) {
     struct tendril_device *dev = tendril_msc_device(lun);
     uint8_t ports[MAX_HUBS];
     size_t count = 0;
-    for (struct tendril_device *up = tendril_device_parent(dev);
-         up != NULL && count < MAX_HUBS; up = tendril_device_parent(up)) {
+    for (struct tendril_device *up = tendril_device_parent(dev); up != NULL && count < MAX_HUBS;
+         up = tendril_device_parent(up)) {
         ports[count++] = tendril_device_port(up);
     }
     size_t used = 0;
@@ -158,17 +158,15 @@ static void disk_path(struct tendril_msc_lun *lun, char *out, size_t size) {
         used += (size_t)snprintf(out + used, size - used, "/hub@%x", ports[i]);
     }
     snprintf(
-        out + used, size - used, "/storage@%x/*@0/*@0,%x",
-        tendril_device_port(dev), tendril_msc_lun_number(lun)
+        out + used, size - used, "/storage@%x/*@0/*@0,%x", tendril_device_port(dev),
+        tendril_msc_lun_number(lun)
     );
 }
 
 static uint32_t disk_info(const struct usb_disk *d, uint32_t gpa) {
     struct tendril_msc_lun *lun = d->lun;
     struct hypercall_usb_disk_info info = { 0 };
-    const struct usb_controller *c = usb_controller_of(
-        tendril_device_hc(tendril_msc_device(lun))
-    );
+    const struct usb_controller *c = usb_controller_of(tendril_device_hc(tendril_msc_device(lun)));
     if (c == NULL) {
         return HYPERCALL_USB_DISK_STATUS_NO_DISK;
     }
@@ -184,24 +182,18 @@ static uint32_t disk_info(const struct usb_disk *d, uint32_t gpa) {
     // no device's.
     int bus = pci_plan_guest_bus(c->f->addr.segment, c->f->addr.bus);
     info.bdf = bus >= 0
-        ? (uint32_t)bus << 8 | (uint32_t)c->f->addr.device << 3
-            | c->f->addr.function
-        : UINT16_MAX;
+             ? (uint32_t)bus << 8 | (uint32_t)c->f->addr.device << 3 | c->f->addr.function
+             : UINT16_MAX;
     disk_path(lun, info.path, sizeof(info.path));
     snprintf(
-        info.description, sizeof(info.description), "USB %s %s",
-        tendril_msc_vendor(lun), tendril_msc_product(lun)
+        info.description, sizeof(info.description), "USB %s %s", tendril_msc_vendor(lun),
+        tendril_msc_product(lun)
     );
-    bool written = guest_phys_write(
-        gpa, &info, sizeof(struct hypercall_usb_disk_info)
-    );
-    return written ? HYPERCALL_USB_DISK_STATUS_OK
-        : HYPERCALL_USB_DISK_STATUS_FAILED;
+    bool written = guest_phys_write(gpa, &info, sizeof(struct hypercall_usb_disk_info));
+    return written ? HYPERCALL_USB_DISK_STATUS_OK : HYPERCALL_USB_DISK_STATUS_FAILED;
 }
 
-static uint32_t disk_start(
-    struct usb_disk *d, const struct hypercall_usb_disk *call, bool read
-) {
+static uint32_t disk_start(struct usb_disk *d, const struct hypercall_usb_disk *call, bool read) {
     size_t block_size = tendril_msc_block_size(d->lun);
     size_t bytes = call->count * block_size;
     if (d->state != DISK_IDLE || call->count == 0 || bytes > BUFFER_SIZE) {
@@ -214,9 +206,8 @@ static uint32_t disk_start(
     d->guest_buffer = call->buffer;
     d->bytes = bytes;
     d->request = (struct tendril_msc_request){
-        .op = read ? TENDRIL_MSC_READ : TENDRIL_MSC_WRITE, .lba = call->lba,
-        .count = call->count, .buffer = d->buffer, .done = request_done,
-        .context = d
+        .op = read ? TENDRIL_MSC_READ : TENDRIL_MSC_WRITE, .lba = call->lba, .count = call->count,
+        .buffer = d->buffer, .done = request_done, .context = d
     };
     d->state = DISK_QUEUED;
     return HYPERCALL_USB_DISK_STATUS_PENDING;

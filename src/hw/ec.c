@@ -106,8 +106,7 @@ static bool ec_read(uint8_t address, uint8_t *value) {
 }
 
 static bool ec_write(uint8_t address, uint8_t value) {
-    return send_command(EC_WR) && send_data(address) && send_data(value)
-        && wait_status(EC_IBF, 0);
+    return send_command(EC_WR) && send_data(address) && send_data(value) && wait_status(EC_IBF, 0);
 }
 
 // The firmware's fields over the EC's space take the global lock themselves
@@ -128,8 +127,9 @@ static uacpi_status region_handler(uacpi_region_op op, uacpi_handle op_data) {
             for (size_t i = 0; i < rw->byte_width; i++) {
                 uint8_t address = (uint8_t)(rw->offset + i);
                 uint8_t byte = (uint8_t)(value >> (8 * i));
-                bool ok = op == UACPI_REGION_OP_READ ? ec_read(address, &byte)
-                    : ec_write(address, byte);
+                bool ok = op == UACPI_REGION_OP_READ
+                        ? ec_read(address, &byte)
+                        : ec_write(address, byte);
                 if (!ok) {
                     printf("Embedded controller timed out at %#x\n", address);
                     return UACPI_STATUS_HARDWARE_TIMEOUT;
@@ -150,8 +150,7 @@ static uacpi_status region_handler(uacpi_region_op op, uacpi_handle op_data) {
 static bool query(uint8_t *value) {
     uint32_t seq = 0;
     if (ec.global_lock
-     && uacpi_acquire_global_lock(EC_GLOBAL_LOCK_TIMEOUT, &seq)
-     != UACPI_STATUS_OK) {
+     && uacpi_acquire_global_lock(EC_GLOBAL_LOCK_TIMEOUT, &seq) != UACPI_STATUS_OK) {
         return false;
     }
     bool ok = send_command(EC_QR) && receive_data(value);
@@ -178,14 +177,11 @@ static void query_work(uacpi_handle ctx) {
         uacpi_status status = uacpi_execute(ec.node, method, NULL);
         if (status != UACPI_STATUS_OK) {
             printf(
-                "Embedded controller event %#x: %s %s\n", q, method,
-                uacpi_status_to_string(status)
+                "Embedded controller event %#x: %s %s\n", q, method, uacpi_status_to_string(status)
             );
         }
     }
-    printf(
-        "Embedded controller events keep coming, %u in a row\n", EC_QUERY_LIMIT
-    );
+    printf("Embedded controller events keep coming, %u in a row\n", EC_QUERY_LIMIT);
 }
 
 // The EC's GPE is edge-triggered, ACPI 6.6, 12.6.
@@ -197,9 +193,7 @@ static uacpi_interrupt_ret gpe_handler(
     (void)idx;
     if (!ec.query_pending) {
         ec.query_pending = true;
-        uacpi_kernel_schedule_work(
-            UACPI_WORK_GPE_EXECUTION, ec.query_work, query_work, NULL
-        );
+        uacpi_kernel_schedule_work(UACPI_WORK_GPE_EXECUTION, ec.query_work, query_work, NULL);
     }
     return UACPI_INTERRUPT_HANDLED | UACPI_GPE_REENABLE;
 }
@@ -222,8 +216,7 @@ static uacpi_iteration_decision port_found(void *user, uacpi_resource *r) {
         ec.command = port;
     }
     ec.ports++;
-    return ec.ports == 2 ? UACPI_ITERATION_DECISION_BREAK
-        : UACPI_ITERATION_DECISION_CONTINUE;
+    return ec.ports == 2 ? UACPI_ITERATION_DECISION_BREAK : UACPI_ITERATION_DECISION_CONTINUE;
 }
 
 static uacpi_iteration_decision device_found(
@@ -248,8 +241,7 @@ static uacpi_iteration_decision device_found(
 // Without such a device, the ECDT can still name one.
 static bool ecdt_find(void) {
     uacpi_table table;
-    if (uacpi_table_find_by_signature(ACPI_ECDT_SIGNATURE, &table)
-     != UACPI_STATUS_OK) {
+    if (uacpi_table_find_by_signature(ACPI_ECDT_SIGNATURE, &table) != UACPI_STATUS_OK) {
         return false;
     }
     const struct acpi_ecdt *ecdt = table.ptr;
@@ -257,8 +249,7 @@ static bool ecdt_find(void) {
     if (ecdt->hdr.length > sizeof(struct acpi_ecdt)
      && ecdt->ec_control.address_space_id == UACPI_ADDRESS_SPACE_SYSTEM_IO
      && ecdt->ec_data.address_space_id == UACPI_ADDRESS_SPACE_SYSTEM_IO
-     && uacpi_namespace_node_find(NULL, ecdt->ec_id, &ec.node)
-     == UACPI_STATUS_OK) {
+     && uacpi_namespace_node_find(NULL, ecdt->ec_id, &ec.node) == UACPI_STATUS_OK) {
         ec.command = (uint16_t)ecdt->ec_control.address;
         ec.data = (uint16_t)ecdt->ec_data.address;
         found = true;
@@ -281,14 +272,11 @@ static bool gpe_find(uacpi_namespace_node **device, uacpi_u16 *idx) {
     if (uacpi_object_get_integer(obj, &value) == UACPI_STATUS_OK) {
         *idx = (uacpi_u16)value;
         found = true;
-    } else if (uacpi_object_get_package(obj, &package) == UACPI_STATUS_OK
-            && package.count == 2) {
+    } else if (uacpi_object_get_package(obj, &package) == UACPI_STATUS_OK && package.count == 2) {
         uacpi_namespace_node *node;
-        bool resolved = uacpi_object_resolve_as_aml_namepath(
-            package.objects[0], ec.node, &node
-        ) == UACPI_STATUS_OK
-            && uacpi_object_get_integer(package.objects[1], &value)
-                == UACPI_STATUS_OK;
+        bool resolved = uacpi_object_resolve_as_aml_namepath(package.objects[0], ec.node, &node)
+                         == UACPI_STATUS_OK
+                     && uacpi_object_get_integer(package.objects[1], &value) == UACPI_STATUS_OK;
         if (resolved) {
             *device = node;
             *idx = (uacpi_u16)value;
@@ -306,13 +294,12 @@ void ec_init(void) {
     }
 
     uint64_t glk;
-    ec.global_lock
-        = uacpi_eval_simple_integer(ec.node, "_GLK", &glk) == UACPI_STATUS_OK
-        && glk != 0;
+    ec.global_lock = uacpi_eval_simple_integer(ec.node, "_GLK", &glk) == UACPI_STATUS_OK
+                  && glk != 0;
     const char *path = uacpi_namespace_node_generate_absolute_path(ec.node);
     printf(
-        "Embedded controller %s, data port %#x, command port %#x%s\n", path,
-        ec.data, ec.command, ec.global_lock ? ", global lock" : ""
+        "Embedded controller %s, data port %#x, command port %#x%s\n", path, ec.data, ec.command,
+        ec.global_lock ? ", global lock" : ""
     );
     uacpi_free_absolute_path(path);
 
@@ -321,8 +308,7 @@ void ec_init(void) {
     );
     if (status != UACPI_STATUS_OK) {
         printf(
-            "Cannot handle the embedded controller's space: %s\n",
-            uacpi_status_to_string(status)
+            "Cannot handle the embedded controller's space: %s\n", uacpi_status_to_string(status)
         );
     }
 

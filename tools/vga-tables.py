@@ -22,8 +22,14 @@
 # taken from QEMU's VGA BIOS, and each standard mode's registers and DAC
 # palette, as vgadump.asm recorded QEMU's VGA BIOS programming them, with the
 # 350- and 200-line text modes made from those (QEMU's BIOS has none).
+import os
 import re
 import sys
+
+# c_layout.py sits beside the generators, which leave no bytecode in the tree.
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from c_layout import finish
 
 # The notice each generated file starts with.
 NOTICE = [
@@ -223,5 +229,5 @@ for m in modes:
     o.append('        .gc = { %s },' % ', '.join('0x%02x' % x for x in gc))
     o.append('    },')
 o.append('};')
-open(out_path, 'w').write('\n'.join(o) + '\n')
+open(out_path, 'w').write(finish('\n'.join(o) + '\n'))
 print('%d modes, %d palettes' % (len(modes), len(palettes)))

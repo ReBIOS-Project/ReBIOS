@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -43,7 +44,7 @@ struct vioapic {
     struct spinlock lock;
     uint32_t select;
     uint32_t id_reg;
-    uint64_t *rtes;
+    _Atomic(uint64_t) *rtes;
 };
 
 static struct vioapic *vioapics;
@@ -58,9 +59,9 @@ void vioapic_init(void) {
         struct vioapic *vio = &vioapics[i];
         struct ioapic *io = ioapic_get(i);
         *vio = (struct vioapic){ .host = io, .id_reg = io->id_reg };
-        vio->rtes = kmalloc(io->pins * sizeof(uint64_t));
+        vio->rtes = kmalloc(io->pins * sizeof(_Atomic(uint64_t)));
         for (size_t pin = 0; pin < io->pins; pin++) {
-            vio->rtes[pin] = IOAPIC_RTE_MASKED;
+            atomic_init(&vio->rtes[pin], IOAPIC_RTE_MASKED);
         }
         // Every access to the page exits.
         mmio_register(io->base, PAGE_SIZE, &mmio_ops, vio);
@@ -73,8 +74,8 @@ bool vioapic_rte(uint32_t gsi, uint64_t *rte) {
     for (size_t i = 0; i < count; i++) {
         struct ioapic *io = vioapics[i].host;
         if (gsi >= io->gsi_base && gsi - io->gsi_base < io->pins) {
-            *rte = __atomic_load_n(
-                &vioapics[i].rtes[gsi - io->gsi_base], __ATOMIC_ACQUIRE
+            *rte = atomic_load_explicit(
+                &vioapics[i].rtes[gsi - io->gsi_base], memory_order_acquire
             );
             return true;
         }
@@ -102,7 +103,7 @@ static uint32_t index_read(struct vioapic *vio, uint32_t index) {
         return 0;
     }
     uint32_t pin = (index - IOAPIC_REG_REDIR(0)) / 2;
-    uint64_t rte = vio->rtes[pin];
+    uint64_t rte = atomic_load_explicit(&vio->rtes[pin], memory_order_relaxed);
     if ((index & 1) != 0) {
         return (uint32_t)(rte >> 32);
     }
@@ -128,14 +129,14 @@ static void index_write(struct vioapic *vio, uint32_t index, uint32_t value) {
         return;
     }
     uint32_t pin = (index - IOAPIC_REG_REDIR(0)) / 2;
-    uint64_t rte = vio->rtes[pin];
+    uint64_t rte = atomic_load_explicit(&vio->rtes[pin], memory_order_relaxed);
     if ((index & 1) != 0) {
         rte = (rte & (uint64_t)0xffffffff) | (uint64_t)value << 32;
     } else {
         rte = (rte & ~(uint64_t)0xffffffff) | value;
     }
     rte &= RTE_WRITABLE;
-    __atomic_store_n(&vio->rtes[pin], rte, __ATOMIC_RELEASE);
+    atomic_store_explicit(&vio->rtes[pin], rte, memory_order_release);
     irq_gsi_changed(io->gsi_base + pin);
 }
 
@@ -174,28 +175,23 @@ static void reg_write(struct vioapic *vio, uint32_t offset, uint32_t value) {
 }
 
 // Registers are 32 bits wide; narrower accesses take part of one.
-static uint64_t mmio_read(
-    struct vcpu *v, void *ctx, uint64_t offset, size_t size
-) {
+static uint64_t mmio_read(struct vcpu *v, void *ctx, uint64_t offset, size_t size) {
     (void)v;
     struct vioapic *vio = ctx;
     spinlock_acquire(&vio->lock);
     uint64_t value;
     if (size == 8) {
         value = reg_read(vio, (uint32_t)offset)
-            | (uint64_t)reg_read(vio, (uint32_t)offset + 4) << 32;
+              | (uint64_t)reg_read(vio, (uint32_t)offset + 4) << 32;
     } else {
         uint64_t mask = ((uint64_t)1 << (size * 8)) - 1;
-        value = (reg_read(vio, (uint32_t)offset & ~(uint32_t)3)
-            >> ((offset & 3) * 8)) & mask;
+        value = (reg_read(vio, (uint32_t)offset & ~(uint32_t)3) >> ((offset & 3) * 8)) & mask;
     }
     spinlock_release(&vio->lock);
     return value;
 }
 
-static void mmio_write(
-    struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value
-) {
+static void mmio_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value) {
     (void)v;
     struct vioapic *vio = ctx;
     spinlock_acquire(&vio->lock);
@@ -204,10 +200,9 @@ static void mmio_write(
         reg_write(vio, (uint32_t)offset + 4, (uint32_t)(value >> 32));
     } else {
         unsigned int shift = (offset & 3) * 8;
-        uint32_t mask = (uint32_t)(size == 4 ? (uint32_t)0xffffffff
-            : ((uint32_t)1 << (size * 8)) - 1) << shift;
-        uint32_t old = size == 4 ? 0
-            : reg_read(vio, (uint32_t)offset & ~(uint32_t)3);
+        uint32_t bits = size == 4 ? (uint32_t)0xffffffff : ((uint32_t)1 << (size * 8)) - 1;
+        uint32_t mask = bits << shift;
+        uint32_t old = size == 4 ? 0 : reg_read(vio, (uint32_t)offset & ~(uint32_t)3);
         reg_write(
             vio, (uint32_t)offset & ~(uint32_t)3,
             (old & ~mask) | (((uint32_t)value << shift) & mask)

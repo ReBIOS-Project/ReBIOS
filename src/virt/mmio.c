@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -40,30 +41,26 @@
 #define ABSENT_REPORTS 16
 
 struct region {
-    uintptr_t base;
-    size_t size;
+    _Atomic(uintptr_t) base;
+    _Atomic(size_t) size;
     const struct mmio_ops *ops;
     void *ctx;
 };
 
 static struct region regions[MAX_REGIONS];
-static size_t region_count;
+static _Atomic(size_t) region_count;
 static struct spinlock region_lock;
 
-int mmio_register(
-    uintptr_t base, size_t size, const struct mmio_ops *ops, void *ctx
-) {
+int mmio_register(uintptr_t base, size_t size, const struct mmio_ops *ops, void *ctx) {
     spinlock_acquire(&region_lock);
     int region = -1;
-    if (region_count == MAX_REGIONS) {
-        printf(
-            "Too many emulated memory regions for %#llx\n",
-            (unsigned long long)base
-        );
+    size_t count = atomic_load_explicit(&region_count, memory_order_relaxed);
+    if (count == MAX_REGIONS) {
+        printf("Too many emulated memory regions for %#llx\n", (unsigned long long)base);
     } else {
-        region = (int)region_count;
-        regions[region_count] = (struct region){ base, size, ops, ctx };
-        __atomic_store_n(&region_count, region_count + 1, __ATOMIC_RELEASE);
+        region = (int)count;
+        regions[count] = (struct region){ base, size, ops, ctx };
+        atomic_store_explicit(&region_count, count + 1, memory_order_release);
     }
     spinlock_release(&region_lock);
     return region;
@@ -72,9 +69,9 @@ int mmio_register(
 // A lookup meanwhile sees the region at one place or the other, or nowhere.
 void mmio_move(int region, uintptr_t base, size_t size) {
     struct region *r = &regions[region];
-    __atomic_store_n(&r->size, 0, __ATOMIC_RELEASE);
-    __atomic_store_n(&r->base, base, __ATOMIC_RELEASE);
-    __atomic_store_n(&r->size, size, __ATOMIC_RELEASE);
+    atomic_store_explicit(&r->size, 0, memory_order_release);
+    atomic_store_explicit(&r->base, base, memory_order_release);
+    atomic_store_explicit(&r->size, size, memory_order_release);
 }
 
 uint64_t mmio_read_host(uintptr_t hpa, size_t size) {
@@ -115,18 +112,14 @@ void mmio_write_host(uintptr_t hpa, size_t size, uint64_t value) {
     }
 }
 
-static uint64_t absent_read(
-    struct vcpu *v, void *ctx, uint64_t offset, size_t size
-) {
+static uint64_t absent_read(struct vcpu *v, void *ctx, uint64_t offset, size_t size) {
     (void)v;
     (void)ctx;
     (void)offset;
     return size == 8 ? UINT64_MAX : ((uint64_t)1 << (size * 8)) - 1;
 }
 
-static void absent_write(
-    struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value
-) {
+static void absent_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value) {
     (void)v;
     (void)ctx;
     (void)offset;
@@ -141,10 +134,10 @@ static const struct mmio_ops absent_ops = { absent_read, absent_write, true };
 static const struct region absent = { 0, UINT64_MAX, &absent_ops, NULL };
 
 static const struct region *find(uintptr_t gpa) {
-    size_t count = __atomic_load_n(&region_count, __ATOMIC_ACQUIRE);
+    size_t count = atomic_load_explicit(&region_count, memory_order_acquire);
     for (size_t i = 0; i < count; i++) {
-        size_t size = __atomic_load_n(&regions[i].size, __ATOMIC_ACQUIRE);
-        if (gpa - __atomic_load_n(&regions[i].base, __ATOMIC_ACQUIRE) < size) {
+        size_t size = atomic_load_explicit(&regions[i].size, memory_order_acquire);
+        if (gpa - atomic_load_explicit(&regions[i].base, memory_order_acquire) < size) {
             return &regions[i];
         }
     }
@@ -158,11 +151,10 @@ static const struct region *find(uintptr_t gpa) {
 
 // In naturally aligned pieces of up to 8 bytes.
 static void region_access(
-    struct vcpu *v, const struct region *r, uintptr_t gpa, uint8_t *buf,
-    size_t len, bool write
+    struct vcpu *v, const struct region *r, uintptr_t gpa, uint8_t *buf, size_t len, bool write
 ) {
     while (len != 0) {
-        uint64_t offset = gpa - r->base;
+        uint64_t offset = gpa - atomic_load_explicit(&r->base, memory_order_relaxed);
         size_t size = 8;
         while (size > len || (offset & (size - 1)) != 0) {
             size >>= 1;
@@ -184,8 +176,8 @@ static void region_access(
 // Translates every page an access touches before any part happens, so that a
 // fault leaves none of it done.
 static bool translate(
-    struct vcpu *v, uintptr_t linear, size_t size, bool write, uint64_t *gpas,
-    unsigned int *lens, unsigned int *pieces
+    struct vcpu *v, uintptr_t linear, size_t size, bool write, uint64_t *gpas, unsigned int *lens,
+    unsigned int *pieces
 ) {
     *pieces = 0;
     while (size != 0) {
@@ -210,9 +202,7 @@ static bool translate(
     return true;
 }
 
-void mmio_phys_access(
-    struct vcpu *v, uintptr_t gpa, void *buf, size_t len, bool write
-) {
+void mmio_phys_access(struct vcpu *v, uintptr_t gpa, void *buf, size_t len, bool write) {
     const struct region *r = find(gpa);
     if (r != NULL) {
         region_access(v, r, gpa, buf, len, write);
@@ -224,9 +214,7 @@ void mmio_phys_access(
     }
 }
 
-static bool access(
-    struct vcpu *v, uintptr_t linear, void *buf, size_t size, bool write
-) {
+static bool access(struct vcpu *v, uintptr_t linear, void *buf, size_t size, bool write) {
     uint64_t gpas[2];
     unsigned int lens[2];
     unsigned int pieces;
@@ -247,23 +235,17 @@ static bool access(
     return true;
 }
 
-bool mmio_read_linear(
-    struct vcpu *v, uintptr_t linear, void *buf, size_t size
-) {
+bool mmio_read_linear(struct vcpu *v, uintptr_t linear, void *buf, size_t size) {
     return access(v, linear, buf, size, false);
 }
 
-bool mmio_write_linear(
-    struct vcpu *v, uintptr_t linear, const void *buf, size_t size
-) {
+bool mmio_write_linear(struct vcpu *v, uintptr_t linear, const void *buf, size_t size) {
     return access(v, linear, (void *)buf, size, true);
 }
 
 static bool mem_ins(
-    struct vcpu *v, uintptr_t linear, uint16_t port, size_t size,
-    uint32_t *value
+    struct vcpu *v, uintptr_t linear, uint16_t port, size_t size, uint32_t *value
 ) {
-    (void)port;
     uint64_t gpas[2];
     unsigned int lens[2];
     unsigned int pieces;
@@ -279,9 +261,7 @@ static bool mem_ins(
     return true;
 }
 
-static void mem_outs(
-    struct vcpu *v, uint16_t port, size_t size, uint32_t value
-) {
+static void mem_outs(struct vcpu *v, uint16_t port, size_t size, uint32_t value) {
     vcpu_io_access(v, port, size);
     if (io_dispatch(v, port, size, false, &value)) {
         return;
@@ -368,9 +348,8 @@ static struct step_page *step_map(struct vcpu *v, uintptr_t gpa, size_t len) {
     if (len == 0) {
         // Not the operand: all of what the region reads as.
         for (size_t offset = 0; offset < PAGE_SIZE; offset += 8) {
-            uint64_t value = r->ops->read(
-                v, r->ctx, page + offset - r->base, 8
-            );
+            uintptr_t base = atomic_load_explicit(&r->base, memory_order_relaxed);
+            uint64_t value = r->ops->read(v, r->ctx, page + offset - base, 8);
             memcpy(p->scratch + offset, &value, 8);
         }
     } else {
@@ -391,9 +370,7 @@ static struct step_page *step_map(struct vcpu *v, uintptr_t gpa, size_t len) {
 // The guest runs the instruction itself, with every other vCPU out of the
 // guest, as the pages are theirs too; one the decoder does not know, insn
 // NULL, against the whole page.
-static void step_begin(
-    struct vcpu *v, uintptr_t gpa, const struct insn *insn
-) {
+static void step_begin(struct vcpu *v, uintptr_t gpa, const struct insn *insn) {
     if (v->step == NULL) {
         v->step = kmalloc(sizeof(struct mmio_step));
         memset(v->step, 0, sizeof(struct mmio_step));
@@ -401,10 +378,8 @@ static void step_begin(
     struct mmio_step *s = v->step;
     s->count = 0;
     s->second = false;
-    s->known = insn != NULL && insn_mem_operand(v, insn, &s->mem)
-        && s->mem.size <= PAGE_SIZE
-        && ((s->mem.access & INSN_MEM_MASKED) == 0
-            || s->mem.size <= MAX_MASKED);
+    s->known = insn != NULL && insn_mem_operand(v, insn, &s->mem) && s->mem.size <= PAGE_SIZE
+            && ((s->mem.access & INSN_MEM_MASKED) == 0 || s->mem.size <= MAX_MASKED);
     if (s->known && s->mem.size == 0) {
         // It only takes the operand's address, as CLFLUSH: nothing for the
         // device.
@@ -413,9 +388,8 @@ static void step_begin(
     }
     if (!vcpu_can_single_step()) {
         printf(
-            "The instruction at %#llx that reached emulated memory at %#llx "
-            "cannot be emulated, skipped\n",
-            (unsigned long long)vcpu_rip(v), (unsigned long long)gpa
+            "The instruction at %#llx that reached emulated memory at %#llx cannot be emulated, "
+            "skipped\n", (unsigned long long)vcpu_rip(v), (unsigned long long)gpa
         );
         if (insn != NULL) {
             vcpu_advance(v, insn->length);
@@ -429,8 +403,8 @@ static void step_begin(
     unsigned int pieces = 0;
     if (s->known) {
         bool translated = translate(
-            v, s->mem.linear, s->mem.size,
-            (s->mem.access & INSN_MEM_WRITE) != 0, gpas, lens, &pieces
+            v, s->mem.linear, s->mem.size, (s->mem.access & INSN_MEM_WRITE) != 0, gpas, lens,
+            &pieces
         );
         if (!translated) {
             return;
@@ -466,15 +440,17 @@ static void write_runs(
     struct vcpu *v, struct step_page *p, size_t start, size_t end, bool masked
 ) {
     for (size_t at = start; at < end; ) {
-        bool written = masked ? p->first[at - p->start] == p->scratch[at]
-            : p->scratch[at] != p->before[at];
+        bool written = masked
+                     ? p->first[at - p->start] == p->scratch[at]
+                     : p->scratch[at] != p->before[at];
         if (!written) {
             at++;
             continue;
         }
         unsigned int stop = at + 1;
         while (stop < end
-            && (masked ? p->first[stop - p->start] == p->scratch[stop]
+            && (masked
+              ? p->first[stop - p->start] == p->scratch[stop]
               : p->scratch[stop] != p->before[stop])) {
             stop++;
         }
@@ -510,8 +486,7 @@ void mmio_step_done(struct vcpu *v) {
             } else {
                 // All of them, alike or not.
                 region_access(
-                    v, p->r, p->gpa + p->start, p->scratch + p->start,
-                    p->end - p->start, true
+                    v, p->r, p->gpa + p->start, p->scratch + p->start, p->end - p->start, true
                 );
             }
             write_runs(v, p, 0, p->start, false);
@@ -574,9 +549,8 @@ static bool fault(struct vcpu *v, uintptr_t gpa, bool fetch) {
     }
     profile_mmio(gpa);
     if (r == &absent) {
-        static unsigned int reported;
-        if (__atomic_fetch_add(&reported, 1, __ATOMIC_RELAXED)
-          < ABSENT_REPORTS) {
+        static _Atomic(unsigned int) reported;
+        if (atomic_fetch_add_explicit(&reported, 1, memory_order_relaxed) < ABSENT_REPORTS) {
             printf(
                 "The guest reached %#llx, where nothing decodes, from %#llx\n",
                 (unsigned long long)gpa, (unsigned long long)vcpu_rip(v)
@@ -588,9 +562,8 @@ static bool fault(struct vcpu *v, uintptr_t gpa, bool fetch) {
         // that reaches more than a step can map is left out.
         if (step_map(v, gpa, 0) == NULL && find(gpa) != NULL) {
             printf(
-                "The instruction at %#llx reaches more emulated memory than "
-                "can be stepped, skipped\n",
-                (unsigned long long)vcpu_rip(v)
+                "The instruction at %#llx reaches more emulated memory than can be stepped, "
+                "skipped\n", (unsigned long long)vcpu_rip(v)
             );
             step_abort(v);
         }

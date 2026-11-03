@@ -71,9 +71,7 @@ bool vlapic_access_page(uintptr_t hpa);
 void vlapic_accept(struct vcpu *v, uint8_t vector, bool level);
 // An interrupt the hypervisor sends as an I/O APIC entry would, to the vCPUs
 // an 8-bit destination names, or to one of them for lowest priority.
-void vlapic_deliver_external(
-    uint32_t dest, bool logical, uint8_t vector, bool level, bool lowest
-);
+void vlapic_deliver_external(uint32_t dest, bool logical, uint8_t vector, bool level, bool lowest);
 // An interrupt message as an I/O APIC entry or an MSI the guest programmed
 // says it, mode as the interrupt command register has it, to the vCPUs an
 // 8-bit destination names: fixed, or lowest priority, NMI, and INIT.

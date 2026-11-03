@@ -66,18 +66,12 @@
 
 struct disk_info {
     EFI_GUID interface;
-    EFI_STATUS(EFI_API *inquiry)(
-        struct disk_info *self, void *data, uint32_t *size
-    );
-    EFI_STATUS(EFI_API *identify)(
-        struct disk_info *self, void *data, uint32_t *size
-    );
+    EFI_STATUS(EFI_API *inquiry)(struct disk_info *self, void *data, uint32_t *size);
+    EFI_STATUS(EFI_API *identify)(struct disk_info *self, void *data, uint32_t *size);
     EFI_STATUS(EFI_API *sense_data)(
         struct disk_info *self, void *data, uint32_t *size, uint8_t *count
     );
-    EFI_STATUS(EFI_API *which_ide)(
-        struct disk_info *self, uint32_t *channel, uint32_t *device
-    );
+    EFI_STATUS(EFI_API *which_ide)(struct disk_info *self, uint32_t *channel, uint32_t *device);
 };
 
 // ATA8-ACS T13/1699-D revision 4a, 7.16.7.13: IDENTIFY DEVICE words 27-46, the
@@ -156,8 +150,7 @@ static size_t drive_count;
 static void *protocol_get(EFI_HANDLE handle, EFI_GUID *guid) {
     void *interface;
     EFI_STATUS status = efi_bs->OpenProtocol(
-        handle, guid, &interface, efi_image_handle, NULL,
-        EFI_OPEN_PROTOCOL_GET_PROTOCOL
+        handle, guid, &interface, efi_image_handle, NULL, EFI_OPEN_PROTOCOL_GET_PROTOCOL
     );
     if (status != EFI_SUCCESS) {
         return NULL;
@@ -193,12 +186,10 @@ static bool root_bridge(EFI_DEVICE_PATH_PROTOCOL *node) {
         return hid == ACPI_PNP0A03 || hid == ACPI_PNP0A08;
     }
     if (node->SubType == EFI_ACPI_EXTENDED_DP
-     && EfiDevicePathNodeLength(node)
-     >= offsetof(EFI_ACPI_EXTENDED_HID_DEVICE_PATH, HidStr)) {
-        EFI_ACPI_EXTENDED_HID_DEVICE_PATH *acpi
-            = (EFI_ACPI_EXTENDED_HID_DEVICE_PATH *)node;
-        return acpi->HID == ACPI_PNP0A03 || acpi->HID == ACPI_PNP0A08
-            || acpi->CID == ACPI_PNP0A03 || acpi->CID == ACPI_PNP0A08;
+     && EfiDevicePathNodeLength(node) >= offsetof(EFI_ACPI_EXTENDED_HID_DEVICE_PATH, HidStr)) {
+        EFI_ACPI_EXTENDED_HID_DEVICE_PATH *acpi = (EFI_ACPI_EXTENDED_HID_DEVICE_PATH *)node;
+        return acpi->HID == ACPI_PNP0A03 || acpi->HID == ACPI_PNP0A08 || acpi->CID == ACPI_PNP0A03
+            || acpi->CID == ACPI_PNP0A08;
     }
     return false;
 }
@@ -224,9 +215,7 @@ static void append(char *out, size_t size, const char *fmt, ...) {
 
 // Copies the printable characters of a fixed-length string, without the
 // padding around them.
-static void copy_text(
-    char *out, size_t size, const uint8_t *s, size_t length
-) {
+static void copy_text(char *out, size_t size, const uint8_t *s, size_t length) {
     while (length > 0 && (s[length - 1] == ' ' || s[length - 1] == 0)) {
         length--;
     }
@@ -266,9 +255,7 @@ static size_t path_length(EFI_DEVICE_PATH_PROTOCOL *path) {
     return length;
 }
 
-static bool path_starts_with(
-    EFI_DEVICE_PATH_PROTOCOL *path, EFI_DEVICE_PATH_PROTOCOL *prefix
-) {
+static bool path_starts_with(EFI_DEVICE_PATH_PROTOCOL *path, EFI_DEVICE_PATH_PROTOCOL *prefix) {
     size_t length = path_length(prefix);
     return path_length(path) >= length && memcmp(path, prefix, length) == 0;
 }
@@ -276,22 +263,18 @@ static bool path_starts_with(
 static void path_text(EFI_DEVICE_PATH_PROTOCOL *path, char *out, size_t size) {
     static EFI_DEVICE_PATH_TO_TEXT_PROTOCOL *to_text;
     if (to_text == NULL
-     && efi_bs->LocateProtocol(&path_to_text_guid, NULL, (void **)&to_text)
-     != EFI_SUCCESS) {
+     && efi_bs->LocateProtocol(&path_to_text_guid, NULL, (void **)&to_text) != EFI_SUCCESS) {
         to_text = NULL;
     }
     out[0] = 0;
     EFI_CHAR16 *text = to_text != NULL
-        ? to_text->ConvertDevicePathToText(path, false, false) : NULL;
+                     ? to_text->ConvertDevicePathToText(path, false, false)
+                     : NULL;
     if (text == NULL) {
         // Without the firmware's rendering, its nodes' types and subtypes.
-        for (EFI_DEVICE_PATH_PROTOCOL *node = path;
-             !EfiIsDevicePathEndType(node);
+        for (EFI_DEVICE_PATH_PROTOCOL *node = path; !EfiIsDevicePathEndType(node);
              node = EfiNextDevicePathNode(node)) {
-            append(
-                out, size, "%sPath(%u,%u)", out[0] != 0 ? "/" : "", node->Type,
-                node->SubType
-            );
+            append(out, size, "%sPath(%u,%u)", out[0] != 0 ? "/" : "", node->Type, node->SubType);
         }
         return;
     }
@@ -305,8 +288,8 @@ static void path_text(EFI_DEVICE_PATH_PROTOCOL *path, char *out, size_t size) {
 
 // The location of the PCI function at the end of the path's first nodes.
 static bool pci_location(
-    EFI_DEVICE_PATH_PROTOCOL *path, size_t length,
-    EFI_PCI_IO_PROTOCOL **pci_io, EFI_UINTN *segment, EFI_UINTN *bus
+    EFI_DEVICE_PATH_PROTOCOL *path, size_t length, EFI_PCI_IO_PROTOCOL **pci_io,
+    EFI_UINTN *segment, EFI_UINTN *bus
 ) {
     uint8_t buffer[512];
     if (length + EFI_END_DEVICE_PATH_LENGTH > sizeof(buffer)) {
@@ -316,8 +299,7 @@ static bool pci_location(
     EfiSetDevicePathEndNode((EFI_DEVICE_PATH_PROTOCOL *)(buffer + length));
     EFI_DEVICE_PATH_PROTOCOL *remaining = (EFI_DEVICE_PATH_PROTOCOL *)buffer;
     EFI_HANDLE handle;
-    if (efi_bs->LocateDevicePath(&pci_io_guid, &remaining, &handle)
-     != EFI_SUCCESS
+    if (efi_bs->LocateDevicePath(&pci_io_guid, &remaining, &handle) != EFI_SUCCESS
      || !EfiIsDevicePathEndType(remaining)) {
         return false;
     }
@@ -325,14 +307,12 @@ static bool pci_location(
     EFI_UINTN device;
     EFI_UINTN function;
     return *pci_io != NULL
-        && (*pci_io)->GetLocation(*pci_io, segment, bus, &device, &function)
-            == EFI_SUCCESS;
+        && (*pci_io)->GetLocation(*pci_io, segment, bus, &device, &function) == EFI_SUCCESS;
 }
 
 static uint32_t pci_class(EFI_PCI_IO_PROTOCOL *pci_io) {
     uint32_t value = 0;
-    if (pci_io->Pci.Read(pci_io, EfiPciIoWidthUint32, 0x08, 1, &value)
-     != EFI_SUCCESS) {
+    if (pci_io->Pci.Read(pci_io, EfiPciIoWidthUint32, 0x08, 1, &value) != EFI_SUCCESS) {
         return 0;
     }
     return value >> 8;
@@ -341,9 +321,7 @@ static uint32_t pci_class(EFI_PCI_IO_PROTOCOL *pci_io) {
 // The drive's name as SeaBIOS's bootorder file has it (SeaBIOS src/boot.c,
 // build_pci_path() and the bootprio_find_*() functions), or false where
 // SeaBIOS could not boot it.
-static bool seabios_name(
-    EFI_DEVICE_PATH_PROTOCOL *path, char *out, size_t size
-) {
+static bool seabios_name(EFI_DEVICE_PATH_PROTOCOL *path, char *out, size_t size) {
     EFI_PCI_DEVICE_PATH *pci[PCI_DEPTH_MAX];
     size_t depth = 0;
     size_t first_pci_end = 0;
@@ -354,10 +332,8 @@ static bool seabios_name(
             if (!root_bridge(node)) {
                 return false;
             }
-        } else if (node->Type == EFI_HARDWARE_DEVICE_PATH
-                && node->SubType == EFI_HW_PCI_DP
-                && EfiDevicePathNodeLength(node)
-                >= sizeof(EFI_PCI_DEVICE_PATH)) {
+        } else if (node->Type == EFI_HARDWARE_DEVICE_PATH && node->SubType == EFI_HW_PCI_DP
+                && EfiDevicePathNodeLength(node) >= sizeof(EFI_PCI_DEVICE_PATH)) {
             if (depth == PCI_DEPTH_MAX) {
                 return false;
             }
@@ -380,25 +356,21 @@ static bool seabios_name(
     EFI_PCI_IO_PROTOCOL *controller_io;
     EFI_UINTN controller_segment;
     EFI_UINTN controller_bus;
-    bool unlocated
-        = !pci_location(path, first_pci_end, &root_io, &segment, &root_bus)
-        || !pci_location(
-            path, offset, &controller_io, &controller_segment, &controller_bus
-        );
+    bool unlocated = !pci_location(path, first_pci_end, &root_io, &segment, &root_bus)
+                  || !pci_location(
+                         path, offset, &controller_io, &controller_segment, &controller_bus
+                     );
     if (unlocated) {
         return false;
     }
 
-    bool usb = node->Type == EFI_MESSAGING_DEVICE_PATH
-        && node->SubType == EFI_MSG_USB_DP;
+    bool usb = node->Type == EFI_MESSAGING_DEVICE_PATH && node->SubType == EFI_MSG_USB_DP;
     out[0] = 0;
     append(out, size, "/pci@i0cf8");
     // The core has the legacy BIOS find another root bus's devices behind the
     // port it gives the root bus, and puts that port in the name instead.
     if (segment != 0 || root_bus != 0) {
-        append(
-            out, size, ",%x:%x", (unsigned int)segment, (unsigned int)root_bus
-        );
+        append(out, size, ",%x:%x", (unsigned int)segment, (unsigned int)root_bus);
     }
     for (size_t i = 0; i < depth; i++) {
         const char *kind = i + 1 < depth ? "pci-bridge" : usb ? "usb" : "*";
@@ -427,10 +399,7 @@ static bool seabios_name(
         }
         case EFI_MSG_ATAPI_DP: {
             EFI_ATAPI_DEVICE_PATH *ata = (EFI_ATAPI_DEVICE_PATH *)node;
-            append(
-                out, size, "/drive@%x/disk@%x", ata->PrimarySecondary,
-                ata->SlaveMaster
-            );
+            append(out, size, "/drive@%x/disk@%x", ata->PrimarySecondary, ata->SlaveMaster);
             node = EfiNextDevicePathNode(node);
             break;
         }
@@ -449,13 +418,11 @@ static bool seabios_name(
         }
         // The hypervisor's USB stack gives the same names (virt/usb_disk.c).
         case EFI_MSG_USB_DP: {
-            while (node->Type == EFI_MESSAGING_DEVICE_PATH
-                && node->SubType == EFI_MSG_USB_DP) {
-                uint32_t port
-                    = ((EFI_USB_DEVICE_PATH *)node)->ParentPortNumber + 1;
+            while (node->Type == EFI_MESSAGING_DEVICE_PATH && node->SubType == EFI_MSG_USB_DP) {
+                uint32_t port = ((EFI_USB_DEVICE_PATH *)node)->ParentPortNumber + 1;
                 node = EfiNextDevicePathNode(node);
                 bool last = node->Type != EFI_MESSAGING_DEVICE_PATH
-                    || node->SubType != EFI_MSG_USB_DP;
+                         || node->SubType != EFI_MSG_USB_DP;
                 append(out, size, last ? "/storage@%x" : "/hub@%x", port);
             }
             uint32_t lun = 0;
@@ -492,39 +459,24 @@ static void ata_model(struct disk_info *info, char *out, size_t size) {
 static void scsi_model(struct disk_info *info, char *out, size_t size) {
     uint8_t inquiry[96];
     uint32_t length = sizeof(inquiry);
-    if (info->inquiry(info, inquiry, &length) != EFI_SUCCESS
-     || length < INQUIRY_LENGTH) {
+    if (info->inquiry(info, inquiry, &length) != EFI_SUCCESS || length < INQUIRY_LENGTH) {
         return;
     }
     char vendor[INQUIRY_VENDOR_LENGTH + 1];
     char product[INQUIRY_PRODUCT_LENGTH + 1];
-    copy_text(
-        vendor, sizeof(vendor), inquiry + INQUIRY_VENDOR_OFFSET,
-        INQUIRY_VENDOR_LENGTH
-    );
-    copy_text(
-        product, sizeof(product), inquiry + INQUIRY_PRODUCT_OFFSET,
-        INQUIRY_PRODUCT_LENGTH
-    );
+    copy_text(vendor, sizeof(vendor), inquiry + INQUIRY_VENDOR_OFFSET, INQUIRY_VENDOR_LENGTH);
+    copy_text(product, sizeof(product), inquiry + INQUIRY_PRODUCT_OFFSET, INQUIRY_PRODUCT_LENGTH);
     out[0] = 0;
-    append(
-        out, size, "%s%s%s", vendor,
-        vendor[0] != 0 && product[0] != 0 ? " " : "", product
-    );
+    append(out, size, "%s%s%s", vendor, vendor[0] != 0 && product[0] != 0 ? " " : "", product);
 }
 
-static void nvme_model(
-    EFI_DEVICE_PATH_PROTOCOL *path, char *out, size_t size
-) {
+static void nvme_model(EFI_DEVICE_PATH_PROTOCOL *path, char *out, size_t size) {
     EFI_DEVICE_PATH_PROTOCOL *remaining = path;
     EFI_HANDLE handle;
-    if (efi_bs->LocateDevicePath(&nvme_guid, &remaining, &handle)
-     != EFI_SUCCESS) {
+    if (efi_bs->LocateDevicePath(&nvme_guid, &remaining, &handle) != EFI_SUCCESS) {
         return;
     }
-    EFI_NVM_EXPRESS_PASS_THRU_PROTOCOL *nvme = protocol_get(
-        handle, &nvme_guid
-    );
+    EFI_NVM_EXPRESS_PASS_THRU_PROTOCOL *nvme = protocol_get(handle, &nvme_guid);
     uintptr_t buffer = efi_alloc_pages(1, 0);
     if (nvme == NULL || buffer == 0) {
         return;
@@ -544,10 +496,7 @@ static void nvme_model(
     packet.NvmeCmd = &command;
     packet.NvmeCompletion = &completion;
     if (nvme->PassThru(nvme, 0, &packet, NULL) == EFI_SUCCESS) {
-        copy_text(
-            out, size, (uint8_t *)(uintptr_t)buffer + NVME_MODEL_OFFSET,
-            NVME_MODEL_LENGTH
-        );
+        copy_text(out, size, (uint8_t *)(uintptr_t)buffer + NVME_MODEL_OFFSET, NVME_MODEL_LENGTH);
     }
     efi_bs->FreePages(buffer, 1);
 }
@@ -575,8 +524,7 @@ static void drive_model(
 // with code, not GPT's protective one, or an El Torito boot record.
 static bool legacy_bootable(EFI_BLOCK_IO_PROTOCOL *block_io, bool optical) {
     EFI_BLOCK_IO_MEDIA *media = block_io->Media;
-    if (!media->MediaPresent || media->BlockSize < 512
-     || media->BlockSize > 4096) {
+    if (!media->MediaPresent || media->BlockSize < 512 || media->BlockSize > 4096) {
         return false;
     }
     uintptr_t buffer = efi_alloc_pages(1, 0);
@@ -587,14 +535,11 @@ static bool legacy_bootable(EFI_BLOCK_IO_PROTOCOL *block_io, bool optical) {
     bool bootable = false;
     if (optical) {
         EFI_STATUS status = block_io->ReadBlocks(
-            block_io, media->MediaId, EL_TORITO_SECTOR, media->BlockSize,
-            sector
+            block_io, media->MediaId, EL_TORITO_SECTOR, media->BlockSize, sector
         );
         if (status == EFI_SUCCESS) {
-            bootable = sector[0] == 0 && memcmp(sector + 1, "CD001", 5) == 0
-                && sector[6] == 1
-                && memcmp(sector + 7, EL_TORITO_ID, sizeof(EL_TORITO_ID) - 1)
-                    == 0;
+            bootable = sector[0] == 0 && memcmp(sector + 1, "CD001", 5) == 0 && sector[6] == 1
+                    && memcmp(sector + 7, EL_TORITO_ID, sizeof(EL_TORITO_ID) - 1) == 0;
         }
     } else {
         EFI_STATUS status = block_io->ReadBlocks(
@@ -602,10 +547,10 @@ static bool legacy_bootable(EFI_BLOCK_IO_PROTOCOL *block_io, bool optical) {
         );
         if (status == EFI_SUCCESS) {
             bootable = sector[MBR_SIGNATURE_OFFSET] == 0x55
-                && sector[MBR_SIGNATURE_OFFSET + 1] == 0xaa;
+                    && sector[MBR_SIGNATURE_OFFSET + 1] == 0xaa;
             for (size_t i = 0; i < 4; i++) {
-                if (sector[MBR_PARTITIONS + i * MBR_PARTITION_SIZE
-                         + MBR_TYPE_OFFSET] == MBR_TYPE_GPT_PROTECTIVE) {
+                if (sector[MBR_PARTITIONS + i * MBR_PARTITION_SIZE + MBR_TYPE_OFFSET]
+                 == MBR_TYPE_GPT_PROTECTIVE) {
                     bootable = false;
                 }
             }
@@ -623,8 +568,7 @@ static bool legacy_bootable(EFI_BLOCK_IO_PROTOCOL *block_io, bool optical) {
 static bool path_has_usb(EFI_DEVICE_PATH_PROTOCOL *path) {
     for (EFI_DEVICE_PATH_PROTOCOL *node = path; !EfiIsDevicePathEndType(node);
          node = EfiNextDevicePathNode(node)) {
-        if (node->Type == EFI_MESSAGING_DEVICE_PATH
-         && node->SubType == EFI_MSG_USB_DP) {
+        if (node->Type == EFI_MESSAGING_DEVICE_PATH && node->SubType == EFI_MSG_USB_DP) {
             return true;
         }
     }
@@ -632,24 +576,19 @@ static bool path_has_usb(EFI_DEVICE_PATH_PROTOCOL *path) {
 }
 
 static EFI_DEVICE_PATH_PROTOCOL *own_path(void) {
-    EFI_LOADED_IMAGE_PROTOCOL *image = protocol_get(
-        efi_image_handle, &loaded_image_guid
-    );
+    EFI_LOADED_IMAGE_PROTOCOL *image = protocol_get(efi_image_handle, &loaded_image_guid);
     if (image == NULL || image->DeviceHandle == NULL) {
         return NULL;
     }
-    EFI_DEVICE_PATH_PROTOCOL *path = protocol_get(
-        image->DeviceHandle, &device_path_guid
-    );
+    EFI_DEVICE_PATH_PROTOCOL *path = protocol_get(image->DeviceHandle, &device_path_guid);
     return path != NULL && path_valid(path) ? path : NULL;
 }
 
 static void drive_add(EFI_HANDLE handle, EFI_DEVICE_PATH_PROTOCOL *own) {
     EFI_BLOCK_IO_PROTOCOL *block_io = protocol_get(handle, &block_io_guid);
     EFI_DEVICE_PATH_PROTOCOL *path = protocol_get(handle, &device_path_guid);
-    if (block_io == NULL || block_io->Media == NULL
-     || block_io->Media->LogicalPartition || path == NULL
-     || !path_valid(path)) {
+    if (block_io == NULL || block_io->Media == NULL || block_io->Media->LogicalPartition
+     || path == NULL || !path_valid(path)) {
         return;
     }
     struct drive d;
@@ -671,10 +610,10 @@ static void drive_add(EFI_HANDLE handle, EFI_DEVICE_PATH_PROTOCOL *own) {
     }
     // CD and DVD drives have 2048-byte blocks, as nothing else here does.
     d.optical = block_io->Media->BlockSize == 2048;
-    d.external = path_has_usb(path)
-        || (!d.optical && block_io->Media->RemovableMedia);
+    d.external = path_has_usb(path) || (!d.optical && block_io->Media->RemovableMedia);
     d.size = block_io->Media->MediaPresent
-        ? (block_io->Media->LastBlock + 1) * block_io->Media->BlockSize : 0;
+           ? (block_io->Media->LastBlock + 1) * block_io->Media->BlockSize
+           : 0;
     d.self = own != NULL && path_starts_with(own, path);
     drive_model(handle, path, d.model, sizeof(d.model));
     d.bootable = legacy_bootable(block_io, d.optical);
@@ -739,7 +678,8 @@ static void rank_drives(void) {
     for (size_t i = 0; i < drive_count; i++) {
         struct drive *d = &drives[i];
         if (named && !chosen
-         && (wanted_is_path(wanted) ? path_matches(wanted, d->text)
+         && (wanted_is_path(wanted)
+           ? path_matches(wanted, d->text)
            : model_matches(wanted, d->model))) {
             d->rank = RANK_CHOSEN;
             chosen = true;
@@ -756,10 +696,7 @@ static void rank_drives(void) {
         }
     }
     if (named && !chosen) {
-        printf(
-            "boot_drive names no drive the firmware knows, ordering as with "
-            "self\n"
-        );
+        printf("boot_drive names no drive the firmware knows, ordering as with self\n");
         for (size_t i = 0; i < drive_count; i++) {
             if (drives[i].self && drives[i].bootable) {
                 drives[i].rank = RANK_SELF;
@@ -786,15 +723,13 @@ static bool drive_before(const struct drive *a, const struct drive *b) {
 static bool driver_managed(EFI_HANDLE handle, EFI_GUID *protocol) {
     EFI_OPEN_PROTOCOL_INFORMATION_ENTRY *entries;
     size_t count;
-    if (efi_bs->OpenProtocolInformation(handle, protocol, &entries, &count)
-     != EFI_SUCCESS) {
+    if (efi_bs->OpenProtocolInformation(handle, protocol, &entries, &count) != EFI_SUCCESS) {
         return false;
     }
     bool managed = false;
+    EFI_UINT32 by_driver = EFI_OPEN_PROTOCOL_BY_DRIVER | EFI_OPEN_PROTOCOL_BY_CHILD_CONTROLLER;
     for (size_t i = 0; i < count; i++) {
-        if ((entries[i].Attributes
-           & (EFI_OPEN_PROTOCOL_BY_DRIVER
-            | EFI_OPEN_PROTOCOL_BY_CHILD_CONTROLLER)) != 0) {
+        if ((entries[i].Attributes & by_driver) != 0) {
             managed = true;
         }
     }
@@ -814,8 +749,7 @@ void drives_connect(void) {
             continue;
         }
         uint32_t class = pci_class(pci_io);
-        if ((class >> 16 == PCI_BASE_CLASS_STORAGE
-          || class >> 8 == PCI_CLASS_SERIAL_USB)
+        if ((class >> 16 == PCI_BASE_CLASS_STORAGE || class >> 8 == PCI_CLASS_SERIAL_USB)
          && !driver_managed(handles[i], &pci_io_guid)) {
             efi_bs->ConnectController(handles[i], NULL, NULL, true);
         }
@@ -856,19 +790,15 @@ void drives_collect(void) {
             "Boot drive %zu: %s, %s, %s%s%s, %llu MiB, %s\n", i + 1, d->text,
             d->model[0] != 0 ? d->model : "no model name",
             d->optical ? "optical" : d->external ? "external" : "internal",
-            d->bootable ? ", legacy bootable" : "",
-            d->self ? ", ReBIOS's" : "", (unsigned long long)(d->size >> 20),
-            d->name
+            d->bootable ? ", legacy bootable" : "", d->self ? ", ReBIOS's" : "",
+            (unsigned long long)(d->size >> 20), d->name
         );
         size_t used = text_length(order);
         if (used + text_length(d->name) + 2 > HANDOFF_MAX_BOOT_ORDER) {
             printf("The boot order has no room for the rest of the drives\n");
             break;
         }
-        append(
-            order, HANDOFF_MAX_BOOT_ORDER, "%s%s", used != 0 ? "\n" : "",
-            d->name
-        );
+        append(order, HANDOFF_MAX_BOOT_ORDER, "%s%s", used != 0 ? "\n" : "", d->name);
     }
     if (drive_count == 0) {
         printf("No drives for the legacy BIOS to boot from\n");

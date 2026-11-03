@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -42,7 +43,7 @@ struct ecam_window {
 };
 
 static struct ecam_window *windows;
-static size_t window_count;
+static _Atomic(size_t) window_count;
 static bool mcfg_done;
 static struct spinlock legacy_lock;
 
@@ -50,8 +51,7 @@ static bool access_valid(struct pci_addr addr, uint32_t offset, size_t size) {
     if (size != 1 && size != 2 && size != 4) {
         return false;
     }
-    return offset < 4096 && offset % size == 0 && addr.device < 32
-        && addr.function < 8;
+    return offset < 4096 && offset % size == 0 && addr.device < 32 && addr.function < 8;
 }
 
 static uint32_t all_ones(size_t size) {
@@ -69,29 +69,25 @@ static uint32_t all_ones(size_t size) {
 }
 
 uintptr_t pci_cfg_ecam_base(uint16_t segment, uint8_t bus) {
-    size_t count = __atomic_load_n(&window_count, __ATOMIC_ACQUIRE);
+    size_t count = atomic_load_explicit(&window_count, memory_order_acquire);
     for (size_t i = 0; i < count; i++) {
         struct ecam_window *w = &windows[i];
-        if (w->segment == segment && bus >= w->start_bus
-         && bus <= w->end_bus) {
+        if (w->segment == segment && bus >= w->start_bus && bus <= w->end_bus) {
             return w->base;
         }
     }
     return 0;
 }
 
-static uintptr_t ecam_address(
-    uintptr_t base, struct pci_addr addr, uint32_t offset
-) {
+static uintptr_t ecam_address(uintptr_t base, struct pci_addr addr, uint32_t offset) {
     return (uintptr_t)(base
-        + (((uint64_t)addr.bus << 20) | ((uint64_t)addr.device << 15)
-            | ((uint64_t)addr.function << 12) | offset));
+                     + (((uint64_t)addr.bus << 20) | ((uint64_t)addr.device << 15)
+                      | ((uint64_t)addr.function << 12) | offset));
 }
 
 static uint32_t legacy_address(struct pci_addr addr, uint32_t offset) {
-    return CONFIG_ENABLE | ((uint32_t)addr.bus << 16)
-        | ((uint32_t)addr.device << 11) | ((uint32_t)addr.function << 8)
-        | (offset & 0xfc);
+    return CONFIG_ENABLE | ((uint32_t)addr.bus << 16) | ((uint32_t)addr.device << 11)
+         | ((uint32_t)addr.function << 8) | (offset & 0xfc);
 }
 
 static bool legacy_reachable(struct pci_addr addr, uint32_t offset) {
@@ -149,9 +145,7 @@ uint32_t pci_cfg_read(struct pci_addr addr, uint32_t offset, size_t size) {
     return value;
 }
 
-void pci_cfg_write(
-    struct pci_addr addr, uint32_t offset, size_t size, uint32_t value
-) {
+void pci_cfg_write(struct pci_addr addr, uint32_t offset, size_t size, uint32_t value) {
     if (!access_valid(addr, offset, size)) {
         return;
     }
@@ -207,17 +201,13 @@ void pci_cfg_init(void) {
         return;
     }
     if (!acpi_tables_ready()) {
-        printf(
-            "PCI configuration space through ports only, without ACPI tables\n"
-        );
+        printf("PCI configuration space through ports only, without ACPI tables\n");
         return;
     }
     mcfg_done = true;
 
     struct uacpi_table table;
-    uacpi_status status = uacpi_table_find_by_signature(
-        ACPI_MCFG_SIGNATURE, &table
-    );
+    uacpi_status status = uacpi_table_find_by_signature(ACPI_MCFG_SIGNATURE, &table);
     if (status != UACPI_STATUS_OK) {
         printf(
             "PCI configuration space through ports only, no MCFG table: %s\n",
@@ -229,8 +219,7 @@ void pci_cfg_init(void) {
     size_t length = table.hdr->length;
     size_t count = 0;
     if (length > sizeof(struct acpi_mcfg)) {
-        count = (length - sizeof(struct acpi_mcfg))
-            / sizeof(struct acpi_mcfg_allocation);
+        count = (length - sizeof(struct acpi_mcfg)) / sizeof(struct acpi_mcfg_allocation);
     }
 
     struct ecam_window *list = kmalloc(count * sizeof(struct ecam_window));
@@ -241,18 +230,17 @@ void pci_cfg_init(void) {
         memcpy(
             &entry,
             (const uint8_t *)table.ptr + sizeof(struct acpi_mcfg)
-                + i * sizeof(struct acpi_mcfg_allocation),
-            sizeof(struct acpi_mcfg_allocation)
+          + i * sizeof(struct acpi_mcfg_allocation), sizeof(struct acpi_mcfg_allocation)
         );
 
         // The base is that of bus 0, whatever the first bus.
         size_t size = ((uint64_t)entry.end_bus + 1) << 20;
-        bool usable = entry.address != 0 && entry.start_bus <= entry.end_bus
-            && size <= top && entry.address <= top - size;
+        bool usable = entry.address != 0 && entry.start_bus <= entry.end_bus && size <= top
+                   && entry.address <= top - size;
         printf(
-            "PCI segment %u buses %02x-%02x: configuration space at %#llx%s\n",
-            entry.segment, entry.start_bus, entry.end_bus,
-            (unsigned long long)entry.address, usable ? "" : ", not usable"
+            "PCI segment %u buses %02x-%02x: configuration space at %#llx%s\n", entry.segment,
+            entry.start_bus, entry.end_bus, (unsigned long long)entry.address,
+            usable ? "" : ", not usable"
         );
         if (usable) {
             list[used].base = entry.address;
@@ -269,5 +257,5 @@ void pci_cfg_init(void) {
         return;
     }
     windows = list;
-    __atomic_store_n(&window_count, used, __ATOMIC_RELEASE);
+    atomic_store_explicit(&window_count, used, memory_order_release);
 }

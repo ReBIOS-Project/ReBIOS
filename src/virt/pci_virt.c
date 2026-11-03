@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -37,6 +38,7 @@
 #include <virt/mmio.h>
 #include <virt/pci_plan.h>
 #include <virt/pci_port.h>
+#include <virt/vcpu.h>
 #include <virt/vlapic.h>
 
 #define CONFIG_ADDRESS 0xcf8
@@ -147,10 +149,10 @@ struct vmsi {
     // MSI Enable and Multiple Message Enable as the guest wrote them.
     uint16_t control;
     uint32_t address;
-    uint32_t upper;
+    _Atomic(uint32_t) upper;
     uint32_t data;
     // The guest's address and data for the processor that takes one.
-    uint64_t message;
+    _Atomic(uint64_t) message;
     struct irq_slot slot;
 };
 
@@ -158,10 +160,10 @@ struct vmsi {
 // hypervisor's message are live at the function, unmasked.
 struct vmsix_entry {
     uint32_t address;
-    uint32_t upper;
+    _Atomic(uint32_t) upper;
     uint32_t data;
     uint32_t control;
-    uint64_t message;
+    _Atomic(uint64_t) message;
     bool armed;
     struct irq_slot slot;
 };
@@ -229,8 +231,7 @@ struct shared_page {
 static struct shared_page shared_pages[SHARED_PAGES];
 
 static uint16_t requester(const struct pci_function *f) {
-    return (uint16_t)(f->addr.bus << 8 | f->addr.device << 3
-        | f->addr.function);
+    return (uint16_t)(f->addr.bus << 8 | f->addr.device << 3 | f->addr.function);
 }
 
 static uint32_t all_ones(size_t size) {
@@ -239,8 +240,7 @@ static uint32_t all_ones(size_t size) {
 
 // In the topology's order.
 static uint32_t addr_key(struct pci_addr a) {
-    return (uint32_t)a.segment << 16 | (uint32_t)a.bus << 8
-        | (uint32_t)a.device << 3 | a.function;
+    return (uint32_t)a.segment << 16 | (uint32_t)a.bus << 8 | (uint32_t)a.device << 3 | a.function;
 }
 
 static struct vfunction *vfunction_find(struct pci_addr a) {
@@ -279,8 +279,8 @@ static uint64_t bar_mask(const struct vbar *b) {
 static bool mappable(const struct vbar *b, uint64_t guest) {
     uintptr_t base = page_down(guest);
     uintptr_t end = page_up(guest + b->size);
-    return ((guest ^ b->host) & (PAGE_SIZE - 1)) == 0 && end > base
-        && end <= virt.address_limit && layout_mmio_free(base, end - base);
+    return ((guest ^ b->host) & (PAGE_SIZE - 1)) == 0 && end > base && end <= virt.address_limit
+        && layout_mmio_free(base, end - base);
 }
 
 static void map_pages(uintptr_t guest, uintptr_t host, uintptr_t end) {
@@ -317,15 +317,13 @@ static void traps_move(const struct vbar *b, uint64_t at) {
     for (size_t i = 0; i < b->trap_count; i++) {
         uintptr_t start = trap_start(b, at, i);
         mmio_move(
-            b->traps[i].region, at != 0 ? start : 0,
-            at != 0 ? trap_end(b, at, i) - start : 0
+            b->traps[i].region, at != 0 ? start : 0, at != 0 ? trap_end(b, at, i) - start : 0
         );
     }
 }
 
 static bool overlaps(const struct vbar *b, uintptr_t base, uintptr_t end) {
-    return b->mapped != 0 && page_down(b->mapped) < end
-        && page_up(b->mapped + b->size) > base;
+    return b->mapped != 0 && page_down(b->mapped) < end && page_up(b->mapped + b->size) > base;
 }
 
 static bool sub_page(const struct vbar *b) {
@@ -369,8 +367,8 @@ static void bar_log(const struct vbar *b, const char *what) {
             snprintf(name, sizeof(name), "BAR%zu", k);
         }
         printf(
-            "PCI %04x:%02x:%02x.%x %s at %#llx: %s\n", a.segment, a.bus,
-            a.device, a.function, name, (unsigned long long)b->guest, what
+            "PCI %04x:%02x:%02x.%x %s at %#llx: %s\n", a.segment, a.bus, a.device, a.function,
+            name, (unsigned long long)b->guest, what
         );
         return;
     }
@@ -382,8 +380,7 @@ static void sub_page_update(struct vbar *b, bool is_rom) {
     uint64_t want = 0;
     if (b->guest != 0 && (!is_rom || b->enabled) && !sizing(b)) {
         uintptr_t page = page_down(b->guest);
-        if (page + PAGE_SIZE <= virt.address_limit
-         && layout_mmio_free(page, PAGE_SIZE)) {
+        if (page + PAGE_SIZE <= virt.address_limit && layout_mmio_free(page, PAGE_SIZE)) {
             want = b->guest;
         } else {
             bar_log(b, "in no place, as the guest has something else there");
@@ -448,12 +445,10 @@ static void bar_update(struct vbar *b, bool is_rom) {
 // the upper half of a 64-bit one.
 static struct vbar *bar_at(struct vfunction *vf, uint32_t reg, bool *upper) {
     unsigned int bars = vf->f->header_type == HEADER_BRIDGE ? 2 : BAR_COUNT;
-    uint32_t rom = vf->f->header_type == HEADER_BRIDGE ? REG_BRIDGE_ROM
-        : REG_ROM;
+    uint32_t rom = vf->f->header_type == HEADER_BRIDGE ? REG_BRIDGE_ROM : REG_ROM;
     *upper = false;
     if (reg == rom) {
-        return vf->bars[ROM_INDEX].kind == PCI_BAR_MEM32 ? &vf->bars[ROM_INDEX]
-            : NULL;
+        return vf->bars[ROM_INDEX].kind == PCI_BAR_MEM32 ? &vf->bars[ROM_INDEX] : NULL;
     }
     if (reg < REG_BAR0 || reg >= REG_BAR0 + 4 * bars) {
         return NULL;
@@ -477,7 +472,7 @@ static bool is_bridge(const struct vfunction *vf) {
 static bool window_reg(const struct vfunction *vf, uint32_t reg) {
     return is_bridge(vf)
         && (reg == REG_MEMORY || reg == REG_PREF || reg == REG_PREF_BASE_UPPER
-            || reg == REG_PREF_LIMIT_UPPER);
+         || reg == REG_PREF_LIMIT_UPPER);
 }
 
 static uint32_t window_word(uintptr_t address) {
@@ -491,27 +486,25 @@ static uint32_t kept_read(struct vfunction *vf, uint32_t reg) {
     if (b != NULL) {
         if (b == &vf->bars[ROM_INDEX]) {
             return ((uint32_t)b->guest & ROM_ADDRESS & (uint32_t)bar_mask(b))
-                | (b->enabled ? ROM_ENABLE : 0);
+                 | (b->enabled ? ROM_ENABLE : 0);
         }
         if (upper) {
             return (uint32_t)((b->guest & bar_mask(b)) >> 32);
         }
-        return ((uint32_t)b->guest & BAR_ADDRESS & (uint32_t)bar_mask(b))
-            | b->type_bits;
+        return ((uint32_t)b->guest & BAR_ADDRESS & (uint32_t)bar_mask(b)) | b->type_bits;
     }
     switch (reg) {
         case REG_BUS_NUMBERS: {
             return (vf->bus_numbers & BUS_NUMBERS_VIRTUAL)
-                | (pci_cfg_read(vf->f->addr, reg, 4) & ~BUS_NUMBERS_VIRTUAL);
+                 | (pci_cfg_read(vf->f->addr, reg, 4) & ~BUS_NUMBERS_VIRTUAL);
         }
         case REG_MEMORY: {
-            return window_word(vf->mem_base)
-                | window_word(vf->mem_limit) << 16;
+            return window_word(vf->mem_base) | window_word(vf->mem_limit) << 16;
         }
         case REG_PREF: {
             uint32_t width = vf->pref_64 ? WINDOW_PREF_64 : 0;
             return (window_word(vf->pref_base) | width)
-                | (window_word(vf->pref_limit) | width) << 16;
+                 | (window_word(vf->pref_limit) | width) << 16;
         }
         case REG_PREF_BASE_UPPER: {
             return vf->pref_64 ? (uint32_t)(vf->pref_base >> 32) : 0;
@@ -532,17 +525,14 @@ static void kept_write(struct vfunction *vf, uint32_t reg, uint32_t value) {
             // The function decodes its ROM where the host has it.
             pci_cfg_write(
                 vf->f->addr, reg, 4,
-                ((uint32_t)b->host & ROM_ADDRESS)
-                    | (b->enabled ? ROM_ENABLE : 0)
+                ((uint32_t)b->host & ROM_ADDRESS) | (b->enabled ? ROM_ENABLE : 0)
             );
             bar_update(b, true);
         } else if (upper) {
-            b->guest = (b->guest & (uint64_t)0xffffffff)
-                | ((uint64_t)value << 32 & bar_mask(b));
+            b->guest = (b->guest & (uint64_t)0xffffffff) | ((uint64_t)value << 32 & bar_mask(b));
             bar_update(b, false);
         } else {
-            b->guest = (b->guest & ~(uint64_t)0xffffffff)
-                | (value & BAR_ADDRESS & bar_mask(b));
+            b->guest = (b->guest & ~(uint64_t)0xffffffff) | (value & BAR_ADDRESS & bar_mask(b));
             bar_update(b, false);
         }
         return;
@@ -554,29 +544,25 @@ static void kept_write(struct vfunction *vf, uint32_t reg, uint32_t value) {
         }
         case REG_MEMORY: {
             vf->mem_base = (uint64_t)(value & WINDOW_ADDRESS) << 16;
-            vf->mem_limit = (uint64_t)(value >> 16 & WINDOW_ADDRESS) << 16
-                | (WINDOW_GRANULE - 1);
+            vf->mem_limit = (uint64_t)(value >> 16 & WINDOW_ADDRESS) << 16 | (WINDOW_GRANULE - 1);
             break;
         }
         case REG_PREF: {
             vf->pref_base = (vf->pref_base & ~(uint64_t)0xffffffff)
-                | (uint64_t)(value & WINDOW_ADDRESS) << 16;
+                          | (uint64_t)(value & WINDOW_ADDRESS) << 16;
             vf->pref_limit = (vf->pref_limit & ~(uint64_t)0xffffffff)
-                | (uint64_t)(value >> 16 & WINDOW_ADDRESS) << 16
-                | (WINDOW_GRANULE - 1);
+                           | (uint64_t)(value >> 16 & WINDOW_ADDRESS) << 16 | (WINDOW_GRANULE - 1);
             break;
         }
         case REG_PREF_BASE_UPPER: {
             if (vf->pref_64) {
-                vf->pref_base = (vf->pref_base & (uint64_t)0xffffffff)
-                    | (uint64_t)value << 32;
+                vf->pref_base = (vf->pref_base & (uint64_t)0xffffffff) | (uint64_t)value << 32;
             }
             break;
         }
         default: {
             if (vf->pref_64) {
-                vf->pref_limit = (vf->pref_limit & (uint64_t)0xffffffff)
-                    | (uint64_t)value << 32;
+                vf->pref_limit = (vf->pref_limit & (uint64_t)0xffffffff) | (uint64_t)value << 32;
             }
             break;
         }
@@ -598,7 +584,7 @@ static bool msi_reg(const struct vfunction *vf, uint32_t reg) {
     uint32_t cap = vf->f->msi_cap;
     return cap != 0
         && (reg == cap || reg == cap + MSI_ADDRESS || reg == msi_data_reg(vf)
-            || (vf->msi.wide && reg == cap + MSI_UPPER));
+         || (vf->msi.wide && reg == cap + MSI_UPPER));
 }
 
 static uint32_t msi_read(struct vfunction *vf, uint32_t reg) {
@@ -606,12 +592,14 @@ static uint32_t msi_read(struct vfunction *vf, uint32_t reg) {
     if (reg == cap) {
         uint32_t hardware = pci_cfg_read(vf->f->addr, reg, 4);
         return (hardware & ~((uint32_t)(MSI_ENABLE | MSI_MME_MASK) << 16))
-            | (uint32_t)vf->msi.control << 16;
+             | (uint32_t)vf->msi.control << 16;
     }
     if (reg == cap + MSI_ADDRESS) {
         return vf->msi.address;
     }
-    return reg == msi_data_reg(vf) ? vf->msi.data : vf->msi.upper;
+    return reg == msi_data_reg(vf)
+         ? vf->msi.data
+         : atomic_load_explicit(&vf->msi.upper, memory_order_relaxed);
 }
 
 // What a guest's message does where it goes: an interrupt, or a write of its
@@ -626,14 +614,12 @@ static void deliver_message(uint32_t upper, uint32_t address, uint32_t data) {
 
 // A function sending a multiple message's index puts it in the data's low bits
 // (PCI Local Bus Specification 3.0, 6.8.3.4).
-static void msi_taken(void *ctx, unsigned int index) {
+static void msi_taken(void *ctx, size_t index) {
     struct vfunction *vf = ctx;
-    uint64_t message = __atomic_load_n(&vf->msi.message, __ATOMIC_ACQUIRE);
-    uint32_t data = ((uint32_t)message & ~(vf->msi.slot.count - (uint32_t)1))
-        | index;
+    uint64_t message = atomic_load_explicit(&vf->msi.message, memory_order_acquire);
+    uint32_t data = ((uint32_t)message & ~(vf->msi.slot.count - (uint32_t)1)) | (uint32_t)index;
     deliver_message(
-        __atomic_load_n(&vf->msi.upper, __ATOMIC_RELAXED),
-        (uint32_t)(message >> 32), data
+        atomic_load_explicit(&vf->msi.upper, memory_order_relaxed), (uint32_t)(message >> 32), data
     );
 }
 
@@ -644,9 +630,8 @@ static void msi_update(struct vfunction *vf) {
     struct vmsi *m = &vf->msi;
     struct pci_addr a = vf->f->addr;
     uint32_t cap = vf->f->msi_cap;
-    __atomic_store_n(
-        &m->message, (uint64_t)m->address << 32 | (m->data & 0xffff),
-        __ATOMIC_RELEASE
+    atomic_store_explicit(
+        &m->message, (uint64_t)m->address << 32 | (m->data & 0xffff), memory_order_release
     );
     uint16_t hardware = (uint16_t)pci_cfg_read(a, cap + MSI_CONTROL, 2);
     unsigned int capable = (hardware >> MSI_MMC_SHIFT) & 7;
@@ -655,7 +640,7 @@ static void msi_update(struct vfunction *vf) {
         enable = capable;
     }
     uint16_t control = (uint16_t)((hardware & ~(MSI_ENABLE | MSI_MME_MASK))
-        | enable << MSI_MME_SHIFT);
+                                | enable << MSI_MME_SHIFT);
     size_t count = (uint32_t)1 << enable;
     if ((m->control & MSI_ENABLE) == 0) {
         pci_cfg_write(a, cap + MSI_CONTROL, 2, control);
@@ -666,8 +651,8 @@ static void msi_update(struct vfunction *vf) {
         pci_cfg_write(a, cap + MSI_CONTROL, 2, control);
         if (!irq_slot_place(&m->slot, vlapic_msi_target(m->address), count)) {
             printf(
-                "PCI %04x:%02x:%02x.%x: no room for %zu MSI vectors\n",
-                a.segment, a.bus, a.device, a.function, count
+                "PCI %04x:%02x:%02x.%x: no room for %zu MSI vectors\n", a.segment, a.bus, a.device,
+                a.function, count
             );
             return;
         }
@@ -686,25 +671,24 @@ static void msi_update(struct vfunction *vf) {
 static void msi_write(struct vfunction *vf, uint32_t reg, uint32_t value) {
     uint32_t cap = vf->f->msi_cap;
     if (reg == cap) {
-        vf->msi.control = (uint16_t)(value >> 16)
-            & (MSI_ENABLE | MSI_MME_MASK);
+        vf->msi.control = (uint16_t)(value >> 16) & (MSI_ENABLE | MSI_MME_MASK);
     } else if (reg == cap + MSI_ADDRESS) {
         vf->msi.address = value & ~(uint32_t)3;
     } else if (reg == msi_data_reg(vf)) {
         vf->msi.data = value & 0xffff;
     } else {
-        __atomic_store_n(&vf->msi.upper, value, __ATOMIC_RELAXED);
+        atomic_store_explicit(&vf->msi.upper, value, memory_order_relaxed);
     }
     msi_update(vf);
 }
 
-static void msix_taken(void *ctx, unsigned int index) {
+static void msix_taken(void *ctx, size_t index) {
     (void)index;
     struct vmsix_entry *e = ctx;
-    uint64_t message = __atomic_load_n(&e->message, __ATOMIC_ACQUIRE);
+    uint64_t message = atomic_load_explicit(&e->message, memory_order_acquire);
     deliver_message(
-        __atomic_load_n(&e->upper, __ATOMIC_RELAXED),
-        (uint32_t)(message >> 32), (uint32_t)message
+        atomic_load_explicit(&e->upper, memory_order_relaxed), (uint32_t)(message >> 32),
+        (uint32_t)message
     );
 }
 
@@ -714,15 +698,11 @@ static void msix_sync(struct vfunction *vf, size_t i) {
     struct vmsix *x = &vf->msix;
     struct vmsix_entry *e = &x->entries[i];
     uint64_t at = x->table + (uint64_t)i * MSIX_ENTRY_SIZE;
-    __atomic_store_n(
-        &e->message, (uint64_t)e->address << 32 | e->data, __ATOMIC_RELEASE
-    );
+    atomic_store_explicit(&e->message, (uint64_t)e->address << 32 | e->data, memory_order_release);
     uint32_t control = (uint32_t)mmio_read_host(at + MSIX_ENTRY_CONTROL, 4);
     if (!x->enabled || (e->control & MSIX_ENTRY_MASKED) != 0) {
         if (e->armed) {
-            mmio_write_host(
-                at + MSIX_ENTRY_CONTROL, 4, control | MSIX_ENTRY_MASKED
-            );
+            mmio_write_host(at + MSIX_ENTRY_CONTROL, 4, control | MSIX_ENTRY_MASKED);
             e->armed = false;
         }
         irq_slot_free(&e->slot);
@@ -732,8 +712,8 @@ static void msix_sync(struct vfunction *vf, size_t i) {
         struct pci_addr a = vf->f->addr;
         if (!irq_slot_place(&e->slot, vlapic_msi_target(e->address), 1)) {
             printf(
-                "PCI %04x:%02x:%02x.%x: no room for MSI-X entry %zu\n",
-                a.segment, a.bus, a.device, a.function, i
+                "PCI %04x:%02x:%02x.%x: no room for MSI-X entry %zu\n", a.segment, a.bus, a.device,
+                a.function, i
             );
             return;
         }
@@ -745,17 +725,13 @@ static void msix_sync(struct vfunction *vf, size_t i) {
         mmio_write_host(at + MSIX_ENTRY_DATA, 4, data);
     }
     if (!e->armed) {
-        mmio_write_host(
-            at + MSIX_ENTRY_CONTROL, 4, control & ~MSIX_ENTRY_MASKED
-        );
+        mmio_write_host(at + MSIX_ENTRY_CONTROL, 4, control & ~MSIX_ENTRY_MASKED);
         e->armed = true;
     }
 }
 
 // The table's pages: entries the guest's, anything else the function's.
-static uint64_t msix_read(
-    struct vcpu *v, void *ctx, uint64_t offset, size_t size
-) {
+static uint64_t msix_read(struct vcpu *v, void *ctx, uint64_t offset, size_t size) {
     (void)v;
     struct vfunction *vf = ctx;
     struct vmsix *x = &vf->msix;
@@ -766,16 +742,15 @@ static uint64_t msix_read(
     }
     spinlock_acquire(&virt.lock);
     const struct vmsix_entry *e = &x->entries[at / MSIX_ENTRY_SIZE];
-    uint32_t words[4] = { e->address, e->upper, e->data, e->control };
+    uint32_t upper = atomic_load_explicit(&e->upper, memory_order_relaxed);
+    uint32_t words[4] = { e->address, upper, e->data, e->control };
     spinlock_release(&virt.lock);
     uint64_t value = 0;
     memcpy(&value, (const uint8_t *)words + at % MSIX_ENTRY_SIZE, size);
     return value;
 }
 
-static void msix_write(
-    struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value
-) {
+static void msix_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value) {
     (void)v;
     struct vfunction *vf = ctx;
     struct vmsix *x = &vf->msix;
@@ -788,10 +763,11 @@ static void msix_write(
     spinlock_acquire(&virt.lock);
     size_t i = (unsigned int)(at / MSIX_ENTRY_SIZE);
     struct vmsix_entry *e = &x->entries[i];
-    uint32_t words[4] = { e->address, e->upper, e->data, e->control };
+    uint32_t upper = atomic_load_explicit(&e->upper, memory_order_relaxed);
+    uint32_t words[4] = { e->address, upper, e->data, e->control };
     memcpy((uint8_t *)words + at % MSIX_ENTRY_SIZE, &value, size);
     e->address = words[0] & ~(uint32_t)3;
-    __atomic_store_n(&e->upper, words[1], __ATOMIC_RELAXED);
+    atomic_store_explicit(&e->upper, words[1], memory_order_relaxed);
     e->data = words[2];
     e->control = words[3];
     msix_sync(vf, i);
@@ -812,8 +788,7 @@ struct shared_target {
 // The BAR of the page an access falls in, if any, found under the lock, which
 // msix_read() and msix_write() take themselves.
 static bool shared_target(
-    const struct shared_page *sp, uint64_t offset, size_t size,
-    struct shared_target *t
+    const struct shared_page *sp, uint64_t offset, size_t size, struct shared_target *t
 ) {
     bool found = false;
     spinlock_acquire(&virt.lock);
@@ -823,8 +798,8 @@ static bool shared_target(
         const struct vbar *b = &vf->bars[sp->residents[i].index];
         if (gpa >= b->mapped && gpa + size <= b->mapped + b->size) {
             *t = (struct shared_target){
-                vf, b->host + (gpa - b->mapped), b->trap_count != 0,
-                b->sub_page_ops, b->sub_page_ctx, gpa - b->mapped
+                vf, b->host + (gpa - b->mapped), b->trap_count != 0, b->sub_page_ops,
+                b->sub_page_ctx, gpa - b->mapped
             };
             found = true;
         }
@@ -833,9 +808,7 @@ static bool shared_target(
     return found;
 }
 
-static uint64_t shared_read(
-    struct vcpu *v, void *ctx, uint64_t offset, size_t size
-) {
+static uint64_t shared_read(struct vcpu *v, void *ctx, uint64_t offset, size_t size) {
     struct shared_target t;
     if (!shared_target(ctx, offset, size, &t)) {
         return size == 8 ? UINT64_MAX : all_ones(size);
@@ -849,9 +822,7 @@ static uint64_t shared_read(
     return mmio_read_host(t.hpa, size);
 }
 
-static void shared_write(
-    struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value
-) {
+static void shared_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value) {
     struct shared_target t;
     if (!shared_target(ctx, offset, size, &t)) {
         return;
@@ -907,8 +878,7 @@ static bool page_arbitrate(uintptr_t page) {
         struct vfunction *vf = &virt.functions[i];
         for (size_t k = 0; k <= BAR_COUNT && n < PAGE_RESIDENTS; k++) {
             const struct vbar *b = &vf->bars[k];
-            if (b->size != 0 && sub_page(b) && b->mapped != 0
-             && page_down(b->mapped) == page) {
+            if (b->size != 0 && sub_page(b) && b->mapped != 0 && page_down(b->mapped) == page) {
                 found[n++] = (struct resident){ vf, k };
             }
         }
@@ -916,7 +886,7 @@ static bool page_arbitrate(uintptr_t page) {
     struct shared_page *sp = shared_find(page);
     struct vbar *only = n == 1 ? &found[0].vf->bars[found[0].index] : NULL;
     bool direct = only != NULL && only->sub_page_ops == NULL
-        && ((only->mapped ^ only->host) & (PAGE_SIZE - 1)) == 0;
+               && ((only->mapped ^ only->host) & (PAGE_SIZE - 1)) == 0;
     gpt_map(page, 0, PAGE_SIZE, 0, 0);
     if (n == 0 || direct) {
         if (sp != NULL) {
@@ -941,10 +911,7 @@ static bool page_arbitrate(uintptr_t page) {
         sp = shared_take(page);
     }
     if (sp == NULL) {
-        printf(
-            "PCI: no room to reach the BARs at %#llx\n",
-            (unsigned long long)page
-        );
+        printf("PCI: no room to reach the BARs at %#llx\n", (unsigned long long)page);
         return false;
     }
     memcpy(sp->residents, found, n * sizeof(struct resident));
@@ -986,8 +953,7 @@ static void msix_init(struct vfunction *vf) {
     struct vbar *b = bir < BAR_COUNT ? &vf->bars[bir] : NULL;
     x->count = (control & MSIX_SIZE_MASK) + 1;
     uint64_t offset = table & ~MSIX_BIR_MASK;
-    if (b == NULL || b->size == 0
-     || offset + (uint64_t)x->count * MSIX_ENTRY_SIZE > b->size) {
+    if (b == NULL || b->size == 0 || offset + (uint64_t)x->count * MSIX_ENTRY_SIZE > b->size) {
         x->count = 0;
         return;
     }
@@ -997,15 +963,10 @@ static void msix_init(struct vfunction *vf) {
         x->count = 0;
         return;
     }
-    pci_cfg_write(
-        f->addr, f->msix_cap + MSIX_CONTROL, 2, control & ~MSIX_ENABLE
-    );
+    pci_cfg_write(f->addr, f->msix_cap + MSIX_CONTROL, 2, control & ~MSIX_ENABLE);
     x->table = b->host + offset;
     x->page = page_down(x->table);
-    mm_map_device(
-        x->page,
-        page_up(x->table + (uint64_t)x->count * MSIX_ENTRY_SIZE) - x->page
-    );
+    mm_map_device(x->page, page_up(x->table + (uint64_t)x->count * MSIX_ENTRY_SIZE) - x->page);
     x->entries = kmalloc(x->count * sizeof(struct vmsix_entry));
     uint32_t command = pci_cfg_read(f->addr, REG_COMMAND, 2);
     pci_cfg_write(f->addr, REG_COMMAND, 2, command | COMMAND_MEMORY);
@@ -1013,20 +974,16 @@ static void msix_init(struct vfunction *vf) {
         struct vmsix_entry *e = &x->entries[i];
         uint64_t at = x->table + (uint64_t)i * MSIX_ENTRY_SIZE;
         e->address = (uint32_t)mmio_read_host(at + MSIX_ENTRY_ADDRESS, 4);
-        e->upper = (uint32_t)mmio_read_host(at + MSIX_ENTRY_UPPER, 4);
+        atomic_store_explicit(
+            &e->upper, (uint32_t)mmio_read_host(at + MSIX_ENTRY_UPPER, 4), memory_order_relaxed
+        );
         e->data = (uint32_t)mmio_read_host(at + MSIX_ENTRY_DATA, 4);
         e->control = (uint32_t)mmio_read_host(at + MSIX_ENTRY_CONTROL, 4);
-        mmio_write_host(
-            at + MSIX_ENTRY_CONTROL, 4, e->control | MSIX_ENTRY_MASKED
-        );
-        e->slot = (struct irq_slot){
-            .taken = msix_taken, .ctx = e, .requester = requester(f)
-        };
+        mmio_write_host(at + MSIX_ENTRY_CONTROL, 4, e->control | MSIX_ENTRY_MASKED);
+        e->slot = (struct irq_slot){ .taken = msix_taken, .ctx = e, .requester = requester(f) };
     }
     pci_cfg_write(f->addr, REG_COMMAND, 2, command);
-    b->traps[0] = (struct bar_trap){
-        offset, (uint64_t)x->count * MSIX_ENTRY_SIZE, region
-    };
+    b->traps[0] = (struct bar_trap){ offset, (uint64_t)x->count * MSIX_ENTRY_SIZE, region };
     b->trap_count = 1;
 }
 
@@ -1040,11 +997,10 @@ static void msi_init(struct vfunction *vf) {
     m->control = control & MSI_MME_MASK;
     pci_cfg_write(a, cap + MSI_CONTROL, 2, control & ~MSI_ENABLE);
     m->address = pci_cfg_read(a, cap + MSI_ADDRESS, 4);
-    m->upper = m->wide ? pci_cfg_read(a, cap + MSI_UPPER, 4) : 0;
+    uint32_t upper = m->wide ? pci_cfg_read(a, cap + MSI_UPPER, 4) : 0;
+    atomic_store_explicit(&m->upper, upper, memory_order_relaxed);
     m->data = pci_cfg_read(a, msi_data_reg(vf), 2);
-    m->slot = (struct irq_slot){
-        .taken = msi_taken, .ctx = vf, .requester = requester(vf->f)
-    };
+    m->slot = (struct irq_slot){ .taken = msi_taken, .ctx = vf, .requester = requester(vf->f) };
 }
 
 // Resizing a BAR would move it on the host, behind the guest's back.
@@ -1053,17 +1009,14 @@ static bool in_rebar(const struct vfunction *vf, uint32_t offset) {
     return cap != 0 && offset >= cap && offset < cap + REBAR_SIZE;
 }
 
-static uint32_t function_read(
-    struct pci_addr a, uint32_t offset, size_t size
-) {
+static uint32_t function_read(struct pci_addr a, uint32_t offset, size_t size) {
     struct vfunction *vf = vfunction_find(a);
     if (vf != NULL && vf->hidden) {
         return all_ones(size);
     }
     uint32_t reg = offset & ~(uint32_t)3;
     uint32_t value;
-    if (vf != NULL && vf->hook != NULL
-     && vf->hook->read(vf->hook_ctx, reg, &value)) {
+    if (vf != NULL && vf->hook != NULL && vf->hook->read(vf->hook_ctx, reg, &value)) {
         return (value >> (8 * (offset & 3))) & all_ones(size);
     }
     if (vf != NULL && msi_reg(vf, reg)) {
@@ -1075,9 +1028,7 @@ static uint32_t function_read(
     return (kept_read(vf, reg) >> (8 * (offset & 3))) & all_ones(size);
 }
 
-static void function_write(
-    struct pci_addr a, uint32_t offset, size_t size, uint32_t value
-) {
+static void function_write(struct pci_addr a, uint32_t offset, size_t size, uint32_t value) {
     struct vfunction *vf = vfunction_find(a);
     if (vf != NULL && (vf->hidden || in_rebar(vf, offset))) {
         return;
@@ -1090,31 +1041,24 @@ static void function_write(
         return;
     }
     if (vf != NULL && msi_reg(vf, reg)) {
-        msi_write(
-            vf, reg, (msi_read(vf, reg) & ~mask) | ((value << shift) & mask)
-        );
+        msi_write(vf, reg, (msi_read(vf, reg) & ~mask) | ((value << shift) & mask));
         return;
     }
     if (vf != NULL && vf->msix.count != 0 && reg == vf->f->msix_cap) {
-        msix_control(
-            vf, (pci_cfg_read(a, reg, 4) & ~mask) | ((value << shift) & mask)
-        );
+        msix_control(vf, (pci_cfg_read(a, reg, 4) & ~mask) | ((value << shift) & mask));
         return;
     }
     if (vf == NULL || offset >= REG_HEADER_END || !is_kept(vf, reg)) {
         pci_cfg_write(a, offset, size, value);
         return;
     }
-    kept_write(
-        vf, reg, (kept_read(vf, reg) & ~mask) | ((value << shift) & mask)
-    );
+    kept_write(vf, reg, (kept_read(vf, reg) & ~mask) | ((value << shift) & mask));
 }
 
 // The guest's bus numbers are the PCI plan's: a port of the plan's, or a
 // function of the host's, or nothing.
 static uint32_t guest_read(
-    uint8_t bus, uint8_t device, uint8_t function, uint32_t offset,
-    size_t size
+    uint8_t bus, uint8_t device, uint8_t function, uint32_t offset, size_t size
 ) {
     int port = bus == 0 ? pci_port_at(device, function) : -1;
     if (port >= 0) {
@@ -1129,8 +1073,7 @@ static uint32_t guest_read(
 }
 
 static void guest_write(
-    uint8_t bus, uint8_t device, uint8_t function, uint32_t offset,
-    size_t size, uint32_t value
+    uint8_t bus, uint8_t device, uint8_t function, uint32_t offset, size_t size, uint32_t value
 ) {
     int port = bus == 0 ? pci_port_at(device, function) : -1;
     if (port >= 0) {
@@ -1177,8 +1120,7 @@ static void port_native(uint16_t port, size_t size, bool in, uint32_t *value) {
 // as the reset control register at CF9h on many chipsets, and data accesses
 // with the address disabled, go on to the hardware.
 static void config_ports(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in,
-    uint32_t *value
+    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
 ) {
     (void)v;
     (void)ctx;
@@ -1195,8 +1137,7 @@ static void config_ports(
     }
     uint32_t address = virt.config_address;
     unsigned int byte = (unsigned int)(port - CONFIG_DATA);
-    if (port < CONFIG_DATA || (address & CONFIG_ENABLE) == 0
-     || byte + size > 4) {
+    if (port < CONFIG_DATA || (address & CONFIG_ENABLE) == 0 || byte + size > 4) {
         port_native(port, size, in, value);
         spinlock_release(&virt.lock);
         return;
@@ -1219,9 +1160,7 @@ static void config_ports(
             if (in) {
                 result |= guest_read(bus, device, function, at, 1) << (8 * i);
             } else {
-                guest_write(
-                    bus, device, function, at, 1, (*value >> (8 * i)) & 0xff
-                );
+                guest_write(bus, device, function, at, 1, (*value >> (8 * i)) & 0xff);
             }
         }
         if (in) {
@@ -1247,9 +1186,7 @@ static uint8_t ecam_function(uint64_t offset) {
     return (uint8_t)((offset >> 12) & 7);
 }
 
-static uint64_t ecam_read(
-    struct vcpu *v, void *ctx, uint64_t offset, size_t size
-) {
+static uint64_t ecam_read(struct vcpu *v, void *ctx, uint64_t offset, size_t size) {
     (void)v;
     (void)ctx;
     uint8_t bus = ecam_bus(offset);
@@ -1260,7 +1197,7 @@ static uint64_t ecam_read(
     uint64_t value;
     if (size == 8) {
         value = guest_read(bus, device, function, reg, 4)
-            | (uint64_t)guest_read(bus, device, function, reg + 4, 4) << 32;
+              | (uint64_t)guest_read(bus, device, function, reg + 4, 4) << 32;
     } else {
         value = guest_read(bus, device, function, reg, size);
     }
@@ -1268,9 +1205,7 @@ static uint64_t ecam_read(
     return value;
 }
 
-static void ecam_write(
-    struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value
-) {
+static void ecam_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value) {
     (void)v;
     (void)ctx;
     uint8_t bus = ecam_bus(offset);
@@ -1280,9 +1215,7 @@ static void ecam_write(
     spinlock_acquire(&virt.lock);
     if (size == 8) {
         guest_write(bus, device, function, reg, 4, (uint32_t)value);
-        guest_write(
-            bus, device, function, reg + 4, 4, (uint32_t)(value >> 32)
-        );
+        guest_write(bus, device, function, reg + 4, 4, (uint32_t)(value >> 32));
     } else {
         guest_write(bus, device, function, reg, size, (uint32_t)value);
     }
@@ -1292,9 +1225,7 @@ static void ecam_write(
 static const struct mmio_ops ecam_ops = { ecam_read, ecam_write, false };
 
 // A bridge's bus numbers as the guest has them, where they are assigned.
-static uint32_t guest_bus_numbers(
-    const struct pci_function *f, uint32_t value
-) {
+static uint32_t guest_bus_numbers(const struct pci_function *f, uint32_t value) {
     if (f->secondary_bus <= f->addr.bus) {
         return value;
     }
@@ -1308,8 +1239,7 @@ static uint32_t guest_bus_numbers(
 }
 
 static void vfunction_init(
-    struct vfunction *vf, struct pci_function *f,
-    const struct pci_plan_function *pf
+    struct vfunction *vf, struct pci_function *f, const struct pci_plan_function *pf
 ) {
     *vf = (struct vfunction){ .f = f };
     if (f->base_class == CLASS_SYSTEM && f->subclass == SUBCLASS_IOMMU) {
@@ -1324,15 +1254,14 @@ static void vfunction_init(
     }
     for (size_t i = 0; i < f->bar_count && i < BAR_COUNT; i++) {
         const struct pci_bar *bar = &f->bars[i];
-        if ((bar->kind != PCI_BAR_MEM32 && bar->kind != PCI_BAR_MEM64)
-         || bar->size == 0) {
+        if ((bar->kind != PCI_BAR_MEM32 && bar->kind != PCI_BAR_MEM64) || bar->size == 0) {
             continue;
         }
         vf->bars[i] = (struct vbar){
             .kind = bar->kind,
             .type_bits = (uint8_t)(pci_cfg_read(f->addr, bar->reg, 4)
-                & ~BAR_ADDRESS),
-            .size = bar->size, .host = bar->base, .guest = pf->bars[i],
+                                 & ~BAR_ADDRESS),
+            .size = bar->size, .host = bar->base, .guest = pf->bars[i]
         };
         // The hypervisor reaches it for the guest where no one page can.
         if (bar->size < PAGE_SIZE) {
@@ -1340,14 +1269,13 @@ static void vfunction_init(
         }
     }
     if (f->rom.kind == PCI_BAR_MEM32 && f->rom.size != 0) {
-        uint32_t reg = f->header_type == HEADER_BRIDGE ? REG_BRIDGE_ROM
-            : REG_ROM;
+        uint32_t reg = f->header_type == HEADER_BRIDGE ? REG_BRIDGE_ROM : REG_ROM;
         vf->bars[ROM_INDEX] = (struct vbar){
             .kind = PCI_BAR_MEM32,
             .size = f->rom.size,
             .host = f->rom.base,
             .guest = pf->rom,
-            .enabled = (pci_cfg_read(f->addr, reg, 4) & ROM_ENABLE) != 0,
+            .enabled = (pci_cfg_read(f->addr, reg, 4) & ROM_ENABLE) != 0
         };
         if (f->rom.size < PAGE_SIZE) {
             mm_map_device(page_down(f->rom.base), PAGE_SIZE);
@@ -1357,15 +1285,12 @@ static void vfunction_init(
         msix_init(vf);
     }
     if (f->header_type == HEADER_BRIDGE) {
-        vf->bus_numbers = guest_bus_numbers(
-            f, pci_cfg_read(f->addr, REG_BUS_NUMBERS, 4)
-        );
+        vf->bus_numbers = guest_bus_numbers(f, pci_cfg_read(f->addr, REG_BUS_NUMBERS, 4));
         vf->mem_base = pf->mem_base;
         vf->mem_limit = pf->mem_limit;
         vf->pref_base = pf->pref_base;
         vf->pref_limit = pf->pref_limit;
-        vf->pref_64 = (pci_cfg_read(f->addr, REG_PREF, 4) & 0xf)
-            == WINDOW_PREF_64;
+        vf->pref_64 = (pci_cfg_read(f->addr, REG_PREF, 4) & 0xf) == WINDOW_PREF_64;
     }
 }
 
@@ -1378,21 +1303,16 @@ void pci_virt_init(void) {
     virt.on = true;
     pci_port_init();
     uint32_t extended = cpuid(0x80000000, 0).eax;
-    unsigned int bits = extended >= 0x80000008
-        ? cpuid(0x80000008, 0).eax & 0xff : 36;
+    unsigned int bits = extended >= 0x80000008 ? cpuid(0x80000008, 0).eax & 0xff : 36;
     virt.address_limit = (uint64_t)1 << bits;
 
     for (size_t i = 0; i < SHARED_PAGES; i++) {
         shared_pages[i].region = -1;
     }
     virt.count = t->function_count;
-    virt.functions = kmalloc(
-        (virt.count != 0 ? virt.count : 1) * sizeof(struct vfunction)
-    );
+    virt.functions = kmalloc((virt.count != 0 ? virt.count : 1) * sizeof(struct vfunction));
     for (size_t i = 0; i < virt.count; i++) {
-        vfunction_init(
-            &virt.functions[i], &t->functions[i], &plan->functions[i]
-        );
+        vfunction_init(&virt.functions[i], &t->functions[i], &plan->functions[i]);
     }
     uint32_t mapped = 0;
     for (size_t i = 0; i < virt.count; i++) {
@@ -1405,9 +1325,7 @@ void pci_virt_init(void) {
         }
     }
 
-    struct io_handler ports = {
-        CONFIG_ADDRESS, CONFIG_PORTS, config_ports, NULL
-    };
+    struct io_handler ports = { CONFIG_ADDRESS, CONFIG_PORTS, config_ports, NULL };
     io_register(&ports);
     if (plan->ecam != 0) {
         size_t size = ((size_t)plan->bus_end + 1) * BUS_SIZE;
@@ -1418,9 +1336,7 @@ void pci_virt_init(void) {
     printf("PCI: %u of the guest's BARs mapped onto the host's\n", mapped);
 }
 
-void pci_virt_hook(
-    struct pci_addr addr, const struct pci_virt_hook *hook, void *ctx
-) {
+void pci_virt_hook(struct pci_addr addr, const struct pci_virt_hook *hook, void *ctx) {
     struct vfunction *vf = vfunction_find(addr);
     if (vf != NULL) {
         vf->hook_ctx = ctx;
@@ -1437,8 +1353,8 @@ bool pci_virt_trap(
         return false;
     }
     struct vbar *b = &vf->bars[bar];
-    if (b->size == 0 || b->trap_count == BAR_TRAPS || size == 0
-     || offset > b->size || size > b->size - offset) {
+    if (b->size == 0 || b->trap_count == BAR_TRAPS || size == 0 || offset > b->size
+     || size > b->size - offset) {
         return false;
     }
     if (sub_page(b)) {
@@ -1458,8 +1374,7 @@ bool pci_virt_trap(
     // Pages of their own, in order.
     unsigned int at = 0;
     for (; at < b->trap_count; at++) {
-        if (page_up(b->traps[at].offset + b->traps[at].size)
-          > page_down(offset)
+        if (page_up(b->traps[at].offset + b->traps[at].size) > page_down(offset)
          && b->traps[at].offset < page_up(offset + size)) {
             return false;
         }

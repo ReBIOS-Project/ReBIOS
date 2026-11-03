@@ -50,9 +50,7 @@ uintptr_t gpt_root(void);
 
 // size and both addresses must be page aligned. prot 0 unmaps. The IOMMU
 // mirrors the mapping, so that device DMA sees the same memory.
-void gpt_map(
-    uintptr_t gpa, uintptr_t hpa, size_t size, uint32_t prot, uint8_t memtype
-);
+void gpt_map(uintptr_t gpa, uintptr_t hpa, size_t size, uint32_t prot, uint8_t memtype);
 
 // Has the processor, but not device DMA, see guest-physical memory below 4 GiB
 // with address bit 20 clear, as a closed A20 gate makes it, or as it is.
@@ -61,14 +59,11 @@ void gpt_mask_a20(bool on);
 uintptr_t gpt_cpu_gpa(uintptr_t gpa);
 
 // Returns false if gpa is unmapped, ignoring A20. memtype may be NULL.
-bool gpt_translate(
-    uintptr_t gpa, uint64_t *hpa, uint32_t *prot, uint8_t *memtype
-);
+bool gpt_translate(uintptr_t gpa, uint64_t *hpa, uint32_t *prot, uint8_t *memtype);
 // Also the level of the leaf that maps it: 0 for 4 KiB, 1 for 2 MiB, 2 for 1
 // GiB.
 bool gpt_translate_leaf(
-    uintptr_t gpa, uint64_t *hpa, uint32_t *prot, uint8_t *memtype,
-    size_t *level
+    uintptr_t gpa, uint64_t *hpa, uint32_t *prot, uint8_t *memtype, size_t *level
 );
 
 // Drops cached translations, on every CPU that will next enter the guest.
@@ -83,12 +78,10 @@ bool gpt_dirty_tracked(void);
 // clearing the flag where clear; whether any page was written to. bits may be
 // NULL. As TLBs may keep translations that are dirty already, the other vCPUs
 // must stay out of the guest from clearing flags until gpt_flush().
-bool gpt_dirty(
-    uintptr_t gpa, size_t size, uint64_t *bits, uintptr_t first, bool clear
-);
+bool gpt_dirty(uintptr_t gpa, size_t size, uint64_t *bits, uintptr_t first, bool clear);
 
 // Bumped by gpt_flush(), for the vCPUs to catch up with as they enter the
 // guest.
-extern uint64_t gpt_generation;
+extern _Atomic(uint64_t) gpt_generation;
 
 #endif

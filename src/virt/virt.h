@@ -21,6 +21,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdnoreturn.h>
 
 // Picks VMX or SVM and sets up what all vCPUs share. Returns false if neither
 // is usable on this processor.
@@ -50,6 +51,6 @@ void virt_x2apic_icr_passed(uint32_t msr);
 
 // The reset a triple fault makes on a PC, held a while first if the log is on
 // the screen (log_take_screen()), so that what led there can be read.
-__attribute__((noreturn)) void virt_reset(bool shown);
+noreturn void virt_reset(bool shown);
 
 #endif

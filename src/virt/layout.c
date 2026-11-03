@@ -141,24 +141,18 @@ static void list_add(struct range_list *list, uintptr_t base, uintptr_t end) {
             panic("Too many memory ranges\n");
         }
         memmove(
-            &list->r[first + 1], &list->r[first],
-            (list->count - first) * sizeof(struct range)
+            &list->r[first + 1], &list->r[first], (list->count - first) * sizeof(struct range)
         );
         list->count++;
     } else {
-        memmove(
-            &list->r[first + 1], &list->r[last],
-            (list->count - last) * sizeof(struct range)
-        );
+        memmove(&list->r[first + 1], &list->r[last], (list->count - last) * sizeof(struct range));
         list->count -= last - first - 1;
     }
     list->r[first].base = base;
     list->r[first].end = end;
 }
 
-static void list_remove(
-    struct range_list *list, uintptr_t base, uintptr_t end
-) {
+static void list_remove(struct range_list *list, uintptr_t base, uintptr_t end) {
     size_t i = 0;
     while (base < end && i < list->count) {
         struct range *r = &list->r[i];
@@ -168,9 +162,7 @@ static void list_remove(
             if (list->count == MAX_RANGES) {
                 panic("Too many memory ranges\n");
             }
-            memmove(
-                &list->r[i + 1], r, (list->count - i) * sizeof(struct range)
-            );
+            memmove(&list->r[i + 1], r, (list->count - i) * sizeof(struct range));
             list->count++;
             list->r[i].end = base;
             list->r[i + 1].base = end;
@@ -224,15 +216,13 @@ static const EFI_MEMORY_DESCRIPTOR *efi_desc(size_t index) {
     if ((index + 1) * h->efi_mmap_desc_size > h->efi_mmap_size) {
         return NULL;
     }
-    return (const void *)(uintptr_t)(h->efi_mmap
-        + index * h->efi_mmap_desc_size);
+    return (const void *)(uintptr_t)(h->efi_mmap + index * h->efi_mmap_desc_size);
 }
 
 static uint64_t efi_attribute_at(uintptr_t addr) {
     const EFI_MEMORY_DESCRIPTOR *d;
     for (size_t i = 0; (d = efi_desc(i)) != NULL; i++) {
-        if (addr >= d->PhysicalStart
-         && addr - d->PhysicalStart < d->NumberOfPages * PAGE_SIZE) {
+        if (addr >= d->PhysicalStart && addr - d->PhysicalStart < d->NumberOfPages * PAGE_SIZE) {
             return d->Attribute;
         }
     }
@@ -241,9 +231,7 @@ static uint64_t efi_attribute_at(uintptr_t addr) {
 
 // The legacy memory map comes first: nothing keeps its host address below 1
 // MiB.
-static void identity_add(
-    uintptr_t base, uintptr_t end, uint32_t efi_type, uint64_t attribute
-) {
+static void identity_add(uintptr_t base, uintptr_t end, uint32_t efi_type, uint64_t attribute) {
     if (base < ONE_MIB) {
         base = ONE_MIB;
     }
@@ -253,9 +241,7 @@ static void identity_add(
     if (identity_count == MAX_RANGES) {
         panic("Too many host ranges for the guest\n");
     }
-    identity[identity_count++] = (struct identity_range){
-        base, end, efi_type, attribute
-    };
+    identity[identity_count++] = (struct identity_range){ base, end, efi_type, attribute };
 }
 
 // Takes [base, end) out of the identity ranges, which may split one.
@@ -279,9 +265,7 @@ static void identity_remove(uintptr_t base, uintptr_t end) {
 }
 
 // The highest align-aligned size bytes in [lo, hi), or 0.
-static uintptr_t fit_top(
-    uint64_t lo, uint64_t hi, size_t size, uint64_t align
-) {
+static uintptr_t fit_top(uint64_t lo, uint64_t hi, size_t size, uint64_t align) {
     if (hi <= lo || hi - lo < size) {
         return 0;
     }
@@ -292,15 +276,12 @@ static uintptr_t fit_top(
 // Takes the highest align-aligned size bytes clear of [avoid_base, avoid_end)
 // and of the first 2 MiB off the list, or returns 0.
 static uintptr_t take_top(
-    struct range_list *list, size_t size, uint64_t align, uintptr_t avoid_base,
-    uintptr_t avoid_end
+    struct range_list *list, size_t size, uint64_t align, uintptr_t avoid_base, uintptr_t avoid_end
 ) {
     for (size_t i = list->count; i-- > 0; ) {
         uint64_t lo = list->r[i].base > TWO_MIB ? list->r[i].base : TWO_MIB;
         uint64_t hi = list->r[i].end;
-        uintptr_t base = fit_top(
-            lo > avoid_end ? lo : avoid_end, hi, size, align
-        );
+        uintptr_t base = fit_top(lo > avoid_end ? lo : avoid_end, hi, size, align);
         if (base == 0) {
             base = fit_top(lo, hi < avoid_base ? hi : avoid_base, size, align);
         }
@@ -332,9 +313,7 @@ static void map_ram(uintptr_t gpa, uintptr_t hpa, size_t size) {
 // Backs the size-aligned blocks of guest with size-aligned blocks of host, in
 // order, until either list runs out, so that they can be mapped with pages
 // that large, and takes them off both lists.
-static void assign_blocks(
-    struct range_list *guest, struct range_list *host, size_t size
-) {
+static void assign_blocks(struct range_list *guest, struct range_list *host, size_t size) {
     struct range_list guest_done;
     struct range_list host_done;
     list_init(&guest_done);
@@ -381,9 +360,7 @@ static void assign_blocks(
 
 // Backs the rest of guest with what is left of host, in order. host must hold
 // enough.
-static void assign_rest(
-    const struct range_list *guest, const struct range_list *host
-) {
+static void assign_rest(const struct range_list *guest, const struct range_list *host) {
     uint32_t h = 0;
     uintptr_t hpa = host->r[0].base;
     for (size_t g = 0; g < guest->count; g++) {
@@ -407,9 +384,7 @@ static void assign_rest(
 // Above 4 GiB, from 4 GiB on, as much as there is around what keeps its place.
 // Lays size bytes of RAM out from 4 GiB around what is to be avoided, into ram
 // and fill where given; returns where it ends.
-static uint64_t add_high(
-    struct range_list *fill, size_t size, const struct range_list *avoid
-) {
+static uint64_t add_high(struct range_list *fill, size_t size, const struct range_list *avoid) {
     uintptr_t at = FOUR_GIB;
     for (size_t i = 0; i <= avoid->count && size != 0; i++) {
         uint64_t stop = i < avoid->count ? avoid->r[i].base : UINT64_MAX;
@@ -471,19 +446,14 @@ void layout_init(void) {
     uintptr_t vbt_base;
     uintptr_t vbt_end;
     if (igfx_one_to_one(&vbt_base, &vbt_end)) {
-        identity_add(
-            vbt_base, vbt_end, EfiReservedMemoryType,
-            efi_attribute_at(vbt_base)
-        );
+        identity_add(vbt_base, vbt_end, EfiReservedMemoryType, efi_attribute_at(vbt_base));
     }
 
     // The interrupt controllers, the timers, and what the guest's ACPI
     // describes, but never the configuration space windows or the IOMMUs.
     const struct pci_host *host = pci_host_scan();
     for (size_t i = 0; i < host->claimed_count; i++) {
-        identity_add(
-            host->claimed[i].base, host->claimed[i].end, EfiMemoryMappedIO, 0
-        );
+        identity_add(host->claimed[i].base, host->claimed[i].end, EfiMemoryMappedIO, 0);
     }
     for (size_t i = 0; i < host->private_count; i++) {
         identity_remove(host->private[i].base, host->private[i].end);
@@ -505,10 +475,7 @@ void layout_init(void) {
         list_add(&avoid, holes.r[i].base, holes.r[i].end);
     }
     for (size_t i = 0; i < h->reserved_count; i++) {
-        list_remove(
-            &free_ram, h->reserved[i].base,
-            h->reserved[i].base + h->reserved[i].size
-        );
+        list_remove(&free_ram, h->reserved[i].base, h->reserved[i].base + h->reserved[i].size);
     }
     for (size_t i = 0; i < pinned.count; i++) {
         list_remove(&free_ram, pinned.r[i].base, pinned.r[i].end);
@@ -527,22 +494,16 @@ void layout_init(void) {
 
     // The PCI hole as high as its BARs allow, and the larger BARs above
     // whatever RAM the guest could have above 4 GiB.
-    struct pci_plan_range *obstacles = kmalloc(
-        (avoid.count + 1) * sizeof(struct pci_plan_range)
-    );
+    struct pci_plan_range *obstacles = kmalloc((avoid.count + 1) * sizeof(struct pci_plan_range));
     for (size_t i = 0; i < avoid.count; i++) {
-        obstacles[i] = (struct pci_plan_range){
-            avoid.r[i].base, avoid.r[i].end
-        };
+        obstacles[i] = (struct pci_plan_range){ avoid.r[i].base, avoid.r[i].end };
     }
     uintptr_t pinned_top = FOUR_GIB;
     if (pinned.count != 0 && pinned.r[pinned.count - 1].end > pinned_top) {
         pinned_top = pinned.r[pinned.count - 1].end;
     }
     uint64_t high_floor = add_high(NULL, available, &avoid);
-    high_floor = align_up(
-        high_floor > pinned_top ? high_floor : pinned_top, ONE_GIB
-    );
+    high_floor = align_up(high_floor > pinned_top ? high_floor : pinned_top, ONE_GIB);
     const struct pci_plan *plan = pci_plan_make(
         obstacles, avoid.count, vga_lfb_size(), high_floor
     );
@@ -562,20 +523,14 @@ void layout_init(void) {
     uintptr_t clear_base;
     uintptr_t clear_end;
     if (igfx_stolen(&stolen_hpa, &stolen_size, &clear_base, &clear_end)) {
-        uintptr_t gpa = take_top(
-            &ram, stolen_size, TWO_MIB, clear_base, clear_end
-        );
+        uintptr_t gpa = take_top(&ram, stolen_size, TWO_MIB, clear_base, clear_end);
         if (gpa != 0) {
             stolen = (struct range){ gpa, gpa + stolen_size };
             igfx_stolen_placed(gpa);
         } else if (igfx_stolen_rmrr_dropped()) {
-            printf(
-                "No room in the guest's memory for the stolen memory: it "
-                "keeps its address\n"
-            );
+            printf("No room in the guest's memory for the stolen memory: it keeps its address\n");
             identity_add(
-                clear_base, clear_end, EfiReservedMemoryType,
-                efi_attribute_at(stolen_hpa)
+                clear_base, clear_end, EfiReservedMemoryType, efi_attribute_at(stolen_hpa)
             );
             list_add(&pinned, clear_base, clear_end);
             list_remove(&ram, clear_base, clear_end);
@@ -602,10 +557,7 @@ void layout_init(void) {
                 // does, for an OS not to take it for room for devices.
                 for (size_t j = 0; j < ram.count; j++) {
                     if (ram.r[j].end > cut) {
-                        list_add(
-                            &kept, ram.r[j].base > cut ? ram.r[j].base : cut,
-                            ram.r[j].end
-                        );
+                        list_add(&kept, ram.r[j].base > cut ? ram.r[j].base : cut, ram.r[j].end);
                     }
                 }
                 list_remove(&fill, cut, UINT64_MAX);
@@ -621,19 +573,14 @@ void layout_init(void) {
     // absent.
     for (size_t i = 0; i < identity_count; i++) {
         const struct identity_range *r = &identity[i];
-        gpt_map(
-            r->base, r->base, r->end - r->base, GPT_RWX, identity_memtype(r)
-        );
+        gpt_map(r->base, r->base, r->end - r->base, GPT_RWX, identity_memtype(r));
     }
     if (stolen.end != 0) {
         struct identity_range r = {
-            stolen_hpa, stolen_hpa + (stolen.end - stolen.base),
-            EfiReservedMemoryType, efi_attribute_at(stolen_hpa)
+            stolen_hpa, stolen_hpa + (stolen.end - stolen.base), EfiReservedMemoryType,
+            efi_attribute_at(stolen_hpa)
         };
-        gpt_map(
-            stolen.base, stolen_hpa, stolen.end - stolen.base, GPT_RWX,
-            identity_memtype(&r)
-        );
+        gpt_map(stolen.base, stolen_hpa, stolen.end - stolen.base, GPT_RWX, identity_memtype(&r));
     }
 
     // Low memory and the ROM area, around the VGA window, which goes to the
@@ -663,9 +610,7 @@ void layout_init(void) {
     printf(
         "Guest RAM: %llu MiB from 1 MiB, to %#llx, and %llu MiB from 4 GiB\n",
         (unsigned long long)(below >> 20),
-        (unsigned long long)(
-            takeable.count != 0 ? takeable.r[takeable.count - 1].end : 0
-        ),
+        (unsigned long long)(takeable.count != 0 ? takeable.r[takeable.count - 1].end : 0),
         (unsigned long long)(above >> 20)
     );
 
@@ -691,8 +636,7 @@ bool layout_mmio_free(uintptr_t base, size_t size) {
     }
     const struct pci_plan *plan = pci_plan();
     if (plan != NULL && plan->ecam != 0) {
-        uintptr_t ecam_end = plan->ecam
-            + (((uint64_t)plan->bus_end + 1) << 20);
+        uintptr_t ecam_end = plan->ecam + (((uint64_t)plan->bus_end + 1) << 20);
         if (base < ecam_end && end > plan->ecam) {
             return false;
         }
@@ -837,18 +781,14 @@ uint32_t layout_take(size_t size, uint32_t align, uint32_t e820_type) {
     return 0;
 }
 
-static uint64_t absent_read(
-    struct vcpu *v, void *ctx, uint64_t offset, size_t size
-) {
+static uint64_t absent_read(struct vcpu *v, void *ctx, uint64_t offset, size_t size) {
     (void)v;
     (void)ctx;
     (void)offset;
     return size == 8 ? UINT64_MAX : ((uint64_t)1 << (size * 8)) - 1;
 }
 
-static void absent_write(
-    struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value
-) {
+static void absent_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value) {
     (void)v;
     (void)ctx;
     (void)offset;
@@ -875,18 +815,14 @@ void layout_absent(uintptr_t gpa, size_t size) {
     gpt_flush();
 }
 
-static uint64_t rom_read(
-    struct vcpu *v, void *ctx, uint64_t offset, size_t size
-) {
+static uint64_t rom_read(struct vcpu *v, void *ctx, uint64_t offset, size_t size) {
     (void)v;
     uint64_t value = 0;
     memcpy(&value, low + (uintptr_t)ctx + offset, size);
     return value;
 }
 
-static void rom_write(
-    struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value
-) {
+static void rom_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value) {
     (void)v;
     (void)ctx;
     (void)offset;
@@ -915,46 +851,30 @@ bool layout_e820(struct e820_map *map) {
             .Type = r->efi_type,
             .PhysicalStart = r->base,
             .NumberOfPages = (r->end - r->base) / PAGE_SIZE,
-            .Attribute = r->attribute,
+            .Attribute = r->attribute
         };
         ok &= e820_set_efi_map(
-            map, &desc, sizeof(EFI_MEMORY_DESCRIPTOR),
-            sizeof(EFI_MEMORY_DESCRIPTOR)
+            map, &desc, sizeof(EFI_MEMORY_DESCRIPTOR), sizeof(EFI_MEMORY_DESCRIPTOR)
         );
     }
     for (size_t i = 0; i < ram.count; i++) {
-        ok &= e820_set(
-            map, ram.r[i].base, ram.r[i].end - ram.r[i].base, E820_RAM
-        );
+        ok &= e820_set(map, ram.r[i].base, ram.r[i].end - ram.r[i].base, E820_RAM);
     }
     for (size_t i = 0; i < taken_count; i++) {
-        ok &= e820_set(
-            map, taken[i].base, taken[i].end - taken[i].base,
-            taken[i].e820_type
-        );
+        ok &= e820_set(map, taken[i].base, taken[i].end - taken[i].base, taken[i].e820_type);
     }
     for (size_t i = 0; i < kept.count; i++) {
-        ok &= e820_set(
-            map, kept.r[i].base, kept.r[i].end - kept.r[i].base, E820_RESERVED
-        );
+        ok &= e820_set(map, kept.r[i].base, kept.r[i].end - kept.r[i].base, E820_RESERVED);
     }
     if (stolen.end != 0) {
-        ok &= e820_set(
-            map, stolen.base, stolen.end - stolen.base, E820_RESERVED
-        );
+        ok &= e820_set(map, stolen.base, stolen.end - stolen.base, E820_RESERVED);
     }
     for (size_t i = 0; i < holes.count; i++) {
-        ok &= e820_set(
-            map, holes.r[i].base, holes.r[i].end - holes.r[i].base,
-            E820_RESERVED
-        );
+        ok &= e820_set(map, holes.r[i].base, holes.r[i].end - holes.r[i].base, E820_RESERVED);
     }
     const struct pci_plan *plan = pci_plan();
     if (plan != NULL && plan->ecam != 0) {
-        ok &= e820_set(
-            map, plan->ecam, ((uint64_t)plan->bus_end + 1) << 20,
-            E820_RESERVED
-        );
+        ok &= e820_set(map, plan->ecam, ((uint64_t)plan->bus_end + 1) << 20, E820_RESERVED);
     }
     ok &= e820_set_low_memory(map);
     return ok;

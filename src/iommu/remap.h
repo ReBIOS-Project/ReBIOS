@@ -15,7 +15,6 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-
 #ifndef IOMMU__REMAP_H
 #define IOMMU__REMAP_H
 
@@ -33,17 +32,11 @@ bool remap_on(void);
 int32_t remap_requester(uint8_t type, uint8_t id);
 // count consecutive entries for the interrupts of a requester ID, or -1.
 int remap_alloc(int32_t requester, size_t count);
-void remap_free(int32_t requester, int index, size_t count);
+void remap_free(int32_t requester, uint16_t index, size_t count);
 // Points an entry at a vector on the processor with an APIC ID.
-void remap_set(
-    int32_t requester, int index, uint32_t apic_id, uint8_t vector, bool level
-);
+void remap_set(int32_t requester, uint16_t index, uint32_t apic_id, uint8_t vector, bool level);
 // The message, and the I/O APIC entry, that name an entry.
-void remap_message(
-    int32_t requester, int index, uint32_t *address, uint32_t *data
-);
-uint64_t remap_rte(
-    int32_t requester, int index, uint8_t vector, bool level, bool active_low
-);
+void remap_message(int32_t requester, uint16_t index, uint32_t *address, uint32_t *data);
+uint64_t remap_rte(int32_t requester, uint16_t index, uint8_t vector, bool level, bool active_low);
 
 #endif

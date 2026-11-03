@@ -40,14 +40,11 @@ static uint8_t byte_sum(const void *p, size_t len) {
 
 struct csm_compat16_table *csm_find_compat16_table(void *image, size_t size) {
     uint8_t *bytes = image;
-    for (size_t off = 0; size - off >= CSM_COMPAT16_TABLE_SPEC_SIZE;
-         off += 16) {
-        struct csm_compat16_table *table = (struct csm_compat16_table *)(bytes
-            + off);
+    for (size_t off = 0; size - off >= CSM_COMPAT16_TABLE_SPEC_SIZE; off += 16) {
+        struct csm_compat16_table *table = (struct csm_compat16_table *)(bytes + off);
         if (table->signature == CSM_COMPAT16_SIGNATURE
          && table->table_length >= CSM_COMPAT16_TABLE_SPEC_SIZE
-         && table->table_length <= size - off
-         && byte_sum(table, table->table_length) == 0) {
+         && table->table_length <= size - off && byte_sum(table, table->table_length) == 0) {
             return table;
         }
     }
@@ -84,9 +81,7 @@ bool csm_copy_rsdp(
     return true;
 }
 
-void csm_fill_init_table(
-    struct csm_init_table *table, const struct csm_init_params *params
-) {
+void csm_fill_init_table(struct csm_init_table *table, const struct csm_init_params *params) {
     memset(table, 0, sizeof(struct csm_init_table));
     // Kept by the Intel CSM Specification 0.98 for older CSM16s: where the low
     // PMM block starts.
@@ -99,9 +94,7 @@ void csm_fill_init_table(
     table->low_pmm_memory_size_in_bytes = params->low_pmm_size;
 }
 
-void csm_fill_boot_table(
-    struct csm_boot_table *table, const struct csm_boot_params *params
-) {
+void csm_fill_boot_table(struct csm_boot_table *table, const struct csm_boot_params *params) {
     memset(table, 0, sizeof(struct csm_boot_table));
     table->major_version = CSM_BOOT_TABLE_MAJOR_VERSION;
     table->minor_version = CSM_BOOT_TABLE_MINOR_VERSION;
@@ -115,8 +108,7 @@ void csm_fill_boot_table(
 }
 
 static void bbs_describe(
-    struct csm_bbs_entry *entry, const struct handoff_block_device *device,
-    uint16_t priority
+    struct csm_bbs_entry *entry, const struct handoff_block_device *device, uint16_t priority
 ) {
     memset(entry, 0, sizeof(struct csm_bbs_entry));
     entry->boot_priority = priority;
@@ -126,8 +118,7 @@ static void bbs_describe(
     entry->class = device->base_class;
     entry->subclass = device->subclass;
     entry->device_type = device->bbs_type;
-    entry->status_flags = CSM_BBS_STATUS_ENABLED
-        | CSM_BBS_STATUS_MEDIA_PRESENT;
+    entry->status_flags = CSM_BBS_STATUS_ENABLED | CSM_BBS_STATUS_MEDIA_PRESENT;
 }
 
 static void bbs_ignore(struct csm_bbs_entry *entry) {
@@ -136,8 +127,8 @@ static void bbs_ignore(struct csm_bbs_entry *entry) {
 }
 
 size_t csm_fill_bbs_table(
-    struct csm_bbs_entry *table, size_t max_entries,
-    const struct handoff_block_device *devices, size_t device_count
+    struct csm_bbs_entry *table, size_t max_entries, const struct handoff_block_device *devices,
+    size_t device_count
 ) {
     size_t used = CSM_BBS_DEVICE_FIRST;
     uint16_t next_priority = 1;
@@ -177,14 +168,10 @@ size_t csm_fill_bbs_table(
     return used < max_entries ? used : max_entries;
 }
 
-void csm_fill_oprom_table(
-    struct csm_oprom_table *table, const struct csm_oprom_params *params
-) {
+void csm_fill_oprom_table(struct csm_oprom_table *table, const struct csm_oprom_params *params) {
     memset(table, 0, sizeof(struct csm_oprom_table));
-    table->pnp_installation_check_segment
-        = params->compat16->pnp_installation_check_segment;
-    table->pnp_installation_check_offset
-        = params->compat16->pnp_installation_check_offset;
+    table->pnp_installation_check_segment = params->compat16->pnp_installation_check_segment;
+    table->pnp_installation_check_offset = params->compat16->pnp_installation_check_offset;
     table->oprom_segment = params->segment;
     table->pci_bus = params->address.bus;
     table->pci_device_function = params->address.devfn;

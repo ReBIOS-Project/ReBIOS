@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -86,8 +87,7 @@ static size_t describe_guest(char *buf, size_t size) {
     }
     int len = snprintf(
         buf, size, "Its guest last exited with %s %#x, at RIP %#llx\n",
-        virt_vmx ? "basic reason" : "code", v->last_exit,
-        (unsigned long long)vcpu_rip(v)
+        virt_vmx ? "basic reason" : "code", v->last_exit, (unsigned long long)vcpu_rip(v)
     );
     return len < 0 ? 0 : (size_t)len;
 }
@@ -102,8 +102,7 @@ void virt_reset(bool shown) {
 
 bool virt_init(void) {
     struct cpuid_regs vendor = cpuid(0, 0);
-    bool intel = vendor.ebx == 0x756e6547 && vendor.edx == 0x49656e69
-        && vendor.ecx == 0x6c65746e;
+    bool intel = vendor.ebx == 0x756e6547 && vendor.edx == 0x49656e69 && vendor.ecx == 0x6c65746e;
 
     if (intel && vmx_supported()) {
         virt_vmx = true;
@@ -129,8 +128,9 @@ bool virt_init(void) {
         virt_intercept_msr(MSR_VM_CR, true, true);
         virt_intercept_msr(MSR_VM_HSAVE_PA, true, true);
         uint32_t features = cpuid(0x80000001, 0).ecx;
-        breakpoint_masks = (features & ((uint32_t)1 << 30)) != 0 ? 4
-            : (features & ((uint32_t)1 << 26)) != 0 ? 1 : 0;
+        breakpoint_masks = (features & ((uint32_t)1 << 30)) != 0
+                         ? 4
+                         : (features & ((uint32_t)1 << 26)) != 0 ? 1 : 0;
     } else {
         return false;
     }
@@ -145,8 +145,7 @@ void virt_cpu_init(void) {
     // The host needs none of the protections the firmware may have turned on,
     // and control-flow enforcement would need shadow stacks it lacks.
     uintptr_t cr4 = read_cr4();
-    cr4 &= ~(uintptr_t)(CR4_CET | CR4_SMEP | CR4_SMAP | CR4_PKE | CR4_UMIP
-        | CR4_PCIDE);
+    cr4 &= ~(uintptr_t)(CR4_CET | CR4_SMEP | CR4_SMAP | CR4_PKE | CR4_UMIP | CR4_PCIDE);
     // The host executes XSETBV for the guest.
     if ((cpuid(1, 0).ecx & ((uint32_t)1 << 26)) != 0) {
         cr4 |= CR4_OSXSAVE;
@@ -304,7 +303,7 @@ void virt_x2apic_icr_passed(uint32_t msr) {
 struct vcpu *vcpu_create(struct cpu *cpu) {
     struct vcpu *v = kmalloc(sizeof(struct vcpu));
     v->cpu = cpu;
-    v->sipi = VCPU_SIPI_RUNNING;
+    atomic_store_explicit(&v->sipi, VCPU_SIPI_RUNNING, memory_order_release);
     cpu->vcpu = v;
     if (virt_vmx) {
         vmx_vcpu_init(v);
@@ -319,20 +318,20 @@ struct vcpu *vcpu_create(struct cpu *cpu) {
 }
 
 static struct spinlock world_lock;
-static struct cpu *world_owner;
+static _Atomic(struct cpu *) world_owner;
 // Odd while the others are paused.
-static uint64_t world_epoch;
-static uint32_t world_acks;
+static _Atomic(uint64_t) world_epoch;
+static _Atomic(uint32_t) world_acks;
 
 static void service_pause(struct vcpu *v) {
     for (;;) {
-        uint64_t epoch = __atomic_load_n(&world_epoch, __ATOMIC_ACQUIRE);
+        uint64_t epoch = atomic_load_explicit(&world_epoch, memory_order_acquire);
         if ((epoch & 1) == 0
-         || __atomic_load_n(&world_owner, __ATOMIC_ACQUIRE) == v->cpu) {
+         || atomic_load_explicit(&world_owner, memory_order_acquire) == v->cpu) {
             return;
         }
-        __atomic_add_fetch(&world_acks, 1, __ATOMIC_ACQ_REL);
-        while (__atomic_load_n(&world_epoch, __ATOMIC_ACQUIRE) == epoch) {
+        atomic_fetch_add_explicit(&world_acks, 1, memory_order_acq_rel);
+        while (atomic_load_explicit(&world_epoch, memory_order_acquire) == epoch) {
             cpu_relax();
         }
     }
@@ -345,29 +344,28 @@ void vcpu_pause_others(void) {
         service_pause(self->vcpu);
         cpu_relax();
     }
-    __atomic_store_n(&world_acks, 0, __ATOMIC_RELAXED);
-    __atomic_store_n(&world_owner, self, __ATOMIC_RELAXED);
-    __atomic_add_fetch(&world_epoch, 1, __ATOMIC_SEQ_CST);
+    atomic_store_explicit(&world_acks, 0, memory_order_relaxed);
+    atomic_store_explicit(&world_owner, self, memory_order_relaxed);
+    atomic_fetch_add_explicit(&world_epoch, 1, memory_order_seq_cst);
     // Those waiting for a start-up IPI stay out of the guest anyway.
     uint32_t expected = 0;
     for (size_t i = 0; i < smp_cpu_count(); i++) {
         struct cpu *cpu = smp_cpu(i);
         struct vcpu *v = cpu->vcpu;
-        if (cpu != self && __atomic_load_n(&cpu->online, __ATOMIC_ACQUIRE)
-         && v != NULL
-         && __atomic_load_n(&v->sipi, __ATOMIC_ACQUIRE) != VCPU_SIPI_WAITING) {
+        if (cpu != self && atomic_load_explicit(&cpu->online, memory_order_acquire) && v != NULL
+         && atomic_load_explicit(&v->sipi, memory_order_acquire) != VCPU_SIPI_WAITING) {
             expected++;
             vcpu_kick(cpu);
         }
     }
-    while (__atomic_load_n(&world_acks, __ATOMIC_ACQUIRE) < expected) {
+    while (atomic_load_explicit(&world_acks, memory_order_acquire) < expected) {
         cpu_relax();
     }
 }
 
 void vcpu_resume_others(void) {
-    __atomic_store_n(&world_owner, NULL, __ATOMIC_RELAXED);
-    __atomic_add_fetch(&world_epoch, 1, __ATOMIC_SEQ_CST);
+    atomic_store_explicit(&world_owner, NULL, memory_order_relaxed);
+    atomic_fetch_add_explicit(&world_epoch, 1, memory_order_seq_cst);
     spinlock_release(&world_lock);
 }
 
@@ -397,17 +395,16 @@ static void set_guest_debugctl(struct vcpu *v, uint64_t value) {
 // The faults a stepped instruction may raise, which SVM intercepts so that the
 // step ends there.
 #define STEP_EXCEPTIONS \
-    ((uint32_t)1 << 0 | (uint32_t)1 << 1 | (uint32_t)1 << 7 \
-        | (uint32_t)1 << 12 | (uint32_t)1 << 13 | (uint32_t)1 << 14 \
-        | (uint32_t)1 << 16 | (uint32_t)1 << 17 | (uint32_t)1 << 19)
+    ((uint32_t)1 << 0 | (uint32_t)1 << 1 | (uint32_t)1 << 7 | (uint32_t)1 << 12 \
+   | (uint32_t)1 << 13 | (uint32_t)1 << 14 | (uint32_t)1 << 16 | (uint32_t)1 << 17 \
+   | (uint32_t)1 << 19)
 
 void vcpu_single_step(struct vcpu *v, bool on) {
     if (virt_vmx) {
         uint64_t controls = vmx_read(VMCS_PROC_CONTROLS);
         vmx_write(
             VMCS_PROC_CONTROLS,
-            on ? controls | PROC_MONITOR_TRAP_FLAG
-                : controls & ~(uint64_t)PROC_MONITOR_TRAP_FLAG
+            on ? controls | PROC_MONITOR_TRAP_FLAG : controls & ~(uint64_t)PROC_MONITOR_TRAP_FLAG
         );
         return;
     }
@@ -450,15 +447,13 @@ static void watchdog(struct vcpu *v) {
     struct cpu *cpu = v->cpu;
     uint64_t now = time_ns();
     uint64_t held = now - cpu->slice_start;
-    if (cpu->slice_start == 0 || held < WATCHDOG_NS
-     || now < cpu->watchdog_next) {
+    if (cpu->slice_start == 0 || held < WATCHDOG_NS || now < cpu->watchdog_next) {
         return;
     }
     cpu->watchdog_next = now + WATCHDOG_REPORT_NS;
     printf(
-        "Exit %#x kept CPU %u from the guest for %llu.%03llu ms\n",
-        v->last_exit, cpu->index, (unsigned long long)(held / 1000000),
-        (unsigned long long)(held / 1000 % 1000)
+        "Exit %#x kept CPU %u from the guest for %llu.%03llu ms\n", v->last_exit, cpu->index,
+        (unsigned long long)(held / 1000000), (unsigned long long)(held / 1000 % 1000)
     );
 }
 
@@ -477,10 +472,10 @@ void vcpu_before_entry(struct vcpu *v) {
     nvmx_wait(v);
     // VMX operation blocks INIT, which its guest's exits take.
     if (!nvmx_holds_init(v)
-     && __atomic_exchange_n(&v->cpu->init_pending, false, __ATOMIC_ACQUIRE)) {
+     && atomic_exchange_explicit(&v->cpu->init_pending, false, memory_order_acquire)) {
         vcpu_init_signal(v);
     }
-    uint64_t generation = __atomic_load_n(&gpt_generation, __ATOMIC_ACQUIRE);
+    uint64_t generation = atomic_load_explicit(&gpt_generation, memory_order_acquire);
     if (v->gpt_generation != generation) {
         v->gpt_generation = generation;
         if (virt_vmx) {
@@ -514,14 +509,12 @@ void vcpu_before_entry(struct vcpu *v) {
 }
 
 void vcpu_kick(struct cpu *cpu) {
-    if (cpu == this_cpu()
-     || !__atomic_load_n(&cpu->online, __ATOMIC_ACQUIRE)) {
+    if (cpu == this_cpu() || !atomic_load_explicit(&cpu->online, memory_order_acquire)) {
         return;
     }
     // One waiting for a start-up IPI catches up before it enters the guest.
     struct vcpu *v = cpu->vcpu;
-    if (v == NULL
-     || __atomic_load_n(&v->sipi, __ATOMIC_ACQUIRE) == VCPU_SIPI_WAITING) {
+    if (v == NULL || atomic_load_explicit(&v->sipi, memory_order_acquire) == VCPU_SIPI_WAITING) {
         return;
     }
     vcpu_wake(cpu);
@@ -530,18 +523,17 @@ void vcpu_kick(struct cpu *cpu) {
 // Interrupts always make the guest exit, and one pending at an entry makes it
 // exit at once, as one ends a halt.
 void vcpu_wake(struct cpu *cpu) {
-    if (cpu == this_cpu()
-     || !__atomic_load_n(&cpu->online, __ATOMIC_ACQUIRE)) {
+    if (cpu == this_cpu() || !atomic_load_explicit(&cpu->online, memory_order_acquire)) {
         return;
     }
-    if (!__atomic_exchange_n(&cpu->kick, true, __ATOMIC_ACQ_REL)) {
+    if (!atomic_exchange_explicit(&cpu->kick, true, memory_order_acq_rel)) {
         lapic_send_ipi(cpu->apic_id, ICR_DELIVERY_FIXED | VLAPIC_KICK_VECTOR);
     }
 }
 
 void vcpu_exit_soon(struct vcpu *v) {
     struct cpu *cpu = v->cpu;
-    if (!__atomic_exchange_n(&cpu->kick, true, __ATOMIC_ACQ_REL)) {
+    if (!atomic_exchange_explicit(&cpu->kick, true, memory_order_acq_rel)) {
         lapic_send_ipi(cpu->apic_id, ICR_DELIVERY_FIXED | VLAPIC_KICK_VECTOR);
     }
 }
@@ -550,15 +542,15 @@ void vcpu_wait(struct vcpu *v, bool (*ends)(struct vcpu *v), bool spin) {
     struct cpu *cpu = v->cpu;
     // SVM's host takes interrupts and NMIs only with GIF set.
     if (!virt_vmx) {
-        asm volatile ("stgi" :: : "memory");
+        asm volatile ("stgi" ::: "memory");
     }
-    cpu->taking_interrupts = true;
+    atomic_store_explicit(&cpu->taking_interrupts, true, memory_order_relaxed);
     vlapic_halt(v, true);
     for (;;) {
         // Each look at whether the wait ends starts a slice, so that the work
         // done meanwhile holds that up no longer than an exit holds the guest.
         cpu_slice_start();
-        __atomic_store_n(&cpu->kicked, false, __ATOMIC_SEQ_CST);
+        atomic_store_explicit(&cpu->kicked, false, memory_order_seq_cst);
         service_pause(v);
         tick_return_check(v);
         if (cpu->bsp) {
@@ -576,18 +568,24 @@ void vcpu_wait(struct vcpu *v, bool (*ends)(struct vcpu *v), bool spin) {
         vga_refresh();
         // Work under way goes on while the guest waits, the boot processor
         // keeping the AML and USB tasks going.
-        if (spin || vga_redrawing()
-         || (cpu->bsp && (acpi_working() || usb_working()))) {
-            asm volatile ("sti\n\tnop\n\tcli" :: : "memory");
+        if (spin || vga_redrawing() || (cpu->bsp && (acpi_working() || usb_working()))) {
+            asm volatile (
+                "sti\n\t"
+                "nop\n\t"
+                "cli"
+                :
+                :
+                : "memory"
+            );
             cpu_relax();
         } else {
             cpu_halt();
         }
     }
     vlapic_halt(v, false);
-    cpu->taking_interrupts = false;
+    atomic_store_explicit(&cpu->taking_interrupts, false, memory_order_relaxed);
     if (!virt_vmx) {
-        asm volatile ("clgi" :: : "memory");
+        asm volatile ("clgi" ::: "memory");
     }
 }
 
@@ -662,8 +660,7 @@ uint64_t vcpu_cr4(struct vcpu *v) {
 // User addresses clear bit 63 (SDM 325462-093 Vol. 3A, 4.4.1). Upper Address
 // Ignore takes bits 63:57 of DS and ES accesses for bit 56's.
 uint64_t vcpu_untagged(struct vcpu *v, size_t reg, uintptr_t linear) {
-    if (!virt_vmx && (reg == SEG_DS || reg == SEG_ES)
-     && (vcpu_efer(v) & EFER_UAIE) != 0) {
+    if (!virt_vmx && (reg == SEG_DS || reg == SEG_ES) && (vcpu_efer(v) & EFER_UAIE) != 0) {
         return (uint64_t)((int64_t)(linear << 7) >> 7);
     }
     int bit;
@@ -679,8 +676,7 @@ uint64_t vcpu_untagged(struct vcpu *v, size_t reg, uintptr_t linear) {
     } else {
         return linear;
     }
-    uint64_t metadata = (((uint64_t)1 << 63) - 1)
-        & ~(((uint64_t)2 << bit) - 1);
+    uint64_t metadata = (((uint64_t)1 << 63) - 1) & ~(((uint64_t)2 << bit) - 1);
     return (linear >> bit & 1) != 0 ? linear | metadata : linear & ~metadata;
 }
 
@@ -780,8 +776,7 @@ void vcpu_load_mode(struct vcpu *v, const struct vcpu_mode *mode) {
         vmx_write(VMCS_GUEST_CR4, vmx_cr4_real(mode->cr4));
         vmx_write(VMCS_GUEST_CR3, mode->cr3);
         vmx_write(VMCS_GUEST_EFER, mode->efer);
-        uint64_t entry = vmx_read(VMCS_ENTRY_CONTROLS)
-            & ~(uint64_t)ENTRY_IA32E_MODE_GUEST;
+        uint64_t entry = vmx_read(VMCS_ENTRY_CONTROLS) & ~(uint64_t)ENTRY_IA32E_MODE_GUEST;
         if ((mode->efer & EFER_LMA) != 0) {
             entry |= ENTRY_IA32E_MODE_GUEST;
         }
@@ -808,8 +803,7 @@ bool vcpu_guest_tf(struct vcpu *v) {
     // With BTF, TF steps only branches (SDM 325462-093 Vol. 3B, 20.4.3; APM
     // 24593 rev. 3.45, 13.1.6.2), and the hypervisor carries out none for the
     // guest.
-    return (vcpu_rflags(v) & RFLAGS_TF) != 0
-        && (guest_debugctl(v) & DEBUGCTL_BTF) == 0;
+    return (vcpu_rflags(v) & RFLAGS_TF) != 0 && (guest_debugctl(v) & DEBUGCTL_BTF) == 0;
 }
 
 void vcpu_debug_trap(struct vcpu *v, uint64_t dr6) {
@@ -825,20 +819,16 @@ void vcpu_debug_trap(struct vcpu *v, uint64_t dr6) {
     if (virt_vmx) {
         // VMX switches DR7 but not DR6, so the processor's is the guest's.
         uint64_t value;
-        asm volatile ("mov %%dr6, %0" : "=r"(value));
-        asm volatile ("mov %0, %%dr6" :: "r"(value | dr6));
-        vmx_write(
-            VMCS_GUEST_DR7, vmx_read(VMCS_GUEST_DR7) & ~(uint64_t)DR7_GD
-        );
+        asm volatile ("movq %%dr6, %0" : "=r"(value));
+        asm volatile ("movq %0, %%dr6" :: "r"(value | dr6));
+        vmx_write(VMCS_GUEST_DR7, vmx_read(VMCS_GUEST_DR7) & ~(uint64_t)DR7_GD);
     } else {
         v->vmcb->save.dr6 |= dr6;
         v->vmcb->save.dr7 &= ~(uint64_t)DR7_GD;
     }
     uint64_t debugctl = guest_debugctl(v);
     if ((debugctl & (DEBUGCTL_LBR | DEBUGCTL_BTF)) != 0) {
-        set_guest_debugctl(
-            v, debugctl & ~(uint64_t)(DEBUGCTL_LBR | DEBUGCTL_BTF)
-        );
+        set_guest_debugctl(v, debugctl & ~(uint64_t)(DEBUGCTL_LBR | DEBUGCTL_BTF));
     }
     vcpu_inject_exception(v, 1, false, 0);
 }
@@ -852,19 +842,19 @@ static uint64_t guest_dr(size_t n) {
     uint64_t value;
     switch (n) {
         case 0: {
-            asm volatile ("mov %%dr0, %0" : "=r"(value));
+            asm volatile ("movq %%dr0, %0" : "=r"(value));
             break;
         }
         case 1: {
-            asm volatile ("mov %%dr1, %0" : "=r"(value));
+            asm volatile ("movq %%dr1, %0" : "=r"(value));
             break;
         }
         case 2: {
-            asm volatile ("mov %%dr2, %0" : "=r"(value));
+            asm volatile ("movq %%dr2, %0" : "=r"(value));
             break;
         }
         default: {
-            asm volatile ("mov %%dr3, %0" : "=r"(value));
+            asm volatile ("movq %%dr3, %0" : "=r"(value));
             break;
         }
     }
@@ -886,15 +876,12 @@ static uint64_t breakpoints_hit(
     uint64_t hits = 0;
     for (size_t n = 0; n < 4; n++) {
         unsigned int rw = (dr7 >> (16 + 4 * n)) & 3;
-        if (((dr7 >> (2 * n)) & 3) == 0
-         || (kinds & ((uint32_t)1 << rw)) == 0) {
+        if (((dr7 >> (2 * n)) & 3) == 0 || (kinds & ((uint32_t)1 << rw)) == 0) {
             continue;
         }
         uint64_t ignored = lengths[(dr7 >> (18 + 4 * n)) & 3] - 1;
         if (n < breakpoint_masks) {
-            ignored |= (uint32_t)rdmsr(
-                n == 0 ? MSR_DR0_ADDR_MASK : MSR_DR1_ADDR_MASK + n - 1
-            );
+            ignored |= (uint32_t)rdmsr(n == 0 ? MSR_DR0_ADDR_MASK : MSR_DR1_ADDR_MASK + n - 1);
         }
         uint64_t dr = guest_dr(n);
         for (size_t i = 0; i < size; i++) {
@@ -907,13 +894,10 @@ static uint64_t breakpoints_hit(
     return hits;
 }
 
-void vcpu_data_access(
-    struct vcpu *v, uintptr_t linear, size_t size, bool write
-) {
+void vcpu_data_access(struct vcpu *v, uintptr_t linear, size_t size, bool write) {
     // R/W 01 breaks on writes, 11 on reads and writes.
     v->db_pending |= breakpoints_hit(
-        v, linear, size,
-        write ? (uint32_t)1 << 1 | (uint32_t)1 << 3 : (uint32_t)1 << 3
+        v, linear, size, write ? (uint32_t)1 << 1 | (uint32_t)1 << 3 : (uint32_t)1 << 3
     );
 }
 
@@ -970,9 +954,7 @@ void vcpu_advance(struct vcpu *v, size_t length) {
         if ((intr & (INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS)) != 0) {
             vmx_write(
                 VMCS_GUEST_INTERRUPTIBILITY,
-                intr
-                    & ~(uint64_t)(INTERRUPTIBILITY_STI
-                        | INTERRUPTIBILITY_MOV_SS)
+                intr & ~(uint64_t)(INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS)
             );
         }
     } else {
@@ -988,9 +970,7 @@ void vcpu_skip_instruction(struct vcpu *v) {
         return;
     }
     if (svm_nrips) {
-        vcpu_advance(
-            v, (unsigned int)(v->vmcb->control.nrip - v->vmcb->save.rip)
-        );
+        vcpu_advance(v, (unsigned int)(v->vmcb->control.nrip - v->vmcb->save.rip));
         return;
     }
     // One the hypervisor cannot read, as where another processor just changed
@@ -1006,9 +986,7 @@ void vcpu_skip_instruction(struct vcpu *v) {
     vcpu_advance(v, len);
 }
 
-void vcpu_inject_exception(
-    struct vcpu *v, uint8_t vector, bool has_error, uint32_t error
-) {
+void vcpu_inject_exception(struct vcpu *v, uint8_t vector, bool has_error, uint32_t error) {
     // Breakpoints not yet reported are lost (SDM 325462-093 Vol. 3B,
     // 20.3.1.2).
     v->db_pending = 0;
@@ -1060,15 +1038,15 @@ void vcpu_wait_for_sipi(struct vcpu *v) {
     vcpu_set_real_mode(v, 0, 0);
     struct cpu *cpu = v->cpu;
     if (!virt_vmx) {
-        asm volatile ("stgi" :: : "memory");
+        asm volatile ("stgi" ::: "memory");
     }
-    cpu->taking_interrupts = true;
-    __atomic_store_n(&v->sipi, VCPU_SIPI_WAITING, __ATOMIC_RELEASE);
+    atomic_store_explicit(&cpu->taking_interrupts, true, memory_order_relaxed);
+    atomic_store_explicit(&v->sipi, VCPU_SIPI_WAITING, memory_order_release);
     int32_t vector;
     for (;;) {
         cpu_slice_start();
-        __atomic_store_n(&cpu->kicked, false, __ATOMIC_SEQ_CST);
-        if ((vector = __atomic_load_n(&v->sipi, __ATOMIC_ACQUIRE)) >= 0) {
+        atomic_store_explicit(&cpu->kicked, false, memory_order_seq_cst);
+        if ((vector = atomic_load_explicit(&v->sipi, memory_order_acquire)) >= 0) {
             break;
         }
         if (cpu->bsp) {
@@ -1078,9 +1056,9 @@ void vcpu_wait_for_sipi(struct vcpu *v) {
         vlapic_timer_program(v);
         cpu_halt();
     }
-    cpu->taking_interrupts = false;
+    atomic_store_explicit(&cpu->taking_interrupts, false, memory_order_relaxed);
     if (!virt_vmx) {
-        asm volatile ("clgi" :: : "memory");
+        asm volatile ("clgi" ::: "memory");
     }
     vcpu_startup(v, (uint8_t)vector);
 }
@@ -1096,7 +1074,7 @@ void vcpu_init_signal(struct vcpu *v) {
 }
 
 void vcpu_startup(struct vcpu *v, uint8_t vector) {
-    __atomic_store_n(&v->sipi, VCPU_SIPI_RUNNING, __ATOMIC_RELEASE);
+    atomic_store_explicit(&v->sipi, VCPU_SIPI_RUNNING, memory_order_release);
     if (!smp_guest_cpu(v->cpu->apic_id)) {
         vcpu_wait_for_sipi(v);
         return;
@@ -1138,8 +1116,7 @@ void vcpu_set_real_mode(struct vcpu *v, uint16_t cs, uint16_t ip) {
         vmx_write(VMCS_GUEST_CR3, 0);
         vmx_write(VMCS_GUEST_EFER, 0);
         vmx_write(
-            VMCS_ENTRY_CONTROLS,
-            vmx_read(VMCS_ENTRY_CONTROLS) & ~(uint64_t)ENTRY_IA32E_MODE_GUEST
+            VMCS_ENTRY_CONTROLS, vmx_read(VMCS_ENTRY_CONTROLS) & ~(uint64_t)ENTRY_IA32E_MODE_GUEST
         );
         vmx_write(VMCS_GUEST_INTERRUPTIBILITY, 0);
         vmx_write(VMCS_GUEST_ACTIVITY_STATE, ACTIVITY_ACTIVE);

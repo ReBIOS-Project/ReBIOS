@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -44,15 +45,12 @@
 // The deepest walk has 5 levels, PAE paging's PDPTE besides.
 #define MAX_LEVELS 5
 
-static bool guest_phys_access(
-    uintptr_t gpa, void *buf, size_t len, bool write
-) {
+static bool guest_phys_access(uintptr_t gpa, void *buf, size_t len, bool write) {
     uint8_t *p = buf;
     while (len != 0) {
         uintptr_t hpa;
         uint32_t prot;
-        if (!gpt_translate(gpa, &hpa, &prot, NULL)
-         || (prot & (write ? GPT_W : GPT_R)) == 0) {
+        if (!gpt_translate(gpa, &hpa, &prot, NULL) || (prot & (write ? GPT_W : GPT_R)) == 0) {
             return false;
         }
         size_t chunk = PAGE_SIZE - (gpa & (PAGE_SIZE - 1));
@@ -83,8 +81,8 @@ bool guest_phys_write(uintptr_t gpa, const void *buf, size_t len) {
 // qualification would: through the guest's EPT where the vCPU runs the guest's
 // guest, else past the A20 gate.
 static bool reach(
-    struct vcpu *v, uintptr_t gpa, uint64_t access, uintptr_t linear,
-    uint64_t *out, uint32_t *pf_error
+    struct vcpu *v, uintptr_t gpa, uint64_t access, uintptr_t linear, uint64_t *out,
+    uint32_t *pf_error
 ) {
     if (nvmx_ept_active(v)) {
         if (!nvmx_ept_translate(v, gpa, access, linear, out)) {
@@ -98,12 +96,9 @@ static bool reach(
 }
 
 static bool read_entry(
-    struct vcpu *v, uintptr_t gpa, uintptr_t linear, uint64_t *entry,
-    bool wide, uint32_t *pf_error
+    struct vcpu *v, uintptr_t gpa, uintptr_t linear, uint64_t *entry, bool wide, uint32_t *pf_error
 ) {
-    bool reached = reach(
-        v, gpa, EPT_QUAL_READ | EPT_QUAL_LINEAR, linear, &gpa, pf_error
-    );
+    bool reached = reach(v, gpa, EPT_QUAL_READ | EPT_QUAL_LINEAR, linear, &gpa, pf_error);
     if (!reached) {
         return false;
     }
@@ -122,14 +117,12 @@ static bool read_entry(
 // it was: false where the entry changed meanwhile, for the walk to start
 // again. Entries the guest cannot write are left as they are.
 static bool mark_entry(
-    struct vcpu *v, uintptr_t gpa, uintptr_t linear, uint64_t was,
-    uint64_t set, bool wide, uint32_t *pf_error
+    struct vcpu *v, uintptr_t gpa, uintptr_t linear, uint64_t was, uint64_t set, bool wide,
+    uint32_t *pf_error
 ) {
     uintptr_t hpa;
     uint32_t prot;
-    bool reached = reach(
-        v, gpa, EPT_QUAL_WRITE | EPT_QUAL_LINEAR, linear, &gpa, pf_error
-    );
+    bool reached = reach(v, gpa, EPT_QUAL_WRITE | EPT_QUAL_LINEAR, linear, &gpa, pf_error);
     if (!reached) {
         return false;
     }
@@ -138,15 +131,15 @@ static bool mark_entry(
     }
     if (wide) {
         uint64_t expected = was;
-        return __atomic_compare_exchange_n(
-            (uint64_t *)(uintptr_t)hpa, &expected, was | set, false,
-            __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST
+        return atomic_compare_exchange_strong_explicit(
+            (_Atomic(uint64_t) *)(uintptr_t)hpa, &expected, was | set, memory_order_seq_cst,
+            memory_order_seq_cst
         );
     }
     uint32_t expected = (uint32_t)was;
-    return __atomic_compare_exchange_n(
-        (uint32_t *)(uintptr_t)hpa, &expected, (uint32_t)(was | set), false,
-        __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST
+    return atomic_compare_exchange_strong_explicit(
+        (_Atomic(uint32_t) *)(uintptr_t)hpa, &expected, (uint32_t)(was | set),
+        memory_order_seq_cst, memory_order_seq_cst
     );
 }
 
@@ -158,7 +151,7 @@ static uint32_t guest_pkru(void) {
     write_cr4(cr4 | CR4_PKE);
     uint32_t pkru;
     uint32_t edx;
-    __asm__ volatile ("rdpkru" : "=a"(pkru), "=d"(edx) : "c"(0));
+    asm volatile ("rdpkru" : "=a"(pkru), "=d"(edx) : "c"(0));
     write_cr4(cr4);
     return pkru;
 }
@@ -168,9 +161,7 @@ static uint32_t guest_pkru(void) {
 // finds them (mmu.c, __reset_rsvds_bits_mask()); but 32-bit paging's 4 MiB
 // pages reserve bit 21 and the address bits past MAXPHYADDR, up to 40, alone.
 // PAE paging's PDPTEs are level 2 with pae.
-static uint64_t reserved_bits(
-    bool wide, bool pae, size_t level, bool large, bool nx
-) {
+static uint64_t reserved_bits(bool wide, bool pae, size_t level, bool large, bool nx) {
     static unsigned int phys_bits;
     static bool gb_pages;
     static bool pse36;
@@ -179,20 +170,18 @@ static uint64_t reserved_bits(
         if (cpuid(0x80000000, 0).eax >= 0x80000008) {
             phys_bits = cpuid(0x80000008, 0).eax & 0xff;
         }
-        gb_pages = (cpuid(0x80000001, 0).edx & CPUID_80000001_EDX_1G_PAGES)
-            != 0;
+        gb_pages = (cpuid(0x80000001, 0).edx & CPUID_80000001_EDX_1G_PAGES) != 0;
         pse36 = (cpuid(1, 0).edx & CPUID_1_EDX_PSE36) != 0;
     }
     if (!wide) {
         unsigned int bits = phys_bits > 40 ? 40 : phys_bits;
         unsigned int low = pse36 && bits > 32 ? 13 + (bits - 32) : 13;
-        return large ? (((uint64_t)1 << 22) - 1) & ~(((uint64_t)1 << low) - 1)
-            : 0;
+        return large ? (((uint64_t)1 << 22) - 1) & ~(((uint64_t)1 << low) - 1) : 0;
     }
     // Address bits past MAXPHYADDR, up to 51 (62 with PAE paging), and NX
     // where IA32_EFER.NXE is clear.
     uint64_t high = ~(((uint64_t)1 << phys_bits) - 1)
-        & ((pae ? (uint64_t)1 << 63 : (uint64_t)1 << 52) - 1);
+                  & ((pae ? (uint64_t)1 << 63 : (uint64_t)1 << 52) - 1);
     if (!nx) {
         high |= (uint64_t)1 << 63;
     }
@@ -207,8 +196,7 @@ static uint64_t reserved_bits(
             return high | (large ? (uint64_t)0x1fe000 : 0);
         }
         case 2: {
-            return high | (gb_pages ? 0 : PTE_PS)
-                | (large ? (uint64_t)0x3fffe000 : 0);
+            return high | (gb_pages ? 0 : PTE_PS) | (large ? (uint64_t)0x3fffe000 : 0);
         }
         default: {
             // PML4Es and PML5Es map no pages; AMD's reserve bit 8 too.
@@ -218,8 +206,7 @@ static uint64_t reserved_bits(
 }
 
 bool guest_pdpte_valid(uint64_t pdpte) {
-    return (pdpte & PTE_P) == 0
-        || (pdpte & reserved_bits(true, true, 2, false, true)) == 0;
+    return (pdpte & PTE_P) == 0 || (pdpte & reserved_bits(true, true, 2, false, true)) == 0;
 }
 
 static uint64_t data_access(bool write, bool fetch) {
@@ -237,8 +224,8 @@ static uint64_t data_access(bool write, bool fetch) {
 // is a supervisor-mode one the processor makes for itself, as to descriptor
 // tables, which SMAP cannot be lifted for.
 static bool linear_to_phys(
-    struct vcpu *v, uintptr_t linear, bool write, bool fetch, bool user,
-    bool implicit, uint64_t *gpa, uint32_t *pf_error
+    struct vcpu *v, uintptr_t linear, bool write, bool fetch, bool user, bool implicit,
+    uint64_t *gpa, uint32_t *pf_error
 ) {
     uint64_t cr0 = vcpu_cr0(v);
     uint64_t cr4 = vcpu_cr4(v);
@@ -246,16 +233,14 @@ static bool linear_to_phys(
 
     // The fetch flag is defined only with SMEP or with PAE paging's NX.
     bool fetch_flag = fetch
-        && ((cr4 & CR4_SMEP) != 0
-            || ((cr4 & CR4_PAE) != 0 && (efer & EFER_NXE) != 0));
+                   && ((cr4 & CR4_SMEP) != 0 || ((cr4 & CR4_PAE) != 0 && (efer & EFER_NXE) != 0));
 retry: *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0)
-    | (fetch_flag ? PF_ERROR_I : 0);
+                 | (fetch_flag ? PF_ERROR_I : 0);
 
     // Without paging, every linear address is a user-mode one, writable and
     // executable (SDM 325462-093 Vol. 3C, Table 30-7).
     if ((cr0 & CR0_PG) == 0) {
-        uint64_t access = data_access(write, fetch) | EPT_QUAL_USER
-            | EPT_QUAL_WRITABLE;
+        uint64_t access = data_access(write, fetch) | EPT_QUAL_USER | EPT_QUAL_WRITABLE;
         return reach(v, linear & 0xffffffff, access, linear, gpa, pf_error);
     }
 
@@ -276,8 +261,7 @@ retry: *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0)
             pdpte = vmx_read(VMCS_GUEST_PDPTE0 + 2 * i);
         } else {
             bool fetched = read_entry(
-                v, (vcpu_cr3(v) & 0xffffffe0) + i * 8, linear, &pdpte, true,
-                pf_error
+                v, (vcpu_cr3(v) & 0xffffffe0) + i * 8, linear, &pdpte, true, pf_error
             );
             if (!fetched) {
                 return false;
@@ -286,9 +270,7 @@ retry: *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0)
         if ((pdpte & PTE_P) == 0) {
             return false;
         }
-        if ((pdpte
-           & reserved_bits(true, true, 2, false, (efer & EFER_NXE) != 0))
-         != 0) {
+        if ((pdpte & reserved_bits(true, true, 2, false, (efer & EFER_NXE) != 0)) != 0) {
             *pf_error |= PF_ERROR_P | PF_ERROR_RSVD;
             return false;
         }
@@ -312,7 +294,7 @@ retry: *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0)
     unsigned int path = 0;
     for (size_t level = levels; level-- > 0; ) {
         unsigned int shift = wide ? 12 + 9 * level : 12 + 10 * level;
-        unsigned int index = (linear >> shift) & (wide ? 511 : 1023);
+        size_t index = (linear >> shift) & (wide ? 511 : 1023);
         uintptr_t entry_gpa = table + index * (wide ? 8 : 4);
         uint64_t entry;
         if (!read_entry(v, entry_gpa, linear, &entry, wide, pf_error)) {
@@ -321,10 +303,8 @@ retry: *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0)
         if ((entry & PTE_P) == 0) {
             return false;
         }
-        bool large = level > 0 && (entry & PTE_PS) != 0
-            && (wide || (cr4 & CR4_PSE) != 0);
-        if ((entry & reserved_bits(wide, pae, (unsigned int)level, large, nx))
-         != 0) {
+        bool large = level > 0 && (entry & PTE_PS) != 0 && (wide || (cr4 & CR4_PSE) != 0);
+        if ((entry & reserved_bits(wide, pae, (unsigned int)level, large, nx)) != 0) {
             *pf_error |= PF_ERROR_P | PF_ERROR_RSVD;
             return false;
         }
@@ -367,13 +347,11 @@ retry: *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0)
             }
             // Protection keys, of 4-level and 5-level paging alone, govern
             // data accesses (SDM 325462-093 Vol. 3A, 5.6.2).
-            if (!fetch && (efer & EFER_LMA) != 0
-             && (cr4 & (user_ok ? CR4_PKE : CR4_PKS)) != 0) {
-                uint64_t rights = user_ok ? guest_pkru()
-                    : rdmsr(MSR_IA32_PKRS);
+            if (!fetch && (efer & EFER_LMA) != 0 && (cr4 & (user_ok ? CR4_PKE : CR4_PKS)) != 0) {
+                uint64_t rights = user_ok ? guest_pkru() : rdmsr(MSR_IA32_PKRS);
                 rights >>= ((entry >> PTE_PKEY_SHIFT) & 0xf) * 2;
                 bool write_disabled = (rights & 2) != 0 && write
-                    && ((user_ok && user) || (cr0 & CR0_WP) != 0);
+                                   && ((user_ok && user) || (cr0 & CR0_WP) != 0);
                 if ((rights & 1) != 0 || write_disabled) {
                     *pf_error |= PF_ERROR_PK;
                     return false;
@@ -384,10 +362,9 @@ retry: *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0)
                 bool leaf = i == path - 1;
                 uint64_t set = PTE_A | (leaf && write ? PTE_D : 0);
                 bool unmarked = (entries[i] & set) != set
-                    && !mark_entry(
-                        v, entry_gpas[i], linear, entries[i], set, wide,
-                        pf_error
-                    );
+                             && !mark_entry(
+                                    v, entry_gpas[i], linear, entries[i], set, wide, pf_error
+                                );
                 if (unmarked) {
                     if ((*pf_error & PF_ERROR_EXIT) != 0) {
                         return false;
@@ -405,9 +382,7 @@ retry: *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0)
             if (!executable) {
                 access |= EPT_QUAL_XD;
             }
-            return reach(
-                v, base | (linear & page_mask), access, linear, gpa, pf_error
-            );
+            return reach(v, base | (linear & page_mask), access, linear, gpa, pf_error);
         }
         table = wide ? entry & PTE_ADDR : entry & 0xfffff000;
     }
@@ -415,8 +390,7 @@ retry: *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0)
 }
 
 bool guest_linear_to_phys(
-    struct vcpu *v, uintptr_t linear, bool write, bool fetch, uint64_t *gpa,
-    uint32_t *pf_error
+    struct vcpu *v, uintptr_t linear, bool write, bool fetch, uint64_t *gpa, uint32_t *pf_error
 ) {
     struct segment ss;
     vcpu_get_seg(v, SEG_SS, &ss);
@@ -427,15 +401,13 @@ bool guest_linear_to_phys(
 // What the processor reads and writes for itself, such as descriptor tables
 // and the TSS, it does with supervisor rights at any CPL.
 static bool system_access(
-    struct vcpu *v, uintptr_t linear, void *buf, size_t len, bool write,
-    uint32_t *pf_error, uint64_t *pf_linear
+    struct vcpu *v, uintptr_t linear, void *buf, size_t len, bool write, uint32_t *pf_error,
+    uint64_t *pf_linear
 ) {
     uint8_t *p = buf;
     while (len != 0) {
         uintptr_t gpa;
-        bool mapped = linear_to_phys(
-            v, linear, write, false, false, true, &gpa, pf_error
-        );
+        bool mapped = linear_to_phys(v, linear, write, false, false, true, &gpa, pf_error);
         if (!mapped) {
             *pf_linear = linear;
             return false;
@@ -453,24 +425,20 @@ static bool system_access(
 }
 
 bool guest_system_read(
-    struct vcpu *v, uintptr_t linear, void *buf, size_t len,
-    uint32_t *pf_error, uint64_t *pf_linear
+    struct vcpu *v, uintptr_t linear, void *buf, size_t len, uint32_t *pf_error,
+    uint64_t *pf_linear
 ) {
     return system_access(v, linear, buf, len, false, pf_error, pf_linear);
 }
 
 bool guest_system_write(
-    struct vcpu *v, uintptr_t linear, const void *buf, size_t len,
-    uint32_t *pf_error, uint64_t *pf_linear
+    struct vcpu *v, uintptr_t linear, const void *buf, size_t len, uint32_t *pf_error,
+    uint64_t *pf_linear
 ) {
-    return system_access(
-        v, linear, (void *)buf, len, true, pf_error, pf_linear
-    );
+    return system_access(v, linear, (void *)buf, len, true, pf_error, pf_linear);
 }
 
-bool guest_linear_read(
-    struct vcpu *v, uintptr_t linear, void *buf, size_t len, bool fetch
-) {
+bool guest_linear_read(struct vcpu *v, uintptr_t linear, void *buf, size_t len, bool fetch) {
     uint8_t *p = buf;
     while (len != 0) {
         uintptr_t gpa;

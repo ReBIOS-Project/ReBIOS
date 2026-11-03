@@ -50,8 +50,8 @@ struct usb_controller {
     volatile uint8_t *mmio;
     size_t mmio_size;
     struct tendril_hc *hc;
-    int state;
-    bool release_wanted;
+    _Atomic(int) state;
+    _Atomic(bool) release_wanted;
     // The ports it shares with an EHCI controller go back to that one, when
     // the OS takes that one.
     bool ports_to_ehci;

@@ -75,18 +75,14 @@ bool nvmx_ept_active(struct vcpu *v);
 // way an EPT violation's qualification gives one; false where that is an exit
 // instead, which waits for the next entry.
 bool nvmx_ept_translate(
-    struct vcpu *v, uintptr_t gpa, uint64_t access, uintptr_t linear,
-    uint64_t *out
+    struct vcpu *v, uintptr_t gpa, uint64_t access, uintptr_t linear, uint64_t *out
 );
 // Whether such an exit waits.
 bool nvmx_exit_pending(struct vcpu *v);
 // An exception that what the hypervisor carries out for the guest's guest
 // raises: whether the guest's exception bitmap makes it an exit instead, with
 // the qualification given.
-bool nvmx_exception(
-    struct vcpu *v, uint8_t vector, bool has_error, uint32_t error,
-    uint64_t qual
-);
+bool nvmx_exception(struct vcpu *v, uint8_t vector, bool has_error, uint32_t error, uint64_t qual);
 // Whether the guest's guest is to make an MTF exit after each instruction, and
 // such an exit after one the hypervisor carried out, with the debug traps of
 // DR6's bits in dr6 pending: whether there is one.

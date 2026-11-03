@@ -42,26 +42,21 @@ void e820_init(struct e820_map *map) {
     map->count = 0;
 }
 
-bool e820_set(
-    struct e820_map *map, uintptr_t base, size_t size, uint32_t type
-) {
+bool e820_set(struct e820_map *map, uintptr_t base, size_t size, uint32_t type) {
     if (size == 0) {
         return true;
     }
-    uintptr_t last = size - 1 > UINT64_MAX - base ? UINT64_MAX
-        : base + (size - 1);
+    uintptr_t last = size - 1 > UINT64_MAX - base ? UINT64_MAX : base + (size - 1);
 
     // The entries that overlap or touch the range are rewritten, and so is one
     // entry either side of them: an address space all of one type stays two
     // entries, which must merge again once the range trims one of them.
     size_t first = 0;
-    while (first < map->count && base != 0
-        && entry_last(&map->entries[first]) < base - 1) {
+    while (first < map->count && base != 0 && entry_last(&map->entries[first]) < base - 1) {
         first++;
     }
     size_t end = first;
-    while (end < map->count
-        && (last == UINT64_MAX || map->entries[end].base <= last + 1)) {
+    while (end < map->count && (last == UINT64_MAX || map->entries[end].base <= last + 1)) {
         end++;
     }
     if (first > 0) {
@@ -78,8 +73,7 @@ bool e820_set(
     for (size_t i = first; i < end; i++) {
         const struct e820_entry *e = &map->entries[i];
         if (e->base < base) {
-            uint64_t kept_last = entry_last(e) < base ? entry_last(e)
-                : base - 1;
+            uint64_t kept_last = entry_last(e) < base ? entry_last(e) : base - 1;
             spans[span_count++] = (struct span){ e->base, kept_last, e->type };
         }
     }
@@ -90,9 +84,7 @@ bool e820_set(
         const struct e820_entry *e = &map->entries[i];
         if (entry_last(e) > last) {
             uintptr_t kept_base = e->base > last ? e->base : last + 1;
-            spans[span_count++] = (struct span){
-                kept_base, entry_last(e), e->type
-            };
+            spans[span_count++] = (struct span){ kept_base, entry_last(e), e->type };
         }
     }
 
@@ -157,8 +149,7 @@ static uint32_t efi_type_to_e820(uint32_t type) {
 }
 
 bool e820_set_efi_map(
-    struct e820_map *map, const void *efi_mmap, size_t mmap_size,
-    size_t desc_size
+    struct e820_map *map, const void *efi_mmap, size_t mmap_size, size_t desc_size
 ) {
     if (desc_size < sizeof(EFI_MEMORY_DESCRIPTOR)) {
         return false;
@@ -168,10 +159,7 @@ bool e820_set_efi_map(
     for (size_t off = 0; mmap_size - off >= desc_size; off += desc_size) {
         // The stride need not keep the descriptors aligned.
         EFI_MEMORY_DESCRIPTOR desc;
-        memcpy(
-            &desc, (const uint8_t *)efi_mmap + off,
-            sizeof(EFI_MEMORY_DESCRIPTOR)
-        );
+        memcpy(&desc, (const uint8_t *)efi_mmap + off, sizeof(EFI_MEMORY_DESCRIPTOR));
         if (desc.NumberOfPages == 0) {
             continue;
         }
@@ -179,9 +167,7 @@ bool e820_set_efi_map(
         if (desc.NumberOfPages <= UINT64_MAX >> EFI_PAGE_SHIFT) {
             size = desc.NumberOfPages << EFI_PAGE_SHIFT;
         }
-        bool added = e820_set(
-            map, desc.PhysicalStart, size, efi_type_to_e820(desc.Type)
-        );
+        bool added = e820_set(map, desc.PhysicalStart, size, efi_type_to_e820(desc.Type));
         if (!added) {
             ok = false;
         }
@@ -195,7 +181,7 @@ bool e820_set_low_memory(struct e820_map *map) {
     static const struct e820_entry layout[] = {
         { 0, 0x9fc00, E820_RAM },
         { 0x9fc00, 0x400, E820_RESERVED },
-        { 0xf0000, 0x10000, E820_RESERVED },
+        { 0xf0000, 0x10000, E820_RESERVED }
     };
 
     // Cleared first, so that no step needs more entries than the result.
@@ -212,8 +198,7 @@ bool e820_set_low_memory(struct e820_map *map) {
 // the previous one ends.
 static uint64_t ram_run_last(const struct e820_map *map, size_t i) {
     uintptr_t last = entry_last(&map->entries[i]);
-    while (i + 1 < map->count && last != UINT64_MAX
-        && map->entries[i + 1].type == E820_RAM
+    while (i + 1 < map->count && last != UINT64_MAX && map->entries[i + 1].type == E820_RAM
         && map->entries[i + 1].base == last + 1) {
         i++;
         last = entry_last(&map->entries[i]);
@@ -240,9 +225,7 @@ void e820_cmos(const struct e820_map *map, struct e820_cmos *cmos) {
             uintptr_t end = saturate(ram_run_last(map, i), 4 * GIB - 1) + 1;
             cmos->extended_kib = saturate((end - 1 * MIB) / 1024, 65535);
             if (end > 16 * MIB) {
-                cmos->above_16m = saturate(
-                    (end - 16 * MIB) / (64 * 1024), 65535
-                );
+                cmos->above_16m = saturate((end - 16 * MIB) / (64 * 1024), 65535);
             }
         }
         if (e->base == 4 * GIB) {
@@ -284,9 +267,7 @@ void e820_log(const struct e820_map *map) {
         const char *name = type_name(e->type);
         char unknown[16];
         if (name == NULL) {
-            snprintf(
-                unknown, sizeof(unknown), "type %u", (unsigned int)e->type
-            );
+            snprintf(unknown, sizeof(unknown), "type %u", (unsigned int)e->type);
             name = unknown;
         }
         printf(

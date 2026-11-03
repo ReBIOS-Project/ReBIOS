@@ -54,11 +54,11 @@
 // hypervisor generates: none points the guest at host memory or at hardware
 // the hypervisor keeps for itself.
 static const char *const kept[] = {
-    "MSDM", "SLIC", "SPCR", "DBGP", "DBG2", "WAET", "WSMT", "VFCT", "BOOT",
+    "MSDM", "SLIC", "SPCR", "DBGP", "DBG2", "WAET", "WSMT", "VFCT", "BOOT"
 };
 
-// A table of the guest's, and where it goes among them, from the firmware's
-// or made, then freed.
+// A table of the guest's, and where it goes among them, from the firmware's or
+// made, then freed.
 struct piece {
     const uint8_t *src;
     size_t length;
@@ -135,7 +135,7 @@ static size_t root_count(const uint8_t *root, size_t entry_size) {
     return (read32(root + SDT_LENGTH) - SDT_HEADER_SIZE) / entry_size;
 }
 
-static bool ioapic_given(uint32_t address) {
+static bool ioapic_given(uintptr_t address) {
     for (size_t i = 0; i < ioapic_count(); i++) {
         if (ioapic_get(i)->base == address) {
             return true;
@@ -158,13 +158,10 @@ static bool madt_entry_kept(const uint8_t *entry, size_t length) {
         }
         case ACPI_MADT_ENTRY_TYPE_IOAPIC: {
             return length >= sizeof(struct acpi_madt_ioapic)
-                && ioapic_given(
-                    read32(entry + offsetof(struct acpi_madt_ioapic, address))
-                );
+                && ioapic_given(read32(entry + offsetof(struct acpi_madt_ioapic, address)));
         }
         case ACPI_MADT_ENTRY_TYPE_INTERRUPT_SOURCE_OVERRIDE: {
-            return length
-                >= sizeof(struct acpi_madt_interrupt_source_override);
+            return length >= sizeof(struct acpi_madt_interrupt_source_override);
         }
         case ACPI_MADT_ENTRY_TYPE_NMI_SOURCE: {
             return length >= sizeof(struct acpi_madt_nmi_source);
@@ -225,8 +222,7 @@ static uint8_t *madt_make(const uint8_t *madt, size_t *length) {
     while (offset + sizeof(struct acpi_entry_hdr) <= host_length) {
         const uint8_t *entry = madt + offset;
         size_t entry_length = entry[1];
-        if (entry_length < sizeof(struct acpi_entry_hdr)
-         || entry_length > host_length - offset) {
+        if (entry_length < sizeof(struct acpi_entry_hdr) || entry_length > host_length - offset) {
             break;
         }
         offset += entry_length;
@@ -250,19 +246,14 @@ static uint8_t *mcfg_make(const uint8_t *mcfg, size_t *length) {
     if (plan == NULL || plan->ecam == 0) {
         return NULL;
     }
-    size_t size = sizeof(struct acpi_mcfg)
-        + sizeof(struct acpi_mcfg_allocation);
+    size_t size = sizeof(struct acpi_mcfg) + sizeof(struct acpi_mcfg_allocation);
     uint8_t *made = kmalloc(size);
     memset(made, 0, size);
     memcpy(made, mcfg, SDT_HEADER_SIZE);
     struct acpi_mcfg_allocation entry = {
-        .address = plan->ecam, .segment = 0, .start_bus = 0,
-        .end_bus = plan->bus_end
+        .address = plan->ecam, .segment = 0, .start_bus = 0, .end_bus = plan->bus_end
     };
-    memcpy(
-        made + sizeof(struct acpi_mcfg), &entry,
-        sizeof(struct acpi_mcfg_allocation)
-    );
+    memcpy(made + sizeof(struct acpi_mcfg), &entry, sizeof(struct acpi_mcfg_allocation));
     write32(made + SDT_LENGTH, (uint32_t)size);
     checksum_set(made, size, SDT_CHECKSUM);
     *length = size;
@@ -294,8 +285,8 @@ static uint8_t *hpet_make(const uint8_t *hpet, size_t *length) {
     return made;
 }
 
-// The guest's version of a table that the hypervisor makes rather than
-// copies, in *made, NULL where the guest has none: false for other tables.
+// The guest's version of a table that the hypervisor makes rather than copies,
+// in *made, NULL where the guest has none: false for other tables.
 static bool table_made(const uint8_t *table, uint8_t **made, size_t *length) {
     if (memcmp(table, "APIC", 4) == 0) {
         *made = madt_make(table, length);
@@ -384,13 +375,10 @@ bool guest_acpi_build(uint8_t rsdp[GUEST_ACPI_RSDP_SIZE]) {
     }
     vacpi_fadt(copy, facs, base + pieces[dsdt_piece].offset);
 
-    const uint8_t *rsdt_header = host != NULL
-        ? host_table(read32(host + RSDP_RSDT)) : NULL;
+    const uint8_t *rsdt_header = host != NULL ? host_table(read32(host + RSDP_RSDT)) : NULL;
     uint8_t *rsdt = copy + rsdt_offset;
     if (rsdt_header != NULL || root != NULL) {
-        memcpy(
-            rsdt, rsdt_header != NULL ? rsdt_header : root, SDT_HEADER_SIZE
-        );
+        memcpy(rsdt, rsdt_header != NULL ? rsdt_header : root, SDT_HEADER_SIZE);
     } else {
         memcpy(rsdt + 10, "REBIOSREBIOS  ", 14);
     }
@@ -412,10 +400,7 @@ bool guest_acpi_build(uint8_t rsdp[GUEST_ACPI_RSDP_SIZE]) {
 
     memset(rsdp, 0, GUEST_ACPI_RSDP_SIZE);
     memcpy(rsdp, "RSD PTR ", 8);
-    memcpy(
-        rsdp + RSDP_OEM_ID,
-        host != NULL ? host + RSDP_OEM_ID : (const uint8_t *)"REBIOS", 6
-    );
+    memcpy(rsdp + RSDP_OEM_ID, host != NULL ? host + RSDP_OEM_ID : (const uint8_t *)"REBIOS", 6);
     write32(rsdp + RSDP_RSDT, base + rsdt_offset);
     checksum_set(rsdp, RSDP_V1_SIZE, RSDP_CHECKSUM);
     printf(

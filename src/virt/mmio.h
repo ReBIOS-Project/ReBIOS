@@ -29,9 +29,7 @@ struct mmio_ops {
     // Accesses of 1, 2, 4, or 8 bytes, naturally aligned, offset into the
     // region. Reads have no side effects.
     uint64_t (*read)(struct vcpu *v, void *ctx, uint64_t offset, size_t size);
-    void (*write)(
-        struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value
-    );
+    void (*write)(struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value);
     // Whether writes go nowhere, so that INS may be emulated into it: the
     // processor may have read the port already.
     bool writes_ignored;
@@ -39,9 +37,7 @@ struct mmio_ops {
 
 // Emulates a page-aligned region, for every vCPU: its number for mmio_move(),
 // or -1 where there are too many.
-int mmio_register(
-    uintptr_t base, size_t size, const struct mmio_ops *ops, void *ctx
-);
+int mmio_register(uintptr_t base, size_t size, const struct mmio_ops *ops, void *ctx);
 // Moves a region, nowhere where size is 0, as when the BAR it is part of
 // moves.
 void mmio_move(int region, uintptr_t base, size_t size);
@@ -54,16 +50,10 @@ void mmio_write_host(uintptr_t hpa, size_t size, uint64_t value);
 // Guest memory at a linear address as the guest's instructions reach it: RAM,
 // emulated regions, or nothing. Accesses are of at most 8 bytes; they return
 // false where the access faulted, having raised the fault.
-bool mmio_read_linear(
-    struct vcpu *v, uintptr_t linear, void *buf, size_t size
-);
-bool mmio_write_linear(
-    struct vcpu *v, uintptr_t linear, const void *buf, size_t size
-);
+bool mmio_read_linear(struct vcpu *v, uintptr_t linear, void *buf, size_t size);
+bool mmio_write_linear(struct vcpu *v, uintptr_t linear, const void *buf, size_t size);
 // The same at a guest-physical address, within a page.
-void mmio_phys_access(
-    struct vcpu *v, uintptr_t gpa, void *buf, size_t len, bool write
-);
+void mmio_phys_access(struct vcpu *v, uintptr_t gpa, void *buf, size_t len, bool write);
 
 // An EPT violation or a nested page fault at gpa, for an access other than a
 // fetch: emulates the instruction that made it, where nothing decodes as

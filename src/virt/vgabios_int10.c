@@ -64,7 +64,7 @@
 // The CGA mode control register value each of modes 0-7 has, which the BIOS
 // data area records.
 static const uint8_t cga_mode_control[8] = {
-    0x2c, 0x28, 0x2d, 0x29, 0x2a, 0x2e, 0x1e, 0x29,
+    0x2c, 0x28, 0x2d, 0x29, 0x2a, 0x2e, 0x1e, 0x29
 };
 
 static void seq_write(uint8_t index, uint8_t value) {
@@ -117,9 +117,7 @@ static uint8_t ac_read(uint8_t index) {
 }
 
 // The mode at a line count, or with any if lines is 0 or none has it.
-static const struct vgabios_mode *find_mode_lines(
-    uint8_t number, uint16_t lines
-) {
+static const struct vgabios_mode *find_mode_lines(uint8_t number, uint16_t lines) {
     const struct vgabios_mode *any = NULL;
     for (size_t i = 0; i < vgabios_mode_count; i++) {
         if (vgabios_modes[i].mode != number) {
@@ -173,7 +171,7 @@ static uint16_t rom_font(uint8_t height) {
 
 static void load_palette(uint8_t index) {
     const struct vgabios_palette *p = &vgabios_palettes[index];
-    const uint8_t *colors = p->colors;
+    const uint8_t *colours = p->colours;
     size_t bytes = p->count * (uint32_t)3;
     bios_out(DAC_WRITE_INDEX, 0);
     if ((peekb(BDA, BDA_VGA_FLAGS) & VGA_FLAGS_GREY) == 0) {
@@ -182,12 +180,13 @@ static void load_palette(uint8_t index) {
     }
     uint8_t dac[(uint32_t)256 * 3];
     for (size_t i = 0; i < (uint32_t)256 * 3; i += 3) {
-        uint8_t r = i < bytes ? colors[i] : 0;
-        uint8_t g = i < bytes ? colors[i + 1] : 0;
-        uint8_t b = i < bytes ? colors[i + 2] : 0;
+        uint8_t r = i < bytes ? colours[i] : 0;
+        uint8_t g = i < bytes ? colours[i + 1] : 0;
+        uint8_t b = i < bytes ? colours[i + 2] : 0;
         // The weighting of the luminance of a colour signal.
-        uint8_t y = (uint8_t)((r * (uint32_t)77 + g * (uint32_t)151
-            + b * (uint32_t)28 + (uint32_t)128) >> 8);
+        uint32_t luminance = r * (uint32_t)77 + g * (uint32_t)151 + b * (uint32_t)28
+                           + (uint32_t)128;
+        uint8_t y = (uint8_t)(luminance >> 8);
         dac[i] = y;
         dac[i + 1] = y;
         dac[i + 2] = y;
@@ -204,8 +203,7 @@ void vgabios_load_palette_256(void) {
 
 // The offset of a character map in plane 2.
 static uint16_t font_block(uint8_t block) {
-    return (uint16_t)((block & 3) * (uint32_t)0x4000
-        + ((block >> 2) & 1) * (uint32_t)0x2000);
+    return (uint16_t)((block & 3) * (uint32_t)0x4000 + ((block >> 2) & 1) * (uint32_t)0x2000);
 }
 
 // Plane 2 at A0000h, one byte per address, for character maps.
@@ -228,15 +226,12 @@ static void font_access_end(const struct vgabios_mode *m) {
 // The rest of the cells cleared first, so that the characters go in one
 // operation.
 static void load_rom_font(
-    const struct vgabios_mode *m, uint16_t font, uint8_t height,
-    uint16_t first, size_t count, uint8_t block
+    const struct vgabios_mode *m, uint16_t font, uint8_t height, uint16_t first, size_t count,
+    uint8_t block
 ) {
     font_access_begin();
     uint16_t base = font_block(block);
-    far_fill8(
-        0xa000, (uint16_t)(base + first * (uint32_t)32), 0,
-        count * (uint32_t)32
-    );
+    far_fill8(0xa000, (uint16_t)(base + first * (uint32_t)32), 0, count * (uint32_t)32);
     far_font(
         0xa000, (uint16_t)(base + first * (uint32_t)32), VGABIOS_SEGMENT,
         (uint16_t)(font + first * height), height, count
@@ -245,15 +240,12 @@ static void load_rom_font(
 }
 
 static void load_user_font(
-    const struct vgabios_mode *m, uint16_t segment, uint16_t offset,
-    uint8_t height, uint16_t first, size_t count, uint8_t block
+    const struct vgabios_mode *m, uint16_t segment, uint16_t offset, uint8_t height,
+    uint16_t first, size_t count, uint8_t block
 ) {
     font_access_begin();
     uint16_t base = font_block(block);
-    far_font(
-        0xa000, (uint16_t)(base + first * (uint32_t)32), segment, offset,
-        height, count
-    );
+    far_font(0xa000, (uint16_t)(base + first * (uint32_t)32), segment, offset, height, count);
     font_access_end(m);
 }
 
@@ -294,10 +286,7 @@ static void set_mode(uint8_t requested) {
     bios_out(MISC_WRITE, m->misc);
     seq_write(0x00, 0x01);
     for (size_t i = 0; i < 4; i++) {
-        seq_write(
-            (uint8_t)(i + 1),
-            i == 0 ? (uint8_t)(m->seq[0] | SEQ_SCREEN_OFF) : m->seq[i]
-        );
+        seq_write((uint8_t)(i + 1), i == 0 ? (uint8_t)(m->seq[0] | SEQ_SCREEN_OFF) : m->seq[i]);
     }
     seq_write(0x00, 0x03);
 
@@ -346,17 +335,10 @@ static void set_mode(uint8_t requested) {
     pokeb(BDA, BDA_PALETTE, m->mode == 6 ? 0x3f : 0x30);
     pokeb(BDA, BDA_ROWS, (uint8_t)(m->rows - 1));
     pokew(BDA, BDA_CHAR_HEIGHT, m->char_height);
-    uint8_t control = peekb(BDA, BDA_VIDEO_CONTROL)
-        & (uint8_t)~VIDEO_CONTROL_KEPT;
-    pokeb(
-        BDA, BDA_VIDEO_CONTROL,
-        (uint8_t)(control | (keep ? VIDEO_CONTROL_KEPT : 0))
-    );
+    uint8_t control = peekb(BDA, BDA_VIDEO_CONTROL) & (uint8_t)~VIDEO_CONTROL_KEPT;
+    pokeb(BDA, BDA_VIDEO_CONTROL, (uint8_t)(control | (keep ? VIDEO_CONTROL_KEPT : 0)));
     uint16_t equipment = peekw(BDA, BDA_EQUIPMENT) & (uint16_t)~0x30;
-    pokew(
-        BDA, BDA_EQUIPMENT,
-        (uint16_t)(equipment | (port == 0x3b4 ? 0x30 : 0x20))
-    );
+    pokew(BDA, BDA_EQUIPMENT, (uint16_t)(equipment | (port == 0x3b4 ? 0x30 : 0x20)));
 
     uint16_t font = is_text(m) ? ROM_FONT8 : rom_font(m->char_height);
     set_vector(0x43, VGABIOS_SEGMENT, font);
@@ -372,15 +354,12 @@ void vgabios_set_mode(uint8_t mode) {
 }
 
 static void set_cursor(uint8_t page, uint8_t row, uint8_t column) {
-    pokew(
-        BDA, (uint16_t)(BDA_CURSOR + page * 2), (uint16_t)(row << 8 | column)
-    );
+    pokew(BDA, (uint16_t)(BDA_CURSOR + page * 2), (uint16_t)(row << 8 | column));
     if (page != peekb(BDA, BDA_PAGE)) {
         return;
     }
     uint16_t columns = peekw(BDA, BDA_COLUMNS);
-    uint16_t address = (uint16_t)(peekw(BDA, BDA_PAGE_START) / 2
-        + row * columns + column);
+    uint16_t address = (uint16_t)(peekw(BDA, BDA_PAGE_START) / 2 + row * columns + column);
     crtc_write(0x0e, (uint8_t)(address >> 8));
     crtc_write(0x0f, (uint8_t)address);
 }
@@ -394,8 +373,8 @@ static uint16_t get_cursor(uint8_t page) {
 static void set_cursor_type(uint8_t start, uint8_t end) {
     pokew(BDA, BDA_CURSOR_TYPE, (uint16_t)(start << 8 | end));
     uint8_t height = peekb(BDA, BDA_CHAR_HEIGHT);
-    if ((peekb(BDA, BDA_VIDEO_CONTROL) & VIDEO_CONTROL_NO_EMULATION) == 0
-     && height > 8 && (start & 0x20) == 0 && start < 8 && end < 8) {
+    if ((peekb(BDA, BDA_VIDEO_CONTROL) & VIDEO_CONTROL_NO_EMULATION) == 0 && height > 8
+     && (start & 0x20) == 0 && start < 8 && end < 8) {
         if (start == 6 && end == 7) {
             start = (uint8_t)(height - 3);
             end = (uint8_t)(height - 2);
@@ -426,23 +405,20 @@ static void set_page(uint8_t page) {
 
 static uint16_t text_offset(uint8_t page, uint8_t row, uint8_t column) {
     return (uint16_t)(page * peekw(BDA, BDA_PAGE_SIZE)
-        + (row * peekw(BDA, BDA_COLUMNS) + column) * (uint32_t)2);
+                    + (row * peekw(BDA, BDA_COLUMNS) + column) * (uint32_t)2);
 }
 
 // A CGA mode's byte holding pixel x of scan line y: even lines in the first 8
 // KiB, odd ones in the second.
 static uint16_t cga_offset(uint16_t x_byte, uint16_t y) {
-    return (uint16_t)((y >> 1) * (uint32_t)80 + (y & 1) * (uint32_t)0x2000
-        + x_byte);
+    return (uint16_t)((y >> 1) * (uint32_t)80 + (y & 1) * (uint32_t)0x2000 + x_byte);
 }
 
 static uint16_t font_segment(void) {
     return peekw(0, VECTOR(0x43) + 2);
 }
 
-static uint16_t glyph_offset(
-    const struct vgabios_mode *m, uint8_t c, uint8_t height
-) {
+static uint16_t glyph_offset(const struct vgabios_mode *m, uint8_t c, uint8_t height) {
     // CGA modes find characters 128-255 through INT 1Fh.
     if ((m->kind == MODE_CGA || m->kind == MODE_CGA1) && c >= 128) {
         return (uint16_t)(peekw(0, VECTOR(0x1f)) + (c - 128) * height);
@@ -450,9 +426,7 @@ static uint16_t glyph_offset(
     return (uint16_t)(peekw(0, VECTOR(0x43)) + c * height);
 }
 
-static uint16_t glyph_segment(
-    const struct vgabios_mode *m, uint8_t c
-) {
+static uint16_t glyph_segment(const struct vgabios_mode *m, uint8_t c) {
     if ((m->kind == MODE_CGA || m->kind == MODE_CGA1) && c >= 128) {
         return peekw(0, VECTOR(0x1f) + 2);
     }
@@ -460,13 +434,12 @@ static uint16_t glyph_segment(
 }
 
 static void draw_char(
-    const struct vgabios_mode *m, uint8_t row, uint8_t column,
-    uint8_t c, uint8_t color
+    const struct vgabios_mode *m, uint8_t row, uint8_t column, uint8_t c, uint8_t colour
 ) {
     uint8_t height = peekb(BDA, BDA_CHAR_HEIGHT);
     uint16_t segment = glyph_segment(m, c);
     uint16_t offset = glyph_offset(m, c, height);
-    bool xor = (color & 0x80) != 0;
+    bool xor = (colour & 0x80) != 0;
     switch (m->kind) {
         case MODE_CGA: {
             for (size_t r = 0; r < height; r++) {
@@ -474,12 +447,10 @@ static void draw_char(
                 uint16_t pixels = 0;
                 for (size_t b = 0; b < 8; b++) {
                     if ((bits & (0x80 >> b)) != 0) {
-                        pixels |= (uint16_t)((color & 3) << (14 - 2 * b));
+                        pixels |= (uint16_t)((colour & 3) << (14 - 2 * b));
                     }
                 }
-                uint16_t at = cga_offset(
-                    (uint16_t)(column * 2), (uint16_t)(row * height + r)
-                );
+                uint16_t at = cga_offset((uint16_t)(column * 2), (uint16_t)(row * height + r));
                 uint8_t high = (uint8_t)(pixels >> 8);
                 uint8_t low = (uint8_t)pixels;
                 if (xor) {
@@ -493,8 +464,7 @@ static void draw_char(
         }
         case MODE_CGA1: {
             for (size_t r = 0; r < height; r++) {
-                uint8_t bits = (color & 1) != 0
-                    ? peekb(segment, (uint16_t)(offset + r)) : 0;
+                uint8_t bits = (colour & 1) != 0 ? peekb(segment, (uint16_t)(offset + r)) : 0;
                 uint16_t at = cga_offset(column, (uint16_t)(row * height + r));
                 if (xor) {
                     bits ^= peekb(0xb800, at);
@@ -505,7 +475,7 @@ static void draw_char(
         }
         case MODE_PLANAR: {
             uint16_t line = m->width / 8;
-            gc_write(0x00, color & 0x0f);
+            gc_write(0x00, colour & 0x0f);
             gc_write(0x01, 0x0f);
             gc_write(0x03, xor ? 0x18 : 0x00);
             for (size_t r = 0; r < height; r++) {
@@ -519,7 +489,7 @@ static void draw_char(
                     gc_write(0x08, (uint8_t)~bits);
                     (void)peekb(0xa000, at);
                     pokeb(0xa000, at, 0xff);
-                    gc_write(0x00, color & 0x0f);
+                    gc_write(0x00, colour & 0x0f);
                 }
             }
             gc_write(0x00, 0x00);
@@ -531,13 +501,9 @@ static void draw_char(
         default: {
             for (size_t r = 0; r < height; r++) {
                 uint8_t bits = peekb(segment, (uint16_t)(offset + r));
-                uint16_t at = (uint16_t)((row * height + r) * m->width
-                    + column * (uint32_t)8);
+                uint16_t at = (uint16_t)((row * height + r) * m->width + column * (uint32_t)8);
                 for (size_t b = 0; b < 8; b++) {
-                    pokeb(
-                        0xa000, (uint16_t)(at + b),
-                        (bits & (0x80 >> b)) != 0 ? color : 0
-                    );
+                    pokeb(0xa000, (uint16_t)(at + b), (bits & (0x80 >> b)) != 0 ? colour : 0);
                 }
             }
             break;
@@ -546,9 +512,7 @@ static void draw_char(
 }
 
 // In graphics modes: the ROM does text modes itself.
-static void write_chars(
-    uint8_t c, uint8_t page, uint8_t attribute, size_t count
-) {
+static void write_chars(uint8_t c, uint8_t page, uint8_t attribute, size_t count) {
     const struct vgabios_mode *m = current_mode();
     if (m == NULL) {
         return;
@@ -563,8 +527,8 @@ static void write_chars(
 }
 
 static void scroll_text(
-    const struct vgabios_mode *m, uint8_t page, int lines,
-    uint8_t top, uint8_t left, uint8_t bottom, uint8_t right, uint8_t attribute
+    const struct vgabios_mode *m, uint8_t page, int lines, uint8_t top, uint8_t left,
+    uint8_t bottom, uint8_t right, uint8_t attribute
 ) {
     uint16_t width = (uint16_t)(right - left + 1);
     size_t height = (size_t)(bottom - top + 1);
@@ -584,38 +548,29 @@ static void scroll_text(
     if (lines >= 0) {
         for (size_t r = 0; r < kept; r += moved_at_once) {
             far_move(
-                m->segment, (uint16_t)(first + r * line),
-                (uint16_t)(first + (r + n) * line), bytes
+                m->segment, (uint16_t)(first + r * line), (uint16_t)(first + (r + n) * line), bytes
             );
         }
         for (size_t r = kept; r < height; r += filled_at_once) {
-            far_fill16(
-                m->segment, (uint16_t)(first + r * line), blank,
-                filled_at_once * width
-            );
+            far_fill16(m->segment, (uint16_t)(first + r * line), blank, filled_at_once * width);
         }
     } else {
         for (size_t r = kept; r > 0; r -= moved_at_once) {
             size_t from = r - moved_at_once;
             far_move(
-                m->segment, (uint16_t)(first + (from + n) * line),
-                (uint16_t)(first + from * line), bytes
+                m->segment, (uint16_t)(first + (from + n) * line), (uint16_t)(first + from * line),
+                bytes
             );
         }
         for (size_t r = 0; r < n; r += filled_at_once) {
-            far_fill16(
-                m->segment, (uint16_t)(first + r * line), blank,
-                filled_at_once * width
-            );
+            far_fill16(m->segment, (uint16_t)(first + r * line), blank, filled_at_once * width);
         }
     }
 }
 
 // A graphics mode's scan line y, from byte column x, and how many bytes a
 // character takes in it.
-static uint16_t pixel_line(
-    const struct vgabios_mode *m, uint16_t x, uint16_t y
-) {
+static uint16_t pixel_line(const struct vgabios_mode *m, uint16_t x, uint16_t y) {
     switch (m->kind) {
         case MODE_CGA:
         case MODE_CGA1: {
@@ -644,24 +599,19 @@ static size_t char_bytes(const struct vgabios_mode *m) {
     }
 }
 
-static void fill_line(
-    const struct vgabios_mode *m, uint16_t at, size_t bytes,
-    uint8_t color
-) {
+static void fill_line(const struct vgabios_mode *m, uint16_t at, size_t bytes, uint8_t colour) {
     switch (m->kind) {
         case MODE_CGA: {
-            uint8_t c = color & 3;
-            far_fill8(
-                0xb800, at, (uint8_t)(c | c << 2 | c << 4 | c << 6), bytes
-            );
+            uint8_t c = colour & 3;
+            far_fill8(0xb800, at, (uint8_t)(c | c << 2 | c << 4 | c << 6), bytes);
             break;
         }
         case MODE_CGA1: {
-            far_fill8(0xb800, at, (color & 1) != 0 ? 0xff : 0x00, bytes);
+            far_fill8(0xb800, at, (colour & 1) != 0 ? 0xff : 0x00, bytes);
             break;
         }
         case MODE_PLANAR: {
-            gc_write(0x00, color & 0x0f);
+            gc_write(0x00, colour & 0x0f);
             gc_write(0x01, 0x0f);
             far_fill8(0xa000, at, 0xff, bytes);
             gc_write(0x00, 0x00);
@@ -669,19 +619,18 @@ static void fill_line(
             break;
         }
         default: {
-            far_fill8(0xa000, at, color, bytes);
+            far_fill8(0xa000, at, colour, bytes);
             break;
         }
     }
 }
 
 static void scroll_graphics(
-    const struct vgabios_mode *m, int lines, uint8_t top,
-    uint8_t left, uint8_t bottom, uint8_t right, uint8_t color
+    const struct vgabios_mode *m, int lines, uint8_t top, uint8_t left, uint8_t bottom,
+    uint8_t right, uint8_t colour
 ) {
     uint8_t height = peekb(BDA, BDA_CHAR_HEIGHT);
-    uint16_t segment = m->kind == MODE_CGA || m->kind == MODE_CGA1 ? 0xb800
-        : 0xa000;
+    uint16_t segment = m->kind == MODE_CGA || m->kind == MODE_CGA1 ? 0xb800 : 0xa000;
     uint8_t per_char = char_bytes(m);
     uint16_t x = (uint16_t)(left * per_char);
     size_t bytes = (uint16_t)((right - left + 1) * per_char);
@@ -719,16 +668,13 @@ static void scroll_graphics(
     size_t first = lines >= 0 ? bottom - n + 1 : top;
     for (size_t r = first; r < first + n; r++) {
         for (size_t s = 0; s < height; s++) {
-            fill_line(
-                m, pixel_line(m, x, (uint16_t)(r * height + s)), bytes, color
-            );
+            fill_line(m, pixel_line(m, x, (uint16_t)(r * height + s)), bytes, colour);
         }
     }
 }
 
 static void scroll(
-    int lines, uint8_t attribute, uint8_t top, uint8_t left, uint8_t bottom,
-    uint8_t right
+    int lines, uint8_t attribute, uint8_t top, uint8_t left, uint8_t bottom, uint8_t right
 ) {
     const struct vgabios_mode *m = current_mode();
     if (m == NULL) {
@@ -746,15 +692,13 @@ static void scroll(
         return;
     }
     if (is_text(m)) {
-        scroll_text(
-            m, peekb(BDA, BDA_PAGE), lines, top, left, bottom, right, attribute
-        );
+        scroll_text(m, peekb(BDA, BDA_PAGE), lines, top, left, bottom, right, attribute);
     } else {
         scroll_graphics(m, lines, top, left, bottom, right, attribute);
     }
 }
 
-static void teletype(uint8_t c, uint8_t color) {
+static void teletype(uint8_t c, uint8_t colour) {
     const struct vgabios_mode *m = current_mode();
     if (m == NULL) {
         return;
@@ -787,7 +731,7 @@ static void teletype(uint8_t c, uint8_t color) {
             if (is_text(m)) {
                 pokeb(m->segment, text_offset(page, row, column), c);
             } else {
-                draw_char(m, row, column, c, color);
+                draw_char(m, row, column, c, colour);
             }
             if (++column >= columns) {
                 column = 0;
@@ -801,33 +745,30 @@ static void teletype(uint8_t c, uint8_t color) {
         uint8_t attribute = 0;
         if (is_text(m)) {
             attribute = peekb(
-                m->segment,
-                (uint16_t)(text_offset(page, (uint8_t)(rows - 1), column) + 1)
+                m->segment, (uint16_t)(text_offset(page, (uint8_t)(rows - 1), column) + 1)
             );
         }
-        scroll(
-            1, attribute, 0, 0, (uint8_t)(rows - 1), (uint8_t)(columns - 1)
-        );
+        scroll(1, attribute, 0, 0, (uint8_t)(rows - 1), (uint8_t)(columns - 1));
         row = (uint8_t)(rows - 1);
     }
     set_cursor(page, row, column);
 }
 
-static void write_pixel(uint16_t x, uint16_t y, uint8_t color) {
+static void write_pixel(uint16_t x, uint16_t y, uint8_t colour) {
     const struct vgabios_mode *m = current_mode();
     if (m == NULL || is_text(m)) {
         return;
     }
-    bool xor = (color & 0x80) != 0;
+    bool xor = (colour & 0x80) != 0;
     switch (m->kind) {
         case MODE_CGA: {
             uint16_t at = cga_offset(x / 4, y);
             uint8_t shift = (uint8_t)((3 - (x & 3)) * 2);
             uint8_t v = peekb(0xb800, at);
             if (xor) {
-                v ^= (uint8_t)((color & 3) << shift);
+                v ^= (uint8_t)((colour & 3) << shift);
             } else {
-                v = (uint8_t)((v & ~(3 << shift)) | ((color & 3) << shift));
+                v = (uint8_t)((v & ~(3 << shift)) | ((colour & 3) << shift));
             }
             pokeb(0xb800, at, v);
             break;
@@ -837,9 +778,9 @@ static void write_pixel(uint16_t x, uint16_t y, uint8_t color) {
             uint8_t bit = (uint8_t)(0x80 >> (x & 7));
             uint8_t v = peekb(0xb800, at);
             if (xor) {
-                v ^= (color & 1) != 0 ? bit : 0;
+                v ^= (colour & 1) != 0 ? bit : 0;
             } else {
-                v = (uint8_t)((v & ~bit) | ((color & 1) != 0 ? bit : 0));
+                v = (uint8_t)((v & ~bit) | ((colour & 1) != 0 ? bit : 0));
             }
             pokeb(0xb800, at, v);
             break;
@@ -852,14 +793,14 @@ static void write_pixel(uint16_t x, uint16_t y, uint8_t color) {
                 gc_write(0x03, 0x18);
             }
             (void)peekb(0xa000, at);
-            pokeb(0xa000, at, color);
+            pokeb(0xa000, at, colour);
             gc_write(0x03, 0x00);
             gc_write(0x05, m->gc[5]);
             gc_write(0x08, 0xff);
             break;
         }
         default: {
-            pokeb(0xa000, (uint16_t)(y * m->width + x), color);
+            pokeb(0xa000, (uint16_t)(y * m->width + x), colour);
             break;
         }
     }
@@ -872,24 +813,22 @@ static uint8_t read_pixel(uint16_t x, uint16_t y) {
     }
     switch (m->kind) {
         case MODE_CGA: {
-            return (uint8_t)((peekb(0xb800, cga_offset(x / 4, y))
-                >> ((3 - (x & 3)) * 2)) & 3);
+            return (uint8_t)((peekb(0xb800, cga_offset(x / 4, y)) >> ((3 - (x & 3)) * 2)) & 3);
         }
         case MODE_CGA1: {
-            return (uint8_t)((peekb(0xb800, cga_offset(x / 8, y))
-                >> (7 - (x & 7))) & 1);
+            return (uint8_t)((peekb(0xb800, cga_offset(x / 8, y)) >> (7 - (x & 7))) & 1);
         }
         case MODE_PLANAR: {
             uint16_t at = (uint16_t)(y * (m->width / (uint32_t)8) + x / 8);
-            uint8_t color = 0;
+            uint8_t colour = 0;
             for (size_t p = 0; p < 4; p++) {
                 gc_write(0x04, p);
                 if (((peekb(0xa000, at) >> (7 - (x & 7))) & 1) != 0) {
-                    color |= (uint8_t)(1 << p);
+                    colour |= (uint8_t)(1 << p);
                 }
             }
             gc_write(0x04, m->gc[4]);
-            return color;
+            return colour;
         }
         default: {
             return peekb(0xa000, (uint16_t)(y * m->width + x));
@@ -920,8 +859,7 @@ static void write_string(struct vgabios_regs *r) {
         if (m != NULL && is_text(m)) {
             uint16_t cursor = get_cursor(page);
             pokew(
-                m->segment,
-                text_offset(page, (uint8_t)(cursor >> 8), (uint8_t)cursor),
+                m->segment, text_offset(page, (uint8_t)(cursor >> 8), (uint8_t)cursor),
                 (uint16_t)(attribute << 8 | c)
             );
             // The teletype moves on, overwriting the character with itself.
@@ -955,9 +893,7 @@ static void palette_functions(struct vgabios_regs *r) {
         }
         case 0x03: {
             uint8_t mode = ac_read(0x10);
-            ac_write(
-                0x10, (uint8_t)((mode & ~0x08) | (r->bl != 0 ? 0x08 : 0x00))
-            );
+            ac_write(0x10, (uint8_t)((mode & ~0x08) | (r->bl != 0 ? 0x08 : 0x00)));
             break;
         }
         case 0x07: {
@@ -992,16 +928,11 @@ static void palette_functions(struct vgabios_regs *r) {
         case 0x13: {
             uint8_t mode = ac_read(0x10);
             if (r->bl == 0) {
-                ac_write(
-                    0x10,
-                    (uint8_t)((mode & ~0x80) | (r->bh != 0 ? 0x80 : 0x00))
-                );
+                ac_write(0x10, (uint8_t)((mode & ~0x80) | (r->bh != 0 ? 0x80 : 0x00)));
             } else {
                 uint8_t page = r->bh;
                 ac_write(
-                    0x14,
-                    (mode & 0x80) != 0 ? (uint8_t)(page & 0x0f)
-                        : (uint8_t)((page & 3) << 2)
+                    0x14, (mode & 0x80) != 0 ? (uint8_t)(page & 0x0f) : (uint8_t)((page & 3) << 2)
                 );
             }
             break;
@@ -1032,8 +963,7 @@ static void palette_functions(struct vgabios_regs *r) {
             uint8_t mode = ac_read(0x10);
             uint8_t select = ac_read(0x14);
             r->bl = (mode & 0x80) != 0 ? 1 : 0;
-            r->bh = (mode & 0x80) != 0 ? (uint8_t)(select & 0x0f)
-                : (uint8_t)((select >> 2) & 3);
+            r->bh = (mode & 0x80) != 0 ? (uint8_t)(select & 0x0f) : (uint8_t)((select >> 2) & 3);
             break;
         }
         case 0x1b: {
@@ -1045,9 +975,9 @@ static void palette_functions(struct vgabios_regs *r) {
                 uint8_t red = bios_in(DAC_DATA);
                 uint8_t green = bios_in(DAC_DATA);
                 uint8_t blue = bios_in(DAC_DATA);
-                uint8_t y = (uint8_t)((red * (uint32_t)77
-                    + green * (uint32_t)151 + blue * (uint32_t)28
-                    + (uint32_t)128) >> 8);
+                uint32_t luminance = red * (uint32_t)77 + green * (uint32_t)151
+                                   + blue * (uint32_t)28 + (uint32_t)128;
+                uint8_t y = (uint8_t)(luminance >> 8);
                 bios_out(DAC_WRITE_INDEX, index);
                 bios_out(DAC_DATA, y);
                 bios_out(DAC_DATA, y);
@@ -1070,15 +1000,15 @@ static void text_rows(const struct vgabios_mode *m, uint8_t height) {
     }
     uint8_t scan = crtc_read(0x09);
     crtc_write(0x09, (uint8_t)((scan & 0xe0) | (height - 1)));
-    uint16_t lines = (uint16_t)(crtc_read(0x12)
-        | ((crtc_read(0x07) & 0x02) << 7) | ((crtc_read(0x07) & 0x40) << 3))
-        + (uint32_t)1;
+    uint8_t vde_low = crtc_read(0x12);
+    uint8_t overflow = crtc_read(0x07);
+    uint16_t vde = (uint16_t)(vde_low | ((overflow & 0x02) << 7) | ((overflow & 0x40) << 3));
+    uint16_t lines = (uint16_t)(vde + 1);
     uint8_t rows = (uint8_t)(lines / height);
     pokeb(BDA, BDA_ROWS, (uint8_t)(rows - 1));
     pokew(BDA, BDA_CHAR_HEIGHT, height);
     pokew(
-        BDA, BDA_PAGE_SIZE,
-        (uint16_t)((rows * m->columns * (uint32_t)2 + 0xff) & ~(uint32_t)0xff)
+        BDA, BDA_PAGE_SIZE, (uint16_t)((rows * m->columns * (uint32_t)2 + 0xff) & ~(uint32_t)0xff)
     );
     crtc_write(0x0a, (uint8_t)(height - 3));
     crtc_write(0x0b, (uint8_t)(height - 2));
@@ -1134,16 +1064,14 @@ static void font_functions(struct vgabios_regs *r) {
         case 0x22:
         case 0x23:
         case 0x24: {
-            uint8_t height = r->al == 0x21 ? r->cl : r->al == 0x22 ? 14
-                : r->al == 0x23 ? 8 : 16;
+            uint8_t height = r->al == 0x21 ? r->cl : r->al == 0x22 ? 14 : r->al == 0x23 ? 8 : 16;
             if (r->al == 0x21) {
                 set_vector(0x43, r->es, r->bp);
             } else {
                 set_vector(0x43, VGABIOS_SEGMENT, rom_font(height));
             }
             pokew(BDA, BDA_CHAR_HEIGHT, height);
-            uint8_t rows = r->bl == 1 ? 14 : r->bl == 2 ? 25 : r->bl == 3 ? 43
-                : r->dl;
+            uint8_t rows = r->bl == 1 ? 14 : r->bl == 2 ? 25 : r->bl == 3 ? 43 : r->dl;
             if (rows != 0) {
                 pokeb(BDA, BDA_ROWS, (uint8_t)(rows - 1));
             }
@@ -1203,8 +1131,7 @@ static void alternate_select(struct vgabios_regs *r) {
             break;
         }
         case 0x30: {
-            uint8_t flags = peekb(BDA, BDA_VGA_FLAGS)
-                & (uint8_t)~(VGA_FLAGS_200 | VGA_FLAGS_400);
+            uint8_t flags = peekb(BDA, BDA_VGA_FLAGS) & (uint8_t)~(VGA_FLAGS_200 | VGA_FLAGS_400);
             if (r->al == 0) {
                 flags |= VGA_FLAGS_200;
             } else if (r->al == 2) {
@@ -1215,12 +1142,8 @@ static void alternate_select(struct vgabios_regs *r) {
             break;
         }
         case 0x31: {
-            uint8_t flags = peekb(BDA, BDA_VGA_FLAGS)
-                & (uint8_t)~VGA_FLAGS_NO_PALETTE;
-            pokeb(
-                BDA, BDA_VGA_FLAGS,
-                (uint8_t)(flags | (r->al != 0 ? VGA_FLAGS_NO_PALETTE : 0))
-            );
+            uint8_t flags = peekb(BDA, BDA_VGA_FLAGS) & (uint8_t)~VGA_FLAGS_NO_PALETTE;
+            pokeb(BDA, BDA_VGA_FLAGS, (uint8_t)(flags | (r->al != 0 ? VGA_FLAGS_NO_PALETTE : 0)));
             r->al = 0x12;
             break;
         }
@@ -1230,22 +1153,16 @@ static void alternate_select(struct vgabios_regs *r) {
             break;
         }
         case 0x33: {
-            uint8_t flags = peekb(BDA, BDA_VGA_FLAGS)
-                & (uint8_t)~VGA_FLAGS_GREY;
-            pokeb(
-                BDA, BDA_VGA_FLAGS,
-                (uint8_t)(flags | (r->al != 0 ? 0 : VGA_FLAGS_GREY))
-            );
+            uint8_t flags = peekb(BDA, BDA_VGA_FLAGS) & (uint8_t)~VGA_FLAGS_GREY;
+            pokeb(BDA, BDA_VGA_FLAGS, (uint8_t)(flags | (r->al != 0 ? 0 : VGA_FLAGS_GREY)));
             r->al = 0x12;
             break;
         }
         case 0x34: {
-            uint8_t control = peekb(BDA, BDA_VIDEO_CONTROL)
-                & (uint8_t)~VIDEO_CONTROL_NO_EMULATION;
+            uint8_t control = peekb(BDA, BDA_VIDEO_CONTROL) & (uint8_t)~VIDEO_CONTROL_NO_EMULATION;
             pokeb(
                 BDA, BDA_VIDEO_CONTROL,
-                (uint8_t)(control
-                    | (r->al != 0 ? VIDEO_CONTROL_NO_EMULATION : 0))
+                (uint8_t)(control | (r->al != 0 ? VIDEO_CONTROL_NO_EMULATION : 0))
             );
             r->al = 0x12;
             break;
@@ -1256,9 +1173,7 @@ static void alternate_select(struct vgabios_regs *r) {
         }
         case 0x36: {
             uint8_t clocking = seq_read(0x01) & (uint8_t)~SEQ_SCREEN_OFF;
-            seq_write(
-                0x01, (uint8_t)(clocking | (r->al != 0 ? SEQ_SCREEN_OFF : 0))
-            );
+            seq_write(0x01, (uint8_t)(clocking | (r->al != 0 ? SEQ_SCREEN_OFF : 0)));
             r->al = 0x12;
             break;
         }
@@ -1279,9 +1194,7 @@ static void state_information(struct vgabios_regs *r) {
     pokew(es, (uint16_t)(to + 7), peekw(BDA, BDA_PAGE_SIZE));
     pokew(es, (uint16_t)(to + 9), peekw(BDA, BDA_PAGE_START));
     for (size_t i = 0; i < 16; i++) {
-        pokeb(
-            es, (uint16_t)(to + 11 + i), peekb(BDA, (uint16_t)(BDA_CURSOR + i))
-        );
+        pokeb(es, (uint16_t)(to + 11 + i), peekb(BDA, (uint16_t)(BDA_CURSOR + i)));
     }
     pokew(es, (uint16_t)(to + 27), peekw(BDA, BDA_CURSOR_TYPE));
     pokeb(es, (uint16_t)(to + 29), peekb(BDA, BDA_PAGE));
@@ -1290,42 +1203,33 @@ static void state_information(struct vgabios_regs *r) {
     pokeb(es, (uint16_t)(to + 33), peekb(BDA, BDA_PALETTE));
     pokeb(es, (uint16_t)(to + 34), (uint8_t)(peekb(BDA, BDA_ROWS) + 1));
     pokew(es, (uint16_t)(to + 35), peekw(BDA, BDA_CHAR_HEIGHT));
-    pokeb(
-        es, (uint16_t)(to + 37),
-        crtc_port() == 0x3b4 ? DCC_VGA_MONO : DCC_VGA_COLOR
-    );
+    pokeb(es, (uint16_t)(to + 37), crtc_port() == 0x3b4 ? DCC_VGA_MONO : DCC_VGA_COLOR);
     pokeb(es, (uint16_t)(to + 38), 0);
-    uint16_t colors = 16;
+    uint16_t colours = 16;
     size_t pages = 1;
     uint8_t lines = 2;
     if (m != NULL) {
         if (m->kind == MODE_LINEAR) {
-            colors = 256;
+            colours = 256;
         } else if (m->kind == MODE_CGA) {
-            colors = 4;
-        } else if (m->kind == MODE_CGA1 || m->mode == 0x07 || m->mode == 0x0f
-                || m->mode == 0x11) {
-            colors = 2;
+            colours = 4;
+        } else if (m->kind == MODE_CGA1 || m->mode == 0x07 || m->mode == 0x0f || m->mode == 0x11) {
+            colours = 2;
         }
         if (m->page_size != 0) {
             pages = (uint8_t)(m->kind == MODE_TEXT
-                ? (uint32_t)0x8000 / m->page_size
-                : (uint32_t)0x10000 / m->page_size);
+                            ? (uint32_t)0x8000 / m->page_size
+                            : (uint32_t)0x10000 / m->page_size);
         }
-        lines = m->height == 200 ? 0 : m->height == 350 ? 1 : m->height == 480
-            ? 3 : 2;
+        lines = m->height == 200 ? 0 : m->height == 350 ? 1 : m->height == 480 ? 3 : 2;
     }
-    pokew(es, (uint16_t)(to + 39), colors);
+    pokew(es, (uint16_t)(to + 39), colours);
     pokeb(es, (uint16_t)(to + 41), pages);
     pokeb(es, (uint16_t)(to + 42), lines);
     uint8_t map = seq_read(0x03);
-    pokeb(
-        es, (uint16_t)(to + 43), (uint8_t)(((map >> 3) & 4) | ((map >> 2) & 3))
-    );
+    pokeb(es, (uint16_t)(to + 43), (uint8_t)(((map >> 3) & 4) | ((map >> 2) & 3)));
     pokeb(es, (uint16_t)(to + 44), (uint8_t)(((map >> 2) & 4) | (map & 3)));
-    pokeb(
-        es, (uint16_t)(to + 45), (uint8_t)(peekb(BDA, BDA_VGA_FLAGS) & 0x0f)
-    );
+    pokeb(es, (uint16_t)(to + 45), (uint8_t)(peekb(BDA, BDA_VGA_FLAGS) & 0x0f));
     for (size_t i = 46; i < 64; i++) {
         pokeb(es, (uint16_t)(to + i), 0);
     }

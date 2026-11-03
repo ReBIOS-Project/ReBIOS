@@ -126,9 +126,7 @@ static volatile uint32_t *reg(uintptr_t base, uint64_t offset) {
 }
 
 // Whether the bits in mask read as want within us microseconds.
-static bool reg_wait(
-    uintptr_t base, uint64_t offset, uint32_t mask, uint32_t want, uint64_t us
-) {
+static bool reg_wait(uintptr_t base, uint64_t offset, uint32_t mask, uint32_t want, uint64_t us) {
     for (size_t waited = 0; ; waited += POLL_US) {
         if ((*reg(base, offset) & mask) == want) {
             return true;
@@ -141,8 +139,7 @@ static bool reg_wait(
 }
 
 static bool cfg_wait(
-    struct pci_addr a, uint32_t offset, uint32_t mask, uint32_t want,
-    uint64_t us
+    struct pci_addr a, uint32_t offset, uint32_t mask, uint32_t want, uint64_t us
 ) {
     for (size_t waited = 0; ; waited += POLL_US) {
         if ((pci_cfg_read(a, offset, 4) & mask) == want) {
@@ -163,8 +160,7 @@ struct release {
 
 uint32_t usb_xhci_legacy_cap(uintptr_t base, size_t size) {
     uint64_t at = (uint64_t)(*reg(base, XHCI_HCCPARAMS1) >> 16) * 4;
-    for (size_t n = 0; at != 0 && at + 8 <= size && n < MAX_CAPABILITIES;
-         n++) {
+    for (size_t n = 0; at != 0 && at + 8 <= size && n < MAX_CAPABILITIES; n++) {
         uint32_t cap = *reg(base, at);
         if ((cap & 0xff) == XHCI_CAP_LEGACY) {
             return (uint32_t)at;
@@ -204,16 +200,13 @@ static bool xhci_take(uintptr_t base, size_t size, struct release *r) {
             }
         }
         uint32_t control = *reg(base, at + XHCI_LEGCTLSTS);
-        *reg(base, at + XHCI_LEGCTLSTS) = (control & XHCI_LEGCTLSTS_RSVDP)
-            | XHCI_LEGCTLSTS_EVENTS;
+        *reg(base, at + XHCI_LEGCTLSTS) = (control & XHCI_LEGCTLSTS_RSVDP) | XHCI_LEGCTLSTS_EVENTS;
     }
 
     uintptr_t op = base + (*reg(base, XHCI_CAPLENGTH) & 0xff);
     reg_wait(op, XHCI_USBSTS, XHCI_USBSTS_CNR, 0, XHCI_READY_US);
     *reg(op, XHCI_USBCMD) &= ~(XHCI_USBCMD_RUN | XHCI_USBCMD_INTERRUPTS);
-    return reg_wait(
-        op, XHCI_USBSTS, XHCI_USBSTS_HCH, XHCI_USBSTS_HCH, HALT_US
-    );
+    return reg_wait(op, XHCI_USBSTS, XHCI_USBSTS_HCH, XHCI_USBSTS_HCH, HALT_US);
 }
 
 // EHCI 1.0, 5.1.
@@ -244,9 +237,7 @@ static bool ehci_take(struct pci_addr a, uintptr_t base, struct release *r) {
     if ((*reg(op, EHCI_USBSTS) & EHCI_USBSTS_HALTED) == 0) {
         *reg(op, EHCI_USBCMD) &= ~EHCI_USBCMD_RUN;
     }
-    bool halted = reg_wait(
-        op, EHCI_USBSTS, EHCI_USBSTS_HALTED, EHCI_USBSTS_HALTED, HALT_US
-    );
+    bool halted = reg_wait(op, EHCI_USBSTS, EHCI_USBSTS_HALTED, EHCI_USBSTS_HALTED, HALT_US);
     *reg(op, EHCI_USBINTR) = 0;
     *reg(op, EHCI_USBSTS) = EHCI_USBSTS_INTERRUPTS;
     // The firmware's port setup does not outlive its ownership: the ports go
@@ -265,9 +256,7 @@ static bool ohci_take(uintptr_t base, struct release *r) {
         r->owned = true;
         *reg(base, OHCI_INTERRUPT_ENABLE) = OHCI_INTERRUPT_OC;
         *reg(base, OHCI_COMMAND_STATUS) = OHCI_COMMAND_OCR;
-        r->forced = !reg_wait(
-            base, OHCI_CONTROL, OHCI_CONTROL_IR, 0, RELEASE_US
-        );
+        r->forced = !reg_wait(base, OHCI_CONTROL, OHCI_CONTROL_IR, 0, RELEASE_US);
     }
     *reg(base, OHCI_INTERRUPT_DISABLE) = UINT32_MAX;
     // UsbReset, keeping RemoteWakeupConnected, then a software reset, which
@@ -276,9 +265,7 @@ static bool ohci_take(uintptr_t base, struct release *r) {
     (void)*reg(base, OHCI_CONTROL);
     uint32_t interval = *reg(base, OHCI_FM_INTERVAL);
     *reg(base, OHCI_COMMAND_STATUS) = OHCI_COMMAND_HCR;
-    bool reset = reg_wait(
-        base, OHCI_COMMAND_STATUS, OHCI_COMMAND_HCR, 0, OHCI_RESET_US
-    );
+    bool reset = reg_wait(base, OHCI_COMMAND_STATUS, OHCI_COMMAND_HCR, 0, OHCI_RESET_US);
     *reg(base, OHCI_FM_INTERVAL) = interval;
     return reset;
 }
@@ -288,8 +275,7 @@ static bool uhci_take(struct pci_addr a, uint16_t port, struct release *r) {
     pci_cfg_write(a, UHCI_LEGSUP, 2, UHCI_LEGSUP_RWC);
     outw(port + UHCI_USBCMD, UHCI_USBCMD_HCRESET);
     bool reset = false;
-    for (size_t waited = 0; !reset && waited <= UHCI_RESET_US;
-         waited += POLL_US) {
+    for (size_t waited = 0; !reset && waited <= UHCI_RESET_US; waited += POLL_US) {
         time_udelay(POLL_US);
         reset = (inw(port + UHCI_USBCMD) & UHCI_USBCMD_HCRESET) == 0;
     }
@@ -337,12 +323,10 @@ static void take(const struct pci_function *f) {
     uint32_t command = pci_cfg_read(a, PCI_COMMAND, 2);
     bool io = f->prog_if == USB_UHCI;
     const struct pci_bar *bar = first_bar(f, io);
-    if (bar == NULL
-     || (command & (io ? PCI_COMMAND_IO : PCI_COMMAND_MEMORY)) == 0) {
+    if (bar == NULL || (command & (io ? PCI_COMMAND_IO : PCI_COMMAND_MEMORY)) == 0) {
         printf(
-            "USB %04x:%02x:%02x.%x: %s left alone, as its registers are not "
-            "decoded\n",
-            a.segment, a.bus, a.device, a.function, name
+            "USB %04x:%02x:%02x.%x: %s left alone, as its registers are not decoded\n", a.segment,
+            a.bus, a.device, a.function, name
         );
         return;
     }
@@ -362,12 +346,14 @@ static void take(const struct pci_function *f) {
         }
     }
 
-    const char *from = !r.owned ? "" : r.forced
-        ? " taken from the firmware, which did not let go, and"
-        : " taken from the firmware and";
+    const char *from = !r.owned
+                     ? ""
+                     : r.forced
+                         ? " taken from the firmware, which did not let go, and"
+                         : " taken from the firmware and";
     printf(
-        "USB %04x:%02x:%02x.%x: %s%s %s\n", a.segment, a.bus, a.device,
-        a.function, name, from, stopped ? "stopped" : "not stopped"
+        "USB %04x:%02x:%02x.%x: %s%s %s\n", a.segment, a.bus, a.device, a.function, name, from,
+        stopped ? "stopped" : "not stopped"
     );
     if (stopped && taken_count < MAX_TAKEN) {
         taken[taken_count++] = a;
@@ -377,8 +363,8 @@ static void take(const struct pci_function *f) {
 static bool unneeded(uint16_t segment, uint16_t rid) {
     for (size_t i = 0; i < taken_count; i++) {
         const struct pci_addr *a = &taken[i];
-        if (a->segment == segment && a->bus == rid >> 8
-         && a->device == (rid >> 3 & 0x1f) && a->function == (rid & 7)) {
+        if (a->segment == segment && a->bus == rid >> 8 && a->device == (rid >> 3 & 0x1f)
+         && a->function == (rid & 7)) {
             return true;
         }
     }
@@ -389,8 +375,7 @@ void usb_handoff(void) {
     const struct pci_topology *t = pci_enum_topology();
     for (size_t i = 0; t != NULL && i < t->function_count; i++) {
         const struct pci_function *f = &t->functions[i];
-        if (f->base_class == PCI_CLASS_SERIAL_BUS
-         && f->subclass == PCI_SUBCLASS_USB) {
+        if (f->base_class == PCI_CLASS_SERIAL_BUS && f->subclass == PCI_SUBCLASS_USB) {
             take(f);
         }
     }

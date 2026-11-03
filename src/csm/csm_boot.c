@@ -98,13 +98,11 @@ _Static_assert(
     "E820 table overlaps the BBS table"
 );
 _Static_assert(
-    BBS_TABLE + CSM_BBS_MAX_ENTRIES * sizeof(struct csm_bbs_entry)
-        <= BOOT_TABLE,
+    BBS_TABLE + CSM_BBS_MAX_ENTRIES * sizeof(struct csm_bbs_entry) <= BOOT_TABLE,
     "BBS table overlaps the boot table"
 );
 _Static_assert(
-    BOOT_TABLE + sizeof(struct csm_boot_table) <= MP_TABLE,
-    "boot table overlaps the MP table"
+    BOOT_TABLE + sizeof(struct csm_boot_table) <= MP_TABLE, "boot table overlaps the MP table"
 );
 _Static_assert(
     PIR_TABLE + LEGACY_TABLE_SIZE <= BOOT_ORDER,
@@ -138,10 +136,7 @@ static uint32_t e820_build(void) {
     printf("Guest memory map:\n");
     e820_log(map);
 
-    memcpy(
-        layout_low(E820_TABLE), map->entries,
-        map->count * sizeof(struct e820_entry)
-    );
+    memcpy(layout_low(E820_TABLE), map->entries, map->count * sizeof(struct e820_entry));
     size_t count = map->count;
     kfree(map);
     return count;
@@ -216,8 +211,8 @@ static void free_uma_absent(void) {
     end &= ~(PAGE_SIZE - 1);
     if (start < end) {
         printf(
-            "Upper memory %#llx-%#llx is free, and absent\n",
-            (unsigned long long)start, (unsigned long long)(end - 1)
+            "Upper memory %#llx-%#llx is free, and absent\n", (unsigned long long)start,
+            (unsigned long long)(end - 1)
         );
         layout_absent(start, end - start);
     }
@@ -239,8 +234,7 @@ static void lock_roms(void) {
     start = (start + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
     if (start >= roms_end && start < ROM_AREA_END) {
         printf(
-            "Legacy BIOS %#llx-%#x is read-only\n", (unsigned long long)start,
-            ROM_AREA_END - 1
+            "Legacy BIOS %#llx-%#x is read-only\n", (unsigned long long)start, ROM_AREA_END - 1
         );
         layout_read_only(start, ROM_AREA_END - start);
     }
@@ -248,9 +242,7 @@ static void lock_roms(void) {
 
 // Sets up the call the thunk makes next: function in AX, its table in ES:BX.
 static void csm_call(struct vcpu *v, uint16_t function, uintptr_t table) {
-    struct segment es = {
-        (uint16_t)(table >> 4), 0x93, 0xffff, table & ~(uint32_t)0xf
-    };
+    struct segment es = { (uint16_t)(table >> 4), 0x93, 0xffff, table & ~(uint32_t)0xf };
     vcpu_set_seg(v, SEG_ES, &es);
     v->gprs.rax = function;
     v->gprs.rbx = table & 0xf;
@@ -313,42 +305,36 @@ static void next_rom(struct vcpu *v) {
         int bus = pci_plan_guest_bus(rom->address.segment, rom->address.bus);
         if (bus < 0) {
             printf(
-                "Not running the option ROM of %04x:%02x:%02x.%x, which the "
-                "guest does not have\n",
-                rom->address.segment, rom->address.bus,
-                rom->address.devfn >> 3, rom->address.devfn & 7
+                "Not running the option ROM of %04x:%02x:%02x.%x, which the guest does not have\n",
+                rom->address.segment, rom->address.bus, rom->address.devfn >> 3,
+                rom->address.devfn & 7
             );
             continue;
         }
         if (csm.rom_end > rom_max || rom->size > rom_max - csm.rom_end) {
             printf(
-                "No room for the option ROM of %02x:%02x.%x, %u bytes at "
-                "%#llx\n",
-                rom->address.bus, rom->address.devfn >> 3,
-                rom->address.devfn & 7, rom->size,
+                "No room for the option ROM of %02x:%02x.%x, %u bytes at %#llx\n",
+                rom->address.bus, rom->address.devfn >> 3, rom->address.devfn & 7, rom->size,
                 (unsigned long long)csm.rom_end
             );
             continue;
         }
 
-        memcpy(
-            layout_low(csm.rom_end), (const void *)(uintptr_t)rom->image,
-            rom->size
-        );
+        memcpy(layout_low(csm.rom_end), (const void *)(uintptr_t)rom->image, rom->size);
         struct csm_oprom_params params = {
             .compat16 = csm.compat16,
             .segment = (uint16_t)(csm.rom_end >> 4),
             .address = rom->address,
             .bbs_table = BBS_TABLE,
-            .bbs_entry_count = csm.bbs_count,
+            .bbs_entry_count = csm.bbs_count
         };
         params.address.segment = 0;
         params.address.bus = (uint8_t)bus;
         csm_fill_oprom_table(layout_low(OPROM_TABLE), &params);
         printf(
-            "Running the option ROM of %02x:%02x.%x (%04x:%04x) at %#llx\n",
-            rom->address.bus, rom->address.devfn >> 3, rom->address.devfn & 7,
-            rom->vendor_id, rom->device_id, (unsigned long long)csm.rom_end
+            "Running the option ROM of %02x:%02x.%x (%04x:%04x) at %#llx\n", rom->address.bus,
+            rom->address.devfn >> 3, rom->address.devfn & 7, rom->vendor_id, rom->device_id,
+            (unsigned long long)csm.rom_end
         );
         csm.rom_at = csm.rom_end;
         csm.stage = STAGE_DISPATCH_OPROM;
@@ -372,13 +358,9 @@ void csm_boot_returned(struct vcpu *v) {
         case STAGE_DISPATCH_OPROM: {
             // What the ROM keeps once initialised, which may be less than it
             // was.
-            size_t size = *(uint8_t *)layout_low(csm.rom_at + 2)
-                * (uint32_t)512;
-            printf(
-                "Option ROM done, status %#x, %zu bytes kept\n", status, size
-            );
-            csm.rom_end = (csm.rom_at + size + OPTION_ROM_ALIGN - 1)
-                & ~(OPTION_ROM_ALIGN - 1);
+            size_t size = *(uint8_t *)layout_low(csm.rom_at + 2) * (uint32_t)512;
+            printf("Option ROM done, status %#x, %zu bytes kept\n", status, size);
+            csm.rom_end = (csm.rom_at + size + OPTION_ROM_ALIGN - 1) & ~(OPTION_ROM_ALIGN - 1);
             csm.roms_done++;
             next_rom(v);
             break;
@@ -398,9 +380,7 @@ void csm_boot_returned(struct vcpu *v) {
             break;
         }
         case STAGE_BOOT: {
-            printf(
-                "The legacy BIOS found nothing to boot, status %#x\n", status
-            );
+            printf("The legacy BIOS found nothing to boot, status %#x\n", status);
             vcpu_set_rip(v, csm_thunk_halt - csm_thunk_start);
             break;
         }
@@ -423,9 +403,7 @@ static void pci_interrupts(void) {
     const struct acpi_irq_pci_route *routes = acpi_irq_pci_routes(&count);
     struct irq_pci_line *lines = kmalloc(count * sizeof(struct irq_pci_line));
     for (size_t i = 0; i < count; i++) {
-        lines[i] = (struct irq_pci_line){
-            routes[i].gsi, routes[i].level, routes[i].active_low
-        };
+        lines[i] = (struct irq_pci_line){ routes[i].gsi, routes[i].level, routes[i].active_low };
     }
     irq_route_pci(lines, count, acpi_irq_isa_claimed());
     kfree(lines);
@@ -438,8 +416,7 @@ static void pci_interrupts(void) {
         }
         uint32_t line = PCI_INTERRUPT_LINE_NONE;
         for (size_t j = 0; j < count; j++) {
-            if (same_function(routes[j].addr, f->addr)
-             && irq_isa_irq(routes[j].gsi) >= 0) {
+            if (same_function(routes[j].addr, f->addr) && irq_isa_irq(routes[j].gsi) >= 0) {
                 line = (uint32_t)irq_isa_irq(routes[j].gsi);
             }
         }
@@ -462,9 +439,7 @@ static bool hex_value(char c, unsigned int *digit) {
 }
 
 // A hexadecimal number at *at, which moves past it.
-static bool hex_number(
-    const char *line, size_t length, size_t *at, uint32_t *n
-) {
+static bool hex_number(const char *line, size_t length, size_t *at, uint32_t *n) {
     unsigned int digit;
     *n = 0;
     size_t first = *at;
@@ -478,13 +453,10 @@ static bool hex_number(
 // The legacy BIOS's name for the root bus whose numbers are at *at, which
 // moves past them: that of the guest's bus 0, or of the port in the bus's
 // place. Returns the name's length, or -1 where the guest has not the bus.
-static int root_name(
-    const char *line, size_t length, size_t *at, char *name, size_t size
-) {
+static int root_name(const char *line, size_t length, size_t *at, char *name, size_t size) {
     uint32_t segment;
     uint32_t bus;
-    if (!hex_number(line, length, at, &segment) || *at >= length
-     || line[*at] != ':') {
+    if (!hex_number(line, length, at, &segment) || *at >= length || line[*at] != ':') {
         return -1;
     }
     (*at)++;
@@ -503,14 +475,11 @@ static int root_name(
         for (size_t k = 0; k < plan->port_count; k++) {
             const struct pci_plan_port *port = &plan->ports[k];
             if (port->root == r && port->function == 0) {
-                return snprintf(
-                    name, size, PCI_DOMAIN "/pci-bridge@%x", port->device
-                );
+                return snprintf(name, size, PCI_DOMAIN "/pci-bridge@%x", port->device);
             }
             if (port->root == r) {
                 return snprintf(
-                    name, size, PCI_DOMAIN "/pci-bridge@%x,%x", port->device,
-                    port->function
+                    name, size, PCI_DOMAIN "/pci-bridge@%x,%x", port->device, port->function
                 );
             }
         }
@@ -522,9 +491,7 @@ static int root_name(
 // loader puts the numbers of a root bus other than segment 0's bus 0 after
 // "/pci@i0cf8,". Returns the line's length, or 0 where it does not fit or the
 // guest has not the root bus.
-static size_t boot_order_line(
-    const char *line, size_t length, char *out, size_t size
-) {
+static size_t boot_order_line(const char *line, size_t length, char *out, size_t size) {
     char prefix[32];
     int prefix_length = 0;
     size_t at = PCI_DOMAIN_LENGTH + 1;
@@ -555,13 +522,10 @@ static void boot_order(void) {
     size_t at = 0;
     while (at < HANDOFF_MAX_BOOT_ORDER && list[at] != 0) {
         size_t end = at;
-        while (end < HANDOFF_MAX_BOOT_ORDER && list[end] != 0
-            && list[end] != '\n') {
+        while (end < HANDOFF_MAX_BOOT_ORDER && list[end] != 0 && list[end] != '\n') {
             end++;
         }
-        size_t n = boot_order_line(
-            list + at, end - at, to + used, room - used
-        );
+        size_t n = boot_order_line(list + at, end - at, to + used, room - used);
         if (n != 0 && used + n + 1 <= room) {
             used += n;
             to[used++] = '\n';
@@ -586,9 +550,7 @@ void csm_boot_start(struct vcpu *v) {
     }
     csm.image_base = ROM_AREA_END - image_size;
     memcpy(layout_low(csm.image_base), seabios_csm, image_size);
-    csm.compat16 = csm_find_compat16_table(
-        layout_low(csm.image_base), image_size
-    );
+    csm.compat16 = csm_find_compat16_table(layout_low(csm.image_base), image_size);
     if (csm.compat16 == NULL) {
         panic("No CSM16 table in the legacy BIOS image\n");
     }
@@ -600,17 +562,14 @@ void csm_boot_start(struct vcpu *v) {
         thunk[csm_thunk_hypercall - csm_thunk_start + 2] = 0xd9;
     }
     uint16_t entry[2] = {
-        csm.compat16->compatibility16_call_offset,
-        csm.compat16->compatibility16_call_segment
+        csm.compat16->compatibility16_call_offset, csm.compat16->compatibility16_call_segment
     };
     memcpy(thunk + (csm_thunk_entry - csm_thunk_start), entry, sizeof(entry));
 
     memset(layout_low(INIT_TABLE), 0, TABLES_END - INIT_TABLE);
     pci_interrupts();
     // The CSM16 copies them where legacy software looks for them.
-    size_t mp_length = mptable_build(
-        layout_low(MP_TABLE), LEGACY_TABLE_SIZE, MP_TABLE
-    );
+    size_t mp_length = mptable_build(layout_low(MP_TABLE), LEGACY_TABLE_SIZE, MP_TABLE);
     size_t pir_length = pir_build(layout_low(PIR_TABLE), LEGACY_TABLE_SIZE);
     if (pir_length != 0) {
         csm.compat16->irq_routing_table_pointer = PIR_TABLE;
@@ -628,8 +587,7 @@ void csm_boot_start(struct vcpu *v) {
     if (plan != NULL && plan->ecam != 0) {
         csm.compat16->pci_express_base = (uint32_t)plan->ecam;
     }
-    if (csm.compat16->table_length
-     >= offsetof(struct csm_compat16_table, boot_order_pointer)) {
+    if (csm.compat16->table_length >= offsetof(struct csm_compat16_table, boot_order_pointer)) {
         csm.compat16->hypervisor_interface = HYPERCALL_INTERFACE;
     } else {
         printf("The legacy BIOS predates the hypervisor's interface\n");
@@ -637,15 +595,13 @@ void csm_boot_start(struct vcpu *v) {
     if (csm.compat16->table_length >= sizeof(struct csm_compat16_table)) {
         boot_order();
     } else {
-        printf(
-            "The legacy BIOS takes no boot order, ordering by controller\n"
-        );
+        printf("The legacy BIOS takes no boot order, ordering by controller\n");
     }
     bool rsdp_failed = acpi
-        && !csm_copy_rsdp(
-            layout_low(csm.image_base), csm.image_base, image_size,
-            csm.compat16, rsdp
-        );
+                    && !csm_copy_rsdp(
+                           layout_low(csm.image_base), csm.image_base, image_size, csm.compat16,
+                           rsdp
+                       );
     if (rsdp_failed) {
         printf("Cannot hand the ACPI RSDP to the legacy BIOS\n");
         acpi = false;
@@ -662,14 +618,14 @@ void csm_boot_start(struct vcpu *v) {
         .high_pmm = high_pmm,
         .high_pmm_size = HIGH_PMM_SIZE,
         .thunk = THUNK_BASE,
-        .thunk_size = TABLES_END - THUNK_BASE,
+        .thunk_size = TABLES_END - THUNK_BASE
     };
     csm_fill_init_table(layout_low(INIT_TABLE), &init);
 
     // At the guest's PCI addresses, which are all in segment 0.
     struct handoff_block_device *devices = kmalloc(
         (h->block_device_count != 0 ? h->block_device_count : 1)
-            * sizeof(struct handoff_block_device)
+      * sizeof(struct handoff_block_device)
     );
     for (size_t i = 0; i < h->block_device_count; i++) {
         devices[i] = h->block_devices[i];
@@ -679,8 +635,7 @@ void csm_boot_start(struct vcpu *v) {
         a->bus = bus >= 0 ? (uint8_t)bus : 0;
     }
     csm.bbs_count = csm_fill_bbs_table(
-        layout_low(BBS_TABLE), CSM_BBS_MAX_ENTRIES, devices,
-        h->block_device_count
+        layout_low(BBS_TABLE), CSM_BBS_MAX_ENTRIES, devices, h->block_device_count
     );
     kfree(devices);
     struct csm_boot_params boot = {
@@ -690,15 +645,13 @@ void csm_boot_start(struct vcpu *v) {
         .bbs_table = BBS_TABLE,
         .bbs_entry_count = csm.bbs_count,
         .mp_floating_pointer = mp_length != 0 ? MP_TABLE : 0,
-        .e820_entry_count = e820_count,
+        .e820_entry_count = e820_count
     };
     csm_fill_boot_table(layout_low(BOOT_TABLE), &boot);
 
     printf(
-        "Legacy BIOS at %#llx, %zu bytes, entry %04x:%04x, high memory at "
-        "%#x\n",
-        (unsigned long long)csm.image_base, image_size, entry[1], entry[0],
-        high_pmm
+        "Legacy BIOS at %#llx, %zu bytes, entry %04x:%04x, high memory at %#x\n",
+        (unsigned long long)csm.image_base, image_size, entry[1], entry[0], high_pmm
     );
 
     vcpu_set_real_mode(v, THUNK_BASE >> 4, 0);

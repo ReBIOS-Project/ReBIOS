@@ -69,8 +69,7 @@ void aml_word(struct aml *a, uint16_t value) {
 
 void aml_dword(struct aml *a, uint32_t value) {
     uint8_t b[4] = {
-        (uint8_t)value, (uint8_t)(value >> 8), (uint8_t)(value >> 16),
-        (uint8_t)(value >> 24)
+        (uint8_t)value, (uint8_t)(value >> 8), (uint8_t)(value >> 16), (uint8_t)(value >> 24)
     };
     aml_bytes(a, b, sizeof(b));
 }
@@ -109,8 +108,7 @@ void aml_end(struct aml *a) {
     uint32_t at = a->open[--a->depth];
     uint32_t content = a->size - at - PKG_LENGTH_MAX;
     // A package's length counts its own encoding.
-    size_t n = content + 1 < 0x40 ? 1 : content + 2 < 0x1000 ? 2
-        : content + 3 < 0x100000 ? 3 : 4;
+    size_t n = content + 1 < 0x40 ? 1 : content + 2 < 0x1000 ? 2 : content + 3 < 0x100000 ? 3 : 4;
     memmove(a->data + at + n, a->data + at + PKG_LENGTH_MAX, content);
     pkg_encode(a->data + at, content + n, n);
     a->size -= PKG_LENGTH_MAX - n;
@@ -161,9 +159,7 @@ void aml_name(struct aml *a, const char *path) {
     }
 }
 
-void aml_name_segs(
-    struct aml *a, bool root, const char (*segs)[4], size_t count
-) {
+void aml_name_segs(struct aml *a, bool root, const char (*segs)[4], size_t count) {
     if (root) {
         aml_byte(a, AML_ROOT_CHAR);
     }
@@ -205,11 +201,11 @@ void aml_buffer(struct aml *a, const void *data, size_t size) {
     aml_end(a);
 }
 
-void aml_local(struct aml *a, unsigned int n) {
+void aml_local(struct aml *a, size_t n) {
     aml_byte(a, (uint8_t)(AML_LOCAL0 + n));
 }
 
-void aml_arg(struct aml *a, unsigned int n) {
+void aml_arg(struct aml *a, size_t n) {
     aml_byte(a, (uint8_t)(AML_ARG0 + n));
 }
 
@@ -229,9 +225,7 @@ void aml_name_string(struct aml *a, const char *path, const char *s) {
     aml_string(a, s, length);
 }
 
-void aml_method(
-    struct aml *a, const char *path, unsigned int args, uint8_t flags
-) {
+void aml_method(struct aml *a, const char *path, unsigned int args, uint8_t flags) {
     aml_begin(a, AML_METHOD);
     aml_name(a, path);
     aml_byte(a, (uint8_t)(args | flags));
@@ -260,8 +254,8 @@ void aml_field_unit(struct aml *a, const char *name, uint32_t bits) {
 }
 
 void aml_table_header(
-    uint8_t *table, size_t length, const char signature[4], uint8_t revision,
-    const char oem_id[6], const char oem_table_id[8], uint32_t oem_revision
+    uint8_t *table, size_t length, const char signature[4], uint8_t revision, const char oem_id[6],
+    const char oem_table_id[8], uint32_t oem_revision
 ) {
     memcpy(table, signature, 4);
     memcpy(table + 4, &length, 4);

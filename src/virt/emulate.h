@@ -29,14 +29,9 @@
 // where the access faulted, having raised the fault.
 struct emulate_mem {
     bool (*read)(struct vcpu *v, uintptr_t linear, void *buf, size_t size);
-    bool (*write)(
-        struct vcpu *v, uintptr_t linear, const void *buf, size_t size
-    );
+    bool (*write)(struct vcpu *v, uintptr_t linear, const void *buf, size_t size);
     // INS's data, for its destination: false where INS is not to be emulated.
-    bool (*ins)(
-        struct vcpu *v, uintptr_t linear, uint16_t port, size_t size,
-        uint32_t *value
-    );
+    bool (*ins)(struct vcpu *v, uintptr_t linear, uint16_t port, size_t size, uint32_t *value);
     void (*outs)(struct vcpu *v, uint16_t port, size_t size, uint32_t value);
 };
 
@@ -49,8 +44,6 @@ struct emulate_mem {
 
 // Emulates the decoded instruction at the guest's RIP: the common integer
 // forms with a memory operand, and the string instructions.
-int emulate(
-    struct vcpu *v, const struct insn *insn, const struct emulate_mem *mem
-);
+int emulate(struct vcpu *v, const struct insn *insn, const struct emulate_mem *mem);
 
 #endif

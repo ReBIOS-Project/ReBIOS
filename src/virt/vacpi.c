@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -150,7 +151,7 @@
 
 struct method {
     uacpi_namespace_node *node;
-    unsigned int args;
+    size_t args;
 };
 
 struct notification {
@@ -217,7 +218,7 @@ static struct {
     struct spinlock lock;
 
     uacpi_handle call_work;
-    uint32_t call;
+    _Atomic(uint32_t) call;
     size_t call_index;
     uint32_t call_argc;
 } vacpi;
@@ -227,16 +228,16 @@ static struct {
 static const char *const left_out_methods[] = {
     "_INI", "_REG", "_PTS", "_WAK", "_GTS", "_BFS", "_TTS", "_PIC", "_PRW",
     "_PSW", "_DSW", "_S0W", "_S1W", "_S2W", "_S3W", "_S4W", "_OSI", "_OS_",
-    "_REV", "_PRT", "_DEP", "_GLK", "_GPE", NULL,
+    "_REV", "_PRT", "_DEP", "_GLK", "_GPE", NULL
 };
 static const char *const left_out_names[] = {
     "_PRW", "_S0_", "_S1_", "_S2_", "_S3_", "_S4_", "_S5_", "_PRT", "_DEP",
-    "_GPE", "_OS_", "_REV", "_GL_", NULL,
+    "_GPE", "_OS_", "_REV", "_GL_", NULL
 };
 // Processor power management stays the hypervisor's.
 static const char *const left_out_processor[] = {
     "_PSS", "_PCT", "_PPC", "_CST", "_TSS", "_PTC", "_TPC", "_CPC", "_LPI",
-    "_PDC", "_OSC", "_PSD", "_CSD", "_TSD", NULL,
+    "_PDC", "_OSC", "_PSD", "_CSD", "_TSD", NULL
 };
 // Methods that return the same thing every time, by the specification, and
 // become names.
@@ -245,19 +246,19 @@ static const char *const constant_methods[] = {
     "_STR", "_MLS", "_PXM", "_SEG", "_BBN", "_UPC", "_PLD", "_EJD", "_RMV",
     "_PR0", "_PR1", "_PR2", "_PR3", "_PRE", "_AL0", "_AL1", "_AL2", "_AL3",
     "_AL4", "_AL5", "_AL6", "_AL7", "_AL8", "_AL9", "_PSL", "_TZD", "_EDL",
-    "_CCA", NULL,
+    "_CCA", NULL
 };
 // What a host bridge has that the device the guest has in its place does not.
 static const char *const left_out_merged[] = {
     "_HID", "_CID", "_UID", "_ADR", "_SEG", "_BBN", "_CRS", "_PRS", "_SRS",
-    "_DIS", "_CBA", "_OSC", NULL,
+    "_DIS", "_CBA", "_OSC", NULL
 };
 // Methods that return packages whose shape does not change, which their stubs,
 // as ACPI 1.0 cannot make packages of a size known only at run time, build to
 // the shape they had once.
 static const char *const shaped_methods[] = {
     "_BIF", "_BIX", "_BST", "_PIF", "_BCL", "_DOD", "_HPP", "_ALR", "_FIF",
-    "_FPS", "_FST", "_BMD", NULL,
+    "_FPS", "_FST", "_BMD", NULL
 };
 
 static bool name_in(const char name[4], const char *const *list) {
@@ -275,8 +276,7 @@ static bool hex_digit(char c) {
 
 // _Lxx, _Exx, _Qxx: the firmware's event handlers.
 static bool event_method(const char name[4]) {
-    return name[0] == '_'
-        && (name[1] == 'L' || name[1] == 'E' || name[1] == 'Q')
+    return name[0] == '_' && (name[1] == 'L' || name[1] == 'E' || name[1] == 'Q')
         && hex_digit(name[2]) && hex_digit(name[3]);
 }
 
@@ -370,30 +370,26 @@ static void emit_seg(struct aml *a, const char name[4]) {
 
 // EisaId("PNPxxxx").
 static uint32_t eisa_id(const char *id) {
-    uint32_t vendor = (uint32_t)(id[0] - '@') << 10
-        | (uint32_t)(id[1] - '@') << 5 | (uint32_t)(id[2] - '@');
+    uint32_t vendor = (uint32_t)(id[0] - '@') << 10 | (uint32_t)(id[1] - '@') << 5
+                    | (uint32_t)(id[2] - '@');
     uint32_t product = 0;
     for (size_t i = 3; i < 7; i++) {
         char c = id[i];
         product = product << 4 | (uint32_t)(c <= '9' ? c - '0' : c - 'A' + 10);
     }
-    return (vendor >> 8 | (vendor & 0xff) << 8)
-        | (product >> 8 | (product & 0xff) << 8) << 16;
+    return (vendor >> 8 | (vendor & 0xff) << 8) | (product >> 8 | (product & 0xff) << 8) << 16;
 }
 
 // Constants, from what evaluating the firmware's objects gave. References
 // become the referenced object's name.
-static void emit_data(
-    struct aml *a, uacpi_object *obj, uacpi_namespace_node *scope
-) {
+static void emit_data(struct aml *a, uacpi_object *obj, uacpi_namespace_node *scope) {
     uint64_t value;
     uacpi_data_view view;
     uacpi_object_array package;
     if (uacpi_object_is_aml_namepath(obj)) {
         uacpi_namespace_node *node;
         struct path p;
-        if (uacpi_object_resolve_as_aml_namepath(obj, scope, &node)
-         == UACPI_STATUS_OK
+        if (uacpi_object_resolve_as_aml_namepath(obj, scope, &node) == UACPI_STATUS_OK
          && guest_path(node, &p)) {
             emit_path(a, &p);
         } else {
@@ -419,8 +415,7 @@ static void emit_data(
         }
         case UACPI_OBJECT_PACKAGE: {
             uacpi_object_get_package(obj, &package);
-            size_t count = package.count < MAX_PACKAGE
-                ? (uint32_t)package.count : MAX_PACKAGE;
+            size_t count = package.count < MAX_PACKAGE ? (uint32_t)package.count : MAX_PACKAGE;
             aml_begin(a, AML_PACKAGE);
             aml_byte(a, (uint8_t)count);
             for (size_t i = 0; i < count; i++) {
@@ -436,10 +431,9 @@ static void emit_data(
     }
 }
 
-static uint32_t method_add(uacpi_namespace_node *node, unsigned int args) {
+static uint32_t method_add(uacpi_namespace_node *node, size_t args) {
     vacpi.methods = grow(
-        vacpi.methods, vacpi.method_count, &vacpi.method_capacity,
-        sizeof(struct method)
+        vacpi.methods, vacpi.method_count, &vacpi.method_capacity, sizeof(struct method)
     );
     vacpi.methods[vacpi.method_count] = (struct method){ node, args };
     return vacpi.method_count++;
@@ -447,21 +441,19 @@ static uint32_t method_add(uacpi_namespace_node *node, unsigned int args) {
 
 static void target_add(uacpi_namespace_node *node) {
     vacpi.targets = grow(
-        vacpi.targets, vacpi.target_count, &vacpi.target_capacity,
-        sizeof(uacpi_namespace_node *)
+        vacpi.targets, vacpi.target_count, &vacpi.target_capacity, sizeof(uacpi_namespace_node *)
     );
     vacpi.targets[vacpi.target_count++] = node;
 }
 
 static void hidden_add(uacpi_namespace_node *node) {
     vacpi.hidden = grow(
-        vacpi.hidden, vacpi.hidden_count, &vacpi.hidden_capacity,
-        sizeof(uacpi_namespace_node *)
+        vacpi.hidden, vacpi.hidden_count, &vacpi.hidden_capacity, sizeof(uacpi_namespace_node *)
     );
     vacpi.hidden[vacpi.hidden_count++] = node;
 }
 
-static void put_args(struct aml *a, unsigned int args) {
+static void put_args(struct aml *a, size_t args) {
     for (size_t k = 0; k < args; k++) {
         helper(a, "PUTA");
         aml_int(a, k);
@@ -481,9 +473,7 @@ static void release(struct aml *a) {
 }
 
 // Store (GELT (i, j), Index (target, index)).
-static void store_element(
-    struct aml *a, size_t i, size_t j, unsigned int target_local, size_t index
-) {
+static void store_element(struct aml *a, size_t i, size_t j, size_t target_local, size_t index) {
     aml_op(a, AML_STORE);
     helper(a, "GELT");
     aml_int(a, i);
@@ -496,8 +486,7 @@ static void store_element(
 
 // A stub that rebuilds a package of the shape the method's result had.
 static void emit_shaped_stub(
-    struct aml *a, const char name[4], unsigned int args, size_t index,
-    uacpi_object *shape
+    struct aml *a, const char name[4], size_t args, size_t index, uacpi_object *shape
 ) {
     uacpi_object_array top;
     uacpi_object_get_package(shape, &top);
@@ -516,8 +505,7 @@ static void emit_shaped_stub(
     aml_local(a, 1);
     for (size_t i = 0; i < top.count; i++) {
         uacpi_object_array inner;
-        if (uacpi_object_get_package(top.objects[i], &inner)
-         != UACPI_STATUS_OK) {
+        if (uacpi_object_get_package(top.objects[i], &inner) != UACPI_STATUS_OK) {
             store_element(a, i, ELEMENT_NONE, 1, i);
             continue;
         }
@@ -546,22 +534,19 @@ static void emit_shaped_stub(
 // ACPI 1.0 allows.
 static bool shape_usable(uacpi_object *obj) {
     uacpi_object_array top;
-    if (uacpi_object_get_package(obj, &top) != UACPI_STATUS_OK
-     || top.count > MAX_PACKAGE) {
+    if (uacpi_object_get_package(obj, &top) != UACPI_STATUS_OK || top.count > MAX_PACKAGE) {
         return false;
     }
     for (size_t i = 0; i < top.count; i++) {
         uacpi_object_array inner;
-        if (uacpi_object_get_package(top.objects[i], &inner)
-         != UACPI_STATUS_OK) {
+        if (uacpi_object_get_package(top.objects[i], &inner) != UACPI_STATUS_OK) {
             continue;
         }
         if (inner.count > MAX_PACKAGE) {
             return false;
         }
         for (size_t j = 0; j < inner.count; j++) {
-            if (uacpi_object_get_type(inner.objects[j])
-             == UACPI_OBJECT_PACKAGE) {
+            if (uacpi_object_get_type(inner.objects[j]) == UACPI_OBJECT_PACKAGE) {
                 return false;
             }
         }
@@ -574,15 +559,12 @@ static bool crs_replaced(uacpi_namespace_node *device);
 // What the guest has in the place of an object of the firmware's, if anything
 // else: nothing for the identity of a host bridge below its own, and bus 0 of
 // segment 0 for its own. Returns whether it is something else.
-static bool emit_replaced(
-    struct aml *a, uacpi_namespace_node *node, const char name[4]
-) {
+static bool emit_replaced(struct aml *a, uacpi_namespace_node *node, const char name[4]) {
     uacpi_namespace_node *parent = uacpi_namespace_node_parent(node);
     if (merged_of(parent) != NULL && name_in(name, left_out_merged)) {
         return true;
     }
-    bool numbers = memcmp(name, "_SEG", 4) == 0
-        || memcmp(name, "_BBN", 4) == 0;
+    bool numbers = memcmp(name, "_SEG", 4) == 0 || memcmp(name, "_BBN", 4) == 0;
     if (vacpi.primary == NULL || parent != vacpi.primary || !numbers) {
         return false;
     }
@@ -593,13 +575,11 @@ static bool emit_replaced(
 }
 
 static void emit_method(
-    struct aml *a, uacpi_namespace_node *node, const char name[4],
-    bool in_processor
+    struct aml *a, uacpi_namespace_node *node, const char name[4], bool in_processor
 ) {
     if (name_in(name, left_out_methods) || event_method(name)
      || (in_processor && name_in(name, left_out_processor))
-     || (memcmp(name, "_CRS", 4) == 0
-      && crs_replaced(uacpi_namespace_node_parent(node))) != 0) {
+     || (memcmp(name, "_CRS", 4) == 0 && crs_replaced(uacpi_namespace_node_parent(node))) != 0) {
         return;
     }
     if (emit_replaced(a, node, name)) {
@@ -609,14 +589,13 @@ static void emit_method(
     if (uacpi_get_namespace_node_info(node, &info) != UACPI_STATUS_OK) {
         return;
     }
-    unsigned int args = info->num_params;
+    size_t args = info->num_params;
     uacpi_free_namespace_node_info(info);
     uacpi_namespace_node *scope = uacpi_namespace_node_parent(node);
 
     if (args == 0 && name_in(name, constant_methods)) {
         uacpi_object *obj;
-        if (uacpi_eval(node, NULL, NULL, &obj) == UACPI_STATUS_OK
-         && obj != NULL) {
+        if (uacpi_eval(node, NULL, NULL, &obj) == UACPI_STATUS_OK && obj != NULL) {
             aml_op(a, AML_NAME);
             emit_seg(a, name);
             emit_data(a, obj, scope);
@@ -628,8 +607,7 @@ static void emit_method(
     size_t index = method_add(node, args);
     if (args == 0 && name_in(name, shaped_methods)) {
         uacpi_object *obj;
-        if (uacpi_eval(node, NULL, NULL, &obj) == UACPI_STATUS_OK
-         && obj != NULL) {
+        if (uacpi_eval(node, NULL, NULL, &obj) == UACPI_STATUS_OK && obj != NULL) {
             bool usable = shape_usable(obj);
             if (usable) {
                 emit_shaped_stub(a, name, args, index, obj);
@@ -673,12 +651,9 @@ static void emit_method(
     aml_end(a);
 }
 
-static void emit_name(
-    struct aml *a, uacpi_namespace_node *node, const char name[4]
-) {
+static void emit_name(struct aml *a, uacpi_namespace_node *node, const char name[4]) {
     if (name_in(name, left_out_names)
-     || (memcmp(name, "_CRS", 4) == 0
-      && crs_replaced(uacpi_namespace_node_parent(node))) != 0) {
+     || (memcmp(name, "_CRS", 4) == 0 && crs_replaced(uacpi_namespace_node_parent(node))) != 0) {
         return;
     }
     if (emit_replaced(a, node, name)) {
@@ -698,8 +673,7 @@ static uacpi_iteration_decision link_irq(void *user, uacpi_resource *r) {
     uint32_t *irq = user;
     if (r->type == UACPI_RESOURCE_TYPE_IRQ && r->irq.num_irqs != 0) {
         *irq = r->irq.irqs[0];
-    } else if (r->type == UACPI_RESOURCE_TYPE_EXTENDED_IRQ
-            && r->extended_irq.num_irqs != 0) {
+    } else if (r->type == UACPI_RESOURCE_TYPE_EXTENDED_IRQ && r->extended_irq.num_irqs != 0) {
         *irq = r->extended_irq.irqs[0];
     } else {
         return UACPI_ITERATION_DECISION_CONTINUE;
@@ -714,8 +688,7 @@ static void emit_prt(struct aml *a, uacpi_namespace_node *bridge) {
     if (uacpi_get_pci_routing_table(bridge, &prt) != UACPI_STATUS_OK) {
         return;
     }
-    size_t count = prt->num_entries < MAX_PACKAGE ? (uint32_t)prt->num_entries
-        : MAX_PACKAGE;
+    size_t count = prt->num_entries < MAX_PACKAGE ? (uint32_t)prt->num_entries : MAX_PACKAGE;
     uint32_t *gsis = kmalloc((count + 1) * sizeof(uint32_t));
     size_t pic_count = 0;
     for (size_t i = 0; i < count; i++) {
@@ -723,9 +696,7 @@ static void emit_prt(struct aml *a, uacpi_namespace_node *bridge) {
         gsis[i] = e->index;
         if (e->source != NULL) {
             gsis[i] = UINT32_MAX;
-            uacpi_for_each_device_resource(
-                e->source, "_CRS", link_irq, &gsis[i]
-            );
+            uacpi_for_each_device_resource(e->source, "_CRS", link_irq, &gsis[i]);
         }
         if (gsis[i] != UINT32_MAX && irq_isa_irq(gsis[i]) >= 0) {
             pic_count++;
@@ -783,9 +754,7 @@ static void emit_prt(struct aml *a, uacpi_namespace_node *bridge) {
     uacpi_free_pci_routing_table(prt);
 }
 
-static void emit_children(
-    struct aml *a, uacpi_namespace_node *parent, bool in_processor
-);
+static void emit_children(struct aml *a, uacpi_namespace_node *parent, bool in_processor);
 static void emit_scopes(struct aml *a, uacpi_namespace_node *parent);
 
 static const char *const link_ids[] = { "PNP0C0F", NULL };
@@ -847,8 +816,8 @@ static size_t resource_size(const uint8_t *p, uint32_t left) {
 // and length fields, each of width bytes, if it is one of the type: ACPI 6.6,
 // 6.4.3.5.
 static bool address_fields(
-    const uint8_t *p, size_t size, uint8_t type, size_t *min, size_t *max,
-    size_t *length, size_t *width
+    const uint8_t *p, size_t size, uint8_t type, size_t *min, size_t *max, size_t *length,
+    size_t *width
 ) {
     switch (p[0]) {
         case RES_WORD_ADDRESS: {
@@ -899,15 +868,12 @@ static bool address_range(
         return false;
     }
     *base = le(p + min, width);
-    *end = le(p + length, width) != 0 ? *base + le(p + length, width)
-        : le(p + max, width) + 1;
+    *end = le(p + length, width) != 0 ? *base + le(p + length, width) : le(p + max, width) + 1;
     return true;
 }
 
 // The memory a descriptor of size bytes describes, if any.
-static bool resource_memory(
-    const uint8_t *p, size_t size, uint64_t *base, uint64_t *end
-) {
+static bool resource_memory(const uint8_t *p, size_t size, uint64_t *base, uint64_t *end) {
     uint64_t min;
     uint64_t max;
     size_t length;
@@ -948,9 +914,7 @@ static bool resource_memory(
     return true;
 }
 
-static uint32_t put_window(
-    uint8_t *out, uintptr_t base, uintptr_t end, bool high
-) {
+static uint32_t put_window(uint8_t *out, uintptr_t base, uintptr_t end, bool high) {
     if (high) {
         uint8_t d[46] = {
             RES_QWORD_ADDRESS, 43, 0, ADDRESS_MEMORY, ADDRESS_FIXED_PRODUCER,
@@ -963,8 +927,7 @@ static uint32_t put_window(
         return sizeof(d);
     }
     uint8_t d[26] = {
-        RES_DWORD_ADDRESS, 23, 0, ADDRESS_MEMORY, ADDRESS_FIXED_PRODUCER,
-        MEMORY_RW
+        RES_DWORD_ADDRESS, 23, 0, ADDRESS_MEMORY, ADDRESS_FIXED_PRODUCER, MEMORY_RW
     };
     put_le(d + 10, base, 4);
     put_le(d + 14, end - 1, 4);
@@ -1000,9 +963,7 @@ struct crs {
     size_t count;
 };
 
-static bool crs_repeats(
-    const struct crs *c, bool io, uint64_t base, uint64_t end
-) {
+static bool crs_repeats(const struct crs *c, bool io, uint64_t base, uint64_t end) {
     for (size_t i = 0; i < c->count; i++) {
         if (c->io[i] == io && base < c->ends[i] && end > c->bases[i]) {
             return true;
@@ -1027,8 +988,7 @@ static void bus_range_widen(uint8_t *p, size_t size) {
     size_t max;
     size_t length;
     size_t width;
-    if (plan == NULL
-     || !address_fields(p, size, ADDRESS_BUS, &min, &max, &length, &width)) {
+    if (plan == NULL || !address_fields(p, size, ADDRESS_BUS, &min, &max, &length, &width)) {
         return;
     }
     uint64_t last = le(p + max, width);
@@ -1048,8 +1008,7 @@ static void bus_range_widen(uint8_t *p, size_t size) {
 // not already. False if the device has no _CRS.
 static bool crs_copy(struct crs *c, uacpi_namespace_node *device, int kind) {
     uacpi_object *obj;
-    if (uacpi_eval(device, "_CRS", NULL, &obj) != UACPI_STATUS_OK
-     || obj == NULL) {
+    if (uacpi_eval(device, "_CRS", NULL, &obj) != UACPI_STATUS_OK || obj == NULL) {
         return false;
     }
     uacpi_data_view view;
@@ -1071,8 +1030,7 @@ static bool crs_copy(struct crs *c, uacpi_namespace_node *device, int kind) {
         bool io = false;
         bool ranged = true;
         if (resource_memory(in, n, &base, &end)) {
-            keep = kind == CRS_MOTHERBOARD ? !overlaps_private(base, end)
-                : end <= ONE_MIB;
+            keep = kind == CRS_MOTHERBOARD ? !overlaps_private(base, end) : end <= ONE_MIB;
         } else if (address_range(in, n, ADDRESS_IO, &base, &end)) {
             keep = true;
             io = true;
@@ -1119,14 +1077,10 @@ static void emit_crs(struct aml *a, uacpi_namespace_node *device) {
     }
     for (size_t r = 0; r < roots; r++) {
         const struct pci_plan_root *root = &plan->roots[r];
-        const struct pci_plan_range *ranges[3] = {
-            &root->low, &root->pref, &root->high
-        };
+        const struct pci_plan_range *ranges[3] = { &root->low, &root->pref, &root->high };
         for (size_t k = 0; k < 3; k++) {
             if (ranges[k]->end != ranges[k]->base) {
-                c.size += put_window(
-                    c.out + c.size, ranges[k]->base, ranges[k]->end, k == 2
-                );
+                c.size += put_window(c.out + c.size, ranges[k]->base, ranges[k]->end, k == 2);
             }
         }
     }
@@ -1206,7 +1160,7 @@ static void bridges_merge(void) {
         struct merged *m = &vacpi.merged[vacpi.merged_count];
         *m = (struct merged){
             .node = hb->node,
-            .adr = (uint32_t)port->device << 16 | port->function,
+            .adr = (uint32_t)port->device << 16 | port->function
         };
         uacpi_object_name name = uacpi_namespace_node_name(hb->node);
         memcpy(m->name, name.text, 4);
@@ -1227,8 +1181,7 @@ static uacpi_iteration_decision hide_found(
 ) {
     (void)user;
     (void)depth;
-    if (uacpi_device_matches_pnp_id(node, link_ids)
-     || uacpi_device_matches_pnp_id(node, ec_ids)) {
+    if (uacpi_device_matches_pnp_id(node, link_ids) || uacpi_device_matches_pnp_id(node, ec_ids)) {
         hidden_add(node);
     }
     return UACPI_ITERATION_DECISION_CONTINUE;
@@ -1237,8 +1190,7 @@ static uacpi_iteration_decision hide_found(
 // A device of the firmware's below the guest's host bridge where a port is,
 // which the guest has instead.
 static bool at_port(uacpi_namespace_node *node) {
-    if (vacpi.primary == NULL
-     || uacpi_namespace_node_parent(node) != vacpi.primary) {
+    if (vacpi.primary == NULL || uacpi_namespace_node_parent(node) != vacpi.primary) {
         return false;
     }
     uint64_t adr;
@@ -1267,9 +1219,7 @@ static void emit_merged(struct aml *a, const struct merged *m) {
     aml_end(a);
 }
 
-static void emit_object(
-    struct aml *a, uacpi_namespace_node *node, bool in_processor
-) {
+static void emit_object(struct aml *a, uacpi_namespace_node *node, bool in_processor) {
     if (uacpi_namespace_node_is_alias(node)) {
         return;
     }
@@ -1283,8 +1233,7 @@ static void emit_object(
         case UACPI_OBJECT_DEVICE: {
             // One HPET is all an in-scope machine has.
             if (uacpi_device_matches_pnp_id(node, link_ids)
-             || (hpet_any_hidden()
-              && uacpi_device_matches_pnp_id(node, hpet_ids))) {
+             || (hpet_any_hidden() && uacpi_device_matches_pnp_id(node, hpet_ids))) {
                 return;
             }
             // The hypervisor drives the embedded controller, so the guest gets
@@ -1317,8 +1266,7 @@ static void emit_object(
         }
         case UACPI_OBJECT_PROCESSOR: {
             uacpi_processor_info info = { 0 };
-            if (uacpi_eval(node, NULL, NULL, &obj) == UACPI_STATUS_OK
-             && obj != NULL) {
+            if (uacpi_eval(node, NULL, NULL, &obj) == UACPI_STATUS_OK && obj != NULL) {
                 uacpi_object_get_processor_info(obj, &info);
                 uacpi_object_unref(obj);
             }
@@ -1334,8 +1282,7 @@ static void emit_object(
         }
         case UACPI_OBJECT_POWER_RESOURCE: {
             uacpi_power_resource_info info = { 0 };
-            if (uacpi_eval(node, NULL, NULL, &obj) == UACPI_STATUS_OK
-             && obj != NULL) {
+            if (uacpi_eval(node, NULL, NULL, &obj) == UACPI_STATUS_OK && obj != NULL) {
                 uacpi_object_get_power_resource_info(obj, &info);
                 uacpi_object_unref(obj);
             }
@@ -1376,9 +1323,7 @@ static void emit_object(
     }
 }
 
-static void emit_children(
-    struct aml *a, uacpi_namespace_node *parent, bool in_processor
-) {
+static void emit_children(struct aml *a, uacpi_namespace_node *parent, bool in_processor) {
     uacpi_namespace_node *iter = NULL;
     while (uacpi_namespace_node_next(parent, &iter) == UACPI_STATUS_OK) {
         emit_object(a, iter, in_processor);
@@ -1387,11 +1332,10 @@ static void emit_children(
 
 static void emit_scopes(struct aml *a, uacpi_namespace_node *parent) {
     uacpi_namespace_node *iter = NULL;
-    uacpi_object_type_bits scopes = UACPI_OBJECT_DEVICE_BIT
-        | UACPI_OBJECT_PROCESSOR_BIT | UACPI_OBJECT_POWER_RESOURCE_BIT
-        | UACPI_OBJECT_THERMAL_ZONE_BIT;
-    while (uacpi_namespace_node_next_typed(parent, &iter, scopes)
-        == UACPI_STATUS_OK) {
+    uacpi_object_type_bits scopes = UACPI_OBJECT_DEVICE_BIT | UACPI_OBJECT_PROCESSOR_BIT
+                                  | UACPI_OBJECT_POWER_RESOURCE_BIT
+                                  | UACPI_OBJECT_THERMAL_ZONE_BIT;
+    while (uacpi_namespace_node_next_typed(parent, &iter, scopes) == UACPI_STATUS_OK) {
         emit_object(a, iter, false);
     }
 }
@@ -1402,19 +1346,14 @@ static void emit_root(struct aml *a) {
     uacpi_namespace_node *iter = NULL;
     while (uacpi_namespace_node_next(root, &iter) == UACPI_STATUS_OK) {
         uacpi_object_name name = uacpi_namespace_node_name(iter);
-        if (memcmp(name.text, "_GPE", 4) == 0
-         || memcmp(name.text, "_GL_", 4) == 0
-         || memcmp(name.text, "_OSI", 4) == 0
-         || memcmp(name.text, "_OS_", 4) == 0
+        if (memcmp(name.text, "_GPE", 4) == 0 || memcmp(name.text, "_GL_", 4) == 0
+         || memcmp(name.text, "_OSI", 4) == 0 || memcmp(name.text, "_OS_", 4) == 0
          || memcmp(name.text, "_REV", 4) == 0) {
             continue;
         }
-        if (memcmp(name.text, "_SB_", 4) == 0
-         || memcmp(name.text, "_TZ_", 4) == 0
-         || memcmp(name.text, "_PR_", 4) == 0
-         || memcmp(name.text, "_SI_", 4) == 0) {
-            if (memcmp(name.text, "_SB_", 4) == 0
-             || memcmp(name.text, "_TZ_", 4) == 0) {
+        if (memcmp(name.text, "_SB_", 4) == 0 || memcmp(name.text, "_TZ_", 4) == 0
+         || memcmp(name.text, "_PR_", 4) == 0 || memcmp(name.text, "_SI_", 4) == 0) {
+            if (memcmp(name.text, "_SB_", 4) == 0 || memcmp(name.text, "_TZ_", 4) == 0) {
                 target_add(iter);
             }
             aml_begin(a, AML_SCOPE);
@@ -1429,7 +1368,7 @@ static void emit_root(struct aml *a) {
 }
 
 // Store (Field, Local) and friends, by name.
-static void store_names(struct aml *a, const char *src, unsigned int local) {
+static void store_names(struct aml *a, const char *src, size_t local) {
     aml_op(a, AML_STORE);
     aml_name(a, src);
     aml_local(a, local);
@@ -1442,9 +1381,7 @@ static void store_int_name(struct aml *a, uint32_t value, const char *dst) {
 }
 
 // If (LEqual (Local, value)) {, closed by aml_end().
-static void if_local_equals(
-    struct aml *a, unsigned int local, uint32_t value
-) {
+static void if_local_equals(struct aml *a, size_t local, uint32_t value) {
     aml_begin(a, AML_IF);
     aml_op(a, AML_LEQUAL);
     aml_local(a, local);
@@ -1452,9 +1389,7 @@ static void if_local_equals(
 }
 
 // Index (Local, Add (Local, offset)): a byte of a buffer, as a target.
-static void byte_at(
-    struct aml *a, unsigned int buffer, unsigned int base, size_t offset
-) {
+static void byte_at(struct aml *a, size_t buffer, size_t base, size_t offset) {
     aml_op(a, AML_INDEX);
     aml_local(a, buffer);
     aml_op(a, AML_ADD);
@@ -1841,13 +1776,12 @@ static void emit_rcal(struct aml *a) {
 
 // What Linux 7.3's i8042 driver takes for the 8042's devices.
 static const char *const keyboard_ids[] = {
-    "PNP0300", "PNP0301", "PNP0302", "PNP0303", "PNP0304", "PNP0305",
-    "PNP0306", "PNP0309", "PNP030A", "PNP030B", "PNP0320", "PNP0343",
-    "PNP0344", "PNP0345", "CPQA0D7", NULL
+    "PNP0300", "PNP0301", "PNP0302", "PNP0303", "PNP0304", "PNP0305", "PNP0306", "PNP0309",
+    "PNP030A", "PNP030B", "PNP0320", "PNP0343", "PNP0344", "PNP0345", "CPQA0D7", NULL
 };
 static const char *const mouse_ids[] = {
-    "AUI0200", "FJC6000", "FJC6001", "PNP0F03", "PNP0F0B", "PNP0F0E",
-    "PNP0F12", "PNP0F13", "PNP0F19", "PNP0F1C", "SYN0801", NULL
+    "AUI0200", "FJC6000", "FJC6001", "PNP0F03", "PNP0F0B", "PNP0F0E", "PNP0F12", "PNP0F13",
+    "PNP0F19", "PNP0F1C", "SYN0801", NULL
 };
 
 static uacpi_iteration_decision device_shown(
@@ -1866,8 +1800,7 @@ static bool firmware_shows(const char *const *ids) {
 }
 
 static void emit_ps2_device(
-    struct aml *a, const char *name, const char *id, const uint8_t *crs,
-    size_t crs_size
+    struct aml *a, const char *name, const char *id, const uint8_t *crs, size_t crs_size
 ) {
     aml_begin(a, AML_DEVICE);
     aml_name(a, name);
@@ -1878,13 +1811,10 @@ static void emit_ps2_device(
     aml_end(a);
 }
 
-static uacpi_iteration_decision window_has_ps2_ports(
-    void *user, uacpi_resource *r
-) {
+static uacpi_iteration_decision window_has_ps2_ports(void *user, uacpi_resource *r) {
     uint64_t minimum = UINT64_MAX;
     uint64_t maximum = 0;
-    if (r->type == UACPI_RESOURCE_TYPE_ADDRESS16
-     && r->address16.common.type == UACPI_RANGE_IO) {
+    if (r->type == UACPI_RESOURCE_TYPE_ADDRESS16 && r->address16.common.type == UACPI_RANGE_IO) {
         minimum = r->address16.minimum;
         maximum = r->address16.maximum;
     } else if (r->type == UACPI_RESOURCE_TYPE_ADDRESS32
@@ -1903,13 +1833,10 @@ static uacpi_iteration_decision window_has_ps2_ports(
     return UACPI_ITERATION_DECISION_BREAK;
 }
 
-static uacpi_namespace_node *isa_bridge_below(
-    const struct pci_host_bridge *bridge
-) {
+static uacpi_namespace_node *isa_bridge_below(const struct pci_host_bridge *bridge) {
     uacpi_namespace_node *iter = NULL;
     uacpi_object_type_bits devices = UACPI_OBJECT_DEVICE_BIT;
-    while (uacpi_namespace_node_next_typed(bridge->node, &iter, devices)
-        == UACPI_STATUS_OK) {
+    while (uacpi_namespace_node_next_typed(bridge->node, &iter, devices) == UACPI_STATUS_OK) {
         uint64_t adr;
         if (uacpi_eval_simple_integer(iter, "_ADR", &adr) != UACPI_STATUS_OK) {
             continue;
@@ -1931,9 +1858,7 @@ static bool ps2_parent(struct path *out) {
     for (size_t i = 0; i < host->bridge_count; i++) {
         const struct pci_host_bridge *bridge = &host->bridges[i];
         bool routes = false;
-        uacpi_for_each_device_resource(
-            bridge->node, "_CRS", window_has_ps2_ports, &routes
-        );
+        uacpi_for_each_device_resource(bridge->node, "_CRS", window_has_ps2_ports, &routes);
         if (routes) {
             uacpi_namespace_node *isa = isa_bridge_below(bridge);
             return guest_path(isa != NULL ? isa : bridge->node, out);
@@ -1948,14 +1873,11 @@ static void emit_ps2_devices(struct aml *a) {
     // IO (Decode16, 0x60, 0x60, 1, 1), IO (Decode16, 0x64, 0x64, 1, 1),
     // IRQNoFlags () { 1 }
     static const uint8_t keyboard_crs[] = {
-        0x47, 0x01, 0x60, 0x00, 0x60, 0x00, 0x01, 0x01,
-        0x47, 0x01, 0x64, 0x00, 0x64, 0x00, 0x01, 0x01,
-        0x22, 0x02, 0x00, RES_END_TAG, 0x00
+        0x47, 0x01, 0x60, 0x00, 0x60, 0x00, 0x01, 0x01, 0x47, 0x01, 0x64, 0x00, 0x64, 0x00, 0x01,
+        0x01, 0x22, 0x02, 0x00, RES_END_TAG, 0x00
     };
     // IRQNoFlags () { 12 }
-    static const uint8_t mouse_crs[] = {
-        0x22, 0x00, 0x10, RES_END_TAG, 0x00
-    };
+    static const uint8_t mouse_crs[] = { 0x22, 0x00, 0x10, RES_END_TAG, 0x00 };
     struct path parent;
     aml_begin(a, AML_SCOPE);
     if (ps2_parent(&parent)) {
@@ -1964,9 +1886,7 @@ static void emit_ps2_devices(struct aml *a) {
         aml_name(a, "\\_SB");
     }
     if (!firmware_shows(keyboard_ids)) {
-        emit_ps2_device(
-            a, "RBKB", "PNP0303", keyboard_crs, sizeof(keyboard_crs)
-        );
+        emit_ps2_device(a, "RBKB", "PNP0303", keyboard_crs, sizeof(keyboard_crs));
     }
     if (!firmware_shows(mouse_ids)) {
         emit_ps2_device(a, "RBMS", "PNP0F13", mouse_crs, sizeof(mouse_crs));
@@ -1986,7 +1906,7 @@ static void emit_mailbox_device(struct aml *a) {
     uint8_t crs[] = {
         RES_FIXED_MEMORY32, 0x09, 0x00, 0x01, 0, 0, 0, 0, 0, 0, 0, 0,
         RES_FIXED_MEMORY32, 0x09, 0x00, 0x01, 0, 0, 0, 0, 0, 0, 0, 0,
-        RES_END_TAG, 0x00,
+        RES_END_TAG, 0x00
     };
     put_le(crs + 4, vacpi.mailbox, 4);
     put_le(crs + 8, MBX_SIZE + DOORBELL_SIZE, 4);
@@ -2030,9 +1950,7 @@ static void emit_mailbox_device(struct aml *a) {
         slot_name(name, slot, 'D');
         aml_field_unit(a, name, MBX_SLOT_DATA_SIZE * 8);
     }
-    aml_field_unit(
-        a, NULL, (MBX_RDATA - MBX_SLOTS - MBX_SLOT_COUNT * MBX_SLOT_SIZE) * 8
-    );
+    aml_field_unit(a, NULL, (MBX_RDATA - MBX_SLOTS - MBX_SLOT_COUNT * MBX_SLOT_SIZE) * 8);
     aml_field_unit(a, "MRDT", MBX_RDATA_SIZE * 8);
     aml_end(a);
 
@@ -2093,8 +2011,8 @@ static void emit_links(struct aml *a) {
         aml_end(a);
         // IRQ (Level, ActiveLow, Shared) {irq}: the ELCR has PCI's level.
         uint8_t crs[] = {
-            0x23, (uint8_t)((uint32_t)1 << irq),
-            (uint8_t)(((uint32_t)1 << irq) >> 8), 0x18, 0x79, 0x00
+            0x23, (uint8_t)((uint32_t)1 << irq), (uint8_t)(((uint32_t)1 << irq) >> 8), 0x18, 0x79,
+            0x00
         };
         aml_op(a, AML_NAME);
         aml_name(a, "_PRS");
@@ -2194,8 +2112,7 @@ static void emit_sleep_and_events(struct aml *a) {
 }
 
 static void sdt_ids(
-    const char signature[4], char oem_id[6], char oem_table_id[8],
-    uint32_t *oem_revision
+    const char signature[4], char oem_id[6], char oem_table_id[8], uint32_t *oem_revision
 ) {
     memcpy(oem_id, "REBIOS", 6);
     memcpy(oem_table_id, "REBIOS  ", 8);
@@ -2223,8 +2140,8 @@ uint8_t *vacpi_dsdt(size_t *length) {
     }
     acpi_lock();
     uacpi_namespace_for_each_child(
-        uacpi_namespace_root(), hide_found, NULL, UACPI_OBJECT_DEVICE_BIT,
-        UACPI_MAX_DEPTH_ANY, NULL
+        uacpi_namespace_root(), hide_found, NULL, UACPI_OBJECT_DEVICE_BIT, UACPI_MAX_DEPTH_ANY,
+        NULL
     );
     bridges_merge();
     emit_mailbox_device(&a);
@@ -2239,12 +2156,10 @@ uint8_t *vacpi_dsdt(size_t *length) {
     uint32_t oem_revision;
     sdt_ids(ACPI_DSDT_SIGNATURE, oem_id, oem_table_id, &oem_revision);
     // Revision 1 keeps the guest's integers to 32 bits, as ACPI 1.0 has them.
-    aml_table_header(
-        a.data, a.size, "DSDT", 1, oem_id, oem_table_id, oem_revision
-    );
+    aml_table_header(a.data, a.size, "DSDT", 1, oem_id, oem_table_id, oem_revision);
     printf(
-        "Guest DSDT: %zu bytes, %zu methods, %zu notification targets\n",
-        a.size, vacpi.method_count, vacpi.target_count
+        "Guest DSDT: %zu bytes, %zu methods, %zu notification targets\n", a.size,
+        vacpi.method_count, vacpi.target_count
     );
     *length = a.size;
     return a.data;
@@ -2272,8 +2187,7 @@ void vacpi_fadt(uint8_t fadt[VACPI_FADT_SIZE], uint32_t facs, uint32_t dsdt) {
     put32(fadt + FADT_DSDT, dsdt);
     // Dual 8259s or I/O APICs, the MADT telling which the guest has.
     fadt[FADT_INT_MODEL] = 1;
-    uint32_t flags = FADT_WBINVD | FADT_PROC_C1 | FADT_SLP_BUTTON
-        | FADT_FIX_RTC;
+    uint32_t flags = FADT_WBINVD | FADT_PROC_C1 | FADT_SLP_BUTTON | FADT_FIX_RTC;
     struct acpi_fadt *host;
     if (uacpi_table_fadt(&host) == UACPI_STATUS_OK) {
         put16(fadt + FADT_SCI_INT, host->sci_int);
@@ -2310,9 +2224,7 @@ void vacpi_fadt(uint8_t fadt[VACPI_FADT_SIZE], uint32_t facs, uint32_t dsdt) {
     char oem_table_id[8];
     uint32_t oem_revision;
     sdt_ids(ACPI_FADT_SIGNATURE, oem_id, oem_table_id, &oem_revision);
-    aml_table_header(
-        fadt, VACPI_FADT_SIZE, "FACP", 1, oem_id, oem_table_id, oem_revision
-    );
+    aml_table_header(fadt, VACPI_FADT_SIZE, "FACP", 1, oem_id, oem_table_id, oem_revision);
 }
 
 static void sci_update(void) {
@@ -2321,7 +2233,7 @@ static void sci_update(void) {
     }
     spinlock_acquire(&vacpi.lock);
     bool level = (vacpi.pm1_sts & vacpi.pm1_en & PM1_PWRBTN) != 0
-        || (vacpi.queue_count != 0 && (vacpi.gpe0_en & 1) != 0);
+              || (vacpi.queue_count != 0 && (vacpi.gpe0_en & 1) != 0);
     spinlock_release(&vacpi.lock);
     irq_virtual_line(vacpi.sci_gsi, level);
 }
@@ -2343,7 +2255,8 @@ static void write_result(uacpi_object *obj, uint32_t status) {
             case UACPI_OBJECT_BUFFER: {
                 uacpi_object_get_string_or_buffer(obj, &view);
                 header[1] = uacpi_object_get_type(obj) == UACPI_OBJECT_STRING
-                    ? TYPE_STRING : TYPE_BUFFER;
+                          ? TYPE_STRING
+                          : TYPE_BUFFER;
                 if (view.length > MBX_RDATA_SIZE) {
                     view.length = MBX_RDATA_SIZE;
                 }
@@ -2363,9 +2276,7 @@ static void write_result(uacpi_object *obj, uint32_t status) {
     }
     guest_phys_write(vacpi.mailbox + MBX_STATUS, header, sizeof(header));
     if (view.length != 0) {
-        guest_phys_write(
-            vacpi.mailbox + MBX_RDATA, view.const_bytes, view.length
-        );
+        guest_phys_write(vacpi.mailbox + MBX_RDATA, view.const_bytes, view.length);
     }
 }
 
@@ -2388,20 +2299,18 @@ static uacpi_object *slot_object(size_t slot) {
         case TYPE_BUFFER: {
             guest_phys_read(base + MBX_SLOT_DATA, data, length);
             uacpi_data_view view = { .const_bytes = data, .length = length };
-            return type == TYPE_STRING ? uacpi_object_create_string(view)
-                : uacpi_object_create_buffer(view);
+            return type == TYPE_STRING
+                 ? uacpi_object_create_string(view)
+                 : uacpi_object_create_buffer(view);
         }
         case TYPE_PACKAGE: {
             guest_phys_read(base + MBX_SLOT_DATA, data, MBX_SLOT_DATA_SIZE);
             uacpi_object *elements[MAX_PACKAGE];
             size_t count = 0;
             size_t off = 0;
-            for (size_t i = 0;
-                 i < length && count < MAX_PACKAGE && off + 4 <= sizeof(data);
-                 i++) {
+            for (size_t i = 0; i < length && count < MAX_PACKAGE && off + 4 <= sizeof(data); i++) {
                 uint8_t etype = data[off];
-                uint32_t elength = (uint32_t)data[off + 2]
-                    | (uint32_t)data[off + 3] << 8;
+                uint32_t elength = (uint32_t)data[off + 2] | (uint32_t)data[off + 3] << 8;
                 if (off + 4 + elength > sizeof(data)) {
                     break;
                 }
@@ -2410,9 +2319,7 @@ static uacpi_object *slot_object(size_t slot) {
                     memcpy(&v, data + off + 4, 4);
                     elements[count++] = uacpi_object_create_integer(v);
                 } else if (etype == TYPE_BUFFER) {
-                    uacpi_data_view view = {
-                        .const_bytes = data + off + 4, .length = elength
-                    };
+                    uacpi_data_view view = { .const_bytes = data + off + 4, .length = elength };
                     elements[count++] = uacpi_object_create_buffer(view);
                 } else {
                     elements[count++] = uacpi_object_create_integer(0);
@@ -2434,17 +2341,13 @@ static uacpi_object *slot_object(size_t slot) {
 
 // Evaluates a method with the arguments in the slots, made anew for each
 // evaluation, as the method may change them.
-static uacpi_status eval_slots(
-    uacpi_namespace_node *node, uint32_t argc, uacpi_object **ret
-) {
+static uacpi_status eval_slots(uacpi_namespace_node *node, uint32_t argc, uacpi_object **ret) {
     uacpi_object *args[MBX_SLOT_COUNT];
     for (size_t i = 0; i < argc; i++) {
         args[i] = slot_object(i);
     }
     uacpi_object_array array = { .objects = args, .count = argc };
-    uacpi_status status = uacpi_eval(
-        node, NULL, argc != 0 ? &array : NULL, ret
-    );
+    uacpi_status status = uacpi_eval(node, NULL, argc != 0 ? &array : NULL, ret);
     for (size_t i = 0; i < argc; i++) {
         uacpi_object_unref(args[i]);
     }
@@ -2472,16 +2375,15 @@ static bool is_primary_osc(uacpi_namespace_node *node) {
 
 // The guest's one host bridge stands for all of the firmware's, so its _OSC
 // lets the guest take control only of what all of theirs do: the set bits of
-// the DWORDs after the first, whose errors and masked capabilities it
-// returns (ACPI 6.6, 6.2.12). One without an _OSC, or with an _OSC that
-// fails, lets it take nothing. False where the result cannot be made.
+// the DWORDs after the first, whose errors and masked capabilities it returns
+// (ACPI 6.6, 6.2.12). One without an _OSC, or with an _OSC that fails, lets it
+// take nothing. False where the result cannot be made.
 static bool osc_merge(uacpi_object **ret, uint32_t argc) {
     uint32_t granted[OSC_DWORDS_MAX];
     uacpi_data_view view;
     if (*ret == NULL || uacpi_object_get_type(*ret) != UACPI_OBJECT_BUFFER
-     || uacpi_object_get_string_or_buffer(*ret, &view) != UACPI_STATUS_OK
-     || view.length < 8 || view.length > sizeof(granted)
-     || view.length % 4 != 0) {
+     || uacpi_object_get_string_or_buffer(*ret, &view) != UACPI_STATUS_OK || view.length < 8
+     || view.length > sizeof(granted) || view.length % 4 != 0) {
         return true;
     }
     size_t count = view.length / 4;
@@ -2494,14 +2396,10 @@ static bool osc_merge(uacpi_object **ret, uint32_t argc) {
     for (size_t i = 0; i < vacpi.merged_count; i++) {
         uint32_t other[OSC_DWORDS_MAX];
         uacpi_namespace_node *osc;
-        uacpi_status found = uacpi_namespace_node_find(
-            vacpi.merged[i].node, "_OSC", &osc
-        );
+        uacpi_status found = uacpi_namespace_node_find(vacpi.merged[i].node, "_OSC", &osc);
         uacpi_object *result = NULL;
-        bool usable = found == UACPI_STATUS_OK
-            && eval_slots(osc, argc, &result) == UACPI_STATUS_OK
-            && osc_dwords(result, other, count)
-            && (other[0] & OSC_ERRORS) == 0;
+        bool usable = found == UACPI_STATUS_OK && eval_slots(osc, argc, &result) == UACPI_STATUS_OK
+                   && osc_dwords(result, other, count) && (other[0] & OSC_ERRORS) == 0;
         uacpi_object_unref(result);
         for (size_t d = 1; d < count; d++) {
             granted[d] &= usable ? other[d] : 0;
@@ -2513,9 +2411,7 @@ static bool osc_merge(uacpi_object **ret, uint32_t argc) {
         }
     }
     uacpi_object_unref(*ret);
-    uacpi_data_view out = {
-        .const_bytes = (const uint8_t *)granted, .length = count * 4
-    };
+    uacpi_data_view out = { .const_bytes = (const uint8_t *)granted, .length = count * 4 };
     *ret = uacpi_object_create_buffer(out);
     return *ret != NULL;
 }
@@ -2528,14 +2424,11 @@ static void mailbox_call(size_t index, uint32_t argc) {
     uacpi_namespace_node *node = vacpi.methods[index].node;
     uacpi_object *ret = NULL;
     uacpi_status status = eval_slots(node, argc, &ret);
-    if (status == UACPI_STATUS_OK && is_primary_osc(node)
-     && !osc_merge(&ret, argc)) {
+    if (status == UACPI_STATUS_OK && is_primary_osc(node) && !osc_merge(&ret, argc)) {
         status = UACPI_STATUS_OUT_OF_MEMORY;
     }
     if (status != UACPI_STATUS_OK) {
-        const char *path = uacpi_namespace_node_generate_absolute_path(
-            vacpi.methods[index].node
-        );
+        const char *path = uacpi_namespace_node_generate_absolute_path(vacpi.methods[index].node);
         printf("Guest call of %s: %s\n", path, uacpi_status_to_string(status));
         uacpi_free_absolute_path(path);
     }
@@ -2549,7 +2442,7 @@ static void mailbox_call(size_t index, uint32_t argc) {
 static void call_run(uacpi_handle ctx) {
     (void)ctx;
     mailbox_call(vacpi.call_index, vacpi.call_argc);
-    __atomic_store_n(&vacpi.call, CALL_DONE, __ATOMIC_RELEASE);
+    atomic_store_explicit(&vacpi.call, CALL_DONE, memory_order_release);
 }
 
 static void mailbox_element(uint32_t element) {
@@ -2557,15 +2450,14 @@ static void mailbox_element(uint32_t element) {
     size_t j = element >> 16;
     uacpi_object_array package;
     uacpi_object *obj = NULL;
-    if (vacpi.last != NULL
-     && uacpi_object_get_package(vacpi.last, &package) == UACPI_STATUS_OK
+    if (vacpi.last != NULL && uacpi_object_get_package(vacpi.last, &package) == UACPI_STATUS_OK
      && i < package.count) {
         obj = package.objects[i];
         if (j != ELEMENT_NONE) {
             uacpi_object_array inner;
-            obj = uacpi_object_get_package(obj, &inner) == UACPI_STATUS_OK
-                && j < inner.count
-                ? inner.objects[j] : NULL;
+            obj = uacpi_object_get_package(obj, &inner) == UACPI_STATUS_OK && j < inner.count
+                ? inner.objects[j]
+                : NULL;
         }
     }
     write_result(obj, obj == NULL);
@@ -2589,9 +2481,7 @@ static void mailbox_notification(void) {
     sci_update();
 }
 
-static uint64_t doorbell_read(
-    struct vcpu *v, void *ctx, uint64_t offset, size_t size
-) {
+static uint64_t doorbell_read(struct vcpu *v, void *ctx, uint64_t offset, size_t size) {
     (void)v;
     (void)ctx;
     (void)offset;
@@ -2618,9 +2508,8 @@ static void doorbell_write(
             // not complete, so that the guest takes its interrupts and writes
             // again.
             uint32_t state = CALL_NONE;
-            bool started = __atomic_compare_exchange_n(
-                &vacpi.call, &state, CALL_RUNNING, false, __ATOMIC_ACQUIRE,
-                __ATOMIC_RELAXED
+            bool started = atomic_compare_exchange_strong_explicit(
+                &vacpi.call, &state, CALL_RUNNING, memory_order_acquire, memory_order_relaxed
             );
             if (started) {
                 vacpi.call_index = header[MBX_INDEX / 4];
@@ -2631,9 +2520,8 @@ static void doorbell_write(
             }
             acpi_slice();
             state = CALL_DONE;
-            bool finished = __atomic_compare_exchange_n(
-                &vacpi.call, &state, CALL_NONE, false, __ATOMIC_ACQUIRE,
-                __ATOMIC_RELAXED
+            bool finished = atomic_compare_exchange_strong_explicit(
+                &vacpi.call, &state, CALL_NONE, memory_order_acquire, memory_order_relaxed
             );
             if (!finished) {
                 v->mmio_retry = true;
@@ -2657,16 +2545,14 @@ static void doorbell_write(
 
 static const struct mmio_ops doorbell_ops = {
     .read = doorbell_read,
-    .write = doorbell_write,
+    .write = doorbell_write
 };
 
 static void mailbox_place(void) {
     if (vacpi.mailbox != 0) {
         return;
     }
-    vacpi.mailbox = layout_take(
-        MBX_SIZE + DOORBELL_SIZE, PAGE_SIZE, E820_RESERVED
-    );
+    vacpi.mailbox = layout_take(MBX_SIZE + DOORBELL_SIZE, PAGE_SIZE, E820_RESERVED);
     if (vacpi.mailbox == 0) {
         panic("No room in the guest's memory for its ACPI mailbox\n");
     }
@@ -2677,9 +2563,7 @@ static void mailbox_place(void) {
     mmio_register(vacpi.doorbell, DOORBELL_SIZE, &doorbell_ops, NULL);
 }
 
-static uacpi_status notify(
-    uacpi_handle ctx, uacpi_namespace_node *node, uacpi_u64 value
-) {
+static uacpi_status notify(uacpi_handle ctx, uacpi_namespace_node *node, uacpi_u64 value) {
     (void)ctx;
     // The guest has the _OSC of the host bridges below its own in its own,
     // which 8 has the OS evaluate again, ACPI 6.6, 6.2.12.
@@ -2695,10 +2579,7 @@ static uacpi_status notify(
     }
     if (target == UINT32_MAX) {
         const char *path = uacpi_namespace_node_generate_absolute_path(node);
-        printf(
-            "Notify(%s, %#llx) has no target in the guest\n", path,
-            (unsigned long long)value
-        );
+        printf("Notify(%s, %#llx) has no target in the guest\n", path, (unsigned long long)value);
         uacpi_free_absolute_path(path);
         return UACPI_STATUS_OK;
     }
@@ -2714,8 +2595,7 @@ static uacpi_status notify(
         return UACPI_STATUS_OK;
     }
     vacpi.dropping = false;
-    struct notification *n = &vacpi.queue[(vacpi.queue_head
-        + vacpi.queue_count) % QUEUE_SIZE];
+    struct notification *n = &vacpi.queue[(vacpi.queue_head + vacpi.queue_count) % QUEUE_SIZE];
     n->target = target;
     n->value = (uint32_t)value;
     vacpi.queue_count++;
@@ -2741,14 +2621,12 @@ static uacpi_interrupt_ret power_button(uacpi_handle ctx) {
 }
 
 static uint32_t bytes_read(uint32_t reg, uint16_t offset, size_t size) {
-    uint32_t mask = size == 4 ? (uint32_t)0xffffffff
-        : ((uint32_t)1 << (8 * size)) - 1;
+    uint32_t mask = size == 4 ? (uint32_t)0xffffffff : ((uint32_t)1 << (8 * size)) - 1;
     return (uint32_t)((uint64_t)reg >> (8 * offset)) & mask;
 }
 
 static void pm1_evt_access(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in,
-    uint32_t *value
+    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
 ) {
     (void)v;
     (void)ctx;
@@ -2763,9 +2641,8 @@ static void pm1_evt_access(
             if (at < 2) {
                 vacpi.pm1_sts &= (uint16_t)~((uint16_t)b << (8 * at));
             } else if (at < 4) {
-                vacpi.pm1_en = (uint16_t)((vacpi.pm1_en
-                    & ~(0xff << (8 * (at - 2))))
-                    | (uint16_t)b << (8 * (at - 2)));
+                vacpi.pm1_en = (uint16_t)((vacpi.pm1_en & ~(0xff << (8 * (at - 2))))
+                                        | (uint16_t)b << (8 * (at - 2)));
             }
         }
     }
@@ -2776,20 +2653,17 @@ static void pm1_evt_access(
 }
 
 static void pm1_cnt_access(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in,
-    uint32_t *value
+    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
 ) {
     (void)v;
     (void)ctx;
-    uint32_t reg = PM1_CNT_SCI_EN
-        | (uint32_t)vacpi.slp_typ << PM1_CNT_SLP_TYP_SHIFT;
+    uint32_t reg = PM1_CNT_SCI_EN | (uint32_t)vacpi.slp_typ << PM1_CNT_SLP_TYP_SHIFT;
     if (in) {
         *value = bytes_read(reg, offset, size);
         return;
     }
-    uint32_t mask
-        = (size == 4 ? (uint32_t)0xffffffff : ((uint32_t)1 << (8 * size)) - 1)
-        << (8 * offset);
+    uint32_t mask = (size == 4 ? (uint32_t)0xffffffff : ((uint32_t)1 << (8 * size)) - 1)
+                 << (8 * offset);
     uint32_t written = (reg & ~mask) | ((*value << (8 * offset)) & mask);
     vacpi.slp_typ = (uint16_t)((written >> PM1_CNT_SLP_TYP_SHIFT) & 7);
     if ((written & PM1_CNT_SLP_EN) == 0) {
@@ -2799,22 +2673,18 @@ static void pm1_cnt_access(
         printf("The guest powers off\n");
         power_off();
     }
-    printf(
-        "The guest asked for sleep type %u, which it has no _Sx for\n",
-        vacpi.slp_typ
-    );
+    printf("The guest asked for sleep type %u, which it has no _Sx for\n", vacpi.slp_typ);
 }
 
 static void gpe0_access(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in,
-    uint32_t *value
+    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
 ) {
     (void)v;
     (void)ctx;
     spinlock_acquire(&vacpi.lock);
     // GPE 0 is level-triggered: its status shows notifications waiting.
     uint32_t reg = (vacpi.queue_count != 0 ? (uint32_t)1 : (uint32_t)0)
-        | (uint32_t)vacpi.gpe0_en << 8;
+                 | (uint32_t)vacpi.gpe0_en << 8;
     if (in) {
         *value = bytes_read(reg, offset, size);
     } else {
@@ -2831,8 +2701,7 @@ static void gpe0_access(
 }
 
 static bool io_block(const struct acpi_gas *gas, uint16_t *port) {
-    if (gas->address == 0
-     || gas->address_space_id != UACPI_ADDRESS_SPACE_SYSTEM_IO
+    if (gas->address == 0 || gas->address_space_id != UACPI_ADDRESS_SPACE_SYSTEM_IO
      || gas->address > 0xfffc) {
         return false;
     }
@@ -2851,7 +2720,7 @@ void vacpi_init(void) {
     struct acpi_fadt *fadt;
     if (uacpi_table_fadt(&fadt) == UACPI_STATUS_OK) {
         vacpi.pm1 = io_block(&fadt->x_pm1a_evt_blk, &vacpi.pm1_evt)
-            && io_block(&fadt->x_pm1a_cnt_blk, &vacpi.pm1_cnt);
+                 && io_block(&fadt->x_pm1a_cnt_blk, &vacpi.pm1_cnt);
         vacpi.gpe = io_block(&fadt->x_gpe0_blk, &vacpi.gpe0);
         if (io_block(&fadt->x_pm_tmr_blk, &vacpi.pm_tmr)) {
             vacpi.pm_tmr_32 = (fadt->flags & ACPI_TMR_VAL_EXT) != 0;
@@ -2859,19 +2728,13 @@ void vacpi_init(void) {
         vacpi.power_button = vacpi.pm1 && (fadt->flags & ACPI_PWR_BUTTON) == 0;
     }
     if (vacpi.pm1) {
-        struct io_handler evt = {
-            .base = vacpi.pm1_evt, .count = 4, .access = pm1_evt_access
-        };
-        struct io_handler cnt = {
-            .base = vacpi.pm1_cnt, .count = 2, .access = pm1_cnt_access
-        };
+        struct io_handler evt = { .base = vacpi.pm1_evt, .count = 4, .access = pm1_evt_access };
+        struct io_handler cnt = { .base = vacpi.pm1_cnt, .count = 2, .access = pm1_cnt_access };
         io_register(&evt);
         io_register(&cnt);
     }
     if (vacpi.gpe) {
-        struct io_handler gpe = {
-            .base = vacpi.gpe0, .count = 2, .access = gpe0_access
-        };
+        struct io_handler gpe = { .base = vacpi.gpe0, .count = 2, .access = gpe0_access };
         io_register(&gpe);
     }
 
@@ -2885,18 +2748,15 @@ void vacpi_init(void) {
         }
     }
     printf(
-        "Guest ACPI: SCI on GSI %d, PM1 at %#x/%#x, GPE0 at %#x, PM timer at "
-        "%#x%s\n",
-        vacpi.sci ? (int)vacpi.sci_gsi : -1, vacpi.pm1_evt, vacpi.pm1_cnt,
-        vacpi.gpe0, vacpi.pm_tmr, vacpi.power_button ? ", power button" : ""
+        "Guest ACPI: SCI on GSI %d, PM1 at %#x/%#x, GPE0 at %#x, PM timer at %#x%s\n",
+        vacpi.sci ? (int)vacpi.sci_gsi : -1, vacpi.pm1_evt, vacpi.pm1_cnt, vacpi.gpe0,
+        vacpi.pm_tmr, vacpi.power_button ? ", power button" : ""
     );
 
     acpi_lock();
     uacpi_install_notify_handler(uacpi_namespace_root(), notify, NULL);
     if (vacpi.power_button) {
-        uacpi_install_fixed_event_handler(
-            UACPI_FIXED_EVENT_POWER_BUTTON, power_button, NULL
-        );
+        uacpi_install_fixed_event_handler(UACPI_FIXED_EVENT_POWER_BUTTON, power_button, NULL);
     }
     acpi_unlock();
 }

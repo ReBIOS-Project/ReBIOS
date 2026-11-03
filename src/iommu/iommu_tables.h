@@ -140,9 +140,7 @@ const struct iommu_tables *iommu_tables_parse(void);
 
 // The range that applies to the requester ID, of those iommu_tables_parse()
 // found, or NULL if no unit translates it.
-const struct iommu_device_range *iommu_range_for(
-    uint16_t segment, uint16_t rid
-);
+const struct iommu_device_range *iommu_range_for(uint16_t segment, uint16_t rid);
 
 // The special device of a type and identity, of those iommu_tables_parse()
 // found, or NULL.
@@ -150,8 +148,6 @@ const struct iommu_special_device *iommu_special_for(uint8_t type, uint8_t id);
 
 // Forgets the regions to map one to one for devices of which unneeded says, of
 // each requester ID the region covers, that it no longer needs them.
-void iommu_tables_forget_reserved(
-    bool (*unneeded)(uint16_t segment, uint16_t rid)
-);
+void iommu_tables_forget_reserved(bool (*unneeded)(uint16_t segment, uint16_t rid));
 
 #endif

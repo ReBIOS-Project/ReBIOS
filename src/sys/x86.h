@@ -20,6 +20,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdnoreturn.h>
 
 #define CR0_PE ((uint32_t)1 << 0)
 #define CR0_MP ((uint32_t)1 << 1)
@@ -159,7 +160,8 @@ static inline void wrmsr(uint32_t msr, uint64_t value) {
         "wrmsr"
         :
         : "c"(msr), "a"((uint32_t)value), "d"((uint32_t)(value >> 32))
-            : "memory");
+        : "memory"
+    );
 }
 
 static inline uint64_t rdtsc(void) {
@@ -200,81 +202,81 @@ static inline uint32_t inl(uint16_t port) {
 
 static inline uintptr_t read_cr0(void) {
     uintptr_t value;
-    asm volatile ("mov %%cr0, %0" : "=r"(value));
+    asm volatile ("movq %%cr0, %0" : "=r"(value));
     return value;
 }
 
 static inline void write_cr0(uintptr_t value) {
-    asm volatile ("mov %0, %%cr0" :: "r"(value) : "memory");
+    asm volatile ("movq %0, %%cr0" :: "r"(value) : "memory");
 }
 
 static inline uintptr_t read_cr2(void) {
     uintptr_t value;
-    asm volatile ("mov %%cr2, %0" : "=r"(value));
+    asm volatile ("movq %%cr2, %0" : "=r"(value));
     return value;
 }
 
 static inline void write_cr2(uintptr_t value) {
-    asm volatile ("mov %0, %%cr2" :: "r"(value));
+    asm volatile ("movq %0, %%cr2" :: "r"(value));
 }
 
 static inline uintptr_t read_cr3(void) {
     uintptr_t value;
-    asm volatile ("mov %%cr3, %0" : "=r"(value));
+    asm volatile ("movq %%cr3, %0" : "=r"(value));
     return value;
 }
 
 static inline void write_cr3(uintptr_t value) {
-    asm volatile ("mov %0, %%cr3" :: "r"(value) : "memory");
+    asm volatile ("movq %0, %%cr3" :: "r"(value) : "memory");
 }
 
 static inline uintptr_t read_cr4(void) {
     uintptr_t value;
-    asm volatile ("mov %%cr4, %0" : "=r"(value));
+    asm volatile ("movq %%cr4, %0" : "=r"(value));
     return value;
 }
 
 static inline void write_cr4(uintptr_t value) {
-    asm volatile ("mov %0, %%cr4" :: "r"(value) : "memory");
+    asm volatile ("movq %0, %%cr4" :: "r"(value) : "memory");
 }
 
 static inline uintptr_t read_dr6(void) {
     uintptr_t value;
-    asm volatile ("mov %%dr6, %0" : "=r"(value));
+    asm volatile ("movq %%dr6, %0" : "=r"(value));
     return value;
 }
 
 static inline uintptr_t read_dr7(void) {
     uintptr_t value;
-    asm volatile ("mov %%dr7, %0" : "=r"(value));
+    asm volatile ("movq %%dr7, %0" : "=r"(value));
     return value;
 }
 
 static inline void cpu_relax(void) {
-    asm volatile ("pause" :: : "memory");
+    asm volatile ("pause" ::: "memory");
 }
 
 static inline void cli(void) {
-    asm volatile ("cli" :: : "memory");
+    asm volatile ("cli" ::: "memory");
 }
 
 static inline void sti(void) {
-    asm volatile ("sti" :: : "memory");
+    asm volatile ("sti" ::: "memory");
 }
 
 static inline void hlt(void) {
-    asm volatile ("hlt" :: : "memory");
+    asm volatile ("hlt" ::: "memory");
 }
 
 static inline void wbinvd(void) {
-    asm volatile ("wbinvd" :: : "memory");
+    asm volatile ("wbinvd" ::: "memory");
 }
 
 static inline void invlpg(uintptr_t addr) {
     asm volatile ("invlpg (%0)" :: "r"(addr) : "memory");
 }
 
-__attribute__((noreturn)) static inline void halt_forever(void) {
+static inline noreturn void halt_forever(void) {
     for (;;) {
         cli();
         hlt();

@@ -84,7 +84,8 @@ static int fixed_index(uint32_t msr) {
 
 void mtrr_init(void) {
     unsigned int bits = cpuid(0x80000000, 0).eax >= 0x80000008
-        ? cpuid(0x80000008, 0).eax & 0xff : 36;
+                      ? cpuid(0x80000008, 0).eax & 0xff
+                      : 36;
     address_mask = (((uint64_t)1 << bits) - 1) & ~(uint64_t)0xfff;
     virt_intercept_msr(MSR_MTRRCAP, true, true);
     virt_intercept_msr(MSR_DEF_TYPE, true, true);
@@ -118,8 +119,7 @@ void mtrr_vcpu_init(struct vcpu *v) {
             size >>= 1;
         }
         v->mtrr_variable[2 * n] = base | TYPE_UC;
-        v->mtrr_variable[2 * n + 1] = (~(size - 1) & address_mask)
-            | PHYSMASK_VALID;
+        v->mtrr_variable[2 * n + 1] = (~(size - 1) & address_mask) | PHYSMASK_VALID;
         base += size;
     }
 }
@@ -170,8 +170,8 @@ bool mtrr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
         size_t i = msr - MSR_PHYSBASE0;
         bool is_mask = i % 2 != 0;
         uint64_t reserved = is_mask
-            ? PHYSMASK_RESERVED_LOW | ~(address_mask | PHYSMASK_VALID)
-            : PHYSBASE_RESERVED_LOW | ~(address_mask | 0xff);
+                          ? PHYSMASK_RESERVED_LOW | ~(address_mask | PHYSMASK_VALID)
+                          : PHYSBASE_RESERVED_LOW | ~(address_mask | 0xff);
         if (i >= 2 * MTRR_VARIABLE_COUNT || (value & reserved) != 0
          || (!is_mask && !type_valid((uint8_t)value))) {
             *fault = true;

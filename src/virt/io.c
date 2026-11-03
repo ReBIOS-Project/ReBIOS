@@ -35,9 +35,7 @@ void io_register(const struct io_handler *handler) {
     virt_intercept_io(handler->base, handler->count, true);
 }
 
-bool io_dispatch(
-    struct vcpu *v, uint16_t port, size_t size, bool in, uint32_t *value
-) {
+bool io_dispatch(struct vcpu *v, uint16_t port, size_t size, bool in, uint32_t *value) {
     for (size_t i = 0; i < handler_count; i++) {
         struct io_handler *h = &handlers[i];
         if (port >= h->base && (size_t)(port - h->base) < h->count) {

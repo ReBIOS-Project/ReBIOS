@@ -76,7 +76,7 @@ static const struct resolution resolutions[] = {
     { 1600, 900 }, { 1600, 1200 }, { 1680, 1050 }, { 1920, 1080 },
     { 1920, 1200 }, { 2048, 1152 }, { 2048, 1536 }, { 2560, 1080 },
     { 2560, 1440 }, { 2560, 1600 }, { 2880, 1800 }, { 3200, 1800 },
-    { 3440, 1440 }, { 3840, 2160 }, { 3840, 2400 }, { 4096, 2160 },
+    { 3440, 1440 }, { 3840, 2160 }, { 3840, 2400 }, { 4096, 2160 }
 };
 
 #define RESOLUTION_COUNT (sizeof(resolutions) / sizeof(struct resolution))
@@ -100,7 +100,7 @@ static const uint16_t mode_numbers[MODE_COUNT + 1] = {
     0x1b8, 0x1b9, 0x1ba, 0x1bb, 0x1bc, 0x1bd, 0x1be, 0x1bf, 0x1c0, 0x1c1,
     0x1c2, 0x1c3, 0x1c4, 0x1c5, 0x1c6, 0x1c7, 0x1c8, 0x1c9, 0x1ca, 0x1cb,
     0x1cc, 0x1cd, 0x1ce, 0x1cf, 0x1d0, 0x1d1, 0x1d2, 0x1d3, 0x1d4, 0x1d5,
-    0x1f0, 0x1f1, 0x1f2, 0x1f3, 0x1f4, 0xffff,
+    0x1f0, 0x1f1, 0x1f2, 0x1f3, 0x1f4, 0xffff
 };
 
 // Each depth's red, green, blue, and reserved field sizes and positions.
@@ -109,7 +109,7 @@ static const uint8_t color_fields[5][8] = {
     { 5, 10, 5, 5, 5, 0, 1, 15 },
     { 5, 11, 6, 5, 5, 0, 0, 0 },
     { 8, 16, 8, 8, 8, 0, 0, 0 },
-    { 8, 16, 8, 8, 8, 0, 8, 24 },
+    { 8, 16, 8, 8, 8, 0, 8, 24 }
 };
 
 // Function 04h's buffer holds the states it is asked for in this order: the
@@ -122,7 +122,7 @@ static const uint8_t state_blocks[4] = { 2, 1, 13, 1 };
 // clearing what follows it.
 static const uint8_t state_dispi[8] = {
     DISPI_BPP, DISPI_XRES, DISPI_YRES, DISPI_ENABLE, DISPI_VIRT_WIDTH,
-    DISPI_X_OFFSET, DISPI_Y_OFFSET, DISPI_BANK,
+    DISPI_X_OFFSET, DISPI_Y_OFFSET, DISPI_BANK
 };
 
 struct mode {
@@ -228,7 +228,7 @@ static void wait_retrace(void) {
 
 // The VbeInfoBlock's fields up to OemProductRevPtr, the rest being 0 but for
 // the OEM area of VBE 2.0 blocks, which strings could go in.
-struct __attribute__((packed)) controller_info_block {
+struct controller_info_block {
     char signature[4];
     uint16_t version;
     uint32_t oem_string;
@@ -239,14 +239,12 @@ struct __attribute__((packed)) controller_info_block {
     uint32_t vendor_name;
     uint32_t product_name;
     uint32_t product_revision;
-};
+} __attribute__((packed));
 
-_Static_assert(
-    sizeof(struct controller_info_block) == 0x22, "VbeInfoBlock layout"
-);
+_Static_assert(sizeof(struct controller_info_block) == 0x22, "VbeInfoBlock layout");
 
 // The ModeInfoBlock's fields up to MaxPixelClock, the rest being 0.
-struct __attribute__((packed)) mode_info_block {
+struct mode_info_block {
     uint16_t attributes;
     uint8_t window_a_attributes;
     uint8_t window_b_attributes;
@@ -277,7 +275,7 @@ struct __attribute__((packed)) mode_info_block {
     uint8_t linear_image_pages;
     uint8_t linear_fields[8];
     uint32_t max_pixel_clock;
-};
+} __attribute__((packed));
 
 _Static_assert(sizeof(struct mode_info_block) == 0x42, "ModeInfoBlock layout");
 
@@ -295,8 +293,7 @@ static uint32_t far_pointer(uint16_t offset) {
 static size_t list_modes(uint16_t *list, size_t count, bool uncommon) {
     for (size_t i = 0; i < MODE_COUNT && count < MODE_LIST_MAX; i++) {
         struct mode m;
-        if (mode_find(mode_numbers[i], &m)
-         && (m.bpp == 15 || m.bpp == 24) == uncommon) {
+        if (mode_find(mode_numbers[i], &m) && (m.bpp == 15 || m.bpp == 24) == uncommon) {
             list[count++] = mode_numbers[i];
         }
     }
@@ -305,7 +302,7 @@ static size_t list_modes(uint16_t *list, size_t count, bool uncommon) {
 
 static void controller_info(struct vgabios_regs *r) {
     bool vbe2 = peekw(r->es, r->di) == ('V' | 'B' << 8)
-        && peekw(r->es, (uint16_t)(r->di + 2)) == ('E' | '2' << 8);
+             && peekw(r->es, (uint16_t)(r->di + 2)) == ('E' | '2' << 8);
     struct controller_info_block b;
     memset(&b, 0, sizeof(struct controller_info_block));
     b.signature[0] = 'V';
@@ -350,8 +347,7 @@ static void mode_info(struct vgabios_regs *r) {
     uint8_t images = pages == 0 ? 0 : (uint8_t)(pages > 256 ? 255 : pages - 1);
     struct mode_info_block b;
     memset(&b, 0, sizeof(struct mode_info_block));
-    b.attributes = ATTRIBUTES_EXTENDED | ATTRIBUTES_COLOR
-        | ATTRIBUTES_GRAPHICS;
+    b.attributes = ATTRIBUTES_EXTENDED | ATTRIBUTES_COLOR | ATTRIBUTES_GRAPHICS;
     if (mode_supported(&m)) {
         b.attributes |= ATTRIBUTES_SUPPORTED;
     }
@@ -418,18 +414,13 @@ static void set_mode(struct vgabios_regs *r) {
     dispi_write(DISPI_BANK, 0);
     dispi_write(
         DISPI_ENABLE,
-        (uint16_t)(DISPI_ENABLED | (lfb ? DISPI_LFB_ENABLED : 0)
-            | (keep ? DISPI_NOCLEARMEM : 0))
+        (uint16_t)(DISPI_ENABLED | (lfb ? DISPI_LFB_ENABLED : 0) | (keep ? DISPI_NOCLEARMEM : 0))
     );
     if (m.bpp == 8) {
         vgabios_load_palette_256();
     }
-    uint8_t control = peekb(BDA, BDA_VIDEO_CONTROL)
-        & (uint8_t)~VIDEO_CONTROL_KEPT;
-    pokeb(
-        BDA, BDA_VIDEO_CONTROL,
-        (uint8_t)(control | (keep ? VIDEO_CONTROL_KEPT : 0))
-    );
+    uint8_t control = peekb(BDA, BDA_VIDEO_CONTROL) & (uint8_t)~VIDEO_CONTROL_KEPT;
+    pokeb(BDA, BDA_VIDEO_CONTROL, (uint8_t)(control | (keep ? VIDEO_CONTROL_KEPT : 0)));
     r->ax = STATUS_SUCCESS;
 }
 
@@ -447,14 +438,13 @@ static void current_mode(struct vgabios_regs *r) {
     uint16_t number = 0;
     for (size_t k = 0; k < MODE_COUNT && number == 0; k++) {
         struct mode m;
-        if (mode_get(mode_numbers[k], &m) && m.width == width
-         && m.height == height && m.bpp == bpp) {
+        if (mode_get(mode_numbers[k], &m) && m.width == width && m.height == height
+         && m.bpp == bpp) {
             number = m.number;
         }
     }
-    r->bx = (uint16_t)(number
-        | ((enable & DISPI_LFB_ENABLED) != 0 ? MODE_LFB : 0)
-        | ((enable & DISPI_NOCLEARMEM) != 0 ? MODE_KEEP : 0));
+    r->bx = (uint16_t)(number | ((enable & DISPI_LFB_ENABLED) != 0 ? MODE_LFB : 0)
+                     | ((enable & DISPI_NOCLEARMEM) != 0 ? MODE_KEEP : 0));
     r->ax = STATUS_SUCCESS;
 }
 
@@ -542,8 +532,7 @@ static void bios_data_copy(uint16_t seg, uint16_t at, bool save) {
     }
     // The vectors of the graphics font, INT 1Fh's and 43h's.
     for (size_t i = 0; i < 4; i++) {
-        uint16_t vector = (uint16_t)((i < 2 ? 0x1f * 4 : 0x43 * 4)
-            + (i & 1) * 2);
+        uint16_t vector = (uint16_t)((i < 2 ? 0x1f * 4 : 0x43 * 4) + (i & 1) * 2);
         if (save) {
             pokew(seg, (uint16_t)(at + 37 + i * 2), peekw(0, vector));
         } else {
@@ -801,8 +790,9 @@ static void dac_format(struct vgabios_regs *r) {
     switch (r->bl) {
         case 0x00: {
             uint16_t bank = dispi_read(DISPI_BANK);
-            enable = r->bh >= 8 ? (uint16_t)(enable | DISPI_8BIT_DAC)
-                : (uint16_t)(enable & ~DISPI_8BIT_DAC);
+            enable = r->bh >= 8
+                   ? (uint16_t)(enable | DISPI_8BIT_DAC)
+                   : (uint16_t)(enable & ~DISPI_8BIT_DAC);
             // Writing the enable register selects bank 0 again.
             dispi_write(DISPI_ENABLE, enable);
             dispi_write(DISPI_BANK, bank);

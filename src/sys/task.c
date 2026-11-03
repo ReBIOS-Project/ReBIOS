@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -38,7 +39,7 @@ void task_main(struct task *t) {
 
 void task_restart(struct task *t) {
     uint8_t *area = (uint8_t *)t->area;
-    t->wake = 0;
+    atomic_init(&t->wake, 0);
     t->done = false;
     // What task_swap() takes off the stack: the callee-saved registers, %rbx
     // the task, then where to return to, task_entry() with the stack aligned
@@ -64,7 +65,7 @@ bool task_run(struct task *t) {
     if (t->done) {
         return false;
     }
-    if (time_ns() < t->wake) {
+    if (time_ns() < atomic_load_explicit(&t->wake, memory_order_relaxed)) {
         return true;
     }
     struct cpu *cpu = this_cpu();
@@ -92,12 +93,12 @@ void task_sleep(uint64_t until) {
     if (t == NULL) {
         panic("A task's sleep outside a task\n");
     }
-    t->wake = until;
+    atomic_store_explicit(&t->wake, until, memory_order_relaxed);
     task_swap(&t->rsp, t->runner_rsp);
 }
 
 void task_wake(struct task *t) {
-    __atomic_store_n(&t->wake, 0, __ATOMIC_RELEASE);
+    atomic_store_explicit(&t->wake, 0, memory_order_release);
 }
 
 bool task_yield_if_over(void) {

@@ -75,9 +75,7 @@
 #define DR6_BT ((uint64_t)1 << 15)
 
 // The segment registers in the order both TSS formats keep them.
-static const size_t tss_segs[] = {
-    SEG_ES, SEG_CS, SEG_SS, SEG_DS, SEG_FS, SEG_GS
-};
+static const size_t tss_segs[] = { SEG_ES, SEG_CS, SEG_SS, SEG_DS, SEG_FS, SEG_GS };
 
 struct desc {
     uint32_t lo;
@@ -110,8 +108,7 @@ struct switcher {
 
 // The exception classes of SDM 325462-093 Vol. 3A, Table 7-4.
 static bool contributory(uint8_t vector) {
-    return vector == 0 || (vector >= VECTOR_TS && vector <= VECTOR_GP)
-        || vector == VECTOR_CP;
+    return vector == 0 || (vector >= VECTOR_TS && vector <= VECTOR_GP) || vector == VECTOR_CP;
 }
 
 static bool page_fault_class(uint8_t vector) {
@@ -121,9 +118,7 @@ static bool page_fault_class(uint8_t vector) {
 // An exception while the switch delivers a hardware exception, before the
 // commit point or after it, interrupts that delivery, which makes it a double
 // fault or a shutdown as SDM 325462-093 Vol. 3A, Table 7-5 says.
-static void deliver(
-    struct switcher *s, uint8_t vector, uint32_t error, uintptr_t linear
-) {
+static void deliver(struct switcher *s, uint8_t vector, uint32_t error, uintptr_t linear) {
     if (s->faulted) {
         return;
     }
@@ -156,9 +151,7 @@ static void fault(struct switcher *s, uint8_t vector, uint32_t error) {
     deliver(s, vector, error, 0);
 }
 
-static bool system_read(
-    struct switcher *s, uintptr_t linear, void *buf, size_t len
-) {
+static bool system_read(struct switcher *s, uintptr_t linear, void *buf, size_t len) {
     uint32_t pf_error;
     uintptr_t pf_linear;
     if (guest_system_read(s->v, linear, buf, len, &pf_error, &pf_linear)) {
@@ -168,9 +161,7 @@ static bool system_read(
     return false;
 }
 
-static bool system_write(
-    struct switcher *s, uintptr_t linear, const void *buf, size_t len
-) {
+static bool system_write(struct switcher *s, uintptr_t linear, const void *buf, size_t len) {
     uint32_t pf_error;
     uintptr_t pf_linear;
     if (guest_system_write(s->v, linear, buf, len, &pf_error, &pf_linear)) {
@@ -181,9 +172,7 @@ static bool system_write(
 }
 
 // Where a selector's descriptor is, in the GDT or the LDT the switch loaded.
-static bool desc_linear(
-    struct switcher *s, uint16_t selector, uint64_t *linear
-) {
+static bool desc_linear(struct switcher *s, uint16_t selector, uint64_t *linear) {
     struct segment table;
     if ((selector & SELECTOR_TI) != 0) {
         table = s->ldtr;
@@ -201,11 +190,8 @@ static bool desc_linear(
     return true;
 }
 
-static bool desc_read(
-    struct switcher *s, uint16_t selector, struct desc *d, uint64_t *linear
-) {
-    return desc_linear(s, selector, linear)
-        && system_read(s, *linear, d, sizeof(struct desc));
+static bool desc_read(struct switcher *s, uint16_t selector, struct desc *d, uint64_t *linear) {
+    return desc_linear(s, selector, linear) && system_read(s, *linear, d, sizeof(struct desc));
 }
 
 static bool null_selector(uint16_t selector) {
@@ -229,9 +215,7 @@ static void tss_mark(struct switcher *s, uint16_t selector, bool busy) {
 
 // The LDT a TSS's LDT selector names, from the GDT, or false where it does not
 // name a present one.
-static bool ldt_lookup(
-    struct switcher *s, uint16_t selector, struct segment *ldt
-) {
+static bool ldt_lookup(struct switcher *s, uint16_t selector, struct segment *ldt) {
     struct segment gdtr;
     vcpu_get_seg(s->v, SEG_GDTR, &gdtr);
     uint32_t index = selector & ~(uint32_t)7;
@@ -270,9 +254,7 @@ static void set_selector(struct vcpu *v, size_t reg, uint16_t selector) {
 // RPL both, as Linux 7.3's KVM and other segment loads check them. They come
 // after the commit point, so the first failure raises its exception in the new
 // task, and the registers after it are left.
-static bool load_seg(
-    struct switcher *s, size_t reg, uint16_t selector, unsigned int cpl
-) {
+static bool load_seg(struct switcher *s, size_t reg, uint16_t selector, unsigned int cpl) {
     if (s->faulted) {
         return false;
     }
@@ -301,14 +283,12 @@ static bool load_seg(
     bool ok = (attrib & DESC_S) != 0;
     if (reg == SEG_CS) {
         ok = ok && (type & DESC_CODE) != 0
-            && ((type & DESC_CONFORMING) != 0 ? dpl <= rpl : dpl == rpl);
+          && ((type & DESC_CONFORMING) != 0 ? dpl <= rpl : dpl == rpl);
     } else if (reg == SEG_SS) {
-        ok = ok && (type & DESC_CODE) == 0 && (type & DESC_RW) != 0
-            && dpl == cpl && rpl == cpl;
+        ok = ok && (type & DESC_CODE) == 0 && (type & DESC_RW) != 0 && dpl == cpl && rpl == cpl;
     } else {
         bool readable = (type & DESC_CODE) == 0 || (type & DESC_RW) != 0;
-        bool conforming = (type & DESC_CODE) != 0
-            && (type & DESC_CONFORMING) != 0;
+        bool conforming = (type & DESC_CODE) != 0 && (type & DESC_CONFORMING) != 0;
         ok = ok && readable && (conforming || (dpl >= cpl && dpl >= rpl));
     }
     if (!ok) {
@@ -316,9 +296,7 @@ static bool load_seg(
         return false;
     }
     if ((attrib & DESC_P) == 0) {
-        fault(
-            s, reg == SEG_SS ? VECTOR_SS : VECTOR_NP, selector & ~SELECTOR_RPL
-        );
+        fault(s, reg == SEG_SS ? VECTOR_SS : VECTOR_NP, selector & ~SELECTOR_RPL);
         return false;
     }
     if ((type & DESC_ACCESSED) == 0) {
@@ -350,8 +328,7 @@ static void push_error(struct switcher *s, uint32_t error, size_t size) {
     vcpu_get_seg(s->v, SEG_SS, &ss);
     bool big = (ss.attrib & SEG_DB) != 0;
     uintptr_t rsp = vcpu_rsp(s->v);
-    uint32_t sp = big ? (uint32_t)rsp - size
-        : (uint16_t)((uint16_t)rsp - size);
+    uint32_t sp = big ? (uint32_t)rsp - size : (uint16_t)((uint16_t)rsp - size);
     uint64_t low = 0;
     uint64_t high = ss.limit;
     if ((ss.attrib & DESC_EXPAND_DOWN) != 0) {
@@ -368,8 +345,7 @@ static void push_error(struct switcher *s, uint32_t error, size_t size) {
 }
 
 void task_switch(
-    struct vcpu *v, uint16_t selector, int source,
-    const struct task_event *event, size_t length
+    struct vcpu *v, uint16_t selector, int source, const struct task_event *event, size_t length
 ) {
     struct switcher s = { .v = v, .event = event };
     struct segment tr;
@@ -482,14 +458,11 @@ void task_switch(
 
     // The commit point: what goes wrong from here on raises its exception in
     // the new task.
-    struct segment new_tr = {
-        selector, new_attrib | DESC_TYPE_BUSY, new_limit, new_base
-    };
+    struct segment new_tr = { selector, new_attrib | DESC_TYPE_BUSY, new_limit, new_base };
     vcpu_set_seg(v, SEG_TR, &new_tr);
     // As Linux 7.3's KVM has it, a CR3 whose PDPTEs PAE paging refuses stays
     // the old task's, with #GP (emulate.c, load_state_from_tss32()).
-    if (new32 && (vcpu_cr0(v) & CR0_PG) != 0
-     && !vmx_load_guest_cr3(cr3, true)) {
+    if (new32 && (vcpu_cr0(v) & CR0_PG) != 0 && !vmx_load_guest_cr3(cr3, true)) {
         fault(&s, VECTOR_GP, 0);
     }
     vcpu_set_rflags(v, new_eflags);
@@ -523,8 +496,7 @@ void task_switch(
         // CS's RPL is the new CPL, which SS's checks need first. Where CS
         // loads but SS does not, SS gets the new CPL, which VMX takes from it.
         unsigned int cpl = sels[1] & SELECTOR_RPL;
-        if (load_seg(&s, SEG_CS, sels[1], cpl)
-         && !load_seg(&s, SEG_SS, sels[2], cpl)) {
+        if (load_seg(&s, SEG_CS, sels[1], cpl) && !load_seg(&s, SEG_SS, sels[2], cpl)) {
             struct segment ss = { sels[2], SEG_UNUSABLE | cpl << 5, 0, 0 };
             vcpu_set_seg(v, SEG_SS, &ss);
         }

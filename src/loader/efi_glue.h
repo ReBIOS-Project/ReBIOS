@@ -31,9 +31,7 @@ extern bool efi_boot_services_exited;
 
 // Returns 0 on failure. max_addr is inclusive; 0 means anywhere.
 uintptr_t efi_alloc_pages(size_t count, uintptr_t max_addr);
-uintptr_t efi_alloc_pages_typed(
-    size_t count, uintptr_t max_addr, EFI_MEMORY_TYPE type
-);
+uintptr_t efi_alloc_pages_typed(size_t count, uintptr_t max_addr, EFI_MEMORY_TYPE type);
 
 // Returns the handles with the protocol, in handle order, in pool memory to
 // free with FreePool(), or NULL if there are none.

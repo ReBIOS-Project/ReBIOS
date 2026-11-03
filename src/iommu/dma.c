@@ -78,8 +78,7 @@ static bool entry_leaf(uint64_t e, size_t level) {
 // The entry at level that points to the table below it.
 static uint64_t table_entry(uintptr_t table, size_t level) {
     if (kind == IOMMU_KIND_AMD) {
-        return table | AMD_PR | (uint64_t)level << AMD_NEXT_LEVEL_SHIFT
-            | AMD_IR | AMD_IW;
+        return table | AMD_PR | (uint64_t)level << AMD_NEXT_LEVEL_SHIFT | AMD_IR | AMD_IW;
     }
     return table | VTD_R | VTD_W;
 }
@@ -120,9 +119,7 @@ static uint64_t *table_for(uintptr_t addr, size_t level) {
             uint32_t prot = leaf_prot(*e);
             uint64_t *next = page_alloc(1);
             for (size_t i = 0; i < 512; i++) {
-                next[i] = leaf_entry(
-                    base + i * level_size(l - 1), prot, l - 1
-                );
+                next[i] = leaf_entry(base + i * level_size(l - 1), prot, l - 1);
             }
             *e = table_entry((uintptr_t)next, l);
         }
@@ -136,8 +133,7 @@ static void map(uintptr_t addr, uintptr_t hpa, size_t size, uint32_t prot) {
         size_t level = 0;
         for (size_t l = leaf_level_max; l > 0; l--) {
             uint64_t ls = level_size(l);
-            if ((addr & (ls - 1)) == 0 && (hpa & (ls - 1)) == 0
-             && size >= ls) {
+            if ((addr & (ls - 1)) == 0 && (hpa & (ls - 1)) == 0 && size >= ls) {
                 level = l;
                 break;
             }
@@ -182,10 +178,7 @@ void dma_init(void) {
         panic("No IOMMU can remap DMA\n");
     }
     if (tables->truncated) {
-        printf(
-            "Devices of the IOMMUs the tables leave out keep untranslated "
-            "DMA\n"
-        );
+        printf("Devices of the IOMMUs the tables leave out keep untranslated DMA\n");
     }
     root = page_alloc(1);
 }

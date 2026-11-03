@@ -18,27 +18,28 @@
 #ifndef LIB__SPINLOCK_H
 #define LIB__SPINLOCK_H
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <sys/x86.h>
 
 struct spinlock {
-    bool locked;
+    _Atomic(bool) locked;
 };
 
 static inline void spinlock_acquire(struct spinlock *lock) {
-    while (__atomic_exchange_n(&lock->locked, true, __ATOMIC_ACQUIRE)) {
-        while (__atomic_load_n(&lock->locked, __ATOMIC_RELAXED)) {
+    while (atomic_exchange_explicit(&lock->locked, true, memory_order_acquire)) {
+        while (atomic_load_explicit(&lock->locked, memory_order_relaxed)) {
             cpu_relax();
         }
     }
 }
 
 static inline bool spinlock_try(struct spinlock *lock) {
-    return !__atomic_exchange_n(&lock->locked, true, __ATOMIC_ACQUIRE);
+    return !atomic_exchange_explicit(&lock->locked, true, memory_order_acquire);
 }
 
 static inline void spinlock_release(struct spinlock *lock) {
-    __atomic_store_n(&lock->locked, false, __ATOMIC_RELEASE);
+    atomic_store_explicit(&lock->locked, false, memory_order_release);
 }
 
 #endif

@@ -94,6 +94,6 @@ struct hypercall_usb_disk_info {
     char description[64];
 };
 
-#endif
+#endif // !__ASSEMBLER__
 
 #endif

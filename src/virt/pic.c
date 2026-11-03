@@ -117,8 +117,7 @@ static int request(const struct chip *c) {
         in_service &= ~((uint32_t)1 << CASCADE_IRQ);
     }
     int current = highest(c, in_service);
-    if (current >= 0
-     && priority(c, (unsigned int)current) <= priority(c, (unsigned int)irq)) {
+    if (current >= 0 && priority(c, (unsigned int)current) <= priority(c, (unsigned int)irq)) {
         return -1;
     }
     return irq;
@@ -163,8 +162,8 @@ void pic_reset(void) {
 static void command(struct chip *c, uint8_t value) {
     if ((value & ICW1) != 0) {
         c->init_step = 2;
-        c->icw4 = value & ICW1_IC4;
-        c->single = value & ICW1_SNGL;
+        c->icw4 = (value & ICW1_IC4) != 0;
+        c->single = (value & ICW1_SNGL) != 0;
         // Edge-triggered inputs need a new edge.
         c->edges = 0;
         c->isr = 0;
@@ -185,10 +184,10 @@ static void command(struct chip *c, uint8_t value) {
             c->poll = true;
         }
         if ((value & OCW3_RR) != 0) {
-            c->read_isr = value & OCW3_RIS;
+            c->read_isr = (value & OCW3_RIS) != 0;
         }
         if ((value & OCW3_ESMM) != 0) {
-            c->special_mask = value & OCW3_SMM;
+            c->special_mask = (value & OCW3_SMM) != 0;
         }
         return;
     }
@@ -246,8 +245,8 @@ static void data(struct chip *c, uint8_t value) {
             break;
         }
         case 4: {
-            c->auto_eoi = value & ICW4_AEOI;
-            c->special_nested = value & ICW4_SFNM;
+            c->auto_eoi = (value & ICW4_AEOI) != 0;
+            c->special_nested = (value & ICW4_SFNM) != 0;
             c->init_step = 0;
             break;
         }
@@ -372,19 +371,19 @@ bool pic_masked(unsigned int irq) {
     if (irq >= 8 && (chips[0].imr & ((uint32_t)1 << CASCADE_IRQ)) != 0) {
         return true;
     }
-    return (chips[irq >> 3].imr >> (irq & 7)) & 1;
+    return ((chips[irq >> 3].imr >> (irq & 7)) & 1) != 0;
 }
 
 bool pic_in_service(unsigned int irq) {
-    return (chips[irq >> 3].isr >> (irq & 7)) & 1;
+    return ((chips[irq >> 3].isr >> (irq & 7)) & 1) != 0;
 }
 
 bool pic_acknowledged(unsigned int irq) {
-    return (chips[irq >> 3].acked >> (irq & 7)) & 1;
+    return ((chips[irq >> 3].acked >> (irq & 7)) & 1) != 0;
 }
 
 bool pic_level_triggered(unsigned int irq) {
-    return (chips[irq >> 3].elcr >> (irq & 7)) & 1;
+    return ((chips[irq >> 3].elcr >> (irq & 7)) & 1) != 0;
 }
 
 bool pic_in_use(void) {

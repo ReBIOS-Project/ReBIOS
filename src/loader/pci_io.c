@@ -48,9 +48,7 @@ static bool pci_io_device_get(EFI_HANDLE handle, struct pci_io_device *dev) {
     EFI_UINTN segment, bus, device, function;
     uint32_t header[4];
 
-    if (efi_bs->HandleProtocol(handle, &pci_io_guid, (void **)&io)
-     != EFI_SUCCESS
-     || io == NULL
+    if (efi_bs->HandleProtocol(handle, &pci_io_guid, (void **)&io) != EFI_SUCCESS || io == NULL
      || io->GetLocation(io, &segment, &bus, &device, &function) != EFI_SUCCESS
      || io->Pci.Read(io, EfiPciIoWidthUint32, 0, 4, header) != EFI_SUCCESS) {
         return false;
@@ -81,8 +79,7 @@ struct pci_io_device *pci_io_devices(EFI_UINTN *count) {
     }
 
     EFI_STATUS status = efi_bs->AllocatePool(
-        EfiLoaderData, handle_count * sizeof(struct pci_io_device),
-        (void **)&devices
+        EfiLoaderData, handle_count * sizeof(struct pci_io_device), (void **)&devices
     );
     if (status != EFI_SUCCESS) {
         printf("Cannot allocate memory to list the PCI devices\n");
@@ -103,14 +100,11 @@ struct pci_io_device *pci_io_devices(EFI_UINTN *count) {
     return devices;
 }
 
-bool pci_io_device_on_path(
-    EFI_DEVICE_PATH_PROTOCOL *path, struct pci_io_device *dev
-) {
+bool pci_io_device_on_path(EFI_DEVICE_PATH_PROTOCOL *path, struct pci_io_device *dev) {
     EFI_DEVICE_PATH_PROTOCOL *rest = path;
     EFI_HANDLE handle;
 
-    if (efi_bs->LocateDevicePath(&pci_io_guid, &rest, &handle)
-     != EFI_SUCCESS) {
+    if (efi_bs->LocateDevicePath(&pci_io_guid, &rest, &handle) != EFI_SUCCESS) {
         return false;
     }
     return pci_io_device_get(handle, dev);
@@ -132,12 +126,9 @@ static bool port_to_slot(EFI_PCI_IO_PROTOCOL *io) {
         io->Pci.Read(io, EfiPciIoWidthUint8, next, 1, &id);
         if (id == PCI_CAPABILITY_EXPRESS) {
             uint16_t flags = 0;
-            io->Pci.Read(
-                io, EfiPciIoWidthUint16, next + PCI_EXPRESS_FLAGS, 1, &flags
-            );
+            io->Pci.Read(io, EfiPciIoWidthUint16, next + PCI_EXPRESS_FLAGS, 1, &flags);
             uint16_t type = flags & PCI_EXPRESS_FLAGS_TYPE;
-            bool port = type == PCI_EXPRESS_TYPE_ROOT_PORT
-                || type == PCI_EXPRESS_TYPE_DOWNSTREAM;
+            bool port = type == PCI_EXPRESS_TYPE_ROOT_PORT || type == PCI_EXPRESS_TYPE_DOWNSTREAM;
             return port && (flags & PCI_EXPRESS_FLAGS_SLOT) != 0;
         }
         uint32_t link = next + (uint32_t)1;
@@ -163,9 +154,7 @@ bool pci_io_device_in_slot(const struct pci_io_device *dev) {
                 continue;
             }
             EFI_PCI_IO_PROTOCOL *io = devices[i].io;
-            io->Pci.Read(
-                io, EfiPciIoWidthUint8, PCI_SECONDARY_BUS, 1, &secondary
-            );
+            io->Pci.Read(io, EfiPciIoWidthUint8, PCI_SECONDARY_BUS, 1, &secondary);
             if (secondary != 0 && secondary == bus) {
                 bridge = &devices[i];
             }

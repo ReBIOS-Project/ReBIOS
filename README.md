@@ -7,7 +7,8 @@
 </p>
 
 <p align="center">
-    <img src="logo.svg?raw=true" alt="ReBIOS logo" title="ReBIOS logo" width="400">
+    <img src="logo.svg?raw=true" alt="ReBIOS logo" title="ReBIOS logo"
+         width="400">
 </p>
 
 ReBIOS is an EFI application designed to be a drop-in solution to enable legacy
@@ -286,10 +287,10 @@ it adds back of the legacy PC:
   them, or has them working: real ones only back the speaker and the PS/2
   devices actually plugged in.
 - **USB as a BIOS's legacy support has it.** ReBIOS drives the USB controllers
-  itself, with [Tendril](https://github.com/Mintsuki/Tendril), until the OS asks
-  for them, as a BIOS's legacy USB support does: USB keyboards and mice reach
-  legacy OSes as PS/2 ones, and SeaBIOS boots from USB disks. An OS without a
-  USB driver keeps its keyboard, whichever USB controller it is on.
+  itself, with [Tendril](https://github.com/Mintsuki/Tendril), until the OS
+  asks for them, as a BIOS's legacy USB support does: USB keyboards and mice
+  reach legacy OSes as PS/2 ones, and SeaBIOS boots from USB disks. An OS
+  without a USB driver keeps its keyboard, whichever USB controller it is on.
 - **One PCI host bridge.** On machines with several PCI host bridges or PCI
   segments, the OS sees one host bridge, with the other root buses behind
   ports on its bus 0, so OSes that know only one host bridge, or only segment

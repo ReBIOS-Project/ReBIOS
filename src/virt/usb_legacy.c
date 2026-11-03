@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -66,12 +67,11 @@
 #define OHCI_COMMAND_OCR ((uint32_t)1 << 3)
 
 static bool owned(const struct usb_controller *c) {
-    return __atomic_load_n(&c->state, __ATOMIC_ACQUIRE) != USB_STATE_RELEASED;
+    return atomic_load_explicit(&c->state, memory_order_acquire) != USB_STATE_RELEASED;
 }
 
 static uint32_t legsup_shown(const struct usb_controller *c, uint32_t value) {
-    return (value & ~(LEGSUP_BIOS | LEGSUP_OS)) | LEGSUP_BIOS
-        | (c->os_owned ? LEGSUP_OS : 0);
+    return (value & ~(LEGSUP_BIOS | LEGSUP_OS)) | LEGSUP_BIOS | (c->os_owned ? LEGSUP_OS : 0);
 }
 
 // A read of size bytes at at, with what falls in the dword at reg from dword.
@@ -104,9 +104,7 @@ static uint32_t access_into_dword(
     return dword;
 }
 
-static uint64_t range_read(
-    struct vcpu *v, void *ctx, uint64_t offset, size_t size
-) {
+static uint64_t range_read(struct vcpu *v, void *ctx, uint64_t offset, size_t size) {
     (void)v;
     struct usb_legacy_range *r = ctx;
     struct usb_controller *c = r->c;
@@ -115,30 +113,19 @@ static uint64_t range_read(
     if (!owned(c)) {
         return value;
     }
-    if (c->type == TENDRIL_HC_XHCI && c->legacy_cap != 0
-     && at < c->legacy_cap + 4 && at + size > c->legacy_cap) {
-        uint32_t real = (uint32_t)mmio_read_host(
-            (uintptr_t)c->mmio + c->legacy_cap, 4
-        );
-        value = dword_into_access(
-            at, size, value, c->legacy_cap, legsup_shown(c, real)
-        );
+    if (c->type == TENDRIL_HC_XHCI && c->legacy_cap != 0 && at < c->legacy_cap + 4
+     && at + size > c->legacy_cap) {
+        uint32_t real = (uint32_t)mmio_read_host((uintptr_t)c->mmio + c->legacy_cap, 4);
+        value = dword_into_access(at, size, value, c->legacy_cap, legsup_shown(c, real));
     }
-    if (c->type == TENDRIL_HC_OHCI && at < OHCI_CONTROL + 4
-     && at + size > OHCI_CONTROL) {
-        uint32_t real = (uint32_t)mmio_read_host(
-            (uintptr_t)c->mmio + OHCI_CONTROL, 4
-        );
-        value = dword_into_access(
-            at, size, value, OHCI_CONTROL, real | OHCI_CONTROL_IR
-        );
+    if (c->type == TENDRIL_HC_OHCI && at < OHCI_CONTROL + 4 && at + size > OHCI_CONTROL) {
+        uint32_t real = (uint32_t)mmio_read_host((uintptr_t)c->mmio + OHCI_CONTROL, 4);
+        value = dword_into_access(at, size, value, OHCI_CONTROL, real | OHCI_CONTROL_IR);
     }
     return value;
 }
 
-static void range_write(
-    struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value
-) {
+static void range_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value) {
     struct usb_legacy_range *r = ctx;
     struct usb_controller *c = r->c;
     uint64_t at = r->offset + offset;
@@ -148,9 +135,7 @@ static void range_write(
     }
     uint32_t mask;
     if (c->type == TENDRIL_HC_XHCI && c->legacy_cap != 0) {
-        uint32_t dword = access_into_dword(
-            at, size, value, c->legacy_cap, &mask
-        );
+        uint32_t dword = access_into_dword(at, size, value, c->legacy_cap, &mask);
         if ((mask & LEGSUP_OS) != 0) {
             c->os_owned = (dword & LEGSUP_OS) != 0;
             if (c->os_owned) {
@@ -162,9 +147,7 @@ static void range_write(
         }
     }
     if (c->type == TENDRIL_HC_OHCI) {
-        uint32_t dword = access_into_dword(
-            at, size, value, OHCI_COMMAND_STATUS, &mask
-        );
+        uint32_t dword = access_into_dword(at, size, value, OHCI_COMMAND_STATUS, &mask);
         if ((dword & OHCI_COMMAND_OCR) != 0) {
             usb_release(c);
             return;
@@ -178,17 +161,14 @@ static const struct mmio_ops range_ops = { range_read, range_write, false };
 
 // The low half of the register at reg, as the guest wrote it.
 static void low_half_keep(
-    struct pci_addr a, uint32_t reg, uint32_t value, uint32_t mask,
-    bool *kept, uint16_t *low
+    struct pci_addr a, uint32_t reg, uint32_t value, uint32_t mask, bool *kept, uint16_t *low
 ) {
     uint32_t real = pci_cfg_read(a, reg, 4);
     uint32_t shown = *kept ? *low : real & COMMAND_BITS;
     *low = (uint16_t)((shown & ~mask) | (value & mask));
     *kept = true;
     // The other half has bits that clear where ones are written.
-    pci_cfg_write(
-        a, reg, 4, (real & COMMAND_BITS) | (value & mask & ~COMMAND_BITS)
-    );
+    pci_cfg_write(a, reg, 4, (real & COMMAND_BITS) | (value & mask & ~COMMAND_BITS));
 }
 
 static bool hook_read(void *ctx, uint32_t reg, uint32_t *value) {
@@ -198,13 +178,11 @@ static bool hook_read(void *ctx, uint32_t reg, uint32_t *value) {
         *value = (pci_cfg_read(a, reg, 4) & ~COMMAND_BITS) | c->command;
         return true;
     }
-    if (c->f->pm_cap != 0 && reg == c->f->pm_cap + (uint32_t)PM_CONTROL
-     && c->power_kept) {
+    if (c->f->pm_cap != 0 && reg == c->f->pm_cap + (uint32_t)PM_CONTROL && c->power_kept) {
         *value = (pci_cfg_read(a, reg, 4) & ~COMMAND_BITS) | c->power;
         return true;
     }
-    if (c->type == TENDRIL_HC_EHCI && c->legacy_cap != 0
-     && reg == c->legacy_cap) {
+    if (c->type == TENDRIL_HC_EHCI && c->legacy_cap != 0 && reg == c->legacy_cap) {
         *value = legsup_shown(c, pci_cfg_read(a, reg, 4));
         return true;
     }
@@ -218,9 +196,7 @@ static bool hook_read(void *ctx, uint32_t reg, uint32_t *value) {
 // Enumeration turns decoding off to size the BARs, and an OS with no driver
 // for the controller may power it down, neither of which must reach it under
 // the stack: those registers wait until the OS has it.
-static bool hook_write(
-    void *ctx, uint32_t reg, uint32_t value, uint32_t mask
-) {
+static bool hook_write(void *ctx, uint32_t reg, uint32_t value, uint32_t mask) {
     struct usb_controller *c = ctx;
     struct pci_addr a = c->f->addr;
     if (reg == REG_COMMAND) {
@@ -231,8 +207,7 @@ static bool hook_write(
         low_half_keep(a, reg, value, mask, &c->power_kept, &c->power);
         return true;
     }
-    if (c->type == TENDRIL_HC_EHCI && c->legacy_cap != 0
-     && reg == c->legacy_cap) {
+    if (c->type == TENDRIL_HC_EHCI && c->legacy_cap != 0 && reg == c->legacy_cap) {
         if ((mask & LEGSUP_OS) != 0) {
             c->os_owned = (value & LEGSUP_OS) != 0;
             if (c->os_owned) {
@@ -241,8 +216,7 @@ static bool hook_write(
         }
         return true;
     }
-    if (c->type == TENDRIL_HC_UHCI && reg == UHCI_LEGSUP
-     && (mask & UHCI_LEGSUP_BITS) != 0) {
+    if (c->type == TENDRIL_HC_UHCI && reg == UHCI_LEGSUP && (mask & UHCI_LEGSUP_BITS) != 0) {
         usb_release(c);
     }
     return false;
@@ -251,8 +225,7 @@ static bool hook_write(
 static const struct pci_virt_hook hook = { hook_read, hook_write };
 
 static void port_access(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in,
-    uint32_t *value
+    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
 ) {
     struct usb_controller *c = ctx;
     uint16_t port = (uint16_t)(c->port + offset);
@@ -310,13 +283,11 @@ static bool trap_registers(struct usb_controller *c) {
     size_t end = c->mmio_size;
     if (f->msix_cap != 0) {
         uint32_t table = pci_cfg_read(f->addr, f->msix_cap + MSIX_TABLE, 4);
-        size_t count = (pci_cfg_read(f->addr, f->msix_cap + MSIX_CONTROL, 2)
-            & MSIX_SIZE_MASK) + 1;
+        size_t count = (pci_cfg_read(f->addr, f->msix_cap + MSIX_CONTROL, 2) & MSIX_SIZE_MASK) + 1;
         if ((table & MSIX_BIR_MASK) == 0) {
             size_t offset = table & ~MSIX_BIR_MASK;
             first = offset & ~(size_t)(PAGE_SIZE - 1);
-            end = (offset + count * MSIX_ENTRY_SIZE + PAGE_SIZE - 1)
-                & ~(size_t)(PAGE_SIZE - 1);
+            end = (offset + count * MSIX_ENTRY_SIZE + PAGE_SIZE - 1) & ~(size_t)(PAGE_SIZE - 1);
         }
     }
     return trap_range(c, 0, first)
@@ -326,18 +297,14 @@ static bool trap_registers(struct usb_controller *c) {
 bool usb_legacy_own(struct usb_controller *c) {
     const struct pci_function *f = c->f;
     if (c->type == TENDRIL_HC_UHCI) {
-        struct io_handler ports = {
-            c->port, c->port_count, port_access, c
-        };
+        struct io_handler ports = { c->port, c->port_count, port_access, c };
         io_register(&ports);
     } else {
         // Firmware that used no USB may have left it off.
         uint32_t command = pci_cfg_read(f->addr, REG_COMMAND, 2);
         pci_cfg_write(f->addr, REG_COMMAND, 2, command | COMMAND_MEMORY);
         if (c->type == TENDRIL_HC_XHCI) {
-            c->legacy_cap = usb_xhci_legacy_cap(
-                (uintptr_t)c->mmio, c->mmio_size
-            );
+            c->legacy_cap = usb_xhci_legacy_cap((uintptr_t)c->mmio, c->mmio_size);
         } else if (c->type == TENDRIL_HC_EHCI) {
             c->legacy_cap = usb_ehci_legacy_cap(f->addr, (uintptr_t)c->mmio);
         }

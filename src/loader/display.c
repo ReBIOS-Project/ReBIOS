@@ -73,8 +73,8 @@ static void reserve_vram(struct handoff_video *video) {
     video->vram_base = base;
     video->vram_size = size;
     printf(
-        "Video memory for the emulated VGA: %llu MiB at %#llx\n",
-        (unsigned long long)(size >> 20), (unsigned long long)base
+        "Video memory for the emulated VGA: %llu MiB at %#llx\n", (unsigned long long)(size >> 20),
+        (unsigned long long)base
     );
 }
 
@@ -88,30 +88,25 @@ static void collect_edid(struct handoff_video *video) {
     }
     for (size_t i = 0; i < count && video->edid_size == 0; i++) {
         EFI_GRAPHICS_OUTPUT_PROTOCOL *gop;
-        if (efi_bs->HandleProtocol(handles[i], &gop_guid, (void **)&gop)
-         != EFI_SUCCESS
-         || gop->Mode == NULL
-         || gop->Mode->FrameBufferBase != video->framebuffer.base) {
+        if (efi_bs->HandleProtocol(handles[i], &gop_guid, (void **)&gop) != EFI_SUCCESS
+         || gop->Mode == NULL || gop->Mode->FrameBufferBase != video->framebuffer.base) {
             continue;
         }
         EFI_GUID *guids[] = { &edid_active_guid, &edid_discovered_guid };
         for (size_t g = 0; g < 2; g++) {
             // Both protocols have the same layout.
             EFI_EDID_ACTIVE_PROTOCOL *edid;
-            if (efi_bs->HandleProtocol(handles[i], guids[g], (void **)&edid)
-             != EFI_SUCCESS
+            if (efi_bs->HandleProtocol(handles[i], guids[g], (void **)&edid) != EFI_SUCCESS
              || edid->SizeOfEdid < 128 || edid->Edid == NULL) {
                 continue;
             }
             size_t size = edid->SizeOfEdid < HANDOFF_MAX_EDID
-                ? edid->SizeOfEdid : HANDOFF_MAX_EDID;
+                        ? edid->SizeOfEdid
+                        : HANDOFF_MAX_EDID;
             size &= ~(uint32_t)127;
             memcpy(video->edid, edid->Edid, size);
             video->edid_size = size;
-            printf(
-                "Display EDID: %zu bytes, %s\n", size,
-                g == 0 ? "active" : "discovered"
-            );
+            printf("Display EDID: %zu bytes, %s\n", size, g == 0 ? "active" : "discovered");
             break;
         }
     }

@@ -15,7 +15,6 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -45,11 +44,10 @@ int32_t remap_requester(uint8_t type, uint8_t id) {
 }
 
 int remap_alloc(int32_t requester, size_t count) {
-    return amd() ? amdvi_remap_alloc(requester, count)
-        : vtd_remap_alloc(count);
+    return amd() ? amdvi_remap_alloc(requester, count) : vtd_remap_alloc(count);
 }
 
-void remap_free(int32_t requester, int index, size_t count) {
+void remap_free(int32_t requester, uint16_t index, size_t count) {
     if (amd()) {
         amdvi_remap_free(requester, index, count);
     } else {
@@ -57,9 +55,7 @@ void remap_free(int32_t requester, int index, size_t count) {
     }
 }
 
-void remap_set(
-    int32_t requester, int index, uint32_t apic_id, uint8_t vector, bool level
-) {
+void remap_set(int32_t requester, uint16_t index, uint32_t apic_id, uint8_t vector, bool level) {
     if (amd()) {
         amdvi_remap_set(requester, index, apic_id, vector);
     } else {
@@ -67,9 +63,7 @@ void remap_set(
     }
 }
 
-void remap_message(
-    int32_t requester, int index, uint32_t *address, uint32_t *data
-) {
+void remap_message(int32_t requester, uint16_t index, uint32_t *address, uint32_t *data) {
     (void)requester;
     if (amd()) {
         amdvi_remap_message(index, address, data);
@@ -79,9 +73,10 @@ void remap_message(
 }
 
 uint64_t remap_rte(
-    int32_t requester, int index, uint8_t vector, bool level, bool active_low
+    int32_t requester, uint16_t index, uint8_t vector, bool level, bool active_low
 ) {
     (void)requester;
-    return amd() ? amdvi_remap_rte(index, level, active_low)
-        : vtd_remap_rte(index, vector, level, active_low);
+    return amd()
+         ? amdvi_remap_rte(index, level, active_low)
+         : vtd_remap_rte(index, vector, level, active_low);
 }

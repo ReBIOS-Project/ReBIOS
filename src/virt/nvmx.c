@@ -15,6 +15,8 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdalign.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -127,7 +129,7 @@ static const uint16_t fields[] = {
     0x6802, 0x6804, 0x6806, 0x6808, 0x680a, 0x680c, 0x680e, 0x6810, 0x6812,
     0x6814, 0x6816, 0x6818, 0x681a, 0x681c, 0x681e, 0x6820, 0x6822, 0x6824,
     0x6826, 0x6c00, 0x6c02, 0x6c04, 0x6c06, 0x6c08, 0x6c0a, 0x6c0c, 0x6c0e,
-    0x6c10, 0x6c12, 0x6c14, 0x6c16,
+    0x6c10, 0x6c12, 0x6c14, 0x6c16
 };
 
 #define FIELD_COUNT (sizeof(fields) / sizeof(uint16_t))
@@ -175,7 +177,7 @@ struct nvmx {
     uintptr_t shadow;
     // VMCS02's VM-exit MSR-store list: IA32_TSC, while the guest's own list
     // has it.
-    uint64_t tsc_store[2] __attribute__((aligned(16)));
+    alignas(16) uint64_t tsc_store[2];
     bool tsc_stored;
     // While the guest's guest runs with the VMX-preemption timer: the TSC,
     // shifted by the timer's rate, at which it expires.
@@ -193,12 +195,12 @@ struct nvmx {
     // While the guest's guest processes posted interrupts, their notification
     // vector, else -1, and whether a notification came for the hypervisor to
     // process.
-    int pi_vector;
-    bool pi_pending;
+    _Atomic(int) pi_vector;
+    _Atomic(bool) pi_pending;
     // The activity state the guest's guest waits in here, and the vector of
     // the start-up IPI that ends the wait for one, else -1.
-    int inactive;
-    int sipi;
+    _Atomic(int) inactive;
+    _Atomic(int) sipi;
     struct ept02 ept02[EPT02_ROOTS];
     struct ept02 *current02;
     size_t ept02_pages;
@@ -218,7 +220,7 @@ struct nvmx {
 
 bool nvmx_enabled;
 // How many vCPUs are in VMX operation.
-static size_t vmxon_count;
+static _Atomic(size_t) vmxon_count;
 
 // The guest's VMX capability MSRs: the processor's allowed settings where
 // ReBIOS emulates them. Their allowed 0-settings are the processor's, so that
@@ -256,34 +258,28 @@ static unsigned int ept02_budget;
 #define ENTRY_DEFAULT1 ((uint32_t)0x000011ff)
 
 #define PIN_EMULATED \
-    (PIN_EXT_INTR_EXITING | PIN_NMI_EXITING | PIN_VIRTUAL_NMIS \
-        | PIN_PREEMPTION_TIMER | PIN_POSTED_INTR | PIN_DEFAULT1)
+    (PIN_EXT_INTR_EXITING | PIN_NMI_EXITING | PIN_VIRTUAL_NMIS | PIN_PREEMPTION_TIMER \
+   | PIN_POSTED_INTR | PIN_DEFAULT1)
 #define PROC_EMULATED \
-    (PROC_INTR_WINDOW_EXITING | PROC_TSC_OFFSETTING | PROC_HLT_EXITING \
-        | PROC_INVLPG_EXITING | PROC_MWAIT_EXITING | PROC_RDPMC_EXITING \
-        | PROC_RDTSC_EXITING | PROC_CR3_LOAD_EXITING | PROC_CR3_STORE_EXITING \
-        | PROC_CR8_LOAD_EXITING | PROC_CR8_STORE_EXITING | PROC_TPR_SHADOW \
-        | PROC_NMI_WINDOW_EXITING | PROC_MOV_DR_EXITING \
-        | PROC_UNCOND_IO_EXITING | PROC_IO_BITMAPS | PROC_MONITOR_TRAP_FLAG \
-        | PROC_MSR_BITMAPS | PROC_MONITOR_EXITING | PROC_PAUSE_EXITING \
-        | PROC_SECONDARY_CONTROLS | PROC_DEFAULT1)
+    (PROC_INTR_WINDOW_EXITING | PROC_TSC_OFFSETTING | PROC_HLT_EXITING | PROC_INVLPG_EXITING \
+   | PROC_MWAIT_EXITING | PROC_RDPMC_EXITING | PROC_RDTSC_EXITING | PROC_CR3_LOAD_EXITING \
+   | PROC_CR3_STORE_EXITING | PROC_CR8_LOAD_EXITING | PROC_CR8_STORE_EXITING | PROC_TPR_SHADOW \
+   | PROC_NMI_WINDOW_EXITING | PROC_MOV_DR_EXITING | PROC_UNCOND_IO_EXITING | PROC_IO_BITMAPS \
+   | PROC_MONITOR_TRAP_FLAG | PROC_MSR_BITMAPS | PROC_MONITOR_EXITING | PROC_PAUSE_EXITING \
+   | PROC_SECONDARY_CONTROLS | PROC_DEFAULT1)
 #define PROC2_EMULATED \
-    (PROC2_VIRT_APIC_ACCESSES | PROC2_EPT | PROC2_DESC_TABLE_EXITING \
-        | PROC2_RDTSCP | PROC2_VIRT_X2APIC | PROC2_VPID \
-        | PROC2_WBINVD_EXITING | PROC2_UNRESTRICTED_GUEST \
-        | PROC2_APIC_REG_VIRT | PROC2_VIRT_INTR_DELIVERY \
-        | PROC2_PAUSE_LOOP_EXITING | PROC2_RDRAND_EXITING | PROC2_INVPCID \
-        | PROC2_VMFUNC | PROC2_VMCS_SHADOWING | PROC2_RDSEED_EXITING \
-        | PROC2_PML | PROC2_XSAVES | PROC2_MBEC | PROC2_TSC_SCALING \
-        | PROC2_USER_WAIT_PAUSE)
+    (PROC2_VIRT_APIC_ACCESSES | PROC2_EPT | PROC2_DESC_TABLE_EXITING | PROC2_RDTSCP \
+   | PROC2_VIRT_X2APIC | PROC2_VPID | PROC2_WBINVD_EXITING | PROC2_UNRESTRICTED_GUEST \
+   | PROC2_APIC_REG_VIRT | PROC2_VIRT_INTR_DELIVERY | PROC2_PAUSE_LOOP_EXITING \
+   | PROC2_RDRAND_EXITING | PROC2_INVPCID | PROC2_VMFUNC | PROC2_VMCS_SHADOWING \
+   | PROC2_RDSEED_EXITING | PROC2_PML | PROC2_XSAVES | PROC2_MBEC | PROC2_TSC_SCALING \
+   | PROC2_USER_WAIT_PAUSE)
 #define EXIT_EMULATED \
-    (EXIT_SAVE_DEBUG_CONTROLS | EXIT_HOST_ADDR_SPACE_SIZE \
-        | EXIT_ACK_INTR_ON_EXIT | EXIT_SAVE_PAT | EXIT_LOAD_PAT \
-        | EXIT_SAVE_EFER | EXIT_LOAD_EFER | EXIT_SAVE_PREEMPTION_TIMER \
-        | EXIT_DEFAULT1)
+    (EXIT_SAVE_DEBUG_CONTROLS | EXIT_HOST_ADDR_SPACE_SIZE | EXIT_ACK_INTR_ON_EXIT | EXIT_SAVE_PAT \
+   | EXIT_LOAD_PAT | EXIT_SAVE_EFER | EXIT_LOAD_EFER | EXIT_SAVE_PREEMPTION_TIMER | EXIT_DEFAULT1)
 #define ENTRY_EMULATED \
-    (ENTRY_LOAD_DEBUG_CONTROLS | ENTRY_IA32E_MODE_GUEST | ENTRY_LOAD_PAT \
-        | ENTRY_LOAD_EFER | ENTRY_DEFAULT1)
+    (ENTRY_LOAD_DEBUG_CONTROLS | ENTRY_IA32E_MODE_GUEST | ENTRY_LOAD_PAT | ENTRY_LOAD_EFER \
+   | ENTRY_DEFAULT1)
 
 // IA32_VMX_BASIC (SDM 325462-093 Vol. 3D, A.1): the VMCS size, write-back
 // memory, the information of INS and OUTS exits, the TRUE capability MSRs, and
@@ -336,12 +332,11 @@ static unsigned int ept02_budget;
 #define CAP_INVVPID_ALL ((uint64_t)1 << 42)
 #define CAP_INVVPID_GLOBALS ((uint64_t)1 << 43)
 #define CAP_EPT_OFFERED \
-    (CAP_EXEC_ONLY | CAP_WALK_4 | CAP_WALK_5 | CAP_UC | CAP_WB | CAP_2M \
-        | CAP_1G | CAP_INVEPT | CAP_AD | CAP_ADVANCED_INFO \
-        | CAP_INVEPT_SINGLE | CAP_INVEPT_ALL)
+    (CAP_EXEC_ONLY | CAP_WALK_4 | CAP_WALK_5 | CAP_UC | CAP_WB | CAP_2M | CAP_1G | CAP_INVEPT \
+   | CAP_AD | CAP_ADVANCED_INFO | CAP_INVEPT_SINGLE | CAP_INVEPT_ALL)
 #define CAP_VPID_OFFERED \
     (CAP_INVVPID | CAP_INVVPID_ADDRESS | CAP_INVVPID_SINGLE | CAP_INVVPID_ALL \
-        | CAP_INVVPID_GLOBALS)
+   | CAP_INVVPID_GLOBALS)
 
 static int field_slot(uint32_t field);
 
@@ -352,9 +347,7 @@ static void shadow_unload(void);
 static void shadow_update(struct vcpu *v, struct nvmx *n, uint32_t field);
 
 // A capability MSR: allowed 0-settings low, allowed 1-settings high.
-static uint64_t capability(
-    uint64_t hardware, uint32_t emulated, uint32_t required
-) {
+static uint64_t capability(uint64_t hardware, uint32_t emulated, uint32_t required) {
     uint32_t allowed1 = (uint32_t)(hardware >> 32) & emulated;
     uint32_t allowed0 = ((uint32_t)hardware | required) & allowed1;
     return (uint64_t)allowed1 << 32 | allowed0;
@@ -368,34 +361,22 @@ void nvmx_init(void) {
 
     for (size_t i = 0; i < FIELD_COUNT; i++) {
         uint32_t field = fields[i];
-        field_slots[FIELD_WIDTH(field)][FIELD_TYPE(field)][FIELD_INDEX(field)]
-            = (uint8_t)(i + 1);
+        field_slots[FIELD_WIDTH(field)][FIELD_TYPE(field)][FIELD_INDEX(field)] = (uint8_t)(i + 1);
     }
 
     uint64_t basic = vmx_capability(MSR_IA32_VMX_BASIC);
-    cap_basic = VMCS12_REVISION | (uint64_t)4096 << BASIC_SIZE_SHIFT
-        | BASIC_MEMTYPE_WB | BASIC_INS_OUTS | BASIC_TRUE_CONTROLS
-        | (basic & BASIC_NO_ERROR_CODE);
+    cap_basic = VMCS12_REVISION | (uint64_t)4096 << BASIC_SIZE_SHIFT | BASIC_MEMTYPE_WB
+              | BASIC_INS_OUTS | BASIC_TRUE_CONTROLS | (basic & BASIC_NO_ERROR_CODE);
 
-    cap_true_pin = capability(
-        vmx_capability(MSR_IA32_VMX_TRUE_PINBASED_CTLS), PIN_EMULATED, 0
-    );
-    cap_true_proc = capability(
-        vmx_capability(MSR_IA32_VMX_TRUE_PROCBASED_CTLS), PROC_EMULATED, 0
-    );
-    cap_true_exit = capability(
-        vmx_capability(MSR_IA32_VMX_TRUE_EXIT_CTLS), EXIT_EMULATED, 0
-    );
-    cap_true_entry = capability(
-        vmx_capability(MSR_IA32_VMX_TRUE_ENTRY_CTLS), ENTRY_EMULATED, 0
-    );
+    cap_true_pin = capability(vmx_capability(MSR_IA32_VMX_TRUE_PINBASED_CTLS), PIN_EMULATED, 0);
+    cap_true_proc = capability(vmx_capability(MSR_IA32_VMX_TRUE_PROCBASED_CTLS), PROC_EMULATED, 0);
+    cap_true_exit = capability(vmx_capability(MSR_IA32_VMX_TRUE_EXIT_CTLS), EXIT_EMULATED, 0);
+    cap_true_entry = capability(vmx_capability(MSR_IA32_VMX_TRUE_ENTRY_CTLS), ENTRY_EMULATED, 0);
     cap_pin = capability(cap_true_pin, PIN_EMULATED, PIN_DEFAULT1);
     cap_proc = capability(cap_true_proc, PROC_EMULATED, PROC_DEFAULT1);
     cap_exit = capability(cap_true_exit, EXIT_EMULATED, EXIT_DEFAULT1);
     cap_entry = capability(cap_true_entry, ENTRY_EMULATED, ENTRY_DEFAULT1);
-    cap_proc2 = capability(
-        vmx_capability(MSR_IA32_VMX_PROCBASED_CTLS2), PROC2_EMULATED, 0
-    );
+    cap_proc2 = capability(vmx_capability(MSR_IA32_VMX_PROCBASED_CTLS2), PROC2_EMULATED, 0);
     uint64_t ept_vpid = vmx_capability(MSR_IA32_VMX_EPT_VPID_CAP);
     cap_ept_vpid = ept_vpid & CAP_EPT_OFFERED;
     // VMCS02 needs a VPID of its own for the guest's.
@@ -421,17 +402,14 @@ void nvmx_init(void) {
     ept02_budget = NESTED_HEAP_SIZE / PAGE_SIZE / smp_cpu_count();
 
     uint64_t misc = vmx_capability(MSR_IA32_VMX_MISC);
-    cr3_targets = (unsigned int)(
-        misc >> MISC_CR3_TARGETS_SHIFT & MISC_CR3_TARGETS_MASK
-    );
+    cr3_targets = (unsigned int)(misc >> MISC_CR3_TARGETS_SHIFT & MISC_CR3_TARGETS_MASK);
     if (cr3_targets > 4) {
         cr3_targets = 4;
     }
     timer_rate = (unsigned int)(misc & MISC_TIMER_RATE);
-    cap_misc = timer_rate | MISC_STORE_LMA | MISC_ACTIVITY_HLT
-        | MISC_ACTIVITY_SHUTDOWN | MISC_ACTIVITY_WAIT_SIPI
-        | (uint64_t)cr3_targets << MISC_CR3_TARGETS_SHIFT | MISC_VMWRITE_ANY
-        | (misc & MISC_ZERO_LENGTH_INJECTION);
+    cap_misc = timer_rate | MISC_STORE_LMA | MISC_ACTIVITY_HLT | MISC_ACTIVITY_SHUTDOWN
+             | MISC_ACTIVITY_WAIT_SIPI | (uint64_t)cr3_targets << MISC_CR3_TARGETS_SHIFT
+             | MISC_VMWRITE_ANY | (misc & MISC_ZERO_LENGTH_INJECTION);
     // Its own Intel PT keeps working in VMX operation, paused while its guests
     // run.
     if (vmx_pt_passthrough()) {
@@ -442,8 +420,7 @@ void nvmx_init(void) {
     cap_cr0_fixed1 = vmx_capability(MSR_IA32_VMX_CR0_FIXED1);
     cap_cr4_fixed0 = vmx_capability(MSR_IA32_VMX_CR4_FIXED0);
     // Only the CR4 bits of features the guest gets may be 1 in VMX operation.
-    cap_cr4_fixed1 = vmx_capability(MSR_IA32_VMX_CR4_FIXED1)
-        & (cpuid_cr4_allowed() | CR4_VMXE);
+    cap_cr4_fixed1 = vmx_capability(MSR_IA32_VMX_CR4_FIXED1) & (cpuid_cr4_allowed() | CR4_VMXE);
 
     shadowing_init(misc);
 
@@ -455,8 +432,7 @@ void nvmx_init(void) {
     }
     cap_vmcs_enum = max_index << 1;
 
-    for (size_t msr = MSR_IA32_VMX_BASIC; msr <= MSR_IA32_VMX_PROCBASED_CTLS3;
-         msr++) {
+    for (size_t msr = MSR_IA32_VMX_BASIC; msr <= MSR_IA32_VMX_PROCBASED_CTLS3; msr++) {
         virt_intercept_msr(msr, true, true);
     }
     printf("Nested VMX for the guest\n");
@@ -514,8 +490,7 @@ static bool field_offered(uint32_t field) {
             return (proc2 & PROC2_VMCS_SHADOWING) != 0;
         }
         case VMCS_EPTP_LIST: {
-            return (proc2 & PROC2_VMFUNC) != 0
-                && (cap_vmfunc & VMFUNC_EPTP_SWITCHING) != 0;
+            return (proc2 & PROC2_VMFUNC) != 0 && (cap_vmfunc & VMFUNC_EPTP_SWITCHING) != 0;
         }
         case VMCS_TSC_MULTIPLIER: {
             return (proc2 & PROC2_TSC_SCALING) != 0;
@@ -554,8 +529,7 @@ static int field_slot(uint32_t field) {
     if (!field_offered(field & ~FIELD_HIGH)) {
         return -1;
     }
-    return field_slots[FIELD_WIDTH(field)][FIELD_TYPE(field)]
-        [FIELD_INDEX(field)] - 1;
+    return field_slots[FIELD_WIDTH(field)][FIELD_TYPE(field)][FIELD_INDEX(field)] - 1;
 }
 
 static uint64_t *field_in(uint8_t *vmcs, int slot) {
@@ -572,9 +546,8 @@ static uint8_t *guest_page(uintptr_t gpa) {
     uintptr_t hpa;
     uint32_t prot;
     uint8_t memtype;
-    if (!gpt_translate(gpa, &hpa, &prot, &memtype)
-     || (prot & (GPT_R | GPT_W)) != (GPT_R | GPT_W) || memtype != MT_WB
-     || vlapic_access_page(hpa & ~(uint64_t)0xfff)) {
+    if (!gpt_translate(gpa, &hpa, &prot, &memtype) || (prot & (GPT_R | GPT_W)) != (GPT_R | GPT_W)
+     || memtype != MT_WB || vlapic_access_page(hpa & ~(uint64_t)0xfff)) {
         return NULL;
     }
     return (uint8_t *)(uintptr_t)hpa;
@@ -618,9 +591,7 @@ static void set_guest_reg(struct vcpu *v, unsigned int reg, uint64_t value) {
 
 // The linear address of a VMX instruction's memory operand, or false with the
 // fault raised.
-static bool operand_address(
-    struct vcpu *v, uint32_t info, size_t size, uint64_t *linear
-) {
+static bool operand_address(struct vcpu *v, uint32_t info, size_t size, uint64_t *linear) {
     uintptr_t address = vmx_read(VMCS_EXIT_QUALIFICATION);
     if ((info & INFO_NO_BASE) == 0) {
         address += guest_reg(v, INFO_BASE(info));
@@ -656,8 +627,7 @@ static bool operand_address(
             return false;
         }
     } else {
-        if ((seg.attrib & SEG_UNUSABLE) != 0
-         || address + size - 1 > seg.limit) {
+        if ((seg.attrib & SEG_UNUSABLE) != 0 || address + size - 1 > seg.limit) {
             vcpu_inject_exception(v, fault, true, 0);
             return false;
         }
@@ -669,8 +639,7 @@ static bool operand_address(
 
 static bool read_operand64(struct vcpu *v, uint32_t info, uint64_t *value) {
     uintptr_t linear;
-    return operand_address(v, info, 8, &linear)
-        && mmio_read_linear(v, linear, value, 8);
+    return operand_address(v, info, 8, &linear) && mmio_read_linear(v, linear, value, 8);
 }
 
 // VMsucceed, VMfailInvalid, and VMfailValid (SDM 325462-093 Vol. 3C, 33.2).
@@ -710,10 +679,8 @@ static void vmxon(struct vcpu *v, struct nvmx *n, uint32_t info) {
     }
     uint64_t cr0 = vcpu_cr0(v);
     uint64_t cr4 = vcpu_cr4(v);
-    if ((cr0 & cap_cr0_fixed0) != cap_cr0_fixed0
-     || (cr0 & ~cap_cr0_fixed1) != 0
-     || (cr4 & cap_cr4_fixed0) != cap_cr4_fixed0
-     || (cr4 & ~cap_cr4_fixed1) != 0) {
+    if ((cr0 & cap_cr0_fixed0) != cap_cr0_fixed0 || (cr0 & ~cap_cr0_fixed1) != 0
+     || (cr4 & cap_cr4_fixed0) != cap_cr4_fixed0 || (cr4 & ~cap_cr4_fixed1) != 0) {
         vcpu_inject_exception(v, 13, true, 0);
         return;
     }
@@ -727,16 +694,13 @@ static void vmxon(struct vcpu *v, struct nvmx *n, uint32_t info) {
         return;
     }
     n->vmxon = true;
-    __atomic_add_fetch(&vmxon_count, 1, __ATOMIC_RELEASE);
+    atomic_fetch_add_explicit(&vmxon_count, 1, memory_order_release);
     n->vmxon_ptr = addr;
     n->current = NO_VMCS;
     n->vmcs12 = NULL;
     // Outside VMX operation, the guest's VMREAD and VMWRITE are to fault.
     if (shadowing) {
-        vmx_write(
-            VMCS_PROC_CONTROLS2,
-            vmx_read(VMCS_PROC_CONTROLS2) | PROC2_VMCS_SHADOWING
-        );
+        vmx_write(VMCS_PROC_CONTROLS2, vmx_read(VMCS_PROC_CONTROLS2) | PROC2_VMCS_SHADOWING);
     }
     succeed(v);
 }
@@ -746,12 +710,11 @@ static void vmxoff(struct vcpu *v, struct nvmx *n) {
     shadow_unload();
     if (shadowing) {
         vmx_write(
-            VMCS_PROC_CONTROLS2,
-            vmx_read(VMCS_PROC_CONTROLS2) & ~(uint64_t)PROC2_VMCS_SHADOWING
+            VMCS_PROC_CONTROLS2, vmx_read(VMCS_PROC_CONTROLS2) & ~(uint64_t)PROC2_VMCS_SHADOWING
         );
     }
     n->vmxon = false;
-    __atomic_sub_fetch(&vmxon_count, 1, __ATOMIC_RELEASE);
+    atomic_fetch_sub_explicit(&vmxon_count, 1, memory_order_release);
     n->current = NO_VMCS;
     n->vmcs12 = NULL;
     ept02_drop_all(n);
@@ -817,8 +780,7 @@ static void vmptrld(struct vcpu *v, struct nvmx *n, uint32_t info) {
 
 static void vmptrst(struct vcpu *v, struct nvmx *n, uint32_t info) {
     uintptr_t linear;
-    if (!operand_address(v, info, 8, &linear)
-     || !mmio_write_linear(v, linear, &n->current, 8)) {
+    if (!operand_address(v, info, 8, &linear) || !mmio_write_linear(v, linear, &n->current, 8)) {
         return;
     }
     succeed(v);
@@ -830,8 +792,7 @@ static void vmptrst(struct vcpu *v, struct nvmx *n, uint32_t info) {
 static void vmread_in(struct vcpu *v, uint8_t *vmcs, uint32_t info) {
     bool wide = long_mode_64(v);
     uint32_t field = (uint32_t)guest_reg(v, INFO_REG2(info));
-    int slot = wide && (guest_reg(v, INFO_REG2(info)) >> 32) != 0 ? -1
-        : field_slot(field);
+    int slot = wide && (guest_reg(v, INFO_REG2(info)) >> 32) != 0 ? -1 : field_slot(field);
     if (slot < 0) {
         fail(v, ERROR_UNSUPPORTED_FIELD);
         return;
@@ -857,9 +818,7 @@ static void vmread_in(struct vcpu *v, uint8_t *vmcs, uint32_t info) {
 }
 
 // Returns whether it wrote the field, then in *written.
-static bool vmwrite_in(
-    struct vcpu *v, uint8_t *vmcs, uint32_t info, uint32_t *written
-) {
+static bool vmwrite_in(struct vcpu *v, uint8_t *vmcs, uint32_t info, uint32_t *written) {
     bool wide = long_mode_64(v);
     uint64_t value = 0;
     if ((info & INFO_REGISTER) != 0) {
@@ -876,8 +835,7 @@ static bool vmwrite_in(
         value &= 0xffffffff;
     }
     uint32_t field = (uint32_t)guest_reg(v, INFO_REG2(info));
-    int slot = wide && (guest_reg(v, INFO_REG2(info)) >> 32) != 0 ? -1
-        : field_slot(field);
+    int slot = wide && (guest_reg(v, INFO_REG2(info)) >> 32) != 0 ? -1 : field_slot(field);
     if (slot < 0) {
         fail(v, ERROR_UNSUPPORTED_FIELD);
         return false;
@@ -956,7 +914,7 @@ static const uint16_t guest_fields[] = {
     VMCS_GUEST_DS_BASE, VMCS_GUEST_FS_BASE, VMCS_GUEST_GS_BASE,
     VMCS_GUEST_LDTR_BASE, VMCS_GUEST_TR_BASE, VMCS_GUEST_GDTR_BASE,
     VMCS_GUEST_IDTR_BASE, VMCS_GUEST_RSP, VMCS_GUEST_RIP, VMCS_GUEST_RFLAGS,
-    VMCS_GUEST_PENDING_DBG, VMCS_GUEST_SYSENTER_ESP, VMCS_GUEST_SYSENTER_EIP,
+    VMCS_GUEST_PENDING_DBG, VMCS_GUEST_SYSENTER_ESP, VMCS_GUEST_SYSENTER_EIP
 };
 
 // The controls VMCS02 takes from VMCS12 as they are.
@@ -964,7 +922,7 @@ static const uint16_t control_fields[] = {
     VMCS_EXCEPTION_BITMAP, VMCS_PF_ERROR_MASK, VMCS_PF_ERROR_MATCH,
     VMCS_CR3_TARGET_COUNT, VMCS_ENTRY_INTR_INFO, VMCS_ENTRY_EXCEPTION_ERROR,
     VMCS_ENTRY_INSTR_LEN, VMCS_CR0_MASK, VMCS_CR4_MASK, VMCS_CR0_SHADOW,
-    VMCS_CR4_SHADOW,
+    VMCS_CR4_SHADOW
 };
 
 // The exit information VMCS12 gets from VMCS02 for exits the processor itself
@@ -973,7 +931,7 @@ static const uint16_t control_fields[] = {
 static const uint16_t exit_fields[] = {
     VMCS_EXIT_INTR_INFO, VMCS_EXIT_INTR_ERROR, VMCS_IDT_VECTORING_INFO,
     VMCS_IDT_VECTORING_ERROR, VMCS_EXIT_INSTR_LEN, VMCS_EXIT_INSTR_INFO,
-    VMCS_GUEST_LINEAR_ADDR, VMCS_GUEST_PHYS_ADDR,
+    VMCS_GUEST_LINEAR_ADDR, VMCS_GUEST_PHYS_ADDR
 };
 
 #define ARRAY_COUNT(a) (sizeof(a) / sizeof((a)[0]))
@@ -991,15 +949,13 @@ static const uint16_t shadow_read_write[] = {
     VMCS_ENTRY_INSTR_LEN, VMCS_TPR_THRESHOLD, VMCS_GUEST_INTERRUPTIBILITY,
     VMCS_PREEMPTION_TIMER, VMCS_GUEST_RIP, VMCS_GUEST_RSP, VMCS_GUEST_RFLAGS,
     VMCS_GUEST_CR0, VMCS_GUEST_CR3, VMCS_GUEST_CR4, VMCS_CR0_MASK,
-    VMCS_CR0_SHADOW, VMCS_CR4_SHADOW, VMCS_HOST_FS_BASE, VMCS_HOST_GS_BASE,
+    VMCS_CR0_SHADOW, VMCS_CR4_SHADOW, VMCS_HOST_FS_BASE, VMCS_HOST_GS_BASE
 };
-static const uint16_t shadow_read_only[] = {
-    VMCS_GUEST_CS_AR, VMCS_GUEST_SS_AR
-};
+static const uint16_t shadow_read_only[] = { VMCS_GUEST_CS_AR, VMCS_GUEST_SS_AR };
 static const uint16_t shadow_exit_information[] = {
     VMCS_EXIT_REASON, VMCS_EXIT_QUALIFICATION, VMCS_EXIT_INTR_INFO,
     VMCS_EXIT_INTR_ERROR, VMCS_IDT_VECTORING_INFO, VMCS_IDT_VECTORING_ERROR,
-    VMCS_EXIT_INSTR_LEN, VMCS_GUEST_LINEAR_ADDR, VMCS_GUEST_PHYS_ADDR,
+    VMCS_EXIT_INSTR_LEN, VMCS_GUEST_LINEAR_ADDR, VMCS_GUEST_PHYS_ADDR
 };
 
 // What the shadow VMCS holds, and of it what the guest writes there.
@@ -1016,7 +972,7 @@ static void shadow_field(uint16_t field, bool written) {
     shadow_loaded[shadow_loaded_count++] = field;
     if (FIELD_WIDTH(field) == FIELD_WIDTH_64) {
         vmread_bitmap[(field | FIELD_HIGH) >> 3] &= (uint8_t)~((uint32_t)1
-            << ((field | FIELD_HIGH) & 7));
+                                                            << ((field | FIELD_HIGH) & 7));
     }
     if (written) {
         vmwrite_bitmap[field >> 3] &= (uint8_t)~((uint32_t)1 << (field & 7));
@@ -1039,17 +995,14 @@ static void shadowing_init(uint64_t misc) {
     for (size_t i = 0; i < ARRAY_COUNT(shadow_read_only); i++) {
         shadow_field(shadow_read_only[i], false);
     }
-    for (size_t i = 0;
-         (misc & MISC_VMWRITE_ANY) != 0
-      && i < ARRAY_COUNT(shadow_exit_information); i++) {
+    for (size_t i = 0; (misc & MISC_VMWRITE_ANY) != 0 && i < ARRAY_COUNT(shadow_exit_information);
+         i++) {
         shadow_field(shadow_exit_information[i], false);
     }
 }
 
 static bool field_shadowed(uint32_t field) {
-    return shadowing
-        && (vmread_bitmap[(field & 0x7fff) >> 3]
-            & ((uint32_t)1 << (field & 7))) == 0;
+    return shadowing && (vmread_bitmap[(field & 0x7fff) >> 3] & ((uint32_t)1 << (field & 7))) == 0;
 }
 
 // The guest's current VMCS for VMCS shadowing: its fields in the shadow VMCS,
@@ -1063,8 +1016,7 @@ static void shadow_load(struct vcpu *v, struct nvmx *n, bool all) {
     for (size_t i = 0; i < shadow_loaded_count; i++) {
         uint16_t field = shadow_loaded[i];
         if (all || FIELD_TYPE(field) == FIELD_TYPE_EXIT_INFO
-         || FIELD_TYPE(field) == FIELD_TYPE_GUEST
-         || field == VMCS_ENTRY_INTR_INFO) {
+         || FIELD_TYPE(field) == FIELD_TYPE_GUEST || field == VMCS_ENTRY_INTR_INFO) {
             vmx_other_write(field, get12(n, field));
         }
     }
@@ -1104,14 +1056,12 @@ static void shadow_update(struct vcpu *v, struct nvmx *n, uint32_t field) {
 static bool allowed(uint64_t value, uint64_t cap) {
     uint32_t required = (uint32_t)cap;
     uint32_t permitted = (uint32_t)(cap >> 32);
-    return (value & required) == required
-        && (value & ~(uint64_t)permitted) == 0;
+    return (value & required) == required && (value & ~(uint64_t)permitted) == 0;
 }
 
 static bool canonical(uintptr_t address) {
     unsigned int bits = (cpuid(0x80000008, 0).eax >> 8) & 0xff;
-    return (uint64_t)((int64_t)(address << (64 - bits)) >> (64 - bits))
-        == address;
+    return (uint64_t)((int64_t)(address << (64 - bits)) >> (64 - bits)) == address;
 }
 
 static bool pat_valid(uint64_t pat) {
@@ -1129,7 +1079,7 @@ static bool pat_valid(uint64_t pat) {
 static bool msr_list_valid(uintptr_t address, size_t count) {
     return count == 0
         || ((address & 15) == 0 && (address >> phys_width) == 0
-            && ((address + count * 16 - 1) >> phys_width) == 0);
+         && ((address + count * 16 - 1) >> phys_width) == 0);
 }
 
 // An entry in the guest's RAM, or NULL.
@@ -1191,17 +1141,15 @@ static bool eptp_valid(uint64_t eptp) {
     uint64_t type = eptp & 7;
     size_t levels = EPTP_LEVELS(eptp);
     return ((type == EPTP_UC && (cap_ept_vpid & CAP_UC) != 0)
-        || (type == EPTP_WB && (cap_ept_vpid & CAP_WB) != 0))
+         || (type == EPTP_WB && (cap_ept_vpid & CAP_WB) != 0))
         && ((levels == 4 && (cap_ept_vpid & CAP_WALK_4) != 0)
-            || (levels == 5 && (cap_ept_vpid & CAP_WALK_5) != 0))
-        && ((eptp & EPTP_AD) == 0 || (cap_ept_vpid & CAP_AD) != 0)
-        && (eptp & EPTP_RESERVED) == 0 && (eptp >> phys_width) == 0;
+         || (levels == 5 && (cap_ept_vpid & CAP_WALK_5) != 0))
+        && ((eptp & EPTP_AD) == 0 || (cap_ept_vpid & CAP_AD) != 0) && (eptp & EPTP_RESERVED) == 0
+        && (eptp >> phys_width) == 0;
 }
 
 // SDM 325462-093 Vol. 3C, 31.3.3.1.
-static bool ept12_misconfigured(
-    uint64_t e, size_t level, bool leaf, bool mbec
-) {
+static bool ept12_misconfigured(uint64_t e, size_t level, bool leaf, bool mbec) {
     if ((e & EPT_R) == 0) {
         if ((e & EPT_W) != 0) {
             return true;
@@ -1268,17 +1216,14 @@ static void pml_log(struct nvmx *n, uintptr_t gpa) {
 // SDM 325462-093 Vol. 3C, 31.3.2, 31.3.3, and 31.3.5: on an access that the
 // guest's EPT allows, the walk sets its accessed and dirty flags, but where
 // the page-modification log has no room left (SDM 325462-093 Vol. 3C, 31.3.6).
-static int ept12_walk(
-    struct nvmx *n, uintptr_t gpa, uint64_t access, struct ept12_walk *w
-) {
+static int ept12_walk(struct nvmx *n, uintptr_t gpa, uint64_t access, struct ept12_walk *w) {
     uint64_t eptp = get12(n, VMCS_EPT_POINTER);
     bool mbec = (proc2_12(n) & PROC2_MBEC) != 0;
     bool ad = (eptp & EPTP_AD) != 0;
     size_t levels = EPTP_LEVELS(eptp);
     // With accessed and dirty flags, accesses to the guest's paging structures
     // are writes.
-    if (ad && (access & EPT_QUAL_LINEAR) != 0
-     && (access & EPT_QUAL_TRANSLATION) == 0) {
+    if (ad && (access & EPT_QUAL_LINEAR) != 0 && (access & EPT_QUAL_TRANSLATION) == 0) {
         access |= EPT_QUAL_READ | EPT_QUAL_WRITE;
     }
     w->access = access;
@@ -1292,10 +1237,10 @@ static int ept12_walk(
     size_t l;
     for (l = levels - 1; ; l--) {
         uint64_t *p = ept12_entry(table + ((gpa >> (12 + 9 * l)) & 511) * 8);
-        uint64_t e = p == NULL ? ~(uint64_t)0
-            : __atomic_load_n(p, __ATOMIC_RELAXED);
-        if ((e & (EPT_R | EPT_W | EPT_X)) == 0
-         && !(mbec && (e & EPT_XU) != 0)) {
+        uint64_t e = p == NULL
+                   ? ~(uint64_t)0
+                   : atomic_load_explicit((_Atomic(uint64_t) *)p, memory_order_relaxed);
+        if ((e & (EPT_R | EPT_W | EPT_X)) == 0 && !(mbec && (e & EPT_XU) != 0)) {
             return EPT12_VIOLATION;
         }
         bool leaf = l == 0 || (l <= 2 && (e & EPT_LARGE) != 0);
@@ -1306,8 +1251,7 @@ static int ept12_walk(
         used[l] = p;
         w->entry[l] = e;
         if (leaf) {
-            w->gpa = (e & EPT_ADDRESS & ~(level_size(l) - 1))
-                | (gpa & (level_size(l) - 1));
+            w->gpa = (e & EPT_ADDRESS & ~(level_size(l) - 1)) | (gpa & (level_size(l) - 1));
             w->level = l;
             w->leaf = e;
             break;
@@ -1323,8 +1267,7 @@ static int ept12_walk(
     }
     if (ad) {
         bool pml = (proc2_12(n) & PROC2_PML) != 0;
-        bool updates = (access & EPT_QUAL_WRITE) != 0
-            && (w->entry[l] & EPT_DIRTY) == 0;
+        bool updates = (access & EPT_QUAL_WRITE) != 0 && (w->entry[l] & EPT_DIRTY) == 0;
         for (size_t i = levels; i-- > l; ) {
             updates |= (w->entry[i] & EPT_ACCESSED) == 0;
         }
@@ -1332,13 +1275,15 @@ static int ept12_walk(
             return EPT12_PML_FULL;
         }
         for (size_t i = levels; i-- > l; ) {
-            __atomic_fetch_or(used[i], EPT_ACCESSED, __ATOMIC_RELAXED);
+            atomic_fetch_or_explicit(
+                (_Atomic(uint64_t) *)used[i], EPT_ACCESSED, memory_order_relaxed
+            );
             w->entry[i] |= EPT_ACCESSED;
         }
         w->leaf |= EPT_ACCESSED;
         if ((access & EPT_QUAL_WRITE) != 0) {
-            uint64_t old = __atomic_fetch_or(
-                used[l], EPT_DIRTY, __ATOMIC_RELAXED
+            uint64_t old = atomic_fetch_or_explicit(
+                (_Atomic(uint64_t) *)used[l], EPT_DIRTY, memory_order_relaxed
             );
             w->leaf |= EPT_DIRTY;
             w->entry[l] |= EPT_DIRTY;
@@ -1353,14 +1298,12 @@ static int ept12_walk(
 // The qualification of an EPT violation of the guest's EPT: the access, the
 // rights the guest's EPT gives, and what else the guest is offered of it.
 static uint64_t ept12_qual(uint64_t access, const struct ept12_walk *w) {
-    uint64_t kept = EPT_QUAL_READ | EPT_QUAL_WRITE | EPT_QUAL_FETCH
-        | EPT_QUAL_LINEAR | EPT_QUAL_TRANSLATION | EPT_QUAL_NMI_UNBLOCKED
-        | EPT_QUAL_ASYNC;
+    uint64_t kept = EPT_QUAL_READ | EPT_QUAL_WRITE | EPT_QUAL_FETCH | EPT_QUAL_LINEAR
+                  | EPT_QUAL_TRANSLATION | EPT_QUAL_NMI_UNBLOCKED | EPT_QUAL_ASYNC;
     if ((cap_ept_vpid & CAP_ADVANCED_INFO) != 0) {
         kept |= EPT_QUAL_USER | EPT_QUAL_WRITABLE | EPT_QUAL_XD;
     }
-    uint64_t rights = (w->rights & (EPT_R | EPT_W | EPT_X))
-        << EPT_QUAL_RIGHTS_SHIFT;
+    uint64_t rights = (w->rights & (EPT_R | EPT_W | EPT_X)) << EPT_QUAL_RIGHTS_SHIFT;
     if ((w->rights & EPT_XU) != 0) {
         rights |= (uint64_t)1 << (EPT_QUAL_RIGHTS_SHIFT + 3);
     }
@@ -1429,8 +1372,8 @@ static uint64_t ept02_pointer(struct nvmx *n) {
         r->root = ept02_table(n);
     }
     n->current02 = r;
-    return (uint64_t)(uintptr_t)r->root
-        | (uint64_t)(EPTP_LEVELS(eptp) - 1) << 3 | EPTP_WB | (eptp & EPTP_AD);
+    return (uint64_t)(uintptr_t)r->root | (uint64_t)(EPTP_LEVELS(eptp) - 1) << 3 | EPTP_WB
+         | (eptp & EPTP_AD);
 }
 
 // An EPT02 leaf for the guest's mapping and the hypervisor's. With accessed
@@ -1439,16 +1382,15 @@ static uint64_t ept02_pointer(struct nvmx *n) {
 // Vol. 3C, 31.3.5). Where the hypervisor's memory type is not write-back, it
 // wins but over uncacheable.
 static uint64_t ept02_leaf(
-    const struct nvmx *n, const struct ept12_walk *w, uintptr_t hpa,
-    uint32_t prot, uint8_t memtype, size_t level
+    const struct nvmx *n, const struct ept12_walk *w, uintptr_t hpa, uint32_t prot,
+    uint8_t memtype, size_t level
 ) {
     uint64_t e = hpa & EPT_ADDRESS & ~(level_size(level) - 1);
     if ((w->rights & EPT_R) != 0 && (prot & GPT_R) != 0) {
         e |= EPT_R;
     }
     if ((w->rights & EPT_W) != 0 && (prot & GPT_W) != 0 && (e & EPT_R) != 0
-     && ((get12(n, VMCS_EPT_POINTER) & EPTP_AD) == 0
-      || (w->leaf & EPT_DIRTY) != 0)) {
+     && ((get12(n, VMCS_EPT_POINTER) & EPTP_AD) == 0 || (w->leaf & EPT_DIRTY) != 0)) {
         e |= EPT_W | EPT_DIRTY;
     }
     if ((w->rights & EPT_X) != 0 && (prot & GPT_X) != 0) {
@@ -1481,9 +1423,7 @@ static uint64_t ept02_leaf(
 // for the page behind the guest's local APICs' pages, which is the guest's
 // guest's only where it is VMCS02's APIC-access page. Returns the rights it
 // got.
-static uint64_t ept02_fill(
-    struct nvmx *n, uintptr_t gpa, const struct ept12_walk *w
-) {
+static uint64_t ept02_fill(struct nvmx *n, uintptr_t gpa, const struct ept12_walk *w) {
     uintptr_t hpa;
     uint32_t prot;
     uint8_t memtype;
@@ -1522,8 +1462,7 @@ static uint64_t ept02_fill(
         }
         bool is_table = (*slot & EPT_RIGHTS) != 0 && (*slot & EPT_LARGE) == 0;
         if (l <= level && !is_table) {
-            *slot = l == level ? leaf
-                : ept02_leaf(n, w, hpa, prot, memtype, l);
+            *slot = l == level ? leaf : ept02_leaf(n, w, hpa, prot, memtype, l);
             return *slot & EPT_RIGHTS;
         }
         if (!is_table) {
@@ -1540,41 +1479,33 @@ static uint64_t ept02_fill(
 // Takes out of a shadow of the guest's EPT what the guest changed since it was
 // made: the entries made from guest entries that read differently now, and
 // what they lead to. Entries the guest added have no shadow yet.
-static void ept02_sync(
-    struct nvmx *n, uint64_t *table, uintptr_t gpa12, size_t level
-) {
-    const uint64_t *guest = (const uint64_t *)(uintptr_t)guest_page(gpa12);
+static void ept02_sync(struct nvmx *n, uint64_t *table, uintptr_t gpa12, size_t level) {
+    const _Atomic(uint64_t) *guest = (const _Atomic(uint64_t) *)(uintptr_t)guest_page(gpa12);
     const uint64_t *made_from = table + 512;
     for (size_t i = 0; i < 512; i++) {
         uint64_t e = table[i];
         if ((e & EPT_RIGHTS) == 0) {
             continue;
         }
-        uint64_t now = guest == NULL ? ~made_from[i]
-            : __atomic_load_n(&guest[i], __ATOMIC_RELAXED);
+        uint64_t now = guest == NULL
+                     ? ~made_from[i]
+                     : atomic_load_explicit(&guest[i], memory_order_relaxed);
         bool below = level > 0 && (e & EPT_LARGE) == 0;
         if (now != made_from[i]) {
             if (below) {
-                ept02_free(
-                    n, (uint64_t *)(uintptr_t)(e & EPT_ADDRESS), level - 1
-                );
+                ept02_free(n, (uint64_t *)(uintptr_t)(e & EPT_ADDRESS), level - 1);
             }
             table[i] = 0;
         } else if (below && (now & EPT_LARGE) == 0) {
             // Below a large page of the guest's, the shadow's tables split it:
             // its entry here covers them.
-            ept02_sync(
-                n, (uint64_t *)(uintptr_t)(e & EPT_ADDRESS), now & EPT_ADDRESS,
-                level - 1
-            );
+            ept02_sync(n, (uint64_t *)(uintptr_t)(e & EPT_ADDRESS), now & EPT_ADDRESS, level - 1);
         }
     }
 }
 
 static void ept02_sync_root(struct nvmx *n, struct ept02 *r) {
-    ept02_sync(
-        n, r->root, r->eptp12 & EPT_ADDRESS, EPTP_LEVELS(r->eptp12) - 1
-    );
+    ept02_sync(n, r->root, r->eptp12 & EPT_ADDRESS, EPTP_LEVELS(r->eptp12) - 1);
 }
 
 // An EPT violation of the guest's leaves nothing cached for the address it was
@@ -1598,12 +1529,10 @@ static void ept02_forget(struct nvmx *n, uintptr_t gpa) {
     }
 }
 
-static bool ept02_allows(
-    const struct nvmx *n, uint64_t rights, uint64_t access
-) {
-    uint64_t fetch
-        = (proc2_12(n) & PROC2_MBEC) != 0 && (access & EPT_QUAL_USER) != 0
-        ? EPT_XU : EPT_X;
+static bool ept02_allows(const struct nvmx *n, uint64_t rights, uint64_t access) {
+    uint64_t fetch = (proc2_12(n) & PROC2_MBEC) != 0 && (access & EPT_QUAL_USER) != 0
+                   ? EPT_XU
+                   : EPT_X;
     return ((access & EPT_QUAL_READ) == 0 || (rights & EPT_R) != 0)
         && ((access & EPT_QUAL_WRITE) == 0 || (rights & EPT_W) != 0)
         && ((access & EPT_QUAL_FETCH) == 0 || (rights & fetch) != 0);
@@ -1614,44 +1543,37 @@ static bool ept02_allows(
 static bool controls_valid(const struct nvmx *n) {
     uint64_t pin = get12(n, VMCS_PIN_CONTROLS);
     uint64_t proc = get12(n, VMCS_PROC_CONTROLS);
-    uint64_t proc2 = (proc & PROC_SECONDARY_CONTROLS) != 0
-        ? get12(n, VMCS_PROC_CONTROLS2) : 0;
+    uint64_t proc2 = (proc & PROC_SECONDARY_CONTROLS) != 0 ? get12(n, VMCS_PROC_CONTROLS2) : 0;
     uint64_t exit = get12(n, VMCS_EXIT_CONTROLS);
     if (!allowed(pin, cap_true_pin) || !allowed(proc, cap_true_proc)
-     || !allowed(exit, cap_true_exit)
-     || !allowed(get12(n, VMCS_ENTRY_CONTROLS), cap_true_entry)
-     || ((proc & PROC_SECONDARY_CONTROLS) != 0
-      && !allowed(proc2, cap_proc2))) {
+     || !allowed(exit, cap_true_exit) || !allowed(get12(n, VMCS_ENTRY_CONTROLS), cap_true_entry)
+     || ((proc & PROC_SECONDARY_CONTROLS) != 0 && !allowed(proc2, cap_proc2))) {
         return false;
     }
     if (get12(n, VMCS_CR3_TARGET_COUNT) > cr3_targets
      || ((pin & PIN_VIRTUAL_NMIS) != 0 && (pin & PIN_NMI_EXITING) == 0)
-     || ((proc & PROC_NMI_WINDOW_EXITING) != 0
-      && (pin & PIN_VIRTUAL_NMIS) == 0)
-     || ((exit & EXIT_SAVE_PREEMPTION_TIMER) != 0
-      && (pin & PIN_PREEMPTION_TIMER) == 0)) {
+     || ((proc & PROC_NMI_WINDOW_EXITING) != 0 && (pin & PIN_VIRTUAL_NMIS) == 0)
+     || ((exit & EXIT_SAVE_PREEMPTION_TIMER) != 0 && (pin & PIN_PREEMPTION_TIMER) == 0)) {
         return false;
     }
     // VMCS02 has addresses and a notification vector of the hypervisor's, and
     // exits on and acknowledges interrupts for it anyway.
+    bool bad_threshold = (proc2 & PROC2_VIRT_INTR_DELIVERY) == 0
+                      && (get12(n, VMCS_TPR_THRESHOLD) >> 4) != 0;
     if ((proc & PROC_TPR_SHADOW) != 0
-     && (!valid_address(get12(n, VMCS_VIRTUAL_APIC_ADDR))
-      || ((proc2 & PROC2_VIRT_INTR_DELIVERY) == 0
-       && (get12(n, VMCS_TPR_THRESHOLD) >> 4) != 0))) {
+     && (!valid_address(get12(n, VMCS_VIRTUAL_APIC_ADDR)) || bad_threshold)) {
         return false;
     }
     if ((proc2 & PROC2_VIRT_APIC_ACCESSES) != 0
      && !valid_address(get12(n, VMCS_APIC_ACCESS_ADDR))) {
         return false;
     }
-    if ((proc2 & PROC2_VIRT_INTR_DELIVERY) != 0
-     && (pin & PIN_EXT_INTR_EXITING) == 0) {
+    if ((proc2 & PROC2_VIRT_INTR_DELIVERY) != 0 && (pin & PIN_EXT_INTR_EXITING) == 0) {
         return false;
     }
     if ((pin & PIN_POSTED_INTR) != 0) {
         uint64_t desc = get12(n, VMCS_POSTED_INTR_DESC);
-        if ((proc2 & PROC2_VIRT_INTR_DELIVERY) == 0
-         || (exit & EXIT_ACK_INTR_ON_EXIT) == 0
+        if ((proc2 & PROC2_VIRT_INTR_DELIVERY) == 0 || (exit & EXIT_ACK_INTR_ON_EXIT) == 0
          || (get12(n, VMCS_POSTED_INTR_NV) >> 8) != 0 || (desc & 0x3f) != 0
          || (desc >> phys_width) != 0) {
             return false;
@@ -1661,12 +1583,10 @@ static bool controls_valid(const struct nvmx *n) {
         if (!eptp_valid(get12(n, VMCS_EPT_POINTER))) {
             return false;
         }
-    } else if ((proc2 & (PROC2_UNRESTRICTED_GUEST | PROC2_PML | PROC2_MBEC))
-            != 0) {
+    } else if ((proc2 & (PROC2_UNRESTRICTED_GUEST | PROC2_PML | PROC2_MBEC)) != 0) {
         return false;
     }
-    if ((proc2 & PROC2_PML) != 0
-     && !valid_address(get12(n, VMCS_PML_ADDRESS))) {
+    if ((proc2 & PROC2_PML) != 0 && !valid_address(get12(n, VMCS_PML_ADDRESS))) {
         return false;
     }
     if ((proc2 & PROC2_VMCS_SHADOWING) != 0
@@ -1678,8 +1598,7 @@ static bool controls_valid(const struct nvmx *n) {
         uint64_t functions = get12(n, VMCS_VMFUNC_CONTROLS);
         if ((functions & ~cap_vmfunc) != 0
          || ((functions & VMFUNC_EPTP_SWITCHING) != 0
-          && ((proc2 & PROC2_EPT) == 0
-           || !valid_address(get12(n, VMCS_EPTP_LIST))))) {
+          && ((proc2 & PROC2_EPT) == 0 || !valid_address(get12(n, VMCS_EPTP_LIST))))) {
             return false;
         }
     }
@@ -1699,17 +1618,9 @@ static bool controls_valid(const struct nvmx *n) {
             return false;
         }
     }
-    return msr_list_valid(
-        get12(n, VMCS_EXIT_MSR_STORE_ADDR), get12(n, VMCS_EXIT_MSR_STORE_COUNT)
-    )
-        && msr_list_valid(
-            get12(n, VMCS_EXIT_MSR_LOAD_ADDR),
-            get12(n, VMCS_EXIT_MSR_LOAD_COUNT)
-        )
-        && msr_list_valid(
-            get12(n, VMCS_ENTRY_MSR_LOAD_ADDR),
-            get12(n, VMCS_ENTRY_MSR_LOAD_COUNT)
-        );
+    return msr_list_valid(get12(n, VMCS_EXIT_MSR_STORE_ADDR), get12(n, VMCS_EXIT_MSR_STORE_COUNT))
+        && msr_list_valid(get12(n, VMCS_EXIT_MSR_LOAD_ADDR), get12(n, VMCS_EXIT_MSR_LOAD_COUNT))
+        && msr_list_valid(get12(n, VMCS_ENTRY_MSR_LOAD_ADDR), get12(n, VMCS_ENTRY_MSR_LOAD_COUNT));
 }
 
 // The checks on the host state (SDM 325462-093 Vol. 3C, 29.2.2, 29.2.3), which
@@ -1726,16 +1637,14 @@ static bool host_state_valid(const struct nvmx *n) {
     if ((cpuid(7, 1).eax & CPUID_7_1_EAX_LAM) != 0) {
         cr3 &= ~(CR3_LAM_U57 | CR3_LAM_U48);
     }
-    if ((cr0 & cap_cr0_fixed0) != cap_cr0_fixed0
-     || (cr0 & ~cap_cr0_fixed1) != 0
-     || (cr4 & cap_cr4_fixed0) != cap_cr4_fixed0
-     || (cr4 & ~cap_cr4_fixed1) != 0
+    if ((cr0 & cap_cr0_fixed0) != cap_cr0_fixed0 || (cr0 & ~cap_cr0_fixed1) != 0
+     || (cr4 & cap_cr4_fixed0) != cap_cr4_fixed0 || (cr4 & ~cap_cr4_fixed1) != 0
      || ((cr4 & CR4_CET) != 0 && (cr0 & CR0_WP) == 0) || (cr3 >> width) != 0) {
         return false;
     }
     static const uint16_t selectors[] = {
         VMCS_HOST_ES_SEL, VMCS_HOST_CS_SEL, VMCS_HOST_SS_SEL, VMCS_HOST_DS_SEL,
-        VMCS_HOST_FS_SEL, VMCS_HOST_GS_SEL, VMCS_HOST_TR_SEL,
+        VMCS_HOST_FS_SEL, VMCS_HOST_GS_SEL, VMCS_HOST_TR_SEL
     };
     for (size_t i = 0; i < ARRAY_COUNT(selectors); i++) {
         if ((get12(n, selectors[i]) & 7) != 0) {
@@ -1758,7 +1667,7 @@ static bool host_state_valid(const struct nvmx *n) {
     static const uint16_t bases[] = {
         VMCS_HOST_FS_BASE, VMCS_HOST_GS_BASE, VMCS_HOST_TR_BASE,
         VMCS_HOST_GDTR_BASE, VMCS_HOST_IDTR_BASE, VMCS_HOST_SYSENTER_ESP,
-        VMCS_HOST_SYSENTER_EIP,
+        VMCS_HOST_SYSENTER_EIP
     };
     for (size_t i = 0; i < ARRAY_COUNT(bases); i++) {
         if (!canonical(get12(n, bases[i]))) {
@@ -1769,9 +1678,8 @@ static bool host_state_valid(const struct nvmx *n) {
         uint64_t efer = get12(n, VMCS_HOST_EFER);
         bool lma = (efer & EFER_LMA) != 0;
         bool lme = (efer & EFER_LME) != 0;
-        if ((efer & ~(uint64_t)(EFER_SCE | EFER_LME | EFER_LMA | EFER_NXE))
-         != 0
-         || lma != host64 || lme != host64) {
+        if ((efer & ~(uint64_t)(EFER_SCE | EFER_LME | EFER_LMA | EFER_NXE)) != 0 || lma != host64
+         || lme != host64) {
             return false;
         }
     }
@@ -1817,15 +1725,10 @@ static bool msr_write(struct vcpu *v, uint32_t msr, uint64_t value) {
         case MSR_EFER: {
             // WRMSR leaves LMA alone.
             uint64_t old = vmx_read(VMCS_GUEST_EFER);
-            if ((value
-               & ~(uint64_t)(EFER_SCE | EFER_LME | EFER_LMA | EFER_NXE))
-             != 0) {
+            if ((value & ~(uint64_t)(EFER_SCE | EFER_LME | EFER_LMA | EFER_NXE)) != 0) {
                 return false;
             }
-            vmx_write(
-                VMCS_GUEST_EFER,
-                (value & ~(uint64_t)EFER_LMA) | (old & EFER_LMA)
-            );
+            vmx_write(VMCS_GUEST_EFER, (value & ~(uint64_t)EFER_LMA) | (old & EFER_LMA));
             return true;
         }
         case MSR_IA32_PAT: {
@@ -1859,15 +1762,13 @@ static bool msr_write(struct vcpu *v, uint32_t msr, uint64_t value) {
 
 // The entries an MSR-load list may not name (SDM 325462-093 Vol. 3C, 29.4).
 static bool msr_loadable(uint32_t msr, uint32_t reserved) {
-    return reserved == 0 && msr != MSR_FS_BASE && msr != MSR_GS_BASE
-        && (msr >> 8) != 8 && msr != MSR_IA32_SMM_MONITOR_CTL;
+    return reserved == 0 && msr != MSR_FS_BASE && msr != MSR_GS_BASE && (msr >> 8) != 8
+        && msr != MSR_IA32_SMM_MONITOR_CTL;
 }
 
 // The number of the entry that failed, from 1, or 0; past IA32_VMX_MISC's
 // maximum, as Linux 7.3's KVM has it.
-static uint64_t load_msr_list(
-    struct vcpu *v, uintptr_t address, size_t count
-) {
+static uint64_t load_msr_list(struct vcpu *v, uintptr_t address, size_t count) {
     for (size_t i = 0; i < count; i++) {
         const uint8_t *entry = msr_entry(address, i);
         if (i == MSR_LIST_MAX || entry == NULL) {
@@ -1885,9 +1786,7 @@ static uint64_t load_msr_list(
 
 // IA32_TSC as it was at the exit, the rest as they are. Longer lists than
 // IA32_VMX_MISC's maximum are undefined (SDM 325462-093 Vol. 3C, A.6).
-static void store_msr_list(
-    struct vcpu *v, uintptr_t address, size_t count, uint64_t tsc
-) {
+static void store_msr_list(struct vcpu *v, uintptr_t address, size_t count, uint64_t tsc) {
     for (size_t i = 0; i < count && i < MSR_LIST_MAX; i++) {
         uint8_t *entry = msr_entry(address, i);
         if (entry == NULL) {
@@ -1916,13 +1815,10 @@ static bool msr_list_has(uintptr_t address, size_t count, uint32_t msr) {
 
 // The guest's bit for an MSR up to 1FFFH in VMX's layout (SDM 325462-093 Vol.
 // 3C, 27.6.9), in place of the hypervisor's.
-static void guest_msr_bit(
-    uint8_t *merged, const uint8_t *bitmap, uint32_t msr, bool write
-) {
+static void guest_msr_bit(uint8_t *merged, const uint8_t *bitmap, uint32_t msr, bool write) {
     unsigned int bit = (write ? 0x800 * 8 : 0) + msr;
     uint8_t mask = (uint8_t)((uint32_t)1 << (bit % 8));
-    merged[bit / 8] = (uint8_t)((merged[bit / 8] & ~mask)
-        | (bitmap[bit / 8] & mask));
+    merged[bit / 8] = (uint8_t)((merged[bit / 8] & ~mask) | (bitmap[bit / 8] & mask));
 }
 
 // The MSR bitmap of the guest's guest: where the guest has its own, that with
@@ -1948,8 +1844,7 @@ static void merge_msr_bitmap(struct nvmx *n, uint64_t proc, uint64_t proc2) {
     }
     if ((proc2 & PROC2_APIC_REG_VIRT) != 0) {
         memcpy(
-            n->msr_bitmap + MSR_X2APIC_FIRST / 8,
-            bitmap + MSR_X2APIC_FIRST / 8,
+            n->msr_bitmap + MSR_X2APIC_FIRST / 8, bitmap + MSR_X2APIC_FIRST / 8,
             (MSR_X2APIC_LAST + 1 - MSR_X2APIC_FIRST) / 8
         );
     }
@@ -1982,7 +1877,7 @@ struct apic_controls {
     uint64_t proc2;
 };
 
-static void apic_virtualization(struct nvmx *n, struct apic_controls *c) {
+static void apic_virtualisation(struct nvmx *n, struct apic_controls *c) {
     uint64_t pin = get12(n, VMCS_PIN_CONTROLS);
     uint64_t proc = get12(n, VMCS_PROC_CONTROLS);
     uint64_t proc2 = proc2_12(n);
@@ -1997,10 +1892,10 @@ static void apic_virtualization(struct nvmx *n, struct apic_controls *c) {
         if (n->vapic != NULL) {
             address = (uintptr_t)n->vapic;
         } else if ((proc & (PROC_CR8_LOAD_EXITING | PROC_CR8_STORE_EXITING))
-                == (PROC_CR8_LOAD_EXITING | PROC_CR8_STORE_EXITING)
+                    == (PROC_CR8_LOAD_EXITING | PROC_CR8_STORE_EXITING)
                 && (proc2
-                  & (PROC2_VIRT_APIC_ACCESSES | PROC2_VIRT_X2APIC
-                   | PROC2_VIRT_INTR_DELIVERY)) == 0) {
+                  & (PROC2_VIRT_APIC_ACCESSES | PROC2_VIRT_X2APIC | PROC2_VIRT_INTR_DELIVERY))
+                    == 0) {
             // Nothing uses the page then, which need not be RAM, as Linux
             // 7.3's KVM has it.
             c->proc &= ~(uint64_t)PROC_TPR_SHADOW;
@@ -2016,9 +1911,9 @@ static void apic_virtualization(struct nvmx *n, struct apic_controls *c) {
         uintptr_t hpa;
         uint32_t prot;
         uint8_t memtype;
-        n->apic_access02 = gpt_translate(
-            get12(n, VMCS_APIC_ACCESS_ADDR), &hpa, &prot, &memtype
-        ) ? hpa : access_nowhere;
+        n->apic_access02 = gpt_translate(get12(n, VMCS_APIC_ACCESS_ADDR), &hpa, &prot, &memtype)
+                         ? hpa
+                         : access_nowhere;
         vmx_write(VMCS_APIC_ACCESS_ADDR, n->apic_access02);
     } else if ((proc & PROC_TPR_SHADOW) == 0 && (proc2 & PROC2_EPT) == 0
             && vlapic_access_address() != 0) {
@@ -2035,9 +1930,7 @@ static void apic_virtualization(struct nvmx *n, struct apic_controls *c) {
     if ((proc2 & PROC2_VIRT_INTR_DELIVERY) != 0) {
         vmx_write(VMCS_GUEST_INTR_STATUS, get12(n, VMCS_GUEST_INTR_STATUS));
         for (size_t i = 0; i < 4; i++) {
-            vmx_write(
-                VMCS_EOI_EXIT0 + 2 * i, get12(n, VMCS_EOI_EXIT0 + 2 * i)
-            );
+            vmx_write(VMCS_EOI_EXIT0 + 2 * i, get12(n, VMCS_EOI_EXIT0 + 2 * i));
         }
     }
     if ((pin & PIN_POSTED_INTR) != 0) {
@@ -2054,16 +1947,13 @@ static void apic_virtualization(struct nvmx *n, struct apic_controls *c) {
             c->pin &= ~(uint64_t)PIN_POSTED_INTR;
         }
     }
-    __atomic_store_n(&n->pi_vector, pi_vector, __ATOMIC_SEQ_CST);
+    atomic_store_explicit(&n->pi_vector, pi_vector, memory_order_seq_cst);
 }
 
-static void write_vmcs02(
-    struct vcpu *v, struct nvmx *n, const struct l1_values *l1
-) {
+static void write_vmcs02(struct vcpu *v, struct nvmx *n, const struct l1_values *l1) {
     uint64_t pin = get12(n, VMCS_PIN_CONTROLS);
     uint64_t proc = get12(n, VMCS_PROC_CONTROLS);
-    uint64_t proc2 = (proc & PROC_SECONDARY_CONTROLS) != 0
-        ? get12(n, VMCS_PROC_CONTROLS2) : 0;
+    uint64_t proc2 = (proc & PROC_SECONDARY_CONTROLS) != 0 ? get12(n, VMCS_PROC_CONTROLS2) : 0;
     uint64_t entry = get12(n, VMCS_ENTRY_CONTROLS);
 
     merge_msr_bitmap(n, proc, proc2);
@@ -2073,13 +1963,12 @@ static void write_vmcs02(
     // exits, to have them read then.
     struct apic_controls c = {
         .pin = pin | PIN_EXT_INTR_EXITING | PIN_NMI_EXITING | PIN_VIRTUAL_NMIS,
-        .proc = (proc & ~(uint64_t)PROC_IO_BITMAPS) | PROC_UNCOND_IO_EXITING
-            | PROC_MSR_BITMAPS | PROC_SECONDARY_CONTROLS | PROC_TSC_OFFSETTING,
+        .proc = (proc & ~(uint64_t)PROC_IO_BITMAPS) | PROC_UNCOND_IO_EXITING | PROC_MSR_BITMAPS
+              | PROC_SECONDARY_CONTROLS | PROC_TSC_OFFSETTING,
         // EPT02's dirty flags are not the guest's: its walks log for it. The
         // guest's shadow VMCS is in its own format, which the hypervisor
         // reads.
-        .proc2 = (proc2 & ~(uint64_t)(PROC2_PML | PROC2_VMCS_SHADOWING))
-            | PROC2_EPT,
+        .proc2 = (proc2 & ~(uint64_t)(PROC2_PML | PROC2_VMCS_SHADOWING)) | PROC2_EPT
     };
     if (!tsc_scaled(n)) {
         c.proc2 &= ~(uint64_t)PROC2_TSC_SCALING;
@@ -2092,15 +1981,14 @@ static void write_vmcs02(
             c.proc2 |= PROC2_CONCEAL_VMX_FROM_PT;
         }
     }
-    apic_virtualization(n, &c);
+    apic_virtualisation(n, &c);
     vmx_write(VMCS_PIN_CONTROLS, c.pin);
     vmx_write(VMCS_PROC_CONTROLS, c.proc);
     vmx_write(VMCS_PROC_CONTROLS2, c.proc2);
     vmx_write(VMCS_EXIT_CONTROLS, l1->exit_controls);
     vmx_write(
         VMCS_ENTRY_CONTROLS,
-        (l1->entry_controls & ~(uint64_t)ENTRY_IA32E_MODE_GUEST)
-            | (entry & ENTRY_IA32E_MODE_GUEST)
+        (l1->entry_controls & ~(uint64_t)ENTRY_IA32E_MODE_GUEST) | (entry & ENTRY_IA32E_MODE_GUEST)
     );
     for (size_t i = 0; i < ARRAY_COUNT(control_fields); i++) {
         vmx_write(control_fields[i], get12(n, control_fields[i]));
@@ -2111,13 +1999,9 @@ static void write_vmcs02(
     uint64_t hidden = ~cpuid_cr4_allowed() & ~(uint64_t)CR4_VMXE;
     uint64_t cr4_mask = get12(n, VMCS_CR4_MASK);
     vmx_write(VMCS_CR4_MASK, cr4_mask | hidden);
-    vmx_write(
-        VMCS_CR4_SHADOW, get12(n, VMCS_CR4_SHADOW) & ~(hidden & ~cr4_mask)
-    );
+    vmx_write(VMCS_CR4_SHADOW, get12(n, VMCS_CR4_SHADOW) & ~(hidden & ~cr4_mask));
     for (size_t i = 0; i < cr3_targets; i++) {
-        vmx_write(
-            VMCS_CR3_TARGET0 + 2 * i, get12(n, VMCS_CR3_TARGET0 + 2 * i)
-        );
+        vmx_write(VMCS_CR3_TARGET0 + 2 * i, get12(n, VMCS_CR3_TARGET0 + 2 * i));
     }
     // The offset is nvmx_tsc_offset()'s, which vmx_run() writes before each
     // entry.
@@ -2138,8 +2022,7 @@ static void write_vmcs02(
     }
     vmx_write(VMCS_MSR_BITMAP, (uint64_t)(uintptr_t)n->msr_bitmap);
     n->tsc_stored = msr_list_has(
-        get12(n, VMCS_EXIT_MSR_STORE_ADDR),
-        get12(n, VMCS_EXIT_MSR_STORE_COUNT), MSR_IA32_TSC
+        get12(n, VMCS_EXIT_MSR_STORE_ADDR), get12(n, VMCS_EXIT_MSR_STORE_COUNT), MSR_IA32_TSC
     );
     n->tsc_store[0] = MSR_IA32_TSC;
     vmx_write(VMCS_EXIT_MSR_STORE_ADDR, (uint64_t)(uintptr_t)n->tsc_store);
@@ -2169,14 +2052,8 @@ static void write_vmcs02(
     // 29.3.2.1).
     bool debug = (entry & ENTRY_LOAD_DEBUG_CONTROLS) != 0;
     vmx_write(VMCS_GUEST_DR7, debug ? get12(n, VMCS_GUEST_DR7) : l1->dr7);
-    vmx_write(
-        VMCS_GUEST_DEBUGCTL,
-        debug ? get12(n, VMCS_GUEST_DEBUGCTL) : l1->debugctl
-    );
-    vmx_write(
-        VMCS_GUEST_PAT,
-        (entry & ENTRY_LOAD_PAT) != 0 ? get12(n, VMCS_GUEST_PAT) : l1->pat
-    );
+    vmx_write(VMCS_GUEST_DEBUGCTL, debug ? get12(n, VMCS_GUEST_DEBUGCTL) : l1->debugctl);
+    vmx_write(VMCS_GUEST_PAT, (entry & ENTRY_LOAD_PAT) != 0 ? get12(n, VMCS_GUEST_PAT) : l1->pat);
     // The guest has no controls for IA32_BNDCFGS or IA32_PERF_GLOBAL_CTRL: its
     // guest runs with its values, and leaves them its own.
     if (vmx_mpx_passthrough()) {
@@ -2202,9 +2079,7 @@ static void write_vmcs02(
     vmx_write(VMCS_GUEST_CR3, get12(n, VMCS_GUEST_CR3));
     if ((proc2 & PROC2_EPT) != 0) {
         for (size_t i = 0; i < 4; i++) {
-            vmx_write(
-                VMCS_GUEST_PDPTE0 + 2 * i, get12(n, VMCS_GUEST_PDPTE0 + 2 * i)
-            );
+            vmx_write(VMCS_GUEST_PDPTE0 + 2 * i, get12(n, VMCS_GUEST_PDPTE0 + 2 * i));
         }
     } else {
         vmx_load_guest_pdptes();
@@ -2230,33 +2105,25 @@ static void save_l2_state(struct nvmx *n) {
     // SDM 325462-093 Vol. 3C, 30.3.4.
     if (ept12(n)) {
         for (size_t i = 0; i < 4; i++) {
-            set12(
-                n, VMCS_GUEST_PDPTE0 + 2 * i,
-                vmx_read(VMCS_GUEST_PDPTE0 + 2 * i)
-            );
+            set12(n, VMCS_GUEST_PDPTE0 + 2 * i, vmx_read(VMCS_GUEST_PDPTE0 + 2 * i));
         }
     }
     if ((proc2_12(n) & PROC2_VIRT_INTR_DELIVERY) != 0) {
         set12(n, VMCS_GUEST_INTR_STATUS, vmx_read(VMCS_GUEST_INTR_STATUS));
     }
     // As IA32_VMX_MISC bit 5 has it.
-    uint64_t entry = get12(n, VMCS_ENTRY_CONTROLS)
-        & ~(uint64_t)ENTRY_IA32E_MODE_GUEST;
-    set12(
-        n, VMCS_ENTRY_CONTROLS,
-        entry | ((efer & EFER_LMA) != 0 ? ENTRY_IA32E_MODE_GUEST : 0)
-    );
+    uint64_t entry = get12(n, VMCS_ENTRY_CONTROLS) & ~(uint64_t)ENTRY_IA32E_MODE_GUEST;
+    set12(n, VMCS_ENTRY_CONTROLS, entry | ((efer & EFER_LMA) != 0 ? ENTRY_IA32E_MODE_GUEST : 0));
 }
 
 static struct segment host_segment(
-    const struct nvmx *n, uint32_t selector_field, uint32_t attrib,
-    uintptr_t base
+    const struct nvmx *n, uint32_t selector_field, uint32_t attrib, uintptr_t base
 ) {
     struct segment seg = {
         .selector = (uint16_t)get12(n, selector_field),
         .attrib = attrib,
         .limit = 0xffffffff,
-        .base = base,
+        .base = base
     };
     if (seg.selector == 0) {
         seg.attrib = SEG_UNUSABLE;
@@ -2268,13 +2135,12 @@ static struct segment host_segment(
 static void load_l1_host_state(struct vcpu *v, struct nvmx *n, bool nmi) {
     uint64_t exit = get12(n, VMCS_EXIT_CONTROLS);
     bool host64 = (exit & EXIT_HOST_ADDR_SPACE_SIZE) != 0;
-    uint64_t nmi_blocked = vmx_read(VMCS_GUEST_INTERRUPTIBILITY)
-        & INTERRUPTIBILITY_NMI;
+    uint64_t nmi_blocked = vmx_read(VMCS_GUEST_INTERRUPTIBILITY) & INTERRUPTIBILITY_NMI;
 
     struct vcpu_mode mode;
     // The bits a VM exit leaves alone.
-    uint64_t kept = CR0_ET | CR0_CD | CR0_NW | (uint64_t)0xffffffff00000000
-        | (uint64_t)0x1ff80000 | (uint64_t)0x20000 | (uint64_t)0xffc0;
+    uint64_t kept = CR0_ET | CR0_CD | CR0_NW | (uint64_t)0xffffffff00000000 | (uint64_t)0x1ff80000
+                  | (uint64_t)0x20000 | (uint64_t)0xffc0;
     mode.cr0 = (vcpu_cr0(v) & kept) | (get12(n, VMCS_HOST_CR0) & ~kept);
     mode.cr4 = get12(n, VMCS_HOST_CR4);
     if (host64) {
@@ -2283,8 +2149,7 @@ static void load_l1_host_state(struct vcpu *v, struct nvmx *n, bool nmi) {
         mode.cr4 &= ~(uint64_t)CR4_PCIDE;
     }
     mode.cr3 = get12(n, VMCS_HOST_CR3);
-    mode.efer = (exit & EXIT_LOAD_EFER) != 0 ? get12(n, VMCS_HOST_EFER)
-        : vcpu_efer(v);
+    mode.efer = (exit & EXIT_LOAD_EFER) != 0 ? get12(n, VMCS_HOST_EFER) : vcpu_efer(v);
     mode.efer &= ~(uint64_t)(EFER_LMA | EFER_LME);
     if (host64) {
         mode.efer |= EFER_LMA | EFER_LME;
@@ -2297,12 +2162,8 @@ static void load_l1_host_state(struct vcpu *v, struct nvmx *n, bool nmi) {
     mode.segs[SEG_SS] = host_segment(n, VMCS_HOST_SS_SEL, data, 0);
     mode.segs[SEG_DS] = host_segment(n, VMCS_HOST_DS_SEL, data, 0);
     mode.segs[SEG_ES] = host_segment(n, VMCS_HOST_ES_SEL, data, 0);
-    mode.segs[SEG_FS] = host_segment(
-        n, VMCS_HOST_FS_SEL, data, get12(n, VMCS_HOST_FS_BASE)
-    );
-    mode.segs[SEG_GS] = host_segment(
-        n, VMCS_HOST_GS_SEL, data, get12(n, VMCS_HOST_GS_BASE)
-    );
+    mode.segs[SEG_FS] = host_segment(n, VMCS_HOST_FS_SEL, data, get12(n, VMCS_HOST_FS_BASE));
+    mode.segs[SEG_GS] = host_segment(n, VMCS_HOST_GS_SEL, data, get12(n, VMCS_HOST_GS_BASE));
     // 64-bit mode uses FS and GS bases however unusable.
     mode.segs[SEG_FS].base = get12(n, VMCS_HOST_FS_BASE);
     mode.segs[SEG_GS].base = get12(n, VMCS_HOST_GS_BASE);
@@ -2310,7 +2171,7 @@ static void load_l1_host_state(struct vcpu *v, struct nvmx *n, bool nmi) {
         .selector = (uint16_t)get12(n, VMCS_HOST_TR_SEL),
         .attrib = 0x8b,
         .limit = 0x67,
-        .base = get12(n, VMCS_HOST_TR_BASE),
+        .base = get12(n, VMCS_HOST_TR_BASE)
     };
     mode.segs[SEG_LDTR] = (struct segment){ .attrib = SEG_UNUSABLE };
     mode.segs[SEG_GDTR] = (struct segment){
@@ -2334,9 +2195,7 @@ static void load_l1_host_state(struct vcpu *v, struct nvmx *n, bool nmi) {
     }
     // Exits keep NMI blocking but where NMIs cause them (SDM 325462-093 Vol.
     // 3C, 30.5.5).
-    vmx_write(
-        VMCS_GUEST_INTERRUPTIBILITY, nmi ? INTERRUPTIBILITY_NMI : nmi_blocked
-    );
+    vmx_write(VMCS_GUEST_INTERRUPTIBILITY, nmi ? INTERRUPTIBILITY_NMI : nmi_blocked);
     vmx_write(VMCS_GUEST_ACTIVITY_STATE, ACTIVITY_ACTIVE);
     vmx_write(VMCS_GUEST_PENDING_DBG, 0);
 }
@@ -2351,22 +2210,23 @@ static void load_l1_host_state(struct vcpu *v, struct nvmx *n, bool nmi) {
 // processor, as the processor does it (SDM 325462-093 Vol. 3C, 32.6), with
 // VMCS02 current.
 static void posted_process(struct nvmx *n) {
-    __atomic_and_fetch(&n->pid[PID_NOTIFICATION], ~PID_ON, __ATOMIC_SEQ_CST);
+    atomic_fetch_and_explicit(
+        (_Atomic(uint32_t) *)&n->pid[PID_NOTIFICATION], ~PID_ON, memory_order_seq_cst
+    );
     int highest = -1;
     for (size_t i = 0; i < 8; i++) {
-        uint32_t bits = __atomic_exchange_n(&n->pid[i], 0, __ATOMIC_SEQ_CST);
+        uint32_t bits = atomic_exchange_explicit(
+            (_Atomic(uint32_t) *)&n->pid[i], 0, memory_order_seq_cst
+        );
         if (bits != 0) {
             uint32_t *irr = (uint32_t *)(n->vapic + VAPIC_IRR + i * 0x10);
-            __atomic_or_fetch(irr, bits, __ATOMIC_SEQ_CST);
+            atomic_fetch_or_explicit((_Atomic(uint32_t) *)irr, bits, memory_order_seq_cst);
             highest = (int)(i * 32 + 31) - __builtin_clz(bits);
         }
     }
     uint64_t status = vmx_read(VMCS_GUEST_INTR_STATUS);
     if (highest > (int)(status & 0xff)) {
-        vmx_write(
-            VMCS_GUEST_INTR_STATUS,
-            (status & ~(uint64_t)0xff) | (uint64_t)highest
-        );
+        vmx_write(VMCS_GUEST_INTR_STATUS, (status & ~(uint64_t)0xff) | (uint64_t)highest);
     }
 }
 
@@ -2375,8 +2235,8 @@ static void posted_process(struct nvmx *n) {
 // guest could not take it, after an entry that failed or in an inactive state,
 // is the guest's interrupt.
 static void posted_leave(struct vcpu *v, struct nvmx *n, bool entered) {
-    int vector = __atomic_exchange_n(&n->pi_vector, -1, __ATOMIC_SEQ_CST);
-    if (!__atomic_exchange_n(&n->pi_pending, false, __ATOMIC_SEQ_CST)) {
+    int vector = atomic_exchange_explicit(&n->pi_vector, -1, memory_order_seq_cst);
+    if (!atomic_exchange_explicit(&n->pi_pending, false, memory_order_seq_cst)) {
         return;
     }
     if (entered && n->pid != NULL) {
@@ -2399,26 +2259,25 @@ static uint64_t timer_left(const struct nvmx *n) {
 // the MSR-store area, and the event to inject alone (SDM 325462-093 Vol. 3C,
 // 27.8.3, 29.8).
 static void exit_to_l1(
-    struct vcpu *v, struct nvmx *n, uint32_t reason, uint64_t qual,
-    uint32_t intr_info, uint32_t intr_error, bool processor
+    struct vcpu *v, struct nvmx *n, uint32_t reason, uint64_t qual, uint32_t intr_info,
+    uint32_t intr_error, bool processor
 ) {
     bool nmi = (reason & 0xffff) == EXIT_REASON_EXCEPTION_NMI
-        && (intr_info & ((uint32_t)7 << 8)) == INTR_TYPE_NMI;
+            && (intr_info & ((uint32_t)7 << 8)) == INTR_TYPE_NMI;
     bool failed = (reason & EXIT_REASON_ENTRY_FAILURE) != 0;
     // The inactive states block the notification's interrupt as any other.
-    posted_leave(v, n, !failed && n->inactive == ACTIVITY_ACTIVE);
+    bool active = atomic_load_explicit(&n->inactive, memory_order_relaxed) == ACTIVITY_ACTIVE;
+    posted_leave(v, n, !failed && active);
     if (!failed) {
         save_l2_state(n);
         set12(
-            n, VMCS_ENTRY_INTR_INFO,
-            get12(n, VMCS_ENTRY_INTR_INFO) & ~(uint64_t)INTR_INFO_VALID
+            n, VMCS_ENTRY_INTR_INFO, get12(n, VMCS_ENTRY_INTR_INFO) & ~(uint64_t)INTR_INFO_VALID
         );
         // An expired timer saves 0 (SDM 325462-093 Vol. 3C, 30.3.4).
         if ((get12(n, VMCS_EXIT_CONTROLS) & EXIT_SAVE_PREEMPTION_TIMER) != 0) {
             set12(
                 n, VMCS_PREEMPTION_TIMER,
-                (reason & 0xffff) == EXIT_REASON_PREEMPTION_TIMER ? 0
-                    : timer_left(n)
+                (reason & 0xffff) == EXIT_REASON_PREEMPTION_TIMER ? 0 : timer_left(n)
             );
         }
     }
@@ -2439,10 +2298,7 @@ static void exit_to_l1(
         uint32_t injected = (uint32_t)vmx_read(VMCS_ENTRY_INTR_INFO);
         if ((injected & INTR_INFO_VALID) != 0) {
             set12(n, VMCS_IDT_VECTORING_INFO, injected);
-            set12(
-                n, VMCS_IDT_VECTORING_ERROR,
-                vmx_read(VMCS_ENTRY_EXCEPTION_ERROR)
-            );
+            set12(n, VMCS_IDT_VECTORING_ERROR, vmx_read(VMCS_ENTRY_EXCEPTION_ERROR));
             set12(n, VMCS_EXIT_INSTR_LEN, vmx_read(VMCS_ENTRY_INSTR_LEN));
             vmx_write(VMCS_ENTRY_INTR_INFO, 0);
         } else if ((v->redeliver & INTR_INFO_VALID) != 0) {
@@ -2454,21 +2310,17 @@ static void exit_to_l1(
     v->redeliver = 0;
     v->injecting = false;
     n->run_pending = false;
-    __atomic_store_n(&n->inactive, ACTIVITY_ACTIVE, __ATOMIC_SEQ_CST);
+    atomic_store_explicit(&n->inactive, ACTIVITY_ACTIVE, memory_order_seq_cst);
     if (!failed) {
         // The processor stores its own TSC, which the guest reads offset.
-        uint64_t tsc = (processor && n->tsc_stored ? n->tsc_store[1] : rdtsc())
-            + v->tsc_offset;
+        uint64_t tsc = (processor && n->tsc_stored ? n->tsc_store[1] : rdtsc()) + v->tsc_offset;
         store_msr_list(
-            v, get12(n, VMCS_EXIT_MSR_STORE_ADDR),
-            get12(n, VMCS_EXIT_MSR_STORE_COUNT), tsc
+            v, get12(n, VMCS_EXIT_MSR_STORE_ADDR), get12(n, VMCS_EXIT_MSR_STORE_COUNT), tsc
         );
     }
 
-    uint64_t bndcfgs = vmx_mpx_passthrough() ? vmx_read(VMCS_GUEST_BNDCFGS)
-        : 0;
-    uint64_t perf = vmx_perf_global_switched()
-        ? vmx_read(VMCS_GUEST_PERF_GLOBAL_CTRL) : 0;
+    uint64_t bndcfgs = vmx_mpx_passthrough() ? vmx_read(VMCS_GUEST_BNDCFGS) : 0;
+    uint64_t perf = vmx_perf_global_switched() ? vmx_read(VMCS_GUEST_PERF_GLOBAL_CTRL) : 0;
     vmx_vmcs_swap(v, &n->other);
     n->in_l2 = false;
     n->launching = false;
@@ -2481,8 +2333,7 @@ static void exit_to_l1(
     load_l1_host_state(v, n, nmi);
     // A failure here would be a VMX abort, which shuts the processor down.
     uint64_t failure = load_msr_list(
-        v, get12(n, VMCS_EXIT_MSR_LOAD_ADDR),
-        get12(n, VMCS_EXIT_MSR_LOAD_COUNT)
+        v, get12(n, VMCS_EXIT_MSR_LOAD_ADDR), get12(n, VMCS_EXIT_MSR_LOAD_COUNT)
     );
     if (failure != 0) {
         printf("The guest's VM-exit MSR-load list failed\n");
@@ -2493,9 +2344,7 @@ static void exit_to_l1(
 
 // An entry failing on the guest state, as the guest sees it: an exit with
 // VMCS02 never entered.
-static void entry_failure(
-    struct vcpu *v, struct nvmx *n, uint32_t reason, uint64_t qual
-) {
+static void entry_failure(struct vcpu *v, struct nvmx *n, uint32_t reason, uint64_t qual) {
     if (n->launching) {
         *(volatile uint32_t *)(n->vmcs12 + VMCS12_LAUNCHED) = 0;
     }
@@ -2513,8 +2362,7 @@ static bool link_pointer_valid(const struct nvmx *n) {
     if (region == NULL || link == n->current) {
         return false;
     }
-    uint32_t shadow = (proc2_12(n) & PROC2_VMCS_SHADOWING) != 0 ? VMCS12_SHADOW
-        : 0;
+    uint32_t shadow = (proc2_12(n) & PROC2_VMCS_SHADOWING) != 0 ? VMCS12_SHADOW : 0;
     return *(const volatile uint32_t *)region == (VMCS12_REVISION | shadow);
 }
 
@@ -2526,8 +2374,8 @@ static bool inactive_valid(const struct nvmx *n, uint64_t activity) {
     if (activity < ACTIVITY_SHUTDOWN) {
         return true;
     }
-    if ((get12(n, VMCS_GUEST_INTERRUPTIBILITY)
-       & (INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS)) != 0) {
+    if ((get12(n, VMCS_GUEST_INTERRUPTIBILITY) & (INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS))
+     != 0) {
         return false;
     }
     uint32_t injected = (uint32_t)get12(n, VMCS_ENTRY_INTR_INFO);
@@ -2536,8 +2384,7 @@ static bool inactive_valid(const struct nvmx *n, uint64_t activity) {
     }
     uint32_t type = injected & ((uint32_t)7 << 8);
     return activity == ACTIVITY_SHUTDOWN
-        && (type == INTR_TYPE_NMI
-            || (type == INTR_TYPE_HW_EXCEPTION && (injected & 0xff) == 18));
+        && (type == INTR_TYPE_NMI || (type == INTR_TYPE_HW_EXCEPTION && (injected & 0xff) == 18));
 }
 
 static void vmlaunch(struct vcpu *v, struct nvmx *n, bool resume) {
@@ -2547,8 +2394,7 @@ static void vmlaunch(struct vcpu *v, struct nvmx *n, bool resume) {
         return;
     }
     shadow_store(v, n);
-    if ((vmx_read(VMCS_GUEST_INTERRUPTIBILITY) & INTERRUPTIBILITY_MOV_SS)
-     != 0) {
+    if ((vmx_read(VMCS_GUEST_INTERRUPTIBILITY) & INTERRUPTIBILITY_MOV_SS) != 0) {
         fail(v, ERROR_ENTRY_MOV_SS);
         return;
     }
@@ -2578,7 +2424,8 @@ static void vmlaunch(struct vcpu *v, struct nvmx *n, bool resume) {
         .pat = vmx_read(VMCS_GUEST_PAT), .efer = vmx_read(VMCS_GUEST_EFER),
         .bndcfgs = vmx_mpx_passthrough() ? vmx_read(VMCS_GUEST_BNDCFGS) : 0,
         .perf_global_ctrl = vmx_perf_global_switched()
-            ? vmx_read(VMCS_GUEST_PERF_GLOBAL_CTRL) : 0,
+                          ? vmx_read(VMCS_GUEST_PERF_GLOBAL_CTRL)
+                          : 0
     };
     if (!n->created) {
         vmx_vmcs_create(v, &n->other);
@@ -2592,8 +2439,7 @@ static void vmlaunch(struct vcpu *v, struct nvmx *n, bool resume) {
     }
     write_vmcs02(v, n, &l1);
     if ((get12(n, VMCS_PIN_CONTROLS) & PIN_PREEMPTION_TIMER) != 0) {
-        n->timer_deadline = (rdtsc() >> timer_rate)
-            + (uint32_t)get12(n, VMCS_PREEMPTION_TIMER);
+        n->timer_deadline = (rdtsc() >> timer_rate) + (uint32_t)get12(n, VMCS_PREEMPTION_TIMER);
     }
     v->redeliver = 0;
     // What the guest injects goes before the hypervisor's own deliveries.
@@ -2603,9 +2449,7 @@ static void vmlaunch(struct vcpu *v, struct nvmx *n, bool resume) {
     // The processor checks VMCS02's guest state, but for the link pointer and
     // the activity states it does not enter VMCS02 in.
     if (!link_pointer_valid(n)) {
-        entry_failure(
-            v, n, EXIT_REASON_INVALID_GUEST_STATE, QUAL_LINK_POINTER
-        );
+        entry_failure(v, n, EXIT_REASON_INVALID_GUEST_STATE, QUAL_LINK_POINTER);
         return;
     }
     uint64_t activity = get12(n, VMCS_GUEST_ACTIVITY_STATE);
@@ -2614,8 +2458,7 @@ static void vmlaunch(struct vcpu *v, struct nvmx *n, bool resume) {
         return;
     }
     uint64_t failed = load_msr_list(
-        v, get12(n, VMCS_ENTRY_MSR_LOAD_ADDR),
-        get12(n, VMCS_ENTRY_MSR_LOAD_COUNT)
+        v, get12(n, VMCS_ENTRY_MSR_LOAD_ADDR), get12(n, VMCS_ENTRY_MSR_LOAD_COUNT)
     );
     if (failed != 0) {
         entry_failure(v, n, EXIT_REASON_MSR_LOADING, failed);
@@ -2631,8 +2474,8 @@ static void vmlaunch(struct vcpu *v, struct nvmx *n, bool resume) {
         return;
     }
     n->run_pending = false;
-    __atomic_store_n(&n->sipi, -1, __ATOMIC_SEQ_CST);
-    __atomic_store_n(&n->inactive, (int)activity, __ATOMIC_SEQ_CST);
+    atomic_store_explicit(&n->sipi, -1, memory_order_seq_cst);
+    atomic_store_explicit(&n->inactive, (int)activity, memory_order_seq_cst);
 }
 
 static uint64_t operand_register(struct vcpu *v, uint32_t info) {
@@ -2643,8 +2486,7 @@ static uint64_t operand_register(struct vcpu *v, uint32_t info) {
 // The 128-bit descriptor INVEPT and INVVPID take.
 static bool read_descriptor(struct vcpu *v, uint32_t info, uint64_t desc[2]) {
     uintptr_t linear;
-    if (!operand_address(v, info, 16, &linear)
-     || !mmio_read_linear(v, linear, &desc[0], 8)) {
+    if (!operand_address(v, info, 16, &linear) || !mmio_read_linear(v, linear, &desc[0], 8)) {
         return false;
     }
     uintptr_t high = linear + 8;
@@ -2672,8 +2514,7 @@ static void invept(struct vcpu *v, struct nvmx *n, uint32_t info) {
         }
         for (size_t i = 0; i < EPT02_ROOTS; i++) {
             struct ept02 *r = &n->ept02[i];
-            if (r->root != NULL
-             && ((r->eptp12 ^ desc[0]) & EPT_ADDRESS) == 0) {
+            if (r->root != NULL && ((r->eptp12 ^ desc[0]) & EPT_ADDRESS) == 0) {
                 ept02_sync_root(n, r);
             }
         }
@@ -2691,7 +2532,7 @@ static void invept(struct vcpu *v, struct nvmx *n, uint32_t info) {
 static void invvpid(struct vcpu *v, struct nvmx *n, uint32_t info) {
     static const uint64_t types[] = {
         CAP_INVVPID_ADDRESS, CAP_INVVPID_SINGLE, CAP_INVVPID_ALL,
-        CAP_INVVPID_GLOBALS,
+        CAP_INVVPID_GLOBALS
     };
     uint64_t type = operand_register(v, info);
     if (type > 3 || (cap_ept_vpid & types[type]) == 0) {
@@ -2703,8 +2544,7 @@ static void invvpid(struct vcpu *v, struct nvmx *n, uint32_t info) {
         return;
     }
     uint16_t vpid = (uint16_t)desc[0];
-    if ((desc[0] >> 16) != 0 || (type != 2 && vpid == 0)
-     || (type == 0 && !canonical(desc[1]))) {
+    if ((desc[0] >> 16) != 0 || (type != 2 && vpid == 0) || (type == 0 && !canonical(desc[1]))) {
         fail(v, ERROR_INVALID_OPERAND);
         return;
     }
@@ -2720,15 +2560,13 @@ void nvmx_instruction(struct vcpu *v, uint32_t reason) {
     // compatibility mode, but not for the guest's CR4.VMXE, which only the
     // shadow has, nor for what the guest is not offered (SDM 325462-093 Vol.
     // 3C, 33.3).
-    bool invept_offered = (cap_proc2 >> 32 & PROC2_EPT) != 0
-        && (cap_ept_vpid & CAP_INVEPT) != 0;
+    bool invept_offered = (cap_proc2 >> 32 & PROC2_EPT) != 0 && (cap_ept_vpid & CAP_INVEPT) != 0;
     bool invvpid_offered = (cap_proc2 >> 32 & PROC2_VPID) != 0
-        && (cap_ept_vpid & CAP_INVVPID) != 0;
-    if (n == NULL || (vcpu_cr4(v) & CR4_VMXE) == 0
-     || (reason != EXIT_REASON_VMXON && !n->vmxon)
+                        && (cap_ept_vpid & CAP_INVVPID) != 0;
+    if (n == NULL || (vcpu_cr4(v) & CR4_VMXE) == 0 || (reason != EXIT_REASON_VMXON && !n->vmxon)
      || (reason == EXIT_REASON_INVEPT && !invept_offered)
-     || (reason == EXIT_REASON_INVVPID && !invvpid_offered)
-     || reason == EXIT_REASON_VMFUNC || reason == EXIT_REASON_GETSEC) {
+     || (reason == EXIT_REASON_INVVPID && !invvpid_offered) || reason == EXIT_REASON_VMFUNC
+     || reason == EXIT_REASON_GETSEC) {
         vcpu_inject_exception(v, 6, false, 0);
         return;
     }
@@ -2795,22 +2633,19 @@ bool nvmx_in_l2(struct vcpu *v) {
 // 7.3's KVM composes them (kvm_calc_nested_tsc_offset()).
 uint64_t nvmx_tsc_offset(struct vcpu *v) {
     struct nvmx *n = v->nvmx;
-    if (!nvmx_in_l2(v)
-     || (get12(n, VMCS_PROC_CONTROLS) & PROC_TSC_OFFSETTING) == 0) {
+    if (!nvmx_in_l2(v) || (get12(n, VMCS_PROC_CONTROLS) & PROC_TSC_OFFSETTING) == 0) {
         return v->tsc_offset;
     }
     uint64_t offset = v->tsc_offset;
     if (tsc_scaled(n)) {
-        offset = (uint64_t)(((__int128)(int64_t)offset
-            * get12(n, VMCS_TSC_MULTIPLIER)) >> 48);
+        offset = (uint64_t)(((__int128)(int64_t)offset * get12(n, VMCS_TSC_MULTIPLIER)) >> 48);
     }
     return offset + get12(n, VMCS_TSC_OFFSET);
 }
 
 uint64_t nvmx_tsc(struct vcpu *v, uint64_t raw) {
     if (nvmx_in_l2(v) && tsc_scaled(v->nvmx)) {
-        raw = (uint64_t)(((unsigned __int128)raw
-            * get12(v->nvmx, VMCS_TSC_MULTIPLIER)) >> 48);
+        raw = (uint64_t)(((unsigned __int128)raw * get12(v->nvmx, VMCS_TSC_MULTIPLIER)) >> 48);
     }
     return raw + nvmx_tsc_offset(v);
 }
@@ -2820,7 +2655,7 @@ bool nvmx_holds_init(struct vcpu *v) {
 }
 
 bool nvmx_any_vmx_operation(void) {
-    return __atomic_load_n(&vmxon_count, __ATOMIC_ACQUIRE) != 0;
+    return atomic_load_explicit(&vmxon_count, memory_order_acquire) != 0;
 }
 
 // What ends the guest's guest's wait: a start-up IPI, else INIT, the
@@ -2828,40 +2663,40 @@ bool nvmx_any_vmx_operation(void) {
 // 29.7.1).
 static bool inactive_ends(struct vcpu *v) {
     struct nvmx *n = v->nvmx;
-    if (n->inactive == ACTIVITY_WAIT_SIPI) {
-        return __atomic_load_n(&n->sipi, __ATOMIC_ACQUIRE) >= 0;
+    if (atomic_load_explicit(&n->inactive, memory_order_relaxed) == ACTIVITY_WAIT_SIPI) {
+        return atomic_load_explicit(&n->sipi, memory_order_acquire) >= 0;
     }
     uint64_t pin = get12(n, VMCS_PIN_CONTROLS);
-    bool nmi = v->nmi_pending
-        || __atomic_load_n(&v->cpu->nmi_pending, __ATOMIC_ACQUIRE);
+    bool nmi = v->nmi_pending || atomic_load_explicit(&v->cpu->nmi_pending, memory_order_acquire);
     bool nmi_blocked = (pin & PIN_VIRTUAL_NMIS) == 0
-        && (get12(n, VMCS_GUEST_INTERRUPTIBILITY) & INTERRUPTIBILITY_NMI) != 0;
-    return __atomic_load_n(&v->cpu->init_pending, __ATOMIC_ACQUIRE)
-        || (nmi && !nmi_blocked)
-        || ((pin & PIN_PREEMPTION_TIMER) != 0 && timer_left(n) == 0);
+                    && (get12(n, VMCS_GUEST_INTERRUPTIBILITY) & INTERRUPTIBILITY_NMI) != 0;
+    return atomic_load_explicit(&v->cpu->init_pending, memory_order_acquire)
+        || (nmi && !nmi_blocked) || ((pin & PIN_PREEMPTION_TIMER) != 0 && timer_left(n) == 0);
 }
 
 void nvmx_wait(struct vcpu *v) {
     struct nvmx *n = v->nvmx;
-    if (n == NULL || !n->in_l2 || n->inactive == ACTIVITY_ACTIVE
+    if (n == NULL || !n->in_l2
+     || atomic_load_explicit(&n->inactive, memory_order_relaxed) == ACTIVITY_ACTIVE
      || inactive_ends(v)) {
         return;
     }
     // Nothing interrupts a halt when the timer expires.
-    bool timer = n->inactive == ACTIVITY_SHUTDOWN
-        && (get12(n, VMCS_PIN_CONTROLS) & PIN_PREEMPTION_TIMER) != 0;
+    bool timer = atomic_load_explicit(&n->inactive, memory_order_relaxed) == ACTIVITY_SHUTDOWN
+              && (get12(n, VMCS_PIN_CONTROLS) & PIN_PREEMPTION_TIMER) != 0;
     vcpu_wait(v, inactive_ends, timer);
 }
 
 bool nvmx_sipi(struct vcpu *v, uint8_t vector) {
     struct nvmx *n = v->nvmx;
     int none = -1;
-    return n != NULL
-        && __atomic_load_n(&n->inactive, __ATOMIC_ACQUIRE)
-            == ACTIVITY_WAIT_SIPI
-        && __atomic_compare_exchange_n(
-            &n->sipi, &none, vector, false, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED
-        );
+    if (n == NULL
+     || atomic_load_explicit(&n->inactive, memory_order_acquire) != ACTIVITY_WAIT_SIPI) {
+        return false;
+    }
+    return atomic_compare_exchange_strong_explicit(
+        &n->sipi, &none, vector, memory_order_acq_rel, memory_order_relaxed
+    );
 }
 
 // The guest's I/O bitmaps, or else its unconditional I/O exiting, decide on
@@ -2877,9 +2712,7 @@ static bool io_wanted(const struct nvmx *n, uint64_t proc, uint64_t qual) {
         return true;
     }
     for (size_t p = port; p < port + size; p++) {
-        uintptr_t bitmap = get12(
-            n, p < 0x8000 ? VMCS_IO_BITMAP_A : VMCS_IO_BITMAP_B
-        );
+        uintptr_t bitmap = get12(n, p < 0x8000 ? VMCS_IO_BITMAP_A : VMCS_IO_BITMAP_B);
         const uint8_t *page = guest_page(bitmap);
         if (page == NULL || (page[(p & 0x7fff) / 8] >> (p % 8) & 1) != 0) {
             return true;
@@ -2890,9 +2723,7 @@ static bool io_wanted(const struct nvmx *n, uint64_t proc, uint64_t qual) {
 
 // MSRs outside the bitmap's ranges always exit (SDM 325462-093 Vol. 3C,
 // 27.6.9).
-static bool msr_wanted(
-    const struct nvmx *n, uint64_t proc, uint32_t msr, bool write
-) {
+static bool msr_wanted(const struct nvmx *n, uint64_t proc, uint32_t msr, bool write) {
     if ((proc & PROC_MSR_BITMAPS) == 0) {
         return true;
     }
@@ -2909,16 +2740,14 @@ static bool msr_wanted(
         return true;
     }
     unsigned int bit = msr & 0x1fff;
-    return page[(write ? 0x800 : 0) + offset + bit / 8] >> (bit % 8) & 1;
+    return ((page[(write ? 0x800 : 0) + offset + bit / 8] >> (bit % 8)) & 1) != 0;
 }
 
 // Whether the guest asked for an exit of its guest's: VMCS02's controls are
 // its own but for interrupts, NMIs, I/O, MSRs, and CR8, whose exits are the
 // hypervisor's where the guest's controls do not take them, and EPT and the
 // local APIC's page, which are the hypervisor's own.
-static bool l1_wants(
-    struct vcpu *v, const struct nvmx *n, uint32_t reason, uint64_t qual
-) {
+static bool l1_wants(struct vcpu *v, const struct nvmx *n, uint32_t reason, uint64_t qual) {
     uint64_t proc = get12(n, VMCS_PROC_CONTROLS);
     switch (reason) {
         case EXIT_REASON_EXCEPTION_NMI: {
@@ -2949,9 +2778,7 @@ static bool l1_wants(
         }
         case EXIT_REASON_RDMSR:
         case EXIT_REASON_WRMSR: {
-            return msr_wanted(
-                n, proc, (uint32_t)v->gprs.rcx, reason == EXIT_REASON_WRMSR
-            );
+            return msr_wanted(n, proc, (uint32_t)v->gprs.rcx, reason == EXIT_REASON_WRMSR);
         }
         case EXIT_REASON_CR_ACCESS: {
             unsigned int cr = qual & 15;
@@ -2964,14 +2791,12 @@ static bool l1_wants(
                 if (!long_mode_64(v)) {
                     value = (uint32_t)value;
                 }
-                return ((value ^ get12(n, VMCS_CR4_SHADOW))
-                    & get12(n, VMCS_CR4_MASK)) != 0;
+                return ((value ^ get12(n, VMCS_CR4_SHADOW)) & get12(n, VMCS_CR4_MASK)) != 0;
             }
             if (cr != 8) {
                 return true;
             }
-            return (proc
-                & (to ? PROC_CR8_LOAD_EXITING : PROC_CR8_STORE_EXITING)) != 0;
+            return (proc & (to ? PROC_CR8_LOAD_EXITING : PROC_CR8_STORE_EXITING)) != 0;
         }
         default: {
             return true;
@@ -3005,16 +2830,11 @@ static void ept_violation(struct vcpu *v, struct nvmx *n, uint64_t qual) {
     int result = ept12_walk(n, gpa, qual, &w);
     if (result == EPT12_VIOLATION) {
         ept02_forget(n, gpa);
-        exit_to_l1(
-            v, n, EXIT_REASON_EPT_VIOLATION, ept12_qual(qual, &w), 0, 0, true
-        );
+        exit_to_l1(v, n, EXIT_REASON_EPT_VIOLATION, ept12_qual(qual, &w), 0, 0, true);
         return;
     }
     if (result == EPT12_PML_FULL) {
-        exit_to_l1(
-            v, n, EXIT_REASON_PML_FULL, qual & EPT_QUAL_NMI_UNBLOCKED, 0, 0,
-            true
-        );
+        exit_to_l1(v, n, EXIT_REASON_PML_FULL, qual & EPT_QUAL_NMI_UNBLOCKED, 0, 0, true);
         return;
     }
     // An IRET that started with NMIs blocked unblocked them before the exit:
@@ -3058,16 +2878,16 @@ static void ept_violation(struct vcpu *v, struct nvmx *n, uint64_t qual) {
 static bool eptp_switch(struct vcpu *v, struct nvmx *n) {
     uint64_t function = v->gprs.rax & 0xffffffff;
     uint64_t index = v->gprs.rcx & 0xffffffff;
-    if (function != 0
-     || (get12(n, VMCS_VMFUNC_CONTROLS) & VMFUNC_EPTP_SWITCHING) == 0
+    if (function != 0 || (get12(n, VMCS_VMFUNC_CONTROLS) & VMFUNC_EPTP_SWITCHING) == 0
      || index >= EPTP_LIST_ENTRIES) {
         return false;
     }
     uint64_t at = get12(n, VMCS_EPTP_LIST) + index * 8;
     const uint8_t *page = guest_page(at & ~(uint64_t)0xfff);
     // Where nothing decodes, it reads as all ones, which is invalid.
-    uint64_t eptp = page == NULL ? ~(uint64_t)0
-        : *(const volatile uint64_t *)(page + (at & 0xfff));
+    uint64_t eptp = page == NULL
+                  ? ~(uint64_t)0
+                  : *(const volatile uint64_t *)(page + (at & 0xfff));
     uint64_t current = get12(n, VMCS_EPT_POINTER);
     if (!eptp_valid(eptp) || EPTP_LEVELS(eptp) != EPTP_LEVELS(current)) {
         return false;
@@ -3088,12 +2908,10 @@ static bool shadow_access(struct vcpu *v, struct nvmx *n, uint32_t reason) {
     uint32_t info = (uint32_t)vmx_read(VMCS_EXIT_INSTR_INFO);
     uint64_t field = operand_register(v, info);
     uintptr_t bitmap = get12(
-        n,
-        reason == EXIT_REASON_VMREAD ? VMCS_VMREAD_BITMAP : VMCS_VMWRITE_BITMAP
+        n, reason == EXIT_REASON_VMREAD ? VMCS_VMREAD_BITMAP : VMCS_VMWRITE_BITMAP
     );
     const uint8_t *page = guest_page(bitmap);
-    if ((field >> 15) != 0 || page == NULL
-     || (page[field >> 3] >> (field & 7) & 1) != 0) {
+    if ((field >> 15) != 0 || page == NULL || (page[field >> 3] >> (field & 7) & 1) != 0) {
         return false;
     }
     if (guest_cpl(v) > 0) {
@@ -3145,8 +2963,7 @@ bool nvmx_l2_exit(struct vcpu *v, uint32_t reason, uint64_t qual) {
     if ((reason & 0xffff) == EXIT_REASON_VMFUNC && eptp_switch(v, n)) {
         return true;
     }
-    if (((reason & 0xffff) == EXIT_REASON_VMREAD
-      || (reason & 0xffff) == EXIT_REASON_VMWRITE)
+    if (((reason & 0xffff) == EXIT_REASON_VMREAD || (reason & 0xffff) == EXIT_REASON_VMWRITE)
      && shadow_access(v, n, reason & 0xffff)) {
         return true;
     }
@@ -3198,16 +3015,15 @@ bool nvmx_before_entry(struct vcpu *v) {
     if (n->pending) {
         n->pending = false;
         exit_to_l1(
-            v, n, n->pending_reason, n->pending_qual, n->pending_info,
-            n->pending_error, false
+            v, n, n->pending_reason, n->pending_qual, n->pending_info, n->pending_error, false
         );
         set12(n, VMCS_GUEST_PHYS_ADDR, n->pending_gpa);
         set12(n, VMCS_GUEST_LINEAR_ADDR, n->pending_linear);
         return false;
     }
     // A start-up IPI ends the wait for one (SDM 325462-093 Vol. 3C, 28.2).
-    if (n->inactive == ACTIVITY_WAIT_SIPI) {
-        int vector = __atomic_exchange_n(&n->sipi, -1, __ATOMIC_SEQ_CST);
+    if (atomic_load_explicit(&n->inactive, memory_order_relaxed) == ACTIVITY_WAIT_SIPI) {
+        int vector = atomic_exchange_explicit(&n->sipi, -1, memory_order_seq_cst);
         exit_to_l1(v, n, EXIT_REASON_SIPI, (uint64_t)vector, 0, 0, false);
         return false;
     }
@@ -3216,14 +3032,13 @@ bool nvmx_before_entry(struct vcpu *v) {
     // and in Linux 7.3's KVM. An interrupt of the hypervisor's own then ends
     // the entry.
     bool waiting = n->run_pending || (v->redeliver & INTR_INFO_VALID) != 0;
-    if (!waiting
-     && __atomic_exchange_n(&v->cpu->init_pending, false, __ATOMIC_ACQUIRE)) {
+    if (!waiting && atomic_exchange_explicit(&v->cpu->init_pending, false, memory_order_acquire)) {
         exit_to_l1(v, n, EXIT_REASON_INIT, 0, 0, 0, false);
         return false;
     }
     uint64_t pin = get12(n, VMCS_PIN_CONTROLS);
     uint64_t proc = get12(n, VMCS_PROC_CONTROLS);
-    if (__atomic_exchange_n(&v->cpu->nmi_pending, false, __ATOMIC_ACQUIRE)) {
+    if (atomic_exchange_explicit(&v->cpu->nmi_pending, false, memory_order_acquire)) {
         v->nmi_pending = true;
     }
     // Without virtual NMIs, the guest's guest's blocking by NMI holds them
@@ -3231,14 +3046,12 @@ bool nvmx_before_entry(struct vcpu *v) {
     bool nmi_held = false;
     if (!waiting && v->nmi_pending && (pin & PIN_NMI_EXITING) != 0) {
         if ((pin & PIN_VIRTUAL_NMIS) == 0
-         && (vmx_read(VMCS_GUEST_INTERRUPTIBILITY) & INTERRUPTIBILITY_NMI)
-         != 0) {
+         && (vmx_read(VMCS_GUEST_INTERRUPTIBILITY) & INTERRUPTIBILITY_NMI) != 0) {
             nmi_held = true;
         } else {
             v->nmi_pending = false;
             exit_to_l1(
-                v, n, EXIT_REASON_EXCEPTION_NMI, 0,
-                INTR_INFO_VALID | INTR_TYPE_NMI | 2, 0, false
+                v, n, EXIT_REASON_EXCEPTION_NMI, 0, INTR_INFO_VALID | INTR_TYPE_NMI | 2, 0, false
             );
             return false;
         }
@@ -3246,7 +3059,7 @@ bool nvmx_before_entry(struct vcpu *v) {
     // The shutdown state blocks interrupts, but not the VMX-preemption timer's
     // exit, and an NMI the guest's guest takes leaves it (SDM 325462-093 Vol.
     // 3C, 28.2).
-    if (n->inactive == ACTIVITY_SHUTDOWN) {
+    if (atomic_load_explicit(&n->inactive, memory_order_relaxed) == ACTIVITY_SHUTDOWN) {
         if ((pin & PIN_PREEMPTION_TIMER) != 0 && timer_left(n) == 0) {
             exit_to_l1(v, n, EXIT_REASON_PREEMPTION_TIMER, 0, 0, 0, false);
             return false;
@@ -3256,24 +3069,22 @@ bool nvmx_before_entry(struct vcpu *v) {
             nvmx_wait(v);
             return nvmx_before_entry(v);
         }
-        __atomic_store_n(&n->inactive, ACTIVITY_ACTIVE, __ATOMIC_SEQ_CST);
+        atomic_store_explicit(&n->inactive, ACTIVITY_ACTIVE, memory_order_seq_cst);
         vmx_write(VMCS_GUEST_ACTIVITY_STATE, ACTIVITY_ACTIVE);
     }
     bool extint = (pin & PIN_EXT_INTR_EXITING) != 0 && irq_extint_pending(v);
-    int vector = ((pin & PIN_EXT_INTR_EXITING) == 0 || extint) ? -1
-        : vlapic_pending(v);
+    int vector = ((pin & PIN_EXT_INTR_EXITING) == 0 || extint) ? -1 : vlapic_pending(v);
     // The notification of the guest's posted interrupts, which the guest's
     // guest's processor takes instead of exiting (SDM 325462-093 Vol. 3C,
     // 32.6).
-    if (vector >= 0 && vector == n->pi_vector) {
+    if (vector >= 0 && vector == atomic_load_explicit(&n->pi_vector, memory_order_relaxed)) {
         vlapic_dismiss(v, (uint8_t)vector);
-        __atomic_store_n(&n->pi_pending, true, __ATOMIC_SEQ_CST);
+        atomic_store_explicit(&n->pi_pending, true, memory_order_seq_cst);
         vector = vlapic_pending(v);
     }
     if (waiting) {
-        if (extint || vector >= 0
-         || (v->nmi_pending && (pin & PIN_NMI_EXITING) != 0)
-         || __atomic_load_n(&v->cpu->init_pending, __ATOMIC_ACQUIRE)) {
+        if (extint || vector >= 0 || (v->nmi_pending && (pin & PIN_NMI_EXITING) != 0)
+         || atomic_load_explicit(&v->cpu->init_pending, memory_order_acquire)) {
             vcpu_exit_soon(v);
         }
     } else if (extint || vector >= 0) {
@@ -3289,8 +3100,7 @@ bool nvmx_before_entry(struct vcpu *v) {
         exit_to_l1(v, n, EXIT_REASON_EXTERNAL_INTR, 0, info, 0, false);
         return false;
     }
-    if (n->pid != NULL
-     && __atomic_exchange_n(&n->pi_pending, false, __ATOMIC_SEQ_CST)) {
+    if (n->pid != NULL && atomic_exchange_explicit(&n->pi_pending, false, memory_order_seq_cst)) {
         posted_process(n);
     }
     uint64_t windows = PROC_INTR_WINDOW_EXITING | PROC_NMI_WINDOW_EXITING;
@@ -3302,8 +3112,7 @@ bool nvmx_before_entry(struct vcpu *v) {
     }
     event_entry_for(
         v, (pin & PIN_NMI_EXITING) == 0,
-        (pin & PIN_EXT_INTR_EXITING) == 0
-            && (proc & PROC_INTR_WINDOW_EXITING) == 0
+        (pin & PIN_EXT_INTR_EXITING) == 0 && (proc & PROC_INTR_WINDOW_EXITING) == 0
     );
     uint64_t wanted = proc & windows;
     if (nmi_held) {
@@ -3410,8 +3219,7 @@ bool nvmx_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
     (void)v;
     (void)value;
     *fault = false;
-    if (!nvmx_enabled || msr < MSR_IA32_VMX_BASIC
-     || msr > MSR_IA32_VMX_PROCBASED_CTLS3) {
+    if (!nvmx_enabled || msr < MSR_IA32_VMX_BASIC || msr > MSR_IA32_VMX_PROCBASED_CTLS3) {
         return false;
     }
     // The capability MSRs are read-only.
@@ -3430,11 +3238,9 @@ bool nvmx_cr_allowed(struct vcpu *v, unsigned int cr, uint64_t value) {
     // VMX operation keeps CR0 and CR4 to the fixed bits (SDM 325462-093 Vol.
     // 3C, 26.8).
     if (cr == 0) {
-        return (value & cap_cr0_fixed0) == cap_cr0_fixed0
-            && (value & ~cap_cr0_fixed1) == 0;
+        return (value & cap_cr0_fixed0) == cap_cr0_fixed0 && (value & ~cap_cr0_fixed1) == 0;
     }
-    return (value & cap_cr4_fixed0) == cap_cr4_fixed0
-        && (value & ~cap_cr4_fixed1) == 0;
+    return (value & cap_cr4_fixed0) == cap_cr4_fixed0 && (value & ~cap_cr4_fixed1) == 0;
 }
 
 bool nvmx_ept_active(struct vcpu *v) {
@@ -3442,8 +3248,7 @@ bool nvmx_ept_active(struct vcpu *v) {
 }
 
 bool nvmx_ept_translate(
-    struct vcpu *v, uintptr_t gpa, uint64_t access, uintptr_t linear,
-    uint64_t *out
+    struct vcpu *v, uintptr_t gpa, uint64_t access, uintptr_t linear, uint64_t *out
 ) {
     struct nvmx *n = v->nvmx;
     if (n->pending) {
@@ -3480,8 +3285,7 @@ bool nvmx_exit_pending(struct vcpu *v) {
 // SDM 325462-093 Vol. 3C, 28.2: a page fault takes bit 14 of the bitmap where
 // its error code matches, else the other way.
 bool nvmx_exception(
-    struct vcpu *v, uint8_t vector, bool has_error, uint32_t error,
-    uint64_t qual
+    struct vcpu *v, uint8_t vector, bool has_error, uint32_t error, uint64_t qual
 ) {
     struct nvmx *n = v->nvmx;
     if (n == NULL || !n->in_l2) {
@@ -3490,7 +3294,7 @@ bool nvmx_exception(
     if (n->pending) {
         return true;
     }
-    bool exits = (get12(n, VMCS_EXCEPTION_BITMAP) >> vector) & 1;
+    bool exits = ((get12(n, VMCS_EXCEPTION_BITMAP) >> vector) & 1) != 0;
     if (vector == 14) {
         uint32_t mask = (uint32_t)get12(n, VMCS_PF_ERROR_MASK);
         uint32_t match = (uint32_t)get12(n, VMCS_PF_ERROR_MATCH);
@@ -3518,19 +3322,17 @@ bool nvmx_exception(
 // 32.6). The vCPU may leave its guest meanwhile and not see it.
 bool nvmx_posted_notification(struct vcpu *v, uint8_t vector) {
     struct nvmx *n = v->nvmx;
-    if (n == NULL
-     || __atomic_load_n(&n->pi_vector, __ATOMIC_SEQ_CST) != vector) {
+    if (n == NULL || atomic_load_explicit(&n->pi_vector, memory_order_seq_cst) != vector) {
         return false;
     }
-    __atomic_store_n(&n->pi_pending, true, __ATOMIC_SEQ_CST);
-    return __atomic_load_n(&n->pi_vector, __ATOMIC_SEQ_CST) == vector
-        || !__atomic_exchange_n(&n->pi_pending, false, __ATOMIC_SEQ_CST);
+    atomic_store_explicit(&n->pi_pending, true, memory_order_seq_cst);
+    return atomic_load_explicit(&n->pi_vector, memory_order_seq_cst) == vector
+        || !atomic_exchange_explicit(&n->pi_pending, false, memory_order_seq_cst);
 }
 
 bool nvmx_monitor_trap_flag(struct vcpu *v) {
     struct nvmx *n = v->nvmx;
-    return n != NULL && n->in_l2
-        && (get12(n, VMCS_PROC_CONTROLS) & PROC_MONITOR_TRAP_FLAG) != 0;
+    return n != NULL && n->in_l2 && (get12(n, VMCS_PROC_CONTROLS) & PROC_MONITOR_TRAP_FLAG) != 0;
 }
 
 // The processor did not run the instruction, which would have made the exit
@@ -3550,9 +3352,7 @@ bool nvmx_monitor_trap(struct vcpu *v, uint64_t dr6) {
         pending |= PENDING_DBG_ENABLED;
     }
     if (pending != 0) {
-        vmx_write(
-            VMCS_GUEST_PENDING_DBG, vmx_read(VMCS_GUEST_PENDING_DBG) | pending
-        );
+        vmx_write(VMCS_GUEST_PENDING_DBG, vmx_read(VMCS_GUEST_PENDING_DBG) | pending);
     }
     n->pending = true;
     n->pending_reason = EXIT_REASON_MONITOR_TRAP;
@@ -3566,12 +3366,10 @@ bool nvmx_monitor_trap(struct vcpu *v, uint64_t dr6) {
 
 void nvmx_arm_timer(struct vcpu *v) {
     struct nvmx *n = v->nvmx;
-    if (n == NULL || !n->in_l2
-     || (get12(n, VMCS_PIN_CONTROLS) & PIN_PREEMPTION_TIMER) == 0) {
+    if (n == NULL || !n->in_l2 || (get12(n, VMCS_PIN_CONTROLS) & PIN_PREEMPTION_TIMER) == 0) {
         return;
     }
-    uint64_t pin = vmx_read(VMCS_PIN_CONTROLS)
-        & ~(uint64_t)PIN_PREEMPTION_TIMER;
+    uint64_t pin = vmx_read(VMCS_PIN_CONTROLS) & ~(uint64_t)PIN_PREEMPTION_TIMER;
     if (!v->stepping) {
         pin |= PIN_PREEMPTION_TIMER;
         vmx_write(VMCS_PREEMPTION_TIMER, timer_left(n));

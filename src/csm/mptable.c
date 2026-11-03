@@ -135,23 +135,11 @@ struct mp_interrupt {
     uint8_t destination_pin;
 } __attribute__((packed));
 
-_Static_assert(
-    sizeof(struct mp_floating_pointer) == 16, "MP floating pointer layout"
-);
-_Static_assert(
-    offsetof(struct mp_config_header, oem_id) == 8, "MP table header layout"
-);
-_Static_assert(
-    offsetof(struct mp_config_header, oem_table) == 28,
-    "MP table header layout"
-);
-_Static_assert(
-    offsetof(struct mp_config_header, local_apic) == 36,
-    "MP table header layout"
-);
-_Static_assert(
-    sizeof(struct mp_config_header) == 44, "MP table header layout"
-);
+_Static_assert(sizeof(struct mp_floating_pointer) == 16, "MP floating pointer layout");
+_Static_assert(offsetof(struct mp_config_header, oem_id) == 8, "MP table header layout");
+_Static_assert(offsetof(struct mp_config_header, oem_table) == 28, "MP table header layout");
+_Static_assert(offsetof(struct mp_config_header, local_apic) == 36, "MP table header layout");
+_Static_assert(sizeof(struct mp_config_header) == 44, "MP table header layout");
 _Static_assert(sizeof(struct mp_processor) == 20, "MP processor entry layout");
 _Static_assert(sizeof(struct mp_bus) == 8, "MP bus entry layout");
 _Static_assert(sizeof(struct mp_ioapic) == 8, "MP I/O APIC entry layout");
@@ -197,9 +185,7 @@ static uint8_t checksum(const uint8_t *bytes, size_t length) {
 }
 
 // MP table strings are ASCII, padded with spaces.
-static void mp_string(
-    char *dest, size_t size, const char *src, size_t length
-) {
+static void mp_string(char *dest, size_t size, const char *src, size_t length) {
     for (size_t i = 0; i < size; i++) {
         char c = i < length ? src[i] : ' ';
         dest[i] = c >= 0x20 && c <= 0x7e ? c : ' ';
@@ -208,14 +194,12 @@ static void mp_string(
 
 // The MADT's entry at *offset, which moves past it, or NULL after the last.
 static const uint8_t *madt_next(const struct mp_input *in, size_t *offset) {
-    if (*offset > in->madt_length
-     || in->madt_length - *offset < sizeof(struct acpi_entry_hdr)) {
+    if (*offset > in->madt_length || in->madt_length - *offset < sizeof(struct acpi_entry_hdr)) {
         return NULL;
     }
     const uint8_t *entry = in->madt + *offset;
     size_t length = entry[1];
-    if (length < sizeof(struct acpi_entry_hdr)
-     || length > in->madt_length - *offset) {
+    if (length < sizeof(struct acpi_entry_hdr) || length > in->madt_length - *offset) {
         return NULL;
     }
     *offset += length;
@@ -227,7 +211,7 @@ static void pci_bus_add(struct mp_input *in, uint8_t bus) {
 }
 
 static bool pci_bus_has(const struct mp_input *in, unsigned int bus) {
-    return (in->pci_buses[bus / 64] >> (bus % 64)) & 1;
+    return ((in->pci_buses[bus / 64] >> (bus % 64)) & 1) != 0;
 }
 
 static void pci_buses_find(struct mp_input *in) {
@@ -241,8 +225,7 @@ static void pci_buses_find(struct mp_input *in) {
     }
     for (size_t i = 0; i < topology->function_count; i++) {
         const struct pci_function *f = &topology->functions[i];
-        bool bridge = f->header_type == PCI_HEADER_BRIDGE
-            || f->header_type == PCI_HEADER_CARDBUS;
+        bool bridge = f->header_type == PCI_HEADER_BRIDGE || f->header_type == PCI_HEADER_CARDBUS;
         // A bridge whose secondary bus is not above its own has not been given
         // one.
         if (!bridge || f->secondary_bus <= f->addr.bus) {
@@ -277,9 +260,7 @@ static void isa_overrides_find(struct mp_input *in) {
             continue;
         }
         struct acpi_madt_interrupt_source_override iso;
-        memcpy(
-            &iso, entry, sizeof(struct acpi_madt_interrupt_source_override)
-        );
+        memcpy(&iso, entry, sizeof(struct acpi_madt_interrupt_source_override));
         if (iso.bus == 0 && iso.source < ISA_IRQS) {
             in->isa_gsi[iso.source] = iso.gsi;
             in->isa_flags[iso.source] = iso.flags & MP_FLAGS_MASK;
@@ -290,8 +271,7 @@ static void isa_overrides_find(struct mp_input *in) {
 static bool input_gather(struct mp_input *in) {
     memset(in, 0, sizeof(struct mp_input));
     if (!acpi_tables_ready()
-     || uacpi_table_find_by_signature(ACPI_MADT_SIGNATURE, &in->madt_table)
-     != UACPI_STATUS_OK) {
+     || uacpi_table_find_by_signature(ACPI_MADT_SIGNATURE, &in->madt_table) != UACPI_STATUS_OK) {
         printf("No MADT, so no MP table\n");
         return false;
     }
@@ -357,7 +337,7 @@ static void processors_emit(struct mp_writer *w, const struct mp_input *in) {
             .apic_version = in->apic_version,
             .flags = MP_PROCESSOR_ENABLED | (cpu->bsp ? MP_PROCESSOR_BSP : 0),
             .signature = in->cpu_signature,
-            .features = in->cpu_features,
+            .features = in->cpu_features
         };
         emit(w, &entry, sizeof(struct mp_processor));
     }
@@ -387,7 +367,7 @@ static void ioapics_emit(struct mp_writer *w) {
             .id = io->id,
             .version = (uint8_t)io->version,
             .flags = MP_IOAPIC_ENABLED,
-            .address = (uint32_t)io->base,
+            .address = (uint32_t)io->base
         };
         emit(w, &entry, sizeof(struct mp_ioapic));
     }
@@ -396,8 +376,8 @@ static void ioapics_emit(struct mp_writer *w) {
 // An I/O interrupt assignment to the I/O APIC input of the GSI, if an I/O APIC
 // has it.
 static bool io_interrupt_emit(
-    struct mp_writer *w, uint8_t interrupt_type, uint16_t flags, uint8_t bus,
-    uint8_t irq, uint32_t gsi
+    struct mp_writer *w, uint8_t interrupt_type, uint16_t flags, uint8_t bus, uint8_t irq,
+    uint32_t gsi
 ) {
     uint32_t pin;
     const struct ioapic *io = ioapic_for_gsi(gsi, &pin);
@@ -411,7 +391,7 @@ static bool io_interrupt_emit(
         .source_bus = bus,
         .source_irq = irq,
         .destination = io->id,
-        .destination_pin = (uint8_t)pin,
+        .destination_pin = (uint8_t)pin
     };
     emit(w, &entry, sizeof(struct mp_interrupt));
     return true;
@@ -424,10 +404,8 @@ static bool pci_entry_made(const struct mp_input *in, size_t i) {
     for (size_t j = 0; j < i; j++) {
         const struct acpi_irq_pci_route *other = &in->routes[j];
         uint32_t pin;
-        if (other->addr.segment == route->addr.segment
-         && other->addr.bus == route->addr.bus
-         && other->addr.device == route->addr.device
-         && other->pin == route->pin
+        if (other->addr.segment == route->addr.segment && other->addr.bus == route->addr.bus
+         && other->addr.device == route->addr.device && other->pin == route->pin
          && ioapic_for_gsi(other->gsi, &pin) != NULL) {
             return true;
         }
@@ -435,9 +413,7 @@ static bool pci_entry_made(const struct mp_input *in, size_t i) {
     return false;
 }
 
-static void io_interrupts_emit(
-    struct mp_writer *w, const struct mp_input *in
-) {
+static void io_interrupts_emit(struct mp_writer *w, const struct mp_input *in) {
     bool gsi0_taken = false;
     if (in->isa) {
         for (size_t irq = 0; irq < ISA_IRQS; irq++) {
@@ -466,7 +442,7 @@ static void io_interrupts_emit(
             continue;
         }
         uint16_t flags = (route->active_low ? MP_ACTIVE_LOW : MP_ACTIVE_HIGH)
-            | (route->level ? MP_LEVEL : MP_EDGE);
+                       | (route->level ? MP_LEVEL : MP_EDGE);
         // MultiProcessor Specification 1.4, Table D-1.
         uint8_t irq = (uint8_t)(route->addr.device << 2 | (route->pin - 1));
         io_interrupt_emit(w, MP_INT, flags, (uint8_t)bus, irq, route->gsi);
@@ -474,8 +450,8 @@ static void io_interrupts_emit(
 }
 
 static void local_interrupt_emit(
-    struct mp_writer *w, uint8_t interrupt_type, uint16_t flags, uint8_t bus,
-    uint8_t destination, uint8_t lint
+    struct mp_writer *w, uint8_t interrupt_type, uint16_t flags, uint8_t bus, uint8_t destination,
+    uint8_t lint
 ) {
     struct mp_interrupt entry = {
         .type = MP_LOCAL_INTERRUPT,
@@ -484,21 +460,18 @@ static void local_interrupt_emit(
         .source_bus = bus,
         .source_irq = 0,
         .destination = destination,
-        .destination_pin = lint,
+        .destination_pin = lint
     };
     emit(w, &entry, sizeof(struct mp_interrupt));
 }
 
 // The APIC ID of the processor whose Processor Local APIC or x2APIC structure
 // has the ACPI Processor UID.
-static bool uid_apic_id(
-    const struct mp_input *in, uint32_t uid, uint32_t *apic_id
-) {
+static bool uid_apic_id(const struct mp_input *in, uint32_t uid, uint32_t *apic_id) {
     size_t offset = sizeof(struct acpi_madt);
     const uint8_t *entry;
     while ((entry = madt_next(in, &offset)) != NULL) {
-        if (entry[0] == ACPI_MADT_ENTRY_TYPE_LAPIC
-         && entry[1] >= sizeof(struct acpi_madt_lapic)) {
+        if (entry[0] == ACPI_MADT_ENTRY_TYPE_LAPIC && entry[1] >= sizeof(struct acpi_madt_lapic)) {
             struct acpi_madt_lapic lapic;
             memcpy(&lapic, entry, sizeof(struct acpi_madt_lapic));
             if (lapic.uid == uid) {
@@ -518,9 +491,7 @@ static bool uid_apic_id(
     return false;
 }
 
-static void local_interrupts_emit(
-    struct mp_writer *w, const struct mp_input *in
-) {
+static void local_interrupts_emit(struct mp_writer *w, const struct mp_input *in) {
     uint8_t bus = in->isa ? in->isa_bus : 0;
     local_interrupt_emit(w, MP_EXTINT, 0, bus, MP_ALL_APICS, 0);
 
@@ -554,13 +525,10 @@ static void local_interrupts_emit(
         madt_nmis = true;
 
         uint32_t apic_id = MP_ALL_APICS;
-        if (!all
-         && (!uid_apic_id(in, uid, &apic_id) || !cpu_listed(apic_id))) {
+        if (!all && (!uid_apic_id(in, uid, &apic_id) || !cpu_listed(apic_id))) {
             continue;
         }
-        local_interrupt_emit(
-            w, MP_NMI, flags & MP_FLAGS_MASK, bus, (uint8_t)apic_id, lint
-        );
+        local_interrupt_emit(w, MP_NMI, flags & MP_FLAGS_MASK, bus, (uint8_t)apic_id, lint);
     }
     if (!madt_nmis) {
         local_interrupt_emit(w, MP_NMI, 0, bus, MP_ALL_APICS, 1);
@@ -568,8 +536,7 @@ static void local_interrupts_emit(
 }
 
 static uint32_t table_write(
-    struct mp_writer *w, const struct mp_input *in, uint8_t *buf,
-    uint32_t guest
+    struct mp_writer *w, const struct mp_input *in, uint8_t *buf, uint32_t guest
 ) {
     *w = (struct mp_writer){ .buf = buf, .length = MP_ENTRIES_OFFSET };
     processors_emit(w, in);
@@ -587,17 +554,14 @@ static uint32_t table_write(
     }
     struct mp_config_header header = {
         .base_table_length = (uint16_t)(w->length
-            - sizeof(struct mp_floating_pointer)),
+                                      - sizeof(struct mp_floating_pointer)),
         .spec_rev = MP_SPEC_REV, .entry_count = entries,
-        .local_apic = in->local_apic,
+        .local_apic = in->local_apic
     };
     memcpy(header.signature, "PCMP", sizeof(header.signature));
+    mp_string(header.oem_id, sizeof(header.oem_id), in->oem_id, sizeof(in->oem_id));
     mp_string(
-        header.oem_id, sizeof(header.oem_id), in->oem_id, sizeof(in->oem_id)
-    );
-    mp_string(
-        header.product_id, sizeof(header.product_id), in->product_id,
-        sizeof(in->product_id)
+        header.product_id, sizeof(header.product_id), in->product_id, sizeof(in->product_id)
     );
     uint8_t *config = buf + sizeof(struct mp_floating_pointer);
     memcpy(config, &header, sizeof(struct mp_config_header));
@@ -610,7 +574,7 @@ static uint32_t table_write(
     struct mp_floating_pointer pointer = {
         .config_table = guest + (uint32_t)sizeof(struct mp_floating_pointer),
         .length = 1,
-        .spec_rev = MP_SPEC_REV,
+        .spec_rev = MP_SPEC_REV
     };
     memcpy(pointer.signature, "_MP_", sizeof(pointer.signature));
     memcpy(buf, &pointer, sizeof(struct mp_floating_pointer));
@@ -633,20 +597,14 @@ uint32_t mptable_build(void *buf, size_t size, uint32_t guest) {
     struct mp_writer w;
     size_t length = table_write(&w, &in, NULL, guest);
     uint32_t written = 0;
-    if (length > size
-     || length - sizeof(struct mp_floating_pointer) > UINT16_MAX) {
-        printf(
-            "The MP table takes %zu bytes, more than the %zu it has\n", length,
-            size
-        );
+    if (length > size || length - sizeof(struct mp_floating_pointer) > UINT16_MAX) {
+        printf("The MP table takes %zu bytes, more than the %zu it has\n", length, size);
     } else {
         written = table_write(&w, &in, buf, guest);
         printf(
-            "MP table at %#x: %u processors, %u buses, %u I/O APICs, %u I/O "
-            "interrupts, %u local interrupts\n",
-            guest, w.counts[MP_PROCESSOR], w.counts[MP_BUS],
-            w.counts[MP_IOAPIC], w.counts[MP_IO_INTERRUPT],
-            w.counts[MP_LOCAL_INTERRUPT]
+            "MP table at %#x: %u processors, %u buses, %u I/O APICs, %u I/O interrupts, %u local "
+            "interrupts\n", guest, w.counts[MP_PROCESSOR], w.counts[MP_BUS], w.counts[MP_IOAPIC],
+            w.counts[MP_IO_INTERRUPT], w.counts[MP_LOCAL_INTERRUPT]
         );
     }
     uacpi_table_unref(&in.madt_table);

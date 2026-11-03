@@ -303,7 +303,7 @@ static const uint8_t translation[256] = {
     0xe0, 0xe1, 0xe2, 0xe3, 0xe4, 0xe5, 0xe6, 0xe7,
     0xe8, 0xe9, 0xea, 0xeb, 0xec, 0xed, 0xee, 0xef,
     0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7,
-    0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe, 0xff,
+    0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe, 0xff
 };
 
 static bool queue_put(struct queue *q, uint8_t byte) {
@@ -328,8 +328,7 @@ static bool queue_take(struct queue *q, uint8_t *byte) {
 // The lines follow the output buffer, so that a byte read by polling leaves no
 // request behind.
 static void lines_update(void) {
-    bool keyboard = output_full && !output_aux
-        && (ram[0] & CCB_KBD_INTERRUPT) != 0;
+    bool keyboard = output_full && !output_aux && (ram[0] & CCB_KBD_INTERRUPT) != 0;
     bool aux = output_full && output_aux && (ram[0] & CCB_AUX_INTERRUPT) != 0;
     if (keyboard != keyboard_line) {
         keyboard_line = keyboard;
@@ -350,19 +349,16 @@ static void output_refill(void) {
         if (queue_take(&loopback_queue, &byte)) {
             aux = true;
         } else if (!queue_take(&controller_queue, &byte)) {
-            if ((ram[0] & CCB_KBD_DISABLED) == 0
-             && queue_take(&keyboard_queue, &byte)) {
+            if ((ram[0] & CCB_KBD_DISABLED) == 0 && queue_take(&keyboard_queue, &byte)) {
                 if ((ram[0] & CCB_TRANSLATE) != 0) {
                     if (byte == SCAN_BREAK) {
                         translate_break = true;
                         continue;
                     }
-                    byte = translation[byte]
-                        | (translate_break ? SET1_BREAK : 0);
+                    byte = translation[byte] | (translate_break ? SET1_BREAK : 0);
                     translate_break = false;
                 }
-            } else if ((ram[0] & CCB_AUX_DISABLED) == 0
-                    && queue_take(&aux_queue, &byte)) {
+            } else if ((ram[0] & CCB_AUX_DISABLED) == 0 && queue_take(&aux_queue, &byte)) {
                 aux = true;
             } else {
                 return;
@@ -382,8 +378,8 @@ static void controller_answer(uint8_t byte) {
 
 static uint8_t hid_leds(uint8_t ps2) {
     return (uint8_t)(((ps2 & PS2_LED_SCROLL) != 0 ? HID_LED_SCROLL : 0)
-        | ((ps2 & PS2_LED_NUM) != 0 ? HID_LED_NUM : 0)
-        | ((ps2 & PS2_LED_CAPS) != 0 ? HID_LED_CAPS : 0));
+                   | ((ps2 & PS2_LED_NUM) != 0 ? HID_LED_NUM : 0)
+                   | ((ps2 & PS2_LED_CAPS) != 0 ? HID_LED_CAPS : 0));
 }
 
 // Answers of the emulated devices: the chipset's give their own.
@@ -570,8 +566,8 @@ static void aux_packet(bool stream) {
         dx = clamp_move(scaled(dx));
         dy = clamp_move(scaled(dy));
     }
-    uint8_t flags = (uint8_t)(PACKET_ALWAYS | aux_packet_buttons()
-        | (dx < 0 ? PACKET_X_SIGN : 0) | (dy < 0 ? PACKET_Y_SIGN : 0));
+    uint8_t flags = (uint8_t)(PACKET_ALWAYS | aux_packet_buttons() | (dx < 0 ? PACKET_X_SIGN : 0)
+                            | (dy < 0 ? PACKET_Y_SIGN : 0));
     queue_put(&aux_queue, flags);
     queue_put(&aux_queue, (uint8_t)dx);
     queue_put(&aux_queue, (uint8_t)dy);
@@ -579,8 +575,8 @@ static void aux_packet(bool stream) {
         queue_put(&aux_queue, (uint8_t)dz);
     } else if (aux_id == AUX_ID_EXPLORER) {
         uint8_t extra = (uint8_t)((dz & 0x0f)
-            | ((aux_buttons & BUTTON_4) != 0 ? PACKET_BUTTON_4 : 0)
-            | ((aux_buttons & BUTTON_5) != 0 ? PACKET_BUTTON_5 : 0));
+                                | ((aux_buttons & BUTTON_4) != 0 ? PACKET_BUTTON_4 : 0)
+                                | ((aux_buttons & BUTTON_5) != 0 ? PACKET_BUTTON_5 : 0));
         queue_put(&aux_queue, extra);
     }
     aux_buttons_changed = false;
@@ -607,8 +603,8 @@ static void aux_rate_set(uint8_t rate) {
     aux_rates[2] = rate;
     if (aux_rates[0] == 200 && aux_rates[1] == 100 && aux_rates[2] == 80) {
         aux_id = AUX_ID_WHEEL;
-    } else if (aux_rates[0] == 200 && aux_rates[1] == 200
-            && aux_rates[2] == 80 && aux_id == AUX_ID_WHEEL) {
+    } else if (aux_rates[0] == 200 && aux_rates[1] == 200 && aux_rates[2] == 80
+            && aux_id == AUX_ID_WHEEL) {
         aux_id = AUX_ID_EXPLORER;
     }
 }
@@ -648,11 +644,11 @@ static void aux_command(uint8_t byte) {
         }
         case AUX_STATUS: {
             uint8_t status = (uint8_t)((aux_remote ? STATUS_REMOTE : 0)
-                | (aux_enabled ? STATUS_ENABLED : 0)
-                | (aux_scaled ? STATUS_SCALING : 0)
-                | ((aux_buttons & 1) != 0 ? STATUS_BUTTONS_LEFT : 0)
-                | ((aux_buttons & 2) != 0 ? STATUS_BUTTONS_RIGHT : 0)
-                | ((aux_buttons & 4) != 0 ? STATUS_BUTTONS_MIDDLE : 0));
+                                     | (aux_enabled ? STATUS_ENABLED : 0)
+                                     | (aux_scaled ? STATUS_SCALING : 0)
+                                     | ((aux_buttons & 1) != 0 ? STATUS_BUTTONS_LEFT : 0)
+                                     | ((aux_buttons & 2) != 0 ? STATUS_BUTTONS_RIGHT : 0)
+                                     | ((aux_buttons & 4) != 0 ? STATUS_BUTTONS_MIDDLE : 0));
             aux_answer(DEVICE_ACK);
             aux_answer(status);
             aux_answer(aux_resolution);
@@ -747,8 +743,7 @@ static void output_port_write(uint8_t value) {
 }
 
 static uint8_t output_port_read(void) {
-    uint8_t value = (output_port & (OUTPUT_RESET_HIGH | OUTPUT_A20))
-        | OUTPUT_LINES_HIGH;
+    uint8_t value = (output_port & (OUTPUT_RESET_HIGH | OUTPUT_A20)) | OUTPUT_LINES_HIGH;
     if (output_full) {
         value |= output_aux ? OUTPUT_AUX_FULL : OUTPUT_KBD_FULL;
     }
@@ -924,8 +919,7 @@ static void data_write(uint8_t value) {
 }
 
 static void data_access(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in,
-    uint32_t *value
+    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
 ) {
     (void)v;
     (void)ctx;
@@ -946,8 +940,7 @@ static void data_access(
     for (size_t i = 1; i < size; i++) {
         uint16_t port = (uint16_t)(PORT_DATA + i);
         if (in) {
-            *value = (*value & ~((uint32_t)0xff << (8 * i)))
-                | (uint32_t)inb(port) << (8 * i);
+            *value = (*value & ~((uint32_t)0xff << (8 * i))) | (uint32_t)inb(port) << (8 * i);
         } else {
             outb(port, (uint8_t)(*value >> (8 * i)));
         }
@@ -956,8 +949,7 @@ static void data_access(
 }
 
 static void command_access(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in,
-    uint32_t *value
+    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
 ) {
     (void)v;
     (void)ctx;
@@ -965,9 +957,9 @@ static void command_access(
     spinlock_acquire(&lock);
     if (in) {
         uint8_t status = STATUS_NOT_INHIBITED | (ram[0] & CCB_SYSTEM)
-            | (last_was_command ? STATUS_COMMAND : 0)
-            | (output_full ? STATUS_OUTPUT_FULL : 0)
-            | (output_full && output_aux ? STATUS_AUX_DATA : 0);
+                       | (last_was_command ? STATUS_COMMAND : 0)
+                       | (output_full ? STATUS_OUTPUT_FULL : 0)
+                       | (output_full && output_aux ? STATUS_AUX_DATA : 0);
         *value = (*value & ~(uint32_t)0xff) | status;
     } else {
         last_was_command = true;
@@ -976,8 +968,7 @@ static void command_access(
     for (size_t i = 1; i < size; i++) {
         uint16_t port = (uint16_t)(PORT_COMMAND + i);
         if (in) {
-            *value = (*value & ~((uint32_t)0xff << (8 * i)))
-                | (uint32_t)inb(port) << (8 * i);
+            *value = (*value & ~((uint32_t)0xff << (8 * i))) | (uint32_t)inb(port) << (8 * i);
         } else {
             outb(port, (uint8_t)(*value >> (8 * i)));
         }
@@ -993,31 +984,30 @@ static void key_bytes(uint16_t usage, bool pressed, uint8_t modifiers) {
         if (!pressed) {
             return;
         }
-        static const uint8_t pause_set1[] = {
-            SCAN_PAUSE, 0x1d, 0x45, SCAN_PAUSE, 0x9d, 0xc5
-        };
+        static const uint8_t pause_set1[] = { SCAN_PAUSE, 0x1d, 0x45, SCAN_PAUSE, 0x9d, 0xc5 };
         static const uint8_t pause_set2[] = {
-            SCAN_PAUSE, 0x14, 0x77, SCAN_PAUSE, SCAN_BREAK, 0x14, SCAN_BREAK,
-            0x77
+            SCAN_PAUSE, 0x14, 0x77, SCAN_PAUSE, SCAN_BREAK, 0x14, SCAN_BREAK, 0x77
         };
-        static const uint8_t break_set1[] = {
-            SCAN_EXTENDED, 0x46, SCAN_EXTENDED, 0xc6
-        };
+        static const uint8_t break_set1[] = { SCAN_EXTENDED, 0x46, SCAN_EXTENDED, 0xc6 };
         static const uint8_t break_set2[] = {
             SCAN_EXTENDED, 0x7e, SCAN_EXTENDED, SCAN_BREAK, 0x7e
         };
         bool ctrl = (modifiers & HID_MOD_CTRL) != 0;
-        const uint8_t *bytes = ctrl ? (set1 ? break_set1 : break_set2)
-            : (set1 ? pause_set1 : pause_set2);
-        size_t count = ctrl ? (set1 ? sizeof(break_set1) : sizeof(break_set2))
-            : (set1 ? sizeof(pause_set1) : sizeof(pause_set2));
+        const uint8_t *bytes;
+        size_t count;
+        if (ctrl) {
+            bytes = set1 ? break_set1 : break_set2;
+            count = set1 ? sizeof(break_set1) : sizeof(break_set2);
+        } else {
+            bytes = set1 ? pause_set1 : pause_set2;
+            count = set1 ? sizeof(pause_set1) : sizeof(pause_set2);
+        }
         for (size_t i = 0; i < count; i++) {
             queue_put(q, bytes[i]);
         }
         return;
     }
-    struct kbc_key key = usage < KBC_KEYS ? kbc_keys[usage]
-        : (struct kbc_key){ 0 };
+    struct kbc_key key = usage < KBC_KEYS ? kbc_keys[usage] : (struct kbc_key){ 0 };
     uint8_t code = set1 ? key.set1 : key.set2;
     if (code == 0) {
         return;
@@ -1029,7 +1019,11 @@ static void key_bytes(uint16_t usage, bool pressed, uint8_t modifiers) {
             if (!pressed && !set1) {
                 queue_put(q, SCAN_BREAK);
             }
-            queue_put(q, set1 ? (pressed ? 0x54 : 0xd4) : 0x84);
+            uint8_t sysrq = 0x84;
+            if (set1) {
+                sysrq = pressed ? 0x54 : 0xd4;
+            }
+            queue_put(q, sysrq);
             return;
         }
         if ((modifiers & (HID_MOD_CTRL | HID_MOD_SHIFT)) == 0 && pressed) {
@@ -1132,8 +1126,7 @@ static void real_receive(void) {
     bool aux;
     uint8_t byte;
     spinlock_acquire(&lock);
-    for (size_t i = 0; i < REAL_RECEIVE_MAX && i8042_receive(&aux, &byte);
-         i++) {
+    for (size_t i = 0; i < REAL_RECEIVE_MAX && i8042_receive(&aux, &byte); i++) {
         if (aux) {
             // The chipset's mouse may not take what it was asked to, which the
             // USB one's reports need to know.
@@ -1175,9 +1168,7 @@ void kbc_init(void) {
     hv_timer_add(&kbd_repeat);
     if (real_keyboard || real_aux) {
         if (real_keyboard) {
-            irq_take_host_line(
-                irq_isa_gsi(IRQ_KEYBOARD), real_interrupt, NULL
-            );
+            irq_take_host_line(irq_isa_gsi(IRQ_KEYBOARD), real_interrupt, NULL);
         }
         if (real_aux) {
             irq_take_host_line(irq_isa_gsi(IRQ_AUX), real_interrupt, NULL);

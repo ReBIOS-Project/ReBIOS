@@ -34,17 +34,13 @@ uintptr_t efi_alloc_pages(size_t count, uintptr_t max_addr) {
 // Some firmware leaves memory above 4 GiB out of the page tables the loader
 // runs on until it has its own, so that is where an address-free allocation
 // goes last.
-uintptr_t efi_alloc_pages_typed(
-    size_t count, uintptr_t max_addr, EFI_MEMORY_TYPE type
-) {
+uintptr_t efi_alloc_pages_typed(size_t count, uintptr_t max_addr, EFI_MEMORY_TYPE type) {
     EFI_PHYSICAL_ADDRESS addr = max_addr == 0 ? UINT32_MAX : max_addr;
-    if (efi_bs->AllocatePages(EfiAllocateMaxAddress, type, count, &addr)
-     == EFI_SUCCESS) {
+    if (efi_bs->AllocatePages(EfiAllocateMaxAddress, type, count, &addr) == EFI_SUCCESS) {
         return addr;
     }
     if (max_addr != 0
-     || efi_bs->AllocatePages(EfiAllocateAnyPages, type, count, &addr)
-     != EFI_SUCCESS) {
+     || efi_bs->AllocatePages(EfiAllocateAnyPages, type, count, &addr) != EFI_SUCCESS) {
         return 0;
     }
     return addr;
@@ -56,9 +52,8 @@ EFI_HANDLE *efi_locate_handles(EFI_GUID *protocol, EFI_UINTN *count) {
     // LocateHandleBuffer() came with EFI 1.10, as did the protocols of
     // interest.
     bool unlocated = efi_bs->Hdr.Revision < EFI_1_10_SYSTEM_TABLE_REVISION
-        || efi_bs->LocateHandleBuffer(
-            EfiByProtocol, protocol, NULL, count, &handles
-        ) != EFI_SUCCESS;
+                  || efi_bs->LocateHandleBuffer(EfiByProtocol, protocol, NULL, count, &handles)
+                      != EFI_SUCCESS;
     if (unlocated) {
         *count = 0;
         return NULL;

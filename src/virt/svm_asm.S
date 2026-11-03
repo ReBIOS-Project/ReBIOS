@@ -15,7 +15,7 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-/* Offsets into struct gprs. RAX and RSP live in the VMCB. */
+// Offsets into struct gprs. RAX and RSP live in the VMCB.
 #define GPR_RCX 8
 #define GPR_RDX 16
 #define GPR_RBX 24
@@ -31,17 +31,13 @@
 #define GPR_R14 112
 #define GPR_R15 120
 
-    .text
+.text
 
-    /*
-     * void svm_enter(uintptr_t vmcb_pa, struct gprs *gprs)
-     *
-     * Runs the guest until its next #VMEXIT, with the state VMLOAD and VMSAVE
-     * cover loaded from and saved to the VMCB, as nothing the host does relies
-     * on that state.
-     */
-    .globl svm_enter
-    .type svm_enter, @function
+// svm_enter(vmcb_pa, gprs) runs the guest until its next #VMEXIT, with the
+// state VMLOAD and VMSAVE cover loaded from and saved to the VMCB, as nothing
+// the host does relies on that state.
+.globl svm_enter
+.type svm_enter, %function
 svm_enter:
     pushq %rbp
     pushq %rbx
@@ -67,10 +63,8 @@ svm_enter:
     movq GPR_R15(%rsi), %r15
     movq GPR_RSI(%rsi), %rsi
 
-    /*
-     * With V_INTR_MASKING, the host's IF at VMRUN gates physical interrupts in
-     * the guest; GIF holds them off in the host meanwhile.
-     */
+    // With V_INTR_MASKING, the host's IF at VMRUN gates physical interrupts in
+    // the guest; GIF holds them off in the host meanwhile.
     clgi
     sti
     vmload %rax
@@ -78,7 +72,7 @@ svm_enter:
     vmsave %rax
     cli
 
-    /* RAX holds the VMCB address again, so it is free to address the gprs. */
+    // RAX holds the VMCB address again, so it is free to address the gprs.
     movq (%rsp), %rax
     movq %rcx, GPR_RCX(%rax)
     movq %rdx, GPR_RDX(%rax)
@@ -102,5 +96,5 @@ svm_enter:
     popq %r12
     popq %rbx
     popq %rbp
-    ret
-    .size svm_enter, . - svm_enter
+    retq
+.size svm_enter, . - svm_enter

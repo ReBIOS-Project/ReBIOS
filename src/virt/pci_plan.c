@@ -168,19 +168,19 @@ static void pack(struct container *c, size_t side) {
 
 // A window in a bridge's parent for what the bridge has on one side.
 static void window_add(
-    struct container *parent, struct container *c, size_t function,
-    uint8_t kind, size_t side_inside, size_t side
+    struct container *parent, struct container *c, size_t function, uint8_t kind,
+    size_t side_inside, size_t side
 ) {
     if (c->size[side_inside] == 0) {
         return;
     }
     uint64_t align = c->align[side_inside] > WINDOW_GRANULE
-        ? c->align[side_inside] : WINDOW_GRANULE;
+                   ? c->align[side_inside]
+                   : WINDOW_GRANULE;
     element_add(
         parent,
         (struct element){
-            function, kind, 0, side,
-            align_up(c->size[side_inside], WINDOW_GRANULE), align, 0
+            function, kind, 0, side, align_up(c->size[side_inside], WINDOW_GRANULE), align, 0
         }
     );
 }
@@ -192,19 +192,14 @@ static bool is_bridge(const struct pci_function *f) {
 // The last bus number the function's bus or, for a bridge, the buses behind it
 // take.
 static uint8_t last_bus(const struct pci_function *f) {
-    bool bridge = (f->header_type == HEADER_BRIDGE
-        || f->header_type == HEADER_CARDBUS)
-        && f->secondary_bus > f->addr.bus;
-    return bridge && f->subordinate_bus > f->addr.bus ? f->subordinate_bus
-        : f->addr.bus;
+    bool bridge = (f->header_type == HEADER_BRIDGE || f->header_type == HEADER_CARDBUS)
+               && f->secondary_bus > f->addr.bus;
+    return bridge && f->subordinate_bus > f->addr.bus ? f->subordinate_bus : f->addr.bus;
 }
 
-static size_t root_index(
-    const struct pci_topology *t, const struct pci_function *f
-) {
+static size_t root_index(const struct pci_topology *t, const struct pci_function *f) {
     for (size_t r = 0; r < t->root_bus_count; r++) {
-        if (t->root_buses[r].segment == f->addr.segment
-         && t->root_buses[r].bus == f->addr.bus) {
+        if (t->root_buses[r].segment == f->addr.segment && t->root_buses[r].bus == f->addr.bus) {
             return r;
         }
     }
@@ -212,18 +207,14 @@ static size_t root_index(
 }
 
 // The root bus whose hierarchy the function is in.
-static size_t root_of(
-    const struct pci_topology *t, const struct pci_function *f
-) {
+static size_t root_of(const struct pci_topology *t, const struct pci_function *f) {
     while (f->parent != NULL) {
         f = f->parent;
     }
     return root_index(t, f);
 }
 
-static uint32_t depth_of(
-    const struct pci_topology *t, const struct pci_function *f
-) {
+static uint32_t depth_of(const struct pci_topology *t, const struct pci_function *f) {
     size_t depth = 0;
     while (f->parent != NULL && depth < t->function_count) {
         f = f->parent;
@@ -236,12 +227,10 @@ static uint32_t depth_of(
 // bridge decodes 64-bit addresses there, as the 64-bit prefetchable window of
 // a port does.
 static bool path_reaches_high(
-    const struct pci_topology *t, const struct pci_function *f,
-    bool prefetchable
+    const struct pci_topology *t, const struct pci_function *f, bool prefetchable
 ) {
     for (const struct pci_function *b = f->parent; b != NULL; b = b->parent) {
-        if (!prefetchable
-         || (pci_cfg_read(b->addr, BRIDGE_PREF, 4) & 0xf) != WINDOW_PREF_64) {
+        if (!prefetchable || (pci_cfg_read(b->addr, BRIDGE_PREF, 4) & 0xf) != WINDOW_PREF_64) {
             return false;
         }
     }
@@ -255,8 +244,8 @@ static bool path_reaches_high(
 // root bus, high_windows[n + r] whether root bus r needs its port's above 4
 // GiB.
 static bool pref_window_low(
-    const struct pci_topology *t, const struct pci_function *bridge,
-    size_t root, const bool *high_windows
+    const struct pci_topology *t, const struct pci_function *bridge, size_t root,
+    const bool *high_windows
 ) {
     bool port = root != plan.primary;
     if (port && high_windows[t->function_count + root]) {
@@ -266,18 +255,17 @@ static bool pref_window_low(
         return port;
     }
     for (const struct pci_function *b = bridge; b != NULL; b = b->parent) {
-        if (high_windows[b - t->functions]
-         || pci_cfg_read(b->addr, BRIDGE_PREF, 4) == 0) {
+        if (high_windows[b - t->functions] || pci_cfg_read(b->addr, BRIDGE_PREF, 4) == 0) {
             return false;
         }
     }
     return true;
 }
 
-// Whether the host bridge of the function's root bus forwards [base,
-// base + size) to it, as it does for what the firmware assigned, and not for
-// what a sizing left in a register it never assigned. Without host bridges
-// known, anything goes.
+// Whether the host bridge of the function's root bus forwards size bytes from
+// base to it, as it does for what the firmware assigned, and not for what a
+// sizing left in a register it never assigned. Without host bridges known,
+// anything goes.
 static bool routed(const struct pci_function *f, uintptr_t base, size_t size) {
     while (f->parent != NULL) {
         f = f->parent;
@@ -289,8 +277,7 @@ static bool routed(const struct pci_function *f, uintptr_t base, size_t size) {
             continue;
         }
         for (size_t w = 0; w < hb->window_count; w++) {
-            if (base >= hb->windows[w].base
-             && base + size <= hb->windows[w].end) {
+            if (base >= hb->windows[w].base && base + size <= hb->windows[w].end) {
                 return true;
             }
         }
@@ -300,8 +287,7 @@ static bool routed(const struct pci_function *f, uintptr_t base, size_t size) {
 }
 
 static bool bar_high(
-    const struct pci_topology *t, const struct pci_function *f,
-    const struct pci_bar *bar
+    const struct pci_topology *t, const struct pci_function *f, const struct pci_bar *bar
 ) {
     return bar->size > PCI_PLAN_LOW_BAR_MAX && bar->kind == PCI_BAR_MEM64
         && path_reaches_high(t, f, bar->prefetchable);
@@ -315,9 +301,7 @@ static size_t element_size(size_t size) {
 
 // The highest address of the gaps where size bytes aligned to align fit, taken
 // out of them.
-static bool take_top(
-    struct gap *gaps, size_t *count, size_t size, uint64_t align, uint64_t *at
-) {
+static bool take_top(struct gap *gaps, size_t *count, size_t size, uint64_t align, uint64_t *at) {
     for (size_t i = *count; i-- > 0; ) {
         if (gaps[i].end - gaps[i].base < size) {
             continue;
@@ -328,10 +312,7 @@ static bool take_top(
         }
         uintptr_t end = base + size;
         if (end < gaps[i].end) {
-            memmove(
-                &gaps[i + 2], &gaps[i + 1],
-                (*count - i - 1) * sizeof(struct gap)
-            );
+            memmove(&gaps[i + 2], &gaps[i + 1], (*count - i - 1) * sizeof(struct gap));
             gaps[i + 1] = (struct gap){ end, gaps[i].end };
             (*count)++;
         }
@@ -389,9 +370,7 @@ static bool numbers_free(const bool *used, size_t base, size_t count) {
 // below them, take the lowest numbers in a row that segment 0 leaves free.
 // Gives each root bus's guest number, -1 where it has none, and returns the
 // highest in use.
-static uint8_t number_buses(
-    const struct pci_topology *t, const uint8_t *ends, int *guest_roots
-) {
+static uint8_t number_buses(const struct pci_topology *t, const uint8_t *ends, int *guest_roots) {
     bool used[BUSES];
     memset(used, 0, BUSES * sizeof(bool));
     for (size_t i = 0; i < t->function_count; i++) {
@@ -432,15 +411,13 @@ static uint8_t number_buses(
         }
         size_t count = (size_t)ends[r] - rb->bus + 1;
         size_t base = r == plan.primary ? 0 : 1;
-        while (r != plan.primary && base < BUSES
-            && !numbers_free(used, base, count)) {
+        while (r != plan.primary && base < BUSES && !numbers_free(used, base, count)) {
             base++;
         }
         if (base == BUSES) {
             printf(
-                "PCI root bus %04x:%02x: no room for its %zu buses among the "
-                "guest's bus numbers\n",
-                rb->segment, rb->bus, count
+                "PCI root bus %04x:%02x: no room for its %zu buses among the guest's bus "
+                "numbers\n", rb->segment, rb->bus, count
             );
             continue;
         }
@@ -465,17 +442,14 @@ static uint8_t number_buses(
 // The device numbers of the guest's bus 0 that its functions leave free, and
 // the devices below its host bridge in the firmware's namespace where firmware
 // is true, lowest first. Device 0 is the host bridge's to software.
-static size_t free_devices(
-    const struct pci_topology *t, bool firmware, uint8_t *devices
-) {
+static size_t free_devices(const struct pci_topology *t, bool firmware, uint8_t *devices) {
     bool taken[DEVICES];
     memset(taken, 0, DEVICES * sizeof(bool));
     taken[0] = true;
     const struct pci_root_bus *primary = &t->root_buses[plan.primary];
     for (size_t i = 0; i < t->function_count; i++) {
         const struct pci_function *f = &t->functions[i];
-        if (f->addr.segment == primary->segment
-         && f->addr.bus == primary->bus) {
+        if (f->addr.segment == primary->segment && f->addr.bus == primary->bus) {
             taken[f->addr.device] = true;
         }
     }
@@ -486,13 +460,10 @@ static size_t free_devices(
             continue;
         }
         uacpi_namespace_node *iter = NULL;
-        while (uacpi_namespace_node_next_typed(
-                   hb->node, &iter, UACPI_OBJECT_DEVICE_BIT
-               )
+        while (uacpi_namespace_node_next_typed(hb->node, &iter, UACPI_OBJECT_DEVICE_BIT)
             == UACPI_STATUS_OK) {
             uint64_t adr;
-            bool known = uacpi_eval_simple_integer(iter, "_ADR", &adr)
-                == UACPI_STATUS_OK;
+            bool known = uacpi_eval_simple_integer(iter, "_ADR", &adr) == UACPI_STATUS_OK;
             if (known && adr >> 16 < DEVICES) {
                 taken[adr >> 16] = true;
             }
@@ -509,16 +480,12 @@ static size_t free_devices(
 
 // A port on the guest's bus 0 for every root bus but the primary that has
 // guest bus numbers, its functions on the first device numbers free.
-static void ports_make(
-    const struct pci_topology *t, const uint8_t *ends, const int *guest_roots
-) {
+static void ports_make(const struct pci_topology *t, const uint8_t *ends, const int *guest_roots) {
     size_t wanted = 0;
     for (size_t r = 0; r < t->root_bus_count; r++) {
         wanted += r != plan.primary && guest_roots[r] >= 0;
     }
-    plan.ports = kmalloc(
-        (wanted != 0 ? wanted : 1) * sizeof(struct pci_plan_port)
-    );
+    plan.ports = kmalloc((wanted != 0 ? wanted : 1) * sizeof(struct pci_plan_port));
     plan.port_count = 0;
     if (wanted == 0) {
         return;
@@ -536,9 +503,8 @@ static void ports_make(
         size_t k = plan.port_count;
         if (k / PORT_FUNCTIONS >= device_count) {
             printf(
-                "PCI root bus %04x:%02x: no device number left on the guest's "
-                "bus 0 for its port\n",
-                rb->segment, rb->bus
+                "PCI root bus %04x:%02x: no device number left on the guest's bus 0 for its "
+                "port\n", rb->segment, rb->bus
             );
             continue;
         }
@@ -547,17 +513,14 @@ static void ports_make(
             .device = devices[k / PORT_FUNCTIONS],
             .function = (uint8_t)(k % PORT_FUNCTIONS),
             .secondary = (uint8_t)guest_roots[r],
-            .subordinate = (uint8_t)(guest_roots[r] + (ends[r] - rb->bus)),
+            .subordinate = (uint8_t)(guest_roots[r] + (ends[r] - rb->bus))
         };
     }
 }
 
 // What the root bus's functions and bridges decode of I/O space, in a window
 // of whole granules.
-static void io_window(
-    const struct pci_topology *t, size_t root, uint32_t *base,
-    uint32_t *limit
-) {
+static void io_window(const struct pci_topology *t, size_t root, uint32_t *base, uint32_t *limit) {
     uint32_t low = UINT32_MAX;
     uint32_t high = 0;
     for (size_t i = 0; i < t->function_count; i++) {
@@ -596,9 +559,7 @@ static void io_window(
 }
 
 // A window from a range, closed where it is empty.
-static void window_of(
-    struct pci_plan_range r, uintptr_t *base, uint64_t *limit
-) {
+static void window_of(struct pci_plan_range r, uintptr_t *base, uint64_t *limit) {
     if (r.end == r.base) {
         *base = WINDOW_GRANULE;
         *limit = WINDOW_GRANULE - 1;
@@ -608,9 +569,7 @@ static void window_of(
     }
 }
 
-static void assign(
-    const struct pci_topology *t, struct container *containers, size_t index
-) {
+static void assign(const struct pci_topology *t, struct container *containers, size_t index) {
     struct container *c = &containers[index];
     for (size_t i = 0; i < c->count; i++) {
         const struct element *e = &c->elements[i];
@@ -626,8 +585,7 @@ static void assign(
         struct pci_plan_function *pf = &plan.functions[e->function];
         switch (e->kind) {
             case ELEMENT_BAR: {
-                pf->bars[e->bar] = base
-                    + (f->bars[e->bar].base & (e->size - 1));
+                pf->bars[e->bar] = base + (f->bars[e->bar].base & (e->size - 1));
                 break;
             }
             case ELEMENT_ROM: {
@@ -642,8 +600,7 @@ static void assign(
                 break;
             }
             default: {
-                size_t side = e->kind == ELEMENT_PREF_WINDOW ? SIDE_PREF
-                    : SIDE_HIGH;
+                size_t side = e->kind == ELEMENT_PREF_WINDOW ? SIDE_PREF : SIDE_HIGH;
                 pf->pref_base = base;
                 pf->pref_limit = base + e->size - 1;
                 containers[e->function].base[side] = base;
@@ -656,8 +613,7 @@ static void assign(
 
 // The lowest base from at, of size and align, that no obstacle overlaps.
 static uintptr_t high_base(
-    const struct pci_plan_range *obstacles, size_t count, uint64_t at,
-    size_t size, uint64_t align
+    const struct pci_plan_range *obstacles, size_t count, uint64_t at, size_t size, uint64_t align
 ) {
     uintptr_t base = align_up(at, align);
     for (size_t i = 0; i < count; i++) {
@@ -670,20 +626,16 @@ static uintptr_t high_base(
 
 // The container of the root bus or bridge the display's VGA device is on, or
 // else of the guest's bus 0.
-static size_t vga_container(
-    const struct pci_topology *t, const uint32_t *parents
-) {
+static size_t vga_container(const struct pci_topology *t, const uint32_t *parents) {
     const struct handoff_pci_address *vga = &core_handoff->video.vga_device;
     for (size_t i = 0; i < t->function_count; i++) {
         const struct pci_addr addr = t->functions[i].addr;
-        if (addr.segment == vga->segment && addr.bus == vga->bus
-         && addr.device == vga->devfn >> 3 && addr.function == (vga->devfn & 7)
-         && parents[i] != NO_CONTAINER) {
+        if (addr.segment == vga->segment && addr.bus == vga->bus && addr.device == vga->devfn >> 3
+         && addr.function == (vga->devfn & 7) && parents[i] != NO_CONTAINER) {
             return parents[i];
         }
     }
-    return t->root_bus_count != 0 ? t->function_count + plan.primary
-        : NO_CONTAINER;
+    return t->root_bus_count != 0 ? t->function_count + plan.primary : NO_CONTAINER;
 }
 
 static const struct pci_plan_port *port_of(size_t root) {
@@ -696,19 +648,14 @@ static const struct pci_plan_port *port_of(size_t root) {
 }
 
 const struct pci_plan *pci_plan_make(
-    const struct pci_plan_range *obstacles, size_t count, size_t lfb_size,
-    uint64_t high_floor
+    const struct pci_plan_range *obstacles, size_t count, size_t lfb_size, uint64_t high_floor
 ) {
     const struct pci_topology *t = pci_enum_topology();
     size_t n = t->function_count;
     uint32_t roots = t->root_bus_count;
     made = true;
-    plan.functions = kmalloc(
-        (n != 0 ? n : 1) * sizeof(struct pci_plan_function)
-    );
-    plan.roots = kmalloc(
-        (roots != 0 ? roots : 1) * sizeof(struct pci_plan_root)
-    );
+    plan.functions = kmalloc((n != 0 ? n : 1) * sizeof(struct pci_plan_function));
+    plan.roots = kmalloc((roots != 0 ? roots : 1) * sizeof(struct pci_plan_root));
     plan.root_count = roots;
     plan.high_floor = high_floor;
     plan.primary = primary_root(t);
@@ -717,7 +664,7 @@ const struct pci_plan *pci_plan_make(
             .mem_base = WINDOW_GRANULE,
             .mem_limit = WINDOW_GRANULE - 1,
             .pref_base = WINDOW_GRANULE,
-            .pref_limit = WINDOW_GRANULE - 1,
+            .pref_limit = WINDOW_GRANULE - 1
         };
     }
 
@@ -755,9 +702,7 @@ const struct pci_plan *pci_plan_make(
     }
 
     // The bridges, and the ports, with something above 4 GiB behind them.
-    bool *high_windows = kmalloc(
-        (n + roots != 0 ? n + roots : 1) * sizeof(bool)
-    );
+    bool *high_windows = kmalloc((n + roots != 0 ? n + roots : 1) * sizeof(bool));
     for (size_t i = 0; i < n + roots; i++) {
         high_windows[i] = false;
     }
@@ -767,8 +712,7 @@ const struct pci_plan *pci_plan_make(
             if (!bar_high(t, f, &f->bars[b])) {
                 continue;
             }
-            for (const struct pci_function *up = f->parent; up != NULL;
-                 up = up->parent) {
+            for (const struct pci_function *up = f->parent; up != NULL; up = up->parent) {
                 high_windows[up - t->functions] = true;
             }
             size_t r = root_of(t, f);
@@ -784,45 +728,33 @@ const struct pci_plan *pci_plan_make(
             continue;
         }
         struct container *c = &containers[parents[i]];
-        bool pref_low = pref_window_low(
-            t, f->parent, root_of(t, f), high_windows
-        );
+        bool pref_low = pref_window_low(t, f->parent, root_of(t, f), high_windows);
         for (size_t b = 0; b < f->bar_count && b < 6; b++) {
             const struct pci_bar *bar = &f->bars[b];
-            if ((bar->kind != PCI_BAR_MEM32 && bar->kind != PCI_BAR_MEM64)
-             || bar->size == 0 || bar->base == 0) {
+            if ((bar->kind != PCI_BAR_MEM32 && bar->kind != PCI_BAR_MEM64) || bar->size == 0
+             || bar->base == 0) {
                 continue;
             }
-            size_t side = bar_high(t, f, bar) ? SIDE_HIGH
-                : bar->prefetchable && pref_low ? SIDE_PREF
-                : SIDE_MEMORY;
+            size_t side = bar_high(t, f, bar)
+                        ? SIDE_HIGH
+                        : bar->prefetchable && pref_low ? SIDE_PREF : SIDE_MEMORY;
             size_t size = element_size(bar->size);
-            element_add(
-                c, (struct element){ i, ELEMENT_BAR, b, side, size, size, 0 }
-            );
+            element_add(c, (struct element){ i, ELEMENT_BAR, b, side, size, size, 0 });
         }
-        if (f->rom.kind == PCI_BAR_MEM32 && f->rom.size != 0
-         && f->rom.base != 0 && routed(f, f->rom.base, f->rom.size)) {
+        if (f->rom.kind == PCI_BAR_MEM32 && f->rom.size != 0 && f->rom.base != 0
+         && routed(f, f->rom.base, f->rom.size)) {
             size_t size = element_size(f->rom.size);
-            element_add(
-                c,
-                (struct element){
-                    i, ELEMENT_ROM, 0, SIDE_MEMORY, size, size, 0
-                }
-            );
+            element_add(c, (struct element){ i, ELEMENT_ROM, 0, SIDE_MEMORY, size, size, 0 });
         }
     }
     // In the memory of what the VGA's card is on: an installed Windows 7 keeps
     // to 16 colours with the linear framebuffer in reserved memory, and on a
     // root bus's when the card is behind a bridge.
-    size_t lfb_container = lfb_size != 0 ? vga_container(t, parents)
-        : NO_CONTAINER;
+    size_t lfb_container = lfb_size != 0 ? vga_container(t, parents) : NO_CONTAINER;
     if (lfb_container != NO_CONTAINER) {
         element_add(
             &containers[lfb_container],
-            (struct element){
-                0, ELEMENT_LFB, 0, SIDE_MEMORY, lfb_size, 2 * ONE_MIB, 0
-            }
+            (struct element){ 0, ELEMENT_LFB, 0, SIDE_MEMORY, lfb_size, 2 * ONE_MIB, 0 }
         );
     }
 
@@ -850,7 +782,7 @@ const struct pci_plan *pci_plan_make(
         struct container *parent = &containers[parents[i]];
         // A root bus has a region below 4 GiB, a port two windows.
         bool on_primary = t->functions[i].parent == NULL
-            && root_of(t, &t->functions[i]) == plan.primary;
+                       && root_of(t, &t->functions[i]) == plan.primary;
         size_t pref_side = on_primary ? SIDE_MEMORY : SIDE_PREF;
         window_add(parent, c, i, ELEMENT_LOW_WINDOW, SIDE_MEMORY, SIDE_MEMORY);
         window_add(parent, c, i, ELEMENT_PREF_WINDOW, SIDE_PREF, pref_side);
@@ -906,7 +838,7 @@ const struct pci_plan *pci_plan_make(
         pack(c, SIDE_HIGH);
         plan.roots[r] = (struct pci_plan_root){
             .segment = t->root_buses[r].segment,
-            .bus = t->root_buses[r].bus,
+            .bus = t->root_buses[r].bus
         };
         piece_size[2 * r] = 0;
         piece_size[2 * r + 1] = 0;
@@ -915,20 +847,16 @@ const struct pci_plan *pci_plan_make(
         }
         if (c->size[SIDE_HIGH] != 0) {
             c->base[SIDE_HIGH] = high_base(
-                obstacles, count, high_cursor, c->size[SIDE_HIGH],
-                c->align[SIDE_HIGH]
+                obstacles, count, high_cursor, c->size[SIDE_HIGH], c->align[SIDE_HIGH]
             );
             c->placed[SIDE_HIGH] = true;
             high_cursor = c->base[SIDE_HIGH] + c->size[SIDE_HIGH];
-            plan.roots[r].high = (struct pci_plan_range){
-                c->base[SIDE_HIGH], high_cursor
-            };
+            plan.roots[r].high = (struct pci_plan_range){ c->base[SIDE_HIGH], high_cursor };
         }
         for (size_t s = 0; s < 2; s++) {
             size_t side = s == 0 ? SIDE_MEMORY : SIDE_PREF;
             piece_size[2 * r + s] = align_up(c->size[side], ONE_MIB);
-            piece_align[2 * r + s] = c->align[side] > ONE_MIB
-                ? c->align[side] : ONE_MIB;
+            piece_align[2 * r + s] = c->align[side] > ONE_MIB ? c->align[side] : ONE_MIB;
         }
     }
     piece_size[ecam_piece] = ecam_present ? ecam_size : 0;
@@ -952,14 +880,10 @@ const struct pci_plan *pci_plan_make(
         uint64_t at;
         if (!take_top(gaps, &gap_count, piece_size[p], piece_align[p], &at)) {
             if (p == ecam_piece) {
-                printf(
-                    "PCI: no room below 4 GiB for the guest's configuration "
-                    "space window\n"
-                );
+                printf("PCI: no room below 4 GiB for the guest's configuration space window\n");
             } else {
                 printf(
-                    "PCI root bus %04x:%02x: no room below 4 GiB for 0x%llx "
-                    "bytes of BARs\n",
+                    "PCI root bus %04x:%02x: no room below 4 GiB for 0x%llx bytes of BARs\n",
                     plan.roots[p / 2].segment, plan.roots[p / 2].bus,
                     (unsigned long long)piece_size[p]
                 );
@@ -1006,8 +930,8 @@ const struct pci_plan *pci_plan_make(
         const struct pci_plan_root *pr = &plan.roots[port->root];
         window_of(pr->low, &port->mem_base, &port->mem_limit);
         window_of(
-            pr->pref.end != pr->pref.base ? pr->pref : pr->high,
-            &port->pref_base, &port->pref_limit
+            pr->pref.end != pr->pref.base ? pr->pref : pr->high, &port->pref_base,
+            &port->pref_limit
         );
         io_window(t, port->root, &port->io_base, &port->io_limit);
     }
@@ -1028,14 +952,12 @@ const struct pci_plan *pci_plan_make(
     for (size_t r = 0; r < roots; r++) {
         const struct pci_plan_root *pr = &plan.roots[r];
         printf(
-            "PCI root bus %04x:%02x: guest memory 0x%llx-0x%llx", pr->segment,
-            pr->bus, (unsigned long long)pr->low.base,
-            (unsigned long long)pr->low.end
+            "PCI root bus %04x:%02x: guest memory 0x%llx-0x%llx", pr->segment, pr->bus,
+            (unsigned long long)pr->low.base, (unsigned long long)pr->low.end
         );
         if (pr->pref.end != pr->pref.base) {
             printf(
-                ", prefetchable 0x%llx-0x%llx",
-                (unsigned long long)pr->pref.base,
+                ", prefetchable 0x%llx-0x%llx", (unsigned long long)pr->pref.base,
                 (unsigned long long)pr->pref.end
             );
         }
@@ -1051,22 +973,17 @@ const struct pci_plan *pci_plan_make(
         const struct pci_plan_port *port = &plan.ports[k];
         const struct pci_plan_root *pr = &plan.roots[port->root];
         printf(
-            "PCI root bus %04x:%02x: the guest's buses %02x-%02x, behind its "
-            "port at 00:%02x.%x\n",
-            pr->segment, pr->bus, port->secondary, port->subordinate,
-            port->device, port->function
+            "PCI root bus %04x:%02x: the guest's buses %02x-%02x, behind its port at 00:%02x.%x\n",
+            pr->segment, pr->bus, port->secondary, port->subordinate, port->device, port->function
         );
     }
     if (plan.ecam != 0) {
         printf(
-            "PCI: guest configuration space for buses 00-%02x at 0x%llx\n",
-            plan.bus_end, (unsigned long long)plan.ecam
+            "PCI: guest configuration space for buses 00-%02x at 0x%llx\n", plan.bus_end,
+            (unsigned long long)plan.ecam
         );
     }
-    printf(
-        "PCI: the guest's PCI hole starts at 0x%llx\n",
-        (unsigned long long)plan.tolud
-    );
+    printf("PCI: the guest's PCI hole starts at 0x%llx\n", (unsigned long long)plan.tolud);
     return &plan;
 }
 

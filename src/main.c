@@ -52,8 +52,7 @@ static void reserve(uintptr_t base, size_t pages) {
         panic("Too many hypervisor memory ranges\n");
     }
     loader_handoff->reserved[loader_handoff->reserved_count].base = base;
-    loader_handoff->reserved[loader_handoff->reserved_count].size = pages
-        * 4096;
+    loader_handoff->reserved[loader_handoff->reserved_count].size = pages * 4096;
     loader_handoff->reserved_count++;
 }
 
@@ -91,8 +90,7 @@ static bool exit_boot_services(void) {
     for (size_t attempt = 0; attempt < 16; attempt++) {
         size_t size = buf_size;
         EFI_STATUS status = efi_bs->GetMemoryMap(
-            &size, (EFI_MEMORY_DESCRIPTOR *)(uintptr_t)buf, &map_key,
-            &desc_size, &desc_version
+            &size, (EFI_MEMORY_DESCRIPTOR *)(uintptr_t)buf, &map_key, &desc_size, &desc_version
         );
         if (status == EFI_BUFFER_TOO_SMALL) {
             if (buf != 0) {
@@ -105,13 +103,11 @@ static bool exit_boot_services(void) {
             }
             continue;
         }
-        if (status != EFI_SUCCESS
-         || desc_size < sizeof(EFI_MEMORY_DESCRIPTOR)) {
+        if (status != EFI_SUCCESS || desc_size < sizeof(EFI_MEMORY_DESCRIPTOR)) {
             return false;
         }
 
-        if (efi_bs->ExitBootServices(efi_image_handle, map_key)
-         == EFI_SUCCESS) {
+        if (efi_bs->ExitBootServices(efi_image_handle, map_key) == EFI_SUCCESS) {
             efi_boot_services_exited = true;
             reserve(buf, page_count(buf_size));
             loader_handoff->efi_mmap = buf;
@@ -140,13 +136,11 @@ static uintptr_t memory_map_top(void) {
         return top;
     }
     EFI_STATUS status = efi_bs->GetMemoryMap(
-        &size, (EFI_MEMORY_DESCRIPTOR *)(uintptr_t)buf, &map_key, &desc_size,
-        &desc_version
+        &size, (EFI_MEMORY_DESCRIPTOR *)(uintptr_t)buf, &map_key, &desc_size, &desc_version
     );
     if (status == EFI_SUCCESS && desc_size >= sizeof(EFI_MEMORY_DESCRIPTOR)) {
         for (size_t off = 0; off + desc_size <= size; off += desc_size) {
-            EFI_MEMORY_DESCRIPTOR *desc
-                = (EFI_MEMORY_DESCRIPTOR *)(uintptr_t)(buf + off);
+            EFI_MEMORY_DESCRIPTOR *desc = (EFI_MEMORY_DESCRIPTOR *)(uintptr_t)(buf + off);
             uintptr_t end = desc->PhysicalStart + desc->NumberOfPages * 4096;
             if (end > top) {
                 top = end;
@@ -168,9 +162,7 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     printf("ReBIOS\n");
     config_load();
 
-    uintptr_t handoff_addr = efi_alloc_pages(
-        page_count(sizeof(struct handoff)), 0
-    );
+    uintptr_t handoff_addr = efi_alloc_pages(page_count(sizeof(struct handoff)), 0);
     if (handoff_addr == 0) {
         panic("Cannot allocate the handoff\n");
     }
@@ -180,10 +172,7 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
 
     video_find_framebuffer();
     console_init();
-    log_init(
-        config.serial ? config.serial_port : 0, config.serial_baud,
-        config.verbose
-    );
+    log_init(config.serial ? config.serial_port : 0, config.serial_baud, config.verbose);
 
     if (!iommu_check()) {
         return EFI_UNSUPPORTED;

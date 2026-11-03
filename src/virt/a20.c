@@ -50,7 +50,7 @@ static void pass_rest(uint16_t port, size_t size, bool in, uint32_t *value) {
     for (size_t i = 1; i < size; i++) {
         if (in) {
             *value = (*value & ~((uint32_t)0xff << (8 * i)))
-                | (uint32_t)inb((uint16_t)(port + i)) << (8 * i);
+                   | (uint32_t)inb((uint16_t)(port + i)) << (8 * i);
         } else {
             outb((uint16_t)(port + i), (uint8_t)(*value >> (8 * i)));
         }
@@ -62,8 +62,7 @@ static uint8_t with_a20(uint8_t value, bool open) {
 }
 
 static void system_control_a(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in,
-    uint32_t *value
+    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
 ) {
     (void)v;
     (void)ctx;
@@ -92,8 +91,6 @@ void a20_init(void) {
     // the hardware has it.
     port92_open = (inb(SYSTEM_CONTROL_A) & A20_BIT) != 0;
 
-    struct io_handler system_control = {
-        SYSTEM_CONTROL_A, 1, system_control_a, NULL
-    };
+    struct io_handler system_control = { SYSTEM_CONTROL_A, 1, system_control_a, NULL };
     io_register(&system_control);
 }

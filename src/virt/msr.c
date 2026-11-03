@@ -133,8 +133,7 @@
 #define CPUID_1_EDX_DS ((uint32_t)1 << 21)
 #define MISC_ENABLE_PEBS_UNAVAILABLE ((uint64_t)1 << 12)
 #define PERF_CAPABILITIES_PEBS \
-    ((uint64_t)3 << 6 | (uint64_t)0xf << 8 | (uint64_t)1 << 14 \
-        | (uint64_t)3 << 16)
+    ((uint64_t)3 << 6 | (uint64_t)0xf << 8 | (uint64_t)1 << 14 | (uint64_t)3 << 16)
 #define PERF_CAPABILITIES_PEBS_FORMAT(c) (((c) >> 8) & 0xf)
 #define MSR_IA32_PEBS_ENABLE 0x3f1
 
@@ -316,9 +315,7 @@ static void misc_enable_init(void) {
     // The limit where leaves go past 2 and it can still be set; XD disable is
     // model-specific, known to exist only where the firmware set it.
     uint32_t max = cpuid(0, 0).eax;
-    if (max > 2
-     && (max < 7
-      || (cpuid(7, 1).ebx & CPUID_7_1_EBX_CPUIDMAXVAL_LIM_RMV) == 0)) {
+    if (max > 2 && (max < 7 || (cpuid(7, 1).ebx & CPUID_7_1_EBX_CPUIDMAXVAL_LIM_RMV) == 0)) {
         misc_enable_supported |= MISC_ENABLE_LIMIT_CPUID;
     }
     misc_enable_supported |= misc_enable_firmware & MISC_ENABLE_XD_DISABLE;
@@ -328,16 +325,14 @@ static void misc_enable_init(void) {
 
 static void mcg_ctl_init(void) {
     uint64_t cap;
-    if (virt_vmx && rdmsr_safe(MSR_IA32_MCG_CAP, &cap)
-     && (cap & MCG_CAP_CTL_P) != 0) {
+    if (virt_vmx && rdmsr_safe(MSR_IA32_MCG_CAP, &cap) && (cap & MCG_CAP_CTL_P) != 0) {
         mcg_ctl = true;
         virt_intercept_msr(MSR_IA32_MCG_CTL, true, true);
     }
 }
 
 static void hfi_init(void) {
-    if (cpuid(0, 0).eax < 6
-     || (cpuid(6, 0).eax & CPUID_6_EAX_HW_FEEDBACK) == 0) {
+    if (cpuid(0, 0).eax < 6 || (cpuid(6, 0).eax & CPUID_6_EAX_HW_FEEDBACK) == 0) {
         return;
     }
     hfi = true;
@@ -349,10 +344,8 @@ static void hfi_init(void) {
 }
 
 static bool pt_msr(uint32_t msr) {
-    return msr == MSR_IA32_RTIT_OUTPUT_BASE
-        || msr == MSR_IA32_RTIT_OUTPUT_MASK_PTRS
-        || (msr >= MSR_IA32_RTIT_TRIGGER0_CFG
-            && msr <= MSR_IA32_RTIT_CR3_MATCH)
+    return msr == MSR_IA32_RTIT_OUTPUT_BASE || msr == MSR_IA32_RTIT_OUTPUT_MASK_PTRS
+        || (msr >= MSR_IA32_RTIT_TRIGGER0_CFG && msr <= MSR_IA32_RTIT_CR3_MATCH)
         || (msr >= MSR_IA32_RTIT_ADDR0_A && msr <= MSR_IA32_RTIT_ADDR3_B);
 }
 
@@ -362,8 +355,7 @@ static void pt_init(void) {
         return;
     }
     pt_hidden = true;
-    for (size_t msr = MSR_IA32_RTIT_OUTPUT_BASE; msr <= MSR_IA32_RTIT_ADDR3_B;
-         msr++) {
+    for (size_t msr = MSR_IA32_RTIT_OUTPUT_BASE; msr <= MSR_IA32_RTIT_ADDR3_B; msr++) {
         if (pt_msr(msr)) {
             virt_intercept_msr(msr, true, true);
         }
@@ -382,7 +374,7 @@ static void mpx_init(void) {
 static void perf_capabilities_init(void) {
     uint64_t capabilities;
     perf_capabilities = (cpuid(1, 0).ecx & CPUID_1_ECX_PDCM) != 0
-        && rdmsr_safe(MSR_IA32_PERF_CAPABILITIES, &capabilities);
+                     && rdmsr_safe(MSR_IA32_PERF_CAPABILITIES, &capabilities);
     if (perf_capabilities) {
         virt_intercept_msr(MSR_IA32_PERF_CAPABILITIES, true, false);
     }
@@ -391,13 +383,12 @@ static void perf_capabilities_init(void) {
 // Ice Lake Xeon, Sapphire and Emerald Rapids, Alder and Raptor Lake, and the
 // Gracemont N-series, all of family 6.
 static const uint8_t pebs_format_4_models[] = {
-    0x6a, 0x6c, 0x8f, 0xcf, 0x97, 0x9a, 0xb7, 0xba, 0xbf, 0xbe,
+    0x6a, 0x6c, 0x8f, 0xcf, 0x97, 0x9a, 0xb7, 0xba, 0xbf, 0xbe
 };
 
 static bool pebs_ept_friendly(void) {
     uint64_t capabilities;
-    if (perf_capabilities
-     && rdmsr_safe(MSR_IA32_PERF_CAPABILITIES, &capabilities)
+    if (perf_capabilities && rdmsr_safe(MSR_IA32_PERF_CAPABILITIES, &capabilities)
      && PERF_CAPABILITIES_PEBS_FORMAT(capabilities) >= 5) {
         return true;
     }
@@ -412,8 +403,7 @@ static bool pebs_ept_friendly(void) {
 
 static void pebs_init(void) {
     uint64_t misc;
-    if ((cpuid(1, 0).edx & CPUID_1_EDX_DS) == 0
-     || !rdmsr_safe(MSR_IA32_MISC_ENABLE, &misc)
+    if ((cpuid(1, 0).edx & CPUID_1_EDX_DS) == 0 || !rdmsr_safe(MSR_IA32_MISC_ENABLE, &misc)
      || (misc & MISC_ENABLE_PEBS_UNAVAILABLE) != 0) {
         return;
     }
@@ -426,8 +416,7 @@ static void pebs_init(void) {
 // The supervisor state components XSAVES and XRSTORS handle: only those the
 // guest gets, as XRSTORS would load PT's IA32_RTIT_CTL, for one.
 static void xss_init(void) {
-    if (cpuid(0, 0).eax >= 0xd
-     && (cpuid(0xd, 1).eax & CPUID_D_1_EAX_XSAVES) != 0) {
+    if (cpuid(0, 0).eax >= 0xd && (cpuid(0xd, 1).eax & CPUID_D_1_EAX_XSAVES) != 0) {
         xss = true;
         virt_intercept_msr(MSR_IA32_XSS, false, true);
     }
@@ -435,8 +424,7 @@ static void xss_init(void) {
 
 static void tsc_init(void) {
     virt_intercept_msr(MSR_IA32_TSC, true, true);
-    if (cpuid(0, 0).eax >= 7
-     && (cpuid(7, 0).ebx & CPUID_7_EBX_TSC_ADJUST) != 0) {
+    if (cpuid(0, 0).eax >= 7 && (cpuid(7, 0).ebx & CPUID_7_EBX_TSC_ADJUST) != 0) {
         tsc_adjust = true;
         virt_intercept_msr(MSR_IA32_TSC_ADJUST, true, true);
     }
@@ -471,39 +459,33 @@ void msr_init(void) {
         uint32_t family = cpu_signature().family;
         if (family == 0x15 || family == 0x16) {
             pstates_read_only = true;
-            for (size_t msr = MSR_AMD_PSTATE_DEF0; msr <= MSR_AMD_PSTATE_DEF7;
-                 msr++) {
+            for (size_t msr = MSR_AMD_PSTATE_DEF0; msr <= MSR_AMD_PSTATE_DEF7; msr++) {
                 virt_intercept_msr(msr, false, true);
             }
         }
         if (!svm_lbr_virtualisation) {
             lbr_hidden = true;
             virt_intercept_msr(MSR_DEBUGCTL, false, true);
-            for (size_t msr = MSR_LAST_BRANCH_FROM_IP;
-                 msr <= MSR_LAST_INT_TO_IP; msr++) {
+            for (size_t msr = MSR_LAST_BRANCH_FROM_IP; msr <= MSR_LAST_INT_TO_IP; msr++) {
                 virt_intercept_msr(msr, true, true);
             }
         }
         virt_intercept_msr(MSR_AMD_NB_CFG, true, true);
         virt_intercept_msr(MSR_AMD_L3_QOS_EXT_CFG, false, true);
         virt_intercept_msr(MSR_AMD_NODE_ID, false, true);
-        for (size_t msr = MSR_AMD_PERF_EVT_SEL0; msr <= MSR_AMD_PERF_EVT_SEL3;
-             msr++) {
+        for (size_t msr = MSR_AMD_PERF_EVT_SEL0; msr <= MSR_AMD_PERF_EVT_SEL3; msr++) {
             virt_intercept_msr(msr, true, true);
         }
-        for (size_t msr = MSR_AMD_PERF_CTL0; msr <= MSR_AMD_PERF_CTL5;
-             msr += 2) {
+        for (size_t msr = MSR_AMD_PERF_CTL0; msr <= MSR_AMD_PERF_CTL5; msr += 2) {
             virt_intercept_msr(msr, true, true);
         }
-        for (size_t msr = MSR_AMD_CPUID_7_FEATURES;
-             msr <= MSR_AMD_CPUID_EXT_FEATURES; msr++) {
+        for (size_t msr = MSR_AMD_CPUID_7_FEATURES; msr <= MSR_AMD_CPUID_EXT_FEATURES; msr++) {
             virt_intercept_msr(msr, true, true);
         }
         address_reserved = ~(((uint64_t)1 << cpu_physical_address_bits()) - 1)
-            & (((uint64_t)1 << 52) - 1);
+                         & (((uint64_t)1 << 52) - 1);
         virt_intercept_msr(MSR_AMD_SYSCFG, true, true);
-        for (size_t msr = MSR_AMD_IORR_BASE0; msr <= MSR_AMD_IORR_MASK1;
-             msr++) {
+        for (size_t msr = MSR_AMD_IORR_BASE0; msr <= MSR_AMD_IORR_MASK1; msr++) {
             virt_intercept_msr(msr, true, true);
         }
         virt_intercept_msr(MSR_AMD_TOP_MEM, true, true);
@@ -535,15 +517,12 @@ void msr_cpu_init(void) {
     uint32_t family = cpu_signature().family;
     uint64_t hwcr;
     if (!virt_vmx && (family == 0x17 || family == 0x19 || family == 0x1a)
-     && rdmsr_safe(MSR_AMD_HWCR, &hwcr)
-     && (hwcr & HWCR_LOCK_TSC_TO_CURRENT_P0) == 0) {
+     && rdmsr_safe(MSR_AMD_HWCR, &hwcr) && (hwcr & HWCR_LOCK_TSC_TO_CURRENT_P0) == 0) {
         wrmsr_safe(MSR_AMD_HWCR, hwcr | HWCR_LOCK_TSC_TO_CURRENT_P0);
     }
 }
 
-static bool in_ranges(
-    const struct msr_range *ranges, size_t count, uint32_t msr
-) {
+static bool in_ranges(const struct msr_range *ranges, size_t count, uint32_t msr) {
     for (size_t i = 0; i < count; i++) {
         if (msr >= ranges[i].first && msr <= ranges[i].last) {
             return true;
@@ -554,22 +533,15 @@ static bool in_ranges(
 
 bool msr_allowed(uint32_t msr) {
     if (!virt_vmx) {
-        return in_ranges(
-            msr_amd_architectural, msr_amd_architectural_count, msr
-        )
-            || (family_msrs != NULL
-                && in_ranges(family_msrs->ranges, family_msrs->count, msr));
+        return in_ranges(msr_amd_architectural, msr_amd_architectural_count, msr)
+            || (family_msrs != NULL && in_ranges(family_msrs->ranges, family_msrs->count, msr));
     }
-    bool architectural = in_ranges(
-        msr_intel_architectural, msr_intel_architectural_count, msr
-    );
+    bool architectural = in_ranges(msr_intel_architectural, msr_intel_architectural_count, msr);
     if (architectural) {
         return true;
     }
     for (size_t i = 0; model != NULL && i < model->count; i++) {
-        bool in_table = in_ranges(
-            model->tables[i]->ranges, model->tables[i]->count, msr
-        );
+        bool in_table = in_ranges(model->tables[i]->ranges, model->tables[i]->count, msr);
         if (in_table) {
             return true;
         }
@@ -601,8 +573,7 @@ void msr_allowed_init(void) {
         return;
     }
     for (size_t i = 0; i < msr_intel_model_count; i++) {
-        if (msr_intel_models[i].family == s.family
-         && msr_intel_models[i].model == s.model) {
+        if (msr_intel_models[i].family == s.family && msr_intel_models[i].model == s.model) {
             model = &msr_intel_models[i];
         }
     }
@@ -636,8 +607,7 @@ static struct hfi_package *hfi_package(bool create) {
 static uint64_t hfi_host_pointer(uint64_t value) {
     uintptr_t gpa = value & ~(uint64_t)HW_FEEDBACK_PTR_VALID;
     uintptr_t hpa;
-    if ((value & HW_FEEDBACK_PTR_VALID) == 0
-     || !layout_ram(gpa, hfi_pages * PAGE_SIZE)
+    if ((value & HW_FEEDBACK_PTR_VALID) == 0 || !layout_ram(gpa, hfi_pages * PAGE_SIZE)
      || !layout_contiguous(gpa, hfi_pages, &hpa)) {
         return 0;
     }
@@ -649,8 +619,7 @@ static uint64_t hfi_host_pointer(uint64_t value) {
 // configuration space window, from bus 0, as a power of two buses.
 static void amd_memory_init(struct vcpu *v) {
     const struct pci_plan *plan = pci_plan();
-    v->amd_top_mem = (plan != NULL ? plan->tolud : FOUR_GIB)
-        & ~(TOP_MEM_UNIT - 1);
+    v->amd_top_mem = (plan != NULL ? plan->tolud : FOUR_GIB) & ~(TOP_MEM_UNIT - 1);
     v->amd_top_mem2 = layout_high_ram_end() & ~(TOP_MEM_UNIT - 1);
     v->amd_syscfg = SYSCFG_MTRR_FIX_DRAM_EN | SYSCFG_MTRR_VAR_DRAM_EN;
     if (v->amd_top_mem2 > FOUR_GIB) {
@@ -700,23 +669,18 @@ void msr_vcpu_init(struct vcpu *v) {
         amd_memory_init(v);
         // As the firmware left them, from the vCPU's own processor.
         for (size_t i = 0; i < 6; i++) {
-            uint32_t msr = i < 4 ? MSR_AMD_PERF_EVT_SEL0 + i
-                : MSR_AMD_PERF_CTL0 + 2 * i;
+            uint32_t msr = i < 4 ? MSR_AMD_PERF_EVT_SEL0 + i : MSR_AMD_PERF_CTL0 + 2 * i;
             v->amd_perf_evt_sel[i] = 0;
             if (rdmsr_safe(msr, &v->amd_perf_evt_sel[i])) {
                 wrmsr_safe(
-                    msr,
-                    (v->amd_perf_evt_sel[i] & ~PERF_EVT_SEL_HG_ONLY)
-                        | PERF_EVT_SEL_GUEST_ONLY
+                    msr, (v->amd_perf_evt_sel[i] & ~PERF_EVT_SEL_HG_ONLY) | PERF_EVT_SEL_GUEST_ONLY
                 );
             }
         }
         // From the processor the vCPU is created on, which is its own.
         v->amd_cpuid_present = 0;
         for (size_t i = 0; i < 4; i++) {
-            bool readable = rdmsr_safe(
-                MSR_AMD_CPUID_7_FEATURES + i, &v->amd_cpuid_hardware[i]
-            );
+            bool readable = rdmsr_safe(MSR_AMD_CPUID_7_FEATURES + i, &v->amd_cpuid_hardware[i]);
             if (readable) {
                 v->amd_cpuid_present |= (uint32_t)1 << i;
             }
@@ -725,12 +689,9 @@ void msr_vcpu_init(struct vcpu *v) {
     }
 }
 
-
 // The guest's AMD memory routing MSRs, and those of SMM and SVM that it may
 // read; true where the MSR is one.
-static bool amd_memory_rdmsr(
-    struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault
-) {
+static bool amd_memory_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
     *fault = false;
     if (msr == MSR_AMD_SYSCFG) {
         *value = v->amd_syscfg;
@@ -742,8 +703,8 @@ static bool amd_memory_rdmsr(
         *value = v->amd_top_mem2;
     } else if (msr == MSR_AMD_MMIO_CFG_BASE) {
         *value = v->amd_mmio_cfg_base;
-    } else if (msr == MSR_AMD_SMM_ADDR || msr == MSR_AMD_SMM_MASK
-            || msr == MSR_AMD_SVM_KEY || msr == MSR_AMD_SMM_KEY) {
+    } else if (msr == MSR_AMD_SMM_ADDR || msr == MSR_AMD_SMM_MASK || msr == MSR_AMD_SVM_KEY
+            || msr == MSR_AMD_SMM_KEY) {
         // No SMRAM, and keys read as 0.
         *value = 0;
     } else if (msr == MSR_AMD_SMM_CTL) {
@@ -755,9 +716,7 @@ static bool amd_memory_rdmsr(
     return true;
 }
 
-static bool amd_memory_wrmsr(
-    struct vcpu *v, uint32_t msr, uint64_t value, bool *fault
-) {
+static bool amd_memory_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
     *fault = false;
     if (msr == MSR_AMD_SYSCFG) {
         *fault = ((value ^ v->amd_syscfg) & ~(uint64_t)SYSCFG_GUEST) != 0;
@@ -767,14 +726,13 @@ static bool amd_memory_wrmsr(
     } else if (msr >= MSR_AMD_IORR_BASE0 && msr <= MSR_AMD_IORR_MASK1) {
         bool base = (msr - MSR_AMD_IORR_BASE0) % 2 == 0;
         uint64_t defined = ((((uint64_t)1 << 52) - 1) & ~(uint64_t)0xfff)
-            | (base ? IORR_BASE_RD_WR : IORR_MASK_VALID);
+                         | (base ? IORR_BASE_RD_WR : IORR_MASK_VALID);
         *fault = (value & address_reserved) != 0;
         if (!*fault) {
             v->amd_iorr[msr - MSR_AMD_IORR_BASE0] = value & defined;
         }
     } else if (msr == MSR_AMD_TOP_MEM || msr == MSR_AMD_TOP_MEM2) {
-        uintptr_t top = value & (((uint64_t)1 << 52) - 1)
-            & ~(TOP_MEM_UNIT - 1);
+        uintptr_t top = value & (((uint64_t)1 << 52) - 1) & ~(TOP_MEM_UNIT - 1);
         *fault = (value & address_reserved) != 0;
         if (!*fault && msr == MSR_AMD_TOP_MEM) {
             v->amd_top_mem = top;
@@ -782,10 +740,8 @@ static bool amd_memory_wrmsr(
             v->amd_top_mem2 = top;
         }
     } else if (msr == MSR_AMD_MMIO_CFG_BASE) {
-        v->amd_mmio_cfg_base = value
-            & (MMIO_CFG_BASE_MASK | MMIO_CFG_BUS_RANGE | MMIO_CFG_ENABLE);
-    } else if (msr == MSR_AMD_SMM_ADDR || msr == MSR_AMD_SMM_MASK
-            || msr == MSR_AMD_SMM_CTL) {
+        v->amd_mmio_cfg_base = value & (MMIO_CFG_BASE_MASK | MMIO_CFG_BUS_RANGE | MMIO_CFG_ENABLE);
+    } else if (msr == MSR_AMD_SMM_ADDR || msr == MSR_AMD_SMM_MASK || msr == MSR_AMD_SMM_CTL) {
         // Locked, as SmmLock has them.
         *fault = true;
     } else if (msr == MSR_AMD_SVM_KEY || msr == MSR_AMD_SMM_KEY) {
@@ -797,21 +753,19 @@ static bool amd_memory_wrmsr(
 }
 
 static bool lbr_msr(uint32_t msr) {
-    return lbr_hidden && msr >= MSR_LAST_BRANCH_FROM_IP
-        && msr <= MSR_LAST_INT_TO_IP;
+    return lbr_hidden && msr >= MSR_LAST_BRANCH_FROM_IP && msr <= MSR_LAST_INT_TO_IP;
 }
 
 bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
-    if ((pt_hidden && pt_msr(msr)) || (mpx_hidden && msr == MSR_IA32_BNDCFGS)
-     || lbr_msr(msr) || (pebs_hidden && msr == MSR_IA32_PEBS_ENABLE)) {
+    if ((pt_hidden && pt_msr(msr)) || (mpx_hidden && msr == MSR_IA32_BNDCFGS) || lbr_msr(msr)
+     || (pebs_hidden && msr == MSR_IA32_PEBS_ENABLE)) {
         *fault = true;
         return true;
     }
     if (!virt_vmx && amd_memory_rdmsr(v, msr, value, fault)) {
         return true;
     }
-    if (!virt_vmx && msr >= MSR_AMD_CPUID_7_FEATURES
-     && msr <= MSR_AMD_CPUID_EXT_FEATURES) {
+    if (!virt_vmx && msr >= MSR_AMD_CPUID_7_FEATURES && msr <= MSR_AMD_CPUID_EXT_FEATURES) {
         size_t i = msr - MSR_AMD_CPUID_7_FEATURES;
         *fault = ((v->amd_cpuid_present >> i) & 1) == 0;
         if (!*fault) {
@@ -851,7 +805,7 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
             }
             *fault = !rdmsr_safe(msr, value);
             *value = (*value & FEATURE_CONTROL_LMCE_ON) | FEATURE_CONTROL_LOCK
-                | (nvmx_enabled ? FEATURE_CONTROL_VMX_OUTSIDE_SMX : 0);
+                   | (nvmx_enabled ? FEATURE_CONTROL_VMX_OUTSIDE_SMX : 0);
             return true;
         }
         case MSR_IA32_CORE_CAPABILITIES:
@@ -861,7 +815,8 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
             }
             *fault = !rdmsr_safe(msr, value);
             *value &= msr == MSR_IA32_ARCH_CAPABILITIES
-                ? ARCH_CAPABILITIES_KNOWN : CORE_CAPABILITIES_KNOWN;
+                    ? ARCH_CAPABILITIES_KNOWN
+                    : CORE_CAPABILITIES_KNOWN;
             return true;
         }
         case MSR_PLATFORM_INFO: {
@@ -870,8 +825,7 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
             }
             *fault = !msr_allowed(msr) || !rdmsr_safe(msr, value);
             *value &= PLATFORM_INFO_KNOWN
-                | (msr_allowed(MSR_FEATURE_ENABLES) ? PLATFORM_INFO_CPUID_FAULT
-                    : 0);
+                    | (msr_allowed(MSR_FEATURE_ENABLES) ? PLATFORM_INFO_CPUID_FAULT : 0);
             return true;
         }
         case MSR_IA32_MISC_ENABLE: {
@@ -879,9 +833,8 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
                 return false;
             }
             *fault = !rdmsr_safe(msr, value);
-            *value = (*value & ~MISC_ENABLE_COPIED)
-                | (v->misc_enable & misc_enable_supported)
-                | (pebs_hidden ? MISC_ENABLE_PEBS_UNAVAILABLE : 0);
+            *value = (*value & ~MISC_ENABLE_COPIED) | (v->misc_enable & misc_enable_supported)
+                   | (pebs_hidden ? MISC_ENABLE_PEBS_UNAVAILABLE : 0);
             return true;
         }
         case MSR_IA32_MCG_CTL: {
@@ -951,21 +904,19 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
 }
 
 bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
-    if ((pt_hidden && pt_msr(msr)) || (mpx_hidden && msr == MSR_IA32_BNDCFGS)
-     || lbr_msr(msr) || (pebs_hidden && msr == MSR_IA32_PEBS_ENABLE)
-     || (pstates_read_only && msr >= MSR_AMD_PSTATE_DEF0
-      && msr <= MSR_AMD_PSTATE_DEF7)) {
+    if ((pt_hidden && pt_msr(msr)) || (mpx_hidden && msr == MSR_IA32_BNDCFGS) || lbr_msr(msr)
+     || (pebs_hidden && msr == MSR_IA32_PEBS_ENABLE)
+     || (pstates_read_only && msr >= MSR_AMD_PSTATE_DEF0 && msr <= MSR_AMD_PSTATE_DEF7)) {
         *fault = true;
         return true;
     }
     if (!virt_vmx && amd_memory_wrmsr(v, msr, value, fault)) {
         return true;
     }
-    if (!virt_vmx && msr >= MSR_AMD_CPUID_7_FEATURES
-     && msr <= MSR_AMD_CPUID_EXT_FEATURES) {
+    if (!virt_vmx && msr >= MSR_AMD_CPUID_7_FEATURES && msr <= MSR_AMD_CPUID_EXT_FEATURES) {
         size_t i = msr - MSR_AMD_CPUID_7_FEATURES;
         *fault = ((v->amd_cpuid_present >> i) & 1) == 0
-            || (value & ~v->amd_cpuid_hardware[i]) != 0;
+              || (value & ~v->amd_cpuid_hardware[i]) != 0;
         if (!*fault) {
             v->amd_cpuid[i] = value;
         }
@@ -973,9 +924,7 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
     }
     int counter = virt_vmx ? -1 : amd_perf_counter(msr);
     if (counter >= 0) {
-        *fault = !wrmsr_safe(
-            msr, (value & ~PERF_EVT_SEL_HG_ONLY) | PERF_EVT_SEL_GUEST_ONLY
-        );
+        *fault = !wrmsr_safe(msr, (value & ~PERF_EVT_SEL_HG_ONLY) | PERF_EVT_SEL_GUEST_ONLY);
         if (!*fault) {
             v->amd_perf_evt_sel[counter] = value;
         }
@@ -1017,13 +966,12 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
                 return false;
             }
             // Bits the processor lacks are reserved.
-            uint64_t kept = MISC_ENABLE_COPIED
-                | (pebs_hidden ? MISC_ENABLE_PEBS_UNAVAILABLE : 0);
+            uint64_t kept = MISC_ENABLE_COPIED | (pebs_hidden ? MISC_ENABLE_PEBS_UNAVAILABLE : 0);
             *fault = (value & MISC_ENABLE_COPIED & ~misc_enable_supported) != 0
-                || !wrmsr_safe(msr, value & ~kept);
+                  || !wrmsr_safe(msr, value & ~kept);
             if (!*fault) {
                 v->misc_enable = (value & MISC_ENABLE_COPIED)
-                    | (v->misc_enable & ~misc_enable_supported);
+                               | (v->misc_enable & ~misc_enable_supported);
             }
             return true;
         }
@@ -1067,12 +1015,8 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
             }
             uint64_t hardware;
             uint64_t fixed = ~(uint64_t)(HWCR_GUEST | HWCR_SMM_LOCK);
-            *fault = !rdmsr_safe(msr, &hardware)
-                || ((value ^ hardware) & fixed) != 0
-                || !wrmsr_safe(
-                    msr,
-                    (hardware & ~(uint64_t)HWCR_GUEST) | (value & HWCR_GUEST)
-                );
+            *fault = !rdmsr_safe(msr, &hardware) || ((value ^ hardware) & fixed) != 0
+                  || !wrmsr_safe(msr, (hardware & ~(uint64_t)HWCR_GUEST) | (value & HWCR_GUEST));
             return true;
         }
         case MSR_AMD_NB_CFG: {
@@ -1081,9 +1025,8 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
             }
             uint64_t hardware;
             uint64_t fixed = ~NB_CFG_ENABLE_CF8_EXT_CFG;
-            *fault = !rdmsr_safe(msr, &hardware)
-                || ((value ^ hardware) & fixed) != 0
-                || !wrmsr_safe(msr, value);
+            *fault = !rdmsr_safe(msr, &hardware) || ((value ^ hardware) & fixed) != 0
+                  || !wrmsr_safe(msr, value);
             return true;
         }
         case MSR_IA32_PERF_GLOBAL_CTRL: {
@@ -1115,8 +1058,7 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
             if (virt_vmx) {
                 return false;
             }
-            *fault = (value & L3_QOS_EXT_CFG_SDCIAE) != 0
-                || !wrmsr_safe(msr, value);
+            *fault = (value & L3_QOS_EXT_CFG_SDCIAE) != 0 || !wrmsr_safe(msr, value);
             return true;
         }
         case MSR_DC_CFG: {
@@ -1131,8 +1073,7 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
             if (!xss) {
                 return false;
             }
-            *fault = (value & ~cpuid_xss_allowed()) != 0
-                || !wrmsr_safe(msr, value);
+            *fault = (value & ~cpuid_xss_allowed()) != 0 || !wrmsr_safe(msr, value);
             return true;
         }
         case MSR_IA32_HW_FEEDBACK_CONFIG: {
@@ -1142,10 +1083,10 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
             // Not without a table the processor can write to, which the
             // guest's pointer may not have given it.
             uint64_t host;
-            *fault = ((value & HW_FEEDBACK_CONFIG_ENABLE) != 0
-                && (!rdmsr_safe(MSR_IA32_HW_FEEDBACK_PTR, &host)
-                    || (host & HW_FEEDBACK_PTR_VALID) == 0))
-                || !wrmsr_safe(msr, value);
+            bool unbacked = (value & HW_FEEDBACK_CONFIG_ENABLE) != 0
+                         && (!rdmsr_safe(MSR_IA32_HW_FEEDBACK_PTR, &host)
+                          || (host & HW_FEEDBACK_PTR_VALID) == 0);
+            *fault = unbacked || !wrmsr_safe(msr, value);
             return true;
         }
         default: {

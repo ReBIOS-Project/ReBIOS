@@ -90,11 +90,11 @@ struct nmi_pin {
 
 static const uint32_t lvt_regs[LVT_COUNT] = {
     APIC_LVT_TIMER, APIC_LVT_THERMAL, APIC_LVT_PERF, APIC_LVT_LINT0,
-    APIC_LVT_LINT1, APIC_LVT_ERROR, APIC_LVT_CMCI,
+    APIC_LVT_LINT1, APIC_LVT_ERROR, APIC_LVT_CMCI
 };
 
 static const char *const lvt_names[LVT_COUNT] = {
-    "timer", "thermal", "perfmon", "LINT0", "LINT1", "error", "CMCI",
+    "timer", "thermal", "perfmon", "LINT0", "LINT1", "error", "CMCI"
 };
 
 // The version register's maximum LVT entry from which each entry exists.
@@ -107,9 +107,7 @@ static uint32_t lapic_read(const struct lapic *lapic, uint32_t reg) {
     return *(volatile uint32_t *)(uintptr_t)(lapic->base + reg);
 }
 
-static void lapic_write(
-    const struct lapic *lapic, uint32_t reg, uint32_t value
-) {
+static void lapic_write(const struct lapic *lapic, uint32_t reg, uint32_t value) {
     if (lapic->x2apic) {
         wrmsr(MSR_X2APIC_FIRST + reg / 16, value);
         return;
@@ -121,7 +119,7 @@ static uint32_t lapic_max_entry(const struct lapic *lapic) {
     return (lapic_read(lapic, APIC_VERSION) >> 16) & 0xff;
 }
 
-static bool lvt_exists(unsigned int index, uint32_t max_entry) {
+static bool lvt_exists(size_t index, uint32_t max_entry) {
     return max_entry >= lvt_first_max_entry[index];
 }
 
@@ -131,27 +129,22 @@ static void lapic_read_regs(
     regs->tpr = lapic_read(lapic, APIC_TPR);
     regs->svr = lapic_read(lapic, APIC_SVR);
     for (size_t i = 0; i < LVT_COUNT; i++) {
-        regs->lvt[i] = lvt_exists(i, max_entry)
-            ? lapic_read(lapic, lvt_regs[i]) : 0;
+        regs->lvt[i] = lvt_exists(i, max_entry) ? lapic_read(lapic, lvt_regs[i]) : 0;
     }
 }
 
 static void log_regs(
-    uint32_t apic_id, const char *what, const struct lapic_regs *regs,
-    uint32_t max_entry
+    uint32_t apic_id, const char *what, const struct lapic_regs *regs, uint32_t max_entry
 ) {
     char line[256];
-    int len = snprintf(
-        line, sizeof(line), "TPR %#x SVR %#x", regs->tpr, regs->svr
-    );
+    int len = snprintf(line, sizeof(line), "TPR %#x SVR %#x", regs->tpr, regs->svr);
     for (size_t i = 0; i < LVT_COUNT; i++) {
         if (len < 0 || (size_t)len >= sizeof(line)) {
             break;
         }
         if (lvt_exists(i, max_entry)) {
             len += snprintf(
-                line + len, sizeof(line) - (size_t)len, " %s %#x",
-                lvt_names[i], regs->lvt[i]
+                line + len, sizeof(line) - (size_t)len, " %s %#x", lvt_names[i], regs->lvt[i]
             );
         }
     }
@@ -185,9 +178,7 @@ static uint32_t apic_id_of(const struct lapic *lapic) {
 
 // Advances *offset past the MADT entry it is at, which it returns, or returns
 // NULL at the end of the table.
-static const uint8_t *madt_next(
-    const uint8_t *madt, size_t length, size_t *offset
-) {
+static const uint8_t *madt_next(const uint8_t *madt, size_t length, size_t *offset) {
     if (*offset > length || length - *offset < 2) {
         return NULL;
     }
@@ -199,14 +190,11 @@ static const uint8_t *madt_next(
     return entry;
 }
 
-static bool madt_uid(
-    const uint8_t *madt, size_t length, uint32_t apic_id, uint32_t *uid
-) {
+static bool madt_uid(const uint8_t *madt, size_t length, uint32_t apic_id, uint32_t *uid) {
     size_t offset = sizeof(struct acpi_madt);
     const uint8_t *entry;
     while ((entry = madt_next(madt, length, &offset)) != NULL) {
-        if (entry[0] == ACPI_MADT_ENTRY_TYPE_LAPIC
-         && entry[1] >= sizeof(struct acpi_madt_lapic)) {
+        if (entry[0] == ACPI_MADT_ENTRY_TYPE_LAPIC && entry[1] >= sizeof(struct acpi_madt_lapic)) {
             struct acpi_madt_lapic lapic;
             memcpy(&lapic, entry, sizeof(struct acpi_madt_lapic));
             if (lapic.id == apic_id) {
@@ -233,8 +221,7 @@ static bool madt_nmi_pin(uint32_t apic_id, struct nmi_pin *pin) {
         return false;
     }
     struct uacpi_table table;
-    if (uacpi_table_find_by_signature(ACPI_MADT_SIGNATURE, &table)
-     != UACPI_STATUS_OK) {
+    if (uacpi_table_find_by_signature(ACPI_MADT_SIGNATURE, &table) != UACPI_STATUS_OK) {
         return false;
     }
     const uint8_t *madt = table.ptr;
@@ -276,10 +263,8 @@ static bool madt_nmi_pin(uint32_t apic_id, struct nmi_pin *pin) {
             continue;
         }
         pin->lint = lint;
-        pin->active_low = (flags & ACPI_MADT_POLARITY_MASK)
-            == ACPI_MADT_POLARITY_ACTIVE_LOW;
-        pin->level = (flags & ACPI_MADT_TRIGGERING_MASK)
-            == ACPI_MADT_TRIGGERING_LEVEL;
+        pin->active_low = (flags & ACPI_MADT_POLARITY_MASK) == ACPI_MADT_POLARITY_ACTIVE_LOW;
+        pin->level = (flags & ACPI_MADT_TRIGGERING_MASK) == ACPI_MADT_TRIGGERING_LEVEL;
         found = true;
         specific = mine;
     }
@@ -292,20 +277,17 @@ void lapic_legacy_init(void) {
     uint64_t found_base = rdmsr(MSR_IA32_APIC_BASE);
     struct lapic lapic = {
         .x2apic = (found_base & APIC_BASE_EXTD) != 0 && xapic_disabled(),
-        .base = found_base & APIC_BASE_ADDRESS,
+        .base = found_base & APIC_BASE_ADDRESS
     };
     if (!lapic.x2apic && lapic.base + 0x1000 > core_handoff->map_top) {
-        printf(
-            "Local APIC registers at %#llx are out of reach\n",
-            (unsigned long long)lapic.base
-        );
+        printf("Local APIC registers at %#llx are out of reach\n", (unsigned long long)lapic.base);
         return;
     }
 
     // Read through the interface the mode found offers.
     struct lapic found_lapic = {
         .x2apic = (found_base & APIC_BASE_EXTD) != 0,
-        .base = lapic.base,
+        .base = lapic.base
     };
     bool found_enabled = (found_base & APIC_BASE_EN) != 0;
     uint32_t found_max_entry = 0;
@@ -330,9 +312,8 @@ void lapic_legacy_init(void) {
     uint32_t max_entry = (version >> 16) & 0xff;
     uint32_t apic_id = apic_id_of(&lapic);
     printf(
-        "Local APIC %#x: IA32_APIC_BASE %#llx -> %#llx, %s, version %#x\n",
-        apic_id, (unsigned long long)found_base,
-        (unsigned long long)rdmsr(MSR_IA32_APIC_BASE),
+        "Local APIC %#x: IA32_APIC_BASE %#llx -> %#llx, %s, version %#x\n", apic_id,
+        (unsigned long long)found_base, (unsigned long long)rdmsr(MSR_IA32_APIC_BASE),
         lapic.x2apic ? "x2APIC mode locked" : "xAPIC mode", version
     );
     if (found_enabled) {
@@ -358,13 +339,11 @@ void lapic_legacy_init(void) {
         // firmware's.
         uint32_t value = lapic_read(&lapic, lvt_regs[i]);
         unsigned int mode = (value >> LVT_DELIVERY_SHIFT) & 7;
-        bool interrupt = mode == LVT_DELIVERY_FIXED
-            || mode == LVT_DELIVERY_LOWEST || mode == LVT_DELIVERY_NMI
-            || mode == LVT_DELIVERY_EXTINT;
+        bool interrupt = mode == LVT_DELIVERY_FIXED || mode == LVT_DELIVERY_LOWEST
+                      || mode == LVT_DELIVERY_NMI || mode == LVT_DELIVERY_EXTINT;
         if (interrupt && (value & LVT_MASKED) == 0) {
             lapic_write(
-                &lapic, lvt_regs[i],
-                (value & ~(LVT_DELIVERY_STATUS | LVT_REMOTE_IRR)) | LVT_MASKED
+                &lapic, lvt_regs[i], (value & ~(LVT_DELIVERY_STATUS | LVT_REMOTE_IRR)) | LVT_MASKED
             );
         }
     }
@@ -373,22 +352,17 @@ void lapic_legacy_init(void) {
     lapic_write(&lapic, APIC_SVR, SVR_APIC_ENABLED | SPURIOUS_VECTOR);
 
     uint32_t nmi_lvt = (LVT_DELIVERY_NMI << LVT_DELIVERY_SHIFT)
-        | (nmi.active_low ? LVT_ACTIVE_LOW : 0) | (nmi.level ? LVT_LEVEL : 0);
+                     | (nmi.active_low ? LVT_ACTIVE_LOW : 0) | (nmi.level ? LVT_LEVEL : 0);
     uint32_t extint_lvt = LVT_DELIVERY_EXTINT << LVT_DELIVERY_SHIFT;
-    lapic_write(
-        &lapic, nmi.lint == 0 ? APIC_LVT_LINT0 : APIC_LVT_LINT1, nmi_lvt
-    );
-    lapic_write(
-        &lapic, nmi.lint == 0 ? APIC_LVT_LINT1 : APIC_LVT_LINT0, extint_lvt
-    );
+    lapic_write(&lapic, nmi.lint == 0 ? APIC_LVT_LINT0 : APIC_LVT_LINT1, nmi_lvt);
+    lapic_write(&lapic, nmi.lint == 0 ? APIC_LVT_LINT1 : APIC_LVT_LINT0, extint_lvt);
 
     struct lapic_regs set;
     lapic_read_regs(&lapic, max_entry, &set);
     log_regs(apic_id, "set", &set, max_entry);
     printf(
-        "Local APIC %#x: NMIs on LINT%u, active %s, %s triggered, %s\n",
-        apic_id, nmi.lint, nmi.active_low ? "low" : "high",
-        nmi.level ? "level" : "edge",
+        "Local APIC %#x: NMIs on LINT%u, active %s, %s triggered, %s\n", apic_id, nmi.lint,
+        nmi.active_low ? "low" : "high", nmi.level ? "level" : "edge",
         from_madt ? "from the MADT" : "by default"
     );
 }

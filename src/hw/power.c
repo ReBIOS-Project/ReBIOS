@@ -32,8 +32,7 @@
 
 // Returns only if the firmware fails to.
 static void firmware_reset(EFI_RESET_TYPE type) {
-    EFI_RUNTIME_SERVICES *rt
-        = (EFI_RUNTIME_SERVICES *)(uintptr_t)core_handoff->efi_rt;
+    EFI_RUNTIME_SERVICES *rt = (EFI_RUNTIME_SERVICES *)(uintptr_t)core_handoff->efi_rt;
     rt->ResetSystem(type, EFI_SUCCESS, 0, NULL);
 }
 
@@ -65,7 +64,12 @@ void power_reset(bool warm) {
         uint16_t limit;
         uint64_t base;
     } __attribute__((packed)) null_idt = { 0, 0 };
-    asm volatile ("lidt %0\n\tint3" :: "m"(null_idt));
+    asm volatile (
+        "lidtq %0\n\t"
+        "int3"
+        :
+        : "m"(null_idt)
+    );
     halt_forever();
 }
 
@@ -74,9 +78,7 @@ void power_reset(bool warm) {
 void power_off(void) {
     printf("Powering the machine off\n");
     if (acpi_init()) {
-        uacpi_status status = uacpi_prepare_for_sleep_state(
-            UACPI_SLEEP_STATE_S5
-        );
+        uacpi_status status = uacpi_prepare_for_sleep_state(UACPI_SLEEP_STATE_S5);
         if (status == UACPI_STATUS_OK) {
             status = uacpi_enter_sleep_state(UACPI_SLEEP_STATE_S5);
         }

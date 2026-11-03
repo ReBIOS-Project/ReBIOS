@@ -142,22 +142,18 @@ void aml_end(struct aml *a);
 // each segment padded with underscores to four characters.
 void aml_name(struct aml *a, const char *path);
 // A NameString from four-character segments, rooted or relative.
-void aml_name_segs(
-    struct aml *a, bool root, const char (*segs)[4], size_t count
-);
+void aml_name_segs(struct aml *a, bool root, const char (*segs)[4], size_t count);
 // The shortest constant for a value, which ACPI 1.0 keeps to 32 bits.
 void aml_int(struct aml *a, uint32_t value);
 void aml_string(struct aml *a, const char *s, size_t length);
 void aml_buffer(struct aml *a, const void *data, size_t size);
-void aml_local(struct aml *a, unsigned int n);
-void aml_arg(struct aml *a, unsigned int n);
+void aml_local(struct aml *a, size_t n);
+void aml_arg(struct aml *a, size_t n);
 
 // Name(path, Integer); Method(path, args, flags) {, closed by aml_end().
 void aml_name_int(struct aml *a, const char *path, uint32_t value);
 void aml_name_string(struct aml *a, const char *path, const char *s);
-void aml_method(
-    struct aml *a, const char *path, unsigned int args, uint8_t flags
-);
+void aml_method(struct aml *a, const char *path, unsigned int args, uint8_t flags);
 // Return (Integer).
 void aml_return_int(struct aml *a, uint32_t value);
 // A NamedField of a Field: four characters and a width in bits.
@@ -166,8 +162,8 @@ void aml_field_unit(struct aml *a, const char *name, uint32_t bits);
 // Fills a definition block's header, checksum included, in front of the AML at
 // table: SDT_HEADER_SIZE bytes, then the AML.
 void aml_table_header(
-    uint8_t *table, size_t length, const char signature[4], uint8_t revision,
-    const char oem_id[6], const char oem_table_id[8], uint32_t oem_revision
+    uint8_t *table, size_t length, const char signature[4], uint8_t revision, const char oem_id[6],
+    const char oem_table_id[8], uint32_t oem_revision
 );
 
 #define AML_SDT_HEADER_SIZE 36

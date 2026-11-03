@@ -39,6 +39,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdnoreturn.h>
 
 struct tss64 {
     uint32_t reserved0;
@@ -61,18 +62,18 @@ struct cpu {
     bool bsp;
     // Whether an NMI reached the host since the vCPU loop last looked, which
     // it must look again for before it enters the guest.
-    volatile bool kicked;
+    _Atomic(bool) kicked;
     uint64_t gdt[5];
     struct tss64 tss;
     struct vcpu *vcpu;
-    volatile bool online;
+    _Atomic(bool) online;
     // Whether a kick's interrupt is on its way, which does for further kicks.
-    volatile bool kick;
-    volatile bool nmi_pending;
+    _Atomic(bool) kick;
+    _Atomic(bool) nmi_pending;
     // An INIT that SVM redirected while the host ran.
-    volatile bool init_pending;
+    _Atomic(bool) init_pending;
     // Whether the host is taking interrupts, as SVM has it do.
-    bool taking_interrupts;
+    _Atomic(bool) taking_interrupts;
     // IA32_APIC_BASE, once lapic_host_mode() set it for good, else 0.
     uint64_t apic_base;
     // The task the CPU runs, while it runs one.
@@ -90,13 +91,11 @@ struct cpu {
     uint64_t watchdog_next;
 };
 
-_Static_assert(
-    sizeof(struct cpu) <= 0x1000, "struct cpu overlaps the IST stacks"
-);
+_Static_assert(sizeof(struct cpu) <= 0x1000, "struct cpu overlaps the IST stacks");
 
 static inline struct cpu *this_cpu(void) {
     uintptr_t rsp;
-    asm volatile ("mov %%rsp, %0" : "=r"(rsp));
+    asm volatile ("movq %%rsp, %0" : "=r"(rsp));
     return ((struct cpu *)(rsp & ~(uintptr_t)(CPU_AREA_SIZE - 1)))->self;
 }
 
@@ -117,9 +116,7 @@ uintptr_t cpu_idt_base(void);
 uintptr_t cpu_stack_top(struct cpu *cpu);
 
 // Runs fn on the given stack, never returning.
-__attribute__((noreturn)) void switch_stack(
-    uintptr_t stack_top, void (*fn)(void *), void *arg
-);
+noreturn void switch_stack(uintptr_t stack_top, void (*fn)(void *), void *arg);
 
 // Code an NMI that reaches the host restarts from start, if it interrupts it.
 void cpu_nmi_restart(uintptr_t start, uintptr_t end);
@@ -139,6 +136,6 @@ unsigned int cpu_physical_address_bits(void);
 // How far an APIC ID shifts right to its package's ID.
 unsigned int cpu_package_shift(void);
 
-#endif
+#endif // !__ASSEMBLER__
 
 #endif

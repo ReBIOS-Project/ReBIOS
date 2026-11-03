@@ -50,8 +50,7 @@ struct task_event {
 // selector and the new TSS's descriptor. length is the instruction's that
 // started it, if one did; event is NULL but for TASK_GATE.
 void task_switch(
-    struct vcpu *v, uint16_t selector, int source,
-    const struct task_event *event, size_t length
+    struct vcpu *v, uint16_t selector, int source, const struct task_event *event, size_t length
 );
 
 #endif

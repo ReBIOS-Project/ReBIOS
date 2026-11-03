@@ -27,7 +27,7 @@
 // are relative to the fields holding them, so that nothing needs relocating. A
 // relocation of no effect from the instruction to its entry keeps the entry
 // wherever --gc-sections keeps the code, as LLD keeps no section for being
-// bounded alone.
+// bounded alone. The entry ends the template it is in.
 #define FIXUP_ENTRY(insn, resume) \
     ".pushsection fixup_table, \"a\"\n\t" \
     ".balign 4\n\t" \
@@ -35,7 +35,7 @@
     ".long " insn " - .\n\t" \
     ".long " resume " - .\n\t" \
     ".popsection\n\t" \
-    ".reloc " insn ", R_X86_64_NONE, 3b\n\t"
+    ".reloc " insn ", R_X86_64_NONE, 3b"
 
 uintptr_t fixup_find(uintptr_t rip);
 

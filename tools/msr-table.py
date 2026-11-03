@@ -34,6 +34,11 @@ import re
 import sys
 import textwrap
 
+# c_layout.py sits beside the generators, which leave no bytecode in the tree.
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from c_layout import finish
+
 # The notice each generated file starts with.
 NOTICE = [
     '// SPDX-License-Identifier: GPL-2.0-only',
@@ -356,6 +361,16 @@ ADDR = re.compile(r'^\s*Register Address: ([0-9A-F_]+)H(?:\s*[-\u2013\u2212]\s*(
 HEADING = re.compile(r'^\s*Table (2-\d+)\.\s')
 
 
+def count_decl(name, array, kind):
+    """The declaration of an array's count, on one line where it fits in 99
+    columns, else broken before its division, lined up under its value."""
+    head = f'const size_t {name} = '
+    line = f'{head}sizeof({array}) / sizeof({kind});'
+    if len(line) <= 99:
+        return [line]
+    return [f'{head}sizeof({array})', ' ' * (len(head) - 2) + f'/ sizeof({kind});']
+
+
 def parse_tables(lines):
     """Every MSR of chapter 2's tables: {table: [(lo, hi, name)]}."""
     start = next(i for i, l in enumerate(lines)
@@ -448,9 +463,8 @@ def intel(specs):
            'const struct msr_range msr_intel_architectural[] = {']
     for lo, hi in ranges(arch):
         out.append(f'    {{ {lo:#x}, {hi:#x} }}, // {label(names, lo, hi)}')
-    out += ['};',
-            'const size_t msr_intel_architectural_count =',
-            '    sizeof(msr_intel_architectural) / sizeof(struct msr_range);']
+    out += ['};'] + count_decl('msr_intel_architectural_count', 'msr_intel_architectural',
+                               'struct msr_range')
     # Tables that give the guest nothing more are left out.
     used = [t for t in used if passed[t]]
     models = [(signatures, [t for t in ts if passed[t]]) for signatures, ts in MODELS]
@@ -477,7 +491,7 @@ def intel(specs):
         out += [''] + textwrap.wrap(heading, 79, initial_indent='// ', subsequent_indent='// ',
                                 break_long_words=False, break_on_hyphens=False)
         out.append(f'static const struct msr_ranges *const model_tables_{i}[] = {{')
-        out += textwrap.wrap(', '.join('&table_' + t.replace('-', '_') for t in ts) + ',', 79,
+        out += textwrap.wrap(', '.join('&table_' + t.replace('-', '_') for t in ts) + ',', 99,
                              initial_indent='    ', subsequent_indent='    ')
         out.append('};')
     out += ['', '// By display family and model.', 'const struct msr_model msr_intel_models[] = {']
@@ -485,9 +499,7 @@ def intel(specs):
         for sig in signatures:
             family, model = (int(x, 16) for x in sig.split('_'))
             out.append(f'    {{ {family:#x}, {model:#x}, model_tables_{i}, {len(ts)} }},')
-    out += ['};',
-            'const size_t msr_intel_model_count = sizeof(msr_intel_models)',
-            '    / sizeof(struct msr_model);']
+    out += ['};'] + count_decl('msr_intel_model_count', 'msr_intel_models', 'struct msr_model')
     order = sorted(left_out.items(), key=lambda x: (int(x[0][0].split('-')[1]), min(x[1])))
     left = [f'left out: Table {t} {min(addrs):#x} {name}' for (t, name), addrs in order]
     return out, left
@@ -628,10 +640,9 @@ def amd(specs):
     out = ['', '// APM 24593 rev. 3.45, Table A-1, and what every family has, as reviewed.',
            'const struct msr_range msr_amd_architectural[] = {']
     for lo, hi, what in AMD_ARCH:
-        out.append(f'    {{ {lo:#x}, {hi:#x} }}, // {what}')
-    out += ['};',
-            'const size_t msr_amd_architectural_count =',
-            '    sizeof(msr_amd_architectural) / sizeof(struct msr_range);']
+        out.append(f'    {{ {lo:#x}, {hi:#x} }}, // {what[:1].upper() + what[1:]}')
+    out += ['};'] + count_decl('msr_amd_architectural_count', 'msr_amd_architectural',
+                               'struct msr_range')
     left = []
     for family, docs in AMD_FAMILIES:
         passed = {}
@@ -681,9 +692,7 @@ def amd(specs):
     for family, _ in AMD_FAMILIES:
         out.append(f'    {{ {family:#x}, family_{family:x}h, '
                    f'sizeof(family_{family:x}h) / sizeof(struct msr_range) }},')
-    out += ['};',
-            'const size_t msr_amd_family_count = sizeof(msr_amd_families)',
-            '    / sizeof(struct msr_family);']
+    out += ['};'] + count_decl('msr_amd_family_count', 'msr_amd_families', 'struct msr_family')
     return out, left
 
 
@@ -703,7 +712,7 @@ def main():
             '#include <virt/msr_table.h>',
             '']
     out += intel_out + amd_out + ['']
-    open(output, 'w').write('\n'.join(out))
+    open(output, 'w').write(finish('\n'.join(out)))
     if report:
         for line in intel_left + amd_left:
             print(line)

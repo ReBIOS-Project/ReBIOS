@@ -45,9 +45,7 @@
 
 // The sRGB primaries and white point, as the colour characteristics bytes
 // (E-EDID A2, 3.7) give them.
-static const uint8_t srgb[10] = {
-    0xee, 0x91, 0xa3, 0x54, 0x4c, 0x99, 0x26, 0x0f, 0x50, 0x54
-};
+static const uint8_t srgb[10] = { 0xee, 0x91, 0xa3, 0x54, 0x4c, 0x99, 0x26, 0x0f, 0x50, 0x54 };
 
 static void display_descriptor(uint8_t *d, uint8_t tag) {
     memset(d, 0, 18);
@@ -55,8 +53,7 @@ static void display_descriptor(uint8_t *d, uint8_t tag) {
 }
 
 static void preferred_timing(
-    uint8_t *d, uint32_t width, uint32_t height, uint32_t clock,
-    uint32_t v_blank
+    uint8_t *d, uint32_t width, uint32_t height, uint32_t clock, uint32_t v_blank
 ) {
     uint32_t v_front = v_blank - V_SYNC - V_BACK_PORCH;
     if (v_front > DTD_V_FRONT_PORCH_MAX) {
@@ -73,21 +70,21 @@ static void preferred_timing(
     d[8] = H_FRONT_PORCH;
     d[9] = H_SYNC;
     d[10] = (uint8_t)((v_front & 0xf) << 4 | (V_SYNC & 0xf));
-    d[11] = (uint8_t)((H_FRONT_PORCH >> 8) << 6 | (H_SYNC >> 8) << 4
-        | (v_front >> 4) << 2 | V_SYNC >> 4);
+    d[11] = (uint8_t)((H_FRONT_PORCH >> 8) << 6 | (H_SYNC >> 8) << 4 | (v_front >> 4) << 2
+                    | V_SYNC >> 4);
     // Digital separate sync, the horizontal one positive, the vertical one
     // negative, as for reduced blanking.
     d[17] = 0x1a;
 }
 
 bool edid_synthesize(uint8_t *edid, uint32_t width, uint32_t height) {
-    if (width == 0 || height == 0 || width > DTD_ACTIVE_MAX
-     || height > DTD_ACTIVE_MAX) {
+    if (width == 0 || height == 0 || width > DTD_ACTIVE_MAX || height > DTD_ACTIVE_MAX) {
         return false;
     }
     // CVT 1.2, 5.4, steps 8 to 13.
-    uint32_t v_blank = (uint32_t)((uint64_t)V_BLANK_MIN_US * REFRESH_HZ
-        * height / (1000000 - V_BLANK_MIN_US * REFRESH_HZ)) + 1;
+    uint64_t v_blank_floor = (uint64_t)V_BLANK_MIN_US * REFRESH_HZ * height
+                           / (1000000 - V_BLANK_MIN_US * REFRESH_HZ);
+    uint32_t v_blank = (uint32_t)v_blank_floor + 1;
     if (v_blank < V_FRONT_PORCH_MIN + V_SYNC + V_BACK_PORCH) {
         v_blank = V_FRONT_PORCH_MIN + V_SYNC + V_BACK_PORCH;
     }
@@ -99,9 +96,7 @@ bool edid_synthesize(uint8_t *edid, uint32_t width, uint32_t height) {
     }
 
     memset(edid, 0, EDID_BLOCK_SIZE);
-    static const uint8_t header[8] = {
-        0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00
-    };
+    static const uint8_t header[8] = { 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00 };
     memcpy(edid, header, sizeof(header));
     edid[0x08] = MANUFACTURER_ID >> 8;
     edid[0x09] = MANUFACTURER_ID & 0xff;

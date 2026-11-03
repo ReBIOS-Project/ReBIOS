@@ -35,7 +35,7 @@
 #define RID_FMT "%02x:%02x.%x"
 #define RID_ARGS(rid) \
     (unsigned int)((rid) >> 8), (unsigned int)(((rid) >> 3) & 0x1f), \
-        (unsigned int)((rid) & 7)
+    (unsigned int)((rid) & 7)
 
 #define PCI_VENDOR_ID 0x00
 #define PCI_HEADER_TYPE 0x0e
@@ -170,19 +170,19 @@ struct range_start {
 static const uint8_t special_types[] = {
     [ACPI_DSS_IOAPIC] = IOMMU_SPECIAL_IOAPIC,
     [ACPI_DSS_MSI_CAPABLE_HPET] = IOMMU_SPECIAL_HPET,
-    [ACPI_DSS_ACPI_NAMESPACE_DEVICE] = IOMMU_SPECIAL_ACPI,
+    [ACPI_DSS_ACPI_NAMESPACE_DEVICE] = IOMMU_SPECIAL_ACPI
 };
 
 static const char *const special_names[] = {
     [IOMMU_SPECIAL_IOAPIC] = "I/O APIC",
     [IOMMU_SPECIAL_HPET] = "HPET",
-    [IOMMU_SPECIAL_ACPI] = "ACPI device",
+    [IOMMU_SPECIAL_ACPI] = "ACPI device"
 };
 
 static const char *const kind_names[] = {
     [IOMMU_KIND_NONE] = "none",
     [IOMMU_KIND_VTD] = "Intel VT-d",
-    [IOMMU_KIND_AMD] = "AMD-Vi",
+    [IOMMU_KIND_AMD] = "AMD-Vi"
 };
 
 static struct iommu_tables tables;
@@ -209,82 +209,59 @@ static void *grow(void *array, size_t count, uint32_t *capacity, size_t size) {
     return grown;
 }
 
-static bool add_unit(
-    struct builder *b, const struct iommu_unit *unit, uint16_t *index
-) {
+static bool add_unit(struct builder *b, const struct iommu_unit *unit, uint16_t *index) {
     struct iommu_tables *t = b->t;
     // Ranges and special devices name their unit in 16 bits.
     if (t->unit_count > UINT16_MAX) {
         return false;
     }
-    t->units = grow(
-        t->units, t->unit_count, &b->unit_capacity, sizeof(struct iommu_unit)
-    );
+    t->units = grow(t->units, t->unit_count, &b->unit_capacity, sizeof(struct iommu_unit));
     *index = (uint16_t)t->unit_count;
     t->units[t->unit_count++] = *unit;
     return true;
 }
 
-static void add_range(
-    struct builder *b, const struct iommu_device_range *range
-) {
+static void add_range(struct builder *b, const struct iommu_device_range *range) {
     struct iommu_tables *t = b->t;
     t->ranges = grow(
-        t->ranges, t->range_count, &b->range_capacity,
-        sizeof(struct iommu_device_range)
+        t->ranges, t->range_count, &b->range_capacity, sizeof(struct iommu_device_range)
     );
     t->ranges[t->range_count++] = *range;
 }
 
-static void add_fallback(
-    struct builder *b, const struct iommu_device_range *range
-) {
+static void add_fallback(struct builder *b, const struct iommu_device_range *range) {
     b->fallbacks = grow(
-        b->fallbacks, b->fallback_count, &b->fallback_capacity,
-        sizeof(struct iommu_device_range)
+        b->fallbacks, b->fallback_count, &b->fallback_capacity, sizeof(struct iommu_device_range)
     );
     b->fallbacks[b->fallback_count++] = *range;
 }
 
-static void add_special(
-    struct builder *b, const struct iommu_special_device *special
-) {
+static void add_special(struct builder *b, const struct iommu_special_device *special) {
     struct iommu_tables *t = b->t;
     t->specials = grow(
-        t->specials, t->special_count, &b->special_capacity,
-        sizeof(struct iommu_special_device)
+        t->specials, t->special_count, &b->special_capacity, sizeof(struct iommu_special_device)
     );
     t->specials[t->special_count++] = *special;
 }
 
-static void add_reserved(
-    struct builder *b, const struct iommu_reserved_region *region
-) {
+static void add_reserved(struct builder *b, const struct iommu_reserved_region *region) {
     struct iommu_tables *t = b->t;
     t->reserved = grow(
-        t->reserved, t->reserved_count, &b->reserved_capacity,
-        sizeof(struct iommu_reserved_region)
+        t->reserved, t->reserved_count, &b->reserved_capacity, sizeof(struct iommu_reserved_region)
     );
     t->reserved[t->reserved_count++] = *region;
 }
 
-static void stop(
-    struct builder *b, const char *what, size_t offset, const char *why
-) {
+static void stop(struct builder *b, const char *what, size_t offset, const char *why) {
     printf("%s at offset %#zx %s, parsing stops there\n", what, offset, why);
     b->t->truncated = true;
 }
 
-static void format_rids(
-    char *buf, size_t size, uint16_t segment, uint16_t first, uint16_t last
-) {
+static void format_rids(char *buf, size_t size, uint16_t segment, uint16_t first, uint16_t last) {
     if (first == last) {
         snprintf(buf, size, "%04x:" RID_FMT, segment, RID_ARGS(first));
     } else {
-        snprintf(
-            buf, size, "%04x:" RID_FMT "-" RID_FMT, segment, RID_ARGS(first),
-            RID_ARGS(last)
-        );
+        snprintf(buf, size, "%04x:" RID_FMT "-" RID_FMT, segment, RID_ARGS(first), RID_ARGS(last));
     }
 }
 
@@ -322,27 +299,20 @@ static size_t dmar_min_length(uint32_t type) {
 }
 
 static bool scope_type_known(uint32_t type) {
-    return type >= ACPI_DSS_PCI_ENDPOINT
-        && type <= ACPI_DSS_ACPI_NAMESPACE_DEVICE;
+    return type >= ACPI_DSS_PCI_ENDPOINT && type <= ACPI_DSS_ACPI_NAMESPACE_DEVICE;
 }
 
 // The length of the device scope at offset, which must end by end, or 0,
 // having stopped the parsing, if it does not.
-static size_t scope_length(
-    struct builder *b, const uint8_t *dmar, size_t offset, size_t end
-) {
+static size_t scope_length(struct builder *b, const uint8_t *dmar, size_t offset, size_t end) {
     if (end - offset < 2) {
-        stop(
-            b, "DMAR device scope", offset,
-            "is cut short by the end of its structure"
-        );
+        stop(b, "DMAR device scope", offset, "is cut short by the end of its structure");
         return 0;
     }
     uint32_t type = dmar[offset];
     size_t length = dmar[offset + 1];
     // Every known type needs a path of at least one entry.
-    uint32_t min = SCOPE_HEADER_SIZE
-        + (scope_type_known(type) ? SCOPE_PATH_ENTRY_SIZE : 0);
+    uint32_t min = SCOPE_HEADER_SIZE + (scope_type_known(type) ? SCOPE_PATH_ENTRY_SIZE : 0);
     if (length < min) {
         stop(b, "DMAR device scope", offset, "is too short for its type");
         return 0;
@@ -354,41 +324,31 @@ static size_t scope_length(
     return length;
 }
 
-static void scope_skip(
-    const char *owner, size_t offset, const uint8_t *scope, const char *why
-) {
+static void scope_skip(const char *owner, size_t offset, const uint8_t *scope, const char *why) {
     char path[128] = "none";
     int len = 0;
-    size_t entries = ((uint32_t)scope[1] - SCOPE_HEADER_SIZE)
-        / SCOPE_PATH_ENTRY_SIZE;
-    for (size_t i = 0; i < entries && len >= 0 && (size_t)len < sizeof(path);
-         i++) {
-        const uint8_t *entry = scope + SCOPE_HEADER_SIZE
-            + i * SCOPE_PATH_ENTRY_SIZE;
+    size_t entries = ((uint32_t)scope[1] - SCOPE_HEADER_SIZE) / SCOPE_PATH_ENTRY_SIZE;
+    for (size_t i = 0; i < entries && len >= 0 && (size_t)len < sizeof(path); i++) {
+        const uint8_t *entry = scope + SCOPE_HEADER_SIZE + i * SCOPE_PATH_ENTRY_SIZE;
         len += snprintf(
-            path + len, sizeof(path) - (size_t)len, "%s%02x.%x",
-            i == 0 ? "" : "/", entry[0], entry[1]
+            path + len, sizeof(path) - (size_t)len, "%s%02x.%x", i == 0 ? "" : "/", entry[0],
+            entry[1]
         );
     }
     printf(
-        "DMAR %s device scope at offset %#zx, type %u, start bus %02x, path "
-        "%s: %s, skipped\n",
+        "DMAR %s device scope at offset %#zx, type %u, start bus %02x, path %s: %s, skipped\n",
         owner, offset, scope[0], scope[5], path, why
     );
 }
 
 // Why the function at addr cannot be a bridge on a scope's path, or NULL with
 // the buses behind it.
-static const char *bridge_buses(
-    struct pci_addr addr, uint8_t *secondary, uint8_t *subordinate
-) {
+static const char *bridge_buses(struct pci_addr addr, uint8_t *secondary, uint8_t *subordinate) {
     if (pci_cfg_read(addr, PCI_VENDOR_ID, 2) == 0xffff) {
         return "reads all ones";
     }
-    uint32_t header_type = pci_cfg_read(addr, PCI_HEADER_TYPE, 1)
-        & PCI_HEADER_TYPE_MASK;
-    if (header_type != PCI_HEADER_TYPE_BRIDGE
-     && header_type != PCI_HEADER_TYPE_CARDBUS) {
+    uint32_t header_type = pci_cfg_read(addr, PCI_HEADER_TYPE, 1) & PCI_HEADER_TYPE_MASK;
+    if (header_type != PCI_HEADER_TYPE_BRIDGE && header_type != PCI_HEADER_TYPE_CARDBUS) {
         return "is not a bridge";
     }
     *secondary = (uint8_t)pci_cfg_read(addr, PCI_SECONDARY_BUS, 1);
@@ -426,10 +386,7 @@ static bool scope_resolve(
         uint8_t device = path[i * SCOPE_PATH_ENTRY_SIZE];
         uint8_t function = path[i * SCOPE_PATH_ENTRY_SIZE + 1];
         if (device >= 32 || function >= 8) {
-            snprintf(
-                why, sizeof(why), "no device %#x function %#x", device,
-                function
-            );
+            snprintf(why, sizeof(why), "no device %#x function %#x", device, function);
             scope_skip(owner, offset, scope, why);
             return false;
         }
@@ -443,8 +400,8 @@ static bool scope_resolve(
         const char *problem = bridge_buses(addr, &secondary, &subordinate);
         if (problem != NULL) {
             snprintf(
-                why, sizeof(why), "bridge %04x:" RID_FMT " %s", segment,
-                RID_ARGS(rid_of(addr)), problem
+                why, sizeof(why), "bridge %04x:" RID_FMT " %s", segment, RID_ARGS(rid_of(addr)),
+                problem
             );
             scope_skip(owner, offset, scope, why);
             return false;
@@ -464,16 +421,14 @@ static bool scope_resolve(
     return true;
 }
 
-static bool dmar_drhd(
-    struct builder *b, const uint8_t *dmar, size_t offset, size_t length
-) {
+static bool dmar_drhd(struct builder *b, const uint8_t *dmar, size_t offset, size_t length) {
     struct acpi_dmar_drhd drhd;
     memcpy(&drhd, dmar + offset, sizeof(struct acpi_dmar_drhd));
     struct iommu_unit unit = {
         .base = drhd.address,
         .vtd_size = (uint64_t)4096 << (drhd.size & DRHD_SIZE_MASK),
         .segment = drhd.segment,
-        .include_all = (drhd.flags & ACPI_INCLUDE_PCI_ALL) != 0,
+        .include_all = (drhd.flags & ACPI_INCLUDE_PCI_ALL) != 0
     };
     uint16_t index;
     if (!add_unit(b, &unit, &index)) {
@@ -485,7 +440,7 @@ static bool dmar_drhd(
             .segment = unit.segment,
             .first = 0,
             .last = 0xffff,
-            .unit = index,
+            .unit = index
         };
         add_fallback(b, &all);
     }
@@ -508,7 +463,7 @@ static bool dmar_drhd(
                         .segment = unit.segment,
                         .first = target.rid,
                         .last = target.rid,
-                        .unit = index,
+                        .unit = index
                     };
                     add_range(b, &range);
                     if (scope[0] == ACPI_DSS_PCI_BRIDGE) {
@@ -524,7 +479,7 @@ static bool dmar_drhd(
                         .id = scope[4],
                         .segment = unit.segment,
                         .rid = target.rid,
-                        .unit = index,
+                        .unit = index
                     };
                     add_special(b, &special);
                     break;
@@ -536,26 +491,20 @@ static bool dmar_drhd(
     return true;
 }
 
-static bool dmar_rmrr(
-    struct builder *b, const uint8_t *dmar, size_t offset, size_t length
-) {
+static bool dmar_rmrr(struct builder *b, const uint8_t *dmar, size_t offset, size_t length) {
     struct acpi_dmar_rmrr rmrr;
     memcpy(&rmrr, dmar + offset, sizeof(struct acpi_dmar_rmrr));
     if (length == sizeof(struct acpi_dmar_rmrr)) {
         printf(
-            "DMAR RMRR at offset %#zx for %#llx-%#llx has no device scope, "
-            "skipped\n",
-            offset, (unsigned long long)rmrr.base,
-            (unsigned long long)rmrr.limit
+            "DMAR RMRR at offset %#zx for %#llx-%#llx has no device scope, skipped\n", offset,
+            (unsigned long long)rmrr.base, (unsigned long long)rmrr.limit
         );
         return true;
     }
     if (rmrr.limit < rmrr.base) {
         printf(
-            "DMAR RMRR at offset %#zx has its limit %#llx below its base "
-            "%#llx, skipped\n",
-            offset, (unsigned long long)rmrr.limit,
-            (unsigned long long)rmrr.base
+            "DMAR RMRR at offset %#zx has its limit %#llx below its base %#llx, skipped\n", offset,
+            (unsigned long long)rmrr.limit, (unsigned long long)rmrr.base
         );
         return true;
     }
@@ -578,7 +527,7 @@ static bool dmar_rmrr(
                 .writable = true,
                 .segment = rmrr.segment,
                 .first = target.rid,
-                .last_rid = target.rid,
+                .last_rid = target.rid
             };
             add_reserved(b, &region);
             if (scope[0] == ACPI_DSS_PCI_BRIDGE) {
@@ -598,13 +547,11 @@ static void dmar_andd(const uint8_t *dmar, size_t offset, size_t length) {
     const uint8_t *name = dmar + offset + sizeof(struct acpi_dmar_andd);
     uint32_t max = length - (uint32_t)sizeof(struct acpi_dmar_andd);
     size_t name_length = 0;
-    while (name_length < max && name[name_length] >= 0x20
-        && name[name_length] < 0x7f) {
+    while (name_length < max && name[name_length] >= 0x20 && name[name_length] < 0x7f) {
         name_length++;
     }
     printf(
-        "DMAR ANDD: ACPI device %u is %.*s\n", andd.device_id,
-        (int)name_length, (const char *)name
+        "DMAR ANDD: ACPI device %u is %.*s\n", andd.device_id, (int)name_length, (const char *)name
     );
 }
 
@@ -614,18 +561,15 @@ static void dmar_parse(struct builder *b, const uint8_t *dmar, size_t length) {
     b->t->vtd_haw = header.haw + (uint32_t)1;
     b->t->vtd_flags = header.flags;
     printf(
-        "DMAR revision %u, host address width %u, flags %#x\n",
-        header.hdr.revision, b->t->vtd_haw, b->t->vtd_flags
+        "DMAR revision %u, host address width %u, flags %#x\n", header.hdr.revision, b->t->vtd_haw,
+        b->t->vtd_flags
     );
 
     size_t offset = sizeof(struct acpi_dmar);
     while (offset < length) {
         struct acpi_dmar_entry_hdr entry;
         if (length - offset < sizeof(struct acpi_dmar_entry_hdr)) {
-            stop(
-                b, "DMAR structure", offset,
-                "is cut short by the end of the table"
-            );
+            stop(b, "DMAR structure", offset, "is cut short by the end of the table");
             return;
         }
         memcpy(&entry, dmar + offset, sizeof(struct acpi_dmar_entry_hdr));
@@ -661,9 +605,8 @@ static void dmar_parse(struct builder *b, const uint8_t *dmar, size_t length) {
             }
             default: {
                 printf(
-                    "DMAR structure at offset %#zx has unknown type %u, "
-                    "skipped\n",
-                    offset, entry.type
+                    "DMAR structure at offset %#zx has unknown type %u, skipped\n", offset,
+                    entry.type
                 );
                 break;
             }
@@ -696,8 +639,7 @@ static size_t ivrs_min_length(uint32_t type) {
 }
 
 static bool ivhd_type(uint32_t type) {
-    return type == IVHD_TYPE_10H || type == IVHD_TYPE_11H
-        || type == IVHD_TYPE_40H;
+    return type == IVHD_TYPE_10H || type == IVHD_TYPE_11H || type == IVHD_TYPE_40H;
 }
 
 // The offset up to which the blocks fit the table and their types, and why the
@@ -738,11 +680,8 @@ static uint32_t ivhd_chosen(const uint8_t *ivrs, size_t end, size_t offset) {
         if (ivhd_type(block.type)) {
             struct ivhd other;
             memcpy(&other, ivrs + at, IVHD_10H_SIZE);
-            bool same = other.iommu_rid == mine.iommu_rid
-                && other.base == mine.base;
-            if (same
-             && (other.type > chosen_type
-              || (other.type == chosen_type && at < chosen))) {
+            bool same = other.iommu_rid == mine.iommu_rid && other.base == mine.base;
+            if (same && (other.type > chosen_type || (other.type == chosen_type && at < chosen))) {
                 chosen = at;
                 chosen_type = other.type;
             }
@@ -769,15 +708,15 @@ static size_t ivhd_entry_size(const uint8_t *ivrs, size_t offset, size_t end) {
 }
 
 static void ivhd_entry(
-    struct builder *b, const struct iommu_unit *unit, uint16_t index,
-    const uint8_t *entry, size_t offset, struct range_start *start
+    struct builder *b, const struct iommu_unit *unit, uint16_t index, const uint8_t *entry,
+    size_t offset, struct range_start *start
 ) {
     struct iommu_device_range range = {
         .segment = unit->segment,
         .first = get16(entry + 1),
         .last = get16(entry + 1),
         .unit = index,
-        .amd_settings = entry[3],
+        .amd_settings = entry[3]
     };
     switch (entry[0]) {
         case IVHD_ENTRY_PAD: {
@@ -814,18 +753,15 @@ static void ivhd_entry(
         case IVHD_ENTRY_END: {
             if (!start->pending) {
                 printf(
-                    "IVHD end of range at offset %#zx has no start of range, "
-                    "skipped\n",
-                    offset
+                    "IVHD end of range at offset %#zx has no start of range, skipped\n", offset
                 );
                 break;
             }
             start->pending = false;
             if (range.last < start->first) {
                 printf(
-                    "IVHD range at offset %#zx ends at " RID_FMT
-                    " before its start " RID_FMT ", skipped\n",
-                    start->offset, RID_ARGS(range.last), RID_ARGS(start->first)
+                    "IVHD range at offset %#zx ends at " RID_FMT " before its start " RID_FMT
+                    ", skipped\n", start->offset, RID_ARGS(range.last), RID_ARGS(start->first)
                 );
                 break;
             }
@@ -842,7 +778,7 @@ static void ivhd_entry(
                 .segment = unit->segment,
                 .rid = get16(entry + 5),
                 .unit = index,
-                .amd_settings = entry[3],
+                .amd_settings = entry[3]
             };
             if (entry[7] == IVHD_SPECIAL_IOAPIC) {
                 special.type = IOMMU_SPECIAL_IOAPIC;
@@ -850,8 +786,7 @@ static void ivhd_entry(
                 special.type = IOMMU_SPECIAL_HPET;
             } else {
                 printf(
-                    "IVHD special device entry at offset %#zx has unknown "
-                    "variety %u, skipped\n",
+                    "IVHD special device entry at offset %#zx has unknown variety %u, skipped\n",
                     offset, entry[7]
                 );
                 break;
@@ -862,15 +797,13 @@ static void ivhd_entry(
         default: {
             if (entry[0] >= IVHD_ENTRY_VARIABLE) {
                 printf(
-                    "IVHD ACPI device entry at offset %#zx for %04x:" RID_FMT
-                    " skipped\n",
-                    offset, unit->segment, RID_ARGS(range.first)
+                    "IVHD ACPI device entry at offset %#zx for %04x:" RID_FMT " skipped\n", offset,
+                    unit->segment, RID_ARGS(range.first)
                 );
             } else {
                 printf(
-                    "IVHD device entry at offset %#zx has unknown type %#x, "
-                    "skipped\n",
-                    offset, entry[0]
+                    "IVHD device entry at offset %#zx has unknown type %#x, skipped\n", offset,
+                    entry[0]
                 );
             }
             break;
@@ -879,19 +812,13 @@ static void ivhd_entry(
 }
 
 static void range_start_drop(struct range_start *start) {
-    printf(
-        "IVHD start of range at offset %#zx has no end of range, dropped\n",
-        start->offset
-    );
+    printf("IVHD start of range at offset %#zx has no end of range, dropped\n", start->offset);
     start->pending = false;
 }
 
-static bool ivhd_parse(
-    struct builder *b, const uint8_t *ivrs, size_t offset, size_t length
-) {
+static bool ivhd_parse(struct builder *b, const uint8_t *ivrs, size_t offset, size_t length) {
     uint32_t type = ivrs[offset];
-    size_t header_size = type == IVHD_TYPE_10H ? IVHD_10H_SIZE
-        : sizeof(struct ivhd);
+    size_t header_size = type == IVHD_TYPE_10H ? IVHD_10H_SIZE : sizeof(struct ivhd);
     struct ivhd ivhd = { 0 };
     memcpy(&ivhd, ivrs + offset, header_size);
     struct iommu_unit unit = {
@@ -904,7 +831,7 @@ static bool ivhd_parse(
         .amd_iommu_info = ivhd.iommu_info,
         .amd_features = ivhd.features,
         .amd_efr = ivhd.efr,
-        .amd_efr2 = ivhd.efr2,
+        .amd_efr2 = ivhd.efr2
     };
     uint16_t index;
     if (!add_unit(b, &unit, &index)) {
@@ -961,18 +888,15 @@ static void ivmd_parse(struct builder *b, const uint8_t *ivrs, size_t offset) {
     }
     if (region.last_rid < region.first) {
         printf(
-            "IVMD at offset %#zx ends at " RID_FMT " before its start " RID_FMT
-            ", skipped\n",
+            "IVMD at offset %#zx ends at " RID_FMT " before its start " RID_FMT ", skipped\n",
             offset, RID_ARGS(region.last_rid), RID_ARGS(region.first)
         );
         return;
     }
     if (ivmd.size == 0 || ivmd.size - 1 > UINT64_MAX - ivmd.start) {
         printf(
-            "IVMD at offset %#zx has a memory block of %#llx bytes at %#llx, "
-            "skipped\n",
-            offset, (unsigned long long)ivmd.size,
-            (unsigned long long)ivmd.start
+            "IVMD at offset %#zx has a memory block of %#llx bytes at %#llx, skipped\n", offset,
+            (unsigned long long)ivmd.size, (unsigned long long)ivmd.start
         );
         return;
     }
@@ -984,12 +908,10 @@ static void ivmd_parse(struct builder *b, const uint8_t *ivrs, size_t offset) {
         // Without Unity, any translation will do, one to one included.
         region.readable = (ivmd.flags & IVMD_READ) != 0;
         region.writable = (ivmd.flags & IVMD_WRITE) != 0;
-        if (!region.readable && !region.writable
-         && (ivmd.flags & IVMD_UNITY) != 0) {
+        if (!region.readable && !region.writable && (ivmd.flags & IVMD_UNITY) != 0) {
             printf(
-                "IVMD at offset %#zx, flags %#x, sets Unity without IR or IW, "
-                "taken as memory never to map\n",
-                offset, ivmd.flags
+                "IVMD at offset %#zx, flags %#x, sets Unity without IR or IW, taken as memory "
+                "never to map\n", offset, ivmd.flags
             );
         }
     }
@@ -1002,9 +924,7 @@ static void ivrs_parse(struct builder *b, const uint8_t *ivrs, size_t length) {
     struct ivrs header;
     memcpy(&header, ivrs, sizeof(struct ivrs));
     b->t->amd_ivinfo = header.ivinfo;
-    printf(
-        "IVRS revision %u, IVinfo %#x\n", header.hdr.revision, header.ivinfo
-    );
+    printf("IVRS revision %u, IVinfo %#x\n", header.hdr.revision, header.ivinfo);
 
     const char *why;
     size_t end = ivrs_end(ivrs, length, &why);
@@ -1018,9 +938,8 @@ static void ivrs_parse(struct builder *b, const uint8_t *ivrs, size_t length) {
                 uint32_t chosen = ivhd_chosen(ivrs, end, offset);
                 if (chosen != offset) {
                     printf(
-                        "IVRS IVHD at offset %#zx, type %#x, superseded by "
-                        "the one at offset %#x, type %#x\n",
-                        offset, block.type, chosen, ivrs[chosen]
+                        "IVRS IVHD at offset %#zx, type %#x, superseded by the one at offset %#x, "
+                        "type %#x\n", offset, block.type, chosen, ivrs[chosen]
                     );
                 } else if (!ivhd_parse(b, ivrs, offset, block.length)) {
                     return;
@@ -1035,9 +954,7 @@ static void ivrs_parse(struct builder *b, const uint8_t *ivrs, size_t length) {
             }
             default: {
                 printf(
-                    "IVRS block at offset %#zx has unknown type %#x, "
-                    "skipped\n",
-                    offset, block.type
+                    "IVRS block at offset %#zx has unknown type %#x, skipped\n", offset, block.type
                 );
                 break;
             }
@@ -1073,25 +990,19 @@ static void log_unit(const struct iommu_tables *t, size_t index) {
     const struct iommu_unit *u = &t->units[index];
     if (t->kind == IOMMU_KIND_VTD) {
         printf(
-            "IOMMU unit %zu: VT-d registers at %#llx, %llu KiB, segment "
-            "%u%s\n",
-            index, (unsigned long long)u->base,
-            (unsigned long long)(u->vtd_size / 1024), u->segment,
+            "IOMMU unit %zu: VT-d registers at %#llx, %llu KiB, segment %u%s\n", index,
+            (unsigned long long)u->base, (unsigned long long)(u->vtd_size / 1024), u->segment,
             u->include_all ? ", all other devices" : ""
         );
         return;
     }
     printf(
-        "IOMMU unit %zu: AMD IVHD type %#x, registers at %#llx, segment %u, "
-        "requester ID " RID_FMT
-        ", capability at %#x, flags %#x, info %#x, %s %#x, EFR %#llx, EFR2 "
-        "%#llx\n",
-        index, u->amd_ivhd_type, (unsigned long long)u->base, u->segment,
-        RID_ARGS(u->amd_rid), u->amd_cap_offset, u->amd_ivhd_flags,
-        u->amd_iommu_info,
-        u->amd_ivhd_type == IVHD_TYPE_10H ? "features" : "attributes",
-        u->amd_features, (unsigned long long)u->amd_efr,
-        (unsigned long long)u->amd_efr2
+        "IOMMU unit %zu: AMD IVHD type %#x, registers at %#llx, segment %u, requester ID " RID_FMT
+        ", capability at %#x, flags %#x, info %#x, %s %#x, EFR %#llx, EFR2 %#llx\n", index,
+        u->amd_ivhd_type, (unsigned long long)u->base, u->segment, RID_ARGS(u->amd_rid),
+        u->amd_cap_offset, u->amd_ivhd_flags, u->amd_iommu_info,
+        u->amd_ivhd_type == IVHD_TYPE_10H ? "features" : "attributes", u->amd_features,
+        (unsigned long long)u->amd_efr, (unsigned long long)u->amd_efr2
     );
 }
 
@@ -1101,13 +1012,10 @@ static void log_range(const struct iommu_tables *t, size_t index) {
     format_rids(rids, sizeof(rids), r->segment, r->first, r->last);
     char extra[48] = "";
     if (t->kind == IOMMU_KIND_AMD) {
-        int len = snprintf(
-            extra, sizeof(extra), ", settings %#x", r->amd_settings
-        );
+        int len = snprintf(extra, sizeof(extra), ", settings %#x", r->amd_settings);
         if (r->has_alias && len >= 0 && (size_t)len < sizeof(extra)) {
             snprintf(
-                extra + len, sizeof(extra) - (size_t)len, ", as " RID_FMT,
-                RID_ARGS(r->alias)
+                extra + len, sizeof(extra) - (size_t)len, ", as " RID_FMT, RID_ARGS(r->alias)
             );
         }
     }
@@ -1121,8 +1029,8 @@ static void log_special(const struct iommu_tables *t, size_t index) {
         snprintf(extra, sizeof(extra), ", settings %#x", s->amd_settings);
     }
     printf(
-        "IOMMU %s %u is %04x:" RID_FMT ": unit %u%s\n", special_names[s->type],
-        s->id, s->segment, RID_ARGS(s->rid), s->unit, extra
+        "IOMMU %s %u is %04x:" RID_FMT ": unit %u%s\n", special_names[s->type], s->id, s->segment,
+        RID_ARGS(s->rid), s->unit, extra
     );
 }
 
@@ -1130,9 +1038,7 @@ static void log_reserved(const struct iommu_tables *t, size_t index) {
     const struct iommu_reserved_region *r = &t->reserved[index];
     char devices[40] = "all devices";
     if (!r->all_devices) {
-        format_rids(
-            devices, sizeof(devices), r->segment, r->first, r->last_rid
-        );
+        format_rids(devices, sizeof(devices), r->segment, r->first, r->last_rid);
     }
     const char *kind = "identity mapping";
     if (r->exclusion) {
@@ -1149,17 +1055,15 @@ static void log_reserved(const struct iommu_tables *t, size_t index) {
         access = "write-only";
     }
     printf(
-        "IOMMU %s %#llx-%#llx, %s, for %s\n", kind,
-        (unsigned long long)r->base, (unsigned long long)r->last, access,
-        devices
+        "IOMMU %s %#llx-%#llx, %s, for %s\n", kind, (unsigned long long)r->base,
+        (unsigned long long)r->last, access, devices
     );
 }
 
 static void log_tables(const struct iommu_tables *t) {
     printf(
-        "IOMMU tables: %s, %zu units, %zu device ranges, %zu special devices, "
-        "%zu reserved regions%s\n",
-        kind_names[t->kind], t->unit_count, t->range_count, t->special_count,
+        "IOMMU tables: %s, %zu units, %zu device ranges, %zu special devices, %zu reserved "
+        "regions%s\n", kind_names[t->kind], t->unit_count, t->range_count, t->special_count,
         t->reserved_count, t->truncated ? ", table cut short" : ""
     );
     for (size_t i = 0; i < t->unit_count; i++) {
@@ -1184,8 +1088,7 @@ static bool vendor_is_amd(char vendor[13]) {
     memcpy(vendor + 4, &regs.edx, 4);
     memcpy(vendor + 8, &regs.ecx, 4);
     vendor[12] = '\0';
-    return memcmp(vendor, "AuthenticAMD", 12) == 0
-        || memcmp(vendor, "HygonGenuine", 12) == 0;
+    return memcmp(vendor, "AuthenticAMD", 12) == 0 || memcmp(vendor, "HygonGenuine", 12) == 0;
 }
 
 static bool table_find(const char *signature, struct uacpi_table *table) {
@@ -1194,10 +1097,7 @@ static bool table_find(const char *signature, struct uacpi_table *table) {
         return true;
     }
     if (status != UACPI_STATUS_NOT_FOUND) {
-        printf(
-            "Cannot get the %s table: %s\n", signature,
-            uacpi_status_to_string(status)
-        );
+        printf("Cannot get the %s table: %s\n", signature, uacpi_status_to_string(status));
     }
     return false;
 }
@@ -1260,9 +1160,7 @@ const struct iommu_tables *iommu_tables_parse(void) {
     return &tables;
 }
 
-const struct iommu_device_range *iommu_range_for(
-    uint16_t segment, uint16_t rid
-) {
+const struct iommu_device_range *iommu_range_for(uint16_t segment, uint16_t rid) {
     for (size_t i = 0; i < tables.range_count; i++) {
         const struct iommu_device_range *r = &tables.ranges[i];
         if (r->segment == segment && rid >= r->first && rid <= r->last) {
@@ -1272,9 +1170,7 @@ const struct iommu_device_range *iommu_range_for(
     return NULL;
 }
 
-const struct iommu_special_device *iommu_special_for(
-    uint8_t type, uint8_t id
-) {
+const struct iommu_special_device *iommu_special_for(uint8_t type, uint8_t id) {
     for (size_t i = 0; i < tables.special_count; i++) {
         const struct iommu_special_device *d = &tables.specials[i];
         if (d->type == type && d->id == id) {
@@ -1284,15 +1180,12 @@ const struct iommu_special_device *iommu_special_for(
     return NULL;
 }
 
-void iommu_tables_forget_reserved(
-    bool (*unneeded)(uint16_t segment, uint16_t rid)
-) {
+void iommu_tables_forget_reserved(bool (*unneeded)(uint16_t segment, uint16_t rid)) {
     iommu_tables_parse();
     uint32_t kept = 0;
     for (size_t i = 0; i < tables.reserved_count; i++) {
         struct iommu_reserved_region r = tables.reserved[i];
-        bool forget = !r.exclusion && (r.readable || r.writable)
-            && !r.all_devices;
+        bool forget = !r.exclusion && (r.readable || r.writable) && !r.all_devices;
         for (size_t rid = r.first; forget && rid <= r.last_rid; rid++) {
             forget = unneeded(r.segment, (uint16_t)rid);
         }
@@ -1302,18 +1195,18 @@ void iommu_tables_forget_reserved(
         }
         char devices[32];
         int n = snprintf(
-            devices, sizeof(devices), "%04x:%02x:%02x.%x", r.segment,
-            r.first >> 8, (r.first >> 3) & 0x1f, r.first & 7
+            devices, sizeof(devices), "%04x:%02x:%02x.%x", r.segment, r.first >> 8,
+            (r.first >> 3) & 0x1f, r.first & 7
         );
         if (r.last_rid != r.first) {
             snprintf(
-                devices + n, sizeof(devices) - (size_t)n, "-%02x:%02x.%x",
-                r.last_rid >> 8, (r.last_rid >> 3) & 0x1f, r.last_rid & 7
+                devices + n, sizeof(devices) - (size_t)n, "-%02x:%02x.%x", r.last_rid >> 8,
+                (r.last_rid >> 3) & 0x1f, r.last_rid & 7
             );
         }
         printf(
-            "IOMMU region %#llx-%#llx of %s no longer needed\n",
-            (unsigned long long)r.base, (unsigned long long)r.last, devices
+            "IOMMU region %#llx-%#llx of %s no longer needed\n", (unsigned long long)r.base,
+            (unsigned long long)r.last, devices
         );
     }
     tables.reserved_count = kept;

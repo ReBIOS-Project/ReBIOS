@@ -21,6 +21,7 @@
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdnoreturn.h>
 
 struct flanterm_context;
 
@@ -36,9 +37,7 @@ void vprintf(const char *fmt, va_list args);
 __attribute__((format(printf, 1, 2))) void printf(const char *fmt, ...);
 // Like printf(), but shown whatever the configuration.
 __attribute__((format(printf, 1, 2))) void log_notice(const char *fmt, ...);
-__attribute__((noreturn, format(printf, 1, 2))) void panic(
-    const char *fmt, ...
-);
+__attribute__((format(printf, 1, 2))) noreturn void panic(const char *fmt, ...);
 bool log_panicked(void);
 // The guest is done for: if the log is on the screen, it is shown there again,
 // over the guest's picture, and log_panicked() stops the other processors.

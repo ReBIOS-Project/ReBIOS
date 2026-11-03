@@ -58,35 +58,26 @@ struct pir_slot {
     uint8_t reserved;
 } __attribute__((packed));
 
-_Static_assert(
-    offsetof(struct pir_header, exclusive_irqs) == 10, "$PIR header layout"
-);
-_Static_assert(
-    offsetof(struct pir_header, checksum) == 31, "$PIR header layout"
-);
+_Static_assert(offsetof(struct pir_header, exclusive_irqs) == 10, "$PIR header layout");
+_Static_assert(offsetof(struct pir_header, checksum) == 31, "$PIR header layout");
 _Static_assert(sizeof(struct pir_header) == 32, "$PIR header layout");
-_Static_assert(
-    offsetof(struct pir_slot, slot) == 14, "$PIR slot entry layout"
-);
+_Static_assert(offsetof(struct pir_slot, slot) == 14, "$PIR slot entry layout");
 _Static_assert(sizeof(struct pir_slot) == 16, "$PIR slot entry layout");
 
 // Fills the slot entry of the device whose routes start at routes[*index], on
 // the guest's bus, and moves *index past them, as the routes of a device
 // follow each other. Returns whether any of its pins is on an ISA IRQ.
 static bool slot_fill(
-    const struct acpi_irq_pci_route *routes, size_t count, size_t *index,
-    uint8_t bus, struct pir_slot *slot
+    const struct acpi_irq_pci_route *routes, size_t count, size_t *index, uint8_t bus,
+    struct pir_slot *slot
 ) {
     const struct pci_addr first = routes[*index].addr;
     // Slot number 0, built in, as which devices sit in slots is not known.
-    *slot = (struct pir_slot){
-        .bus = bus, .devfn = (uint8_t)(first.device << 3)
-    };
+    *slot = (struct pir_slot){ .bus = bus, .devfn = (uint8_t)(first.device << 3) };
     bool any = false;
     for (; *index < count; (*index)++) {
         const struct acpi_irq_pci_route *route = &routes[*index];
-        if (route->addr.segment != first.segment
-         || route->addr.bus != first.bus
+        if (route->addr.segment != first.segment || route->addr.bus != first.bus
          || route->addr.device != first.device) {
             break;
         }
@@ -124,13 +115,10 @@ uint32_t pir_build(void *buf, size_t size) {
         printf("No PCI interrupts on ISA IRQs, so no PCI IRQ routing table\n");
         return 0;
     }
-    size_t length = sizeof(struct pir_header)
-        + slots * sizeof(struct pir_slot);
+    size_t length = sizeof(struct pir_header) + slots * sizeof(struct pir_slot);
     if (length > size || length > UINT16_MAX) {
         printf(
-            "The PCI IRQ routing table takes %zu bytes, more than the %zu it "
-            "has\n",
-            length, size
+            "The PCI IRQ routing table takes %zu bytes, more than the %zu it has\n", length, size
         );
         return 0;
     }
@@ -157,7 +145,7 @@ uint32_t pir_build(void *buf, size_t size) {
     struct pir_header header = {
         .version = PIR_VERSION,
         .table_size = (uint16_t)length,
-        .exclusive_irqs = exclusive,
+        .exclusive_irqs = exclusive
     };
     memcpy(header.signature, "$PIR", sizeof(header.signature));
     memcpy(bytes, &header, sizeof(struct pir_header));
@@ -167,8 +155,6 @@ uint32_t pir_build(void *buf, size_t size) {
     }
     bytes[offsetof(struct pir_header, checksum)] = (uint8_t)-sum;
 
-    printf(
-        "PCI IRQ routing table: %zu slots, PCI IRQs %#x\n", slots, exclusive
-    );
+    printf("PCI IRQ routing table: %zu slots, PCI IRQs %#x\n", slots, exclusive);
     return length;
 }

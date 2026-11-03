@@ -15,7 +15,6 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -63,8 +62,7 @@ static unsigned int timers(uintptr_t base) {
 
 static bool fsb_capable(uintptr_t base) {
     for (size_t n = 0; n < timers(base); n++) {
-        if ((read32(base + TIMER_BASE + n * TIMER_STRIDE) & TIMER_FSB_CAP)
-         != 0) {
+        if ((read32(base + TIMER_BASE + n * TIMER_STRIDE) & TIMER_FSB_CAP) != 0) {
             return true;
         }
     }
@@ -76,16 +74,13 @@ static bool fsb_capable(uintptr_t base) {
 static void hide(uintptr_t base) {
     for (size_t n = 0; n < timers(base); n++) {
         uintptr_t config = base + TIMER_BASE + n * TIMER_STRIDE;
-        write32(
-            config, read32(config) & ~(TIMER_INT_ENABLE | TIMER_FSB_ENABLE)
-        );
+        write32(config, read32(config) & ~(TIMER_INT_ENABLE | TIMER_FSB_ENABLE));
     }
     write32(base + CONFIG, read32(base + CONFIG) & ~CONFIG_LEGACY_ROUTE);
     layout_absent(base, HPET_SIZE);
     hidden[hidden_count++] = base;
     printf(
-        "HPET at %#llx hidden from the guest, as its timers can deliver "
-        "through the FSB\n",
+        "HPET at %#llx hidden from the guest, as its timers can deliver through the FSB\n",
         (unsigned long long)base
     );
 }
@@ -93,18 +88,16 @@ static void hide(uintptr_t base) {
 void hpet_init(void) {
     struct uacpi_table table;
     for (size_t n = 0;
-         uacpi_table_find_nth_by_signature(ACPI_HPET_SIGNATURE, n, &table)
-      == UACPI_STATUS_OK; n++) {
+         uacpi_table_find_nth_by_signature(ACPI_HPET_SIGNATURE, n, &table) == UACPI_STATUS_OK;
+         n++) {
         if (table.hdr->length >= sizeof(struct acpi_hpet)) {
             struct acpi_hpet hpet;
             memcpy(&hpet, table.ptr, sizeof(struct acpi_hpet));
             uintptr_t base = hpet.address.address;
             if (hpet.address.address_space_id == ACPI_AS_ID_SYS_MEM
-             && (base & (PAGE_SIZE - 1)) == 0 && hidden_count < MAX_HIDDEN
-             && fsb_capable(base)) {
+             && (base & (PAGE_SIZE - 1)) == 0 && hidden_count < MAX_HIDDEN && fsb_capable(base)) {
                 hide(base);
-            } else if (hpet.address.address_space_id == ACPI_AS_ID_SYS_MEM
-                    && guest_base == 0) {
+            } else if (hpet.address.address_space_id == ACPI_AS_ID_SYS_MEM && guest_base == 0) {
                 guest_base = base;
             }
         }

@@ -107,23 +107,19 @@ bool insn_decode(struct vcpu *v, struct insn *insn);
 // The linear address of a decoded instruction's ModRM memory operand, or of
 // MOV's offset operand: false where it has neither. VEX, EVEX, and XOP forms
 // are not handled.
-bool insn_mem_linear(
-    struct vcpu *v, const struct insn *insn, uint64_t *linear
-);
+bool insn_mem_linear(struct vcpu *v, const struct insn *insn, uint64_t *linear);
 // Where an instruction's ModRM memory operand is, and which of its bytes the
 // instruction reads and writes, as SDM 325462-093 and APM 40332 rev. 4.10
 // describe the instruction: none where it only uses the operand's address, as
 // CLFLUSH. Returns false where the instruction has no such operand, or they do
 // not say.
-bool insn_mem_operand(
-    struct vcpu *v, const struct insn *insn, struct insn_mem *mem
-);
+bool insn_mem_operand(struct vcpu *v, const struct insn *insn, struct insn_mem *mem);
 // A string instruction's linear address for size bytes: its destination at
 // ES:rDI, or its source at DS:rSI or the segment an override names. False,
 // with #GP(0) or #SS(0) raised, where the segment does not allow the access.
 bool insn_string_linear(
-    struct vcpu *v, const struct insn *insn, bool destination, size_t size,
-    bool write, uint64_t *linear
+    struct vcpu *v, const struct insn *insn, bool destination, size_t size, bool write,
+    uint64_t *linear
 );
 
 // The guest's general register, as the encoding numbers them.

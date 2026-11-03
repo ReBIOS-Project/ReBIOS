@@ -36,9 +36,7 @@ bool exit_msr_write(struct vcpu *v, uint32_t msr, uint64_t value);
 void exit_xsetbv(struct vcpu *v);
 
 // An I/O port access the bitmaps trap. value is in and out.
-void exit_io(
-    struct vcpu *v, uint16_t port, size_t size, bool in, uint32_t *value
-);
+void exit_io(struct vcpu *v, uint16_t port, size_t size, bool in, uint32_t *value);
 // The same for INS and OUTS, which it emulates.
 void exit_string_io(struct vcpu *v, uint16_t port);
 

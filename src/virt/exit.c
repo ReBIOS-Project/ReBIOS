@@ -45,9 +45,7 @@
 #define MSR_IA32_CR_PAT 0x277
 
 void exit_cpuid(struct vcpu *v) {
-    struct cpuid_regs r = cpuid_guest(
-        v, (uint32_t)v->gprs.rax, (uint32_t)v->gprs.rcx
-    );
+    struct cpuid_regs r = cpuid_guest(v, (uint32_t)v->gprs.rax, (uint32_t)v->gprs.rcx);
     v->gprs.rax = r.eax;
     v->gprs.rbx = r.ebx;
     v->gprs.rcx = r.ecx;
@@ -144,9 +142,8 @@ void exit_invalid_opcode(struct vcpu *v) {
 
 bool exit_msr_read(struct vcpu *v, uint32_t msr, uint64_t *value) {
     bool fault;
-    if (vlapic_rdmsr(v, msr, value, &fault)
-     || mtrr_rdmsr(v, msr, value, &fault) || msr_rdmsr(v, msr, value, &fault)
-     || nvmx_rdmsr(v, msr, value, &fault)) {
+    if (vlapic_rdmsr(v, msr, value, &fault) || mtrr_rdmsr(v, msr, value, &fault)
+     || msr_rdmsr(v, msr, value, &fault) || nvmx_rdmsr(v, msr, value, &fault)) {
         return !fault;
     }
     if (!virt_vmx && msr == MSR_EFER) {
@@ -183,9 +180,8 @@ void exit_rdmsr(struct vcpu *v) {
 
 bool exit_msr_write(struct vcpu *v, uint32_t msr, uint64_t value) {
     bool fault;
-    if (vlapic_wrmsr(v, msr, value, &fault)
-     || mtrr_wrmsr(v, msr, value, &fault) || msr_wrmsr(v, msr, value, &fault)
-     || nvmx_wrmsr(v, msr, value, &fault)) {
+    if (vlapic_wrmsr(v, msr, value, &fault) || mtrr_wrmsr(v, msr, value, &fault)
+     || msr_wrmsr(v, msr, value, &fault) || nvmx_wrmsr(v, msr, value, &fault)) {
         return !fault;
     }
     if (!virt_vmx && msr == MSR_EFER) {
@@ -193,8 +189,7 @@ bool exit_msr_write(struct vcpu *v, uint32_t msr, uint64_t value) {
             return false;
         }
         uint64_t old = v->vmcb->save.efer;
-        v->vmcb->save.efer = (value & ~(uint64_t)EFER_LMA) | (old & EFER_LMA)
-            | EFER_SVME;
+        v->vmcb->save.efer = (value & ~(uint64_t)EFER_LMA) | (old & EFER_LMA) | EFER_SVME;
         // The processor would have flushed them for the guest's own write.
         svm_flush_guest_tlb(v);
     } else if (!virt_vmx && msr == MSR_IA32_CR_PAT) {
@@ -215,8 +210,7 @@ bool exit_msr_write(struct vcpu *v, uint32_t msr, uint64_t value) {
 }
 
 void exit_wrmsr(struct vcpu *v) {
-    uint64_t value = ((uint64_t)(uint32_t)v->gprs.rdx << 32)
-        | (uint32_t)v->gprs.rax;
+    uint64_t value = ((uint64_t)(uint32_t)v->gprs.rdx << 32) | (uint32_t)v->gprs.rax;
     if (!exit_msr_write(v, (uint32_t)v->gprs.rcx, value)) {
         vcpu_inject_exception(v, 13, true, 0);
         return;
@@ -226,12 +220,10 @@ void exit_wrmsr(struct vcpu *v) {
 
 void exit_xsetbv(struct vcpu *v) {
     uint32_t index = (uint32_t)v->gprs.rcx;
-    uint64_t value = ((uint64_t)(uint32_t)v->gprs.rdx << 32)
-        | (uint32_t)v->gprs.rax;
+    uint64_t value = ((uint64_t)(uint32_t)v->gprs.rdx << 32) | (uint32_t)v->gprs.rax;
 
     // Only the state components the guest gets.
-    if ((index == 0 && (value & ~cpuid_xcr0_allowed()) != 0)
-     || !xsetbv_safe(index, value)) {
+    if ((index == 0 && (value & ~cpuid_xcr0_allowed()) != 0) || !xsetbv_safe(index, value)) {
         vcpu_inject_exception(v, 13, true, 0);
         return;
     }
@@ -268,9 +260,7 @@ static void port_native(uint16_t port, size_t size, bool in, uint32_t *value) {
     }
 }
 
-static void port_access(
-    struct vcpu *v, uint16_t port, size_t size, bool in, uint32_t *value
-) {
+static void port_access(struct vcpu *v, uint16_t port, size_t size, bool in, uint32_t *value) {
     vcpu_io_access(v, port, size);
     if (io_dispatch(v, port, size, in, value)) {
         return;
@@ -285,25 +275,20 @@ static void port_access(
     }
 }
 
-void exit_io(
-    struct vcpu *v, uint16_t port, size_t size, bool in, uint32_t *value
-) {
+void exit_io(struct vcpu *v, uint16_t port, size_t size, bool in, uint32_t *value) {
     profile_io(port);
     port_access(v, port, size, in, value);
 }
 
 static bool string_ins(
-    struct vcpu *v, uintptr_t linear, uint16_t port, size_t size,
-    uint32_t *value
+    struct vcpu *v, uintptr_t linear, uint16_t port, size_t size, uint32_t *value
 ) {
     (void)linear;
     port_access(v, port, size, true, value);
     return true;
 }
 
-static void string_outs(
-    struct vcpu *v, uint16_t port, size_t size, uint32_t value
-) {
+static void string_outs(struct vcpu *v, uint16_t port, size_t size, uint32_t value) {
     port_access(v, port, size, false, &value);
 }
 
@@ -319,8 +304,7 @@ void exit_string_io(struct vcpu *v, uint16_t port) {
     if (!insn_decode(v, &insn)) {
         if (!nvmx_exit_pending(v)) {
             printf(
-                "Cannot decode the instruction at %#llx that reached trapped "
-                "port %#x\n",
+                "Cannot decode the instruction at %#llx that reached trapped port %#x\n",
                 (unsigned long long)vcpu_rip(v), port
             );
         }

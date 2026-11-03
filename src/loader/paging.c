@@ -36,7 +36,7 @@
 
 uintptr_t paging_build_identity_map(uintptr_t *map_top, size_t *pages) {
     bool huge_pages = cpuid(0x80000000, 0).eax >= 0x80000001
-        && (cpuid(0x80000001, 0).edx & ((uint32_t)1 << 26)) != 0;
+                   && (cpuid(0x80000001, 0).edx & ((uint32_t)1 << 26)) != 0;
 
     uintptr_t top = (*map_top + GIB - 1) & ~(GIB - 1);
     size_t gib_count = top / GIB;
@@ -98,9 +98,7 @@ static uint64_t *next_table(uint64_t *entry) {
 bool paging_map_device(uintptr_t pml4, uintptr_t base, size_t size) {
     uintptr_t end = (base + size + MIB2 - 1) & ~(MIB2 - 1);
     for (uintptr_t a = base & ~(MIB2 - 1); a < end; a += MIB2) {
-        uint64_t *pdpt = next_table(
-            (uint64_t *)(uintptr_t)pml4 + (a >> 39 & 511)
-        );
+        uint64_t *pdpt = next_table((uint64_t *)(uintptr_t)pml4 + (a >> 39 & 511));
         if (pdpt == NULL) {
             return false;
         }

@@ -28,8 +28,6 @@ void pci_port_init(void);
 int pci_port_at(uint8_t device, uint8_t function);
 
 uint32_t pci_port_read(size_t port, uint32_t offset, size_t size);
-void pci_port_write(
-    size_t port, uint32_t offset, size_t size, uint32_t value
-);
+void pci_port_write(size_t port, uint32_t offset, size_t size, uint32_t value);
 
 #endif

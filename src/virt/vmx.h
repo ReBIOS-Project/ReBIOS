@@ -21,6 +21,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdnoreturn.h>
 
 // VMCS field encodings (SDM 325462-093 Vol. 3D, Appendix B).
 #define VMCS_VPID 0x0000
@@ -424,7 +425,7 @@ struct vmx_vmcs {
 bool vmx_supported(void);
 void vmx_cpu_init(void);
 void vmx_vcpu_init(struct vcpu *v);
-__attribute__((noreturn)) void vmx_run(struct vcpu *v);
+noreturn void vmx_run(struct vcpu *v);
 // Whether the guest's VMCS gets the secondary processor-based control.
 bool vmx_secondary_allowed(uint32_t control);
 // Whether the guest's VMCS gets the pin-based control.
@@ -490,7 +491,7 @@ void vmx_load_guest_pdptes(void);
 // enables, and, for an NMI delivered through a task gate, blocking NMIs.
 void vmx_task_switched(struct vcpu *v, bool nmi);
 // Ends the guest where the processor cannot go on, as a triple fault does.
-__attribute__((noreturn)) void vmx_shutdown(const char *why);
+noreturn void vmx_shutdown(const char *why);
 void vmx_write(uint32_t field, uint64_t value);
 
 #endif

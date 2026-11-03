@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -48,8 +49,8 @@ struct counters {
 };
 
 struct page_count {
-    uint64_t page;
-    size_t count;
+    _Atomic(uint64_t) page;
+    _Atomic(size_t) count;
 };
 
 bool profile_on;
@@ -63,7 +64,7 @@ static uint64_t hypercalls[HYPERCALLS];
 static uint64_t hypercalls_before[HYPERCALLS];
 static const char *hypercall_names[HYPERCALLS] = {
     "debug output", "CSM return", "reset", "call32 init", "call32 enter",
-    "call32 return",
+    "call32 return"
 };
 static uint64_t last_report;
 
@@ -77,7 +78,7 @@ static const char *vmx_names[] = {
     [32] = "WRMSR", [37] = "monitor trap", [43] = "TPR below threshold",
     [44] = "APIC access", [45] = "EOI", [48] = "EPT violation",
     [49] = "EPT misconfiguration", [50] = "INVEPT", [52] = "preemption timer",
-    [53] = "INVVPID", [55] = "XSETBV", [56] = "APIC write",
+    [53] = "INVVPID", [55] = "XSETBV", [56] = "APIC write"
 };
 
 static const char *svm_name(unsigned int slot) {
@@ -135,8 +136,7 @@ void profile_init(void) {
     if (core_handoff->config.profile == 0) {
         return;
     }
-    size_t port_pages = (0x10000 * sizeof(uint32_t) + PAGE_SIZE - 1)
-        / PAGE_SIZE;
+    size_t port_pages = (0x10000 * sizeof(uint32_t) + PAGE_SIZE - 1) / PAGE_SIZE;
     ports = page_alloc(port_pages);
     ports_before = page_alloc(port_pages);
     memset(ports, 0, 0x10000 * sizeof(uint32_t));
@@ -144,8 +144,7 @@ void profile_init(void) {
     last_report = time_ns();
     profile_on = true;
     printf(
-        "Profiling the guest's exits, every %llu s\n",
-        (unsigned long long)(PERIOD_NS / 1000000000)
+        "Profiling the guest's exits, every %llu s\n", (unsigned long long)(PERIOD_NS / 1000000000)
     );
 }
 
@@ -155,18 +154,22 @@ void profile_exit(struct vcpu *v, uint32_t reason) {
     }
     v->profile_slot = slot_of(reason);
     v->profile_tsc = rdtsc();
-    __atomic_fetch_add(&now.exits[v->profile_slot], 1, __ATOMIC_RELAXED);
+    atomic_fetch_add_explicit(
+        (_Atomic(uint64_t) *)&now.exits[v->profile_slot], 1, memory_order_relaxed
+    );
 }
 
 void profile_hypercall(uint32_t function) {
     if (profile_on && function < HYPERCALLS) {
-        __atomic_fetch_add(&hypercalls[function], 1, __ATOMIC_RELAXED);
+        atomic_fetch_add_explicit(
+            (_Atomic(uint64_t) *)&hypercalls[function], 1, memory_order_relaxed
+        );
     }
 }
 
 void profile_io(uint16_t port) {
     if (profile_on) {
-        __atomic_fetch_add(&ports[port], 1, __ATOMIC_RELAXED);
+        atomic_fetch_add_explicit((_Atomic(uint32_t) *)&ports[port], 1, memory_order_relaxed);
     }
 }
 
@@ -177,16 +180,16 @@ void profile_mmio(uintptr_t gpa) {
     uint64_t key = (gpa & ~(uint64_t)(PAGE_SIZE - 1)) + 1;
     for (size_t i = 0; i < PAGES; i++) {
         struct page_count *p = &pages[(unsigned int)((key >> 12) + i) % PAGES];
-        uint64_t seen = __atomic_load_n(&p->page, __ATOMIC_RELAXED);
+        uint64_t seen = atomic_load_explicit(&p->page, memory_order_relaxed);
         if (seen == 0) {
             uint64_t expected = 0;
-            seen = __atomic_compare_exchange_n(
-                &p->page, &expected, key, false, __ATOMIC_RELAXED,
-                __ATOMIC_RELAXED
-            ) ? key : expected;
+            bool taken = atomic_compare_exchange_strong_explicit(
+                &p->page, &expected, key, memory_order_relaxed, memory_order_relaxed
+            );
+            seen = taken ? key : expected;
         }
         if (seen == key) {
-            __atomic_fetch_add(&p->count, 1, __ATOMIC_RELAXED);
+            atomic_fetch_add_explicit(&p->count, 1, memory_order_relaxed);
             return;
         }
     }
@@ -226,22 +229,22 @@ static void report(uint64_t elapsed_ns) {
     uint64_t ms = elapsed_ns / 1000000;
     uint64_t period = hz * ms / 1000 + 1;
     printf(
-        "Profile: %llu exits/s, %llu.%llu%% of a processor in the hypervisor, "
-        "%llu.%llu%% halted\n",
-        (unsigned long long)(total * 1000 / (ms != 0 ? ms : 1)),
+        "Profile: %llu exits/s, %llu.%llu%% of a processor in the hypervisor, %llu.%llu%% "
+        "halted\n", (unsigned long long)(total * 1000 / (ms != 0 ? ms : 1)),
         (unsigned long long)(cycles * 100 / period),
         (unsigned long long)(cycles * 1000 / period % 10),
-        (unsigned long long)(idle * 100 / period),
-        (unsigned long long)(idle * 1000 / period % 10)
+        (unsigned long long)(idle * 100 / period), (unsigned long long)(idle * 1000 / period % 10)
     );
     for (size_t i = 0; i < TOP && top[i].exits != 0; i++) {
-        const char *name = virt_vmx
-            ? (top[i].slot < sizeof(vmx_names) / sizeof(char *)
-                ? vmx_names[top[i].slot] : NULL) : svm_name(top[i].slot);
+        const char *name = NULL;
+        if (!virt_vmx) {
+            name = svm_name(top[i].slot);
+        } else if (top[i].slot < sizeof(vmx_names) / sizeof(char *)) {
+            name = vmx_names[top[i].slot];
+        }
         printf(
-            "Profile:   %-20s %#5x %8llu/s %6llu us each\n",
-            name != NULL ? name : "?", top[i].slot,
-            (unsigned long long)(top[i].exits * 1000 / (ms != 0 ? ms : 1)),
+            "Profile:   %-20s %#5x %8llu/s %6llu us each\n", name != NULL ? name : "?",
+            top[i].slot, (unsigned long long)(top[i].exits * 1000 / (ms != 0 ? ms : 1)),
             (unsigned long long)(top[i].cycles * 1000000 / hz / top[i].exits)
         );
     }
@@ -277,13 +280,11 @@ static void report(uint64_t elapsed_ns) {
     }
     memcpy(ports_before, ports, 0x10000 * sizeof(uint32_t));
     for (size_t i = 0; i < PAGES; i++) {
-        size_t count = __atomic_exchange_n(
-            &pages[i].count, 0, __ATOMIC_RELAXED
-        );
+        size_t count = atomic_exchange_explicit(&pages[i].count, 0, memory_order_relaxed);
         if (count * 1000 / (ms != 0 ? ms : 1) >= 100) {
+            uint64_t page = atomic_load_explicit(&pages[i].page, memory_order_relaxed) - 1;
             printf(
-                "Profile:   page %#llx %8llu/s\n",
-                (unsigned long long)(pages[i].page - 1),
+                "Profile:   page %#llx %8llu/s\n", (unsigned long long)page,
                 (unsigned long long)count * 1000 / (ms != 0 ? ms : 1)
             );
         }
@@ -295,9 +296,9 @@ void profile_entry(struct vcpu *v) {
         return;
     }
     if (v->profile_tsc != 0) {
-        __atomic_fetch_add(
-            &now.cycles[v->profile_slot], rdtsc() - v->profile_tsc,
-            __ATOMIC_RELAXED
+        atomic_fetch_add_explicit(
+            (_Atomic(uint64_t) *)&now.cycles[v->profile_slot], rdtsc() - v->profile_tsc,
+            memory_order_relaxed
         );
         v->profile_tsc = 0;
     }

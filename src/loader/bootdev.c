@@ -37,8 +37,7 @@ static EFI_GUID pci_io_guid = EFI_PCI_IO_PROTOCOL_GUID;
 static void *protocol_get(EFI_HANDLE handle, EFI_GUID *guid) {
     void *interface;
     EFI_STATUS status = efi_bs->OpenProtocol(
-        handle, guid, &interface, efi_image_handle, NULL,
-        EFI_OPEN_PROTOCOL_GET_PROTOCOL
+        handle, guid, &interface, efi_image_handle, NULL, EFI_OPEN_PROTOCOL_GET_PROTOCOL
     );
     if (status != EFI_SUCCESS) {
         return NULL;
@@ -56,13 +55,11 @@ static uint8_t device_path_bbs_type(EFI_DEVICE_PATH_PROTOCOL *path) {
             break;
         }
         if (node->Type == EFI_MESSAGING_DEVICE_PATH
-         && (node->SubType == EFI_MSG_USB_DP
-          || node->SubType == EFI_MSG_USB_WWID_DP
+         && (node->SubType == EFI_MSG_USB_DP || node->SubType == EFI_MSG_USB_WWID_DP
           || node->SubType == EFI_MSG_USB_CLASS_DP)) {
             return EFI_BBS_TYPE_USB;
         }
-        if (node->Type == EFI_MEDIA_DEVICE_PATH
-         && node->SubType == EFI_MEDIA_CDROM_DP) {
+        if (node->Type == EFI_MEDIA_DEVICE_PATH && node->SubType == EFI_MEDIA_CDROM_DP) {
             cdrom = true;
         }
     }
@@ -84,22 +81,16 @@ static const char *bbs_type_name(uint8_t type) {
     }
 }
 
-static bool config_read8(
-    EFI_PCI_IO_PROTOCOL *pci_io, uint32_t offset, uint8_t *value
-) {
-    return pci_io->Pci.Read(pci_io, EfiPciIoWidthUint8, offset, 1, value)
-        == EFI_SUCCESS;
+static bool config_read8(EFI_PCI_IO_PROTOCOL *pci_io, uint32_t offset, uint8_t *value) {
+    return pci_io->Pci.Read(pci_io, EfiPciIoWidthUint8, offset, 1, value) == EFI_SUCCESS;
 }
 
 // Describes the PCI controller on the device path, and the device type the
 // path implies, in *dev. Returns false if there is no such controller.
-static bool controller_resolve(
-    EFI_DEVICE_PATH_PROTOCOL *path, struct handoff_block_device *dev
-) {
+static bool controller_resolve(EFI_DEVICE_PATH_PROTOCOL *path, struct handoff_block_device *dev) {
     EFI_DEVICE_PATH_PROTOCOL *remaining = path;
     EFI_HANDLE pci_handle;
-    if (efi_bs->LocateDevicePath(&pci_io_guid, &remaining, &pci_handle)
-     != EFI_SUCCESS) {
+    if (efi_bs->LocateDevicePath(&pci_io_guid, &remaining, &pci_handle) != EFI_SUCCESS) {
         return false;
     }
     EFI_PCI_IO_PROTOCOL *pci_io = protocol_get(pci_handle, &pci_io_guid);
@@ -111,8 +102,7 @@ static bool controller_resolve(
     EFI_UINTN bus;
     EFI_UINTN device;
     EFI_UINTN function;
-    if (pci_io->GetLocation(pci_io, &segment, &bus, &device, &function)
-     != EFI_SUCCESS
+    if (pci_io->GetLocation(pci_io, &segment, &bus, &device, &function) != EFI_SUCCESS
      || segment > 0xffff || bus > 0xff || device > 31 || function > 7) {
         return false;
     }
@@ -134,38 +124,29 @@ static bool controller_resolve(
     return true;
 }
 
-static void device_log(
-    const char *what, const struct handoff_block_device *dev
-) {
+static void device_log(const char *what, const struct handoff_block_device *dev) {
     printf(
-        "%s %04x:%02x:%02x.%x, %s, class %02x:%02x%s\n", what,
-        dev->address.segment, dev->address.bus, dev->address.devfn >> 3,
-        dev->address.devfn & 7, bbs_type_name(dev->bbs_type), dev->base_class,
-        dev->subclass, dev->boot ? ", boot" : ""
+        "%s %04x:%02x:%02x.%x, %s, class %02x:%02x%s\n", what, dev->address.segment,
+        dev->address.bus, dev->address.devfn >> 3, dev->address.devfn & 7,
+        bbs_type_name(dev->bbs_type), dev->base_class, dev->subclass, dev->boot ? ", boot" : ""
     );
 }
 
 // Says why if there is no boot device. *block is whether the device itself has
 // a block I/O interface.
 static bool boot_device_find(struct handoff_block_device *boot, bool *block) {
-    EFI_LOADED_IMAGE_PROTOCOL *image = protocol_get(
-        efi_image_handle, &loaded_image_guid
-    );
+    EFI_LOADED_IMAGE_PROTOCOL *image = protocol_get(efi_image_handle, &loaded_image_guid);
     if (image == NULL || image->DeviceHandle == NULL) {
         printf("No boot device: the loader's image names no device\n");
         return false;
     }
-    EFI_DEVICE_PATH_PROTOCOL *path = protocol_get(
-        image->DeviceHandle, &device_path_guid
-    );
+    EFI_DEVICE_PATH_PROTOCOL *path = protocol_get(image->DeviceHandle, &device_path_guid);
     if (path == NULL) {
         printf("No boot device: the loader's device has no device path\n");
         return false;
     }
     if (!controller_resolve(path, boot)) {
-        printf(
-            "No boot device: the loader's device is not on a PCI controller\n"
-        );
+        printf("No boot device: the loader's device is not on a PCI controller\n");
         return false;
     }
     *block = protocol_get(image->DeviceHandle, &block_io_guid) != NULL;
@@ -173,15 +154,13 @@ static bool boot_device_find(struct handoff_block_device *boot, bool *block) {
 }
 
 static uint32_t address_key(const struct handoff_pci_address *address) {
-    return (uint32_t)address->segment << 16 | (uint32_t)address->bus << 8
-        | address->devfn;
+    return (uint32_t)address->segment << 16 | (uint32_t)address->bus << 8 | address->devfn;
 }
 
 // The boot controller's records go first, the boot device's own type leading
 // them, then the others by controller and type.
 static bool record_before(
-    const struct handoff_block_device *a, const struct handoff_block_device *b,
-    uint8_t boot_type
+    const struct handoff_block_device *a, const struct handoff_block_device *b, uint8_t boot_type
 ) {
     if (a->boot != b->boot) {
         return a->boot;
@@ -222,10 +201,7 @@ static void record(const struct handoff_block_device *dev, uint8_t boot_type) {
         count--;
     }
 
-    memmove(
-        &records[pos + 1], &records[pos],
-        (count - pos) * sizeof(struct handoff_block_device)
-    );
+    memmove(&records[pos + 1], &records[pos], (count - pos) * sizeof(struct handoff_block_device));
     records[pos] = *dev;
     loader_handoff->block_device_count = count + 1;
 }
@@ -258,22 +234,16 @@ void bootdev_collect(void) {
     }
 
     for (size_t i = 0; i < handle_count; i++) {
-        EFI_BLOCK_IO_PROTOCOL *block_io = protocol_get(
-            handles[i], &block_io_guid
-        );
-        if (block_io == NULL || block_io->Media == NULL
-         || block_io->Media->LogicalPartition) {
+        EFI_BLOCK_IO_PROTOCOL *block_io = protocol_get(handles[i], &block_io_guid);
+        if (block_io == NULL || block_io->Media == NULL || block_io->Media->LogicalPartition) {
             continue;
         }
-        EFI_DEVICE_PATH_PROTOCOL *path = protocol_get(
-            handles[i], &device_path_guid
-        );
+        EFI_DEVICE_PATH_PROTOCOL *path = protocol_get(handles[i], &device_path_guid);
         struct handoff_block_device dev;
         if (path == NULL || !controller_resolve(path, &dev)) {
             continue;
         }
-        dev.boot = have_boot
-            && address_key(&dev.address) == address_key(&boot.address);
+        dev.boot = have_boot && address_key(&dev.address) == address_key(&boot.address);
         record(&dev, boot.bbs_type);
     }
 

@@ -19,13 +19,9 @@
 #include <stdint.h>
 #include <virt/alu.h>
 
-uint64_t alu_run(
-    unsigned int stub, uint64_t dst, uint64_t src, uint64_t *rflags
-);
+uint64_t alu_run(unsigned int stub, uint64_t dst, uint64_t src, uint64_t *rflags);
 
-uint64_t alu(
-    unsigned int op, size_t size, uint64_t dst, uint64_t src, uint64_t *rflags
-) {
+uint64_t alu(unsigned int op, size_t size, uint64_t dst, uint64_t src, uint64_t *rflags) {
     size_t index = size == 1 ? 0 : size == 2 ? 1 : size == 4 ? 2 : 3;
     return alu_run(op * 4 + index, dst, src, rflags);
 }

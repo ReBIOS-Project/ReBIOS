@@ -53,13 +53,13 @@
 
 // What a stopped graphics driver may turn off, and the VBIOS needs.
 #define VGA_DECODE_ATTRIBUTES \
-    (EFI_PCI_IO_ATTRIBUTE_IO | EFI_PCI_IO_ATTRIBUTE_MEMORY \
-        | EFI_PCI_IO_ATTRIBUTE_BUS_MASTER | EFI_PCI_IO_ATTRIBUTE_VGA_MEMORY \
-        | EFI_PCI_IO_ATTRIBUTE_VGA_IO | EFI_PCI_IO_ATTRIBUTE_VGA_IO_16)
+    (EFI_PCI_IO_ATTRIBUTE_IO | EFI_PCI_IO_ATTRIBUTE_MEMORY | EFI_PCI_IO_ATTRIBUTE_BUS_MASTER \
+   | EFI_PCI_IO_ATTRIBUTE_VGA_MEMORY | EFI_PCI_IO_ATTRIBUTE_VGA_IO \
+   | EFI_PCI_IO_ATTRIBUTE_VGA_IO_16)
 
 #define VGA_ATTRIBUTES \
     (EFI_PCI_IO_ATTRIBUTE_VGA_MEMORY | EFI_PCI_IO_ATTRIBUTE_VGA_IO \
-        | EFI_PCI_IO_ATTRIBUTE_VGA_IO_16)
+   | EFI_PCI_IO_ATTRIBUTE_VGA_IO_16)
 
 static EFI_GUID gop_guid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
 static EFI_GUID device_path_guid = EFI_DEVICE_PATH_PROTOCOL_GUID;
@@ -71,8 +71,7 @@ static EFI_GUID file_info_guid = EFI_FILE_INFO_ID;
 // in One, Sub Notebook, Tablet, Convertible, Detachable, IoT Gateway, Embedded
 // PC, Mini PC, and Stick PC.
 static const uint8_t slotless_chassis[] = {
-    0x08, 0x09, 0x0a, 0x0b, 0x0d, 0x0e, 0x1e, 0x1f, 0x20, 0x21, 0x22, 0x23,
-    0x24
+    0x08, 0x09, 0x0a, 0x0b, 0x0d, 0x0e, 0x1e, 0x1f, 0x20, 0x21, 0x22, 0x23, 0x24
 };
 
 // A VBIOS image the configuration names.
@@ -91,9 +90,7 @@ struct vbios_choice {
     const char *source;
 };
 
-static bool setting_starts_with(
-    const EFI_CHAR16 *setting, const char *prefix
-) {
+static bool setting_starts_with(const EFI_CHAR16 *setting, const char *prefix) {
     for (size_t i = 0; prefix[i] != 0; i++) {
         if (setting[i] != (uint8_t)prefix[i]) {
             return false;
@@ -102,9 +99,7 @@ static bool setting_starts_with(
     return true;
 }
 
-static void setting_to_ascii(
-    const EFI_CHAR16 *setting, char *out, size_t out_size
-) {
+static void setting_to_ascii(const EFI_CHAR16 *setting, char *out, size_t out_size) {
     size_t i = 0;
     for (; i + 1 < out_size && setting[i] != 0; i++) {
         out[i] = setting[i] < 0x80 ? (char)setting[i] : '?';
@@ -120,15 +115,12 @@ static bool gop_mode_usable(EFI_GRAPHICS_OUTPUT_PROTOCOL *gop) {
 
     EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *info = mode->Info;
     EFI_PIXEL_BITMASK *masks = &info->PixelInformation;
-    bool format_usable
-        = info->PixelFormat == EfiPixelRedGreenBlueReserved8BitPerColor
-        || info->PixelFormat == EfiPixelBlueGreenRedReserved8BitPerColor
-        || (info->PixelFormat == EfiPixelBitMask
-            && (masks->RedMask | masks->GreenMask | masks->BlueMask
-                | masks->ReservedMask) != 0);
+    EFI_UINT32 bits = masks->RedMask | masks->GreenMask | masks->BlueMask | masks->ReservedMask;
+    bool format_usable = info->PixelFormat == EfiPixelRedGreenBlueReserved8BitPerColor
+                      || info->PixelFormat == EfiPixelBlueGreenRedReserved8BitPerColor
+                      || (info->PixelFormat == EfiPixelBitMask && bits != 0);
 
-    return format_usable && info->HorizontalResolution != 0
-        && info->VerticalResolution != 0
+    return format_usable && info->HorizontalResolution != 0 && info->VerticalResolution != 0
         && info->PixelsPerScanLine >= info->HorizontalResolution;
 }
 
@@ -143,9 +135,7 @@ static bool gop_prepare(EFI_GRAPHICS_OUTPUT_PROTOCOL *gop) {
     }
 
     // Some firmware leaves the protocol unstarted until a mode is set.
-    EFI_STATUS status = gop->QueryMode(
-        gop, gop->Mode->Mode, &info_size, &info
-    );
+    EFI_STATUS status = gop->QueryMode(gop, gop->Mode->Mode, &info_size, &info);
     if (status == EFI_NOT_STARTED) {
         gop->SetMode(gop, 0);
         status = gop->QueryMode(gop, gop->Mode->Mode, &info_size, &info);
@@ -172,8 +162,7 @@ static bool gop_prepare(EFI_GRAPHICS_OUTPUT_PROTOCOL *gop) {
 
 static bool gop_pci_device(EFI_HANDLE handle, struct pci_io_device *dev) {
     EFI_DEVICE_PATH_PROTOCOL *path;
-    if (efi_bs->HandleProtocol(handle, &device_path_guid, (void **)&path)
-     != EFI_SUCCESS
+    if (efi_bs->HandleProtocol(handle, &device_path_guid, (void **)&path) != EFI_SUCCESS
      || path == NULL) {
         return false;
     }
@@ -199,8 +188,7 @@ static EFI_HANDLE choose_gop(EFI_GRAPHICS_OUTPUT_PROTOCOL **chosen) {
             if (gop_of_configured_device(handles[i]) != (pass == 0)) {
                 continue;
             }
-            if (efi_bs->HandleProtocol(handles[i], &gop_guid, (void **)&gop)
-             == EFI_SUCCESS
+            if (efi_bs->HandleProtocol(handles[i], &gop_guid, (void **)&gop) == EFI_SUCCESS
              && gop != NULL && gop_prepare(gop)) {
                 found = handles[i];
                 *chosen = gop;
@@ -232,17 +220,12 @@ static void describe_framebuffer(
     EFI_PIXEL_BITMASK masks = info->PixelInformation;
 
     if (info->PixelFormat == EfiPixelRedGreenBlueReserved8BitPerColor) {
-        masks = (EFI_PIXEL_BITMASK){
-            0x000000ff, 0x0000ff00, 0x00ff0000, 0xff000000
-        };
+        masks = (EFI_PIXEL_BITMASK){ 0x000000ff, 0x0000ff00, 0x00ff0000, 0xff000000 };
     } else if (info->PixelFormat == EfiPixelBlueGreenRedReserved8BitPerColor) {
-        masks = (EFI_PIXEL_BITMASK){
-            0x00ff0000, 0x0000ff00, 0x000000ff, 0xff000000
-        };
+        masks = (EFI_PIXEL_BITMASK){ 0x00ff0000, 0x0000ff00, 0x000000ff, 0xff000000 };
     }
 
-    uint32_t all = masks.RedMask | masks.GreenMask | masks.BlueMask
-        | masks.ReservedMask;
+    uint32_t all = masks.RedMask | masks.GreenMask | masks.BlueMask | masks.ReservedMask;
     uint32_t bpp = (32 - (uint32_t)__builtin_clz(all) + 7) / 8 * 8;
 
     fb->base = mode->FrameBufferBase;
@@ -262,8 +245,8 @@ static void describe_framebuffer(
     fb->present = true;
 
     printf(
-        "Framebuffer at %#llx, %ux%u, %u bpp, pitch %u\n",
-        (unsigned long long)fb->base, fb->width, fb->height, bpp, fb->pitch
+        "Framebuffer at %#llx, %ux%u, %u bpp, pitch %u\n", (unsigned long long)fb->base, fb->width,
+        fb->height, bpp, fb->pitch
     );
 }
 
@@ -276,8 +259,7 @@ static bool load_cbfs_vbios(struct user_vbios *vbios) {
         snprintf(name, sizeof(name), "%s", CBFS_DEFAULT_NAME);
     } else {
         size_t i = 0;
-        for (; prefix + i < CONFIG_VGABIOS_MAX && setting[prefix + i] != 0;
-             i++) {
+        for (; prefix + i < CONFIG_VGABIOS_MAX && setting[prefix + i] != 0; i++) {
             if (setting[prefix + i] >= 0x80) {
                 printf("The VBIOS CBFS file name is not ASCII\n");
                 return false;
@@ -304,10 +286,8 @@ static bool file_size(EFI_FILE_PROTOCOL *file, uint64_t *size) {
     EFI_FILE_INFO *info;
     bool ok = false;
 
-    if (file->GetInfo(file, &file_info_guid, &info_size, NULL)
-     != EFI_BUFFER_TOO_SMALL
-     || efi_bs->AllocatePool(EfiLoaderData, info_size, (void **)&info)
-     != EFI_SUCCESS) {
+    if (file->GetInfo(file, &file_info_guid, &info_size, NULL) != EFI_BUFFER_TOO_SMALL
+     || efi_bs->AllocatePool(EfiLoaderData, info_size, (void **)&info) != EFI_SUCCESS) {
         return false;
     }
     if (file->GetInfo(file, &file_info_guid, &info_size, info) == EFI_SUCCESS
@@ -323,14 +303,13 @@ static bool file_size(EFI_FILE_PROTOCOL *file, uint64_t *size) {
 static void *read_file(EFI_FILE_PROTOCOL *file, size_t size) {
     uint8_t *buffer;
 
-    if (efi_bs->AllocatePool(EfiLoaderData, size, (void **)&buffer)
-     != EFI_SUCCESS) {
+    if (efi_bs->AllocatePool(EfiLoaderData, size, (void **)&buffer) != EFI_SUCCESS) {
         return NULL;
     }
     for (size_t done = 0; done < size; ) {
         EFI_UINTN chunk = size - done;
-        if (file->Read(file, &chunk, buffer + done) != EFI_SUCCESS
-         || chunk == 0 || chunk > size - done) {
+        if (file->Read(file, &chunk, buffer + done) != EFI_SUCCESS || chunk == 0
+         || chunk > size - done) {
             efi_bs->FreePool(buffer);
             return NULL;
         }
@@ -356,19 +335,19 @@ static bool load_file_vbios(struct user_vbios *vbios) {
     path[i] = 0;
     setting_to_ascii(path, name, sizeof(name));
 
-    bool unopened = efi_bs->HandleProtocol(
+    EFI_STATUS status = efi_bs->HandleProtocol(
         efi_image_handle, &loaded_image_guid, (void **)&loaded_image
-    ) != EFI_SUCCESS
-        || efi_bs->HandleProtocol(
+    );
+    if (status == EFI_SUCCESS) {
+        status = efi_bs->HandleProtocol(
             loaded_image->DeviceHandle, &file_system_guid, (void **)&fs
-        ) != EFI_SUCCESS
-        || fs->OpenVolume(fs, &root) != EFI_SUCCESS;
-    if (unopened) {
-        printf(
-            "Cannot open the volume ReBIOS was loaded from to read the VBIOS "
-            "file %s\n",
-            name
         );
+    }
+    if (status == EFI_SUCCESS) {
+        status = fs->OpenVolume(fs, &root);
+    }
+    if (status != EFI_SUCCESS) {
+        printf("Cannot open the volume ReBIOS was loaded from to read the VBIOS file %s\n", name);
         return false;
     }
 
@@ -379,8 +358,7 @@ static bool load_file_vbios(struct user_vbios *vbios) {
             printf("Cannot read the VBIOS file %s\n", name);
         } else if (size == 0 || size > VBIOS_FILE_MAX) {
             printf(
-                "The VBIOS file %s is empty or larger than %u KiB\n", name,
-                VBIOS_FILE_MAX / 1024
+                "The VBIOS file %s is empty or larger than %u KiB\n", name, VBIOS_FILE_MAX / 1024
             );
         } else if ((vbios->buffer = read_file(file, (uint32_t)size)) == NULL) {
             printf("Cannot read the VBIOS file %s\n", name);
@@ -408,8 +386,7 @@ static bool load_user_vbios(struct user_vbios *vbios) {
         return false;
     }
 
-    if ((setting_starts_with(setting, CBFS_SETTING)
-      && setting[sizeof(CBFS_SETTING) - 1] == 0)
+    if ((setting_starts_with(setting, CBFS_SETTING) && setting[sizeof(CBFS_SETTING) - 1] == 0)
      || setting_starts_with(setting, CBFS_SETTING_PREFIX)) {
         loaded = load_cbfs_vbios(vbios);
     } else {
@@ -421,10 +398,7 @@ static bool load_user_vbios(struct user_vbios *vbios) {
 
     const uint8_t *image = vbios->image;
     if (vbios->size < 2 || image[0] != 0x55 || image[1] != 0xaa) {
-        printf(
-            "Not using %s as the VBIOS, as it lacks the ROM signature\n",
-            vbios->source
-        );
+        printf("Not using %s as the VBIOS, as it lacks the ROM signature\n", vbios->source);
         if (vbios->buffer != NULL) {
             efi_bs->FreePool(vbios->buffer);
             vbios->buffer = NULL;
@@ -434,15 +408,12 @@ static bool load_user_vbios(struct user_vbios *vbios) {
     return true;
 }
 
-static bool gpu_listed(
-    const struct gpu_id *list, size_t count, const struct pci_io_device *dev
-) {
+static bool gpu_listed(const struct gpu_id *list, size_t count, const struct pci_io_device *dev) {
     for (size_t i = 0; i < count; i++) {
         const struct gpu_id *id = &list[i];
         if (id->vendor == dev->vendor_id && id->first <= dev->device_id
          && id->last >= dev->device_id
-         && (id->revision == GPU_ANY_REVISION
-          || id->revision == dev->revision)) {
+         && (id->revision == GPU_ANY_REVISION || id->revision == dev->revision)) {
             return true;
         }
     }
@@ -477,8 +448,7 @@ static bool vbios_trusted(const struct pci_io_device *dev) {
     if (gpu_listed(vbios_blocklist, vbios_blocklist_count, dev)) {
         return false;
     }
-    return gpu_listed(vbios_allowlist, vbios_allowlist_count, dev)
-        || slotted_card(dev);
+    return gpu_listed(vbios_allowlist, vbios_allowlist_count, dev) || slotted_card(dev);
 }
 
 // The aliased variant of the I/O decoding is preferred, as legacy software
@@ -487,8 +457,7 @@ static bool enable_vga_decoding(EFI_PCI_IO_PROTOCOL *io) {
     EFI_UINT64 supported;
     EFI_UINT64 vga_io;
 
-    if (io->Attributes(io, EfiPciIoAttributeOperationSupported, 0, &supported)
-     != EFI_SUCCESS
+    if (io->Attributes(io, EfiPciIoAttributeOperationSupported, 0, &supported) != EFI_SUCCESS
      || (supported & EFI_PCI_IO_ATTRIBUTE_VGA_MEMORY) == 0) {
         return false;
     }
@@ -499,10 +468,10 @@ static bool enable_vga_decoding(EFI_PCI_IO_PROTOCOL *io) {
     } else {
         return false;
     }
-    return io->Attributes(
-        io, EfiPciIoAttributeOperationEnable,
-        EFI_PCI_IO_ATTRIBUTE_VGA_MEMORY | vga_io, NULL
-    ) == EFI_SUCCESS;
+    EFI_STATUS status = io->Attributes(
+        io, EfiPciIoAttributeOperationEnable, EFI_PCI_IO_ATTRIBUTE_VGA_MEMORY | vga_io, NULL
+    );
+    return status == EFI_SUCCESS;
 }
 
 // Only one device decodes the VGA ranges, so another one that does, such as
@@ -518,9 +487,8 @@ static bool take_vga_decoding(const struct pci_io_device *dev) {
     EFI_UINT64 *held;
     bool taken = false;
     bool unlisted = devices == NULL
-        || efi_bs->AllocatePool(
-            EfiLoaderData, count * sizeof(EFI_UINT64), (void **)&held
-        ) != EFI_SUCCESS;
+                 || efi_bs->AllocatePool(EfiLoaderData, count * sizeof(EFI_UINT64), (void **)&held)
+                     != EFI_SUCCESS;
     if (unlisted) {
         if (devices != NULL) {
             efi_bs->FreePool(devices);
@@ -533,14 +501,12 @@ static bool take_vga_decoding(const struct pci_io_device *dev) {
         EFI_UINT64 attributes;
         held[i] = 0;
         if (pci_address_equal(devices[i].address, dev->address)
-         || io->Attributes(io, EfiPciIoAttributeOperationGet, 0, &attributes)
-         != EFI_SUCCESS
+         || io->Attributes(io, EfiPciIoAttributeOperationGet, 0, &attributes) != EFI_SUCCESS
          || (attributes & VGA_ATTRIBUTES) == 0) {
             continue;
         }
         EFI_STATUS status = io->Attributes(
-            io, EfiPciIoAttributeOperationDisable, attributes & VGA_ATTRIBUTES,
-            NULL
+            io, EfiPciIoAttributeOperationDisable, attributes & VGA_ATTRIBUTES, NULL
         );
         if (status == EFI_SUCCESS) {
             held[i] = attributes & VGA_ATTRIBUTES;
@@ -554,10 +520,8 @@ static bool take_vga_decoding(const struct pci_io_device *dev) {
         }
         if (taken) {
             printf(
-                "Legacy VGA decoding moves from " PCI_ADDRESS_FMT " to "
-                PCI_ADDRESS_FMT "\n",
-                PCI_ADDRESS_ARGS(devices[i].address),
-                PCI_ADDRESS_ARGS(dev->address)
+                "Legacy VGA decoding moves from " PCI_ADDRESS_FMT " to " PCI_ADDRESS_FMT "\n",
+                PCI_ADDRESS_ARGS(devices[i].address), PCI_ADDRESS_ARGS(dev->address)
             );
         } else {
             devices[i].io->Attributes(
@@ -574,8 +538,7 @@ static bool take_vga_decoding(const struct pci_io_device *dev) {
 // Uses the user's VBIOS if given, which needs no matching IDs, or else the
 // legacy image of the device's expansion ROM.
 static bool try_device(
-    const struct pci_io_device *dev, const struct user_vbios *user,
-    struct vbios_choice *choice
+    const struct pci_io_device *dev, const struct user_vbios *user, struct vbios_choice *choice
 ) {
     const void *image;
     size_t size;
@@ -583,25 +546,21 @@ static bool try_device(
     if (user != NULL) {
         image = user->image;
         size = user->size;
-    } else if (config.vga_emulation != HANDOFF_VGA_EMULATION_NEVER
-            && !vbios_trusted(dev)) {
+    } else if (config.vga_emulation != HANDOFF_VGA_EMULATION_NEVER && !vbios_trusted(dev)) {
         printf(
             "Skipping the VBIOS of " PCI_ADDRESS_FMT
-            " (%04x:%04x, revision %02x), not of a card in a slot or graphics "
-            "from before 2018, but with vga_emulation = never\n",
-            PCI_ADDRESS_ARGS(dev->address), dev->vendor_id, dev->device_id,
-            dev->revision
+            " (%04x:%04x, revision %02x), not of a card in a slot or graphics from before 2018, "
+            "but with vga_emulation = never\n", PCI_ADDRESS_ARGS(dev->address), dev->vendor_id,
+            dev->device_id, dev->revision
         );
         return false;
     } else {
         bool legacy = pci_rom_find_legacy_image(
-            dev->io->RomImage, dev->io->RomSize, dev->vendor_id,
-            dev->device_id, &image, &size
+            dev->io->RomImage, dev->io->RomSize, dev->vendor_id, dev->device_id, &image, &size
         );
         if (!legacy) {
             printf(
-                "No legacy VBIOS in the expansion ROM of " PCI_ADDRESS_FMT
-                " (%04x:%04x)\n",
+                "No legacy VBIOS in the expansion ROM of " PCI_ADDRESS_FMT " (%04x:%04x)\n",
                 PCI_ADDRESS_ARGS(dev->address), dev->vendor_id, dev->device_id
             );
             return false;
@@ -624,9 +583,7 @@ static bool try_device(
     return true;
 }
 
-static bool find_pci_device(
-    struct handoff_pci_address address, struct pci_io_device *dev
-) {
+static bool find_pci_device(struct handoff_pci_address address, struct pci_io_device *dev) {
     size_t count;
     struct pci_io_device *devices = pci_io_devices(&count);
     bool found = false;
@@ -697,10 +654,7 @@ static bool install_vbios(const struct vbios_choice *choice) {
         return false;
     }
     memcpy((void *)(uintptr_t)copy, choice->image, choice->size);
-    memset(
-        (uint8_t *)(uintptr_t)copy + choice->size, 0,
-        pages * 4096 - choice->size
-    );
+    memset((uint8_t *)(uintptr_t)copy + choice->size, 0, pages * 4096 - choice->size);
 
     record_vga_device(dev);
     video->vbios_present = true;
@@ -714,10 +668,9 @@ static bool install_vbios(const struct vbios_choice *choice) {
     video->vbios.image = copy;
 
     printf(
-        "VGA device " PCI_ADDRESS_FMT
-        " (%04x:%04x), VBIOS from %s, %zu bytes\n",
-        PCI_ADDRESS_ARGS(dev->address), dev->vendor_id, dev->device_id,
-        choice->source, choice->size
+        "VGA device " PCI_ADDRESS_FMT " (%04x:%04x), VBIOS from %s, %zu bytes\n",
+        PCI_ADDRESS_ARGS(dev->address), dev->vendor_id, dev->device_id, choice->source,
+        choice->size
     );
     return true;
 }
@@ -746,13 +699,11 @@ void video_init(void) {
 
     bool have_user = load_user_vbios(&user);
     const struct user_vbios *user_vbios = have_user ? &user : NULL;
-    bool automatic = config.vga_emulation == HANDOFF_VGA_EMULATION_AUTO
-        && !have_user;
+    bool automatic = config.vga_emulation == HANDOFF_VGA_EMULATION_AUTO && !have_user;
     bool apple = automatic && apple_firmware();
     // A VBIOS draws as the panel scans, sideways on one mounted sideways, and
     // the firmware's driver stopped for one left a Lenovo D330's panel dark.
-    bool sideways = automatic
-        && loader_handoff->video.framebuffer.rotation != HANDOFF_ROTATE_0;
+    bool sideways = automatic && loader_handoff->video.framebuffer.rotation != HANDOFF_ROTATE_0;
     bool skip = apple || sideways;
 
     if (config.vga_specified) {
@@ -761,8 +712,7 @@ void video_init(void) {
             found = !skip && try_device(&dev, user_vbios, &choice);
         } else {
             printf(
-                "The configured VGA device " PCI_ADDRESS_FMT
-                " does not exist\n",
+                "The configured VGA device " PCI_ADDRESS_FMT " does not exist\n",
                 PCI_ADDRESS_ARGS(config.vga_device)
             );
         }
@@ -773,24 +723,21 @@ void video_init(void) {
         found = !skip && try_device(&dev, user_vbios, &choice);
     } else if (have_user) {
         printf(
-            "Not using %s as the VBIOS: no VGA device is configured, and no "
-            "graphics output leads to one\n",
-            user.source
+            "Not using %s as the VBIOS: no VGA device is configured, and no graphics output leads "
+            "to one\n", user.source
         );
     } else if (gop_handle == NULL) {
         found = !skip && try_display_devices(&choice);
     }
 
     if (!found || !install_vbios(&choice)) {
-        printf(
-            apple
-                ? "No VBIOS under Apple's firmware but with vga_emulation = "
-                    "never\n"
-                : sideways
-                ? "No VBIOS on a panel mounted sideways but with "
-                    "vga_emulation = never\n"
-                : "No usable VBIOS\n"
-        );
+        const char *message = "No usable VBIOS\n";
+        if (apple) {
+            message = "No VBIOS under Apple's firmware but with vga_emulation = never\n";
+        } else if (sideways) {
+            message = "No VBIOS on a panel mounted sideways but with vga_emulation = never\n";
+        }
+        printf("%s", message);
         // It keeps its legacy VGA resources, for the emulated VGA to stand in
         // for.
         if (have_dev) {
@@ -822,7 +769,7 @@ void video_exit_boot_services(void) {
     EFI_HANDLE *handles = efi_locate_handles(&gop_guid, &count);
     for (size_t i = 0; i < count && !driven; i++) {
         driven = gop_pci_device(handles[i], &dev)
-            && pci_address_equal(dev.address, video->vga_device);
+              && pci_address_equal(dev.address, video->vga_device);
     }
     if (handles != NULL) {
         efi_bs->FreePool(handles);
@@ -834,9 +781,7 @@ void video_exit_boot_services(void) {
     // A stopped driver restores the attributes the device had before it
     // started, and a VGA controller starts with its decoding off.
     EFI_UINT64 attributes;
-    EFI_STATUS status = dev.io->Attributes(
-        dev.io, EfiPciIoAttributeOperationGet, 0, &attributes
-    );
+    EFI_STATUS status = dev.io->Attributes(dev.io, EfiPciIoAttributeOperationGet, 0, &attributes);
     if (status != EFI_SUCCESS) {
         attributes = 0;
     }
@@ -845,16 +790,14 @@ void video_exit_boot_services(void) {
     status = efi_bs->DisconnectController(dev.handle, NULL, NULL);
     if (status != EFI_SUCCESS) {
         printf(
-            "Cannot stop the firmware's graphics driver for " PCI_ADDRESS_FMT
-            ", status %#llx\n",
+            "Cannot stop the firmware's graphics driver for " PCI_ADDRESS_FMT ", status %#llx\n",
             PCI_ADDRESS_ARGS(dev.address), (unsigned long long)status
         );
         return;
     }
     bool undecoded = attributes != 0
-        && dev.io->Attributes(
-            dev.io, EfiPciIoAttributeOperationEnable, attributes, NULL
-        ) != EFI_SUCCESS;
+                  && dev.io->Attributes(dev.io, EfiPciIoAttributeOperationEnable, attributes, NULL)
+                      != EFI_SUCCESS;
     if (undecoded) {
         printf(
             "Cannot restore the decoding of " PCI_ADDRESS_FMT

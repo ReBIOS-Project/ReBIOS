@@ -24,7 +24,7 @@
 // guest's work, whatever the guest does with its local APIC timers.
 struct hv_timer {
     // By the processor's TSC, or 0.
-    uint64_t deadline;
+    _Atomic(uint64_t) deadline;
     void (*fired)(void *ctx);
     void *ctx;
 };

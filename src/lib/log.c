@@ -16,6 +16,7 @@
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -32,8 +33,8 @@ static uint16_t log_serial_port;
 static bool log_console;
 static bool log_started;
 static struct flanterm_context *log_screen;
-static bool log_screen_handed_over;
-static bool log_panicking;
+static _Atomic(bool) log_screen_handed_over;
+static _Atomic(bool) log_panicking;
 
 static struct spinlock log_lock;
 static char early_log[8192];
@@ -64,7 +65,9 @@ static void con_put(struct con_buffer *buf, EFI_CHAR16 c) {
 }
 
 static bool screen_shown(void) {
-    return log_console && (!log_screen_handed_over || log_panicking);
+    return log_console
+        && (!atomic_load_explicit(&log_screen_handed_over, memory_order_relaxed)
+         || atomic_load_explicit(&log_panicking, memory_order_relaxed));
 }
 
 static void screen_put(struct con_buffer *buf, char c) {
@@ -162,7 +165,7 @@ void log_set_screen(struct flanterm_context *screen) {
 }
 
 void log_hand_over_screen(void) {
-    __atomic_store_n(&log_screen_handed_over, true, __ATOMIC_RELEASE);
+    atomic_store_explicit(&log_screen_handed_over, true, memory_order_release);
 }
 
 void vprintf(const char *fmt, va_list args) {
@@ -193,12 +196,13 @@ void log_notice(const char *fmt, ...) {
 void panic(const char *fmt, ...) {
     // Whatever the configuration, a fatal error is shown, over anything the
     // guest drew.
-    __atomic_store_n(&log_panicking, true, __ATOMIC_RELEASE);
+    atomic_store_explicit(&log_panicking, true, memory_order_release);
     log_console = true;
     if (!log_started) {
         log_start();
     }
-    if (log_screen != NULL && log_screen_handed_over) {
+    if (log_screen != NULL
+     && atomic_load_explicit(&log_screen_handed_over, memory_order_relaxed)) {
         flanterm_full_refresh(log_screen);
     }
     // Without the lock, which the panicking processor may hold.
@@ -211,7 +215,7 @@ void panic(const char *fmt, ...) {
 }
 
 bool log_panicked(void) {
-    return __atomic_load_n(&log_panicking, __ATOMIC_ACQUIRE);
+    return atomic_load_explicit(&log_panicking, memory_order_acquire);
 }
 
 bool log_take_screen(void) {
@@ -219,8 +223,9 @@ bool log_take_screen(void) {
         return false;
     }
     spinlock_acquire(&log_lock);
-    __atomic_store_n(&log_panicking, true, __ATOMIC_RELEASE);
-    if (log_screen != NULL && log_screen_handed_over) {
+    atomic_store_explicit(&log_panicking, true, memory_order_release);
+    if (log_screen != NULL
+     && atomic_load_explicit(&log_screen_handed_over, memory_order_relaxed)) {
         flanterm_full_refresh(log_screen);
     }
     spinlock_release(&log_lock);

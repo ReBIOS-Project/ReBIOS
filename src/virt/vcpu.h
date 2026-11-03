@@ -21,6 +21,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdnoreturn.h>
 #include <virt/mtrr.h>
 
 // Indexed by the register numbers used in instruction encodings. The RSP slot
@@ -92,7 +93,7 @@ struct vcpu {
     // The VMCB as the last exit left it, for its clean bits.
     uint8_t *vmcb_seen;
     // Whether the vCPU is in the guest or entering it, for AVIC's doorbells.
-    volatile bool in_guest;
+    _Atomic(bool) in_guest;
     // The instruction bytes the processor fetched for the exit at hand, at
     // fetched_rip, if fetched_count is not 0.
     uint8_t fetched[15];
@@ -167,7 +168,7 @@ struct vcpu {
     // Whether the vCPU waits for a start-up IPI, VCPU_SIPI_WAITING, or runs,
     // VCPU_SIPI_RUNNING, or else, where the processor cannot wait for one in
     // the guest, the vector of the one passed on to it.
-    volatile int32_t sipi;
+    _Atomic(int32_t) sipi;
 
     // The legacy BIOS's 32-bit flat mode, and the mode its 16-bit code was in
     // when it last switched there, for HYPERCALL_CALL32_*.
@@ -184,7 +185,7 @@ struct vcpu {
 extern bool virt_vmx;
 
 struct vcpu *vcpu_create(struct cpu *cpu);
-__attribute__((noreturn)) void vcpu_run(struct vcpu *v);
+noreturn void vcpu_run(struct vcpu *v);
 
 // Catches up with what changed while the vCPU was out of the guest, and sets
 // up what it gets on entering it.
@@ -246,9 +247,7 @@ void vcpu_step_trap(struct vcpu *v);
 void vcpu_debug_trap(struct vcpu *v, uint64_t dr6);
 // Where an access the hypervisor carries out for the guest meets the guest's
 // data and I/O breakpoints.
-void vcpu_data_access(
-    struct vcpu *v, uintptr_t linear, size_t size, bool write
-);
+void vcpu_data_access(struct vcpu *v, uintptr_t linear, size_t size, bool write);
 void vcpu_io_access(struct vcpu *v, uint16_t port, size_t size);
 // The debug trap for the breakpoints those hit, and the single step asked for.
 void vcpu_debug_traps(struct vcpu *v, bool single_step);
@@ -257,9 +256,7 @@ void vcpu_debug_traps(struct vcpu *v, bool single_step);
 // asks its guest to make; and whether either stops the guest after each.
 void vcpu_step_boundary(struct vcpu *v);
 bool vcpu_stepped(struct vcpu *v);
-void vcpu_inject_exception(
-    struct vcpu *v, uint8_t vector, bool has_error, uint32_t error
-);
+void vcpu_inject_exception(struct vcpu *v, uint8_t vector, bool has_error, uint32_t error);
 void vcpu_inject_page_fault(struct vcpu *v, uintptr_t linear, uint32_t error);
 
 // Puts the vCPU in the state the processor has after INIT, in real mode at

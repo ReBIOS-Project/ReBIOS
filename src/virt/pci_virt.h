@@ -40,9 +40,7 @@ struct pci_virt_hook {
 
 // Hands the function's registers to hook before anything else, or no longer
 // for NULL. After pci_virt_init().
-void pci_virt_hook(
-    struct pci_addr addr, const struct pci_virt_hook *hook, void *ctx
-);
+void pci_virt_hook(struct pci_addr addr, const struct pci_virt_hook *hook, void *ctx);
 
 // Hands the guest's accesses to the pages holding [offset, offset + size) of a
 // memory BAR of the function to ops, wherever the guest puts the BAR, with

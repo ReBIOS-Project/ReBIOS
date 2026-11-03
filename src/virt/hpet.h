@@ -15,7 +15,6 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-
 #ifndef VIRT__HPET_H
 #define VIRT__HPET_H
 
@@ -36,8 +35,8 @@ bool hpet_any_hidden(void);
 // (IA-PC HPET Specification 1.0a, 3.2.4, Table 3): false for a base that is
 // not page aligned, which the hypervisor does not read.
 bool hpet_block_id(uintptr_t base, uint32_t *id);
-// Whether the guest's HPET has taken IRQ 0, so that the 8254 interrupts nothing
-// (IA-PC HPET Specification 1.0a, 2.4.2.1).
+// Whether the guest's HPET has taken IRQ 0, so that the 8254 interrupts
+// nothing (IA-PC HPET Specification 1.0a, 2.4.2.1).
 bool hpet_replaces_pit(void);
 
 #endif

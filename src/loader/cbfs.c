@@ -56,9 +56,8 @@ static uint8_t flash_read8(uintptr_t addr) {
 }
 
 static uint32_t flash_read_be32(uintptr_t addr) {
-    return (uint32_t)flash_read8(addr) << 24
-        | (uint32_t)flash_read8(addr + 1) << 16
-        | (uint32_t)flash_read8(addr + 2) << 8 | flash_read8(addr + 3);
+    return (uint32_t)flash_read8(addr) << 24 | (uint32_t)flash_read8(addr + 1) << 16
+         | (uint32_t)flash_read8(addr + 2) << 8 | flash_read8(addr + 3);
 }
 
 static bool file_magic_matches(uint64_t file) {
@@ -99,8 +98,7 @@ static bool file_compressed(uint64_t file, uint64_t attribute, uint64_t data) {
          || size < ATTRIBUTE_HEADER_SIZE || attribute + size > data) {
             break;
         }
-        if (tag == ATTRIBUTE_TAG_COMPRESSION
-         && size >= COMPRESSION_ATTRIBUTE_SIZE) {
+        if (tag == ATTRIBUTE_TAG_COMPRESSION && size >= COMPRESSION_ATTRIBUTE_SIZE) {
             return flash_read_be32(file + attribute + 8) != 0;
         }
         attribute += size;
@@ -109,8 +107,7 @@ static bool file_compressed(uint64_t file, uint64_t attribute, uint64_t data) {
 }
 
 bool cbfs_find_file(const char *name, const void **data, size_t *size) {
-    uint32_t pointer
-        = *(volatile const uint32_t *)(uintptr_t)MASTER_HEADER_POINTER;
+    uint32_t pointer = *(volatile const uint32_t *)(uintptr_t)MASTER_HEADER_POINTER;
     if (pointer % 4 != 0) {
         return false;
     }
@@ -118,8 +115,7 @@ bool cbfs_find_file(const char *name, const void **data, size_t *size) {
     // Whether the pointer is the header's address or its negative offset from
     // 4GiB, sign-extending it and adding 4GiB yields the address.
     uintptr_t header = FLASH_TOP + (uint64_t)(int64_t)(int32_t)pointer;
-    if (header < FLASH_TOP - FLASH_WINDOW
-     || header > FLASH_TOP - MASTER_HEADER_SIZE
+    if (header < FLASH_TOP - FLASH_WINDOW || header > FLASH_TOP - MASTER_HEADER_SIZE
      || flash_read_be32(header) != MASTER_HEADER_MAGIC) {
         return false;
     }
@@ -131,12 +127,8 @@ bool cbfs_find_file(const char *name, const void **data, size_t *size) {
     if (align == 0) {
         align = DEFAULT_ALIGN;
     }
-    if (header < rom || offset >= rom_size
-     || rom + offset < FLASH_TOP - FLASH_WINDOW) {
-        printf(
-            "Ignoring the unusable CBFS master header at %#llx\n",
-            (unsigned long long)header
-        );
+    if (header < rom || offset >= rom_size || rom + offset < FLASH_TOP - FLASH_WINDOW) {
+        printf("Ignoring the unusable CBFS master header at %#llx\n", (unsigned long long)header);
         return false;
     }
 
@@ -149,21 +141,16 @@ bool cbfs_find_file(const char *name, const void **data, size_t *size) {
         uintptr_t name_end = attributes != 0 ? attributes : data_offset;
 
         // Data overlapping the header would also keep the walk from advancing.
-        if (data_offset < FILE_HEADER_SIZE || name_end < FILE_HEADER_SIZE
-         || name_end > data_offset || file + data_offset + len > FLASH_TOP) {
+        if (data_offset < FILE_HEADER_SIZE || name_end < FILE_HEADER_SIZE || name_end > data_offset
+         || file + data_offset + len > FLASH_TOP) {
             break;
         }
 
         bool matched = type != FILE_TYPE_DELETED && type != FILE_TYPE_NULL
-            && name_matches(
-                file + FILE_HEADER_SIZE, name_end - FILE_HEADER_SIZE, name
-            );
+                    && name_matches(file + FILE_HEADER_SIZE, name_end - FILE_HEADER_SIZE, name);
         if (matched) {
             if (file_compressed(file, attributes, data_offset)) {
-                printf(
-                    "The CBFS file %s is compressed, which is not supported\n",
-                    name
-                );
+                printf("The CBFS file %s is compressed, which is not supported\n", name);
                 return false;
             }
             *data = (const void *)(uintptr_t)(file + data_offset);

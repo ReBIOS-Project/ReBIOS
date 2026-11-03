@@ -45,9 +45,7 @@ struct irq_pci_line {
 // those neither ISA devices (isa_claimed, bit n for IRQ n), the SCI, nor the
 // hypervisor's own devices use, in turn, so that as few GSIs share one as can
 // be. Before the guest runs.
-void irq_route_pci(
-    const struct irq_pci_line *lines, size_t count, uint16_t isa_claimed
-);
+void irq_route_pci(const struct irq_pci_line *lines, size_t count, uint16_t isa_claimed);
 
 // The ISA IRQ the guest's 8259s see a GSI's interrupts on, or -1.
 int irq_isa_irq(uint32_t gsi);
@@ -89,7 +87,7 @@ struct irq_slot {
     int32_t requester;
     // Called on the processor that took one of the vectors, before its EOI,
     // with the vector's index in the block.
-    void (*taken)(void *ctx, unsigned int index);
+    void (*taken)(void *ctx, size_t index);
     void *ctx;
 };
 

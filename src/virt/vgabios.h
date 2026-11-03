@@ -83,7 +83,7 @@ struct vgabios_mode {
 };
 
 struct vgabios_palette {
-    const uint8_t *colors;
+    const uint8_t *colours;
     size_t count;
 };
 
@@ -180,22 +180,16 @@ uint16_t peekw(uint16_t segment, uint16_t offset);
 void pokeb(uint16_t segment, uint16_t offset, uint8_t value);
 void pokew(uint16_t segment, uint16_t offset, uint16_t value);
 // An even number of bytes to memory.
-void poke_block(
-    uint16_t segment, uint16_t offset, const void *bytes, size_t count
-);
+void poke_block(uint16_t segment, uint16_t offset, const void *bytes, size_t count);
 // Count bytes or words from segment:offset.
-void far_fill8(
-    uint16_t segment, uint16_t offset, uint8_t value, size_t count
-);
-void far_fill16(
-    uint16_t segment, uint16_t offset, uint16_t value, size_t count
-);
+void far_fill8(uint16_t segment, uint16_t offset, uint8_t value, size_t count);
+void far_fill16(uint16_t segment, uint16_t offset, uint16_t value, size_t count);
 // Moves count bytes within a segment, overlapping or not.
 void far_move(uint16_t segment, uint16_t to, uint16_t from, size_t count);
 // A character map's height bytes per character to count cells of 32 bytes.
 void far_font(
-    uint16_t to_segment, uint16_t to, uint16_t from_segment, uint16_t from,
-    uint8_t height, size_t count
+    uint16_t to_segment, uint16_t to, uint16_t from_segment, uint16_t from, uint8_t height,
+    size_t count
 );
 // The caller's ECX.
 uint32_t bios_ecx(const struct vgabios_regs *r);

@@ -79,14 +79,12 @@ static const struct pch_family pch_families[] = {
     { 0xb5, 0xe0000000, 0xca, 31, 1 },
     { 0xbd, 0xe0000000, 0xca, 31, 1 },
     // Panther Lake.
-    { 0xcc, 0xe0000000, 0x69, 31, 1 },
+    { 0xcc, 0xe0000000, 0x69, 31, 1 }
 };
 
-static uintptr_t pcr_address(
-    uintptr_t base, uint8_t port_id, uint32_t offset
-) {
+static uintptr_t pcr_address(uintptr_t base, uint8_t port_id, uint32_t offset) {
     return base | ((uint64_t)port_id << 16) | (offset & 0xffff)
-        | ((uint64_t)((offset >> 16) & 0xf) << 24);
+         | ((uint64_t)((offset >> 16) & 0xf) << 24);
 }
 
 static uintptr_t sideband_base(const struct pch_family *pch) {
@@ -94,7 +92,7 @@ static uintptr_t sideband_base(const struct pch_family *pch) {
         .segment = 0,
         .bus = 0,
         .device = pch->p2sb_device,
-        .function = pch->p2sb_function,
+        .function = pch->p2sb_function
     };
     bool hidden = pci_cfg_read(p2sb, 0, 2) == 0xffff;
     if (hidden) {
@@ -114,23 +112,18 @@ static uintptr_t sideband_base(const struct pch_family *pch) {
 
     if (base == 0) {
         printf(
-            "8254 clock gate: P2SB BAR unavailable, assuming sideband "
-            "registers at %#x\n",
+            "8254 clock gate: P2SB BAR unavailable, assuming sideband registers at %#x\n",
             pch->sideband_base
         );
         return pch->sideband_base;
     }
-    printf(
-        "8254 clock gate: sideband registers at %#llx\n",
-        (unsigned long long)base
-    );
+    printf("8254 clock gate: sideband registers at %#llx\n", (unsigned long long)base);
     return base;
 }
 
 void intel_pit_ungate(void) {
     struct cpuid_regs vendor = cpuid(0, 0);
-    bool intel = vendor.ebx == 0x756e6547 && vendor.edx == 0x49656e69
-        && vendor.ecx == 0x6c65746e;
+    bool intel = vendor.ebx == 0x756e6547 && vendor.edx == 0x49656e69 && vendor.ecx == 0x6c65746e;
     struct cpuid_regs leaf1 = cpuid(1, 0);
     unsigned int family = (leaf1.eax >> 8) & 0xf;
     unsigned int model = (leaf1.eax >> 4) & 0xf;
@@ -140,15 +133,12 @@ void intel_pit_ungate(void) {
     if (family == 6 || family >= 0xf) {
         model |= (leaf1.eax >> 12) & 0xf0;
     }
-    struct pci_addr host_bridge = {
-        .segment = 0, .bus = 0, .device = 0, .function = 0
-    };
+    struct pci_addr host_bridge = { .segment = 0, .bus = 0, .device = 0, .function = 0 };
     uint32_t host_vendor = pci_cfg_read(host_bridge, 0, 2);
 
     const struct pch_family *pch = NULL;
     if (intel && family == 6 && host_vendor == INTEL_VENDOR_ID) {
-        for (size_t i = 0;
-             i < sizeof(pch_families) / sizeof(struct pch_family); i++) {
+        for (size_t i = 0; i < sizeof(pch_families) / sizeof(struct pch_family); i++) {
             if (pch_families[i].model == model) {
                 pch = &pch_families[i];
                 break;
@@ -157,9 +147,9 @@ void intel_pit_ungate(void) {
     }
     if (pch == NULL) {
         printf(
-            "8254 clock gate: not a chipset known to have one (%s processor "
-            "family %#x model %#x, host bridge vendor %#x), doing nothing\n",
-            intel ? "Intel" : "non-Intel", family, model, host_vendor
+            "8254 clock gate: not a chipset known to have one (%s processor family %#x model %#x, "
+            "host bridge vendor %#x), doing nothing\n", intel ? "Intel" : "non-Intel", family,
+            model, host_vendor
         );
         return;
     }
@@ -169,13 +159,10 @@ void intel_pit_ungate(void) {
         return;
     }
 
-    uintptr_t address = pcr_address(
-        sideband_base(pch), pch->itss_port_id, ITSSPRC
-    );
+    uintptr_t address = pcr_address(sideband_base(pch), pch->itss_port_id, ITSSPRC);
     if (address > core_handoff->map_top - 4) {
         printf(
-            "8254 clock gate: ITSSPRC at %#llx is out of reach, doing "
-            "nothing\n",
+            "8254 clock gate: ITSSPRC at %#llx is out of reach, doing nothing\n",
             (unsigned long long)address
         );
         return;
@@ -185,8 +172,7 @@ void intel_pit_ungate(void) {
     uint32_t before = *itssprc;
     if (before == 0xffffffff) {
         printf(
-            "8254 clock gate: ITSSPRC at %#llx reads all ones, doing "
-            "nothing\n",
+            "8254 clock gate: ITSSPRC at %#llx reads all ones, doing nothing\n",
             (unsigned long long)address
         );
         return;
@@ -195,7 +181,7 @@ void intel_pit_ungate(void) {
         *itssprc = before & ~ITSSPRC_CGE8254;
     }
     printf(
-        "8254 clock gate: ITSSPRC at %#llx was %#x, now %#x\n",
-        (unsigned long long)address, before, *itssprc
+        "8254 clock gate: ITSSPRC at %#llx was %#x, now %#x\n", (unsigned long long)address,
+        before, *itssprc
     );
 }

@@ -152,16 +152,10 @@ static void list_add(struct range_list *l, uintptr_t base, uintptr_t end) {
     }
     if (last == first) {
         list_grow(l);
-        memmove(
-            &l->r[first + 1], &l->r[first],
-            (l->count - first) * sizeof(struct range)
-        );
+        memmove(&l->r[first + 1], &l->r[first], (l->count - first) * sizeof(struct range));
         l->count++;
     } else {
-        memmove(
-            &l->r[first + 1], &l->r[last],
-            (l->count - last) * sizeof(struct range)
-        );
+        memmove(&l->r[first + 1], &l->r[last], (l->count - last) * sizeof(struct range));
         l->count -= last - first - 1;
     }
     l->r[first].base = base;
@@ -178,10 +172,7 @@ static void list_remove(struct range_list *l, uintptr_t base, uintptr_t end) {
             uintptr_t old_end = x->end;
             x->end = base;
             list_grow(l);
-            memmove(
-                &l->r[i + 2], &l->r[i + 1],
-                (l->count - i - 1) * sizeof(struct range)
-            );
+            memmove(&l->r[i + 2], &l->r[i + 1], (l->count - i - 1) * sizeof(struct range));
             l->count++;
             l->r[i + 1].base = end;
             l->r[i + 1].end = old_end;
@@ -214,9 +205,7 @@ static void claim(struct scan *r, uintptr_t base, size_t size) {
     claim_into(&r->claimed, base, size);
 }
 
-static void log_failure(
-    uacpi_namespace_node *node, const char *name, uacpi_status status
-) {
+static void log_failure(uacpi_namespace_node *node, const char *name, uacpi_status status) {
     const char *path = uacpi_namespace_node_generate_absolute_path(node);
     printf(
         "Cannot evaluate %s.%s: %s\n", path != NULL ? path : "?", name,
@@ -229,8 +218,7 @@ static void log_failure(
 
 static void private_mcfg(struct scan *r) {
     struct uacpi_table table;
-    if (uacpi_table_find_by_signature(ACPI_MCFG_SIGNATURE, &table)
-     != UACPI_STATUS_OK) {
+    if (uacpi_table_find_by_signature(ACPI_MCFG_SIGNATURE, &table) != UACPI_STATUS_OK) {
         return;
     }
     size_t length = table.hdr->length;
@@ -238,10 +226,7 @@ static void private_mcfg(struct scan *r) {
          off <= length && length - off >= sizeof(struct acpi_mcfg_allocation);
          off += sizeof(struct acpi_mcfg_allocation)) {
         struct acpi_mcfg_allocation entry;
-        memcpy(
-            &entry, (const uint8_t *)table.ptr + off,
-            sizeof(struct acpi_mcfg_allocation)
-        );
+        memcpy(&entry, (const uint8_t *)table.ptr + off, sizeof(struct acpi_mcfg_allocation));
         if (entry.start_bus <= entry.end_bus) {
             claim_into(
                 &r->private, entry.address + ((uint64_t)entry.start_bus << 20),
@@ -254,8 +239,7 @@ static void private_mcfg(struct scan *r) {
 
 static void claim_madt(struct scan *r) {
     struct uacpi_table table;
-    if (uacpi_table_find_by_signature(ACPI_MADT_SIGNATURE, &table)
-     != UACPI_STATUS_OK) {
+    if (uacpi_table_find_by_signature(ACPI_MADT_SIGNATURE, &table) != UACPI_STATUS_OK) {
         return;
     }
     const uint8_t *madt = table.ptr;
@@ -272,8 +256,7 @@ static void claim_madt(struct scan *r) {
     while (off <= length && length - off >= sizeof(struct acpi_entry_hdr)) {
         uint8_t type = madt[off];
         size_t entry_length = madt[off + 1];
-        if (entry_length < sizeof(struct acpi_entry_hdr)
-         || entry_length > length - off) {
+        if (entry_length < sizeof(struct acpi_entry_hdr) || entry_length > length - off) {
             break;
         }
         if (type == ACPI_MADT_ENTRY_TYPE_IOAPIC
@@ -282,13 +265,9 @@ static void claim_madt(struct scan *r) {
             memcpy(&entry, madt + off, sizeof(struct acpi_madt_ioapic));
             claim(r, entry.address, APIC_MMIO_SIZE);
         } else if (type == ACPI_MADT_ENTRY_TYPE_LAPIC_ADDRESS_OVERRIDE
-                && entry_length
-                >= sizeof(struct acpi_madt_lapic_address_override)) {
+                && entry_length >= sizeof(struct acpi_madt_lapic_address_override)) {
             struct acpi_madt_lapic_address_override entry;
-            memcpy(
-                &entry, madt + off,
-                sizeof(struct acpi_madt_lapic_address_override)
-            );
+            memcpy(&entry, madt + off, sizeof(struct acpi_madt_lapic_address_override));
             lapic = entry.address;
         }
         off += entry_length;
@@ -300,8 +279,8 @@ static void claim_madt(struct scan *r) {
 static void claim_hpets(struct scan *r) {
     struct uacpi_table table;
     for (size_t n = 0;
-         uacpi_table_find_nth_by_signature(ACPI_HPET_SIGNATURE, n, &table)
-      == UACPI_STATUS_OK; n++) {
+         uacpi_table_find_nth_by_signature(ACPI_HPET_SIGNATURE, n, &table) == UACPI_STATUS_OK;
+         n++) {
         if (table.hdr->length >= sizeof(struct acpi_hpet)) {
             struct acpi_hpet hpet;
             memcpy(&hpet, table.ptr, sizeof(struct acpi_hpet));
@@ -322,40 +301,29 @@ static void private_iommus(struct scan *r) {
         } else if (tables->kind == IOMMU_KIND_AMD) {
             claim_into(
                 &r->private, u->base,
-                u->base % AMD_IOMMU_MMIO_LARGE == 0 ? AMD_IOMMU_MMIO_LARGE
-                    : AMD_IOMMU_MMIO_SMALL
+                u->base % AMD_IOMMU_MMIO_LARGE == 0 ? AMD_IOMMU_MMIO_LARGE : AMD_IOMMU_MMIO_SMALL
             );
         }
     }
 }
 
-static void window_add(
-    struct host_bridge *hb, uintptr_t base, uintptr_t end, bool prefetchable
-) {
+static void window_add(struct host_bridge *hb, uintptr_t base, uintptr_t end, bool prefetchable) {
     if (hb->window_count == hb->window_capacity) {
-        size_t capacity = hb->window_capacity == 0 ? 8
-            : hb->window_capacity * 2;
-        struct pci_host_window *windows = kmalloc(
-            capacity * sizeof(struct pci_host_window)
-        );
+        size_t capacity = hb->window_capacity == 0 ? 8 : hb->window_capacity * 2;
+        struct pci_host_window *windows = kmalloc(capacity * sizeof(struct pci_host_window));
         if (hb->window_count != 0) {
-            memcpy(
-                windows, hb->windows,
-                hb->window_count * sizeof(struct pci_host_window)
-            );
+            memcpy(windows, hb->windows, hb->window_count * sizeof(struct pci_host_window));
         }
         kfree(hb->windows);
         hb->windows = windows;
         hb->window_capacity = capacity;
     }
-    hb->windows[hb->window_count++] = (struct pci_host_window){
-        base, end, prefetchable
-    };
+    hb->windows[hb->window_count++] = (struct pci_host_window){ base, end, prefetchable };
 }
 
 static void crs_address(
-    struct crs_scan *s, const uacpi_resource_address_common *common,
-    uintptr_t minimum, size_t length, uint64_t translation
+    struct crs_scan *s, const uacpi_resource_address_common *common, uintptr_t minimum,
+    size_t length, uint64_t translation
 ) {
     if (common->type == UACPI_RANGE_BUS) {
         if (s->hb != NULL && !s->bus_found) {
@@ -372,14 +340,11 @@ static void crs_address(
         return;
     }
     if (translation != 0) {
-        const char *path = uacpi_namespace_node_generate_absolute_path(
-            s->hb->node
-        );
+        const char *path = uacpi_namespace_node_generate_absolute_path(s->hb->node);
         printf(
-            "PCI host bridge %s: window 0x%llx+0x%llx translated by 0x%llx, "
-            "not used\n",
-            path != NULL ? path : "?", (unsigned long long)minimum,
-            (unsigned long long)length, (unsigned long long)translation
+            "PCI host bridge %s: window 0x%llx+0x%llx translated by 0x%llx, not used\n",
+            path != NULL ? path : "?", (unsigned long long)minimum, (unsigned long long)length,
+            (unsigned long long)translation
         );
         if (path != NULL) {
             uacpi_free_absolute_path(path);
@@ -399,43 +364,27 @@ static uacpi_iteration_decision crs_resource(void *user, uacpi_resource *res) {
     switch (res->type) {
         case UACPI_RESOURCE_TYPE_ADDRESS16: {
             const uacpi_resource_address16 *a = &res->address16;
-            crs_address(
-                s, &a->common, a->minimum, a->address_length,
-                a->translation_offset
-            );
+            crs_address(s, &a->common, a->minimum, a->address_length, a->translation_offset);
             break;
         }
         case UACPI_RESOURCE_TYPE_ADDRESS32: {
             const uacpi_resource_address32 *a = &res->address32;
-            crs_address(
-                s, &a->common, a->minimum, a->address_length,
-                a->translation_offset
-            );
+            crs_address(s, &a->common, a->minimum, a->address_length, a->translation_offset);
             break;
         }
         case UACPI_RESOURCE_TYPE_ADDRESS64: {
             const uacpi_resource_address64 *a = &res->address64;
-            crs_address(
-                s, &a->common, a->minimum, a->address_length,
-                a->translation_offset
-            );
+            crs_address(s, &a->common, a->minimum, a->address_length, a->translation_offset);
             break;
         }
         case UACPI_RESOURCE_TYPE_ADDRESS64_EXTENDED: {
-            const uacpi_resource_address64_extended *a
-                = &res->address64_extended;
-            crs_address(
-                s, &a->common, a->minimum, a->address_length,
-                a->translation_offset
-            );
+            const uacpi_resource_address64_extended *a = &res->address64_extended;
+            crs_address(s, &a->common, a->minimum, a->address_length, a->translation_offset);
             break;
         }
         case UACPI_RESOURCE_TYPE_MEMORY24: {
             // In 256-byte units, ACPI 6.6, 6.4.3.1.
-            claim(
-                s->r, (uint64_t)res->memory24.minimum << 8,
-                (uint64_t)res->memory24.length << 8
-            );
+            claim(s->r, (uint64_t)res->memory24.minimum << 8, (uint64_t)res->memory24.length << 8);
             break;
         }
         case UACPI_RESOURCE_TYPE_MEMORY32: {
@@ -443,9 +392,7 @@ static uacpi_iteration_decision crs_resource(void *user, uacpi_resource *res) {
             break;
         }
         case UACPI_RESOURCE_TYPE_FIXED_MEMORY32: {
-            claim(
-                s->r, res->fixed_memory32.address, res->fixed_memory32.length
-            );
+            claim(s->r, res->fixed_memory32.address, res->fixed_memory32.length);
             break;
         }
         default: {
@@ -492,8 +439,8 @@ static bool eval_optional(
 
 static void host_bridge_log(const struct host_bridge *hb, const char *path) {
     printf(
-        "PCI host bridge %s: segment %04x, bus %02x, %s windows below 4 GiB\n",
-        path, hb->segment, hb->bus, hb->low_window_count == 0 ? "no" : "with"
+        "PCI host bridge %s: segment %04x, bus %02x, %s windows below 4 GiB\n", path, hb->segment,
+        hb->bus, hb->low_window_count == 0 ? "no" : "with"
     );
     for (size_t i = 0; i < hb->window_count; i++) {
         const struct pci_host_window *w = &hb->windows[i];
@@ -501,9 +448,8 @@ static void host_bridge_log(const struct host_bridge *hb, const char *path) {
         uintptr_t end = w->end > FOUR_GIB ? FOUR_GIB : w->end;
         if (base < end) {
             printf(
-                "PCI host bridge %s: window 0x%llx-0x%llx%s\n", path,
-                (unsigned long long)base, (unsigned long long)(end - 1),
-                w->prefetchable ? ", prefetchable" : ""
+                "PCI host bridge %s: window 0x%llx-0x%llx%s\n", path, (unsigned long long)base,
+                (unsigned long long)(end - 1), w->prefetchable ? ", prefetchable" : ""
             );
         }
     }
@@ -513,12 +459,10 @@ static bool host_bridge_known(
     const struct scan *r, const struct host_bridge *hb, const char *name
 ) {
     for (size_t i = 0; i < r->bridge_count; i++) {
-        if (r->bridges[i].segment == hb->segment
-         && r->bridges[i].bus == hb->bus) {
+        if (r->bridges[i].segment == hb->segment && r->bridges[i].bus == hb->bus) {
             printf(
-                "PCI host bridge %s: segment %04x, bus %02x has a host bridge "
-                "already, ignoring this one\n",
-                name, hb->segment, hb->bus
+                "PCI host bridge %s: segment %04x, bus %02x has a host bridge already, ignoring "
+                "this one\n", name, hb->segment, hb->bus
             );
             return true;
         }
@@ -555,8 +499,8 @@ static void host_bridge_found(struct scan *r, uacpi_namespace_node *node) {
     const char *name = path != NULL ? path : "?";
     if (scan.bus_found && has_bbn && (uint8_t)bbn != hb.bus) {
         printf(
-            "PCI host bridge %s: _CRS starts at bus %02x, _BBN says %02x\n",
-            name, hb.bus, (uint8_t)bbn
+            "PCI host bridge %s: _CRS starts at bus %02x, _BBN says %02x\n", name, hb.bus,
+            (uint8_t)bbn
         );
     }
     host_bridge_log(&hb, name);
@@ -571,14 +515,9 @@ static void host_bridge_found(struct scan *r, uacpi_namespace_node *node) {
 
     if (r->bridge_count == r->bridge_capacity) {
         size_t capacity = r->bridge_capacity == 0 ? 8 : r->bridge_capacity * 2;
-        struct host_bridge *bridges = kmalloc(
-            capacity * sizeof(struct host_bridge)
-        );
+        struct host_bridge *bridges = kmalloc(capacity * sizeof(struct host_bridge));
         if (r->bridge_count != 0) {
-            memcpy(
-                bridges, r->bridges,
-                r->bridge_count * sizeof(struct host_bridge)
-            );
+            memcpy(bridges, r->bridges, r->bridge_count * sizeof(struct host_bridge));
         }
         kfree(r->bridges);
         r->bridges = bridges;
@@ -617,12 +556,8 @@ static uacpi_iteration_decision device_found(
     return UACPI_ITERATION_DECISION_CONTINUE;
 }
 
-static void ranges_out(
-    const struct range_list *l, struct pci_host_range **out, size_t *count
-) {
-    *out = kmalloc(
-        (l->count != 0 ? l->count : 1) * sizeof(struct pci_host_range)
-    );
+static void ranges_out(const struct range_list *l, struct pci_host_range **out, size_t *count) {
+    *out = kmalloc((l->count != 0 ? l->count : 1) * sizeof(struct pci_host_range));
     for (size_t i = 0; i < l->count; i++) {
         (*out)[i] = (struct pci_host_range){ l->r[i].base, l->r[i].end };
     }
@@ -646,23 +581,22 @@ const struct pci_host *pci_host_scan(void) {
     claim_hpets(&r);
     claim(&r, MSI_BASE, MSI_SIZE);
     uacpi_namespace_for_each_child(
-        uacpi_namespace_root(), device_found, NULL, UACPI_OBJECT_DEVICE_BIT,
-        UACPI_MAX_DEPTH_ANY, &r
+        uacpi_namespace_root(), device_found, NULL, UACPI_OBJECT_DEVICE_BIT, UACPI_MAX_DEPTH_ANY,
+        &r
     );
     // Devices may list them among what they use, as motherboard resources do.
     for (size_t i = 0; i < r.private.count; i++) {
         list_remove(&r.claimed, r.private.r[i].base, r.private.r[i].end);
     }
     printf(
-        "PCI: %zu ranges of memory claimed, %u devices whose _CRS fails\n",
-        r.claimed.count, r.crs_failures
+        "PCI: %zu ranges of memory claimed, %u devices whose _CRS fails\n", r.claimed.count,
+        r.crs_failures
     );
 
     ranges_out(&r.claimed, &host.claimed, &host.claimed_count);
     ranges_out(&r.private, &host.private, &host.private_count);
     host.bridges = kmalloc(
-        (r.bridge_count != 0 ? r.bridge_count : 1)
-            * sizeof(struct pci_host_bridge)
+        (r.bridge_count != 0 ? r.bridge_count : 1) * sizeof(struct pci_host_bridge)
     );
     for (size_t i = 0; i < r.bridge_count; i++) {
         const struct host_bridge *hb = &r.bridges[i];
@@ -671,7 +605,7 @@ const struct pci_host *pci_host_scan(void) {
             .segment = hb->segment,
             .bus = hb->bus,
             .windows = hb->windows,
-            .window_count = hb->window_count,
+            .window_count = hb->window_count
         };
     }
     host.bridge_count = r.bridge_count;

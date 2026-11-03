@@ -91,9 +91,7 @@ static bool namespace_loaded(void) {
     return uacpi_get_current_init_level() >= UACPI_INIT_LEVEL_NAMESPACE_LOADED;
 }
 
-static void log_failure(
-    uacpi_namespace_node *node, const char *name, uacpi_status status
-) {
+static void log_failure(uacpi_namespace_node *node, const char *name, uacpi_status status) {
     const char *path = uacpi_namespace_node_generate_absolute_path(node);
     printf(
         "Cannot evaluate %s.%s: %s\n", path != NULL ? path : "?", name,
@@ -106,14 +104,11 @@ static void log_failure(
 
 static bool device_present(uacpi_namespace_node *node) {
     uacpi_u32 sta;
-    return uacpi_eval_sta(node, &sta) == UACPI_STATUS_OK
-        && (sta & STA_PRESENT) != 0;
+    return uacpi_eval_sta(node, &sta) == UACPI_STATUS_OK && (sta & STA_PRESENT) != 0;
 }
 
 // _SEG and _BBN, which are 0 where a host bridge has none.
-static bool eval_optional(
-    uacpi_namespace_node *node, const char *name, uint64_t *value
-) {
+static bool eval_optional(uacpi_namespace_node *node, const char *name, uint64_t *value) {
     uacpi_status status = uacpi_eval_simple_integer(node, name, value);
     if (status == UACPI_STATUS_NOT_FOUND) {
         *value = 0;
@@ -136,22 +131,15 @@ static uacpi_iteration_decision host_bridge_found(
     }
     uint64_t segment;
     uint64_t bus;
-    if (!eval_optional(node, "_SEG", &segment)
-     || !eval_optional(node, "_BBN", &bus)) {
+    if (!eval_optional(node, "_SEG", &segment) || !eval_optional(node, "_BBN", &bus)) {
         return UACPI_ITERATION_DECISION_CONTINUE;
     }
 
     if (l->host_bridge_count == l->host_bridge_capacity) {
-        size_t capacity = l->host_bridge_capacity == 0 ? 8
-            : l->host_bridge_capacity * 2;
-        struct host_bridge *items = kmalloc(
-            capacity * sizeof(struct host_bridge)
-        );
+        size_t capacity = l->host_bridge_capacity == 0 ? 8 : l->host_bridge_capacity * 2;
+        struct host_bridge *items = kmalloc(capacity * sizeof(struct host_bridge));
         if (l->host_bridge_count != 0) {
-            memcpy(
-                items, l->host_bridges,
-                l->host_bridge_count * sizeof(struct host_bridge)
-            );
+            memcpy(items, l->host_bridges, l->host_bridge_count * sizeof(struct host_bridge));
         }
         kfree(l->host_bridges);
         l->host_bridges = items;
@@ -163,14 +151,13 @@ static uacpi_iteration_decision host_bridge_found(
         .node = node,
         .segment = (uint16_t)segment,
         .bus = (uint8_t)bus,
-        .present = device_present(node),
+        .present = device_present(node)
     };
 
     const char *path = uacpi_namespace_node_generate_absolute_path(node);
     printf(
-        "PCI host bridge %s: segment %04x, bus %02x%s\n",
-        path != NULL ? path : "?", hb->segment, hb->bus,
-        hb->present ? "" : ", not present"
+        "PCI host bridge %s: segment %04x, bus %02x%s\n", path != NULL ? path : "?", hb->segment,
+        hb->bus, hb->present ? "" : ", not present"
     );
     if (path != NULL) {
         uacpi_free_absolute_path(path);
@@ -201,9 +188,7 @@ static uacpi_namespace_node *host_bridge_node(
 
 // The child device object with the address, a present one first, as with host
 // bridges.
-static uacpi_namespace_node *child_at(
-    uacpi_namespace_node *parent, uint64_t adr
-) {
+static uacpi_namespace_node *child_at(uacpi_namespace_node *parent, uint64_t adr) {
     uacpi_namespace_node *first = NULL;
     uacpi_namespace_node *iter = NULL;
     for (;;) {
@@ -214,8 +199,7 @@ static uacpi_namespace_node *child_at(
             break;
         }
         uint64_t value;
-        if (uacpi_eval_simple_integer(iter, "_ADR", &value) != UACPI_STATUS_OK
-         || value != adr) {
+        if (uacpi_eval_simple_integer(iter, "_ADR", &value) != UACPI_STATUS_OK || value != adr) {
             continue;
         }
         if (device_present(iter)) {
@@ -231,8 +215,7 @@ static uacpi_namespace_node *child_at(
 // The bus's device object is its host bridge, or else the child of the object
 // of the bus above that has the address of the bus's bridge.
 static struct bus_info *bus_get(
-    struct lookup *l, uint16_t segment, uint8_t number,
-    const struct pci_function *bridge
+    struct lookup *l, uint16_t segment, uint8_t number, const struct pci_function *bridge
 ) {
     for (size_t i = 0; i < l->bus_count; i++) {
         if (l->buses[i].segment == segment && l->buses[i].number == number) {
@@ -247,8 +230,7 @@ static struct bus_info *bus_get(
             l, bridge->addr.segment, bridge->addr.bus, bridge->parent
         );
         if (above->node != NULL) {
-            uint64_t adr = (uint64_t)bridge->addr.device << 16
-                | bridge->addr.function;
+            uint64_t adr = (uint64_t)bridge->addr.device << 16 | bridge->addr.function;
             node = child_at(above->node, adr);
         }
     }
@@ -259,7 +241,7 @@ static struct bus_info *bus_get(
         .number = number,
         .root = root,
         .node = node,
-        .prt = NULL,
+        .prt = NULL
     };
     if (node != NULL) {
         uacpi_status status = uacpi_get_pci_routing_table(node, &info->prt);
@@ -296,33 +278,28 @@ static uint8_t bridge_pin(uint8_t device, uint8_t pin) {
 }
 
 static void route_set(
-    struct acpi_irq_pci_route *route, uint32_t gsi, uint8_t triggering,
-    uint8_t polarity
+    struct acpi_irq_pci_route *route, uint32_t gsi, uint8_t triggering, uint8_t polarity
 ) {
     route->gsi = gsi;
     route->level = triggering == UACPI_TRIGGERING_LEVEL;
     route->active_low = polarity == UACPI_POLARITY_ACTIVE_LOW;
 }
 
-static uacpi_iteration_decision link_resource(
-    void *user, uacpi_resource *resource
-) {
+static uacpi_iteration_decision link_resource(void *user, uacpi_resource *resource) {
     struct link_search *search = user;
     if (search->position++ != search->index) {
         return UACPI_ITERATION_DECISION_CONTINUE;
     }
-    if (resource->type == UACPI_RESOURCE_TYPE_IRQ
-     && resource->irq.num_irqs != 0) {
+    if (resource->type == UACPI_RESOURCE_TYPE_IRQ && resource->irq.num_irqs != 0) {
         route_set(
-            search->route, resource->irq.irqs[0], resource->irq.triggering,
-            resource->irq.polarity
+            search->route, resource->irq.irqs[0], resource->irq.triggering, resource->irq.polarity
         );
         search->found = true;
     } else if (resource->type == UACPI_RESOURCE_TYPE_EXTENDED_IRQ
             && resource->extended_irq.num_irqs != 0) {
         route_set(
-            search->route, resource->extended_irq.irqs[0],
-            resource->extended_irq.triggering, resource->extended_irq.polarity
+            search->route, resource->extended_irq.irqs[0], resource->extended_irq.triggering,
+            resource->extended_irq.polarity
         );
         search->found = true;
     }
@@ -330,8 +307,7 @@ static uacpi_iteration_decision link_resource(
 }
 
 static bool link_interrupt(
-    uacpi_namespace_node *link, uint32_t index,
-    struct acpi_irq_pci_route *route
+    uacpi_namespace_node *link, uint32_t index, struct acpi_irq_pci_route *route
 ) {
     uacpi_resources *resources;
     uacpi_status status = uacpi_get_current_resources(link, &resources);
@@ -347,34 +323,25 @@ static bool link_interrupt(
 
 // ACPI 6.6, 6.2.14: without a Source, the Source Index is the GSI.
 static bool entry_resolve(
-    const uacpi_pci_routing_table_entry *entry,
-    struct acpi_irq_pci_route *route
+    const uacpi_pci_routing_table_entry *entry, struct acpi_irq_pci_route *route
 ) {
     if (entry->source == NULL) {
         // As PCI interrupt lines are.
-        route_set(
-            route, entry->index, UACPI_TRIGGERING_LEVEL,
-            UACPI_POLARITY_ACTIVE_LOW
-        );
+        route_set(route, entry->index, UACPI_TRIGGERING_LEVEL, UACPI_POLARITY_ACTIVE_LOW);
         return true;
     }
     return link_interrupt(entry->source, entry->index, route);
 }
 
 static bool route_find(
-    struct lookup *l, const struct pci_function *f,
-    struct acpi_irq_pci_route *route
+    struct lookup *l, const struct pci_function *f, struct acpi_irq_pci_route *route
 ) {
     const struct pci_function *at = f;
     uint8_t device = f->addr.device;
     uint8_t pin = f->interrupt_pin;
     for (;;) {
-        const struct bus_info *bus = bus_get(
-            l, at->addr.segment, at->addr.bus, at->parent
-        );
-        const uacpi_pci_routing_table_entry *entry = prt_find(
-            bus->prt, device, pin
-        );
+        const struct bus_info *bus = bus_get(l, at->addr.segment, at->addr.bus, at->parent);
+        const uacpi_pci_routing_table_entry *entry = prt_find(bus->prt, device, pin);
         if (entry != NULL) {
             return entry_resolve(entry, route);
         }
@@ -390,13 +357,10 @@ static bool route_find(
 static void format_addr(char *buf, size_t size, struct pci_addr addr) {
     if (addr.segment != 0) {
         snprintf(
-            buf, size, "%04x:%02x:%02x.%x", addr.segment, addr.bus,
-            addr.device, addr.function
+            buf, size, "%04x:%02x:%02x.%x", addr.segment, addr.bus, addr.device, addr.function
         );
     } else {
-        snprintf(
-            buf, size, "%02x:%02x.%x", addr.bus, addr.device, addr.function
-        );
+        snprintf(buf, size, "%02x:%02x.%x", addr.bus, addr.device, addr.function);
     }
 }
 
@@ -409,33 +373,28 @@ static void routes_find(void) {
 
     struct lookup l = {
         .host_bridges = NULL,
-        .buses = kmalloc(topology->function_count * sizeof(struct bus_info)),
+        .buses = kmalloc(topology->function_count * sizeof(struct bus_info))
     };
     uacpi_namespace_for_each_child(
-        uacpi_namespace_root(), host_bridge_found, NULL,
-        UACPI_OBJECT_DEVICE_BIT, UACPI_MAX_DEPTH_ANY, &l
+        uacpi_namespace_root(), host_bridge_found, NULL, UACPI_OBJECT_DEVICE_BIT,
+        UACPI_MAX_DEPTH_ANY, &l
     );
 
-    routes = kmalloc(
-        topology->function_count * sizeof(struct acpi_irq_pci_route)
-    );
+    routes = kmalloc(topology->function_count * sizeof(struct acpi_irq_pci_route));
     for (size_t i = 0; i < topology->function_count; i++) {
         const struct pci_function *f = &topology->functions[i];
         if (f->interrupt_pin < 1 || f->interrupt_pin > PCI_PINS) {
             continue;
         }
-        struct acpi_irq_pci_route route = {
-            .addr = f->addr, .pin = f->interrupt_pin
-        };
+        struct acpi_irq_pci_route route = { .addr = f->addr, .pin = f->interrupt_pin };
         char text[ADDR_TEXT_SIZE];
         format_addr(text, sizeof(text), f->addr);
         char pin = (char)('A' + f->interrupt_pin - 1);
         if (route_find(&l, f, &route)) {
             routes[route_count++] = route;
             printf(
-                "PCI %s INT%c# is GSI %u, %s, active %s\n", text, pin,
-                route.gsi, route.level ? "level" : "edge",
-                route.active_low ? "low" : "high"
+                "PCI %s INT%c# is GSI %u, %s, active %s\n", text, pin, route.gsi,
+                route.level ? "level" : "edge", route.active_low ? "low" : "high"
             );
         } else {
             printf("PCI %s INT%c# has no route\n", text, pin);
@@ -458,9 +417,7 @@ const struct acpi_irq_pci_route *acpi_irq_pci_routes(size_t *count) {
     return routes;
 }
 
-static uacpi_iteration_decision claim_resource(
-    void *user, uacpi_resource *resource
-) {
+static uacpi_iteration_decision claim_resource(void *user, uacpi_resource *resource) {
     uint16_t *claimed = user;
     if (resource->type == UACPI_RESOURCE_TYPE_IRQ) {
         for (size_t i = 0; i < resource->irq.num_irqs; i++) {
@@ -471,8 +428,7 @@ static uacpi_iteration_decision claim_resource(
     } else if (resource->type == UACPI_RESOURCE_TYPE_EXTENDED_IRQ) {
         for (size_t i = 0; i < resource->extended_irq.num_irqs; i++) {
             if (resource->extended_irq.irqs[i] < ISA_IRQS) {
-                *claimed |= (uint16_t)((uint32_t)1
-                    << resource->extended_irq.irqs[i]);
+                *claimed |= (uint16_t)((uint32_t)1 << resource->extended_irq.irqs[i]);
             }
         }
     }
@@ -519,8 +475,8 @@ uint16_t acpi_irq_isa_claimed(void) {
         return isa_claimed;
     }
     uacpi_namespace_for_each_child(
-        uacpi_namespace_root(), claim_device, NULL, UACPI_OBJECT_DEVICE_BIT,
-        UACPI_MAX_DEPTH_ANY, &isa_claimed
+        uacpi_namespace_root(), claim_device, NULL, UACPI_OBJECT_DEVICE_BIT, UACPI_MAX_DEPTH_ANY,
+        &isa_claimed
     );
 
     char text[ISA_IRQS * 4 + 1];
@@ -528,8 +484,7 @@ uint16_t acpi_irq_isa_claimed(void) {
     for (size_t irq = 0; irq < ISA_IRQS; irq++) {
         if ((isa_claimed & ((uint32_t)1 << irq)) != 0) {
             int n = snprintf(
-                text + length, sizeof(text) - length, "%s%zu",
-                length == 0 ? "" : ", ", irq
+                text + length, sizeof(text) - length, "%s%zu", length == 0 ? "" : ", ", irq
             );
             length += (size_t)n;
         }

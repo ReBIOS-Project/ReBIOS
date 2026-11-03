@@ -42,10 +42,7 @@ static void sort_by_address(struct found_rom *roms, size_t count) {
     for (size_t i = 1; i < count; i++) {
         struct found_rom rom = roms[i];
         size_t j = i;
-        for (;
-             j > 0
-          && pci_address_compare(roms[j - 1].dev->address, rom.dev->address)
-           > 0; j--) {
+        for (; j > 0 && pci_address_compare(roms[j - 1].dev->address, rom.dev->address) > 0; j--) {
             roms[j] = roms[j - 1];
         }
         roms[j] = rom;
@@ -78,13 +75,12 @@ void oprom_collect(void) {
         const struct pci_io_device *dev = &devices[i];
         if (dev->io->RomImage == NULL || dev->io->RomSize == 0
          || dev->base_class == PCI_CLASS_DISPLAY
-         || (video->vga_present
-          && pci_address_equal(dev->address, video->vga_device))) {
+         || (video->vga_present && pci_address_equal(dev->address, video->vga_device))) {
             continue;
         }
         bool legacy = pci_rom_find_legacy_image(
-            dev->io->RomImage, dev->io->RomSize, dev->vendor_id,
-            dev->device_id, &roms[count].image, &roms[count].size
+            dev->io->RomImage, dev->io->RomSize, dev->vendor_id, dev->device_id,
+            &roms[count].image, &roms[count].size
         );
         if (legacy) {
             roms[count].dev = dev;
@@ -97,10 +93,8 @@ void oprom_collect(void) {
     sort_by_address(roms, count);
     for (size_t i = HANDOFF_MAX_PCI_ROMS; i < count; i++) {
         printf(
-            "Too many option ROMs, skipping that of " PCI_ADDRESS_FMT
-            " (%04x:%04x)\n",
-            PCI_ADDRESS_ARGS(roms[i].dev->address), roms[i].dev->vendor_id,
-            roms[i].dev->device_id
+            "Too many option ROMs, skipping that of " PCI_ADDRESS_FMT " (%04x:%04x)\n",
+            PCI_ADDRESS_ARGS(roms[i].dev->address), roms[i].dev->vendor_id, roms[i].dev->device_id
         );
     }
     if (count > HANDOFF_MAX_PCI_ROMS) {
@@ -115,10 +109,7 @@ void oprom_collect(void) {
     }
     uintptr_t at = count > 0 ? loader_alloc_reserved(pages, 0) : 0;
     if (count > 0 && at == 0) {
-        printf(
-            "Cannot allocate %llu pages for the option ROMs\n",
-            (unsigned long long)pages
-        );
+        printf("Cannot allocate %llu pages for the option ROMs\n", (unsigned long long)pages);
         count = 0;
     }
 
@@ -128,9 +119,7 @@ void oprom_collect(void) {
         uint64_t space = page_count(roms[i].size) * 4096;
 
         memcpy((void *)(uintptr_t)at, roms[i].image, roms[i].size);
-        memset(
-            (uint8_t *)(uintptr_t)at + roms[i].size, 0, space - roms[i].size
-        );
+        memset((uint8_t *)(uintptr_t)at + roms[i].size, 0, space - roms[i].size);
 
         rom->address = dev->address;
         rom->vendor_id = dev->vendor_id;
@@ -143,8 +132,7 @@ void oprom_collect(void) {
 
         printf(
             "Option ROM of " PCI_ADDRESS_FMT " (%04x:%04x), %zu bytes\n",
-            PCI_ADDRESS_ARGS(dev->address), dev->vendor_id, dev->device_id,
-            roms[i].size
+            PCI_ADDRESS_ARGS(dev->address), dev->vendor_id, dev->device_id, roms[i].size
         );
         at += space;
     }

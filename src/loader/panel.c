@@ -43,7 +43,7 @@ static const struct {
     [DMI_PRODUCT_NAME] = { 1, 0x05 },
     [DMI_PRODUCT_VERSION] = { 1, 0x06 },
     [DMI_BOARD_VENDOR] = { 2, 0x04 },
-    [DMI_BOARD_NAME] = { 2, 0x05 },
+    [DMI_BOARD_NAME] = { 2, 0x05 }
 };
 
 #define DMI_MATCHES_MAX 4
@@ -55,8 +55,8 @@ struct dmi_match {
     const char *text;
 };
 
-#define DMI_EXACT_MATCH(field, text) { field, true, text }
-#define DMI_MATCH(field, text) { field, false, text }
+#define DMI_EXACT_MATCH(field, text) { (field), true, (text) }
+#define DMI_MATCH(field, text) { (field), false, (text) }
 
 // Portrait panels whose firmware gives their framebuffer's size and pitch as
 // if it were landscape, which Linux 7.3 swaps for these models
@@ -105,7 +105,7 @@ static const struct swap_quirk swap_quirks[] = {
             DMI_EXACT_MATCH(DMI_PRODUCT_VERSION, "1")
         },
         1280, 800, 3328
-    },
+    }
 };
 
 // Panels mounted turned in their casing, the panel's left or right side at the
@@ -127,15 +127,9 @@ struct orientation_quirk {
 };
 
 static const char *const gpd_micropc_dates[] = { "04/26/2019", NULL };
-static const char *const gpd_onemix2s_dates[] = {
-    "05/21/2018", "10/26/2018", "03/04/2019", NULL
-};
-static const char *const gpd_pocket2_dates[] = {
-    "06/28/2018", "08/28/2018", "12/07/2018", NULL
-};
-static const char *const gpd_win2_dates[] = {
-    "12/07/2017", "05/24/2018", "06/29/2018", NULL
-};
+static const char *const gpd_onemix2s_dates[] = { "05/21/2018", "10/26/2018", "03/04/2019", NULL };
+static const char *const gpd_pocket2_dates[] = { "06/28/2018", "08/28/2018", "12/07/2018", NULL };
+static const char *const gpd_win2_dates[] = { "12/07/2017", "05/24/2018", "06/29/2018", NULL };
 static const char *const onegx1_pro_dates[] = { "12/17/2020", NULL };
 
 static const struct orientation_quirk orientation_quirks[] = {
@@ -149,10 +143,7 @@ static const struct orientation_quirk orientation_quirks[] = {
     },
     // AYA NEO AYANEO 2/2S
     {
-        {
-            DMI_EXACT_MATCH(DMI_SYS_VENDOR, "AYANEO"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "AYANEO 2")
-        },
+        { DMI_EXACT_MATCH(DMI_SYS_VENDOR, "AYANEO"), DMI_MATCH(DMI_PRODUCT_NAME, "AYANEO 2") },
         1200, 1920, NULL, RIGHT_UP
     },
     // AYA NEO 2021
@@ -165,10 +156,7 @@ static const struct orientation_quirk orientation_quirks[] = {
     },
     // AYA NEO AIR
     {
-        {
-            DMI_EXACT_MATCH(DMI_SYS_VENDOR, "AYANEO"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "AIR")
-        },
+        { DMI_EXACT_MATCH(DMI_SYS_VENDOR, "AYANEO"), DMI_MATCH(DMI_PRODUCT_NAME, "AIR") },
         1080, 1920, NULL, LEFT_UP
     },
     // AYA NEO Flip DS Bottom Screen
@@ -181,10 +169,7 @@ static const struct orientation_quirk orientation_quirks[] = {
     },
     // AYA NEO Flip KB/DS Top Screen
     {
-        {
-            DMI_EXACT_MATCH(DMI_SYS_VENDOR, "AYANEO"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "FLIP")
-        },
+        { DMI_EXACT_MATCH(DMI_SYS_VENDOR, "AYANEO"), DMI_MATCH(DMI_PRODUCT_NAME, "FLIP") },
         1080, 1920, NULL, LEFT_UP
     },
     // AYA NEO Founder
@@ -197,50 +182,32 @@ static const struct orientation_quirk orientation_quirks[] = {
     },
     // AYA NEO GEEK
     {
-        {
-            DMI_EXACT_MATCH(DMI_SYS_VENDOR, "AYANEO"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "GEEK")
-        },
+        { DMI_EXACT_MATCH(DMI_SYS_VENDOR, "AYANEO"), DMI_MATCH(DMI_PRODUCT_NAME, "GEEK") },
         800, 1280, NULL, RIGHT_UP
     },
     // AYA NEO NEXT
     {
-        {
-            DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
-            DMI_MATCH(DMI_BOARD_NAME, "NEXT")
-        },
+        { DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"), DMI_MATCH(DMI_BOARD_NAME, "NEXT") },
         800, 1280, NULL, RIGHT_UP
     },
     // AYA NEO KUN
     {
-        {
-            DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
-            DMI_MATCH(DMI_BOARD_NAME, "KUN")
-        },
+        { DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"), DMI_MATCH(DMI_BOARD_NAME, "KUN") },
         1600, 2560, NULL, RIGHT_UP
     },
     // AYA NEO SLIDE
     {
-        {
-            DMI_EXACT_MATCH(DMI_SYS_VENDOR, "AYANEO"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "SLIDE")
-        },
+        { DMI_EXACT_MATCH(DMI_SYS_VENDOR, "AYANEO"), DMI_MATCH(DMI_PRODUCT_NAME, "SLIDE") },
         1080, 1920, NULL, LEFT_UP
     },
     // AYN Loki Max
     {
-        {
-            DMI_EXACT_MATCH(DMI_SYS_VENDOR, "ayn"),
-            DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "Loki Max")
-        },
+        { DMI_EXACT_MATCH(DMI_SYS_VENDOR, "ayn"), DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "Loki Max") },
         1080, 1920, NULL, LEFT_UP
     },
     // AYN Loki Zero
     {
-        {
-            DMI_EXACT_MATCH(DMI_SYS_VENDOR, "ayn"),
-            DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "Loki Zero")
-        },
+        { DMI_EXACT_MATCH(DMI_SYS_VENDOR, "ayn"), DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "Loki Zero") },
         1080, 1920, NULL, LEFT_UP
     },
     // Dynabook K50
@@ -263,18 +230,12 @@ static const struct orientation_quirk orientation_quirks[] = {
     },
     // GPD MicroPC (later BIOS versions with proper DMI strings)
     {
-        {
-            DMI_EXACT_MATCH(DMI_SYS_VENDOR, "GPD"),
-            DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "MicroPC")
-        },
+        { DMI_EXACT_MATCH(DMI_SYS_VENDOR, "GPD"), DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "MicroPC") },
         720, 1280, NULL, RIGHT_UP
     },
     // GPD Win Max
     {
-        {
-            DMI_EXACT_MATCH(DMI_SYS_VENDOR, "GPD"),
-            DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "G1619-01")
-        },
+        { DMI_EXACT_MATCH(DMI_SYS_VENDOR, "GPD"), DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "G1619-01") },
         800, 1280, NULL, RIGHT_UP
     },
     // GPD Pocket 2 (generic strings, also match on bios date)
@@ -299,26 +260,17 @@ static const struct orientation_quirk orientation_quirks[] = {
     },
     // GPD Win 2 (correct DMI strings)
     {
-        {
-            DMI_EXACT_MATCH(DMI_SYS_VENDOR, "GPD"),
-            DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "WIN2")
-        },
+        { DMI_EXACT_MATCH(DMI_SYS_VENDOR, "GPD"), DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "WIN2") },
         720, 1280, NULL, RIGHT_UP
     },
     // GPD Win 3
     {
-        {
-            DMI_EXACT_MATCH(DMI_SYS_VENDOR, "GPD"),
-            DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "G1618-03")
-        },
+        { DMI_EXACT_MATCH(DMI_SYS_VENDOR, "GPD"), DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "G1618-03") },
         720, 1280, NULL, RIGHT_UP
     },
     // GPD Win Mini
     {
-        {
-            DMI_EXACT_MATCH(DMI_SYS_VENDOR, "GPD"),
-            DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "G1617-01")
-        },
+        { DMI_EXACT_MATCH(DMI_SYS_VENDOR, "GPD"), DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "G1617-01") },
         1080, 1920, NULL, RIGHT_UP
     },
     // Lenovo Ideapad D330-10IGM (HD)
@@ -363,10 +315,7 @@ static const struct orientation_quirk orientation_quirks[] = {
     },
     // Nanote UMPC-01
     {
-        {
-            DMI_MATCH(DMI_SYS_VENDOR, "RWC CO.,LTD"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "UMPC-01")
-        },
+        { DMI_MATCH(DMI_SYS_VENDOR, "RWC CO.,LTD"), DMI_MATCH(DMI_PRODUCT_NAME, "UMPC-01") },
         1200, 1920, NULL, RIGHT_UP
     },
     // OneGX1 Pro
@@ -381,9 +330,7 @@ static const struct orientation_quirk orientation_quirks[] = {
     // OneXPlayer
     {
         {
-            DMI_EXACT_MATCH(
-                DMI_SYS_VENDOR, "ONE-NETBOOK TECHNOLOGY CO., LTD."
-            ),
+            DMI_EXACT_MATCH(DMI_SYS_VENDOR, "ONE-NETBOOK TECHNOLOGY CO., LTD."),
             DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "ONE XPLAYER")
         },
         1600, 2560, NULL, LEFT_UP
@@ -391,9 +338,7 @@ static const struct orientation_quirk orientation_quirks[] = {
     // OneXPlayer Mini (Intel)
     {
         {
-            DMI_EXACT_MATCH(
-                DMI_SYS_VENDOR, "ONE-NETBOOK TECHNOLOGY CO., LTD."
-            ),
+            DMI_EXACT_MATCH(DMI_SYS_VENDOR, "ONE-NETBOOK TECHNOLOGY CO., LTD."),
             DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "ONE XPLAYER")
         },
         1200, 1920, NULL, LEFT_UP
@@ -434,10 +379,7 @@ static const struct orientation_quirk orientation_quirks[] = {
     },
     // ZOTAC Gaming Zone
     {
-        {
-            DMI_EXACT_MATCH(DMI_SYS_VENDOR, "ZOTAC"),
-            DMI_EXACT_MATCH(DMI_BOARD_NAME, "G0A1W")
-        },
+        { DMI_EXACT_MATCH(DMI_SYS_VENDOR, "ZOTAC"), DMI_EXACT_MATCH(DMI_BOARD_NAME, "G0A1W") },
         1080, 1920, NULL, LEFT_UP
     },
     // One Mix 2S (generic strings, also match on bios date)
@@ -449,7 +391,7 @@ static const struct orientation_quirk orientation_quirks[] = {
             DMI_EXACT_MATCH(DMI_BOARD_NAME, "Default string")
         },
         1200, 1920, gpd_onemix2s_dates, RIGHT_UP
-    },
+    }
 };
 
 static bool text_equal(const char *a, const char *b) {
@@ -474,9 +416,7 @@ static bool text_contains(const char *haystack, const char *needle) {
 }
 
 static const char *dmi_string(uint8_t field) {
-    return fwtables_smbios_string(
-        dmi_fields[field].type, dmi_fields[field].offset
-    );
+    return fwtables_smbios_string(dmi_fields[field].type, dmi_fields[field].offset);
 }
 
 // As Linux 7.3's dmi_matches(): every match must hold, and a field the
@@ -488,8 +428,7 @@ static bool dmi_matches(const struct dmi_match *matches) {
         if (value == NULL) {
             return false;
         }
-        if (m->exact ? !text_equal(value, m->text)
-          : !text_contains(value, m->text)) {
+        if (m->exact ? !text_equal(value, m->text) : !text_contains(value, m->text)) {
             return false;
         }
     }
@@ -497,15 +436,13 @@ static bool dmi_matches(const struct dmi_match *matches) {
 }
 
 void panel_fix_framebuffer(struct handoff_framebuffer *fb) {
-    for (size_t i = 0; i < sizeof(swap_quirks) / sizeof(struct swap_quirk);
-         i++) {
+    for (size_t i = 0; i < sizeof(swap_quirks) / sizeof(struct swap_quirk); i++) {
         const struct swap_quirk *q = &swap_quirks[i];
         if (!dmi_matches(q->matches)) {
             continue;
         }
         // As Linux's, the first quirk that matches decides.
-        if (q->width != 0
-         && (fb->width != q->width || fb->height != q->height)) {
+        if (q->width != 0 && (fb->width != q->width || fb->height != q->height)) {
             return;
         }
         uint32_t width = fb->height;
@@ -516,9 +453,8 @@ void panel_fix_framebuffer(struct handoff_framebuffer *fb) {
             fb->size = (uint64_t)fb->pitch * fb->height;
         }
         printf(
-            "This machine's firmware gives its portrait panel as landscape: "
-            "the framebuffer is %ux%u, pitch %u\n",
-            fb->width, fb->height, fb->pitch
+            "This machine's firmware gives its portrait panel as landscape: the framebuffer is "
+            "%ux%u, pitch %u\n", fb->width, fb->height, fb->pitch
         );
         return;
     }
@@ -541,12 +477,9 @@ static bool date_listed(const char *const *dates) {
 // efifb.c turns the console: clockwise on a right side up panel, anticlockwise
 // on a left side up one.
 uint8_t panel_rotation(const struct handoff_framebuffer *fb) {
-    for (size_t i = 0;
-         i < sizeof(orientation_quirks) / sizeof(struct orientation_quirk);
-         i++) {
+    for (size_t i = 0; i < sizeof(orientation_quirks) / sizeof(struct orientation_quirk); i++) {
         const struct orientation_quirk *q = &orientation_quirks[i];
-        if (!dmi_matches(q->matches) || fb->width != q->width
-         || fb->height != q->height) {
+        if (!dmi_matches(q->matches) || fb->width != q->width || fb->height != q->height) {
             continue;
         }
         if (q->bios_dates != NULL && !date_listed(q->bios_dates)) {
@@ -554,10 +487,8 @@ uint8_t panel_rotation(const struct handoff_framebuffer *fb) {
         }
         bool right_up = q->orientation == RIGHT_UP;
         printf(
-            "The panel is mounted with its %s side up, so its picture is "
-            "turned %s\n",
-            right_up ? "right" : "left",
-            right_up ? "clockwise" : "anticlockwise"
+            "The panel is mounted with its %s side up, so its picture is turned %s\n",
+            right_up ? "right" : "left", right_up ? "clockwise" : "anticlockwise"
         );
         return right_up ? HANDOFF_ROTATE_90 : HANDOFF_ROTATE_270;
     }

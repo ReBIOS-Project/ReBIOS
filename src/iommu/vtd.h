@@ -41,10 +41,10 @@ void vtd_enable(uintptr_t pml4);
 // and the I/O APIC entry that name an entry.
 bool vtd_remap_on(void);
 int vtd_remap_alloc(size_t count);
-void vtd_remap_free(int index, size_t count);
-void vtd_remap_set(int index, uint32_t apic_id, uint8_t vector, bool level);
-void vtd_remap_message(int index, uint32_t *address, uint32_t *data);
-uint64_t vtd_remap_rte(int index, uint8_t vector, bool level, bool active_low);
+void vtd_remap_free(uint16_t index, size_t count);
+void vtd_remap_set(uint16_t index, uint32_t apic_id, uint8_t vector, bool level);
+void vtd_remap_message(uint16_t index, uint32_t *address, uint32_t *data);
+uint64_t vtd_remap_rte(uint16_t index, uint8_t vector, bool level, bool active_low);
 
 // Makes the units see changes to the tables made while they translate.
 void vtd_flush(void);

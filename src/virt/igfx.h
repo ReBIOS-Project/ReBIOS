@@ -34,9 +34,7 @@ bool igfx_one_to_one(uint64_t *base, uint64_t *end);
 // if any, and the host range the guest's own must stay clear of: the stolen
 // memory and the GGTT's below it. layout_init() places it and tells
 // igfx_stolen_placed() where.
-bool igfx_stolen(
-    uint64_t *host, uint64_t *size, uint64_t *clear_base, uint64_t *clear_end
-);
+bool igfx_stolen(uint64_t *host, uint64_t *size, uint64_t *clear_base, uint64_t *clear_end);
 void igfx_stolen_placed(uintptr_t gpa);
 // Whether the stolen memory's RMRR is gone: where layout_init() cannot place
 // the stolen memory, it keeps the host's addresses for it as the RMRR would.
