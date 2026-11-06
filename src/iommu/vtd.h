@@ -47,6 +47,11 @@ void vtd_remap_set(uint16_t index, uint32_t apic_id, uint8_t vector, bool level)
 // the 64-byte posted-interrupt descriptor at descriptor.
 bool vtd_posting(void);
 void vtd_remap_post(uint16_t index, uint8_t vector, uintptr_t descriptor);
+// Whether every unit also remaps in x2APIC format, which posting then follows
+// the descriptors' destinations into, whether they do now, and switching.
+bool vtd_remap_x2apic_capable(void);
+bool vtd_remap_x2apic_on(void);
+void vtd_remap_x2apic(bool on);
 void vtd_remap_message(uint16_t index, uint32_t *address, uint32_t *data);
 uint64_t vtd_remap_rte(uint16_t index, uint8_t vector, bool level, bool active_low);
 

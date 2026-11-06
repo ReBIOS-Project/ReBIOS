@@ -39,6 +39,11 @@ void remap_set(int32_t requester, uint16_t index, uint32_t apic_id, uint8_t vect
 // descriptor instead, and an entry that has them post a vector there.
 bool remap_posting(void);
 void remap_post(int32_t requester, uint16_t index, uint8_t vector, uintptr_t descriptor);
+// Whether the IOMMUs can also remap in x2APIC format, reading the descriptors'
+// destinations in it, whether they do now, and switching them to it or back.
+bool remap_x2apic_capable(void);
+bool remap_x2apic_on(void);
+void remap_x2apic(bool on);
 // The message, and the I/O APIC entry, that name an entry.
 void remap_message(int32_t requester, uint16_t index, uint32_t *address, uint32_t *data);
 uint64_t remap_rte(int32_t requester, uint16_t index, uint8_t vector, bool level, bool active_low);

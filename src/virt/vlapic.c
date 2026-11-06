@@ -22,6 +22,7 @@
 #include <virt/vlapic.h>
 #include <hw/lapic.h>
 #include <hw/power.h>
+#include <iommu/remap.h>
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
@@ -37,6 +38,7 @@
 #include <virt/irq.h>
 #include <virt/mmio.h>
 #include <virt/nvmx.h>
+#include <virt/pci_virt.h>
 #include <virt/svm.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>
@@ -266,6 +268,8 @@ static uint32_t pid_table_last;
 static struct spinlock ipiv_lock;
 static _Atomic(bool) ipiv_x2apic;
 static _Atomic(bool) ipiv_recheck;
+// Nothing is posted while the destinations change format.
+static _Atomic(bool) post_paused;
 
 // The x2APIC MSRs whose registers hold what they read as, and those whose
 // writes VMX virtualises with virtual-interrupt delivery (SDM 325462-093 Vol.
@@ -755,6 +759,18 @@ static void ipiv_reformat(void) {
         all = base != 0 && ((base & APIC_BASE_EXTD) != 0) == to;
     }
     if (all) {
+        // The IOMMUs read the destinations in the format they remap in, which
+        // follows where it can, nothing being posted meanwhile, as an
+        // interrupt to a descriptor in the other is blocked (D51397-019 rev.
+        // 5.20, 5.2.3, 9.11). A processor still in xAPIC mode takes x2APIC
+        // format's interrupts, which x2APIC mode comes after (SDM 325462-093
+        // Vol. 3A, 13.12.7).
+        bool posting = remap_posting();
+        if (posting) {
+            atomic_store_explicit(&post_paused, true, memory_order_release);
+            pci_virt_repost();
+            remap_x2apic(to);
+        }
         for (size_t i = 0; i < smp_cpu_count(); i++) {
             struct vcpu *v = smp_cpu(i)->vcpu;
             if (v != NULL && v->vlapic != NULL) {
@@ -765,6 +781,10 @@ static void ipiv_reformat(void) {
             }
         }
         atomic_store_explicit(&ipiv_x2apic, to, memory_order_release);
+        if (posting) {
+            atomic_store_explicit(&post_paused, false, memory_order_release);
+            pci_virt_repost();
+        }
     }
     spinlock_release(&ipiv_lock);
 }
@@ -1591,11 +1611,13 @@ void vlapic_deliver_msi(uint32_t address, uint32_t data) {
 
 // Only where posting does what vlapic_deliver_msi() does: fixed or lowest
 // priority edge-triggered interrupts, of vectors past the exceptions', to one
-// vCPU whose local APIC takes them. The IOMMUs read the descriptors'
-// destinations in xAPIC format, which IPI virtualisation may switch: none is
-// posted where it runs.
+// vCPU whose local APIC takes them, while the IOMMUs read the descriptors'
+// destinations in the format IPI virtualisation has them in.
 uintptr_t vlapic_post_descriptor(uint32_t address, uint32_t data, size_t count) {
-    if (!posted_interrupts || ipi_virtualization
+    bool x2apic_destinations = ipi_virtualization
+                            && atomic_load_explicit(&ipiv_x2apic, memory_order_acquire);
+    if (!posted_interrupts || atomic_load_explicit(&post_paused, memory_order_acquire)
+     || x2apic_destinations != remap_x2apic_on()
      || (address & MSI_ADDRESS_MASK) != MSI_ADDRESS_BASE) {
         return 0;
     }

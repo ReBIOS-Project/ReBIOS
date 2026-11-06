@@ -66,6 +66,7 @@
 #define ECAP_C ((uint64_t)1 << 0)
 #define ECAP_QI ((uint64_t)1 << 1)
 #define ECAP_IR ((uint64_t)1 << 3)
+#define ECAP_EIM ((uint64_t)1 << 4)
 #define ECAP_EIMER ((uint64_t)1 << 61)
 
 // The same bits report each command's state in the global status register.
@@ -108,6 +109,7 @@
 // 16 bytes (D51397-019 rev 5.20, 9.9 and the IRTA register).
 #define REMAP_SIZE 11
 #define REMAP_ENTRIES ((uint32_t)2 << REMAP_SIZE)
+#define IRTA_EIME ((uint64_t)1 << 11)
 #define IRTE_P ((uint64_t)1 << 0)
 #define IRTE_TM ((uint64_t)1 << 4)
 #define IRTE_IM ((uint64_t)1 << 15)
@@ -152,8 +154,14 @@ static struct vtd_unit *units;
 static size_t unit_count;
 // Over the units' invalidation queues, which any processor may fill.
 static struct spinlock queue_lock;
+// The table the units remap through, the first of two where they can remap in
+// x2APIC format too (D51397-019 rev. 5.20, 9.9), the second in that format.
+static uint64_t *remap_tables[2];
 static uint64_t *remap_table;
+static bool x2apic_capable;
+static bool x2apic_format;
 static uint64_t remap_used[REMAP_ENTRIES / 64];
+// Over the entries, and over which table the units use.
 static struct spinlock remap_lock;
 // Every unit posts interrupts to descriptors in memory too (D51397-019 rev.
 // 5.20, 5.2).
@@ -437,6 +445,7 @@ static void unit_enable(struct vtd_unit *u, uintptr_t pml4) {
 void vtd_start(void) {
     bool remap = true;
     bool post = true;
+    bool eim = true;
     for (size_t i = 0; i < unit_count; i++) {
         struct vtd_unit *u = &units[i];
         unit_take_over(u);
@@ -447,6 +456,7 @@ void vtd_start(void) {
         global_command(u, GCMD_QIE, true, "enable queued invalidation");
         remap = remap && (u->ecap & ECAP_IR) != 0;
         post = post && (u->cap & CAP_PI) != 0;
+        eim = eim && (u->ecap & ECAP_EIM) != 0;
         // Remapping only in x2APIC mode would need every local APIC in it.
         if ((u->ecap & ECAP_EIMER) != 0) {
             printf(
@@ -461,6 +471,11 @@ void vtd_start(void) {
         return;
     }
     remap_table = page_alloc(REMAP_ENTRIES * 16 / PAGE_SIZE);
+    remap_tables[0] = remap_table;
+    if (post && eim) {
+        remap_tables[1] = page_alloc(REMAP_ENTRIES * 16 / PAGE_SIZE);
+        x2apic_capable = true;
+    }
     tables_flush_caches();
     for (size_t i = 0; i < unit_count; i++) {
         struct vtd_unit *u = &units[i];
@@ -501,13 +516,13 @@ int vtd_remap_alloc(size_t count) {
 
 // Its entries not present first, so that nothing reaches a freed vector.
 void vtd_remap_free(uint16_t index, size_t count) {
+    spinlock_acquire(&remap_lock);
     for (size_t i = 0; i < count; i++) {
         atomic_store_explicit(
             (_Atomic(uint64_t) *)&remap_table[(index + i) * 2], 0, memory_order_release
         );
         remap_invalidate((uint16_t)(index + i));
     }
-    spinlock_acquire(&remap_lock);
     for (size_t i = 0; i < count; i++) {
         remap_used[(index + i) / 64] &= ~((uint64_t)1 << ((index + i) % 64));
     }
@@ -521,18 +536,25 @@ static void irte_store(uint16_t index, uint64_t low, uint64_t high) {
 }
 
 static void irte_write(uint16_t index, uint64_t low, uint64_t high) {
-    if (remap_table[index * 2] == low && remap_table[index * 2 + 1] == high) {
-        return;
+    spinlock_acquire(&remap_lock);
+    if (remap_table[index * 2] != low || remap_table[index * 2 + 1] != high) {
+        irte_store(index, low, high);
+        remap_invalidate(index);
     }
-    irte_store(index, low, high);
-    remap_invalidate(index);
+    spinlock_release(&remap_lock);
+}
+
+// xAPIC format's 8-bit destination at bits 47:40, or x2APIC format's 32 bits
+// at 63:32 (D51397-019 rev. 5.20, 9.9).
+static uint64_t irte_destination(uint32_t apic_id, bool x2apic) {
+    return x2apic ? (uint64_t)apic_id << 32 : (uint64_t)(apic_id & 0xff) << IRTE_DEST_SHIFT;
 }
 
 // Physical destination, fixed delivery, no source validation: the entries only
 // ever name the hypervisor's vectors, whatever device sends them.
 void vtd_remap_set(uint16_t index, uint32_t apic_id, uint8_t vector, bool level) {
     uint64_t entry = IRTE_P | (level ? IRTE_TM : 0) | (uint64_t)vector << IRTE_VECTOR_SHIFT
-                   | (uint64_t)(apic_id & 0xff) << IRTE_DEST_SHIFT;
+                   | irte_destination(apic_id, x2apic_format);
     irte_write(index, entry, 0);
 }
 
@@ -547,6 +569,48 @@ void vtd_remap_post(uint16_t index, uint8_t vector, uintptr_t descriptor) {
     uint64_t low = IRTE_P | IRTE_IM | (uint64_t)vector << IRTE_VECTOR_SHIFT
                  | ((uint64_t)descriptor & 0xffffffc0) << 32;
     irte_write(index, low, (uint64_t)descriptor & 0xffffffff00000000);
+}
+
+bool vtd_remap_x2apic_capable(void) {
+    return x2apic_capable;
+}
+
+bool vtd_remap_x2apic_on(void) {
+    return x2apic_format;
+}
+
+// Into the other table, its remapped entries' destinations in the other
+// format, which the units take with EIME at once: a table that remaps alike,
+// as the units may use either for interrupts in flight until they no longer
+// cache the old (D51397-019 rev. 5.20, 6.7).
+void vtd_remap_x2apic(bool on) {
+    spinlock_acquire(&remap_lock);
+    if (!x2apic_capable || on == x2apic_format) {
+        spinlock_release(&remap_lock);
+        return;
+    }
+    uint64_t *next = remap_tables[on ? 1 : 0];
+    for (size_t i = 0; i < REMAP_ENTRIES; i++) {
+        uint64_t low = remap_table[i * 2];
+        if ((low & (IRTE_P | IRTE_IM)) == IRTE_P) {
+            uint32_t dest = x2apic_format
+                          ? (uint32_t)(low >> 32)
+                          : (uint32_t)(low >> IRTE_DEST_SHIFT & 0xff);
+            low = (low & 0xffffffff) | irte_destination(dest, on);
+        }
+        next[i * 2] = low;
+        next[i * 2 + 1] = remap_table[i * 2 + 1];
+    }
+    tables_flush_caches();
+    for (size_t i = 0; i < unit_count; i++) {
+        struct vtd_unit *u = &units[i];
+        reg_write64(u, REG_IRTA, (uint64_t)(uintptr_t)next | (on ? IRTA_EIME : 0) | REMAP_SIZE);
+        global_command(u, GCMD_SIRTP, true, "take the interrupt remapping table");
+    }
+    remap_table = next;
+    x2apic_format = on;
+    remap_invalidate_all();
+    spinlock_release(&remap_lock);
 }
 
 void vtd_remap_message(uint16_t index, uint32_t *address, uint32_t *data) {

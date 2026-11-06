@@ -72,6 +72,20 @@ void remap_post(int32_t requester, uint16_t index, uint8_t vector, uintptr_t des
     vtd_remap_post(index, vector, descriptor);
 }
 
+bool remap_x2apic_capable(void) {
+    return !amd() && vtd_remap_x2apic_capable();
+}
+
+bool remap_x2apic_on(void) {
+    return !amd() && vtd_remap_x2apic_on();
+}
+
+void remap_x2apic(bool on) {
+    if (!amd()) {
+        vtd_remap_x2apic(on);
+    }
+}
+
 void remap_message(int32_t requester, uint16_t index, uint32_t *address, uint32_t *data) {
     (void)requester;
     if (amd()) {
