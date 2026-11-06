@@ -38,6 +38,11 @@
 #include <sys/x86.h>
 
 #define CORE_HEAP_SIZE ((uint64_t)64 << 20)
+// The page tables the processor runs the guest's guests with, which the
+// hypervisor builds from the guest's and its own and drops when they outgrow
+// their share: 1/NESTED_HEAP_SHARE of the RAM, at most NESTED_HEAP_MAX.
+#define NESTED_HEAP_SHARE 32
+#define NESTED_HEAP_MAX ((uint64_t)128 << 20)
 
 struct handoff *loader_handoff;
 
@@ -121,13 +126,21 @@ static bool exit_boot_services(void) {
     return false;
 }
 
-static uintptr_t memory_map_top(void) {
+// The memory the OS may use once boot services end (UEFI 2.11, Table 7.6).
+static bool ram_type(uint32_t type) {
+    return type == EfiLoaderCode || type == EfiLoaderData || type == EfiBootServicesCode
+        || type == EfiBootServicesData || type == EfiConventionalMemory;
+}
+
+// The top of the memory map, 4 GiB at least, and the RAM in it.
+static uintptr_t memory_map_top(uint64_t *ram) {
     size_t size = 0;
     EFI_UINTN map_key;
     size_t desc_size;
     EFI_UINT32 desc_version;
     uintptr_t top = (uint64_t)1 << 32;
 
+    *ram = 0;
     efi_bs->GetMemoryMap(&size, NULL, &map_key, &desc_size, &desc_version);
     size += 16 * desc_size;
     size_t pages = page_count(size);
@@ -144,6 +157,9 @@ static uintptr_t memory_map_top(void) {
             uintptr_t end = desc->PhysicalStart + desc->NumberOfPages * 4096;
             if (end > top) {
                 top = end;
+            }
+            if (ram_type(desc->Type)) {
+                *ram += desc->NumberOfPages * 4096;
             }
         }
     }
@@ -188,7 +204,8 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     }
     reserve((uintptr_t)image->ImageBase, page_count(image->ImageSize));
 
-    uintptr_t map_top = memory_map_top();
+    uint64_t ram;
+    uintptr_t map_top = memory_map_top(&ram);
     size_t table_pages;
     uintptr_t pml4 = paging_build_identity_map(&map_top, &table_pages);
     if (pml4 == 0) {
@@ -214,7 +231,11 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
         printf("No page below 1 MiB to start the other processors in\n");
     }
 
-    size_t heap_size = CORE_HEAP_SIZE + (config.nested ? NESTED_HEAP_SIZE : 0);
+    uint64_t nested_heap_size = (ram / NESTED_HEAP_SHARE) & ~(uint64_t)4095;
+    if (nested_heap_size > NESTED_HEAP_MAX) {
+        nested_heap_size = NESTED_HEAP_MAX;
+    }
+    size_t heap_size = CORE_HEAP_SIZE + nested_heap_size;
     uint64_t heap = loader_alloc_reserved(page_count(heap_size), 0);
     if (heap == 0) {
         panic("Cannot allocate the core's heap\n");
@@ -227,6 +248,7 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     loader_handoff->ap_boot = ap_boot;
     loader_handoff->heap_base = heap;
     loader_handoff->heap_size = heap_size;
+    loader_handoff->nested_heap_size = nested_heap_size;
     loader_handoff->tsc_hz = measure_tsc_hz();
     config_to_handoff(&loader_handoff->config);
     fwtables_collect();

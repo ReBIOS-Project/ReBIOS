@@ -177,7 +177,6 @@ printf '\x07\x00\x00\x00%s' "$(cat rebios.ini)" > /sys/firmware/efi/efivars/ReBI
 | `vga_scaling` | `stretch`/`aspect`/`integer`/`center`/`manual` | `stretch` | How the emulated VGA fills the screen: all of it; as much of it as 4:3 allows, as a VGA monitor shows every mode; the largest whole number of screen pixels per VGA pixel that fits; one screen pixel per VGA pixel; or `vga_scale` screen pixels per VGA pixel. All but `stretch` center the picture |
 | `vga_scale` | int | `1` | The scale factor for `vga_scaling = manual`, from 1 to 16 |
 | `profile` | bool | `false` | Log, every 10 seconds, how often the OS made ReBIOS step in and why: VM exits per second and the time taken by reason, and the emulated I/O ports and memory pages behind them. A debugging aid |
-| `nested` | bool | `false` | Let the OS use the processor's virtualisation itself, to run virtual machines of its own: Intel's VMX for now, AMD's SVM still to come, hence off by default |
 | `avic` | `auto`/`always`/`never` | `auto` | When to have AMD's AVIC run the OS's local APICs, which saves exits to ReBIOS: on Zen 4 and later processors with x2AVIC, as Linux's KVM does; on every processor with AVIC but those of family 17h, where AMD advises against it; or never |
 | `cpuid_limit` | bool | `false` | Start the OS with CPUID reporting no basic leaf past 2, as firmware setups' "Limit CPUID Maxval" option does, for OSes that fail on processors with more, such as Windows NT 4.0. On Intel processors that still have that option, the OS sees it set in IA32_MISC_ENABLE and may turn it off |
 | `igpu_stolen_remap` | bool | `true` | Give an Intel integrated GPU's stolen memory (the graphics memory the firmware sets aside) an address in the OS's own memory map, and move the firmware's graphics page table entries there, as the IOMMU translates what the GPU accesses. If the screen goes black on an Intel integrated GPU once the OS starts, try `false`: the stolen memory then stays at the firmware's address, as with ReBIOS 0.3.0 |
@@ -185,6 +184,7 @@ printf '\x07\x00\x00\x00%s' "$(cat rebios.ini)" > /sys/firmware/efi/efivars/ReBI
 | `cpu_allowlist` | int/hex list | *(unset)* | Comma-separated list of APIC IDs of logical CPUs that should be given to the OS. Each entry is either a single ID or an inclusive range `N-M` (e.g. `0,2-4,7`). An empty value (`cpu_allowlist =`) is itself a setting and means "hide every AP" (only the BSP stays visible). The BSP is always given to the OS regardless. Mutually exclusive with `cpu_blocklist` |
 | `cpu_blocklist` | int/hex list | *(unset)* | Comma-separated list of APIC IDs of logical CPUs that should be hidden from the OS. Each entry is either a single ID or an inclusive range `N-M` (e.g. `5-7`). An empty value (`cpu_blocklist =`) is a no-op for visibility but still claims the slot, so `cpu_allowlist` cannot also be set. The BSP is always given to the OS regardless. Mutually exclusive with `cpu_allowlist` |
 | `iommu_disable` | | | Obsolete CSMWrap setting, ignored with a warning: ReBIOS requires the IOMMU |
+| `nested` | | | Obsolete setting, ignored with a warning: the OS always gets the processor's virtualisation wherever ReBIOS can give it |
 | `system_thread` | | | Obsolete CSMWrap setting, ignored with a warning: ReBIOS keeps no CPU for itself |
 
 Hidden CPUs are left out of the MADT and the MP table, and cannot be started by
@@ -227,6 +227,11 @@ BIOS, and the like.
 ReBIOS does not keep a logical processor for itself as CSMWrap does: every one
 of them is given to the OS (unless `cpu_allowlist` or `cpu_blocklist` say
 otherwise), and systems with only one logical processor work too.
+
+### Can the OS run virtual machines of its own?
+
+Yes, on Intel processors: ReBIOS gives the OS the processor's VMX, so that
+hypervisors such as Linux's KVM run in it. AMD's SVM is still to come.
 
 ### Does ReBIOS have any advantages over native CSM?
 

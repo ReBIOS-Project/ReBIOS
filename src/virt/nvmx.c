@@ -247,7 +247,7 @@ static unsigned int phys_width;
 static uintptr_t access_nowhere;
 // The largest pages EPT02 maps: 2 MiB, or 1 GiB.
 static size_t ept02_level_max;
-// The EPT02 tables each vCPU may have, of the heap's NESTED_HEAP_SIZE.
+// The EPT02 tables each vCPU may have, of the heap's part for them.
 static unsigned int ept02_budget;
 
 // What the default1 classes of the controls the old capability MSRs report as
@@ -354,7 +354,7 @@ static uint64_t capability(uint64_t hardware, uint32_t emulated, uint32_t requir
 }
 
 void nvmx_init(void) {
-    if (!virt_vmx || core_handoff->config.nested == 0) {
+    if (!virt_vmx) {
         return;
     }
     nvmx_enabled = true;
@@ -399,7 +399,7 @@ void nvmx_init(void) {
         access_nowhere = (uintptr_t)page_alloc(1);
     }
     ept02_level_max = (ept_vpid & CAP_1G) != 0 ? 2 : 1;
-    ept02_budget = NESTED_HEAP_SIZE / PAGE_SIZE / smp_cpu_count();
+    ept02_budget = core_handoff->nested_heap_size / PAGE_SIZE / smp_cpu_count();
 
     uint64_t misc = vmx_capability(MSR_IA32_VMX_MISC);
     cr3_targets = (unsigned int)(misc >> MISC_CR3_TARGETS_SHIFT & MISC_CR3_TARGETS_MASK);

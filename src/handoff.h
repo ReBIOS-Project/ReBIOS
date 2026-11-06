@@ -21,10 +21,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-// The page tables the processor runs the guest's guests with, which the
-// hypervisor builds from the guest's and its own.
-#define NESTED_HEAP_SIZE ((uint64_t)128 << 20)
-
 #define HANDOFF_MAX_RESERVED 16
 #define HANDOFF_MAX_PCI_ROMS 16
 #define HANDOFF_MAX_BLOCK_DEVICES 32
@@ -154,8 +150,6 @@ struct handoff_config {
     uint8_t vga_scaling;
     uint8_t vga_scale;
     uint8_t profile;
-    // Whether the guest gets the processor's virtualisation of its own.
-    uint8_t nested;
     // One of the HANDOFF_AVIC_* values.
     uint8_t avic;
     // Whether the guest starts with CPUID's basic leaves limited to 2, as
@@ -191,10 +185,11 @@ struct handoff {
     // A page below 1 MiB, where the other processors start, or 0.
     uint64_t ap_boot;
 
-    // Memory the core manages itself, NESTED_HEAP_SIZE more of it where the
-    // guest gets VMX or SVM of its own.
+    // Memory the core manages itself, nested_heap_size of it for the tables of
+    // the guest's own VMX or SVM.
     uint64_t heap_base;
     uint64_t heap_size;
+    uint64_t nested_heap_size;
 
     // The TSC's rate, measured against the firmware's delay service.
     uint64_t tsc_hz;

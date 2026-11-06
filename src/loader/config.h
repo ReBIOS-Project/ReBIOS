@@ -41,7 +41,6 @@ struct config {
     uint8_t vga_scaling;
     uint8_t vga_scale;
     bool profile;
-    bool nested;
     // One of the HANDOFF_AVIC_* values.
     uint8_t avic;
     bool cpuid_limit;

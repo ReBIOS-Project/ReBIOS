@@ -426,7 +426,6 @@ static const struct setting settings[] = {
     { .name = "vga_scaling", .apply = apply_vga_scaling },
     { .name = "vga_scale", .apply = apply_vga_scale },
     { .name = "profile", .apply = apply_boolean, .flag = &config.profile },
-    { .name = "nested", .apply = apply_boolean, .flag = &config.nested },
     { .name = "avic", .apply = apply_avic },
     { .name = "cpuid_limit", .apply = apply_boolean, .flag = &config.cpuid_limit },
     { .name = "igpu_stolen_remap", .apply = apply_boolean, .flag = &config.igpu_stolen_remap },
@@ -434,6 +433,7 @@ static const struct setting settings[] = {
     { .name = "cpu_allowlist", .apply = apply_cpu_list, .filter = HANDOFF_CPU_FILTER_ALLOW },
     { .name = "cpu_blocklist", .apply = apply_cpu_list, .filter = HANDOFF_CPU_FILTER_BLOCK },
     { .name = "iommu_disable", .apply = apply_obsolete },
+    { .name = "nested", .apply = apply_obsolete },
     { .name = "system_thread", .apply = apply_obsolete }
 };
 
@@ -803,7 +803,6 @@ void config_to_handoff(struct handoff_config *out) {
     out->vga_scaling = config.vga_scaling;
     out->vga_scale = config.vga_scale;
     out->profile = config.profile;
-    out->nested = config.nested;
     out->avic = config.avic;
     out->cpuid_limit = config.cpuid_limit;
     out->igpu_stolen_remap = config.igpu_stolen_remap;
