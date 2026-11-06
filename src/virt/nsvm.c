@@ -101,6 +101,11 @@
 
 #define NPT02_ROOTS 4
 
+#define DEBUGCTL_LBR ((uint64_t)1 << 0)
+#define DEBUGCTL_BTF ((uint64_t)1 << 1)
+#define DEBUGCTL_BLCKDB ((uint64_t)1 << 2)
+#define CPUID_7_0_ECX_BUSLOCKTRAP ((uint32_t)1 << 24)
+
 // A shadow of one of the guest's nested page tables, for one ASID of its
 // guests: what it and the hypervisor's make of the guest's guest's addresses,
 // filled in as the processor misses them.
@@ -156,6 +161,8 @@ struct nsvm {
     uint64_t vintr12;
     bool window;
     uint64_t tsc_offset12;
+    // Whether VMCB12 has the processor switch the last branch records.
+    bool lbrv;
     // VMCB02's MSR permission map: the hypervisor's and VMCB12's.
     uint8_t *msrpm02;
     // Whether VMCB12 enables nested paging, and the guest's paging mode at its
@@ -197,6 +204,9 @@ static _Atomic(size_t) svm_count;
 // largest pages they map: 2 MiB, or 1 GiB.
 static size_t npt02_budget;
 static size_t npt02_level_max;
+// The DebugCtl bits a guest's guest's last branch records may have: LBR, BTF,
+// and BLCKDB with bus lock traps (APM 24593 rev. 3.46, 13.1.1.6).
+static uint64_t debugctl_bits;
 
 void nsvm_init(void) {
     if (virt_vmx) {
@@ -212,6 +222,8 @@ void nsvm_init(void) {
     phys_width = cpuid(0x80000008, 0).eax & 0xff;
     npt02_budget = core_handoff->nested_heap_size / PAGE_SIZE / smp_cpu_count();
     npt02_level_max = svm_huge_pages() ? 2 : 1;
+    debugctl_bits = DEBUGCTL_LBR | DEBUGCTL_BTF
+                  | ((cpuid(7, 0).ecx & CPUID_7_0_ECX_BUSLOCKTRAP) != 0 ? DEBUGCTL_BLCKDB : 0);
     iopm02 = page_alloc(IOPM_SIZE / PAGE_SIZE);
     memset(iopm02, 0xff, IOPM_SIZE);
     printf("Nested SVM for the guest\n");
@@ -321,7 +333,7 @@ struct cpuid_regs nsvm_cpuid(void) {
     struct cpuid_regs svm = cpuid(0x8000000a, 0);
     uint32_t features = SVM_FEATURE_NP | SVM_FEATURE_NRIPS | SVM_FEATURE_VMCB_CLEAN
                       | SVM_FEATURE_FLUSH_BY_ASID | SVM_FEATURE_PAUSE_FILTER
-                      | SVM_FEATURE_PAUSE_FILTER_THRESHOLD;
+                      | SVM_FEATURE_PAUSE_FILTER_THRESHOLD | SVM_FEATURE_LBRV;
     return (struct cpuid_regs){ svm.eax & 0xff, nasid - 1, 0, svm.edx & features };
 }
 
@@ -403,16 +415,20 @@ static void copy_vmload_state(struct vmcb_save *to, const struct vmcb_save *from
     to->sysenter_eip = from->sysenter_eip;
 }
 
+// The last branch records, which the processor switches where VMCB12 has it,
+// and the guest and its guest share else (APM 24593 rev. 3.46, 15.23.1).
+static void copy_lbrs(struct vmcb_save *to, const struct vmcb_save *from) {
+    to->dbgctl = from->dbgctl;
+    to->br_from = from->br_from;
+    to->br_to = from->br_to;
+    to->last_excp_from = from->last_excp_from;
+    to->last_excp_to = from->last_excp_to;
+}
+
 // What else the guest and its guest share, as the processor keeps it but for
-// VMCB12's controls, which the guest is not offered yet: the last branch
-// records, and FRED's state.
+// VMCB12's controls, which the guest is not offered yet: FRED's state.
 static void copy_shared_state(struct vmcb *to, const struct vmcb *from) {
     copy_vmload_state(&to->save, &from->save);
-    to->save.dbgctl = from->save.dbgctl;
-    to->save.br_from = from->save.br_from;
-    to->save.br_to = from->save.br_to;
-    to->save.last_excp_from = from->save.last_excp_from;
-    to->save.last_excp_to = from->save.last_excp_to;
     if (vcpu_fred()) {
         memcpy(
             (uint8_t *)to + VMCB_FRED_STATE, (const uint8_t *)from + VMCB_FRED_STATE,
@@ -533,6 +549,7 @@ static void exit_to_l1(
         vmcb01->control.vintr = (vmcb01->control.vintr & ~SVM_VINTR_NMI_MASK)
                               | (c02->vintr & SVM_VINTR_NMI_MASK);
     }
+    copy_lbrs(n->lbrv ? s12 : &vmcb01->save, s02);
     copy_shared_state(vmcb01, vmcb02);
     if (svm_eraps) {
         vmcb01->control.rap_control |= SVM_RAP_CLEAR;
@@ -1081,6 +1098,11 @@ static void prepare_vmcb02(struct nsvm *n) {
     s->rax = s12->rax;
     // Without nested paging of its own, the guest's guest has the guest's PAT.
     s->g_pat = n->npt ? s12->g_pat : vmcb01->save.g_pat;
+    n->lbrv = svm_lbr_virtualisation && (c12->virt_ext & SVM_VIRT_EXT_LBR) != 0;
+    copy_lbrs(s, n->lbrv ? s12 : &vmcb01->save);
+    if (n->lbrv) {
+        s->dbgctl &= debugctl_bits;
+    }
     copy_shared_state(vmcb02, vmcb01);
 }
 
