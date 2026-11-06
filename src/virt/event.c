@@ -26,6 +26,7 @@
 #include <sys/x86.h>
 #include <virt/irq.h>
 #include <virt/mmio.h>
+#include <virt/nsvm.h>
 #include <virt/nvmx.h>
 #include <virt/pit.h>
 #include <virt/svm.h>
@@ -95,7 +96,9 @@ void event_exit(struct vcpu *v) {
         unsigned int type = info & EVENT_TYPE_MASK;
         if (type == EVENT_TYPE_SOFTWARE || type == EVENT_TYPE_INT1 || type == EVENT_TYPE_SYSCALL
          || (type == EVENT_TYPE_EXCEPTION && (vector == VECTOR_BP || vector == VECTOR_OF))) {
-            return;
+            if (!nsvm_inject_again(v, exitintinfo)) {
+                return;
+            }
         }
         error = (uint32_t)(exitintinfo >> 32);
         if (vcpu_fred()) {
@@ -210,6 +213,10 @@ static bool deliver_nmi(struct vcpu *v) {
         v->nmi_pending = false;
         return false;
     }
+    // A clear global interrupt flag holds it until STGI, which exits.
+    if (!nsvm_gif(v)) {
+        return false;
+    }
     if (nmi_blocked()) {
         set_proc_control(PROC_NMI_WINDOW_EXITING, true);
         return false;
@@ -293,7 +300,7 @@ bool event_interruptible(struct vcpu *v) {
         uint64_t blocking = vmx_read(VMCS_GUEST_INTERRUPTIBILITY);
         return (blocking & (INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS)) == 0;
     }
-    return (v->vmcb->save.rflags & RFLAGS_IF) != 0 && (v->vmcb->control.interrupt_shadow & 1) == 0;
+    return nsvm_interruptible(v);
 }
 
 #define WINDOW_OFF (-1)
@@ -305,6 +312,17 @@ static void interrupt_window(struct vcpu *v, int class) {
     if (virt_vmx) {
         set_proc_control(PROC_INTR_WINDOW_EXITING, class == WINDOW_ANY);
         return;
+    }
+    // The guest's TPR, which holds back a priority class, changes in its
+    // guest's exits alone.
+    if (nsvm_in_l2(v)) {
+        nsvm_interrupt_window(v, class == WINDOW_ANY);
+        return;
+    }
+    // While the global interrupt flag holds interrupts back, the STGI that
+    // sets it, intercepted, is the window.
+    if (!nsvm_gif(v)) {
+        class = WINDOW_OFF;
     }
     struct vmcb_control *c = &v->vmcb->control;
     c->vintr &= ~(SVM_VINTR_IRQ | SVM_VINTR_IGN_TPR | SVM_VINTR_PRIO_MASK);
@@ -331,8 +349,18 @@ static bool window_needed(struct vcpu *v) {
 
 bool event_halt_ends(struct vcpu *v) {
     struct cpu *cpu = v->cpu;
+    if (v->injecting) {
+        return true;
+    }
+    // A clear global interrupt flag holds back everything that would.
+    if (!nsvm_gif(v)) {
+        return false;
+    }
+    if (nsvm_in_l2(v)) {
+        return nsvm_halt_ends(v);
+    }
     if (v->nmi_pending || atomic_load_explicit(&cpu->nmi_pending, memory_order_acquire)
-     || atomic_load_explicit(&cpu->init_pending, memory_order_acquire) || v->injecting) {
+     || atomic_load_explicit(&cpu->init_pending, memory_order_acquire)) {
         return true;
     }
     if (!virt_vmx && svm_vnmi

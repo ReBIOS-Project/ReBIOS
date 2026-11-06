@@ -36,6 +36,7 @@
 #include <virt/gpt.h>
 #include <virt/insn.h>
 #include <virt/mmio.h>
+#include <virt/nsvm.h>
 #include <virt/profile.h>
 #include <virt/vcpu.h>
 #include <virt/vioapic.h>
@@ -76,7 +77,7 @@ bool svm_x2avic;
 bool svm_avic_ext_lvt_reads;
 // TLB_CONTROL can flush the guest's ASID alone (APM 24593 rev. 3.45, Table
 // 15-9), sparing the host's translations.
-static bool flush_by_asid;
+bool svm_flush_by_asid;
 static bool vmcb_clean_bits;
 // The guest's INVLPGB and TLBSYNC, which TlbiCtl has the hypervisor enable
 // (APM 24593 rev. 3.46, Table B-1), and which run without it. TLBSYNC needs no
@@ -92,11 +93,10 @@ static bool decode_assists;
 // predictor wherever its TLB is flushed (APM 24593 rev. 3.45, 3.2.9): VMRUN
 // clears it where the hypervisor changes the guest's paging, and the guest
 // gets the whole predictor (APM 24593 rev. 3.45, 15.37.2).
-static bool eraps;
+bool svm_eraps;
+uint64_t svm_firmware_vm_cr;
 
 #define CPUID_80000021_EAX_ERAPS ((uint32_t)1 << 24)
-#define RAP_ALLOW_LARGER ((uint32_t)1 << 0)
-#define RAP_CLEAR ((uint32_t)1 << 1)
 
 #define CLEAN_I ((uint32_t)1 << 0)
 #define CLEAN_IOPM ((uint32_t)1 << 1)
@@ -204,7 +204,7 @@ bool svm_supported(void) {
     }
     svm_lbr_virtualisation = (features & SVM_FEATURE_LBRV) != 0;
     svm_nrips = (features & SVM_FEATURE_NRIPS) != 0;
-    flush_by_asid = (features & SVM_FEATURE_FLUSH_BY_ASID) != 0;
+    svm_flush_by_asid = (features & SVM_FEATURE_FLUSH_BY_ASID) != 0;
     vmcb_clean_bits = (features & SVM_FEATURE_VMCB_CLEAN) != 0;
     tlbictl = (features & SVM_FEATURE_TLBICTL) != 0;
     struct cpuid_regs sizes = cpuid(0x80000008, 0);
@@ -232,15 +232,15 @@ bool svm_supported(void) {
               && (zen4 || signature.family >= 0x1a)));
     svm_x2avic = svm_avic && (features & SVM_FEATURE_X2AVIC) != 0;
     svm_avic_ext_lvt_reads = svm_avic && (features & SVM_FEATURE_EXT_LVT_AVIC_ACCESS) != 0;
-    eraps = cpuid(0x80000000, 0).eax >= 0x80000021
-         && (cpuid(0x80000021, 0).eax & CPUID_80000021_EAX_ERAPS) != 0;
+    svm_eraps = cpuid(0x80000000, 0).eax >= 0x80000021
+             && (cpuid(0x80000021, 0).eax & CPUID_80000021_EAX_ERAPS) != 0;
     return true;
 }
 
 void svm_flush_guest_tlb(struct vcpu *v) {
-    v->vmcb->control.tlb_control = flush_by_asid ? 3 : 1;
-    if (eraps) {
-        v->vmcb->control.rap_control |= RAP_CLEAR;
+    v->vmcb->control.tlb_control = svm_flush_by_asid ? SVM_TLB_FLUSH_ASID : SVM_TLB_FLUSH_ALL;
+    if (svm_eraps) {
+        v->vmcb->control.rap_control |= SVM_RAP_CLEAR;
     }
 }
 
@@ -257,7 +257,11 @@ void svm_cpu_init(void) {
     wrmsr(MSR_VM_HSAVE_PA, (uint64_t)(uintptr_t)page_alloc(1));
     // INITs become #SX, which the guest's intercept or the host's handler
     // takes, rather than resetting the processor under the hypervisor.
-    if (!wrmsr_safe(MSR_VM_CR, rdmsr(MSR_VM_CR) | VM_CR_R_INIT)) {
+    uint64_t vm_cr = rdmsr(MSR_VM_CR);
+    if (this_cpu()->bsp) {
+        svm_firmware_vm_cr = vm_cr;
+    }
+    if (!wrmsr_safe(MSR_VM_CR, vm_cr | VM_CR_R_INIT)) {
         printf("Cannot redirect INIT on this processor\n");
     }
     svm_erratum_383 = erratum_383_present();
@@ -278,9 +282,11 @@ void svm_vcpu_init(struct vcpu *v) {
     struct vmcb_control *c = &v->vmcb->control;
     // For the CR4 bits of features the guest does not get (cpuid.c).
     c->intercept_cr = SVM_INTERCEPT_CR4_WRITE;
+    // INVLPGA too, which the processor would carry out for the guest whatever
+    // its own EFER.SVME (nsvm.c).
     c->intercept_misc1 = SVM_INTERCEPT_INTR | SVM_INTERCEPT_NMI | SVM_INTERCEPT_CPUID
-                       | SVM_INTERCEPT_HLT | SVM_INTERCEPT_INVD | SVM_INTERCEPT_IOIO
-                       | SVM_INTERCEPT_MSR | SVM_INTERCEPT_SHUTDOWN;
+                       | SVM_INTERCEPT_HLT | SVM_INTERCEPT_INVD | SVM_INTERCEPT_INVLPGA
+                       | SVM_INTERCEPT_IOIO | SVM_INTERCEPT_MSR | SVM_INTERCEPT_SHUTDOWN;
     // Physical interrupts exit whatever the guest's IF, and CR8 is the virtual
     // local APIC's TPR.
     c->vintr = SVM_VINTR_MASKING;
@@ -301,8 +307,8 @@ void svm_vcpu_init(struct vcpu *v) {
     c->guest_asid = 1;
     // Flush everything on the first VMRUN, then nothing.
     c->tlb_control = 1;
-    if (eraps) {
-        c->rap_control = RAP_ALLOW_LARGER | RAP_CLEAR;
+    if (svm_eraps) {
+        c->rap_control = SVM_RAP_ALLOW_LARGER | SVM_RAP_CLEAR;
     }
     c->np_enable = SVM_NP_ENABLE | (tlbictl ? SVM_NP_INVLPGB : 0);
     c->n_cr3 = gpt_root();
@@ -440,9 +446,8 @@ static void svm_step_exception(struct vcpu *v, unsigned int vector) {
     }
 }
 
-// The guest got where the processor cannot go on from, as a triple fault does:
-// the machine resets, as a PC's chipset makes it.
-static noreturn void svm_shutdown(struct vcpu *v, const char *why) {
+// The machine resets, as a PC's chipset makes it.
+noreturn void svm_shutdown(struct vcpu *v, const char *why) {
     bool shown = log_take_screen();
     printf("%s\n", why);
     svm_dump_guest(v);
@@ -460,9 +465,9 @@ static noreturn void svm_shutdown(struct vcpu *v, const char *why) {
 
 // The guest's INVLPGB faults as the guest's own EFER and CR4 say rather than
 // as the processor sees them, with the SVME that VMRUN needs. It goes on to
-// the processor with the guest's ASID but no PCID, which the host's CR4 does
-// not enable, so it drops that ASID's translations of every PCID, as INVLPGB
-// may.
+// the processor with the ASID it is for (nsvm.c) but no PCID, which the host's
+// CR4 does not enable, so it drops that ASID's translations of every PCID, as
+// INVLPGB may.
 static void exit_invlpgb(struct vcpu *v) {
     struct vmcb_save *s = &v->vmcb->save;
     if ((s->cr0 & CR0_PE) == 0 || (s->rflags & RFLAGS_VM) != 0) {
@@ -480,9 +485,8 @@ static void exit_invlpgb(struct vcpu *v) {
     uint32_t ecx = (uint32_t)v->gprs.rcx & INVLPGB_ECX;
     uint32_t edx = (uint32_t)v->gprs.rdx;
     bool pse_paging = (s->cr0 & CR0_PG) != 0 && (s->cr4 & (CR4_PAE | CR4_PSE)) == CR4_PSE;
-    // The guest has no SVM of its own, so no ASID either.
     if (s->cpl != 0 || (rax & INVLPGB_FAULTING) != 0 || edx >> 28 != 0
-     || ((edx >> 16) != 0 && (s->cr4 & CR4_PCIDE) == 0) || (edx & 0xffff) != 0
+     || ((edx >> 16) != 0 && (s->cr4 & CR4_PCIDE) == 0) || (edx & 0xffff) >= nsvm_invlpgb_asids(v)
      || (ecx & 0xffff) > invlpgb_count_max || pse_paging) {
         vcpu_inject_exception(v, 13, true, 0);
         return;
@@ -490,8 +494,10 @@ static void exit_invlpgb(struct vcpu *v) {
     if (insn.address_size < 8) {
         rax &= insn.address_size == 4 ? 0xffffffff : 0xffff;
     }
-    rax = (rax & ~INVLPGB_PCID) | INVLPGB_ASID;
-    asm volatile ("invlpgb" :: "a"(rax), "c"(ecx), "d"(v->vmcb->control.guest_asid) : "memory");
+    uint32_t asid;
+    bool one = nsvm_invlpgb_asid(v, (rax & INVLPGB_ASID) != 0, edx & 0xffff, &asid);
+    rax = (rax & ~(INVLPGB_PCID | INVLPGB_ASID)) | (one ? INVLPGB_ASID : 0);
+    asm volatile ("invlpgb" :: "a"(rax), "c"(ecx), "d"(asid) : "memory");
     vcpu_advance(v, insn.length);
 }
 
@@ -502,6 +508,9 @@ static void svm_handle_exit(struct vcpu *v) {
     if (v->stepping && c->exitcode >= SVM_EXIT_EXCEPTION_BASE
      && c->exitcode < SVM_EXIT_EXCEPTION_BASE + 32) {
         svm_step_exception(v, (unsigned int)(c->exitcode - SVM_EXIT_EXCEPTION_BASE));
+        return;
+    }
+    if (nsvm_l2_exit(v)) {
         return;
     }
 
@@ -559,8 +568,10 @@ static void svm_handle_exit(struct vcpu *v) {
             svm_machine_check(v);
             break;
         }
+        // An INIT, which the guest's global interrupt flag and its guest's
+        // intercept decide on from the next entry.
         case SVM_EXIT_EXCEPTION_BASE + 30: {
-            vcpu_init_signal(v);
+            atomic_store_explicit(&v->cpu->init_pending, true, memory_order_release);
             break;
         }
         case SVM_EXIT_VMMCALL: {
@@ -597,8 +608,9 @@ static void svm_handle_exit(struct vcpu *v) {
         case SVM_EXIT_VMSAVE:
         case SVM_EXIT_STGI:
         case SVM_EXIT_CLGI:
-        case SVM_EXIT_SKINIT: {
-            vcpu_inject_exception(v, 6, false, 0);
+        case SVM_EXIT_SKINIT:
+        case SVM_EXIT_INVLPGA: {
+            nsvm_instruction(v, c->exitcode);
             break;
         }
         case SVM_EXIT_NPF: {
@@ -708,7 +720,7 @@ void svm_run(struct vcpu *v) {
     for (;;) {
         vcpu_before_entry(v);
         v->vmcb->save.rax = v->gprs.rax;
-        v->vmcb->control.tsc_offset = v->tsc_offset;
+        v->vmcb->control.tsc_offset = nsvm_tsc_offset(v);
         clean_before_entry(v);
         // Before the processor looks at the guest's interrupt requests.
         atomic_store_explicit(&v->in_guest, true, memory_order_seq_cst);
@@ -719,7 +731,7 @@ void svm_run(struct vcpu *v) {
         v->fetched_count = 0;
         v->gprs.rax = v->vmcb->save.rax;
         v->vmcb->control.tlb_control = 0;
-        v->vmcb->control.rap_control &= ~RAP_CLEAR;
+        v->vmcb->control.rap_control &= (uint8_t)~SVM_RAP_CLEAR;
         // What it cut short comes back in EXITINTINFO.
         v->vmcb->control.eventinj = 0;
         vlapic_after_exit(v);

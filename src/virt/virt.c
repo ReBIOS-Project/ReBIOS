@@ -41,6 +41,7 @@
 #include <virt/insn.h>
 #include <virt/msr.h>
 #include <virt/mtrr.h>
+#include <virt/nsvm.h>
 #include <virt/nvmx.h>
 #include <virt/pci_virt.h>
 #include <virt/pit.h>
@@ -327,6 +328,7 @@ struct vcpu *vcpu_create(struct cpu *cpu) {
     mtrr_vcpu_init(v);
     msr_vcpu_init(v);
     nvmx_vcpu_init(v);
+    nsvm_vcpu_init(v);
     return v;
 }
 
@@ -483,8 +485,9 @@ void vcpu_before_entry(struct vcpu *v) {
     // Before the flush below, which the display's remapping may need.
     vga_refresh();
     nvmx_wait(v);
-    // VMX operation blocks INIT, which its guest's exits take.
-    if (!nvmx_holds_init(v)
+    // VMX operation blocks INIT, which its guest's exits take, and SVM's
+    // global interrupt flag holds it.
+    if (!nvmx_holds_init(v) && !nsvm_holds_init(v)
      && atomic_exchange_explicit(&v->cpu->init_pending, false, memory_order_acquire)) {
         vcpu_init_signal(v);
     }
@@ -498,6 +501,7 @@ void vcpu_before_entry(struct vcpu *v) {
         } else {
             v->vmcb->control.n_cr3 = gpt_root();
             svm_flush_guest_tlb(v);
+            nsvm_gpt_changed(v);
         }
     }
     watchdog(v);
@@ -512,7 +516,7 @@ void vcpu_before_entry(struct vcpu *v) {
         pci_virt_repost();
     }
     vlapic_prepare_entry(v);
-    if (nvmx_before_entry(v)) {
+    if (nvmx_before_entry(v) || nsvm_before_entry(v)) {
         return;
     }
     // A stepped instruction is to run, not an event's handler.
@@ -752,7 +756,7 @@ uint64_t vcpu_efer(struct vcpu *v) {
     if (virt_vmx) {
         return vmx_read(VMCS_GUEST_EFER);
     }
-    return v->vmcb->save.efer & ~(uint64_t)EFER_SVME;
+    return (v->vmcb->save.efer & ~(uint64_t)EFER_SVME) | (nsvm_svme(v) ? EFER_SVME : 0);
 }
 
 static struct vmcb_seg *svm_seg(struct vcpu *v, size_t reg) {
@@ -858,6 +862,7 @@ void vcpu_load_mode(struct vcpu *v, const struct vcpu_mode *mode) {
     s->cr3 = mode->cr3;
     s->cr4 = mode->cr4;
     s->efer = mode->efer | EFER_SVME;
+    nsvm_set_svme(v, (mode->efer & EFER_SVME) != 0);
     v->vmcb->control.interrupt_shadow = 0;
     svm_flush_guest_tlb(v);
 }
@@ -1079,7 +1084,8 @@ void vcpu_inject_exception_data(
     if ((vcpu_cr0(v) & CR0_PE) == 0) {
         has_error = false;
     }
-    if (nvmx_exception(v, vector, has_error, error, data)) {
+    if (nvmx_exception(v, vector, has_error, error, data)
+     || nsvm_exception(v, vector, has_error, error, data)) {
         return;
     }
     v->injecting = true;
@@ -1108,8 +1114,10 @@ void vcpu_inject_exception(struct vcpu *v, uint8_t vector, bool has_error, uint3
 
 void vcpu_inject_page_fault(struct vcpu *v, uintptr_t linear, uint32_t error) {
     // A page fault's exit takes the address as its qualification, leaving CR2
-    // alone (SDM 325462-093 Vol. 3C, 30.2.1).
-    if (nvmx_exception(v, 14, true, error, linear)) {
+    // alone (SDM 325462-093 Vol. 3C, 30.2.1), and its intercept comes before
+    // CR2 is written (APM 24593 rev. 3.46, 15.12.15).
+    if (nvmx_exception(v, 14, true, error, linear)
+     || nsvm_exception(v, 14, true, error, linear)) {
         return;
     }
     // VMX leaves CR2 as it is for the guest, and the host takes no page
@@ -1154,6 +1162,9 @@ void vcpu_wait_for_sipi(struct vcpu *v) {
 }
 
 void vcpu_init_signal(struct vcpu *v) {
+    if (nsvm_init_signal(v)) {
+        return;
+    }
     if (v->cpu->bsp) {
         // Its INIT takes the boot processor back to the BIOS.
         printf("INIT for the boot processor, resetting\n");
@@ -1223,6 +1234,7 @@ void vcpu_set_real_mode(struct vcpu *v, uint16_t cs, uint16_t ip) {
     s->cr3 = 0;
     s->cr4 = 0;
     s->efer = EFER_SVME;
+    nsvm_set_svme(v, false);
     s->cpl = 0;
     v->vmcb->control.interrupt_shadow = 0;
     svm_flush_guest_tlb(v);

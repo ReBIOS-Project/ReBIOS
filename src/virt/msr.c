@@ -31,6 +31,7 @@
 #include <virt/cpuid.h>
 #include <virt/layout.h>
 #include <virt/msr_table.h>
+#include <virt/nsvm.h>
 #include <virt/nvmx.h>
 #include <virt/pci_plan.h>
 #include <virt/svm.h>
@@ -782,7 +783,7 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
     }
     switch (msr) {
         case MSR_IA32_TSC: {
-            *value = nvmx_tsc(v, rdtsc());
+            *value = virt_vmx ? nvmx_tsc(v, rdtsc()) : rdtsc() + nsvm_tsc_offset(v);
             return true;
         }
         case MSR_IA32_TSC_ADJUST: {
@@ -932,7 +933,9 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
     }
     switch (msr) {
         // As the processor does, IA32_TSC_ADJUST moves with the TSC (SDM
-        // 325462-093 Vol. 3B, 20.17.3).
+        // 325462-093 Vol. 3B, 20.17.3). The guest's guest's write sets the
+        // guest's TSC, which its own reads then scale and offset (SDM
+        // 325462-093 Vol. 3C, 28.3; APM 24593 rev. 3.46, 15.30.5).
         case MSR_IA32_TSC: {
             uint64_t now = rdtsc();
             v->tsc_adjust += value - (now + v->tsc_offset);

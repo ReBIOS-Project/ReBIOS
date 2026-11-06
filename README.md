@@ -230,8 +230,8 @@ otherwise), and systems with only one logical processor work too.
 
 ### Can the OS run virtual machines of its own?
 
-Yes, on Intel processors: ReBIOS gives the OS the processor's VMX, so that
-hypervisors such as Linux's KVM run in it. AMD's SVM is still to come.
+Yes: ReBIOS gives the OS the processor's VMX on Intel processors and its SVM on
+AMD processors, so that hypervisors such as Linux's KVM run in it.
 
 ### Does ReBIOS have any advantages over native CSM?
 

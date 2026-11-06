@@ -145,6 +145,9 @@ void vlapic_avic_access_exit(struct vcpu *v, uint64_t info1);
 // The I/O APIC entry for the 8259 changed, which decides whether AVIC can run
 // the local APICs.
 void vlapic_extint_moved(void);
+// Whether any vCPU has SVM of its own enabled changed, which AVIC cannot run
+// with.
+void vlapic_nested_changed(void);
 // Before the vCPU's events are seen to, as its local APIC's mode may change.
 void vlapic_prepare_entry(struct vcpu *v);
 // The vCPU waits in the hypervisor for its HLT to end, or no longer does.

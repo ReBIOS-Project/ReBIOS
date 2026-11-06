@@ -150,9 +150,16 @@ _Static_assert(offsetof(struct vmcb_save, rax) == 0x1f8, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_save, cr2) == 0x240, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 
-// Intercept vector 0, at offset 000h: writes of CR4 (APM 24593 rev. 3.45,
-// Table B-1).
+// The intercept vectors, 32 bits each from offset 000h, in which an exit code
+// below C0h is the number of its intercept's bit (APM 24593 rev. 3.46, Table
+// B-1 and Table C-1).
+#define SVM_INTERCEPT_VECTORS 6
+
+// Intercept vector 0, at offset 000h: reads and writes of CR8, and writes of
+// CR4 (APM 24593 rev. 3.46, Table B-1).
+#define SVM_INTERCEPT_CR8_READ ((uint32_t)1 << 8)
 #define SVM_INTERCEPT_CR4_WRITE ((uint32_t)1 << 20)
+#define SVM_INTERCEPT_CR8_WRITE ((uint32_t)1 << 24)
 
 // Intercept vector 3, at offset 00Ch.
 #define SVM_INTERCEPT_INTR ((uint32_t)1 << 0)
@@ -164,6 +171,7 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 #define SVM_INTERCEPT_RSM ((uint32_t)1 << 19)
 #define SVM_INTERCEPT_INVD ((uint32_t)1 << 22)
 #define SVM_INTERCEPT_HLT ((uint32_t)1 << 24)
+#define SVM_INTERCEPT_INVLPGA ((uint32_t)1 << 26)
 #define SVM_INTERCEPT_IOIO ((uint32_t)1 << 27)
 #define SVM_INTERCEPT_MSR ((uint32_t)1 << 28)
 #define SVM_INTERCEPT_TASK_SWITCH ((uint32_t)1 << 29)
@@ -181,10 +189,13 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 
 // Intercept vector 5, at offset 014h.
 #define SVM_INTERCEPT_INVLPGB ((uint32_t)1 << 0)
+#define SVM_INTERCEPT_INVPCID ((uint32_t)1 << 2)
 
 // Exit codes (APM 24593 rev. 3.45, Appendix C).
+#define SVM_EXIT_CR8_READ 0x08
 #define SVM_EXIT_CR0_WRITE 0x10
 #define SVM_EXIT_CR4_WRITE 0x14
+#define SVM_EXIT_CR8_WRITE 0x18
 #define SVM_EXIT_EXCEPTION_BASE 0x40
 #define SVM_EXIT_INTR 0x60
 #define SVM_EXIT_NMI 0x61
@@ -195,6 +206,7 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 #define SVM_EXIT_RSM 0x73
 #define SVM_EXIT_INVD 0x76
 #define SVM_EXIT_HLT 0x78
+#define SVM_EXIT_INVLPGA 0x7a
 #define SVM_EXIT_IOIO 0x7b
 #define SVM_EXIT_MSR 0x7c
 #define SVM_EXIT_TASK_SWITCH 0x7d
@@ -218,6 +230,7 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 #define NPF_FETCH ((uint64_t)1 << 4)
 
 // Virtual interrupt control, at offset 060h.
+#define SVM_VINTR_TPR_MASK ((uint64_t)0xf)
 #define SVM_VINTR_IRQ ((uint64_t)1 << 8)
 #define SVM_VINTR_GIF ((uint64_t)1 << 9)
 #define SVM_VINTR_NMI ((uint64_t)1 << 11)
@@ -230,6 +243,18 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 #define SVM_VINTR_NMI_ENABLE ((uint64_t)1 << 26)
 #define SVM_VINTR_X2AVIC ((uint64_t)1 << 30)
 #define SVM_VINTR_AVIC ((uint64_t)1 << 31)
+#define SVM_VINTR_VECTOR_MASK ((uint64_t)0xff << 32)
+
+// The interrupt shadow, at offset 068h.
+#define SVM_INTERRUPT_SHADOW ((uint64_t)1 << 0)
+
+// TLB_CONTROL, at offset 05Ch (APM 24593 rev. 3.46, Table 15-9), and the
+// return address predictor's control beside it.
+#define SVM_TLB_FLUSH_ALL 1
+#define SVM_TLB_FLUSH_ASID 3
+#define SVM_TLB_FLUSH_ASID_LOCAL 7
+#define SVM_RAP_ALLOW_LARGER ((uint8_t)1 << 0)
+#define SVM_RAP_CLEAR ((uint8_t)1 << 1)
 
 // Nested paging and what goes with it, at offset 090h.
 #define SVM_NP_ENABLE ((uint64_t)1 << 0)
@@ -242,6 +267,8 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 // Event injection.
 #define SVM_EVENT_VALID ((uint64_t)1 << 31)
 #define SVM_EVENT_ERROR_VALID ((uint64_t)1 << 11)
+#define SVM_EVENT_VECTOR_MASK ((uint64_t)0xff)
+#define SVM_EVENT_TYPE_MASK ((uint64_t)7 << 8)
 #define SVM_EVENT_TYPE_INTR ((uint64_t)0 << 8)
 #define SVM_EVENT_TYPE_NMI ((uint64_t)2 << 8)
 #define SVM_EVENT_TYPE_EXCEPTION ((uint64_t)3 << 8)
@@ -251,7 +278,9 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 #define DC_CFG_ERRATUM_383 ((uint64_t)1 << 47)
 #define MSR_VM_CR 0xc0010114
 #define MSR_VM_HSAVE_PA 0xc0010117
+#define VM_CR_DPD ((uint32_t)1 << 0)
 #define VM_CR_R_INIT ((uint32_t)1 << 1)
+#define VM_CR_DIS_A20M ((uint32_t)1 << 2)
 #define VM_CR_LOCK ((uint32_t)1 << 3)
 #define VM_CR_SVMDIS ((uint32_t)1 << 4)
 
@@ -275,6 +304,12 @@ extern bool svm_x2avic;
 // to them, where it otherwise faults on both (APM 24593 rev. 3.46, Table
 // 15-22; APM 24594 rev. 3.39, CPUID Fn8000_000A_EDX[ExtLvtAvicAccessChg]).
 extern bool svm_avic_ext_lvt_reads;
+// TLB_CONTROL can flush one ASID's translations, and the processor's return
+// address predictor is the guest's to have cleared (svm.c).
+extern bool svm_flush_by_asid;
+extern bool svm_eraps;
+// The processor's VM_CR as the firmware left it.
+extern uint64_t svm_firmware_vm_cr;
 
 bool svm_supported(void);
 // The guest's translations go before its next run, as when the hypervisor
@@ -284,5 +319,7 @@ bool svm_huge_pages(void);
 void svm_cpu_init(void);
 void svm_vcpu_init(struct vcpu *v);
 noreturn void svm_run(struct vcpu *v);
+// The guest got where the processor cannot go on from, as a triple fault does.
+noreturn void svm_shutdown(struct vcpu *v, const char *why);
 
 #endif

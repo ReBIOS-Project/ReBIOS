@@ -21,6 +21,7 @@
 #include <virt/cpuid.h>
 #include <sys/x86.h>
 #include <virt/msr.h>
+#include <virt/nsvm.h>
 #include <virt/nvmx.h>
 #include <virt/svm.h>
 #include <virt/vcpu.h>
@@ -377,6 +378,7 @@ static const struct last_subleaf amd_last_subleaves[] = {
 #define CPUID_PERFMON_EXT 0x23
 #define CPUID_PERFMON_EXT_PEBS ((uint32_t)3 << 4)
 #define CPUID_80000001_ECX_TCE ((uint32_t)1 << 17)
+#define CPUID_80000001_ECX_SVM ((uint32_t)1 << 2)
 #define CPUID_80000001_EDX_APIC ((uint32_t)1 << 9)
 #define CPUID_80000001_EDX_SYSCALL ((uint32_t)1 << 11)
 #define CPUID_80000001_EDX_NX ((uint32_t)1 << 20)
@@ -607,6 +609,9 @@ uint64_t cpuid_efer_allowed(struct vcpu *v) {
     if ((ext.ecx & CPUID_80000001_ECX_TCE) != 0) {
         efer |= EFER_TCE;
     }
+    if ((ext.ecx & CPUID_80000001_ECX_SVM) != 0 && nsvm_svme_allowed(v)) {
+        efer |= EFER_SVME;
+    }
     if (!virt_vmx) {
         if ((cpuid_guest(v, 0x80000008, 0).ebx & CPUID_80000008_EBX_LMSLE_UNSUPPORTED) == 0) {
             efer |= EFER_LMSLE;
@@ -786,6 +791,16 @@ struct cpuid_regs cpuid_guest(struct vcpu *v, uint32_t leaf, uint32_t subleaf) {
             }
             if (!virt_vmx && msr_allowed(MSR_AMD_NODE_ID)) {
                 r.ecx |= cpuid(leaf, 0).ecx & CPUID_80000001_ECX_NODE_ID;
+            }
+            // SVM where the guest gets it.
+            if (nsvm_enabled) {
+                r.ecx |= CPUID_80000001_ECX_SVM;
+            }
+            break;
+        }
+        case 0x8000000a: {
+            if (nsvm_enabled) {
+                r = nsvm_cpuid();
             }
             break;
         }

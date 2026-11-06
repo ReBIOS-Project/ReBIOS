@@ -70,6 +70,7 @@ struct vcpu_mode {
 
 struct cpu;
 struct mmio_step;
+struct nsvm;
 struct nvmx;
 struct vlapic;
 struct vmcb;
@@ -115,6 +116,7 @@ struct vcpu {
     bool nmi_pending;
     struct vlapic *vlapic;
     struct nvmx *nvmx;
+    struct nsvm *nsvm;
     // Whether the guest runs one instruction against emulated memory's values,
     // which mmio.c sets up, and what SVM's stepping changed.
     bool stepping;

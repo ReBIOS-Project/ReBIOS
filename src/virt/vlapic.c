@@ -37,6 +37,7 @@
 #include <virt/insn.h>
 #include <virt/irq.h>
 #include <virt/mmio.h>
+#include <virt/nsvm.h>
 #include <virt/nvmx.h>
 #include <virt/pci_virt.h>
 #include <virt/svm.h>
@@ -812,6 +813,10 @@ void vlapic_extint_moved(void) {
     avic_recheck_soon();
 }
 
+void vlapic_nested_changed(void) {
+    avic_recheck_soon();
+}
+
 // AVIC finds the targets of logical destinations in a table of one vCPU per
 // destination bit, all in the same format (APM 24593 rev. 3.45, 15.29.5.3):
 // built from the software-enabled local APICs' LDRs and DFRs, with whether
@@ -867,7 +872,9 @@ static bool avic_logical_rebuild(void) {
 // to be mapped.
 static bool avic_decide(bool *map) {
     spinlock_acquire(&avic_lock);
-    bool want = avic_logical_rebuild() && !irq_extint_routed();
+    // The guest's guests reach the page behind the local APICs' through the
+    // nested page tables, where AVIC does not run them.
+    bool want = avic_logical_rebuild() && !irq_extint_routed() && !nsvm_any_svm();
     spinlock_release(&avic_lock);
     bool any_xapic = false;
     bool any_x2apic = false;
@@ -1154,8 +1161,8 @@ uint64_t vlapic_page(struct vcpu *v) {
 }
 
 bool vlapic_virtual_delivery(struct vcpu *v) {
-    // VMCS02 delivers none of the guest's interrupts itself.
-    if (nvmx_in_l2(v)) {
+    // VMCS02 and VMCB02 deliver none of the guest's interrupts themselves.
+    if (nvmx_in_l2(v) || nsvm_in_l2(v)) {
         return false;
     }
     return virt_vmx
@@ -1442,13 +1449,18 @@ void vlapic_before_entry(struct vcpu *v) {
         vmx_write(VMCS_TPR_THRESHOLD, held < 0 ? 0 : (uint64_t)held);
         return;
     }
+    // VMCB02's V_TPR is the guest's guest's own.
+    if (nsvm_in_l2(v)) {
+        return;
+    }
     struct vmcb_control *c = &v->vmcb->control;
     c->vintr = (c->vintr & ~(uint64_t)0xf) | (tpr_get(vl) >> 4);
 }
 
 void vlapic_after_exit(struct vcpu *v) {
     struct vlapic *vl = v->vlapic;
-    if (virt_vmx || atomic_load_explicit(&vl->avic, memory_order_relaxed) != AVIC_OFF) {
+    if (virt_vmx || atomic_load_explicit(&vl->avic, memory_order_relaxed) != AVIC_OFF
+     || nsvm_in_l2(v)) {
         return;
     }
     uint32_t vtpr = (uint32_t)(v->vmcb->control.vintr & 0xf);

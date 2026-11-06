@@ -74,6 +74,7 @@
 #define MSR_IA32_PAT 0x277
 #define MSR_IA32_PERF_GLOBAL_CTRL 0x38f
 #define MSR_IA32_RTIT_STATUS 0x571
+#define MSR_IA32_U_CET 0x6a0
 #define MSR_EFER 0xc0000080
 
 // SDM 325462-093 Vol. 4, Tables 2-2 and 2-3.

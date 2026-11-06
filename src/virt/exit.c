@@ -34,6 +34,7 @@
 #include <virt/mmio.h>
 #include <virt/msr.h>
 #include <virt/mtrr.h>
+#include <virt/nsvm.h>
 #include <virt/nvmx.h>
 #include <virt/profile.h>
 #include <virt/svm.h>
@@ -143,7 +144,8 @@ void exit_invalid_opcode(struct vcpu *v) {
 bool exit_msr_read(struct vcpu *v, uint32_t msr, uint64_t *value) {
     bool fault;
     if (vlapic_rdmsr(v, msr, value, &fault) || mtrr_rdmsr(v, msr, value, &fault)
-     || msr_rdmsr(v, msr, value, &fault) || nvmx_rdmsr(v, msr, value, &fault)) {
+     || msr_rdmsr(v, msr, value, &fault) || nvmx_rdmsr(v, msr, value, &fault)
+     || nsvm_rdmsr(v, msr, value, &fault)) {
         return !fault;
     }
     if (!virt_vmx && msr == MSR_EFER) {
@@ -158,8 +160,8 @@ bool exit_msr_read(struct vcpu *v, uint32_t msr, uint64_t *value) {
         *value = 0;
         return true;
     }
-    // SVM, which the guest does not get, as a BIOS that disabled it leaves it
-    // (APM 24593 rev. 3.45, 15.30.1).
+    // SVM, where the guest does not get it, as a BIOS that disabled it leaves
+    // it (APM 24593 rev. 3.45, 15.30.1).
     if (!virt_vmx && msr == MSR_VM_CR) {
         *value = VM_CR_LOCK | VM_CR_SVMDIS;
         return true;
@@ -181,7 +183,8 @@ void exit_rdmsr(struct vcpu *v) {
 bool exit_msr_write(struct vcpu *v, uint32_t msr, uint64_t value) {
     bool fault;
     if (vlapic_wrmsr(v, msr, value, &fault) || mtrr_wrmsr(v, msr, value, &fault)
-     || msr_wrmsr(v, msr, value, &fault) || nvmx_wrmsr(v, msr, value, &fault)) {
+     || msr_wrmsr(v, msr, value, &fault) || nvmx_wrmsr(v, msr, value, &fault)
+     || nsvm_wrmsr(v, msr, value, &fault)) {
         return !fault;
     }
     if (!virt_vmx && msr == MSR_EFER) {
@@ -190,6 +193,7 @@ bool exit_msr_write(struct vcpu *v, uint32_t msr, uint64_t value) {
         }
         uint64_t old = v->vmcb->save.efer;
         v->vmcb->save.efer = (value & ~(uint64_t)EFER_LMA) | (old & EFER_LMA) | EFER_SVME;
+        nsvm_set_svme(v, (value & EFER_SVME) != 0);
         // The processor would have flushed them for the guest's own write.
         svm_flush_guest_tlb(v);
     } else if (!virt_vmx && msr == MSR_IA32_CR_PAT) {
@@ -200,9 +204,9 @@ bool exit_msr_write(struct vcpu *v, uint32_t msr, uint64_t value) {
                 return false;
             }
         }
-        v->vmcb->save.g_pat = value;
+        nsvm_set_pat(v, value);
     } else if (!virt_vmx && (msr == MSR_VM_HSAVE_PA || msr == MSR_VM_CR)) {
-        // The guest has no SVM of its own to configure yet.
+        // SVM, where the guest does not get it, which it cannot configure.
     } else {
         return msr_allowed(msr) && wrmsr_safe(msr, value);
     }
@@ -265,7 +269,7 @@ static void port_access(struct vcpu *v, uint16_t port, size_t size, bool in, uin
     if (io_dispatch(v, port, size, in, value)) {
         return;
     }
-    if (nvmx_in_l2(v)) {
+    if (nvmx_in_l2(v) || nsvm_in_l2(v)) {
         port_native(port, size, in, value);
         return;
     }
