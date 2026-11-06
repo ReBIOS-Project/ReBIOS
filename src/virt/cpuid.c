@@ -285,11 +285,12 @@ static const struct leaf_bits amd_leaves[] = {
     // ProcPowerReporting, CppcPerfPriority.
     { 0x80000007, SUBLEAF_ALL, { 0x00000000, 0x0000800f, 0xffffffff, 0x00011fdf } },
     // EAX physical bits, linear bits; EBX CLZERO, InstRetCntMsr,
-    // RstrFpErrPtrs, RDPRU, BE, WBNOINVD, IBPB, INT_WBINVD, IBRS, STIBP, IBRS
-    // always on, STIBP always on, IBRS preferred, IBRS same mode, LMSLE
-    // unsupported, SSBD, SSBD not required, CPPC, PSFD, BTC_NO, IBPB_RET; ECX
-    // cores, APIC ID size, PerfTsc size; EDX RDPRU registers.
-    { 0x80000008, SUBLEAF_ALL, { 0x0000ffff, 0x7d1ff257, 0x0003f0ff, 0x00ff0000 } },
+    // RstrFpErrPtrs, INVLPGB, RDPRU, BE, WBNOINVD, IBPB, INT_WBINVD, IBRS,
+    // STIBP, IBRS always on, STIBP always on, IBRS preferred, IBRS same mode,
+    // LMSLE unsupported, SSBD, SSBD not required, CPPC, PSFD, BTC_NO,
+    // IBPB_RET; ECX cores, APIC ID size, PerfTsc size; EDX INVLPGB count,
+    // RDPRU registers.
+    { 0x80000008, SUBLEAF_ALL, { 0x0000ffff, 0x7d1ff25f, 0x0003f0ff, 0x00ffffff } },
     // EAX 1 GiB TLB; EBX 1 GiB TLB.
     { 0x80000019, SUBLEAF_ALL, { 0xffffffff, 0xffffffff, 0x00000000, 0x00000000 } },
     // EAX FP128, MOVU, FP256.

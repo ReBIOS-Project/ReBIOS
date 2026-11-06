@@ -51,9 +51,11 @@
 #define SVM_FEATURE_AVIC ((uint32_t)1 << 13)
 #define SVM_FEATURE_X2AVIC ((uint32_t)1 << 18)
 #define SVM_FEATURE_VGIF ((uint32_t)1 << 16)
+#define SVM_FEATURE_TLBICTL ((uint32_t)1 << 24)
 #define SVM_FEATURE_VNMI ((uint32_t)1 << 25)
 
 #define CPUID_80000001_ECX_OSVW ((uint32_t)1 << 9)
+#define CPUID_80000008_EBX_INVLPGB ((uint32_t)1 << 3)
 #define MSR_MCG_CAP 0x179
 #define MSR_MCG_STATUS 0x17a
 #define MCG_STATUS_MCIP ((uint64_t)1 << 2)
@@ -74,6 +76,13 @@ bool svm_x2avic;
 // 15-9), sparing the host's translations.
 static bool flush_by_asid;
 static bool vmcb_clean_bits;
+// The guest's INVLPGB and TLBSYNC, which TlbiCtl has the hypervisor enable
+// (APM 24593 rev. 3.46, Table B-1), and which run without it. TLBSYNC needs no
+// intercept, as INVLPGB's broadcast takes the guest's ASID, the same on every
+// vCPU (APM 24594 rev. 3.39, INVLPGB); INVLPGB itself exits, for its faults.
+static bool tlbictl;
+static bool invlpgb;
+static uint32_t invlpgb_count_max;
 // Nested page faults bring the guest's instruction bytes along (APM 24593 rev.
 // 3.45, 15.8.4).
 static bool decode_assists;
@@ -195,6 +204,10 @@ bool svm_supported(void) {
     svm_nrips = (features & SVM_FEATURE_NRIPS) != 0;
     flush_by_asid = (features & SVM_FEATURE_FLUSH_BY_ASID) != 0;
     vmcb_clean_bits = (features & SVM_FEATURE_VMCB_CLEAN) != 0;
+    tlbictl = (features & SVM_FEATURE_TLBICTL) != 0;
+    struct cpuid_regs sizes = cpuid(0x80000008, 0);
+    invlpgb = (sizes.ebx & CPUID_80000008_EBX_INVLPGB) != 0;
+    invlpgb_count_max = sizes.edx & 0xffff;
     decode_assists = (features & SVM_FEATURE_DECODE_ASSISTS) != 0;
     svm_vnmi = (features & (SVM_FEATURE_VNMI | SVM_FEATURE_VGIF))
             == (SVM_FEATURE_VNMI | SVM_FEATURE_VGIF);
@@ -233,7 +246,11 @@ bool svm_huge_pages(void) {
 }
 
 void svm_cpu_init(void) {
-    wrmsr(MSR_EFER, rdmsr(MSR_EFER) | EFER_SVME);
+    // The INVLPGBs that the hypervisor issues for the guest follow this
+    // processor's TCE, cleared so that they drop every cached upper-level
+    // entry, as those of a guest with its TCE clear do (APM 24593 rev. 3.46,
+    // 3.1.7).
+    wrmsr(MSR_EFER, (rdmsr(MSR_EFER) & ~(uint64_t)EFER_TCE) | EFER_SVME);
     wrmsr(MSR_VM_HSAVE_PA, (uint64_t)(uintptr_t)page_alloc(1));
     // INITs become #SX, which the guest's intercept or the host's handler
     // takes, rather than resetting the processor under the hypervisor.
@@ -270,6 +287,7 @@ void svm_vcpu_init(struct vcpu *v) {
     c->intercept_misc2 = SVM_INTERCEPT_VMRUN | SVM_INTERCEPT_VMMCALL | SVM_INTERCEPT_VMLOAD
                        | SVM_INTERCEPT_VMSAVE | SVM_INTERCEPT_STGI | SVM_INTERCEPT_CLGI
                        | SVM_INTERCEPT_SKINIT;
+    c->intercept_misc3 = invlpgb ? SVM_INTERCEPT_INVLPGB : 0;
     // The legacy BIOS's VMCALL hypercalls raise #UD here, and INITs #SX.
     c->intercept_exceptions = (uint32_t)1 << 6 | (uint32_t)1 << 30;
     if (svm_erratum_383) {
@@ -283,7 +301,7 @@ void svm_vcpu_init(struct vcpu *v) {
     if (eraps) {
         c->rap_control = RAP_ALLOW_LARGER | RAP_CLEAR;
     }
-    c->np_enable = 1;
+    c->np_enable = SVM_NP_ENABLE | (tlbictl ? SVM_NP_INVLPGB : 0);
     c->n_cr3 = gpt_root();
     // The guest's DebugCtl and last branch records, from the save area's
     // power-on zeros, are its own (APM 24593 rev. 3.45, 15.23.1).
@@ -422,6 +440,52 @@ static noreturn void svm_shutdown(struct vcpu *v, const char *why) {
     virt_reset(shown);
 }
 
+// INVLPGB's attributes in rAX: those it compares, and bits 11:5, which fault:
+// nested translations, which the guest is not shown, the IOMMU's, which it
+// cannot enable (EnhancedTlbi), and reserved ones. Of ECX, it defines only the
+// count and, in bit 31, the stride (APM 24594 rev. 3.39, INVLPGB).
+#define INVLPGB_PCID ((uint64_t)1 << 1)
+#define INVLPGB_ASID ((uint64_t)1 << 2)
+#define INVLPGB_FAULTING ((uint64_t)0xfe0)
+#define INVLPGB_ECX ((uint32_t)0x8000ffff)
+
+// The guest's INVLPGB faults as the guest's own EFER and CR4 say rather than
+// as the processor sees them, with the SVME that VMRUN needs. It goes on to
+// the processor with the guest's ASID but no PCID, which the host's CR4 does
+// not enable, so it drops that ASID's translations of every PCID, as INVLPGB
+// may.
+static void exit_invlpgb(struct vcpu *v) {
+    struct vmcb_save *s = &v->vmcb->save;
+    if ((s->cr0 & CR0_PE) == 0 || (s->rflags & RFLAGS_VM) != 0) {
+        vcpu_inject_exception(v, 6, false, 0);
+        return;
+    }
+    // One the hypervisor cannot read or finds changed, as where another
+    // processor just remapped or rewrote it, runs again.
+    struct insn insn;
+    if (!insn_decode(v, &insn) || insn.opcode != (INSN_OPCODE_0F | 0x01) || insn.modrm != 0xfe) {
+        printf("Cannot decode the INVLPGB at %#llx\n", (unsigned long long)s->rip);
+        return;
+    }
+    uint64_t rax = v->gprs.rax;
+    uint32_t ecx = (uint32_t)v->gprs.rcx & INVLPGB_ECX;
+    uint32_t edx = (uint32_t)v->gprs.rdx;
+    bool pse_paging = (s->cr0 & CR0_PG) != 0 && (s->cr4 & (CR4_PAE | CR4_PSE)) == CR4_PSE;
+    // The guest has no SVM of its own, so no ASID either.
+    if (s->cpl != 0 || (rax & INVLPGB_FAULTING) != 0 || edx >> 28 != 0
+     || ((edx >> 16) != 0 && (s->cr4 & CR4_PCIDE) == 0) || (edx & 0xffff) != 0
+     || (ecx & 0xffff) > invlpgb_count_max || pse_paging) {
+        vcpu_inject_exception(v, 13, true, 0);
+        return;
+    }
+    if (insn.address_size < 8) {
+        rax &= insn.address_size == 4 ? 0xffffffff : 0xffff;
+    }
+    rax = (rax & ~INVLPGB_PCID) | INVLPGB_ASID;
+    asm volatile ("invlpgb" :: "a"(rax), "c"(ecx), "d"(v->vmcb->control.guest_asid) : "memory");
+    vcpu_advance(v, insn.length);
+}
+
 static void svm_handle_exit(struct vcpu *v) {
     struct vmcb_control *c = &v->vmcb->control;
     v->last_exit = (uint32_t)c->exitcode;
@@ -504,6 +568,10 @@ static void svm_handle_exit(struct vcpu *v) {
             } else {
                 exit_wrmsr(v);
             }
+            break;
+        }
+        case SVM_EXIT_INVLPGB: {
+            exit_invlpgb(v);
             break;
         }
         case SVM_EXIT_INVD: {
