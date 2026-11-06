@@ -63,6 +63,8 @@
 #define CR4_LAM_SUP ((uint32_t)1 << 28)
 #define CR4_FRED ((uint64_t)1 << 32)
 
+#define XCR0_APX ((uint64_t)1 << 19)
+
 #define CR3_LAM_U57 ((uint64_t)1 << 61)
 #define CR3_LAM_U48 ((uint64_t)1 << 62)
 
@@ -266,6 +268,32 @@ static inline void sti(void) {
 
 static inline void hlt(void) {
     asm volatile ("hlt" ::: "memory");
+}
+
+static inline uint64_t xgetbv(uint32_t index) {
+    uint32_t lo, hi;
+    asm volatile ("xgetbv" : "=a"(lo), "=d"(hi) : "c"(index));
+    return ((uint64_t)hi << 32) | lo;
+}
+
+// The state components of mask that XCR0 enables, saved to and restored from a
+// 64-byte aligned XSAVE area in the standard format.
+static inline void xsave(void *area, uint64_t mask) {
+    asm volatile (
+        "xsave (%0)"
+        :
+        : "r"(area), "a"((uint32_t)mask), "d"((uint32_t)(mask >> 32))
+        : "memory"
+    );
+}
+
+static inline void xrstor(const void *area, uint64_t mask) {
+    asm volatile (
+        "xrstor (%0)"
+        :
+        : "r"(area), "a"((uint32_t)mask), "d"((uint32_t)(mask >> 32))
+        : "memory"
+    );
 }
 
 static inline void wbinvd(void) {

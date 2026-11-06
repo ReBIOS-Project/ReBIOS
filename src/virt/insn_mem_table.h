@@ -26,6 +26,8 @@
 #define INSN_REG_ANY 8
 #define INSN_W_ANY 2
 #define INSN_L_ANY 4
+#define INSN_ND_ANY 2
+#define INSN_NF_ANY 2
 
 #define INSN_MODE_64 0x01
 #define INSN_MODE_OTHER 0x02
@@ -49,7 +51,8 @@
 #define INSN_SIZE_UNKNOWN 9
 
 // Instruction forms with a ModRM memory operand, sorted by space and opcode,
-// the more specific forms of an opcode first.
+// the more specific forms of an opcode first. EVEX map 4's ND and NF bits tell
+// some of its instructions apart (Intel APX 355828-009, 3.1.2.3.1).
 struct insn_mem_form {
     uint8_t space;
     uint8_t opcode;
@@ -57,6 +60,8 @@ struct insn_mem_form {
     uint8_t reg;
     uint8_t w;
     uint8_t l;
+    uint8_t nd;
+    uint8_t nf;
     uint8_t modes;
     // INSN_MEM_*.
     uint8_t access;

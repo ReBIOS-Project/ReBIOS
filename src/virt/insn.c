@@ -188,6 +188,48 @@ static const uint8_t two_byte[256] = {
 #define MAP_0F 1
 #define MAP_0F38 2
 #define MAP_0F3A 3
+#define MAP_EVEX4 4
+
+#define REX_B 0x01
+#define REX_X 0x02
+#define REX_R 0x04
+
+// EVEX map 4's immediates, those of its instructions' map 0 opcodes, and of
+// SHLD and SHRD at 24 and 2C (Intel APX 355828-009, 3.1.5).
+static unsigned int evex4_imm(uint8_t op) {
+    switch (op) {
+        case 0x24:
+        case 0x2c:
+        case 0x6b:
+        case 0x80:
+        case 0x83:
+        case 0xc0:
+        case 0xc1: {
+            return IMM_B;
+        }
+        case 0x69:
+        case 0x81: {
+            return IMM_Z;
+        }
+        default: {
+            return IMM_NONE;
+        }
+    }
+}
+
+// Whether REX2 may prefix an opcode: not those of the rows with no register to
+// extend, JMPABS at A1 aside, nor the prefixes that cannot follow it, as none
+// is an opcode in 64-bit mode (Intel APX 355828-009, 3.1.2.1).
+static bool rex2_allowed(unsigned int map, uint8_t op) {
+    unsigned int row = op >> 4;
+    if (map == MAP_0F) {
+        return row != 3 && row != 8;
+    }
+    if (op == 0x62 || op == 0xc4 || op == 0xc5 || op == 0xd5) {
+        return false;
+    }
+    return (row != 4 && row != 7 && row != 0xa && row != 0xe) || op == 0xa1;
+}
 
 static size_t imm_size(unsigned int kind, const struct insn *insn, bool long_mode) {
     switch (kind) {
@@ -358,6 +400,23 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
             return false;
         }
     }
+    // REX2 is the last prefix, which D5 is in 64-bit mode, where it is no AAD,
+    // and a REX prefix cannot come right before it; the opcode follows it in
+    // the map its M0 bit gives, with no escape (Intel APX 355828-009,
+    // 3.1.2.1).
+    bool rex2 = long_mode && bytes[i] == 0xd5;
+    unsigned int rex2_map = MAP_ONE;
+    if (rex2) {
+        if (rex != 0) {
+            return false;
+        }
+        uint8_t payload = bytes[i + 1];
+        rex = 0x40 | (payload & 0x0f);
+        rex_w = (payload & 0x08) != 0;
+        insn->rex_upper = (payload >> 4) & 0x07;
+        rex2_map = (payload & 0x80) != 0 ? MAP_0F : MAP_ONE;
+        i += 2;
+    }
     if (rex_w) {
         operand = 8;
     } else if (operand_prefix) {
@@ -382,7 +441,10 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
     // ModRM byte could not follow.
     bool vex = long_mode || (bytes[i + 1] & 0xc0) == 0xc0;
     bool vex_like = false;
-    if (op == 0xc5 && vex) {
+    if (rex2) {
+        map = rex2_map;
+        insn->space = INSN_SPACE_LEGACY | map;
+    } else if (op == 0xc5 && vex) {
         // R vvvv L pp, with X and B clear and W 0.
         uint8_t b = bytes[i + 1];
         vex_rex(insn, b | 0x60, false, long_mode);
@@ -402,13 +464,33 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
         i += 3;
         vex_like = true;
     } else if (op == 0x62 && vex) {
-        // R X B R' 0 mmm, W vvvv 1 pp, then z L'L b V' aaa.
-        vex_rex(insn, bytes[i + 1], (bytes[i + 2] >> 7) != 0, long_mode);
-        insn->prefix = bytes[i + 2] & 3;
-        insn->vector_length = (bytes[i + 3] >> 5) & 3;
-        insn->evex_b = ((bytes[i + 3] >> 4) & 1) != 0;
-        insn->evex_aaa = bytes[i + 3] & 7;
-        map = bytes[i + 1] & 0x07;
+        // R X B R' B4 mmm, W vvvv U pp, then z L'L b V' aaa, where in 64-bit
+        // mode B4, and R' and U inverted, are APX's B4, R4, and X4, and map 4
+        // has ND for b and NF for aaa's bit 2, its W and pp giving the operand
+        // size as REX.W and 66 do (Intel APX 355828-009, 3.1.2.3).
+        uint8_t p0 = bytes[i + 1];
+        uint8_t p1 = bytes[i + 2];
+        uint8_t p2 = bytes[i + 3];
+        vex_rex(insn, p0, (p1 >> 7) != 0, long_mode);
+        if (long_mode) {
+            insn->rex_upper = ((p0 & 0x10) == 0 ? REX_R : 0) | ((p1 & 0x04) == 0 ? REX_X : 0)
+                            | ((p0 & 0x08) != 0 ? REX_B : 0);
+        }
+        insn->prefix = p1 & 3;
+        insn->vector_length = (p2 >> 5) & 3;
+        map = p0 & 0x07;
+        if (map == MAP_EVEX4) {
+            insn->nd = (p2 & 0x10) != 0;
+            insn->nf = (p2 & 0x04) != 0;
+            if (insn->w) {
+                insn->operand_size = 8;
+            } else {
+                insn->operand_size = insn->prefix == INSN_PREFIX_66 ? 2 : 4;
+            }
+        } else {
+            insn->evex_b = (p2 & 0x10) != 0;
+            insn->evex_aaa = p2 & 7;
+        }
         insn->space = INSN_SPACE_EVEX | map;
         i += 4;
         vex_like = true;
@@ -443,6 +525,7 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
     }
     op = bytes[i++];
     insn->opcode_byte = op;
+    bool evex4 = (insn->space & 0xf0) == INSN_SPACE_EVEX && map == MAP_EVEX4;
 
     uint8_t entry;
     if (map == MAP_ONE) {
@@ -460,20 +543,31 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
     } else if (map == MAP_0F3A) {
         entry = OP_MODRM | IMM_B;
         insn->opcode = INSN_OPCODE_OTHER;
+    } else if (evex4) {
+        // Each instruction there has a ModRM byte (Intel APX 355828-009,
+        // 3.1.2.3.1).
+        entry = OP_MODRM | evex4_imm(op);
+        insn->opcode = INSN_OPCODE_OTHER;
     } else {
         // 0F 38, and the EVEX maps 5 and 6.
         entry = OP_MODRM;
         insn->opcode = INSN_OPCODE_OTHER;
     }
-    if ((entry & OP_SPECIAL) != 0) {
+    if ((entry & OP_SPECIAL) != 0 || (rex2 && !rex2_allowed(map, op))) {
         return false;
+    }
+    // JMPABS's 64-bit target is no offset of MOV's (Intel APX 355828-009,
+    // 7.1).
+    if (rex2 && map == MAP_ONE && op == 0xa1) {
+        insn->opcode = INSN_OPCODE_OTHER;
     }
 
     insn->vex = vex_like;
     unsigned int imm = entry & OP_IMM_MASK;
     if ((entry & OP_MODRM) != 0) {
-        // TEST in group 3 is the only member with an immediate.
-        if (map == MAP_ONE && (op == 0xf6 || op == 0xf7) && ((bytes[i] >> 3) & 7) < 2) {
+        // TEST in group 3 is the only member with an immediate, as CTEST is in
+        // EVEX map 4's.
+        if ((map == MAP_ONE || evex4) && (op == 0xf6 || op == 0xf7) && ((bytes[i] >> 3) & 7) < 2) {
             imm = op == 0xf6 ? IMM_B : IMM_Z;
         }
         i += decode_modrm(bytes, i, insn);
@@ -486,9 +580,6 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
     insn->length = i;
     return i <= INSN_MAX_LENGTH;
 }
-
-#define REX_B 0x01
-#define REX_X 0x02
 
 static uint64_t address_mask(size_t size) {
     return size == 8 ? UINT64_MAX : ((uint64_t)1 << (size * 8)) - 1;
@@ -519,10 +610,10 @@ static bool mem_linear(struct vcpu *v, const struct insn *insn, int64_t disp, ui
     } else if (insn->address_size == 2) {
         unsigned int mod = insn->modrm >> 6;
         unsigned int rm = insn->modrm & 7;
-        uint64_t bx = insn_gpr(v, 3);
-        uint64_t bp = insn_gpr(v, 5);
-        uint64_t si = insn_gpr(v, 6);
-        uint64_t di = insn_gpr(v, 7);
+        uint64_t bx = vcpu_gpr(v, 3);
+        uint64_t bp = vcpu_gpr(v, 5);
+        uint64_t si = vcpu_gpr(v, 6);
+        uint64_t di = vcpu_gpr(v, 7);
         static const uint8_t base_is_bp = (uint32_t)1 << 2 | (uint32_t)1 << 3 | (uint32_t)1 << 6;
         uint64_t sums[8] = { bx + si, bx + di, bp + si, bp + di, si, di, bp, bx };
         ea = (uint64_t)disp;
@@ -540,9 +631,10 @@ static bool mem_linear(struct vcpu *v, const struct insn *insn, int64_t disp, ui
         unsigned int base = rm;
         if (insn->has_sib) {
             base = insn->sib & 7;
-            uint8_t index = ((insn->sib >> 3) & 7) | ((insn->rex & REX_X) != 0 ? 8 : 0);
+            uint8_t index = ((insn->sib >> 3) & 7) | ((insn->rex & REX_X) != 0 ? 8 : 0)
+                          | ((insn->rex_upper & REX_X) != 0 ? 16 : 0);
             if (index != 4) {
-                ea += insn_gpr(v, index) << (insn->sib >> 6);
+                ea += vcpu_gpr(v, index) << (insn->sib >> 6);
             }
         }
         if (mod == 0 && base == 5) {
@@ -551,7 +643,9 @@ static bool mem_linear(struct vcpu *v, const struct insn *insn, int64_t disp, ui
                 ea += vcpu_rip(v) + insn->length;
             }
         } else {
-            ea += insn_gpr(v, base | ((insn->rex & REX_B) != 0 ? 8 : 0));
+            unsigned int reg = base | ((insn->rex & REX_B) != 0 ? 8 : 0)
+                             | ((insn->rex_upper & REX_B) != 0 ? 16 : 0);
+            ea += vcpu_gpr(v, reg);
             if (base == 4 || base == 5) {
                 segment = SEG_SS;
             }
@@ -594,7 +688,9 @@ static const struct insn_mem_form *mem_form(const struct insn *insn) {
         }
         if ((f->prefix == INSN_PREFIX_ANY || f->prefix == insn->prefix)
          && (f->reg == INSN_REG_ANY || f->reg == reg) && (f->w == INSN_W_ANY || f->w == insn->w)
-         && (f->l == INSN_L_ANY || f->l == insn->vector_length) && (f->modes & mode) != 0) {
+         && (f->l == INSN_L_ANY || f->l == insn->vector_length)
+         && (f->nd == INSN_ND_ANY || f->nd == insn->nd)
+         && (f->nf == INSN_NF_ANY || f->nf == insn->nf) && (f->modes & mode) != 0) {
             return f;
         }
     }
@@ -753,19 +849,4 @@ bool insn_string_linear(
     }
     int segment = insn->segment >= 0 ? insn->segment : SEG_DS;
     return linearise(v, insn, segment, v->gprs.rsi & mask, size, write, linear);
-}
-
-uint64_t insn_gpr(struct vcpu *v, unsigned int reg) {
-    if (reg == 4) {
-        return vcpu_rsp(v);
-    }
-    return ((uint64_t *)&v->gprs)[reg];
-}
-
-void insn_set_gpr(struct vcpu *v, unsigned int reg, uint64_t value) {
-    if (reg == 4) {
-        vcpu_set_rsp(v, value);
-        return;
-    }
-    ((uint64_t *)&v->gprs)[reg] = value;
 }

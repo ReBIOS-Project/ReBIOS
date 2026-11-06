@@ -16,17 +16,18 @@
 # You should have received a copy of the GNU General Public License along
 # with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-# Usage: insn-mem-table.py <SDM text> <APM text> <output.c> [report]
+# Usage: insn-mem-table.py <SDM text> <APM text> <APX text> <output.c> [report]
 #
 # Generates src/virt/insn_mem_table.c: what every instruction form with a ModRM
 # memory operand does with that operand, whether it reads it, writes it, or
 # both, and how many bytes of it. The forms and their operands come from the
 # instruction pages of the Intel SDM 325462-093, Vols. 2 and 3C (opcode tables
-# and operand encoding tables), and, for the instructions only AMD processors
-# have, from the encoding tables of the AMD APM 40332 rev. 4.10, Vols. 3-5. Both
-# texts are `pdftotext -layout` output of the manuals. With report, it also
-# lists what it could not parse, the sizes it corrected, where the two manuals'
-# sizes differ, and the AMD-only forms.
+# and operand encoding tables), the EVEX forms of the instructions APX promotes
+# from the instruction pages of the Intel APX 355828-009, chapters 6 to 9, and,
+# for the instructions only AMD processors have, from the encoding tables of the
+# AMD APM 40332 rev. 4.10, Vols. 3-5. The texts are `pdftotext -layout` output
+# of the manuals. With report, it also lists what it could not parse, the sizes
+# it corrected, where the two manuals' sizes differ, and the AMD-only forms.
 
 import os
 import re
@@ -188,7 +189,7 @@ def starts_opcode(line):
 
 def new_key():
     return {'space': 'legacy', 'map': 0, 'opcode': None, 'prefix': None, 'reg': None, 'w': None,
-            'l': None, 'reg_only': False}
+            'l': None, 'nd': None, 'nf': None, 'reg_only': False}
 
 
 def parse_key(tokens):
@@ -770,6 +771,133 @@ def apm_key(tokens):
     return key
 
 
+# Intel APX 355828-009's chapters 6 to 9: the EVEX forms of the instructions it
+# promotes, each an encoding ("EVEX.LLZ.66.MAP4.SCALABLE 01 /r"), its Op/En and
+# modes on the next line, and the instruction on the one after, whose "{ND=0}"
+# or "{ND=1}" and "{NF=0}" or "{NF=1}" are the EVEX.ND and EVEX.NF it takes in
+# map 4 (3.1.2.3.1), where those bits tell instructions apart. Only W0 and W1
+# tell forms apart: a SCALABLE W is the operand size's.
+APX_PAGE = re.compile(r'^\s*[6-9]\.\d+\s+([A-Z][A-Z0-9\[\],]*)\s*$')
+APX_ENCODING = re.compile(r'^\s*EVEX\.(LLZ|128)\.(NP|66|F2|F3)\.(0F|0F38|0F3A|MAP4|MAP7)\.([A-Z0-9/]*)'
+                          r'\s+([0-9A-F]{2})\s+(\S+)')
+APX_MAPS = {'0F': 1, '0F38': 2, '0F3A': 3, 'MAP4': 4, 'MAP7': 7}
+APX_PREFIXES = {'NP': 'none', '66': '66', 'F2': 'F2', 'F3': 'F3'}
+# The accesses the encoding tables give, "c" a conditional write: SHLD and
+# SHRD's, which the SDM 325462-093 tables take as always made, and CFCMOVcc's
+# store, which accesses memory only where it writes (Intel APX 355828-009, 8.2).
+APX_ACCESS = {'r': 'r', 'w': 'w', 'rw': 'rw', 'rcw': 'rw', 'cw': 'w'}
+
+
+def apx_encodings(body):
+    # Op/En -> its four operands, a page's table having no tuple types or a
+    # column of them.
+    table = {}
+    for n, line in enumerate(body):
+        if not re.match(r'^\s*Op/En\s+Tuple\s+Operand 1', line):
+            continue
+        for row in body[n + 1:]:
+            if not row.strip():
+                break
+            cells = re.split(r'\s{2,}', row.strip())
+            if len(cells) in (5, 6):
+                table[cells[0]] = cells[len(cells) - 4:]
+    return table
+
+
+def apx_mem_spec(operand, w):
+    # The memory part of an operand: ('n', bytes), ('operand', 0), or
+    # ('unknown',). "mv" is as large as the operand size, "my" 32 bits but with
+    # W1 (Intel APX 355828-009, 3.1.5).
+    for p in operand.split('/'):
+        m = re.match(r'^m(\d+)$', p)
+        if m:
+            return ('n', int(m.group(1)) // 8)
+        if p == 'mv':
+            return ('operand', 0)
+        if p == 'my':
+            return ('n', 8 if w == 1 else 4)
+        if p == 'sibmem':
+            return ('unknown',)
+    return None
+
+
+def apx_forms(path, problems):
+    lines = open(path, encoding='utf-8', errors='replace').read().split('\n')
+    start = next(i for i, l in enumerate(lines) if re.match(r'^6\.1\s+AADD\s*$', l))
+    pages = [i for i in range(start, len(lines)) if APX_PAGE.match(lines[i])] + [len(lines)]
+    forms = []
+    for a, b in zip(pages, pages[1:]):
+        body = lines[a:b]
+        title = APX_PAGE.match(body[0]).group(1)
+        encodings = apx_encodings(body)
+        for n, line in enumerate(body):
+            m = APX_ENCODING.match(line)
+            if not m:
+                continue
+            following = [l.strip() for l in body[n + 1:n + 4] if l.strip()]
+            op_en = following[0].split()[0]
+            syntax = ' '.join(following[1].split())
+            where = (title, line.strip(), syntax)
+            modrm = m.group(6)
+            if modrm.startswith('11:'):
+                continue
+            key = new_key()
+            key.update({'space': 'evex', 'map': APX_MAPS[m.group(3)], 'opcode': int(m.group(5), 16),
+                        'prefix': APX_PREFIXES[m.group(2)], 'l': 0,
+                        'w': {'W0': 0, 'W1': 1}.get(m.group(4))})
+            if re.match(r'^/[0-7]$', modrm):
+                key['reg'] = int(modrm[1])
+            elif re.match(r'^!\(11\):[01]{3}:', modrm):
+                key['reg'] = int(modrm[6:9], 2)
+            elif modrm != '/r' and not modrm.startswith('!(11):rrr:'):
+                problems.append(where + ('ModRM not understood',))
+                continue
+            for field in ('ND', 'NF'):
+                value = re.search(r'\{%s=([01])\}' % field, syntax)
+                if value and key['map'] == 4:
+                    key[field.lower()] = int(value.group(1))
+            mnemonic = syntax.split()[0]
+            ops = [o.strip() for o in re.sub(r'\{[^}]*\}', '', syntax).split(None, 1)[1].split(',')]
+            ws = [0, 1] if any(o.split('/')[-1] == 'my' for o in ops) and key['w'] is None else [key['w']]
+            for w in ws:
+                memory = [k for k, o in enumerate(ops) if apx_mem_spec(o, w) is not None]
+                if not memory:
+                    break
+                encoded = encodings.get(op_en)
+                if encoded is None or len(memory) != 1 or memory[0] >= len(encoded) \
+                        or not encoded[memory[0]].startswith('MODRM.R/M('):
+                    problems.append(where + ('no ModRM:r/m operand with memory', encoded))
+                    break
+                access = APX_ACCESS.get(encoded[memory[0]][len('MODRM.R/M('):-1])
+                if access is None:
+                    problems.append(where + ('no access in ' + encoded[memory[0]],))
+                    break
+                f = dict(key, w=w)
+                f.update({'mnemonic': mnemonic, 'syntax': mnemonic + ' ' + ', '.join(ops),
+                          'access': access, 'spec': apx_mem_spec(ops[memory[0]], w), 'bcst': 0,
+                          'masked': False, 'scale': 1, 'modes': frozenset({'64'}), 'source': 'apx'})
+                forms.append(f)
+    return forms
+
+
+def apx_entries(forms, problems):
+    # One entry for the forms of an opcode alike but for their syntax, as
+    # CCMPscc's, whose conditions are not in their opcodes.
+    entries = {}
+    for f in forms:
+        kind = {'n': 'n', 'operand': 'operand', 'unknown': 'unknown'}[f['spec'][0]]
+        size = f['spec'][1] if kind == 'n' else 0
+        k = (f['map'], f['opcode'], f['prefix'], f['reg'], f['w'], f['nd'], f['nf'])
+        e = {'space': 'evex', 'map': f['map'], 'opcode': f['opcode'], 'prefix': f['prefix'],
+             'reg': f['reg'], 'w': f['w'], 'l': 0, 'nd': f['nd'], 'nf': f['nf'], 'modes': f['modes'],
+             'access': f['access'], 'masked': False, 'kind': kind, 'size': size, 'bcst': 0,
+             'scale': 1, 'mnemonic': f['mnemonic'], 'syntax': f['syntax'], 'source': 'apx'}
+        old = entries.setdefault(k, e)
+        if (old['access'], old['kind'], old['size']) != (e['access'], e['kind'], e['size']):
+            problems.append(('APX forms differ', f['syntax'], old['syntax']))
+    return list(entries.values())
+
+
 SPACES = {'legacy': 0x00, 'vex': 0x10, 'evex': 0x20, 'xop': 0x30}
 PREFIXES = {'none': 'NONE', '66': '66', 'F3': 'F3', 'F2': 'F2', None: 'ANY'}
 
@@ -865,6 +993,7 @@ def merge(forms, problems):
                               and (l is None or r['l'] == l)), first)
                 entries.append({
                     'space': k[0], 'map': k[1], 'opcode': k[2], 'prefix': k[3], 'reg': k[4], 'w': w, 'l': l,
+                    'nd': None, 'nf': None,
                     'modes': {'all': frozenset({'64', '32'}), '64': frozenset({'64'}),
                               '32': frozenset({'32'})}[mode],
                     'access': access, 'masked': k[5], 'kind': rule[0], 'size': rule[1], 'bcst': bcst,
@@ -909,7 +1038,8 @@ def vector_rules(rows, problems):
 
 
 def specificity(e):
-    return (e['prefix'] is None, e['reg'] is None, e['w'] is None, e['l'] is None, len(e['modes']))
+    return (e['prefix'] is None, e['reg'] is None, e['w'] is None, e['l'] is None, e['nd'] is None,
+            e['nf'] is None, len(e['modes']))
 
 
 def emit(entries, path):
@@ -917,7 +1047,8 @@ def emit(entries, path):
     out = []
     out.extend(NOTICE + [''])
     out.append('// Generated by tools/insn-mem-table.py from the Intel SDM 325462-093, Vols. 2')
-    out.append('// and 3C, and the AMD APM 40332 rev. 4.10, Vols. 3-5. Do not edit.')
+    out.append('// and 3C, the Intel APX 355828-009, chapters 6 to 9, and the AMD APM 40332')
+    out.append('// rev. 4.10, Vols. 3-5. Do not edit.')
     out.append('')
     out.append('#include <stddef.h>')
     out.append('#include <stdint.h>')
@@ -932,6 +1063,8 @@ def emit(entries, path):
     out.append('#define R_ANY INSN_REG_ANY')
     out.append('#define W_ANY INSN_W_ANY')
     out.append('#define L_ANY INSN_L_ANY')
+    out.append('#define ND_ANY INSN_ND_ANY')
+    out.append('#define NF_ANY INSN_NF_ANY')
     out.append('#define M_64 INSN_MODE_64')
     out.append('#define M_OTHER INSN_MODE_OTHER')
     out.append('#define M_ALL (INSN_MODE_64 | INSN_MODE_OTHER)')
@@ -957,10 +1090,11 @@ def emit(entries, path):
         if e['masked'] and access in ('R', 'W'):
             access += 'M'
         modes = {frozenset({'64', '32'}): 'M_ALL', frozenset({'64'}): 'M_64', frozenset({'32'}): 'M_OTHER'}
-        out.append('    { %s | %d, 0x%02x, P_%s, %s, %s, %s, %s, %s, %s, %d, %d, %d }, // %s' % (
+        out.append('    { %s | %d, 0x%02x, P_%s, %s, %s, %s, %s, %s, %s, %s, %s, %d, %d, %d }, // %s' % (
             e['space'].upper(), e['map'], e['opcode'], PREFIXES[e['prefix']],
             'R_ANY' if e['reg'] is None else str(e['reg']), 'W_ANY' if e['w'] is None else str(e['w']),
-            'L_ANY' if e['l'] is None else str(e['l']), modes[e['modes']], access, kind,
+            'L_ANY' if e['l'] is None else str(e['l']), 'ND_ANY' if e['nd'] is None else str(e['nd']),
+            'NF_ANY' if e['nf'] is None else str(e['nf']), modes[e['modes']], access, kind,
             size if kind in ('S_FIXED', 'S_VECTOR') else 0, e['bcst'], e['scale'], e['syntax']))
     out.append('};')
     out.append('')
@@ -976,10 +1110,18 @@ def main():
     # where both have a form, SDM 325462-093's operand encoding tables say more.
     extra = [g for g in apm if amd_only(g) and not any(covers(f, g) for f in sdm)]
     entries = merge(sdm + extra, problems)
-    emit(entries, sys.argv[3])
-    print('SDM forms: %d, AMD-only forms: %d, entries: %d, problems: %d'
-          % (len(sdm), len(extra), len(entries), len(problems)))
-    if len(sys.argv) > 4:
+    # Intel APX 355828-009 promotes into the EVEX space only what had no EVEX
+    # form there.
+    apx = apx_forms(sys.argv[3], problems)
+    promoted = apx_entries(apx, problems)
+    for e in promoted:
+        if any(covers(e, f) for f in entries):
+            problems.append(('APX form over another', e['syntax']))
+    entries += promoted
+    emit(entries, sys.argv[4])
+    print('SDM forms: %d, AMD-only forms: %d, APX forms: %d, entries: %d, problems: %d'
+          % (len(sdm), len(extra), len(apx), len(entries), len(problems)))
+    if len(sys.argv) > 5:
         for p in problems:
             print('PROBLEM', p)
         for c in CORRECTED:

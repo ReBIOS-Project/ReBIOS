@@ -221,6 +221,10 @@ uint64_t vcpu_rip(struct vcpu *v);
 void vcpu_set_rip(struct vcpu *v, uintptr_t rip);
 uint64_t vcpu_rsp(struct vcpu *v);
 void vcpu_set_rsp(struct vcpu *v, uintptr_t rsp);
+// The general register of the vCPU on this processor that an encoding numbers,
+// APX's R16 to R31 included.
+uint64_t vcpu_gpr(struct vcpu *v, unsigned int reg);
+void vcpu_set_gpr(struct vcpu *v, unsigned int reg, uint64_t value);
 uint64_t vcpu_rflags(struct vcpu *v);
 void vcpu_set_rflags(struct vcpu *v, uint64_t rflags);
 uint64_t vcpu_cr0(struct vcpu *v);

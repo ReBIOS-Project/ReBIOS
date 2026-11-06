@@ -54,7 +54,8 @@ static unsigned int group(const struct insn *insn) {
 }
 
 static unsigned int modrm_reg(const struct insn *insn) {
-    return group(insn) | ((insn->rex & REX_R) != 0 ? 8 : 0);
+    return group(insn) | ((insn->rex & REX_R) != 0 ? 8 : 0)
+         | ((insn->rex_upper & REX_R) != 0 ? 16 : 0);
 }
 
 // Without a REX prefix, byte registers 4 to 7 are AH, CH, DH, and BH.
@@ -64,21 +65,21 @@ static bool high_byte(const struct insn *insn, unsigned int reg, size_t size) {
 
 static uint64_t reg_get(struct ctx *c, unsigned int reg, size_t size) {
     if (high_byte(c->insn, reg, size)) {
-        return (insn_gpr(c->v, reg - 4) >> 8) & 0xff;
+        return (vcpu_gpr(c->v, reg - 4) >> 8) & 0xff;
     }
-    return insn_gpr(c->v, reg) & size_mask(size);
+    return vcpu_gpr(c->v, reg) & size_mask(size);
 }
 
 static void reg_set(struct ctx *c, unsigned int reg, size_t size, uint64_t value) {
     if (high_byte(c->insn, reg, size)) {
-        uint64_t old = insn_gpr(c->v, reg - 4);
-        insn_set_gpr(c->v, reg - 4, (old & ~(uint64_t)0xff00) | (value & 0xff) << 8);
+        uint64_t old = vcpu_gpr(c->v, reg - 4);
+        vcpu_set_gpr(c->v, reg - 4, (old & ~(uint64_t)0xff00) | (value & 0xff) << 8);
     } else if (size == 4) {
         // 32-bit results are zero-extended.
-        insn_set_gpr(c->v, reg, value & 0xffffffff);
+        vcpu_set_gpr(c->v, reg, value & 0xffffffff);
     } else {
         uint64_t mask = size_mask(size);
-        insn_set_gpr(c->v, reg, (insn_gpr(c->v, reg) & ~mask) | (value & mask));
+        vcpu_set_gpr(c->v, reg, (vcpu_gpr(c->v, reg) & ~mask) | (value & mask));
     }
 }
 

@@ -61,8 +61,11 @@ struct insn {
     bool lock;
     // The segment register an override prefix names, or -1.
     int segment;
-    // The REX prefix, or 0.
+    // The REX prefix, or 0: for VEX, EVEX, and REX2 too, from their R, X, B,
+    // and W bits. APX's fifth bits of the registers, R4, X4, and B4, are where
+    // REX has R, X, and B in rex_upper (Intel APX 355828-009, 3.1.2).
     uint8_t rex;
+    uint8_t rex_upper;
     // Whether it is VEX, EVEX, or XOP encoded.
     bool vex;
     bool has_modrm;
@@ -82,9 +85,13 @@ struct insn {
     uint8_t prefix;
     bool w;
     uint8_t vector_length;
-    // EVEX's broadcast bit and opmask register.
+    // EVEX's broadcast bit and opmask register, which EVEX map 4 has none of,
+    // and that map's ND and NF bits in their place (Intel APX 355828-009,
+    // 3.1.2.3.1).
     bool evex_b;
     uint8_t evex_aaa;
+    bool nd;
+    bool nf;
 };
 
 struct insn_mem {
@@ -109,10 +116,10 @@ bool insn_decode(struct vcpu *v, struct insn *insn);
 // are not handled.
 bool insn_mem_linear(struct vcpu *v, const struct insn *insn, uint64_t *linear);
 // Where an instruction's ModRM memory operand is, and which of its bytes the
-// instruction reads and writes, as SDM 325462-093 and APM 40332 rev. 4.10
-// describe the instruction: none where it only uses the operand's address, as
-// CLFLUSH. Returns false where the instruction has no such operand, or they do
-// not say.
+// instruction reads and writes, as SDM 325462-093, Intel APX 355828-009, and
+// APM 40332 rev. 4.10 describe the instruction: none where it only uses the
+// operand's address, as CLFLUSH. Returns false where the instruction has no
+// such operand, or they do not say.
 bool insn_mem_operand(struct vcpu *v, const struct insn *insn, struct insn_mem *mem);
 // A string instruction's linear address for size bytes: its destination at
 // ES:rDI, or its source at DS:rSI or the segment an override names. False,
@@ -121,9 +128,5 @@ bool insn_string_linear(
     struct vcpu *v, const struct insn *insn, bool destination, size_t size, bool write,
     uint64_t *linear
 );
-
-// The guest's general register, as the encoding numbers them.
-uint64_t insn_gpr(struct vcpu *v, unsigned int reg);
-void insn_set_gpr(struct vcpu *v, unsigned int reg, uint64_t value);
 
 #endif

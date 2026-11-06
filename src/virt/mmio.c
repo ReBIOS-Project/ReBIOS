@@ -287,9 +287,9 @@ static const struct emulate_mem guest_mem = {
 };
 
 // The pages a single-stepped instruction runs against, and of them the bytes
-// SDM 325462-093 and APM 40332 rev. 4.10 say it reads or writes: those are
-// what their regions read as, and come back as writes; other bytes it changes
-// come back too.
+// SDM 325462-093, Intel APX 355828-009, and APM 40332 rev. 4.10 say it reads
+// or writes: those are what their regions read as, and come back as writes;
+// other bytes it changes come back too.
 #define MAX_STEP_PAGES 4
 // Masked stores are vector stores.
 #define MAX_MASKED 64

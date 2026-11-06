@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdalign.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -63,6 +64,13 @@
 // BD, and BS (SDM 325462-093 Vol. 3A, 8.3.2.1).
 #define DR6_FRED_DATA ((uint64_t)0x600f)
 #define DR7_GD ((uint32_t)1 << 13)
+
+// XSAVE's standard format: its header, and APX's state component, R16 to R31
+// (Intel APX 355828-009, 3.1.4.3.2).
+#define XSAVE_HEADER 512
+#define XSAVE_HEADER_SIZE 64
+#define XSAVE_APX_OFFSET 960
+#define XSAVE_APX_SIZE 128
 
 #define RESET_HOLD_SECONDS 30
 
@@ -631,6 +639,58 @@ void vcpu_set_rsp(struct vcpu *v, uintptr_t rsp) {
     } else {
         v->vmcb->save.rsp = rsp;
     }
+}
+
+// The guest's R16 to R31 stay in the processor while the hypervisor, which
+// never uses them, runs, and XSAVE saves them through the guest's XCR0 with no
+// APX instruction (Intel APX 355828-009, 3.1.4.1.2 and 3.1.4.3.3). False where
+// the guest has not enabled them, as nothing can name them then.
+static bool egprs_save(uint8_t *area) {
+    if ((cpuid_xcr0_allowed() & XCR0_APX) == 0 || (xgetbv(0) & XCR0_APX) == 0) {
+        return false;
+    }
+    memset(area + XSAVE_HEADER, 0, XSAVE_HEADER_SIZE);
+    xsave(area, XCR0_APX);
+    uint64_t state;
+    memcpy(&state, area + XSAVE_HEADER, sizeof(uint64_t));
+    if ((state & XCR0_APX) == 0) {
+        memset(area + XSAVE_APX_OFFSET, 0, XSAVE_APX_SIZE);
+    }
+    return true;
+}
+
+uint64_t vcpu_gpr(struct vcpu *v, unsigned int reg) {
+    if (reg == 4) {
+        return vcpu_rsp(v);
+    }
+    if (reg < 16) {
+        return ((const uint64_t *)&v->gprs)[reg];
+    }
+    alignas(64) uint8_t area[XSAVE_APX_OFFSET + XSAVE_APX_SIZE];
+    uint64_t value = 0;
+    if (egprs_save(area)) {
+        memcpy(&value, area + XSAVE_APX_OFFSET + (reg - 16) * 8, sizeof(uint64_t));
+    }
+    return value;
+}
+
+void vcpu_set_gpr(struct vcpu *v, unsigned int reg, uint64_t value) {
+    if (reg == 4) {
+        vcpu_set_rsp(v, value);
+        return;
+    }
+    if (reg < 16) {
+        ((uint64_t *)&v->gprs)[reg] = value;
+        return;
+    }
+    alignas(64) uint8_t area[XSAVE_APX_OFFSET + XSAVE_APX_SIZE];
+    if (!egprs_save(area)) {
+        return;
+    }
+    memcpy(area + XSAVE_APX_OFFSET + (reg - 16) * 8, &value, sizeof(uint64_t));
+    uint64_t state = XCR0_APX;
+    memcpy(area + XSAVE_HEADER, &state, sizeof(uint64_t));
+    xrstor(area, XCR0_APX);
 }
 
 uint64_t vcpu_rflags(struct vcpu *v) {
