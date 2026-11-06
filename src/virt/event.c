@@ -40,7 +40,13 @@
 #define EVENT_TYPE_NMI ((uint32_t)2 << 8)
 #define EVENT_TYPE_EXCEPTION ((uint32_t)3 << 8)
 #define EVENT_TYPE_SOFTWARE ((uint32_t)4 << 8)
+// FRED's INT1 and SYSCALL in SVM's events (AMD 69191 rev. 1.10).
+#define EVENT_TYPE_INT1 ((uint32_t)5 << 8)
+#define EVENT_TYPE_SYSCALL ((uint32_t)7 << 8)
 #define EVENT_ERROR_VALID ((uint32_t)1 << 11)
+// An exception FRED event delivery met (SDM 325462-093 Vol. 3C, 30.2.4; AMD
+// 69191 rev. 1.10).
+#define EVENT_NESTED ((uint32_t)1 << 13)
 #define EVENT_VALID ((uint32_t)1 << 31)
 
 #define VECTOR_NMI 2
@@ -55,18 +61,19 @@
 void event_exit(struct vcpu *v) {
     uint32_t info;
     uint32_t error = 0;
+    uint64_t data = 0;
     if (virt_vmx) {
         info = (uint32_t)vmx_read(VMCS_IDT_VECTORING_INFO);
         if ((info & INTR_INFO_VALID) == 0) {
             return;
         }
-        // Software interrupts and exceptions leave RIP at their instruction,
-        // which raises them again; those the guest injects into its guest have
-        // none, so the guest's guest's go in again with their length, as Linux
-        // 7.3's KVM has it.
+        // Software interrupts and exceptions, and FRED's SYSCALL and SYSENTER,
+        // leave RIP at their instruction, which raises them again; those the
+        // guest injects into its guest have none, so the guest's guest's go in
+        // again with their length, as Linux 7.3's KVM has it.
         unsigned int type = info & EVENT_TYPE_MASK;
         if (type == INTR_TYPE_SW_INTR || type == INTR_TYPE_PRIV_SW_EXCEPTION
-         || type == INTR_TYPE_SW_EXCEPTION) {
+         || type == INTR_TYPE_SW_EXCEPTION || type == INTR_TYPE_OTHER_EVENT) {
             if (!nvmx_in_l2(v)) {
                 return;
             }
@@ -74,6 +81,9 @@ void event_exit(struct vcpu *v) {
         }
         if ((info & INTR_INFO_ERROR_CODE) != 0) {
             error = (uint32_t)vmx_read(VMCS_IDT_VECTORING_ERROR);
+        }
+        if (vcpu_fred()) {
+            data = vmx_read(VMCS_ORIGINAL_EVENT_DATA);
         }
     } else {
         uint64_t exitintinfo = v->vmcb->control.exitintinfo;
@@ -83,14 +93,19 @@ void event_exit(struct vcpu *v) {
         info = (uint32_t)exitintinfo;
         unsigned int vector = info & EVENT_VECTOR_MASK;
         unsigned int type = info & EVENT_TYPE_MASK;
-        if (type == EVENT_TYPE_SOFTWARE
+        if (type == EVENT_TYPE_SOFTWARE || type == EVENT_TYPE_INT1 || type == EVENT_TYPE_SYSCALL
          || (type == EVENT_TYPE_EXCEPTION && (vector == VECTOR_BP || vector == VECTOR_OF))) {
             return;
         }
         error = (uint32_t)(exitintinfo >> 32);
+        if (vcpu_fred()) {
+            data = v->vmcb->control.exitintdata;
+        }
     }
-    v->redeliver = info & (EVENT_VALID | EVENT_ERROR_VALID | EVENT_TYPE_MASK | EVENT_VECTOR_MASK);
+    v->redeliver = info & (EVENT_VALID | EVENT_ERROR_VALID | EVENT_NESTED | EVENT_TYPE_MASK
+                         | EVENT_VECTOR_MASK);
     v->redeliver_error = error;
+    v->redeliver_data = data;
 }
 
 void event_nmi(struct vcpu *v) {
@@ -106,6 +121,7 @@ void event_cancel(struct vcpu *v) {
     if ((info & INTR_INFO_ERROR_CODE) != 0) {
         v->redeliver_error = (uint32_t)vmx_read(VMCS_ENTRY_EXCEPTION_ERROR);
     }
+    v->redeliver_data = vcpu_fred() ? vmx_read(VMCS_INJECTED_EVENT_DATA) : 0;
     vmx_write(VMCS_ENTRY_INTR_INFO, 0);
 }
 
@@ -151,7 +167,8 @@ bool event_deliver_real_mode(struct vcpu *v) {
     return true;
 }
 
-static void inject(struct vcpu *v, uint32_t info, uint32_t error) {
+static void inject(struct vcpu *v, uint32_t info, uint32_t error, uint64_t data) {
+    vcpu_set_event_data(v, data);
     if (virt_vmx) {
         if ((info & EVENT_ERROR_VALID) != 0) {
             vmx_write(VMCS_ENTRY_EXCEPTION_ERROR, error);
@@ -200,7 +217,7 @@ static bool deliver_nmi(struct vcpu *v) {
     if (virt_vmx) {
         set_proc_control(PROC_NMI_WINDOW_EXITING, false);
     }
-    inject(v, EVENT_VALID | EVENT_TYPE_NMI | VECTOR_NMI, 0);
+    inject(v, EVENT_VALID | EVENT_TYPE_NMI | VECTOR_NMI, 0, 0);
     v->nmi_pending = false;
     return true;
 }
@@ -355,7 +372,7 @@ static void deliver_interrupt(struct vcpu *v) {
     } else {
         vlapic_take(v, (uint8_t)vector);
     }
-    inject(v, EVENT_VALID | EVENT_TYPE_EXTERNAL | (uint32_t)vector, 0);
+    inject(v, EVENT_VALID | EVENT_TYPE_EXTERNAL | (uint32_t)vector, 0, 0);
     interrupt_window(v, window_needed(v) ? WINDOW_ANY : WINDOW_OFF);
 }
 
@@ -392,11 +409,11 @@ static void entry(struct vcpu *v, bool nmis, bool interrupts) {
         return;
     }
     if ((v->redeliver & EVENT_VALID) != 0) {
-        inject(v, v->redeliver, v->redeliver_error);
+        inject(v, v->redeliver, v->redeliver_error, v->redeliver_data);
         unsigned int type = v->redeliver & EVENT_TYPE_MASK;
         if (virt_vmx
          && (type == INTR_TYPE_SW_INTR || type == INTR_TYPE_PRIV_SW_EXCEPTION
-          || type == INTR_TYPE_SW_EXCEPTION)) {
+          || type == INTR_TYPE_SW_EXCEPTION || type == INTR_TYPE_OTHER_EVENT)) {
             vmx_write(VMCS_ENTRY_INSTR_LEN, v->redeliver_length);
         }
         v->redeliver = 0;

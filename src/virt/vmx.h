@@ -69,7 +69,9 @@
 #define VMCS_TSC_MULTIPLIER 0x2032
 #define VMCS_TERTIARY_CONTROLS 0x2034
 #define VMCS_PID_POINTER_TABLE 0x2042
+#define VMCS_INJECTED_EVENT_DATA 0x2052
 #define VMCS_GUEST_PHYS_ADDR 0x2400
+#define VMCS_ORIGINAL_EVENT_DATA 0x2404
 #define VMCS_LINK_POINTER 0x2800
 #define VMCS_GUEST_DEBUGCTL 0x2802
 #define VMCS_GUEST_PAT 0x2804
@@ -359,12 +361,14 @@
 // Event injection and exit interruption information fields.
 #define INTR_INFO_VALID ((uint32_t)1 << 31)
 #define INTR_INFO_ERROR_CODE ((uint32_t)1 << 11)
+#define INTR_INFO_NESTED_EXCEPTION ((uint32_t)1 << 13)
 #define INTR_TYPE_EXT_INTR ((uint32_t)0 << 8)
 #define INTR_TYPE_NMI ((uint32_t)2 << 8)
 #define INTR_TYPE_HW_EXCEPTION ((uint32_t)3 << 8)
 #define INTR_TYPE_SW_INTR ((uint32_t)4 << 8)
 #define INTR_TYPE_PRIV_SW_EXCEPTION ((uint32_t)5 << 8)
 #define INTR_TYPE_SW_EXCEPTION ((uint32_t)6 << 8)
+#define INTR_TYPE_OTHER_EVENT ((uint32_t)7 << 8)
 
 // Guest interruptibility state.
 #define INTERRUPTIBILITY_STI ((uint32_t)1 << 0)

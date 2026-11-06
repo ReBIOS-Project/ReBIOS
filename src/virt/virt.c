@@ -33,6 +33,7 @@
 #include <sys/mm.h>
 #include <sys/smp.h>
 #include <sys/x86.h>
+#include <virt/cpuid.h>
 #include <virt/event.h>
 #include <virt/gpt.h>
 #include <virt/hv_timer.h>
@@ -58,6 +59,9 @@
 #define DEBUGCTL_LBR ((uint32_t)1 << 0)
 #define DEBUGCTL_BTF ((uint32_t)1 << 1)
 #define DR6_BS ((uint64_t)1 << 14)
+// The bits FRED's event data for a debug exception has where DR6 does: B3-B0,
+// BD, and BS (SDM 325462-093 Vol. 3A, 8.3.2.1).
+#define DR6_FRED_DATA ((uint64_t)0x600f)
 #define DR7_GD ((uint32_t)1 << 13)
 
 #define RESET_HOLD_SECONDS 30
@@ -834,7 +838,7 @@ void vcpu_debug_trap(struct vcpu *v, uint64_t dr6) {
     if ((debugctl & (DEBUGCTL_LBR | DEBUGCTL_BTF)) != 0) {
         set_guest_debugctl(v, debugctl & ~(uint64_t)(DEBUGCTL_LBR | DEBUGCTL_BTF));
     }
-    vcpu_inject_exception(v, 1, false, 0);
+    vcpu_inject_exception_data(v, 1, false, 0, dr6 & DR6_FRED_DATA);
 }
 
 void vcpu_step_trap(struct vcpu *v) {
@@ -990,7 +994,24 @@ void vcpu_skip_instruction(struct vcpu *v) {
     vcpu_advance(v, len);
 }
 
-void vcpu_inject_exception(struct vcpu *v, uint8_t vector, bool has_error, uint32_t error) {
+bool vcpu_fred(void) {
+    return (cpuid_cr4_allowed() & CR4_FRED) != 0;
+}
+
+void vcpu_set_event_data(struct vcpu *v, uint64_t data) {
+    if (!vcpu_fred()) {
+        return;
+    }
+    if (virt_vmx) {
+        vmx_write(VMCS_INJECTED_EVENT_DATA, data);
+    } else {
+        v->vmcb->control.eventinjdata = data;
+    }
+}
+
+void vcpu_inject_exception_data(
+    struct vcpu *v, uint8_t vector, bool has_error, uint32_t error, uint64_t data
+) {
     // Breakpoints not yet reported are lost (SDM 325462-093 Vol. 3B,
     // 20.3.1.2).
     v->db_pending = 0;
@@ -998,10 +1019,11 @@ void vcpu_inject_exception(struct vcpu *v, uint8_t vector, bool has_error, uint3
     if ((vcpu_cr0(v) & CR0_PE) == 0) {
         has_error = false;
     }
-    if (nvmx_exception(v, vector, has_error, error, 0)) {
+    if (nvmx_exception(v, vector, has_error, error, data)) {
         return;
     }
     v->injecting = true;
+    vcpu_set_event_data(v, data);
 
     if (virt_vmx) {
         uint32_t info = INTR_INFO_VALID | INTR_TYPE_HW_EXCEPTION | vector;
@@ -1020,6 +1042,10 @@ void vcpu_inject_exception(struct vcpu *v, uint8_t vector, bool has_error, uint3
     v->vmcb->control.eventinj = event;
 }
 
+void vcpu_inject_exception(struct vcpu *v, uint8_t vector, bool has_error, uint32_t error) {
+    vcpu_inject_exception_data(v, vector, has_error, error, 0);
+}
+
 void vcpu_inject_page_fault(struct vcpu *v, uintptr_t linear, uint32_t error) {
     // A page fault's exit takes the address as its qualification, leaving CR2
     // alone (SDM 325462-093 Vol. 3C, 30.2.1).
@@ -1033,7 +1059,7 @@ void vcpu_inject_page_fault(struct vcpu *v, uintptr_t linear, uint32_t error) {
     } else {
         v->vmcb->save.cr2 = linear;
     }
-    vcpu_inject_exception(v, 14, true, error);
+    vcpu_inject_exception_data(v, 14, true, error, linear);
 }
 
 // Halted, as most processors wait out the guest's not starting them: the

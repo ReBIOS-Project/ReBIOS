@@ -64,8 +64,8 @@ NOTICE = [
 # MTRRs, ARCH_CAPABILITIES, XAPIC_DISABLE_STATUS, the VMX capabilities, the
 # x2APIC range), and those of what the guest does not get: the microcode
 # update interface beyond the trigger and the signature, SMM, SGX, TME, TDX,
-# DCA, debug interface, PASID, user MSRs, MSR lists, FRED, architectural LBRs
-# and PEBS, and the reserved ranges.
+# DCA, debug interface, PASID, user MSRs, MSR lists, architectural LBRs and
+# PEBS, and the reserved ranges.
 INTEL_ARCH = [
     (0x0, 0x1),          # Pentium machine check address and type
     (0x6, 0x6),          # MONITOR filter size
@@ -93,6 +93,7 @@ INTEL_ARCH = [
     (0x1a0, 0x1a0),      # miscellaneous enables
     (0x1b0, 0x1b2),      # energy-performance bias, package thermal
     (0x1c4, 0x1c5),      # extended feature disable
+    (0x1cc, 0x1d4),      # FRED
     (0x1d9, 0x1d9),      # debug control
     (0x277, 0x277),      # PAT
     (0x280, 0x29f),      # machine check bank control 2
@@ -232,9 +233,9 @@ APM = 'amd-apm-40332-rev4.10.txt'
 # modules of the hypervisor handle (APIC_BASE, the MTRRs, PAT, XSS's writes,
 # EFER, HWCR, SYSCFG, the IORRs, the tops of memory, VM_CR, VM_HSAVE_PA, the SMM
 # and SVM keys and controls, the x2APIC range), and those of what the guest does
-# not get: FRED, SMM, SVM's own, SEV and SNP, IBS, the watchdog timer, the LBR
-# stack, the processor name string, the MCA interrupt configuration, and the L3
-# range reservation.
+# not get: SMM, SVM's own, SEV and SNP, IBS, the watchdog timer, the LBR stack,
+# the processor name string, the MCA interrupt configuration, and the L3 range
+# reservation. FRED's are those of AMD 69191 rev. 1.10.
 AMD_ARCH = [
     (0x0, 0x1, 'load-store MCA address and status'),
     (0x10, 0x10, 'TSC'),
@@ -246,6 +247,7 @@ AMD_ARCH = [
     (0x10b, 0x10b, 'flush command'),
     (0x174, 0x176, 'SYSENTER'),
     (0x179, 0x17b, 'machine check globals'),
+    (0x1cc, 0x1d4, 'FRED'),
     (0x1d9, 0x1d9, 'debug control'),
     (0x1db, 0x1de, 'last branch and exception records'),
     (0x400, 0x47f, 'machine check banks'),

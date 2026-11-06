@@ -103,10 +103,12 @@ struct vcpu {
     uint64_t gpt_generation;
 
     // An event whose delivery an exit cut short, to deliver again, with its
-    // error code and, for VMX's software events, instruction length: in the
-    // format VMX's interruption information and SVM's events share.
+    // error code, its event data for FRED, and, for VMX's software events,
+    // instruction length: in the format VMX's interruption information and
+    // SVM's events share.
     uint32_t redeliver;
     uint32_t redeliver_error;
+    uint64_t redeliver_data;
     size_t redeliver_length;
     // Whether vcpu_inject_exception() set up an event for the coming entry.
     bool injecting;
@@ -258,6 +260,17 @@ void vcpu_step_boundary(struct vcpu *v);
 bool vcpu_stepped(struct vcpu *v);
 void vcpu_inject_exception(struct vcpu *v, uint8_t vector, bool has_error, uint32_t error);
 void vcpu_inject_page_fault(struct vcpu *v, uintptr_t linear, uint32_t error);
+// An exception with the event data that FRED event delivery saves for it,
+// which is a debug exception's DR6 bits and a page fault's address, the
+// qualifications of their exits (SDM 325462-093 Vol. 3A, 8.3.2.1).
+void vcpu_inject_exception_data(
+    struct vcpu *v, uint8_t vector, bool has_error, uint32_t error, uint64_t data
+);
+// Whether the guest may have FRED, and the event data for the event the coming
+// entry injects, which FRED event delivery saves (SDM 325462-093 Vol. 3C,
+// 29.6.1.1; AMD 69191 rev. 1.10).
+bool vcpu_fred(void);
+void vcpu_set_event_data(struct vcpu *v, uint64_t data);
 
 // Puts the vCPU in the state the processor has after INIT, in real mode at
 // cs:ip, as for a start-up IPI or the reset vector.

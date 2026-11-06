@@ -51,6 +51,7 @@ const struct msr_range msr_intel_architectural[] = {
     { 0x1a0, 0x1a0 }, // IA32_MISC_ENABLE.
     { 0x1b0, 0x1b2 }, // IA32_ENERGY_PERF_BIAS to IA32_PACKAGE_THERM_INTERRUPT.
     { 0x1c4, 0x1c5 }, // IA32_XFD to IA32_XFD_ERR.
+    { 0x1cc, 0x1d4 }, // IA32_FRED_RSP0 to IA32_FRED_CONFIG.
     { 0x1d9, 0x1d9 }, // IA32_DEBUGCTL.
     { 0x277, 0x277 }, // IA32_PAT.
     { 0x280, 0x29f }, // IA32_MC0_CTL2 to IA32_MC31_CTL2.
@@ -1096,6 +1097,7 @@ const struct msr_range msr_amd_architectural[] = {
     { 0x10b, 0x10b }, // Flush command.
     { 0x174, 0x176 }, // SYSENTER.
     { 0x179, 0x17b }, // Machine check globals.
+    { 0x1cc, 0x1d4 }, // FRED.
     { 0x1d9, 0x1d9 }, // Debug control.
     { 0x1db, 0x1de }, // Last branch and exception records.
     { 0x400, 0x47f }, // Machine check banks.

@@ -62,7 +62,11 @@ struct vmcb_control {
     uint64_t reserved3;
     uint64_t avic_logical_table;
     uint64_t avic_physical_table;
-    uint8_t reserved4[0x400 - 0x100];
+    uint8_t reserved4[0x170 - 0x100];
+    // FRED's event data (AMD 69191 rev. 1.10).
+    uint64_t exitintdata;
+    uint64_t eventinjdata;
+    uint8_t reserved5[0x400 - 0x180];
 } __attribute__((packed));
 
 struct vmcb_seg {
@@ -134,6 +138,7 @@ _Static_assert(offsetof(struct vmcb_control, nrip) == 0xc8, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_control, insn_len) == 0xd0, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_control, avic_backing_page) == 0xe0, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_control, avic_physical_table) == 0xf8, "VMCB layout");
+_Static_assert(offsetof(struct vmcb_control, exitintdata) == 0x170, "VMCB layout");
 _Static_assert(sizeof(struct vmcb_control) == 0x400, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_save, tr) == 0x90, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_save, cpl) == 0xcb, "VMCB layout");
@@ -232,6 +237,7 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 
 // Virtualisation extensions, at offset 0B8h.
 #define SVM_VIRT_EXT_LBR ((uint64_t)1 << 0)
+#define SVM_VIRT_EXT_FRED ((uint64_t)1 << 4)
 
 // Event injection.
 #define SVM_EVENT_VALID ((uint64_t)1 << 31)

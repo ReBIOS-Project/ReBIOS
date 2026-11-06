@@ -1177,8 +1177,9 @@ static void vmx_handle_exit(struct vcpu *v) {
                 if ((info & 0xff) == 14) {
                     vcpu_inject_page_fault(v, qual, error);
                 } else {
-                    vcpu_inject_exception(
-                        v, (uint8_t)info, (info & INTR_INFO_ERROR_CODE) != 0, error
+                    vcpu_inject_exception_data(
+                        v, (uint8_t)info, (info & INTR_INFO_ERROR_CODE) != 0, error,
+                        (info & 0xff) == 1 ? qual : 0
                     );
                 }
             }

@@ -311,6 +311,12 @@ void svm_vcpu_init(struct vcpu *v) {
     if (svm_lbr_virtualisation) {
         c->virt_ext |= SVM_VIRT_EXT_LBR;
     }
+    // The guest's FRED MSRs, from the save area's zeros, are switched with the
+    // VMCB, all but FRED_RSP0, which the host leaves alone (AMD 69191 rev.
+    // 1.10).
+    if (vcpu_fred()) {
+        c->virt_ext |= SVM_VIRT_EXT_FRED;
+    }
 
     struct vmcb_save *s = &v->vmcb->save;
     // The PAT's power-on value.
@@ -644,7 +650,10 @@ static void svm_handle_exit(struct vcpu *v) {
                 } else {
                     bool has_error = vector == 8 || (vector >= 10 && vector <= 14) || vector == 17
                                   || vector == 21;
-                    vcpu_inject_exception(v, (uint8_t)vector, has_error, (uint32_t)c->exitinfo1);
+                    vcpu_inject_exception_data(
+                        v, (uint8_t)vector, has_error, (uint32_t)c->exitinfo1,
+                        vector == 1 ? c->exitinfo2 : 0
+                    );
                 }
                 break;
             }

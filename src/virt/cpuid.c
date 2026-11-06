@@ -22,6 +22,7 @@
 #include <sys/x86.h>
 #include <virt/msr.h>
 #include <virt/nvmx.h>
+#include <virt/svm.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>
 #include <virt/vlapic.h>
@@ -83,11 +84,11 @@ static const struct leaf_bits intel_leaves[] = {
     { 0x7, 0, { 0xffffffff, 0xffbffffb, 0x9bff5fef, 0xffd9ef3c } },
     // EAX SHA512, SM3, SM4, AVX_VNNI, AVX512_BF16, LASS, CMPCCXADD,
     // ARCH_PERFMON_EXT, fast zero-length MOVSB, fast short STOSB, fast short
-    // CMPSB/SCASB, LKGS, WRMSRNS, AMX_FP16, HRESET, AVX_IFMA, LAM; EBX PPIN,
-    // CPUIDMAXVAL_LIM_RMV; ECX RDT-M asymmetric, RDT-A asymmetric; EDX
+    // CMPSB/SCASB, FRED, LKGS, WRMSRNS, AMX_FP16, HRESET, AVX_IFMA, LAM; EBX
+    // PPIN, CPUIDMAXVAL_LIM_RMV; ECX RDT-M asymmetric, RDT-A asymmetric; EDX
     // AVX_VNNI_INT8, AVX_NE_CONVERT, AMX_COMPLEX, AVX_VNNI_INT16, PREFETCHI,
     // UIRET_UIF, CET_SSS, AVX10, MWAIT.
-    { 0x7, 1, { 0x04ec1df7, 0x00000009, 0x00000003, 0x008e4530 } },
+    { 0x7, 1, { 0x04ee1df7, 0x00000009, 0x00000003, 0x008e4530 } },
     // EDX PSFD, IPRED_CTRL, RRSBA_CTRL, DDPD_U, BHI_CTRL, MCDT_NO, UC-lock
     // disable, MONITOR_MITG_NO.
     { 0x7, 2, { 0x00000000, 0x00000000, 0x00000000, 0x000000ff } },
@@ -238,8 +239,9 @@ static const struct leaf_bits amd_leaves[] = {
     // trap, MOVDIRI, MOVDIR64B; EDX FSRM, AVX512_FP16, L1D flush (FSRM as SDM
     // 325462-093 Vol. 1, chapter 21 defines it).
     { 0x7, 0, { 0xffffffff, 0xf1bf97ab, 0x19415fce, 0x10800010 } },
-    // EAX AVX_VNNI, AVX512_BF16, AVX_IFMA; EDX AVX_VNNI_INT8, AVX_NE_CONVERT.
-    { 0x7, 1, { 0x00800030, 0x00000000, 0x00000000, 0x00000030 } },
+    // EAX AVX_VNNI, AVX512_BF16, FRED, LKGS, AVX_IFMA; EDX AVX_VNNI_INT8,
+    // AVX_NE_CONVERT.
+    { 0x7, 1, { 0x00860030, 0x00000000, 0x00000000, 0x00000030 } },
     // EAX shift; EBX processors; ECX level, type; EDX x2APIC ID.
     { 0xb, SUBLEAF_ALL, { 0x0000001f, 0x0000ffff, 0x0000ffff, 0xffffffff } },
     // EAX x87, SSE, AVX, opmask, ZMM_Hi256, Hi16_ZMM, PKRU; EBX size enabled;
@@ -364,6 +366,7 @@ static const struct last_subleaf amd_last_subleaves[] = {
 #define CPUID_7_ECX_MAWAU ((uint32_t)0x1f << 17)
 #define CPUID_7_ECX_RDPID ((uint32_t)1 << 22)
 #define CPUID_7_EDX_ARCH_LBR ((uint32_t)1 << 19)
+#define CPUID_7_1_EAX_FRED ((uint32_t)1 << 17)
 #define CPUID_D_1_EAX_XSAVES ((uint32_t)1 << 3)
 #define CPUID_PT 0x14
 #define CPUID_ARCH_LBR 0x1c
@@ -481,6 +484,10 @@ static struct cpuid_regs masked(uint32_t leaf, uint32_t subleaf) {
     r.ebx &= bits->keep[1];
     r.ecx &= bits->keep[2];
     r.edx &= bits->keep[3];
+    // SVM's FRED needs its NMI virtualisation (AMD 69191 rev. 1.10).
+    if (leaf == 7 && subleaf == 1 && !virt_vmx && !svm_vnmi) {
+        r.eax &= ~CPUID_7_1_EAX_FRED;
+    }
     return r;
 }
 
