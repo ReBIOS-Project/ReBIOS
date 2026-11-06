@@ -56,4 +56,8 @@ bool pci_virt_trap(
 // the BAR is.
 void pci_virt_untrap(struct pci_addr addr, unsigned int bar, uint64_t offset);
 
+// Routes the guest's messages again after its local APICs changed in a way
+// that decides where they can be posted (vlapic_post_changed()).
+void pci_virt_repost(void);
+
 #endif

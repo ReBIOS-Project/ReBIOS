@@ -35,6 +35,10 @@ int remap_alloc(int32_t requester, size_t count);
 void remap_free(int32_t requester, uint16_t index, size_t count);
 // Points an entry at a vector on the processor with an APIC ID.
 void remap_set(int32_t requester, uint16_t index, uint32_t apic_id, uint8_t vector, bool level);
+// Whether the IOMMUs can post interrupts to a vCPU's posted-interrupt
+// descriptor instead, and an entry that has them post a vector there.
+bool remap_posting(void);
+void remap_post(int32_t requester, uint16_t index, uint8_t vector, uintptr_t descriptor);
 // The message, and the I/O APIC entry, that name an entry.
 void remap_message(int32_t requester, uint16_t index, uint32_t *address, uint32_t *data);
 uint64_t remap_rte(int32_t requester, uint16_t index, uint8_t vector, bool level, bool active_low);

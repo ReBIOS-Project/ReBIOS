@@ -276,6 +276,25 @@ static inline void invlpg(uintptr_t addr) {
     asm volatile ("invlpg (%0)" :: "r"(addr) : "memory");
 }
 
+// Both halves of 16 aligned bytes at once, as a device that reads them in one
+// go sees them: a locked CMPXCHG16B, where a 16-byte atomic of the compiler's
+// may take a lock that the device cannot see.
+static inline void store16(volatile void *p, uint64_t low, uint64_t high) {
+    volatile uint64_t *q = p;
+    uint64_t old_low = q[0];
+    uint64_t old_high = q[1];
+    bool stored;
+    do {
+        asm volatile (
+            "lock cmpxchg16b %1\n\t"
+            "setzb %0"
+            : "=qm"(stored), "+m"(*q), "+a"(old_low), "+d"(old_high)
+            : "b"(low), "c"(high)
+            : "memory", "cc"
+        );
+    } while (!stored);
+}
+
 static inline noreturn void halt_forever(void) {
     for (;;) {
         cli();

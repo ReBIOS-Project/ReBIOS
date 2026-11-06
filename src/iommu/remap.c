@@ -63,6 +63,15 @@ void remap_set(int32_t requester, uint16_t index, uint32_t apic_id, uint8_t vect
     }
 }
 
+bool remap_posting(void) {
+    return !amd() && vtd_posting();
+}
+
+void remap_post(int32_t requester, uint16_t index, uint8_t vector, uintptr_t descriptor) {
+    (void)requester;
+    vtd_remap_post(index, vector, descriptor);
+}
+
 void remap_message(int32_t requester, uint16_t index, uint32_t *address, uint32_t *data) {
     (void)requester;
     if (amd()) {

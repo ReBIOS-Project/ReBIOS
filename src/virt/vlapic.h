@@ -84,6 +84,11 @@ void vlapic_deliver_message(
 // A message-signalled interrupt the guest programmed, as the APIC bus takes
 // it.
 void vlapic_deliver_msi(uint32_t address, uint32_t data);
+// The posted-interrupt descriptor that the IOMMUs can post such a message's
+// count vectors to, doing what vlapic_deliver_msi() does, or 0; and whether
+// the vCPU changed what decides that since the last call.
+uintptr_t vlapic_post_descriptor(uint32_t address, uint32_t data, size_t count);
+bool vlapic_post_changed(struct vcpu *v);
 // The processor of the first vCPU an 8-bit destination names, or NULL.
 struct cpu *vlapic_target(uint32_t dest, bool logical);
 struct cpu *vlapic_msi_target(uint32_t address);

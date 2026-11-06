@@ -656,16 +656,23 @@ void irq_slot_free(struct irq_slot *s) {
 // vectors are.
 void irq_slot_message(struct irq_slot *s, uint32_t *address, uint32_t *data) {
     if (s->remapped) {
-        for (size_t i = 0; i < s->count; i++) {
-            remap_set(
-                s->requester, s->remap + (int)i, s->cpu->apic_id, (uint8_t)(s->vector + i), false
-            );
-        }
+        irq_slot_route(s, 0, 0);
         remap_message(s->requester, s->remap, address, data);
         return;
     }
     *address = MSI_ADDRESS_BASE | s->cpu->apic_id << MSI_ADDRESS_DEST_SHIFT;
     *data = s->vector;
+}
+
+void irq_slot_route(struct irq_slot *s, uintptr_t descriptor, uint8_t vector) {
+    for (size_t i = 0; s->remapped && i < s->count; i++) {
+        uint16_t index = (uint16_t)(s->remap + i);
+        if (descriptor != 0) {
+            remap_post(s->requester, index, (uint8_t)(vector + i), descriptor);
+        } else {
+            remap_set(s->requester, index, s->cpu->apic_id, (uint8_t)(s->vector + i), false);
+        }
+    }
 }
 
 uint64_t irq_slot_rte(struct irq_slot *s, bool level, bool active_low) {

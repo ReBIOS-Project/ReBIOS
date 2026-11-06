@@ -43,6 +43,10 @@ bool vtd_remap_on(void);
 int vtd_remap_alloc(size_t count);
 void vtd_remap_free(uint16_t index, size_t count);
 void vtd_remap_set(uint16_t index, uint32_t apic_id, uint8_t vector, bool level);
+// Whether every unit posts interrupts too, and an entry that posts a vector to
+// the 64-byte posted-interrupt descriptor at descriptor.
+bool vtd_posting(void);
+void vtd_remap_post(uint16_t index, uint8_t vector, uintptr_t descriptor);
 void vtd_remap_message(uint16_t index, uint32_t *address, uint32_t *data);
 uint64_t vtd_remap_rte(uint16_t index, uint8_t vector, bool level, bool active_low);
 

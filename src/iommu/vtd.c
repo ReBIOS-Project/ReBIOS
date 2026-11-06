@@ -55,6 +55,7 @@
 #define CAP_NFR_SHIFT 40
 #define CAP_DWD ((uint64_t)1 << 54)
 #define CAP_DRD ((uint64_t)1 << 55)
+#define CAP_PI ((uint64_t)1 << 59)
 
 #define PCI_VENDOR_INTEL 0x8086
 #define PCI_BASE_CLASS_DISPLAY 0x03
@@ -109,6 +110,7 @@
 #define REMAP_ENTRIES ((uint32_t)2 << REMAP_SIZE)
 #define IRTE_P ((uint64_t)1 << 0)
 #define IRTE_TM ((uint64_t)1 << 4)
+#define IRTE_IM ((uint64_t)1 << 15)
 #define IRTE_VECTOR_SHIFT 16
 #define IRTE_DEST_SHIFT 40
 // Remappable format messages (5.1.5.2) and I/O APIC entries (5.1.5.1).
@@ -153,6 +155,9 @@ static struct spinlock queue_lock;
 static uint64_t *remap_table;
 static uint64_t remap_used[REMAP_ENTRIES / 64];
 static struct spinlock remap_lock;
+// Every unit posts interrupts to descriptors in memory too (D51397-019 rev.
+// 5.20, 5.2).
+static bool posting;
 // Whether every unit snoops the processor's caches when reading the tables.
 static bool coherent = true;
 
@@ -431,6 +436,7 @@ static void unit_enable(struct vtd_unit *u, uintptr_t pml4) {
 // starts out with no entry present.
 void vtd_start(void) {
     bool remap = true;
+    bool post = true;
     for (size_t i = 0; i < unit_count; i++) {
         struct vtd_unit *u = &units[i];
         unit_take_over(u);
@@ -440,6 +446,7 @@ void vtd_start(void) {
         reg_write64(u, REG_IQA, (uint64_t)(uintptr_t)u->queue);
         global_command(u, GCMD_QIE, true, "enable queued invalidation");
         remap = remap && (u->ecap & ECAP_IR) != 0;
+        post = post && (u->cap & CAP_PI) != 0;
         // Remapping only in x2APIC mode would need every local APIC in it.
         if ((u->ecap & ECAP_EIMER) != 0) {
             printf(
@@ -465,6 +472,7 @@ void vtd_start(void) {
         global_command(&units[i], GCMD_IRE, true, "remap interrupts");
         global_command(&units[i], GCMD_CFI, false, "block compatibility format interrupts");
     }
+    posting = post;
 }
 
 bool vtd_remap_on(void) {
@@ -506,18 +514,39 @@ void vtd_remap_free(uint16_t index, size_t count) {
     spinlock_release(&remap_lock);
 }
 
+// Both halves of an entry at once, as the units read it (D51397-019 rev. 5.20,
+// 5.1.4).
+static void irte_store(uint16_t index, uint64_t low, uint64_t high) {
+    store16(&remap_table[index * 2], low, high);
+}
+
+static void irte_write(uint16_t index, uint64_t low, uint64_t high) {
+    if (remap_table[index * 2] == low && remap_table[index * 2 + 1] == high) {
+        return;
+    }
+    irte_store(index, low, high);
+    remap_invalidate(index);
+}
+
 // Physical destination, fixed delivery, no source validation: the entries only
 // ever name the hypervisor's vectors, whatever device sends them.
 void vtd_remap_set(uint16_t index, uint32_t apic_id, uint8_t vector, bool level) {
     uint64_t entry = IRTE_P | (level ? IRTE_TM : 0) | (uint64_t)vector << IRTE_VECTOR_SHIFT
                    | (uint64_t)(apic_id & 0xff) << IRTE_DEST_SHIFT;
-    _Atomic(uint64_t) *low = (_Atomic(uint64_t) *)&remap_table[index * 2];
-    if (atomic_load_explicit(low, memory_order_acquire) == entry) {
-        return;
-    }
-    remap_table[index * 2 + 1] = 0;
-    atomic_store_explicit(low, entry, memory_order_release);
-    remap_invalidate(index);
+    irte_write(index, entry, 0);
+}
+
+bool vtd_posting(void) {
+    return posting;
+}
+
+// Posted format (D51397-019 rev. 5.20, 9.10), not urgent: the unit sets the
+// vector's bit in the descriptor's requests and notifies the processor the
+// descriptor names, whatever device sends the message.
+void vtd_remap_post(uint16_t index, uint8_t vector, uintptr_t descriptor) {
+    uint64_t low = IRTE_P | IRTE_IM | (uint64_t)vector << IRTE_VECTOR_SHIFT
+                 | ((uint64_t)descriptor & 0xffffffc0) << 32;
+    irte_write(index, low, (uint64_t)descriptor & 0xffffffff00000000);
 }
 
 void vtd_remap_message(uint16_t index, uint32_t *address, uint32_t *data) {

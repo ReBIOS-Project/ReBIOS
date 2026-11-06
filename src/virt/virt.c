@@ -40,6 +40,7 @@
 #include <virt/msr.h>
 #include <virt/mtrr.h>
 #include <virt/nvmx.h>
+#include <virt/pci_virt.h>
 #include <virt/pit.h>
 #include <virt/profile.h>
 #include <virt/svm.h>
@@ -495,6 +496,9 @@ void vcpu_before_entry(struct vcpu *v) {
     }
     vlapic_timer_program(v);
     cpu_slice_end();
+    if (vlapic_post_changed(v)) {
+        pci_virt_repost();
+    }
     vlapic_prepare_entry(v);
     if (nvmx_before_entry(v)) {
         return;
@@ -1070,6 +1074,11 @@ void vcpu_init_signal(struct vcpu *v) {
         power_reset(true);
     }
     vlapic_reset(v);
+    // It waits for a start-up IPI out of the guest, with its local APIC
+    // software-disabled: the messages posted to it are routed again first.
+    if (vlapic_post_changed(v)) {
+        pci_virt_repost();
+    }
     vcpu_wait_for_sipi(v);
 }
 

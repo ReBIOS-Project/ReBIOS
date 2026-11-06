@@ -136,7 +136,7 @@ static const uint32_t lvt_writable[LVT_COUNT] = {
 struct posted {
     _Atomic(uint32_t) pir[8];
     // ON, then the vector and the destination of the notifications IPI
-    // virtualisation sends.
+    // virtualisation and the IOMMUs send (D51397-019 rev. 5.20, 9.11).
     _Atomic(uint32_t) notification;
     _Atomic(uint32_t) destination;
     uint32_t reserved[6];
@@ -162,6 +162,9 @@ struct vlapic {
     _Atomic(int) avic;
     // Whether VMX virtualises the vCPU's IPIs.
     bool ipiv;
+    // Something that decides where the guest's messages can be posted changed:
+    // they are routed again before the vCPU enters the guest.
+    bool post_recheck;
     // When the guest's timer next expires by the processor's TSC, or 0: the
     // processor's timer is the hypervisor's, which has its own uses for it.
     uint64_t timer_deadline;
@@ -721,6 +724,18 @@ static void ipiv_recheck_soon(void) {
     }
 }
 
+static void post_recheck_soon(struct vlapic *vl) {
+    if (posted_interrupts) {
+        vl->post_recheck = true;
+    }
+}
+
+bool vlapic_post_changed(struct vcpu *v) {
+    bool changed = v->vlapic->post_recheck;
+    v->vlapic->post_recheck = false;
+    return changed;
+}
+
 // The destinations change mode once every vCPU but those waiting for a
 // start-up IPI is in the other: none virtualises IPIs then, as a vCPU only
 // changes its mode out of the guest.
@@ -1006,6 +1021,7 @@ static void reset_registers(struct vcpu *v) {
     eilvt_lvts(vl);
     mirror_logical(vl);
     avic_recheck_soon();
+    post_recheck_soon(vl);
 }
 
 void vlapic_reset(struct vcpu *v) {
@@ -1038,8 +1054,7 @@ void vlapic_create(struct vcpu *v) {
             vmx_write(VMCS_PIN_CONTROLS, vmx_read(VMCS_PIN_CONTROLS) | PIN_POSTED_INTR);
             vmx_write(VMCS_POSTED_INTR_NV, VLAPIC_POSTED_VECTOR);
             vmx_write(VMCS_POSTED_INTR_DESC, (uint64_t)(uintptr_t)vl->posted);
-        }
-        if (ipi_virtualization) {
+            // The notifications that IPI virtualisation and the IOMMUs send.
             spinlock_acquire(&ipiv_lock);
             atomic_init(
                 &vl->posted->notification, (uint32_t)VLAPIC_POSTED_VECTOR << POSTED_VECTOR_SHIFT
@@ -1047,6 +1062,8 @@ void vlapic_create(struct vcpu *v) {
             bool x2apic = atomic_load_explicit(&ipiv_x2apic, memory_order_acquire);
             atomic_init(&vl->posted->destination, ipiv_destination(vl->id, x2apic));
             spinlock_release(&ipiv_lock);
+        }
+        if (ipi_virtualization) {
             atomic_store_explicit(
                 (_Atomic(uint64_t) *)&pid_table[vl->id], (uint64_t)(uintptr_t)vl->posted | 1,
                 memory_order_release
@@ -1572,6 +1589,46 @@ void vlapic_deliver_msi(uint32_t address, uint32_t data) {
     );
 }
 
+// Only where posting does what vlapic_deliver_msi() does: fixed or lowest
+// priority edge-triggered interrupts, of vectors past the exceptions', to one
+// vCPU whose local APIC takes them. The IOMMUs read the descriptors'
+// destinations in xAPIC format, which IPI virtualisation may switch: none is
+// posted where it runs.
+uintptr_t vlapic_post_descriptor(uint32_t address, uint32_t data, size_t count) {
+    if (!posted_interrupts || ipi_virtualization
+     || (address & MSI_ADDRESS_MASK) != MSI_ADDRESS_BASE) {
+        return 0;
+    }
+    uint32_t mode = data & ICR_DELIVERY_MASK;
+    bool lowest = mode == ICR_DELIVERY_LOWEST
+               || (mode == ICR_DELIVERY_FIXED && (address & MSI_ADDRESS_REDIRECT) != 0);
+    if ((mode != ICR_DELIVERY_FIXED && mode != ICR_DELIVERY_LOWEST) || (data & ICR_LEVEL) != 0
+     || (data & ICR_VECTOR_MASK & ~(uint32_t)(count - 1)) < 16) {
+        return 0;
+    }
+    uint32_t dest = address >> MSI_ADDRESS_DEST_SHIFT & 0xff;
+    bool logical = (address & MSI_ADDRESS_LOGICAL) != 0;
+    struct vcpu *target = NULL;
+    for (size_t i = 0; i < smp_cpu_count(); i++) {
+        struct vcpu *to = smp_cpu(i)->vcpu;
+        if (to == NULL || to->vlapic == NULL || !matches(to->vlapic, dest, logical, false)) {
+            continue;
+        }
+        // A fixed interrupt to several is beyond one descriptor.
+        if (target != NULL) {
+            return 0;
+        }
+        target = to;
+        if (lowest) {
+            break;
+        }
+    }
+    if (target == NULL || !enabled(target->vlapic) || !sw_enabled(target->vlapic)) {
+        return 0;
+    }
+    return (uintptr_t)target->vlapic->posted;
+}
+
 static bool ipi_target(struct vcpu *from, struct vcpu *to, uint32_t dest, uint32_t command) {
     switch (command & ICR_SHORTHAND_MASK) {
         case ICR_SHORTHAND_SELF: {
@@ -1629,6 +1686,7 @@ static void ext_write(struct vlapic *vl, uint32_t reg, uint32_t value) {
     if (reg == APIC_EXT_CONTROL) {
         regs_set(vl, APIC_EXT_CONTROL, value & ext_feature & EXT_CONTROL_BITS);
         avic_recheck_soon();
+        post_recheck_soon(vl);
     } else if (reg == APIC_SEOI) {
         regs_set(vl, APIC_SEOI, value & 0xff);
         if ((regs_get(vl, APIC_EXT_CONTROL) & EXT_SEOI) != 0) {
@@ -1788,6 +1846,7 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
                 eilvt_lvts(vl);
             }
             avic_recheck_soon();
+            post_recheck_soon(vl);
             return true;
         }
         case APIC_ESR: {
@@ -1830,12 +1889,14 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
             regs_set(vl, APIC_LDR, value & 0xff000000);
             mirror_logical(vl);
             avic_recheck_soon();
+            post_recheck_soon(vl);
             break;
         }
         case APIC_DFR: {
             regs_set(vl, APIC_DFR, value | 0x0fffffff);
             mirror_logical(vl);
             avic_recheck_soon();
+            post_recheck_soon(vl);
             break;
         }
         case APIC_ICR_HIGH: {
@@ -2046,6 +2107,7 @@ static bool apic_base_write(struct vcpu *v, uint64_t value) {
         svm_flush_guest_tlb(v);
         avic_recheck_soon();
     }
+    post_recheck_soon(vl);
     if (!en) {
         if (was_en) {
             reset_registers(v);

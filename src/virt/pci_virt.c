@@ -23,6 +23,7 @@
 #include <hw/lapic.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
+#include <iommu/remap.h>
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/printf.h>
@@ -623,6 +624,17 @@ static void msi_taken(void *ctx, size_t index) {
     );
 }
 
+// Where the IOMMUs send a guest's message that a slot backs: posted to the one
+// vCPU it reaches where they can do what delivering it does, else to the slot,
+// whose taking delivers it.
+static void message_route(struct irq_slot *s, uint32_t upper, uint32_t address, uint32_t data) {
+    if (!s->remapped || !remap_posting()) {
+        return;
+    }
+    uintptr_t descriptor = upper == 0 ? vlapic_post_descriptor(address, data, s->count) : 0;
+    irq_slot_route(s, descriptor, (uint8_t)(data & ~(uint32_t)(s->count - 1)));
+}
+
 // The function's MSI after the guest changed it: off at the function while its
 // vectors move, then on with the hypervisor's message, its Multiple Message
 // Enable cut to what it can send.
@@ -665,6 +677,8 @@ static void msi_update(struct vfunction *vf) {
         }
         pci_cfg_write(a, msi_data_reg(vf), 2, data);
     }
+    uint32_t upper = atomic_load_explicit(&m->upper, memory_order_relaxed);
+    message_route(&m->slot, upper, m->address, m->data);
     pci_cfg_write(a, cap + MSI_CONTROL, 2, control | MSI_ENABLE);
 }
 
@@ -724,6 +738,8 @@ static void msix_sync(struct vfunction *vf, size_t i) {
         mmio_write_host(at + MSIX_ENTRY_UPPER, 4, 0);
         mmio_write_host(at + MSIX_ENTRY_DATA, 4, data);
     }
+    uint32_t upper = atomic_load_explicit(&e->upper, memory_order_relaxed);
+    message_route(&e->slot, upper, e->address, e->data);
     if (!e->armed) {
         mmio_write_host(at + MSIX_ENTRY_CONTROL, 4, control & ~MSIX_ENTRY_MASKED);
         e->armed = true;
@@ -1431,6 +1447,29 @@ void pci_virt_untrap(struct pci_addr addr, unsigned int bar, uint64_t offset) {
             gpt_flush();
         }
         break;
+    }
+    spinlock_release(&virt.lock);
+}
+
+void pci_virt_repost(void) {
+    spinlock_acquire(&virt.lock);
+    for (size_t i = 0; i < virt.count; i++) {
+        struct vfunction *vf = &virt.functions[i];
+        struct vmsi *m = &vf->msi;
+        if (vf->hidden) {
+            continue;
+        }
+        if (m->slot.cpu != NULL) {
+            uint32_t upper = atomic_load_explicit(&m->upper, memory_order_relaxed);
+            message_route(&m->slot, upper, m->address, m->data);
+        }
+        for (size_t k = 0; k < vf->msix.count; k++) {
+            struct vmsix_entry *e = &vf->msix.entries[k];
+            if (e->slot.cpu != NULL) {
+                uint32_t upper = atomic_load_explicit(&e->upper, memory_order_relaxed);
+                message_route(&e->slot, upper, e->address, e->data);
+            }
+        }
     }
     spinlock_release(&virt.lock);
 }
