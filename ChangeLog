@@ -1,3 +1,66 @@
+2026-11-07  Mintsuki  <mintsuki@protonmail.com>
+
+    *** Release 0.6.0 ***
+
+    Noteworthy changes compared to the previous release, 0.5.2:
+
+    New features:
+        - The OS can run hypervisors of its own, such as Linux's KVM, on AMD
+          processors too: ReBIOS gives it the processor's SVM, with nested
+          paging, NRIP saving, VMCB clean bits, flush by ASID, PAUSE
+          filtering, LBR virtualisation, read-only guest page tables, page
+          modification logging, TlbiCtl, decode assists, NMI virtualisation,
+          the virtual GIF, virtual VMLOAD and VMSAVE, the guest mode execute
+          trap, the TSC ratio MSR, SVM-Lock, the idle HLT intercept, the bus
+          lock threshold, and FRED virtualisation, each where the processor
+          has it, and with the guest VMCB address check.
+        - On AMD processors, run the VMLOAD, VMSAVE, CLGI, and STGI of the
+          OS's own hypervisors on the processor where it virtualises them,
+          and have HLT exit to ReBIOS only where no interrupt waits for the
+          OS, which saves exits.
+        - The OS always gets the processor's VMX on Intel processors: the
+          `nested` setting is obsolete, and ignored with a warning. ReBIOS
+          sets aside 1/32 of the memory, at most 128 MiB, for the page tables
+          it runs the guests of the OS's own hypervisors with.
+        - Give the OS FRED, user interrupts, and, on Intel processors, APX,
+          where the processor has them.
+        - Give the OS INVLPGB and TLBSYNC, PCID, and the extended APIC space
+          with its extended interrupt LVTs, on AMD processors that have them.
+        - Post the OS's MSIs to its processors through the IOMMU where it can:
+          with VT-d's posted interrupts, with IPI virtualisation or without,
+          and with AMD-Vi's guest virtual APIC mode where AVIC runs.
+        - On machines with several PCI host bridges or segments, show the OS
+          one host bridge, with the other root buses behind ports on its bus
+          0, so that OSes that know only one still find every device. The
+          legacy BIOS follows the firmware's boot order for drives on those
+          buses too, and _OSC grants the OS only what every host bridge does.
+        - Make the OS's MCFG, MADT, and HPET tables describe the machine it
+          gets rather than adjust the firmware's: one PCI segment, only the
+          processors and I/O APICs it has, and no hidden HPET.
+        - Keep the OS's port 92h in ReBIOS: its fast reset bit now sends INIT
+          to the OS's processors, as the chipset's INIT# does, rather than
+          reaching the machine's own.
+        - On AMD processors with HOST_MCE_OVERRIDE, log the banks of a
+          machine check that shuts down an OS without CR4.MCE.
+
+    Bug fixes:
+        - Keep the machine's page 0 out of the OS's memory: the OS's own
+          hypervisors failed where it held their data structures, which
+          ReBIOS took for missing.
+        - Raise #UD, as the processor does, for the SVM instructions that an
+          OS runs outside ring 0 without enabling SVM, rather than #GP.
+        - Keep AMD's extended APIC registers when ReBIOS's own local APIC
+          leaves x2APIC mode, so that its APIC IDs stay 8 bits wide.
+        - Update Tendril, which now waits for USB devices to show up after an
+          xHCI controller's reset.
+        - Update SeaBIOS, which now reads a disc swapped into a CD drive
+          rather than fail every read of it.
+
+    Miscellaneous:
+        - Align the code with the updated style rules.
+        - Panic on processors that are neither Intel's nor AMD's, and on the
+          other processor vendor's IOMMU, which only virtual machines have.
+
 2026-11-03  Mintsuki  <mintsuki@protonmail.com>
 
     *** Release 0.5.2 ***
