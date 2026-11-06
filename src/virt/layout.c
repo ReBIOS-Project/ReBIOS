@@ -481,8 +481,10 @@ void layout_init(void) {
         list_remove(&free_ram, pinned.r[i].base, pinned.r[i].end);
     }
     // The host's own legacy region is left alone, for its shadowing to be
-    // probed after the guest programs the chipset.
+    // probed after the guest programs the chipset, and so is its page 0, whose
+    // address is the null pointer to the hypervisor's accesses.
     list_remove(&free_ram, VGA_BASE, ONE_MIB);
+    list_remove(&free_ram, 0, PAGE_SIZE);
 
     uintptr_t low_hpa;
     if (!take_block(&free_ram, TWO_MIB, &low_hpa)) {
