@@ -178,6 +178,10 @@ struct nsvm {
     bool npt_pse;
     bool npt_smep;
     uint64_t npt_pat;
+    // Whether the guest's guest's page table walks are writes at the nested
+    // page tables' level only where they set accessed or dirty flags, as
+    // VMCB12 may have it (APM 24593 rev. 3.46, 15.25.6.1).
+    bool rogpt;
     struct npt02 npt02[NPT02_ROOTS];
     struct npt02 *current02;
     size_t npt02_pages;
@@ -207,6 +211,8 @@ static size_t npt02_level_max;
 // The DebugCtl bits a guest's guest's last branch records may have: LBR, BTF,
 // and BLCKDB with bus lock traps (APM 24593 rev. 3.46, 13.1.1.6).
 static uint64_t debugctl_bits;
+// Whether the processor has read-only guest page tables.
+static bool rogpt;
 
 void nsvm_init(void) {
     if (virt_vmx) {
@@ -222,6 +228,7 @@ void nsvm_init(void) {
     phys_width = cpuid(0x80000008, 0).eax & 0xff;
     npt02_budget = core_handoff->nested_heap_size / PAGE_SIZE / smp_cpu_count();
     npt02_level_max = svm_huge_pages() ? 2 : 1;
+    rogpt = (cpuid(0x8000000a, 0).edx & SVM_FEATURE_ROGPT) != 0;
     debugctl_bits = DEBUGCTL_LBR | DEBUGCTL_BTF
                   | ((cpuid(7, 0).ecx & CPUID_7_0_ECX_BUSLOCKTRAP) != 0 ? DEBUGCTL_BLCKDB : 0);
     iopm02 = page_alloc(IOPM_SIZE / PAGE_SIZE);
@@ -333,7 +340,7 @@ struct cpuid_regs nsvm_cpuid(void) {
     struct cpuid_regs svm = cpuid(0x8000000a, 0);
     uint32_t features = SVM_FEATURE_NP | SVM_FEATURE_NRIPS | SVM_FEATURE_VMCB_CLEAN
                       | SVM_FEATURE_FLUSH_BY_ASID | SVM_FEATURE_PAUSE_FILTER
-                      | SVM_FEATURE_PAUSE_FILTER_THRESHOLD | SVM_FEATURE_LBRV;
+                      | SVM_FEATURE_PAUSE_FILTER_THRESHOLD | SVM_FEATURE_LBRV | SVM_FEATURE_ROGPT;
     return (struct cpuid_regs){ svm.eax & 0xff, nasid - 1, 0, svm.edx & features };
 }
 
@@ -1052,6 +1059,10 @@ static void prepare_vmcb02(struct nsvm *n) {
         n->npt_pse = (s01->cr4 & CR4_PSE) != 0;
         n->npt_smep = (s01->cr4 & CR4_SMEP) != 0;
         n->npt_pat = s01->g_pat;
+        n->rogpt = rogpt && (c12->np_enable & SVM_NP_ROGPT) != 0;
+        if (n->rogpt) {
+            c->np_enable |= SVM_NP_ROGPT;
+        }
         // Its flushes drop the nested translations too, but for those of its
         // ASID's non-global translations alone, which a change of its nested
         // page tables does not take (APM 24593 rev. 3.46, 15.16.1).
@@ -1401,14 +1412,15 @@ static bool l1_wants(struct vcpu *v, struct nsvm *n, uint64_t code) {
 // A nested page fault of NPT02: the guest's where its nested page tables do
 // not allow the access, else mapped as the hypervisor's nested page tables
 // have the guest's memory, or emulated where that is the hypervisor's own
-// device. The guest's guest's page table walks are writes (APM 24593 rev.
-// 3.46, 15.25.5).
+// device. The guest's guest's page table walks are writes, but those that set
+// no flag where VMCB12 has read-only guest page tables, as VMCB02 then has
+// (APM 24593 rev. 3.46, 15.25.5 and 15.25.6.1).
 static void npt_fault(struct vcpu *v, struct nsvm *n) {
     struct vmcb_control *c = &v->vmcb->control;
     uintptr_t gpa = c->exitinfo2;
     uint64_t info = c->exitinfo1;
     bool walk = (info & NPF_TABLE) != 0;
-    bool write = walk || (info & NPF_RW) != 0;
+    bool write = (walk && !n->rogpt) || (info & NPF_RW) != 0;
     bool fetch = !walk && (info & NPF_ID) != 0;
     struct npt12_walk w;
     uint64_t error = npt12_walk(n, gpa, write, fetch, &w);
@@ -1451,7 +1463,7 @@ bool nsvm_npt_translate(
         return false;
     }
     struct npt12_walk w;
-    uint64_t error = npt12_walk(n, gpa, write || walk, fetch && !walk, &w);
+    uint64_t error = npt12_walk(n, gpa, write || (walk && !n->rogpt), fetch && !walk, &w);
     if (error == 0) {
         *out = w.gpa;
         return true;

@@ -268,12 +268,14 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 #define SVM_FEATURE_AVIC ((uint32_t)1 << 13)
 #define SVM_FEATURE_VGIF ((uint32_t)1 << 16)
 #define SVM_FEATURE_X2AVIC ((uint32_t)1 << 18)
+#define SVM_FEATURE_ROGPT ((uint32_t)1 << 21)
 #define SVM_FEATURE_TLBICTL ((uint32_t)1 << 24)
 #define SVM_FEATURE_VNMI ((uint32_t)1 << 25)
 #define SVM_FEATURE_EXT_LVT_AVIC_ACCESS ((uint32_t)1 << 27)
 
 // Nested paging and what goes with it, at offset 090h.
 #define SVM_NP_ENABLE ((uint64_t)1 << 0)
+#define SVM_NP_ROGPT ((uint64_t)1 << 6)
 #define SVM_NP_INVLPGB ((uint64_t)1 << 7)
 
 // Virtualisation extensions, at offset 0B8h.
