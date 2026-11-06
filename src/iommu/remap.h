@@ -24,8 +24,9 @@
 
 // Interrupt remapping by the IOMMUs, where they all can: interrupt messages
 // then name entries of tables of the hypervisor's, and other ones are blocked,
-// whatever device sends them. AMD-Vi's starts once the I/O APICs are known.
-void remap_init(void);
+// whatever device sends them. AMD-Vi's starts once the I/O APICs are known, in
+// the guest virtual APIC's format where AVIC may run the guest's local APICs.
+void remap_init(bool guest_vapic);
 bool remap_on(void);
 // The requester ID that an I/O APIC's (by its APIC ID) or an HPET's (by its
 // number) messages carry, as the firmware's tables give it, or -1.

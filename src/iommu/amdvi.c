@@ -47,10 +47,17 @@
 #define CONTROL_EVENT_LOG_EN ((uint64_t)1 << 2)
 #define CONTROL_COHERENT ((uint64_t)1 << 10)
 #define CONTROL_COMMAND_BUFFER_EN ((uint64_t)1 << 12)
+#define CONTROL_GA_EN ((uint64_t)1 << 17)
+#define CONTROL_GAM_GUEST_VAPIC ((uint64_t)1 << 25)
 // What firmware may have turned on that ReBIOS does not use: interrupt
 // enables, peripheral page requests, guest translation, guest virtual APIC,
 // dual logs, and device table segmentation, along with the enables above.
 #define CONTROL_TAKEN ((uint64_t)0x0000001ffe03f01d)
+
+// The guest virtual APIC and its modes (AMD IOMMU 48882 rev. 3.11, 3.4.4).
+#define FEATURE_GA ((uint64_t)1 << 7)
+#define FEATURE_GAM_MASK ((uint64_t)7 << 21)
+#define FEATURE_GAM_GUEST_VAPIC ((uint64_t)1 << 21)
 
 #define STATUS_EVENT_OVERFLOW ((uint64_t)1 << 0)
 #define STATUS_EVENT_LOG_RUN ((uint64_t)1 << 3)
@@ -88,9 +95,9 @@
 #define DTE_PASS (DTE_INIT_PASS | DTE_EINT_PASS | DTE_NMI_PASS | DTE_LINT0_PASS | DTE_LINT1_PASS)
 #define DOMAIN_ID ((uint64_t)1)
 
-// A device's interrupt remapping table: 512 entries in the basic format, as
-// many as a fixed or arbitrated message's data bits 8:0 name (AMD IOMMU 48882
-// rev. 3.11, Table 19, Table 20).
+// A device's interrupt remapping table: 512 entries, as many as a fixed or
+// arbitrated message's data bits 8:0 name, in the basic format or in the guest
+// virtual APIC's (AMD IOMMU 48882 rev. 3.11, Table 19 to Table 22).
 #define REMAP_LOG2 9
 #define REMAP_ENTRIES ((uint32_t)1 << REMAP_LOG2)
 #define IRTE_REMAP_EN ((uint32_t)1 << 0)
@@ -124,16 +131,25 @@ struct amdvi_unit {
     _Atomic(uint64_t) wait_done;
 };
 
-// A table in a page of its own: its entries, the ones in use, and the device
-// IDs whose entries point at it, as a device's messages may come with any of
-// several.
+// A table in pages of its own: its entries of either format, the ones in use,
+// and the device IDs whose entries point at it, as a device's messages may
+// come with any of several.
+#define REMAP_TABLE_PAGES 3
+#define REMAP_USERS \
+    ((REMAP_TABLE_PAGES * PAGE_SIZE - REMAP_ENTRIES * 16 - REMAP_ENTRIES / 8 - 4) / 2)
 struct remap_table {
-    uint32_t entries[REMAP_ENTRIES];
+    union {
+        uint32_t basic[REMAP_ENTRIES];
+        uint64_t wide[REMAP_ENTRIES * 2];
+    } entries;
     uint64_t used[REMAP_ENTRIES / 64];
     uint32_t user_count;
-    uint16_t users[(PAGE_SIZE - REMAP_ENTRIES * 4 - REMAP_ENTRIES / 8 - 4) / 2];
+    uint16_t users[REMAP_USERS];
 };
-_Static_assert(sizeof(struct remap_table) <= PAGE_SIZE, "a remapping table takes a page");
+_Static_assert(
+    sizeof(struct remap_table) <= REMAP_TABLE_PAGES * PAGE_SIZE,
+    "a remapping table takes its pages"
+);
 
 static struct amdvi_unit *units;
 static size_t unit_count;
@@ -141,6 +157,8 @@ static uint64_t *device_table;
 // Over the units' command buffers, which any processor may fill.
 static struct spinlock command_lock;
 static bool remap_enabled;
+// The tables' entries are in the guest virtual APIC's format.
+static bool wide_entries;
 static struct spinlock remap_lock;
 
 #define EVENT_WRITE_TIMEOUT_NS ((uint64_t)1000000)
@@ -385,7 +403,7 @@ void amdvi_enable(uintptr_t root) {
 
 // The I/O APICs' interrupts come through the IOMMUs as well, so remapping
 // needs their device IDs, as Linux 7.3's check_ioapic_information() also asks.
-void amdvi_remap_start(void) {
+void amdvi_remap_start(bool guest_vapic) {
     for (size_t i = 0; i < ioapic_count(); i++) {
         uint8_t id = ioapic_get(i)->id;
         if (iommu_special_for(IOMMU_SPECIAL_IOAPIC, id) == NULL) {
@@ -396,6 +414,24 @@ void amdvi_remap_start(void) {
             return;
         }
     }
+    // The guest virtual APIC's entries where interrupts may be posted to AVIC,
+    // its mode the same on every unit (AMD IOMMU 48882 rev. 3.11, 2.2.5.2),
+    // before any table is.
+    bool wide = guest_vapic;
+    for (size_t i = 0; i < unit_count && wide; i++) {
+        uint64_t features = reg_read(&units[i], REG_FEATURES);
+        wide = (features & FEATURE_GA) != 0
+            && (features & FEATURE_GAM_MASK) == FEATURE_GAM_GUEST_VAPIC;
+    }
+    for (size_t i = 0; i < unit_count && wide; i++) {
+        struct amdvi_unit *u = &units[i];
+        uint64_t control = reg_read(u, REG_CONTROL);
+        reg_write(u, REG_CONTROL, control | CONTROL_GA_EN | CONTROL_GAM_GUEST_VAPIC);
+    }
+    if (wide) {
+        printf("AMD-Vi: interrupts are remapped in the guest virtual APIC's format\n");
+    }
+    wide_entries = wide;
     remap_enabled = true;
 }
 
@@ -501,7 +537,7 @@ static struct remap_table *table_for(uint16_t id) {
         t = table_of(ids[i]);
     }
     if (t == NULL) {
-        t = page_alloc(1);
+        t = page_alloc(REMAP_TABLE_PAGES);
     }
     for (size_t i = 0; i < n; i++) {
         struct remap_table *had = table_of(ids[i]);
@@ -543,14 +579,31 @@ int amdvi_remap_alloc(int32_t requester, size_t count) {
     return found;
 }
 
+// An entry, the high half only in the guest virtual APIC's format, written as
+// the units read it: false where it already was.
+static bool entry_write(struct remap_table *t, uint16_t index, uint64_t low, uint64_t high) {
+    if (!wide_entries) {
+        _Atomic(uint32_t) *entry = (_Atomic(uint32_t) *)&t->entries.basic[index];
+        if (atomic_load_explicit(entry, memory_order_relaxed) == (uint32_t)low) {
+            return false;
+        }
+        atomic_store_explicit(entry, (uint32_t)low, memory_order_release);
+        return true;
+    }
+    uint64_t *entry = &t->entries.wide[index * 2];
+    if (entry[0] == low && entry[1] == high) {
+        return false;
+    }
+    store16(entry, low, high);
+    return true;
+}
+
 void amdvi_remap_free(int32_t requester, uint16_t index, size_t count) {
     spinlock_acquire(&remap_lock);
     struct remap_table *t = table_of((uint16_t)requester);
     if (t != NULL) {
         for (size_t i = 0; i < count; i++) {
-            atomic_store_explicit(
-                (_Atomic(uint32_t) *)&t->entries[index + i], 0, memory_order_release
-            );
+            entry_write(t, (uint16_t)(index + i), 0, 0);
             t->used[(index + i) / 64] &= ~((uint64_t)1 << ((index + i) % 64));
         }
         invalidate_table(t);
@@ -558,15 +611,20 @@ void amdvi_remap_free(int32_t requester, uint16_t index, size_t count) {
     spinlock_release(&remap_lock);
 }
 
-// Fixed delivery, physical destination.
+// Fixed delivery, physical destination: in the guest virtual APIC's format the
+// vector in the high half, with the destination's top byte (AMD IOMMU 48882
+// rev. 3.11, Figure 17, Figure 19).
 void amdvi_remap_set(int32_t requester, uint16_t index, uint32_t apic_id, uint8_t vector) {
-    uint32_t entry = IRTE_REMAP_EN | (apic_id & 0xff) << IRTE_DEST_SHIFT
-                   | (uint32_t)vector << IRTE_VECTOR_SHIFT;
+    uint64_t low = IRTE_REMAP_EN | (uint64_t)(apic_id & 0xff) << IRTE_DEST_SHIFT;
+    uint64_t high = 0;
+    if (wide_entries) {
+        high = vector;
+    } else {
+        low |= (uint64_t)vector << IRTE_VECTOR_SHIFT;
+    }
     spinlock_acquire(&remap_lock);
     struct remap_table *t = table_of((uint16_t)requester);
-    _Atomic(uint32_t) *slot = t != NULL ? (_Atomic(uint32_t) *)&t->entries[index] : NULL;
-    if (slot != NULL && atomic_load_explicit(slot, memory_order_relaxed) != entry) {
-        atomic_store_explicit(slot, entry, memory_order_release);
+    if (t != NULL && entry_write(t, index, low, high)) {
         invalidate_table(t);
     }
     spinlock_release(&remap_lock);

@@ -28,9 +28,9 @@ static bool amd(void) {
     return iommu_tables_parse()->kind == IOMMU_KIND_AMD;
 }
 
-void remap_init(void) {
+void remap_init(bool guest_vapic) {
     if (amd()) {
-        amdvi_remap_start();
+        amdvi_remap_start(guest_vapic);
     }
 }
 

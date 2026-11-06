@@ -41,8 +41,9 @@ void amdvi_flush(void);
 void amdvi_report_faults(void);
 
 // Interrupt remapping, once the I/O APICs are known: tables per device ID, of
-// the requester IDs that interrupt messages carry.
-void amdvi_remap_start(void);
+// the requester IDs that interrupt messages carry, in the guest virtual APIC's
+// format for guest_vapic where every unit has it.
+void amdvi_remap_start(bool guest_vapic);
 bool amdvi_remap_on(void);
 int amdvi_remap_alloc(int32_t requester, size_t count);
 void amdvi_remap_free(int32_t requester, uint16_t index, size_t count);

@@ -49,6 +49,7 @@
 #include <virt/pci_virt.h>
 #include <virt/pit.h>
 #include <virt/profile.h>
+#include <virt/svm.h>
 #include <virt/usb.h>
 #include <virt/vacpi.h>
 #include <virt/vcpu.h>
@@ -96,7 +97,7 @@ static void bsp_main(void *arg) {
     lapic_host_init(VLAPIC_SPURIOUS_VECTOR, VLAPIC_TIMER_VECTOR);
     smp_start_aps();
     ioapic_init();
-    remap_init();
+    remap_init(!virt_vmx && svm_avic);
     vioapic_init();
     irq_init();
     kbc_init();
