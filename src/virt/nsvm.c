@@ -356,7 +356,8 @@ struct cpuid_regs nsvm_cpuid(void) {
     struct cpuid_regs svm = cpuid(0x8000000a, 0);
     uint32_t features = SVM_FEATURE_NP | SVM_FEATURE_NRIPS | SVM_FEATURE_VMCB_CLEAN
                       | SVM_FEATURE_FLUSH_BY_ASID | SVM_FEATURE_PAUSE_FILTER
-                      | SVM_FEATURE_PAUSE_FILTER_THRESHOLD | SVM_FEATURE_LBRV | SVM_FEATURE_ROGPT;
+                      | SVM_FEATURE_PAUSE_FILTER_THRESHOLD | SVM_FEATURE_LBRV | SVM_FEATURE_ROGPT
+                      | SVM_FEATURE_TLBICTL;
     return (struct cpuid_regs){
         svm.eax & 0xff, nasid - 1, svm.ecx & CPUID_8000000A_ECX_PML, svm.edx & features
     };
@@ -1042,8 +1043,11 @@ static void prepare_vmcb02(struct nsvm *n) {
     struct vmcb_save *s = &vmcb02->save;
 
     memcpy(n->intercepts, c12, sizeof(n->intercepts));
-    // Nothing of vector 5 but the INVLPGB and INVPCID intercepts yet.
-    n->intercepts[5] &= SVM_INTERCEPT_INVLPGB | SVM_INTERCEPT_INVPCID;
+    // Of vector 5, the INVLPGB intercepts where the processor has INVLPGB, the
+    // TLBSYNC one where it has TlbiCtl, and the INVPCID one.
+    uint32_t invlpgb = n->vmcb01->control.intercept_misc3 & SVM_INTERCEPT_INVLPGB;
+    n->intercepts[5] &= (invlpgb != 0 ? SVM_INTERCEPT_INVLPGB | SVM_INTERCEPT_INVLPGB_ILLEGAL : 0)
+                      | (svm_tlbictl ? SVM_INTERCEPT_TLBSYNC : 0) | SVM_INTERCEPT_INVPCID;
     n->vintr12 = c12->vintr;
     n->window = false;
     n->tsc_offset12 = c12->tsc_offset;
@@ -1080,7 +1084,9 @@ static void prepare_vmcb02(struct nsvm *n) {
     c->exitinfo1 = 0;
     c->exitinfo2 = 0;
     c->exitintinfo = 0;
-    c->np_enable = vmcb01->control.np_enable;
+    // VMCB12's TlbiCtl, where the processor has it.
+    c->np_enable = (vmcb01->control.np_enable & ~SVM_NP_INVLPGB)
+                 | (svm_tlbictl ? c12->np_enable & SVM_NP_INVLPGB : 0);
     c->n_cr3 = gpt_root();
     if (n->npt) {
         const struct vmcb_save *s01 = &vmcb01->save;
@@ -1272,10 +1278,27 @@ static void invlpga(struct vcpu *v) {
     vcpu_advance(v, insn.length);
 }
 
+// The guest's guest's INVLPGB, as VMCB12's TlbiCtl enables it where the
+// processor has TlbiCtl (APM 24594 rev. 3.39, INVLPGB).
+bool nsvm_tlbi_enabled(struct vcpu *v) {
+    struct nsvm *n = v->nsvm;
+    return n == NULL || !n->in_l2 || !svm_tlbictl
+        || (n->copy.control.np_enable & SVM_NP_INVLPGB) != 0;
+}
+
 // An ASID needs EFER.SVME, and one the processor has (APM 24594 rev. 3.39,
 // INVLPGB).
 uint32_t nsvm_invlpgb_asids(struct vcpu *v) {
     return nsvm_svme(v) ? nasid - 1 : 1;
+}
+
+bool nsvm_invlpgb_illegal(struct vcpu *v) {
+    struct nsvm *n = v->nsvm;
+    if (n == NULL || !n->in_l2 || (n->intercepts[5] & SVM_INTERCEPT_INVLPGB_ILLEGAL) == 0) {
+        return false;
+    }
+    exit_to_l1(v, n, SVM_EXIT_INVLPGB_ILLEGAL, 0, 0, v->vmcb->control.exitintinfo, true);
+    return true;
 }
 
 // A guest's INVLPGB is for its own ASID (APM 24594 rev. 3.39, INVLPGB), so is

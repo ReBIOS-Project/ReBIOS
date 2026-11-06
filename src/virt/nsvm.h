@@ -32,10 +32,14 @@ void nsvm_vcpu_init(struct vcpu *v);
 
 // The guest's SVM instructions, by the exits they cause.
 void nsvm_instruction(struct vcpu *v, uint64_t code);
-// For INVLPGB (svm.c): how many ASIDs it may name, 1 without EFER.SVME, and
-// the processor's ASID it is for, and whether it is one ASID's rather than
-// every one's.
+// For INVLPGB (svm.c): whether the guest's guest has it enabled, as TlbiCtl
+// has the guest do; how many ASIDs it may name, 1 without EFER.SVME; whether
+// the guest intercepts its guest's illegal one, which then exits; and the
+// processor's ASID it is for, and whether it is one ASID's rather than every
+// one's.
+bool nsvm_tlbi_enabled(struct vcpu *v);
 uint32_t nsvm_invlpgb_asids(struct vcpu *v);
+bool nsvm_invlpgb_illegal(struct vcpu *v);
 bool nsvm_invlpgb_asid(struct vcpu *v, bool named, uint32_t asid, uint32_t *processor);
 // The guest's VM_CR and VM_HSAVE_PA.
 bool nsvm_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault);

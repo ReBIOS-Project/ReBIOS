@@ -67,11 +67,10 @@ bool svm_avic_ext_lvt_reads;
 // 15-9), sparing the host's translations.
 bool svm_flush_by_asid;
 static bool vmcb_clean_bits;
-// The guest's INVLPGB and TLBSYNC, which TlbiCtl has the hypervisor enable
-// (APM 24593 rev. 3.46, Table B-1), and which run without it. TLBSYNC needs no
+// The guest's INVLPGB and TLBSYNC, which TlbiCtl enables. TLBSYNC needs no
 // intercept, as INVLPGB's broadcast takes the guest's ASID, the same on every
 // vCPU (APM 24594 rev. 3.39, INVLPGB); INVLPGB itself exits, for its faults.
-static bool tlbictl;
+bool svm_tlbictl;
 static bool invlpgb;
 static uint32_t invlpgb_count_max;
 // Nested page faults bring the guest's instruction bytes along (APM 24593 rev.
@@ -194,7 +193,7 @@ bool svm_supported(void) {
     svm_nrips = (features & SVM_FEATURE_NRIPS) != 0;
     svm_flush_by_asid = (features & SVM_FEATURE_FLUSH_BY_ASID) != 0;
     vmcb_clean_bits = (features & SVM_FEATURE_VMCB_CLEAN) != 0;
-    tlbictl = (features & SVM_FEATURE_TLBICTL) != 0;
+    svm_tlbictl = (features & SVM_FEATURE_TLBICTL) != 0;
     struct cpuid_regs sizes = cpuid(0x80000008, 0);
     invlpgb = (sizes.ebx & CPUID_80000008_EBX_INVLPGB) != 0;
     invlpgb_count_max = sizes.edx & 0xffff;
@@ -300,7 +299,7 @@ void svm_vcpu_init(struct vcpu *v) {
     if (svm_eraps) {
         c->rap_control = SVM_RAP_ALLOW_LARGER | SVM_RAP_CLEAR;
     }
-    c->np_enable = SVM_NP_ENABLE | (tlbictl ? SVM_NP_INVLPGB : 0);
+    c->np_enable = SVM_NP_ENABLE | (svm_tlbictl ? SVM_NP_INVLPGB : 0);
     c->n_cr3 = gpt_root();
     // The guest's DebugCtl and last branch records, from the save area's
     // power-on zeros, are its own (APM 24593 rev. 3.45, 15.23.1).
@@ -454,13 +453,13 @@ noreturn void svm_shutdown(struct vcpu *v, const char *why) {
 #define INVLPGB_ECX ((uint32_t)0x8000ffff)
 
 // The guest's INVLPGB faults as the guest's own EFER and CR4 say rather than
-// as the processor sees them, with the SVME that VMRUN needs. It goes on to
-// the processor with the ASID it is for (nsvm.c) but no PCID, which the host's
-// CR4 does not enable, so it drops that ASID's translations of every PCID, as
-// INVLPGB may.
+// as the processor sees them, with the SVME that VMRUN needs, and in its guest
+// as its VMCB has it. It goes on to the processor with the ASID it is for
+// (nsvm.c) but no PCID, which the host's CR4 does not enable, so it drops that
+// ASID's translations of every PCID, as INVLPGB may.
 static void exit_invlpgb(struct vcpu *v) {
     struct vmcb_save *s = &v->vmcb->save;
-    if ((s->cr0 & CR0_PE) == 0 || (s->rflags & RFLAGS_VM) != 0) {
+    if ((s->cr0 & CR0_PE) == 0 || (s->rflags & RFLAGS_VM) != 0 || !nsvm_tlbi_enabled(v)) {
         vcpu_inject_exception(v, 6, false, 0);
         return;
     }
@@ -475,10 +474,16 @@ static void exit_invlpgb(struct vcpu *v) {
     uint32_t ecx = (uint32_t)v->gprs.rcx & INVLPGB_ECX;
     uint32_t edx = (uint32_t)v->gprs.rdx;
     bool pse_paging = (s->cr0 & CR0_PG) != 0 && (s->cr4 & (CR4_PAE | CR4_PSE)) == CR4_PSE;
-    if (s->cpl != 0 || (rax & INVLPGB_FAULTING) != 0 || edx >> 28 != 0
+    if (s->cpl != 0) {
+        vcpu_inject_exception(v, 13, true, 0);
+        return;
+    }
+    if ((rax & INVLPGB_FAULTING) != 0 || edx >> 28 != 0
      || ((edx >> 16) != 0 && (s->cr4 & CR4_PCIDE) == 0) || (edx & 0xffff) >= nsvm_invlpgb_asids(v)
      || (ecx & 0xffff) > invlpgb_count_max || pse_paging) {
-        vcpu_inject_exception(v, 13, true, 0);
+        if (!nsvm_invlpgb_illegal(v)) {
+            vcpu_inject_exception(v, 13, true, 0);
+        }
         return;
     }
     if (insn.address_size < 8) {

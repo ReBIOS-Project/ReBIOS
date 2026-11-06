@@ -193,7 +193,9 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 
 // Intercept vector 5, at offset 014h.
 #define SVM_INTERCEPT_INVLPGB ((uint32_t)1 << 0)
+#define SVM_INTERCEPT_INVLPGB_ILLEGAL ((uint32_t)1 << 1)
 #define SVM_INTERCEPT_INVPCID ((uint32_t)1 << 2)
+#define SVM_INTERCEPT_TLBSYNC ((uint32_t)1 << 4)
 
 // Exit codes (APM 24593 rev. 3.45, Appendix C).
 #define SVM_EXIT_CR8_READ 0x08
@@ -224,6 +226,7 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 #define SVM_EXIT_SKINIT 0x86
 #define SVM_EXIT_XSETBV 0x8d
 #define SVM_EXIT_INVLPGB 0xa0
+#define SVM_EXIT_INVLPGB_ILLEGAL 0xa1
 #define SVM_EXIT_NPF 0x400
 #define SVM_EXIT_AVIC_INCOMPLETE_IPI 0x401
 #define SVM_EXIT_AVIC_NOACCEL 0x402
@@ -332,6 +335,10 @@ extern bool svm_avic_ext_lvt_reads;
 // address predictor is the guest's to have cleared (svm.c).
 extern bool svm_flush_by_asid;
 extern bool svm_eraps;
+// TlbiCtl: the hypervisor enables its guests' INVLPGB and TLBSYNC, which run
+// without it on processors that lack it, and TLBSYNC can be intercepted (APM
+// 24593 rev. 3.46, Table B-1).
+extern bool svm_tlbictl;
 // The processor's VM_CR as the firmware left it.
 extern uint64_t svm_firmware_vm_cr;
 
