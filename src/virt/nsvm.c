@@ -320,7 +320,8 @@ bool nsvm_in_l2(struct vcpu *v) {
 struct cpuid_regs nsvm_cpuid(void) {
     struct cpuid_regs svm = cpuid(0x8000000a, 0);
     uint32_t features = SVM_FEATURE_NP | SVM_FEATURE_NRIPS | SVM_FEATURE_VMCB_CLEAN
-                      | SVM_FEATURE_FLUSH_BY_ASID;
+                      | SVM_FEATURE_FLUSH_BY_ASID | SVM_FEATURE_PAUSE_FILTER
+                      | SVM_FEATURE_PAUSE_FILTER_THRESHOLD;
     return (struct cpuid_regs){ svm.eax & 0xff, nasid - 1, 0, svm.edx & features };
 }
 
@@ -991,8 +992,10 @@ static void prepare_vmcb02(struct nsvm *n) {
     n->tsc_offset12 = c12->tsc_offset;
     merge_intercepts(n);
 
-    c->pause_filter_threshold = 0;
-    c->pause_filter_count = 0;
+    // The guest's PAUSE filter, as the hypervisor intercepts no PAUSE itself
+    // (APM 24593 rev. 3.46, 15.14.4).
+    c->pause_filter_threshold = c12->pause_filter_threshold;
+    c->pause_filter_count = c12->pause_filter_count;
     c->iopm_base_pa = (uintptr_t)iopm02;
     c->msrpm_base_pa = merge_msrpm(n, c12->msrpm_base_pa);
     c->guest_asid = c12->guest_asid + 1;

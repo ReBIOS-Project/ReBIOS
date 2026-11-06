@@ -263,6 +263,8 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 #define SVM_FEATURE_VMCB_CLEAN ((uint32_t)1 << 5)
 #define SVM_FEATURE_FLUSH_BY_ASID ((uint32_t)1 << 6)
 #define SVM_FEATURE_DECODE_ASSISTS ((uint32_t)1 << 7)
+#define SVM_FEATURE_PAUSE_FILTER ((uint32_t)1 << 10)
+#define SVM_FEATURE_PAUSE_FILTER_THRESHOLD ((uint32_t)1 << 12)
 #define SVM_FEATURE_AVIC ((uint32_t)1 << 13)
 #define SVM_FEATURE_VGIF ((uint32_t)1 << 16)
 #define SVM_FEATURE_X2AVIC ((uint32_t)1 << 18)
