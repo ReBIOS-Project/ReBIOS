@@ -87,8 +87,9 @@ static const struct leaf_bits intel_leaves[] = {
     // CMPSB/SCASB, FRED, LKGS, WRMSRNS, AMX_FP16, HRESET, AVX_IFMA, LAM; EBX
     // PPIN, CPUIDMAXVAL_LIM_RMV; ECX RDT-M asymmetric, RDT-A asymmetric; EDX
     // AVX_VNNI_INT8, AVX_NE_CONVERT, AMX_COMPLEX, AVX_VNNI_INT16, PREFETCHI,
-    // UIRET_UIF, CET_SSS, AVX10, MWAIT.
-    { 0x7, 1, { 0x04ee1df7, 0x00000009, 0x00000003, 0x008e4530 } },
+    // UIRET_UIF, CET_SSS, AVX10, APX_F, MWAIT (APX_F as Intel APX 355828-009,
+    // 3.1.4.3.1 defines it).
+    { 0x7, 1, { 0x04ee1df7, 0x00000009, 0x00000003, 0x00ae4530 } },
     // EDX PSFD, IPRED_CTRL, RRSBA_CTRL, DDPD_U, BHI_CTRL, MCDT_NO, UC-lock
     // disable, MONITOR_MITG_NO.
     { 0x7, 2, { 0x00000000, 0x00000000, 0x00000000, 0x000000ff } },
@@ -98,8 +99,9 @@ static const struct leaf_bits intel_leaves[] = {
     // EAX shift; EBX processors; ECX level, type; EDX x2APIC ID.
     { 0xb, SUBLEAF_ALL, { 0x0000001f, 0x0000ffff, 0x0000ffff, 0xffffffff } },
     // EAX x87, SSE, AVX, BNDREGS, BNDCSR, opmask, ZMM_Hi256, Hi16_ZMM, PKRU,
-    // TILECFG, TILEDATA; EBX size enabled; ECX size supported.
-    { 0xd, 0, { 0x000602ff, 0xffffffff, 0xffffffff, 0x00000000 } },
+    // TILECFG, TILEDATA, APX; EBX size enabled; ECX size supported (APX as
+    // Intel APX 355828-009, 3.1.4.3.2 defines it).
+    { 0xd, 0, { 0x000e02ff, 0xffffffff, 0xffffffff, 0x00000000 } },
     // EAX XSAVEOPT, XSAVEC, XGETBV1, XSAVES, XFD; EBX size enabled; ECX PT,
     // CET_U, CET_S, HDC, UINTR, LBR, HWP.
     { 0xd, 1, { 0x0000001f, 0xffffffff, 0x0001f900, 0x00000000 } },
@@ -197,6 +199,8 @@ static const struct leaf_bits intel_leaves[] = {
     { 0x28, 5, { 0x00000fff, 0x00000000, 0x00000008, 0x0000ffff } },
     // EAX thread enable, package enable.
     { 0x28, 6, { 0x00000003, 0x00000000, 0x00000000, 0x00000000 } },
+    // EAX last subleaf; EBX APX_NCI_NDD_NF (Intel APX 355828-009, 3.1.4.3.1).
+    { 0x29, 0, { 0xffffffff, 0x00000001, 0x00000000, 0x00000000 } },
     // nothing.
     { 0x80000000, SUBLEAF_ALL, { 0x00000000, 0x00000000, 0x00000000, 0x00000000 } },
     // ECX LAHF/SAHF, LZCNT, PREFETCHW; EDX SYSCALL, NX, 1 GiB pages, RDTSCP,
@@ -332,7 +336,7 @@ static const struct leaf_bits amd_leaves[] = {
 };
 
 // The last leaves the tables have.
-#define INTEL_LAST_BASIC 0x28
+#define INTEL_LAST_BASIC 0x29
 #define INTEL_LAST_EXTENDED 0x80000008
 #define AMD_LAST_BASIC 0x10
 #define AMD_LAST_EXTENDED 0x80000026
@@ -346,7 +350,7 @@ struct last_subleaf {
 
 static const struct last_subleaf intel_last_subleaves[] = {
     { 0x7, 2 }, { 0x14, 1 }, { 0x17, 3 }, { 0x1d, 1 }, { 0x20, 0 },
-    { 0x24, 1 }
+    { 0x24, 1 }, { 0x29, 0 }
 };
 
 static const struct last_subleaf amd_last_subleaves[] = {

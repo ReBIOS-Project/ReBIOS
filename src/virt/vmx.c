@@ -938,23 +938,12 @@ static void vmx_handle_task_switch(struct vcpu *v, uint64_t qual) {
 }
 
 // The access types of control register exits' qualification (SDM 325462-093
-// Vol. 3C, Table 30-3).
+// Vol. 3C, Table 30-3), whose register number APX widens to bits 12:8 (Intel
+// APX 355828-009, Table 3.12).
 #define CR_ACCESS_MOV_TO 0
 #define CR_ACCESS_MOV_FROM 1
 #define CR_ACCESS_CLTS 2
 #define CR_ACCESS_LMSW 3
-
-static uint64_t guest_reg(struct vcpu *v, unsigned int reg) {
-    return reg == 4 ? vmx_read(VMCS_GUEST_RSP) : ((uint64_t *)&v->gprs)[reg];
-}
-
-static void set_guest_reg(struct vcpu *v, unsigned int reg, uint64_t value) {
-    if (reg == 4) {
-        vmx_write(VMCS_GUEST_RSP, value);
-    } else {
-        ((uint64_t *)&v->gprs)[reg] = value;
-    }
-}
 
 // Whether the processor takes CR0 and CR4 values, the old ones then the new,
 // as the guest sees them: the #GP(0) cases of MOV to CR0 and CR4 (SDM
@@ -1052,11 +1041,11 @@ static void cr_write(struct vcpu *v, unsigned int cr, uint64_t value) {
 static void vmx_handle_cr_access(struct vcpu *v, uint64_t qual) {
     unsigned int cr = qual & 15;
     unsigned int type = (qual >> 4) & 3;
-    unsigned int reg = (qual >> 8) & 15;
+    unsigned int reg = (qual >> 8) & 31;
     uint64_t cr0 = vcpu_cr0(v);
     switch (type) {
         case CR_ACCESS_MOV_TO: {
-            uint64_t value = guest_reg(v, reg);
+            uint64_t value = vcpu_gpr(v, reg);
             // Outside 64-bit mode the move takes the register's low 32 bits.
             if ((vmx_read(VMCS_GUEST_EFER) & EFER_LMA) == 0
              || (vmx_read(VMCS_GUEST_CS_AR) & VMX_AR_L) == 0) {
@@ -1079,7 +1068,7 @@ static void vmx_handle_cr_access(struct vcpu *v, uint64_t qual) {
             break;
         }
         case CR_ACCESS_MOV_FROM: {
-            set_guest_reg(v, reg, cr == 3 ? vmx_read(VMCS_GUEST_CR3) : vlapic_cr8(v));
+            vcpu_set_gpr(v, reg, cr == 3 ? vmx_read(VMCS_GUEST_CR3) : vlapic_cr8(v));
             vcpu_skip_instruction(v);
             break;
         }

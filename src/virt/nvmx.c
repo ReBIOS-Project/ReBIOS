@@ -117,7 +117,7 @@ static const uint16_t fields[] = {
     0x080e, 0x0810, 0x0812, 0x0c00, 0x0c02, 0x0c04, 0x0c06, 0x0c08, 0x0c0a,
     0x0c0c, 0x2000, 0x2002, 0x2004, 0x2006, 0x2008, 0x200a, 0x200e, 0x2010,
     0x2012, 0x2014, 0x2016, 0x2018, 0x201a, 0x202c, 0x2032, 0x201c, 0x201e,
-    0x2020, 0x2022, 0x2024, 0x2026, 0x2028, 0x2400, 0x2800, 0x2802, 0x2804,
+    0x2020, 0x2022, 0x2024, 0x2026, 0x2028, 0x2400, 0x2406, 0x2800, 0x2802, 0x2804,
     0x2806, 0x280a, 0x280c, 0x280e, 0x2810, 0x2c00, 0x2c02, 0x4000, 0x4002,
     0x4004, 0x4006, 0x4008, 0x400a, 0x400c, 0x400e, 0x4010, 0x4012, 0x4014,
     0x4016, 0x4018, 0x401a, 0x401c, 0x401e, 0x4020, 0x4022, 0x4400, 0x4402,
@@ -237,6 +237,9 @@ static uint64_t cap_vmfunc;
 static unsigned int cr3_targets;
 // The VMX-preemption timer counts TSC >> timer_rate.
 static unsigned int timer_rate;
+// Whether the guest has APX, and its VMCSs the processor's extended
+// instruction information with it (Intel APX 355828-009, 3.1.4.4.1).
+static bool apx_info;
 // Whether VMCS shadowing serves the guest, and its bitmaps.
 static bool shadowing;
 static uint8_t *vmread_bitmap;
@@ -363,6 +366,7 @@ void nvmx_init(void) {
         uint32_t field = fields[i];
         field_slots[FIELD_WIDTH(field)][FIELD_TYPE(field)][FIELD_INDEX(field)] = (uint8_t)(i + 1);
     }
+    apx_info = (cpuid_xcr0_allowed() & XCR0_APX) != 0;
 
     uint64_t basic = vmx_capability(MSR_IA32_VMX_BASIC);
     cap_basic = VMCS12_REVISION | (uint64_t)4096 << BASIC_SIZE_SHIFT | BASIC_MEMTYPE_WB
@@ -495,6 +499,9 @@ static bool field_offered(uint32_t field) {
         case VMCS_TSC_MULTIPLIER: {
             return (proc2 & PROC2_TSC_SCALING) != 0;
         }
+        case VMCS_EXIT_EXT_INSTR_INFO: {
+            return apx_info;
+        }
         case VMCS_PLE_GAP:
         case VMCS_PLE_WINDOW: {
             return (proc2 & PROC2_PAUSE_LOOP_EXITING) != 0;
@@ -565,39 +572,42 @@ static bool long_mode_64(struct vcpu *v) {
     return (vcpu_efer(v) & EFER_LMA) != 0 && (cs.attrib & SEG_L) != 0;
 }
 
-static uint64_t guest_reg(struct vcpu *v, unsigned int reg) {
-    return reg == 4 ? vcpu_rsp(v) : ((const uint64_t *)&v->gprs)[reg];
-}
-
-static void set_guest_reg(struct vcpu *v, unsigned int reg, uint64_t value) {
-    if (reg == 4) {
-        vcpu_set_rsp(v, value);
-    } else {
-        ((uint64_t *)&v->gprs)[reg] = value;
-    }
-}
-
-// Instruction information (SDM 325462-093 Vol. 3C, Tables 30-14 and 30-15).
+// Instruction information, as APX's extended field has it, with 5-bit register
+// numbers (Intel APX 355828-009, Table 3.11).
 #define INFO_SCALE(info) ((info) & 3)
-#define INFO_REG1(info) ((info) >> 3 & 15)
-#define INFO_ADDRESS_SIZE(info) ((info) >> 7 & 7)
-#define INFO_REGISTER ((uint32_t)1 << 10)
-#define INFO_SEGMENT(info) ((info) >> 15 & 7)
-#define INFO_INDEX(info) ((info) >> 18 & 15)
-#define INFO_NO_INDEX ((uint32_t)1 << 22)
-#define INFO_BASE(info) ((info) >> 23 & 15)
-#define INFO_NO_BASE ((uint32_t)1 << 27)
-#define INFO_REG2(info) ((info) >> 28 & 15)
+#define INFO_ADDRESS_SIZE(info) ((info) >> 2 & 3)
+#define INFO_REGISTER ((uint64_t)1 << 4)
+#define INFO_SEGMENT(info) ((info) >> 7 & 7)
+#define INFO_NO_INDEX ((uint64_t)1 << 10)
+#define INFO_NO_BASE ((uint64_t)1 << 11)
+#define INFO_REG1(info) ((info) >> 16 & 31)
+#define INFO_INDEX(info) ((info) >> 24 & 31)
+#define INFO_BASE(info) ((info) >> 32 & 31)
+#define INFO_REG2(info) ((info) >> 40 & 31)
+
+// The instruction information of the exit at hand: the processor's extended
+// field where it has APX, which a hypervisor giving its guest APX reads, else
+// the field it extends (SDM 325462-093 Vol. 3C, Tables 30-14 and 30-15) laid
+// out alike (Intel APX 355828-009, 3.1.4.4.1).
+static uint64_t exit_instr_info(void) {
+    if (apx_info) {
+        return vmx_read(VMCS_EXIT_EXT_INSTR_INFO);
+    }
+    uint64_t info = vmx_read(VMCS_EXIT_INSTR_INFO);
+    return (info & 3) | (info >> 7 & 3) << 2 | (info >> 10 & 1) << 4 | (info >> 15 & 7) << 7
+         | (info >> 22 & 1) << 10 | (info >> 27 & 1) << 11 | (info >> 3 & 15) << 16
+         | (info >> 18 & 15) << 24 | (info >> 23 & 15) << 32 | (info >> 28 & 15) << 40;
+}
 
 // The linear address of a VMX instruction's memory operand, or false with the
 // fault raised.
-static bool operand_address(struct vcpu *v, uint32_t info, size_t size, uint64_t *linear) {
+static bool operand_address(struct vcpu *v, uint64_t info, size_t size, uint64_t *linear) {
     uintptr_t address = vmx_read(VMCS_EXIT_QUALIFICATION);
     if ((info & INFO_NO_BASE) == 0) {
-        address += guest_reg(v, INFO_BASE(info));
+        address += vcpu_gpr(v, INFO_BASE(info));
     }
     if ((info & INFO_NO_INDEX) == 0) {
-        address += guest_reg(v, INFO_INDEX(info)) << INFO_SCALE(info);
+        address += vcpu_gpr(v, INFO_INDEX(info)) << INFO_SCALE(info);
     }
     switch (INFO_ADDRESS_SIZE(info)) {
         case 0: {
@@ -637,7 +647,7 @@ static bool operand_address(struct vcpu *v, uint32_t info, size_t size, uint64_t
     return true;
 }
 
-static bool read_operand64(struct vcpu *v, uint32_t info, uint64_t *value) {
+static bool read_operand64(struct vcpu *v, uint64_t info, uint64_t *value) {
     uintptr_t linear;
     return operand_address(v, info, 8, &linear) && mmio_read_linear(v, linear, value, 8);
 }
@@ -672,7 +682,7 @@ static bool valid_address(uintptr_t addr) {
     return (addr & 0xfff) == 0 && (addr >> phys_width) == 0;
 }
 
-static void vmxon(struct vcpu *v, struct nvmx *n, uint32_t info) {
+static void vmxon(struct vcpu *v, struct nvmx *n, uint64_t info) {
     if (n->vmxon) {
         fail(v, ERROR_VMXON_IN_ROOT);
         return;
@@ -722,7 +732,7 @@ static void vmxoff(struct vcpu *v, struct nvmx *n) {
     succeed(v);
 }
 
-static void vmclear(struct vcpu *v, struct nvmx *n, uint32_t info) {
+static void vmclear(struct vcpu *v, struct nvmx *n, uint64_t info) {
     uintptr_t addr;
     if (!read_operand64(v, info, &addr)) {
         return;
@@ -746,7 +756,7 @@ static void vmclear(struct vcpu *v, struct nvmx *n, uint32_t info) {
     succeed(v);
 }
 
-static void vmptrld(struct vcpu *v, struct nvmx *n, uint32_t info) {
+static void vmptrld(struct vcpu *v, struct nvmx *n, uint64_t info) {
     uintptr_t addr;
     if (!read_operand64(v, info, &addr)) {
         return;
@@ -778,7 +788,7 @@ static void vmptrld(struct vcpu *v, struct nvmx *n, uint32_t info) {
     succeed(v);
 }
 
-static void vmptrst(struct vcpu *v, struct nvmx *n, uint32_t info) {
+static void vmptrst(struct vcpu *v, struct nvmx *n, uint64_t info) {
     uintptr_t linear;
     if (!operand_address(v, info, 8, &linear) || !mmio_write_linear(v, linear, &n->current, 8)) {
         return;
@@ -789,10 +799,10 @@ static void vmptrst(struct vcpu *v, struct nvmx *n, uint32_t info) {
 // Outside 64-bit mode, VMREAD and VMWRITE take 32-bit operands (SDM 325462-093
 // Vol. 3C, 33.3). They access a VMCS region given, while their failures go to
 // the current VMCS.
-static void vmread_in(struct vcpu *v, uint8_t *vmcs, uint32_t info) {
+static void vmread_in(struct vcpu *v, uint8_t *vmcs, uint64_t info) {
     bool wide = long_mode_64(v);
-    uint32_t field = (uint32_t)guest_reg(v, INFO_REG2(info));
-    int slot = wide && (guest_reg(v, INFO_REG2(info)) >> 32) != 0 ? -1 : field_slot(field);
+    uint32_t field = (uint32_t)vcpu_gpr(v, INFO_REG2(info));
+    int slot = wide && (vcpu_gpr(v, INFO_REG2(info)) >> 32) != 0 ? -1 : field_slot(field);
     if (slot < 0) {
         fail(v, ERROR_UNSUPPORTED_FIELD);
         return;
@@ -805,7 +815,7 @@ static void vmread_in(struct vcpu *v, uint8_t *vmcs, uint32_t info) {
         value &= 0xffffffff;
     }
     if ((info & INFO_REGISTER) != 0) {
-        set_guest_reg(v, INFO_REG1(info), value);
+        vcpu_set_gpr(v, INFO_REG1(info), value);
     } else {
         uintptr_t linear;
         size_t size = wide ? 8 : 4;
@@ -818,11 +828,11 @@ static void vmread_in(struct vcpu *v, uint8_t *vmcs, uint32_t info) {
 }
 
 // Returns whether it wrote the field, then in *written.
-static bool vmwrite_in(struct vcpu *v, uint8_t *vmcs, uint32_t info, uint32_t *written) {
+static bool vmwrite_in(struct vcpu *v, uint8_t *vmcs, uint64_t info, uint32_t *written) {
     bool wide = long_mode_64(v);
     uint64_t value = 0;
     if ((info & INFO_REGISTER) != 0) {
-        value = guest_reg(v, INFO_REG1(info));
+        value = vcpu_gpr(v, INFO_REG1(info));
     } else {
         uintptr_t linear;
         size_t size = wide ? 8 : 4;
@@ -834,8 +844,8 @@ static bool vmwrite_in(struct vcpu *v, uint8_t *vmcs, uint32_t info, uint32_t *w
     if (!wide) {
         value &= 0xffffffff;
     }
-    uint32_t field = (uint32_t)guest_reg(v, INFO_REG2(info));
-    int slot = wide && (guest_reg(v, INFO_REG2(info)) >> 32) != 0 ? -1 : field_slot(field);
+    uint32_t field = (uint32_t)vcpu_gpr(v, INFO_REG2(info));
+    int slot = wide && (vcpu_gpr(v, INFO_REG2(info)) >> 32) != 0 ? -1 : field_slot(field);
     if (slot < 0) {
         fail(v, ERROR_UNSUPPORTED_FIELD);
         return false;
@@ -870,7 +880,7 @@ static bool vmwrite_in(struct vcpu *v, uint8_t *vmcs, uint32_t info, uint32_t *w
     return true;
 }
 
-static void vmread(struct vcpu *v, struct nvmx *n, uint32_t info) {
+static void vmread(struct vcpu *v, struct nvmx *n, uint64_t info) {
     if (n->vmcs12 == NULL) {
         fail_invalid(v);
         return;
@@ -878,7 +888,7 @@ static void vmread(struct vcpu *v, struct nvmx *n, uint32_t info) {
     vmread_in(v, n->vmcs12, info);
 }
 
-static void vmwrite(struct vcpu *v, struct nvmx *n, uint32_t info) {
+static void vmwrite(struct vcpu *v, struct nvmx *n, uint64_t info) {
     if (n->vmcs12 == NULL) {
         fail_invalid(v);
         return;
@@ -2287,9 +2297,15 @@ static void exit_to_l1(
         for (size_t i = 0; i < ARRAY_COUNT(exit_fields); i++) {
             set12(n, exit_fields[i], vmx_read(exit_fields[i]));
         }
+        if (apx_info) {
+            set12(n, VMCS_EXIT_EXT_INSTR_INFO, vmx_read(VMCS_EXIT_EXT_INSTR_INFO));
+        }
     } else if (!failed) {
         for (size_t i = 0; i < ARRAY_COUNT(exit_fields); i++) {
             set12(n, exit_fields[i], 0);
+        }
+        if (apx_info) {
+            set12(n, VMCS_EXIT_EXT_INSTR_INFO, 0);
         }
         set12(n, VMCS_EXIT_INTR_INFO, intr_info);
         set12(n, VMCS_EXIT_INTR_ERROR, intr_error);
@@ -2478,13 +2494,13 @@ static void vmlaunch(struct vcpu *v, struct nvmx *n, bool resume) {
     atomic_store_explicit(&n->inactive, (int)activity, memory_order_seq_cst);
 }
 
-static uint64_t operand_register(struct vcpu *v, uint32_t info) {
-    uint64_t value = guest_reg(v, INFO_REG2(info));
+static uint64_t operand_register(struct vcpu *v, uint64_t info) {
+    uint64_t value = vcpu_gpr(v, INFO_REG2(info));
     return long_mode_64(v) ? value : value & 0xffffffff;
 }
 
 // The 128-bit descriptor INVEPT and INVVPID take.
-static bool read_descriptor(struct vcpu *v, uint32_t info, uint64_t desc[2]) {
+static bool read_descriptor(struct vcpu *v, uint64_t info, uint64_t desc[2]) {
     uintptr_t linear;
     if (!operand_address(v, info, 16, &linear) || !mmio_read_linear(v, linear, &desc[0], 8)) {
         return false;
@@ -2496,7 +2512,7 @@ static bool read_descriptor(struct vcpu *v, uint32_t info, uint64_t desc[2]) {
     return mmio_read_linear(v, high, &desc[1], 8);
 }
 
-static void invept(struct vcpu *v, struct nvmx *n, uint32_t info) {
+static void invept(struct vcpu *v, struct nvmx *n, uint64_t info) {
     uint64_t type = operand_register(v, info);
     if (!(type == 1 && (cap_ept_vpid & CAP_INVEPT_SINGLE) != 0)
      && !(type == 2 && (cap_ept_vpid & CAP_INVEPT_ALL) != 0)) {
@@ -2529,7 +2545,7 @@ static void invept(struct vcpu *v, struct nvmx *n, uint32_t info) {
     succeed(v);
 }
 
-static void invvpid(struct vcpu *v, struct nvmx *n, uint32_t info) {
+static void invvpid(struct vcpu *v, struct nvmx *n, uint64_t info) {
     static const uint64_t types[] = {
         CAP_INVVPID_ADDRESS, CAP_INVVPID_SINGLE, CAP_INVVPID_ALL,
         CAP_INVVPID_GLOBALS
@@ -2574,7 +2590,7 @@ void nvmx_instruction(struct vcpu *v, uint32_t reason) {
         vcpu_inject_exception(v, 13, true, 0);
         return;
     }
-    uint32_t info = (uint32_t)vmx_read(VMCS_EXIT_INSTR_INFO);
+    uint64_t info = exit_instr_info();
     switch (reason) {
         case EXIT_REASON_VMXON: {
             vmxon(v, n, info);
@@ -2787,7 +2803,7 @@ static bool l1_wants(struct vcpu *v, const struct nvmx *n, uint32_t reason, uint
             // differ from its read shadow (SDM 325462-093 Vol. 3C, 28.1.3),
             // else for a bit of the hypervisor's.
             if (cr == 4 && to) {
-                uint64_t value = guest_reg(v, (qual >> 8) & 15);
+                uint64_t value = vcpu_gpr(v, (qual >> 8) & 31);
                 if (!long_mode_64(v)) {
                     value = (uint32_t)value;
                 }
@@ -2807,16 +2823,16 @@ static bool l1_wants(struct vcpu *v, const struct nvmx *n, uint32_t reason, uint
 // The guest's guest's MOV to and from CR8, where the guest does not take them:
 // the guest's local APIC's TPR.
 static void cr8_access(struct vcpu *v, uint64_t qual) {
-    unsigned int reg = (qual >> 8) & 15;
+    unsigned int reg = (qual >> 8) & 31;
     if (((qual >> 4) & 3) == 0) {
-        uint64_t value = guest_reg(v, reg);
+        uint64_t value = vcpu_gpr(v, reg);
         if (value >> 4 != 0) {
             vcpu_inject_exception(v, 13, true, 0);
             return;
         }
         vlapic_set_cr8(v, (uint32_t)value);
     } else {
-        set_guest_reg(v, reg, vlapic_cr8(v));
+        vcpu_set_gpr(v, reg, vlapic_cr8(v));
     }
     vcpu_skip_instruction(v);
 }
@@ -2905,7 +2921,7 @@ static bool shadow_access(struct vcpu *v, struct nvmx *n, uint32_t reason) {
     if ((proc2_12(n) & PROC2_VMCS_SHADOWING) == 0) {
         return false;
     }
-    uint32_t info = (uint32_t)vmx_read(VMCS_EXIT_INSTR_INFO);
+    uint64_t info = exit_instr_info();
     uint64_t field = operand_register(v, info);
     uintptr_t bitmap = get12(
         n, reason == EXIT_REASON_VMREAD ? VMCS_VMREAD_BITMAP : VMCS_VMWRITE_BITMAP
