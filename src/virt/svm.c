@@ -53,6 +53,7 @@
 #define SVM_FEATURE_VGIF ((uint32_t)1 << 16)
 #define SVM_FEATURE_TLBICTL ((uint32_t)1 << 24)
 #define SVM_FEATURE_VNMI ((uint32_t)1 << 25)
+#define SVM_FEATURE_EXT_LVT_AVIC_ACCESS ((uint32_t)1 << 27)
 
 #define CPUID_80000001_ECX_OSVW ((uint32_t)1 << 9)
 #define CPUID_80000008_EBX_INVLPGB ((uint32_t)1 << 3)
@@ -72,6 +73,7 @@ bool svm_nrips;
 bool svm_vnmi;
 bool svm_avic;
 bool svm_x2avic;
+bool svm_avic_ext_lvt_reads;
 // TLB_CONTROL can flush the guest's ASID alone (APM 24593 rev. 3.45, Table
 // 15-9), sparing the host's translations.
 static bool flush_by_asid;
@@ -229,6 +231,7 @@ bool svm_supported(void) {
              || (setting == HANDOFF_AVIC_AUTO && (features & SVM_FEATURE_X2AVIC) != 0
               && (zen4 || signature.family >= 0x1a)));
     svm_x2avic = svm_avic && (features & SVM_FEATURE_X2AVIC) != 0;
+    svm_avic_ext_lvt_reads = svm_avic && (features & SVM_FEATURE_EXT_LVT_AVIC_ACCESS) != 0;
     eraps = cpuid(0x80000000, 0).eax >= 0x80000021
          && (cpuid(0x80000021, 0).eax & CPUID_80000021_EAX_ERAPS) != 0;
     return true;

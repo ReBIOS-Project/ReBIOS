@@ -19,11 +19,14 @@
 #define VIRT__VLAPIC_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <virt/vcpu.h>
 
 // Vectors the hypervisor takes its own interrupts on at the processor's local
-// APIC, which guests use for none of their MSIs and I/O APIC entries.
+// APIC, which guests use for none of their MSIs and I/O APIC entries: from the
+// first, one for each of AMD's extended LVT entries.
+#define VLAPIC_EILVT_VECTOR 0xf0
 #define VLAPIC_PERF_VECTOR 0xf8
 #define VLAPIC_THERMAL_VECTOR 0xf9
 #define VLAPIC_NESTED_POSTED_VECTOR 0xfa
@@ -102,6 +105,9 @@ void vlapic_thermal_fired(struct vcpu *v);
 // The processor's performance monitoring interrupt, which the vCPU's entry for
 // it asks for, came.
 void vlapic_perf_fired(struct vcpu *v);
+// The processor's interrupt for one of its extended LVT entries, which the
+// vCPU's entry asks for, came.
+void vlapic_eilvt_fired(struct vcpu *v, size_t entry);
 
 // The vector of the interrupt the vCPU takes next, or -1, and taking it.
 int vlapic_pending(struct vcpu *v);

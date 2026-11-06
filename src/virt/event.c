@@ -242,6 +242,11 @@ void event_interrupt(uint8_t vector) {
             break;
         }
     }
+    if (vector >= VLAPIC_EILVT_VECTOR && vector < VLAPIC_EILVT_VECTOR + APIC_EILVT_MAX) {
+        lapic_eoi();
+        vlapic_eilvt_fired(v, vector - VLAPIC_EILVT_VECTOR);
+        return;
+    }
     if (irq_host_vector(vector)) {
         irq_host_interrupt(vector);
         return;

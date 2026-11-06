@@ -260,13 +260,14 @@ static const struct leaf_bits amd_leaves[] = {
     // EBX vendor; ECX vendor; EDX vendor.
     { 0x80000000, SUBLEAF_ALL, { 0x00000000, 0xffffffff, 0xffffffff, 0xffffffff } },
     // EAX stepping, base model, base family, extended model, extended family;
-    // EBX brand ID, package type; ECX LAHF/SAHF, CmpLegacy, AltMovCr8, ABM,
-    // SSE4A, MisAlignSse, 3DNowPrefetch, OSVW, XOP, FMA4, TCE, TBM, topology
-    // extensions, PerfCtrExtCore, PerfCtrExtNB, DataBkptExt, PerfTsc,
-    // PerfCtrExtLLC, MONITORX, AddrMaskExt; EDX FPU, VME, DE, PSE, TSC, MSR,
-    // PAE, MCE, CMPXCHG8B, SYSCALL, MTRR, PGE, MCA, CMOV, PAT, PSE36, NX,
-    // MmxExt, MMX, FXSR, FFXSR, 1 GiB pages, RDTSCP, LM, 3DNowExt, 3DNow.
-    { 0x80000001, SUBLEAF_ALL, { 0x0fff0fff, 0xf000ffff, 0x7de30bf3, 0xefd3f9ff } },
+    // EBX brand ID, package type; ECX LAHF/SAHF, CmpLegacy, ExtApicSpace,
+    // AltMovCr8, ABM, SSE4A, MisAlignSse, 3DNowPrefetch, OSVW, XOP, FMA4, TCE,
+    // TBM, topology extensions, PerfCtrExtCore, PerfCtrExtNB, DataBkptExt,
+    // PerfTsc, PerfCtrExtLLC, MONITORX, AddrMaskExt; EDX FPU, VME, DE, PSE,
+    // TSC, MSR, PAE, MCE, CMPXCHG8B, SYSCALL, MTRR, PGE, MCA, CMOV, PAT,
+    // PSE36, NX, MmxExt, MMX, FXSR, FFXSR, 1 GiB pages, RDTSCP, LM, 3DNowExt,
+    // 3DNow.
+    { 0x80000001, SUBLEAF_ALL, { 0x0fff0fff, 0xf000ffff, 0x7de30bfb, 0xefd3f9ff } },
     // EAX name; EBX name; ECX name; EDX name.
     { 0x80000002, SUBLEAF_ALL, { 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff } },
     // EAX name; EBX name; ECX name; EDX name.

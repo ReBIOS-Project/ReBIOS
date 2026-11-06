@@ -265,6 +265,10 @@ extern bool svm_vnmi;
 // whether it runs x2APIC mode's MSRs too (APM 24593 rev. 3.45, 15.29.10).
 extern bool svm_avic;
 extern bool svm_x2avic;
+// AVIC reads AMD's extended LVT entries from the backing page and traps writes
+// to them, where it otherwise faults on both (APM 24593 rev. 3.46, Table
+// 15-22; APM 24594 rev. 3.39, CPUID Fn8000_000A_EDX[ExtLvtAvicAccessChg]).
+extern bool svm_avic_ext_lvt_reads;
 
 bool svm_supported(void);
 // The guest's translations go before its next run, as when the hypervisor

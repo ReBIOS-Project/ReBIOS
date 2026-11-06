@@ -50,6 +50,8 @@
 // 16.3.6, 16.4.5).
 #define APIC_EXT_FEATURE 0x400
 #define APIC_EXT_CONTROL 0x410
+#define APIC_SEOI 0x420
+#define APIC_IER 0x480
 #define APIC_EILVT 0x500
 #define APIC_EILVT_MAX 8
 

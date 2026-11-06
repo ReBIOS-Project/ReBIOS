@@ -75,6 +75,15 @@
 #define LVT_TIMER_PERIODIC ((uint32_t)1 << 17)
 #define LVT_TIMER_TSC_DEADLINE ((uint32_t)2 << 17)
 #define CPUID_1_ECX_TSC_DEADLINE ((uint32_t)1 << 24)
+// What AMD's extended feature register says the space has, each turned on by
+// the control register's bit at its position (APM 24593 rev. 3.46, 16.3.5,
+// 16.3.6): the interrupt enable registers, specific EOIs, and 8-bit APIC IDs.
+#define EXT_IER ((uint32_t)1 << 0)
+#define EXT_SEOI ((uint32_t)1 << 1)
+#define EXT_APIC_ID ((uint32_t)1 << 2)
+#define EXT_CONTROL_BITS (EXT_IER | EXT_SEOI | EXT_APIC_ID)
+// The vector, message type, and mask (APM 24593 rev. 3.46, 16.4.5).
+#define EILVT_WRITABLE ((uint32_t)0x107ff)
 
 #define MSR_AVIC_DOORBELL 0xc001011b
 // The physical APIC ID table's entries and the logical one's (APM 24593 rev.
@@ -186,6 +195,11 @@ static void regs_and(struct vlapic *vl, uint32_t offset, uint32_t bits) {
 
 static uint32_t host_version;
 static bool tsc_deadline_mode;
+// AMD's extended APIC space, where the processor has one: its feature register
+// as the guest reads it, and its extended LVT entries.
+static bool ext_space;
+static uint32_t ext_feature;
+static size_t eilvt_count;
 
 // The Max LVT Entry of the version register each LVT entry needs (SDM
 // 325462-093 Vol. 3A, 13.4.8): those beyond it are not there.
@@ -204,11 +218,22 @@ static bool lvt_reg_present(uint32_t reg) {
     return true;
 }
 
+static uint32_t eilvt_reg(size_t i) {
+    return APIC_EILVT + (uint32_t)i * 0x10;
+}
+
+static uint32_t ier_reg(size_t i) {
+    return APIC_IER + (uint32_t)i * 0x10;
+}
+
 // What a legacy BIOS hands the boot processor's local APIC over with.
 static uint32_t legacy_svr;
 static uint32_t legacy_lint0;
 static uint32_t legacy_lint1;
 static uint32_t legacy_thermal;
+static uint32_t legacy_ext_control;
+static uint32_t legacy_ier[8];
+static uint32_t legacy_eilvt[APIC_EILVT_MAX];
 
 // Pages the guest has had its local APICs at, which all exit, but for the
 // accesses the processor virtualises.
@@ -321,6 +346,22 @@ void vlapic_init(void) {
     legacy_lint1 = lapic_read(APIC_LVT_LINT1);
     if (lvt_present(LVT_THERMAL)) {
         legacy_thermal = lapic_read(APIC_LVT_THERMAL);
+    }
+    if (!virt_vmx && (host_version & APIC_VERSION_EXT_SPACE) != 0) {
+        uint32_t feature = lapic_read(APIC_EXT_FEATURE);
+        ext_space = true;
+        eilvt_count = (feature >> 16) & 0xff;
+        if (eilvt_count > APIC_EILVT_MAX) {
+            eilvt_count = APIC_EILVT_MAX;
+        }
+        ext_feature = (feature & EXT_CONTROL_BITS) | (uint32_t)eilvt_count << 16;
+        legacy_ext_control = lapic_read(APIC_EXT_CONTROL) & ext_feature & EXT_CONTROL_BITS;
+        for (size_t i = 0; i < 8; i++) {
+            legacy_ier[i] = (feature & EXT_IER) != 0 ? lapic_read(ier_reg(i)) : 0xffffffff;
+        }
+        for (size_t i = 0; i < eilvt_count; i++) {
+            legacy_eilvt[i] = lapic_read(eilvt_reg(i)) & EILVT_WRITABLE;
+        }
     }
     if (virt_vmx && vmx_secondary_allowed(PROC2_VIRT_APIC_ACCESSES)) {
         uint8_t *page = page_alloc(1);
@@ -461,6 +502,52 @@ static int highest(const struct vlapic *vl, uint32_t base) {
     return -1;
 }
 
+// Whether AMD's interrupt enable registers hold requests back (PPR 57238 rev.
+// 0.49, 2.1.13.2.1.8).
+static bool ier_on(const struct vlapic *vl) {
+    return ext_space && (regs_get(vl, APIC_EXT_CONTROL) & EXT_IER) != 0;
+}
+
+// Whether they hold any vector back, of those that can be requested.
+static bool ier_holds_back(const struct vlapic *vl) {
+    if (!ier_on(vl)) {
+        return false;
+    }
+    for (size_t i = 0; i < 8; i++) {
+        uint32_t enabled = regs_get(vl, ier_reg(i));
+        if (i == 0) {
+            enabled |= 0xffff;
+        }
+        if (enabled != 0xffffffff) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The highest request that takes part in prioritisation: the others stay
+// requested.
+static int highest_request(const struct vlapic *vl) {
+    if (!ier_on(vl)) {
+        return highest(vl, APIC_IRR);
+    }
+    for (size_t i = 8; i-- > 0; ) {
+        uint32_t word = regs_get(vl, APIC_IRR + (uint32_t)i * 0x10) & regs_get(vl, ier_reg(i));
+        if (word != 0) {
+            return i * 32 + 31 - __builtin_clz(word);
+        }
+    }
+    return -1;
+}
+
+// Whether the local APIC matches xAPIC mode's physical destinations by 4-bit
+// IDs, broadcast being xxxx1111b, where the guest left AMD's 8-bit ones off
+// (APM 24593 rev. 3.46, 16.3.6).
+static bool short_ids(const struct vlapic *vl) {
+    return (ext_feature & EXT_APIC_ID) != 0 && !x2apic(vl)
+        && (regs_get(vl, APIC_EXT_CONTROL) & EXT_APIC_ID) == 0;
+}
+
 static uint32_t tpr_get(const struct vlapic *vl) {
     return regs_get(vl, APIC_TPR) & 0xff;
 }
@@ -579,42 +666,48 @@ static void timer_mode_changed(struct vlapic *vl, uint32_t old_mode) {
     }
 }
 
-// The processor's thermal interrupt, on the hypervisor's vector while the
-// guest's entry asks for an interrupt or an NMI, and its SMIs, which go to the
-// firmware, as the guest's entry has them.
-static void thermal_lvt(const struct vlapic *vl) {
-    if (!lvt_present(LVT_THERMAL)) {
-        return;
-    }
-    uint32_t lvt = regs_get(vl, APIC_LVT_THERMAL);
+// The processor's entry for an interrupt of its own that the guest's entry at
+// the same offset asks for: the hypervisor's vector while that asks for an
+// interrupt or an NMI, and its SMIs, which go to the firmware, as the guest's
+// entry has them.
+static void host_lvt(const struct vlapic *vl, uint32_t reg, uint8_t vector) {
+    uint32_t lvt = regs_get(vl, reg);
     uint32_t mode = lvt & LVT_DELIVERY_MASK;
     uint32_t host = APIC_LVT_MASKED;
     if (mode == LVT_DELIVERY_SMI) {
         host = lvt;
     } else if ((lvt & APIC_LVT_MASKED) == 0
             && (mode == LVT_DELIVERY_FIXED || mode == LVT_DELIVERY_NMI)) {
-        host = VLAPIC_THERMAL_VECTOR;
+        host = vector;
     }
-    lapic_write(APIC_LVT_THERMAL, host);
+    lapic_write(reg, host);
 }
 
-// The processor's performance monitoring interrupt, on the hypervisor's vector
-// while the guest's entry asks for an interrupt or an NMI, and its SMIs, which
-// go to the firmware, as the guest's entry has them.
+// The processor's thermal interrupt.
+static void thermal_lvt(const struct vlapic *vl) {
+    if (lvt_present(LVT_THERMAL)) {
+        host_lvt(vl, APIC_LVT_THERMAL, VLAPIC_THERMAL_VECTOR);
+    }
+}
+
+// The processor's performance monitoring interrupt.
 static void perf_lvt(const struct vlapic *vl) {
-    if (!lvt_present(LVT_PERF)) {
-        return;
+    if (lvt_present(LVT_PERF)) {
+        host_lvt(vl, APIC_LVT_PERF, VLAPIC_PERF_VECTOR);
     }
-    uint32_t lvt = regs_get(vl, APIC_LVT_PERF);
-    uint32_t mode = lvt & LVT_DELIVERY_MASK;
-    uint32_t host = APIC_LVT_MASKED;
-    if (mode == LVT_DELIVERY_SMI) {
-        host = lvt;
-    } else if ((lvt & APIC_LVT_MASKED) == 0
-            && (mode == LVT_DELIVERY_FIXED || mode == LVT_DELIVERY_NMI)) {
-        host = VLAPIC_PERF_VECTOR;
+}
+
+// The processor's interrupts for its extended LVT entries, which the firmware
+// assigns to sources such as MCA thresholding (PPR 57238 rev. 0.49,
+// APICx5[0...3]0).
+static void eilvt_lvt(const struct vlapic *vl, size_t i) {
+    host_lvt(vl, eilvt_reg(i), (uint8_t)(VLAPIC_EILVT_VECTOR + i));
+}
+
+static void eilvt_lvts(const struct vlapic *vl) {
+    for (size_t i = 0; i < eilvt_count; i++) {
+        eilvt_lvt(vl, i);
     }
-    lapic_write(APIC_LVT_PERF, host);
 }
 
 // As a local APIC in either mode reads it (SDM 325462-093 Vol. 3C, 32.1.6.2).
@@ -743,13 +836,16 @@ static bool avic_decide(bool *map) {
     spinlock_release(&avic_lock);
     bool any_xapic = false;
     bool any_x2apic = false;
+    bool any_short_ids = false;
     uint32_t max_id = 0;
     for (size_t i = 0; i < smp_cpu_count(); i++) {
         struct vcpu *to = smp_cpu(i)->vcpu;
         if (to == NULL || to->vlapic == NULL) {
             continue;
         }
-        want = want && !vlapic_extint_open(to);
+        // It delivers what AMD's interrupt enable registers hold back.
+        want = want && !vlapic_extint_open(to) && !ier_holds_back(to->vlapic);
+        any_short_ids = any_short_ids || short_ids(to->vlapic);
         if (x2apic(to->vlapic)) {
             any_x2apic = true;
         } else {
@@ -763,6 +859,12 @@ static bool avic_decide(bool *map) {
     // all of which xAPIC mode's broadcasts are to reach, and, before x2AVIC,
     // the 8-bit IDs its doorbells name (APM 24593 rev. 3.45, Figure 15-22).
     if (max_id > (svm_x2avic && !any_xapic ? X2AVIC_MAX_ID : AVIC_MAX_ID)) {
+        want = false;
+    }
+    // Its table matches 8-bit IDs, and 4-bit ones match alike while every
+    // vCPU's is below 15, their broadcast (BKDG 42301 rev. 3.14, 2.4.8.1.3):
+    // AVIC exits for the destinations no vCPU has.
+    if (any_short_ids && max_id >= 0xf) {
         want = false;
     }
     *map = want && !any_x2apic;
@@ -882,9 +984,26 @@ static void reset_registers(struct vcpu *v) {
     }
     regs_set(vl, APIC_TIMER_INITIAL, 0);
     regs_set(vl, APIC_TIMER_DIVIDE, 0);
+    if (ext_space) {
+        // 8-bit APIC IDs stay on: the firmware turns them on (BKDG 42301 rev.
+        // 3.14, APIC410), Linux 7.3 never, and starting the APs of a processor
+        // with more than 16 in xAPIC mode needs them.
+        regs_set(vl, APIC_EXT_CONTROL, regs_get(vl, APIC_EXT_CONTROL) & EXT_APIC_ID);
+        regs_set(vl, APIC_SEOI, 0);
+        for (size_t i = 0; i < 8; i++) {
+            regs_set(vl, ier_reg(i), 0xffffffff);
+        }
+        // Masked, as PPR 57238 rev. 0.49 has them, where APM 24593 rev. 3.46's
+        // Table 16-2 has 0, which Linux 7.3 takes for an entry in use (apic.c,
+        // eilvt_entry_is_changeable()).
+        for (size_t i = 0; i < eilvt_count; i++) {
+            regs_set(vl, eilvt_reg(i), APIC_LVT_MASKED);
+        }
+    }
     timer_stop(vl);
     thermal_lvt(vl);
     perf_lvt(vl);
+    eilvt_lvts(vl);
     mirror_logical(vl);
     avic_recheck_soon();
 }
@@ -955,15 +1074,29 @@ void vlapic_create(struct vcpu *v) {
     }
     reset_registers(v);
     access_virtualisation(vl);
+    if (ext_space) {
+        // Its processor's 8-bit APIC IDs, as the firmware left them.
+        regs_set(vl, APIC_EXT_CONTROL, lapic_read(APIC_EXT_CONTROL) & ext_feature & EXT_APIC_ID);
+    }
     if (v->cpu->bsp) {
         // Its LINT entries as lapic_legacy_init() set the processor's, and its
-        // thermal entry as that left the firmware's.
+        // thermal entry and extended space as that left the firmware's.
         regs_set(vl, APIC_SVR, legacy_svr & SVR_WRITABLE);
         regs_set(vl, APIC_LVT_LINT0, legacy_lint0 & lvt_writable[LVT_LINT0]);
         regs_set(vl, APIC_LVT_LINT1, legacy_lint1 & lvt_writable[LVT_LINT1]);
         if (lvt_present(LVT_THERMAL)) {
             regs_set(vl, APIC_LVT_THERMAL, legacy_thermal & lvt_writable[LVT_THERMAL]);
             thermal_lvt(vl);
+        }
+        if (ext_space) {
+            regs_set(vl, APIC_EXT_CONTROL, legacy_ext_control);
+            for (size_t i = 0; i < 8; i++) {
+                regs_set(vl, ier_reg(i), legacy_ier[i]);
+            }
+            for (size_t i = 0; i < eilvt_count; i++) {
+                regs_set(vl, eilvt_reg(i), legacy_eilvt[i]);
+            }
+            eilvt_lvts(vl);
         }
     }
 }
@@ -1102,8 +1235,8 @@ void vlapic_tsc_offset_changed(struct vcpu *v) {
     }
 }
 
-void vlapic_thermal_fired(struct vcpu *v) {
-    uint32_t lvt = regs_get(v->vlapic, APIC_LVT_THERMAL);
+// What the vCPU's entry asks of a local interrupt that came.
+static void local_interrupt(struct vcpu *v, uint32_t lvt) {
     if ((lvt & APIC_LVT_MASKED) != 0) {
         return;
     }
@@ -1114,21 +1247,24 @@ void vlapic_thermal_fired(struct vcpu *v) {
     }
 }
 
+void vlapic_thermal_fired(struct vcpu *v) {
+    local_interrupt(v, regs_get(v->vlapic, APIC_LVT_THERMAL));
+}
+
 void vlapic_perf_fired(struct vcpu *v) {
     struct vlapic *vl = v->vlapic;
     uint32_t lvt = regs_get(vl, APIC_LVT_PERF);
-    if ((lvt & APIC_LVT_MASKED) != 0) {
-        return;
-    }
     // Intel's local APICs mask the entry as they deliver the interrupt, as the
     // processor's has (SDM 325462-093 Vol. 3A, 13.5.1); AMD's do not.
-    if (virt_vmx) {
+    if (virt_vmx && (lvt & APIC_LVT_MASKED) == 0) {
         regs_set(vl, APIC_LVT_PERF, lvt | APIC_LVT_MASKED);
     }
-    if ((lvt & LVT_DELIVERY_MASK) == LVT_DELIVERY_FIXED) {
-        vlapic_accept(v, (uint8_t)lvt, false);
-    } else if ((lvt & LVT_DELIVERY_MASK) == LVT_DELIVERY_NMI) {
-        atomic_store_explicit(&v->cpu->nmi_pending, true, memory_order_release);
+    local_interrupt(v, lvt);
+}
+
+void vlapic_eilvt_fired(struct vcpu *v, size_t entry) {
+    if (entry < eilvt_count) {
+        local_interrupt(v, regs_get(v->vlapic, eilvt_reg(entry)));
     }
 }
 
@@ -1138,7 +1274,7 @@ int vlapic_pending(struct vcpu *v) {
         return -1;
     }
     merge(vl);
-    int irr = highest(vl, APIC_IRR);
+    int irr = highest_request(vl);
     if (irr < 0 || ((uint32_t)irr & 0xf0) <= (ppr(vl) & 0xf0)) {
         return -1;
     }
@@ -1159,7 +1295,7 @@ int vlapic_tpr_held(struct vcpu *v) {
         return -1;
     }
     merge(vl);
-    int irr = highest(vl, APIC_IRR);
+    int irr = highest_request(vl);
     int isrv = highest(vl, APIC_ISR);
     if (irr < 0 || (isrv >= 0 && (irr & 0xf0) <= (isrv & 0xf0))) {
         return -1;
@@ -1270,17 +1406,29 @@ void vlapic_after_exit(struct vcpu *v) {
     }
 }
 
-static void eoi(struct vlapic *vl) {
-    int vector = highest(vl, APIC_ISR);
-    if (vector < 0) {
-        return;
-    }
-    set_vector(vl, APIC_ISR, (unsigned int)vector, false);
+static void end_interrupt(struct vlapic *vl, unsigned int vector) {
+    set_vector(vl, APIC_ISR, vector, false);
     // Level-triggered ones end at the I/O APICs too, but where the guest ends
     // them there itself.
-    if (vector_set(vl, APIC_TMR, (unsigned int)vector)
+    if (vector_set(vl, APIC_TMR, vector)
      && (regs_get(vl, APIC_SVR) & SVR_SUPPRESS_EOI_BROADCAST) == 0) {
         irq_mirror_eoi((uint8_t)vector);
+    }
+}
+
+static void eoi(struct vlapic *vl) {
+    int vector = highest(vl, APIC_ISR);
+    if (vector >= 0) {
+        end_interrupt(vl, (unsigned int)vector);
+    }
+}
+
+// AMD's specific EOI ends a vector in service whether or not it is the highest
+// (APM 24593 rev. 3.46, 16.7.1), and one not in service, which PPR 57238 rev.
+// 0.49 leaves undefined, is left alone.
+static void specific_eoi(struct vlapic *vl, unsigned int vector) {
+    if (vector_set(vl, APIC_ISR, vector)) {
+        end_interrupt(vl, vector);
     }
 }
 
@@ -1293,6 +1441,9 @@ static bool matches(const struct vlapic *target, uint32_t dest, bool logical, bo
     if (!logical) {
         if (x2apic_dest) {
             return dest == X2APIC_BROADCAST || dest == target->id;
+        }
+        if (short_ids(target)) {
+            return (dest & 0xf) == 0xf || (dest & 0xf) == (target->id & 0xf);
         }
         return dest == XAPIC_BROADCAST || dest == (target->id & 0xff);
     }
@@ -1457,6 +1608,49 @@ static void send_ipi(struct vcpu *from, uint32_t dest, uint32_t command) {
     }
 }
 
+// Whether AMD's extended space has a register, as the processor's does.
+static bool ext_present(uint32_t reg) {
+    if (!ext_space) {
+        return false;
+    }
+    if (reg == APIC_EXT_FEATURE || reg == APIC_EXT_CONTROL) {
+        return true;
+    }
+    if (reg == APIC_SEOI) {
+        return (ext_feature & EXT_SEOI) != 0;
+    }
+    if (reg >= APIC_IER && reg < ier_reg(8)) {
+        return (ext_feature & EXT_IER) != 0;
+    }
+    return reg >= APIC_EILVT && reg < eilvt_reg(eilvt_count);
+}
+
+static void ext_write(struct vlapic *vl, uint32_t reg, uint32_t value) {
+    if (reg == APIC_EXT_CONTROL) {
+        regs_set(vl, APIC_EXT_CONTROL, value & ext_feature & EXT_CONTROL_BITS);
+        avic_recheck_soon();
+    } else if (reg == APIC_SEOI) {
+        regs_set(vl, APIC_SEOI, value & 0xff);
+        if ((regs_get(vl, APIC_EXT_CONTROL) & EXT_SEOI) != 0) {
+            specific_eoi(vl, value & 0xff);
+        }
+    } else if (reg >= APIC_IER && reg < ier_reg(8)) {
+        // The control register's bit enables writes to them too.
+        if (ier_on(vl)) {
+            regs_set(vl, reg, value);
+            avic_recheck_soon();
+        }
+    } else if (reg >= APIC_EILVT) {
+        value &= EILVT_WRITABLE;
+        // A software disabled local APIC keeps them masked.
+        if (!sw_enabled(vl)) {
+            value |= APIC_LVT_MASKED;
+        }
+        regs_set(vl, reg, value);
+        eilvt_lvt(vl, (reg - APIC_EILVT) / 0x10);
+    }
+}
+
 // Returns false for registers that are not there.
 static bool reg_read(struct vcpu *v, uint32_t reg, uint32_t *value) {
     struct vlapic *vl = v->vlapic;
@@ -1502,6 +1696,10 @@ static bool reg_read(struct vcpu *v, uint32_t reg, uint32_t *value) {
         default: {
             break;
         }
+    }
+    if (ext_present(reg)) {
+        *value = reg == APIC_EXT_FEATURE ? ext_feature : regs_get(vl, reg);
+        return true;
     }
     if (x2) {
         return false;
@@ -1582,8 +1780,12 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
                         regs_set(vl, lvt_regs[i], regs_get(vl, lvt_regs[i]) | APIC_LVT_MASKED);
                     }
                 }
+                for (size_t i = 0; i < eilvt_count; i++) {
+                    regs_set(vl, eilvt_reg(i), regs_get(vl, eilvt_reg(i)) | APIC_LVT_MASKED);
+                }
                 thermal_lvt(vl);
                 perf_lvt(vl);
+                eilvt_lvts(vl);
             }
             avic_recheck_soon();
             return true;
@@ -1615,6 +1817,10 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
         default: {
             break;
         }
+    }
+    if (ext_present(reg)) {
+        ext_write(vl, reg, value);
+        return true;
     }
     if (x2) {
         return false;
@@ -1699,6 +1905,9 @@ void vlapic_avic_ipi_exit(struct vcpu *v, uint64_t info1, uint64_t info2) {
 }
 
 static bool avic_trapped(uint32_t offset) {
+    if (svm_avic_ext_lvt_reads && offset >= APIC_EILVT && offset < eilvt_reg(APIC_EILVT_MAX)) {
+        return true;
+    }
     for (size_t i = 0; i < sizeof(avic_trapped_writes) / sizeof(uint32_t); i++) {
         if (avic_trapped_writes[i] == offset) {
             return true;
@@ -1712,9 +1921,10 @@ void vlapic_avic_access_exit(struct vcpu *v, uint64_t info1) {
     bool write = ((info1 >> 32) & 1) != 0;
     // The write is in the registers already, past its instruction.
     if (write && avic_trapped(offset)) {
-        // Remote Read is read-only.
-        if (offset == APIC_RRD) {
-            regs_set(v->vlapic, APIC_RRD, 0);
+        // Remote Read is read-only, and AMD's extended LVT entries past the
+        // processor's last read as none.
+        if (offset == APIC_RRD || (offset >= APIC_EILVT && !ext_present(offset))) {
+            regs_set(v->vlapic, offset, 0);
         } else {
             vlapic_apic_write(v, offset);
         }
@@ -1859,6 +2069,7 @@ static bool apic_base_write(struct vcpu *v, uint64_t value) {
         id_reg(vl);
         thermal_lvt(vl);
         perf_lvt(vl);
+        eilvt_lvts(vl);
         mirror_logical(vl);
     }
     if (!extd) {
@@ -1934,7 +2145,8 @@ bool vlapic_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
         bool readable = reg == APIC_EOI || reg_read(v, reg, &ignored);
         if (!readable || (value >> 32) != 0 || reg == APIC_ID || reg == APIC_VERSION
          || reg == APIC_PPR || reg == APIC_LDR || reg == APIC_TIMER_CURRENT
-         || (reg >= APIC_ISR && reg < APIC_IRR + 0x80) || !reg_write(v, reg, (uint32_t)value)) {
+         || reg == APIC_EXT_FEATURE || (reg >= APIC_ISR && reg < APIC_IRR + 0x80)
+         || !reg_write(v, reg, (uint32_t)value)) {
             *fault = true;
         }
     }
