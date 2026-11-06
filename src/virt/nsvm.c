@@ -98,6 +98,14 @@
 #define NPF_ID ((uint64_t)1 << 4)
 #define NPF_FINAL ((uint64_t)1 << 32)
 #define NPF_TABLE ((uint64_t)1 << 33)
+// What the walk of the guest's nested page tables gives where page
+// modification logging has no room for the page an access would dirty, which
+// is no error code's.
+#define NPT12_PML_FULL ((uint64_t)1 << 63)
+// Page modification logging, in CPUID Fn8000_000A_ECX, and the last index of
+// its log (APM 24593 rev. 3.46, 15.25.16).
+#define CPUID_8000000A_ECX_PML ((uint32_t)1 << 4)
+#define PML_LAST 0x1ff
 
 #define NPT02_ROOTS 4
 
@@ -182,6 +190,11 @@ struct nsvm {
     // page tables' level only where they set accessed or dirty flags, as
     // VMCB12 may have it (APM 24593 rev. 3.46, 15.25.6.1).
     bool rogpt;
+    // Whether VMCB12 has the guest's guest's writes that set dirty flags log
+    // their pages, and where.
+    bool pml;
+    uint64_t pml_base;
+    uint16_t pml_index;
     struct npt02 npt02[NPT02_ROOTS];
     struct npt02 *current02;
     size_t npt02_pages;
@@ -211,8 +224,10 @@ static size_t npt02_level_max;
 // The DebugCtl bits a guest's guest's last branch records may have: LBR, BTF,
 // and BLCKDB with bus lock traps (APM 24593 rev. 3.46, 13.1.1.6).
 static uint64_t debugctl_bits;
-// Whether the processor has read-only guest page tables.
+// Whether the processor has read-only guest page tables, and page modification
+// logging.
 static bool rogpt;
+static bool pml;
 
 void nsvm_init(void) {
     if (virt_vmx) {
@@ -229,6 +244,7 @@ void nsvm_init(void) {
     npt02_budget = core_handoff->nested_heap_size / PAGE_SIZE / smp_cpu_count();
     npt02_level_max = svm_huge_pages() ? 2 : 1;
     rogpt = (cpuid(0x8000000a, 0).edx & SVM_FEATURE_ROGPT) != 0;
+    pml = (cpuid(0x8000000a, 0).ecx & CPUID_8000000A_ECX_PML) != 0;
     debugctl_bits = DEBUGCTL_LBR | DEBUGCTL_BTF
                   | ((cpuid(7, 0).ecx & CPUID_7_0_ECX_BUSLOCKTRAP) != 0 ? DEBUGCTL_BLCKDB : 0);
     iopm02 = page_alloc(IOPM_SIZE / PAGE_SIZE);
@@ -341,7 +357,9 @@ struct cpuid_regs nsvm_cpuid(void) {
     uint32_t features = SVM_FEATURE_NP | SVM_FEATURE_NRIPS | SVM_FEATURE_VMCB_CLEAN
                       | SVM_FEATURE_FLUSH_BY_ASID | SVM_FEATURE_PAUSE_FILTER
                       | SVM_FEATURE_PAUSE_FILTER_THRESHOLD | SVM_FEATURE_LBRV | SVM_FEATURE_ROGPT;
-    return (struct cpuid_regs){ svm.eax & 0xff, nasid - 1, 0, svm.edx & features };
+    return (struct cpuid_regs){
+        svm.eax & 0xff, nasid - 1, svm.ecx & CPUID_8000000A_ECX_PML, svm.edx & features
+    };
 }
 
 uint64_t nsvm_tsc_offset(struct vcpu *v) {
@@ -523,6 +541,9 @@ static void exit_to_l1(
     s12->cpl = s02->cpl;
     if (n->npt) {
         s12->g_pat = s02->g_pat;
+    }
+    if (n->pml) {
+        vmcb12->control.pml_index = n->pml_index;
     }
 
     // Of the virtual interrupt control, the processor writes back V_TPR and
@@ -818,11 +839,23 @@ retry:;
         if (!user || (write && !writable) || (fetch && !executable)) {
             return error | NPF_P;
         }
+        // A write that sets the dirty flag logs its 4-KByte page, where VMCB12
+        // has it, or is not done for want of room (APM 24593 rev. 3.46,
+        // 15.25.16).
+        bool logs = n->pml && write && (e & NPT_D) == 0;
+        if (logs && n->pml_index > PML_LAST) {
+            return NPT12_PML_FULL;
+        }
         for (size_t l = n->npt_levels; l-- > level; ) {
             uint64_t set = NPT_A | (l == level && write ? NPT_D : 0);
             if ((entries[l] & set) != set && !npt12_mark(n, used[l], entries[l], set)) {
                 goto retry;
             }
+        }
+        if (logs) {
+            uint64_t page = gpa & ~(uint64_t)0xfff;
+            guest_phys_write((n->pml_base & ~(uint64_t)0xfff) + n->pml_index * 8, &page, 8);
+            n->pml_index--;
         }
         uint64_t page_mask = ((uint64_t)1 << shift) - 1;
         if (wide) {
@@ -1060,6 +1093,9 @@ static void prepare_vmcb02(struct nsvm *n) {
         n->npt_smep = (s01->cr4 & CR4_SMEP) != 0;
         n->npt_pat = s01->g_pat;
         n->rogpt = rogpt && (c12->np_enable & SVM_NP_ROGPT) != 0;
+        n->pml = pml && (c12->np_enable & SVM_NP_PML) != 0;
+        n->pml_base = c12->pml_base;
+        n->pml_index = c12->pml_index;
         if (n->rogpt) {
             c->np_enable |= SVM_NP_ROGPT;
         }
@@ -1424,6 +1460,10 @@ static void npt_fault(struct vcpu *v, struct nsvm *n) {
     bool fetch = !walk && (info & NPF_ID) != 0;
     struct npt12_walk w;
     uint64_t error = npt12_walk(n, gpa, write, fetch, &w);
+    if (error == NPT12_PML_FULL) {
+        exit_to_l1(v, n, SVM_EXIT_PML_FULL, 0, 0, c->exitintinfo, false);
+        return;
+    }
     if (error != 0) {
         error |= info & (NPF_FINAL | NPF_TABLE);
         exit_to_l1(v, n, SVM_EXIT_NPF, error, gpa, c->exitintinfo, true);
@@ -1469,6 +1509,12 @@ bool nsvm_npt_translate(
         return true;
     }
     n->pending = true;
+    if (error == NPT12_PML_FULL) {
+        n->pending_code = SVM_EXIT_PML_FULL;
+        n->pending_info1 = 0;
+        n->pending_info2 = 0;
+        return false;
+    }
     n->pending_code = SVM_EXIT_NPF;
     n->pending_info1 = error | (walk ? NPF_TABLE : NPF_FINAL);
     n->pending_info2 = gpa;

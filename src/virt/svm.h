@@ -66,7 +66,10 @@ struct vmcb_control {
     // FRED's event data (AMD 69191 rev. 1.10).
     uint64_t exitintdata;
     uint64_t eventinjdata;
-    uint8_t reserved5[0x400 - 0x180];
+    uint8_t reserved5[0x1c8 - 0x180];
+    uint64_t pml_base;
+    uint16_t pml_index;
+    uint8_t reserved6[0x400 - 0x1d2];
 } __attribute__((packed));
 
 struct vmcb_seg {
@@ -139,6 +142,7 @@ _Static_assert(offsetof(struct vmcb_control, insn_len) == 0xd0, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_control, avic_backing_page) == 0xe0, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_control, avic_physical_table) == 0xf8, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_control, exitintdata) == 0x170, "VMCB layout");
+_Static_assert(offsetof(struct vmcb_control, pml_index) == 0x1d0, "VMCB layout");
 _Static_assert(sizeof(struct vmcb_control) == 0x400, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_save, tr) == 0x90, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_save, cpl) == 0xcb, "VMCB layout");
@@ -223,6 +227,7 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 #define SVM_EXIT_NPF 0x400
 #define SVM_EXIT_AVIC_INCOMPLETE_IPI 0x401
 #define SVM_EXIT_AVIC_NOACCEL 0x402
+#define SVM_EXIT_PML_FULL 0x407
 #define SVM_EXIT_INVALID ((uint64_t)0xffffffffffffffff)
 
 // Nested page fault error code: the access was a write, or a fetch.
@@ -276,6 +281,7 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 // Nested paging and what goes with it, at offset 090h.
 #define SVM_NP_ENABLE ((uint64_t)1 << 0)
 #define SVM_NP_ROGPT ((uint64_t)1 << 6)
+#define SVM_NP_PML ((uint64_t)1 << 11)
 #define SVM_NP_INVLPGB ((uint64_t)1 << 7)
 
 // Virtualisation extensions, at offset 0B8h.
