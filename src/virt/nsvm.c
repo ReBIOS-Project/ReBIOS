@@ -314,11 +314,13 @@ bool nsvm_in_l2(struct vcpu *v) {
     return v->nsvm != NULL && v->nsvm->in_l2;
 }
 
-// The processor's revision, its ASIDs but the guest's own, nested paging, and
-// the processor's NRIP saving.
+// The processor's revision, its ASIDs but the guest's own, and the features of
+// its SVM that the guest's has. VMCB12 is read whole at every VMRUN, as clean
+// bits allow (APM 24593 rev. 3.46, 15.15.1).
 struct cpuid_regs nsvm_cpuid(void) {
-    uint32_t edx = SVM_FEATURE_NP | (svm_nrips ? SVM_FEATURE_NRIPS : 0);
-    return (struct cpuid_regs){ cpuid(0x8000000a, 0).eax & 0xff, nasid - 1, 0, edx };
+    struct cpuid_regs svm = cpuid(0x8000000a, 0);
+    uint32_t features = SVM_FEATURE_NP | SVM_FEATURE_NRIPS | SVM_FEATURE_VMCB_CLEAN;
+    return (struct cpuid_regs){ svm.eax & 0xff, nasid - 1, 0, svm.edx & features };
 }
 
 uint64_t nsvm_tsc_offset(struct vcpu *v) {
