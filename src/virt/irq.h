@@ -24,6 +24,8 @@
 #include <sys/cpu.h>
 #include <virt/vcpu.h>
 
+struct remap_target;
+
 // The host's interrupts reach the guest through its virtual 8259s and I/O
 // APICs: puts the host in APIC mode for good, masks its 8259s, and routes the
 // ISA IRQs as the MADT has them. Needs vioapic_init().
@@ -102,10 +104,10 @@ bool irq_slot_fixed(struct irq_slot *s, struct cpu *cpu, uint8_t vector);
 // The message a source sends for the slot's first vector, which a source of
 // several puts its vector's index in the low bits of data of.
 void irq_slot_message(struct irq_slot *s, uint32_t *address, uint32_t *data);
-// Where the IOMMUs send a remapped slot's messages: posted to the
-// posted-interrupt descriptor at descriptor, as the vectors from vector on, or
-// for 0 to the slot's own vectors, as irq_slot_message() has them.
-void irq_slot_route(struct irq_slot *s, uintptr_t descriptor, uint8_t vector);
+// Where the IOMMUs send a remapped slot's messages: posted to a vCPU, as the
+// vectors from vector on, where they can, or for NULL to the slot's own
+// vectors, as irq_slot_message() has them.
+void irq_slot_route(struct irq_slot *s, const struct remap_target *target, uint8_t vector);
 // An I/O APIC entry for the slot's vector, with the line's trigger mode and
 // polarity.
 uint64_t irq_slot_rte(struct irq_slot *s, bool level, bool active_low);

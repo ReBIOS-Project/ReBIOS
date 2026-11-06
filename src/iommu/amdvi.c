@@ -21,14 +21,18 @@
 #include <stdint.h>
 #include <iommu/amdvi.h>
 #include <hw/ioapic.h>
+#include <hw/lapic.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
 #include <iommu/iommu_tables.h>
+#include <iommu/remap.h>
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
 #include <lib/time.h>
+#include <sys/cpu.h>
 #include <sys/mm.h>
+#include <sys/smp.h>
 #include <sys/x86.h>
 
 #define REG_DEVICE_TABLE 0x0000
@@ -37,11 +41,15 @@
 #define REG_CONTROL 0x0018
 #define REG_EXCLUSION_BASE 0x0020
 #define REG_FEATURES 0x0030
+#define REG_GA_LOG 0x00e0
+#define REG_GA_LOG_TAIL_ADDRESS 0x00e8
 #define REG_COMMAND_HEAD 0x2000
 #define REG_COMMAND_TAIL 0x2008
 #define REG_EVENT_HEAD 0x2010
 #define REG_EVENT_TAIL 0x2018
 #define REG_STATUS 0x2020
+#define REG_GA_LOG_HEAD 0x2040
+#define REG_GA_LOG_TAIL 0x2048
 
 #define CONTROL_IOMMU_EN ((uint64_t)1 << 0)
 #define CONTROL_EVENT_LOG_EN ((uint64_t)1 << 2)
@@ -49,6 +57,8 @@
 #define CONTROL_COMMAND_BUFFER_EN ((uint64_t)1 << 12)
 #define CONTROL_GA_EN ((uint64_t)1 << 17)
 #define CONTROL_GAM_GUEST_VAPIC ((uint64_t)1 << 25)
+#define CONTROL_GA_LOG_EN ((uint64_t)1 << 28)
+#define CONTROL_GA_INT_EN ((uint64_t)1 << 29)
 // What firmware may have turned on that ReBIOS does not use: interrupt
 // enables, peripheral page requests, guest translation, guest virtual APIC,
 // dual logs, and device table segmentation, along with the enables above.
@@ -62,10 +72,25 @@
 #define STATUS_EVENT_OVERFLOW ((uint64_t)1 << 0)
 #define STATUS_EVENT_LOG_RUN ((uint64_t)1 << 3)
 #define STATUS_COMMAND_BUFFER_RUN ((uint64_t)1 << 4)
+#define STATUS_GA_LOG_RUN ((uint64_t)1 << 8)
+#define STATUS_GA_OVERFLOW ((uint64_t)1 << 9)
+#define STATUS_GA_INT ((uint64_t)1 << 10)
 
 // 256 entries of 16 bytes, the least the length fields allow.
 #define LOG_LENGTH_256 ((uint64_t)8 << 56)
 #define LOG_ENTRIES 256
+
+// The GA log of interrupts for vCPUs that did not run: 512 entries of 8 bytes,
+// the least its length field allows, and the opcode of an entry for one, with
+// the entry's GATag in bits 31:0 (AMD IOMMU 48882 rev. 3.11, MMIO Offset
+// 00E0h, Table 76).
+#define GA_LOG_LENGTH_512 ((uint64_t)8 << 56)
+#define GA_LOG_ENTRIES 512
+#define GA_OPCODE_SHIFT 60
+#define GA_GUEST_NR 0x1
+// Rounds of clearing the GA log's interrupt status and reading the entries
+// before it, until it reads as clear.
+#define GA_ROUNDS 4
 
 #define DEVICE_IDS 65536
 // The device table holds every device ID, in (511 + 1) 4KiB pages.
@@ -103,6 +128,18 @@
 #define IRTE_REMAP_EN ((uint32_t)1 << 0)
 #define IRTE_DEST_SHIFT 8
 #define IRTE_VECTOR_SHIFT 16
+// With GuestMode, an entry posts to a guest virtual APIC: its backing page's
+// address in place in the high half, with the vector, and its doorbell's
+// destination, 8 bits wide without x2APIC support (AMD IOMMU 48882 rev. 3.11,
+// Table 23, Figure 20).
+#define IRTE_GA_LOG_INTR ((uint64_t)1 << 2)
+#define IRTE_IS_RUN ((uint64_t)1 << 6)
+#define IRTE_GUEST_MODE ((uint64_t)1 << 7)
+#define IRTE_GA_TAG_SHIFT 32
+#define IRTE_GA_ROOT_MASK ((uint64_t)0x000ffffffffff000)
+// The highest APIC ID an 8-bit physical destination names, 0xff being
+// broadcast.
+#define MAX_DEST_ID 0xfe
 #define MSI_ADDRESS ((uint32_t)0xfee00000)
 #define RTE_ACTIVE_LOW ((uint64_t)1 << 13)
 #define RTE_LEVEL ((uint64_t)1 << 15)
@@ -121,14 +158,35 @@
 #define CMD_PAGES_SIZE ((uint32_t)1 << 0)
 #define CMD_PAGES_PDE ((uint32_t)1 << 1)
 
+// PCI Local Bus Specification 3.0, 6.8.1: MSI's Message Control register and
+// the registers after it.
+#define MSI_CONTROL 2
+#define MSI_ENABLE ((uint32_t)0x0001)
+#define MSI_MME_MASK ((uint32_t)0x0070)
+#define MSI_WIDE ((uint32_t)0x0080)
+#define MSI_ADDRESS_LOW 4
+#define MSI_ADDRESS_HIGH 8
+#define MSI_DATA_NARROW 8
+#define MSI_DATA_WIDE 0xc
+
 #define TIMEOUT_NS ((uint64_t)1000000000)
+// As long as Linux 7.3's iommu_ga_log_enable() waits for the log to start.
+#define GA_LOG_TIMEOUT_NS ((uint64_t)20000000)
 
 struct amdvi_unit {
     uintptr_t base;
+    // The function whose MSI capability the unit's own interrupts use.
+    struct pci_addr function;
     uint32_t *commands;
     uint32_t command_tail;
     uint32_t *events;
     _Atomic(uint64_t) wait_done;
+    // The GA log, the entry to read next, where the unit keeps a copy of its
+    // tail, and whether its interrupt status may have been left set.
+    uint64_t *ga_log;
+    uint32_t ga_head;
+    _Atomic(uint64_t) ga_tail;
+    bool ga_unsettled;
 };
 
 // A table in pages of its own: its entries of either format, the ones in use,
@@ -160,6 +218,23 @@ static bool remap_enabled;
 // The tables' entries are in the guest virtual APIC's format.
 static bool wide_entries;
 static struct spinlock remap_lock;
+
+// The entries that post to each vCPU, by its tag, whose IsRun follows whether
+// it runs: under its lock, which remap_lock comes before, and which entries
+// they are under remap_lock too.
+#define TARGET_ENTRIES 64
+struct post_target {
+    struct spinlock lock;
+    bool running;
+    size_t count;
+    uint64_t *entries[TARGET_ENTRIES];
+};
+static struct post_target *targets;
+static size_t target_count;
+// Every unit logs the interrupts it posts for vCPUs that do not run, and
+// interrupts the processor that reads the logs on ga_vector.
+static bool posting;
+static uint8_t ga_vector;
 
 #define EVENT_WRITE_TIMEOUT_NS ((uint64_t)1000000)
 #define L2_CONFIG_INDEX 0xf0
@@ -285,11 +360,10 @@ bool amdvi_probe(const struct iommu_tables *tables, size_t *leaf_level) {
         }
         const struct iommu_unit *t = &tables->units[i];
         uint16_t rid = t->amd_rid;
-        erratum_746(
-            (struct pci_addr){
-                t->segment, (uint8_t)(rid >> 8), (uint8_t)(rid >> 3 & 0x1f), (uint8_t)(rid & 7)
-            }
-        );
+        u->function = (struct pci_addr){
+            t->segment, (uint8_t)(rid >> 8), (uint8_t)(rid >> 3 & 0x1f), (uint8_t)(rid & 7)
+        };
+        erratum_746(u->function);
         printf(
             "AMD-Vi unit %zu at %#llx: features %#llx, control %#llx\n", i,
             (unsigned long long)u->base, (unsigned long long)reg_read(u, REG_FEATURES),
@@ -401,9 +475,68 @@ void amdvi_enable(uintptr_t root) {
     }
 }
 
+// The unit's own interrupts, which it sends unremapped through its function's
+// MSI capability (AMD IOMMU 48882 rev. 3.11, Capability Offset 10h), as Linux
+// 7.3 has them without the units' x2APIC support: fixed, to the processor with
+// the APIC ID, at vector.
+static bool unit_msi(const struct amdvi_unit *u, uint32_t apic_id, uint8_t vector) {
+    const struct pci_function *f = pci_enum_find(u->function);
+    if (f == NULL || f->msi_cap == 0 || apic_id > MAX_DEST_ID) {
+        return false;
+    }
+    uint32_t cap = f->msi_cap;
+    uint32_t control = pci_cfg_read(u->function, cap + MSI_CONTROL, 2)
+                     & ~(MSI_ENABLE | MSI_MME_MASK);
+    pci_cfg_write(u->function, cap + MSI_CONTROL, 2, control);
+    pci_cfg_write(
+        u->function, cap + MSI_ADDRESS_LOW, 4, MSI_ADDRESS | apic_id << MSI_ADDRESS_DEST_SHIFT
+    );
+    uint32_t data = MSI_DATA_NARROW;
+    if ((control & MSI_WIDE) != 0) {
+        pci_cfg_write(u->function, cap + MSI_ADDRESS_HIGH, 4, 0);
+        data = MSI_DATA_WIDE;
+    }
+    pci_cfg_write(u->function, cap + data, 2, vector);
+    pci_cfg_write(u->function, cap + MSI_CONTROL, 2, control | MSI_ENABLE);
+    return true;
+}
+
+// The GA log, started as Linux 7.3's iommu_ga_log_enable() starts it, with the
+// unit interrupting for its entries.
+static bool ga_log_start(struct amdvi_unit *u, uint32_t apic_id, uint8_t vector) {
+    if (!unit_msi(u, apic_id, vector)) {
+        printf(
+            "AMD-Vi unit at %#llx cannot interrupt the processor with APIC ID %#x\n",
+            (unsigned long long)u->base, apic_id
+        );
+        return false;
+    }
+    u->ga_log = page_alloc(1);
+    u->ga_head = 0;
+    u->ga_unsettled = false;
+    atomic_store_explicit(&u->ga_tail, 0, memory_order_relaxed);
+    reg_write(u, REG_GA_LOG, (uint64_t)(uintptr_t)u->ga_log | GA_LOG_LENGTH_512);
+    reg_write(u, REG_GA_LOG_TAIL_ADDRESS, (uint64_t)(uintptr_t)&u->ga_tail);
+    reg_write(u, REG_GA_LOG_HEAD, 0);
+    reg_write(u, REG_GA_LOG_TAIL, 0);
+    reg_write(u, REG_STATUS, STATUS_GA_INT | STATUS_GA_OVERFLOW);
+    reg_write(u, REG_CONTROL, reg_read(u, REG_CONTROL) | CONTROL_GA_INT_EN | CONTROL_GA_LOG_EN);
+    uint64_t deadline = time_ns() + GA_LOG_TIMEOUT_NS;
+    while ((reg_read(u, REG_STATUS) & STATUS_GA_LOG_RUN) == 0) {
+        if (time_ns() > deadline) {
+            printf(
+                "AMD-Vi unit at %#llx does not start its GA log\n", (unsigned long long)u->base
+            );
+            return false;
+        }
+        cpu_relax();
+    }
+    return true;
+}
+
 // The I/O APICs' interrupts come through the IOMMUs as well, so remapping
 // needs their device IDs, as Linux 7.3's check_ioapic_information() also asks.
-void amdvi_remap_start(bool guest_vapic) {
+void amdvi_remap_start(bool guest_vapic, uint8_t vector) {
     for (size_t i = 0; i < ioapic_count(); i++) {
         uint8_t id = ioapic_get(i)->id;
         if (iommu_special_for(IOMMU_SPECIAL_IOAPIC, id) == NULL) {
@@ -433,6 +566,21 @@ void amdvi_remap_start(bool guest_vapic) {
     }
     wide_entries = wide;
     remap_enabled = true;
+    // Posting, where every unit can tell the calling processor of what it
+    // posts for vCPUs that do not run.
+    bool post = wide;
+    for (size_t i = 0; i < unit_count && post; i++) {
+        post = ga_log_start(&units[i], this_cpu()->apic_id, vector);
+    }
+    if (post) {
+        target_count = smp_cpu_count();
+        targets = page_alloc(
+            (target_count * sizeof(struct post_target) + PAGE_SIZE - 1) / PAGE_SIZE
+        );
+        ga_vector = vector;
+        posting = true;
+        printf("AMD-Vi: interrupts are posted to the vCPUs that AVIC runs\n");
+    }
 }
 
 bool amdvi_remap_on(void) {
@@ -598,11 +746,34 @@ static bool entry_write(struct remap_table *t, uint16_t index, uint64_t low, uin
     return true;
 }
 
+// Takes an entry that posts to a vCPU off the vCPU's list before it changes,
+// so that its IsRun no longer follows the vCPU.
+static void unpost(struct remap_table *t, uint16_t index) {
+    if (!posting) {
+        return;
+    }
+    uint64_t *entry = &t->entries.wide[index * 2];
+    uint64_t low = atomic_load_explicit((_Atomic(uint64_t) *)entry, memory_order_relaxed);
+    if ((low & (IRTE_REMAP_EN | IRTE_GUEST_MODE)) != (IRTE_REMAP_EN | IRTE_GUEST_MODE)) {
+        return;
+    }
+    struct post_target *g = &targets[low >> IRTE_GA_TAG_SHIFT];
+    spinlock_acquire(&g->lock);
+    for (size_t i = 0; i < g->count; i++) {
+        if (g->entries[i] == entry) {
+            g->entries[i] = g->entries[--g->count];
+            break;
+        }
+    }
+    spinlock_release(&g->lock);
+}
+
 void amdvi_remap_free(int32_t requester, uint16_t index, size_t count) {
     spinlock_acquire(&remap_lock);
     struct remap_table *t = table_of((uint16_t)requester);
     if (t != NULL) {
         for (size_t i = 0; i < count; i++) {
+            unpost(t, (uint16_t)(index + i));
             entry_write(t, (uint16_t)(index + i), 0, 0);
             t->used[(index + i) / 64] &= ~((uint64_t)1 << ((index + i) % 64));
         }
@@ -624,10 +795,147 @@ void amdvi_remap_set(int32_t requester, uint16_t index, uint32_t apic_id, uint8_
     }
     spinlock_acquire(&remap_lock);
     struct remap_table *t = table_of((uint16_t)requester);
-    if (t != NULL && entry_write(t, index, low, high)) {
-        invalidate_table(t);
+    if (t != NULL) {
+        unpost(t, index);
+        if (entry_write(t, index, low, high)) {
+            invalidate_table(t);
+        }
     }
     spinlock_release(&remap_lock);
+}
+
+bool amdvi_posting(void) {
+    return posting;
+}
+
+// On the vCPU's list before the entry posts to it, with IsRun as the vCPU
+// runs, and its GATag naming the list. The units cache all of it but IsRun,
+// the destination, GALogIntr, and the GATag (AMD IOMMU 48882 rev. 3.11,
+// 2.2.5.2), so IsRun changes without invalidations.
+bool amdvi_remap_post(
+    int32_t requester, uint16_t index, uint8_t vector, const struct remap_target *target
+) {
+    if (!posting || target->apic_id > MAX_DEST_ID || target->tag >= target_count) {
+        return false;
+    }
+    uint64_t low = IRTE_REMAP_EN | IRTE_GA_LOG_INTR | IRTE_GUEST_MODE
+                 | (uint64_t)target->apic_id << IRTE_DEST_SHIFT
+                 | (uint64_t)target->tag << IRTE_GA_TAG_SHIFT;
+    uint64_t high = vector | ((uint64_t)target->descriptor & IRTE_GA_ROOT_MASK);
+    struct post_target *g = &targets[target->tag];
+    spinlock_acquire(&remap_lock);
+    struct remap_table *t = table_of((uint16_t)requester);
+    bool posted = false;
+    if (t != NULL) {
+        uint64_t *entry = &t->entries.wide[index * 2];
+        uint64_t had = atomic_load_explicit((_Atomic(uint64_t) *)entry, memory_order_relaxed);
+        uint64_t guest = IRTE_REMAP_EN | IRTE_GUEST_MODE;
+        bool listed = (had & guest) == guest && had >> IRTE_GA_TAG_SHIFT == target->tag;
+        posted = listed || g->count < TARGET_ENTRIES;
+        if (!listed && posted) {
+            unpost(t, index);
+        }
+        bool changed = false;
+        if (posted) {
+            spinlock_acquire(&g->lock);
+            if (!listed) {
+                g->entries[g->count++] = entry;
+            }
+            changed = entry_write(t, index, low | (g->running ? IRTE_IS_RUN : 0), high);
+            spinlock_release(&g->lock);
+        }
+        if (changed) {
+            invalidate_table(t);
+        }
+    }
+    spinlock_release(&remap_lock);
+    return posted;
+}
+
+// The units set a posted vector's bit in the IRR, then read IsRun again, to
+// ring the doorbell or log the interrupt (AMD IOMMU 48882 rev. 3.11, 2.2.5.2):
+// a vCPU that stops running and then reads its IRR finds every interrupt
+// posted before, and has those after logged.
+void amdvi_running(uint32_t tag, bool running) {
+    if (!posting || tag >= target_count) {
+        return;
+    }
+    struct post_target *g = &targets[tag];
+    spinlock_acquire(&g->lock);
+    g->running = running;
+    for (size_t i = 0; i < g->count; i++) {
+        _Atomic(uint64_t) *low = (_Atomic(uint64_t) *)g->entries[i];
+        if (running) {
+            atomic_fetch_or_explicit(low, IRTE_IS_RUN, memory_order_seq_cst);
+        } else {
+            atomic_fetch_and_explicit(low, ~IRTE_IS_RUN, memory_order_seq_cst);
+        }
+    }
+    spinlock_release(&g->lock);
+}
+
+// The interrupt status is cleared before the entries before it are read, so
+// that an entry after them interrupts again, until it reads as clear, as Linux
+// 7.3's amd_iommu_handle_irq() does for erratum ERBT1312: false where it may
+// still be set. An overflow loses entries, so every vCPU wakes, and logging
+// restarts where it stopped (AMD IOMMU 48882 rev. 3.11, 2.7.4), as Linux 7.3's
+// amd_iommu_restart_log() restarts it.
+static bool ga_drain(struct amdvi_unit *u, void (*woken)(uint32_t tag)) {
+    for (size_t round = 0; round < GA_ROUNDS; round++) {
+        uint64_t status = reg_read(u, REG_STATUS);
+        if (round != 0 && (status & (STATUS_GA_INT | STATUS_GA_OVERFLOW)) == 0) {
+            return true;
+        }
+        if ((status & STATUS_GA_INT) != 0) {
+            reg_write(u, REG_STATUS, STATUS_GA_INT);
+        }
+        uint32_t tail = (reg_read(u, REG_GA_LOG_TAIL) >> 3) % GA_LOG_ENTRIES;
+        while (u->ga_head != tail) {
+            uint64_t entry = ((volatile uint64_t *)u->ga_log)[u->ga_head];
+            u->ga_head = (u->ga_head + 1) % GA_LOG_ENTRIES;
+            if (entry >> GA_OPCODE_SHIFT == GA_GUEST_NR) {
+                woken((uint32_t)entry);
+            }
+        }
+        reg_write(u, REG_GA_LOG_HEAD, (uint64_t)u->ga_head << 3);
+        if ((status & STATUS_GA_OVERFLOW) == 0) {
+            continue;
+        }
+        uint64_t control = reg_read(u, REG_CONTROL);
+        bool stopped = (reg_read(u, REG_STATUS) & STATUS_GA_LOG_RUN) == 0;
+        if (stopped) {
+            reg_write(u, REG_CONTROL, control & ~(CONTROL_GA_LOG_EN | CONTROL_GA_INT_EN));
+        }
+        reg_write(u, REG_STATUS, STATUS_GA_OVERFLOW);
+        if (stopped) {
+            reg_write(u, REG_CONTROL, control | CONTROL_GA_LOG_EN | CONTROL_GA_INT_EN);
+        }
+        for (size_t tag = 0; tag < target_count; tag++) {
+            woken((uint32_t)tag);
+        }
+    }
+    return false;
+}
+
+// Only the processor the units interrupt reads the logs. A unit writes the
+// copy of its tail before it interrupts, and an interrupt status that may
+// still be set has the processor come back at once.
+void amdvi_poll(void (*woken)(uint32_t tag)) {
+    if (!posting) {
+        return;
+    }
+    bool again = false;
+    for (size_t i = 0; i < unit_count; i++) {
+        struct amdvi_unit *u = &units[i];
+        uint64_t tail = atomic_load_explicit(&u->ga_tail, memory_order_acquire);
+        if (u->ga_unsettled || (tail >> 3) % GA_LOG_ENTRIES != u->ga_head) {
+            u->ga_unsettled = !ga_drain(u, woken);
+            again = again || u->ga_unsettled;
+        }
+    }
+    if (again) {
+        lapic_send_ipi(this_cpu()->apic_id, ICR_DELIVERY_FIXED | ga_vector);
+    }
 }
 
 void amdvi_remap_message(uint16_t index, uint32_t *address, uint32_t *data) {

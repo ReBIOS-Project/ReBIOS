@@ -28,9 +28,9 @@ static bool amd(void) {
     return iommu_tables_parse()->kind == IOMMU_KIND_AMD;
 }
 
-void remap_init(bool guest_vapic) {
+void remap_init(bool guest_vapic, uint8_t vector) {
     if (amd()) {
-        amdvi_remap_start(guest_vapic);
+        amdvi_remap_start(guest_vapic, vector);
     }
 }
 
@@ -64,12 +64,29 @@ void remap_set(int32_t requester, uint16_t index, uint32_t apic_id, uint8_t vect
 }
 
 bool remap_posting(void) {
-    return !amd() && vtd_posting();
+    return amd() ? amdvi_posting() : vtd_posting();
 }
 
-void remap_post(int32_t requester, uint16_t index, uint8_t vector, uintptr_t descriptor) {
-    (void)requester;
-    vtd_remap_post(index, vector, descriptor);
+bool remap_post(
+    int32_t requester, uint16_t index, uint8_t vector, const struct remap_target *target
+) {
+    if (amd()) {
+        return amdvi_remap_post(requester, index, vector, target);
+    }
+    vtd_remap_post(index, vector, target->descriptor);
+    return true;
+}
+
+void remap_running(uint32_t tag, bool running) {
+    if (amd()) {
+        amdvi_running(tag, running);
+    }
+}
+
+void remap_poll(void (*woken)(uint32_t tag)) {
+    if (amd()) {
+        amdvi_poll(woken);
+    }
 }
 
 bool remap_x2apic_capable(void) {

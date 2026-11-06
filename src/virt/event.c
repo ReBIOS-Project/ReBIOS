@@ -225,6 +225,9 @@ void event_interrupt(uint8_t vector) {
         case VLAPIC_KICK_VECTOR: {
             atomic_store_explicit(&cpu->kick, false, memory_order_seq_cst);
             lapic_eoi();
+            if (cpu->bsp) {
+                vlapic_posted_log();
+            }
             return;
         }
         // A notification outside the guest: what it posted is merged before

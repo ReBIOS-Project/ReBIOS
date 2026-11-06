@@ -23,6 +23,8 @@
 #include <stdint.h>
 #include <virt/vcpu.h>
 
+struct remap_target;
+
 // Vectors the hypervisor takes its own interrupts on at the processor's local
 // APIC, which guests use for none of their MSIs and I/O APIC entries: from the
 // first, one for each of AMD's extended LVT entries.
@@ -84,10 +86,12 @@ void vlapic_deliver_message(
 // A message-signalled interrupt the guest programmed, as the APIC bus takes
 // it.
 void vlapic_deliver_msi(uint32_t address, uint32_t data);
-// The posted-interrupt descriptor that the IOMMUs can post such a message's
-// count vectors to, doing what vlapic_deliver_msi() does, or 0; and whether
-// the vCPU changed what decides that since the last call.
-uintptr_t vlapic_post_descriptor(uint32_t address, uint32_t data, size_t count);
+// Where the IOMMUs can post such a message's count vectors to, doing what
+// vlapic_deliver_msi() does, or false; and whether the vCPU changed what
+// decides that since the last call.
+bool vlapic_post_target(
+    uint32_t address, uint32_t data, size_t count, struct remap_target *target
+);
 bool vlapic_post_changed(struct vcpu *v);
 // The processor of the first vCPU an 8-bit destination names, or NULL.
 struct cpu *vlapic_target(uint32_t dest, bool logical);
@@ -145,6 +149,10 @@ void vlapic_extint_moved(void);
 void vlapic_prepare_entry(struct vcpu *v);
 // The vCPU waits in the hypervisor for its HLT to end, or no longer does.
 void vlapic_halt(struct vcpu *v, bool halting);
+// On the boot processor, which the IOMMUs interrupt on VLAPIC_KICK_VECTOR for
+// what they log: wakes the vCPUs they posted interrupts for while those did
+// not run.
+void vlapic_posted_log(void);
 
 // The TPR, which the guest also changes through CR8 without exits, kept in
 // step around entries.

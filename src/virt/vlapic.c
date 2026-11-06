@@ -729,7 +729,7 @@ static void ipiv_recheck_soon(void) {
 }
 
 static void post_recheck_soon(struct vlapic *vl) {
-    if (posted_interrupts) {
+    if (posted_interrupts || avic_supported) {
         vl->post_recheck = true;
     }
 }
@@ -907,7 +907,8 @@ static bool avic_decide(bool *map) {
 }
 
 // The other vCPUs are kept out of the guest while the page behind the local
-// APICs' changes, and switch before they go back in.
+// APICs' changes, and switch before they go back in. The guest's messages are
+// posted to the vCPUs while AVIC runs them, and only then.
 static void avic_update(void) {
     bool map;
     bool want = avic_decide(&map);
@@ -917,6 +918,7 @@ static void avic_update(void) {
     }
     vcpu_pause_others();
     want = avic_decide(&map);
+    bool changed = want != atomic_load_explicit(&avic_wanted, memory_order_acquire);
     if (map != atomic_load_explicit(&avic_mapped, memory_order_acquire)) {
         spinlock_acquire(&page_lock);
         for (size_t i = 0; i < page_count; i++) {
@@ -932,14 +934,19 @@ static void avic_update(void) {
     atomic_store_explicit(&avic_mapped, map, memory_order_release);
     atomic_store_explicit(&avic_wanted, want, memory_order_release);
     vcpu_resume_others();
+    if (changed) {
+        pci_virt_repost();
+    }
 }
 
 // Whether the vCPU is on its processor, in the guest or not, as far as AVIC's
-// IPIs go: they exit for the others, for the hypervisor to wake them.
-static void avic_running(struct vlapic *vl, bool running) {
-    _Atomic(uint64_t) *entry = (_Atomic(uint64_t) *)&avic_physical_table[vl->id];
+// IPIs and the IOMMUs' doorbells go: they exit or are logged for the others,
+// for the hypervisor to wake them.
+static void avic_running(struct vcpu *v, bool running) {
+    _Atomic(uint64_t) *entry = (_Atomic(uint64_t) *)&avic_physical_table[v->vlapic->id];
     uint64_t value = atomic_load_explicit(entry, memory_order_relaxed) & ~AVIC_ENTRY_RUNNING;
     atomic_store_explicit(entry, value | (running ? AVIC_ENTRY_RUNNING : 0), memory_order_seq_cst);
+    remap_running(v->cpu->index, running);
 }
 
 static int avic_mode_for(struct vcpu *v) {
@@ -971,7 +978,7 @@ static void avic_switch(struct vcpu *v, int mode) {
         max_id = X2AVIC_MAX_ID;
     }
     c->avic_physical_table = (uint64_t)(uintptr_t)avic_physical_table | max_id;
-    avic_running(vl, mode != AVIC_OFF);
+    avic_running(v, mode != AVIC_OFF);
     // The TLB may hold translations of the local APIC's page from before,
     // which AVIC redirects now or no longer does, as Linux 7.3's KVM finds.
     svm_flush_guest_tlb(v);
@@ -1400,10 +1407,17 @@ void vlapic_prepare_entry(struct vcpu *v) {
 }
 
 void vlapic_halt(struct vcpu *v, bool halting) {
-    struct vlapic *vl = v->vlapic;
-    if (atomic_load_explicit(&vl->avic, memory_order_relaxed) != AVIC_OFF) {
-        avic_running(vl, !halting);
+    if (atomic_load_explicit(&v->vlapic->avic, memory_order_relaxed) != AVIC_OFF) {
+        avic_running(v, !halting);
     }
+}
+
+static void posted_woken(uint32_t tag) {
+    vcpu_kick(smp_cpu(tag));
+}
+
+void vlapic_posted_log(void) {
+    remap_poll(posted_woken);
 }
 
 void vlapic_before_entry(struct vcpu *v) {
@@ -1611,44 +1625,56 @@ void vlapic_deliver_msi(uint32_t address, uint32_t data) {
 
 // Only where posting does what vlapic_deliver_msi() does: fixed or lowest
 // priority edge-triggered interrupts, of vectors past the exceptions', to one
-// vCPU whose local APIC takes them, while the IOMMUs read the descriptors'
-// destinations in the format IPI virtualisation has them in.
-uintptr_t vlapic_post_descriptor(uint32_t address, uint32_t data, size_t count) {
-    bool x2apic_destinations = ipi_virtualization
-                            && atomic_load_explicit(&ipiv_x2apic, memory_order_acquire);
-    if (!posted_interrupts || atomic_load_explicit(&post_paused, memory_order_acquire)
-     || x2apic_destinations != remap_x2apic_on()
-     || (address & MSI_ADDRESS_MASK) != MSI_ADDRESS_BASE) {
-        return 0;
+// vCPU whose local APIC takes them; with VMX, while the IOMMUs read the
+// descriptors' destinations in the format IPI virtualisation has them in, and
+// with SVM, while AVIC runs the local APICs from their registers.
+bool vlapic_post_target(
+    uint32_t address, uint32_t data, size_t count, struct remap_target *target
+) {
+    if (virt_vmx) {
+        bool x2apic_destinations = ipi_virtualization
+                                && atomic_load_explicit(&ipiv_x2apic, memory_order_acquire);
+        if (!posted_interrupts || atomic_load_explicit(&post_paused, memory_order_acquire)
+         || x2apic_destinations != remap_x2apic_on()) {
+            return false;
+        }
+    } else if (!atomic_load_explicit(&avic_wanted, memory_order_acquire)) {
+        return false;
     }
     uint32_t mode = data & ICR_DELIVERY_MASK;
     bool lowest = mode == ICR_DELIVERY_LOWEST
                || (mode == ICR_DELIVERY_FIXED && (address & MSI_ADDRESS_REDIRECT) != 0);
-    if ((mode != ICR_DELIVERY_FIXED && mode != ICR_DELIVERY_LOWEST) || (data & ICR_LEVEL) != 0
+    if ((address & MSI_ADDRESS_MASK) != MSI_ADDRESS_BASE
+     || (mode != ICR_DELIVERY_FIXED && mode != ICR_DELIVERY_LOWEST) || (data & ICR_LEVEL) != 0
      || (data & ICR_VECTOR_MASK & ~(uint32_t)(count - 1)) < 16) {
-        return 0;
+        return false;
     }
     uint32_t dest = address >> MSI_ADDRESS_DEST_SHIFT & 0xff;
     bool logical = (address & MSI_ADDRESS_LOGICAL) != 0;
-    struct vcpu *target = NULL;
+    struct vcpu *found = NULL;
     for (size_t i = 0; i < smp_cpu_count(); i++) {
         struct vcpu *to = smp_cpu(i)->vcpu;
         if (to == NULL || to->vlapic == NULL || !matches(to->vlapic, dest, logical, false)) {
             continue;
         }
         // A fixed interrupt to several is beyond one descriptor.
-        if (target != NULL) {
-            return 0;
+        if (found != NULL) {
+            return false;
         }
-        target = to;
+        found = to;
         if (lowest) {
             break;
         }
     }
-    if (target == NULL || !enabled(target->vlapic) || !sw_enabled(target->vlapic)) {
-        return 0;
+    if (found == NULL || !enabled(found->vlapic) || !sw_enabled(found->vlapic)) {
+        return false;
     }
-    return (uintptr_t)target->vlapic->posted;
+    *target = (struct remap_target){
+        .descriptor = virt_vmx ? (uintptr_t)found->vlapic->posted : (uintptr_t)found->vlapic->regs,
+        .tag = found->cpu->index,
+        .apic_id = found->cpu->apic_id
+    };
+    return true;
 }
 
 static bool ipi_target(struct vcpu *from, struct vcpu *to, uint32_t dest, uint32_t command) {

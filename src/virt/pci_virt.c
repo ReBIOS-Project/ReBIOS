@@ -631,8 +631,9 @@ static void message_route(struct irq_slot *s, uint32_t upper, uint32_t address, 
     if (!s->remapped || !remap_posting()) {
         return;
     }
-    uintptr_t descriptor = upper == 0 ? vlapic_post_descriptor(address, data, s->count) : 0;
-    irq_slot_route(s, descriptor, (uint8_t)(data & ~(uint32_t)(s->count - 1)));
+    struct remap_target target;
+    bool post = upper == 0 && vlapic_post_target(address, data, s->count, &target);
+    irq_slot_route(s, post ? &target : NULL, (uint8_t)(data & ~(uint32_t)(s->count - 1)));
 }
 
 // The function's MSI after the guest changed it: off at the function while its
