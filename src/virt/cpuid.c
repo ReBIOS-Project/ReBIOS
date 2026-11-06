@@ -221,11 +221,11 @@ static const struct leaf_bits amd_leaves[] = {
     { 0x0, SUBLEAF_ALL, { 0x00000000, 0xffffffff, 0xffffffff, 0xffffffff } },
     // EAX stepping, base model, base family, extended model, extended family;
     // EBX brand ID, CLFLUSH size, processor count, initial APIC ID; ECX SSE3,
-    // PCLMULQDQ, MONITOR, SSSE3, FMA, CMPXCHG16B, SSE4.1, SSE4.2, x2APIC,
-    // MOVBE, POPCNT, AES, XSAVE, AVX, F16C, RDRAND; EDX FPU, VME, DE, PSE,
-    // TSC, MSR, PAE, MCE, CMPXCHG8B, SYSENTER, MTRR, PGE, MCA, CMOV, PAT,
+    // PCLMULQDQ, MONITOR, SSSE3, FMA, CMPXCHG16B, PCID, SSE4.1, SSE4.2,
+    // x2APIC, MOVBE, POPCNT, AES, XSAVE, AVX, F16C, RDRAND; EDX FPU, VME, DE,
+    // PSE, TSC, MSR, PAE, MCE, CMPXCHG8B, SYSENTER, MTRR, PGE, MCA, CMOV, PAT,
     // PSE36, CLFSH, MMX, FXSR, SSE, SSE2, HTT.
-    { 0x1, SUBLEAF_ALL, { 0x0fff0fff, 0xffffffff, 0x76f8320b, 0x178bf9ff } },
+    { 0x1, SUBLEAF_ALL, { 0x0fff0fff, 0xffffffff, 0x76fa320b, 0x178bf9ff } },
     // EAX smallest line; EBX largest line; ECX EMX, IBE.
     { 0x5, SUBLEAF_ALL, { 0x0000ffff, 0x0000ffff, 0x00000003, 0x00000000 } },
     // EAX ARAT; ECX EffFreq.
