@@ -314,9 +314,11 @@ bool nsvm_in_l2(struct vcpu *v) {
     return v->nsvm != NULL && v->nsvm->in_l2;
 }
 
-// The processor's revision, its ASIDs but the guest's own, and nested paging.
+// The processor's revision, its ASIDs but the guest's own, nested paging, and
+// the processor's NRIP saving.
 struct cpuid_regs nsvm_cpuid(void) {
-    return (struct cpuid_regs){ cpuid(0x8000000a, 0).eax & 0xff, nasid - 1, 0, SVM_FEATURE_NP };
+    uint32_t edx = SVM_FEATURE_NP | (svm_nrips ? SVM_FEATURE_NRIPS : 0);
+    return (struct cpuid_regs){ cpuid(0x8000000a, 0).eax & 0xff, nasid - 1, 0, edx };
 }
 
 uint64_t nsvm_tsc_offset(struct vcpu *v) {
@@ -459,7 +461,8 @@ static void resume_l1(struct vcpu *v, struct nsvm *n) {
 // APM 24594 rev. 3.39, VMRUN): VMCB12 takes VMCB02's state and the exit's, and
 // the guest goes on with what VMCB01 held.
 static void exit_to_l1(
-    struct vcpu *v, struct nsvm *n, uint64_t code, uint64_t info1, uint64_t info2, uint64_t intinfo
+    struct vcpu *v, struct nsvm *n, uint64_t code, uint64_t info1, uint64_t info2,
+    uint64_t intinfo, bool hardware
 ) {
     struct vmcb *vmcb02 = n->vmcb02;
     struct vmcb *vmcb12 = (struct vmcb *)guest_page(n->vmcb12);
@@ -509,6 +512,12 @@ static void exit_to_l1(
     c12->exitinfo2 = info2;
     c12->exitintinfo = intinfo;
     c12->eventinj = 0;
+    // The next RIP of an exit the processor made, which it saves for the
+    // instructions it intercepts, and 0 for the hypervisor's own exits (APM
+    // 24593 rev. 3.46, 15.7.1).
+    if (svm_nrips) {
+        c12->nrip = hardware ? c02->nrip : 0;
+    }
 
     // What the guest's guest left of NMIs: blocked as the processor still has
     // them, and one injected but not taken still pending.
@@ -1012,9 +1021,9 @@ static void prepare_vmcb02(struct nsvm *n) {
     }
     c->eventinj = c12->eventinj & ~EVENT_RESERVED;
     // Software interrupts injected take their return address from here (APM
-    // 24593 rev. 3.46, 15.20): the guest, without NRIP saving, has its RIP
-    // past the instruction already.
-    c->nrip = s12->rip;
+    // 24593 rev. 3.46, 15.20): VMCB12's where the guest has NRIP saving, else
+    // its RIP, which the guest moved past the instruction itself.
+    c->nrip = svm_nrips ? c12->nrip : s12->rip;
     c->virt_ext = vmcb01->control.virt_ext;
     c->exitintdata = 0;
     c->eventinjdata = 0;
@@ -1357,7 +1366,7 @@ static void npt_fault(struct vcpu *v, struct nsvm *n) {
     uint64_t error = npt12_walk(n, gpa, write, fetch, &w);
     if (error != 0) {
         error |= info & (NPF_FINAL | NPF_TABLE);
-        exit_to_l1(v, n, SVM_EXIT_NPF, error, gpa, c->exitintinfo);
+        exit_to_l1(v, n, SVM_EXIT_NPF, error, gpa, c->exitintinfo, true);
         return;
     }
     if (npt02_allows(npt02_fill(n, gpa, &w), write, fetch)) {
@@ -1372,7 +1381,7 @@ static void npt_fault(struct vcpu *v, struct nsvm *n) {
         if ((n->intercepts[3] & SVM_INTERCEPT_SHUTDOWN) == 0) {
             svm_shutdown(v, "The guest's guest's event cannot be delivered");
         }
-        exit_to_l1(v, n, SVM_EXIT_SHUTDOWN, 0, 0, 0);
+        exit_to_l1(v, n, SVM_EXIT_SHUTDOWN, 0, 0, 0, false);
         return;
     }
     if (fetch) {
@@ -1428,7 +1437,7 @@ bool nsvm_l2_exit(struct vcpu *v) {
         return true;
     }
     if (l1_wants(v, n, code)) {
-        exit_to_l1(v, n, code, c->exitinfo1, c->exitinfo2, c->exitintinfo);
+        exit_to_l1(v, n, code, c->exitinfo1, c->exitinfo2, c->exitintinfo, true);
         return true;
     }
     if (code == SVM_EXIT_CR8_READ || code == SVM_EXIT_CR8_WRITE) {
@@ -1471,7 +1480,7 @@ bool nsvm_inject_again(struct vcpu *v, uint64_t event) {
      || v->vmcb->save.rip != n->copy.save.rip) {
         return false;
     }
-    v->vmcb->control.nrip = n->copy.save.rip;
+    v->vmcb->control.nrip = svm_nrips ? n->copy.control.nrip : n->copy.save.rip;
     return true;
 }
 
@@ -1594,7 +1603,7 @@ bool nsvm_before_entry(struct vcpu *v) {
     }
     if (n->pending) {
         n->pending = false;
-        exit_to_l1(v, n, n->pending_code, n->pending_info1, n->pending_info2, cut_short(v));
+        exit_to_l1(v, n, n->pending_code, n->pending_info1, n->pending_info2, cut_short(v), false);
         return false;
     }
     bool waiting = n->run_pending || v->injecting || (v->redeliver & SVM_EVENT_VALID) != 0;
@@ -1608,7 +1617,7 @@ bool nsvm_before_entry(struct vcpu *v) {
         if (waiting) {
             vcpu_exit_soon(v);
         } else if ((misc & SVM_INTERCEPT_INIT) != 0) {
-            exit_to_l1(v, n, SVM_EXIT_INIT, 0, 0, 0);
+            exit_to_l1(v, n, SVM_EXIT_INIT, 0, 0, 0, false);
             return false;
         } else {
             atomic_store_explicit(&cpu->init_pending, false, memory_order_release);
@@ -1621,7 +1630,7 @@ bool nsvm_before_entry(struct vcpu *v) {
         if (waiting) {
             vcpu_exit_soon(v);
         } else {
-            exit_to_l1(v, n, SVM_EXIT_NMI, 0, 0, 0);
+            exit_to_l1(v, n, SVM_EXIT_NMI, 0, 0, 0, false);
             return false;
         }
     }
@@ -1633,7 +1642,7 @@ bool nsvm_before_entry(struct vcpu *v) {
         } else if (waiting) {
             vcpu_exit_soon(v);
         } else {
-            exit_to_l1(v, n, SVM_EXIT_INTR, 0, 0, 0);
+            exit_to_l1(v, n, SVM_EXIT_INTR, 0, 0, 0, false);
             return false;
         }
     }
