@@ -64,8 +64,8 @@ NOTICE = [
 # MTRRs, ARCH_CAPABILITIES, XAPIC_DISABLE_STATUS, the VMX capabilities, the
 # x2APIC range), and those of what the guest does not get: the microcode
 # update interface beyond the trigger and the signature, SMM, SGX, TME, TDX,
-# DCA, debug interface, PASID, user MSRs, MSR lists, FRED, user interrupts,
-# architectural LBRs and PEBS, and the reserved ranges.
+# DCA, debug interface, PASID, user MSRs, MSR lists, FRED, architectural LBRs
+# and PEBS, and the reserved ranges.
 INTEL_ARCH = [
     (0x0, 0x1),          # Pentium machine check address and type
     (0x6, 0x6),          # MONITOR filter size
@@ -112,6 +112,7 @@ INTEL_ARCH = [
     (0x6a4, 0x6a8),      # shadow stack pointers and table
     (0x6e0, 0x6e1),      # TSC deadline, supervisor protection keys
     (0x770, 0x777),      # HWP
+    (0x985, 0x98a),      # user interrupts
     (0x990, 0x991),      # Key Locker copy and backup status
     (0xc81, 0xc83),      # RDT configuration
     (0xc88, 0xc89),      # RDT resource priority

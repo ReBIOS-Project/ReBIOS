@@ -76,18 +76,18 @@ static const struct leaf_bits intel_leaves[] = {
     // WAITPKG, AVX512_VBMI2, CET_SS, GFNI, VAES, VPCLMULQDQ, AVX512_VNNI,
     // AVX512_BITALG, AVX512_VPOPCNTDQ, LA57, MAWAU, RDPID, Key Locker, bus
     // lock detect, CLDEMOTE, MOVDIRI, MOVDIR64B, PKS; EDX AVX512_4VNNIW,
-    // AVX512_4FMAPS, FSRM, AVX512_VP2INTERSECT, MCU_OPT_CTRL, MD_CLEAR,
+    // AVX512_4FMAPS, FSRM, UINTR, AVX512_VP2INTERSECT, MCU_OPT_CTRL, MD_CLEAR,
     // RTM_ALWAYS_ABORT, RTM_FORCE_ABORT, SERIALIZE, hybrid, TSXLDTRK, arch
     // LBRs, CET_IBT, AMX_BF16, AVX512_FP16, AMX_TILE, AMX_INT8, IBRS/IBPB,
     // STIBP, L1D_FLUSH, ARCH_CAPABILITIES, CORE_CAPABILITIES, SSBD.
-    { 0x7, 0, { 0xffffffff, 0xffbffffb, 0x9bff5fef, 0xffd9ef1c } },
+    { 0x7, 0, { 0xffffffff, 0xffbffffb, 0x9bff5fef, 0xffd9ef3c } },
     // EAX SHA512, SM3, SM4, AVX_VNNI, AVX512_BF16, LASS, CMPCCXADD,
     // ARCH_PERFMON_EXT, fast zero-length MOVSB, fast short STOSB, fast short
     // CMPSB/SCASB, LKGS, WRMSRNS, AMX_FP16, HRESET, AVX_IFMA, LAM; EBX PPIN,
     // CPUIDMAXVAL_LIM_RMV; ECX RDT-M asymmetric, RDT-A asymmetric; EDX
     // AVX_VNNI_INT8, AVX_NE_CONVERT, AMX_COMPLEX, AVX_VNNI_INT16, PREFETCHI,
-    // CET_SSS, AVX10, MWAIT.
-    { 0x7, 1, { 0x04ec1df7, 0x00000009, 0x00000003, 0x008c4530 } },
+    // UIRET_UIF, CET_SSS, AVX10, MWAIT.
+    { 0x7, 1, { 0x04ec1df7, 0x00000009, 0x00000003, 0x008e4530 } },
     // EDX PSFD, IPRED_CTRL, RRSBA_CTRL, DDPD_U, BHI_CTRL, MCDT_NO, UC-lock
     // disable, MONITOR_MITG_NO.
     { 0x7, 2, { 0x00000000, 0x00000000, 0x00000000, 0x000000ff } },
@@ -100,8 +100,8 @@ static const struct leaf_bits intel_leaves[] = {
     // TILECFG, TILEDATA; EBX size enabled; ECX size supported.
     { 0xd, 0, { 0x000602ff, 0xffffffff, 0xffffffff, 0x00000000 } },
     // EAX XSAVEOPT, XSAVEC, XGETBV1, XSAVES, XFD; EBX size enabled; ECX PT,
-    // CET_U, CET_S, HDC, LBR, HWP.
-    { 0xd, 1, { 0x0000001f, 0xffffffff, 0x0001b900, 0x00000000 } },
+    // CET_U, CET_S, HDC, UINTR, LBR, HWP.
+    { 0xd, 1, { 0x0000001f, 0xffffffff, 0x0001f900, 0x00000000 } },
     // EBX last RMID; EDX L3 monitoring.
     { 0xf, 0, { 0x00000000, 0xffffffff, 0x00000000, 0x00000002 } },
     // EAX counter width, overflow, I/O RDT CMT, I/O RDT MBM; EBX factor; ECX

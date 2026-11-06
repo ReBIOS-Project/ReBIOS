@@ -47,6 +47,11 @@
 #define VECTOR_BP 3
 #define VECTOR_OF 4
 
+// UINV, the vector of user-interrupt notifications (SDM 325462-093 Vol. 3A,
+// 9.4).
+#define MSR_IA32_UINTR_MISC 0x988
+#define UINTR_MISC_UINV_SHIFT 32
+
 void event_exit(struct vcpu *v) {
     uint32_t info;
     uint32_t error = 0;
@@ -320,6 +325,15 @@ bool event_halt_ends(struct vcpu *v) {
     return (vcpu_rflags(v) & RFLAGS_IF) != 0 && interrupt_pending(v);
 }
 
+// An injected interrupt of the vector that UINV has is no interrupt to a guest
+// in 64-bit mode with user interrupts on: the processor processes the
+// notification instead, with no EOI (SDM 325462-093 Vol. 3C, 29.6), so it ends
+// as soon as it is taken. UINV is the guest's, as VM entry loads none.
+static bool user_notification(struct vcpu *v, uint8_t vector) {
+    return virt_vmx && (vcpu_cr4(v) & CR4_UINTR) != 0 && (vcpu_efer(v) & EFER_LMA) != 0
+        && (uint8_t)(rdmsr(MSR_IA32_UINTR_MISC) >> UINTR_MISC_UINV_SHIFT) == vector;
+}
+
 static void deliver_interrupt(struct vcpu *v) {
     bool extint = irq_extint_pending(v);
     bool virtual_delivery = vlapic_virtual_delivery(v);
@@ -336,6 +350,8 @@ static void deliver_interrupt(struct vcpu *v) {
     if (extint) {
         // The 8259 answers the acknowledge only now, when the guest takes it.
         vector = irq_extint_acknowledge();
+    } else if (user_notification(v, (uint8_t)vector)) {
+        vlapic_dismiss(v, (uint8_t)vector);
     } else {
         vlapic_take(v, (uint8_t)vector);
     }

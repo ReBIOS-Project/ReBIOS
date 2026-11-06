@@ -70,6 +70,7 @@ const struct msr_range msr_intel_architectural[] = {
     { 0x6a4, 0x6a8 }, // IA32_PL0_SSP to IA32_INTERRUPT_SSP_TABLE_ADDR.
     { 0x6e0, 0x6e1 }, // IA32_TSC_DEADLINE to IA32_PKRS.
     { 0x770, 0x777 }, // IA32_PM_ENABLE to IA32_HWP_STATUS.
+    { 0x985, 0x98a }, // IA32_UINTR_RR to IA32_UINTR_TT.
     { 0x990, 0x991 }, // IA32_COPY_STATUS4 to IA32_IWKEYBACKUP_STATUS5.
     { 0xc81, 0xc83 }, // IA32_L3_QOS_CFG to IA32_L3_IO_QOS_CFG.
     { 0xc88, 0xc89 }, // IA32_RESOURCE_PRIORITY to IA32_RESOURCE_PRIORITY_PKG.
