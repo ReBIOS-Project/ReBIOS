@@ -166,24 +166,35 @@ static bool host_mode(bool x2apic) {
     }
 
     // x2APIC mode is only left for the disabled state, which resets the
-    // registers: those the hypervisor set come back.
+    // registers: those the hypervisor set come back, and so do AMD's extended
+    // control register and LVT entries, which the firmware sets too.
     static const uint32_t kept[] = {
         APIC_SVR, APIC_TPR, APIC_LVT_TIMER, APIC_LVT_THERMAL, APIC_LVT_PERF,
-        APIC_LVT_LINT0, APIC_LVT_LINT1, APIC_LVT_ERROR, APIC_TIMER_DIVIDE,
-        APIC_LVT_CMCI
+        APIC_LVT_LINT0, APIC_LVT_LINT1, APIC_LVT_ERROR, APIC_TIMER_DIVIDE
     };
-    size_t count = sizeof(kept) / sizeof(uint32_t);
-    if (max_entry() < LVT_CMCI_MIN_MAX_ENTRY) {
-        count--;
+    uint32_t regs[sizeof(kept) / sizeof(uint32_t) + 2 + APIC_EILVT_MAX];
+    size_t count = 0;
+    for (size_t i = 0; i < sizeof(kept) / sizeof(uint32_t); i++) {
+        regs[count++] = kept[i];
     }
-    uint32_t values[sizeof(kept) / sizeof(uint32_t)];
+    if (max_entry() >= LVT_CMCI_MIN_MAX_ENTRY) {
+        regs[count++] = APIC_LVT_CMCI;
+    }
+    if ((lapic_read(APIC_VERSION) & APIC_VERSION_EXT_SPACE) != 0) {
+        regs[count++] = APIC_EXT_CONTROL;
+        size_t entries = (lapic_read(APIC_EXT_FEATURE) >> 16) & 0xff;
+        for (size_t i = 0; i < entries && i < APIC_EILVT_MAX; i++) {
+            regs[count++] = APIC_EILVT + (uint32_t)i * 0x10;
+        }
+    }
+    uint32_t values[sizeof(regs) / sizeof(uint32_t)];
     for (size_t i = 0; i < count; i++) {
-        values[i] = lapic_read(kept[i]);
+        values[i] = lapic_read(regs[i]);
     }
     wrmsr(MSR_IA32_APIC_BASE, base & ~(APIC_BASE_EN | APIC_BASE_EXTD));
     wrmsr(MSR_IA32_APIC_BASE, (base & ~APIC_BASE_EXTD) | APIC_BASE_EN);
     for (size_t i = 0; i < count; i++) {
-        lapic_write(kept[i], values[i]);
+        lapic_write(regs[i], values[i]);
     }
     return false;
 }

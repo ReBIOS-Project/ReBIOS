@@ -45,7 +45,15 @@
 #define APIC_TIMER_INITIAL 0x380
 #define APIC_TIMER_CURRENT 0x390
 #define APIC_TIMER_DIVIDE 0x3e0
+// AMD's extended APIC space, there where the version register's bit 31 says,
+// with up to eight extended LVT entries (APM 24593 rev. 3.46, 16.3.4 to
+// 16.3.6, 16.4.5).
+#define APIC_EXT_FEATURE 0x400
+#define APIC_EXT_CONTROL 0x410
+#define APIC_EILVT 0x500
+#define APIC_EILVT_MAX 8
 
+#define APIC_VERSION_EXT_SPACE ((uint32_t)1 << 31)
 #define APIC_SVR_ENABLED ((uint32_t)1 << 8)
 #define APIC_LVT_MASKED ((uint32_t)1 << 16)
 
