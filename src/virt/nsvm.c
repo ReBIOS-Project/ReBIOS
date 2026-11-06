@@ -315,6 +315,21 @@ bool nsvm_svme(struct vcpu *v) {
     return n->in_l2 ? n->svme02 : n->svme;
 }
 
+// The SVM instructions of a guest whose own EFER.SVME is clear raise #UD,
+// which the processor, finding EFER.SVME set, has as #GP outside CPL 0
+// (svm.c): VMCB01 intercepts #GP while the guest's is clear, and VMCB02 while
+// its guest's is or the guest intercepts #GP.
+static void svme_gp_intercept(struct nsvm *n) {
+    uint32_t gp = (uint32_t)1 << VECTOR_GP;
+    struct vmcb_control *c = n->in_l2 ? &n->vmcb02->control : &n->vmcb01->control;
+    bool intercept = n->in_l2 ? !n->svme02 || (n->intercepts[2] & gp) != 0 : !n->svme;
+    if (intercept) {
+        c->intercept_exceptions |= gp;
+    } else {
+        c->intercept_exceptions &= ~gp;
+    }
+}
+
 void nsvm_set_svme(struct vcpu *v, bool on) {
     struct nsvm *n = v->nsvm;
     if (n == NULL) {
@@ -322,12 +337,14 @@ void nsvm_set_svme(struct vcpu *v, bool on) {
     }
     if (n->in_l2) {
         n->svme02 = on;
+        svme_gp_intercept(n);
         return;
     }
     if (on == n->svme) {
         return;
     }
     n->svme = on;
+    svme_gp_intercept(n);
     if (on) {
         atomic_fetch_add_explicit(&svm_count, 1, memory_order_acq_rel);
     } else {
@@ -1558,12 +1575,15 @@ bool nsvm_l2_exit(struct vcpu *v) {
     }
     // Where the guest's guest's own EFER.SVME is clear, the SVM instructions
     // raise #UD before their intercepts, but VMMCALL, whose intercept comes
-    // first (APM 24593 rev. 3.46, Table 15-7); the guest may intercept #UD
-    // instead.
+    // first (APM 24593 rev. 3.46, Table 15-7), and their #GP outside CPL 0 is
+    // #UD too (svm.c); the guest may intercept #UD instead.
     if (!n->svme02 && (code == SVM_EXIT_VMRUN || code == SVM_EXIT_INVLPGA
                     || (code >= SVM_EXIT_VMLOAD && code <= SVM_EXIT_SKINIT))) {
         vcpu_inject_exception(v, VECTOR_UD, false, 0);
         return true;
+    }
+    if (code == SVM_EXIT_EXCEPTION_BASE + VECTOR_GP && !n->svme02) {
+        return false;
     }
     if (l1_wants(v, n, code)) {
         exit_to_l1(v, n, code, c->exitinfo1, c->exitinfo2, c->exitintinfo, true);
@@ -1598,6 +1618,11 @@ bool nsvm_exception(
     return true;
 }
 
+bool nsvm_intercepts_exception(struct vcpu *v, uint8_t vector) {
+    struct nsvm *n = v->nsvm;
+    return n != NULL && n->in_l2 && ((n->intercepts[2] >> vector) & 1) != 0;
+}
+
 // The guest's guest has no instruction that raises again a software event that
 // VMRUN injected, while it is still at VMRUN's RIP: the event goes in again
 // with VMRUN's next RIP, which the exit reset (APM 24593 rev. 3.46, 15.7.1),
@@ -1610,6 +1635,15 @@ bool nsvm_inject_again(struct vcpu *v, uint64_t event) {
         return false;
     }
     v->vmcb->control.nrip = svm_nrips ? n->copy.control.nrip : n->copy.save.rip;
+    return true;
+}
+
+bool nsvm_shutdown(struct vcpu *v) {
+    struct nsvm *n = v->nsvm;
+    if (n == NULL || !n->in_l2 || (n->intercepts[3] & SVM_INTERCEPT_SHUTDOWN) == 0) {
+        return false;
+    }
+    exit_to_l1(v, n, SVM_EXIT_SHUTDOWN, 0, 0, 0, false);
     return true;
 }
 

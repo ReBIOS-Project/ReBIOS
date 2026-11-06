@@ -87,9 +87,14 @@ void nsvm_interrupt_window(struct vcpu *v, bool on);
 bool nsvm_exception(
     struct vcpu *v, uint8_t vector, bool has_error, uint32_t error, uint64_t info2
 );
+// Whether the guest intercepts an exception of its guest, which the vCPU runs.
+bool nsvm_intercepts_exception(struct vcpu *v, uint8_t vector);
 // Whether a software interrupt or exception that an exit cut short is the one
 // VMRUN injected into the guest's guest, which then goes in again.
 bool nsvm_inject_again(struct vcpu *v, uint64_t event);
+// A shutdown of the guest's guest, which the vCPU runs: whether the guest
+// intercepts it, which then exits to the guest.
+bool nsvm_shutdown(struct vcpu *v);
 // Whether such an exit waits for the next entry.
 bool nsvm_exit_pending(struct vcpu *v);
 // The guest's PAT, which its guest shares where the guest has no nested paging

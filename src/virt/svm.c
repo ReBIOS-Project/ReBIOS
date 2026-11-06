@@ -55,6 +55,9 @@
 #define MSR_OSVW_STATUS 0xc0010141
 #define OSVW_ERRATUM_383 3
 #define ERRATUM_383_SIGNATURE ((uint64_t)0xb600000000010015)
+#define VECTOR_UD 6
+#define VECTOR_DF 8
+#define VECTOR_GP 13
 #define VECTOR_MC 18
 
 bool svm_lbr_virtualisation;
@@ -286,8 +289,9 @@ void svm_vcpu_init(struct vcpu *v) {
                        | SVM_INTERCEPT_VMSAVE | SVM_INTERCEPT_STGI | SVM_INTERCEPT_CLGI
                        | SVM_INTERCEPT_SKINIT;
     c->intercept_misc3 = invlpgb ? SVM_INTERCEPT_INVLPGB : 0;
-    // The legacy BIOS's VMCALL hypercalls raise #UD here, and INITs #SX.
-    c->intercept_exceptions = (uint32_t)1 << 6 | (uint32_t)1 << 30;
+    // The legacy BIOS's VMCALL hypercalls raise #UD here, INITs #SX, and the
+    // SVM instructions #GP while the guest's own EFER.SVME is clear (nsvm.c).
+    c->intercept_exceptions = (uint32_t)1 << 6 | (uint32_t)1 << VECTOR_GP | (uint32_t)1 << 30;
     if (svm_erratum_383) {
         c->intercept_exceptions |= (uint32_t)1 << VECTOR_MC;
     }
@@ -496,6 +500,59 @@ static void exit_invlpgb(struct vcpu *v) {
     vcpu_advance(v, insn.length);
 }
 
+// Whether a #GP that interrupts the delivery of an exception makes a double
+// fault: after a contributory exception or a page fault (APM 24593 rev. 3.46,
+// 8.2.9 and Table 8-2).
+static bool gp_double_faults(uint8_t first) {
+    return first == 0 || (first >= 10 && first <= 14) || first == 21 || first == 29 || first == 30;
+}
+
+// A #GP of a guest whose own EFER.SVME is clear: an SVM instruction's is #UD
+// (APM 24594 rev. 3.39, VMRUN, VMLOAD, VMSAVE, STGI, CLGI, SKINIT, INVLPGA),
+// which the processor, finding EFER.SVME set as VMRUN needs it (APM 24593 rev.
+// 3.46, 15.5.1), has as #GP outside CPL 0, before their intercepts (Table
+// 15-7). Others are the guest's, or its hypervisor's where that intercepts
+// them, but one that interrupts the delivery of an exception, which makes a
+// double fault, or after one a shutdown (8.2.9).
+static void exit_general_protection(struct vcpu *v) {
+    struct vmcb_control *c = &v->vmcb->control;
+    uint64_t event = c->exitintinfo;
+    uint32_t error = (uint32_t)c->exitinfo1;
+    if ((event & SVM_EVENT_VALID) == 0 && error == 0) {
+        // One the hypervisor cannot read, as where another processor just
+        // remapped it, runs again.
+        struct insn insn;
+        if (!insn_decode(v, &insn)) {
+            return;
+        }
+        if (insn.opcode == (INSN_OPCODE_0F | 0x01) && (insn.modrm & 0xf8) == 0xd8) {
+            vcpu_inject_exception(v, VECTOR_UD, false, 0);
+            return;
+        }
+    }
+    uint8_t vector = VECTOR_GP;
+    if ((event & SVM_EVENT_VALID) != 0 && (event & SVM_EVENT_TYPE_MASK) == SVM_EVENT_TYPE_EXCEPTION
+     && !nsvm_intercepts_exception(v, VECTOR_GP)) {
+        uint8_t first = (uint8_t)(event & SVM_EVENT_VECTOR_MASK);
+        if (first == VECTOR_DF) {
+            if (!nsvm_shutdown(v)) {
+                svm_shutdown(v, "Guest shutdown");
+            }
+            return;
+        }
+        if (gp_double_faults(first)) {
+            vector = VECTOR_DF;
+            error = 0;
+        }
+    }
+    vcpu_inject_exception(v, vector, true, error);
+    // It takes the place of the event, but in an exit to the guest's
+    // hypervisor, which carries that.
+    if (v->injecting) {
+        v->redeliver = 0;
+    }
+}
+
 static void svm_handle_exit(struct vcpu *v) {
     struct vmcb_control *c = &v->vmcb->control;
     v->last_exit = (uint32_t)c->exitcode;
@@ -557,6 +614,10 @@ static void svm_handle_exit(struct vcpu *v) {
         }
         case SVM_EXIT_EXCEPTION_BASE + 6: {
             exit_invalid_opcode(v);
+            break;
+        }
+        case SVM_EXIT_EXCEPTION_BASE + VECTOR_GP: {
+            exit_general_protection(v);
             break;
         }
         case SVM_EXIT_EXCEPTION_BASE + VECTOR_MC: {
