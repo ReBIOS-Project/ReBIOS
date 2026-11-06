@@ -150,6 +150,10 @@ static uint64_t leaf_entry(uintptr_t hpa, uint32_t prot, uint8_t memtype, size_t
     return e;
 }
 
+uint64_t gpt_npt_leaf(uintptr_t hpa, uint32_t prot, uint8_t memtype, size_t level) {
+    return leaf_entry(hpa, prot, memtype, level);
+}
+
 static uintptr_t leaf_addr(uint64_t e, size_t level) {
     return e & ENTRY_ADDR_MASK & ~(level_size(level) - 1);
 }

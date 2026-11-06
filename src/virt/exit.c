@@ -306,7 +306,7 @@ void exit_string_io(struct vcpu *v, uint16_t port) {
     // its mapping, runs again.
     struct insn insn;
     if (!insn_decode(v, &insn)) {
-        if (!nvmx_exit_pending(v)) {
+        if (!nvmx_exit_pending(v) && !nsvm_exit_pending(v)) {
             printf(
                 "Cannot decode the instruction at %#llx that reached trapped port %#x\n",
                 (unsigned long long)vcpu_rip(v), port

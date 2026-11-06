@@ -256,6 +256,20 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 #define SVM_RAP_ALLOW_LARGER ((uint8_t)1 << 0)
 #define SVM_RAP_CLEAR ((uint8_t)1 << 1)
 
+// CPUID Fn8000_000A_EDX (APM 24594 rev. 3.39, E.4.9).
+#define SVM_FEATURE_NP ((uint32_t)1 << 0)
+#define SVM_FEATURE_LBRV ((uint32_t)1 << 1)
+#define SVM_FEATURE_NRIPS ((uint32_t)1 << 3)
+#define SVM_FEATURE_VMCB_CLEAN ((uint32_t)1 << 5)
+#define SVM_FEATURE_FLUSH_BY_ASID ((uint32_t)1 << 6)
+#define SVM_FEATURE_DECODE_ASSISTS ((uint32_t)1 << 7)
+#define SVM_FEATURE_AVIC ((uint32_t)1 << 13)
+#define SVM_FEATURE_VGIF ((uint32_t)1 << 16)
+#define SVM_FEATURE_X2AVIC ((uint32_t)1 << 18)
+#define SVM_FEATURE_TLBICTL ((uint32_t)1 << 24)
+#define SVM_FEATURE_VNMI ((uint32_t)1 << 25)
+#define SVM_FEATURE_EXT_LVT_AVIC_ACCESS ((uint32_t)1 << 27)
+
 // Nested paging and what goes with it, at offset 090h.
 #define SVM_NP_ENABLE ((uint64_t)1 << 0)
 #define SVM_NP_INVLPGB ((uint64_t)1 << 7)

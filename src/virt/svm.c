@@ -43,20 +43,8 @@
 #include <virt/virt.h>
 #include <virt/vlapic.h>
 
-#define SVM_FEATURE_NP ((uint32_t)1 << 0)
-#define SVM_FEATURE_LBRV ((uint32_t)1 << 1)
-#define SVM_FEATURE_NRIPS ((uint32_t)1 << 3)
-#define SVM_FEATURE_VMCB_CLEAN ((uint32_t)1 << 5)
-#define SVM_FEATURE_FLUSH_BY_ASID ((uint32_t)1 << 6)
-#define SVM_FEATURE_DECODE_ASSISTS ((uint32_t)1 << 7)
-#define SVM_FEATURE_AVIC ((uint32_t)1 << 13)
-#define SVM_FEATURE_X2AVIC ((uint32_t)1 << 18)
-#define SVM_FEATURE_VGIF ((uint32_t)1 << 16)
-#define SVM_FEATURE_TLBICTL ((uint32_t)1 << 24)
-#define SVM_FEATURE_VNMI ((uint32_t)1 << 25)
-#define SVM_FEATURE_EXT_LVT_AVIC_ACCESS ((uint32_t)1 << 27)
-
 #define CPUID_80000001_ECX_OSVW ((uint32_t)1 << 9)
+#define CPUID_80000001_EDX_NX ((uint32_t)1 << 20)
 #define CPUID_80000008_EBX_INVLPGB ((uint32_t)1 << 3)
 #define MSR_MCG_CAP 0x179
 #define MSR_MCG_STATUS 0x17a
@@ -252,8 +240,10 @@ void svm_cpu_init(void) {
     // The INVLPGBs that the hypervisor issues for the guest follow this
     // processor's TCE, cleared so that they drop every cached upper-level
     // entry, as those of a guest with its TCE clear do (APM 24593 rev. 3.46,
-    // 3.1.7).
-    wrmsr(MSR_EFER, (rdmsr(MSR_EFER) & ~(uint64_t)EFER_TCE) | EFER_SVME);
+    // 3.1.7). NXE is for the no-execute bits of the shadows of the guest's
+    // nested page tables (nsvm.c).
+    uint64_t nxe = (cpuid(0x80000001, 0).edx & CPUID_80000001_EDX_NX) != 0 ? EFER_NXE : 0;
+    wrmsr(MSR_EFER, (rdmsr(MSR_EFER) & ~(uint64_t)EFER_TCE) | EFER_SVME | nxe);
     wrmsr(MSR_VM_HSAVE_PA, (uint64_t)(uintptr_t)page_alloc(1));
     // INITs become #SX, which the guest's intercept or the host's handler
     // takes, rather than resetting the processor under the hypervisor.

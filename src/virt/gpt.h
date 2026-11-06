@@ -66,6 +66,10 @@ bool gpt_translate_leaf(
     uintptr_t gpa, uint64_t *hpa, uint32_t *prot, uint8_t *memtype, size_t *level
 );
 
+// A leaf of SVM nested paging's tables mapping hpa at level as gpt_map() makes
+// them, for the shadows of the guest's own nested page tables (nsvm.c).
+uint64_t gpt_npt_leaf(uintptr_t hpa, uint32_t prot, uint8_t memtype, size_t level);
+
 // Drops cached translations, on every CPU that will next enter the guest.
 void gpt_flush(void);
 

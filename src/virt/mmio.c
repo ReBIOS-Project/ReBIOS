@@ -31,6 +31,7 @@
 #include <virt/guest_mem.h>
 #include <virt/insn.h>
 #include <virt/io.h>
+#include <virt/nsvm.h>
 #include <virt/nvmx.h>
 #include <virt/profile.h>
 #include <virt/vcpu.h>
@@ -576,8 +577,9 @@ static bool fault(struct vcpu *v, uintptr_t gpa, bool fetch) {
     }
     struct insn insn;
     if (!insn_decode(v, &insn)) {
-        // The guest's EPT may not let it fetch the instruction.
-        if (!nvmx_exit_pending(v)) {
+        // The guest's EPT or nested page tables may not let it fetch the
+        // instruction.
+        if (!nvmx_exit_pending(v) && !nsvm_exit_pending(v)) {
             step_begin(v, gpa, NULL);
         }
         return true;

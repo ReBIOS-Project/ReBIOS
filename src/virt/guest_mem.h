@@ -41,6 +41,11 @@ bool guest_phys_write(uintptr_t gpa, const void *buf, size_t len);
 // Whether PAE paging may load the PDPTE: not present, or setting no bit it
 // reserves.
 bool guest_pdpte_valid(uint64_t pdpte);
+// The bits a paging-structure entry at level, 0 for the page table's, reserves
+// where it maps a page or not, in 64-bit entries or 32-bit paging's, and with
+// NX or without (SDM 325462-093 Vol. 3A, Tables 5-4 to 5-20). PAE paging's
+// PDPTEs are level 2 with pae.
+uint64_t guest_pte_reserved(bool wide, bool pae, size_t level, bool large, bool nx);
 
 // Translates through the guest's own paging, as the processor would for the
 // access. On failure, *pf_error holds the page fault error code to raise.

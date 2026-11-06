@@ -20,11 +20,14 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <virt/nsvm.h>
+#include <core.h>
+#include <handoff.h>
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <memory.h>
 #include <sys/cpu.h>
 #include <sys/mm.h>
+#include <sys/smp.h>
 #include <sys/x86.h>
 #include <virt/cpuid.h>
 #include <virt/event.h>
@@ -32,6 +35,7 @@
 #include <virt/guest_mem.h>
 #include <virt/insn.h>
 #include <virt/irq.h>
+#include <virt/mmio.h>
 #include <virt/svm.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>
@@ -71,6 +75,52 @@
 #define VMCB_FRED_STATE 0xcc0
 #define VMCB_FRED_SIZE 0x40
 
+// Nested paging's tables, in the formats of the guest's page tables (APM 24593
+// rev. 3.46, 15.25.3 and 15.25.5).
+#define NPT_P ((uint64_t)1 << 0)
+#define NPT_RW ((uint64_t)1 << 1)
+#define NPT_US ((uint64_t)1 << 2)
+#define NPT_PWT ((uint64_t)1 << 3)
+#define NPT_PCD ((uint64_t)1 << 4)
+#define NPT_A ((uint64_t)1 << 5)
+#define NPT_D ((uint64_t)1 << 6)
+#define NPT_PS ((uint64_t)1 << 7)
+#define NPT_PAT_4K ((uint64_t)1 << 7)
+#define NPT_PAT_LARGE ((uint64_t)1 << 12)
+#define NPT_NX ((uint64_t)1 << 63)
+#define NPT_ADDRESS ((uint64_t)0x000ffffffffff000)
+
+// A nested page fault's error code (APM 24593 rev. 3.46, 15.25.7).
+#define NPF_P ((uint64_t)1 << 0)
+#define NPF_RW ((uint64_t)1 << 1)
+#define NPF_US ((uint64_t)1 << 2)
+#define NPF_RSV ((uint64_t)1 << 3)
+#define NPF_ID ((uint64_t)1 << 4)
+#define NPF_FINAL ((uint64_t)1 << 32)
+#define NPF_TABLE ((uint64_t)1 << 33)
+
+#define NPT02_ROOTS 4
+
+// A shadow of one of the guest's nested page tables, for one ASID of its
+// guests: what it and the hypervisor's make of the guest's guest's addresses,
+// filled in as the processor misses them.
+struct npt02 {
+    uint64_t ncr3;
+    uint32_t asid;
+    uint64_t *root;
+};
+
+// What a walk of the guest's nested page tables made of an address of its
+// guest: the guest's physical address, the level of the leaf, 0 for a 4 KiB
+// page, the leaf, and the rights of every entry used, ANDed.
+struct npt12_walk {
+    uintptr_t gpa;
+    size_t level;
+    uint64_t leaf;
+    bool writable;
+    bool executable;
+};
+
 // SVM as the guest gets it.
 struct nsvm {
     // EFER.SVME of the guest, and of its guest while that runs, which the
@@ -108,6 +158,23 @@ struct nsvm {
     uint64_t tsc_offset12;
     // VMCB02's MSR permission map: the hypervisor's and VMCB12's.
     uint8_t *msrpm02;
+    // Whether VMCB12 enables nested paging, and the guest's paging mode at its
+    // VMRUN, which the nested page tables take (APM 24593 rev. 3.46, 15.25.3):
+    // the levels, below the PDPT for PAE paging, 64-bit entries, and the
+    // guest's EFER.NXE, CR4.PSE, and PAT.
+    bool npt;
+    uint64_t ncr3;
+    size_t npt_levels;
+    bool npt_wide;
+    bool npt_pae;
+    bool npt_nx;
+    bool npt_pse;
+    bool npt_smep;
+    uint64_t npt_pat;
+    struct npt02 npt02[NPT02_ROOTS];
+    struct npt02 *current02;
+    size_t npt02_pages;
+    size_t npt02_next;
     // An exit of the guest's guest that what the hypervisor carried out for it
     // raised, for the next entry.
     bool pending;
@@ -126,6 +193,10 @@ static uint32_t nasid;
 static uint8_t *iopm02;
 // How many vCPUs have the guest's EFER.SVME set.
 static _Atomic(size_t) svm_count;
+// The NPT02 tables each vCPU may have, of the heap's part for them, and the
+// largest pages they map: 2 MiB, or 1 GiB.
+static size_t npt02_budget;
+static size_t npt02_level_max;
 
 void nsvm_init(void) {
     if (virt_vmx) {
@@ -139,6 +210,8 @@ void nsvm_init(void) {
     }
     nsvm_enabled = true;
     phys_width = cpuid(0x80000008, 0).eax & 0xff;
+    npt02_budget = core_handoff->nested_heap_size / PAGE_SIZE / smp_cpu_count();
+    npt02_level_max = svm_huge_pages() ? 2 : 1;
     iopm02 = page_alloc(IOPM_SIZE / PAGE_SIZE);
     memset(iopm02, 0xff, IOPM_SIZE);
     printf("Nested SVM for the guest\n");
@@ -241,9 +314,9 @@ bool nsvm_in_l2(struct vcpu *v) {
     return v->nsvm != NULL && v->nsvm->in_l2;
 }
 
-// The processor's revision, and its ASIDs but the guest's own.
+// The processor's revision, its ASIDs but the guest's own, and nested paging.
 struct cpuid_regs nsvm_cpuid(void) {
-    return (struct cpuid_regs){ cpuid(0x8000000a, 0).eax & 0xff, nasid - 1, 0, 0 };
+    return (struct cpuid_regs){ cpuid(0x8000000a, 0).eax & 0xff, nasid - 1, 0, SVM_FEATURE_NP };
 }
 
 uint64_t nsvm_tsc_offset(struct vcpu *v) {
@@ -302,7 +375,7 @@ bool nsvm_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
 void nsvm_set_pat(struct vcpu *v, uint64_t pat) {
     struct nsvm *n = v->nsvm;
     v->vmcb->save.g_pat = pat;
-    if (n != NULL && n->in_l2) {
+    if (n != NULL && n->in_l2 && !n->npt) {
         n->vmcb01->save.g_pat = pat;
     }
 }
@@ -418,6 +491,9 @@ static void exit_to_l1(
     s12->dr7 = s02->dr7;
     s12->dr6 = s02->dr6;
     s12->cpl = s02->cpl;
+    if (n->npt) {
+        s12->g_pat = s02->g_pat;
+    }
 
     // Of the virtual interrupt control, the processor writes back V_TPR and
     // V_IRQ alone.
@@ -489,7 +565,19 @@ static bool injection_valid(uint64_t event) {
 }
 
 // A permission map's last byte is below the maximum physical address, which is
-// the last one MAXPHYADDR has (APM 24593 rev. 3.46, 15.10.1 and 15.11).
+// the last one MAXPHYADDR has (APM 24593 rev. 3.46, 15.10.1 and 15.11). Each
+// entry names one of the types 0, 1, 4, 5, 6, or 7 (APM 24593 rev. 3.46,
+// 7.8.1).
+static bool pat_valid(uint64_t pat) {
+    for (size_t i = 0; i < 8; i++) {
+        uint8_t type = pat >> (i * 8);
+        if (type > 7 || type == 2 || type == 3) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static bool table_fits(uint64_t base, size_t size) {
     return ((base & ~(uint64_t)0xfff) + size) >> phys_width == 0;
 }
@@ -519,6 +607,14 @@ static bool vmcb12_valid(struct vcpu *v, const struct vmcb *vmcb12) {
      || (s->cr4 & ~cpuid_cr4_allowed()) != 0 || (s->efer & ~cpuid_efer_allowed(v)) != 0) {
         return false;
     }
+    // Nested paging takes the guest's paging, and a valid nCR3 and guest PAT
+    // (APM 24593 rev. 3.46, 15.25.3 and 15.25.4).
+    bool npt = (c->np_enable & SVM_NP_ENABLE) != 0;
+    if (npt
+     && ((v->vmcb->save.cr0 & CR0_PG) == 0 || (c->n_cr3 >> phys_width) != 0
+      || !pat_valid(s->g_pat))) {
+        return false;
+    }
     if ((s->efer & EFER_LME) != 0 && (s->cr0 & CR0_PG) != 0) {
         if ((s->cr4 & CR4_PAE) == 0 || (s->cr0 & CR0_PE) == 0 || (s->cr3 >> phys_width) != 0
          || ((s->cs.attrib & SEG_L) != 0 && (s->cs.attrib & SEG_DB) != 0)) {
@@ -528,7 +624,7 @@ static bool vmcb12_valid(struct vcpu *v, const struct vmcb *vmcb12) {
     }
     // Without nested paging, VMRUN loads PAE paging's four PDPEs, which may
     // not set reserved bits (APM 24593 rev. 3.46, 15.5.1).
-    if ((s->cr0 & CR0_PG) != 0 && (s->cr4 & CR4_PAE) != 0) {
+    if (!npt && (s->cr0 & CR0_PG) != 0 && (s->cr4 & CR4_PAE) != 0) {
         uint64_t pdpte[4];
         if (!guest_phys_read(s->cr3 & 0xffffffe0, pdpte, sizeof(pdpte))) {
             return false;
@@ -583,6 +679,275 @@ static uintptr_t merge_msrpm(struct nsvm *n, uint64_t base12) {
     return (uintptr_t)n->msrpm02;
 }
 
+// An entry of the guest's nested page tables, which reads as all ones where
+// nothing decodes, its reserved bits set.
+static uint64_t npt12_read(const struct nsvm *n, uintptr_t gpa, void **at) {
+    uint8_t *page = guest_page(gpa & ~(uint64_t)0xfff);
+    *at = NULL;
+    if (page == NULL) {
+        return ~(uint64_t)0;
+    }
+    if (n->npt_wide) {
+        *at = page + (gpa & 0xff8);
+        return atomic_load_explicit((_Atomic(uint64_t) *)*at, memory_order_relaxed);
+    }
+    *at = page + (gpa & 0xffc);
+    return atomic_load_explicit((_Atomic(uint32_t) *)*at, memory_order_relaxed);
+}
+
+// Sets bits in an entry the walk found as it was: false where the entry
+// changed meanwhile, for the walk to start again.
+static bool npt12_mark(const struct nsvm *n, void *at, uint64_t was, uint64_t set) {
+    if (n->npt_wide) {
+        uint64_t expected = was;
+        return atomic_compare_exchange_strong_explicit(
+            (_Atomic(uint64_t) *)at, &expected, was | set, memory_order_seq_cst,
+            memory_order_seq_cst
+        );
+    }
+    uint32_t expected = (uint32_t)was;
+    return atomic_compare_exchange_strong_explicit(
+        (_Atomic(uint32_t) *)at, &expected, (uint32_t)(was | set), memory_order_seq_cst,
+        memory_order_seq_cst
+    );
+}
+
+// The walk of the guest's nested page tables for an access of its guest's (APM
+// 24593 rev. 3.46, 15.25.5, 15.25.7, and 15.25.8), as the guest's own page
+// tables are walked in its paging mode at VMRUN, every access a user one: 0
+// where the walk maps the access, which sets its accessed flags and, for a
+// write, its dirty flag, else the nested page fault's error code.
+static uint64_t npt12_walk(
+    struct nsvm *n, uintptr_t gpa, bool write, bool fetch, struct npt12_walk *w
+) {
+    bool wide = n->npt_wide;
+    // The fetch flag is defined only with SMEP or with PAE paging's NX (APM
+    // 24593 rev. 3.46, 8.4.2), as for the guest's page faults (guest_mem.c).
+    bool fetch_flag = fetch && (n->npt_smep || (wide && n->npt_nx));
+    uint64_t error = NPF_US | (write ? NPF_RW : 0) | (fetch_flag ? NPF_ID : 0);
+retry:;
+    uintptr_t table;
+    // The PDPT of PAE paging, which nested paging reads as it walks (APM 24593
+    // rev. 3.46, 15.25.11), at nCR3 bits 31:5 as Linux 7.3's KVM finds
+    // (nested.c, nested_svm_get_tdp_pdptr()).
+    if (n->npt_pae) {
+        void *at;
+        if ((gpa >> 32) != 0) {
+            return error;
+        }
+        uint64_t pdpte = npt12_read(n, (n->ncr3 & ~(uint64_t)0x1f) + ((gpa >> 30) & 3) * 8, &at);
+        if ((pdpte & NPT_P) == 0) {
+            return error;
+        }
+        if (!guest_pdpte_valid(pdpte)) {
+            return error | NPF_P | NPF_RSV;
+        }
+        table = pdpte & NPT_ADDRESS;
+    } else if (!wide) {
+        if ((gpa >> 32) != 0) {
+            return error;
+        }
+        table = n->ncr3 & 0xfffff000;
+    } else {
+        if ((gpa >> (12 + 9 * n->npt_levels)) != 0) {
+            return error;
+        }
+        table = n->ncr3 & NPT_ADDRESS;
+    }
+    void *used[5];
+    uint64_t entries[5];
+    bool writable = true;
+    bool user = true;
+    bool executable = true;
+    for (size_t level = n->npt_levels; level-- > 0; ) {
+        unsigned int shift = wide ? 12 + 9 * level : 12 + 10 * level;
+        size_t index = (gpa >> shift) & (wide ? 511 : 1023);
+        uint64_t e = npt12_read(n, table + index * (wide ? 8 : 4), &used[level]);
+        if ((e & NPT_P) == 0) {
+            return error;
+        }
+        bool large = level > 0 && (e & NPT_PS) != 0 && (wide || n->npt_pse);
+        if ((e & guest_pte_reserved(wide, n->npt_pae, level, large, n->npt_nx)) != 0) {
+            return error | NPF_P | NPF_RSV;
+        }
+        entries[level] = e;
+        writable = writable && (e & NPT_RW) != 0;
+        user = user && (e & NPT_US) != 0;
+        executable = executable && (!wide || !n->npt_nx || (e & NPT_NX) == 0);
+        if (level > 0 && !large) {
+            table = wide ? e & NPT_ADDRESS : e & 0xfffff000;
+            continue;
+        }
+        if (!user || (write && !writable) || (fetch && !executable)) {
+            return error | NPF_P;
+        }
+        for (size_t l = n->npt_levels; l-- > level; ) {
+            uint64_t set = NPT_A | (l == level && write ? NPT_D : 0);
+            if ((entries[l] & set) != set && !npt12_mark(n, used[l], entries[l], set)) {
+                goto retry;
+            }
+        }
+        uint64_t page_mask = ((uint64_t)1 << shift) - 1;
+        if (wide) {
+            w->gpa = (e & NPT_ADDRESS & ~page_mask) | (gpa & page_mask);
+        } else if (large) {
+            // PSE-36 puts physical address bits 39:32 in PDE bits 20:13.
+            w->gpa = (e & 0xffc00000) | ((e >> 13) & 0xff) << 32 | (gpa & page_mask);
+        } else {
+            w->gpa = (e & 0xfffff000) | (gpa & page_mask);
+        }
+        w->level = level;
+        w->leaf = e | NPT_A | (write ? NPT_D : 0);
+        w->writable = writable;
+        w->executable = executable;
+        return 0;
+    }
+    return error;
+}
+
+static size_t level_size(size_t level) {
+    return (uint64_t)1 << (12 + 9 * level);
+}
+
+static void npt02_free(struct nsvm *n, uint64_t *table, size_t level) {
+    for (size_t i = 0; level > 0 && i < 512; i++) {
+        uint64_t e = table[i];
+        if ((e & NPT_P) != 0 && (e & NPT_PS) == 0) {
+            npt02_free(n, (uint64_t *)(uintptr_t)(e & NPT_ADDRESS), level - 1);
+        }
+    }
+    page_free(table, 1);
+    n->npt02_pages--;
+}
+
+// The processor may hold translations from the tables until a flush of every
+// ASID, which comes before the guest's guest runs again.
+static void npt02_drop_all(struct nsvm *n) {
+    for (size_t i = 0; i < NPT02_ROOTS; i++) {
+        if (n->npt02[i].root != NULL) {
+            npt02_free(n, n->npt02[i].root, 3);
+            n->npt02[i].root = NULL;
+        }
+    }
+    n->current02 = NULL;
+    n->vmcb02->control.tlb_control = SVM_TLB_FLUSH_ALL;
+}
+
+static uint64_t *npt02_table(struct nsvm *n) {
+    n->npt02_pages++;
+    return page_alloc(1);
+}
+
+// The root of the shadow of VMCB12's nested page tables for its ASID, of the
+// hypervisor's 4-level nested paging.
+static uintptr_t npt02_root(struct nsvm *n) {
+    uint32_t asid = n->copy.control.guest_asid;
+    struct npt02 *r = NULL;
+    for (size_t i = 0; i < NPT02_ROOTS && r == NULL; i++) {
+        struct npt02 *at = &n->npt02[i];
+        if (at->root != NULL && at->ncr3 == n->ncr3 && at->asid == asid) {
+            r = at;
+        }
+    }
+    for (size_t i = 0; i < NPT02_ROOTS && r == NULL; i++) {
+        if (n->npt02[i].root == NULL) {
+            r = &n->npt02[i];
+        }
+    }
+    if (r == NULL) {
+        r = &n->npt02[n->npt02_next];
+        n->npt02_next = (n->npt02_next + 1) % NPT02_ROOTS;
+        npt02_free(n, r->root, 3);
+        r->root = NULL;
+        n->vmcb02->control.tlb_control = SVM_TLB_FLUSH_ALL;
+    }
+    if (r->root == NULL) {
+        r->ncr3 = n->ncr3;
+        r->asid = asid;
+        r->root = npt02_table(n);
+    }
+    n->current02 = r;
+    return (uintptr_t)r->root;
+}
+
+// The memory type of a leaf of the guest's nested page tables, through its PAT
+// (APM 24593 rev. 3.46, 15.25.9).
+static uint8_t npt12_memtype(const struct nsvm *n, const struct npt12_walk *w) {
+    uint64_t pat = w->level > 0 ? NPT_PAT_LARGE : NPT_PAT_4K;
+    size_t index = ((w->leaf & pat) != 0 ? 4 : 0) | ((w->leaf & NPT_PCD) != 0 ? 2 : 0)
+                 | ((w->leaf & NPT_PWT) != 0 ? 1 : 0);
+    return (uint8_t)((n->npt_pat >> (index * 8)) & 7);
+}
+
+// An NPT02 leaf for the guest's mapping and the hypervisor's. Writes wait for
+// the guest's dirty flag, which the leaf then takes as set until the guest
+// flushes its guest's translations, as a processor's TLB may (APM 24593 rev.
+// 3.46, 15.16). Where the hypervisor's memory type is not write-back, it wins
+// but over uncacheable.
+static uint64_t npt02_leaf(
+    const struct nsvm *n, const struct npt12_walk *w, uintptr_t hpa, uint32_t prot,
+    uint8_t memtype, size_t level
+) {
+    uint8_t type = npt12_memtype(n, w);
+    if (memtype != MT_WB && type != MT_UC) {
+        type = memtype;
+    }
+    bool writable = w->writable && (prot & GPT_W) != 0 && (w->leaf & NPT_D) != 0;
+    uint64_t e = gpt_npt_leaf(
+        hpa & ~(level_size(level) - 1), writable ? GPT_RWX : GPT_R | GPT_X, type, level
+    );
+    e |= NPT_A | (writable ? NPT_D : 0);
+    if (!w->executable) {
+        e |= NPT_NX;
+    }
+    return e;
+}
+
+// Maps an address of the guest's guest in NPT02 as the walk of the guest's
+// nested page tables found it and the hypervisor's have the guest's memory,
+// but for the page behind the local APICs' pages, which the hypervisor's
+// emulation gives a meaning. Returns the leaf it made, or 0.
+static uint64_t npt02_fill(struct nsvm *n, uintptr_t gpa, const struct npt12_walk *w) {
+    uintptr_t hpa;
+    uint32_t prot;
+    uint8_t memtype;
+    size_t level;
+    if (!gpt_translate_leaf(w->gpa, &hpa, &prot, &memtype, &level)
+     || vlapic_access_page(hpa & ~(uint64_t)0xfff)) {
+        return 0;
+    }
+    // 32-bit paging's 4 MiB pages take 2 MiB ones.
+    if (level > w->level) {
+        level = w->level;
+    }
+    if (level > npt02_level_max) {
+        level = npt02_level_max;
+    }
+    if (n->npt02_pages + 3 > npt02_budget) {
+        npt02_drop_all(n);
+        n->vmcb02->control.n_cr3 = npt02_root(n);
+    }
+    uint64_t *table = n->current02->root;
+    for (size_t l = 3; l > level; l--) {
+        uint64_t *slot = &table[(gpa >> (12 + 9 * l)) & 511];
+        if ((*slot & NPT_P) == 0 || (*slot & NPT_PS) != 0) {
+            *slot = (uint64_t)(uintptr_t)npt02_table(n) | NPT_P | NPT_RW | NPT_US | NPT_A;
+        }
+        table = (uint64_t *)(uintptr_t)(*slot & NPT_ADDRESS);
+    }
+    uint64_t *slot = &table[(gpa >> (12 + 9 * level)) & 511];
+    if ((*slot & NPT_P) != 0 && (*slot & NPT_PS) == 0 && level > 0) {
+        npt02_free(n, (uint64_t *)(uintptr_t)(*slot & NPT_ADDRESS), level - 1);
+    }
+    *slot = npt02_leaf(n, w, hpa, prot, memtype, level);
+    return *slot;
+}
+
+static bool npt02_allows(uint64_t leaf, bool write, bool fetch) {
+    return (leaf & NPT_P) != 0 && (!write || (leaf & NPT_RW) != 0)
+        && (!fetch || (leaf & NPT_NX) == 0);
+}
+
 // VMCB02 from VMCB12 and the hypervisor's own controls in VMCB01 (APM 24594
 // rev. 3.39, VMRUN): the guest's guest runs on the hypervisor's nested page
 // tables, in the processor's ASID one past VMCB12's.
@@ -613,6 +978,7 @@ static void prepare_vmcb02(struct nsvm *n) {
     if ((c12->tlb_control & 1) != 0) {
         c->tlb_control = SVM_TLB_FLUSH_ALL;
     }
+    n->npt = (c12->np_enable & SVM_NP_ENABLE) != 0;
     // The predictor's entries from the guest are the guest's guest's to have
     // cleared, as Linux 7.3's KVM has it (nested.c,
     // nested_vmcb02_prepare_control()).
@@ -628,6 +994,22 @@ static void prepare_vmcb02(struct nsvm *n) {
     c->exitintinfo = 0;
     c->np_enable = vmcb01->control.np_enable;
     c->n_cr3 = gpt_root();
+    if (n->npt) {
+        const struct vmcb_save *s01 = &vmcb01->save;
+        n->ncr3 = c12->n_cr3;
+        n->npt_wide = (s01->efer & EFER_LMA) != 0 || (s01->cr4 & CR4_PAE) != 0;
+        n->npt_pae = (s01->efer & EFER_LMA) == 0 && (s01->cr4 & CR4_PAE) != 0;
+        n->npt_levels = (s01->efer & EFER_LMA) == 0 ? 2 : (s01->cr4 & CR4_LA57) != 0 ? 5 : 4;
+        n->npt_nx = (s01->efer & EFER_NXE) != 0;
+        n->npt_pse = (s01->cr4 & CR4_PSE) != 0;
+        n->npt_smep = (s01->cr4 & CR4_SMEP) != 0;
+        n->npt_pat = s01->g_pat;
+        // Its flushes drop the nested translations too.
+        if (c->tlb_control != 0) {
+            npt02_drop_all(n);
+        }
+        c->n_cr3 = npt02_root(n);
+    }
     c->eventinj = c12->eventinj & ~EVENT_RESERVED;
     // Software interrupts injected take their return address from here (APM
     // 24593 rev. 3.46, 15.20): the guest, without NRIP saving, has its RIP
@@ -663,7 +1045,7 @@ static void prepare_vmcb02(struct nsvm *n) {
     s->rsp = s12->rsp;
     s->rax = s12->rax;
     // Without nested paging of its own, the guest's guest has the guest's PAT.
-    s->g_pat = vmcb01->save.g_pat;
+    s->g_pat = n->npt ? s12->g_pat : vmcb01->save.g_pat;
     copy_shared_state(vmcb02, vmcb01);
 }
 
@@ -959,6 +1341,71 @@ static bool l1_wants(struct vcpu *v, struct nsvm *n, uint64_t code) {
     return ((n->intercepts[code / 32] >> (code % 32)) & 1) != 0;
 }
 
+// A nested page fault of NPT02: the guest's where its nested page tables do
+// not allow the access, else mapped as the hypervisor's nested page tables
+// have the guest's memory, or emulated where that is the hypervisor's own
+// device. The guest's guest's page table walks are writes (APM 24593 rev.
+// 3.46, 15.25.5).
+static void npt_fault(struct vcpu *v, struct nsvm *n) {
+    struct vmcb_control *c = &v->vmcb->control;
+    uintptr_t gpa = c->exitinfo2;
+    uint64_t info = c->exitinfo1;
+    bool walk = (info & NPF_TABLE) != 0;
+    bool write = walk || (info & NPF_RW) != 0;
+    bool fetch = !walk && (info & NPF_ID) != 0;
+    struct npt12_walk w;
+    uint64_t error = npt12_walk(n, gpa, write, fetch, &w);
+    if (error != 0) {
+        error |= info & (NPF_FINAL | NPF_TABLE);
+        exit_to_l1(v, n, SVM_EXIT_NPF, error, gpa, c->exitintinfo);
+        return;
+    }
+    if (npt02_allows(npt02_fill(n, gpa, &w), write, fetch)) {
+        return;
+    }
+    // An event the hypervisor cannot deliver itself ends the guest's guest as
+    // a shutdown would.
+    if (event_cut_short(v)) {
+        if (event_deliver_real_mode(v)) {
+            return;
+        }
+        if ((n->intercepts[3] & SVM_INTERCEPT_SHUTDOWN) == 0) {
+            svm_shutdown(v, "The guest's guest's event cannot be delivered");
+        }
+        exit_to_l1(v, n, SVM_EXIT_SHUTDOWN, 0, 0, 0);
+        return;
+    }
+    if (fetch) {
+        mmio_fetch(v, w.gpa);
+    } else {
+        mmio_fault(v, w.gpa);
+    }
+}
+
+bool nsvm_npt_active(struct vcpu *v) {
+    return v->nsvm != NULL && v->nsvm->in_l2 && v->nsvm->npt;
+}
+
+bool nsvm_npt_translate(
+    struct vcpu *v, uintptr_t gpa, bool write, bool fetch, bool walk, uint64_t *out
+) {
+    struct nsvm *n = v->nsvm;
+    if (n->pending) {
+        return false;
+    }
+    struct npt12_walk w;
+    uint64_t error = npt12_walk(n, gpa, write || walk, fetch && !walk, &w);
+    if (error == 0) {
+        *out = w.gpa;
+        return true;
+    }
+    n->pending = true;
+    n->pending_code = SVM_EXIT_NPF;
+    n->pending_info1 = error | (walk ? NPF_TABLE : NPF_FINAL);
+    n->pending_info2 = gpa;
+    return false;
+}
+
 bool nsvm_l2_exit(struct vcpu *v) {
     struct nsvm *n = v->nsvm;
     if (n == NULL || !n->in_l2) {
@@ -967,6 +1414,10 @@ bool nsvm_l2_exit(struct vcpu *v) {
     struct vmcb_control *c = &v->vmcb->control;
     uint64_t code = c->exitcode;
     n->run_pending = false;
+    if (code == SVM_EXIT_NPF && n->npt) {
+        npt_fault(v, n);
+        return true;
+    }
     // Where the guest's guest's own EFER.SVME is clear, the SVM instructions
     // raise #UD before their intercepts, but VMMCALL, whose intercept comes
     // first (APM 24593 rev. 3.46, Table 15-7); the guest may intercept #UD
@@ -1209,5 +1660,9 @@ void nsvm_gpt_changed(struct vcpu *v) {
     n->vmcb01->control.n_cr3 = gpt_root();
     if (n->ran) {
         v->vmcb->control.tlb_control = SVM_TLB_FLUSH_ALL;
+    }
+    npt02_drop_all(n);
+    if (n->in_l2 && n->npt) {
+        n->vmcb02->control.n_cr3 = npt02_root(n);
     }
 }

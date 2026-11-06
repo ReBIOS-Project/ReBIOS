@@ -88,8 +88,21 @@ bool nsvm_exception(
 bool nsvm_inject_again(struct vcpu *v, uint64_t event);
 // Whether such an exit waits for the next entry.
 bool nsvm_exit_pending(struct vcpu *v);
-// The guest's PAT, which its guest shares.
+// The guest's PAT, which its guest shares where the guest has no nested paging
+// of its own.
 void nsvm_set_pat(struct vcpu *v, uint64_t pat);
+// Whether the vCPU runs the guest's guest through the guest's nested page
+// tables, which then translate what the vCPU's accesses take as guest-physical
+// addresses.
+bool nsvm_npt_active(struct vcpu *v);
+// An address of the guest's guest through the guest's nested page tables, for
+// a data write, an instruction fetch, or neither, of the guest's guest's own
+// page table walks or else at the address it translates to: false where that
+// is a nested page fault of the guest's instead, which waits for the next
+// entry.
+bool nsvm_npt_translate(
+    struct vcpu *v, uintptr_t gpa, bool write, bool fetch, bool walk, uint64_t *out
+);
 // The hypervisor's nested page tables changed: the translations of every ASID
 // the guest's guests ran in go too.
 void nsvm_gpt_changed(struct vcpu *v);

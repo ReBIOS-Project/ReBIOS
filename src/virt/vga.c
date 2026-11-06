@@ -32,6 +32,7 @@
 #include <virt/io.h>
 #include <virt/layout.h>
 #include <virt/mmio.h>
+#include <virt/nsvm.h>
 #include <virt/nvmx.h>
 #include <virt/vcpu.h>
 #include <virt/vgabios.h>
@@ -1689,8 +1690,9 @@ static void vbe_start(uint64_t now) {
         out.valid = false;
     }
     // The guest's guests write to memory past the dirty flags of the
-    // hypervisor's EPT, and after them every line needs comparing once.
-    bool track = vbe.track && !nvmx_any_vmx_operation();
+    // hypervisor's EPT or nested page tables, and after them every line needs
+    // comparing once.
+    bool track = vbe.track && !nvmx_any_vmx_operation() && !nsvm_any_svm();
     out.vbe_compare_all = !track || !out.vbe_tracked || now >= out.vbe_compare_due;
     if (out.vbe_compare_all) {
         out.vbe_compare_due = now + COMPARE_ALL_NS;
