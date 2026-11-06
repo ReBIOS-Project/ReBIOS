@@ -319,7 +319,8 @@ bool nsvm_in_l2(struct vcpu *v) {
 // bits allow (APM 24593 rev. 3.46, 15.15.1).
 struct cpuid_regs nsvm_cpuid(void) {
     struct cpuid_regs svm = cpuid(0x8000000a, 0);
-    uint32_t features = SVM_FEATURE_NP | SVM_FEATURE_NRIPS | SVM_FEATURE_VMCB_CLEAN;
+    uint32_t features = SVM_FEATURE_NP | SVM_FEATURE_NRIPS | SVM_FEATURE_VMCB_CLEAN
+                      | SVM_FEATURE_FLUSH_BY_ASID;
     return (struct cpuid_regs){ svm.eax & 0xff, nasid - 1, 0, svm.edx & features };
 }
 
@@ -844,6 +845,18 @@ static void npt02_drop_all(struct nsvm *n) {
     n->vmcb02->control.tlb_control = SVM_TLB_FLUSH_ALL;
 }
 
+// The tables of one ASID, for a flush of its translations alone, which VMCB02
+// then makes.
+static void npt02_drop_asid(struct nsvm *n, uint32_t asid) {
+    for (size_t i = 0; i < NPT02_ROOTS; i++) {
+        if (n->npt02[i].root != NULL && n->npt02[i].asid == asid) {
+            npt02_free(n, n->npt02[i].root, 3);
+            n->npt02[i].root = NULL;
+        }
+    }
+    n->current02 = NULL;
+}
+
 static uint64_t *npt02_table(struct nsvm *n) {
     n->npt02_pages++;
     return page_alloc(1);
@@ -983,11 +996,15 @@ static void prepare_vmcb02(struct nsvm *n) {
     c->iopm_base_pa = (uintptr_t)iopm02;
     c->msrpm_base_pa = merge_msrpm(n, c12->msrpm_base_pa);
     c->guest_asid = c12->guest_asid + 1;
-    // A flush of VMCB12's ASID alone, which the guest is not offered yet, is
-    // one of every ASID, as bit 0 makes it where TLB_CONTROL was a flag, and
-    // one VMCB02 still owes stays.
-    if ((c12->tlb_control & 1) != 0) {
-        c->tlb_control = SVM_TLB_FLUSH_ALL;
+    // VMCB12's flush, of its ASID where the guest has flush by ASID, else of
+    // every ASID where bit 0 is set, as where TLB_CONTROL was a flag (APM
+    // 24593 rev. 3.46, 15.16.1), but for one of every ASID VMCB02 still owes.
+    uint8_t flush = c12->tlb_control;
+    if (!svm_flush_by_asid || (flush != SVM_TLB_FLUSH_ASID && flush != SVM_TLB_FLUSH_ASID_LOCAL)) {
+        flush = (flush & 1) != 0 ? SVM_TLB_FLUSH_ALL : 0;
+    }
+    if (c->tlb_control == 0) {
+        c->tlb_control = flush;
     }
     n->npt = (c12->np_enable & SVM_NP_ENABLE) != 0;
     // The predictor's entries from the guest are the guest's guest's to have
@@ -1015,9 +1032,13 @@ static void prepare_vmcb02(struct nsvm *n) {
         n->npt_pse = (s01->cr4 & CR4_PSE) != 0;
         n->npt_smep = (s01->cr4 & CR4_SMEP) != 0;
         n->npt_pat = s01->g_pat;
-        // Its flushes drop the nested translations too.
-        if (c->tlb_control != 0) {
+        // Its flushes drop the nested translations too, but for those of its
+        // ASID's non-global translations alone, which a change of its nested
+        // page tables does not take (APM 24593 rev. 3.46, 15.16.1).
+        if (c->tlb_control == SVM_TLB_FLUSH_ALL) {
             npt02_drop_all(n);
+        } else if (c->tlb_control == SVM_TLB_FLUSH_ASID) {
+            npt02_drop_asid(n, c12->guest_asid);
         }
         c->n_cr3 = npt02_root(n);
     }
