@@ -87,30 +87,10 @@ static bool namespace_loaded(void) {
     return uacpi_get_current_init_level() >= UACPI_INIT_LEVEL_NAMESPACE_LOADED;
 }
 
-static void log_failure(uacpi_namespace_node *node, const char *name, uacpi_status status) {
-    const char *path = acpi_path(node);
-    printf("Cannot evaluate %s.%s: %s\n", path, name, uacpi_status_to_string(status));
-    acpi_path_free(path);
-}
-
 static bool device_present(uacpi_namespace_node *node) {
     uacpi_u32 sta;
     return uacpi_eval_sta(node, &sta) == UACPI_STATUS_OK
         && (sta & ACPI_STA_RESULT_DEVICE_PRESENT) != 0;
-}
-
-// _SEG and _BBN, which are 0 where a host bridge has none.
-static bool eval_optional(uacpi_namespace_node *node, const char *name, uint64_t *value) {
-    uacpi_status status = uacpi_eval_simple_integer(node, name, value);
-    if (status == UACPI_STATUS_NOT_FOUND) {
-        *value = 0;
-        return true;
-    }
-    if (status != UACPI_STATUS_OK) {
-        log_failure(node, name, status);
-        return false;
-    }
-    return true;
 }
 
 static uacpi_iteration_decision host_bridge_found(
@@ -123,7 +103,8 @@ static uacpi_iteration_decision host_bridge_found(
     }
     uint64_t segment;
     uint64_t bus;
-    if (!eval_optional(node, "_SEG", &segment) || !eval_optional(node, "_BBN", &bus)) {
+    if (!acpi_eval_optional(node, "_SEG", &segment, NULL)
+     || !acpi_eval_optional(node, "_BBN", &bus, NULL)) {
         return UACPI_ITERATION_DECISION_CONTINUE;
     }
 
@@ -232,7 +213,7 @@ static struct bus_info *bus_get(
         if (status != UACPI_STATUS_OK) {
             info->prt = NULL;
             if (status != UACPI_STATUS_NOT_FOUND) {
-                log_failure(node, "_PRT", status);
+                acpi_log_failure(node, "_PRT", status);
             }
         }
     }
@@ -296,7 +277,7 @@ static bool link_interrupt(
     uacpi_resources *resources;
     uacpi_status status = uacpi_get_current_resources(link, &resources);
     if (status != UACPI_STATUS_OK) {
-        log_failure(link, "_CRS", status);
+        acpi_log_failure(link, "_CRS", status);
         return false;
     }
     struct link_search search = { .index = index, .route = route };
@@ -429,7 +410,7 @@ static uacpi_iteration_decision claim_device(
     uacpi_u32 sta;
     uacpi_status status = uacpi_eval_sta(node, &sta);
     if (status != UACPI_STATUS_OK) {
-        log_failure(node, "_STA", status);
+        acpi_log_failure(node, "_STA", status);
         return UACPI_ITERATION_DECISION_CONTINUE;
     }
     uacpi_u32 wanted = ACPI_STA_RESULT_DEVICE_PRESENT | ACPI_STA_RESULT_DEVICE_ENABLED;
@@ -441,7 +422,7 @@ static uacpi_iteration_decision claim_device(
     status = uacpi_get_current_resources(node, &resources);
     if (status != UACPI_STATUS_OK) {
         if (status != UACPI_STATUS_NOT_FOUND) {
-            log_failure(node, "_CRS", status);
+            acpi_log_failure(node, "_CRS", status);
         }
         return UACPI_ITERATION_DECISION_CONTINUE;
     }

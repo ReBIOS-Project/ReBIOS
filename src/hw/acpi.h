@@ -22,6 +22,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <uacpi/acpi.h>
+#include <uacpi/status.h>
 #include <uacpi/types.h>
 
 // Where the RSDP's fields and a table header's are, by uACPI's layouts of
@@ -101,5 +102,14 @@ void acpi_path_free(const char *path);
 // The PNP IDs of PCI host bridges, and of PCI interrupt link devices.
 extern const char *const acpi_host_bridge_ids[];
 extern const char *const acpi_link_ids[];
+
+// Logs that a node's object could not be evaluated.
+void acpi_log_failure(uacpi_namespace_node *node, const char *name, uacpi_status status);
+// An integer object that a node may lack, as a host bridge may lack _SEG and
+// _BBN, 0 then, found telling which where it is not NULL. False, logged, where
+// it cannot be evaluated.
+bool acpi_eval_optional(
+    uacpi_namespace_node *node, const char *name, uint64_t *value, bool *found
+);
 
 #endif

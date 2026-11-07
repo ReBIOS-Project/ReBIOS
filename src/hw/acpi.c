@@ -893,3 +893,27 @@ void acpi_path_free(const char *path) {
 
 const char *const acpi_host_bridge_ids[] = { "PNP0A03", "PNP0A08", NULL };
 const char *const acpi_link_ids[] = { "PNP0C0F", NULL };
+
+void acpi_log_failure(uacpi_namespace_node *node, const char *name, uacpi_status status) {
+    const char *path = acpi_path(node);
+    printf("Cannot evaluate %s.%s: %s\n", path, name, uacpi_status_to_string(status));
+    acpi_path_free(path);
+}
+
+bool acpi_eval_optional(
+    uacpi_namespace_node *node, const char *name, uint64_t *value, bool *found
+) {
+    uacpi_status status = uacpi_eval_simple_integer(node, name, value);
+    if (found != NULL) {
+        *found = status == UACPI_STATUS_OK;
+    }
+    if (status == UACPI_STATUS_NOT_FOUND) {
+        *value = 0;
+        return true;
+    }
+    if (status != UACPI_STATUS_OK) {
+        acpi_log_failure(node, name, status);
+        return false;
+    }
+    return true;
+}

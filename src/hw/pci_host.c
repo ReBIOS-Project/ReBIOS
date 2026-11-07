@@ -25,7 +25,6 @@
 #include <uacpi/status.h>
 #include <uacpi/tables.h>
 #include <uacpi/types.h>
-#include <uacpi/uacpi.h>
 #include <uacpi/utilities.h>
 #include <hw/pci_host.h>
 #include <hw/acpi.h>
@@ -179,12 +178,6 @@ static void claim_into(struct range_list *list, uintptr_t base, size_t size) {
 
 static void claim(struct scan *r, uintptr_t base, size_t size) {
     claim_into(&r->claimed, base, size);
-}
-
-static void log_failure(uacpi_namespace_node *node, const char *name, uacpi_status status) {
-    const char *path = acpi_path(node);
-    printf("Cannot evaluate %s.%s: %s\n", path, name, uacpi_status_to_string(status));
-    acpi_path_free(path);
 }
 
 static void private_mcfg(struct scan *r) {
@@ -380,25 +373,6 @@ static uacpi_status crs_walk(struct crs_scan *s, uacpi_namespace_node *node) {
     return UACPI_STATUS_OK;
 }
 
-// _SEG and _BBN, which are 0 where a host bridge has none. found may be NULL.
-static bool eval_optional(
-    uacpi_namespace_node *node, const char *name, uint64_t *value, bool *found
-) {
-    uacpi_status status = uacpi_eval_simple_integer(node, name, value);
-    if (found != NULL) {
-        *found = status == UACPI_STATUS_OK;
-    }
-    if (status == UACPI_STATUS_NOT_FOUND) {
-        *value = 0;
-        return true;
-    }
-    if (status != UACPI_STATUS_OK) {
-        log_failure(node, name, status);
-        return false;
-    }
-    return true;
-}
-
 static void host_bridge_log(const struct host_bridge *hb, const char *path) {
     printf(
         "PCI host bridge %s: segment %04x, bus %02x, %s windows below 4 GiB\n", path, hb->segment,
@@ -437,14 +411,14 @@ static void host_bridge_found(struct scan *r, uacpi_namespace_node *node) {
     struct crs_scan scan = { .r = r, .hb = &hb };
     uacpi_status status = crs_walk(&scan, node);
     if (status != UACPI_STATUS_OK) {
-        log_failure(node, "_CRS", status);
+        acpi_log_failure(node, "_CRS", status);
     }
 
     uint64_t segment;
     uint64_t bbn;
     bool has_bbn;
-    if (!eval_optional(node, "_SEG", &segment, NULL)
-     || !eval_optional(node, "_BBN", &bbn, &has_bbn)) {
+    if (!acpi_eval_optional(node, "_SEG", &segment, NULL)
+     || !acpi_eval_optional(node, "_BBN", &bbn, &has_bbn)) {
         kfree(hb.windows);
         return;
     }
@@ -487,7 +461,7 @@ static uacpi_iteration_decision device_found(
     uacpi_u32 sta;
     uacpi_status status = uacpi_eval_sta(node, &sta);
     if (status != UACPI_STATUS_OK) {
-        log_failure(node, "_STA", status);
+        acpi_log_failure(node, "_STA", status);
         // A host bridge that may be absent gives no windows, and another
         // device's memory is kept clear all the same.
         if (host_bridge) {
