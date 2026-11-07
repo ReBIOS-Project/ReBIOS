@@ -22,6 +22,7 @@
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
 #include <hw/pci_regs.h>
+#include <hw/usb_regs.h>
 #include <iommu/iommu_tables.h>
 #include <lib/log.h>
 #include <lib/time.h>
@@ -32,70 +33,6 @@
 #define USB_OHCI 0x10
 #define USB_EHCI 0x20
 #define USB_XHCI 0x30
-
-// UHCI 1.1, 5.2.1: the enables of the firmware's keyboard emulation, and the
-// R/WC status bits, which writing ones clears.
-#define UHCI_LEGSUP 0xc0
-#define UHCI_LEGSUP_ENABLES ((uint32_t)0xbf)
-#define UHCI_LEGSUP_RWC ((uint32_t)0x8f00)
-// UHCI 1.1, 2.1.1 and 2.1.3.
-#define UHCI_USBCMD 0x00
-#define UHCI_USBCMD_HCRESET ((uint32_t)1 << 1)
-#define UHCI_USBINTR 0x04
-
-// OHCI 1.0a, 7.1.2, 7.1.3, 7.1.5, 7.1.6, and 7.3.1.
-#define OHCI_CONTROL 0x04
-#define OHCI_CONTROL_IR ((uint32_t)1 << 8)
-#define OHCI_CONTROL_RWC ((uint32_t)1 << 9)
-#define OHCI_COMMAND_STATUS 0x08
-#define OHCI_COMMAND_HCR ((uint32_t)1 << 0)
-#define OHCI_COMMAND_OCR ((uint32_t)1 << 3)
-#define OHCI_INTERRUPT_ENABLE 0x10
-#define OHCI_INTERRUPT_DISABLE 0x14
-#define OHCI_INTERRUPT_OC ((uint32_t)1 << 30)
-#define OHCI_FM_INTERVAL 0x34
-
-// EHCI 1.0: HCCPARAMS' pointer to the extended capabilities in configuration
-// space, 40h or above (2.2.4); USBLEGSUP's semaphores, a byte each (2.1.7);
-// USBLEGCTLSTS's SMI enables (2.1.8); the operational registers (2.3).
-#define EHCI_CAPLENGTH 0x00
-#define EHCI_HCCPARAMS 0x08
-#define EHCI_EECP_MIN 0x40
-#define EHCI_CAP_LEGACY 1
-#define EHCI_LEGSUP_BIOS ((uint32_t)1 << 16)
-#define EHCI_LEGSUP_BIOS_BYTE 2
-#define EHCI_LEGSUP_OS_BYTE 3
-#define EHCI_LEGCTLSTS 4
-#define EHCI_USBCMD 0x00
-#define EHCI_USBCMD_RUN ((uint32_t)1 << 0)
-#define EHCI_USBSTS 0x04
-#define EHCI_USBSTS_HALTED ((uint32_t)1 << 12)
-// The R/WC interrupt status bits.
-#define EHCI_USBSTS_INTERRUPTS ((uint32_t)0x3f)
-#define EHCI_USBINTR 0x08
-#define EHCI_CONFIGFLAG 0x40
-
-// xHCI 1.2: HCCPARAMS1's pointer to the extended capabilities, in dwords
-// (5.3.6); USB Legacy Support's semaphores (7.1.1) and SMI controls (7.1.2),
-// of which the RsvdP bits are written back, the enables cleared, and the RW1C
-// events written to clear them; USBCMD's interrupt enables INTE, HSEE, and EWE
-// (5.4.1); USBSTS (5.4.2).
-#define XHCI_CAPLENGTH 0x00
-#define XHCI_HCCPARAMS1 0x10
-#define XHCI_CAP_LEGACY 1
-#define XHCI_LEGSUP_BIOS ((uint32_t)1 << 16)
-#define XHCI_LEGSUP_OS ((uint32_t)1 << 24)
-#define XHCI_LEGCTLSTS 4
-#define XHCI_LEGCTLSTS_RSVDP \
-    (((uint32_t)7 << 1) | ((uint32_t)0xff << 5) | ((uint32_t)7 << 17))
-#define XHCI_LEGCTLSTS_EVENTS ((uint32_t)7 << 29)
-#define XHCI_USBCMD 0x00
-#define XHCI_USBCMD_RUN ((uint32_t)1 << 0)
-#define XHCI_USBCMD_INTERRUPTS \
-    (((uint32_t)1 << 2) | ((uint32_t)1 << 3) | ((uint32_t)1 << 10))
-#define XHCI_USBSTS 0x04
-#define XHCI_USBSTS_HCH ((uint32_t)1 << 0)
-#define XHCI_USBSTS_CNR ((uint32_t)1 << 11)
 
 // The firmware gets a second to let go and xHCI controllers 5 seconds to be
 // ready, as Linux 7.3 gives them (drivers/usb/host/pci-quirks.c). Controllers
@@ -186,12 +123,12 @@ static bool xhci_take(uintptr_t base, size_t size, struct release *r) {
     uint32_t at = usb_xhci_legacy_cap(base, size);
     if (at != 0) {
         uint32_t cap = *reg(base, at);
-        if ((cap & XHCI_LEGSUP_BIOS) != 0) {
+        if ((cap & USBLEGSUP_BIOS_OWNED) != 0) {
             r->owned = true;
-            *reg(base, at) = cap | XHCI_LEGSUP_OS;
-            if (!reg_wait(base, at, XHCI_LEGSUP_BIOS, 0, RELEASE_US)) {
+            *reg(base, at) = cap | USBLEGSUP_OS_OWNED;
+            if (!reg_wait(base, at, USBLEGSUP_BIOS_OWNED, 0, RELEASE_US)) {
                 r->forced = true;
-                *reg(base, at) = (cap | XHCI_LEGSUP_OS) & ~XHCI_LEGSUP_BIOS;
+                *reg(base, at) = (cap | USBLEGSUP_OS_OWNED) & ~USBLEGSUP_BIOS_OWNED;
             }
         }
         uint32_t control = *reg(base, at + XHCI_LEGCTLSTS);
@@ -213,12 +150,12 @@ static bool ehci_take(struct pci_cfg_addr a, uintptr_t base, struct release *r) 
             break;
         }
         if ((cap & 0xff) == EHCI_CAP_LEGACY) {
-            if ((cap & EHCI_LEGSUP_BIOS) != 0) {
+            if ((cap & USBLEGSUP_BIOS_OWNED) != 0) {
                 // The semaphore's byte alone: Linux 7.3 notes firmware that
                 // misbehaves when it is set any other way.
                 r->owned = true;
                 pci_cfg_write(a, at + EHCI_LEGSUP_OS_BYTE, 1, 1);
-                if (!cfg_wait(a, at, EHCI_LEGSUP_BIOS, 0, RELEASE_US)) {
+                if (!cfg_wait(a, at, USBLEGSUP_BIOS_OWNED, 0, RELEASE_US)) {
                     r->forced = true;
                     pci_cfg_write(a, at + EHCI_LEGSUP_BIOS_BYTE, 1, 0);
                 }

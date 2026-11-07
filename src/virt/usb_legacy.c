@@ -24,6 +24,7 @@
 #include <hw/pci_enum.h>
 #include <hw/pci_regs.h>
 #include <hw/usb_handoff.h>
+#include <hw/usb_regs.h>
 #include <lib/util.h>
 #include <sys/x86.h>
 #include <virt/io.h>
@@ -44,27 +45,13 @@
 // PCI Power Management Interface 1.2, 3.2.4.
 #define PM_CONTROL 4
 
-// xHCI 1.2, 7.1.1, and EHCI 1.0, 2.1.7.
-#define LEGSUP_BIOS ((uint32_t)1 << 16)
-#define LEGSUP_OS ((uint32_t)1 << 24)
-
-// UHCI 1.1, 5.2.1: the enable of the SMI a BIOS's support takes.
-#define UHCI_LEGSUP 0xc0
-#define UHCI_LEGSUP_SMI_ENABLE ((uint32_t)1 << 4)
-#define UHCI_LEGSUP_BITS ((uint32_t)0xffff)
-
-// OHCI 1.0a, 5.1.1.3.3, 7.1.2, and 7.1.3.
-#define OHCI_CONTROL 0x04
-#define OHCI_CONTROL_IR ((uint32_t)1 << 8)
-#define OHCI_COMMAND_STATUS 0x08
-#define OHCI_COMMAND_OCR ((uint32_t)1 << 3)
-
 static bool owned(const struct usb_controller *c) {
     return atomic_load_explicit(&c->state, memory_order_acquire) != USB_STATE_RELEASED;
 }
 
 static uint32_t legsup_shown(const struct usb_controller *c, uint32_t value) {
-    return (value & ~(LEGSUP_BIOS | LEGSUP_OS)) | LEGSUP_BIOS | (c->os_owned ? LEGSUP_OS : 0);
+    return (value & ~(USBLEGSUP_BIOS_OWNED | USBLEGSUP_OS_OWNED)) | USBLEGSUP_BIOS_OWNED
+         | (c->os_owned ? USBLEGSUP_OS_OWNED : 0);
 }
 
 // A read of size bytes at at, with what falls in the dword at reg from dword.
@@ -129,8 +116,8 @@ static void range_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size,
     uint32_t mask;
     if (c->type == TENDRIL_HC_XHCI && c->legacy_cap != 0) {
         uint32_t dword = access_into_dword(at, size, value, c->legacy_cap, &mask);
-        if ((mask & LEGSUP_OS) != 0) {
-            c->os_owned = (dword & LEGSUP_OS) != 0;
+        if ((mask & USBLEGSUP_OS_OWNED) != 0) {
+            c->os_owned = (dword & USBLEGSUP_OS_OWNED) != 0;
             if (c->os_owned) {
                 usb_release(c);
             }
@@ -201,8 +188,8 @@ static bool hook_write(void *ctx, uint32_t reg, uint32_t value, uint32_t mask) {
         return true;
     }
     if (c->type == TENDRIL_HC_EHCI && c->legacy_cap != 0 && reg == c->legacy_cap) {
-        if ((mask & LEGSUP_OS) != 0) {
-            c->os_owned = (value & LEGSUP_OS) != 0;
+        if ((mask & USBLEGSUP_OS_OWNED) != 0) {
+            c->os_owned = (value & USBLEGSUP_OS_OWNED) != 0;
             if (c->os_owned) {
                 usb_release(c);
             }
