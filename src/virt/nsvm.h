@@ -60,6 +60,9 @@ bool nsvm_any_svm(void);
 // The global interrupt flag, which holds back interrupts, NMIs, and INIT while
 // clear (APM 24593 rev. 3.46, 15.17).
 bool nsvm_gif(struct vcpu *v);
+// Takes the guest's global interrupt flag from VMCB01, which its own CLGI and
+// STGI change where the processor virtualises it, as an exit begins.
+void nsvm_sync_gif(struct vcpu *v);
 // The guest's guest's TSC offset, from the guest's and the one its VMCB adds.
 uint64_t nsvm_tsc_offset(struct vcpu *v);
 // An exit of the guest's guest: whether it went to the guest, else the

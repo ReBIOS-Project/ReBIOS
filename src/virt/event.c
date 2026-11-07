@@ -320,8 +320,10 @@ static void interrupt_window(struct vcpu *v, int class) {
         return;
     }
     // While the global interrupt flag holds interrupts back, the STGI that
-    // sets it, intercepted, is the window.
-    if (!nsvm_gif(v)) {
+    // sets it, intercepted, is the window, but where the processor holds the
+    // window's virtual interrupt back under its copy of the flag itself (APM
+    // 24593 rev. 3.46, 15.33.2).
+    if (!nsvm_gif(v) && !svm_vgif) {
         class = WINDOW_OFF;
     }
     struct vmcb_control *c = &v->vmcb->control;

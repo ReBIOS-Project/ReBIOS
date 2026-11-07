@@ -294,30 +294,52 @@ static bool shadow_stacks(void) {
     return (cpuid_cr4_allowed() & CR4_CET) != 0;
 }
 
-// The global interrupt flag, which the processor's copy of, where it keeps one
-// for the guest's virtual NMIs, follows.
+// The global interrupt flag, which the processor's copy of follows where it
+// virtualises it.
 static void set_gif(struct vcpu *v, struct nsvm *n, bool on) {
     n->gif = on;
-    if (svm_vnmi) {
+    if (svm_vgif) {
         struct vmcb_control *c = &v->vmcb->control;
         c->vintr = on ? c->vintr | SVM_VINTR_GIF : c->vintr & ~SVM_VINTR_GIF;
     }
 }
 
-bool nsvm_gif(struct vcpu *v) {
-    return v->nsvm == NULL || v->nsvm->gif;
+void nsvm_sync_gif(struct vcpu *v) {
+    struct nsvm *n = v->nsvm;
+    if (n != NULL && !n->in_l2 && svm_vgif) {
+        n->gif = (n->vmcb01->control.vintr & SVM_VINTR_GIF) != 0;
+    }
 }
 
 // While the guest's EFER.SVME is set, its VMLOAD and VMSAVE run on the
-// processor where it virtualises them (APM 24593 rev. 3.46, 15.33.1).
-static void l1_intercepts(struct nsvm *n) {
+// processor where it virtualises them, and so do its CLGI and STGI where it
+// virtualises the global interrupt flag (APM 24593 rev. 3.46, 15.33), but for
+// STGI while the flag holds back an INIT, or an NMI that the processor does
+// not hold back itself: its exit lets that in, as in Linux 7.3's KVM (svm.c,
+// svm_enable_nmi_window()).
+static void l1_intercepts(struct vcpu *v, struct nsvm *n) {
+    const uint32_t gif = SVM_INTERCEPT_STGI | SVM_INTERCEPT_CLGI;
     const uint32_t vls = SVM_INTERCEPT_VMLOAD | SVM_INTERCEPT_VMSAVE;
     struct vmcb_control *c = &n->vmcb01->control;
-    uint32_t misc = c->intercept_misc2 & ~vls;
+    struct cpu *cpu = v->cpu;
+    uint32_t misc = c->intercept_misc2 & ~(gif | vls);
     if (!n->svme || !svm_vls) {
         misc |= vls;
     }
+    if (!n->svme || !svm_vgif) {
+        misc |= gif;
+    } else if (!n->gif
+            && (atomic_load_explicit(&cpu->init_pending, memory_order_acquire)
+             || (!svm_vnmi
+              && (v->nmi_pending
+               || atomic_load_explicit(&cpu->nmi_pending, memory_order_acquire))))) {
+        misc |= SVM_INTERCEPT_STGI;
+    }
     c->intercept_misc2 = misc;
+}
+
+bool nsvm_gif(struct vcpu *v) {
+    return v->nsvm == NULL || v->nsvm->gif;
 }
 
 bool nsvm_svme(struct vcpu *v) {
@@ -731,9 +753,9 @@ static bool vmcb12_valid(struct vcpu *v, const struct vmcb *vmcb12) {
 // opens for the guest itself, the hypercalls of the legacy BIOS, which are #UD
 // and VMMCALL, and the guest's guest's CR8, which is its own where VMCB12
 // masks interrupts virtually and is the guest's TPR otherwise (APM 24593 rev.
-// 3.46, 15.21.2). The guest's guest's VMLOAD and VMSAVE, which the hypervisor
-// runs for it where the guest does not intercept them, always exit, whatever
-// the guest's own do.
+// 3.46, 15.21.2). The guest's guest's VMLOAD, VMSAVE, CLGI, and STGI, which
+// the hypervisor runs for it where the guest does not intercept them, always
+// exit, whatever the guest's own do.
 static void merge_intercepts(struct nsvm *n) {
     uint32_t own[SVM_INTERCEPT_VECTORS];
     uint32_t to[SVM_INTERCEPT_VECTORS];
@@ -744,7 +766,7 @@ static void merge_intercepts(struct nsvm *n) {
     to[2] = (own[2] & ~((uint32_t)1 << VECTOR_UD)) | n->intercepts[2];
     to[3] = (own[3] & ~SVM_INTERCEPT_VINTR) | n->intercepts[3];
     to[4] = (own[4] & ~SVM_INTERCEPT_VMMCALL) | n->intercepts[4] | SVM_INTERCEPT_VMLOAD
-          | SVM_INTERCEPT_VMSAVE;
+          | SVM_INTERCEPT_VMSAVE | SVM_INTERCEPT_STGI | SVM_INTERCEPT_CLGI;
     if ((n->vintr12 & SVM_VINTR_MASKING) == 0) {
         to[0] |= SVM_INTERCEPT_CR8_READ | SVM_INTERCEPT_CR8_WRITE;
     }
@@ -1787,7 +1809,7 @@ bool nsvm_before_entry(struct vcpu *v) {
         return false;
     }
     if (!n->in_l2) {
-        l1_intercepts(n);
+        l1_intercepts(v, n);
         return false;
     }
     if (n->pending) {

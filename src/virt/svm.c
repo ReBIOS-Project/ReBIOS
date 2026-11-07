@@ -66,6 +66,7 @@
 bool svm_lbr_virtualisation;
 bool svm_nrips;
 bool svm_vnmi;
+bool svm_vgif;
 bool svm_vls;
 bool svm_avic;
 bool svm_x2avic;
@@ -242,9 +243,9 @@ bool svm_supported(void) {
     invlpgb = (sizes.ebx & CPUID_80000008_EBX_INVLPGB) != 0;
     invlpgb_count_max = sizes.edx & 0xffff;
     decode_assists = (features & SVM_FEATURE_DECODE_ASSISTS) != 0;
+    svm_vgif = (features & SVM_FEATURE_VGIF) != 0;
     svm_vls = (features & SVM_FEATURE_VLS) != 0;
-    svm_vnmi = (features & (SVM_FEATURE_VNMI | SVM_FEATURE_VGIF))
-            == (SVM_FEATURE_VNMI | SVM_FEATURE_VGIF);
+    svm_vnmi = svm_vgif && (features & SVM_FEATURE_VNMI) != 0;
     // Unless the avic setting says otherwise, AVIC serves only from Zen 4 on,
     // with x2AVIC, as Linux 7.3's KVM has it by default
     // (arch/x86/kvm/svm/avic.c, avic_want_avic_enabled(), with
@@ -328,8 +329,11 @@ void svm_vcpu_init(struct vcpu *v) {
     // Physical interrupts exit whatever the guest's IF, and CR8 is the virtual
     // local APIC's TPR.
     c->vintr = SVM_VINTR_MASKING;
+    if (svm_vgif) {
+        c->vintr |= SVM_VINTR_GIF_ENABLE | SVM_VINTR_GIF;
+    }
     if (svm_vnmi) {
-        c->vintr |= SVM_VINTR_GIF_ENABLE | SVM_VINTR_GIF | SVM_VINTR_NMI_ENABLE;
+        c->vintr |= SVM_VINTR_NMI_ENABLE;
     }
     c->intercept_misc2 = SVM_INTERCEPT_VMRUN | SVM_INTERCEPT_VMMCALL | SVM_INTERCEPT_VMLOAD
                        | SVM_INTERCEPT_VMSAVE | SVM_INTERCEPT_STGI | SVM_INTERCEPT_CLGI
@@ -609,6 +613,7 @@ static void svm_handle_exit(struct vcpu *v) {
     struct vmcb_control *c = &v->vmcb->control;
     v->last_exit = (uint32_t)c->exitcode;
     profile_exit(v, v->last_exit);
+    nsvm_sync_gif(v);
     if (v->stepping && c->exitcode >= SVM_EXIT_EXCEPTION_BASE
      && c->exitcode < SVM_EXIT_EXCEPTION_BASE + 32) {
         svm_step_exception(v, (unsigned int)(c->exitcode - SVM_EXIT_EXCEPTION_BASE));

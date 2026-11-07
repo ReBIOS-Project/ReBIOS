@@ -329,6 +329,10 @@ extern bool svm_nrips;
 // the guest can (APM 24593 rev. 3.45, 15.21.10), with GIF virtualised, as
 // Linux 7.3's KVM has it.
 extern bool svm_vnmi;
+// The processor holds virtual interrupts back under a virtual GIF, which the
+// guest's CLGI and STGI change where they do not exit (APM 24593 rev. 3.46,
+// 15.33.2).
+extern bool svm_vgif;
 // The guest's VMLOAD and VMSAVE run on the processor where they do not exit,
 // with addresses in the guest's physical memory (APM 24593 rev. 3.46,
 // 15.33.1).
