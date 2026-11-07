@@ -67,7 +67,9 @@
 #define DR6_BT ((uint64_t)1 << 15)
 
 // The segment registers in the order both TSS formats keep them.
-static const size_t tss_segs[] = { SEG_ES, SEG_CS, SEG_SS, SEG_DS, SEG_FS, SEG_GS };
+static const size_t tss_segs[] = {
+    VCPU_SEG_ES, VCPU_SEG_CS, VCPU_SEG_SS, VCPU_SEG_DS, VCPU_SEG_FS, VCPU_SEG_GS
+};
 
 struct desc {
     uint32_t lo;
@@ -95,7 +97,7 @@ struct switcher {
     const struct task_event *event;
     // Whether an exception is already on its way to the guest.
     bool faulted;
-    struct segment ldtr;
+    struct vcpu_segment ldtr;
 };
 
 // The exception classes of SDM 325462-093 Vol. 3A, Table 7-4.
@@ -165,14 +167,14 @@ static bool system_write(struct switcher *s, uintptr_t linear, const void *buf, 
 
 // Where a selector's descriptor is, in the GDT or the LDT the switch loaded.
 static bool desc_linear(struct switcher *s, uint16_t selector, uint64_t *linear) {
-    struct segment table;
+    struct vcpu_segment table;
     if ((selector & SELECTOR_TI) != 0) {
         table = s->ldtr;
-        if ((table.attrib & SEG_UNUSABLE) != 0) {
+        if ((table.attrib & VCPU_SEG_UNUSABLE) != 0) {
             return false;
         }
     } else {
-        vcpu_get_seg(s->v, SEG_GDTR, &table);
+        vcpu_get_seg(s->v, VCPU_SEG_GDTR, &table);
     }
     uint32_t index = selector & ~(uint32_t)7;
     if ((uint64_t)index + 7 > table.limit) {
@@ -207,9 +209,9 @@ static void tss_mark(struct switcher *s, uint16_t selector, bool busy) {
 
 // The LDT a TSS's LDT selector names, from the GDT, or false where it does not
 // name a present one.
-static bool ldt_lookup(struct switcher *s, uint16_t selector, struct segment *ldt) {
-    struct segment gdtr;
-    vcpu_get_seg(s->v, SEG_GDTR, &gdtr);
+static bool ldt_lookup(struct switcher *s, uint16_t selector, struct vcpu_segment *ldt) {
+    struct vcpu_segment gdtr;
+    vcpu_get_seg(s->v, VCPU_SEG_GDTR, &gdtr);
     uint32_t index = selector & ~(uint32_t)7;
     if ((selector & SELECTOR_TI) != 0 || (uint64_t)index + 7 > gdtr.limit) {
         return false;
@@ -223,19 +225,19 @@ static bool ldt_lookup(struct switcher *s, uint16_t selector, struct segment *ld
      || (attrib & DESC_P) == 0) {
         return false;
     }
-    *ldt = (struct segment){ selector, attrib, desc_limit(d), desc_base(d) };
+    *ldt = (struct vcpu_segment){ selector, attrib, desc_limit(d), desc_base(d) };
     return true;
 }
 
-static struct segment v86_segment(uint16_t selector) {
-    return (struct segment){ selector, 0xf3, 0xffff, (uint64_t)selector << 4 };
+static struct vcpu_segment v86_segment(uint16_t selector) {
+    return (struct vcpu_segment){ selector, 0xf3, 0xffff, (uint64_t)selector << 4 };
 }
 
 // Step 9 loads every selector, step 14 the descriptors (SDM 325462-093 Vol.
 // 3A, 10.3), so the registers the switch does not get to keep the new
 // selectors with their old descriptors, as Linux 7.3's KVM leaves them.
 static void set_selector(struct vcpu *v, size_t reg, uint16_t selector) {
-    struct segment seg;
+    struct vcpu_segment seg;
     vcpu_get_seg(v, reg, &seg);
     seg.selector = selector;
     vcpu_set_seg(v, reg, &seg);
@@ -251,11 +253,11 @@ static bool load_seg(struct switcher *s, size_t reg, uint16_t selector, unsigned
         return false;
     }
     if (null_selector(selector)) {
-        if (reg == SEG_CS || reg == SEG_SS) {
+        if (reg == VCPU_SEG_CS || reg == VCPU_SEG_SS) {
             fault(s, VECTOR_TS, 0);
             return false;
         }
-        struct segment seg = { selector, SEG_UNUSABLE, 0, 0 };
+        struct vcpu_segment seg = { selector, VCPU_SEG_UNUSABLE, 0, 0 };
         vcpu_set_seg(s->v, reg, &seg);
         return true;
     }
@@ -273,10 +275,10 @@ static bool load_seg(struct switcher *s, size_t reg, uint16_t selector, unsigned
     unsigned int dpl = (attrib >> 5) & 3;
     unsigned int rpl = selector & SELECTOR_RPL;
     bool ok = (attrib & DESC_S) != 0;
-    if (reg == SEG_CS) {
+    if (reg == VCPU_SEG_CS) {
         ok = ok && (type & DESC_CODE) != 0
           && ((type & DESC_CONFORMING) != 0 ? dpl <= rpl : dpl == rpl);
-    } else if (reg == SEG_SS) {
+    } else if (reg == VCPU_SEG_SS) {
         ok = ok && (type & DESC_CODE) == 0 && (type & DESC_RW) != 0 && dpl == cpl && rpl == cpl;
     } else {
         bool readable = (type & DESC_CODE) == 0 || (type & DESC_RW) != 0;
@@ -288,7 +290,7 @@ static bool load_seg(struct switcher *s, size_t reg, uint16_t selector, unsigned
         return false;
     }
     if ((attrib & DESC_P) == 0) {
-        fault(s, reg == SEG_SS ? VECTOR_SS : VECTOR_NP, selector & ~SELECTOR_RPL);
+        fault(s, reg == VCPU_SEG_SS ? VECTOR_SS : VECTOR_NP, selector & ~SELECTOR_RPL);
         return false;
     }
     if ((type & DESC_ACCESSED) == 0) {
@@ -296,7 +298,7 @@ static bool load_seg(struct switcher *s, size_t reg, uint16_t selector, unsigned
         attrib |= DESC_ACCESSED;
         system_write(s, linear + 4, &d.hi, sizeof(uint32_t));
     }
-    struct segment seg = { selector, attrib, desc_limit(d), desc_base(d) };
+    struct vcpu_segment seg = { selector, attrib, desc_limit(d), desc_base(d) };
     vcpu_set_seg(s->v, reg, &seg);
     return true;
 }
@@ -304,21 +306,21 @@ static bool load_seg(struct switcher *s, size_t reg, uint16_t selector, unsigned
 // LDTR first, which Table 10-1 checks before the other registers. A bad LDT
 // leaves LDTR unusable, as VMX takes no LDTR with the TI flag set.
 static void load_ldt(struct switcher *s, uint16_t selector) {
-    s->ldtr = (struct segment){ selector, SEG_UNUSABLE, 0, 0 };
+    s->ldtr = (struct vcpu_segment){ selector, VCPU_SEG_UNUSABLE, 0, 0 };
     if (!null_selector(selector) && !ldt_lookup(s, selector, &s->ldtr)) {
-        s->ldtr = (struct segment){ selector, SEG_UNUSABLE, 0, 0 };
+        s->ldtr = (struct vcpu_segment){ selector, VCPU_SEG_UNUSABLE, 0, 0 };
         fault(s, VECTOR_TS, selector & ~SELECTOR_RPL);
     }
-    vcpu_set_seg(s->v, SEG_LDTR, &s->ldtr);
+    vcpu_set_seg(s->v, VCPU_SEG_LDTR, &s->ldtr);
 }
 
 // The event's error code on the new task's stack, with the checks of a push:
 // #SS where the stack segment does not hold it, still part of the event's
 // delivery (Intel's and AMD's processors raise #DF(0) for a #GP there).
 static void push_error(struct switcher *s, uint32_t error, size_t size) {
-    struct segment ss;
-    vcpu_get_seg(s->v, SEG_SS, &ss);
-    bool big = (ss.attrib & SEG_DB) != 0;
+    struct vcpu_segment ss;
+    vcpu_get_seg(s->v, VCPU_SEG_SS, &ss);
+    bool big = (ss.attrib & VCPU_SEG_DB) != 0;
     uintptr_t rsp = vcpu_rsp(s->v);
     uint32_t sp = big ? (uint32_t)rsp - size : (uint16_t)((uint16_t)rsp - size);
     uint64_t low = 0;
@@ -340,8 +342,8 @@ void task_switch(
     struct vcpu *v, uint16_t selector, int source, const struct task_event *event, size_t length
 ) {
     struct switcher s = { .v = v, .event = event };
-    struct segment tr;
-    vcpu_get_seg(v, SEG_TR, &tr);
+    struct vcpu_segment tr;
+    vcpu_get_seg(v, VCPU_SEG_TR, &tr);
 
     // What VMX has checked: that the descriptor is in the GDT, a TSS of the
     // right busy state, present, and large enough.
@@ -414,7 +416,7 @@ void task_switch(
         write_le32(state + 4, eflags);
         memcpy(state + TSS32_GPRS - TSS32_EIP, regs, sizeof(regs));
         for (size_t i = 0; i < 6; i++) {
-            struct segment seg;
+            struct vcpu_segment seg;
             vcpu_get_seg(v, tss_segs[i], &seg);
             write_le32(state + TSS32_SEGS - TSS32_EIP + i * 4, seg.selector);
         }
@@ -429,7 +431,7 @@ void task_switch(
             write_le16(state + TSS16_GPRS - TSS16_IP + i * 2, (uint16_t)regs[i]);
         }
         for (size_t i = 0; i < 4; i++) {
-            struct segment seg;
+            struct vcpu_segment seg;
             vcpu_get_seg(v, tss_segs[i], &seg);
             write_le16(state + TSS16_SEGS - TSS16_IP + i * 2, seg.selector);
         }
@@ -445,8 +447,8 @@ void task_switch(
 
     // The commit point: what goes wrong from here on raises its exception in
     // the new task.
-    struct segment new_tr = { selector, new_attrib | DESC_TYPE_BUSY, new_limit, new_base };
-    vcpu_set_seg(v, SEG_TR, &new_tr);
+    struct vcpu_segment new_tr = { selector, new_attrib | DESC_TYPE_BUSY, new_limit, new_base };
+    vcpu_set_seg(v, VCPU_SEG_TR, &new_tr);
     // As Linux 7.3's KVM has it, a CR3 whose PDPTEs PAE paging refuses stays
     // the old task's, with #GP (emulate.c, load_state_from_tss32()).
     if (new32 && (vcpu_cr0(v) & CR0_PG) != 0 && !vmx_load_guest_cr3(cr3, true)) {
@@ -476,21 +478,21 @@ void task_switch(
 
     if (v86) {
         for (size_t i = 0; i < 6; i++) {
-            struct segment seg = v86_segment(sels[i]);
+            struct vcpu_segment seg = v86_segment(sels[i]);
             vcpu_set_seg(v, tss_segs[i], &seg);
         }
     } else {
         // CS's RPL is the new CPL, which SS's checks need first. Where CS
         // loads but SS does not, SS gets the new CPL, which VMX takes from it.
         unsigned int cpl = sels[1] & SELECTOR_RPL;
-        if (load_seg(&s, SEG_CS, sels[1], cpl) && !load_seg(&s, SEG_SS, sels[2], cpl)) {
-            struct segment ss = { sels[2], SEG_UNUSABLE | cpl << 5, 0, 0 };
-            vcpu_set_seg(v, SEG_SS, &ss);
+        if (load_seg(&s, VCPU_SEG_CS, sels[1], cpl) && !load_seg(&s, VCPU_SEG_SS, sels[2], cpl)) {
+            struct vcpu_segment ss = { sels[2], VCPU_SEG_UNUSABLE | cpl << 5, 0, 0 };
+            vcpu_set_seg(v, VCPU_SEG_SS, &ss);
         }
-        load_seg(&s, SEG_DS, sels[3], cpl);
-        load_seg(&s, SEG_ES, sels[0], cpl);
-        load_seg(&s, SEG_FS, sels[4], cpl);
-        load_seg(&s, SEG_GS, sels[5], cpl);
+        load_seg(&s, VCPU_SEG_DS, sels[3], cpl);
+        load_seg(&s, VCPU_SEG_ES, sels[0], cpl);
+        load_seg(&s, VCPU_SEG_FS, sels[4], cpl);
+        load_seg(&s, VCPU_SEG_GS, sels[5], cpl);
     }
 
     vmx_task_switched(v, event != NULL && event->nmi);

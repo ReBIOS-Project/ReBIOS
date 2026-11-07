@@ -15,7 +15,7 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-// Offsets into struct gprs. RAX and RSP live in the VMCB.
+// Offsets into struct vcpu_gprs. RAX and RSP live in the VMCB.
 #define GPR_RCX 8
 #define GPR_RDX 16
 #define GPR_RBX 24

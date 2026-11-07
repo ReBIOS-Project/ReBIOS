@@ -23,6 +23,9 @@
 #include <stdint.h>
 #include <stdnoreturn.h>
 
+// Whether the vCPUs run under VMX, else SVM.
+extern bool virt_vmx;
+
 // Picks VMX or SVM and sets up what all vCPUs share. Returns false if neither
 // is usable on this processor.
 bool virt_init(void);

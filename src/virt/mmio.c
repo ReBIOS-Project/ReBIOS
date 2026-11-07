@@ -36,6 +36,7 @@
 #include <virt/nvmx.h>
 #include <virt/profile.h>
 #include <virt/vcpu.h>
+#include <virt/virt.h>
 
 #define MAX_REGIONS 256
 

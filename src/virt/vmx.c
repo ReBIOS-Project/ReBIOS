@@ -59,7 +59,7 @@ static uint64_t cr0_fixed0, cr0_fixed1, cr4_fixed0, cr4_fixed1;
 #define VMX_ENTER_FAILED 1
 #define VMX_ENTER_KICKED 2
 
-int vmx_enter(struct gprs *gprs, bool launched);
+int vmx_enter(struct vcpu_gprs *gprs, bool launched);
 void vmx_exit_entry(void);
 extern const uint8_t vmx_enter_restart[];
 extern const uint8_t vmx_enter_restart_end[];
@@ -428,7 +428,7 @@ void vmx_cpu_init(void) {
 }
 
 static uint32_t seg_to_ar(uint32_t attrib) {
-    if ((attrib & SEG_UNUSABLE) != 0) {
+    if ((attrib & VCPU_SEG_UNUSABLE) != 0) {
         return 0x10000;
     }
     return (attrib & 0xff) | ((attrib & 0xf00) << 4);
@@ -436,7 +436,7 @@ static uint32_t seg_to_ar(uint32_t attrib) {
 
 static uint32_t ar_to_seg(uint32_t ar) {
     if ((ar & 0x10000) != 0) {
-        return SEG_UNUSABLE;
+        return VCPU_SEG_UNUSABLE;
     }
     return (ar & 0xff) | ((ar >> 4) & 0xf00);
 }
@@ -466,10 +466,10 @@ static const uint32_t seg_ar_fields[] = {
     VMCS_GUEST_FS_AR, VMCS_GUEST_GS_AR, VMCS_GUEST_LDTR_AR, VMCS_GUEST_TR_AR
 };
 
-void vmx_get_seg(size_t reg, struct segment *seg) {
+void vmx_get_seg(size_t reg, struct vcpu_segment *seg) {
     seg->base = vmx_read(seg_base_fields[reg]);
     seg->limit = vmx_read(seg_limit_fields[reg]);
-    if (reg >= SEG_GDTR) {
+    if (reg >= VCPU_SEG_GDTR) {
         seg->selector = 0;
         seg->attrib = 0;
         return;
@@ -478,10 +478,10 @@ void vmx_get_seg(size_t reg, struct segment *seg) {
     seg->attrib = ar_to_seg(vmx_read(seg_ar_fields[reg]));
 }
 
-void vmx_set_seg(size_t reg, const struct segment *seg) {
+void vmx_set_seg(size_t reg, const struct vcpu_segment *seg) {
     vmx_write(seg_base_fields[reg], seg->base);
     vmx_write(seg_limit_fields[reg], seg->limit);
-    if (reg >= SEG_GDTR) {
+    if (reg >= VCPU_SEG_GDTR) {
         return;
     }
     vmx_write(seg_sel_fields[reg], seg->selector);

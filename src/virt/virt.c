@@ -762,7 +762,8 @@ uint64_t vcpu_cr4(struct vcpu *v) {
 // User addresses clear bit 63 (SDM 325462-093 Vol. 3A, 4.4.1). Upper Address
 // Ignore takes bits 63:57 of DS and ES accesses for bit 56's.
 uint64_t vcpu_untagged(struct vcpu *v, size_t reg, uintptr_t linear) {
-    if (!virt_vmx && (reg == SEG_DS || reg == SEG_ES) && (vcpu_efer(v) & EFER_UAIE) != 0) {
+    if (!virt_vmx && (reg == VCPU_SEG_DS || reg == VCPU_SEG_ES)
+     && (vcpu_efer(v) & EFER_UAIE) != 0) {
         return (uint64_t)((int64_t)(linear << 7) >> 7);
     }
     int bit;
@@ -792,31 +793,31 @@ uint64_t vcpu_efer(struct vcpu *v) {
 static struct vmcb_seg *svm_seg(struct vcpu *v, size_t reg) {
     struct vmcb_save *s = &v->vmcb->save;
     switch (reg) {
-        case SEG_ES: {
+        case VCPU_SEG_ES: {
             return &s->es;
         }
-        case SEG_CS: {
+        case VCPU_SEG_CS: {
             return &s->cs;
         }
-        case SEG_SS: {
+        case VCPU_SEG_SS: {
             return &s->ss;
         }
-        case SEG_DS: {
+        case VCPU_SEG_DS: {
             return &s->ds;
         }
-        case SEG_FS: {
+        case VCPU_SEG_FS: {
             return &s->fs;
         }
-        case SEG_GS: {
+        case VCPU_SEG_GS: {
             return &s->gs;
         }
-        case SEG_LDTR: {
+        case VCPU_SEG_LDTR: {
             return &s->ldtr;
         }
-        case SEG_TR: {
+        case VCPU_SEG_TR: {
             return &s->tr;
         }
-        case SEG_GDTR: {
+        case VCPU_SEG_GDTR: {
             return &s->gdtr;
         }
         default: {
@@ -825,7 +826,7 @@ static struct vmcb_seg *svm_seg(struct vcpu *v, size_t reg) {
     }
 }
 
-void vcpu_get_seg(struct vcpu *v, size_t reg, struct segment *seg) {
+void vcpu_get_seg(struct vcpu *v, size_t reg, struct vcpu_segment *seg) {
     if (virt_vmx) {
         vmx_get_seg(reg, seg);
         return;
@@ -837,17 +838,17 @@ void vcpu_get_seg(struct vcpu *v, size_t reg, struct segment *seg) {
     seg->base = s->base;
 }
 
-void vcpu_set_seg(struct vcpu *v, size_t reg, const struct segment *seg) {
+void vcpu_set_seg(struct vcpu *v, size_t reg, const struct vcpu_segment *seg) {
     if (virt_vmx) {
         vmx_set_seg(reg, seg);
         return;
     }
     struct vmcb_seg *s = svm_seg(v, reg);
     s->selector = seg->selector;
-    s->attrib = (seg->attrib & SEG_UNUSABLE) != 0 ? 0 : seg->attrib;
+    s->attrib = (seg->attrib & VCPU_SEG_UNUSABLE) != 0 ? 0 : seg->attrib;
     s->limit = seg->limit;
     s->base = seg->base;
-    if (reg == SEG_SS) {
+    if (reg == VCPU_SEG_SS) {
         v->vmcb->save.cpl = (seg->attrib >> 5) & 3;
     }
 }
@@ -858,13 +859,13 @@ void vcpu_save_mode(struct vcpu *v, struct vcpu_mode *mode) {
     mode->cr4 = vcpu_cr4(v);
     mode->efer = vcpu_efer(v);
     mode->rflags = vcpu_rflags(v);
-    for (size_t reg = SEG_ES; reg <= SEG_IDTR; reg++) {
+    for (size_t reg = VCPU_SEG_ES; reg <= VCPU_SEG_IDTR; reg++) {
         vcpu_get_seg(v, reg, &mode->segs[reg]);
     }
 }
 
 void vcpu_load_mode(struct vcpu *v, const struct vcpu_mode *mode) {
-    for (size_t reg = SEG_ES; reg <= SEG_IDTR; reg++) {
+    for (size_t reg = VCPU_SEG_ES; reg <= VCPU_SEG_IDTR; reg++) {
         vcpu_set_seg(v, reg, &mode->segs[reg]);
     }
     vcpu_set_rflags(v, mode->rflags);
@@ -1040,9 +1041,9 @@ void vcpu_advance(struct vcpu *v, size_t length) {
     // (vmx.c, skip_emulated_instruction()); a 32-bit guest with a wider one is
     // unpredictable on AMD's Family 19h (erratum 1393, 57095 rev. 1.05).
     if ((next >> 32) != (rip >> 32)) {
-        struct segment cs;
-        vcpu_get_seg(v, SEG_CS, &cs);
-        if ((vcpu_efer(v) & EFER_LMA) == 0 || (cs.attrib & SEG_L) == 0) {
+        struct vcpu_segment cs;
+        vcpu_get_seg(v, VCPU_SEG_CS, &cs);
+        if ((vcpu_efer(v) & EFER_LMA) == 0 || (cs.attrib & VCPU_SEG_L) == 0) {
             next = (uint32_t)next;
         }
     }
@@ -1220,27 +1221,27 @@ void vcpu_startup(struct vcpu *v, uint8_t vector) {
 }
 
 void vcpu_set_real_mode(struct vcpu *v, uint16_t cs, uint16_t ip) {
-    struct segment code = { cs, 0x9b, 0xffff, (uint64_t)cs << 4 };
-    struct segment data = { 0, 0x93, 0xffff, 0 };
-    struct segment ldtr = { 0, 0x82, 0xffff, 0 };
-    struct segment tr = { 0, 0x8b, 0xffff, 0 };
-    struct segment table = { 0, 0, 0xffff, 0 };
+    struct vcpu_segment code = { cs, 0x9b, 0xffff, (uint64_t)cs << 4 };
+    struct vcpu_segment data = { 0, 0x93, 0xffff, 0 };
+    struct vcpu_segment ldtr = { 0, 0x82, 0xffff, 0 };
+    struct vcpu_segment tr = { 0, 0x8b, 0xffff, 0 };
+    struct vcpu_segment table = { 0, 0, 0xffff, 0 };
 
-    vcpu_set_seg(v, SEG_CS, &code);
-    vcpu_set_seg(v, SEG_DS, &data);
-    vcpu_set_seg(v, SEG_ES, &data);
-    vcpu_set_seg(v, SEG_FS, &data);
-    vcpu_set_seg(v, SEG_GS, &data);
-    vcpu_set_seg(v, SEG_SS, &data);
-    vcpu_set_seg(v, SEG_LDTR, &ldtr);
-    vcpu_set_seg(v, SEG_TR, &tr);
-    vcpu_set_seg(v, SEG_GDTR, &table);
-    vcpu_set_seg(v, SEG_IDTR, &table);
+    vcpu_set_seg(v, VCPU_SEG_CS, &code);
+    vcpu_set_seg(v, VCPU_SEG_DS, &data);
+    vcpu_set_seg(v, VCPU_SEG_ES, &data);
+    vcpu_set_seg(v, VCPU_SEG_FS, &data);
+    vcpu_set_seg(v, VCPU_SEG_GS, &data);
+    vcpu_set_seg(v, VCPU_SEG_SS, &data);
+    vcpu_set_seg(v, VCPU_SEG_LDTR, &ldtr);
+    vcpu_set_seg(v, VCPU_SEG_TR, &tr);
+    vcpu_set_seg(v, VCPU_SEG_GDTR, &table);
+    vcpu_set_seg(v, VCPU_SEG_IDTR, &table);
 
     vcpu_set_rip(v, ip);
     vcpu_set_rsp(v, 0);
     vcpu_set_rflags(v, RFLAGS_FIXED);
-    v->gprs = (struct gprs){ 0 };
+    v->gprs = (struct vcpu_gprs){ 0 };
     v->redeliver = 0;
 
     v->cr0_shadow = CR0_ET;

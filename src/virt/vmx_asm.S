@@ -17,7 +17,7 @@
 
 #include <sys/cpu.h>
 
-// Offsets into struct gprs.
+// Offsets into struct vcpu_gprs.
 #define GPR_RAX 0
 #define GPR_RCX 8
 #define GPR_RDX 16

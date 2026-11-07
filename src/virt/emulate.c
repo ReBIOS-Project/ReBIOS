@@ -264,10 +264,10 @@ static int memory_op(struct ctx *c, uintptr_t linear) {
         }
         case 0x8c: {
             // Segment registers are numbered as the encoding numbers them.
-            if (group(insn) > SEG_GS) {
+            if (group(insn) > VCPU_SEG_GS) {
                 return EMULATE_UNSUPPORTED;
             }
-            struct segment segment;
+            struct vcpu_segment segment;
             vcpu_get_seg(c->v, (size_t)group(insn), &segment);
             return store(c, 2, linear, segment.selector);
         }

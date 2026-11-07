@@ -47,9 +47,9 @@ static bool is_legacy_prefix(uint8_t b) {
 }
 
 unsigned int insn_length_intercepted(struct vcpu *v) {
-    struct segment cs;
-    vcpu_get_seg(v, SEG_CS, &cs);
-    bool long_mode = (vcpu_efer(v) & EFER_LMA) != 0 && (cs.attrib & SEG_L) != 0;
+    struct vcpu_segment cs;
+    vcpu_get_seg(v, VCPU_SEG_CS, &cs);
+    bool long_mode = (vcpu_efer(v) & EFER_LMA) != 0 && (cs.attrib & VCPU_SEG_L) != 0;
     uintptr_t linear = vcpu_rip(v);
     if (!long_mode) {
         linear = (cs.base + linear) & 0xffffffff;
@@ -307,13 +307,13 @@ static void vex_rex(struct insn *insn, uint8_t rxb, bool w, bool long_mode) {
 }
 
 bool insn_decode(struct vcpu *v, struct insn *insn) {
-    struct segment cs;
-    vcpu_get_seg(v, SEG_CS, &cs);
-    bool long_mode = (vcpu_efer(v) & EFER_LMA) != 0 && (cs.attrib & SEG_L) != 0;
+    struct vcpu_segment cs;
+    vcpu_get_seg(v, VCPU_SEG_CS, &cs);
+    bool long_mode = (vcpu_efer(v) & EFER_LMA) != 0 && (cs.attrib & VCPU_SEG_L) != 0;
     // CS's descriptor gives the defaults, in real mode too, where its cached D
     // bit outlives protected mode, as Linux 7.3's KVM decodes (emulate.c,
     // x86_decode_insn()); V86 mode's are 16-bit.
-    bool big = (vcpu_rflags(v) & RFLAGS_VM) == 0 && (cs.attrib & SEG_DB) != 0;
+    bool big = (vcpu_rflags(v) & RFLAGS_VM) == 0 && (cs.attrib & VCPU_SEG_DB) != 0;
     uintptr_t linear = vcpu_rip(v);
     if (!long_mode) {
         linear = (cs.base + linear) & 0xffffffff;
@@ -354,31 +354,31 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
             int segment = -1;
             switch (b) {
                 case 0x26: {
-                    segment = SEG_ES;
+                    segment = VCPU_SEG_ES;
                     break;
                 }
                 case 0x2e: {
-                    segment = SEG_CS;
+                    segment = VCPU_SEG_CS;
                     break;
                 }
                 case 0x36: {
-                    segment = SEG_SS;
+                    segment = VCPU_SEG_SS;
                     break;
                 }
                 case 0x3e: {
-                    segment = SEG_DS;
+                    segment = VCPU_SEG_DS;
                     break;
                 }
                 case 0x64: {
-                    segment = SEG_FS;
+                    segment = VCPU_SEG_FS;
                     break;
                 }
                 case 0x65: {
-                    segment = SEG_GS;
+                    segment = VCPU_SEG_GS;
                     break;
                 }
             }
-            if (segment >= 0 && (!long_mode || segment == SEG_FS || segment == SEG_GS)) {
+            if (segment >= 0 && (!long_mode || segment == VCPU_SEG_FS || segment == VCPU_SEG_GS)) {
                 insn->segment = segment;
             }
             // A REX prefix only counts right before the opcode.
@@ -585,9 +585,9 @@ static uint64_t address_mask(size_t size) {
 // Outside 64-bit mode the linear address space wraps at 4 GiB, and in it only
 // FS and GS have bases.
 static uintptr_t segment_linear(struct vcpu *v, const struct insn *insn, int reg, uintptr_t ea) {
-    struct segment segment;
+    struct vcpu_segment segment;
     if (insn->long_mode) {
-        if (reg != SEG_FS && reg != SEG_GS) {
+        if (reg != VCPU_SEG_FS && reg != VCPU_SEG_GS) {
             return vcpu_untagged(v, (size_t)reg, ea);
         }
         vcpu_get_seg(v, reg, &segment);
@@ -598,7 +598,7 @@ static uintptr_t segment_linear(struct vcpu *v, const struct insn *insn, int reg
 }
 
 static bool mem_linear(struct vcpu *v, const struct insn *insn, int64_t disp, uint64_t *linear) {
-    int segment = SEG_DS;
+    int segment = VCPU_SEG_DS;
     uintptr_t ea;
     if (insn->opcode >= 0xa0 && insn->opcode <= 0xa3) {
         ea = insn->imm;
@@ -617,7 +617,7 @@ static bool mem_linear(struct vcpu *v, const struct insn *insn, int64_t disp, ui
         if (rm != 6 || mod != 0) {
             ea += sums[rm];
             if (((base_is_bp >> rm) & 1) != 0) {
-                segment = SEG_SS;
+                segment = VCPU_SEG_SS;
             }
         }
         ea &= 0xffff;
@@ -644,7 +644,7 @@ static bool mem_linear(struct vcpu *v, const struct insn *insn, int64_t disp, ui
                              | ((insn->rex_upper & INSN_REX_B) != 0 ? 16 : 0);
             ea += vcpu_gpr(v, reg);
             if (base == 4 || base == 5) {
-                segment = SEG_SS;
+                segment = VCPU_SEG_SS;
             }
         }
         ea &= address_mask(insn->address_size);
@@ -781,8 +781,8 @@ static bool lass_violation(struct vcpu *v, const struct insn *insn, uint64_t la)
     if ((vcpu_efer(v) & EFER_LMA) == 0 || (vcpu_cr4(v) & CR4_LASS) == 0) {
         return false;
     }
-    struct segment ss;
-    vcpu_get_seg(v, SEG_SS, &ss);
+    struct vcpu_segment ss;
+    vcpu_get_seg(v, VCPU_SEG_SS, &ss);
     bool high = insn->long_mode && (la >> 63) != 0;
     if (((ss.attrib >> 5) & 3) == 3) {
         return high;
@@ -809,12 +809,12 @@ static bool linearise(
             return true;
         }
     } else {
-        struct segment s;
+        struct vcpu_segment s;
         vcpu_get_seg(v, reg, &s);
         bool code = (s.attrib & SEG_CODE) != 0;
         bool real = (vcpu_cr0(v) & CR0_PE) == 0;
         uint64_t limit = s.limit;
-        bool allowed = (s.attrib & SEG_UNUSABLE) == 0 && (s.attrib & SEG_PRESENT) != 0;
+        bool allowed = (s.attrib & VCPU_SEG_UNUSABLE) == 0 && (s.attrib & SEG_PRESENT) != 0;
         if (write && ((code && !real) || (s.attrib & SEG_RW) == 0)) {
             allowed = false;
         }
@@ -823,7 +823,7 @@ static bool linearise(
         }
         if (!code && (s.attrib & SEG_EXPAND_DOWN) != 0) {
             allowed &= ea > limit;
-            limit = (s.attrib & SEG_DB) != 0 ? 0xffffffff : 0xffff;
+            limit = (s.attrib & VCPU_SEG_DB) != 0 ? 0xffffffff : 0xffff;
         }
         uint64_t la = (s.base + ea) & 0xffffffff;
         if (allowed && ea <= limit && (limit == 0xffffffff || size <= limit + 1 - ea)
@@ -832,7 +832,7 @@ static bool linearise(
             return true;
         }
     }
-    vcpu_inject_exception(v, reg == SEG_SS ? 12 : 13, true, 0);
+    vcpu_inject_exception(v, reg == VCPU_SEG_SS ? 12 : 13, true, 0);
     return false;
 }
 
@@ -842,8 +842,8 @@ bool insn_string_linear(
 ) {
     uint64_t mask = address_mask(insn->address_size);
     if (destination) {
-        return linearise(v, insn, SEG_ES, v->gprs.rdi & mask, size, write, linear);
+        return linearise(v, insn, VCPU_SEG_ES, v->gprs.rdi & mask, size, write, linear);
     }
-    int segment = insn->segment >= 0 ? insn->segment : SEG_DS;
+    int segment = insn->segment >= 0 ? insn->segment : VCPU_SEG_DS;
     return linearise(v, insn, segment, v->gprs.rsi & mask, size, write, linear);
 }

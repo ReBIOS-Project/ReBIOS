@@ -538,15 +538,15 @@ static uint8_t *guest_page(uintptr_t gpa) {
 }
 
 static unsigned int guest_cpl(struct vcpu *v) {
-    struct segment ss;
-    vcpu_get_seg(v, SEG_SS, &ss);
+    struct vcpu_segment ss;
+    vcpu_get_seg(v, VCPU_SEG_SS, &ss);
     return (ss.attrib >> 5) & 3;
 }
 
 static bool long_mode_64(struct vcpu *v) {
-    struct segment cs;
-    vcpu_get_seg(v, SEG_CS, &cs);
-    return (vcpu_efer(v) & EFER_LMA) != 0 && (cs.attrib & SEG_L) != 0;
+    struct vcpu_segment cs;
+    vcpu_get_seg(v, VCPU_SEG_CS, &cs);
+    return (vcpu_efer(v) & EFER_LMA) != 0 && (cs.attrib & VCPU_SEG_L) != 0;
 }
 
 // Instruction information, as APX's extended field has it, with 5-bit register
@@ -600,11 +600,11 @@ static bool operand_address(struct vcpu *v, uint64_t info, size_t size, uint64_t
         }
     }
     size_t reg = (size_t)INFO_SEGMENT(info);
-    struct segment seg;
+    struct vcpu_segment seg;
     vcpu_get_seg(v, reg, &seg);
-    uint8_t fault = reg == SEG_SS ? 12 : 13;
+    uint8_t fault = reg == VCPU_SEG_SS ? 12 : 13;
     if (long_mode_64(v)) {
-        if (reg == SEG_FS || reg == SEG_GS) {
+        if (reg == VCPU_SEG_FS || reg == VCPU_SEG_GS) {
             address += seg.base;
         }
         address = vcpu_untagged(v, reg, address);
@@ -614,7 +614,7 @@ static bool operand_address(struct vcpu *v, uint64_t info, size_t size, uint64_t
             return false;
         }
     } else {
-        if ((seg.attrib & SEG_UNUSABLE) != 0 || address + size - 1 > seg.limit) {
+        if ((seg.attrib & VCPU_SEG_UNUSABLE) != 0 || address + size - 1 > seg.limit) {
             vcpu_inject_exception(v, fault, true, 0);
             return false;
         }
@@ -2081,17 +2081,17 @@ static void save_l2_state(struct nvmx *n) {
     set12(n, VMCS_ENTRY_CONTROLS, entry | ((efer & EFER_LMA) != 0 ? ENTRY_IA32E_MODE_GUEST : 0));
 }
 
-static struct segment host_segment(
+static struct vcpu_segment host_segment(
     const struct nvmx *n, uint32_t selector_field, uint32_t attrib, uintptr_t base
 ) {
-    struct segment seg = {
+    struct vcpu_segment seg = {
         .selector = (uint16_t)get12(n, selector_field),
         .attrib = attrib,
         .limit = 0xffffffff,
         .base = base
     };
     if (seg.selector == 0) {
-        seg.attrib = SEG_UNUSABLE;
+        seg.attrib = VCPU_SEG_UNUSABLE;
     }
     return seg;
 }
@@ -2121,28 +2121,28 @@ static void load_l1_host_state(struct vcpu *v, struct nvmx *n, bool nmi) {
     }
     mode.rflags = RFLAGS_FIXED;
 
-    uint32_t code = 0x9b | ((uint32_t)1 << 11) | (host64 ? SEG_L : SEG_DB);
-    uint32_t data = 0x93 | ((uint32_t)1 << 11) | SEG_DB;
-    mode.segs[SEG_CS] = host_segment(n, VMCS_HOST_CS_SEL, code, 0);
-    mode.segs[SEG_SS] = host_segment(n, VMCS_HOST_SS_SEL, data, 0);
-    mode.segs[SEG_DS] = host_segment(n, VMCS_HOST_DS_SEL, data, 0);
-    mode.segs[SEG_ES] = host_segment(n, VMCS_HOST_ES_SEL, data, 0);
-    mode.segs[SEG_FS] = host_segment(n, VMCS_HOST_FS_SEL, data, get12(n, VMCS_HOST_FS_BASE));
-    mode.segs[SEG_GS] = host_segment(n, VMCS_HOST_GS_SEL, data, get12(n, VMCS_HOST_GS_BASE));
+    uint32_t code = 0x9b | ((uint32_t)1 << 11) | (host64 ? VCPU_SEG_L : VCPU_SEG_DB);
+    uint32_t data = 0x93 | ((uint32_t)1 << 11) | VCPU_SEG_DB;
+    mode.segs[VCPU_SEG_CS] = host_segment(n, VMCS_HOST_CS_SEL, code, 0);
+    mode.segs[VCPU_SEG_SS] = host_segment(n, VMCS_HOST_SS_SEL, data, 0);
+    mode.segs[VCPU_SEG_DS] = host_segment(n, VMCS_HOST_DS_SEL, data, 0);
+    mode.segs[VCPU_SEG_ES] = host_segment(n, VMCS_HOST_ES_SEL, data, 0);
+    mode.segs[VCPU_SEG_FS] = host_segment(n, VMCS_HOST_FS_SEL, data, get12(n, VMCS_HOST_FS_BASE));
+    mode.segs[VCPU_SEG_GS] = host_segment(n, VMCS_HOST_GS_SEL, data, get12(n, VMCS_HOST_GS_BASE));
     // 64-bit mode uses FS and GS bases however unusable.
-    mode.segs[SEG_FS].base = get12(n, VMCS_HOST_FS_BASE);
-    mode.segs[SEG_GS].base = get12(n, VMCS_HOST_GS_BASE);
-    mode.segs[SEG_TR] = (struct segment){
+    mode.segs[VCPU_SEG_FS].base = get12(n, VMCS_HOST_FS_BASE);
+    mode.segs[VCPU_SEG_GS].base = get12(n, VMCS_HOST_GS_BASE);
+    mode.segs[VCPU_SEG_TR] = (struct vcpu_segment){
         .selector = (uint16_t)get12(n, VMCS_HOST_TR_SEL),
         .attrib = 0x8b,
         .limit = 0x67,
         .base = get12(n, VMCS_HOST_TR_BASE)
     };
-    mode.segs[SEG_LDTR] = (struct segment){ .attrib = SEG_UNUSABLE };
-    mode.segs[SEG_GDTR] = (struct segment){
+    mode.segs[VCPU_SEG_LDTR] = (struct vcpu_segment){ .attrib = VCPU_SEG_UNUSABLE };
+    mode.segs[VCPU_SEG_GDTR] = (struct vcpu_segment){
         .limit = 0xffff, .base = get12(n, VMCS_HOST_GDTR_BASE)
     };
-    mode.segs[SEG_IDTR] = (struct segment){
+    mode.segs[VCPU_SEG_IDTR] = (struct vcpu_segment){
         .limit = 0xffff, .base = get12(n, VMCS_HOST_IDTR_BASE)
     };
     vcpu_load_mode(v, &mode);

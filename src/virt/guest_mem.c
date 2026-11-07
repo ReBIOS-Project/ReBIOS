@@ -28,6 +28,7 @@
 #include <virt/nsvm.h>
 #include <virt/nvmx.h>
 #include <virt/vcpu.h>
+#include <virt/virt.h>
 #include <virt/vmx.h>
 
 #define MSR_IA32_PKRS 0x6e1
@@ -396,8 +397,8 @@ retry: *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0)
 bool guest_mem_linear_to_phys(
     struct vcpu *v, uintptr_t linear, bool write, bool fetch, uint64_t *gpa, uint32_t *pf_error
 ) {
-    struct segment ss;
-    vcpu_get_seg(v, SEG_SS, &ss);
+    struct vcpu_segment ss;
+    vcpu_get_seg(v, VCPU_SEG_SS, &ss);
     bool user = ((ss.attrib >> 5) & 3) == 3;
     return linear_to_phys(v, linear, write, fetch, user, false, gpa, pf_error);
 }

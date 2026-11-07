@@ -30,6 +30,7 @@
 #include <sys/mm.h>
 #include <sys/x86.h>
 #include <virt/vcpu.h>
+#include <virt/virt.h>
 
 #define PERIOD_NS ((uint64_t)10000000000)
 

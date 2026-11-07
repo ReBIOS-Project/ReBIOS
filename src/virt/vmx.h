@@ -456,7 +456,7 @@
 #define FEATURE_CONTROL_LOCK ((uint32_t)1 << 0)
 #define FEATURE_CONTROL_VMX_OUTSIDE_SMX ((uint32_t)1 << 2)
 
-struct segment;
+struct vcpu_segment;
 struct vcpu;
 struct vmcs_cache;
 
@@ -498,8 +498,8 @@ uint64_t vmx_read(uint32_t field);
 bool vmx_ept_huge_pages(void);
 bool vmx_ept_dirty_flags(void);
 bool vmx_monitor_trap_supported(void);
-void vmx_get_seg(size_t reg, struct segment *seg);
-void vmx_set_seg(size_t reg, const struct segment *seg);
+void vmx_get_seg(size_t reg, struct vcpu_segment *seg);
+void vmx_set_seg(size_t reg, const struct vcpu_segment *seg);
 uint64_t vmx_cr0_mask(void);
 uint64_t vmx_cr4_mask(void);
 uint64_t vmx_cr0_real(uint64_t guest_cr0);

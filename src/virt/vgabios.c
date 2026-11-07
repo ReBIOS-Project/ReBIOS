@@ -503,8 +503,8 @@ static bool real_mode_rom(struct vcpu *v) {
     if ((vcpu_cr0(v) & CR0_PE) != 0) {
         return false;
     }
-    struct segment cs;
-    vcpu_get_seg(v, SEG_CS, &cs);
+    struct vcpu_segment cs;
+    vcpu_get_seg(v, VCPU_SEG_CS, &cs);
     return cs.selector == VGABIOS_SEGMENT;
 }
 
@@ -551,8 +551,8 @@ static uint16_t call_begin(struct vcpu *v, bool vga_ports) {
     if (!c->direct) {
         return port;
     }
-    struct segment ss;
-    vcpu_get_seg(v, SEG_SS, &ss);
+    struct vcpu_segment ss;
+    vcpu_get_seg(v, VCPU_SEG_SS, &ss);
     c->v = v;
     c->frame = ss.base + (uint16_t)v->gprs.rbp;
     frame_load(c);

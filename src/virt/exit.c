@@ -40,6 +40,7 @@
 #include <virt/svm.h>
 #include <virt/usb_disk.h>
 #include <virt/vcpu.h>
+#include <virt/virt.h>
 #include <virt/vlapic.h>
 #include <virt/vmx.h>
 
@@ -124,10 +125,10 @@ void exit_hypercall(struct vcpu *v) {
 
 void exit_invalid_opcode(struct vcpu *v) {
     static const uint8_t vmcall[] = { 0x0f, 0x01, 0xc1 };
-    struct segment cs;
+    struct vcpu_segment cs;
     uint8_t insn[sizeof(vmcall)];
 
-    vcpu_get_seg(v, SEG_CS, &cs);
+    vcpu_get_seg(v, VCPU_SEG_CS, &cs);
     uintptr_t rip = vcpu_rip(v);
     if (guest_mem_linear_read(v, cs.base + rip, insn, sizeof(insn), true)
      && memcmp(insn, vmcall, sizeof(vmcall)) == 0) {

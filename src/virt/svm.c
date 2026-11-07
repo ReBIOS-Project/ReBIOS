@@ -211,7 +211,7 @@ static void svm_machine_check(struct vcpu *v) {
     vcpu_inject_exception(v, VECTOR_MC, false, 0);
 }
 
-void svm_enter(uintptr_t vmcb_pa, struct gprs *gprs);
+void svm_enter(uintptr_t vmcb_pa, struct vcpu_gprs *gprs);
 
 bool svm_supported(void) {
     if (cpuid(0x80000000, 0).eax < 0x8000000a) {
@@ -453,10 +453,10 @@ static void svm_handle_cr4_write(struct vcpu *v) {
     }
     unsigned int reg = assisted ? c->exitinfo1 & 15 : (insn.modrm & 7) | (insn.rex & 1) << 3;
     uint64_t value = reg == 4 ? vcpu_rsp(v) : ((uint64_t *)&v->gprs)[reg];
-    struct segment cs;
-    vcpu_get_seg(v, SEG_CS, &cs);
+    struct vcpu_segment cs;
+    vcpu_get_seg(v, VCPU_SEG_CS, &cs);
     // Outside 64-bit mode the move takes the register's low 32 bits.
-    if ((v->vmcb->save.efer & EFER_LMA) == 0 || (cs.attrib & SEG_L) == 0) {
+    if ((v->vmcb->save.efer & EFER_LMA) == 0 || (cs.attrib & VCPU_SEG_L) == 0) {
         value = (uint32_t)value;
     }
     if ((value & ~cpuid_cr4_allowed()) != 0) {
@@ -477,9 +477,9 @@ static void svm_handle_cr4_write(struct vcpu *v) {
 
 // Whether the guest's code is 64-bit.
 static bool code64(struct vcpu *v) {
-    struct segment cs;
-    vcpu_get_seg(v, SEG_CS, &cs);
-    return (v->vmcb->save.efer & EFER_LMA) != 0 && (cs.attrib & SEG_L) != 0;
+    struct vcpu_segment cs;
+    vcpu_get_seg(v, VCPU_SEG_CS, &cs);
+    return (v->vmcb->save.efer & EFER_LMA) != 0 && (cs.attrib & VCPU_SEG_L) != 0;
 }
 
 uint64_t svm_guest_cr0(struct vcpu *v) {

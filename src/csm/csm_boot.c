@@ -219,8 +219,8 @@ static void lock_roms(void) {
 
 // Sets up the call the thunk makes next: function in AX, its table in ES:BX.
 static void csm_call(struct vcpu *v, uint16_t function, uintptr_t table) {
-    struct segment es = { (uint16_t)(table >> 4), 0x93, 0xffff, table & ~(uint32_t)0xf };
-    vcpu_set_seg(v, SEG_ES, &es);
+    struct vcpu_segment es = { (uint16_t)(table >> 4), 0x93, 0xffff, table & ~(uint32_t)0xf };
+    vcpu_set_seg(v, VCPU_SEG_ES, &es);
     v->gprs.rax = function;
     v->gprs.rbx = table & 0xf;
     vcpu_set_rip(v, 0);
@@ -625,8 +625,8 @@ void csm_boot_start(struct vcpu *v) {
     );
 
     vcpu_set_real_mode(v, THUNK_BASE >> 4, 0);
-    struct segment stack = { THUNK_BASE >> 4, 0x93, 0xffff, THUNK_BASE };
-    vcpu_set_seg(v, SEG_SS, &stack);
+    struct vcpu_segment stack = { THUNK_BASE >> 4, 0x93, 0xffff, THUNK_BASE };
+    vcpu_set_seg(v, VCPU_SEG_SS, &stack);
     vcpu_set_rsp(v, THUNK_STACK_TOP - THUNK_BASE);
     csm.rom_end = ROM_AREA_BASE;
     csm.stage = STAGE_INITIALIZE;

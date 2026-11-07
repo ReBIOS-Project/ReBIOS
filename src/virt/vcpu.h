@@ -26,29 +26,29 @@
 
 // Indexed by the register numbers used in instruction encodings. The RSP slot
 // is unused: the guest's RSP lives in the VMCS or VMCB.
-struct gprs {
+struct vcpu_gprs {
     uint64_t rax, rcx, rdx, rbx, rsp, rbp, rsi, rdi;
     uint64_t r8, r9, r10, r11, r12, r13, r14, r15;
 };
 
-#define SEG_ES 0
-#define SEG_CS 1
-#define SEG_SS 2
-#define SEG_DS 3
-#define SEG_FS 4
-#define SEG_GS 5
-#define SEG_LDTR 6
-#define SEG_TR 7
-#define SEG_GDTR 8
-#define SEG_IDTR 9
+#define VCPU_SEG_ES 0
+#define VCPU_SEG_CS 1
+#define VCPU_SEG_SS 2
+#define VCPU_SEG_DS 3
+#define VCPU_SEG_FS 4
+#define VCPU_SEG_GS 5
+#define VCPU_SEG_LDTR 6
+#define VCPU_SEG_TR 7
+#define VCPU_SEG_GDTR 8
+#define VCPU_SEG_IDTR 9
 
 // Attributes are in the VMCB's packed form: descriptor bits 47:40 in bits 7:0
-// and descriptor bits 55:52 in bits 11:8, plus SEG_UNUSABLE.
-#define SEG_L ((uint32_t)1 << 9)
-#define SEG_DB ((uint32_t)1 << 10)
-#define SEG_UNUSABLE ((uint32_t)1 << 16)
+// and descriptor bits 55:52 in bits 11:8, plus VCPU_SEG_UNUSABLE.
+#define VCPU_SEG_L ((uint32_t)1 << 9)
+#define VCPU_SEG_DB ((uint32_t)1 << 10)
+#define VCPU_SEG_UNUSABLE ((uint32_t)1 << 16)
 
-struct segment {
+struct vcpu_segment {
     uint16_t selector;
     uint32_t attrib;
     uint32_t limit;
@@ -62,7 +62,7 @@ struct vcpu_mode {
     uint64_t cr4;
     uint64_t efer;
     uint64_t rflags;
-    struct segment segs[SEG_IDTR + 1];
+    struct vcpu_segment segs[VCPU_SEG_IDTR + 1];
 };
 
 #define VCPU_SIPI_RUNNING (-2)
@@ -78,7 +78,7 @@ struct vmcs_cache;
 
 struct vcpu {
     // Must come first: the entry stubs address it from the struct's start.
-    struct gprs gprs;
+    struct vcpu_gprs gprs;
 
     struct cpu *cpu;
 
@@ -192,8 +192,6 @@ struct vcpu {
     uint32_t last_exit;
 };
 
-extern bool virt_vmx;
-
 struct vcpu *vcpu_create(struct cpu *cpu);
 noreturn void vcpu_run(struct vcpu *v);
 
@@ -252,8 +250,8 @@ uint64_t vcpu_efer(struct vcpu *v);
 // metadata LAM masks (SDM 325462-093 Vol. 3A, 4.4.2) or the bits Upper Address
 // Ignore leaves out (APM 24593 rev. 3.45, 5.10.2).
 uint64_t vcpu_untagged(struct vcpu *v, size_t reg, uintptr_t linear);
-void vcpu_get_seg(struct vcpu *v, size_t reg, struct segment *seg);
-void vcpu_set_seg(struct vcpu *v, size_t reg, const struct segment *seg);
+void vcpu_get_seg(struct vcpu *v, size_t reg, struct vcpu_segment *seg);
+void vcpu_set_seg(struct vcpu *v, size_t reg, const struct vcpu_segment *seg);
 void vcpu_save_mode(struct vcpu *v, struct vcpu_mode *mode);
 void vcpu_load_mode(struct vcpu *v, const struct vcpu_mode *mode);
 

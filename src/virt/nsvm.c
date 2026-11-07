@@ -849,7 +849,7 @@ static bool vmcb12_valid(struct vcpu *v, const struct vmcb *vmcb12) {
     // pointers' bits 2:0 (AMD 69191 rev. 1.10).
     if ((s->cr4 & CR4_FRED) != 0) {
         unsigned int ss_dpl = (s->ss.attrib >> 5) & 3;
-        bool long_cs = (s->cs.attrib & SEG_L) != 0;
+        bool long_cs = (s->cs.attrib & VCPU_SEG_L) != 0;
         bool iopl0 = (s->rflags & RFLAGS_IOPL) == 0;
         if (((s->cpl != 0 || !long_cs) && (s->cpl != 3 || !iopl0))
          || ((ss_dpl != 0 || !long_cs) && (ss_dpl != 3 || !iopl0))) {
@@ -876,7 +876,7 @@ static bool vmcb12_valid(struct vcpu *v, const struct vmcb *vmcb12) {
     }
     if ((s->efer & EFER_LME) != 0 && (s->cr0 & CR0_PG) != 0) {
         if ((s->cr4 & CR4_PAE) == 0 || (s->cr0 & CR0_PE) == 0 || (s->cr3 >> phys_width) != 0
-         || ((s->cs.attrib & SEG_L) != 0 && (s->cs.attrib & SEG_DB) != 0)) {
+         || ((s->cs.attrib & VCPU_SEG_L) != 0 && (s->cs.attrib & VCPU_SEG_DB) != 0)) {
             return false;
         }
         return true;
@@ -1284,7 +1284,7 @@ static void prepare_vmcb02(struct nsvm *n) {
     // 64-bit mode (APM 24593 rev. 3.46, 15.33.1).
     bool vls = svm_vls && (c12->virt_ext & SVM_VIRT_EXT_VLS) != 0;
     n->vls12 = vls && (c12->np_enable & SVM_NP_ENABLE) != 0 && (vmcb01->save.efer & EFER_LMA) != 0
-            && (vmcb01->save.cs.attrib & SEG_L) != 0;
+            && (vmcb01->save.cs.attrib & VCPU_SEG_L) != 0;
     n->vls12_refused = vls && !n->vls12;
     n->fred12 = vcpu_fred() && (c12->virt_ext & SVM_VIRT_EXT_FRED) != 0;
     merge_intercepts(n);
@@ -1470,7 +1470,7 @@ static void vmrun(struct vcpu *v, struct nsvm *n) {
     uint64_t rip = vmcb01->save.rip;
     uint64_t next = svm_nrips ? vmcb01->control.nrip : rip + insn.length;
     if ((next >> 32) != (rip >> 32)
-     && ((vmcb01->save.efer & EFER_LMA) == 0 || (vmcb01->save.cs.attrib & SEG_L) == 0)) {
+     && ((vmcb01->save.efer & EFER_LMA) == 0 || (vmcb01->save.cs.attrib & VCPU_SEG_L) == 0)) {
         next = (uint32_t)next;
     }
     vmcb01->save.rip = next;

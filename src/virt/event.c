@@ -31,6 +31,7 @@
 #include <virt/pit.h>
 #include <virt/svm.h>
 #include <virt/vcpu.h>
+#include <virt/virt.h>
 #include <virt/vlapic.h>
 #include <virt/vmx.h>
 
@@ -137,17 +138,17 @@ bool event_deliver_real_mode(struct vcpu *v) {
     // SDM 325462-093 Vol. 3B, 23.1.4: FLAGS, CS, and IP pushed, the handler
     // from the interrupt table IDTR points to, and no error code.
     unsigned int vector = v->redeliver & EVENT_VECTOR_MASK;
-    struct segment idtr, ss, cs;
-    vcpu_get_seg(v, SEG_IDTR, &idtr);
-    vcpu_get_seg(v, SEG_SS, &ss);
-    vcpu_get_seg(v, SEG_CS, &cs);
+    struct vcpu_segment idtr, ss, cs;
+    vcpu_get_seg(v, VCPU_SEG_IDTR, &idtr);
+    vcpu_get_seg(v, VCPU_SEG_SS, &ss);
+    vcpu_get_seg(v, VCPU_SEG_CS, &cs);
     uint32_t handler;
     if (vector * 4 + 3 > idtr.limit || !mmio_read_linear(v, idtr.base + vector * 4, &handler, 4)) {
         return false;
     }
     uint64_t rflags = vcpu_rflags(v);
     uint16_t frame[3] = { (uint16_t)vcpu_rip(v), cs.selector, (uint16_t)rflags };
-    uint64_t sp_mask = (ss.attrib & SEG_DB) != 0 ? (uint64_t)0xffffffff : (uint64_t)0xffff;
+    uint64_t sp_mask = (ss.attrib & VCPU_SEG_DB) != 0 ? (uint64_t)0xffffffff : (uint64_t)0xffff;
     uintptr_t rsp = vcpu_rsp(v);
     uint64_t sp = (rsp - sizeof(frame)) & sp_mask;
     for (size_t i = 0; i < 3; i++) {
@@ -159,7 +160,7 @@ bool event_deliver_real_mode(struct vcpu *v) {
     vcpu_set_rsp(v, (rsp & ~sp_mask) | sp);
     cs.selector = (uint16_t)(handler >> 16);
     cs.base = (uint64_t)cs.selector << 4;
-    vcpu_set_seg(v, SEG_CS, &cs);
+    vcpu_set_seg(v, VCPU_SEG_CS, &cs);
     vcpu_set_rip(v, handler & 0xffff);
     vcpu_set_rflags(v, rflags & ~(uint64_t)(RFLAGS_IF | RFLAGS_TF | RFLAGS_RF | RFLAGS_AC));
     v->redeliver = 0;
