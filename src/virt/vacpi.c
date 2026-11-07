@@ -44,9 +44,11 @@
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
+#include <lib/time.h>
 #include <lib/util.h>
 #include <memory.h>
 #include <sys/mm.h>
+#include <sys/x86.h>
 #include <virt/gpt.h>
 #include <virt/guest_mem.h>
 #include <virt/hpet.h>
@@ -2640,6 +2642,19 @@ static uint32_t bytes_read(uint32_t reg, uint16_t offset, size_t size) {
     return (uint32_t)((uint64_t)reg >> (8 * offset)) & mask;
 }
 
+// The guest's PM timer where the machine's fails its checks: the TSC, counted
+// at the PM timer's rate, and as wide as the machine's.
+static void pm_tmr_access(
+    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
+) {
+    (void)v;
+    (void)ctx;
+    if (in) {
+        uint64_t ticks = mul_div(rdtsc(), PM_TIMER_HZ, time_tsc_hz());
+        *value = bytes_read((uint32_t)ticks & pm_timer_mask(), offset, size);
+    }
+}
+
 static void pm1_evt_access(
     struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
 ) {
@@ -2758,9 +2773,15 @@ void vacpi_init(void) {
         if (fadt->smi_cmd != 0 && fadt->smi_cmd <= 0xffff) {
             io_block((uint16_t)fadt->smi_cmd, 1);
         }
-        // The guest's PM timer is the machine's.
-        if (pm_timer_port() != 0) {
+        // The guest's PM timer is the machine's where it is sound.
+        if (pm_timer_sound()) {
             io_pass(pm_timer_port(), 4);
+        } else if (pm_timer_port() != 0) {
+            struct io_handler tmr = {
+                .base = pm_timer_port(), .count = 4, .access = pm_tmr_access
+            };
+            io_register(&tmr);
+            printf("The guest's PM timer counts from the TSC\n");
         }
     }
     if (vacpi.pm1) {

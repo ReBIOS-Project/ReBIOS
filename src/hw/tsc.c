@@ -39,6 +39,11 @@
 // The reads a round starts with, for the quickest of them.
 #define START_READS 8
 
+// How far the PM timer's rate may be from what it should be, as Linux 7.3's
+// verify_pmtmr_rate() has it in its 32-bit builds, which check it against the
+// PIT.
+#define PM_TIMER_TOLERANCE 20
+
 // The HPET's period, configuration, and main counter registers (IA-PC HPET
 // Specification 1.0a, 2.3).
 #define HPET_PERIOD 0x04
@@ -205,10 +210,24 @@ static uint64_t nominal_hz(void) {
     return crystal * leaf.ebx / leaf.eax;
 }
 
-// Whether a is within 1% of b.
-static bool agree(uint64_t a, uint64_t b) {
+// Whether a is within b / fraction of b.
+static bool within(uint64_t a, uint64_t b, uint64_t fraction) {
     uint64_t difference = a > b ? a - b : b - a;
-    return difference <= b / 100;
+    return difference <= b / fraction;
+}
+
+static bool agree(uint64_t a, uint64_t b) {
+    return within(a, b, 100);
+}
+
+// The PM timer's rate, as the TSC at hz times it, which a clock other than the
+// PM timer gave.
+static void check_pm_timer(const struct reference *r, uint64_t estimate, uint64_t hz) {
+    uint64_t seen;
+    if (measure_round(r, estimate, &seen) && within(seen, hz, PM_TIMER_TOLERANCE)) {
+        return;
+    }
+    pm_timer_reject();
 }
 
 void tsc_calibrate(void) {
@@ -225,11 +244,22 @@ void tsc_calibrate(void) {
     }
     uint64_t hz = estimate;
     const char *source = "the firmware's Stall()";
-    for (size_t i = 0; i < count; i++) {
-        if (measure(&references[i], estimate, &hz)) {
-            source = references[i].name;
-            break;
+    size_t used = count;
+    for (size_t i = 0; i < count && used == count; i++) {
+        uint64_t measured;
+        if (!measure(&references[i], estimate, &measured)) {
+            continue;
         }
+        // Without the HPET, the PM timer is checked against the firmware's
+        // Stall(), the only other clock there is.
+        if (references[i].read == pm_timer_read
+         && !within(measured, estimate, PM_TIMER_TOLERANCE)) {
+            pm_timer_reject();
+            continue;
+        }
+        hz = measured;
+        source = references[i].name;
+        used = i;
     }
 
     // The nominal rate is exact where it is right, which Table 22-95's crystal
@@ -240,6 +270,11 @@ void tsc_calibrate(void) {
         hz = nominal;
     }
     time_set_tsc_hz(hz);
+    for (size_t i = 0; i < count; i++) {
+        if (i != used && references[i].read == pm_timer_read && pm_timer_sound()) {
+            check_pm_timer(&references[i], estimate, hz);
+        }
+    }
     printf(
         "TSC at %llu Hz, %s %s\n", (unsigned long long)hz,
         nominal_agrees ? "its nominal rate, which agrees with" : "as measured with", source

@@ -96,3 +96,8 @@ uint32_t pm_timer_mask(void) {
 bool pm_timer_sound(void) {
     return sound;
 }
+
+void pm_timer_reject(void) {
+    sound = false;
+    printf("The PM timer at %#x does not count at its rate\n", port);
+}

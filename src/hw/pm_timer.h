@@ -31,8 +31,10 @@ void pm_timer_init(void);
 uint16_t pm_timer_port(void);
 // Where its count wraps: 24 bits wide, or 32 with the FADT's TMR_VAL_EXT.
 uint32_t pm_timer_mask(void);
-// Whether it passed that check.
+// Whether it passed that check, and was not rejected since.
 bool pm_timer_sound(void);
+// For a timer that runs at the wrong rate, which tsc_calibrate() checks.
+void pm_timer_reject(void);
 uint32_t pm_timer_read(void);
 
 #endif
