@@ -172,9 +172,10 @@ struct nsvm {
     uint64_t tsc_offset12;
     // Whether VMCB12 has the processor switch the last branch records.
     bool lbrv;
-    // Whether VMCB12 has the processor virtualise the guest's guest's NMIs
-    // (APM 24593 rev. 3.46, 15.21.10).
+    // Whether VMCB12 has the processor virtualise the guest's guest's NMIs and
+    // global interrupt flag (APM 24593 rev. 3.46, 15.21.10 and 15.33.2).
     bool vnmi12;
+    bool vgif12;
     // VMCB02's MSR permission map: the hypervisor's and VMCB12's.
     uint8_t *msrpm02;
     // Whether VMCB12 enables nested paging, and the guest's paging mode at its
@@ -298,11 +299,12 @@ static bool shadow_stacks(void) {
 }
 
 // The global interrupt flag, which the processor's copy of follows where it
-// virtualises it.
+// virtualises it: VMCB01's while VMCB02's is the guest's guest's own.
 static void set_gif(struct vcpu *v, struct nsvm *n, bool on) {
     n->gif = on;
     if (svm_vgif) {
-        struct vmcb_control *c = &v->vmcb->control;
+        bool l2s = n->in_l2 && n->vgif12;
+        struct vmcb_control *c = l2s ? &n->vmcb01->control : &v->vmcb->control;
         c->vintr = on ? c->vintr | SVM_VINTR_GIF : c->vintr & ~SVM_VINTR_GIF;
     }
 }
@@ -417,7 +419,7 @@ struct cpuid_regs nsvm_cpuid(void) {
     uint32_t features = SVM_FEATURE_NP | SVM_FEATURE_NRIPS | SVM_FEATURE_VMCB_CLEAN
                       | SVM_FEATURE_FLUSH_BY_ASID | SVM_FEATURE_PAUSE_FILTER
                       | SVM_FEATURE_PAUSE_FILTER_THRESHOLD | SVM_FEATURE_LBRV | SVM_FEATURE_ROGPT
-                      | SVM_FEATURE_TLBICTL | SVM_FEATURE_DECODE_ASSISTS
+                      | SVM_FEATURE_TLBICTL | SVM_FEATURE_DECODE_ASSISTS | SVM_FEATURE_VGIF
                       | (svm_vnmi ? SVM_FEATURE_VNMI : 0);
     return (struct cpuid_regs){
         svm.eax & 0xff, nasid - 1, svm.ecx & CPUID_8000000A_ECX_PML,
@@ -610,12 +612,13 @@ static void exit_to_l1(
     }
 
     // Of the virtual interrupt control, the processor writes back V_TPR and
-    // V_IRQ, and the virtual NMI state where VMCB12 has it virtualise NMIs
-    // (APM 24593 rev. 3.46, 15.21.10).
+    // V_IRQ, and V_GIF and the virtual NMI state where VMCB12 has it
+    // virtualise them (APM 24593 rev. 3.46, 15.21.10 and 15.33.2).
     struct vmcb_control *c02 = &vmcb02->control;
     struct vmcb_control *c12 = &vmcb12->control;
     uint64_t virq = n->window ? n->vintr12 : c02->vintr;
-    uint64_t back = n->vnmi12 ? SVM_VINTR_NMI | SVM_VINTR_NMI_MASK : 0;
+    uint64_t back = (n->vnmi12 ? SVM_VINTR_NMI | SVM_VINTR_NMI_MASK : 0)
+                  | (n->vgif12 ? SVM_VINTR_GIF : 0);
     c12->vintr = (c12->vintr & ~(SVM_VINTR_TPR_MASK | SVM_VINTR_IRQ | back))
                | (c02->vintr & (SVM_VINTR_TPR_MASK | back)) | (virq & SVM_VINTR_IRQ);
     c12->interrupt_shadow = (c12->interrupt_shadow & ~SVM_INTERRUPT_SHADOW)
@@ -783,9 +786,10 @@ static bool vmcb12_valid(struct vcpu *v, const struct vmcb *vmcb12) {
 // opens for the guest itself, the hypercalls of the legacy BIOS, which are #UD
 // and VMMCALL, and the guest's guest's CR8, which is its own where VMCB12
 // masks interrupts virtually and is the guest's TPR otherwise (APM 24593 rev.
-// 3.46, 15.21.2). The guest's guest's VMLOAD, VMSAVE, CLGI, and STGI, which
-// the hypervisor runs for it where the guest does not intercept them, always
-// exit, whatever the guest's own do.
+// 3.46, 15.21.2). The guest's guest's VMLOAD and VMSAVE, which the hypervisor
+// runs for it where the guest does not intercept them, always exit, whatever
+// the guest's own do, and so do its CLGI and STGI but where VMCB12 has the
+// processor virtualise its global interrupt flag.
 static void merge_intercepts(struct nsvm *n) {
     uint32_t own[SVM_INTERCEPT_VECTORS];
     uint32_t to[SVM_INTERCEPT_VECTORS];
@@ -795,8 +799,9 @@ static void merge_intercepts(struct nsvm *n) {
     }
     to[2] = (own[2] & ~((uint32_t)1 << VECTOR_UD)) | n->intercepts[2];
     to[3] = (own[3] & ~SVM_INTERCEPT_VINTR) | n->intercepts[3];
-    to[4] = (own[4] & ~SVM_INTERCEPT_VMMCALL) | n->intercepts[4] | SVM_INTERCEPT_VMLOAD
-          | SVM_INTERCEPT_VMSAVE | SVM_INTERCEPT_STGI | SVM_INTERCEPT_CLGI;
+    to[4] = (own[4] & ~(SVM_INTERCEPT_VMMCALL | SVM_INTERCEPT_STGI | SVM_INTERCEPT_CLGI))
+          | n->intercepts[4] | SVM_INTERCEPT_VMLOAD | SVM_INTERCEPT_VMSAVE
+          | (n->vgif12 ? 0 : SVM_INTERCEPT_STGI | SVM_INTERCEPT_CLGI);
     if ((n->vintr12 & SVM_VINTR_MASKING) == 0) {
         to[0] |= SVM_INTERCEPT_CR8_READ | SVM_INTERCEPT_CR8_WRITE;
     }
@@ -1137,6 +1142,7 @@ static void prepare_vmcb02(struct nsvm *n) {
     n->window = false;
     n->tsc_offset12 = c12->tsc_offset;
     n->vnmi12 = svm_vnmi && (c12->vintr & SVM_VINTR_NMI_ENABLE) != 0;
+    n->vgif12 = svm_vgif && (c12->vintr & SVM_VINTR_GIF_ENABLE) != 0;
     merge_intercepts(n);
 
     // The guest's PAUSE filter, as the hypervisor intercepts no PAUSE itself
@@ -1161,12 +1167,14 @@ static void prepare_vmcb02(struct nsvm *n) {
     // cleared, as Linux 7.3's KVM has it (nested.c,
     // nested_vmcb02_prepare_control()).
     c->rap_control = svm_eraps ? (c12->rap_control & SVM_RAP_ALLOW_LARGER) | SVM_RAP_CLEAR : 0;
-    // VMCB12's NMI virtualisation where the guest enables it for its guest,
-    // else the hypervisor's, for the guest's own NMIs (APM 24593 rev. 3.46,
-    // 15.21.10).
+    // VMCB12's NMI virtualisation and virtual GIF where the guest enables them
+    // for its guest, else the hypervisor's, for the guest's own NMIs and flag
+    // (APM 24593 rev. 3.46, 15.21.10 and 15.33.2).
     uint64_t nmi = SVM_VINTR_NMI | SVM_VINTR_NMI_MASK | SVM_VINTR_NMI_ENABLE;
-    uint64_t from12 = SVM_VINTR_TPR_MASK | VIRQ_BITS | (n->vnmi12 ? nmi : 0);
-    uint64_t from01 = SVM_VINTR_MASKING | SVM_VINTR_GIF_ENABLE
+    uint64_t gif = SVM_VINTR_GIF | SVM_VINTR_GIF_ENABLE;
+    uint64_t from12 = SVM_VINTR_TPR_MASK | VIRQ_BITS | (n->vnmi12 ? nmi : 0)
+                    | (n->vgif12 ? gif : 0);
+    uint64_t from01 = SVM_VINTR_MASKING | (n->vgif12 ? 0 : SVM_VINTR_GIF_ENABLE)
                     | (n->vnmi12 ? 0 : SVM_VINTR_NMI_ENABLE | SVM_VINTR_NMI_MASK);
     c->vintr = (c12->vintr & from12) | (vmcb01->control.vintr & from01);
     c->interrupt_shadow = c12->interrupt_shadow & SVM_INTERRUPT_SHADOW;
