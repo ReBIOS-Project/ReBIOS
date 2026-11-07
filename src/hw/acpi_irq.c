@@ -18,6 +18,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <uacpi/acpi.h>
 #include <uacpi/namespace.h>
 #include <uacpi/platform/types.h>
 #include <uacpi/resources.h>
@@ -38,8 +39,6 @@
 // The function number of every _PRT entry's Address: all functions, ACPI 6.6,
 // 6.2.14.
 #define PRT_ANY_FUNCTION ((uint32_t)0xffff)
-#define STA_PRESENT ((uint32_t)1 << 0)
-#define STA_ENABLED ((uint32_t)1 << 1)
 #define ADDR_TEXT_SIZE 16
 
 struct host_bridge {
@@ -104,7 +103,8 @@ static void log_failure(uacpi_namespace_node *node, const char *name, uacpi_stat
 
 static bool device_present(uacpi_namespace_node *node) {
     uacpi_u32 sta;
-    return uacpi_eval_sta(node, &sta) == UACPI_STATUS_OK && (sta & STA_PRESENT) != 0;
+    return uacpi_eval_sta(node, &sta) == UACPI_STATUS_OK
+        && (sta & ACPI_STA_RESULT_DEVICE_PRESENT) != 0;
 }
 
 // _SEG and _BBN, which are 0 where a host bridge has none.
@@ -448,7 +448,8 @@ static uacpi_iteration_decision claim_device(
         log_failure(node, "_STA", status);
         return UACPI_ITERATION_DECISION_CONTINUE;
     }
-    if ((sta & (STA_PRESENT | STA_ENABLED)) != (STA_PRESENT | STA_ENABLED)) {
+    uacpi_u32 wanted = ACPI_STA_RESULT_DEVICE_PRESENT | ACPI_STA_RESULT_DEVICE_ENABLED;
+    if ((sta & wanted) != wanted) {
         return UACPI_ITERATION_DECISION_CONTINUE;
     }
 

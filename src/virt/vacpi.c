@@ -774,20 +774,6 @@ static const char *const hpet_ids[] = { "PNP0103", NULL };
 static const char *const host_bridge_ids[] = { "PNP0A03", "PNP0A08", NULL };
 static const char *const motherboard_ids[] = { "PNP0C01", "PNP0C02", NULL };
 
-// Resource descriptors, ACPI 6.6, 6.4: small items have their length in bits
-// 2:0, large ones in the 16 bits after the first byte.
-#define RES_LARGE ((uint32_t)0x80)
-#define RES_END_TAG 0x79
-#define RES_MEMORY24 0x81
-#define RES_MEMORY32 0x85
-#define RES_FIXED_MEMORY32 0x86
-#define RES_DWORD_ADDRESS 0x87
-#define RES_WORD_ADDRESS 0x88
-#define RES_QWORD_ADDRESS 0x8a
-#define RES_EXTENDED_ADDRESS 0x8b
-#define ADDRESS_MEMORY 0
-#define ADDRESS_IO 1
-#define ADDRESS_BUS 2
 // A producer's fixed window, readable and writable, uncached or cacheable.
 #define ADDRESS_FIXED_PRODUCER 0x0c
 #define MEMORY_RW 0x01
@@ -816,7 +802,7 @@ static void put_le(uint8_t *p, uint64_t value, size_t bytes) {
 }
 
 static size_t resource_size(const uint8_t *p, uint32_t left) {
-    if ((p[0] & RES_LARGE) == 0) {
+    if ((p[0] & ACPI_LARGE_ITEM) == 0) {
         return 1 + (p[0] & (uint32_t)7);
     }
     return left < 3 ? left + 1 : 3 + (uint32_t)le(p + 1, 2);
@@ -830,28 +816,28 @@ static bool address_fields(
     size_t *width
 ) {
     switch (p[0]) {
-        case RES_WORD_ADDRESS: {
+        case ACPI_TAG_ADDRESS16: {
             *min = 8;
             *max = 10;
             *length = 14;
             *width = 2;
             break;
         }
-        case RES_DWORD_ADDRESS: {
+        case ACPI_TAG_ADDRESS32: {
             *min = 10;
             *max = 14;
             *length = 22;
             *width = 4;
             break;
         }
-        case RES_QWORD_ADDRESS: {
+        case ACPI_TAG_ADDRESS64: {
             *min = 14;
             *max = 22;
             *length = 38;
             *width = 8;
             break;
         }
-        case RES_EXTENDED_ADDRESS: {
+        case ACPI_TAG_ADDRESS64_EXTENDED: {
             *min = 16;
             *max = 24;
             *length = 40;
@@ -888,7 +874,7 @@ static bool resource_memory(const uint8_t *p, size_t size, uint64_t *base, uint6
     uint64_t max;
     size_t length;
     switch (p[0]) {
-        case RES_MEMORY24: {
+        case ACPI_TAG_MEMORY24: {
             if (size < 12) {
                 return false;
             }
@@ -897,7 +883,7 @@ static bool resource_memory(const uint8_t *p, size_t size, uint64_t *base, uint6
             length = le(p + 10, 2) << 8;
             break;
         }
-        case RES_MEMORY32: {
+        case ACPI_TAG_MEMORY32: {
             if (size < 20) {
                 return false;
             }
@@ -906,7 +892,7 @@ static bool resource_memory(const uint8_t *p, size_t size, uint64_t *base, uint6
             length = le(p + 16, 4);
             break;
         }
-        case RES_FIXED_MEMORY32: {
+        case ACPI_TAG_FIXED_MEMORY32: {
             if (size < 12) {
                 return false;
             }
@@ -916,7 +902,7 @@ static bool resource_memory(const uint8_t *p, size_t size, uint64_t *base, uint6
             break;
         }
         default: {
-            return address_range(p, size, ADDRESS_MEMORY, base, end);
+            return address_range(p, size, UACPI_RANGE_MEMORY, base, end);
         }
     }
     *base = min;
@@ -927,7 +913,7 @@ static bool resource_memory(const uint8_t *p, size_t size, uint64_t *base, uint6
 static uint32_t put_window(uint8_t *out, uintptr_t base, uintptr_t end, bool high) {
     if (high) {
         uint8_t d[46] = {
-            RES_QWORD_ADDRESS, 43, 0, ADDRESS_MEMORY, ADDRESS_FIXED_PRODUCER,
+            ACPI_TAG_ADDRESS64, 43, 0, UACPI_RANGE_MEMORY, ADDRESS_FIXED_PRODUCER,
             MEMORY_RW | MEMORY_CACHEABLE
         };
         put_le(d + 14, base, 8);
@@ -937,7 +923,7 @@ static uint32_t put_window(uint8_t *out, uintptr_t base, uintptr_t end, bool hig
         return sizeof(d);
     }
     uint8_t d[26] = {
-        RES_DWORD_ADDRESS, 23, 0, ADDRESS_MEMORY, ADDRESS_FIXED_PRODUCER, MEMORY_RW
+        ACPI_TAG_ADDRESS32, 23, 0, UACPI_RANGE_MEMORY, ADDRESS_FIXED_PRODUCER, MEMORY_RW
     };
     put_le(d + 10, base, 4);
     put_le(d + 14, end - 1, 4);
@@ -998,7 +984,7 @@ static void bus_range_widen(uint8_t *p, size_t size) {
     size_t max;
     size_t length;
     size_t width;
-    if (plan == NULL || !address_fields(p, size, ADDRESS_BUS, &min, &max, &length, &width)) {
+    if (plan == NULL || !address_fields(p, size, UACPI_RANGE_BUS, &min, &max, &length, &width)) {
         return;
     }
     uint64_t last = le(p + max, width);
@@ -1029,7 +1015,7 @@ static bool crs_copy(struct crs *c, uacpi_namespace_node *device, int kind) {
     }
     const uint8_t *in = view.const_bytes;
     uint32_t left = (uint32_t)view.length;
-    while (left != 0 && in[0] != RES_END_TAG) {
+    while (left != 0 && in[0] != ACPI_TAG_END) {
         size_t n = resource_size(in, left);
         if (n > left) {
             break;
@@ -1041,7 +1027,7 @@ static bool crs_copy(struct crs *c, uacpi_namespace_node *device, int kind) {
         bool ranged = true;
         if (resource_memory(in, n, &base, &end)) {
             keep = kind == CRS_MOTHERBOARD ? !overlaps_private(base, end) : end <= ONE_MIB;
-        } else if (address_range(in, n, ADDRESS_IO, &base, &end)) {
+        } else if (address_range(in, n, UACPI_RANGE_IO, &base, &end)) {
             keep = true;
             io = true;
         } else {
@@ -1094,7 +1080,7 @@ static void emit_crs(struct aml *a, uacpi_namespace_node *device) {
             }
         }
     }
-    c.out[c.size++] = RES_END_TAG;
+    c.out[c.size++] = ACPI_TAG_END;
     c.out[c.size++] = 0;
     aml_op(a, AML_NAME);
     emit_seg(a, "_CRS");
@@ -1875,30 +1861,30 @@ static bool ps2_parent(struct path *out) {
 static void emit_legacy_devices(struct aml *a) {
     static const uint8_t pic_crs[] = {
         0x47, 0x01, 0x20, 0x00, 0x20, 0x00, 0x01, 0x02, 0x47, 0x01, 0xa0, 0x00, 0xa0, 0x00, 0x01,
-        0x02, 0x47, 0x01, 0xd0, 0x04, 0xd0, 0x04, 0x01, 0x02, 0x22, 0x04, 0x00, RES_END_TAG, 0x00
+        0x02, 0x47, 0x01, 0xd0, 0x04, 0xd0, 0x04, 0x01, 0x02, 0x22, 0x04, 0x00, ACPI_TAG_END, 0x00
     };
     static const uint8_t timer_crs[] = {
-        0x47, 0x01, 0x40, 0x00, 0x40, 0x00, 0x01, 0x04, 0x22, 0x01, 0x00, RES_END_TAG, 0x00
+        0x47, 0x01, 0x40, 0x00, 0x40, 0x00, 0x01, 0x04, 0x22, 0x01, 0x00, ACPI_TAG_END, 0x00
     };
     static const uint8_t rtc_crs[] = {
-        0x47, 0x01, 0x70, 0x00, 0x70, 0x00, 0x01, 0x08, 0x22, 0x00, 0x01, RES_END_TAG, 0x00
+        0x47, 0x01, 0x70, 0x00, 0x70, 0x00, 0x01, 0x08, 0x22, 0x00, 0x01, ACPI_TAG_END, 0x00
     };
     static const uint8_t speaker_crs[] = {
-        0x47, 0x01, 0x61, 0x00, 0x61, 0x00, 0x01, 0x01, RES_END_TAG, 0x00
+        0x47, 0x01, 0x61, 0x00, 0x61, 0x00, 0x01, 0x01, ACPI_TAG_END, 0x00
     };
     // Channel 4, the cascade, in compatibility timing, 8- and 16-bit.
     static const uint8_t dma_crs[] = {
         0x47, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01, 0x20, 0x47, 0x01, 0x81, 0x00, 0x81, 0x00, 0x01,
-        0x0f, 0x47, 0x01, 0xc0, 0x00, 0xc0, 0x00, 0x01, 0x20, 0x2a, 0x10, 0x01, RES_END_TAG, 0x00
+        0x0f, 0x47, 0x01, 0xc0, 0x00, 0xc0, 0x00, 0x01, 0x20, 0x2a, 0x10, 0x01, ACPI_TAG_END, 0x00
     };
     static const uint8_t fpu_crs[] = {
-        0x47, 0x01, 0xf0, 0x00, 0xf0, 0x00, 0x01, 0x01, 0x22, 0x00, 0x20, RES_END_TAG, 0x00
+        0x47, 0x01, 0xf0, 0x00, 0xf0, 0x00, 0x01, 0x01, 0x22, 0x00, 0x20, ACPI_TAG_END, 0x00
     };
     static const uint8_t keyboard_crs[] = {
         0x47, 0x01, 0x60, 0x00, 0x60, 0x00, 0x01, 0x01, 0x47, 0x01, 0x64, 0x00, 0x64, 0x00, 0x01,
-        0x01, 0x22, 0x02, 0x00, RES_END_TAG, 0x00
+        0x01, 0x22, 0x02, 0x00, ACPI_TAG_END, 0x00
     };
-    static const uint8_t mouse_crs[] = { 0x22, 0x00, 0x10, RES_END_TAG, 0x00 };
+    static const uint8_t mouse_crs[] = { 0x22, 0x00, 0x10, ACPI_TAG_END, 0x00 };
     struct path parent;
     aml_begin(a, AML_SCOPE);
     if (ps2_parent(&parent)) {
@@ -1927,9 +1913,9 @@ static void emit_mailbox_device(struct aml *a) {
     // The mailbox, and the guest's configuration space window, which an OS
     // uses only once a motherboard resource claims it.
     uint8_t crs[] = {
-        RES_FIXED_MEMORY32, 0x09, 0x00, 0x01, 0, 0, 0, 0, 0, 0, 0, 0,
-        RES_FIXED_MEMORY32, 0x09, 0x00, 0x01, 0, 0, 0, 0, 0, 0, 0, 0,
-        RES_END_TAG, 0x00
+        ACPI_TAG_FIXED_MEMORY32, 0x09, 0x00, 0x01, 0, 0, 0, 0, 0, 0, 0, 0,
+        ACPI_TAG_FIXED_MEMORY32, 0x09, 0x00, 0x01, 0, 0, 0, 0, 0, 0, 0, 0,
+        ACPI_TAG_END, 0x00
     };
     put_le(crs + 4, vacpi.mailbox, 4);
     put_le(crs + 8, MBX_SIZE + DOORBELL_SIZE, 4);
@@ -1940,7 +1926,7 @@ static void emit_mailbox_device(struct aml *a) {
         put_le(crs + 20, ((uint64_t)plan->bus_end + 1) << 20, 4);
         crs_size += 12;
     }
-    crs[crs_size] = RES_END_TAG;
+    crs[crs_size] = ACPI_TAG_END;
     crs[crs_size + 1] = 0x00;
     aml_op(a, AML_NAME);
     aml_name(a, "_CRS");

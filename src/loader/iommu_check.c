@@ -20,6 +20,7 @@
 #include <stdint.h>
 #include <efi.h>
 #include <loader/iommu_check.h>
+#include <hw/acpi.h>
 #include <hw/pci_regs.h>
 #include <lib/log.h>
 #include <lib/util.h>
@@ -28,12 +29,6 @@
 #include <memory.h>
 #include <sys/x86.h>
 
-#define RSDP_REVISION 15
-#define RSDP_RSDT 16
-#define RSDP_XSDT 24
-
-#define SDT_LENGTH 4
-#define SDT_HEADER_SIZE 36
 // DMAR and IVRS have 12 more header bytes before their structures.
 #define IOMMU_TABLE_HEADER_SIZE 48
 
@@ -131,7 +126,7 @@ static int iommu_table_check(const uint8_t *table) {
             (const char *)table
         );
     }
-    size_t length = read_le32(table + SDT_LENGTH);
+    size_t length = read_le32(table + ACPI_SDT_LENGTH);
     if (length < IOMMU_TABLE_HEADER_SIZE || checksum8(table, length) != 0) {
         printf("The %.4s table is malformed\n", (const char *)table);
         return FOUND_NONE;
@@ -168,12 +163,13 @@ static int iommu_table_check(const uint8_t *table) {
 // Every table describing IOMMUs, all of which the hypervisor must be able to
 // use.
 static int sdt_find_iommu(const uint8_t *sdt, size_t entry_size) {
-    size_t length = read_le32(sdt + SDT_LENGTH);
-    if (length < SDT_HEADER_SIZE) {
+    size_t length = read_le32(sdt + ACPI_SDT_LENGTH);
+    if (length < ACPI_SDT_HEADER_SIZE) {
         return FOUND_NONE;
     }
     int result = FOUND_NONE;
-    for (size_t offset = SDT_HEADER_SIZE; length - offset >= entry_size; offset += entry_size) {
+    for (size_t offset = ACPI_SDT_HEADER_SIZE; length - offset >= entry_size;
+         offset += entry_size) {
         uintptr_t address = entry_size == 8 ? read_le64(sdt + offset) : read_le32(sdt + offset);
         const uint8_t *table = (const uint8_t *)(uintptr_t)address;
         int found = table != NULL ? iommu_table_check(table) : FOUND_NONE;
@@ -199,13 +195,13 @@ static int acpi_find_iommu(void) {
         printf("No ACPI tables\n");
         return FOUND_NONE;
     }
-    if (rsdp[RSDP_REVISION] >= 2) {
-        uintptr_t xsdt = read_le64(rsdp + RSDP_XSDT);
+    if (rsdp[ACPI_RSDP_REVISION] >= 2) {
+        uintptr_t xsdt = read_le64(rsdp + ACPI_RSDP_XSDT);
         if (xsdt != 0) {
             return sdt_find_iommu((const uint8_t *)(uintptr_t)xsdt, 8);
         }
     }
-    uint32_t rsdt = read_le32(rsdp + RSDP_RSDT);
+    uint32_t rsdt = read_le32(rsdp + ACPI_RSDP_RSDT);
     return rsdt != 0 ? sdt_find_iommu((const uint8_t *)(uintptr_t)rsdt, 4) : FOUND_NONE;
 }
 

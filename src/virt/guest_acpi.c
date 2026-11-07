@@ -23,6 +23,7 @@
 #include <core.h>
 #include <csm/e820.h>
 #include <handoff.h>
+#include <hw/acpi.h>
 #include <hw/ioapic.h>
 #include <lib/heap.h>
 #include <lib/log.h>
@@ -35,18 +36,6 @@
 #include <virt/pci_plan.h>
 #include <virt/vacpi.h>
 #include <virt/vlapic.h>
-
-#define RSDP_CHECKSUM 8
-#define RSDP_OEM_ID 9
-#define RSDP_REVISION 15
-#define RSDP_RSDT 16
-#define RSDP_XSDT 24
-#define RSDP_V1_SIZE 20
-
-#define SDT_LENGTH 4
-#define SDT_REVISION 8
-#define SDT_CHECKSUM 9
-#define SDT_HEADER_SIZE 36
 
 #define TABLE_ALIGN 16
 #define FACS_ALIGN 64
@@ -75,12 +64,12 @@ static void checksum_set(uint8_t *p, size_t size, uint32_t at) {
 // The table at addr, if it lies within the memory the hypervisor maps.
 static const uint8_t *host_table(uintptr_t addr) {
     uintptr_t top = core_handoff->map_top;
-    if (addr == 0 || addr >= top || top - addr < SDT_HEADER_SIZE) {
+    if (addr == 0 || addr >= top || top - addr < ACPI_SDT_HEADER_SIZE) {
         return NULL;
     }
     const uint8_t *table = (const void *)(uintptr_t)addr;
-    size_t length = read_le32(table + SDT_LENGTH);
-    if (length < SDT_HEADER_SIZE || top - addr < length) {
+    size_t length = read_le32(table + ACPI_SDT_LENGTH);
+    if (length < ACPI_SDT_HEADER_SIZE || top - addr < length) {
         return NULL;
     }
     return table;
@@ -92,24 +81,24 @@ static const uint8_t *host_rsdp(void) {
 
 // The firmware's XSDT, or its RSDT if it has none, with the size of entries.
 static const uint8_t *host_root(const uint8_t *rsdp, size_t *entry_size) {
-    if (rsdp[RSDP_REVISION] >= 2) {
-        const uint8_t *xsdt = host_table(read_le64(rsdp + RSDP_XSDT));
+    if (rsdp[ACPI_RSDP_REVISION] >= 2) {
+        const uint8_t *xsdt = host_table(read_le64(rsdp + ACPI_RSDP_XSDT));
         if (xsdt != NULL) {
             *entry_size = 8;
             return xsdt;
         }
     }
     *entry_size = 4;
-    return host_table(read_le32(rsdp + RSDP_RSDT));
+    return host_table(read_le32(rsdp + ACPI_RSDP_RSDT));
 }
 
 static uint64_t root_entry(const uint8_t *root, size_t entry_size, size_t i) {
-    const uint8_t *entry = root + SDT_HEADER_SIZE + i * entry_size;
+    const uint8_t *entry = root + ACPI_SDT_HEADER_SIZE + i * entry_size;
     return entry_size == 8 ? read_le64(entry) : read_le32(entry);
 }
 
 static size_t root_count(const uint8_t *root, size_t entry_size) {
-    return (read_le32(root + SDT_LENGTH) - SDT_HEADER_SIZE) / entry_size;
+    return (read_le32(root + ACPI_SDT_LENGTH) - ACPI_SDT_HEADER_SIZE) / entry_size;
 }
 
 static bool ioapic_given(uintptr_t address) {
@@ -185,7 +174,7 @@ static uint8_t *madt_make(const uint8_t *madt, size_t *length) {
         return NULL;
     }
     uint8_t *made = kmalloc(host_length);
-    memcpy(made, madt, SDT_HEADER_SIZE);
+    memcpy(made, madt, ACPI_SDT_HEADER_SIZE);
     write_le32(
         made + offsetof(struct acpi_madt, local_interrupt_controller_address),
         (uint32_t)VLAPIC_DEFAULT_BASE
@@ -209,8 +198,8 @@ static uint8_t *madt_make(const uint8_t *madt, size_t *length) {
             out += entry_length;
         }
     }
-    write_le32(made + SDT_LENGTH, (uint32_t)out);
-    checksum_set(made, out, SDT_CHECKSUM);
+    write_le32(made + ACPI_SDT_LENGTH, (uint32_t)out);
+    checksum_set(made, out, ACPI_SDT_CHECKSUM);
     *length = out;
     return made;
 }
@@ -226,13 +215,13 @@ static uint8_t *mcfg_make(const uint8_t *mcfg, size_t *length) {
     size_t size = sizeof(struct acpi_mcfg) + sizeof(struct acpi_mcfg_allocation);
     uint8_t *made = kmalloc(size);
     memset(made, 0, size);
-    memcpy(made, mcfg, SDT_HEADER_SIZE);
+    memcpy(made, mcfg, ACPI_SDT_HEADER_SIZE);
     struct acpi_mcfg_allocation entry = {
         .address = plan->ecam, .segment = 0, .start_bus = 0, .end_bus = plan->bus_end
     };
     memcpy(made + sizeof(struct acpi_mcfg), &entry, sizeof(struct acpi_mcfg_allocation));
-    write_le32(made + SDT_LENGTH, (uint32_t)size);
-    checksum_set(made, size, SDT_CHECKSUM);
+    write_le32(made + ACPI_SDT_LENGTH, (uint32_t)size);
+    checksum_set(made, size, ACPI_SDT_CHECKSUM);
     *length = size;
     return made;
 }
@@ -257,7 +246,7 @@ static uint8_t *hpet_make(const uint8_t *hpet, size_t *length) {
     table.hdr.length = sizeof(struct acpi_hpet);
     uint8_t *made = kmalloc(sizeof(struct acpi_hpet));
     memcpy(made, &table, sizeof(struct acpi_hpet));
-    checksum_set(made, sizeof(struct acpi_hpet), SDT_CHECKSUM);
+    checksum_set(made, sizeof(struct acpi_hpet), ACPI_SDT_CHECKSUM);
     *length = sizeof(struct acpi_hpet);
     return made;
 }
@@ -309,7 +298,7 @@ bool guest_acpi_build(uint8_t rsdp[GUEST_ACPI_RSDP_SIZE]) {
         if (table == NULL) {
             continue;
         }
-        size_t length = read_le32(table + SDT_LENGTH);
+        size_t length = read_le32(table + ACPI_SDT_LENGTH);
         uint8_t *made = NULL;
         if (table_made(table, &made, &length)) {
             if (made != NULL) {
@@ -328,7 +317,7 @@ bool guest_acpi_build(uint8_t rsdp[GUEST_ACPI_RSDP_SIZE]) {
         offset = align_up(offset + pieces[i].length, TABLE_ALIGN);
     }
     size_t rsdt_offset = offset;
-    size_t rsdt_length = SDT_HEADER_SIZE + tables * 4;
+    size_t rsdt_length = ACPI_SDT_HEADER_SIZE + tables * 4;
     size_t total = align_up(offset + rsdt_length, TABLE_ALIGN);
 
     uintptr_t base = layout_take(total, TABLE_ALIGN, E820_ACPI);
@@ -352,20 +341,22 @@ bool guest_acpi_build(uint8_t rsdp[GUEST_ACPI_RSDP_SIZE]) {
     }
     vacpi_fadt(copy, facs, base + pieces[dsdt_piece].offset);
 
-    const uint8_t *rsdt_header = host != NULL ? host_table(read_le32(host + RSDP_RSDT)) : NULL;
+    const uint8_t *rsdt_header = host != NULL
+                               ? host_table(read_le32(host + ACPI_RSDP_RSDT))
+                               : NULL;
     uint8_t *rsdt = copy + rsdt_offset;
     if (rsdt_header != NULL || root != NULL) {
-        memcpy(rsdt, rsdt_header != NULL ? rsdt_header : root, SDT_HEADER_SIZE);
+        memcpy(rsdt, rsdt_header != NULL ? rsdt_header : root, ACPI_SDT_HEADER_SIZE);
     } else {
         memcpy(rsdt + 10, "REBIOSREBIOS  ", 14);
     }
     memcpy(rsdt, "RSDT", 4);
-    write_le32(rsdt + SDT_LENGTH, rsdt_length);
-    rsdt[SDT_REVISION] = 1;
+    write_le32(rsdt + ACPI_SDT_LENGTH, rsdt_length);
+    rsdt[ACPI_SDT_REVISION] = 1;
     for (size_t i = 0; i < tables; i++) {
-        write_le32(rsdt + SDT_HEADER_SIZE + i * 4, base + pieces[i].offset);
+        write_le32(rsdt + ACPI_SDT_HEADER_SIZE + i * 4, base + pieces[i].offset);
     }
-    checksum_set(rsdt, rsdt_length, SDT_CHECKSUM);
+    checksum_set(rsdt, rsdt_length, ACPI_SDT_CHECKSUM);
 
     uint8_t facs_table[VACPI_FACS_SIZE];
     vacpi_facs(facs_table);
@@ -377,9 +368,10 @@ bool guest_acpi_build(uint8_t rsdp[GUEST_ACPI_RSDP_SIZE]) {
 
     memset(rsdp, 0, GUEST_ACPI_RSDP_SIZE);
     memcpy(rsdp, "RSD PTR ", 8);
-    memcpy(rsdp + RSDP_OEM_ID, host != NULL ? host + RSDP_OEM_ID : (const uint8_t *)"REBIOS", 6);
-    write_le32(rsdp + RSDP_RSDT, base + rsdt_offset);
-    checksum_set(rsdp, RSDP_V1_SIZE, RSDP_CHECKSUM);
+    const uint8_t *oem_id = host != NULL ? host + ACPI_RSDP_OEM_ID : (const uint8_t *)"REBIOS";
+    memcpy(rsdp + ACPI_RSDP_OEM_ID, oem_id, 6);
+    write_le32(rsdp + ACPI_RSDP_RSDT, base + rsdt_offset);
+    checksum_set(rsdp, ACPI_RSDP_V1_SIZE, ACPI_RSDP_CHECKSUM);
     printf(
         "Guest ACPI tables at %#llx, %zu bytes, %u listed, FACS at %#x\n",
         (unsigned long long)base, total, tables, facs

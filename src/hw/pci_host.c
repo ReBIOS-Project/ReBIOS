@@ -48,8 +48,6 @@
 #define MSI_BASE ((uint64_t)0xfee00000)
 #define MSI_SIZE ((uint64_t)0x100000)
 
-#define STA_PRESENT ((uint32_t)1 << 0)
-
 struct range {
     uintptr_t base;
     uintptr_t end;
@@ -531,9 +529,9 @@ static uacpi_iteration_decision device_found(
         if (host_bridge) {
             return UACPI_ITERATION_DECISION_CONTINUE;
         }
-        sta = STA_PRESENT;
+        sta = ACPI_STA_RESULT_DEVICE_PRESENT;
     }
-    if ((sta & STA_PRESENT) == 0) {
+    if ((sta & ACPI_STA_RESULT_DEVICE_PRESENT) == 0) {
         return UACPI_ITERATION_DECISION_CONTINUE;
     }
 

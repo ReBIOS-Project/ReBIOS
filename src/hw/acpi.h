@@ -19,7 +19,37 @@
 #define HW__ACPI_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
+#include <uacpi/acpi.h>
+
+// Where the RSDP's fields and a table header's are, by uACPI's layouts of
+// them, and an ACPI 1.0 RSDP's size, that of what comes before the length.
+#define ACPI_RSDP_CHECKSUM offsetof(struct acpi_rsdp, checksum)
+#define ACPI_RSDP_OEM_ID offsetof(struct acpi_rsdp, oemid)
+#define ACPI_RSDP_REVISION offsetof(struct acpi_rsdp, revision)
+#define ACPI_RSDP_RSDT offsetof(struct acpi_rsdp, rsdt_addr)
+#define ACPI_RSDP_XSDT offsetof(struct acpi_rsdp, xsdt_addr)
+#define ACPI_RSDP_V1_SIZE offsetof(struct acpi_rsdp, length)
+#define ACPI_SDT_LENGTH offsetof(struct acpi_sdt_hdr, length)
+#define ACPI_SDT_REVISION offsetof(struct acpi_sdt_hdr, revision)
+#define ACPI_SDT_CHECKSUM offsetof(struct acpi_sdt_hdr, checksum)
+#define ACPI_SDT_HEADER_SIZE sizeof(struct acpi_sdt_hdr)
+
+// The first bytes of the resource descriptors that ReBIOS reads and writes
+// (ACPI 6.6, 6.4), by uACPI's names of them: a small item's name and its
+// length, which bits 2:0 give, and a large item's name, whose length is in the
+// 16 bits after the first byte.
+#define ACPI_TAG_IO (ACPI_RESOURCE_IO << ACPI_SMALL_ITEM_NAME_IDX | 7)
+#define ACPI_TAG_FIXED_IO (ACPI_RESOURCE_FIXED_IO << ACPI_SMALL_ITEM_NAME_IDX | 3)
+#define ACPI_TAG_END (ACPI_RESOURCE_END_TAG << ACPI_SMALL_ITEM_NAME_IDX | 1)
+#define ACPI_TAG_MEMORY24 (ACPI_LARGE_ITEM | ACPI_RESOURCE_MEMORY24)
+#define ACPI_TAG_MEMORY32 (ACPI_LARGE_ITEM | ACPI_RESOURCE_MEMORY32)
+#define ACPI_TAG_FIXED_MEMORY32 (ACPI_LARGE_ITEM | ACPI_RESOURCE_FIXED_MEMORY32)
+#define ACPI_TAG_ADDRESS16 (ACPI_LARGE_ITEM | ACPI_RESOURCE_ADDRESS16)
+#define ACPI_TAG_ADDRESS32 (ACPI_LARGE_ITEM | ACPI_RESOURCE_ADDRESS32)
+#define ACPI_TAG_ADDRESS64 (ACPI_LARGE_ITEM | ACPI_RESOURCE_ADDRESS64)
+#define ACPI_TAG_ADDRESS64_EXTENDED (ACPI_LARGE_ITEM | ACPI_RESOURCE_ADDRESS64_EXTENDED)
 
 // Sets up table access, switches the platform to ACPI mode, then loads the
 // namespace, without initialising any device. Returns false if there is no

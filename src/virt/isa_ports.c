@@ -62,17 +62,7 @@ static const char *const port_ids[] = { "PNP0500", "PNP0501", "PNP0400", "PNP040
 // the small I/O Port and Fixed Location I/O Port ones (6.4.2.5, 6.4.2.6), and
 // the large Word, DWord, QWord, and Extended Address Space ones (6.4.3.5.1 to
 // 6.4.3.5.4) of resource type 1, I/O; and the End Tag (6.4.2.9).
-#define RES_LARGE 0x80
-#define RES_SMALL_LENGTH 0x07
-#define RES_IO 0x47
-#define RES_FIXED_IO 0x4b
 #define RES_FIXED_IO_MASK 0x3ff
-#define RES_END 0x79
-#define RES_DWORD 0x87
-#define RES_WORD 0x88
-#define RES_QWORD 0x8a
-#define RES_EXTENDED 0x8b
-#define RES_RANGE_IO 1
 
 struct device_ports {
     uint16_t base[MAX_RANGES];
@@ -277,25 +267,25 @@ static uint64_t field(const uint8_t *p, size_t width) {
 // gives as the last port: false for a descriptor of anything else.
 static bool template_ports(const uint8_t *r, size_t size, uint64_t *base, uint64_t *end) {
     switch (r[0]) {
-        case RES_IO: {
+        case ACPI_TAG_IO: {
             *base = field(&r[2], 2);
             *end = *base + r[7];
             return true;
         }
-        case RES_FIXED_IO: {
+        case ACPI_TAG_FIXED_IO: {
             *base = field(&r[1], 2) & RES_FIXED_IO_MASK;
             *end = *base + r[3];
             return true;
         }
-        case RES_WORD:
-        case RES_DWORD:
-        case RES_QWORD:
-        case RES_EXTENDED: {
+        case ACPI_TAG_ADDRESS16:
+        case ACPI_TAG_ADDRESS32:
+        case ACPI_TAG_ADDRESS64:
+        case ACPI_TAG_ADDRESS64_EXTENDED: {
             // Granularity, minimum, maximum, translation, and length follow
             // each other.
-            size_t width = r[0] == RES_WORD ? 2 : r[0] == RES_DWORD ? 4 : 8;
-            size_t at = r[0] == RES_EXTENDED ? 8 : 6;
-            if (r[3] != RES_RANGE_IO || at + 5 * width > size) {
+            size_t width = r[0] == ACPI_TAG_ADDRESS16 ? 2 : r[0] == ACPI_TAG_ADDRESS32 ? 4 : 8;
+            size_t at = r[0] == ACPI_TAG_ADDRESS64_EXTENDED ? 8 : 6;
+            if (r[3] != UACPI_RANGE_IO || at + 5 * width > size) {
                 return false;
             }
             *base = field(&r[at + width], width);
@@ -310,11 +300,11 @@ static bool template_ports(const uint8_t *r, size_t size, uint64_t *base, uint64
 
 bool isa_ports_settable(const uint8_t *template, size_t length) {
     size_t at = 0;
-    while (at < length && template[at] != RES_END) {
+    while (at < length && template[at] != ACPI_TAG_END) {
         const uint8_t *r = &template[at];
         size_t size;
-        if ((r[0] & RES_LARGE) == 0) {
-            size = 1 + (size_t)(r[0] & RES_SMALL_LENGTH);
+        if ((r[0] & ACPI_LARGE_ITEM) == 0) {
+            size = 1 + (size_t)(r[0] & ACPI_SMALL_ITEM_LENGTH_MASK);
         } else if (at + 3 <= length) {
             size = 3 + (size_t)field(&r[1], 2);
         } else {
