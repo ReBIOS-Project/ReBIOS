@@ -252,12 +252,14 @@ static size_t npt02_level_max;
 // and BLCKDB with bus lock traps (APM 24593 rev. 3.46, 13.1.1.6).
 static uint64_t debugctl_bits;
 // Whether the processor has read-only guest page tables, page modification
-// logging, GMET, the TSC ratio MSR, and the idle HLT intercept.
+// logging, GMET, the TSC ratio MSR, the idle HLT intercept, and the bus lock
+// threshold.
 static bool rogpt;
 static bool pml;
 static bool gmet;
 static bool tsc_scaling;
 static bool idle_hlt;
+static bool bus_lock_threshold;
 
 void nsvm_init(void) {
     if (virt_vmx) {
@@ -277,6 +279,7 @@ void nsvm_init(void) {
     gmet = (cpuid(0x8000000a, 0).edx & SVM_FEATURE_GMET) != 0;
     tsc_scaling = (cpuid(0x8000000a, 0).edx & SVM_FEATURE_TSC_RATIO) != 0;
     idle_hlt = (cpuid(0x8000000a, 0).edx & SVM_FEATURE_IDLE_HLT) != 0;
+    bus_lock_threshold = (cpuid(0x8000000a, 0).edx & SVM_FEATURE_BUS_LOCK_THRESHOLD) != 0;
     pml = (cpuid(0x8000000a, 0).ecx & CPUID_8000000A_ECX_PML) != 0;
     debugctl_bits = DEBUGCTL_LBR | DEBUGCTL_BTF
                   | ((cpuid(7, 0).ecx & CPUID_7_0_ECX_BUSLOCKTRAP) != 0 ? DEBUGCTL_BLCKDB : 0);
@@ -451,7 +454,7 @@ struct cpuid_regs nsvm_cpuid(void) {
                       | SVM_FEATURE_PAUSE_FILTER_THRESHOLD | SVM_FEATURE_LBRV | SVM_FEATURE_ROGPT
                       | SVM_FEATURE_TLBICTL | SVM_FEATURE_DECODE_ASSISTS | SVM_FEATURE_VGIF
                       | SVM_FEATURE_VLS | SVM_FEATURE_GMET | SVM_FEATURE_TSC_RATIO
-                      | SVM_FEATURE_SVML | SVM_FEATURE_IDLE_HLT
+                      | SVM_FEATURE_SVML | SVM_FEATURE_IDLE_HLT | SVM_FEATURE_BUS_LOCK_THRESHOLD
                       | (svm_vnmi ? SVM_FEATURE_VNMI : 0);
     return (struct cpuid_regs){
         svm.eax & 0xff, nasid - 1, svm.ecx & CPUID_8000000A_ECX_PML,
@@ -711,6 +714,9 @@ static void exit_to_l1(
                | (c02->vintr & (SVM_VINTR_TPR_MASK | back)) | (virq & SVM_VINTR_IRQ);
     c12->interrupt_shadow = (c12->interrupt_shadow & ~SVM_INTERRUPT_SHADOW)
                           | (c02->interrupt_shadow & SVM_INTERRUPT_SHADOW);
+    if (bus_lock_threshold) {
+        c12->bus_lock_counter = c02->bus_lock_counter;
+    }
     c12->exitcode = code;
     c12->exitinfo1 = info1;
     c12->exitinfo2 = info2;
@@ -1240,12 +1246,13 @@ static void prepare_vmcb02(struct nsvm *n) {
 
     memcpy(n->intercepts, c12, sizeof(n->intercepts));
     // Of vector 5, the INVLPGB intercepts where the processor has INVLPGB, the
-    // TLBSYNC one where it has TlbiCtl, the idle HLT one where it has it, and
-    // the INVPCID one.
+    // TLBSYNC one where it has TlbiCtl, the idle HLT and bus lock ones where
+    // it has them, and the INVPCID one.
     uint32_t invlpgb = n->vmcb01->control.intercept_misc3 & SVM_INTERCEPT_INVLPGB;
     n->intercepts[5] &= (invlpgb != 0 ? SVM_INTERCEPT_INVLPGB | SVM_INTERCEPT_INVLPGB_ILLEGAL : 0)
                       | (svm_tlbictl ? SVM_INTERCEPT_TLBSYNC : 0)
-                      | (idle_hlt ? SVM_INTERCEPT_IDLE_HLT : 0) | SVM_INTERCEPT_INVPCID;
+                      | (idle_hlt ? SVM_INTERCEPT_IDLE_HLT : 0)
+                      | (bus_lock_threshold ? SVM_INTERCEPT_BUS_LOCK : 0) | SVM_INTERCEPT_INVPCID;
     n->vintr12 = c12->vintr;
     n->window = false;
     n->tsc_offset12 = c12->tsc_offset;
@@ -1263,6 +1270,11 @@ static void prepare_vmcb02(struct nsvm *n) {
     // (APM 24593 rev. 3.46, 15.14.4).
     c->pause_filter_threshold = c12->pause_filter_threshold;
     c->pause_filter_count = c12->pause_filter_count;
+    // The count of the guest's bus lock threshold, which the processor takes
+    // at VMRUN and writes back at #VMEXIT (APM 24593 rev. 3.46, 15.14.5).
+    if (bus_lock_threshold) {
+        c->bus_lock_counter = c12->bus_lock_counter;
+    }
     c->iopm_base_pa = (uintptr_t)iopm02;
     c->msrpm_base_pa = merge_msrpm(n, c12->msrpm_base_pa);
     c->guest_asid = c12->guest_asid + 1;

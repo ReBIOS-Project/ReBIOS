@@ -62,14 +62,18 @@ struct vmcb_control {
     uint64_t reserved3;
     uint64_t avic_logical_table;
     uint64_t avic_physical_table;
-    uint8_t reserved4[0x170 - 0x100];
+    uint8_t reserved4[0x120 - 0x100];
+    // The bus locks the guest may make before one exits (APM 24593 rev. 3.46,
+    // 15.14.5).
+    uint16_t bus_lock_counter;
+    uint8_t reserved5[0x170 - 0x122];
     // FRED's event data (AMD 69191 rev. 1.10).
     uint64_t exitintdata;
     uint64_t eventinjdata;
-    uint8_t reserved5[0x1c8 - 0x180];
+    uint8_t reserved6[0x1c8 - 0x180];
     uint64_t pml_base;
     uint16_t pml_index;
-    uint8_t reserved6[0x400 - 0x1d2];
+    uint8_t reserved7[0x400 - 0x1d2];
 } __attribute__((packed));
 
 struct vmcb_seg {
@@ -141,6 +145,7 @@ _Static_assert(offsetof(struct vmcb_control, nrip) == 0xc8, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_control, insn_len) == 0xd0, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_control, avic_backing_page) == 0xe0, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_control, avic_physical_table) == 0xf8, "VMCB layout");
+_Static_assert(offsetof(struct vmcb_control, bus_lock_counter) == 0x120, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_control, exitintdata) == 0x170, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_control, pml_index) == 0x1d0, "VMCB layout");
 _Static_assert(sizeof(struct vmcb_control) == 0x400, "VMCB layout");
@@ -196,6 +201,7 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 #define SVM_INTERCEPT_INVLPGB_ILLEGAL ((uint32_t)1 << 1)
 #define SVM_INTERCEPT_INVPCID ((uint32_t)1 << 2)
 #define SVM_INTERCEPT_TLBSYNC ((uint32_t)1 << 4)
+#define SVM_INTERCEPT_BUS_LOCK ((uint32_t)1 << 5)
 #define SVM_INTERCEPT_IDLE_HLT ((uint32_t)1 << 6)
 
 // Exit codes (APM 24593 rev. 3.45, Appendix C).
@@ -288,6 +294,7 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 #define SVM_FEATURE_VNMI ((uint32_t)1 << 25)
 #define SVM_FEATURE_EXT_LVT_AVIC_ACCESS ((uint32_t)1 << 27)
 #define SVM_FEATURE_VMCB_ADDR_CHECK ((uint32_t)1 << 28)
+#define SVM_FEATURE_BUS_LOCK_THRESHOLD ((uint32_t)1 << 29)
 #define SVM_FEATURE_IDLE_HLT ((uint32_t)1 << 30)
 
 // Nested paging and what goes with it, at offset 090h.
