@@ -78,6 +78,10 @@ struct identity_range {
 
 static struct identity_range *identity;
 static size_t identity_count;
+// The host's memory that the firmware leaves free, in whole pages, but where a
+// descriptor of another type overlaps it: such a range keeps the other type,
+// as Linux 7.3's e820__update_table() resolves overlaps.
+static struct range_list host_free;
 // Where the identity ranges are, merged.
 static struct range_list pinned;
 // The guest's RAM from 1 MiB.
@@ -181,6 +185,15 @@ static void list_remove(struct range_list *list, uintptr_t base, uintptr_t end) 
     }
 }
 
+static bool list_overlaps(const struct range_list *list, uintptr_t base, uintptr_t end) {
+    for (size_t i = 0; i < list->count; i++) {
+        if (list->r[i].base < end && base < list->r[i].end) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static uint64_t list_total(const struct range_list *list) {
     size_t total = 0;
     for (size_t i = 0; i < list->count; i++) {
@@ -218,6 +231,17 @@ static const EFI_MEMORY_DESCRIPTOR *efi_desc(size_t index) {
         return NULL;
     }
     return (const void *)(uintptr_t)(h->efi_mmap + index * h->efi_mmap_desc_size);
+}
+
+// Where a descriptor ends, or false where its pages run past the end of the
+// address space, which makes it one that Linux 7.3's efi_memmap_entry_valid()
+// drops.
+static bool desc_end(const EFI_MEMORY_DESCRIPTOR *d, uintptr_t *end) {
+    if (d->NumberOfPages > (UINT64_MAX - d->PhysicalStart) / PAGE_SIZE) {
+        return false;
+    }
+    *end = d->PhysicalStart + d->NumberOfPages * PAGE_SIZE;
+    return true;
 }
 
 static uint64_t efi_attribute_at(uintptr_t addr) {
@@ -411,8 +435,7 @@ static uint64_t add_high(struct range_list *fill, size_t size, const struct rang
 
 void layout_init(void) {
     const struct handoff *h = core_handoff;
-    struct range_list free_ram;
-    list_init(&free_ram);
+    list_init(&host_free);
     list_init(&pinned);
     list_init(&ram);
     list_init(&takeable);
@@ -421,11 +444,36 @@ void layout_init(void) {
 
     const EFI_MEMORY_DESCRIPTOR *d;
     for (size_t i = 0; (d = efi_desc(i)) != NULL; i++) {
-        uintptr_t base = d->PhysicalStart;
-        uintptr_t end = base + d->NumberOfPages * PAGE_SIZE;
-        if (type_is_free(d->Type)) {
-            list_add(&free_ram, base, end);
+        uintptr_t end;
+        if (!desc_end(d, &end)) {
+            printf(
+                "Firmware memory map: the descriptor at %#llx runs past the end of memory, so "
+                "it is ignored\n", (unsigned long long)d->PhysicalStart
+            );
+        } else if (type_is_free(d->Type)) {
+            uintptr_t base = align_up(d->PhysicalStart, PAGE_SIZE);
+            list_add(&host_free, base, align_down(end, PAGE_SIZE));
         }
+    }
+    for (size_t i = 0; (d = efi_desc(i)) != NULL; i++) {
+        uintptr_t end;
+        if (type_is_free(d->Type) || !desc_end(d, &end)) {
+            continue;
+        }
+        uintptr_t base = align_down(d->PhysicalStart, PAGE_SIZE);
+        end = align_up(end, PAGE_SIZE);
+        if (list_overlaps(&host_free, base, end)) {
+            printf(
+                "Firmware memory map: type %u memory at %#llx-%#llx overlaps free memory and "
+                "keeps its type\n", d->Type, (unsigned long long)base, (unsigned long long)end
+            );
+            list_remove(&host_free, base, end);
+        }
+    }
+    struct range_list free_ram;
+    list_init(&free_ram);
+    for (size_t i = 0; i < host_free.count; i++) {
+        list_add(&free_ram, host_free.r[i].base, host_free.r[i].end);
     }
 
     // One domain serves every device, so what one device needs one to one
@@ -705,15 +753,7 @@ uintptr_t layout_high_ram_end(void) {
 }
 
 bool layout_host_kept(uintptr_t base, uintptr_t end) {
-    const EFI_MEMORY_DESCRIPTOR *d;
-    for (size_t i = 0; (d = efi_desc(i)) != NULL; i++) {
-        uintptr_t start = d->PhysicalStart;
-        uint64_t stop = start + d->NumberOfPages * PAGE_SIZE;
-        if (type_is_free(d->Type) && start < end && base < stop) {
-            return false;
-        }
-    }
-    return true;
+    return !list_overlaps(&host_free, base, end);
 }
 
 bool layout_ram(uintptr_t gpa, size_t size) {
