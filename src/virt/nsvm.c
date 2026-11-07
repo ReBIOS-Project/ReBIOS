@@ -172,10 +172,15 @@ struct nsvm {
     uint64_t tsc_offset12;
     // Whether VMCB12 has the processor switch the last branch records.
     bool lbrv;
-    // Whether VMCB12 has the processor virtualise the guest's guest's NMIs and
-    // global interrupt flag (APM 24593 rev. 3.46, 15.21.10 and 15.33.2).
+    // Whether VMCB12 has the processor virtualise the guest's guest's NMIs,
+    // global interrupt flag, and VMLOAD and VMSAVE (APM 24593 rev. 3.46,
+    // 15.21.10 and 15.33).
     bool vnmi12;
     bool vgif12;
+    bool vls12;
+    // Whether VMCB12 has the processor virtualise VMLOAD and VMSAVE where its
+    // checks refuse to, which has them exit (APM 24593 rev. 3.46, 15.33.1).
+    bool vls12_refused;
     // VMCB02's MSR permission map: the hypervisor's and VMCB12's.
     uint8_t *msrpm02;
     // Whether VMCB12 enables nested paging, and the guest's paging mode at its
@@ -420,7 +425,7 @@ struct cpuid_regs nsvm_cpuid(void) {
                       | SVM_FEATURE_FLUSH_BY_ASID | SVM_FEATURE_PAUSE_FILTER
                       | SVM_FEATURE_PAUSE_FILTER_THRESHOLD | SVM_FEATURE_LBRV | SVM_FEATURE_ROGPT
                       | SVM_FEATURE_TLBICTL | SVM_FEATURE_DECODE_ASSISTS | SVM_FEATURE_VGIF
-                      | (svm_vnmi ? SVM_FEATURE_VNMI : 0);
+                      | SVM_FEATURE_VLS | (svm_vnmi ? SVM_FEATURE_VNMI : 0);
     return (struct cpuid_regs){
         svm.eax & 0xff, nasid - 1, svm.ecx & CPUID_8000000A_ECX_PML,
         (svm.edx & features) | SVM_FEATURE_VMCB_ADDR_CHECK
@@ -786,10 +791,11 @@ static bool vmcb12_valid(struct vcpu *v, const struct vmcb *vmcb12) {
 // opens for the guest itself, the hypercalls of the legacy BIOS, which are #UD
 // and VMMCALL, and the guest's guest's CR8, which is its own where VMCB12
 // masks interrupts virtually and is the guest's TPR otherwise (APM 24593 rev.
-// 3.46, 15.21.2). The guest's guest's VMLOAD and VMSAVE, which the hypervisor
-// runs for it where the guest does not intercept them, always exit, whatever
-// the guest's own do, and so do its CLGI and STGI but where VMCB12 has the
-// processor virtualise its global interrupt flag.
+// 3.46, 15.21.2). The guest's guest's VMLOAD, VMSAVE, CLGI, and STGI, which
+// the hypervisor runs for it where the guest does not intercept them, exit
+// whatever the guest's own do, but where VMCB12 has the processor virtualise
+// them: the guest's nested paging then translates VMLOAD's and VMSAVE's
+// addresses.
 static void merge_intercepts(struct nsvm *n) {
     uint32_t own[SVM_INTERCEPT_VECTORS];
     uint32_t to[SVM_INTERCEPT_VECTORS];
@@ -799,8 +805,10 @@ static void merge_intercepts(struct nsvm *n) {
     }
     to[2] = (own[2] & ~((uint32_t)1 << VECTOR_UD)) | n->intercepts[2];
     to[3] = (own[3] & ~SVM_INTERCEPT_VINTR) | n->intercepts[3];
-    to[4] = (own[4] & ~(SVM_INTERCEPT_VMMCALL | SVM_INTERCEPT_STGI | SVM_INTERCEPT_CLGI))
-          | n->intercepts[4] | SVM_INTERCEPT_VMLOAD | SVM_INTERCEPT_VMSAVE
+    uint32_t svm = SVM_INTERCEPT_VMLOAD | SVM_INTERCEPT_VMSAVE | SVM_INTERCEPT_STGI
+                 | SVM_INTERCEPT_CLGI;
+    to[4] = (own[4] & ~(SVM_INTERCEPT_VMMCALL | svm)) | n->intercepts[4]
+          | (n->vls12 ? 0 : SVM_INTERCEPT_VMLOAD | SVM_INTERCEPT_VMSAVE)
           | (n->vgif12 ? 0 : SVM_INTERCEPT_STGI | SVM_INTERCEPT_CLGI);
     if ((n->vintr12 & SVM_VINTR_MASKING) == 0) {
         to[0] |= SVM_INTERCEPT_CR8_READ | SVM_INTERCEPT_CR8_WRITE;
@@ -1143,6 +1151,12 @@ static void prepare_vmcb02(struct nsvm *n) {
     n->tsc_offset12 = c12->tsc_offset;
     n->vnmi12 = svm_vnmi && (c12->vintr & SVM_VINTR_NMI_ENABLE) != 0;
     n->vgif12 = svm_vgif && (c12->vintr & SVM_VINTR_GIF_ENABLE) != 0;
+    // Virtual VMLOAD and VMSAVE need VMCB12's nested paging and the guest in
+    // 64-bit mode (APM 24593 rev. 3.46, 15.33.1).
+    bool vls = svm_vls && (c12->virt_ext & SVM_VIRT_EXT_VLS) != 0;
+    n->vls12 = vls && (c12->np_enable & SVM_NP_ENABLE) != 0 && (vmcb01->save.efer & EFER_LMA) != 0
+            && (vmcb01->save.cs.attrib & SEG_L) != 0;
+    n->vls12_refused = vls && !n->vls12;
     merge_intercepts(n);
 
     // The guest's PAUSE filter, as the hypervisor intercepts no PAUSE itself
@@ -1565,6 +1579,11 @@ static bool l1_wants(struct vcpu *v, struct nsvm *n, uint64_t code) {
     if (code >= SVM_EXIT_EXCEPTION_BASE && code < SVM_EXIT_EXCEPTION_BASE + 32) {
         uint32_t own = n->vmcb01->control.intercept_exceptions & ~((uint32_t)1 << VECTOR_UD);
         return ((own >> (code - SVM_EXIT_EXCEPTION_BASE)) & 1) == 0;
+    }
+    // VMLOAD and VMSAVE that VMCB12 has virtualised where the processor's
+    // checks refuse exit as though intercepted (APM 24593 rev. 3.46, 15.33.1).
+    if ((code == SVM_EXIT_VMLOAD || code == SVM_EXIT_VMSAVE) && n->vls12_refused) {
+        return true;
     }
     if (code >= 32 * SVM_INTERCEPT_VECTORS) {
         return false;
