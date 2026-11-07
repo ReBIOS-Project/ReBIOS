@@ -122,7 +122,7 @@ static uint64_t absent_read(struct vcpu *v, void *ctx, uint64_t offset, size_t s
     return size == 8 ? UINT64_MAX : ((uint64_t)1 << (size * 8)) - 1;
 }
 
-static void absent_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value) {
+void mmio_absent_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value) {
     (void)v;
     (void)ctx;
     (void)offset;
@@ -130,11 +130,11 @@ static void absent_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size
     (void)value;
 }
 
-static const struct mmio_ops absent_ops = { absent_read, absent_write, true };
+const struct mmio_ops mmio_absent_ops = { absent_read, mmio_absent_write, true };
 
 // What the guest reaches where it has neither memory nor a device, as a PC
 // does where nothing decodes: such as the addresses an OS moves a BAR to.
-static const struct region absent = { 0, UINT64_MAX, &absent_ops, NULL };
+static const struct region absent = { 0, UINT64_MAX, &mmio_absent_ops, NULL };
 
 static const struct region *find(uintptr_t gpa) {
     size_t count = atomic_load_explicit(&region_count, memory_order_acquire);

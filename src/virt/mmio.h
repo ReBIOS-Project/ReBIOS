@@ -35,6 +35,11 @@ struct mmio_ops {
     bool writes_ignored;
 };
 
+// What the guest reaches where nothing decodes: reads of all ones, writes
+// dropped, as other regions' writes may be too.
+extern const struct mmio_ops mmio_absent_ops;
+void mmio_absent_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value);
+
 // Emulates a page-aligned region, for every vCPU: its number for mmio_move(),
 // or -1 where there are too many.
 int mmio_register(uintptr_t base, size_t size, const struct mmio_ops *ops, void *ctx);

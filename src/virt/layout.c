@@ -852,23 +852,6 @@ uint32_t layout_take(size_t size, uint32_t align, uint32_t e820_type) {
     return 0;
 }
 
-static uint64_t absent_read(struct vcpu *v, void *ctx, uint64_t offset, size_t size) {
-    (void)v;
-    (void)ctx;
-    (void)offset;
-    return size == 8 ? UINT64_MAX : ((uint64_t)1 << (size * 8)) - 1;
-}
-
-static void absent_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value) {
-    (void)v;
-    (void)ctx;
-    (void)offset;
-    (void)size;
-    (void)value;
-}
-
-static const struct mmio_ops absent_ops = { absent_read, absent_write, true };
-
 void layout_absent(uintptr_t gpa, size_t size) {
     if (size == 0) {
         return;
@@ -879,7 +862,7 @@ void layout_absent(uintptr_t gpa, size_t size) {
         ones_page = (uintptr_t)page;
     }
     // Reads hit the page of ones, writes exit.
-    mmio_register(gpa, size, &absent_ops, NULL);
+    mmio_register(gpa, size, &mmio_absent_ops, NULL);
     for (size_t offset = 0; offset < size; offset += PAGE_SIZE) {
         gpt_map(gpa + offset, ones_page, PAGE_SIZE, GPT_R | GPT_X, MT_WB);
     }
@@ -893,15 +876,7 @@ static uint64_t rom_read(struct vcpu *v, void *ctx, uint64_t offset, size_t size
     return value;
 }
 
-static void rom_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value) {
-    (void)v;
-    (void)ctx;
-    (void)offset;
-    (void)size;
-    (void)value;
-}
-
-static const struct mmio_ops rom_ops = { rom_read, rom_write, true };
+static const struct mmio_ops rom_ops = { rom_read, mmio_absent_write, true };
 
 void layout_read_only(uintptr_t gpa, size_t size) {
     if (size == 0 || gpa >= ONE_MIB || size > ONE_MIB - gpa) {
