@@ -32,6 +32,7 @@
 #include <lib/log.h>
 #include <lib/time.h>
 #include <lib/util.h>
+#include <memory.h>
 #include <sys/x86.h>
 #include <virt/hv_timer.h>
 #include <virt/vacpi.h>
@@ -49,16 +50,35 @@
 // 0 C, in the tenths of a kelvin that ACPI gives temperatures in.
 #define ZERO_CELSIUS 2732
 
+// A zone's active cooling levels, _AC0 to _AC9 (ACPI 6.6, 11.4.1), and the
+// power resources that ReBIOS keeps count of.
+#define ACTIVE_LEVELS 10
+#define MAX_RESOURCES 32
+
 struct zone {
     uacpi_namespace_node *node;
     // Its trip points, 0 where it has none.
     uint64_t critical;
     uint64_t hot;
     uint64_t poll_ds;
+    // Its active trip points, hottest first, and whether ReBIOS has each
+    // level's list on.
+    uint64_t active[ACTIVE_LEVELS];
+    size_t active_count;
+    bool active_on[ACTIVE_LEVELS];
+};
+
+// A power resource that ReBIOS turned on, and the lists that want it, as lists
+// may share one.
+struct resource {
+    uacpi_namespace_node *node;
+    size_t users;
 };
 
 static struct zone zones[MAX_ZONES];
 static size_t zone_count;
+static struct resource resources[MAX_RESOURCES];
+static size_t resource_count;
 static uacpi_handle work;
 static _Atomic(bool) work_queued;
 static struct hv_timer timer;
@@ -85,12 +105,131 @@ static void read_trip_points(struct zone *z) {
     if (z->poll_ds == 0) {
         z->poll_ds = DEFAULT_POLL_DS;
     }
+    z->active_count = 0;
+    for (size_t x = 0; x < ACTIVE_LEVELS; x++) {
+        char name[5] = { '_', 'A', 'C', (char)('0' + x), '\0' };
+        uint64_t trip = zone_integer(z, name);
+        if (trip == 0) {
+            break;
+        }
+        z->active[z->active_count++] = trip;
+    }
+}
+
+// A package element that names an object, as a name or as a string, which
+// firmware gives either way.
+static uacpi_namespace_node *element_node(uacpi_object *element, uacpi_namespace_node *scope) {
+    uacpi_data_view text;
+    if (uacpi_object_get_string(element, &text) != UACPI_STATUS_OK) {
+        return NULL;
+    }
+    uacpi_namespace_node *node;
+    uacpi_status status = uacpi_namespace_node_resolve_from_aml_namepath(
+        scope, text.const_text, &node
+    );
+    return status == UACPI_STATUS_OK ? node : NULL;
+}
+
+// A method that the node may lack.
+static void run_optional(uacpi_namespace_node *node, const char *name) {
+    uacpi_status status = uacpi_eval(node, name, UACPI_NULL, UACPI_NULL);
+    if (status != UACPI_STATUS_OK && status != UACPI_STATUS_NOT_FOUND) {
+        acpi_log_failure(node, name, status);
+    }
+}
+
+// Turns a power resource on for its first user, and off as its last goes. One
+// that the table has no room for stays on.
+static void resource_use(uacpi_namespace_node *node, bool on) {
+    struct resource *r = NULL;
+    for (size_t i = 0; i < resource_count && r == NULL; i++) {
+        if (resources[i].node == node) {
+            r = &resources[i];
+        }
+    }
+    if (r == NULL && on && resource_count < MAX_RESOURCES) {
+        r = &resources[resource_count++];
+        *r = (struct resource){ node, 0 };
+    }
+    if (r == NULL) {
+        if (on) {
+            run_optional(node, "_ON");
+        }
+        return;
+    }
+    if (on && r->users++ == 0) {
+        run_optional(node, "_ON");
+    } else if (!on && r->users > 0 && --r->users == 0) {
+        run_optional(node, "_OFF");
+    }
+}
+
+static void device_power(uacpi_namespace_node *device, bool on);
+
+// Turns on or off the power resources that a list of the owner's names, and
+// the devices too where an active list may hold them.
+static void list_power(uacpi_namespace_node *owner, const char *name, bool on, bool devices) {
+    uacpi_object *list;
+    uacpi_status status = uacpi_eval_simple_package(owner, name, &list);
+    if (status != UACPI_STATUS_OK) {
+        if (status != UACPI_STATUS_NOT_FOUND) {
+            acpi_log_failure(owner, name, status);
+        }
+        return;
+    }
+    uacpi_object_array elements;
+    if (uacpi_object_get_package(list, &elements) == UACPI_STATUS_OK) {
+        for (size_t i = 0; i < elements.count; i++) {
+            uacpi_namespace_node *node = element_node(elements.objects[i], owner);
+            uacpi_object_type type;
+            if (node == NULL || uacpi_namespace_node_type(node, &type) != UACPI_STATUS_OK) {
+                continue;
+            }
+            if (type == UACPI_OBJECT_POWER_RESOURCE) {
+                resource_use(node, on);
+            } else if (type == UACPI_OBJECT_DEVICE && devices) {
+                device_power(node, on);
+            }
+        }
+    }
+    uacpi_object_unref(list);
+}
+
+// A device in an active list runs in D0 and stops in D3, through the power
+// resources of its _PR0, and its _PS0 and _PS3 (ACPI 6.6, 7.3).
+static void device_power(uacpi_namespace_node *device, bool on) {
+    if (!on) {
+        run_optional(device, "_PS3");
+    }
+    list_power(device, "_PR0", on, false);
+    if (on) {
+        run_optional(device, "_PS0");
+    }
+}
+
+// Each active level runs its list from its trip point up (ACPI 6.6, 11.1.4).
+static void cool_actively(struct zone *z, uint64_t now) {
+    for (size_t x = 0; x < ACTIVE_LEVELS; x++) {
+        bool want = x < z->active_count && now >= z->active[x];
+        if (want == z->active_on[x]) {
+            continue;
+        }
+        z->active_on[x] = want;
+        char name[5] = { '_', 'A', 'L', (char)('0' + x), '\0' };
+        list_power(z->node, name, want, true);
+        const char *path = acpi_path(z->node);
+        printf(
+            "Thermal zone %s at %lld C, its active cooling level %zu %s\n", path, celsius(now), x,
+            want ? "on" : "off"
+        );
+        acpi_path_free(path);
+    }
 }
 
 // Past its critical trip point, an OSPM shuts the machine down at once (ACPI
 // 6.6, 11.1.6), and past its hot one, where a guest without one could not go
 // to sleep, so does ReBIOS.
-static void check(const struct zone *z) {
+static void check(struct zone *z) {
     uint64_t now;
     uacpi_status status = uacpi_eval_simple_integer(z->node, "_TMP", &now);
     if (status != UACPI_STATUS_OK) {
@@ -115,6 +254,7 @@ static void check(const struct zone *z) {
         acpi_path_free(path);
         power_off();
     }
+    cool_actively(z, now);
 }
 
 // In the AML task.
@@ -126,6 +266,13 @@ static void poll(uacpi_handle ctx) {
     if (guest != guest_watches) {
         guest_watches = guest;
         printf("The thermal zones are the %s's to watch\n", guest ? "guest" : "hypervisor");
+        // The guest's OSPM finds the devices as ReBIOS left them.
+        if (guest) {
+            for (size_t i = 0; i < zone_count; i++) {
+                memset(zones[i].active_on, 0, sizeof(zones[i].active_on));
+            }
+            resource_count = 0;
+        }
     }
     if (!guest) {
         for (size_t i = 0; i < zone_count; i++) {
