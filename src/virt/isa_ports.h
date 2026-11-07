@@ -18,10 +18,15 @@
 #ifndef VIRT__ISA_PORTS_H
 #define VIRT__ISA_PORTS_H
 
+#include <stdbool.h>
+
 // Gives the guest the machine's serial and parallel ports that the firmware's
 // ACPI describes as enabled, with their interrupts, but for the UART of
 // ReBIOS's log, which the guest never reaches, and the IDE channels in
 // compatibility mode. After irq_init() and acpi_namespace_start().
 void isa_ports_init(void);
+
+// Whether the guest got the serial or parallel port of that device.
+bool isa_ports_given(const void *node);
 
 #endif

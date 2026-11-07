@@ -49,6 +49,7 @@
 #include <virt/hpet.h>
 #include <virt/io.h>
 #include <virt/irq.h>
+#include <virt/isa_ports.h>
 #include <virt/layout.h>
 #include <virt/mmio.h>
 #include <virt/pci_plan.h>
@@ -204,13 +205,15 @@ static struct {
     size_t hidden_count;
     uint32_t hidden_capacity;
     uint16_t links;
-    // The host bridge of the guest's bus 0, and the firmware's others: below
-    // it, or left out with what is below them where they have no port.
+    // The host bridge of the guest's bus 0, and the others merged below it.
     uacpi_namespace_node *primary;
     struct merged *merged;
     size_t merged_count;
+    // What the guest lacks with what is below it: host bridges without a port,
+    // and the devices ReBIOS gives it its own of or keeps from it.
     uacpi_namespace_node **dropped;
     size_t dropped_count;
+    uint32_t dropped_capacity;
 
     struct notification queue[QUEUE_SIZE];
     uint32_t queue_head;
@@ -453,6 +456,13 @@ static void hidden_add(uacpi_namespace_node *node) {
         vacpi.hidden, vacpi.hidden_count, &vacpi.hidden_capacity, sizeof(uacpi_namespace_node *)
     );
     vacpi.hidden[vacpi.hidden_count++] = node;
+}
+
+static void dropped_add(uacpi_namespace_node *node) {
+    vacpi.dropped = grow(
+        vacpi.dropped, vacpi.dropped_count, &vacpi.dropped_capacity, sizeof(uacpi_namespace_node *)
+    );
+    vacpi.dropped[vacpi.dropped_count++] = node;
 }
 
 static void put_args(struct aml *a, size_t args) {
@@ -1131,7 +1141,6 @@ static void bridges_merge(void) {
     const struct pci_plan *plan = pci_plan();
     size_t count = host->bridge_count != 0 ? host->bridge_count : 1;
     vacpi.merged = kmalloc(count * sizeof(struct merged));
-    vacpi.dropped = kmalloc(count * sizeof(uacpi_namespace_node *));
     if (plan == NULL || plan->root_count == 0) {
         return;
     }
@@ -1155,7 +1164,7 @@ static void bridges_merge(void) {
             continue;
         }
         if (port == NULL || vacpi.primary == NULL) {
-            vacpi.dropped[vacpi.dropped_count++] = hb->node;
+            dropped_add(hb->node);
             bridge_log(hb->node, "left out, as the guest has not its bus");
             continue;
         }
@@ -1177,6 +1186,15 @@ static void bridges_merge(void) {
     }
 }
 
+// The machine's legacy devices, which the guest has ReBIOS's in place of, and
+// its serial and parallel ports, which it has only where isa_ports gives them.
+static const char *const legacy_ids[] = {
+    "PNP0000", "PNP0001", "PNP0100", "PNP0101", "PNP0102", "PNP0B00", "PNP0B01", "PNP0B02",
+    "ACPI000E", "PNP0200", "PNP0800", "PNP0C04", "PNP0700", "PNP0701", "PNPB02F", "PNPB006",
+    NULL
+};
+static const char *const port_ids[] = { "PNP0500", "PNP0501", "PNP0400", "PNP0401", NULL };
+
 // The devices the guest does not get, known before anything refers to them.
 static uacpi_iteration_decision hide_found(
     void *user, uacpi_namespace_node *node, uacpi_u32 depth
@@ -1185,6 +1203,11 @@ static uacpi_iteration_decision hide_found(
     (void)depth;
     if (uacpi_device_matches_pnp_id(node, link_ids) || uacpi_device_matches_pnp_id(node, ec_ids)) {
         hidden_add(node);
+    } else if (uacpi_device_matches_pnp_id(node, legacy_ids)
+            || uacpi_device_matches_pnp_id(node, i8042_keyboard_ids)
+            || uacpi_device_matches_pnp_id(node, i8042_mouse_ids)
+            || (uacpi_device_matches_pnp_id(node, port_ids) && !isa_ports_given(node))) {
+        dropped_add(node);
     }
     return UACPI_ITERATION_DECISION_CONTINUE;
 }
@@ -1776,22 +1799,7 @@ static void emit_rcal(struct aml *a) {
     aml_end(a);
 }
 
-static uacpi_iteration_decision device_shown(
-    void *user, uacpi_namespace_node *node, uacpi_u32 depth
-) {
-    (void)node;
-    (void)depth;
-    *(bool *)user = true;
-    return UACPI_ITERATION_DECISION_BREAK;
-}
-
-static bool firmware_shows(const char *const *ids) {
-    bool shown = false;
-    uacpi_find_devices_at(uacpi_namespace_root(), ids, device_shown, &shown);
-    return shown;
-}
-
-static void emit_ps2_device(
+static void emit_legacy_device(
     struct aml *a, const char *name, const char *id, const uint8_t *crs, size_t crs_size
 ) {
     aml_begin(a, AML_DEVICE);
@@ -1859,16 +1867,35 @@ static bool ps2_parent(struct path *out) {
     return false;
 }
 
-// An OS looks in the namespace for the 8042's devices, which the guest has
-// whatever the firmware says of the machine's.
-static void emit_ps2_devices(struct aml *a) {
-    // IO (Decode16, 0x60, 0x60, 1, 1), IO (Decode16, 0x64, 0x64, 1, 1),
-    // IRQNoFlags () { 1 }
+// The legacy devices ReBIOS gives the guest, as an OS looks for them in the
+// namespace, whatever the firmware says of the machine's: the 8259s with the
+// ELCR, the 8254, the RTC, the speaker's port 61h, the 8237s and their page
+// registers, and the 8042's keyboard and mouse. ACPI 1.0's resources: IO
+// (Decode16, base, base, 1, length) is 47h 01h base base 01h length,
+// IRQNoFlags () is 22h and a mask, DMA () is 2Ah, a mask, and its flags.
+static void emit_legacy_devices(struct aml *a) {
+    static const uint8_t pic_crs[] = {
+        0x47, 0x01, 0x20, 0x00, 0x20, 0x00, 0x01, 0x02, 0x47, 0x01, 0xa0, 0x00, 0xa0, 0x00, 0x01,
+        0x02, 0x47, 0x01, 0xd0, 0x04, 0xd0, 0x04, 0x01, 0x02, 0x22, 0x04, 0x00, RES_END_TAG, 0x00
+    };
+    static const uint8_t timer_crs[] = {
+        0x47, 0x01, 0x40, 0x00, 0x40, 0x00, 0x01, 0x04, 0x22, 0x01, 0x00, RES_END_TAG, 0x00
+    };
+    static const uint8_t rtc_crs[] = {
+        0x47, 0x01, 0x70, 0x00, 0x70, 0x00, 0x01, 0x08, 0x22, 0x00, 0x01, RES_END_TAG, 0x00
+    };
+    static const uint8_t speaker_crs[] = {
+        0x47, 0x01, 0x61, 0x00, 0x61, 0x00, 0x01, 0x01, RES_END_TAG, 0x00
+    };
+    // Channel 4, the cascade, in compatibility timing, 8- and 16-bit.
+    static const uint8_t dma_crs[] = {
+        0x47, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01, 0x20, 0x47, 0x01, 0x81, 0x00, 0x81, 0x00, 0x01,
+        0x0f, 0x47, 0x01, 0xc0, 0x00, 0xc0, 0x00, 0x01, 0x20, 0x2a, 0x10, 0x01, RES_END_TAG, 0x00
+    };
     static const uint8_t keyboard_crs[] = {
         0x47, 0x01, 0x60, 0x00, 0x60, 0x00, 0x01, 0x01, 0x47, 0x01, 0x64, 0x00, 0x64, 0x00, 0x01,
         0x01, 0x22, 0x02, 0x00, RES_END_TAG, 0x00
     };
-    // IRQNoFlags () { 12 }
     static const uint8_t mouse_crs[] = { 0x22, 0x00, 0x10, RES_END_TAG, 0x00 };
     struct path parent;
     aml_begin(a, AML_SCOPE);
@@ -1877,12 +1904,13 @@ static void emit_ps2_devices(struct aml *a) {
     } else {
         aml_name(a, "\\_SB");
     }
-    if (!firmware_shows(i8042_keyboard_ids)) {
-        emit_ps2_device(a, "RBKB", "PNP0303", keyboard_crs, sizeof(keyboard_crs));
-    }
-    if (!firmware_shows(i8042_mouse_ids)) {
-        emit_ps2_device(a, "RBMS", "PNP0F13", mouse_crs, sizeof(mouse_crs));
-    }
+    emit_legacy_device(a, "RPIC", "PNP0000", pic_crs, sizeof(pic_crs));
+    emit_legacy_device(a, "RTMR", "PNP0100", timer_crs, sizeof(timer_crs));
+    emit_legacy_device(a, "RRTC", "PNP0B00", rtc_crs, sizeof(rtc_crs));
+    emit_legacy_device(a, "RSPK", "PNP0800", speaker_crs, sizeof(speaker_crs));
+    emit_legacy_device(a, "RDMA", "PNP0200", dma_crs, sizeof(dma_crs));
+    emit_legacy_device(a, "RBKB", "PNP0303", keyboard_crs, sizeof(keyboard_crs));
+    emit_legacy_device(a, "RBMS", "PNP0F13", mouse_crs, sizeof(mouse_crs));
     aml_end(a);
 }
 
@@ -2138,7 +2166,7 @@ uint8_t *vacpi_dsdt(size_t *length) {
     bridges_merge();
     emit_mailbox_device(&a);
     emit_root(&a);
-    emit_ps2_devices(&a);
+    emit_legacy_devices(&a);
     emit_links(&a);
     emit_sleep_and_events(&a);
     acpi_unlock();

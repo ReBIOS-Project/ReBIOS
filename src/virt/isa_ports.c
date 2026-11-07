@@ -39,6 +39,7 @@
 static const char *const port_ids[] = { "PNP0500", "PNP0501", "PNP0400", "PNP0401", NULL };
 
 #define UART_PORTS 8
+#define MAX_GIVEN 8
 #define MAX_RANGES 4
 #define MAX_LINES 4
 #define ISA_IRQS 16
@@ -66,6 +67,18 @@ struct device_ports {
     bool line_is_gsi[MAX_LINES];
     size_t line_count;
 };
+
+static const void *given[MAX_GIVEN];
+static size_t given_count;
+
+bool isa_ports_given(const void *node) {
+    for (size_t i = 0; i < given_count; i++) {
+        if (given[i] == node) {
+            return true;
+        }
+    }
+    return false;
+}
 
 static void add_line(struct device_ports *d, uint32_t line, bool gsi) {
     if (d->line_count < MAX_LINES) {
@@ -133,6 +146,10 @@ static uacpi_iteration_decision give_device(
             return UACPI_ITERATION_DECISION_CONTINUE;
         }
     }
+    if (given_count == MAX_GIVEN) {
+        return UACPI_ITERATION_DECISION_CONTINUE;
+    }
+    given[given_count++] = node;
     for (size_t i = 0; i < d.ranges; i++) {
         io_pass(d.base[i], d.count[i]);
         printf(
