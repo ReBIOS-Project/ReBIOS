@@ -27,6 +27,7 @@
 #include <core.h>
 #include <handoff.h>
 #include <hw/acpi.h>
+#include <hw/pci_regs.h>
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
@@ -61,7 +62,8 @@ static bool access_valid(struct pci_cfg_addr addr, uint32_t offset, size_t size)
     if (size != 1 && size != 2 && size != 4) {
         return false;
     }
-    return offset < 4096 && offset % size == 0 && addr.device < 32 && addr.function < 8;
+    return offset < PCI_CFG_SPACE_EXP_SIZE && offset % size == 0 && addr.device < 32
+        && addr.function < 8;
 }
 
 static uint32_t all_ones(size_t size) {

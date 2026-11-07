@@ -39,6 +39,7 @@
 #include <hw/cmos.h>
 #include <hw/ec.h>
 #include <hw/pci_cfg.h>
+#include <hw/pci_regs.h>
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
@@ -172,7 +173,7 @@ void uacpi_kernel_pci_device_close(uacpi_handle handle) {
 static uacpi_status pci_read(
     uacpi_handle device, uacpi_size offset, size_t size, uint32_t *value
 ) {
-    if (offset >= 4096 || offset % size != 0) {
+    if (offset >= PCI_CFG_SPACE_EXP_SIZE || offset % size != 0) {
         return UACPI_STATUS_INVALID_ARGUMENT;
     }
     const struct pci_cfg_addr *addr = device;
@@ -183,7 +184,7 @@ static uacpi_status pci_read(
 static uacpi_status pci_write(
     uacpi_handle device, uacpi_size offset, size_t size, uint32_t value
 ) {
-    if (offset >= 4096 || offset % size != 0) {
+    if (offset >= PCI_CFG_SPACE_EXP_SIZE || offset % size != 0) {
         return UACPI_STATUS_INVALID_ARGUMENT;
     }
     const struct pci_cfg_addr *addr = device;

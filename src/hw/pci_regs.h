@@ -20,6 +20,9 @@
 
 #include <stdint.h>
 
+// The configuration space of a PCI Express function, which ECAM maps whole.
+#define PCI_CFG_SPACE_EXP_SIZE 4096
+
 // A function's configuration header (PCI Local Bus Specification 3.0, 6.1 and
 // 6.2) and a bridge's (PCI-to-PCI Bridge Architecture Specification 1.1, 3.2),
 // by the names that Linux 7.3's include/uapi/linux/pci_regs.h gives them.
