@@ -252,11 +252,12 @@ static size_t npt02_level_max;
 // and BLCKDB with bus lock traps (APM 24593 rev. 3.46, 13.1.1.6).
 static uint64_t debugctl_bits;
 // Whether the processor has read-only guest page tables, page modification
-// logging, GMET, and the TSC ratio MSR.
+// logging, GMET, the TSC ratio MSR, and the idle HLT intercept.
 static bool rogpt;
 static bool pml;
 static bool gmet;
 static bool tsc_scaling;
+static bool idle_hlt;
 
 void nsvm_init(void) {
     if (virt_vmx) {
@@ -275,6 +276,7 @@ void nsvm_init(void) {
     rogpt = (cpuid(0x8000000a, 0).edx & SVM_FEATURE_ROGPT) != 0;
     gmet = (cpuid(0x8000000a, 0).edx & SVM_FEATURE_GMET) != 0;
     tsc_scaling = (cpuid(0x8000000a, 0).edx & SVM_FEATURE_TSC_RATIO) != 0;
+    idle_hlt = (cpuid(0x8000000a, 0).edx & SVM_FEATURE_IDLE_HLT) != 0;
     pml = (cpuid(0x8000000a, 0).ecx & CPUID_8000000A_ECX_PML) != 0;
     debugctl_bits = DEBUGCTL_LBR | DEBUGCTL_BTF
                   | ((cpuid(7, 0).ecx & CPUID_7_0_ECX_BUSLOCKTRAP) != 0 ? DEBUGCTL_BLCKDB : 0);
@@ -449,7 +451,8 @@ struct cpuid_regs nsvm_cpuid(void) {
                       | SVM_FEATURE_PAUSE_FILTER_THRESHOLD | SVM_FEATURE_LBRV | SVM_FEATURE_ROGPT
                       | SVM_FEATURE_TLBICTL | SVM_FEATURE_DECODE_ASSISTS | SVM_FEATURE_VGIF
                       | SVM_FEATURE_VLS | SVM_FEATURE_GMET | SVM_FEATURE_TSC_RATIO
-                      | SVM_FEATURE_SVML | (svm_vnmi ? SVM_FEATURE_VNMI : 0);
+                      | SVM_FEATURE_SVML | SVM_FEATURE_IDLE_HLT
+                      | (svm_vnmi ? SVM_FEATURE_VNMI : 0);
     return (struct cpuid_regs){
         svm.eax & 0xff, nasid - 1, svm.ecx & CPUID_8000000A_ECX_PML,
         (svm.edx & features) | SVM_FEATURE_VMCB_ADDR_CHECK
@@ -893,6 +896,11 @@ static void merge_intercepts(struct nsvm *n) {
     if ((n->vintr12 & SVM_VINTR_MASKING) == 0) {
         to[0] |= SVM_INTERCEPT_CR8_READ | SVM_INTERCEPT_CR8_WRITE;
     }
+    // VMCB12's idle HLT intercept is HLT's in VMCB02, whose virtual interrupts
+    // may be the hypervisor's (nsvm_l2_exit()).
+    if ((n->intercepts[5] & SVM_INTERCEPT_IDLE_HLT) != 0) {
+        to[3] |= SVM_INTERCEPT_HLT;
+    }
     memcpy(&n->vmcb02->control, to, sizeof(to));
 }
 
@@ -1232,10 +1240,12 @@ static void prepare_vmcb02(struct nsvm *n) {
 
     memcpy(n->intercepts, c12, sizeof(n->intercepts));
     // Of vector 5, the INVLPGB intercepts where the processor has INVLPGB, the
-    // TLBSYNC one where it has TlbiCtl, and the INVPCID one.
+    // TLBSYNC one where it has TlbiCtl, the idle HLT one where it has it, and
+    // the INVPCID one.
     uint32_t invlpgb = n->vmcb01->control.intercept_misc3 & SVM_INTERCEPT_INVLPGB;
     n->intercepts[5] &= (invlpgb != 0 ? SVM_INTERCEPT_INVLPGB | SVM_INTERCEPT_INVLPGB_ILLEGAL : 0)
-                      | (svm_tlbictl ? SVM_INTERCEPT_TLBSYNC : 0) | SVM_INTERCEPT_INVPCID;
+                      | (svm_tlbictl ? SVM_INTERCEPT_TLBSYNC : 0)
+                      | (idle_hlt ? SVM_INTERCEPT_IDLE_HLT : 0) | SVM_INTERCEPT_INVPCID;
     n->vintr12 = c12->vintr;
     n->window = false;
     n->tsc_offset12 = c12->tsc_offset;
@@ -1792,6 +1802,18 @@ bool nsvm_l2_exit(struct vcpu *v) {
     }
     if (code == SVM_EXIT_EXCEPTION_BASE + VECTOR_GP && !n->svme02) {
         return false;
+    }
+    // For VMCB12's idle HLT intercept, the guest's guest's HLT exits to the
+    // guest where none of VMCB12's own virtual interrupts is pending: V_IRQ,
+    // or V_NMI where VMCB12 virtualises NMIs (APM 24593 rev. 3.46, Table
+    // 15-7). Its HLT intercept comes first.
+    if (code == SVM_EXIT_HLT && (n->intercepts[3] & SVM_INTERCEPT_HLT) == 0
+     && (n->intercepts[5] & SVM_INTERCEPT_IDLE_HLT) != 0) {
+        uint64_t virq = n->window ? n->vintr12 : c->vintr;
+        if ((virq & SVM_VINTR_IRQ) == 0 && (!n->vnmi12 || (c->vintr & SVM_VINTR_NMI) == 0)) {
+            exit_to_l1(v, n, SVM_EXIT_IDLE_HLT, 0, 0, c->exitintinfo, true);
+            return true;
+        }
     }
     if (l1_wants(v, n, code)) {
         exit_to_l1(v, n, code, c->exitinfo1, c->exitinfo2, c->exitintinfo, true);
