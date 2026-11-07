@@ -125,7 +125,21 @@ static void ap_main(struct cpu *cpu) {
     vcpu_run(v);
 }
 
+// Whether INIT and SIPI can reach the APIC ID alone, sent once
+// lapic_host_init() has the local APIC in xAPIC mode, unless that is locked
+// off: xAPIC mode broadcasts to ID FFh and cannot name IDs above it, x2APIC
+// mode broadcasts to FFFFFFFFh, so an entry with such an ID would reset every
+// processor. Linux 7.3 ignores them too (acpi_parse_lapic(),
+// acpi_parse_x2apic(), apic_id_valid()).
+static bool reachable(uint32_t id) {
+    return lapic_xapic_locked() ? id != UINT32_MAX : id < 0xff;
+}
+
 static void add_id(uint32_t *ids, size_t *count, uint32_t id) {
+    if (!reachable(id)) {
+        printf("Not starting the processor with APIC ID %#x, which no IPI can name alone\n", id);
+        return;
+    }
     for (size_t i = 0; i < *count; i++) {
         if (ids[i] == id) {
             return;
