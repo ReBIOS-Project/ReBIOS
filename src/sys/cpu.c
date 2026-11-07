@@ -73,23 +73,6 @@ static const char *exception_names[32] = {
 
 void cpu_exception_handler(struct exception_frame *frame);
 
-struct fixup {
-    int32_t insn;
-    int32_t resume;
-};
-
-extern const struct fixup __start_fixup_table[];
-extern const struct fixup __stop_fixup_table[];
-
-uintptr_t fixup_find(uintptr_t rip) {
-    for (const struct fixup *f = __start_fixup_table; f < __stop_fixup_table; f++) {
-        if ((uintptr_t)&f->insn + f->insn == rip) {
-            return (uintptr_t)&f->resume + f->resume;
-        }
-    }
-    return 0;
-}
-
 _Static_assert(offsetof(struct cpu, kicked) == CPU_KICKED, "CPU_KICKED is out of date");
 
 // The longest an exit keeps the CPU from the guest for what can wait for its
