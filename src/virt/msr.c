@@ -783,7 +783,7 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
     }
     switch (msr) {
         case MSR_IA32_TSC: {
-            *value = virt_vmx ? nvmx_tsc(v, rdtsc()) : rdtsc() + nsvm_tsc_offset(v);
+            *value = virt_vmx ? nvmx_tsc(v, rdtsc()) : nsvm_tsc(v, rdtsc());
             return true;
         }
         case MSR_IA32_TSC_ADJUST: {

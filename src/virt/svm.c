@@ -885,6 +885,7 @@ void svm_run(struct vcpu *v) {
         vcpu_before_entry(v);
         v->vmcb->save.rax = v->gprs.rax;
         v->vmcb->control.tsc_offset = nsvm_tsc_offset(v);
+        nsvm_load_tsc_ratio(v);
         clean_before_entry(v);
         // Before the processor looks at the guest's interrupt requests.
         atomic_store_explicit(&v->in_guest, true, memory_order_seq_cst);

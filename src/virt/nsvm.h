@@ -63,8 +63,12 @@ bool nsvm_gif(struct vcpu *v);
 // Takes the guest's global interrupt flag from VMCB01, which its own CLGI and
 // STGI change where the processor virtualises it, as an exit begins.
 void nsvm_sync_gif(struct vcpu *v);
-// The guest's guest's TSC offset, from the guest's and the one its VMCB adds.
+// The guest's guest's TSC offset and TSC from the processor's, scaled by the
+// guest's TSC_RATIO and offset by its VMCB, and the processor's TSC_RATIO for
+// the next entry.
 uint64_t nsvm_tsc_offset(struct vcpu *v);
+uint64_t nsvm_tsc(struct vcpu *v, uint64_t raw);
+void nsvm_load_tsc_ratio(struct vcpu *v);
 // An exit of the guest's guest: whether it went to the guest, else the
 // hypervisor's to handle as its own.
 bool nsvm_l2_exit(struct vcpu *v);

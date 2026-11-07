@@ -270,6 +270,7 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 #define SVM_FEATURE_NP ((uint32_t)1 << 0)
 #define SVM_FEATURE_LBRV ((uint32_t)1 << 1)
 #define SVM_FEATURE_NRIPS ((uint32_t)1 << 3)
+#define SVM_FEATURE_TSC_RATIO ((uint32_t)1 << 4)
 #define SVM_FEATURE_VMCB_CLEAN ((uint32_t)1 << 5)
 #define SVM_FEATURE_FLUSH_BY_ASID ((uint32_t)1 << 6)
 #define SVM_FEATURE_DECODE_ASSISTS ((uint32_t)1 << 7)
@@ -314,6 +315,7 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 #define DC_CFG_ERRATUM_383 ((uint64_t)1 << 47)
 #define MSR_VM_CR 0xc0010114
 #define MSR_VM_HSAVE_PA 0xc0010117
+#define MSR_TSC_RATIO 0xc0000104
 #define VM_CR_DPD ((uint32_t)1 << 0)
 #define VM_CR_R_INIT ((uint32_t)1 << 1)
 #define VM_CR_DIS_A20M ((uint32_t)1 << 2)

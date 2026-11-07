@@ -54,6 +54,11 @@
 #define VM_CR_DEFINED \
     (VM_CR_DPD | VM_CR_R_INIT | VM_CR_DIS_A20M | VM_CR_LOCK | VM_CR_SVMDIS)
 
+// TSC_RATIO's 1.0 in its 8.32 format, and its bits below the reserved bits
+// 63:40 (APM 24593 rev. 3.46, 15.30.5).
+#define TSC_RATIO_ONE ((uint64_t)1 << 32)
+#define TSC_RATIO_DEFINED (((uint64_t)1 << 40) - 1)
+
 // The bits EVENTINJ reserves, which VMRUN ignores, as Linux 7.3's KVM has it
 // (nested.c, __nested_copy_vmcb_control_to_cache()).
 #define EVENT_RESERVED ((uint64_t)0x7ffff000)
@@ -173,6 +178,10 @@ struct nsvm {
     uint64_t vintr12;
     bool window;
     uint64_t tsc_offset12;
+    // The guest's TSC_RATIO, which scales its guest's TSC, and the one the
+    // processor has.
+    uint64_t tsc_ratio;
+    uint64_t tsc_ratio_loaded;
     // Whether VMCB12 has the processor switch the last branch records.
     bool lbrv;
     // Whether VMCB12 has the processor virtualise the guest's guest's NMIs,
@@ -241,10 +250,11 @@ static size_t npt02_level_max;
 // and BLCKDB with bus lock traps (APM 24593 rev. 3.46, 13.1.1.6).
 static uint64_t debugctl_bits;
 // Whether the processor has read-only guest page tables, page modification
-// logging, and GMET.
+// logging, GMET, and the TSC ratio MSR.
 static bool rogpt;
 static bool pml;
 static bool gmet;
+static bool tsc_scaling;
 
 void nsvm_init(void) {
     if (virt_vmx) {
@@ -262,6 +272,7 @@ void nsvm_init(void) {
     npt02_level_max = svm_huge_pages() ? 2 : 1;
     rogpt = (cpuid(0x8000000a, 0).edx & SVM_FEATURE_ROGPT) != 0;
     gmet = (cpuid(0x8000000a, 0).edx & SVM_FEATURE_GMET) != 0;
+    tsc_scaling = (cpuid(0x8000000a, 0).edx & SVM_FEATURE_TSC_RATIO) != 0;
     pml = (cpuid(0x8000000a, 0).ecx & CPUID_8000000A_ECX_PML) != 0;
     debugctl_bits = DEBUGCTL_LBR | DEBUGCTL_BTF
                   | ((cpuid(7, 0).ecx & CPUID_7_0_ECX_BUSLOCKTRAP) != 0 ? DEBUGCTL_BLCKDB : 0);
@@ -279,6 +290,8 @@ void nsvm_vcpu_init(struct vcpu *v) {
     // and SVM, which the firmware left enabled.
     *n = (struct nsvm){
         .gif = true,
+        .tsc_ratio = TSC_RATIO_ONE,
+        .tsc_ratio_loaded = TSC_RATIO_ONE,
         .vm_cr = svm_firmware_vm_cr & (VM_CR_DPD | VM_CR_DIS_A20M | VM_CR_LOCK),
         .vmcb01 = v->vmcb,
         .vmcb01_pa = v->vmcb_pa
@@ -433,16 +446,47 @@ struct cpuid_regs nsvm_cpuid(void) {
                       | SVM_FEATURE_FLUSH_BY_ASID | SVM_FEATURE_PAUSE_FILTER
                       | SVM_FEATURE_PAUSE_FILTER_THRESHOLD | SVM_FEATURE_LBRV | SVM_FEATURE_ROGPT
                       | SVM_FEATURE_TLBICTL | SVM_FEATURE_DECODE_ASSISTS | SVM_FEATURE_VGIF
-                      | SVM_FEATURE_VLS | SVM_FEATURE_GMET | (svm_vnmi ? SVM_FEATURE_VNMI : 0);
+                      | SVM_FEATURE_VLS | SVM_FEATURE_GMET | SVM_FEATURE_TSC_RATIO
+                      | (svm_vnmi ? SVM_FEATURE_VNMI : 0);
     return (struct cpuid_regs){
         svm.eax & 0xff, nasid - 1, svm.ecx & CPUID_8000000A_ECX_PML,
         (svm.edx & features) | SVM_FEATURE_VMCB_ADDR_CHECK
     };
 }
 
+// The guest's guest reads the guest's TSC, scaled by the guest's TSC_RATIO and
+// offset by VMCB12 (APM 24593 rev. 3.46, 15.30.5), as Linux 7.3's KVM composes
+// them (kvm_calc_nested_tsc_offset()).
 uint64_t nsvm_tsc_offset(struct vcpu *v) {
     struct nsvm *n = v->nsvm;
-    return v->tsc_offset + (n != NULL && n->in_l2 ? n->tsc_offset12 : 0);
+    if (n == NULL || !n->in_l2) {
+        return v->tsc_offset;
+    }
+    uint64_t offset = v->tsc_offset;
+    if (n->tsc_ratio != TSC_RATIO_ONE) {
+        offset = (uint64_t)(((__int128)(int64_t)offset * n->tsc_ratio) >> 32);
+    }
+    return offset + n->tsc_offset12;
+}
+
+uint64_t nsvm_tsc(struct vcpu *v, uint64_t raw) {
+    struct nsvm *n = v->nsvm;
+    if (n != NULL && n->in_l2 && n->tsc_ratio != TSC_RATIO_ONE) {
+        raw = (uint64_t)(((unsigned __int128)raw * n->tsc_ratio) >> 32);
+    }
+    return raw + nsvm_tsc_offset(v);
+}
+
+void nsvm_load_tsc_ratio(struct vcpu *v) {
+    struct nsvm *n = v->nsvm;
+    if (n == NULL || !tsc_scaling) {
+        return;
+    }
+    uint64_t ratio = n->in_l2 ? n->tsc_ratio : TSC_RATIO_ONE;
+    if (ratio != n->tsc_ratio_loaded) {
+        wrmsr(MSR_TSC_RATIO, ratio);
+        n->tsc_ratio_loaded = ratio;
+    }
 }
 
 bool nsvm_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
@@ -457,6 +501,10 @@ bool nsvm_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
     }
     if (msr == MSR_VM_HSAVE_PA) {
         *value = n->hsave;
+        return true;
+    }
+    if (msr == MSR_TSC_RATIO && tsc_scaling) {
+        *value = n->tsc_ratio;
         return true;
     }
     return false;
@@ -487,6 +535,13 @@ bool nsvm_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
         *fault = !valid_page(value);
         if (!*fault) {
             n->hsave = value;
+        }
+        return true;
+    }
+    if (msr == MSR_TSC_RATIO && tsc_scaling) {
+        *fault = (value & ~TSC_RATIO_DEFINED) != 0;
+        if (!*fault) {
+            n->tsc_ratio = value;
         }
         return true;
     }
