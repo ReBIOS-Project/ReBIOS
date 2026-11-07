@@ -24,8 +24,10 @@
 #include <uacpi/io.h>
 #include <uacpi/kernel_api.h>
 #include <uacpi/log.h>
+#include <uacpi/namespace.h>
 #include <uacpi/platform/arch_helpers.h>
 #include <uacpi/platform/types.h>
+#include <uacpi/resources.h>
 #include <uacpi/status.h>
 #include <uacpi/tables.h>
 #include <uacpi/types.h>
@@ -675,4 +677,83 @@ bool acpi_init(void) {
     kfree(buffer);
     init_ok = true;
     return true;
+}
+
+static uacpi_iteration_decision device_found(
+    void *user, uacpi_namespace_node *node, uacpi_u32 depth
+) {
+    (void)node;
+    (void)depth;
+    *(bool *)user = true;
+    return UACPI_ITERATION_DECISION_BREAK;
+}
+
+bool acpi_has_device(const char *const *ids) {
+    if (!init_ok) {
+        return false;
+    }
+    bool found = false;
+    acpi_lock();
+    uacpi_find_devices_at(uacpi_namespace_root(), ids, device_found, &found);
+    acpi_unlock();
+    return found;
+}
+
+struct port_claim {
+    uint16_t port;
+    bool claimed;
+};
+
+static uacpi_iteration_decision resource_claims(void *user, uacpi_resource *resource) {
+    struct port_claim *claim = user;
+    uint32_t base;
+    uint32_t length;
+    switch (resource->type) {
+        case UACPI_RESOURCE_TYPE_IO: {
+            base = resource->io.minimum;
+            length = resource->io.length;
+            break;
+        }
+        case UACPI_RESOURCE_TYPE_FIXED_IO: {
+            base = resource->fixed_io.address;
+            length = resource->fixed_io.length;
+            break;
+        }
+        default: {
+            return UACPI_ITERATION_DECISION_CONTINUE;
+        }
+    }
+    if (claim->port >= base && claim->port - base < length) {
+        claim->claimed = true;
+        return UACPI_ITERATION_DECISION_BREAK;
+    }
+    return UACPI_ITERATION_DECISION_CONTINUE;
+}
+
+static uacpi_iteration_decision device_claims(
+    void *user, uacpi_namespace_node *node, uacpi_u32 depth
+) {
+    (void)depth;
+    struct port_claim *claim = user;
+    uacpi_u32 sta;
+    if (uacpi_eval_sta(node, &sta) != UACPI_STATUS_OK
+     || (sta & (ACPI_STA_RESULT_DEVICE_PRESENT | ACPI_STA_RESULT_DEVICE_FUNCTIONING)) == 0) {
+        return UACPI_ITERATION_DECISION_NEXT_PEER;
+    }
+    uacpi_for_each_device_resource(node, "_CRS", resource_claims, claim);
+    return claim->claimed ? UACPI_ITERATION_DECISION_BREAK : UACPI_ITERATION_DECISION_CONTINUE;
+}
+
+bool acpi_claims_port(uint16_t port) {
+    if (!init_ok) {
+        return false;
+    }
+    struct port_claim claim = { port, false };
+    acpi_lock();
+    uacpi_namespace_for_each_child(
+        uacpi_namespace_root(), device_claims, NULL, UACPI_OBJECT_DEVICE_BIT, UACPI_MAX_DEPTH_ANY,
+        &claim
+    );
+    acpi_unlock();
+    return claim.claimed;
 }

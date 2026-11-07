@@ -20,6 +20,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <virt/pit.h>
+#include <hw/acpi.h>
+#include <lib/log.h>
 #include <lib/spinlock.h>
 #include <lib/time.h>
 #include <sys/cpu.h>
@@ -74,12 +76,19 @@ struct vcpu;
 #define STATUS_NULL_COUNT 0x40
 
 #define NMI_GATE 0x01
+#define NMI_SPEAKER 0x02
+#define NMI_ENABLES 0x0c
 #define NMI_WRITABLE 0x0f
 #define NMI_REFRESH 0x10
 #define NMI_OUT2 0x20
 #define NMI_STATUS_BITS 0xc0
 // PIT clocks a memory refresh took on PCs, which the toggle still follows.
 #define REFRESH_TICKS 18
+// Channel 2 in mode 0, whose output rises once a count of about 2 ms ends.
+#define CONTROL_SPEAKER_CHECK 0xb0
+#define SPEAKER_CHECK_COUNT 2386
+#define SPEAKER_CHECK_EARLY_US 500
+#define SPEAKER_CHECK_LATE_US 3000
 
 struct channel {
     // The TSC when the count started, so that counting is d ticks in.
@@ -120,6 +129,10 @@ static uint64_t tick_held_until;
 static bool host_edge;
 static uint8_t nmi_written;
 static uint64_t boot_tsc;
+// The real port 61h, which the firmware's ACPI describes, and the real channel
+// 2 behind it, which also counts.
+static bool real_port_61h;
+static bool real_speaker;
 
 static uint64_t ticks_since(uint64_t start, uint64_t now) {
     if (now <= start) {
@@ -412,7 +425,7 @@ static void control_write(uint8_t value) {
     if (select == 0) {
         schedule_counter_0(now);
     }
-    if (select == CHANNEL_SPEAKER) {
+    if (select == CHANNEL_SPEAKER && real_speaker) {
         outb(PORT_CONTROL, value);
     }
 }
@@ -442,7 +455,7 @@ static void counter_write(size_t index, uint8_t value) {
             break;
         }
     }
-    if (index == CHANNEL_SPEAKER) {
+    if (index == CHANNEL_SPEAKER && real_speaker) {
         outb(PORT_COUNTER_FIRST + CHANNEL_SPEAKER, value);
     }
 }
@@ -549,7 +562,7 @@ static void nmi_status_access(
     uint64_t now = rdtsc();
     if (in) {
         // The chipset's own status bits, where it has any.
-        uint8_t real = inb(PORT_NMI_STATUS);
+        uint8_t real = real_port_61h ? inb(PORT_NMI_STATUS) : 0xff;
         uint8_t chipset = real != 0xff ? real & NMI_STATUS_BITS : 0;
         bool refresh = ticks_since(boot_tsc, now) / REFRESH_TICKS % 2 != 0;
         bool out2 = out_level(&channels[CHANNEL_SPEAKER], now);
@@ -559,7 +572,12 @@ static void nmi_status_access(
     } else {
         nmi_written = (uint8_t)*value & NMI_WRITABLE;
         speaker_gate((nmi_written & NMI_GATE) != 0);
-        outb(PORT_NMI_STATUS, (uint8_t)*value);
+        // The host's NMIs reach the guest, whose handler clears their sources
+        // here.
+        if (real_port_61h) {
+            uint8_t bits = real_speaker ? NMI_WRITABLE : NMI_ENABLES;
+            outb(PORT_NMI_STATUS, (uint8_t)(nmi_written & bits));
+        }
     }
     // Wider accesses go on to ports that are no business of this one's.
     for (size_t i = 1; i < size; i++) {
@@ -573,18 +591,45 @@ static void nmi_status_access(
     spinlock_release(&lock);
 }
 
+// Whether the real channel 2 counts, with port 61h gating it and showing its
+// output, checked with the speaker's data bit clear, so silently. A chipset
+// that gates the 8254, as firmware does for systems with C11 (Intel
+// 795260-001, ITSSPRC), takes the writes, but its 8254 never counts.
+static bool speaker_works(void) {
+    uint8_t saved = inb(PORT_NMI_STATUS);
+    uint8_t quiet = (uint8_t)(saved & NMI_ENABLES);
+    outb(PORT_NMI_STATUS, quiet);
+    outb(PORT_CONTROL, CONTROL_SPEAKER_CHECK);
+    outb(PORT_COUNTER_FIRST + CHANNEL_SPEAKER, SPEAKER_CHECK_COUNT & 0xff);
+    outb(PORT_COUNTER_FIRST + CHANNEL_SPEAKER, SPEAKER_CHECK_COUNT >> 8);
+    outb(PORT_NMI_STATUS, quiet | NMI_GATE);
+    time_udelay(SPEAKER_CHECK_EARLY_US);
+    bool counting = (inb(PORT_NMI_STATUS) & NMI_OUT2) == 0;
+    time_udelay(SPEAKER_CHECK_LATE_US - SPEAKER_CHECK_EARLY_US);
+    bool ended = (inb(PORT_NMI_STATUS) & NMI_OUT2) != 0;
+    outb(PORT_NMI_STATUS, (uint8_t)(saved & NMI_WRITABLE));
+    return counting && ended;
+}
+
 void pit_init(void) {
     boot_tsc = rdtsc();
-    // The chipset's stops interrupting, where it runs: its line stays for the
-    // HPET, whose legacy replacement route a guest may use. The count is for
-    // the implementations that only heed the mode once one comes, as Linux
-    // 7.3's clockevent_i8253_disable() has it.
-    outb(PORT_CONTROL, CONTROL_STOP_COUNTER_0);
-    outb(PORT_COUNTER_FIRST, 0);
-    outb(PORT_COUNTER_FIRST, 0);
-    outb(PORT_CONTROL, CONTROL_STOP_COUNTER_0);
-    uint8_t real = inb(PORT_NMI_STATUS);
+    static const char *const pit_ids[] = { "PNP0100", NULL };
+    bool real_pit = acpi_has_device(pit_ids);
+    real_port_61h = acpi_claims_port(PORT_NMI_STATUS);
+    if (real_pit) {
+        // The chipset's stops interrupting, where it runs: its line stays for
+        // the HPET, whose legacy replacement route a guest may use. The count
+        // is for the implementations that only heed the mode once one comes,
+        // as Linux 7.3's clockevent_i8253_disable() has it.
+        outb(PORT_CONTROL, CONTROL_STOP_COUNTER_0);
+        outb(PORT_COUNTER_FIRST, 0);
+        outb(PORT_COUNTER_FIRST, 0);
+        outb(PORT_CONTROL, CONTROL_STOP_COUNTER_0);
+    }
+    uint8_t real = real_port_61h ? inb(PORT_NMI_STATUS) : 0xff;
     nmi_written = real != 0xff ? real & NMI_WRITABLE : 0;
+    real_speaker = real_pit && real_port_61h && speaker_works();
+    printf("The guest's speaker %s\n", real_speaker ? "sounds on the machine's" : "is silent");
     channels[0].gate = true;
     channels[1].gate = true;
     channels[CHANNEL_SPEAKER].gate = (nmi_written & NMI_GATE) != 0;

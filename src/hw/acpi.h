@@ -45,6 +45,14 @@ void acpi_namespace_start(void);
 void acpi_slice(void);
 bool acpi_working(void);
 
+// Whether the firmware shows a device with one of the IDs, a NULL-ended list,
+// as present or functioning by its _STA.
+bool acpi_has_device(const char *const *ids);
+
+// Whether a device the firmware shows has the I/O port among its current
+// resources.
+bool acpi_claims_port(uint16_t port);
+
 // The SCI's interrupt as the FADT has it, which the caller connects to
 // acpi_sci_interrupt(). Returns false if uACPI has no SCI handler.
 bool acpi_sci_irq(uint32_t *irq);

@@ -289,8 +289,9 @@ it adds back of the legacy PC:
   wiring.
 - **A legacy timer and keyboard controller on any machine.** The 8254 and the
   8042 the OS sees are virtual, so it does not matter whether the chipset has
-  them, or has them working: real ones only back the speaker and the PS/2
-  devices actually plugged in.
+  them, or has them working: real ones only back the speaker, where the
+  firmware's ACPI describes the 8254 and port 61h and the 8254 counts, and the
+  PS/2 devices actually plugged in.
 - **USB as a BIOS's legacy support has it.** ReBIOS drives the USB controllers
   itself, with [Tendril](https://github.com/Mintsuki/Tendril), until the OS
   asks for them, as a BIOS's legacy USB support does: USB keyboards and mice
