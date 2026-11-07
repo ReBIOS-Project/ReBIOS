@@ -133,12 +133,12 @@ static uintptr_t memory_map_top(uint64_t *ram) {
     if (status == EFI_SUCCESS && desc_size >= sizeof(EFI_MEMORY_DESCRIPTOR)) {
         for (size_t off = 0; off + desc_size <= size; off += desc_size) {
             EFI_MEMORY_DESCRIPTOR *desc = (EFI_MEMORY_DESCRIPTOR *)(uintptr_t)(buf + off);
-            uintptr_t end = desc->PhysicalStart + desc->NumberOfPages * 4096;
+            uintptr_t end = desc->PhysicalStart + desc->NumberOfPages * EFI_PAGE_SIZE;
             if (end > top) {
                 top = end;
             }
             if (ram_type(desc->Type)) {
-                *ram += desc->NumberOfPages * 4096;
+                *ram += desc->NumberOfPages * EFI_PAGE_SIZE;
             }
         }
     }

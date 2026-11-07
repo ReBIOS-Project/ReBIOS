@@ -61,7 +61,7 @@ static void reserve_vram(struct handoff_video *video) {
     while (size < 2 * frame && size < VRAM_MAX) {
         size <<= 1;
     }
-    uintptr_t base = loader_alloc_reserved(size / 4096, 0);
+    uintptr_t base = loader_alloc_reserved(EFI_SIZE_TO_PAGES(size), 0);
     if (base == 0) {
         printf(
             "Cannot reserve %llu MiB of video memory for the emulated VGA\n",

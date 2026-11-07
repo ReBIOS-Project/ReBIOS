@@ -669,7 +669,7 @@ static bool install_vbios(const struct vbios_choice *choice) {
         return false;
     }
     memcpy((void *)(uintptr_t)copy, choice->image, choice->size);
-    memset((uint8_t *)(uintptr_t)copy + choice->size, 0, pages * 4096 - choice->size);
+    memset((uint8_t *)(uintptr_t)copy + choice->size, 0, pages * EFI_PAGE_SIZE - choice->size);
 
     record_vga_device(dev);
     video->vbios_present = true;

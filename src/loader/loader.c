@@ -17,6 +17,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <efi.h>
 #include <loader/loader.h>
 #include <handoff.h>
 #include <lib/log.h>
@@ -29,7 +30,7 @@ void loader_reserve(uintptr_t base, size_t pages) {
         panic("Too many hypervisor memory ranges\n");
     }
     loader_handoff->reserved[loader_handoff->reserved_count].base = base;
-    loader_handoff->reserved[loader_handoff->reserved_count].size = pages * 4096;
+    loader_handoff->reserved[loader_handoff->reserved_count].size = pages * EFI_PAGE_SIZE;
     loader_handoff->reserved_count++;
 }
 

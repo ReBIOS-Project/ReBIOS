@@ -18,6 +18,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <efi.h>
 #include <loader/paging.h>
 #include <lib/util.h>
 #include <loader/efi_glue.h>
@@ -44,14 +45,14 @@ uintptr_t paging_build_identity_map(uintptr_t *map_top, size_t *pages) {
     if (tables == 0) {
         return 0;
     }
-    memset((void *)(uintptr_t)tables, 0, table_pages * 4096);
+    memset((void *)(uintptr_t)tables, 0, table_pages * EFI_PAGE_SIZE);
 
     uint64_t *pml4 = (uint64_t *)(uintptr_t)tables;
-    uintptr_t pdpt_base = tables + 4096;
-    uintptr_t pd_base = pdpt_base + pdpt_count * 4096;
+    uintptr_t pdpt_base = tables + EFI_PAGE_SIZE;
+    uintptr_t pd_base = pdpt_base + pdpt_count * EFI_PAGE_SIZE;
 
     for (size_t i = 0; i < pdpt_count; i++) {
-        pml4[i] = (pdpt_base + i * 4096) | PTE_P | PTE_W;
+        pml4[i] = (pdpt_base + i * EFI_PAGE_SIZE) | PTE_P | PTE_W;
     }
 
     for (size_t gib = 0; gib < gib_count; gib++) {
@@ -60,7 +61,7 @@ uintptr_t paging_build_identity_map(uintptr_t *map_top, size_t *pages) {
             *pdpte = gib * ONE_GIB | PTE_P | PTE_W | PTE_PS;
             continue;
         }
-        uintptr_t pd_addr = pd_base + gib * 4096;
+        uintptr_t pd_addr = pd_base + gib * EFI_PAGE_SIZE;
         uint64_t *pd = (uint64_t *)(uintptr_t)pd_addr;
         *pdpte = pd_addr | PTE_P | PTE_W;
         for (size_t j = 0; j < 512; j++) {
@@ -80,7 +81,7 @@ static uint64_t *next_table(uint64_t *entry) {
         if (table == 0) {
             return NULL;
         }
-        memset((void *)(uintptr_t)table, 0, 4096);
+        memset((void *)(uintptr_t)table, 0, EFI_PAGE_SIZE);
         *entry = table | PTE_P | PTE_W;
     }
     return (uint64_t *)(uintptr_t)(*entry & PTE_ADDRESS);
