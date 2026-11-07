@@ -68,6 +68,7 @@ bool svm_nrips;
 bool svm_vnmi;
 bool svm_vgif;
 bool svm_vls;
+bool svm_vmcb_addr_check;
 bool svm_avic;
 bool svm_x2avic;
 bool svm_avic_ext_lvt_reads;
@@ -204,11 +205,11 @@ static void svm_machine_check(struct vcpu *v) {
     if ((v->vmcb->save.cr4 & CR4_MCE) == 0) {
         printf("Machine check in a guest without CR4.MCE\n");
         log_machine_check();
-    }
         if (!nsvm_shutdown(v)) {
             svm_shutdown(v, "Guest shutdown");
         }
         return;
+    }
     // As the guest would have taken it without the intercept.
     vcpu_inject_exception(v, VECTOR_MC, false, 0);
 }
@@ -245,6 +246,7 @@ bool svm_supported(void) {
     decode_assists = (features & SVM_FEATURE_DECODE_ASSISTS) != 0;
     svm_vgif = (features & SVM_FEATURE_VGIF) != 0;
     svm_vls = (features & SVM_FEATURE_VLS) != 0;
+    svm_vmcb_addr_check = (features & SVM_FEATURE_VMCB_ADDR_CHECK) != 0;
     svm_vnmi = svm_vgif && (features & SVM_FEATURE_VNMI) != 0;
     // Unless the avic setting says otherwise, AVIC serves only from Zen 4 on,
     // with x2AVIC, as Linux 7.3's KVM has it by default
@@ -563,6 +565,53 @@ static bool gp_double_faults(uint8_t first) {
     return first == 0 || (first >= 10 && first <= 14) || first == 21 || first == 29 || first == 30;
 }
 
+// Without the guest VMCB address check, VMRUN, VMLOAD, and VMSAVE raise #GP
+// ahead of their intercepts at addresses the processor reserves, as Linux
+// 7.3's KVM finds (svm.c, gp_interception()): such a #GP of a guest with
+// EFER.SVME set, at CPL 0 with a page-aligned rAX, becomes the instruction's
+// exit, whose emulation refuses the address where the #GP was the guest's.
+static void svm_gp_erratum(struct vcpu *v) {
+    struct vmcb_control *c = &v->vmcb->control;
+    if (svm_vmcb_addr_check || c->exitcode != SVM_EXIT_EXCEPTION_BASE + VECTOR_GP
+     || (c->exitintinfo & SVM_EVENT_VALID) != 0 || c->exitinfo1 != 0 || !nsvm_svme(v)
+     || v->vmcb->save.cpl != 0) {
+        return;
+    }
+    struct insn insn;
+    if (!insn_decode(v, &insn) || insn.opcode != (INSN_OPCODE_0F | 0x01)) {
+        return;
+    }
+    uint64_t rax = v->gprs.rax;
+    if (insn.address_size < 8) {
+        rax &= insn.address_size == 4 ? 0xffffffff : 0xffff;
+    }
+    uint64_t code;
+    switch (insn.modrm) {
+        case 0xd8: {
+            code = SVM_EXIT_VMRUN;
+            break;
+        }
+        case 0xda: {
+            code = SVM_EXIT_VMLOAD;
+            break;
+        }
+        case 0xdb: {
+            code = SVM_EXIT_VMSAVE;
+            break;
+        }
+        default: {
+            return;
+        }
+    }
+    if ((rax & 0xfff) != 0) {
+        return;
+    }
+    c->exitcode = code;
+    c->exitinfo1 = 0;
+    c->exitinfo2 = 0;
+    c->nrip = v->vmcb->save.rip + insn.length;
+}
+
 // A #GP of a guest whose own EFER.SVME is clear: an SVM instruction's is #UD
 // (APM 24594 rev. 3.39, VMRUN, VMLOAD, VMSAVE, STGI, CLGI, SKINIT, INVLPGA),
 // which the processor, finding EFER.SVME set as VMRUN needs it (APM 24593 rev.
@@ -574,7 +623,7 @@ static void exit_general_protection(struct vcpu *v) {
     struct vmcb_control *c = &v->vmcb->control;
     uint64_t event = c->exitintinfo;
     uint32_t error = (uint32_t)c->exitinfo1;
-    if ((event & SVM_EVENT_VALID) == 0 && error == 0) {
+    if ((event & SVM_EVENT_VALID) == 0 && error == 0 && !nsvm_svme(v)) {
         // One the hypervisor cannot read, as where another processor just
         // remapped it, runs again.
         struct insn insn;
@@ -619,6 +668,7 @@ static void svm_handle_exit(struct vcpu *v) {
         svm_step_exception(v, (unsigned int)(c->exitcode - SVM_EXIT_EXCEPTION_BASE));
         return;
     }
+    svm_gp_erratum(v);
     if (nsvm_l2_exit(v)) {
         return;
     }

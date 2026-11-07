@@ -284,6 +284,7 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 #define SVM_FEATURE_TLBICTL ((uint32_t)1 << 24)
 #define SVM_FEATURE_VNMI ((uint32_t)1 << 25)
 #define SVM_FEATURE_EXT_LVT_AVIC_ACCESS ((uint32_t)1 << 27)
+#define SVM_FEATURE_VMCB_ADDR_CHECK ((uint32_t)1 << 28)
 #define SVM_FEATURE_IDLE_HLT ((uint32_t)1 << 30)
 
 // Nested paging and what goes with it, at offset 090h.
@@ -337,6 +338,9 @@ extern bool svm_vgif;
 // with addresses in the guest's physical memory (APM 24593 rev. 3.46,
 // 15.33.1).
 extern bool svm_vls;
+// VMRUN, VMLOAD, and VMSAVE exit on their intercepts whatever their address,
+// rather than raising #GP at addresses the processor reserves.
+extern bool svm_vmcb_addr_check;
 // The processor's AVIC (APM 24593 rev. 3.45, 15.29), where it can be used, and
 // whether it runs x2APIC mode's MSRs too (APM 24593 rev. 3.45, 15.29.10).
 extern bool svm_avic;

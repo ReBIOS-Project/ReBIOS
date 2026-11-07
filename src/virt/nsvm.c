@@ -353,11 +353,14 @@ bool nsvm_svme(struct vcpu *v) {
 // The SVM instructions of a guest whose own EFER.SVME is clear raise #UD,
 // which the processor, finding EFER.SVME set, has as #GP outside CPL 0
 // (svm.c): VMCB01 intercepts #GP while the guest's is clear, and VMCB02 while
-// its guest's is or the guest intercepts #GP.
+// its guest's is or the guest intercepts #GP. Without the guest VMCB address
+// check, both always do, for the #GP that VMRUN, VMLOAD, and VMSAVE may raise
+// ahead of their intercepts (svm.c).
 static void svme_gp_intercept(struct nsvm *n) {
     uint32_t gp = (uint32_t)1 << VECTOR_GP;
     struct vmcb_control *c = n->in_l2 ? &n->vmcb02->control : &n->vmcb01->control;
-    bool intercept = n->in_l2 ? !n->svme02 || (n->intercepts[2] & gp) != 0 : !n->svme;
+    bool intercept = !svm_vmcb_addr_check
+                  || (n->in_l2 ? !n->svme02 || (n->intercepts[2] & gp) != 0 : !n->svme);
     if (intercept) {
         c->intercept_exceptions |= gp;
     } else {
@@ -403,7 +406,9 @@ bool nsvm_in_l2(struct vcpu *v) {
 
 // The processor's revision, its ASIDs but the guest's own, and the features of
 // its SVM that the guest's has. VMCB12 is read whole at every VMRUN, as clean
-// bits allow (APM 24593 rev. 3.46, 15.15.1).
+// bits allow (APM 24593 rev. 3.46, 15.15.1). The guest VMCB address check
+// holds on every processor, where the hypervisor takes the #GP that stands in
+// for it (svm.c).
 struct cpuid_regs nsvm_cpuid(void) {
     struct cpuid_regs svm = cpuid(0x8000000a, 0);
     uint32_t features = SVM_FEATURE_NP | SVM_FEATURE_NRIPS | SVM_FEATURE_VMCB_CLEAN
@@ -411,7 +416,8 @@ struct cpuid_regs nsvm_cpuid(void) {
                       | SVM_FEATURE_PAUSE_FILTER_THRESHOLD | SVM_FEATURE_LBRV | SVM_FEATURE_ROGPT
                       | SVM_FEATURE_TLBICTL;
     return (struct cpuid_regs){
-        svm.eax & 0xff, nasid - 1, svm.ecx & CPUID_8000000A_ECX_PML, svm.edx & features
+        svm.eax & 0xff, nasid - 1, svm.ecx & CPUID_8000000A_ECX_PML,
+        (svm.edx & features) | SVM_FEATURE_VMCB_ADDR_CHECK
     };
 }
 
