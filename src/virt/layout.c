@@ -685,6 +685,15 @@ bool layout_mmio_free(uintptr_t base, size_t size) {
     return true;
 }
 
+uintptr_t layout_low_ram_end(void) {
+    for (size_t i = 0; i < ram.count; i++) {
+        if (ram.r[i].base <= ONE_MIB && ram.r[i].end > ONE_MIB) {
+            return ram.r[i].end;
+        }
+    }
+    return ONE_MIB;
+}
+
 uintptr_t layout_high_ram_end(void) {
     uintptr_t end = FOUR_GIB;
     for (size_t i = 0; i < ram.count; i++) {

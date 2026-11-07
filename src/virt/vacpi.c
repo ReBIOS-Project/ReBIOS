@@ -52,6 +52,7 @@
 #include <virt/layout.h>
 #include <virt/mmio.h>
 #include <virt/pci_plan.h>
+#include <virt/rtc.h>
 #include <virt/vcpu.h>
 
 // The mailbox the guest's AML calls the firmware's methods through: a header,
@@ -2179,12 +2180,10 @@ void vacpi_fadt(uint8_t fadt[VACPI_FADT_SIZE], uint32_t facs, uint32_t dsdt) {
     // Dual 8259s or I/O APICs, the MADT telling which the guest has.
     fadt[FADT_INT_MODEL] = 1;
     uint32_t flags = FADT_WBINVD | FADT_PROC_C1 | FADT_SLP_BUTTON | FADT_FIX_RTC;
+    rtc_fadt_indexes(fadt + FADT_CENTURY, fadt + FADT_DAY_ALRM, fadt + FADT_MON_ALRM);
     struct acpi_fadt *host;
     if (uacpi_table_fadt(&host) == UACPI_STATUS_OK) {
         put16(fadt + FADT_SCI_INT, host->sci_int);
-        fadt[FADT_DAY_ALRM] = host->day_alrm;
-        fadt[FADT_MON_ALRM] = host->mon_alrm;
-        fadt[FADT_CENTURY] = host->century;
     }
     if (vacpi.pm1) {
         put32(fadt + FADT_PM1A_EVT_BLK, vacpi.pm1_evt);

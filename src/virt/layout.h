@@ -43,6 +43,8 @@ uintptr_t layout_lfb(void);
 bool layout_mmio_free(uintptr_t base, size_t size);
 // Where the guest's RAM above 4 GiB ends: 4 GiB where it has none there.
 uintptr_t layout_high_ram_end(void);
+// Where the guest's RAM from 1 MiB on ends, before its first gap.
+uintptr_t layout_low_ram_end(void);
 // Whether the firmware keeps all of the host's range [base, end): no part of
 // it is memory that the guest's RAM may be backed with.
 bool layout_host_kept(uintptr_t base, uintptr_t end);

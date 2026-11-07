@@ -194,6 +194,18 @@ struct handoff {
     // The TSC's rate, measured against the firmware's delay service.
     uint64_t tsc_hz;
 
+    // The firmware's time from GetTime(), and the TSC when it was read, for a
+    // guest RTC without the machine's to start from: time_valid is false where
+    // the firmware gave none, or one no RTC could hold.
+    bool time_valid;
+    uint16_t time_year;
+    uint8_t time_month;
+    uint8_t time_day;
+    uint8_t time_hour;
+    uint8_t time_minute;
+    uint8_t time_second;
+    uint64_t time_tsc;
+
     // The memory map current at ExitBootServices().
     uint64_t efi_mmap;
     uint64_t efi_mmap_size;

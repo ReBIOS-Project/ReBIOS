@@ -168,6 +168,27 @@ static uintptr_t memory_map_top(uint64_t *ram) {
     return top;
 }
 
+// What an MC146818 can hold, with a century byte, of the firmware's time.
+static void record_time(void) {
+    EFI_TIME now;
+    if (efi_rt->GetTime(&now, NULL) != EFI_SUCCESS) {
+        return;
+    }
+    uint64_t tsc = rdtsc();
+    if (now.Year < 1900 || now.Year > 2099 || now.Month < 1 || now.Month > 12 || now.Day < 1
+     || now.Day > 31 || now.Hour > 23 || now.Minute > 59 || now.Second > 59) {
+        return;
+    }
+    loader_handoff->time_year = now.Year;
+    loader_handoff->time_month = now.Month;
+    loader_handoff->time_day = now.Day;
+    loader_handoff->time_hour = now.Hour;
+    loader_handoff->time_minute = now.Minute;
+    loader_handoff->time_second = now.Second;
+    loader_handoff->time_tsc = tsc;
+    loader_handoff->time_valid = true;
+}
+
 EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     efi_image_handle = image_handle;
     efi_st = system_table;
@@ -271,6 +292,7 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     loader_handoff->heap_size = heap_size;
     loader_handoff->nested_heap_size = nested_heap_size;
     loader_handoff->tsc_hz = measure_tsc_hz();
+    record_time();
     config_to_handoff(&loader_handoff->config);
     fwtables_collect();
     drives_connect();

@@ -50,6 +50,7 @@
 #include <virt/pci_virt.h>
 #include <virt/pit.h>
 #include <virt/profile.h>
+#include <virt/rtc.h>
 #include <virt/svm.h>
 #include <virt/usb.h>
 #include <virt/vacpi.h>
@@ -66,6 +67,7 @@ static void bsp_main(void *arg) {
     struct cpu *cpu = this_cpu();
 
     acpi_init();
+    rtc_sample();
     pci_cfg_init();
     pci_enum_scan();
     pci_enum_shrink_rebars(PCI_PLAN_LOW_BAR_MAX);
@@ -108,6 +110,7 @@ static void bsp_main(void *arg) {
     }
     kbc_init();
     pit_init();
+    rtc_init();
     hpet_init();
     vacpi_init();
     profile_init();
