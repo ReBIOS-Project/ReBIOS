@@ -1058,16 +1058,17 @@ def emit(entries, path):
     out.append('#define VEX INSN_SPACE_VEX')
     out.append('#define EVEX INSN_SPACE_EVEX')
     out.append('#define XOP INSN_SPACE_XOP')
-    for name in ('NONE', '66', 'F3', 'F2', 'ANY'):
+    for name in ('NONE', '66', 'F3', 'F2'):
         out.append('#define P_%s INSN_PREFIX_%s' % (name, name))
-    out.append('#define R_ANY INSN_REG_ANY')
-    out.append('#define W_ANY INSN_W_ANY')
-    out.append('#define L_ANY INSN_L_ANY')
-    out.append('#define ND_ANY INSN_ND_ANY')
-    out.append('#define NF_ANY INSN_NF_ANY')
-    out.append('#define M_64 INSN_MODE_64')
-    out.append('#define M_OTHER INSN_MODE_OTHER')
-    out.append('#define M_ALL (INSN_MODE_64 | INSN_MODE_OTHER)')
+    out.append('#define P_ANY INSN_MEM_TABLE_PREFIX_ANY')
+    out.append('#define R_ANY INSN_MEM_TABLE_REG_ANY')
+    out.append('#define W_ANY INSN_MEM_TABLE_W_ANY')
+    out.append('#define L_ANY INSN_MEM_TABLE_L_ANY')
+    out.append('#define ND_ANY INSN_MEM_TABLE_ND_ANY')
+    out.append('#define NF_ANY INSN_MEM_TABLE_NF_ANY')
+    out.append('#define M_64 INSN_MEM_TABLE_MODE_64')
+    out.append('#define M_OTHER INSN_MEM_TABLE_MODE_OTHER')
+    out.append('#define M_ALL (INSN_MEM_TABLE_MODE_64 | INSN_MEM_TABLE_MODE_OTHER)')
     out.append('#define R INSN_MEM_READ')
     out.append('#define W INSN_MEM_WRITE')
     out.append('#define RW (INSN_MEM_READ | INSN_MEM_WRITE)')
@@ -1075,9 +1076,9 @@ def emit(entries, path):
     out.append('#define WM (INSN_MEM_WRITE | INSN_MEM_MASKED)')
     for kind in ('FIXED', 'VECTOR', 'OPERAND', 'STACK', 'FAR', 'PAIR', 'FPU_ENV', 'FPU_STATE', 'NONE',
                  'UNKNOWN'):
-        out.append('#define S_%s INSN_SIZE_%s' % (kind, kind))
+        out.append('#define S_%s INSN_MEM_TABLE_SIZE_%s' % (kind, kind))
     out.append('')
-    out.append('const struct insn_mem_form insn_mem_forms[] = {')
+    out.append('const struct insn_mem_table_form insn_mem_table_forms[] = {')
     kinds = {'n': 'S_FIXED', 'vector': 'S_VECTOR', 'operand': 'S_OPERAND', 'stack': 'S_STACK', 'far': 'S_FAR',
              'pair': 'S_PAIR', 'env': 'S_FPU_ENV', 'state': 'S_FPU_STATE', 'none': 'S_NONE',
              'unknown': 'S_UNKNOWN'}
@@ -1098,7 +1099,7 @@ def emit(entries, path):
             size if kind in ('S_FIXED', 'S_VECTOR') else 0, e['bcst'], e['scale'], e['syntax']))
     out.append('};')
     out.append('')
-    out += count_decl('insn_mem_form_count', 'insn_mem_forms')
+    out += count_decl('insn_mem_table_form_count', 'insn_mem_table_forms')
     open(path, 'w').write(finish('\n'.join(out) + '\n'))
 
 

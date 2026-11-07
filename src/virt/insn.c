@@ -664,60 +664,62 @@ bool insn_mem_linear(struct vcpu *v, const struct insn *insn, uint64_t *linear) 
 }
 
 // The first form of the instruction's opcode it matches, if any.
-static const struct insn_mem_form *mem_form(const struct insn *insn) {
+static const struct insn_mem_table_form *mem_form(const struct insn *insn) {
     unsigned int key = (unsigned int)insn->space << 8 | insn->opcode_byte;
     unsigned int low = 0;
-    unsigned int high = insn_mem_form_count;
+    unsigned int high = insn_mem_table_form_count;
     while (low < high) {
         unsigned int mid = (low + high) / 2;
-        if (((unsigned int)insn_mem_forms[mid].space << 8 | insn_mem_forms[mid].opcode) < key) {
+        const struct insn_mem_table_form *f = &insn_mem_table_forms[mid];
+        if (((unsigned int)f->space << 8 | f->opcode) < key) {
             low = mid + 1;
         } else {
             high = mid;
         }
     }
     unsigned int reg = (insn->modrm >> 3) & 7;
-    unsigned int mode = insn->long_mode ? INSN_MODE_64 : INSN_MODE_OTHER;
-    for (size_t i = low; i < insn_mem_form_count; i++) {
-        const struct insn_mem_form *f = &insn_mem_forms[i];
+    unsigned int mode = insn->long_mode ? INSN_MEM_TABLE_MODE_64 : INSN_MEM_TABLE_MODE_OTHER;
+    for (size_t i = low; i < insn_mem_table_form_count; i++) {
+        const struct insn_mem_table_form *f = &insn_mem_table_forms[i];
         if (((unsigned int)f->space << 8 | f->opcode) != key) {
             break;
         }
-        if ((f->prefix == INSN_PREFIX_ANY || f->prefix == insn->prefix)
-         && (f->reg == INSN_REG_ANY || f->reg == reg) && (f->w == INSN_W_ANY || f->w == insn->w)
-         && (f->l == INSN_L_ANY || f->l == insn->vector_length)
-         && (f->nd == INSN_ND_ANY || f->nd == insn->nd)
-         && (f->nf == INSN_NF_ANY || f->nf == insn->nf) && (f->modes & mode) != 0) {
+        if ((f->prefix == INSN_MEM_TABLE_PREFIX_ANY || f->prefix == insn->prefix)
+         && (f->reg == INSN_MEM_TABLE_REG_ANY || f->reg == reg)
+         && (f->w == INSN_MEM_TABLE_W_ANY || f->w == insn->w)
+         && (f->l == INSN_MEM_TABLE_L_ANY || f->l == insn->vector_length)
+         && (f->nd == INSN_MEM_TABLE_ND_ANY || f->nd == insn->nd)
+         && (f->nf == INSN_MEM_TABLE_NF_ANY || f->nf == insn->nf) && (f->modes & mode) != 0) {
             return f;
         }
     }
     return NULL;
 }
 
-static size_t mem_size(const struct insn *insn, const struct insn_mem_form *f) {
+static size_t mem_size(const struct insn *insn, const struct insn_mem_table_form *f) {
     switch (f->size_kind) {
-        case INSN_SIZE_FIXED: {
+        case INSN_MEM_TABLE_SIZE_FIXED: {
             return f->size;
         }
-        case INSN_SIZE_VECTOR: {
+        case INSN_MEM_TABLE_SIZE_VECTOR: {
             return f->size << insn->vector_length;
         }
-        case INSN_SIZE_OPERAND: {
+        case INSN_MEM_TABLE_SIZE_OPERAND: {
             return insn->operand_size;
         }
-        case INSN_SIZE_STACK: {
+        case INSN_MEM_TABLE_SIZE_STACK: {
             return insn->long_mode && insn->operand_size == 4 ? 8 : insn->operand_size;
         }
-        case INSN_SIZE_FAR: {
+        case INSN_MEM_TABLE_SIZE_FAR: {
             return insn->operand_size + 2;
         }
-        case INSN_SIZE_PAIR: {
+        case INSN_MEM_TABLE_SIZE_PAIR: {
             return insn->operand_size * 2;
         }
-        case INSN_SIZE_FPU_ENV: {
+        case INSN_MEM_TABLE_SIZE_FPU_ENV: {
             return insn->operand_size == 2 ? 14 : 28;
         }
-        case INSN_SIZE_FPU_STATE: {
+        case INSN_MEM_TABLE_SIZE_FPU_STATE: {
             return insn->operand_size == 2 ? 94 : 108;
         }
         default: {
@@ -730,11 +732,11 @@ bool insn_mem_operand(struct vcpu *v, const struct insn *insn, struct insn_mem *
     if (!insn->has_modrm || insn->modrm >> 6 == 3) {
         return false;
     }
-    const struct insn_mem_form *f = mem_form(insn);
-    if (f == NULL || f->size_kind == INSN_SIZE_UNKNOWN) {
+    const struct insn_mem_table_form *f = mem_form(insn);
+    if (f == NULL || f->size_kind == INSN_MEM_TABLE_SIZE_UNKNOWN) {
         return false;
     }
-    if (f->size_kind == INSN_SIZE_NONE) {
+    if (f->size_kind == INSN_MEM_TABLE_SIZE_NONE) {
         *mem = (struct insn_mem){ 0 };
         return true;
     }

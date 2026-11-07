@@ -32,32 +32,32 @@
 #define P_66 INSN_PREFIX_66
 #define P_F3 INSN_PREFIX_F3
 #define P_F2 INSN_PREFIX_F2
-#define P_ANY INSN_PREFIX_ANY
-#define R_ANY INSN_REG_ANY
-#define W_ANY INSN_W_ANY
-#define L_ANY INSN_L_ANY
-#define ND_ANY INSN_ND_ANY
-#define NF_ANY INSN_NF_ANY
-#define M_64 INSN_MODE_64
-#define M_OTHER INSN_MODE_OTHER
-#define M_ALL (INSN_MODE_64 | INSN_MODE_OTHER)
+#define P_ANY INSN_MEM_TABLE_PREFIX_ANY
+#define R_ANY INSN_MEM_TABLE_REG_ANY
+#define W_ANY INSN_MEM_TABLE_W_ANY
+#define L_ANY INSN_MEM_TABLE_L_ANY
+#define ND_ANY INSN_MEM_TABLE_ND_ANY
+#define NF_ANY INSN_MEM_TABLE_NF_ANY
+#define M_64 INSN_MEM_TABLE_MODE_64
+#define M_OTHER INSN_MEM_TABLE_MODE_OTHER
+#define M_ALL (INSN_MEM_TABLE_MODE_64 | INSN_MEM_TABLE_MODE_OTHER)
 #define R INSN_MEM_READ
 #define W INSN_MEM_WRITE
 #define RW (INSN_MEM_READ | INSN_MEM_WRITE)
 #define RM (INSN_MEM_READ | INSN_MEM_MASKED)
 #define WM (INSN_MEM_WRITE | INSN_MEM_MASKED)
-#define S_FIXED INSN_SIZE_FIXED
-#define S_VECTOR INSN_SIZE_VECTOR
-#define S_OPERAND INSN_SIZE_OPERAND
-#define S_STACK INSN_SIZE_STACK
-#define S_FAR INSN_SIZE_FAR
-#define S_PAIR INSN_SIZE_PAIR
-#define S_FPU_ENV INSN_SIZE_FPU_ENV
-#define S_FPU_STATE INSN_SIZE_FPU_STATE
-#define S_NONE INSN_SIZE_NONE
-#define S_UNKNOWN INSN_SIZE_UNKNOWN
+#define S_FIXED INSN_MEM_TABLE_SIZE_FIXED
+#define S_VECTOR INSN_MEM_TABLE_SIZE_VECTOR
+#define S_OPERAND INSN_MEM_TABLE_SIZE_OPERAND
+#define S_STACK INSN_MEM_TABLE_SIZE_STACK
+#define S_FAR INSN_MEM_TABLE_SIZE_FAR
+#define S_PAIR INSN_MEM_TABLE_SIZE_PAIR
+#define S_FPU_ENV INSN_MEM_TABLE_SIZE_FPU_ENV
+#define S_FPU_STATE INSN_MEM_TABLE_SIZE_FPU_STATE
+#define S_NONE INSN_MEM_TABLE_SIZE_NONE
+#define S_UNKNOWN INSN_MEM_TABLE_SIZE_UNKNOWN
 
-const struct insn_mem_form insn_mem_forms[] = {
+const struct insn_mem_table_form insn_mem_table_forms[] = {
     // ADD r/m8, r8.
     { LEGACY | 0, 0x00, P_ANY, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RW, S_FIXED, 1, 0, 0 },
     // ADD r/m16, r16.
@@ -5342,4 +5342,4 @@ const struct insn_mem_form insn_mem_forms[] = {
     { XOP | 10, 0x12, P_NONE, 1, W_ANY, 0, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 }
 };
 
-const size_t insn_mem_form_count = ARRAY_COUNT(insn_mem_forms);
+const size_t insn_mem_table_form_count = ARRAY_COUNT(insn_mem_table_forms);

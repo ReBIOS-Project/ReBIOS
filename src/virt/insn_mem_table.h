@@ -22,15 +22,15 @@
 #include <stdint.h>
 #include <virt/insn.h>
 
-#define INSN_PREFIX_ANY 4
-#define INSN_REG_ANY 8
-#define INSN_W_ANY 2
-#define INSN_L_ANY 4
-#define INSN_ND_ANY 2
-#define INSN_NF_ANY 2
+#define INSN_MEM_TABLE_PREFIX_ANY 4
+#define INSN_MEM_TABLE_REG_ANY 8
+#define INSN_MEM_TABLE_W_ANY 2
+#define INSN_MEM_TABLE_L_ANY 4
+#define INSN_MEM_TABLE_ND_ANY 2
+#define INSN_MEM_TABLE_NF_ANY 2
 
-#define INSN_MODE_64 0x01
-#define INSN_MODE_OTHER 0x02
+#define INSN_MEM_TABLE_MODE_64 0x01
+#define INSN_MEM_TABLE_MODE_OTHER 0x02
 
 // How large a memory operand is: size bytes; size bytes at a vector length of
 // 128 bits, doubling with each step of L; the operand size; the operand size,
@@ -39,21 +39,21 @@
 // the x87 environment and state, 14 and 94 bytes with a 16-bit operand size,
 // else 28 and 108; nothing, as only its address is used; or anything anywhere
 // (XSAVE, gathers and scatters, AMX tiles).
-#define INSN_SIZE_FIXED 0
-#define INSN_SIZE_VECTOR 1
-#define INSN_SIZE_OPERAND 2
-#define INSN_SIZE_STACK 3
-#define INSN_SIZE_FAR 4
-#define INSN_SIZE_PAIR 5
-#define INSN_SIZE_FPU_ENV 6
-#define INSN_SIZE_FPU_STATE 7
-#define INSN_SIZE_NONE 8
-#define INSN_SIZE_UNKNOWN 9
+#define INSN_MEM_TABLE_SIZE_FIXED 0
+#define INSN_MEM_TABLE_SIZE_VECTOR 1
+#define INSN_MEM_TABLE_SIZE_OPERAND 2
+#define INSN_MEM_TABLE_SIZE_STACK 3
+#define INSN_MEM_TABLE_SIZE_FAR 4
+#define INSN_MEM_TABLE_SIZE_PAIR 5
+#define INSN_MEM_TABLE_SIZE_FPU_ENV 6
+#define INSN_MEM_TABLE_SIZE_FPU_STATE 7
+#define INSN_MEM_TABLE_SIZE_NONE 8
+#define INSN_MEM_TABLE_SIZE_UNKNOWN 9
 
 // Instruction forms with a ModRM memory operand, sorted by space and opcode,
 // the more specific forms of an opcode first. EVEX map 4's ND and NF bits tell
 // some of its instructions apart (Intel APX 355828-009, 3.1.2.3.1).
-struct insn_mem_form {
+struct insn_mem_table_form {
     uint8_t space;
     uint8_t opcode;
     uint8_t prefix;
@@ -73,7 +73,7 @@ struct insn_mem_form {
     uint8_t disp8_scale;
 };
 
-extern const struct insn_mem_form insn_mem_forms[];
-extern const size_t insn_mem_form_count;
+extern const struct insn_mem_table_form insn_mem_table_forms[];
+extern const size_t insn_mem_table_form_count;
 
 #endif
