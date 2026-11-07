@@ -390,25 +390,23 @@ uint16_t vgabios_window_offset(void) {
     return (uint16_t)(vgabios_stub_window - vgabios_stub);
 }
 
+// Where the stub saves each register, in struct vgabios_regs's order.
+static const uint8_t frame_offsets[REGISTER_COUNT] = {
+    VGABIOS_STUB_FRAME_AX, VGABIOS_STUB_FRAME_BX, VGABIOS_STUB_FRAME_CX, VGABIOS_STUB_FRAME_DX,
+    VGABIOS_STUB_FRAME_DI, VGABIOS_STUB_FRAME_BP, VGABIOS_STUB_FRAME_ES
+};
+
 static void frame_load(struct call *c) {
-    static const uint8_t offsets[REGISTER_COUNT] = {
-        VGABIOS_STUB_FRAME_AX, VGABIOS_STUB_FRAME_BX, VGABIOS_STUB_FRAME_CX, VGABIOS_STUB_FRAME_DX,
-        VGABIOS_STUB_FRAME_DI, VGABIOS_STUB_FRAME_BP, VGABIOS_STUB_FRAME_ES
-    };
     uint16_t words[REGISTER_COUNT];
     for (size_t i = 0; i < REGISTER_COUNT; i++) {
         words[i] = 0;
-        mmio_read_linear(c->v, c->frame + offsets[i], &words[i], 2);
+        mmio_read_linear(c->v, c->frame + frame_offsets[i], &words[i], 2);
     }
     memcpy(&c->regs, words, sizeof(words));
 }
 
 // What the call changed, back in the registers the ROM saved.
 static void registers_give(struct call *c, const struct vgabios_regs *before) {
-    static const uint8_t offsets[REGISTER_COUNT] = {
-        VGABIOS_STUB_FRAME_AX, VGABIOS_STUB_FRAME_BX, VGABIOS_STUB_FRAME_CX, VGABIOS_STUB_FRAME_DX,
-        VGABIOS_STUB_FRAME_DI, VGABIOS_STUB_FRAME_BP, VGABIOS_STUB_FRAME_ES
-    };
     uint16_t old[REGISTER_COUNT];
     uint16_t now[REGISTER_COUNT];
     memcpy(old, before, sizeof(old));
@@ -418,10 +416,10 @@ static void registers_give(struct call *c, const struct vgabios_regs *before) {
             continue;
         }
         if (c->direct) {
-            mmio_write_linear(c->v, c->frame + offsets[i], &now[i], 2);
+            mmio_write_linear(c->v, c->frame + frame_offsets[i], &now[i], 2);
         } else {
             uint16_t head[2] = {
-                (uint16_t)(VGABIOS_STUB_OP_SET_REGISTER | offsets[i] << 8), now[i]
+                (uint16_t)(VGABIOS_STUB_OP_SET_REGISTER | frame_offsets[i] << 8), now[i]
             };
             exchange(head, 2, NULL, 0, NULL, 0);
         }
