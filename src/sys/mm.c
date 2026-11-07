@@ -209,11 +209,11 @@ void mm_write_combining(uintptr_t base, size_t size) {
     for (uintptr_t a = start; a < end; ) {
         uint64_t *pml4e = &top[x86_level_index(a, 3)];
         if ((*pml4e & PTE_P) == 0) {
-            return;
+            break;
         }
         uint64_t *pdpte = &table_of(*pml4e)[x86_level_index(a, 2)];
         if ((*pdpte & PTE_P) == 0) {
-            return;
+            break;
         }
         if ((*pdpte & PTE_PS) != 0) {
             if (a % ONE_GIB == 0 && end - a >= ONE_GIB) {
@@ -224,6 +224,9 @@ void mm_write_combining(uintptr_t base, size_t size) {
             split(pdpte, ONE_GIB, false);
         }
         uint64_t *pde = &table_of(*pdpte)[x86_level_index(a, 1)];
+        if ((*pde & PTE_P) == 0) {
+            break;
+        }
         if ((*pde & PTE_PS) != 0) {
             if (a % TWO_MIB == 0 && end - a >= TWO_MIB) {
                 *pde = write_combining(*pde, PTE_PAT_LARGE);
