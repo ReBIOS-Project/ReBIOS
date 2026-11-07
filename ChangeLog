@@ -1,3 +1,163 @@
+2026-11-09  Mintsuki  <mintsuki@protonmail.com>
+
+    *** Release 0.7.0 ***
+
+    Noteworthy changes compared to the previous release, 0.6.0:
+
+    New features:
+        - Give the OS an RTC and CMOS RAM of its own: the machine's clock
+          where the firmware's FADT allows it and the RTC reads sanely, else
+          an emulated one set from the firmware's time, and CMOS RAM that no
+          longer reaches the machine's.
+        - Give the OS the PC/AT's 8237 DMA controllers, a reset control
+          register at CF9h of its own, and, for OSes that clear CR0.NE, the
+          PC/AT's report of x87 errors on IRQ13, with port F0h.
+        - Give the OS the serial and parallel ports that the firmware's ACPI
+          describes, with their interrupts, including those the OS turns on
+          or moves, but for the one ReBIOS logs to. The other legacy ports
+          read as absent, as on a board without those devices.
+        - Describe ReBIOS's legacy devices in the OS's ACPI namespace in place
+          of the firmware's: the 8259s, the 8254, the RTC, the speaker's port,
+          the 8237s, the x87 error port, and the PS/2 keyboard and mouse.
+        - Take the serial log's port from the firmware's SPCR or DBG2 table:
+          `serial_port` defaults to `auto`.
+        - For OSes without ACPI, do what the firmware does outside ACPI mode:
+          power the machine off at a press of the power button, a
+          control-method one too, and watch the firmware's thermal zones,
+          powering the machine off past their critical and hot trip points,
+          running their fans past their active ones, and slowing their
+          processors down past their passive ones, until the OS's own ACPI
+          takes them over.
+        - Give the OS a PM timer of its own, counted from the TSC, where the
+          machine's stands still, goes backwards, or runs at the wrong rate.
+        - Run the machine's local APICs in x2APIC mode wherever the processor
+          has it and the firmware's DMAR table does not opt out of it, with
+          the IOMMU remapping interrupts to x2APIC destinations, choosing the
+          mode once at boot rather than following the OS's.
+        - With `save_log`, keep ReBIOS's log in EFI variables while the OS
+          runs, for machines without a serial port: the next start of ReBIOS
+          writes it to `rebios-last.log` beside `rebios.efi`.
+        - Report the DMA faults that the IOMMUs record while the OS runs, not
+          only while the legacy BIOS starts.
+        - Make the emulated VGA several times faster: repeated string
+          instructions on its memory, and repeated OUTS from RAM, run in bulk
+          rather than an iteration at a time, its writes reach all four
+          planes at once, MOVSB copies through its latches go a run at a
+          time, and its redraws take a half to a fifth of the time. Every
+          emulated memory access also reads less of the processor's state.
+        - Load the microcode updates that the OS gives the processor, on
+          Intel's and AMD's processors alike, as the OS would on bare metal,
+          which a hypervisor's guest cannot do itself.
+        - Show the OS the BARs it gave a device wherever the device gives its
+          configuration space a second way: the copies that NVIDIA's and AMD's
+          GPUs keep in their BARs and reach through their ports, and the
+          RTL8168's window onto its MSI-X table.
+
+    Bug fixes:
+        - Reach the machine's legacy devices only where its firmware describes
+          them, and its quirks allow: mask the 8259s only where the MADT has
+          them, sound the speaker only where ACPI has the 8254 and port 61h
+          and the 8254 counts, probe the 8042 only as Linux 7.3 does, pulse
+          its reset line only where one exists, and use CF9h only where the
+          PCI configuration ports answer, with Linux 7.3's values. Port 92h
+          and the PCH's 8254 gate are left alone.
+        - Run the firmware's AML and ReBIOS's own accesses to the RTC through
+          one owner, so that neither changes the index register under the
+          other.
+        - Split wide port accesses to 8-bit devices into bytes, as an ISA bus
+          does.
+        - Pass the OS only the interrupt lines of the devices it gets, and
+          follow its HPET's legacy replacement route, which IRQs 0 and 8
+          take.
+        - Raise INIT from the keyboard controller's reset line, as the
+          chipset does: the legacy BIOS then resumes where the CMOS shutdown
+          byte asks it to, or resets the machine.
+        - Fill the OS's A20-masked view of memory as it reaches it, rather
+          than all at once when the gate first closes, which kept the
+          processor from the OS for tens of milliseconds.
+        - Check the firmware's tables and the hardware before trusting them,
+          as Linux 7.3 does: memory map entries that overlap, or that are
+          specific-purpose or uncacheable, SMBIOS 2.1 entry points of 1Eh
+          bytes, broken XSDTs, I/O APICs that read all ones or share GSIs,
+          processors whose APIC IDs an IPI cannot name alone, VT-d units at
+          address 0 or reading all ones, the interrupt remapping erratum of
+          Intel's 5500, 5520, and X58 I/O hubs, pre-2016 firmware's ECAM
+          reservations, the DMAR table's x2APIC opt-out, the TSC-deadline
+          erratum of older microcode, and the C1E timer erratum of AMD's
+          family 10h.
+        - Measure the TSC's rate against the HPET or the PM timer, and take
+          the processor's nominal rate where it agrees, rather than timing it
+          with the firmware's Stall() alone.
+        - Leave alone GPUs that have no display attached, whose firmware can
+          hang when set to a mode.
+        - Give the OS the firmware's EDID only as Linux 7.3 would take it,
+          else one of ReBIOS's own.
+        - Flush the whole ASID for the INVLPGA of the OS's own hypervisors,
+          as Linux 7.3's KVM does for INVLPGA's errata on Genoa and Turin.
+        - Hand the legacy BIOS the SMBIOS table's length and address in full,
+          whose upper bytes came from uninitialised memory.
+        - Set up every processor's control registers, PAT, and MTRRs alike,
+          whatever the firmware left on each: the others could not call the
+          firmware's runtime services, which may use SSE, shut down at
+          machine checks, and kept MTRRs unlike the boot processor's.
+        - Start the processors one at a time, only those that the MADT has
+          enabled, with INIT and SIPIs of their own rather than broadcast
+          ones: firmware marks disabled the local APICs that hang the
+          machine when written to.
+        - Restore the firmware's LVT entries when leaving x2APIC mode, take
+          each LINT pin's NMI from the MADT as ACPI ranks its structures,
+          fence the writes to x2APIC registers, select I/O APIC registers
+          with byte writes, leave the firmware's SMI entries alone, and clear
+          the remote IRRs that unacknowledged interrupts left set.
+        - Give PCI interrupt links that the firmware left disabled an IRQ, as
+          Linux 7.3 does, and take the SCI as active low and level-triggered
+          where the MADT does not say otherwise.
+        - End a call to the firmware's runtime services that takes a page
+          fault, and call them no more, rather than panicking, as Linux 7.3
+          does.
+        - Quiesce the invalidation queue that the firmware left on in each
+          VT-d unit, stop each AMD-Vi unit's command buffer and logs before
+          the unit, as their specifications ask, and add the I/O APICs that
+          some laptops' IVRS tables leave out, as Linux 7.3 does.
+        - Disconnect the firmware's graphics output rather than its graphics
+          driver, which left some panels dark.
+        - Probe serial ports by their divisor latch, turn on their FIFOs, and
+          take the UART's clock from the SPCR.
+        - Allocate no memory after the first ExitBootServices() call, as UEFI
+          requires, align boot sector reads as the drive asks, and clear the
+          firmware's CPUID limit before anything reads CPUID.
+        - Work around AMD's processor errata as Linux 7.3 does: its chicken
+          bits, a cleared divider before every entry to the OS on Zen 1, no
+          virtualised VMLOAD and VMSAVE on the Zen 4 models where they reset
+          the machine, and a #UD in the OS rather than a panic for an INVLPGB
+          that the processor refuses.
+        - Turn on the decoding of a PCI serial card that ReBIOS logs to and of
+          the card whose VBIOS runs, which firmware without drivers for them
+          leaves off.
+        - Drop the OS's translations on INIT and when it turns paging on, on
+          Intel's processors, which kept Windows 10 from starting its other
+          processors.
+        - Emulate the PC's interrupt controllers as Linux 7.3's KVM does: keep
+          the 8259s' in-service bits across ICW1, and pass their interrupts to
+          local APIC LINT0 entries that ask for an NMI, as old Linux's NMI
+          watchdog has them; clear an I/O APIC entry's Remote IRR when it is
+          made edge-triggered; and in the local APICs, deliver nothing to one
+          that is globally disabled, give a lowest priority interrupt to one
+          that takes interrupts, take every INIT but the level de-assert,
+          raise #GP for reserved bits of x2APIC mode's ICR and SELF IPI, count
+          a late periodic timer's next period, and match physical destinations
+          by the whole APIC ID.
+        - Release the 8254's latched count when the counter is reprogrammed,
+          as its datasheet has it.
+
+    Miscellaneous:
+        - Share the definitions and helpers that files repeated, and include
+          only the headers that each file uses.
+        - `make run` runs Nephrite, the fork of QEMU that ReBIOS is tested
+          on, in place of QEMU, and emulates an Intel processor with VMX
+          behind VT-d, or with `QEMU_VIRT=svm` an AMD one with SVM behind
+          AMD-Vi, rather than nesting KVM.
+
 2026-11-07  Mintsuki  <mintsuki@protonmail.com>
 
     *** Release 0.6.0 ***
