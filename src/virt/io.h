@@ -40,6 +40,11 @@ struct io_handler {
 // Traps the ports and routes them to the handler, for every vCPU.
 void io_register(const struct io_handler *handler);
 
+// Lets the guest reach the machine's ports, where no handler has them, or
+// keeps it from them, which then read all ones and drop writes.
+void io_pass(uint16_t base, size_t count);
+void io_block(uint16_t base, size_t count);
+
 // Runs an access the guest made: through the handler of its first port, or a
 // byte at a time where that is an 8-bit device's or nobody's, each byte going
 // to its port's handler, else to the machine for a port the guest is given,

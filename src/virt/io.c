@@ -36,6 +36,21 @@ void io_register(const struct io_handler *handler) {
     virt_intercept_io(handler->base, handler->count, true);
 }
 
+static const struct io_handler *handler_for(uint16_t port);
+
+void io_pass(uint16_t base, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        uint16_t port = (uint16_t)(base + i);
+        if (handler_for(port) == NULL) {
+            virt_intercept_io(port, 1, false);
+        }
+    }
+}
+
+void io_block(uint16_t base, size_t count) {
+    virt_intercept_io(base, count, true);
+}
+
 static const struct io_handler *handler_for(uint16_t port) {
     for (size_t i = 0; i < handler_count; i++) {
         const struct io_handler *h = &handlers[i];

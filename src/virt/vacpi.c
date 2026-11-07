@@ -2690,7 +2690,7 @@ static void gpe0_access(
     }
 }
 
-static bool io_block(const struct acpi_gas *gas, uint16_t *port) {
+static bool fadt_port(const struct acpi_gas *gas, uint16_t *port) {
     if (gas->address == 0 || gas->address_space_id != UACPI_ADDRESS_SPACE_SYSTEM_IO
      || gas->address > 0xfffc) {
         return false;
@@ -2708,10 +2708,10 @@ void vacpi_init(void) {
     // The guest's PM1 and GPE registers are where the host's are, trapped.
     struct acpi_fadt *fadt;
     if (uacpi_table_fadt(&fadt) == UACPI_STATUS_OK) {
-        vacpi.pm1 = io_block(&fadt->x_pm1a_evt_blk, &vacpi.pm1_evt)
-                 && io_block(&fadt->x_pm1a_cnt_blk, &vacpi.pm1_cnt);
-        vacpi.gpe = io_block(&fadt->x_gpe0_blk, &vacpi.gpe0);
-        if (io_block(&fadt->x_pm_tmr_blk, &vacpi.pm_tmr)) {
+        vacpi.pm1 = fadt_port(&fadt->x_pm1a_evt_blk, &vacpi.pm1_evt)
+                 && fadt_port(&fadt->x_pm1a_cnt_blk, &vacpi.pm1_cnt);
+        vacpi.gpe = fadt_port(&fadt->x_gpe0_blk, &vacpi.gpe0);
+        if (fadt_port(&fadt->x_pm_tmr_blk, &vacpi.pm_tmr)) {
             vacpi.pm_tmr_32 = (fadt->flags & ACPI_TMR_VAL_EXT) != 0;
         }
         vacpi.power_button = vacpi.pm1 && (fadt->flags & ACPI_PWR_BUTTON) == 0;
