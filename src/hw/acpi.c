@@ -917,3 +917,15 @@ bool acpi_eval_optional(
     }
     return true;
 }
+
+const struct acpi_entry_hdr *acpi_madt_next(const void *madt, size_t length, size_t *offset) {
+    if (*offset > length || length - *offset < sizeof(struct acpi_entry_hdr)) {
+        return NULL;
+    }
+    const struct acpi_entry_hdr *entry = (const void *)((const uint8_t *)madt + *offset);
+    if (entry->length < sizeof(struct acpi_entry_hdr) || entry->length > length - *offset) {
+        return NULL;
+    }
+    *offset += entry->length;
+    return entry;
+}

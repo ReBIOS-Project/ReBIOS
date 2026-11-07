@@ -157,18 +157,15 @@ void ioapic_init(void) {
     size_t length = table.hdr->length;
     // At most one I/O APIC per entry.
     ioapics = kmalloc(length / sizeof(struct acpi_madt_ioapic) * sizeof(struct ioapic));
-    for (size_t off = sizeof(struct acpi_madt); off + sizeof(struct acpi_entry_hdr) <= length; ) {
-        const struct acpi_entry_hdr *hdr = (const void *)(madt + off);
-        if (hdr->length < sizeof(struct acpi_entry_hdr) || hdr->length > length - off) {
-            break;
-        }
+    size_t offset = sizeof(struct acpi_madt);
+    const struct acpi_entry_hdr *hdr;
+    while ((hdr = acpi_madt_next(madt, length, &offset)) != NULL) {
         if (hdr->type == ACPI_MADT_ENTRY_TYPE_IOAPIC
          && hdr->length >= sizeof(struct acpi_madt_ioapic)) {
             struct acpi_madt_ioapic entry;
             memcpy(&entry, hdr, sizeof(struct acpi_madt_ioapic));
             add(&entry);
         }
-        off += hdr->length;
     }
     uacpi_table_unref(&table);
 }

@@ -181,20 +181,6 @@ static void mp_string(char *dest, size_t size, const char *src, size_t length) {
     }
 }
 
-// The MADT's entry at *offset, which moves past it, or NULL after the last.
-static const uint8_t *madt_next(const struct mp_input *in, size_t *offset) {
-    if (*offset > in->madt_length || in->madt_length - *offset < sizeof(struct acpi_entry_hdr)) {
-        return NULL;
-    }
-    const uint8_t *entry = in->madt + *offset;
-    size_t length = entry[1];
-    if (length < sizeof(struct acpi_entry_hdr) || length > in->madt_length - *offset) {
-        return NULL;
-    }
-    *offset += length;
-    return entry;
-}
-
 static void pci_bus_add(struct mp_input *in, uint8_t bus) {
     in->pci_buses[bus / 64] |= (uint64_t)1 << (bus % 64);
 }
@@ -243,10 +229,10 @@ static void isa_overrides_find(struct mp_input *in) {
         in->isa_flags[irq] = 0;
     }
     size_t offset = sizeof(struct acpi_madt);
-    const uint8_t *entry;
-    while ((entry = madt_next(in, &offset)) != NULL) {
-        if (entry[0] != ACPI_MADT_ENTRY_TYPE_INTERRUPT_SOURCE_OVERRIDE
-         || entry[1] < sizeof(struct acpi_madt_interrupt_source_override)) {
+    const struct acpi_entry_hdr *entry;
+    while ((entry = acpi_madt_next(in->madt, in->madt_length, &offset)) != NULL) {
+        if (entry->type != ACPI_MADT_ENTRY_TYPE_INTERRUPT_SOURCE_OVERRIDE
+         || entry->length < sizeof(struct acpi_madt_interrupt_source_override)) {
             continue;
         }
         struct acpi_madt_interrupt_source_override iso;
@@ -459,17 +445,18 @@ static void local_interrupt_emit(
 // has the ACPI Processor UID.
 static bool uid_apic_id(const struct mp_input *in, uint32_t uid, uint32_t *apic_id) {
     size_t offset = sizeof(struct acpi_madt);
-    const uint8_t *entry;
-    while ((entry = madt_next(in, &offset)) != NULL) {
-        if (entry[0] == ACPI_MADT_ENTRY_TYPE_LAPIC && entry[1] >= sizeof(struct acpi_madt_lapic)) {
+    const struct acpi_entry_hdr *entry;
+    while ((entry = acpi_madt_next(in->madt, in->madt_length, &offset)) != NULL) {
+        if (entry->type == ACPI_MADT_ENTRY_TYPE_LAPIC
+         && entry->length >= sizeof(struct acpi_madt_lapic)) {
             struct acpi_madt_lapic lapic;
             memcpy(&lapic, entry, sizeof(struct acpi_madt_lapic));
             if (lapic.uid == uid) {
                 *apic_id = lapic.id;
                 return true;
             }
-        } else if (entry[0] == ACPI_MADT_ENTRY_TYPE_LOCAL_X2APIC
-                && entry[1] >= sizeof(struct acpi_madt_x2apic)) {
+        } else if (entry->type == ACPI_MADT_ENTRY_TYPE_LOCAL_X2APIC
+                && entry->length >= sizeof(struct acpi_madt_x2apic)) {
             struct acpi_madt_x2apic x2apic;
             memcpy(&x2apic, entry, sizeof(struct acpi_madt_x2apic));
             if (x2apic.uid == uid) {
@@ -487,22 +474,22 @@ static void local_interrupts_emit(struct mp_writer *w, const struct mp_input *in
 
     bool madt_nmis = false;
     size_t offset = sizeof(struct acpi_madt);
-    const uint8_t *entry;
-    while ((entry = madt_next(in, &offset)) != NULL) {
+    const struct acpi_entry_hdr *entry;
+    while ((entry = acpi_madt_next(in->madt, in->madt_length, &offset)) != NULL) {
         uint32_t uid;
         uint16_t flags;
         uint8_t lint;
         bool all;
-        if (entry[0] == ACPI_MADT_ENTRY_TYPE_LAPIC_NMI
-         && entry[1] >= sizeof(struct acpi_madt_lapic_nmi)) {
+        if (entry->type == ACPI_MADT_ENTRY_TYPE_LAPIC_NMI
+         && entry->length >= sizeof(struct acpi_madt_lapic_nmi)) {
             struct acpi_madt_lapic_nmi nmi;
             memcpy(&nmi, entry, sizeof(struct acpi_madt_lapic_nmi));
             uid = nmi.uid;
             flags = nmi.flags;
             lint = nmi.lint;
             all = nmi.uid == MADT_ALL_UIDS;
-        } else if (entry[0] == ACPI_MADT_ENTRY_TYPE_LOCAL_X2APIC_NMI
-                && entry[1] >= sizeof(struct acpi_madt_x2apic_nmi)) {
+        } else if (entry->type == ACPI_MADT_ENTRY_TYPE_LOCAL_X2APIC_NMI
+                && entry->length >= sizeof(struct acpi_madt_x2apic_nmi)) {
             struct acpi_madt_x2apic_nmi nmi;
             memcpy(&nmi, entry, sizeof(struct acpi_madt_x2apic_nmi));
             uid = nmi.uid;

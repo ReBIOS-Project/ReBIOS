@@ -196,18 +196,15 @@ static void routes_init(void) {
     }
     const uint8_t *madt = table.ptr;
     size_t length = table.hdr->length;
-    for (size_t off = sizeof(struct acpi_madt); off + sizeof(struct acpi_entry_hdr) <= length; ) {
-        const struct acpi_entry_hdr *hdr = (const void *)(madt + off);
-        if (hdr->length < sizeof(struct acpi_entry_hdr) || hdr->length > length - off) {
-            break;
-        }
+    size_t offset = sizeof(struct acpi_madt);
+    const struct acpi_entry_hdr *hdr;
+    while ((hdr = acpi_madt_next(madt, length, &offset)) != NULL) {
         if (hdr->type == ACPI_MADT_ENTRY_TYPE_INTERRUPT_SOURCE_OVERRIDE
          && hdr->length >= sizeof(struct acpi_madt_interrupt_source_override)) {
             struct acpi_madt_interrupt_source_override iso;
             memcpy(&iso, hdr, sizeof(struct acpi_madt_interrupt_source_override));
             override(&iso);
         }
-        off += hdr->length;
     }
     uacpi_table_unref(&table);
 }

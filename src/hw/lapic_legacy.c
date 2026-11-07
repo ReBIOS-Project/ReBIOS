@@ -107,33 +107,20 @@ static uint32_t apic_id_of(void) {
     return lapic_x2apic() ? id : id >> 24;
 }
 
-// Advances *offset past the MADT entry it is at, which it returns, or returns
-// NULL at the end of the table.
-static const uint8_t *madt_next(const uint8_t *madt, size_t length, size_t *offset) {
-    if (*offset > length || length - *offset < 2) {
-        return NULL;
-    }
-    const uint8_t *entry = madt + *offset;
-    if (entry[1] < 2 || entry[1] > length - *offset) {
-        return NULL;
-    }
-    *offset += entry[1];
-    return entry;
-}
-
 static bool madt_uid(const uint8_t *madt, size_t length, uint32_t apic_id, uint32_t *uid) {
     size_t offset = sizeof(struct acpi_madt);
-    const uint8_t *entry;
-    while ((entry = madt_next(madt, length, &offset)) != NULL) {
-        if (entry[0] == ACPI_MADT_ENTRY_TYPE_LAPIC && entry[1] >= sizeof(struct acpi_madt_lapic)) {
+    const struct acpi_entry_hdr *entry;
+    while ((entry = acpi_madt_next(madt, length, &offset)) != NULL) {
+        if (entry->type == ACPI_MADT_ENTRY_TYPE_LAPIC
+         && entry->length >= sizeof(struct acpi_madt_lapic)) {
             struct acpi_madt_lapic lapic;
             memcpy(&lapic, entry, sizeof(struct acpi_madt_lapic));
             if (lapic.id == apic_id) {
                 *uid = lapic.uid;
                 return true;
             }
-        } else if (entry[0] == ACPI_MADT_ENTRY_TYPE_LOCAL_X2APIC
-                && entry[1] >= sizeof(struct acpi_madt_x2apic)) {
+        } else if (entry->type == ACPI_MADT_ENTRY_TYPE_LOCAL_X2APIC
+                && entry->length >= sizeof(struct acpi_madt_x2apic)) {
             struct acpi_madt_x2apic x2apic;
             memcpy(&x2apic, entry, sizeof(struct acpi_madt_x2apic));
             if (x2apic.id == apic_id) {
@@ -164,22 +151,22 @@ static bool madt_nmi_pin(uint32_t apic_id, struct nmi_pin *pin) {
     bool found = false;
     bool specific = false;
     size_t offset = sizeof(struct acpi_madt);
-    const uint8_t *entry;
-    while (!specific && (entry = madt_next(madt, length, &offset)) != NULL) {
+    const struct acpi_entry_hdr *entry;
+    while (!specific && (entry = acpi_madt_next(madt, length, &offset)) != NULL) {
         bool all;
         bool mine;
         uint16_t flags;
         uint8_t lint;
-        if (entry[0] == ACPI_MADT_ENTRY_TYPE_LAPIC_NMI
-         && entry[1] >= sizeof(struct acpi_madt_lapic_nmi)) {
+        if (entry->type == ACPI_MADT_ENTRY_TYPE_LAPIC_NMI
+         && entry->length >= sizeof(struct acpi_madt_lapic_nmi)) {
             struct acpi_madt_lapic_nmi nmi;
             memcpy(&nmi, entry, sizeof(struct acpi_madt_lapic_nmi));
             all = nmi.uid == 0xff;
             mine = have_uid && nmi.uid == uid;
             flags = nmi.flags;
             lint = nmi.lint;
-        } else if (entry[0] == ACPI_MADT_ENTRY_TYPE_LOCAL_X2APIC_NMI
-                && entry[1] >= sizeof(struct acpi_madt_x2apic_nmi)) {
+        } else if (entry->type == ACPI_MADT_ENTRY_TYPE_LOCAL_X2APIC_NMI
+                && entry->length >= sizeof(struct acpi_madt_x2apic_nmi)) {
             struct acpi_madt_x2apic_nmi nmi;
             memcpy(&nmi, entry, sizeof(struct acpi_madt_x2apic_nmi));
             all = nmi.uid == 0xffffffff;

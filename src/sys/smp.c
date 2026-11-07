@@ -166,27 +166,23 @@ static uint32_t madt_aps(uint32_t **ids_out) {
     uint32_t *ids = kmalloc(length / sizeof(struct acpi_entry_hdr) * sizeof(uint32_t));
     size_t count = 0;
     size_t offset = sizeof(struct acpi_madt);
-    while (offset + sizeof(struct acpi_entry_hdr) <= length) {
-        uint8_t type = madt[offset];
-        size_t entry_length = madt[offset + 1];
-        if (entry_length < sizeof(struct acpi_entry_hdr) || length - offset < entry_length) {
-            break;
-        }
-        if (type == ACPI_MADT_ENTRY_TYPE_LAPIC && entry_length >= sizeof(struct acpi_madt_lapic)) {
+    const struct acpi_entry_hdr *hdr;
+    while ((hdr = acpi_madt_next(madt, length, &offset)) != NULL) {
+        if (hdr->type == ACPI_MADT_ENTRY_TYPE_LAPIC
+         && hdr->length >= sizeof(struct acpi_madt_lapic)) {
             struct acpi_madt_lapic entry;
-            memcpy(&entry, madt + offset, sizeof(struct acpi_madt_lapic));
+            memcpy(&entry, hdr, sizeof(struct acpi_madt_lapic));
             if ((entry.flags & ACPI_PIC_ENABLED) != 0 && entry.id != self) {
                 add_id(ids, &count, entry.id);
             }
-        } else if (type == ACPI_MADT_ENTRY_TYPE_LOCAL_X2APIC
-                && entry_length >= sizeof(struct acpi_madt_x2apic)) {
+        } else if (hdr->type == ACPI_MADT_ENTRY_TYPE_LOCAL_X2APIC
+                && hdr->length >= sizeof(struct acpi_madt_x2apic)) {
             struct acpi_madt_x2apic entry;
-            memcpy(&entry, madt + offset, sizeof(struct acpi_madt_x2apic));
+            memcpy(&entry, hdr, sizeof(struct acpi_madt_x2apic));
             if ((entry.flags & ACPI_PIC_ENABLED) != 0 && entry.id != self) {
                 add_id(ids, &count, entry.id);
             }
         }
-        offset += entry_length;
     }
     uacpi_table_unref(&table);
     *ids_out = ids;

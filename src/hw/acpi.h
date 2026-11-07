@@ -112,4 +112,9 @@ bool acpi_eval_optional(
     uacpi_namespace_node *node, const char *name, uint64_t *value, bool *found
 );
 
+// The MADT's interrupt controller structure at *offset, which moves past it:
+// NULL past the last, or at one that is too short or runs past the table. The
+// first is at sizeof(struct acpi_madt).
+const struct acpi_entry_hdr *acpi_madt_next(const void *madt, size_t length, size_t *offset);
+
 #endif

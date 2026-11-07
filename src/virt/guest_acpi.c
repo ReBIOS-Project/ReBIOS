@@ -185,17 +185,13 @@ static uint8_t *madt_make(const uint8_t *madt, size_t *length) {
     );
     size_t out = sizeof(struct acpi_madt);
     size_t offset = sizeof(struct acpi_madt);
-    while (offset + sizeof(struct acpi_entry_hdr) <= host_length) {
-        const uint8_t *entry = madt + offset;
-        size_t entry_length = entry[1];
-        if (entry_length < sizeof(struct acpi_entry_hdr) || entry_length > host_length - offset) {
-            break;
-        }
-        offset += entry_length;
-        if (madt_entry_kept(entry, entry_length)) {
-            memcpy(made + out, entry, entry_length);
+    const struct acpi_entry_hdr *hdr;
+    while ((hdr = acpi_madt_next(madt, host_length, &offset)) != NULL) {
+        const uint8_t *entry = (const uint8_t *)hdr;
+        if (madt_entry_kept(entry, hdr->length)) {
+            memcpy(made + out, entry, hdr->length);
             processor_hide(made + out);
-            out += entry_length;
+            out += hdr->length;
         }
     }
     write_le32(made + ACPI_SDT_LENGTH, (uint32_t)out);
