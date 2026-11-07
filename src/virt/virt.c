@@ -115,8 +115,7 @@ void virt_reset(bool shown) {
 }
 
 bool virt_init(void) {
-    struct cpuid_regs vendor = cpuid(0, 0);
-    bool intel = vendor.ebx == 0x756e6547 && vendor.edx == 0x49656e69 && vendor.ecx == 0x6c65746e;
+    bool intel = cpu_vendor() == CPU_VENDOR_INTEL;
 
     if (intel && vmx_supported()) {
         virt_vmx = true;

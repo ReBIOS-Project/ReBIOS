@@ -560,7 +560,6 @@ static void pass_ranges(const struct msr_range *ranges, size_t count) {
 void msr_allowed_init(void) {
     struct cpu_signature s = cpu_signature();
     if (!virt_vmx) {
-        // Hygon's are in none of AMD's families.
         for (size_t i = 0; i < msr_amd_family_count; i++) {
             if (msr_amd_families[i].family == s.family) {
                 family_msrs = &msr_amd_families[i];

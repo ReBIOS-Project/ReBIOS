@@ -254,16 +254,15 @@ bool svm_supported(void) {
     // with x2AVIC, as Linux 7.3's KVM has it by default
     // (arch/x86/kvm/svm/avic.c, avic_want_avic_enabled(), with
     // arch/x86/kernel/cpu/amd.c's Zen 4 models): Windows hangs at its logo
-    // with AVIC on a Zen 3+ processor without x2AVIC. Never on family 17h, or
-    // Hygon's 18h made from it, where AVIC may miss IPIs and AMD advises
-    // against it (56323 rev. 1.03 and 55449 rev. 1.21, erratum 1235).
+    // with AVIC on a Zen 3+ processor without x2AVIC. Never on family 17h,
+    // where AVIC may miss IPIs and AMD advises against it (56323 rev. 1.03 and
+    // 55449 rev. 1.21, erratum 1235).
     struct cpu_signature signature = cpu_signature();
     bool zen4 = signature.family == 0x19
              && ((signature.model >= 0x10 && signature.model <= 0x1f)
               || (signature.model >= 0x60 && signature.model <= 0xaf));
     uint8_t setting = core_handoff->config.avic;
     svm_avic = (features & SVM_FEATURE_AVIC) != 0 && signature.family != 0x17
-            && signature.family != 0x18
             && (setting == HANDOFF_AVIC_ALWAYS
              || (setting == HANDOFF_AVIC_AUTO && (features & SVM_FEATURE_X2AVIC) != 0
               && (zen4 || signature.family >= 0x1a)));

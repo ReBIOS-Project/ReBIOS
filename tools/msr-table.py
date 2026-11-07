@@ -289,7 +289,6 @@ AMD_SERIES = [(0x400, 0x47f), (0xc90, 0xd8f), (0xc0000200, 0xc00002ff), (0xc0002
 # The families that can run the hypervisor, with an IOMMU and nested paging,
 # and their documents: Family 10h from revision D on, whose platforms are the
 # first with an IOMMU (BKDG 31116 rev. 3.62), but neither Family 12h nor 14h.
-# Hygon's 18h has none, and gets only the architectural MSRs.
 AMD_FAMILIES = [
     (0x10, ['amd-bkdg-fam10h-31116-rev3.62']),
     (0x15, ['amd-bkdg-fam15h-m00h-0fh-42301-rev3.14', 'amd-bkdg-fam15h-m10h-1fh-42300-rev3.12',

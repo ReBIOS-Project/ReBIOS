@@ -122,8 +122,7 @@ static uintptr_t sideband_base(const struct pch_family *pch) {
 }
 
 void intel_pit_ungate(void) {
-    struct cpuid_regs vendor = cpuid(0, 0);
-    bool intel = vendor.ebx == 0x756e6547 && vendor.edx == 0x49656e69 && vendor.ecx == 0x6c65746e;
+    bool intel = cpu_vendor() == CPU_VENDOR_INTEL;
     struct cpuid_regs leaf1 = cpuid(1, 0);
     unsigned int family = (leaf1.eax >> 8) & 0xf;
     unsigned int model = (leaf1.eax >> 4) & 0xf;
@@ -148,8 +147,8 @@ void intel_pit_ungate(void) {
     if (pch == NULL) {
         printf(
             "8254 clock gate: not a chipset known to have one (%s processor family %#x model %#x, "
-            "host bridge vendor %#x), doing nothing\n", intel ? "Intel" : "non-Intel", family,
-            model, host_vendor
+            "host bridge vendor %#x), doing nothing\n", intel ? "Intel" : "AMD", family, model,
+            host_vendor
         );
         return;
     }
