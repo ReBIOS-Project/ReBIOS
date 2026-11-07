@@ -529,7 +529,7 @@ static void write_host_state(struct cpu *cpu) {
     vmx_write(VMCS_HOST_SYSENTER_ESP, 0);
     vmx_write(VMCS_HOST_SYSENTER_EIP, 0);
     vmx_write(VMCS_HOST_EFER, rdmsr(MSR_EFER));
-    vmx_write(VMCS_HOST_PAT, HOST_PAT);
+    vmx_write(VMCS_HOST_PAT, GPT_HOST_PAT);
     if (perf_global_switched) {
         vmx_write(VMCS_HOST_PERF_GLOBAL_CTRL, 0);
     }

@@ -110,7 +110,7 @@ static uint64_t leaf_entry(uintptr_t hpa, uint32_t prot, uint8_t memtype, size_t
         e |= PTE_PS;
     }
 
-    // Indices into HOST_PAT.
+    // Indices into GPT_HOST_PAT.
     uint64_t pat = level > 0 ? PTE_PAT_LARGE : PTE_PAT_4K;
     switch (memtype) {
         case MT_WB: {
@@ -168,7 +168,7 @@ static void leaf_decode(uint64_t e, size_t level, uint32_t *prot, uint8_t *memty
     uint64_t pat = level > 0 ? PTE_PAT_LARGE : PTE_PAT_4K;
     uint8_t index = ((e & pat) != 0 ? 4 : 0) | ((e & PTE_PCD) != 0 ? 2 : 0)
                   | ((e & PTE_PWT) != 0 ? 1 : 0);
-    *memtype = (HOST_PAT >> (index * 8)) & 7;
+    *memtype = (GPT_HOST_PAT >> (index * 8)) & 7;
 }
 
 void gpt_init(bool ept, bool huge_pages, bool dirty_flags) {

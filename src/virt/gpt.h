@@ -33,7 +33,7 @@
 
 // The value the host's IA32_PAT gets, so that nested paging can name every
 // memory type above. This is the layout Linux 7.3 uses (pat_bp_init()).
-#define HOST_PAT ((uint64_t)0x0407050600070106)
+#define GPT_HOST_PAT ((uint64_t)0x0407050600070106)
 
 // dirty_flags tells whether the processor can keep dirty flags in the tables'
 // leaves, which EPT does only once enabled.

@@ -120,7 +120,7 @@ void virt_cpu_init(void) {
     }
     write_cr4(cr4);
     write_cr0(read_cr0() & ~(uintptr_t)(CR0_CD | CR0_NW));
-    wrmsr(MSR_IA32_PAT, HOST_PAT);
+    wrmsr(MSR_IA32_PAT, GPT_HOST_PAT);
 
     if (virt_vmx) {
         vmx_cpu_init();
