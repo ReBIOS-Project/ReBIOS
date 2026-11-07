@@ -32,6 +32,10 @@ const char *fwtables_smbios_string(uint8_t type, uint8_t offset);
 // Gets the FADT's preferred power management profile, if there is one.
 bool fwtables_fadt_pm_profile(uint8_t *profile);
 
+// The I/O port of the 16550 or 16450 the firmware's SPCR table, or else its
+// DBG2 table, describes, or 0. Needs no fwtables_collect().
+uint16_t fwtables_serial_port(void);
+
 // Gets the byte at offset in the firmware's first SMBIOS structure of type, if
 // there is such a structure and field.
 bool fwtables_smbios_byte(uint8_t type, uint8_t offset, uint8_t *value);

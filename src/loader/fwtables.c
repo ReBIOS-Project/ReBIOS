@@ -50,9 +50,33 @@ _Static_assert(sizeof(struct rsdp) == 36, "RSDP layout");
 #define RSDP_MAX_SIZE 4096
 
 #define ACPI_TABLE_LENGTH 4
+#define ACPI_TABLE_REVISION 8
 #define ACPI_TABLE_HEADER_SIZE 36
 // ACPI 6.6, 5.2.9.
 #define FADT_PREFERRED_PM_PROFILE 45
+// Microsoft's SPCR (table revision 4) and DBG2 (2023-04-10) specifications.
+#define SPCR_INTERFACE_TYPE 36
+#define SPCR_BASE_ADDRESS 40
+#define DBG2_DEVICE_OFFSET 36
+#define DBG2_DEVICE_COUNT 40
+#define DBG2_DEVICE_LENGTH 1
+#define DBG2_DEVICE_PORT_TYPE 12
+#define DBG2_DEVICE_PORT_SUBTYPE 14
+#define DBG2_DEVICE_BASE_OFFSET 18
+#define DBG2_DEVICE_MIN_LENGTH 22
+#define DBG2_PORT_SERIAL 0x8000
+// A Generic Address Structure: its address space, then its address.
+#define GAS_SIZE 12
+#define GAS_SPACE 0
+#define GAS_ADDRESS 4
+#define GAS_SPACE_SYSTEM_IO 1
+// What 16550s and 16450s a table may name: the full one, the subset that
+// DBGP's revision 1 describes, and one with its parameters in the GAS, as
+// DBG2's Table 3 has them, which the SPCR's revisions after 1 share. Its
+// revision 1 has only the first two.
+#define UART_FULL_16550 0x0000
+#define UART_16550_SUBSET 0x0001
+#define UART_16550_GAS 0x0012
 
 struct smbios2_entry {
     char anchor[4];
@@ -439,6 +463,113 @@ bool fwtables_fadt_pm_profile(uint8_t *profile) {
         return true;
     }
     return false;
+}
+
+// A table the RSDP in the firmware's configuration tables leads to.
+static const uint8_t *acpi_table(const char *signature) {
+    const struct rsdp *rsdp = config_table_find(&acpi_20_guid);
+    if (rsdp == NULL || rsdp_check(rsdp) != NULL) {
+        rsdp = config_table_find(&acpi_10_guid);
+        if (rsdp == NULL || rsdp_check(rsdp) != NULL) {
+            return NULL;
+        }
+    }
+    bool xsdt = rsdp->revision >= 2 && rsdp->xsdt_address != 0;
+    size_t entry_size = xsdt ? sizeof(uint64_t) : sizeof(uint32_t);
+    uintptr_t root_address = xsdt ? rsdp->xsdt_address : rsdp->rsdt_address;
+    const uint8_t *root = (const uint8_t *)root_address;
+    if (root == NULL) {
+        return NULL;
+    }
+    uint32_t length;
+    memcpy(&length, root + ACPI_TABLE_LENGTH, sizeof(uint32_t));
+    if (length < ACPI_TABLE_HEADER_SIZE || byte_sum(root, length) != 0) {
+        return NULL;
+    }
+    for (size_t off = ACPI_TABLE_HEADER_SIZE; off + entry_size <= length; off += entry_size) {
+        uintptr_t address = 0;
+        memcpy(&address, root + off, entry_size);
+        const uint8_t *table = (const uint8_t *)address;
+        if (table == NULL || memcmp(table, signature, 4) != 0) {
+            continue;
+        }
+        uint32_t table_length;
+        memcpy(&table_length, table + ACPI_TABLE_LENGTH, sizeof(uint32_t));
+        if (table_length < ACPI_TABLE_HEADER_SIZE || byte_sum(table, table_length) != 0) {
+            return NULL;
+        }
+        return table;
+    }
+    return NULL;
+}
+
+static uint32_t table_length(const uint8_t *table) {
+    uint32_t length;
+    memcpy(&length, table + ACPI_TABLE_LENGTH, sizeof(uint32_t));
+    return length;
+}
+
+// The port a Generic Address Structure gives, if it is one.
+static uint16_t gas_port(const uint8_t *gas) {
+    uint64_t address;
+    memcpy(&address, gas + GAS_ADDRESS, sizeof(uint64_t));
+    if (gas[GAS_SPACE] != GAS_SPACE_SYSTEM_IO || address == 0 || address > 0xfff8) {
+        return 0;
+    }
+    return (uint16_t)address;
+}
+
+static uint16_t spcr_port(void) {
+    const uint8_t *spcr = acpi_table("SPCR");
+    if (spcr == NULL || table_length(spcr) < SPCR_BASE_ADDRESS + GAS_SIZE) {
+        return 0;
+    }
+    uint8_t type = spcr[SPCR_INTERFACE_TYPE];
+    bool uart = type == UART_FULL_16550 || type == UART_16550_SUBSET
+             || (spcr[ACPI_TABLE_REVISION] > 1 && type == UART_16550_GAS);
+    return uart ? gas_port(spcr + SPCR_BASE_ADDRESS) : 0;
+}
+
+static uint16_t dbg2_port(void) {
+    const uint8_t *dbg2 = acpi_table("DBG2");
+    if (dbg2 == NULL || table_length(dbg2) < DBG2_DEVICE_COUNT + sizeof(uint32_t)) {
+        return 0;
+    }
+    uint32_t length = table_length(dbg2);
+    uint32_t offset;
+    uint32_t count;
+    memcpy(&offset, dbg2 + DBG2_DEVICE_OFFSET, sizeof(uint32_t));
+    memcpy(&count, dbg2 + DBG2_DEVICE_COUNT, sizeof(uint32_t));
+    for (size_t i = 0; i < count && offset <= length - DBG2_DEVICE_MIN_LENGTH; i++) {
+        const uint8_t *device = dbg2 + offset;
+        uint16_t size;
+        uint16_t type;
+        uint16_t subtype;
+        uint16_t base;
+        memcpy(&size, device + DBG2_DEVICE_LENGTH, sizeof(uint16_t));
+        memcpy(&type, device + DBG2_DEVICE_PORT_TYPE, sizeof(uint16_t));
+        memcpy(&subtype, device + DBG2_DEVICE_PORT_SUBTYPE, sizeof(uint16_t));
+        memcpy(&base, device + DBG2_DEVICE_BASE_OFFSET, sizeof(uint16_t));
+        if (size < DBG2_DEVICE_MIN_LENGTH || size > length - offset) {
+            return 0;
+        }
+        bool uart = type == DBG2_PORT_SERIAL
+                 && (subtype == UART_FULL_16550 || subtype == UART_16550_SUBSET
+                  || subtype == UART_16550_GAS);
+        if (uart && base <= size - GAS_SIZE) {
+            uint16_t port = gas_port(device + base);
+            if (port != 0) {
+                return port;
+            }
+        }
+        offset += size;
+    }
+    return 0;
+}
+
+uint16_t fwtables_serial_port(void) {
+    uint16_t port = spcr_port();
+    return port != 0 ? port : dbg2_port();
 }
 
 bool fwtables_smbios_byte(uint8_t type, uint8_t offset, uint8_t *value) {

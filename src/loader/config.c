@@ -271,9 +271,15 @@ static bool apply_boolean(const struct setting *setting, struct span value) {
     return true;
 }
 
+// 0 stands for auto: the port the firmware's tables give.
 static bool apply_serial_port(const struct setting *setting, struct span value) {
+    if (equals_ignoring_case(value, "auto")) {
+        config.serial_port = 0;
+        printf("  %s = auto\n", setting->name);
+        return true;
+    }
     uint32_t port;
-    if (!parse_integer(value, &port) || port > 0xffff) {
+    if (!parse_integer(value, &port) || port == 0 || port > 0xffff) {
         return false;
     }
     config.serial_port = (uint16_t)port;
@@ -768,7 +774,7 @@ static bool apply_variable(EFI_CHAR16 *name, EFI_GUID *guid, const char *source)
 
 void config_load(void) {
     memset(&config, 0, sizeof(struct config));
-    config.serial_port = 0x3f8;
+    config.serial_port = 0;
     config.serial_baud = 115200;
     config.vga_emulation = HANDOFF_VGA_EMULATION_AUTO;
     config.vga_scaling = HANDOFF_VGA_SCALING_STRETCH;

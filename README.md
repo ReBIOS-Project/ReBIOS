@@ -167,7 +167,7 @@ printf '\x07\x00\x00\x00%s' "$(cat rebios.ini)" > /sys/firmware/efi/efivars/ReBI
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `serial` | bool | `false` | Enable serial debug output |
-| `serial_port` | hex/int | `0x3f8` | Serial I/O port address (COM1=`0x3f8`, COM2=`0x2f8`, COM3=`0x3e8`, COM4=`0x2e8`) |
+| `serial_port` | `auto`/hex/int | `auto` | Serial I/O port address (COM1=`0x3f8`, COM2=`0x2f8`, COM3=`0x3e8`, COM4=`0x2e8`). `auto`: the 16550 the firmware's SPCR table, or else its DBG2 table, describes, and none without one |
 | `serial_baud` | int | `115200` | Serial baud rate |
 | `verbose` | bool | `false` | Show debug output on screen while ReBIOS starts |
 | `boot_drive` | `self`/`auto`/drive | `self` | The drive SeaBIOS boots first, the others following in the `auto` order. `self`: the drive ReBIOS was started from, if it has a legacy boot sector. `auto`: drives with something to boot (a legacy boot sector, or a bootable CD or DVD) before those without, internal drives before CDs and DVDs before external (USB) drives, and the drive ReBIOS was started from last; the [ReBIOS USB stick](#the-rebios-usb-stick)'s setting. Anything else names a drive by its UEFI device path (e.g. `PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x1,0xFFFF,0x0)`), or else by part of its model name (e.g. `Samsung SSD 860`), case aside, as ReBIOS lists them when `verbose` is on |
