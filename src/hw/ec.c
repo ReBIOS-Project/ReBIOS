@@ -31,6 +31,7 @@
 #include <uacpi/uacpi.h>
 #include <uacpi/utilities.h>
 #include <hw/ec.h>
+#include <hw/acpi.h>
 #include <lib/log.h>
 #include <lib/time.h>
 #include <sys/task.h>
@@ -296,12 +297,12 @@ void ec_init(void) {
     uint64_t glk;
     ec.global_lock = uacpi_eval_simple_integer(ec.node, "_GLK", &glk) == UACPI_STATUS_OK
                   && glk != 0;
-    const char *path = uacpi_namespace_node_generate_absolute_path(ec.node);
+    const char *path = acpi_path(ec.node);
     printf(
         "Embedded controller %s, data port %#x, command port %#x%s\n", path, ec.data, ec.command,
         ec.global_lock ? ", global lock" : ""
     );
-    uacpi_free_absolute_path(path);
+    acpi_path_free(path);
 
     uacpi_status status = uacpi_install_address_space_handler(
         ec.node, UACPI_ADDRESS_SPACE_EMBEDDED_CONTROLLER, region_handler, NULL

@@ -184,14 +184,9 @@ static void claim(struct scan *r, uintptr_t base, size_t size) {
 }
 
 static void log_failure(uacpi_namespace_node *node, const char *name, uacpi_status status) {
-    const char *path = uacpi_namespace_node_generate_absolute_path(node);
-    printf(
-        "Cannot evaluate %s.%s: %s\n", path != NULL ? path : "?", name,
-        uacpi_status_to_string(status)
-    );
-    if (path != NULL) {
-        uacpi_free_absolute_path(path);
-    }
+    const char *path = acpi_path(node);
+    printf("Cannot evaluate %s.%s: %s\n", path, name, uacpi_status_to_string(status));
+    acpi_path_free(path);
 }
 
 static void private_mcfg(struct scan *r) {
@@ -311,15 +306,13 @@ static void crs_address(
         return;
     }
     if (translation != 0) {
-        const char *path = uacpi_namespace_node_generate_absolute_path(s->hb->node);
+        const char *path = acpi_path(s->hb->node);
         printf(
-            "PCI host bridge %s: window 0x%llx+0x%llx translated by 0x%llx, not used\n",
-            path != NULL ? path : "?", (unsigned long long)minimum, (unsigned long long)length,
+            "PCI host bridge %s: window 0x%llx+0x%llx translated by 0x%llx, not used\n", path,
+            (unsigned long long)minimum, (unsigned long long)length,
             (unsigned long long)translation
         );
-        if (path != NULL) {
-            uacpi_free_absolute_path(path);
-        }
+        acpi_path_free(path);
         return;
     }
     // ACPI 6.6, 6.4.3.5.5: for PCI windows, cacheable and write-combining mean
@@ -466,8 +459,7 @@ static void host_bridge_found(struct scan *r, uacpi_namespace_node *node) {
         }
     }
 
-    const char *path = uacpi_namespace_node_generate_absolute_path(node);
-    const char *name = path != NULL ? path : "?";
+    const char *name = acpi_path(node);
     if (scan.bus_found && has_bbn && (uint8_t)bbn != hb.bus) {
         printf(
             "PCI host bridge %s: _CRS starts at bus %02x, _BBN says %02x\n", name, hb.bus,
@@ -476,9 +468,7 @@ static void host_bridge_found(struct scan *r, uacpi_namespace_node *node) {
     }
     host_bridge_log(&hb, name);
     bool known = host_bridge_known(r, &hb, name);
-    if (path != NULL) {
-        uacpi_free_absolute_path(path);
-    }
+    acpi_path_free(name);
     if (known) {
         kfree(hb.windows);
         return;

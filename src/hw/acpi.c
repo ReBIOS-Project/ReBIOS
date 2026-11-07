@@ -877,3 +877,16 @@ bool acpi_claims_port(uint16_t port) {
     acpi_unlock();
     return claim.claimed;
 }
+
+static const char unknown_path[] = "?";
+
+const char *acpi_path(uacpi_namespace_node *node) {
+    const char *path = uacpi_namespace_node_generate_absolute_path(node);
+    return path != NULL ? path : unknown_path;
+}
+
+void acpi_path_free(const char *path) {
+    if (path != unknown_path) {
+        uacpi_free_absolute_path(path);
+    }
+}

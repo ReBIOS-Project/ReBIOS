@@ -22,6 +22,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <uacpi/acpi.h>
+#include <uacpi/types.h>
 
 // Where the RSDP's fields and a table header's are, by uACPI's layouts of
 // them, and an ACPI 1.0 RSDP's size, that of what comes before the length.
@@ -91,5 +92,10 @@ bool acpi_motherboard_reserves(uint64_t base, uint64_t end);
 // acpi_sci_interrupt(). Returns false if uACPI has no SCI handler.
 bool acpi_sci_irq(uint32_t *irq);
 void acpi_sci_interrupt(void *ctx);
+
+// A namespace node's absolute path, for messages, "?" where uACPI cannot make
+// it: acpi_path_free() takes it back.
+const char *acpi_path(uacpi_namespace_node *node);
+void acpi_path_free(const char *path);
 
 #endif

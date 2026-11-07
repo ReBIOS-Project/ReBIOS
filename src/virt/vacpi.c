@@ -1098,11 +1098,9 @@ static bool merged_name_free(const char name[4]) {
 }
 
 static void bridge_log(uacpi_namespace_node *node, const char *what) {
-    const char *path = uacpi_namespace_node_generate_absolute_path(node);
-    printf("Guest ACPI: host bridge %s %s\n", path != NULL ? path : "?", what);
-    if (path != NULL) {
-        uacpi_free_absolute_path(path);
-    }
+    const char *path = acpi_path(node);
+    printf("Guest ACPI: host bridge %s %s\n", path, what);
+    acpi_path_free(path);
 }
 
 // The firmware's host bridges but the guest's are devices below it at their
@@ -2448,9 +2446,9 @@ static void mailbox_call(size_t index, uint32_t argc) {
         isa_ports_changed(port);
     }
     if (status != UACPI_STATUS_OK) {
-        const char *path = uacpi_namespace_node_generate_absolute_path(vacpi.methods[index].node);
+        const char *path = acpi_path(vacpi.methods[index].node);
         printf("Guest call of %s: %s\n", path, uacpi_status_to_string(status));
-        uacpi_free_absolute_path(path);
+        acpi_path_free(path);
     }
     if (vacpi.last != NULL) {
         uacpi_object_unref(vacpi.last);
@@ -2598,9 +2596,9 @@ static uacpi_status notify(uacpi_handle ctx, uacpi_namespace_node *node, uacpi_u
         }
     }
     if (target == UINT32_MAX) {
-        const char *path = uacpi_namespace_node_generate_absolute_path(node);
+        const char *path = acpi_path(node);
         printf("Notify(%s, %#llx) has no target in the guest\n", path, (unsigned long long)value);
-        uacpi_free_absolute_path(path);
+        acpi_path_free(path);
         return UACPI_STATUS_OK;
     }
     spinlock_acquire(&vacpi.lock);

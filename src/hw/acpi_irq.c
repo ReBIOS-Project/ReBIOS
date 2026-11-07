@@ -27,6 +27,7 @@
 #include <uacpi/uacpi.h>
 #include <uacpi/utilities.h>
 #include <hw/acpi_irq.h>
+#include <hw/acpi.h>
 #include <hw/isa.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
@@ -90,14 +91,9 @@ static bool namespace_loaded(void) {
 }
 
 static void log_failure(uacpi_namespace_node *node, const char *name, uacpi_status status) {
-    const char *path = uacpi_namespace_node_generate_absolute_path(node);
-    printf(
-        "Cannot evaluate %s.%s: %s\n", path != NULL ? path : "?", name,
-        uacpi_status_to_string(status)
-    );
-    if (path != NULL) {
-        uacpi_free_absolute_path(path);
-    }
+    const char *path = acpi_path(node);
+    printf("Cannot evaluate %s.%s: %s\n", path, name, uacpi_status_to_string(status));
+    acpi_path_free(path);
 }
 
 static bool device_present(uacpi_namespace_node *node) {
@@ -147,14 +143,12 @@ static uacpi_iteration_decision host_bridge_found(
         .present = device_present(node)
     };
 
-    const char *path = uacpi_namespace_node_generate_absolute_path(node);
+    const char *path = acpi_path(node);
     printf(
-        "PCI host bridge %s: segment %04x, bus %02x%s\n", path != NULL ? path : "?", hb->segment,
-        hb->bus, hb->present ? "" : ", not present"
+        "PCI host bridge %s: segment %04x, bus %02x%s\n", path, hb->segment, hb->bus,
+        hb->present ? "" : ", not present"
     );
-    if (path != NULL) {
-        uacpi_free_absolute_path(path);
-    }
+    acpi_path_free(path);
     return UACPI_ITERATION_DECISION_CONTINUE;
 }
 
