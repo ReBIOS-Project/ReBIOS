@@ -1206,7 +1206,7 @@ static uacpi_iteration_decision hide_found(
     } else if (uacpi_device_matches_pnp_id(node, legacy_ids)
             || uacpi_device_matches_pnp_id(node, i8042_keyboard_ids)
             || uacpi_device_matches_pnp_id(node, i8042_mouse_ids)
-            || (uacpi_device_matches_pnp_id(node, port_ids) && !isa_ports_given(node))) {
+            || (uacpi_device_matches_pnp_id(node, port_ids) && !isa_ports_shown(node))) {
         dropped_add(node);
     }
     return UACPI_ITERATION_DECISION_CONTINUE;
@@ -2434,16 +2434,49 @@ static bool osc_merge(uacpi_object **ret, uint32_t argc) {
     return *ret != NULL;
 }
 
+// The serial or parallel port whose _SRS or _DIS the method is, which
+// isa_ports follows: NULL for other methods.
+static uacpi_namespace_node *port_resources(uacpi_namespace_node *node) {
+    uacpi_object_name name = uacpi_namespace_node_name(node);
+    if (memcmp(name.text, "_SRS", 4) != 0 && memcmp(name.text, "_DIS", 4) != 0) {
+        return NULL;
+    }
+    uacpi_namespace_node *device = uacpi_namespace_node_parent(node);
+    return isa_ports_shown(device) ? device : NULL;
+}
+
+// Whether an _SRS's template, in the first slot, may reach the firmware.
+static bool srs_settable(uacpi_namespace_node *node, uint32_t argc) {
+    uacpi_object_name name = uacpi_namespace_node_name(node);
+    if (memcmp(name.text, "_SRS", 4) != 0 || argc == 0) {
+        return true;
+    }
+    uacpi_object *template = slot_object(0);
+    uacpi_data_view view;
+    bool settable = template == NULL || uacpi_object_get_type(template) != UACPI_OBJECT_BUFFER
+                 || uacpi_object_get_string_or_buffer(template, &view) != UACPI_STATUS_OK
+                 || isa_ports_settable(view.const_bytes, view.length);
+    uacpi_object_unref(template);
+    return settable;
+}
+
 static void mailbox_call(size_t index, uint32_t argc) {
     if (index >= vacpi.method_count || argc > MBX_SLOT_COUNT) {
         write_result(NULL, 1);
         return;
     }
     uacpi_namespace_node *node = vacpi.methods[index].node;
+    uacpi_namespace_node *port = port_resources(node);
     uacpi_object *ret = NULL;
-    uacpi_status status = eval_slots(node, argc, &ret);
+    uacpi_status status = UACPI_STATUS_DENIED;
+    if (port == NULL || srs_settable(node, argc)) {
+        status = eval_slots(node, argc, &ret);
+    }
     if (status == UACPI_STATUS_OK && is_primary_osc(node) && !osc_merge(&ret, argc)) {
         status = UACPI_STATUS_OUT_OF_MEMORY;
+    }
+    if (status == UACPI_STATUS_OK && port != NULL) {
+        isa_ports_changed(port);
     }
     if (status != UACPI_STATUS_OK) {
         const char *path = uacpi_namespace_node_generate_absolute_path(vacpi.methods[index].node);

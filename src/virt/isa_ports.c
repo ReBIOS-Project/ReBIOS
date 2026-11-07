@@ -33,13 +33,14 @@
 #include <lib/log.h>
 #include <virt/io.h>
 #include <virt/irq.h>
+#include <virt/vcpu.h>
 
 // The standard PC serial and parallel ports' IDs that Linux 7.3's 8250_pnp and
 // parport_pc drivers take.
 static const char *const port_ids[] = { "PNP0500", "PNP0501", "PNP0400", "PNP0401", NULL };
 
 #define UART_PORTS 8
-#define MAX_GIVEN 8
+#define MAX_DEVICES 8
 #define MAX_RANGES 4
 #define MAX_LINES 4
 #define ISA_IRQS 16
@@ -58,6 +59,22 @@ static const char *const port_ids[] = { "PNP0500", "PNP0501", "PNP0400", "PNP040
 #define IDE_SECONDARY_IRQ 15
 #define IDE_CHANNEL_PORTS 8
 
+// ACPI 6.6's resource descriptors that take I/O ports, by their first byte:
+// the small I/O Port and Fixed Location I/O Port ones (6.4.2.5, 6.4.2.6), and
+// the large Word, DWord, QWord, and Extended Address Space ones (6.4.3.5.1 to
+// 6.4.3.5.4) of resource type 1, I/O; and the End Tag (6.4.2.9).
+#define RES_LARGE 0x80
+#define RES_SMALL_LENGTH 0x07
+#define RES_IO 0x47
+#define RES_FIXED_IO 0x4b
+#define RES_FIXED_IO_MASK 0x3ff
+#define RES_END 0x79
+#define RES_DWORD 0x87
+#define RES_WORD 0x88
+#define RES_QWORD 0x8a
+#define RES_EXTENDED 0x8b
+#define RES_RANGE_IO 1
+
 struct device_ports {
     uint16_t base[MAX_RANGES];
     uint16_t count[MAX_RANGES];
@@ -68,16 +85,39 @@ struct device_ports {
     size_t line_count;
 };
 
-static const void *given[MAX_GIVEN];
-static size_t given_count;
+// A serial or parallel port in the guest's namespace, which the guest's OS may
+// turn on, off, or move through its _SRS and _DIS: what the guest has of it.
+struct port_device {
+    uacpi_namespace_node *node;
+    struct device_ports given;
+};
 
-bool isa_ports_given(const void *node) {
-    for (size_t i = 0; i < given_count; i++) {
-        if (given[i] == node) {
-            return true;
+static struct port_device devices[MAX_DEVICES];
+static size_t device_count;
+
+static struct port_device *device_of(const void *node) {
+    for (size_t i = 0; i < device_count; i++) {
+        if (devices[i].node == node) {
+            return &devices[i];
         }
     }
-    return false;
+    return NULL;
+}
+
+bool isa_ports_shown(const void *node) {
+    return device_of(node) != NULL;
+}
+
+static uint16_t log_port(void) {
+    const struct handoff_config *config = &core_handoff->config;
+    return config->serial != 0 ? config->serial_port : 0;
+}
+
+// Whether ports from base up to end, which it does not include, take one of
+// the log UART's.
+static bool takes_log(uint64_t base, uint64_t end) {
+    uint16_t log = log_port();
+    return log != 0 && base < (uint64_t)log + UART_PORTS && log < end;
 }
 
 static void add_line(struct device_ports *d, uint32_t line, bool gsi) {
@@ -101,6 +141,34 @@ static uacpi_iteration_decision collect_range(void *user, uacpi_resource *resour
         case UACPI_RESOURCE_TYPE_FIXED_IO: {
             base = resource->fixed_io.address;
             count = resource->fixed_io.length;
+            break;
+        }
+        case UACPI_RESOURCE_TYPE_ADDRESS16: {
+            if (resource->address16.common.type != UACPI_RANGE_IO) {
+                return UACPI_ITERATION_DECISION_CONTINUE;
+            }
+            base = resource->address16.minimum;
+            count = resource->address16.address_length;
+            break;
+        }
+        case UACPI_RESOURCE_TYPE_ADDRESS32: {
+            if (resource->address32.common.type != UACPI_RANGE_IO
+             || resource->address32.minimum > UINT16_MAX
+             || resource->address32.address_length > UINT16_MAX) {
+                return UACPI_ITERATION_DECISION_CONTINUE;
+            }
+            base = (uint16_t)resource->address32.minimum;
+            count = (uint16_t)resource->address32.address_length;
+            break;
+        }
+        case UACPI_RESOURCE_TYPE_ADDRESS64: {
+            if (resource->address64.common.type != UACPI_RANGE_IO
+             || resource->address64.minimum > UINT16_MAX
+             || resource->address64.address_length > UINT16_MAX) {
+                return UACPI_ITERATION_DECISION_CONTINUE;
+            }
+            base = (uint16_t)resource->address64.minimum;
+            count = (uint16_t)resource->address64.address_length;
             break;
         }
         case UACPI_RESOURCE_TYPE_IRQ: {
@@ -127,44 +195,166 @@ static uacpi_iteration_decision collect_range(void *user, uacpi_resource *resour
     return UACPI_ITERATION_DECISION_CONTINUE;
 }
 
-static uacpi_iteration_decision give_device(
+// The resources the device has, as its _CRS says while it is enabled: false
+// where they take the log UART's ports, which the guest never gets.
+static bool current_ports(uacpi_namespace_node *node, struct device_ports *d, bool *enabled) {
+    *d = (struct device_ports){ .ranges = 0, .line_count = 0 };
+    uacpi_u32 sta;
+    *enabled = uacpi_eval_sta(node, &sta) == UACPI_STATUS_OK
+            && (sta & ACPI_STA_RESULT_DEVICE_ENABLED) != 0;
+    if (!*enabled) {
+        return true;
+    }
+    uacpi_for_each_device_resource(node, "_CRS", collect_range, d);
+    for (size_t i = 0; i < d->ranges; i++) {
+        if (takes_log(d->base[i], (uint64_t)d->base[i] + d->count[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void give_lines(const struct device_ports *d) {
+    for (size_t i = 0; i < d->line_count; i++) {
+        if (d->line_is_gsi[i]) {
+            irq_give_gsi(d->lines[i]);
+        } else if (d->lines[i] < ISA_IRQS) {
+            irq_give_isa_line(d->lines[i]);
+        }
+    }
+}
+
+static void log_ports(uacpi_namespace_node *node, const struct device_ports *d) {
+    for (size_t i = 0; i < d->ranges; i++) {
+        printf(
+            "The guest gets %.4s's ports %#x-%#x\n", uacpi_namespace_node_name(node).text,
+            d->base[i], d->base[i] + d->count[i] - 1
+        );
+    }
+}
+
+// Those the firmware enabled, and those it left for the OS to turn on, but for
+// the one of ReBIOS's log.
+static uacpi_iteration_decision find_device(
     void *user, uacpi_namespace_node *node, uacpi_u32 depth
 ) {
     (void)user;
     (void)depth;
     uacpi_u32 sta;
+    uacpi_namespace_node *srs;
     if (uacpi_eval_sta(node, &sta) != UACPI_STATUS_OK
-     || (sta & ACPI_STA_RESULT_DEVICE_ENABLED) == 0) {
+     || (sta & ACPI_STA_RESULT_DEVICE_PRESENT) == 0
+     || ((sta & ACPI_STA_RESULT_DEVICE_ENABLED) == 0
+      && uacpi_namespace_node_find(node, "_SRS", &srs) != UACPI_STATUS_OK)) {
         return UACPI_ITERATION_DECISION_CONTINUE;
     }
-    struct device_ports d = { .ranges = 0, .line_count = 0 };
-    uacpi_for_each_device_resource(node, "_CRS", collect_range, &d);
-    const struct handoff_config *config = &core_handoff->config;
-    uint16_t log = config->serial != 0 ? config->serial_port : 0;
-    for (size_t i = 0; i < d.ranges; i++) {
-        if (log >= d.base[i] && log - d.base[i] < d.count[i]) {
-            return UACPI_ITERATION_DECISION_CONTINUE;
-        }
-    }
-    if (given_count == MAX_GIVEN) {
+    struct device_ports d;
+    bool enabled;
+    if (!current_ports(node, &d, &enabled) || device_count == MAX_DEVICES) {
         return UACPI_ITERATION_DECISION_CONTINUE;
     }
-    given[given_count++] = node;
+    devices[device_count++] = (struct port_device){ .node = node, .given = d };
     for (size_t i = 0; i < d.ranges; i++) {
         io_pass(d.base[i], d.count[i]);
-        printf(
-            "The guest gets %.4s's ports %#x-%#x\n", uacpi_namespace_node_name(node).text,
-            d.base[i], d.base[i] + d.count[i] - 1
-        );
     }
-    for (size_t i = 0; i < d.line_count; i++) {
-        if (d.line_is_gsi[i]) {
-            irq_give_gsi(d.lines[i]);
-        } else if (d.lines[i] < ISA_IRQS) {
-            irq_give_isa_line(d.lines[i]);
+    give_lines(&d);
+    if (!enabled) {
+        printf("The guest's OS may turn %.4s on\n", uacpi_namespace_node_name(node).text);
+    }
+    log_ports(node, &d);
+    return UACPI_ITERATION_DECISION_CONTINUE;
+}
+
+static uint64_t field(const uint8_t *p, size_t width) {
+    uint64_t value = 0;
+    for (size_t i = 0; i < width; i++) {
+        value |= (uint64_t)p[i] << (8 * i);
+    }
+    return value;
+}
+
+// The ports an I/O descriptor of an _SRS template sets, from its minimum, the
+// base that firmware takes, up to end, whatever its maximum, which Linux 7.3
+// gives as the last port: false for a descriptor of anything else.
+static bool template_ports(const uint8_t *r, size_t size, uint64_t *base, uint64_t *end) {
+    switch (r[0]) {
+        case RES_IO: {
+            *base = field(&r[2], 2);
+            *end = *base + r[7];
+            return true;
+        }
+        case RES_FIXED_IO: {
+            *base = field(&r[1], 2) & RES_FIXED_IO_MASK;
+            *end = *base + r[3];
+            return true;
+        }
+        case RES_WORD:
+        case RES_DWORD:
+        case RES_QWORD:
+        case RES_EXTENDED: {
+            // Granularity, minimum, maximum, translation, and length follow
+            // each other.
+            size_t width = r[0] == RES_WORD ? 2 : r[0] == RES_DWORD ? 4 : 8;
+            size_t at = r[0] == RES_EXTENDED ? 8 : 6;
+            if (r[3] != RES_RANGE_IO || at + 5 * width > size) {
+                return false;
+            }
+            *base = field(&r[at + width], width);
+            *end = *base + field(&r[at + 4 * width], width);
+            return true;
+        }
+        default: {
+            return false;
         }
     }
-    return UACPI_ITERATION_DECISION_CONTINUE;
+}
+
+bool isa_ports_settable(const uint8_t *template, size_t length) {
+    size_t at = 0;
+    while (at < length && template[at] != RES_END) {
+        const uint8_t *r = &template[at];
+        size_t size;
+        if ((r[0] & RES_LARGE) == 0) {
+            size = 1 + (size_t)(r[0] & RES_SMALL_LENGTH);
+        } else if (at + 3 <= length) {
+            size = 3 + (size_t)field(&r[1], 2);
+        } else {
+            return false;
+        }
+        uint64_t base;
+        uint64_t end;
+        if (at + size > length || (template_ports(r, size, &base, &end) && takes_log(base, end))) {
+            return false;
+        }
+        at += size;
+    }
+    return true;
+}
+
+void isa_ports_changed(const void *node) {
+    struct port_device *dev = device_of(node);
+    if (dev == NULL) {
+        return;
+    }
+    struct device_ports now;
+    bool enabled;
+    if (!current_ports(dev->node, &now, &enabled)) {
+        now = (struct device_ports){ .ranges = 0, .line_count = 0 };
+    }
+    vcpu_pause_others();
+    for (size_t i = 0; i < dev->given.ranges; i++) {
+        io_unpass(dev->given.base[i], dev->given.count[i]);
+    }
+    for (size_t i = 0; i < now.ranges; i++) {
+        io_pass(now.base[i], now.count[i]);
+    }
+    vcpu_resume_others();
+    give_lines(&now);
+    dev->given = now;
+    if (!enabled) {
+        printf("The guest's OS turned %.4s off\n", uacpi_namespace_node_name(dev->node).text);
+    }
+    log_ports(dev->node, &now);
 }
 
 static void give_ide_channels(void) {
@@ -197,6 +387,6 @@ void isa_ports_init(void) {
         return;
     }
     acpi_lock();
-    uacpi_find_devices_at(uacpi_namespace_root(), port_ids, give_device, NULL);
+    uacpi_find_devices_at(uacpi_namespace_root(), port_ids, find_device, NULL);
     acpi_unlock();
 }
