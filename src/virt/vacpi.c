@@ -121,6 +121,10 @@
 #define PM1_CNT_SLP_EN 0x2000
 #define SLP_TYP_S5 5
 
+// What a control-method power button's Notify() says of a press (ACPI 6.6,
+// Table 5.231).
+#define NOTIFY_POWER_BUTTON_PRESSED 0x80
+
 #define QUEUE_SIZE 128
 #define MAX_PATH_DEPTH 32
 #define MAX_PACKAGE 255
@@ -761,6 +765,7 @@ static void emit_scopes(struct aml *a, uacpi_namespace_node *parent);
 static const char *const ec_ids[] = { "PNP0C09", NULL };
 static const char *const hpet_ids[] = { "PNP0103", NULL };
 static const char *const motherboard_ids[] = { "PNP0C01", "PNP0C02", NULL };
+static const char *const power_button_ids[] = { "PNP0C0C", NULL };
 
 // A producer's fixed window, readable and writable, uncached or cacheable.
 #define ADDRESS_FIXED_PRODUCER 0x0c
@@ -2580,8 +2585,25 @@ static void mailbox_place(void) {
     mmio_register(vacpi.doorbell, DOORBELL_SIZE, &doorbell_ops, NULL);
 }
 
+// Until the guest takes the power button over, it powers the machine off, as
+// the firmware's does outside ACPI mode.
+static void power_button_pressed(bool guest) {
+    if (!guest) {
+        printf("Power button pressed, with no OS to take it\n");
+        power_off();
+    }
+}
+
 static uacpi_status notify(uacpi_handle ctx, uacpi_namespace_node *node, uacpi_u64 value) {
     (void)ctx;
+    // A control-method power button reaches the guest as a notification.
+    if (value == NOTIFY_POWER_BUTTON_PRESSED
+     && uacpi_device_matches_pnp_id(node, power_button_ids)) {
+        spinlock_acquire(&vacpi.lock);
+        bool guest = (vacpi.gpe0_en & 1) != 0;
+        spinlock_release(&vacpi.lock);
+        power_button_pressed(guest);
+    }
     // The guest has the _OSC of the host bridges below its own in its own,
     // which 8 has the OS evaluate again, ACPI 6.6, 6.2.12.
     if (value == 8 && merged_of(node) != NULL) {
@@ -2621,18 +2643,14 @@ static uacpi_status notify(uacpi_handle ctx, uacpi_namespace_node *node, uacpi_u
     return UACPI_STATUS_OK;
 }
 
-// Until the guest takes the power button over, it powers the machine off, as
-// the firmware's does outside ACPI mode.
+// The fixed power button.
 static uacpi_interrupt_ret power_button(uacpi_handle ctx) {
     (void)ctx;
     spinlock_acquire(&vacpi.lock);
     bool guest = (vacpi.pm1_en & PM1_PWRBTN) != 0;
     vacpi.pm1_sts |= PM1_PWRBTN;
     spinlock_release(&vacpi.lock);
-    if (!guest) {
-        printf("Power button pressed, with no OS to take it\n");
-        power_off();
-    }
+    power_button_pressed(guest);
     sci_update();
     return UACPI_INTERRUPT_HANDLED;
 }
