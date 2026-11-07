@@ -44,20 +44,6 @@
 #include <virt/virt.h>
 #include <virt/vlapic.h>
 
-#define EPT_CAP_WALK_4 ((uint64_t)1 << 6)
-#define EPT_CAP_WB ((uint64_t)1 << 14)
-#define EPT_CAP_2M ((uint64_t)1 << 16)
-#define EPT_CAP_1G ((uint64_t)1 << 17)
-#define EPT_CAP_INVEPT ((uint64_t)1 << 20)
-#define EPT_CAP_DIRTY ((uint64_t)1 << 21)
-#define EPT_CAP_INVEPT_ALL ((uint64_t)1 << 26)
-#define VPID_CAP_INVVPID ((uint64_t)1 << 32)
-#define VPID_CAP_INVVPID_ADDRESS ((uint64_t)1 << 40)
-#define VPID_CAP_INVVPID_SINGLE ((uint64_t)1 << 41)
-#define VPID_CAP_INVVPID_ALL ((uint64_t)1 << 42)
-#define VPID_CAP_INVVPID_GLOBALS ((uint64_t)1 << 43)
-
-#define EPTP_WB 6
 #define EPTP_WALK_4 (3 << 3)
 #define EPTP_DIRTY (1 << 6)
 
@@ -360,7 +346,7 @@ bool vmx_ept_huge_pages(void) {
 }
 
 bool vmx_ept_dirty_flags(void) {
-    return (ept_vpid_cap & EPT_CAP_DIRTY) != 0;
+    return (ept_vpid_cap & EPT_CAP_AD) != 0;
 }
 
 bool vmx_pt_passthrough(void) {

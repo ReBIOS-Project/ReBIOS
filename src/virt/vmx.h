@@ -351,6 +351,46 @@
 #define EPT_QUAL_NMI_UNBLOCKED ((uint64_t)1 << 12)
 #define EPT_QUAL_ASYNC ((uint64_t)1 << 16)
 
+// IA32_VMX_EPT_VPID_CAP (SDM 325462-093 Vol. 3D, A.10).
+#define EPT_CAP_EXEC_ONLY ((uint64_t)1 << 0)
+#define EPT_CAP_WALK_4 ((uint64_t)1 << 6)
+#define EPT_CAP_WALK_5 ((uint64_t)1 << 7)
+#define EPT_CAP_UC ((uint64_t)1 << 8)
+#define EPT_CAP_WB ((uint64_t)1 << 14)
+#define EPT_CAP_2M ((uint64_t)1 << 16)
+#define EPT_CAP_1G ((uint64_t)1 << 17)
+#define EPT_CAP_INVEPT ((uint64_t)1 << 20)
+#define EPT_CAP_AD ((uint64_t)1 << 21)
+#define EPT_CAP_ADVANCED_INFO ((uint64_t)1 << 22)
+#define EPT_CAP_INVEPT_SINGLE ((uint64_t)1 << 25)
+#define EPT_CAP_INVEPT_ALL ((uint64_t)1 << 26)
+#define VPID_CAP_INVVPID ((uint64_t)1 << 32)
+#define VPID_CAP_INVVPID_ADDRESS ((uint64_t)1 << 40)
+#define VPID_CAP_INVVPID_SINGLE ((uint64_t)1 << 41)
+#define VPID_CAP_INVVPID_ALL ((uint64_t)1 << 42)
+#define VPID_CAP_INVVPID_GLOBALS ((uint64_t)1 << 43)
+
+// EPT paging-structure entries (SDM 325462-093 Vol. 3C, 31.3.2), whose dirty
+// flags the EPT pointer enables (31.3.5), and the bits reserved in those that
+// reference tables, bit 7 aside.
+#define EPT_R ((uint64_t)1 << 0)
+#define EPT_W ((uint64_t)1 << 1)
+#define EPT_X ((uint64_t)1 << 2)
+#define EPT_MEMTYPE_SHIFT 3
+#define EPT_IPAT ((uint64_t)1 << 6)
+#define EPT_LARGE ((uint64_t)1 << 7)
+#define EPT_ACCESSED ((uint64_t)1 << 8)
+#define EPT_DIRTY ((uint64_t)1 << 9)
+#define EPT_XU ((uint64_t)1 << 10)
+#define EPT_TABLE_RESERVED ((uint64_t)0x78)
+
+// The EPTP (SDM 325462-093 Vol. 3C, Table 27-9).
+#define EPTP_LEVELS(eptp) ((int)((eptp) >> 3 & 7) + 1)
+#define EPTP_AD ((uint64_t)1 << 6)
+#define EPTP_RESERVED ((uint64_t)0xf80)
+#define EPTP_UC 0
+#define EPTP_WB 6
+
 // APIC-access exit qualification: the page offset, and the access type (SDM
 // 325462-093 Vol. 3C, Table 30-6).
 #define APIC_ACCESS_OFFSET_MASK ((uint64_t)0xfff)

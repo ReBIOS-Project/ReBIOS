@@ -28,15 +28,7 @@
 #include <sys/smp.h>
 #include <sys/x86.h>
 #include <virt/vcpu.h>
-
-// EPT entry bits.
-#define EPT_R ((uint64_t)1 << 0)
-#define EPT_W ((uint64_t)1 << 1)
-#define EPT_X ((uint64_t)1 << 2)
-#define EPT_MEMTYPE_SHIFT 3
-#define EPT_LARGE ((uint64_t)1 << 7)
-// Where the EPT pointer enables it (SDM 325462-093 Vol. 3C, 31.3.5).
-#define EPT_DIRTY ((uint64_t)1 << 9)
+#include <virt/vmx.h>
 
 // What a closed A20 gate folds, up to where a legacy guest reaches.
 #define A20_BIT ((uint64_t)0x100000)

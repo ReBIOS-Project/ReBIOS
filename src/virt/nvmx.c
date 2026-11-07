@@ -308,32 +308,15 @@ static unsigned int ept02_budget;
 
 #define CPUID_7_1_EAX_LAM ((uint32_t)1 << 26)
 
-// IA32_VMX_EPT_VPID_CAP (SDM 325462-093 Vol. 3D, A.10). The guest does without
-// supervisor shadow-stack control and the HLAT prefix size, whose controls it
-// is not offered.
-#define CAP_EXEC_ONLY ((uint64_t)1 << 0)
-#define CAP_WALK_4 ((uint64_t)1 << 6)
-#define CAP_WALK_5 ((uint64_t)1 << 7)
-#define CAP_UC ((uint64_t)1 << 8)
-#define CAP_WB ((uint64_t)1 << 14)
-#define CAP_2M ((uint64_t)1 << 16)
-#define CAP_1G ((uint64_t)1 << 17)
-#define CAP_INVEPT ((uint64_t)1 << 20)
-#define CAP_AD ((uint64_t)1 << 21)
-#define CAP_ADVANCED_INFO ((uint64_t)1 << 22)
-#define CAP_INVEPT_SINGLE ((uint64_t)1 << 25)
-#define CAP_INVEPT_ALL ((uint64_t)1 << 26)
-#define CAP_INVVPID ((uint64_t)1 << 32)
-#define CAP_INVVPID_ADDRESS ((uint64_t)1 << 40)
-#define CAP_INVVPID_SINGLE ((uint64_t)1 << 41)
-#define CAP_INVVPID_ALL ((uint64_t)1 << 42)
-#define CAP_INVVPID_GLOBALS ((uint64_t)1 << 43)
+// What the guest is offered of IA32_VMX_EPT_VPID_CAP: not supervisor
+// shadow-stack control nor the HLAT prefix size, whose controls it lacks.
 #define CAP_EPT_OFFERED \
-    (CAP_EXEC_ONLY | CAP_WALK_4 | CAP_WALK_5 | CAP_UC | CAP_WB | CAP_2M | CAP_1G | CAP_INVEPT \
-   | CAP_AD | CAP_ADVANCED_INFO | CAP_INVEPT_SINGLE | CAP_INVEPT_ALL)
+    (EPT_CAP_EXEC_ONLY | EPT_CAP_WALK_4 | EPT_CAP_WALK_5 | EPT_CAP_UC | EPT_CAP_WB | EPT_CAP_2M \
+   | EPT_CAP_1G | EPT_CAP_INVEPT | EPT_CAP_AD | EPT_CAP_ADVANCED_INFO | EPT_CAP_INVEPT_SINGLE \
+   | EPT_CAP_INVEPT_ALL)
 #define CAP_VPID_OFFERED \
-    (CAP_INVVPID | CAP_INVVPID_ADDRESS | CAP_INVVPID_SINGLE | CAP_INVVPID_ALL \
-   | CAP_INVVPID_GLOBALS)
+    (VPID_CAP_INVVPID | VPID_CAP_INVVPID_ADDRESS | VPID_CAP_INVVPID_SINGLE | VPID_CAP_INVVPID_ALL \
+   | VPID_CAP_INVVPID_GLOBALS)
 
 static int field_slot(uint32_t field);
 
@@ -385,7 +368,7 @@ void nvmx_init(void) {
     }
     // Only the processor's advanced information tells EPT02's fetches from
     // user-mode linear addresses from others.
-    if ((ept_vpid & CAP_ADVANCED_INFO) == 0) {
+    if ((ept_vpid & EPT_CAP_ADVANCED_INFO) == 0) {
         cap_proc2 &= ~((uint64_t)PROC2_MBEC << 32);
     }
     // EPTP switching is the hypervisor's to carry out, on EPT02.
@@ -396,7 +379,7 @@ void nvmx_init(void) {
     if ((cap_proc2 >> 32 & PROC2_VIRT_APIC_ACCESSES) != 0) {
         access_nowhere = (uintptr_t)page_alloc(1);
     }
-    ept02_level_max = (ept_vpid & CAP_1G) != 0 ? 2 : 1;
+    ept02_level_max = (ept_vpid & EPT_CAP_1G) != 0 ? 2 : 1;
     ept02_budget = core_handoff->nested_heap_size / PAGE_SIZE / smp_cpu_count();
 
     uint64_t misc = vmx_capability(MSR_IA32_VMX_MISC);
@@ -1109,30 +1092,10 @@ static bool ept12(const struct nvmx *n) {
     return (proc2_12(n) & PROC2_EPT) != 0;
 }
 
-// EPT paging-structure entries (SDM 325462-093 Vol. 3C, 31.3.2).
-#define EPT_R ((uint64_t)1 << 0)
-#define EPT_W ((uint64_t)1 << 1)
-#define EPT_X ((uint64_t)1 << 2)
-#define EPT_MEMTYPE_SHIFT 3
-#define EPT_IPAT ((uint64_t)1 << 6)
-#define EPT_LARGE ((uint64_t)1 << 7)
-#define EPT_ACCESSED ((uint64_t)1 << 8)
-#define EPT_DIRTY ((uint64_t)1 << 9)
-#define EPT_XU ((uint64_t)1 << 10)
 #define EPT_RIGHTS (EPT_R | EPT_W | EPT_X | EPT_XU)
-#define EPT_ADDRESS ((uint64_t)0x000ffffffffff000)
-// Reserved in entries that reference tables, bit 7 aside.
-#define EPT_TABLE_RESERVED ((uint64_t)0x78)
 
 // The page-modification log's entries (SDM 325462-093 Vol. 3C, 31.3.6).
 #define PML_ENTRIES 512
-
-// The EPTP (SDM 325462-093 Vol. 3C, Table 27-9).
-#define EPTP_LEVELS(eptp) ((int)((eptp) >> 3 & 7) + 1)
-#define EPTP_AD ((uint64_t)1 << 6)
-#define EPTP_RESERVED ((uint64_t)0xf80)
-#define EPTP_UC 0
-#define EPTP_WB 6
 
 static size_t level_size(size_t level) {
     return (uint64_t)1 << (12 + 9 * level);
@@ -1142,12 +1105,12 @@ static size_t level_size(size_t level) {
 static bool eptp_valid(uint64_t eptp) {
     uint64_t type = eptp & 7;
     size_t levels = EPTP_LEVELS(eptp);
-    return ((type == EPTP_UC && (cap_ept_vpid & CAP_UC) != 0)
-         || (type == EPTP_WB && (cap_ept_vpid & CAP_WB) != 0))
-        && ((levels == 4 && (cap_ept_vpid & CAP_WALK_4) != 0)
-         || (levels == 5 && (cap_ept_vpid & CAP_WALK_5) != 0))
-        && ((eptp & EPTP_AD) == 0 || (cap_ept_vpid & CAP_AD) != 0) && (eptp & EPTP_RESERVED) == 0
-        && (eptp >> phys_width) == 0;
+    return ((type == EPTP_UC && (cap_ept_vpid & EPT_CAP_UC) != 0)
+         || (type == EPTP_WB && (cap_ept_vpid & EPT_CAP_WB) != 0))
+        && ((levels == 4 && (cap_ept_vpid & EPT_CAP_WALK_4) != 0)
+         || (levels == 5 && (cap_ept_vpid & EPT_CAP_WALK_5) != 0))
+        && ((eptp & EPTP_AD) == 0 || (cap_ept_vpid & EPT_CAP_AD) != 0)
+        && (eptp & EPTP_RESERVED) == 0 && (eptp >> phys_width) == 0;
 }
 
 // SDM 325462-093 Vol. 3C, 31.3.3.1.
@@ -1156,12 +1119,12 @@ static bool ept12_misconfigured(uint64_t e, size_t level, bool leaf, bool mbec) 
         if ((e & EPT_W) != 0) {
             return true;
         }
-        if ((cap_ept_vpid & CAP_EXEC_ONLY) == 0
+        if ((cap_ept_vpid & EPT_CAP_EXEC_ONLY) == 0
          && ((e & EPT_X) != 0 || (mbec && (e & EPT_XU) != 0))) {
             return true;
         }
     }
-    if ((e & EPT_ADDRESS & ~(((uint64_t)1 << phys_width) - 1)) != 0) {
+    if ((e & PTE_ADDRESS & ~(((uint64_t)1 << phys_width) - 1)) != 0) {
         return true;
     }
     if (!leaf) {
@@ -1171,11 +1134,11 @@ static bool ept12_misconfigured(uint64_t e, size_t level, bool leaf, bool mbec) 
     if (type == 2 || type == 3 || type == 7) {
         return true;
     }
-    if ((level == 1 && (cap_ept_vpid & CAP_2M) == 0)
-     || (level == 2 && (cap_ept_vpid & CAP_1G) == 0)) {
+    if ((level == 1 && (cap_ept_vpid & EPT_CAP_2M) == 0)
+     || (level == 2 && (cap_ept_vpid & EPT_CAP_1G) == 0)) {
         return true;
     }
-    return (e & EPT_ADDRESS & (level_size(level) - 1)) != 0;
+    return (e & PTE_ADDRESS & (level_size(level) - 1)) != 0;
 }
 
 // What a walk of the guest's EPT made of an address of its guest.
@@ -1235,7 +1198,7 @@ static int ept12_walk(struct nvmx *n, uintptr_t gpa, uint64_t access, struct ept
     }
     uint64_t *used[5] = { 0 };
     uint64_t rights = EPT_RIGHTS;
-    uintptr_t table = eptp & EPT_ADDRESS;
+    uintptr_t table = eptp & PTE_ADDRESS;
     size_t l;
     for (l = levels - 1; ; l--) {
         uint64_t *p = ept12_entry(table + ((gpa >> (12 + 9 * l)) & 511) * 8);
@@ -1253,12 +1216,12 @@ static int ept12_walk(struct nvmx *n, uintptr_t gpa, uint64_t access, struct ept
         used[l] = p;
         w->entry[l] = e;
         if (leaf) {
-            w->gpa = (e & EPT_ADDRESS & ~(level_size(l) - 1)) | (gpa & (level_size(l) - 1));
+            w->gpa = (e & PTE_ADDRESS & ~(level_size(l) - 1)) | (gpa & (level_size(l) - 1));
             w->level = l;
             w->leaf = e;
             break;
         }
-        table = e & EPT_ADDRESS;
+        table = e & PTE_ADDRESS;
     }
     w->rights = rights & (mbec ? EPT_RIGHTS : EPT_R | EPT_W | EPT_X);
     uint64_t fetch = mbec && (access & EPT_QUAL_USER) != 0 ? EPT_XU : EPT_X;
@@ -1302,7 +1265,7 @@ static int ept12_walk(struct nvmx *n, uintptr_t gpa, uint64_t access, struct ept
 static uint64_t ept12_qual(uint64_t access, const struct ept12_walk *w) {
     uint64_t kept = EPT_QUAL_READ | EPT_QUAL_WRITE | EPT_QUAL_FETCH | EPT_QUAL_LINEAR
                   | EPT_QUAL_TRANSLATION | EPT_QUAL_NMI_UNBLOCKED | EPT_QUAL_ASYNC;
-    if ((cap_ept_vpid & CAP_ADVANCED_INFO) != 0) {
+    if ((cap_ept_vpid & EPT_CAP_ADVANCED_INFO) != 0) {
         kept |= EPT_QUAL_USER | EPT_QUAL_WRITABLE | EPT_QUAL_XD;
     }
     uint64_t rights = (w->rights & (EPT_R | EPT_W | EPT_X)) << EPT_QUAL_RIGHTS_SHIFT;
@@ -1323,7 +1286,7 @@ static void ept02_free(struct nvmx *n, uint64_t *table, size_t level) {
     for (size_t i = 0; level > 0 && i < 512; i++) {
         uint64_t e = table[i];
         if ((e & EPT_RIGHTS) != 0 && (e & EPT_LARGE) == 0) {
-            ept02_free(n, (uint64_t *)(uintptr_t)(e & EPT_ADDRESS), level - 1);
+            ept02_free(n, (uint64_t *)(uintptr_t)(e & PTE_ADDRESS), level - 1);
         }
     }
     page_free(table, 2);
@@ -1387,7 +1350,7 @@ static uint64_t ept02_leaf(
     const struct nvmx *n, const struct ept12_walk *w, uintptr_t hpa, uint32_t prot,
     uint8_t memtype, size_t level
 ) {
-    uint64_t e = hpa & EPT_ADDRESS & ~(level_size(level) - 1);
+    uint64_t e = hpa & PTE_ADDRESS & ~(level_size(level) - 1);
     if ((w->rights & EPT_R) != 0 && (prot & GPT_R) != 0) {
         e |= EPT_R;
     }
@@ -1470,7 +1433,7 @@ static uint64_t ept02_fill(struct nvmx *n, uintptr_t gpa, const struct ept12_wal
         if (!is_table) {
             *slot = (uint64_t)(uintptr_t)ept02_table(n) | EPT_RIGHTS;
         }
-        table = (uint64_t *)(uintptr_t)(*slot & EPT_ADDRESS);
+        table = (uint64_t *)(uintptr_t)(*slot & PTE_ADDRESS);
     }
     leaf = ept02_leaf(n, w, hpa, prot, memtype, 0);
     table[(gpa >> 12) & 511] = leaf;
@@ -1495,19 +1458,19 @@ static void ept02_sync(struct nvmx *n, uint64_t *table, uintptr_t gpa12, size_t 
         bool below = level > 0 && (e & EPT_LARGE) == 0;
         if (now != made_from[i]) {
             if (below) {
-                ept02_free(n, (uint64_t *)(uintptr_t)(e & EPT_ADDRESS), level - 1);
+                ept02_free(n, (uint64_t *)(uintptr_t)(e & PTE_ADDRESS), level - 1);
             }
             table[i] = 0;
         } else if (below && (now & EPT_LARGE) == 0) {
             // Below a large page of the guest's, the shadow's tables split it:
             // its entry here covers them.
-            ept02_sync(n, (uint64_t *)(uintptr_t)(e & EPT_ADDRESS), now & EPT_ADDRESS, level - 1);
+            ept02_sync(n, (uint64_t *)(uintptr_t)(e & PTE_ADDRESS), now & PTE_ADDRESS, level - 1);
         }
     }
 }
 
 static void ept02_sync_root(struct nvmx *n, struct ept02 *r) {
-    ept02_sync(n, r->root, r->eptp12 & EPT_ADDRESS, EPTP_LEVELS(r->eptp12) - 1);
+    ept02_sync(n, r->root, r->eptp12 & PTE_ADDRESS, EPTP_LEVELS(r->eptp12) - 1);
 }
 
 // An EPT violation of the guest's leaves nothing cached for the address it was
@@ -1527,7 +1490,7 @@ static void ept02_forget(struct nvmx *n, uintptr_t gpa) {
             *slot = 0;
             return;
         }
-        table = (uint64_t *)(uintptr_t)(*slot & EPT_ADDRESS);
+        table = (uint64_t *)(uintptr_t)(*slot & PTE_ADDRESS);
     }
 }
 
@@ -2506,8 +2469,8 @@ static bool read_descriptor(struct vcpu *v, uint64_t info, uint64_t desc[2]) {
 
 static void invept(struct vcpu *v, struct nvmx *n, uint64_t info) {
     uint64_t type = operand_register(v, info);
-    if (!(type == 1 && (cap_ept_vpid & CAP_INVEPT_SINGLE) != 0)
-     && !(type == 2 && (cap_ept_vpid & CAP_INVEPT_ALL) != 0)) {
+    if (!(type == 1 && (cap_ept_vpid & EPT_CAP_INVEPT_SINGLE) != 0)
+     && !(type == 2 && (cap_ept_vpid & EPT_CAP_INVEPT_ALL) != 0)) {
         fail(v, ERROR_INVALID_OPERAND);
         return;
     }
@@ -2522,7 +2485,7 @@ static void invept(struct vcpu *v, struct nvmx *n, uint64_t info) {
         }
         for (size_t i = 0; i < EPT02_ROOTS; i++) {
             struct ept02 *r = &n->ept02[i];
-            if (r->root != NULL && ((r->eptp12 ^ desc[0]) & EPT_ADDRESS) == 0) {
+            if (r->root != NULL && ((r->eptp12 ^ desc[0]) & PTE_ADDRESS) == 0) {
                 ept02_sync_root(n, r);
             }
         }
@@ -2539,8 +2502,8 @@ static void invept(struct vcpu *v, struct nvmx *n, uint64_t info) {
 
 static void invvpid(struct vcpu *v, struct nvmx *n, uint64_t info) {
     static const uint64_t types[] = {
-        CAP_INVVPID_ADDRESS, CAP_INVVPID_SINGLE, CAP_INVVPID_ALL,
-        CAP_INVVPID_GLOBALS
+        VPID_CAP_INVVPID_ADDRESS, VPID_CAP_INVVPID_SINGLE, VPID_CAP_INVVPID_ALL,
+        VPID_CAP_INVVPID_GLOBALS
     };
     uint64_t type = operand_register(v, info);
     if (type > 3 || (cap_ept_vpid & types[type]) == 0) {
@@ -2568,9 +2531,10 @@ void nvmx_instruction(struct vcpu *v, uint32_t reason) {
     // compatibility mode, but not for the guest's CR4.VMXE, which only the
     // shadow has, nor for what the guest is not offered (SDM 325462-093 Vol.
     // 3C, 33.3).
-    bool invept_offered = (cap_proc2 >> 32 & PROC2_EPT) != 0 && (cap_ept_vpid & CAP_INVEPT) != 0;
+    bool invept_offered = (cap_proc2 >> 32 & PROC2_EPT) != 0
+                       && (cap_ept_vpid & EPT_CAP_INVEPT) != 0;
     bool invvpid_offered = (cap_proc2 >> 32 & PROC2_VPID) != 0
-                        && (cap_ept_vpid & CAP_INVVPID) != 0;
+                        && (cap_ept_vpid & VPID_CAP_INVVPID) != 0;
     if (n == NULL || (vcpu_cr4(v) & CR4_VMXE) == 0 || (reason != EXIT_REASON_VMXON && !n->vmxon)
      || (reason == EXIT_REASON_INVEPT && !invept_offered)
      || (reason == EXIT_REASON_INVVPID && !invvpid_offered) || reason == EXIT_REASON_VMFUNC
