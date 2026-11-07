@@ -58,14 +58,8 @@
 // The bits EVENTINJ reserves, which VMRUN ignores, as Linux 7.3's KVM has it
 // (nested.c, __nested_copy_vmcb_control_to_cache()).
 #define EVENT_RESERVED ((uint64_t)0x7ffff000)
-#define EVENT_TYPE_NMI ((uint64_t)2 << 8)
-#define EVENT_TYPE_SOFT_INT ((uint64_t)4 << 8)
-// FRED's event types and nested-exception bit, in the events of a guest with
-// CR4.FRED, and the bits of FRED_CONFIG that VMRUN refuses (AMD 69191 rev.
-// 1.10).
-#define EVENT_TYPE_INT1 ((uint64_t)5 << 8)
-#define EVENT_TYPE_SYSCALL ((uint64_t)7 << 8)
-#define EVENT_NESTED ((uint64_t)1 << 13)
+
+// The bits of FRED_CONFIG that VMRUN refuses (AMD 69191 rev. 1.10).
 #define FRED_CONFIG_RESERVED ((uint64_t)0x834)
 
 // The virtual interrupt the guest gives its guest, which the hypervisor's own
@@ -788,11 +782,11 @@ static bool injection_valid(uint64_t event, bool fred) {
     // For a guest with FRED, INT1 and SYSCALL have vector 1, and only
     // exceptions have error codes or nest (AMD 69191 rev. 1.10).
     if (fred) {
-        if ((event & (SVM_EVENT_ERROR_VALID | EVENT_NESTED)) != 0
+        if ((event & (SVM_EVENT_ERROR_VALID | SVM_EVENT_NESTED)) != 0
          && type != SVM_EVENT_TYPE_EXCEPTION) {
             return false;
         }
-        if (type == EVENT_TYPE_INT1 || type == EVENT_TYPE_SYSCALL) {
+        if (type == SVM_EVENT_TYPE_INT1 || type == SVM_EVENT_TYPE_SYSCALL) {
             return vector == 1;
         }
     }
@@ -802,7 +796,8 @@ static bool injection_valid(uint64_t event, bool fred) {
         }
         return vector < 32 && ((INJECTABLE_EXCEPTIONS >> vector) & 1) != 0;
     }
-    return type == SVM_EVENT_TYPE_INTR || type == EVENT_TYPE_NMI || type == EVENT_TYPE_SOFT_INT;
+    return type == SVM_EVENT_TYPE_INTR || type == SVM_EVENT_TYPE_NMI
+        || type == SVM_EVENT_TYPE_SOFT_INT;
 }
 
 // A permission map's last byte is below the maximum physical address, which is
@@ -1381,7 +1376,7 @@ static void prepare_vmcb02(struct nsvm *n) {
     }
     // FRED's nested-exception bit is not reserved where the guest's guest has
     // CR4.FRED (AMD 69191 rev. 1.10).
-    uint64_t reserved = EVENT_RESERVED & ~((s12->cr4 & CR4_FRED) != 0 ? EVENT_NESTED : 0);
+    uint64_t reserved = EVENT_RESERVED & ~((s12->cr4 & CR4_FRED) != 0 ? SVM_EVENT_NESTED : 0);
     c->eventinj = c12->eventinj & ~reserved;
     // Software interrupts injected take their return address from here (APM
     // 24593 rev. 3.46, 15.20): VMCB12's where the guest has NRIP saving, else

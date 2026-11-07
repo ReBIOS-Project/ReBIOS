@@ -332,6 +332,11 @@ _Static_assert(offsetof(struct vmcb_save, fred_rsp) == 0x8c0, "VMCB layout");
 #define SVM_EVENT_TYPE_NMI ((uint64_t)2 << 8)
 #define SVM_EVENT_TYPE_EXCEPTION ((uint64_t)3 << 8)
 #define SVM_EVENT_TYPE_SOFT_INT ((uint64_t)4 << 8)
+// FRED's event types and nested-exception bit, in the events of a guest with
+// CR4.FRED (AMD 69191 rev. 1.10).
+#define SVM_EVENT_TYPE_INT1 ((uint64_t)5 << 8)
+#define SVM_EVENT_TYPE_SYSCALL ((uint64_t)7 << 8)
+#define SVM_EVENT_NESTED ((uint64_t)1 << 13)
 
 #define MSR_DC_CFG 0xc0011022
 #define DC_CFG_ERRATUM_383 ((uint64_t)1 << 47)
