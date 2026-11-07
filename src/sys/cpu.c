@@ -243,7 +243,7 @@ void cpu_exception_handler(struct exception_frame *frame) {
         (unsigned long long)frame->r12, (unsigned long long)frame->r13,
         (unsigned long long)frame->r14, (unsigned long long)frame->r15
     );
-    if (frame->rsp % 8 == 0 && frame->rsp >= 4096 && frame->rsp + 64 <= map_top) {
+    if (frame->rsp % 8 == 0 && frame->rsp >= PAGE_SIZE && frame->rsp + 64 <= map_top) {
         const uint64_t *stack = (const uint64_t *)(uintptr_t)frame->rsp;
         append(
             text, sizeof(text), &len, "Stack %#llx %#llx %#llx %#llx %#llx %#llx %#llx %#llx\n",
