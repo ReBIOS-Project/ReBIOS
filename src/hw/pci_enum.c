@@ -90,7 +90,7 @@ struct bar_sample {
 };
 
 struct function_list {
-    struct pci_function *items;
+    struct pci_enum_function *items;
     size_t count;
     size_t capacity;
 };
@@ -101,7 +101,7 @@ struct log_line {
     size_t prefix_length;
 };
 
-static struct pci_topology topology;
+static struct pci_enum_topology topology;
 static _Atomic(bool) scanned;
 
 static void line_flush(struct log_line *line) {
@@ -155,14 +155,14 @@ __attribute__((format(printf, 2, 3))) static void line_add(
     va_end(args);
 }
 
-static bool is_host_bridge(const struct pci_function *f) {
+static bool is_host_bridge(const struct pci_enum_function *f) {
     return f->base_class == PCI_BASE_CLASS_BRIDGE && f->subclass == PCI_SUBCLASS_BRIDGE_HOST;
 }
 
 // Clears the bits of the command register, and returns what decode_restore()
 // needs to set them back. A host bridge is left decoding, as on some chipsets
 // one that stops no longer routes the accesses the rest of the system needs.
-static uint16_t decode_disable(const struct pci_function *f, uint16_t bits) {
+static uint16_t decode_disable(const struct pci_enum_function *f, uint16_t bits) {
     if (is_host_bridge(f)) {
         return 0;
     }
@@ -173,7 +173,7 @@ static uint16_t decode_disable(const struct pci_function *f, uint16_t bits) {
     return command;
 }
 
-static void decode_restore(const struct pci_function *f, uint16_t command, uint16_t bits) {
+static void decode_restore(const struct pci_enum_function *f, uint16_t command, uint16_t bits) {
     if ((command & bits) != 0) {
         pci_cfg_write(f->addr, PCI_COMMAND, 2, command);
     }
@@ -185,23 +185,23 @@ static void bar_sample_read(
     *s = (struct bar_sample){ .reg = reg };
     s->low = pci_cfg_read(addr, reg, 4);
     if ((s->low & BAR_IO) != 0) {
-        s->kind = PCI_BAR_IO;
+        s->kind = PCI_ENUM_BAR_IO;
         return;
     }
     s->prefetchable = (s->low & BAR_PREFETCHABLE) != 0;
     if ((s->low & BAR_TYPE) != BAR_TYPE_64) {
-        s->kind = PCI_BAR_MEM32;
+        s->kind = PCI_ENUM_BAR_MEM32;
     } else if (last_slot) {
-        s->kind = PCI_BAR_NONE;
+        s->kind = PCI_ENUM_BAR_NONE;
         s->malformed = true;
     } else {
-        s->kind = PCI_BAR_MEM64;
+        s->kind = PCI_ENUM_BAR_MEM64;
         s->high = pci_cfg_read(addr, reg + 4, 4);
     }
 }
 
 static void rom_sample_read(struct pci_cfg_addr addr, uint8_t reg, struct bar_sample *s) {
-    *s = (struct bar_sample){ .reg = reg, .kind = PCI_BAR_MEM32, .rom = true };
+    *s = (struct bar_sample){ .reg = reg, .kind = PCI_ENUM_BAR_MEM32, .rom = true };
     s->low = pci_cfg_read(addr, reg, 4);
 }
 
@@ -210,10 +210,10 @@ static void rom_sample_read(struct pci_cfg_addr addr, uint8_t reg, struct bar_sa
 // and restoring it last keeps those above 4 GiB. The expansion ROM BAR is
 // written with its enable bit clear.
 static void bar_sample_probe(struct pci_cfg_addr addr, struct bar_sample *s) {
-    if (s->kind == PCI_BAR_NONE) {
+    if (s->kind == PCI_ENUM_BAR_NONE) {
         return;
     }
-    bool wide = s->kind == PCI_BAR_MEM64;
+    bool wide = s->kind == PCI_ENUM_BAR_MEM64;
     if (wide) {
         pci_cfg_write(addr, s->reg + 4, 4, 0xffffffff);
     }
@@ -232,27 +232,27 @@ static void bar_sample_probe(struct pci_cfg_addr addr, struct bar_sample *s) {
 // bits above the register as ones. A device that leaves upper address bits
 // unimplemented makes that meaningless, and the lowest bit it implements is
 // the size instead. Returns false if so.
-static bool bar_sample_result(const struct bar_sample *s, struct pci_bar *bar) {
-    *bar = (struct pci_bar){ .reg = s->reg };
+static bool bar_sample_result(const struct bar_sample *s, struct pci_enum_bar *bar) {
+    *bar = (struct pci_enum_bar){ .reg = s->reg };
     uint64_t bits;
     uint64_t above;
     uintptr_t base;
     switch (s->kind) {
-        case PCI_BAR_IO: {
+        case PCI_ENUM_BAR_IO: {
             bits = s->readback & BAR_IO_ADDRESS;
             // A 16-bit I/O BAR reads back 0 in its upper half.
             above = (bits >> 16) == 0 ? UPPER_48 : UPPER_32;
             base = s->low & BAR_IO_ADDRESS;
             break;
         }
-        case PCI_BAR_MEM32: {
+        case PCI_ENUM_BAR_MEM32: {
             uint32_t address = s->rom ? PCI_ROM_ADDRESS_MASK : BAR_MEMORY_ADDRESS;
             bits = s->readback & address;
             above = UPPER_32;
             base = s->low & address;
             break;
         }
-        case PCI_BAR_MEM64: {
+        case PCI_ENUM_BAR_MEM64: {
             bits = s->readback & ~(uint64_t)0xf;
             above = 0;
             base = ((uint64_t)s->high << 32) | (s->low & BAR_MEMORY_ADDRESS);
@@ -280,7 +280,7 @@ static bool bar_sample_result(const struct bar_sample *s, struct pci_bar *bar) {
 }
 
 static void bar_record(
-    const struct pci_function *f, const struct bar_sample *s, struct pci_bar *bar
+    const struct pci_enum_function *f, const struct bar_sample *s, struct pci_enum_bar *bar
 ) {
     if (s->malformed) {
         printf(
@@ -302,16 +302,16 @@ static void bar_record(
 // rom_reg unless it is 0, with the function's decoding off unless it is a host
 // bridge.
 static void size_bars(
-    struct pci_function *f, unsigned int first, unsigned int end, uint8_t rom_reg
+    struct pci_enum_function *f, unsigned int first, unsigned int end, uint8_t rom_reg
 ) {
     struct bar_sample samples[6];
-    struct bar_sample rom = { .kind = PCI_BAR_NONE };
+    struct bar_sample rom = { .kind = PCI_ENUM_BAR_NONE };
 
     for (size_t i = first; i < end; i++) {
         bar_sample_read(
             f->addr, (uint8_t)(PCI_BASE_ADDRESS_0 + 4 * i), i + 1 == f->bar_count, &samples[i]
         );
-        if (samples[i].kind == PCI_BAR_MEM64 && i + 1 < end) {
+        if (samples[i].kind == PCI_ENUM_BAR_MEM64 && i + 1 < end) {
             i++;
             samples[i] = (struct bar_sample){ .reg = (uint8_t)(PCI_BASE_ADDRESS_0 + 4 * i) };
         }
@@ -335,7 +335,7 @@ static void size_bars(
     }
 }
 
-static void walk_capabilities(struct pci_function *f) {
+static void walk_capabilities(struct pci_enum_function *f) {
     uint16_t status = (uint16_t)pci_cfg_read(f->addr, PCI_STATUS, 2);
     if ((status & PCI_STATUS_CAP_LIST) == 0) {
         return;
@@ -382,7 +382,7 @@ static void walk_capabilities(struct pci_function *f) {
     }
 }
 
-static void walk_extended_capabilities(struct pci_function *f) {
+static void walk_extended_capabilities(struct pci_enum_function *f) {
     if (f->pcie_cap == 0 || pci_cfg_ecam_base(f->addr.segment, f->addr.bus) == 0) {
         return;
     }
@@ -407,7 +407,7 @@ static void walk_extended_capabilities(struct pci_function *f) {
     }
 }
 
-static void read_bridge(struct pci_function *f) {
+static void read_bridge(struct pci_enum_function *f) {
     uint32_t buses = pci_cfg_read(f->addr, PCI_PRIMARY_BUS, 4);
     f->primary_bus = (uint8_t)buses;
     f->secondary_bus = (uint8_t)(buses >> 8);
@@ -453,16 +453,16 @@ static void read_bridge(struct pci_function *f) {
     f->bridge_control = (uint16_t)pci_cfg_read(f->addr, PCI_BRIDGE_CONTROL, 2);
 }
 
-static bool is_bridge(const struct pci_function *f) {
+static bool is_bridge(const struct pci_enum_function *f) {
     return f->header_type == PCI_HEADER_TYPE_BRIDGE || f->header_type == PCI_HEADER_TYPE_CARDBUS;
 }
 
-static const char *bar_kind_name(const struct pci_bar *bar) {
+static const char *bar_kind_name(const struct pci_enum_bar *bar) {
     switch (bar->kind) {
-        case PCI_BAR_IO: {
+        case PCI_ENUM_BAR_IO: {
             return "io";
         }
-        case PCI_BAR_MEM32: {
+        case PCI_ENUM_BAR_MEM32: {
             return bar->prefetchable ? "mem32-pref" : "mem32";
         }
         default: {
@@ -483,7 +483,7 @@ static void line_add_window(
     }
 }
 
-static void log_function(const struct pci_function *f) {
+static void log_function(const struct pci_enum_function *f) {
     struct log_line line;
     line_start(&line, "PCI " ADDR_FMT, ADDR_ARGS(f->addr));
     line_add(
@@ -491,7 +491,7 @@ static void log_function(const struct pci_function *f) {
         f->subclass, f->prog_if, f->header_type
     );
     for (size_t i = 0; i < f->bar_count; i++) {
-        const struct pci_bar *bar = &f->bars[i];
+        const struct pci_enum_bar *bar = &f->bars[i];
         if (bar->size != 0) {
             line_add(
                 &line, " BAR%zu %s 0x%llx+0x%llx", i, bar_kind_name(bar),
@@ -519,12 +519,12 @@ static void log_function(const struct pci_function *f) {
     line_flush(&line);
 }
 
-static struct pci_function *function_list_add(struct function_list *list) {
+static struct pci_enum_function *function_list_add(struct function_list *list) {
     if (list->count == list->capacity) {
         size_t capacity = list->capacity == 0 ? 64 : list->capacity * 2;
-        struct pci_function *items = kmalloc(capacity * sizeof(struct pci_function));
+        struct pci_enum_function *items = kmalloc(capacity * sizeof(struct pci_enum_function));
         if (list->count != 0) {
-            memcpy(items, list->items, list->count * sizeof(struct pci_function));
+            memcpy(items, list->items, list->count * sizeof(struct pci_enum_function));
         }
         kfree(list->items);
         list->items = items;
@@ -534,7 +534,7 @@ static struct pci_function *function_list_add(struct function_list *list) {
 }
 
 static void scan_function(struct function_list *list, struct pci_cfg_addr addr, uint32_t id) {
-    struct pci_function *f = function_list_add(list);
+    struct pci_enum_function *f = function_list_add(list);
     f->addr = addr;
     f->vendor_id = (uint16_t)id;
     f->device_id = (uint16_t)(id >> 16);
@@ -659,13 +659,13 @@ static uint32_t buses_to_scan(struct segment_buses **out) {
 // one, and must not be taken for the parent of the functions on bus 0.
 static void link_topology(void) {
     size_t count = topology.function_count;
-    struct pci_function *functions = topology.functions;
+    struct pci_enum_function *functions = topology.functions;
     if (count == 0) {
         return;
     }
 
-    struct pci_function **bridges = kmalloc(256 * sizeof(struct pci_function *));
-    struct pci_root_bus *roots = kmalloc(count * sizeof(struct pci_root_bus));
+    struct pci_enum_function **bridges = kmalloc(256 * sizeof(struct pci_enum_function *));
+    struct pci_enum_root_bus *roots = kmalloc(count * sizeof(struct pci_enum_root_bus));
     size_t root_count = 0;
 
     size_t first = 0;
@@ -676,13 +676,13 @@ static void link_topology(void) {
             end++;
         }
 
-        memset(bridges, 0, 256 * sizeof(struct pci_function *));
+        memset(bridges, 0, 256 * sizeof(struct pci_enum_function *));
         for (size_t i = first; i < end; i++) {
-            struct pci_function *f = &functions[i];
+            struct pci_enum_function *f = &functions[i];
             if (!is_bridge(f) || f->secondary_bus <= f->addr.bus) {
                 continue;
             }
-            struct pci_function *other = bridges[f->secondary_bus];
+            struct pci_enum_function *other = bridges[f->secondary_bus];
             if (other != NULL) {
                 printf(
                     "PCI " ADDR_FMT ": secondary bus %02x is already behind " ADDR_FMT
@@ -695,7 +695,7 @@ static void link_topology(void) {
         }
 
         for (size_t i = first; i < end; i++) {
-            struct pci_function *f = &functions[i];
+            struct pci_enum_function *f = &functions[i];
             f->parent = bridges[f->addr.bus];
             bool first_on_bus = i == first || functions[i - 1].addr.bus != f->addr.bus;
             if (f->parent == NULL && first_on_bus) {
@@ -712,7 +712,7 @@ static void link_topology(void) {
     topology.root_bus_count = root_count;
 }
 
-const struct pci_topology *pci_enum_scan(void) {
+const struct pci_enum_topology *pci_enum_scan(void) {
     if (atomic_load_explicit(&scanned, memory_order_acquire)) {
         return &topology;
     }
@@ -751,7 +751,7 @@ const struct pci_topology *pci_enum_scan(void) {
     return &topology;
 }
 
-const struct pci_topology *pci_enum_topology(void) {
+const struct pci_enum_topology *pci_enum_topology(void) {
     return atomic_load_explicit(&scanned, memory_order_acquire) ? &topology : NULL;
 }
 
@@ -760,7 +760,7 @@ static uint32_t addr_key(struct pci_cfg_addr addr) {
          | addr.function;
 }
 
-struct pci_function *pci_enum_find(struct pci_cfg_addr addr) {
+struct pci_enum_function *pci_enum_find(struct pci_cfg_addr addr) {
     if (!atomic_load_explicit(&scanned, memory_order_acquire) || addr.device >= 32
      || addr.function >= 8) {
         return NULL;
@@ -800,10 +800,10 @@ static bool rebar_has(uint64_t supported, int encoding) {
 }
 
 static void rebar_resize(
-    struct pci_function *f, uint8_t index, uint32_t control_reg, unsigned int encoding
+    struct pci_enum_function *f, uint8_t index, uint32_t control_reg, unsigned int encoding
 ) {
-    struct pci_bar *bar = &f->bars[index];
-    bool wide = bar->kind == PCI_BAR_MEM64;
+    struct pci_enum_bar *bar = &f->bars[index];
+    bool wide = bar->kind == PCI_ENUM_BAR_MEM64;
     size_t old_size = bar->size;
     size_t new_size = rebar_size(encoding);
 
@@ -844,7 +844,7 @@ static void rebar_resize(
 }
 
 static void rebar_shrink(
-    struct pci_function *f, uint32_t control_reg, uint32_t capability, uint32_t control,
+    struct pci_enum_function *f, uint32_t control_reg, uint32_t capability, uint32_t control,
     size_t max_size
 ) {
     uint8_t index = control & REBAR_INDEX;
@@ -856,8 +856,8 @@ static void rebar_shrink(
         );
         return;
     }
-    struct pci_bar *bar = &f->bars[index];
-    if ((bar->kind != PCI_BAR_MEM32 && bar->kind != PCI_BAR_MEM64) || bar->size == 0) {
+    struct pci_enum_bar *bar = &f->bars[index];
+    if ((bar->kind != PCI_ENUM_BAR_MEM32 && bar->kind != PCI_ENUM_BAR_MEM64) || bar->size == 0) {
         return;
     }
 
@@ -927,7 +927,7 @@ void pci_enum_shrink_rebars(size_t max_size) {
     }
 
     for (size_t i = 0; i < topology.function_count; i++) {
-        struct pci_function *f = &topology.functions[i];
+        struct pci_enum_function *f = &topology.functions[i];
         if (f->rebar_ext_cap == 0) {
             continue;
         }

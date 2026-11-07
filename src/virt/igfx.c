@@ -136,8 +136,8 @@
 #define STOLEN_DSMBASE 3
 
 static struct {
-    struct pci_function *f;
-    struct pci_function *host_bridge;
+    struct pci_enum_function *f;
+    struct pci_enum_function *host_bridge;
     // The host's OpRegion and the bytes from it the guest may read: a raw VBT
     // that follows it included.
     uint32_t asls;
@@ -164,7 +164,7 @@ static uint64_t read64(uintptr_t hpa) {
     return mmio_read_host(hpa, 4) | mmio_read_host(hpa + 4, 4) << 32;
 }
 
-static void scan_opregion(struct pci_function *f) {
+static void scan_opregion(struct pci_enum_function *f) {
     uint32_t asls = pci_cfg_read(f->addr, REG_ASLS, 4);
     if (asls == 0 || asls == UINT32_MAX) {
         return;
@@ -207,9 +207,9 @@ static size_t ggms_size(uint32_t ggc) {
     return ggms != 0 ? (uint64_t)1 << (20 + ggms) : 0;
 }
 
-static void scan_stolen(struct pci_function *f) {
-    const struct pci_bar *bar = &f->bars[0];
-    if (f->bar_count == 0 || bar->kind != PCI_BAR_MEM64 || bar->size < GTTMMADR_GEN8_SIZE) {
+static void scan_stolen(struct pci_enum_function *f) {
+    const struct pci_enum_bar *bar = &f->bars[0];
+    if (f->bar_count == 0 || bar->kind != PCI_ENUM_BAR_MEM64 || bar->size < GTTMMADR_GEN8_SIZE) {
         return;
     }
     uint32_t ggc = pci_cfg_read(f->addr, REG_GGC, 2);
@@ -279,12 +279,14 @@ static bool rmrr_unneeded(uint16_t segment, uint16_t rid) {
 }
 
 void igfx_scan(void) {
-    struct pci_function *f = pci_enum_find((struct pci_cfg_addr){ 0, 0, IGFX_DEVICE, 0 });
+    struct pci_enum_function *f = pci_enum_find((struct pci_cfg_addr){ 0, 0, IGFX_DEVICE, 0 });
     if (f == NULL || f->vendor_id != VENDOR_INTEL || f->base_class != CLASS_DISPLAY) {
         return;
     }
     igfx.f = f;
-    struct pci_function *h = pci_enum_find((struct pci_cfg_addr){ 0, 0, HOST_BRIDGE_DEVICE, 0 });
+    struct pci_enum_function *h = pci_enum_find(
+        (struct pci_cfg_addr){ 0, 0, HOST_BRIDGE_DEVICE, 0 }
+    );
     if (h != NULL && h->vendor_id == VENDOR_INTEL) {
         igfx.host_bridge = h;
     }

@@ -23,14 +23,14 @@
 #include <stdint.h>
 #include <hw/pci_cfg.h>
 
-#define PCI_BAR_NONE 0
-#define PCI_BAR_IO 1
-#define PCI_BAR_MEM32 2
-#define PCI_BAR_MEM64 3
+#define PCI_ENUM_BAR_NONE 0
+#define PCI_ENUM_BAR_IO 1
+#define PCI_ENUM_BAR_MEM32 2
+#define PCI_ENUM_BAR_MEM64 3
 
-struct pci_bar {
+struct pci_enum_bar {
     // One of PCI_BAR_*. A 64-bit BAR is described by the entry of its lower
-    // register; the entry of its upper register is PCI_BAR_NONE.
+    // register; the entry of its upper register is PCI_ENUM_BAR_NONE.
     uint8_t kind;
     bool prefetchable;
     // Configuration space offset of its (lower) register.
@@ -40,7 +40,7 @@ struct pci_bar {
     size_t size;
 };
 
-struct pci_function {
+struct pci_enum_function {
     struct pci_cfg_addr addr;
     uint16_t vendor_id;
     uint16_t device_id;
@@ -67,9 +67,9 @@ struct pci_function {
 
     // 6 BARs for header type 0, 2 for header type 1, none for type 2.
     size_t bar_count;
-    struct pci_bar bars[6];
-    // The expansion ROM BAR, kind PCI_BAR_MEM32 if implemented.
-    struct pci_bar rom;
+    struct pci_enum_bar bars[6];
+    // The expansion ROM BAR, kind PCI_ENUM_BAR_MEM32 if implemented.
+    struct pci_enum_bar rom;
 
     // Header types 1 and 2.
     uint8_t primary_bus;
@@ -86,31 +86,31 @@ struct pci_function {
     uint16_t bridge_control;
 
     // The bridge whose secondary bus this function is on, NULL on a root bus.
-    struct pci_function *parent;
+    struct pci_enum_function *parent;
 };
 
-struct pci_root_bus {
+struct pci_enum_root_bus {
     uint16_t segment;
     uint8_t bus;
 };
 
-struct pci_topology {
+struct pci_enum_topology {
     // Sorted by segment, bus, device, and function.
     size_t function_count;
-    struct pci_function *functions;
+    struct pci_enum_function *functions;
     // Sorted by segment and bus.
     size_t root_bus_count;
-    struct pci_root_bus *root_buses;
+    struct pci_enum_root_bus *root_buses;
 };
 
 // Scans every reachable function. Needs pci_cfg_init(). Runs once; later calls
 // return the same topology.
-const struct pci_topology *pci_enum_scan(void);
+const struct pci_enum_topology *pci_enum_scan(void);
 
 // The topology, or NULL before pci_enum_scan().
-const struct pci_topology *pci_enum_topology(void);
+const struct pci_enum_topology *pci_enum_topology(void);
 
-struct pci_function *pci_enum_find(struct pci_cfg_addr addr);
+struct pci_enum_function *pci_enum_find(struct pci_cfg_addr addr);
 
 // Shrinks each Resizable BAR above max_size, and records its new size.
 void pci_enum_shrink_rebars(size_t max_size);

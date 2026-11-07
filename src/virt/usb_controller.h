@@ -22,7 +22,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-struct pci_function;
+struct pci_enum_function;
 struct tendril_hc;
 
 // Who has it: the stack is yet to take it, has it, or the guest does.
@@ -42,7 +42,7 @@ struct usb_legacy_range {
 };
 
 struct usb_controller {
-    const struct pci_function *f;
+    const struct pci_enum_function *f;
     int type;
     // Its registers: ports for UHCI, where mmio is NULL, else memory.
     uint16_t port;

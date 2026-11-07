@@ -380,9 +380,9 @@ static void pci_interrupts(void) {
     irq_route_pci(lines, count, acpi_irq_isa_claimed());
     kfree(lines);
 
-    const struct pci_topology *topology = pci_enum_topology();
+    const struct pci_enum_topology *topology = pci_enum_topology();
     for (size_t i = 0; i < topology->function_count; i++) {
-        const struct pci_function *f = &topology->functions[i];
+        const struct pci_enum_function *f = &topology->functions[i];
         if (f->interrupt_pin == 0 || f->interrupt_pin > 4) {
             continue;
         }

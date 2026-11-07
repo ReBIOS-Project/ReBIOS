@@ -138,7 +138,7 @@ struct vmsix {
 };
 
 struct vfunction {
-    struct pci_function *f;
+    struct pci_enum_function *f;
     bool hidden;
     const struct pci_virt_hook *hook;
     void *hook_ctx;
@@ -190,7 +190,7 @@ struct shared_page {
 
 static struct shared_page shared_pages[SHARED_PAGES];
 
-static uint16_t requester(const struct pci_function *f) {
+static uint16_t requester(const struct pci_enum_function *f) {
     return (uint16_t)(f->addr.bus << 8 | f->addr.device << 3 | f->addr.function);
 }
 
@@ -402,17 +402,17 @@ static struct vbar *bar_at(struct vfunction *vf, uint32_t reg, bool *upper) {
                  : PCI_ROM_ADDRESS;
     *upper = false;
     if (reg == rom) {
-        return vf->bars[ROM_INDEX].kind == PCI_BAR_MEM32 ? &vf->bars[ROM_INDEX] : NULL;
+        return vf->bars[ROM_INDEX].kind == PCI_ENUM_BAR_MEM32 ? &vf->bars[ROM_INDEX] : NULL;
     }
     if (reg < PCI_BASE_ADDRESS_0 || reg >= PCI_BASE_ADDRESS_0 + 4 * bars) {
         return NULL;
     }
     size_t i = (reg - PCI_BASE_ADDRESS_0) / 4;
     struct vbar *b = &vf->bars[i];
-    if (b->kind == PCI_BAR_MEM32 || b->kind == PCI_BAR_MEM64) {
+    if (b->kind == PCI_ENUM_BAR_MEM32 || b->kind == PCI_ENUM_BAR_MEM64) {
         return b;
     }
-    if (i > 0 && vf->bars[i - 1].kind == PCI_BAR_MEM64) {
+    if (i > 0 && vf->bars[i - 1].kind == PCI_ENUM_BAR_MEM64) {
         *upper = true;
         return &vf->bars[i - 1];
     }
@@ -921,7 +921,7 @@ static void msix_control(struct vfunction *vf, uint32_t value) {
 // Disabled, as after a reset, every entry masked at the function, the guest's
 // entries what the function held. Memory decoding is on meanwhile.
 static void msix_init(struct vfunction *vf) {
-    struct pci_function *f = vf->f;
+    struct pci_enum_function *f = vf->f;
     struct vmsix *x = &vf->msix;
     uint32_t control = pci_cfg_read(f->addr, f->msix_cap + PCI_MSIX_FLAGS, 2);
     uint32_t table = pci_cfg_read(f->addr, f->msix_cap + PCI_MSIX_TABLE, 4);
@@ -991,9 +991,9 @@ static bool in_rebar(const struct vfunction *vf, uint32_t offset) {
 #define IO_BAR_ADDRESS ((uint32_t)0xfffffffc)
 
 // Where the function's I/O BAR decodes, if below 1000h: 0 where not.
-static uint16_t legacy_io_base(const struct pci_function *f, size_t i) {
-    const struct pci_bar *bar = &f->bars[i];
-    if (bar->kind != PCI_BAR_IO || bar->size == 0) {
+static uint16_t legacy_io_base(const struct pci_enum_function *f, size_t i) {
+    const struct pci_enum_bar *bar = &f->bars[i];
+    if (bar->kind != PCI_ENUM_BAR_IO || bar->size == 0) {
         return 0;
     }
     uint32_t base = pci_cfg_read(f->addr, bar->reg, 4) & IO_BAR_ADDRESS;
@@ -1012,7 +1012,7 @@ static bool legacy_io_moved(const struct vfunction *vf) {
 // Gives the guest the ports of the function's I/O BARs below 1000h, and takes
 // back those of the ones that left.
 static void legacy_io_update(struct vfunction *vf) {
-    const struct pci_function *f = vf->f;
+    const struct pci_enum_function *f = vf->f;
     for (size_t i = 0; i < f->bar_count && i < BAR_COUNT; i++) {
         uint16_t base = legacy_io_base(f, i);
         if (base == vf->legacy_io[i]) {
@@ -1277,7 +1277,7 @@ static void ecam_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, 
 static const struct mmio_ops ecam_ops = { ecam_read, ecam_write, false };
 
 // A bridge's bus numbers as the guest has them, where they are assigned.
-static uint32_t guest_bus_numbers(const struct pci_function *f, uint32_t value) {
+static uint32_t guest_bus_numbers(const struct pci_enum_function *f, uint32_t value) {
     if (f->secondary_bus <= f->addr.bus) {
         return value;
     }
@@ -1291,7 +1291,7 @@ static uint32_t guest_bus_numbers(const struct pci_function *f, uint32_t value) 
 }
 
 static void vfunction_init(
-    struct vfunction *vf, struct pci_function *f, const struct pci_plan_function *pf
+    struct vfunction *vf, struct pci_enum_function *f, const struct pci_plan_function *pf
 ) {
     *vf = (struct vfunction){ .f = f };
     // An AMD IOMMU's function, whose capability holds its registers' address.
@@ -1306,8 +1306,9 @@ static void vfunction_init(
         msi_init(vf);
     }
     for (size_t i = 0; i < f->bar_count && i < BAR_COUNT; i++) {
-        const struct pci_bar *bar = &f->bars[i];
-        if ((bar->kind != PCI_BAR_MEM32 && bar->kind != PCI_BAR_MEM64) || bar->size == 0) {
+        const struct pci_enum_bar *bar = &f->bars[i];
+        if ((bar->kind != PCI_ENUM_BAR_MEM32 && bar->kind != PCI_ENUM_BAR_MEM64)
+         || bar->size == 0) {
             continue;
         }
         vf->bars[i] = (struct vbar){
@@ -1321,12 +1322,12 @@ static void vfunction_init(
             mm_map_device(page_down(bar->base), PAGE_SIZE);
         }
     }
-    if (f->rom.kind == PCI_BAR_MEM32 && f->rom.size != 0) {
+    if (f->rom.kind == PCI_ENUM_BAR_MEM32 && f->rom.size != 0) {
         uint32_t reg = f->header_type == PCI_HEADER_TYPE_BRIDGE
                      ? PCI_ROM_ADDRESS1
                      : PCI_ROM_ADDRESS;
         vf->bars[ROM_INDEX] = (struct vbar){
-            .kind = PCI_BAR_MEM32,
+            .kind = PCI_ENUM_BAR_MEM32,
             .size = f->rom.size,
             .host = f->rom.base,
             .guest = pf->rom,
@@ -1351,7 +1352,7 @@ static void vfunction_init(
 }
 
 void pci_virt_init(void) {
-    const struct pci_topology *t = pci_enum_topology();
+    const struct pci_enum_topology *t = pci_enum_topology();
     const struct pci_plan *plan = pci_plan();
     if (t == NULL || plan == NULL || virt.on) {
         return;

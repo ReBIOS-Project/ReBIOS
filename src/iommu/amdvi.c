@@ -472,7 +472,7 @@ void amdvi_enable(uintptr_t root) {
 // 7.3 has them without the units' x2APIC support: fixed, to the processor with
 // the APIC ID, at vector.
 static bool unit_msi(const struct amdvi_unit *u, uint32_t apic_id, uint8_t vector) {
-    const struct pci_function *f = pci_enum_find(u->function);
+    const struct pci_enum_function *f = pci_enum_find(u->function);
     if (f == NULL || f->msi_cap == 0 || apic_id > MAX_DEST_ID) {
         return false;
     }
@@ -611,11 +611,12 @@ static unsigned int aliases(uint16_t id, uint16_t *ids) {
     struct pci_cfg_addr addr = {
         0, (uint8_t)(id >> 8), (uint8_t)(id >> 3 & 0x1f), (uint8_t)(id & 7)
     };
-    const struct pci_function *f = pci_enum_find(addr);
+    const struct pci_enum_function *f = pci_enum_find(addr);
     if (f != NULL && f->pcie_cap != 0 && f->pcie_port_type == PCIE_ROOT_PORT && erratum_1063()) {
         alias_add(ids, &n, 0);
     }
-    for (const struct pci_function *b = f != NULL ? f->parent : NULL; b != NULL; b = b->parent) {
+    for (const struct pci_enum_function *b = f != NULL ? f->parent : NULL; b != NULL;
+         b = b->parent) {
         uint16_t own = (uint16_t)(b->addr.bus << 8 | b->addr.device << 3 | b->addr.function);
         uint16_t secondary = (uint16_t)(b->secondary_bus << 8);
         if (b->pcie_cap == 0) {

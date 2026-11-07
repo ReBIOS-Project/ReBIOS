@@ -252,9 +252,9 @@ bool tendril_glue_pci_find_read8(
     void *ctx, uint16_t vendor, uint16_t device, uint16_t offset, uint8_t *value
 ) {
     (void)ctx;
-    const struct pci_topology *t = pci_enum_topology();
+    const struct pci_enum_topology *t = pci_enum_topology();
     for (size_t i = 0; t != NULL && i < t->function_count; i++) {
-        const struct pci_function *f = &t->functions[i];
+        const struct pci_enum_function *f = &t->functions[i];
         if (f->vendor_id == vendor && f->device_id == device) {
             *value = (uint8_t)pci_cfg_read(f->addr, offset, 1);
             return true;
@@ -478,7 +478,7 @@ struct usb_controller *usb_controller_of(const struct tendril_hc *hc) {
     return NULL;
 }
 
-static void controller_add(const struct pci_function *f, int type) {
+static void controller_add(const struct pci_enum_function *f, int type) {
     if (controller_count == MAX_CONTROLLERS) {
         return;
     }
@@ -486,18 +486,18 @@ static void controller_add(const struct pci_function *f, int type) {
     c->f = f;
     c->type = type;
     size_t index = type == TENDRIL_HC_UHCI ? UHCI_BAR : 0;
-    const struct pci_bar *bar = &f->bars[index];
+    const struct pci_enum_bar *bar = &f->bars[index];
     if (bar->size == 0 || bar->base == 0) {
         return;
     }
     if (type == TENDRIL_HC_UHCI) {
-        if (bar->kind != PCI_BAR_IO) {
+        if (bar->kind != PCI_ENUM_BAR_IO) {
             return;
         }
         c->port = (uint16_t)bar->base;
         c->port_count = bar->size;
     } else {
-        if (bar->kind == PCI_BAR_IO) {
+        if (bar->kind == PCI_ENUM_BAR_IO) {
             return;
         }
         mm_map_device(bar->base, bar->size);
@@ -515,9 +515,9 @@ void usb_init(void) {
     if (core_handoff->config.legacy_usb == 0) {
         return;
     }
-    const struct pci_topology *t = pci_enum_topology();
+    const struct pci_enum_topology *t = pci_enum_topology();
     for (size_t i = 0; t != NULL && i < t->function_count; i++) {
-        const struct pci_function *f = &t->functions[i];
+        const struct pci_enum_function *f = &t->functions[i];
         int type;
         uint32_t class_code = (uint32_t)f->base_class << 16 | (uint32_t)f->subclass << 8
                             | f->prog_if;

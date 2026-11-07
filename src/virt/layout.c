@@ -503,13 +503,13 @@ void layout_init(void) {
     // memory below 4 GiB stays at its host addresses too, beside its BARs.
     if (h->video.vbios_present) {
         const struct handoff_pci_address *va = &h->video.vga_device;
-        struct pci_function *f = pci_enum_find((struct pci_cfg_addr){
+        struct pci_enum_function *f = pci_enum_find((struct pci_cfg_addr){
             va->segment, va->bus, (uint8_t)(va->devfn >> 3),
             (uint8_t)(va->devfn & 7)
         });
         for (size_t b = 0; f != NULL && b < f->bar_count && b < 6; b++) {
-            const struct pci_bar *bar = &f->bars[b];
-            if ((bar->kind != PCI_BAR_MEM32 && bar->kind != PCI_BAR_MEM64)
+            const struct pci_enum_bar *bar = &f->bars[b];
+            if ((bar->kind != PCI_ENUM_BAR_MEM32 && bar->kind != PCI_ENUM_BAR_MEM64)
              || bar->size == 0 || bar->base == 0
              || bar->base + bar->size > FOUR_GIB) {
                 continue;

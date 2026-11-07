@@ -216,11 +216,11 @@ static bool uhci_take(struct pci_cfg_addr a, uint16_t port, struct release *r) {
     return reset;
 }
 
-static const struct pci_bar *first_bar(const struct pci_function *f, bool io) {
+static const struct pci_enum_bar *first_bar(const struct pci_enum_function *f, bool io) {
     for (size_t i = 0; i < f->bar_count; i++) {
-        const struct pci_bar *b = &f->bars[i];
-        bool is_io = b->kind == PCI_BAR_IO;
-        bool is_memory = b->kind == PCI_BAR_MEM32 || b->kind == PCI_BAR_MEM64;
+        const struct pci_enum_bar *b = &f->bars[i];
+        bool is_io = b->kind == PCI_ENUM_BAR_IO;
+        bool is_memory = b->kind == PCI_ENUM_BAR_MEM32 || b->kind == PCI_ENUM_BAR_MEM64;
         if ((io ? is_io : is_memory) && b->base != 0 && b->size != 0) {
             return b;
         }
@@ -228,7 +228,7 @@ static const struct pci_bar *first_bar(const struct pci_function *f, bool io) {
     return NULL;
 }
 
-static void take(const struct pci_function *f) {
+static void take(const struct pci_enum_function *f) {
     const char *name;
     switch (f->prog_if) {
         case USB_UHCI: {
@@ -254,7 +254,7 @@ static void take(const struct pci_function *f) {
     struct pci_cfg_addr a = f->addr;
     uint32_t command = pci_cfg_read(a, PCI_COMMAND, 2);
     bool io = f->prog_if == USB_UHCI;
-    const struct pci_bar *bar = first_bar(f, io);
+    const struct pci_enum_bar *bar = first_bar(f, io);
     if (bar == NULL || (command & (io ? PCI_COMMAND_IO : PCI_COMMAND_MEMORY)) == 0) {
         printf(
             "USB %04x:%02x:%02x.%x: %s left alone, as its registers are not decoded\n", a.segment,
@@ -304,9 +304,9 @@ static bool unneeded(uint16_t segment, uint16_t rid) {
 }
 
 void usb_handoff(void) {
-    const struct pci_topology *t = pci_enum_topology();
+    const struct pci_enum_topology *t = pci_enum_topology();
     for (size_t i = 0; t != NULL && i < t->function_count; i++) {
-        const struct pci_function *f = &t->functions[i];
+        const struct pci_enum_function *f = &t->functions[i];
         if (f->base_class == PCI_BASE_CLASS_SERIAL && f->subclass == PCI_SUBCLASS_SERIAL_USB) {
             take(f);
         }

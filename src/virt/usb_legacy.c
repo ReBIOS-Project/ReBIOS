@@ -258,7 +258,7 @@ static bool trap_range(struct usb_controller *c, size_t offset, size_t size) {
 // All of the BAR but the pages of an MSI-X table, which are the guest's
 // anyway.
 static bool trap_registers(struct usb_controller *c) {
-    const struct pci_function *f = c->f;
+    const struct pci_enum_function *f = c->f;
     size_t first = c->mmio_size;
     size_t end = c->mmio_size;
     if (f->msix_cap != 0) {
@@ -276,7 +276,7 @@ static bool trap_registers(struct usb_controller *c) {
 }
 
 bool usb_legacy_own(struct usb_controller *c) {
-    const struct pci_function *f = c->f;
+    const struct pci_enum_function *f = c->f;
     if (c->type == TENDRIL_HC_UHCI) {
         struct io_handler ports = { c->port, c->port_count, port_access, c, false };
         io_register(&ports);
@@ -301,7 +301,7 @@ bool usb_legacy_own(struct usb_controller *c) {
 }
 
 void usb_legacy_disown(struct usb_controller *c) {
-    const struct pci_function *f = c->f;
+    const struct pci_enum_function *f = c->f;
     pci_virt_hook(f->addr, NULL, NULL);
     if (c->power_kept) {
         pci_cfg_write(f->addr, f->pm_cap + PM_CONTROL, 2, c->power);

@@ -204,16 +204,16 @@ static bool pci_bus_has(const struct mp_input *in, unsigned int bus) {
 }
 
 static void pci_buses_find(struct mp_input *in) {
-    const struct pci_topology *topology = pci_enum_scan();
+    const struct pci_enum_topology *topology = pci_enum_scan();
     for (size_t i = 0; i < topology->root_bus_count; i++) {
-        const struct pci_root_bus *rb = &topology->root_buses[i];
+        const struct pci_enum_root_bus *rb = &topology->root_buses[i];
         int bus = pci_plan_guest_bus(rb->segment, rb->bus);
         if (bus >= 0) {
             pci_bus_add(in, (uint8_t)bus);
         }
     }
     for (size_t i = 0; i < topology->function_count; i++) {
-        const struct pci_function *f = &topology->functions[i];
+        const struct pci_enum_function *f = &topology->functions[i];
         bool bridge = f->header_type == PCI_HEADER_TYPE_BRIDGE
                    || f->header_type == PCI_HEADER_TYPE_CARDBUS;
         // A bridge whose secondary bus is not above its own has not been given

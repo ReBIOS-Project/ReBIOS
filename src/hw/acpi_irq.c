@@ -215,7 +215,7 @@ static uacpi_namespace_node *child_at(uacpi_namespace_node *parent, uint64_t adr
 // The bus's device object is its host bridge, or else the child of the object
 // of the bus above that has the address of the bus's bridge.
 static struct bus_info *bus_get(
-    struct lookup *l, uint16_t segment, uint8_t number, const struct pci_function *bridge
+    struct lookup *l, uint16_t segment, uint8_t number, const struct pci_enum_function *bridge
 ) {
     for (size_t i = 0; i < l->bus_count; i++) {
         if (l->buses[i].segment == segment && l->buses[i].number == number) {
@@ -334,9 +334,9 @@ static bool entry_resolve(
 }
 
 static bool route_find(
-    struct lookup *l, const struct pci_function *f, struct acpi_irq_pci_route *route
+    struct lookup *l, const struct pci_enum_function *f, struct acpi_irq_pci_route *route
 ) {
-    const struct pci_function *at = f;
+    const struct pci_enum_function *at = f;
     uint8_t device = f->addr.device;
     uint8_t pin = f->interrupt_pin;
     for (;;) {
@@ -365,7 +365,7 @@ static void format_addr(char *buf, size_t size, struct pci_cfg_addr addr) {
 }
 
 static void routes_find(void) {
-    const struct pci_topology *topology = pci_enum_scan();
+    const struct pci_enum_topology *topology = pci_enum_scan();
     if (!namespace_loaded()) {
         printf("No ACPI namespace, so no PCI interrupt routes\n");
         return;
@@ -382,7 +382,7 @@ static void routes_find(void) {
 
     routes = kmalloc(topology->function_count * sizeof(struct acpi_irq_pci_route));
     for (size_t i = 0; i < topology->function_count; i++) {
-        const struct pci_function *f = &topology->functions[i];
+        const struct pci_enum_function *f = &topology->functions[i];
         if (f->interrupt_pin < 1 || f->interrupt_pin > PCI_PINS) {
             continue;
         }

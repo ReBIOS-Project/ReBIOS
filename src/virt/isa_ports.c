@@ -347,9 +347,9 @@ void isa_ports_changed(const void *node) {
 }
 
 static void give_ide_channels(void) {
-    const struct pci_topology *t = pci_enum_topology();
+    const struct pci_enum_topology *t = pci_enum_topology();
     for (size_t i = 0; t != NULL && i < t->function_count; i++) {
-        const struct pci_function *f = &t->functions[i];
+        const struct pci_enum_function *f = &t->functions[i];
         if (f->base_class != PCI_BASE_CLASS_STORAGE || f->subclass != PCI_SUBCLASS_STORAGE_IDE) {
             continue;
         }

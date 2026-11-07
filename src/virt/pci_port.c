@@ -105,7 +105,7 @@ static uint32_t window_word(uintptr_t address) {
     return (uint32_t)(address >> 16) & MEMORY_WINDOW;
 }
 
-static size_t root_of(const struct pci_topology *t, const struct pci_function *f) {
+static size_t root_of(const struct pci_enum_topology *t, const struct pci_enum_function *f) {
     while (f->parent != NULL) {
         f = f->parent;
     }
@@ -127,11 +127,13 @@ struct below {
     uint32_t width;
 };
 
-static struct below below_port(const struct pci_topology *t, const struct pci_root_bus *rb) {
+static struct below below_port(
+    const struct pci_enum_topology *t, const struct pci_enum_root_bus *rb
+) {
     struct below b = { DEVCAP_PAYLOAD, 0, 1, 1 };
     bool any = false;
     for (size_t i = 0; i < t->function_count; i++) {
-        const struct pci_function *f = &t->functions[i];
+        const struct pci_enum_function *f = &t->functions[i];
         if (f->addr.segment != rb->segment || f->addr.bus != rb->bus || f->pcie_cap == 0) {
             continue;
         }
@@ -164,7 +166,7 @@ static struct below below_port(const struct pci_topology *t, const struct pci_ro
 
 // Whether the display's VGA device is behind the port, and the VGA 16-bit
 // decode of the bridge above it there, where it has one.
-static bool vga_below(const struct pci_topology *t, size_t root, bool *decode_16) {
+static bool vga_below(const struct pci_enum_topology *t, size_t root, bool *decode_16) {
     const struct handoff_video *video = &core_handoff->video;
     *decode_16 = true;
     if (!video->vga_present) {
@@ -174,7 +176,7 @@ static bool vga_below(const struct pci_topology *t, size_t root, bool *decode_16
         video->vga_device.segment, video->vga_device.bus, (uint8_t)(video->vga_device.devfn >> 3),
         (uint8_t)(video->vga_device.devfn & 7)
     };
-    const struct pci_function *f = pci_enum_find(a);
+    const struct pci_enum_function *f = pci_enum_find(a);
     if (f == NULL || root_of(t, f) != root) {
         return false;
     }
@@ -187,9 +189,9 @@ static bool vga_below(const struct pci_topology *t, size_t root, bool *decode_16
 // Whether an ISA bridge is behind the port, whose devices' legacy addresses no
 // window of the port has: it then forwards what nothing else on bus 0 claims,
 // as the host bridge in its place does.
-static bool isa_below(const struct pci_topology *t, size_t root) {
+static bool isa_below(const struct pci_enum_topology *t, size_t root) {
     for (size_t i = 0; i < t->function_count; i++) {
-        const struct pci_function *f = &t->functions[i];
+        const struct pci_enum_function *f = &t->functions[i];
         if (f->base_class == PCI_BASE_CLASS_BRIDGE && f->subclass == PCI_SUBCLASS_BRIDGE_ISA
          && root_of(t, f) == root) {
             return true;
@@ -198,10 +200,10 @@ static bool isa_below(const struct pci_topology *t, size_t root) {
     return false;
 }
 
-static uint16_t vendor_id(const struct pci_topology *t, size_t primary) {
-    const struct pci_root_bus *rb = &t->root_buses[primary];
+static uint16_t vendor_id(const struct pci_enum_topology *t, size_t primary) {
+    const struct pci_enum_root_bus *rb = &t->root_buses[primary];
     for (size_t i = 0; i < t->function_count; i++) {
-        const struct pci_function *f = &t->functions[i];
+        const struct pci_enum_function *f = &t->functions[i];
         if (f->addr.segment == rb->segment && f->addr.bus == rb->bus) {
             return f->vendor_id;
         }
@@ -212,7 +214,7 @@ static uint16_t vendor_id(const struct pci_topology *t, size_t primary) {
 static void port_build(
     struct port *p, const struct pci_plan_port *pp, bool multi, uint16_t vendor
 ) {
-    const struct pci_topology *t = pci_enum_topology();
+    const struct pci_enum_topology *t = pci_enum_topology();
     uint8_t *c = p->config;
     uint8_t *w = p->writable;
     memset(p, 0, sizeof(struct port));
@@ -280,7 +282,7 @@ static void port_build(
 
 void pci_port_init(void) {
     const struct pci_plan *plan = pci_plan();
-    const struct pci_topology *t = pci_enum_topology();
+    const struct pci_enum_topology *t = pci_enum_topology();
     if (plan == NULL || t == NULL || plan->port_count == 0) {
         return;
     }
