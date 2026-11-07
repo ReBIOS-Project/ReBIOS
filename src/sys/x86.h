@@ -157,6 +157,14 @@
 #define VECTOR_CP 21
 #define VECTOR_SX 30
 
+// The page fault's error code (SDM 325462-093 Vol. 3A, Figure 5-12).
+#define PF_ERROR_P ((uint32_t)1 << 0)
+#define PF_ERROR_W ((uint32_t)1 << 1)
+#define PF_ERROR_U ((uint32_t)1 << 2)
+#define PF_ERROR_RSVD ((uint32_t)1 << 3)
+#define PF_ERROR_I ((uint32_t)1 << 4)
+#define PF_ERROR_PK ((uint32_t)1 << 5)
+
 // The bits of paging-structure entries, which AMD's nested paging uses too,
 // and whose address bits EPT's and the IOMMUs' tables share.
 #define PTE_P ((uint64_t)1 << 0)

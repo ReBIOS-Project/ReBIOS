@@ -23,12 +23,6 @@
 #include <stdint.h>
 #include <virt/vcpu.h>
 
-#define PF_ERROR_P ((uint32_t)1 << 0)
-#define PF_ERROR_W ((uint32_t)1 << 1)
-#define PF_ERROR_U ((uint32_t)1 << 2)
-#define PF_ERROR_RSVD ((uint32_t)1 << 3)
-#define PF_ERROR_I ((uint32_t)1 << 4)
-#define PF_ERROR_PK ((uint32_t)1 << 5)
 // Not a page fault: the access made an exit of the guest's guest instead,
 // which waits for the next entry.
 #define PF_ERROR_EXIT ((uint32_t)1 << 31)
