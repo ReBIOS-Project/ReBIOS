@@ -195,6 +195,9 @@ struct nsvm {
     struct npt02 *current02;
     size_t npt02_pages;
     size_t npt02_next;
+    // A bit for each of the guest's guests' ASIDs whose translations the
+    // guest's INVLPGA flushed since VMCB02 last had the ASID.
+    uint64_t *invlpga_asids;
     // An exit of the guest's guest that what the hypervisor carried out for it
     // raised, for the next entry.
     bool pending;
@@ -275,6 +278,7 @@ void nsvm_vcpu_init(struct vcpu *v) {
     n->vmcb02 = page_alloc(1);
     n->vmcb02_pa = (uintptr_t)n->vmcb02;
     n->msrpm02 = page_alloc(MSRPM_SIZE / PAGE_SIZE);
+    n->invlpga_asids = page_alloc(page_count((nasid + 63) / 64 * sizeof(uint64_t)));
     v->nsvm = n;
 }
 
@@ -1339,6 +1343,16 @@ static void prepare_vmcb02(struct nsvm *n) {
         }
         c->n_cr3 = npt02_root(n);
     }
+    // A flush for the guest's INVLPGAs for the ASID, of all of its
+    // translations, global ones too, but not the nested ones.
+    uint64_t *owed = &n->invlpga_asids[c12->guest_asid / 64];
+    uint64_t bit = (uint64_t)1 << (c12->guest_asid % 64);
+    if ((*owed & bit) != 0) {
+        *owed &= ~bit;
+        if (c->tlb_control != SVM_TLB_FLUSH_ALL) {
+            c->tlb_control = svm_flush_by_asid ? SVM_TLB_FLUSH_ASID : SVM_TLB_FLUSH_ALL;
+        }
+    }
     // FRED's nested-exception bit is not reserved where the guest's guest has
     // CR4.FRED (AMD 69191 rev. 1.10).
     uint64_t reserved = EVENT_RESERVED & ~((s12->cr4 & CR4_FRED) != 0 ? SVM_EVENT_NESTED : 0);
@@ -1492,8 +1506,10 @@ static void vmload_vmsave(struct vcpu *v, bool load) {
     vcpu_advance(v, insn.length);
 }
 
-// INVLPGA (APM 24593 rev. 3.46, 15.16.2) in the processor's ASID for ECX's,
-// one past it, the guest's own for 0; ASIDs past those the guest has hold no
+// INVLPGA (APM 24593 rev. 3.46, 15.16.2), as a flush of every translation of
+// ECX's ASID, which Linux 7.3's KVM makes for it, INVLPGA having errata on
+// Genoa and Turin (svm.c, svm_flush_tlb_gva()): of the guest's own, 0, at
+// once, of another at its next VMRUN. ASIDs past those the guest has hold no
 // translations.
 static void invlpga(struct vcpu *v) {
     struct insn insn;
@@ -1501,10 +1517,10 @@ static void invlpga(struct vcpu *v) {
         return;
     }
     uint32_t asid = (uint32_t)v->gprs.rcx;
-    if (asid < nasid - 1) {
-        uint64_t address = rax_address(v, &insn);
-        uint32_t own = asid == 0 ? 1 : asid + 1;
-        asm volatile ("invlpga %0, %1" :: "a"(address), "c"(own) : "memory");
+    if (asid == 0) {
+        svm_flush_guest_tlb(v);
+    } else if (asid < nasid - 1) {
+        v->nsvm->invlpga_asids[asid / 64] |= (uint64_t)1 << (asid % 64);
     }
     vcpu_advance(v, insn.length);
 }
