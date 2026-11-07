@@ -30,6 +30,7 @@
 #include <hw/pci_host.h>
 #include <lib/heap.h>
 #include <lib/log.h>
+#include <lib/util.h>
 #include <memory.h>
 #include <sys/mm.h>
 
@@ -106,14 +107,6 @@ struct gap {
 
 static struct pci_plan plan;
 static bool made;
-
-static uint64_t align_up(uint64_t x, uint64_t align) {
-    return (x + align - 1) & ~(align - 1);
-}
-
-static uint64_t align_down(uint64_t x, uint64_t align) {
-    return x & ~(align - 1);
-}
 
 static void element_add(struct container *c, struct element e) {
     if (c->count == c->capacity) {
@@ -554,8 +547,8 @@ static void io_window(const struct pci_topology *t, size_t root, uint32_t *base,
         *limit = IO_GRANULE - 1;
         return;
     }
-    *base = low & ~(IO_GRANULE - 1);
-    *limit = ((high + IO_GRANULE - 1) & ~(IO_GRANULE - 1)) - 1;
+    *base = align_down(low, IO_GRANULE);
+    *limit = align_up(high, IO_GRANULE) - 1;
 }
 
 // A window from a range, closed where it is empty.

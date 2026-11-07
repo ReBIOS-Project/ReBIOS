@@ -23,6 +23,7 @@
 #include <virt/vmx.h>
 #include <hw/power.h>
 #include <lib/log.h>
+#include <lib/util.h>
 #include <memory.h>
 #include <sys/cpu.h>
 #include <sys/fixup.h>
@@ -579,7 +580,7 @@ static void vmptrld(uintptr_t pa) {
 }
 
 static struct vmcs_cache *cache_alloc(void) {
-    struct vmcs_cache *c = page_alloc((sizeof(struct vmcs_cache) + PAGE_SIZE - 1) / PAGE_SIZE);
+    struct vmcs_cache *c = page_alloc(page_count(sizeof(struct vmcs_cache)));
     memset(c, 0, sizeof(struct vmcs_cache));
     return c;
 }

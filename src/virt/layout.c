@@ -110,14 +110,6 @@ static uint8_t *low;
 static uintptr_t ones_page;
 static size_t moved_pages;
 
-static uint64_t align_up(uint64_t x, uint64_t align) {
-    return (x + align - 1) & ~(align - 1);
-}
-
-static uint64_t align_down(uint64_t x, uint64_t align) {
-    return x & ~(align - 1);
-}
-
 static void list_init(struct range_list *list) {
     list->r = kmalloc(MAX_RANGES * sizeof(struct range));
     list->count = 0;
@@ -442,8 +434,8 @@ void layout_init(void) {
                 "it is ignored\n", (unsigned long long)d->PhysicalStart
             );
         } else if (desc_is_free(d)) {
-            uintptr_t base = align_up(d->PhysicalStart, PAGE_SIZE);
-            list_add(&host_free, base, align_down(end, PAGE_SIZE));
+            uintptr_t base = page_up(d->PhysicalStart);
+            list_add(&host_free, base, page_down(end));
         } else if (type_is_free(d->Type)) {
             const char *what = (d->Attribute & EFI_MEMORY_SP) != 0
                              ? "specific-purpose memory"
@@ -459,8 +451,8 @@ void layout_init(void) {
         if (desc_is_free(d) || !handoff_efi_desc_end(d, &end)) {
             continue;
         }
-        uintptr_t base = align_down(d->PhysicalStart, PAGE_SIZE);
-        end = align_up(end, PAGE_SIZE);
+        uintptr_t base = page_down(d->PhysicalStart);
+        end = page_up(end);
         if (list_overlaps(&host_free, base, end)) {
             printf(
                 "Firmware memory map: type %u memory at %#llx-%#llx overlaps free memory, which "
@@ -481,8 +473,8 @@ void layout_init(void) {
     const struct iommu_tables *tables = iommu_tables_parse();
     for (size_t i = 0; i < tables->reserved_count; i++) {
         const struct iommu_reserved_region *r = &tables->reserved[i];
-        uintptr_t base = align_down(r->base, PAGE_SIZE);
-        uintptr_t end = align_down(r->last, PAGE_SIZE) + PAGE_SIZE;
+        uintptr_t base = page_down(r->base);
+        uintptr_t end = page_down(r->last) + PAGE_SIZE;
         if (base < ONE_MIB) {
             printf(
                 "IOMMU region %#llx-%#llx is in the guest's legacy memory\n",
@@ -825,7 +817,7 @@ uint32_t layout_take_reserved(size_t size, uint32_t align, uintptr_t *hpa) {
     if (gpa == 0) {
         return 0;
     }
-    size_t pages = align_up(size, PAGE_SIZE) / PAGE_SIZE;
+    size_t pages = page_count(size);
     if (!contiguous(gpa, pages, hpa)) {
         *hpa = (uintptr_t)page_alloc(pages);
         map_ram(gpa, *hpa, pages * PAGE_SIZE);
@@ -835,7 +827,7 @@ uint32_t layout_take_reserved(size_t size, uint32_t align, uintptr_t *hpa) {
 
 uint32_t layout_take(size_t size, uint32_t align, uint32_t e820_type) {
     // Whole pages, as the memory map and the page tables have them.
-    size = (uint32_t)align_up(size, PAGE_SIZE);
+    size = (uint32_t)page_up(size);
     if (align < PAGE_SIZE) {
         align = PAGE_SIZE;
     }

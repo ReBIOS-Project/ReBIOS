@@ -32,6 +32,7 @@
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/printf.h>
+#include <lib/util.h>
 #include <memory.h>
 #include <sys/mm.h>
 #include <virt/guest_acpi.h>
@@ -206,8 +207,8 @@ static void free_uma_absent(void) {
         printf("No end found to the free upper memory, keeping it as RAM\n");
         return;
     }
-    uintptr_t start = (csm.rom_end + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
-    end &= ~(PAGE_SIZE - 1);
+    uintptr_t start = page_up(csm.rom_end);
+    end = page_down(end);
     if (start < end) {
         printf(
             "Upper memory %#llx-%#llx is free, and absent\n", (unsigned long long)start,
@@ -221,7 +222,7 @@ static void free_uma_absent(void) {
 // memory zone, which it reports as that of the free upper memory, are locked
 // as a BIOS locks its shadow RAM.
 static void lock_roms(void) {
-    uintptr_t roms_end = (csm.rom_end + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+    uintptr_t roms_end = page_up(csm.rom_end);
     if (roms_end > ROM_AREA_BASE) {
         printf(
             "Option ROMs %#x-%#llx are read-only\n", ROM_AREA_BASE,
@@ -230,7 +231,7 @@ static void lock_roms(void) {
         layout_read_only(ROM_AREA_BASE, roms_end - ROM_AREA_BASE);
     }
     uintptr_t start = csm.compat16->uma_address + csm.compat16->uma_size;
-    start = (start + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+    start = page_up(start);
     if (start >= roms_end && start < ROM_AREA_END) {
         printf(
             "Legacy BIOS %#llx-%#x is read-only\n", (unsigned long long)start, ROM_AREA_END - 1
@@ -264,7 +265,7 @@ static const struct handoff_pci_rom *emulated_vbios(void) {
     }
     const struct handoff *h = core_handoff;
     size_t size = VGABIOS_ROM_SIZE;
-    uint8_t *image = page_alloc((size + PAGE_SIZE - 1) / PAGE_SIZE);
+    uint8_t *image = page_alloc(page_count(size));
     vgabios_rom_fill(image);
     uint8_t sum = 0;
     for (size_t i = 0; i + 1 < size; i++) {
@@ -359,7 +360,7 @@ void csm_boot_returned(struct vcpu *v) {
             // was.
             size_t size = *(uint8_t *)layout_low(csm.rom_at + 2) * (uint32_t)512;
             printf("Option ROM done, status %#x, %zu bytes kept\n", status, size);
-            csm.rom_end = (csm.rom_at + size + OPTION_ROM_ALIGN - 1) & ~(OPTION_ROM_ALIGN - 1);
+            csm.rom_end = align_up(csm.rom_at + size, OPTION_ROM_ALIGN);
             csm.roms_done++;
             next_rom(v);
             break;

@@ -23,6 +23,7 @@
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
+#include <lib/util.h>
 #include <memory.h>
 #include <sys/mm.h>
 #include <virt/emulate.h>
@@ -143,7 +144,7 @@ static const struct region *find(uintptr_t gpa) {
     }
     uintptr_t hpa;
     uint32_t prot;
-    if (!gpt_translate(gpa & ~(uint64_t)(PAGE_SIZE - 1), &hpa, &prot, NULL)) {
+    if (!gpt_translate(page_down(gpa), &hpa, &prot, NULL)) {
         return &absent;
     }
     return NULL;
@@ -310,7 +311,7 @@ struct mmio_step {
 // others nothing in particular.
 static struct step_page *step_map(struct vcpu *v, uintptr_t gpa, size_t len) {
     struct mmio_step *s = v->step;
-    uintptr_t page = gpa & ~(uint64_t)(PAGE_SIZE - 1);
+    uintptr_t page = page_down(gpa);
     const struct region *r = find(page);
     if (r == NULL || s->count == MAX_STEP_PAGES) {
         return NULL;

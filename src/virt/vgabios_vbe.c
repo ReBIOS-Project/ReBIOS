@@ -343,7 +343,7 @@ static void mode_info(struct vgabios_regs *r) {
     }
     size_t bytes = bytes_per_pixel(m.bpp);
     uint32_t pitch = (uint32_t)m.width * bytes;
-    uint32_t page = (pitch * m.height + 0xffff) & ~(uint32_t)0xffff;
+    uint32_t page = (uint32_t)align_up(pitch * m.height, 0x10000);
     size_t pages = page != 0 ? vram_size() / page : 0;
     uint8_t images = pages == 0 ? 0 : (uint8_t)(pages > 256 ? 255 : pages - 1);
     struct mode_info_block b;

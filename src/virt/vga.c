@@ -1603,7 +1603,7 @@ static void direct_update(void) {
 static void vbe_take_written(uintptr_t start, size_t size) {
     memset(vbe.written, 0, vbe.vram_size / PAGE_SIZE / 8);
     size_t first = start / PAGE_SIZE;
-    uintptr_t end = (start + size + PAGE_SIZE - 1) / PAGE_SIZE;
+    size_t end = page_count(start + size);
     if (end > vbe.vram_size / PAGE_SIZE) {
         end = vbe.vram_size / PAGE_SIZE;
     }
@@ -1873,12 +1873,12 @@ static void vbe_init(void) {
     vbe.window_bank = NO_BANK;
     vbe.track = gpt_track_dirty();
     if (vbe.track) {
-        size_t bitmap_pages = (vbe.vram_size / PAGE_SIZE / 8 + PAGE_SIZE - 1) / PAGE_SIZE;
+        size_t bitmap_pages = page_count(vbe.vram_size / PAGE_SIZE / 8);
         vbe.written = page_alloc(bitmap_pages);
         vbe.written_before = page_alloc(bitmap_pages);
     }
-    out.vbe_hashes = page_alloc((DISPI_MAX_YRES * sizeof(uint64_t) + PAGE_SIZE - 1) / PAGE_SIZE);
-    out.vbe_line = page_alloc((DISPI_MAX_XRES * sizeof(uint32_t) + PAGE_SIZE - 1) / PAGE_SIZE);
+    out.vbe_hashes = page_alloc(page_count(DISPI_MAX_YRES * sizeof(uint64_t)));
+    out.vbe_line = page_alloc(page_count(DISPI_MAX_XRES * sizeof(uint32_t)));
     struct io_handler ports = { DISPI_PORT, DISPI_PORT_COUNT, dispi_ports, NULL, false };
     io_register(&ports);
     vbe.present = true;
@@ -1887,8 +1887,7 @@ static void vbe_init(void) {
     // bytes, and its scan lines are a multiple of 32 bytes. A turned picture
     // is never the framebuffer's own.
     const struct handoff_framebuffer *fb = &video->framebuffer;
-    uint64_t frame = ((uint64_t)fb->pitch * fb->height + PAGE_SIZE - 1)
-                   & ~(uint64_t)(PAGE_SIZE - 1);
+    uint64_t frame = page_up((uint64_t)fb->pitch * fb->height);
     if (fb->present && fb->rotation == HANDOFF_ROTATE_0 && fb->bpp == 32 && fb->red_size == 8
      && fb->red_shift == 16 && fb->green_size == 8 && fb->green_shift == 8 && fb->blue_size == 8
      && fb->blue_shift == 0 && fb->pitch % 32 == 0 && fb->base % PAGE_SIZE == 0
@@ -2005,13 +2004,13 @@ bool vga_init(void) {
         vga.planes[p] = page_alloc(PLANE_SIZE / PAGE_SIZE);
         memset(vga.planes[p], 0, PLANE_SIZE);
     }
-    size_t frame_pages = (MAX_WIDTH * MAX_HEIGHT * sizeof(uint32_t) + PAGE_SIZE - 1) / PAGE_SIZE;
+    size_t frame_pages = page_count(MAX_WIDTH * MAX_HEIGHT * sizeof(uint32_t));
     out.frame = page_alloc(frame_pages);
     out.shown = page_alloc(frame_pages);
     uint32_t screen_width;
     uint32_t screen_height;
     vga_screen_size(&screen_width, &screen_height);
-    size_t line_pages = (screen_width * sizeof(uint32_t) + PAGE_SIZE - 1) / PAGE_SIZE;
+    size_t line_pages = page_count(screen_width * sizeof(uint32_t));
     out.xmap = page_alloc(line_pages);
     out.fb_line = page_alloc(line_pages);
     if (fb->rotation != HANDOFF_ROTATE_0) {

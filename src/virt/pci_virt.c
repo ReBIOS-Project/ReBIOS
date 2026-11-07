@@ -29,6 +29,7 @@
 #include <lib/log.h>
 #include <lib/printf.h>
 #include <lib/spinlock.h>
+#include <lib/util.h>
 #include <memory.h>
 #include <sys/mm.h>
 #include <sys/x86.h>
@@ -265,14 +266,6 @@ static struct vfunction *vfunction_find(struct pci_addr a) {
         }
     }
     return NULL;
-}
-
-static uint64_t page_down(uint64_t x) {
-    return x & ~(uint64_t)(PAGE_SIZE - 1);
-}
-
-static uint64_t page_up(uint64_t x) {
-    return (x + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
 }
 
 static uint64_t bar_mask(const struct vbar *b) {

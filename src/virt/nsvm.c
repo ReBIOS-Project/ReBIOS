@@ -24,6 +24,7 @@
 #include <handoff.h>
 #include <lib/heap.h>
 #include <lib/log.h>
+#include <lib/util.h>
 #include <memory.h>
 #include <sys/cpu.h>
 #include <sys/mm.h>
@@ -323,7 +324,7 @@ static uint8_t *guest_page(uintptr_t gpa) {
     uint32_t prot;
     uint8_t memtype;
     if (!gpt_translate(gpa, &hpa, &prot, &memtype) || (prot & (GPT_R | GPT_W)) != (GPT_R | GPT_W)
-     || memtype != MT_WB || vlapic_access_page(hpa & ~(uint64_t)0xfff)) {
+     || memtype != MT_WB || vlapic_access_page(page_down(hpa))) {
         return NULL;
     }
     return (uint8_t *)(uintptr_t)hpa;
@@ -845,7 +846,7 @@ static bool pat_valid(uint64_t pat) {
 }
 
 static bool table_fits(uint64_t base, size_t size) {
-    return ((base & ~(uint64_t)0xfff) + size) >> phys_width == 0;
+    return (page_down(base) + size) >> phys_width == 0;
 }
 
 // VMRUN's checks of the state it loads (APM 24593 rev. 3.46, 15.5.1, and 15.20
@@ -980,9 +981,7 @@ static uintptr_t merge_msrpm(struct nsvm *n, uint64_t base12) {
     }
     for (size_t page = 0; page < MSRPM_SIZE / PAGE_SIZE; page++) {
         const uint64_t *mine = (const uint64_t *)(own + page * PAGE_SIZE);
-        const uint64_t *l1 = (const uint64_t *)guest_page(
-            (base12 & ~(uint64_t)0xfff) + page * PAGE_SIZE
-        );
+        const uint64_t *l1 = (const uint64_t *)guest_page(page_down(base12) + page * PAGE_SIZE);
         uint64_t *to = (uint64_t *)(n->msrpm02 + page * PAGE_SIZE);
         for (size_t i = 0; i < PAGE_SIZE / 8; i++) {
             to[i] = mine[i] | (l1 == NULL ? ~(uint64_t)0 : l1[i]);
@@ -994,7 +993,7 @@ static uintptr_t merge_msrpm(struct nsvm *n, uint64_t base12) {
 // An entry of the guest's nested page tables, which reads as all ones where
 // nothing decodes, its reserved bits set.
 static uint64_t npt12_read(const struct nsvm *n, uintptr_t gpa, void **at) {
-    uint8_t *page = guest_page(gpa & ~(uint64_t)0xfff);
+    uint8_t *page = guest_page(page_down(gpa));
     *at = NULL;
     if (page == NULL) {
         return ~(uint64_t)0;
@@ -1112,8 +1111,8 @@ retry:;
             }
         }
         if (logs) {
-            uint64_t page = gpa & ~(uint64_t)0xfff;
-            guest_phys_write((n->pml_base & ~(uint64_t)0xfff) + n->pml_index * 8, &page, 8);
+            uint64_t page = page_down(gpa);
+            guest_phys_write(page_down(n->pml_base) + n->pml_index * 8, &page, 8);
             n->pml_index--;
         }
         uint64_t page_mask = ((uint64_t)1 << shift) - 1;
@@ -1259,7 +1258,7 @@ static uint64_t npt02_fill(struct nsvm *n, uintptr_t gpa, const struct npt12_wal
     uint8_t memtype;
     size_t level;
     if (!gpt_translate_leaf(w->gpa, &hpa, &prot, &memtype, &level)
-     || vlapic_access_page(hpa & ~(uint64_t)0xfff)) {
+     || vlapic_access_page(page_down(hpa))) {
         return 0;
     }
     // 32-bit paging's 4 MiB pages take 2 MiB ones.
@@ -1655,9 +1654,9 @@ static bool io_wanted(struct nsvm *n, uint64_t info) {
     }
     size_t size = (info >> 4) & 7;
     size = size == 4 ? 4 : size == 2 ? 2 : 1;
-    uintptr_t base = n->copy.control.iopm_base_pa & ~(uint64_t)0xfff;
+    uintptr_t base = page_down(n->copy.control.iopm_base_pa);
     for (size_t port = info >> 16; port < (info >> 16) + size; port++) {
-        const uint8_t *page = guest_page(base + (port / 8 & ~(size_t)0xfff));
+        const uint8_t *page = guest_page(base + page_down(port / 8));
         if (page == NULL || ((page[port / 8 & 0xfff] >> (port % 8)) & 1) != 0) {
             return true;
         }
@@ -1683,8 +1682,8 @@ static bool msr_wanted(struct vcpu *v, struct nsvm *n, bool write) {
         return true;
     }
     size_t bit = offset * 8 + (msr & 0x1fff) * 2 + (write ? 1 : 0);
-    uintptr_t base = n->copy.control.msrpm_base_pa & ~(uint64_t)0xfff;
-    const uint8_t *page = guest_page(base + (bit / 8 & ~(size_t)0xfff));
+    uintptr_t base = page_down(n->copy.control.msrpm_base_pa);
+    const uint8_t *page = guest_page(base + page_down(bit / 8));
     return page == NULL || ((page[bit / 8 & 0xfff] >> (bit % 8)) & 1) != 0;
 }
 

@@ -251,8 +251,8 @@ static uint32_t legacy_eilvt[APIC_EILVT_MAX];
 // Pages the guest has had its local APICs at, which all exit, but for the
 // accesses the processor virtualises.
 #define MAX_PAGES 4
-static uint64_t pages[MAX_PAGES];
-static size_t page_count;
+static uint64_t apic_pages[MAX_PAGES];
+static size_t apic_page_count;
 static struct spinlock page_lock;
 // Where VMX virtualises accesses to those pages, they are this page (SDM
 // 325462-093 Vol. 3C, 32.4), whose contents the processor then leaves alone:
@@ -322,18 +322,18 @@ static const struct mmio_ops mmio_ops;
 
 static void trap_page(uintptr_t page) {
     spinlock_acquire(&page_lock);
-    for (size_t i = 0; i < page_count; i++) {
-        if (pages[i] == page) {
+    for (size_t i = 0; i < apic_page_count; i++) {
+        if (apic_pages[i] == page) {
             spinlock_release(&page_lock);
             return;
         }
     }
-    if (page_count == MAX_PAGES) {
+    if (apic_page_count == MAX_PAGES) {
         printf("Local APIC page %#llx left mapped: too many\n", (unsigned long long)page);
         spinlock_release(&page_lock);
         return;
     }
-    pages[page_count++] = page;
+    apic_pages[apic_page_count++] = page;
     spinlock_release(&page_lock);
     mmio_register(page, PAGE_SIZE, &mmio_ops, (void *)(uintptr_t)page);
     if (apic_access_page != 0
@@ -413,7 +413,7 @@ void vlapic_init(void) {
         if (pid_table_last > 0xffff) {
             ipi_virtualization = false;
         } else {
-            pid_table = page_alloc(((pid_table_last + 1) * 8 + PAGE_SIZE - 1) / PAGE_SIZE);
+            pid_table = page_alloc(page_count((pid_table_last + 1) * 8));
             atomic_store_explicit(&ipiv_x2apic, lapic_x2apic(), memory_order_release);
             atomic_store_explicit(&ipiv_recheck, true, memory_order_release);
         }
@@ -951,11 +951,11 @@ static void avic_update(void) {
     bool changed = want != atomic_load_explicit(&avic_wanted, memory_order_acquire);
     if (map != atomic_load_explicit(&avic_mapped, memory_order_acquire)) {
         spinlock_acquire(&page_lock);
-        for (size_t i = 0; i < page_count; i++) {
+        for (size_t i = 0; i < apic_page_count; i++) {
             if (map) {
-                gpt_map(pages[i], apic_access_page, PAGE_SIZE, GPT_RWX, MT_WB);
+                gpt_map(apic_pages[i], apic_access_page, PAGE_SIZE, GPT_RWX, MT_WB);
             } else {
-                gpt_map(pages[i], 0, PAGE_SIZE, 0, 0);
+                gpt_map(apic_pages[i], 0, PAGE_SIZE, 0, 0);
             }
         }
         spinlock_release(&page_lock);

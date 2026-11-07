@@ -148,10 +148,6 @@ static uint8_t byte_sum(const void *data, size_t size) {
     return sum;
 }
 
-static size_t page_count(size_t size) {
-    return (size + 4095) / 4096;
-}
-
 // Returns why the RSDP is invalid, or NULL.
 static const char *rsdp_check(const struct rsdp *rsdp) {
     if (memcmp(rsdp->signature, "RSD PTR ", sizeof(rsdp->signature)) != 0) {
@@ -262,7 +258,7 @@ static uint64_t smbios2_use(const struct smbios2_entry *eps) {
     }
 
     uintptr_t copy = efi_alloc_pages_typed(
-        page_count(size + eps->table_length), UINT32_MAX, EfiRuntimeServicesData
+        EFI_SIZE_TO_PAGES(size + eps->table_length), UINT32_MAX, EfiRuntimeServicesData
     );
     if (copy == 0) {
         printf("Cannot allocate memory below 4GiB for the SMBIOS tables\n");
@@ -344,7 +340,8 @@ static uint64_t smbios3_synthesise(const struct smbios3_entry *eps3) {
     }
 
     uintptr_t addr = efi_alloc_pages_typed(
-        page_count(sizeof(struct smbios2_entry) + walk.length), UINT32_MAX, EfiRuntimeServicesData
+        EFI_SIZE_TO_PAGES(sizeof(struct smbios2_entry) + walk.length), UINT32_MAX,
+        EfiRuntimeServicesData
     );
     if (addr == 0) {
         printf("Cannot allocate memory below 4GiB for the SMBIOS tables\n");

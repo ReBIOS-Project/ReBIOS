@@ -92,10 +92,6 @@ static void checksum_set(uint8_t *p, size_t size, uint32_t at) {
     p[at] = (uint8_t)-sum;
 }
 
-static uint32_t align_up(uint32_t x, uint32_t align) {
-    return (x + align - 1) & ~(align - 1);
-}
-
 // The table at addr, if it lies within the memory the hypervisor maps.
 static const uint8_t *host_table(uintptr_t addr) {
     uintptr_t top = core_handoff->map_top;

@@ -24,6 +24,7 @@
 #include <iommu/vtd.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
+#include <lib/util.h>
 #include <sys/mm.h>
 #include <sys/x86.h>
 #include <virt/gpt.h>
@@ -208,7 +209,7 @@ static void reserved_regions_apply(const struct iommu_tables *tables) {
             );
             continue;
         }
-        uintptr_t base = r->base & ~(uint64_t)(PAGE_SIZE - 1);
+        uintptr_t base = page_down(r->base);
         uintptr_t last = r->last | (PAGE_SIZE - 1);
         if (last < LEGACY_END) {
             continue;

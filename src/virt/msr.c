@@ -23,6 +23,7 @@
 #include <handoff.h>
 #include <lib/heap.h>
 #include <lib/spinlock.h>
+#include <lib/util.h>
 #include <sys/cpu.h>
 #include <sys/fixup.h>
 #include <sys/mm.h>
@@ -618,8 +619,8 @@ static uint64_t hfi_host_pointer(uint64_t value) {
 // configuration space window, from bus 0, as a power of two buses.
 static void amd_memory_init(struct vcpu *v) {
     const struct pci_plan *plan = pci_plan();
-    v->amd_top_mem = (plan != NULL ? plan->tolud : FOUR_GIB) & ~(TOP_MEM_UNIT - 1);
-    v->amd_top_mem2 = layout_high_ram_end() & ~(TOP_MEM_UNIT - 1);
+    v->amd_top_mem = align_down(plan != NULL ? plan->tolud : FOUR_GIB, TOP_MEM_UNIT);
+    v->amd_top_mem2 = align_down(layout_high_ram_end(), TOP_MEM_UNIT);
     v->amd_syscfg = SYSCFG_MTRR_FIX_DRAM_EN | SYSCFG_MTRR_VAR_DRAM_EN;
     if (v->amd_top_mem2 > FOUR_GIB) {
         v->amd_syscfg |= SYSCFG_MTRR_TOM2_EN | SYSCFG_TOM2_FORCE_WB;

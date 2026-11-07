@@ -23,7 +23,7 @@
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
 #include <hw/usb_handoff.h>
-#include <sys/mm.h>
+#include <lib/util.h>
 #include <sys/x86.h>
 #include <virt/io.h>
 #include <virt/mmio.h>
@@ -286,8 +286,8 @@ static bool trap_registers(struct usb_controller *c) {
         size_t count = (pci_cfg_read(f->addr, f->msix_cap + MSIX_CONTROL, 2) & MSIX_SIZE_MASK) + 1;
         if ((table & MSIX_BIR_MASK) == 0) {
             size_t offset = table & ~MSIX_BIR_MASK;
-            first = offset & ~(size_t)(PAGE_SIZE - 1);
-            end = (offset + count * MSIX_ENTRY_SIZE + PAGE_SIZE - 1) & ~(size_t)(PAGE_SIZE - 1);
+            first = page_down(offset);
+            end = page_up(offset + count * MSIX_ENTRY_SIZE);
         }
     }
     return trap_range(c, 0, first)

@@ -656,7 +656,7 @@ static void record_vga_device(const struct pci_io_device *dev) {
 static bool install_vbios(const struct vbios_choice *choice) {
     struct handoff_video *video = &loader_handoff->video;
     const struct pci_io_device *dev = &choice->dev;
-    size_t pages = ((uint64_t)choice->size + 4095) / 4096;
+    size_t pages = EFI_SIZE_TO_PAGES(choice->size);
 
     uintptr_t copy = loader_alloc_reserved(pages, 0);
     if (copy == 0) {

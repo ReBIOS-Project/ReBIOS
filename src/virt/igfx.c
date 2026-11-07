@@ -159,14 +159,6 @@ static struct {
     bool rmrr_dropped;
 } igfx;
 
-static uint64_t page_down(uint64_t x) {
-    return x & ~(uint64_t)(PAGE_SIZE - 1);
-}
-
-static uint64_t page_up(uint64_t x) {
-    return page_down(x + PAGE_SIZE - 1);
-}
-
 static uint64_t read64(uintptr_t hpa) {
     return mmio_read_host(hpa, 4) | mmio_read_host(hpa + 4, 4) << 32;
 }
@@ -617,7 +609,7 @@ void igfx_switch_end(void) {
     }
     (void)mmio_read_host(ggtt, 8);
     if (igfx.kind == STOLEN_BSM && !gen9_lp(igfx.f->device_id)) {
-        mm_map_device(igfx.gttmmadr + MMIO_FLSH_CNTL - MMIO_FLSH_CNTL % PAGE_SIZE, PAGE_SIZE);
+        mm_map_device(page_down(igfx.gttmmadr + MMIO_FLSH_CNTL), PAGE_SIZE);
         mmio_write_host(igfx.gttmmadr + MMIO_FLSH_CNTL, 4, FLSH_CNTL_EN);
     }
     time_udelay(SETTLE_US);

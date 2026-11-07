@@ -19,6 +19,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <loader/paging.h>
+#include <lib/util.h>
 #include <loader/efi_glue.h>
 #include <loader/loader.h>
 #include <memory.h>
@@ -38,7 +39,7 @@ uintptr_t paging_build_identity_map(uintptr_t *map_top, size_t *pages) {
     bool huge_pages = cpuid(0x80000000, 0).eax >= 0x80000001
                    && (cpuid(0x80000001, 0).edx & ((uint32_t)1 << 26)) != 0;
 
-    uintptr_t top = (*map_top + GIB - 1) & ~(GIB - 1);
+    uintptr_t top = align_up(*map_top, GIB);
     size_t gib_count = top / GIB;
     size_t pdpt_count = (gib_count + 511) / 512;
     size_t pd_count = huge_pages ? 0 : gib_count;
@@ -96,8 +97,8 @@ static uint64_t *next_table(uint64_t *entry) {
 }
 
 bool paging_map_device(uintptr_t pml4, uintptr_t base, size_t size) {
-    uintptr_t end = (base + size + MIB2 - 1) & ~(MIB2 - 1);
-    for (uintptr_t a = base & ~(MIB2 - 1); a < end; a += MIB2) {
+    uintptr_t end = align_up(base + size, MIB2);
+    for (uintptr_t a = align_down(base, MIB2); a < end; a += MIB2) {
         uint64_t *pdpt = next_table((uint64_t *)(uintptr_t)pml4 + (a >> 39 & 511));
         if (pdpt == NULL) {
             return false;

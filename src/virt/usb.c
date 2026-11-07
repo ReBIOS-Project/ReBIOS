@@ -30,6 +30,7 @@
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/time.h>
+#include <lib/util.h>
 #include <memory.h>
 #include <sys/mm.h>
 #include <sys/smp.h>
@@ -104,7 +105,7 @@ static uint8_t leds;
 static size_t hid_devices;
 
 void *usb_dma_alloc(size_t size, size_t align, uintptr_t *bus) {
-    size_t pages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+    size_t pages = page_count(size);
     size_t step = align > PAGE_SIZE ? align / PAGE_SIZE : 1;
     // The pool itself is aligned as far as anyone asks.
     for (size_t first = 0; first + pages <= pool_pages; first += step) {
@@ -123,7 +124,7 @@ void *usb_dma_alloc(size_t size, size_t align, uintptr_t *bus) {
 
 void usb_dma_free(void *ptr, size_t size) {
     size_t first = (size_t)((uint8_t *)ptr - pool) / PAGE_SIZE;
-    memset(pool_used + first, 0, (size + PAGE_SIZE - 1) / PAGE_SIZE);
+    memset(pool_used + first, 0, page_count(size));
 }
 
 void *tendril_glue_alloc(size_t size) {

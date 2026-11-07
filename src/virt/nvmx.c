@@ -555,7 +555,7 @@ static uint8_t *guest_page(uintptr_t gpa) {
     uint32_t prot;
     uint8_t memtype;
     if (!gpt_translate(gpa, &hpa, &prot, &memtype) || (prot & (GPT_R | GPT_W)) != (GPT_R | GPT_W)
-     || memtype != MT_WB || vlapic_access_page(hpa & ~(uint64_t)0xfff)) {
+     || memtype != MT_WB || vlapic_access_page(page_down(hpa))) {
         return NULL;
     }
     return (uint8_t *)(uintptr_t)hpa;
@@ -1094,7 +1094,7 @@ static bool msr_list_valid(uintptr_t address, size_t count) {
 // An entry in the guest's RAM, or NULL.
 static uint8_t *msr_entry(uintptr_t address, size_t index) {
     uint64_t at = address + index * 16;
-    uint8_t *page = guest_page(at & ~(uint64_t)0xfff);
+    uint8_t *page = guest_page(page_down(at));
     return page == NULL ? NULL : page + (at & 0xfff);
 }
 
@@ -1206,7 +1206,7 @@ struct ept12_walk {
 
 // Where nothing decodes, an entry reads as all ones, which is misconfigured.
 static uint64_t *ept12_entry(uintptr_t gpa) {
-    uint8_t *page = guest_page(gpa & ~(uint64_t)0xfff);
+    uint8_t *page = guest_page(page_down(gpa));
     return page == NULL ? NULL : (uint64_t *)(page + (gpa & 0xff8));
 }
 
@@ -1215,9 +1215,9 @@ static uint64_t *ept12_entry(uintptr_t gpa) {
 static void pml_log(struct nvmx *n, uintptr_t gpa) {
     uint64_t index = get12(n, VMCS_GUEST_PML_INDEX);
     uint64_t at = get12(n, VMCS_PML_ADDRESS) + index * 8;
-    uint8_t *page = guest_page(at & ~(uint64_t)0xfff);
+    uint8_t *page = guest_page(page_down(at));
     if (page != NULL) {
-        *(volatile uint64_t *)(page + (at & 0xfff)) = gpa & ~(uint64_t)0xfff;
+        *(volatile uint64_t *)(page + (at & 0xfff)) = page_down(gpa);
     }
     set12(n, VMCS_GUEST_PML_INDEX, (index - 1) & 0xffff);
 }
@@ -1440,8 +1440,8 @@ static uint64_t ept02_fill(struct nvmx *n, uintptr_t gpa, const struct ept12_wal
     if (!gpt_translate_leaf(w->gpa, &hpa, &prot, &memtype, &level)) {
         return 0;
     }
-    if (vlapic_access_page(hpa & ~(uint64_t)0xfff)) {
-        if ((hpa & ~(uint64_t)0xfff) != n->apic_access02) {
+    if (vlapic_access_page(page_down(hpa))) {
+        if (page_down(hpa) != n->apic_access02) {
             return 0;
         }
         n->ept02_apic = true;
@@ -1944,7 +1944,7 @@ static void apic_virtualisation(struct nvmx *n, struct apic_controls *c) {
     }
     if ((pin & PIN_POSTED_INTR) != 0) {
         uint64_t desc = get12(n, VMCS_POSTED_INTR_DESC);
-        uint8_t *page = guest_page(desc & ~(uint64_t)0xfff);
+        uint8_t *page = guest_page(page_down(desc));
         if (page != NULL && n->vapic != NULL) {
             n->pid = (uint32_t *)(page + (desc & 0xfff));
             vmx_write(VMCS_POSTED_INTR_NV, VLAPIC_NESTED_POSTED_VECTOR);
@@ -2898,7 +2898,7 @@ static bool eptp_switch(struct vcpu *v, struct nvmx *n) {
         return false;
     }
     uint64_t at = get12(n, VMCS_EPTP_LIST) + index * 8;
-    const uint8_t *page = guest_page(at & ~(uint64_t)0xfff);
+    const uint8_t *page = guest_page(page_down(at));
     // Where nothing decodes, it reads as all ones, which is invalid.
     uint64_t eptp = page == NULL
                   ? ~(uint64_t)0

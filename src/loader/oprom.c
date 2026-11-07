@@ -22,6 +22,7 @@
 #include <loader/oprom.h>
 #include <handoff.h>
 #include <lib/log.h>
+#include <lib/util.h>
 #include <loader/efi_glue.h>
 #include <loader/loader.h>
 #include <loader/pci_io.h>
@@ -33,10 +34,6 @@ struct found_rom {
     const void *image;
     size_t size;
 };
-
-static size_t page_count(size_t size) {
-    return (size + 4095) / 4096;
-}
 
 static void sort_by_address(struct found_rom *roms, size_t count) {
     for (size_t i = 1; i < count; i++) {
@@ -105,7 +102,7 @@ void oprom_collect(void) {
     // few.
     size_t pages = 0;
     for (size_t i = 0; i < count; i++) {
-        pages += page_count(roms[i].size);
+        pages += EFI_SIZE_TO_PAGES(roms[i].size);
     }
     uintptr_t at = count > 0 ? loader_alloc_reserved(pages, 0) : 0;
     if (count > 0 && at == 0) {
@@ -116,7 +113,7 @@ void oprom_collect(void) {
     for (size_t i = 0; i < count; i++) {
         const struct pci_io_device *dev = roms[i].dev;
         struct handoff_pci_rom *rom = &loader_handoff->pci_roms[i];
-        uint64_t space = page_count(roms[i].size) * 4096;
+        uint64_t space = align_up(roms[i].size, EFI_PAGE_SIZE);
 
         memcpy((void *)(uintptr_t)at, roms[i].image, roms[i].size);
         memset((uint8_t *)(uintptr_t)at + roms[i].size, 0, space - roms[i].size);

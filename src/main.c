@@ -22,6 +22,7 @@
 #include <core.h>
 #include <handoff.h>
 #include <lib/log.h>
+#include <lib/util.h>
 #include <loader/bootdev.h>
 #include <loader/config.h>
 #include <loader/console.h>
@@ -48,10 +49,6 @@
 struct handoff *loader_handoff;
 
 static EFI_GUID loaded_image_guid = EFI_LOADED_IMAGE_PROTOCOL_GUID;
-
-static size_t page_count(size_t size) {
-    return (size + 4095) / 4096;
-}
 
 static void reserve(uintptr_t base, size_t pages) {
     if (loader_handoff->reserved_count == HANDOFF_MAX_RESERVED) {
@@ -100,10 +97,10 @@ static bool exit_boot_services(void) {
         );
         if (status == EFI_BUFFER_TOO_SMALL) {
             if (buf != 0) {
-                efi_bs->FreePages(buf, page_count(buf_size));
+                efi_bs->FreePages(buf, EFI_SIZE_TO_PAGES(buf_size));
             }
-            buf_size = (size + 16 * desc_size + 4095) & ~(uint64_t)4095;
-            buf = efi_alloc_pages(page_count(buf_size), 0);
+            buf_size = align_up(size + 16 * desc_size, EFI_PAGE_SIZE);
+            buf = efi_alloc_pages(EFI_SIZE_TO_PAGES(buf_size), 0);
             if (buf == 0) {
                 return false;
             }
@@ -115,7 +112,7 @@ static bool exit_boot_services(void) {
 
         if (efi_bs->ExitBootServices(efi_image_handle, map_key) == EFI_SUCCESS) {
             efi_boot_services_exited = true;
-            reserve(buf, page_count(buf_size));
+            reserve(buf, EFI_SIZE_TO_PAGES(buf_size));
             loader_handoff->efi_mmap = buf;
             loader_handoff->efi_mmap_size = size;
             loader_handoff->efi_mmap_desc_size = desc_size;
@@ -144,7 +141,7 @@ static uintptr_t memory_map_top(uint64_t *ram) {
     *ram = 0;
     efi_bs->GetMemoryMap(&size, NULL, &map_key, &desc_size, &desc_version);
     size += 16 * desc_size;
-    size_t pages = page_count(size);
+    size_t pages = EFI_SIZE_TO_PAGES(size);
     uintptr_t buf = efi_alloc_pages(pages, 0);
     if (buf == 0) {
         return top;
@@ -200,13 +197,13 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     printf("ReBIOS\n");
     config_load();
 
-    uintptr_t handoff_addr = efi_alloc_pages(page_count(sizeof(struct handoff)), 0);
+    uintptr_t handoff_addr = efi_alloc_pages(EFI_SIZE_TO_PAGES(sizeof(struct handoff)), 0);
     if (handoff_addr == 0) {
         panic("Cannot allocate the handoff\n");
     }
     loader_handoff = (struct handoff *)(uintptr_t)handoff_addr;
     memset(loader_handoff, 0, sizeof(struct handoff));
-    reserve(handoff_addr, page_count(sizeof(struct handoff)));
+    reserve(handoff_addr, EFI_SIZE_TO_PAGES(sizeof(struct handoff)));
 
     video_find_framebuffer();
     console_init();
@@ -244,7 +241,7 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     if (status != EFI_SUCCESS) {
         panic("Cannot find where ReBIOS is loaded\n");
     }
-    reserve((uintptr_t)image->ImageBase, page_count(image->ImageSize));
+    reserve((uintptr_t)image->ImageBase, EFI_SIZE_TO_PAGES(image->ImageSize));
 
     uint64_t ram;
     uintptr_t map_top = memory_map_top(&ram);
@@ -273,12 +270,12 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
         printf("No page below 1 MiB to start the other processors in\n");
     }
 
-    uint64_t nested_heap_size = (ram / NESTED_HEAP_SHARE) & ~(uint64_t)4095;
+    uint64_t nested_heap_size = align_down(ram / NESTED_HEAP_SHARE, EFI_PAGE_SIZE);
     if (nested_heap_size > NESTED_HEAP_MAX) {
         nested_heap_size = NESTED_HEAP_MAX;
     }
     size_t heap_size = CORE_HEAP_SIZE + nested_heap_size;
-    uint64_t heap = loader_alloc_reserved(page_count(heap_size), 0);
+    uint64_t heap = loader_alloc_reserved(EFI_SIZE_TO_PAGES(heap_size), 0);
     if (heap == 0) {
         panic("Cannot allocate the core's heap\n");
     }

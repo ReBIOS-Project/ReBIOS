@@ -19,6 +19,7 @@
 #include <stdint.h>
 #include <lib/heap.h>
 #include <lib/spinlock.h>
+#include <lib/util.h>
 #include <memory.h>
 #include <sys/mm.h>
 
@@ -57,7 +58,7 @@ void *kmalloc(size_t size) {
     int c = size_class(total);
 
     if (c < 0) {
-        size_t pages = (total + PAGE_SIZE - 1) / PAGE_SIZE;
+        size_t pages = page_count(total);
         struct header *h = page_alloc(pages);
         h->class_or_mark = LARGE_MARK;
         h->pages = pages;

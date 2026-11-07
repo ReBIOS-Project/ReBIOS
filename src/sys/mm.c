@@ -21,6 +21,7 @@
 #include <sys/mm.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
+#include <lib/util.h>
 #include <memory.h>
 #include <sys/x86.h>
 
@@ -49,7 +50,7 @@ void mm_init(uintptr_t base, size_t size) {
     heap_bitmap = (uint64_t *)(uintptr_t)base;
 
     size_t bitmap_bytes = (heap_pages + 63) / 64 * 8;
-    size_t bitmap_pages = (bitmap_bytes + PAGE_SIZE - 1) / PAGE_SIZE;
+    size_t bitmap_pages = page_count(bitmap_bytes);
     memset(heap_bitmap, 0, bitmap_pages * PAGE_SIZE);
     for (size_t i = 0; i < bitmap_pages; i++) {
         page_mark(i, true);
@@ -139,7 +140,7 @@ static uint64_t write_combining(uint64_t entry, uint64_t pat_bit) {
 // but for their addresses.
 static void split(uint64_t *entry, size_t size, bool to_4k) {
     uint64_t *table = page_alloc(1);
-    uintptr_t base = *entry & PTE_ADDRESS & ~(size - 1);
+    uintptr_t base = align_down(*entry & PTE_ADDRESS, size);
     uint64_t flags = *entry & PTE_LARGE_FLAGS;
     if (to_4k) {
         bool pat = (*entry & PTE_PAT_LARGE) != 0;
@@ -166,13 +167,13 @@ void mm_map_device(uintptr_t base, size_t size) {
     if ((read_cr4() & CR4_LA57) != 0) {
         top = table_of(top[0]);
     }
-    uintptr_t end = (base + size + SIZE_2M - 1) & ~(SIZE_2M - 1);
+    uintptr_t end = align_up(base + size, SIZE_2M);
     if (end > (uint64_t)1 << 48) {
         printf("Cannot map device registers at %#llx\n", (unsigned long long)base);
         return;
     }
     spinlock_acquire(&map_lock);
-    for (uintptr_t a = base & ~(SIZE_2M - 1); a < end; a += SIZE_2M) {
+    for (uintptr_t a = align_down(base, SIZE_2M); a < end; a += SIZE_2M) {
         uint64_t *pdpte = &next_table(&top[(a >> 39) & 511])[(a >> 30) & 511];
         if ((*pdpte & PTE_PS) != 0) {
             continue;
@@ -186,8 +187,8 @@ void mm_map_device(uintptr_t base, size_t size) {
 }
 
 void mm_write_combining(uintptr_t base, size_t size) {
-    uintptr_t start = base & ~(uint64_t)(PAGE_SIZE - 1);
-    uintptr_t end = (base + size + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
+    uintptr_t start = page_down(base);
+    uintptr_t end = page_up(base + size);
     uint64_t *top = table_of(read_cr3());
     if ((read_cr4() & CR4_LA57) != 0) {
         top = table_of(top[0]);

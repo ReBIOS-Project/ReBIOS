@@ -18,6 +18,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <efi.h>
 #include <flanterm.h>
 #include <flanterm_backends/fb.h>
 #include <loader/console.h>
@@ -27,7 +28,7 @@
 
 // The memory stays the hypervisor's, as the console outlives boot services.
 static void *console_alloc(size_t size) {
-    uintptr_t base = loader_alloc_reserved((size + 4095) / 4096, 0);
+    uintptr_t base = loader_alloc_reserved(EFI_SIZE_TO_PAGES(size), 0);
     return base != 0 ? (void *)(uintptr_t)base : NULL;
 }
 

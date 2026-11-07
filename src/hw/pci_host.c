@@ -32,6 +32,7 @@
 #include <iommu/iommu_tables.h>
 #include <lib/heap.h>
 #include <lib/log.h>
+#include <lib/util.h>
 #include <memory.h>
 
 #define ONE_MIB ((uint64_t)0x100000)
@@ -98,16 +99,6 @@ static bool scanned;
 
 static uintptr_t range_end(uintptr_t base, size_t size) {
     return size > UINT64_MAX - base ? UINT64_MAX : base + size;
-}
-
-// align is a power of two.
-static bool align_up(uint64_t x, uint64_t align, uint64_t *out) {
-    uint64_t r = (x + align - 1) & ~(align - 1);
-    if (r < x) {
-        return false;
-    }
-    *out = r;
-    return true;
 }
 
 static void list_grow(struct range_list *l) {
@@ -194,11 +185,12 @@ static void claim_into(struct range_list *list, uintptr_t base, size_t size) {
     if (size == 0) {
         return;
     }
-    uintptr_t end;
-    if (!align_up(range_end(base, size), CLAIM_GRANULE, &end)) {
+    uintptr_t last = range_end(base, size);
+    uintptr_t end = align_up(last, CLAIM_GRANULE);
+    if (end < last) {
         end = UINT64_MAX;
     }
-    list_add(list, base & ~(CLAIM_GRANULE - 1), end);
+    list_add(list, align_down(base, CLAIM_GRANULE), end);
 }
 
 static void claim(struct scan *r, uintptr_t base, size_t size) {

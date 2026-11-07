@@ -137,7 +137,7 @@ void profile_init(void) {
     if (core_handoff->config.profile == 0) {
         return;
     }
-    size_t port_pages = (0x10000 * sizeof(uint32_t) + PAGE_SIZE - 1) / PAGE_SIZE;
+    size_t port_pages = page_count(0x10000 * sizeof(uint32_t));
     ports = page_alloc(port_pages);
     ports_before = page_alloc(port_pages);
     memset(ports, 0, 0x10000 * sizeof(uint32_t));
@@ -178,7 +178,7 @@ void profile_mmio(uintptr_t gpa) {
     if (!profile_on) {
         return;
     }
-    uint64_t key = (gpa & ~(uint64_t)(PAGE_SIZE - 1)) + 1;
+    uint64_t key = page_down(gpa) + 1;
     for (size_t i = 0; i < PAGES; i++) {
         struct page_count *p = &pages[(unsigned int)((key >> 12) + i) % PAGES];
         uint64_t seen = atomic_load_explicit(&p->page, memory_order_relaxed);

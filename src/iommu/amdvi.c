@@ -575,9 +575,7 @@ void amdvi_remap_start(bool guest_vapic, uint8_t vector) {
     }
     if (post) {
         target_count = smp_cpu_count();
-        targets = page_alloc(
-            (target_count * sizeof(struct post_target) + PAGE_SIZE - 1) / PAGE_SIZE
-        );
+        targets = page_alloc(page_count(target_count * sizeof(struct post_target)));
         ga_vector = vector;
         posting = true;
         printf("AMD-Vi: interrupts are posted to the vCPUs that AVIC runs\n");

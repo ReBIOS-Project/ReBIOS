@@ -23,6 +23,7 @@
 #include <iommu/dma.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
+#include <lib/util.h>
 #include <sys/mm.h>
 #include <sys/smp.h>
 #include <sys/x86.h>
@@ -243,7 +244,7 @@ static bool region_filled(uintptr_t gpa) {
 
 // Under gpt_lock.
 static void fill_region(uintptr_t gpa) {
-    uintptr_t base = gpa & ~(A20_REGION - 1);
+    uintptr_t base = align_down(gpa, A20_REGION);
     for (uintptr_t at = base; at < base + A20_BIT; at += PAGE_SIZE) {
         uintptr_t hpa;
         uint32_t prot;

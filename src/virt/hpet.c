@@ -26,6 +26,7 @@
 #include <virt/hpet.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
+#include <lib/util.h>
 #include <memory.h>
 #include <sys/mm.h>
 #include <virt/gpt.h>
@@ -134,7 +135,7 @@ static const struct mmio_ops guest_ops = { guest_read, guest_write, false };
 // the hypervisor, which so knows whether the 8254 and the RTC interrupt or
 // timers 0 and 1 in their place (IA-PC HPET Specification 1.0a, 2.4.2.1).
 static void trap_writes(uintptr_t base) {
-    uintptr_t page = base & ~(uintptr_t)(PAGE_SIZE - 1);
+    uintptr_t page = page_down(base);
     follow_route();
     mmio_register(page, PAGE_SIZE, &guest_ops, (void *)page);
     gpt_map(page, page, PAGE_SIZE, GPT_R, MT_UC);
