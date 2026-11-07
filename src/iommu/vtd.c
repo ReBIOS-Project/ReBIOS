@@ -58,7 +58,9 @@
 #define CAP_PI ((uint64_t)1 << 59)
 
 #define PCI_VENDOR_INTEL 0x8086
+#define PCI_CLASS_REVISION 0x08
 #define PCI_BASE_CLASS_DISPLAY 0x03
+#define PCI_CLASS_BRIDGE_HOST 0x0600
 
 #define MODEL_SANDY_BRIDGE 0x2a
 #define MODEL_SANDY_BRIDGE_X 0x2d
@@ -287,6 +289,29 @@ static const uint8_t keep_translating_ids[] = {
     0x45, 0x46, 0x4c, 0x4e, 0x8a, 0x98, 0x9a, 0xa7, 0x7d
 };
 
+// Intel's 5500, 5520, and X58 I/O hubs, host bridges 3403h, 3405h, and 3406h
+// on bus 0, cannot drain interrupts while they remap them, to revision 13h and
+// at 3405h's revision 22h, so Linux 7.3 remaps none there
+// (arch/x86/kernel/early-quirks.c, intel_remapping_check()).
+static const uint16_t remap_broken_ids[] = { 0x3403, 0x3405, 0x3406 };
+
+static bool remapping_broken(void) {
+    struct pci_addr host = { 0, 0, 0, 0 };
+    uint32_t id = pci_cfg_read(host, 0, 4);
+    uint32_t class_revision = pci_cfg_read(host, PCI_CLASS_REVISION, 4);
+    if ((id & 0xffff) != PCI_VENDOR_INTEL || class_revision >> 16 != PCI_CLASS_BRIDGE_HOST) {
+        return false;
+    }
+    uint16_t device = (uint16_t)(id >> 16);
+    uint8_t revision = (uint8_t)class_revision;
+    for (size_t i = 0; i < sizeof(remap_broken_ids) / sizeof(uint16_t); i++) {
+        if (device == remap_broken_ids[i]) {
+            return revision <= 0x13 || (device == 0x3405 && revision == 0x22);
+        }
+    }
+    return false;
+}
+
 static bool keep_translating(const struct iommu_tables *tables, uint32_t index, uint64_t cap) {
     if (tables->units[index].include_all || (cap & (CAP_DRD | CAP_DWD)) == 0) {
         return false;
@@ -478,6 +503,10 @@ void vtd_start(void) {
             );
             remap = false;
         }
+    }
+    if (remap && remapping_broken()) {
+        printf("VT-d: the I/O hub cannot remap interrupts safely (its revision's erratum)\n");
+        remap = false;
     }
     if (!remap) {
         printf("VT-d: interrupts are not remapped, so the guest's devices can send any\n");
