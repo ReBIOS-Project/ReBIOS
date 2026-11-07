@@ -88,6 +88,12 @@ struct ioapic *ioapic_for_gsi(uint32_t gsi, uint32_t *pin) {
 
 static void add(const struct acpi_madt_ioapic *entry) {
     uintptr_t base = entry->address;
+    // A zero address is a field the firmware left unfilled, not an I/O APIC,
+    // whose window would then be RAM at address 0.
+    if (base == 0) {
+        printf("I/O APIC %u at address 0 is left out\n", entry->id);
+        return;
+    }
     if (base + IOAPIC_PAGE_SIZE > core_handoff->map_top) {
         printf("I/O APIC %u at %#llx is out of reach\n", entry->id, (unsigned long long)base);
         return;
@@ -101,7 +107,28 @@ static void add(const struct acpi_madt_ioapic *entry) {
     io->id_reg = reg_read(io, IOAPIC_REG_ID);
     io->version = reg_read(io, IOAPIC_REG_VERSION);
     io->arbitration = reg_read(io, IOAPIC_REG_ARBITRATION);
+    // An address that nothing decodes, and an I/O APIC whose GSIs another's
+    // already has, are left out, as Linux 7.3 leaves them
+    // (bad_ioapic_register(), mp_register_ioapic()).
+    if (io->id_reg == UINT32_MAX && io->version == UINT32_MAX && io->arbitration == UINT32_MAX) {
+        printf(
+            "I/O APIC %u at %#llx reads all ones, so it is left out\n", entry->id,
+            (unsigned long long)base
+        );
+        return;
+    }
     io->pins = ((io->version >> 16) & 0xff) + 1;
+    uint32_t gsi_last = entry->gsi_base + io->pins - 1;
+    for (size_t i = 0; i < count; i++) {
+        uint32_t other_last = ioapics[i].gsi_base + ioapics[i].pins - 1;
+        if (entry->gsi_base <= other_last && ioapics[i].gsi_base <= gsi_last) {
+            printf(
+                "I/O APIC %u at %#llx has GSIs %u-%u, which I/O APIC %u has, so it is left out\n",
+                entry->id, (unsigned long long)base, entry->gsi_base, gsi_last, ioapics[i].id
+            );
+            return;
+        }
+    }
     count++;
 
     uint32_t masked = 0;
