@@ -51,6 +51,10 @@
 #define TIMER_MEASURE_US 5000
 
 #define MSR_IA32_BIOS_SIGN_ID 0x8b
+// AMD's Interrupt Pending and CMP-Halt Register: SmiOnCmpHalt and
+// C1eOnCmpHalt.
+#define MSR_INTERRUPT_PENDING 0xc0010055
+#define INTERRUPT_PENDING_C1E ((uint64_t)3 << 27)
 
 static bool timer_tsc_deadline;
 // The rate of the timer's clock, measured once, as not every processor says.
@@ -325,7 +329,23 @@ void lapic_timer_arm(uint64_t tsc) {
     lapic_write(APIC_TIMER_INITIAL, ticks < UINT32_MAX ? (uint32_t)ticks : UINT32_MAX);
 }
 
+// AMD erratum 400 (41322 rev. 3.92): in C1E, which firmware may turn on as
+// late as the switch to ACPI mode, a timer interrupt does not wake the
+// processor, so the hypervisor's halts could sleep through its deadlines. C1E
+// goes off instead, as Xen 4.22's disable_c1e() turns it off.
+static void c1e_off(void) {
+    uint64_t pending;
+    if (cpu_vendor() != CPU_VENDOR_AMD || cpu_signature().family != 0x10
+     || !rdmsr_safe(MSR_INTERRUPT_PENDING, &pending) || (pending & INTERRUPT_PENDING_C1E) == 0) {
+        return;
+    }
+    if (!wrmsr_safe(MSR_INTERRUPT_PENDING, pending & ~INTERRUPT_PENDING_C1E)) {
+        printf("Local APIC %#x: C1E cannot be turned off\n", lapic_cpu_apic_id());
+    }
+}
+
 void lapic_host_init(uint8_t spurious_vector, uint8_t timer_vector) {
+    c1e_off();
     lapic_host_mode(false);
     lapic_write(APIC_TPR, 0);
     lapic_write(APIC_SVR, APIC_SVR_ENABLED | spurious_vector);
