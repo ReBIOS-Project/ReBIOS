@@ -196,13 +196,13 @@ static struct {
 
     struct method *methods;
     size_t method_count;
-    uint32_t method_capacity;
+    size_t method_capacity;
     uacpi_namespace_node **targets;
     size_t target_count;
-    uint32_t target_capacity;
+    size_t target_capacity;
     uacpi_namespace_node **hidden;
     size_t hidden_count;
-    uint32_t hidden_capacity;
+    size_t hidden_capacity;
     uint16_t links;
     // The host bridge of the guest's bus 0, and the others merged below it.
     uacpi_namespace_node *primary;
@@ -212,7 +212,7 @@ static struct {
     // and the devices ReBIOS gives it its own of or keeps from it.
     uacpi_namespace_node **dropped;
     size_t dropped_count;
-    uint32_t dropped_capacity;
+    size_t dropped_capacity;
 
     struct notification queue[QUEUE_SIZE];
     uint32_t queue_head;
@@ -282,20 +282,6 @@ static bool hex_digit(char c) {
 static bool event_method(const char name[4]) {
     return name[0] == '_' && (name[1] == 'L' || name[1] == 'E' || name[1] == 'Q')
         && hex_digit(name[2]) && hex_digit(name[3]);
-}
-
-static void *grow(void *array, size_t count, uint32_t *capacity, size_t size) {
-    if (count < *capacity) {
-        return array;
-    }
-    uint32_t new_capacity = *capacity != 0 ? *capacity * 2 : 64;
-    void *bigger = kmalloc(new_capacity * size);
-    if (count != 0) {
-        memcpy(bigger, array, count * size);
-    }
-    kfree(array);
-    *capacity = new_capacity;
-    return bigger;
 }
 
 static bool is_hidden(uacpi_namespace_node *node) {
@@ -436,30 +422,33 @@ static void emit_data(struct aml *a, uacpi_object *obj, uacpi_namespace_node *sc
 }
 
 static uint32_t method_add(uacpi_namespace_node *node, size_t args) {
-    vacpi.methods = grow(
-        vacpi.methods, vacpi.method_count, &vacpi.method_capacity, sizeof(struct method)
+    vacpi.methods = heap_grow(
+        vacpi.methods, vacpi.method_count, &vacpi.method_capacity, sizeof(struct method), 64
     );
     vacpi.methods[vacpi.method_count] = (struct method){ node, args };
     return vacpi.method_count++;
 }
 
 static void target_add(uacpi_namespace_node *node) {
-    vacpi.targets = grow(
-        vacpi.targets, vacpi.target_count, &vacpi.target_capacity, sizeof(uacpi_namespace_node *)
+    vacpi.targets = heap_grow(
+        vacpi.targets, vacpi.target_count, &vacpi.target_capacity, sizeof(uacpi_namespace_node *),
+        64
     );
     vacpi.targets[vacpi.target_count++] = node;
 }
 
 static void hidden_add(uacpi_namespace_node *node) {
-    vacpi.hidden = grow(
-        vacpi.hidden, vacpi.hidden_count, &vacpi.hidden_capacity, sizeof(uacpi_namespace_node *)
+    vacpi.hidden = heap_grow(
+        vacpi.hidden, vacpi.hidden_count, &vacpi.hidden_capacity, sizeof(uacpi_namespace_node *),
+        64
     );
     vacpi.hidden[vacpi.hidden_count++] = node;
 }
 
 static void dropped_add(uacpi_namespace_node *node) {
-    vacpi.dropped = grow(
-        vacpi.dropped, vacpi.dropped_count, &vacpi.dropped_capacity, sizeof(uacpi_namespace_node *)
+    vacpi.dropped = heap_grow(
+        vacpi.dropped, vacpi.dropped_count, &vacpi.dropped_capacity,
+        sizeof(uacpi_namespace_node *), 64
     );
     vacpi.dropped[vacpi.dropped_count++] = node;
 }

@@ -67,7 +67,7 @@ struct host_bridge {
     // The memory windows of its _CRS, as given, and how many lie below 4 GiB.
     struct pci_host_window *windows;
     size_t window_count;
-    uint32_t window_capacity;
+    size_t window_capacity;
     size_t low_window_count;
 };
 
@@ -77,7 +77,7 @@ struct scan {
     uint32_t crs_failures;
     struct host_bridge *bridges;
     size_t bridge_count;
-    uint32_t bridge_capacity;
+    size_t bridge_capacity;
 };
 
 struct crs_scan {
@@ -98,17 +98,7 @@ static uintptr_t range_end(uintptr_t base, size_t size) {
 }
 
 static void list_grow(struct range_list *l) {
-    if (l->count < l->capacity) {
-        return;
-    }
-    size_t capacity = l->capacity == 0 ? 32 : l->capacity * 2;
-    struct range *r = kmalloc(capacity * sizeof(struct range));
-    if (l->count != 0) {
-        memcpy(r, l->r, l->count * sizeof(struct range));
-    }
-    kfree(l->r);
-    l->r = r;
-    l->capacity = capacity;
+    l->r = heap_grow(l->r, l->count, &l->capacity, sizeof(struct range), 32);
 }
 
 static void list_free(struct range_list *l) {
@@ -296,16 +286,9 @@ static void private_iommus(struct scan *r) {
 }
 
 static void window_add(struct host_bridge *hb, uintptr_t base, uintptr_t end, bool prefetchable) {
-    if (hb->window_count == hb->window_capacity) {
-        size_t capacity = hb->window_capacity == 0 ? 8 : hb->window_capacity * 2;
-        struct pci_host_window *windows = kmalloc(capacity * sizeof(struct pci_host_window));
-        if (hb->window_count != 0) {
-            memcpy(windows, hb->windows, hb->window_count * sizeof(struct pci_host_window));
-        }
-        kfree(hb->windows);
-        hb->windows = windows;
-        hb->window_capacity = capacity;
-    }
+    hb->windows = heap_grow(
+        hb->windows, hb->window_count, &hb->window_capacity, sizeof(struct pci_host_window), 8
+    );
     hb->windows[hb->window_count++] = (struct pci_host_window){ base, end, prefetchable };
 }
 
@@ -501,16 +484,9 @@ static void host_bridge_found(struct scan *r, uacpi_namespace_node *node) {
         return;
     }
 
-    if (r->bridge_count == r->bridge_capacity) {
-        size_t capacity = r->bridge_capacity == 0 ? 8 : r->bridge_capacity * 2;
-        struct host_bridge *bridges = kmalloc(capacity * sizeof(struct host_bridge));
-        if (r->bridge_count != 0) {
-            memcpy(bridges, r->bridges, r->bridge_count * sizeof(struct host_bridge));
-        }
-        kfree(r->bridges);
-        r->bridges = bridges;
-        r->bridge_capacity = capacity;
-    }
+    r->bridges = heap_grow(
+        r->bridges, r->bridge_count, &r->bridge_capacity, sizeof(struct host_bridge), 8
+    );
     r->bridges[r->bridge_count++] = hb;
 }
 

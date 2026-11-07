@@ -103,3 +103,17 @@ void kfree(void *ptr) {
     free_lists[c] = b;
     spinlock_release(&heap_lock);
 }
+
+void *heap_grow(void *array, size_t count, size_t *capacity, size_t size, size_t first) {
+    if (count < *capacity) {
+        return array;
+    }
+    size_t grown_capacity = *capacity == 0 ? first : *capacity * 2;
+    void *grown = kmalloc(grown_capacity * size);
+    if (count != 0) {
+        memcpy(grown, array, count * size);
+    }
+    kfree(array);
+    *capacity = grown_capacity;
+    return grown;
+}

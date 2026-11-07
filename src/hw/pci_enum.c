@@ -520,16 +520,9 @@ static void log_function(const struct pci_enum_function *f) {
 }
 
 static struct pci_enum_function *function_list_add(struct function_list *list) {
-    if (list->count == list->capacity) {
-        size_t capacity = list->capacity == 0 ? 64 : list->capacity * 2;
-        struct pci_enum_function *items = kmalloc(capacity * sizeof(struct pci_enum_function));
-        if (list->count != 0) {
-            memcpy(items, list->items, list->count * sizeof(struct pci_enum_function));
-        }
-        kfree(list->items);
-        list->items = items;
-        list->capacity = capacity;
-    }
+    list->items = heap_grow(
+        list->items, list->count, &list->capacity, sizeof(struct pci_enum_function), 64
+    );
     return &list->items[list->count++];
 }
 

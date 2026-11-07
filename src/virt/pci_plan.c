@@ -95,16 +95,7 @@ static struct pci_plan plan;
 static bool made;
 
 static void element_add(struct container *c, struct element e) {
-    if (c->count == c->capacity) {
-        size_t capacity = c->capacity == 0 ? 8 : c->capacity * 2;
-        struct element *elements = kmalloc(capacity * sizeof(struct element));
-        if (c->count != 0) {
-            memcpy(elements, c->elements, c->count * sizeof(struct element));
-        }
-        kfree(c->elements);
-        c->elements = elements;
-        c->capacity = capacity;
-    }
+    c->elements = heap_grow(c->elements, c->count, &c->capacity, sizeof(struct element), 8);
     c->elements[c->count++] = e;
 }
 

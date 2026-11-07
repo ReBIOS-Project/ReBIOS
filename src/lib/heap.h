@@ -24,4 +24,9 @@
 void *kmalloc(size_t size);
 void kfree(void *ptr);
 
+// Room for one more of the count items of size bytes in array, which kmalloc()
+// gave, *capacity of them long: where it is full, a new array of twice the
+// capacity, or of first where none, takes them over. Returns the array.
+void *heap_grow(void *array, size_t count, size_t *capacity, size_t size, size_t first);
+
 #endif

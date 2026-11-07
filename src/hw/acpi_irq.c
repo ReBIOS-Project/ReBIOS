@@ -33,7 +33,6 @@
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/printf.h>
-#include <memory.h>
 
 #define PCI_PINS 4
 // The function number of every _PRT entry's Address: all functions, ACPI 6.6,
@@ -62,7 +61,7 @@ struct bus_info {
 struct lookup {
     struct host_bridge *host_bridges;
     size_t host_bridge_count;
-    uint32_t host_bridge_capacity;
+    size_t host_bridge_capacity;
     // Each bus looked up has a function on it, if only a bridge, so there are
     // no more of them than functions.
     struct bus_info *buses;
@@ -135,16 +134,10 @@ static uacpi_iteration_decision host_bridge_found(
         return UACPI_ITERATION_DECISION_CONTINUE;
     }
 
-    if (l->host_bridge_count == l->host_bridge_capacity) {
-        size_t capacity = l->host_bridge_capacity == 0 ? 8 : l->host_bridge_capacity * 2;
-        struct host_bridge *items = kmalloc(capacity * sizeof(struct host_bridge));
-        if (l->host_bridge_count != 0) {
-            memcpy(items, l->host_bridges, l->host_bridge_count * sizeof(struct host_bridge));
-        }
-        kfree(l->host_bridges);
-        l->host_bridges = items;
-        l->host_bridge_capacity = capacity;
-    }
+    l->host_bridges = heap_grow(
+        l->host_bridges, l->host_bridge_count, &l->host_bridge_capacity,
+        sizeof(struct host_bridge), 8
+    );
     // The low bits only, ACPI 6.6, 6.5.5 and 6.5.6.
     struct host_bridge *hb = &l->host_bridges[l->host_bridge_count++];
     *hb = (struct host_bridge){

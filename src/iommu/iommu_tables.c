@@ -131,15 +131,15 @@ _Static_assert(sizeof(struct ivmd) == 32, "IVMD layout");
 
 struct builder {
     struct iommu_tables *t;
-    uint32_t unit_capacity;
-    uint32_t range_capacity;
-    uint32_t special_capacity;
-    uint32_t reserved_capacity;
+    size_t unit_capacity;
+    size_t range_capacity;
+    size_t special_capacity;
+    size_t reserved_capacity;
     // Ranges of every requester ID a unit translates, which only apply to what
     // no other range lists, so they go last.
     struct iommu_tables_device_range *fallbacks;
     size_t fallback_count;
-    uint32_t fallback_capacity;
+    size_t fallback_capacity;
 };
 
 // The requester IDs a DMAR device scope resolves to.
@@ -182,27 +182,15 @@ static struct iommu_tables tables;
 static bool parse_done;
 
 // Returns the array, with room for one more element than count.
-static void *grow(void *array, size_t count, uint32_t *capacity, size_t size) {
-    if (count < *capacity) {
-        return array;
-    }
-    uint32_t new_capacity = *capacity == 0 ? 8 : *capacity * 2;
-    void *grown = kmalloc(new_capacity * size);
-    if (count != 0) {
-        memcpy(grown, array, count * size);
-    }
-    kfree(array);
-    *capacity = new_capacity;
-    return grown;
-}
-
 static bool add_unit(struct builder *b, const struct iommu_tables_unit *unit, uint16_t *index) {
     struct iommu_tables *t = b->t;
     // Ranges and special devices name their unit in 16 bits.
     if (t->unit_count > UINT16_MAX) {
         return false;
     }
-    t->units = grow(t->units, t->unit_count, &b->unit_capacity, sizeof(struct iommu_tables_unit));
+    t->units = heap_grow(
+        t->units, t->unit_count, &b->unit_capacity, sizeof(struct iommu_tables_unit), 8
+    );
     *index = (uint16_t)t->unit_count;
     t->units[t->unit_count++] = *unit;
     return true;
@@ -210,34 +198,34 @@ static bool add_unit(struct builder *b, const struct iommu_tables_unit *unit, ui
 
 static void add_range(struct builder *b, const struct iommu_tables_device_range *range) {
     struct iommu_tables *t = b->t;
-    t->ranges = grow(
-        t->ranges, t->range_count, &b->range_capacity, sizeof(struct iommu_tables_device_range)
+    t->ranges = heap_grow(
+        t->ranges, t->range_count, &b->range_capacity, sizeof(struct iommu_tables_device_range), 8
     );
     t->ranges[t->range_count++] = *range;
 }
 
 static void add_fallback(struct builder *b, const struct iommu_tables_device_range *range) {
-    b->fallbacks = grow(
+    b->fallbacks = heap_grow(
         b->fallbacks, b->fallback_count, &b->fallback_capacity,
-        sizeof(struct iommu_tables_device_range)
+        sizeof(struct iommu_tables_device_range), 8
     );
     b->fallbacks[b->fallback_count++] = *range;
 }
 
 static void add_special(struct builder *b, const struct iommu_tables_special_device *special) {
     struct iommu_tables *t = b->t;
-    t->specials = grow(
+    t->specials = heap_grow(
         t->specials, t->special_count, &b->special_capacity,
-        sizeof(struct iommu_tables_special_device)
+        sizeof(struct iommu_tables_special_device), 8
     );
     t->specials[t->special_count++] = *special;
 }
 
 static void add_reserved(struct builder *b, const struct iommu_tables_reserved_region *region) {
     struct iommu_tables *t = b->t;
-    t->reserved = grow(
+    t->reserved = heap_grow(
         t->reserved, t->reserved_count, &b->reserved_capacity,
-        sizeof(struct iommu_tables_reserved_region)
+        sizeof(struct iommu_tables_reserved_region), 8
     );
     t->reserved[t->reserved_count++] = *region;
 }
