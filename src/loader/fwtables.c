@@ -138,28 +138,19 @@ static void *config_table_find(const EFI_GUID *guid) {
     return NULL;
 }
 
-static uint8_t byte_sum(const void *data, size_t size) {
-    const uint8_t *bytes = data;
-    uint8_t sum = 0;
-    for (size_t i = 0; i < size; i++) {
-        sum += bytes[i];
-    }
-    return sum;
-}
-
 // Returns why the RSDP is invalid, or NULL.
 static const char *rsdp_check(const struct rsdp *rsdp) {
     if (memcmp(rsdp->signature, "RSD PTR ", sizeof(rsdp->signature)) != 0) {
         return "bad signature";
     }
-    if (byte_sum(rsdp, RSDP_V1_SIZE) != 0) {
+    if (checksum8(rsdp, RSDP_V1_SIZE) != 0) {
         return "bad checksum";
     }
     if (rsdp->revision >= 2) {
         if (rsdp->length < sizeof(struct rsdp) || rsdp->length > RSDP_MAX_SIZE) {
             return "bad length";
         }
-        if (byte_sum(rsdp, rsdp->length) != 0) {
+        if (checksum8(rsdp, rsdp->length) != 0) {
             return "bad extended checksum";
         }
     }
@@ -194,14 +185,14 @@ static const char *smbios2_check(const struct smbios2_entry *eps) {
     if (eps->length < SMBIOS2_MIN_LENGTH || eps->length > SMBIOS2_MAX_LENGTH) {
         return "bad length";
     }
-    if (byte_sum(eps, eps->length) != 0) {
+    if (checksum8(eps, eps->length) != 0) {
         return "bad checksum";
     }
     int anchor = memcmp(eps->intermediate_anchor, "_DMI_", sizeof(eps->intermediate_anchor));
     if (anchor != 0) {
         return "bad intermediate anchor";
     }
-    uint8_t sum = byte_sum((const uint8_t *)eps + intermediate, SMBIOS2_INTERMEDIATE_SIZE);
+    uint8_t sum = checksum8((const uint8_t *)eps + intermediate, SMBIOS2_INTERMEDIATE_SIZE);
     if (sum != 0) {
         return "bad intermediate checksum";
     }
@@ -216,7 +207,7 @@ static const char *smbios3_check(const struct smbios3_entry *eps) {
     if (eps->length < sizeof(struct smbios3_entry)) {
         return "bad length";
     }
-    if (byte_sum(eps, eps->length) != 0) {
+    if (checksum8(eps, eps->length) != 0) {
         return "bad checksum";
     }
     return NULL;
@@ -225,11 +216,11 @@ static const char *smbios3_check(const struct smbios3_entry *eps) {
 static void smbios2_checksum(struct smbios2_entry *eps) {
     size_t intermediate = offsetof(struct smbios2_entry, intermediate_anchor);
     eps->intermediate_checksum = 0;
-    eps->intermediate_checksum = (uint8_t)-byte_sum(
+    eps->intermediate_checksum = (uint8_t)-checksum8(
         (uint8_t *)eps + intermediate, SMBIOS2_INTERMEDIATE_SIZE
     );
     eps->checksum = 0;
-    eps->checksum = (uint8_t)-byte_sum(eps, eps->length);
+    eps->checksum = (uint8_t)-checksum8(eps, eps->length);
 }
 
 static void smbios_log(const char *how, const struct smbios2_entry *eps) {
@@ -450,7 +441,7 @@ static bool root_sound(uintptr_t address, const char *signature) {
     }
     uint32_t length;
     memcpy(&length, root + ACPI_TABLE_LENGTH, sizeof(uint32_t));
-    return length >= ACPI_TABLE_HEADER_SIZE && byte_sum(root, length) == 0;
+    return length >= ACPI_TABLE_HEADER_SIZE && checksum8(root, length) == 0;
 }
 
 // The XSDT, or the RSDT where the XSDT is broken, as Linux 7.3 falls back for
@@ -525,7 +516,7 @@ static const uint8_t *acpi_table(const char *signature) {
         }
         uint32_t table_length;
         memcpy(&table_length, table + ACPI_TABLE_LENGTH, sizeof(uint32_t));
-        if (table_length < ACPI_TABLE_HEADER_SIZE || byte_sum(table, table_length) != 0) {
+        if (table_length < ACPI_TABLE_HEADER_SIZE || checksum8(table, table_length) != 0) {
             return NULL;
         }
         return table;
@@ -680,7 +671,7 @@ static uint64_t rsdp_for_rsdt(const struct rsdp *rsdp) {
     memcpy(v1, rsdp, RSDP_V1_SIZE);
     v1->revision = 0;
     v1->checksum = 0;
-    v1->checksum = (uint8_t)-byte_sum(v1, RSDP_V1_SIZE);
+    v1->checksum = (uint8_t)-checksum8(v1, RSDP_V1_SIZE);
     return copy;
 }
 

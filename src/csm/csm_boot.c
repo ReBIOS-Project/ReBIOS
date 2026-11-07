@@ -142,14 +142,6 @@ static uint32_t e820_build(void) {
     return count;
 }
 
-static uint8_t byte_sum(const uint8_t *p, size_t size) {
-    uint8_t sum = 0;
-    for (size_t i = 0; i < size; i++) {
-        sum += p[i];
-    }
-    return sum;
-}
-
 // The firmware's SMBIOS tables need not be in memory the guest sees, so the
 // guest gets a copy, at the top of its RAM. Returns the copy's entry point.
 static uint32_t smbios_copy(size_t *table_length) {
@@ -180,11 +172,11 @@ static uint32_t smbios_copy(size_t *table_length) {
     uintptr_t guest_table = base + SMBIOS2_ENTRY_SPACE;
     memcpy(copy + SMBIOS2_TABLE_ADDRESS, &guest_table, sizeof(uint32_t));
     copy[SMBIOS2_INTERMEDIATE_CHECKSUM] = 0;
-    copy[SMBIOS2_INTERMEDIATE_CHECKSUM] = (uint8_t)-byte_sum(
+    copy[SMBIOS2_INTERMEDIATE_CHECKSUM] = (uint8_t)-checksum8(
         copy + SMBIOS2_INTERMEDIATE, SMBIOS2_INTERMEDIATE_SIZE
     );
     copy[SMBIOS2_CHECKSUM] = 0;
-    copy[SMBIOS2_CHECKSUM] = (uint8_t)-byte_sum(copy, entry_length);
+    copy[SMBIOS2_CHECKSUM] = (uint8_t)-checksum8(copy, entry_length);
     guest_phys_write(base, copy, size);
     kfree(copy);
     *table_length = length;
@@ -267,11 +259,7 @@ static const struct handoff_pci_rom *emulated_vbios(void) {
     size_t size = VGABIOS_ROM_SIZE;
     uint8_t *image = page_alloc(page_count(size));
     vgabios_rom_fill(image);
-    uint8_t sum = 0;
-    for (size_t i = 0; i + 1 < size; i++) {
-        sum = (uint8_t)(sum + image[i]);
-    }
-    image[size - 1] = (uint8_t)-sum;
+    image[size - 1] = (uint8_t)-checksum8(image, size - 1);
     if (h->video.vga_present) {
         rom.address = h->video.vga_device;
         rom.vendor_id = h->video.vga_vendor_id;

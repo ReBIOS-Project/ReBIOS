@@ -109,14 +109,6 @@ static uint16_t get16(const uint8_t *p) {
     return value;
 }
 
-static bool checksum_ok(const uint8_t *table, size_t length) {
-    uint8_t sum = 0;
-    for (size_t i = 0; i < length; i++) {
-        sum += table[i];
-    }
-    return sum == 0;
-}
-
 // What the core needs of a VT-d unit, as boot services are the last chance to
 // go back: queued invalidation, and second-stage tables of 3 or 4 levels.
 static bool vtd_unit_usable(uintptr_t base) {
@@ -158,7 +150,7 @@ static int iommu_table_check(const uint8_t *table) {
         );
     }
     size_t length = get32(table + SDT_LENGTH);
-    if (length < IOMMU_TABLE_HEADER_SIZE || !checksum_ok(table, length)) {
+    if (length < IOMMU_TABLE_HEADER_SIZE || checksum8(table, length) != 0) {
         printf("The %.4s table is malformed\n", (const char *)table);
         return FOUND_NONE;
     }

@@ -84,12 +84,8 @@ static void write32(uint8_t *p, uint32_t value) {
 }
 
 static void checksum_set(uint8_t *p, size_t size, uint32_t at) {
-    uint8_t sum = 0;
     p[at] = 0;
-    for (size_t i = 0; i < size; i++) {
-        sum += p[i];
-    }
-    p[at] = (uint8_t)-sum;
+    p[at] = (uint8_t)-checksum8(p, size);
 }
 
 // The table at addr, if it lies within the memory the hypervisor maps.

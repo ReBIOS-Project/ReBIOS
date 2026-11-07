@@ -28,6 +28,7 @@
 #include <hw/lapic.h>
 #include <hw/pci_enum.h>
 #include <lib/log.h>
+#include <lib/util.h>
 #include <memory.h>
 #include <sys/cpu.h>
 #include <sys/smp.h>
@@ -175,14 +176,6 @@ struct mp_writer {
     size_t length;
     uint16_t counts[MP_ENTRY_TYPES];
 };
-
-static uint8_t checksum(const uint8_t *bytes, size_t length) {
-    uint8_t sum = 0;
-    for (size_t i = 0; i < length; i++) {
-        sum = (uint8_t)(sum + bytes[i]);
-    }
-    return (uint8_t)-sum;
-}
 
 // MP table strings are ASCII, padded with spaces.
 static void mp_string(char *dest, size_t size, const char *src, size_t length) {
@@ -565,7 +558,7 @@ static uint32_t table_write(
     );
     uint8_t *config = buf + sizeof(struct mp_floating_pointer);
     memcpy(config, &header, sizeof(struct mp_config_header));
-    config[offsetof(struct mp_config_header, checksum)] = checksum(
+    config[offsetof(struct mp_config_header, checksum)] = (uint8_t)-checksum8(
         config, header.base_table_length
     );
 
@@ -578,7 +571,7 @@ static uint32_t table_write(
     };
     memcpy(pointer.signature, "_MP_", sizeof(pointer.signature));
     memcpy(buf, &pointer, sizeof(struct mp_floating_pointer));
-    buf[offsetof(struct mp_floating_pointer, checksum)] = checksum(
+    buf[offsetof(struct mp_floating_pointer, checksum)] = (uint8_t)-checksum8(
         buf, sizeof(struct mp_floating_pointer)
     );
     return w->length;

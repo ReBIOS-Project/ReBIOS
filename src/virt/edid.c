@@ -19,6 +19,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <virt/edid.h>
+#include <lib/util.h>
 #include <memory.h>
 
 #define REFRESH_HZ 60
@@ -159,10 +160,6 @@ bool edid_synthesize(uint8_t *edid, uint32_t width, uint32_t height) {
 
     display_descriptor(edid + 0x6c, 0x10);
 
-    uint8_t sum = 0;
-    for (size_t i = 0; i + 1 < EDID_BLOCK_SIZE; i++) {
-        sum = (uint8_t)(sum + edid[i]);
-    }
-    edid[EDID_BLOCK_SIZE - 1] = (uint8_t)-sum;
+    edid[EDID_BLOCK_SIZE - 1] = (uint8_t)-checksum8(edid, EDID_BLOCK_SIZE - 1);
     return true;
 }

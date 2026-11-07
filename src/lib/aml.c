@@ -21,6 +21,7 @@
 #include <lib/aml.h>
 #include <lib/heap.h>
 #include <lib/log.h>
+#include <lib/util.h>
 #include <memory.h>
 
 // Room for the longest PkgLength while a construct is open.
@@ -267,9 +268,5 @@ void aml_table_header(
     memcpy(table + 28, "RBIO", 4);
     uint32_t creator_revision = 1;
     memcpy(table + 32, &creator_revision, 4);
-    uint8_t sum = 0;
-    for (size_t i = 0; i < length; i++) {
-        sum += table[i];
-    }
-    table[9] = (uint8_t)-sum;
+    table[9] = (uint8_t)-checksum8(table, length);
 }

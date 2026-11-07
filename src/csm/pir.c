@@ -22,6 +22,7 @@
 #include <hw/acpi_irq.h>
 #include <hw/pci_cfg.h>
 #include <lib/log.h>
+#include <lib/util.h>
 #include <memory.h>
 #include <virt/irq.h>
 #include <virt/pci_plan.h>
@@ -149,11 +150,7 @@ uint32_t pir_build(void *buf, size_t size) {
     };
     memcpy(header.signature, "$PIR", sizeof(header.signature));
     memcpy(bytes, &header, sizeof(struct pir_header));
-    uint8_t sum = 0;
-    for (size_t i = 0; i < length; i++) {
-        sum = (uint8_t)(sum + bytes[i]);
-    }
-    bytes[offsetof(struct pir_header, checksum)] = (uint8_t)-sum;
+    bytes[offsetof(struct pir_header, checksum)] = (uint8_t)-checksum8(bytes, length);
 
     printf("PCI IRQ routing table: %zu slots, PCI IRQs %#x\n", slots, exclusive);
     return length;

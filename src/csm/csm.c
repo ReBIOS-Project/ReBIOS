@@ -21,6 +21,7 @@
 #include <uacpi/acpi.h>
 #include <csm/csm.h>
 #include <handoff.h>
+#include <lib/util.h>
 #include <memory.h>
 
 #define PCI_CLASS_MASS_STORAGE 0x01
@@ -29,22 +30,13 @@
 // A sanity bound, well above the 36 bytes of every ACPI revision so far.
 #define RSDP_MAX_SIZE 64
 
-static uint8_t byte_sum(const void *p, size_t len) {
-    const uint8_t *bytes = p;
-    uint8_t sum = 0;
-    for (size_t i = 0; i < len; i++) {
-        sum += bytes[i];
-    }
-    return sum;
-}
-
 struct csm_compat16_table *csm_find_compat16_table(void *image, size_t size) {
     uint8_t *bytes = image;
     for (size_t off = 0; size - off >= CSM_COMPAT16_TABLE_SPEC_SIZE; off += 16) {
         struct csm_compat16_table *table = (struct csm_compat16_table *)(bytes + off);
         if (table->signature == CSM_COMPAT16_SIGNATURE
          && table->table_length >= CSM_COMPAT16_TABLE_SPEC_SIZE
-         && table->table_length <= size - off && byte_sum(table, table->table_length) == 0) {
+         && table->table_length <= size - off && checksum8(table, table->table_length) == 0) {
             return table;
         }
     }
@@ -53,7 +45,7 @@ struct csm_compat16_table *csm_find_compat16_table(void *image, size_t size) {
 
 void csm_compat16_table_checksum(struct csm_compat16_table *table) {
     table->table_checksum = 0;
-    table->table_checksum = (uint8_t)-byte_sum(table, table->table_length);
+    table->table_checksum = (uint8_t)-checksum8(table, table->table_length);
 }
 
 bool csm_copy_rsdp(

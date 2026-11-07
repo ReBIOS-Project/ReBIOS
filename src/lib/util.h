@@ -46,6 +46,17 @@ static inline uint64_t page_down(uint64_t value) {
     return align_down(value, PAGE_SIZE);
 }
 
+// The sum of size bytes at data, modulo 256: 0 over a table, ACPI's, SMBIOS's,
+// and the like, whose checksum is right.
+static inline uint8_t checksum8(const void *data, size_t size) {
+    const uint8_t *bytes = data;
+    uint8_t sum = 0;
+    for (size_t i = 0; i < size; i++) {
+        sum = (uint8_t)(sum + bytes[i]);
+    }
+    return sum;
+}
+
 // The pages that size bytes take up, the last of them maybe in part.
 static inline size_t page_count(size_t size) {
     return (size + PAGE_SIZE - 1) / PAGE_SIZE;
