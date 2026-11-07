@@ -20,6 +20,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <virt/guest_mem.h>
+#include <lib/util.h>
 #include <memory.h>
 #include <sys/mm.h>
 #include <sys/x86.h>
@@ -29,6 +30,7 @@
 #include <virt/nvmx.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>
+#include <virt/vlapic.h>
 #include <virt/vmx.h>
 
 #define MSR_IA32_PKRS 0x6e1
@@ -68,6 +70,17 @@ bool guest_mem_phys_read(uintptr_t gpa, void *buf, size_t len) {
 
 bool guest_mem_phys_write(uintptr_t gpa, const void *buf, size_t len) {
     return guest_phys_access(gpa, (void *)buf, len, true);
+}
+
+uint8_t *guest_mem_page(uintptr_t gpa) {
+    uintptr_t hpa;
+    uint32_t prot;
+    uint8_t memtype;
+    if (!gpt_translate(gpa, &hpa, &prot, &memtype) || (prot & (GPT_R | GPT_W)) != (GPT_R | GPT_W)
+     || memtype != MT_WB || vlapic_access_page(page_down(hpa))) {
+        return NULL;
+    }
+    return (uint8_t *)(uintptr_t)hpa;
 }
 
 // gpa as the processor reaches it for an access, given as an EPT violation's

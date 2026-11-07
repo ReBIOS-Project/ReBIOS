@@ -36,6 +36,7 @@
 #include <virt/event.h>
 #include <virt/exit.h>
 #include <virt/gpt.h>
+#include <virt/guest_mem.h>
 #include <virt/irq.h>
 #include <virt/mmio.h>
 #include <virt/vcpu.h>
@@ -524,19 +525,6 @@ static uint64_t *field_at(const struct nvmx *n, int slot) {
     return field_in(n->vmcs12, slot);
 }
 
-// The guest's RAM at a guest-physical page, for the regions VMX instructions
-// and VMCSs name: not the page behind its local APICs' pages.
-static uint8_t *guest_page(uintptr_t gpa) {
-    uintptr_t hpa;
-    uint32_t prot;
-    uint8_t memtype;
-    if (!gpt_translate(gpa, &hpa, &prot, &memtype) || (prot & (GPT_R | GPT_W)) != (GPT_R | GPT_W)
-     || memtype != MT_WB || vlapic_access_page(page_down(hpa))) {
-        return NULL;
-    }
-    return (uint8_t *)(uintptr_t)hpa;
-}
-
 static unsigned int guest_cpl(struct vcpu *v) {
     struct vcpu_segment ss;
     vcpu_get_seg(v, VCPU_SEG_SS, &ss);
@@ -675,7 +663,7 @@ static void vmxon(struct vcpu *v, struct nvmx *n, uint64_t info) {
     if (!read_operand64(v, info, &addr)) {
         return;
     }
-    uint8_t *region = valid_address(addr) ? guest_page(addr) : NULL;
+    uint8_t *region = valid_address(addr) ? guest_mem_page(addr) : NULL;
     if (region == NULL || *(volatile uint32_t *)region != VMCS12_REVISION) {
         fail_invalid(v);
         return;
@@ -714,7 +702,7 @@ static void vmclear(struct vcpu *v, struct nvmx *n, uint64_t info) {
     if (!read_operand64(v, info, &addr)) {
         return;
     }
-    uint8_t *region = valid_address(addr) ? guest_page(addr) : NULL;
+    uint8_t *region = valid_address(addr) ? guest_mem_page(addr) : NULL;
     if (region == NULL) {
         fail(v, ERROR_VMCLEAR_ADDRESS);
         return;
@@ -738,7 +726,7 @@ static void vmptrld(struct vcpu *v, struct nvmx *n, uint64_t info) {
     if (!read_operand64(v, info, &addr)) {
         return;
     }
-    uint8_t *region = valid_address(addr) ? guest_page(addr) : NULL;
+    uint8_t *region = valid_address(addr) ? guest_mem_page(addr) : NULL;
     if (region == NULL) {
         fail(v, ERROR_VMPTRLD_ADDRESS);
         return;
@@ -1060,7 +1048,7 @@ static bool msr_list_valid(uintptr_t address, size_t count) {
 // An entry in the guest's RAM, or NULL.
 static uint8_t *msr_entry(uintptr_t address, size_t index) {
     uint64_t at = address + index * 16;
-    uint8_t *page = guest_page(page_down(at));
+    uint8_t *page = guest_mem_page(page_down(at));
     return page == NULL ? NULL : page + (at & 0xfff);
 }
 
@@ -1148,7 +1136,7 @@ struct ept12_walk {
 
 // Where nothing decodes, an entry reads as all ones, which is misconfigured.
 static uint64_t *ept12_entry(uintptr_t gpa) {
-    uint8_t *page = guest_page(page_down(gpa));
+    uint8_t *page = guest_mem_page(page_down(gpa));
     return page == NULL ? NULL : (uint64_t *)(page + (gpa & 0xff8));
 }
 
@@ -1157,7 +1145,7 @@ static uint64_t *ept12_entry(uintptr_t gpa) {
 static void pml_log(struct nvmx *n, uintptr_t gpa) {
     uint64_t index = get12(n, VMCS_GUEST_PML_INDEX);
     uint64_t at = get12(n, VMCS_PML_ADDRESS) + index * 8;
-    uint8_t *page = guest_page(page_down(at));
+    uint8_t *page = guest_mem_page(page_down(at));
     if (page != NULL) {
         *(volatile uint64_t *)(page + (at & 0xfff)) = page_down(gpa);
     }
@@ -1432,7 +1420,7 @@ static uint64_t ept02_fill(struct nvmx *n, uintptr_t gpa, const struct ept12_wal
 // made: the entries made from guest entries that read differently now, and
 // what they lead to. Entries the guest added have no shadow yet.
 static void ept02_sync(struct nvmx *n, uint64_t *table, uintptr_t gpa12, size_t level) {
-    const _Atomic(uint64_t) *guest = (const _Atomic(uint64_t) *)(uintptr_t)guest_page(gpa12);
+    const _Atomic(uint64_t) *guest = (const _Atomic(uint64_t) *)(uintptr_t)guest_mem_page(gpa12);
     const uint64_t *made_from = table + 512;
     for (size_t i = 0; i < 512; i++) {
         uint64_t e = table[i];
@@ -1784,7 +1772,7 @@ static void merge_msr_bitmap(struct nvmx *n, uint64_t proc, uint64_t proc2) {
         return;
     }
     const uint8_t *own_msr = (const uint8_t *)virt_msr_bitmap();
-    const uint8_t *bitmap = guest_page(get12(n, VMCS_MSR_BITMAP));
+    const uint8_t *bitmap = guest_mem_page(get12(n, VMCS_MSR_BITMAP));
     for (size_t i = 0; i < PAGE_SIZE; i++) {
         n->msr_bitmap[i] = bitmap == NULL ? 0xff : bitmap[i] | own_msr[i];
     }
@@ -1838,7 +1826,7 @@ static void apic_virtualisation(struct nvmx *n, struct apic_controls *c) {
     n->apic_access02 = 0;
     int pi_vector = -1;
     if ((proc & PROC_TPR_SHADOW) != 0) {
-        n->vapic = guest_page(get12(n, VMCS_VIRTUAL_APIC_ADDR));
+        n->vapic = guest_mem_page(get12(n, VMCS_VIRTUAL_APIC_ADDR));
         // One the processor cannot take, to fail the entry.
         uintptr_t address = ~(uint64_t)0;
         if (n->vapic != NULL) {
@@ -1887,7 +1875,7 @@ static void apic_virtualisation(struct nvmx *n, struct apic_controls *c) {
     }
     if ((pin & PIN_POSTED_INTR) != 0) {
         uint64_t desc = get12(n, VMCS_POSTED_INTR_DESC);
-        uint8_t *page = guest_page(page_down(desc));
+        uint8_t *page = guest_mem_page(page_down(desc));
         if (page != NULL && n->vapic != NULL) {
             n->pid = (uint32_t *)(page + (desc & 0xfff));
             vmx_write(VMCS_POSTED_INTR_NV, VLAPIC_NESTED_POSTED_VECTOR);
@@ -2316,7 +2304,7 @@ static bool link_pointer_valid(const struct nvmx *n) {
     if (link == NO_VMCS) {
         return true;
     }
-    const uint8_t *region = valid_address(link) ? guest_page(link) : NULL;
+    const uint8_t *region = valid_address(link) ? guest_mem_page(link) : NULL;
     if (region == NULL || link == n->current) {
         return false;
     }
@@ -2672,7 +2660,7 @@ static bool io_wanted(const struct nvmx *n, uint64_t proc, uint64_t qual) {
     }
     for (size_t p = port; p < port + size; p++) {
         uintptr_t bitmap = get12(n, p < 0x8000 ? VMCS_IO_BITMAP_A : VMCS_IO_BITMAP_B);
-        const uint8_t *page = guest_page(bitmap);
+        const uint8_t *page = guest_mem_page(bitmap);
         if (page == NULL || (page[(p & 0x7fff) / 8] >> (p % 8) & 1) != 0) {
             return true;
         }
@@ -2694,7 +2682,7 @@ static bool msr_wanted(const struct nvmx *n, uint64_t proc, uint32_t msr, bool w
     } else {
         return true;
     }
-    const uint8_t *page = guest_page(get12(n, VMCS_MSR_BITMAP));
+    const uint8_t *page = guest_mem_page(get12(n, VMCS_MSR_BITMAP));
     if (page == NULL) {
         return true;
     }
@@ -2842,7 +2830,7 @@ static bool eptp_switch(struct vcpu *v, struct nvmx *n) {
         return false;
     }
     uint64_t at = get12(n, VMCS_EPTP_LIST) + index * 8;
-    const uint8_t *page = guest_page(page_down(at));
+    const uint8_t *page = guest_mem_page(page_down(at));
     // Where nothing decodes, it reads as all ones, which is invalid.
     uint64_t eptp = page == NULL
                   ? ~(uint64_t)0
@@ -2869,7 +2857,7 @@ static bool shadow_access(struct vcpu *v, struct nvmx *n, uint32_t reason) {
     uintptr_t bitmap = get12(
         n, reason == EXIT_REASON_VMREAD ? VMCS_VMREAD_BITMAP : VMCS_VMWRITE_BITMAP
     );
-    const uint8_t *page = guest_page(bitmap);
+    const uint8_t *page = guest_mem_page(bitmap);
     if ((field >> 15) != 0 || page == NULL || (page[field >> 3] >> (field & 7) & 1) != 0) {
         return false;
     }
@@ -2878,7 +2866,7 @@ static bool shadow_access(struct vcpu *v, struct nvmx *n, uint32_t reason) {
         return true;
     }
     uintptr_t link = get12(n, VMCS_LINK_POINTER);
-    uint8_t *shadow = link == NO_VMCS ? NULL : guest_page(link);
+    uint8_t *shadow = link == NO_VMCS ? NULL : guest_mem_page(link);
     if (shadow == NULL) {
         fail_invalid(v);
         return true;

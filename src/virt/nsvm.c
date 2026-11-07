@@ -278,19 +278,6 @@ void nsvm_vcpu_init(struct vcpu *v) {
     v->nsvm = n;
 }
 
-// The guest's RAM at a guest-physical page, for the VMCBs and permission maps
-// SVM instructions and VMCBs name: not the page behind its local APICs' pages.
-static uint8_t *guest_page(uintptr_t gpa) {
-    uintptr_t hpa;
-    uint32_t prot;
-    uint8_t memtype;
-    if (!gpt_translate(gpa, &hpa, &prot, &memtype) || (prot & (GPT_R | GPT_W)) != (GPT_R | GPT_W)
-     || memtype != MT_WB || vlapic_access_page(page_down(hpa))) {
-        return NULL;
-    }
-    return (uint8_t *)(uintptr_t)hpa;
-}
-
 static bool valid_page(uint64_t address) {
     return (address & 0xfff) == 0 && (address >> phys_width) == 0;
 }
@@ -641,7 +628,7 @@ static void exit_to_l1(
     uint64_t intinfo, bool hardware
 ) {
     struct vmcb *vmcb02 = n->vmcb02;
-    struct vmcb *vmcb12 = (struct vmcb *)guest_page(n->vmcb12);
+    struct vmcb *vmcb12 = (struct vmcb *)guest_mem_page(n->vmcb12);
     if (vmcb12 == NULL) {
         svm_shutdown(v, "The guest's VMCB is gone");
     }
@@ -930,7 +917,9 @@ static uintptr_t merge_msrpm(struct nsvm *n, uint64_t base12) {
     }
     for (size_t page = 0; page < MSRPM_SIZE / PAGE_SIZE; page++) {
         const uint64_t *mine = (const uint64_t *)(own + page * PAGE_SIZE);
-        const uint64_t *l1 = (const uint64_t *)guest_page(page_down(base12) + page * PAGE_SIZE);
+        const uint64_t *l1 = (const uint64_t *)guest_mem_page(
+            page_down(base12) + page * PAGE_SIZE
+        );
         uint64_t *to = (uint64_t *)(n->msrpm02 + page * PAGE_SIZE);
         for (size_t i = 0; i < PAGE_SIZE / 8; i++) {
             to[i] = mine[i] | (l1 == NULL ? ~(uint64_t)0 : l1[i]);
@@ -943,7 +932,7 @@ static uintptr_t merge_msrpm(struct nsvm *n, uint64_t base12) {
 // tables (APM 24593 rev. 3.46, 15.25.3 and 15.25.5), which reads as all ones
 // where nothing decodes, its reserved bits set.
 static uint64_t npt12_read(const struct nsvm *n, uintptr_t gpa, void **at) {
-    uint8_t *page = guest_page(page_down(gpa));
+    uint8_t *page = guest_mem_page(page_down(gpa));
     *at = NULL;
     if (page == NULL) {
         return ~(uint64_t)0;
@@ -1445,7 +1434,7 @@ static void vmrun(struct vcpu *v, struct nsvm *n) {
         return;
     }
     uint64_t gpa = rax_address(v, &insn);
-    struct vmcb *vmcb12 = valid_page(gpa) ? (struct vmcb *)guest_page(gpa) : NULL;
+    struct vmcb *vmcb12 = valid_page(gpa) ? (struct vmcb *)guest_mem_page(gpa) : NULL;
     if (vmcb12 == NULL) {
         vcpu_inject_exception(v, VECTOR_GP, true, 0);
         return;
@@ -1490,7 +1479,7 @@ static void vmload_vmsave(struct vcpu *v, bool load) {
         return;
     }
     uint64_t gpa = rax_address(v, &insn);
-    struct vmcb *vmcb = valid_page(gpa) ? (struct vmcb *)guest_page(gpa) : NULL;
+    struct vmcb *vmcb = valid_page(gpa) ? (struct vmcb *)guest_mem_page(gpa) : NULL;
     if (vmcb == NULL) {
         vcpu_inject_exception(v, VECTOR_GP, true, 0);
         return;
@@ -1602,7 +1591,7 @@ static bool io_wanted(struct nsvm *n, uint64_t info) {
     size = size == 4 ? 4 : size == 2 ? 2 : 1;
     uintptr_t base = page_down(n->copy.control.iopm_base_pa);
     for (size_t port = info >> 16; port < (info >> 16) + size; port++) {
-        const uint8_t *page = guest_page(base + page_down(port / 8));
+        const uint8_t *page = guest_mem_page(base + page_down(port / 8));
         if (page == NULL || ((page[port / 8 & 0xfff] >> (port % 8)) & 1) != 0) {
             return true;
         }
@@ -1629,7 +1618,7 @@ static bool msr_wanted(struct vcpu *v, struct nsvm *n, bool write) {
     }
     size_t bit = offset * 8 + (msr & 0x1fff) * 2 + (write ? 1 : 0);
     uintptr_t base = page_down(n->copy.control.msrpm_base_pa);
-    const uint8_t *page = guest_page(base + page_down(bit / 8));
+    const uint8_t *page = guest_mem_page(base + page_down(bit / 8));
     return page == NULL || ((page[bit / 8 & 0xfff] >> (bit % 8)) & 1) != 0;
 }
 

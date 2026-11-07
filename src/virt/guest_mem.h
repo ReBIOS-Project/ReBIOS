@@ -32,6 +32,12 @@
 bool guest_mem_phys_read(uintptr_t gpa, void *buf, size_t len);
 bool guest_mem_phys_write(uintptr_t gpa, const void *buf, size_t len);
 
+// The guest's RAM at a guest-physical page, readable, writable, and
+// write-back, for the structures that the guest names to its processors, such
+// as VMCBs, VMCSs, and their permission maps: not the page behind its local
+// APICs' pages. NULL otherwise.
+uint8_t *guest_mem_page(uintptr_t gpa);
+
 // Whether PAE paging may load the PDPTE: not present, or setting no bit it
 // reserves.
 bool guest_mem_pdpte_valid(uint64_t pdpte);
