@@ -205,6 +205,10 @@ void vcpu_exit_soon(struct vcpu *v);
 // Interrupts the processor's halt, as one waiting for a start-up IPI is in.
 void vcpu_wake(struct cpu *cpu);
 
+// INIT# from the chipset, which reaches every processor, as an INIT IPI does,
+// and leaves one that waits for a start-up IPI waiting.
+void vcpu_init_all(void);
+
 // Waits in the hypervisor, taking interrupts, until ends() holds: halted, or
 // spinning where nothing would interrupt the halt in time.
 void vcpu_wait(struct vcpu *v, bool (*ends)(struct vcpu *v), bool spin);

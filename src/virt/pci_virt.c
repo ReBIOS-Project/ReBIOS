@@ -23,6 +23,7 @@
 #include <hw/lapic.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
+#include <hw/power.h>
 #include <iommu/remap.h>
 #include <lib/heap.h>
 #include <lib/log.h>
@@ -1133,15 +1134,50 @@ static void port_native(uint16_t port, size_t size, bool in, uint32_t *value) {
     }
 }
 
-// Only dword accesses to CF8h are the configuration address: the others, such
-// as the reset control register at CF9h on many chipsets, and data accesses
-// with the address disabled, go on to the hardware.
+// The reset control register at CF9h (ICH10 datasheet 319973-003, 13.7.5): its
+// RST_CPU's rise resets the machine, or with SYS_RST clear, is INIT#.
+#define PORT_RST_CNT 0xcf9
+#define RST_CNT_SYS_RST 0x02
+#define RST_CNT_RST_CPU 0x04
+#define RST_CNT_FULL_RST 0x08
+#define RST_CNT_WRITABLE 0x0e
+
+static struct spinlock rst_cnt_lock;
+static uint8_t rst_cnt;
+
+static void rst_cnt_access(bool in, uint32_t *value) {
+    spinlock_acquire(&rst_cnt_lock);
+    if (in) {
+        *value = (*value & ~(uint32_t)0xff) | rst_cnt;
+        spinlock_release(&rst_cnt_lock);
+        return;
+    }
+    uint8_t old = rst_cnt;
+    uint8_t now = (uint8_t)*value & RST_CNT_WRITABLE;
+    rst_cnt = now;
+    spinlock_release(&rst_cnt_lock);
+    if ((old & RST_CNT_RST_CPU) != 0 || (now & RST_CNT_RST_CPU) == 0) {
+        return;
+    }
+    if ((now & RST_CNT_SYS_RST) != 0) {
+        power_reset((now & RST_CNT_FULL_RST) == 0);
+    }
+    vcpu_init_all();
+}
+
+// Only dword accesses to CF8h are the configuration address: the others, but
+// for the reset control register, and data accesses with the address disabled,
+// go on to the hardware.
 static void config_ports(
     struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
 ) {
     (void)v;
     (void)ctx;
     uint16_t port = (uint16_t)(CONFIG_ADDRESS + offset);
+    if (port == PORT_RST_CNT && size == 1) {
+        rst_cnt_access(in, value);
+        return;
+    }
     spinlock_acquire(&virt.lock);
     if (port == CONFIG_ADDRESS && size == 4) {
         if (in) {

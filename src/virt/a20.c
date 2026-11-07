@@ -15,14 +15,11 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <virt/a20.h>
 #include <lib/spinlock.h>
-#include <sys/cpu.h>
-#include <sys/smp.h>
 #include <sys/x86.h>
 #include <virt/gpt.h>
 #include <virt/io.h>
@@ -66,21 +63,6 @@ static void pass_rest(uint16_t port, size_t size, bool in, uint32_t *value) {
     }
 }
 
-// INIT# reaches every processor, as an INIT IPI does, which leaves one that
-// waits for a start-up IPI waiting.
-static void init_processors(void) {
-    for (size_t i = 0; i < smp_cpu_count(); i++) {
-        struct cpu *cpu = smp_cpu(i);
-        struct vcpu *to = cpu->vcpu;
-        if (to == NULL
-         || atomic_load_explicit(&to->sipi, memory_order_acquire) != VCPU_SIPI_RUNNING) {
-            continue;
-        }
-        atomic_store_explicit(&cpu->init_pending, true, memory_order_release);
-        vcpu_kick(cpu);
-    }
-}
-
 static void system_control_a(
     struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
 ) {
@@ -98,7 +80,7 @@ static void system_control_a(
         // datasheet 319973-003, 13.7.3).
         if ((old & INIT_NOW) == 0 && (written & INIT_NOW) != 0) {
             system_control |= A20_BIT;
-            init_processors();
+            vcpu_init_all();
         }
         update_gate();
     }

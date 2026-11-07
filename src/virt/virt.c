@@ -550,6 +550,19 @@ void vcpu_wake(struct cpu *cpu) {
     }
 }
 
+void vcpu_init_all(void) {
+    for (size_t i = 0; i < smp_cpu_count(); i++) {
+        struct cpu *cpu = smp_cpu(i);
+        struct vcpu *to = cpu->vcpu;
+        if (to == NULL
+         || atomic_load_explicit(&to->sipi, memory_order_acquire) != VCPU_SIPI_RUNNING) {
+            continue;
+        }
+        atomic_store_explicit(&cpu->init_pending, true, memory_order_release);
+        vcpu_kick(cpu);
+    }
+}
+
 void vcpu_exit_soon(struct vcpu *v) {
     struct cpu *cpu = v->cpu;
     if (!atomic_exchange_explicit(&cpu->kick, true, memory_order_acq_rel)) {
