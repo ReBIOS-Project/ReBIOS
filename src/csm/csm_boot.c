@@ -26,7 +26,6 @@
 #include <csm/pir.h>
 #include <handoff.h>
 #include <hw/acpi_irq.h>
-#include <hw/intel_pit.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
 #include <iommu/dma.h>
@@ -541,8 +540,6 @@ static void boot_order(void) {
 
 void csm_boot_start(struct vcpu *v) {
     const struct handoff *h = core_handoff;
-
-    intel_pit_ungate();
 
     size_t image_size = (uint32_t)(seabios_csm_end - seabios_csm);
     if (image_size > ROM_AREA_END - ROM_AREA_BASE) {
