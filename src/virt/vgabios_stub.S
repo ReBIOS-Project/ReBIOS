@@ -25,22 +25,11 @@
 // to get others wrong. This is data to the hypervisor.
 
 #include <virt/bda.h>
+#include <virt/vgabios_stub.h>
 
 .section .rodata.vgabios_stub, "a"
 .code16
 .arch i8086
-
-#define PORT_ALLOCATE 0x1d0
-#define PORT_VGA_ALLOCATE 0x3de
-#define KNOCK 0x5242
-#define KNOCK_INIT 0x5243
-#define VGA_PORTS 0x3b0
-
-#define FRAME_AX 0
-#define FRAME_BX 2
-#define FRAME_BH 3
-#define FRAME_CX 4
-#define FRAME_DX 6
 
 .globl vgabios_stub
 vgabios_stub:
@@ -54,7 +43,7 @@ vgabios_stub:
 .org 0x1e
 .ascii "IBM"
 
-// The registers vgabios.c's FRAME_ offsets find.
+// The registers that the VGABIOS_STUB_FRAME_ offsets find.
 .macro save
     pushw %es
     pushw %ds
@@ -83,7 +72,7 @@ vgabios_stub:
 
 init_entry:
     save
-    movw $KNOCK_INIT, %ax
+    movw $VGABIOS_STUB_KNOCK_INIT, %ax
     callw knock
     restore
     lretw
@@ -120,7 +109,7 @@ teletype:
     jae to_door
     callw page_cursor
     movw %cx, %dx
-    movb FRAME_AX(%bp), %al
+    movb VGABIOS_STUB_FRAME_AX(%bp), %al
     cmpb $7, %al
     je to_finish
     cmpb $8, %al
@@ -138,7 +127,7 @@ teletype:
     callw on_screen
     jnc to_door
     callw text_offset
-    movb FRAME_AX(%bp), %al
+    movb VGABIOS_STUB_FRAME_AX(%bp), %al
     stosb
     jmp .Lteletype_6
 .Lteletype_2:
@@ -161,9 +150,9 @@ teletype:
 
 // AH=02h.
 set_cursor:
-    movb FRAME_BH(%bp), %al
+    movb VGABIOS_STUB_FRAME_BH(%bp), %al
     callw page_cursor
-    movw FRAME_DX(%bp), %ax
+    movw VGABIOS_STUB_FRAME_DX(%bp), %ax
     movw %ax, BDA_CURSOR(%bx)
     movw %di, %cx
     cmpb BDA_PAGE, %cl
@@ -192,11 +181,11 @@ cursor_shown:
 
 // AH=03h.
 get_cursor:
-    movb FRAME_BH(%bp), %al
+    movb VGABIOS_STUB_FRAME_BH(%bp), %al
     callw page_cursor
-    movw %cx, FRAME_DX(%bp)
+    movw %cx, VGABIOS_STUB_FRAME_DX(%bp)
     movw BDA_CURSOR_TYPE, %ax
-    movw %ax, FRAME_CX(%bp)
+    movw %ax, VGABIOS_STUB_FRAME_CX(%bp)
     jmp finish
 
 // AH=0Fh.
@@ -205,9 +194,9 @@ get_mode:
     andb $0x80, %al
     orb BDA_MODE, %al
     movb BDA_COLUMNS, %ah
-    movw %ax, FRAME_AX(%bp)
+    movw %ax, VGABIOS_STUB_FRAME_AX(%bp)
     movb BDA_PAGE, %al
-    movb %al, FRAME_BH(%bp)
+    movb %al, VGABIOS_STUB_FRAME_BH(%bp)
     jmp finish
 
 // AH=08h, in text modes.
@@ -215,16 +204,16 @@ read_char:
     callw text_cell
     jc to_door
     movw %es:(%di), %ax
-    movw %ax, FRAME_AX(%bp)
+    movw %ax, VGABIOS_STUB_FRAME_AX(%bp)
     jmp finish
 
 // AH=09h, in text modes.
 write_char_attribute:
     callw text_cell
     jc to_door
-    movw FRAME_AX(%bp), %ax
-    movb FRAME_BX(%bp), %ah
-    movw FRAME_CX(%bp), %cx
+    movw VGABIOS_STUB_FRAME_AX(%bp), %ax
+    movb VGABIOS_STUB_FRAME_BX(%bp), %ah
+    movw VGABIOS_STUB_FRAME_CX(%bp), %cx
     rep stosw
     jmp finish
 
@@ -232,8 +221,8 @@ write_char_attribute:
 write_char:
     callw text_cell
     jc to_door
-    movb FRAME_AX(%bp), %al
-    movw FRAME_CX(%bp), %cx
+    movb VGABIOS_STUB_FRAME_AX(%bp), %al
+    movw VGABIOS_STUB_FRAME_CX(%bp), %cx
     jcxz .Lwrite_char_2
 .Lwrite_char_1:
     stosb
@@ -247,7 +236,7 @@ write_pixel:
     cmpb $0x13, BDA_MODE
     jne to_door_pixel
     callw pixel_place
-    movb FRAME_AX(%bp), %al
+    movb VGABIOS_STUB_FRAME_AX(%bp), %al
     stosb
     jmp finish
 
@@ -257,7 +246,7 @@ read_pixel:
     jne to_door_pixel
     callw pixel_place
     movb %es:(%di), %al
-    movb %al, FRAME_AX(%bp)
+    movb %al, VGABIOS_STUB_FRAME_AX(%bp)
     jmp finish
 
 to_door_pixel:
@@ -267,10 +256,10 @@ to_door_pixel:
 pixel_place:
     movw $0xa000, %ax
     movw %ax, %es
-    movw FRAME_DX(%bp), %ax
+    movw VGABIOS_STUB_FRAME_DX(%bp), %ax
     movw $320, %dx
     mulw %dx
-    addw FRAME_CX(%bp), %ax
+    addw VGABIOS_STUB_FRAME_CX(%bp), %ax
     movw %ax, %di
     retw
 
@@ -279,7 +268,7 @@ pixel_place:
 text_cell:
     callw text_segment
     jc .Ltext_cell_1
-    movb FRAME_BH(%bp), %al
+    movb VGABIOS_STUB_FRAME_BH(%bp), %al
     callw page_cursor
     callw text_offset
     clc
@@ -368,16 +357,16 @@ vgabios_stub_window:
 // real mode, and all ones that the port does not reach the hypervisor, as from
 // Windows NT's DOS boxes, which let a program have only the VGA's ports.
 run:
-    movw $KNOCK, %ax
+    movw $VGABIOS_STUB_KNOCK, %ax
 knock:
     movw %ax, %si
-    movw $PORT_ALLOCATE, %dx
+    movw $VGABIOS_STUB_PORT_ALLOCATE, %dx
     outw %ax, %dx
     inw %dx, %ax
     cmpw $0xffff, %ax
     jne .Lknock_1
     movw %si, %ax
-    movw $PORT_VGA_ALLOCATE, %dx
+    movw $(VGABIOS_STUB_PORT_VGA + VGABIOS_STUB_PORT_VGA_ALLOCATE_OFFSET), %dx
     outw %ax, %dx
     inw %dx, %ax
 .Lknock_1:
@@ -395,9 +384,9 @@ next:
     inw %dx, %ax
     cmpw $0xffff, %ax
     je op_done
-    cmpb $0x80, %al
+    cmpb $VGABIOS_STUB_OP_VGA_IN, %al
     jae vga_port
-    cmpb $0x20, %al
+    cmpb $VGABIOS_STUB_OP_INDEXED_CRTC, %al
     jae vga_indexed
     movb %al, %bl
     xorb %bh, %bh
@@ -412,14 +401,14 @@ vga_indexed:
     movb %al, %bl
     andb $0x1f, %al
     movw $0x3d4, %dx
-    cmpb $0x40, %bl
+    cmpb $VGABIOS_STUB_OP_INDEXED_CRTC_MONO, %bl
     jb .Lvga_indexed_1
     movw $0x3b4, %dx
-    cmpb $0x60, %bl
+    cmpb $VGABIOS_STUB_OP_INDEXED_SEQ, %bl
     jb .Lvga_indexed_1
     andb $0x0f, %al
     movw $0x3c4, %dx
-    cmpb $0x70, %bl
+    cmpb $VGABIOS_STUB_OP_INDEXED_GC, %bl
     jb .Lvga_indexed_1
     movw $0x3ce, %dx
 .Lvga_indexed_1:
@@ -433,9 +422,9 @@ vga_port:
     andb $0x3f, %al
     movb %ah, %bl
     xorb %ah, %ah
-    addw $VGA_PORTS, %ax
+    addw $VGABIOS_STUB_VGA_PORTS, %ax
     movw %ax, %dx
-    cmpb $0xc0, %cl
+    cmpb $VGABIOS_STUB_OP_VGA_OUT, %cl
     jae .Lvga_port_1
     inb %dx, %al
     movw %si, %dx
@@ -701,7 +690,7 @@ op_ecx_high:
     outw %ax, %dx
     jmp next
 
-// In vgabios.c's order of OP_ values.
+// In the operations' order, VGABIOS_STUB_OP_DONE to VGABIOS_STUB_OP_DAC_ROM.
 operations:
 .word op_done - vgabios_stub
 .word next - vgabios_stub

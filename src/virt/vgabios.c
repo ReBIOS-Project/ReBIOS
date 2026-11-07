@@ -32,62 +32,13 @@
 #include <virt/mmio.h>
 #include <virt/vcpu.h>
 #include <virt/vga.h>
+#include <virt/vgabios_stub.h>
 
-// A word read from the first port starts a call, and tells it its own port
-// among the next ones, if the ROM's word came first: other software that reads
-// ports to see what is there finds nothing.
-#define PORT_ALLOCATE 0x1d0
-#define KNOCK 0x5242
-#define KNOCK_INIT 0x5243
 #define CALLS 8
 #define PORT_COUNT (CALLS + 1)
 
-// Where those do not reach the hypervisor, as from Windows NT's DOS boxes,
-// which let a program have only the VGA's ports, two that no VGA has a use
-// for: one to start with, and one more call's own.
-#define PORT_VGA 0x3dc
-#define PORT_VGA_COUNT 4
-#define PORT_VGA_CALL_OFFSET 0
-#define PORT_VGA_ALLOCATE_OFFSET 2
-
-// Where vgabios_stub.S saves the registers: from the frame BP gives.
-#define FRAME_AX 0
-#define FRAME_BX 2
-#define FRAME_CX 4
-#define FRAME_DX 6
-#define FRAME_DI 10
-#define FRAME_BP 12
-#define FRAME_ES 16
 #define REGISTER_COUNT 7
 
-#define OP_DONE 0
-#define OP_NOTHING 1
-#define OP_REGISTERS 2
-#define OP_SET_REGISTER 3
-#define OP_BDA_READ8 4
-#define OP_BDA_READ16 5
-#define OP_BDA_WRITE8 6
-#define OP_BDA_WRITE16 7
-#define OP_READ8 8
-#define OP_READ16 9
-#define OP_WRITE8 10
-#define OP_WRITE16 11
-#define OP_FILL8 12
-#define OP_FILL16 13
-#define OP_COPY 14
-#define OP_FONT 15
-#define OP_OUT_BLOCK 16
-#define OP_WRITE_BLOCK 17
-#define OP_READ_BLOCK 18
-#define OP_ECX_HIGH 19
-#define OP_DAC_ROM 20
-#define OP_INDEXED_CRTC 0x20
-#define OP_INDEXED_CRTC_MONO 0x40
-#define OP_INDEXED_SEQ 0x60
-#define OP_INDEXED_GC 0x70
-#define OP_VGA_IN 0x80
-#define OP_VGA_OUT 0xc0
-#define VGA_PORTS 0x3b0
 #define VGA_DAC_DATA 0x3c9
 
 #define ALL_ONES 0xffff
@@ -182,7 +133,7 @@ uint8_t vgabios_in(uint16_t port) {
     if (current->direct) {
         return (uint8_t)direct_port(port, 1, true, 0);
     }
-    uint16_t head = (uint16_t)(OP_VGA_IN | (port - VGA_PORTS));
+    uint16_t head = (uint16_t)(VGABIOS_STUB_OP_VGA_IN | (port - VGABIOS_STUB_VGA_PORTS));
     uint16_t value;
     exchange(&head, 1, NULL, 0, &value, 1);
     return (uint8_t)value;
@@ -193,7 +144,8 @@ void vgabios_out(uint16_t port, uint8_t value) {
         direct_port(port, 1, false, value);
         return;
     }
-    uint16_t head = (uint16_t)(OP_VGA_OUT | (port - VGA_PORTS) | value << 8);
+    uint16_t head = (uint16_t)(VGABIOS_STUB_OP_VGA_OUT | (port - VGABIOS_STUB_VGA_PORTS)
+                             | value << 8);
     exchange(&head, 1, NULL, 0, NULL, 0);
 }
 
@@ -203,13 +155,13 @@ void vgabios_out_indexed(uint16_t port, uint8_t index, uint8_t value) {
         direct_port(port, 2, false, both);
         return;
     }
-    uint16_t set = OP_INDEXED_CRTC;
+    uint16_t set = VGABIOS_STUB_OP_INDEXED_CRTC;
     if (port == 0x3b4) {
-        set = OP_INDEXED_CRTC_MONO;
+        set = VGABIOS_STUB_OP_INDEXED_CRTC_MONO;
     } else if (port == 0x3c4) {
-        set = OP_INDEXED_SEQ;
+        set = VGABIOS_STUB_OP_INDEXED_SEQ;
     } else if (port == 0x3ce) {
-        set = OP_INDEXED_GC;
+        set = VGABIOS_STUB_OP_INDEXED_GC;
     }
     uint16_t head = both | set;
     exchange(&head, 1, NULL, 0, NULL, 0);
@@ -224,7 +176,7 @@ void vgabios_out_block(uint16_t port, const uint8_t *bytes, size_t count) {
         return;
     }
     size_t words = count / 2;
-    uint16_t head[3] = { OP_OUT_BLOCK, port, (uint16_t)words };
+    uint16_t head[3] = { VGABIOS_STUB_OP_OUT_BLOCK, port, (uint16_t)words };
     exchange(head, 3, bytes, words, NULL, 0);
     if ((count & 1) != 0) {
         vgabios_out(port, bytes[count - 1]);
@@ -239,7 +191,7 @@ void vgabios_dac_from_rom(uint16_t offset, size_t count) {
         }
         return;
     }
-    uint16_t head[3] = { OP_DAC_ROM, offset, (uint16_t)count };
+    uint16_t head[3] = { VGABIOS_STUB_OP_DAC_ROM, offset, (uint16_t)count };
     exchange(head, 3, NULL, 0, NULL, 0);
 }
 
@@ -257,10 +209,10 @@ uint8_t vgabios_peekb(uint16_t segment, uint16_t offset) {
     }
     uint16_t value;
     if (segment == BDA && offset <= 0xff) {
-        uint16_t head = (uint16_t)(OP_BDA_READ8 | offset << 8);
+        uint16_t head = (uint16_t)(VGABIOS_STUB_OP_BDA_READ8 | offset << 8);
         exchange(&head, 1, NULL, 0, &value, 1);
     } else {
-        uint16_t head[3] = { OP_READ8, segment, offset };
+        uint16_t head[3] = { VGABIOS_STUB_OP_READ8, segment, offset };
         exchange(head, 3, NULL, 0, &value, 1);
     }
     return (uint8_t)value;
@@ -275,10 +227,10 @@ uint16_t vgabios_peekw(uint16_t segment, uint16_t offset) {
     }
     uint16_t value;
     if (segment == BDA && offset <= 0xff) {
-        uint16_t head = (uint16_t)(OP_BDA_READ16 | offset << 8);
+        uint16_t head = (uint16_t)(VGABIOS_STUB_OP_BDA_READ16 | offset << 8);
         exchange(&head, 1, NULL, 0, &value, 1);
     } else {
-        uint16_t head[3] = { OP_READ16, segment, offset };
+        uint16_t head[3] = { VGABIOS_STUB_OP_READ16, segment, offset };
         exchange(head, 3, NULL, 0, &value, 1);
     }
     return value;
@@ -290,10 +242,10 @@ void vgabios_pokeb(uint16_t segment, uint16_t offset, uint8_t value) {
         return;
     }
     if (segment == BDA && offset <= 0xff) {
-        uint16_t head[2] = { (uint16_t)(OP_BDA_WRITE8 | offset << 8), value };
+        uint16_t head[2] = { (uint16_t)(VGABIOS_STUB_OP_BDA_WRITE8 | offset << 8), value };
         exchange(head, 2, NULL, 0, NULL, 0);
     } else {
-        uint16_t head[3] = { (uint16_t)(OP_WRITE8 | value << 8), segment, offset };
+        uint16_t head[3] = { (uint16_t)(VGABIOS_STUB_OP_WRITE8 | value << 8), segment, offset };
         exchange(head, 3, NULL, 0, NULL, 0);
     }
 }
@@ -304,10 +256,10 @@ void vgabios_pokew(uint16_t segment, uint16_t offset, uint16_t value) {
         return;
     }
     if (segment == BDA && offset <= 0xff) {
-        uint16_t head[2] = { (uint16_t)(OP_BDA_WRITE16 | offset << 8), value };
+        uint16_t head[2] = { (uint16_t)(VGABIOS_STUB_OP_BDA_WRITE16 | offset << 8), value };
         exchange(head, 2, NULL, 0, NULL, 0);
     } else {
-        uint16_t head[4] = { OP_WRITE16, segment, offset, value };
+        uint16_t head[4] = { VGABIOS_STUB_OP_WRITE16, segment, offset, value };
         exchange(head, 4, NULL, 0, NULL, 0);
     }
 }
@@ -321,7 +273,7 @@ void vgabios_poke_block(uint16_t segment, uint16_t offset, const void *bytes, si
         }
         return;
     }
-    uint16_t head[4] = { OP_WRITE_BLOCK, segment, offset, (uint16_t)(count / 2) };
+    uint16_t head[4] = { VGABIOS_STUB_OP_WRITE_BLOCK, segment, offset, (uint16_t)(count / 2) };
     exchange(head, 4, p, count / 2, NULL, 0);
 }
 
@@ -336,7 +288,9 @@ void vgabios_far_fill8(uint16_t segment, uint16_t offset, uint8_t value, size_t 
         }
         return;
     }
-    uint16_t head[4] = { (uint16_t)(OP_FILL8 | value << 8), segment, offset, (uint16_t)count };
+    uint16_t head[4] = {
+        (uint16_t)(VGABIOS_STUB_OP_FILL8 | value << 8), segment, offset, (uint16_t)count
+    };
     exchange(head, 4, NULL, 0, NULL, 0);
 }
 
@@ -351,7 +305,7 @@ void vgabios_far_fill16(uint16_t segment, uint16_t offset, uint16_t value, size_
         }
         return;
     }
-    uint16_t head[5] = { OP_FILL16, segment, offset, (uint16_t)count, value };
+    uint16_t head[5] = { VGABIOS_STUB_OP_FILL16, segment, offset, (uint16_t)count, value };
     exchange(head, 5, NULL, 0, NULL, 0);
 }
 
@@ -371,7 +325,7 @@ void vgabios_far_move(uint16_t segment, uint16_t to, uint16_t from, size_t count
         return;
     }
     uint16_t head[6] = {
-        (uint16_t)(OP_COPY | (backwards ? 1 : 0) << 8), segment,
+        (uint16_t)(VGABIOS_STUB_OP_COPY | (backwards ? 1 : 0) << 8), segment,
         (uint16_t)(backwards ? to + count - 1 : to), segment,
         (uint16_t)(backwards ? from + count - 1 : from), (uint16_t)count
     };
@@ -398,7 +352,8 @@ void vgabios_far_font(
         return;
     }
     uint16_t head[6] = {
-        (uint16_t)(OP_FONT | height << 8), to_segment, to, from_segment, from, (uint16_t)count
+        (uint16_t)(VGABIOS_STUB_OP_FONT | height << 8), to_segment, to, from_segment, from,
+        (uint16_t)count
     };
     exchange(head, 6, NULL, 0, NULL, 0);
 }
@@ -407,7 +362,7 @@ uint32_t vgabios_ecx(const struct vgabios_regs *r) {
     if (current->direct) {
         return (uint32_t)current->v->gprs.rcx;
     }
-    uint16_t head = OP_ECX_HIGH;
+    uint16_t head = VGABIOS_STUB_OP_ECX_HIGH;
     uint16_t high;
     exchange(&head, 1, NULL, 0, &high, 1);
     return (uint32_t)high << 16 | r->cx;
@@ -437,7 +392,8 @@ uint16_t vgabios_window_offset(void) {
 
 static void frame_load(struct call *c) {
     static const uint8_t offsets[REGISTER_COUNT] = {
-        FRAME_AX, FRAME_BX, FRAME_CX, FRAME_DX, FRAME_DI, FRAME_BP, FRAME_ES
+        VGABIOS_STUB_FRAME_AX, VGABIOS_STUB_FRAME_BX, VGABIOS_STUB_FRAME_CX, VGABIOS_STUB_FRAME_DX,
+        VGABIOS_STUB_FRAME_DI, VGABIOS_STUB_FRAME_BP, VGABIOS_STUB_FRAME_ES
     };
     uint16_t words[REGISTER_COUNT];
     for (size_t i = 0; i < REGISTER_COUNT; i++) {
@@ -450,7 +406,8 @@ static void frame_load(struct call *c) {
 // What the call changed, back in the registers the ROM saved.
 static void registers_give(struct call *c, const struct vgabios_regs *before) {
     static const uint8_t offsets[REGISTER_COUNT] = {
-        FRAME_AX, FRAME_BX, FRAME_CX, FRAME_DX, FRAME_DI, FRAME_BP, FRAME_ES
+        VGABIOS_STUB_FRAME_AX, VGABIOS_STUB_FRAME_BX, VGABIOS_STUB_FRAME_CX, VGABIOS_STUB_FRAME_DX,
+        VGABIOS_STUB_FRAME_DI, VGABIOS_STUB_FRAME_BP, VGABIOS_STUB_FRAME_ES
     };
     uint16_t old[REGISTER_COUNT];
     uint16_t now[REGISTER_COUNT];
@@ -463,7 +420,9 @@ static void registers_give(struct call *c, const struct vgabios_regs *before) {
         if (c->direct) {
             mmio_write_linear(c->v, c->frame + offsets[i], &now[i], 2);
         } else {
-            uint16_t head[2] = { (uint16_t)(OP_SET_REGISTER | offsets[i] << 8), now[i] };
+            uint16_t head[2] = {
+                (uint16_t)(VGABIOS_STUB_OP_SET_REGISTER | offsets[i] << 8), now[i]
+            };
             exchange(head, 2, NULL, 0, NULL, 0);
         }
     }
@@ -473,7 +432,7 @@ static void call_main(void *arg) {
     struct call *c = arg;
     for (;;) {
         if (!c->direct) {
-            uint16_t head = OP_REGISTERS;
+            uint16_t head = VGABIOS_STUB_OP_REGISTERS;
             uint16_t words[REGISTER_COUNT];
             exchange(&head, 1, NULL, 0, words, REGISTER_COUNT);
             memcpy(&c->regs, words, sizeof(words));
@@ -547,8 +506,8 @@ static uint16_t call_begin(struct vcpu *v, bool vga_ports) {
     c->init = init_knocked;
     init_knocked = false;
     uint16_t port = vga_ports
-                  ? PORT_VGA + PORT_VGA_CALL_OFFSET
-                  : (uint16_t)(PORT_ALLOCATE + 1 + (c - calls));
+                  ? VGABIOS_STUB_PORT_VGA + VGABIOS_STUB_PORT_VGA_CALL_OFFSET
+                  : (uint16_t)(VGABIOS_STUB_PORT_ALLOCATE + 1 + (c - calls));
     if (!c->direct) {
         return port;
     }
@@ -568,12 +527,12 @@ static uint16_t call_begin(struct vcpu *v, bool vga_ports) {
 static uint16_t call_word(struct call *c, struct vcpu *v) {
     if (c->head_left == 0 && c->data_left == 0) {
         if (c->into_left != 0) {
-            return OP_NOTHING;
+            return VGABIOS_STUB_OP_NOTHING;
         }
         call_run(c, v);
         if (c->finished) {
             c->busy = false;
-            return OP_DONE;
+            return VGABIOS_STUB_OP_DONE;
         }
     }
     if (c->head_left != 0) {
@@ -586,7 +545,7 @@ static uint16_t call_word(struct call *c, struct vcpu *v) {
         c->data_left--;
         return word;
     }
-    return OP_NOTHING;
+    return VGABIOS_STUB_OP_NOTHING;
 }
 
 static uint32_t allocate_access(struct vcpu *v, bool vga_ports, bool in, uint16_t word) {
@@ -597,9 +556,9 @@ static uint32_t allocate_access(struct vcpu *v, bool vga_ports, bool in, uint16_
         knocks--;
         return call_begin(v, vga_ports);
     }
-    if (knocks < CALLS && (word == KNOCK || word == KNOCK_INIT)) {
+    if (knocks < CALLS && (word == VGABIOS_STUB_KNOCK || word == VGABIOS_STUB_KNOCK_INIT)) {
         knocks++;
-        init_knocked = word == KNOCK_INIT;
+        init_knocked = word == VGABIOS_STUB_KNOCK_INIT;
     }
     return 0xffffffff;
 }
@@ -644,9 +603,9 @@ static void vga_ports_access(
     uint32_t result = 0xffffffff;
     if (size == 2) {
         spinlock_acquire(&lock);
-        if (offset == PORT_VGA_ALLOCATE_OFFSET) {
+        if (offset == VGABIOS_STUB_PORT_VGA_ALLOCATE_OFFSET) {
             result = allocate_access(v, true, in, (uint16_t)*value);
-        } else if (offset == PORT_VGA_CALL_OFFSET) {
+        } else if (offset == VGABIOS_STUB_PORT_VGA_CALL_OFFSET) {
             result = call_access(&calls[CALLS], v, in, (uint16_t)*value);
         }
         spinlock_release(&lock);
@@ -657,9 +616,13 @@ static void vga_ports_access(
 }
 
 void vgabios_init(void) {
-    struct io_handler ports = { PORT_ALLOCATE, PORT_COUNT, ports_access, NULL, false };
+    struct io_handler ports = {
+        VGABIOS_STUB_PORT_ALLOCATE, PORT_COUNT, ports_access, NULL, false
+    };
     io_register(&ports);
-    struct io_handler vga_ports = { PORT_VGA, PORT_VGA_COUNT, vga_ports_access, NULL, false };
+    struct io_handler vga_ports = {
+        VGABIOS_STUB_PORT_VGA, VGABIOS_STUB_PORT_VGA_COUNT, vga_ports_access, NULL, false
+    };
     io_register(&vga_ports);
 }
 
