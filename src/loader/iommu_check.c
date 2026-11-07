@@ -24,6 +24,7 @@
 #include <loader/efi_glue.h>
 #include <loader/pci_io.h>
 #include <memory.h>
+#include <sys/x86.h>
 
 #define RSDP_REVISION 15
 #define RSDP_RSDT 16
@@ -142,11 +143,18 @@ static bool vtd_unit_usable(uintptr_t base) {
 }
 
 // Whether the table is a DMAR or IVRS describing remapping hardware, within
-// its length, and whether the hypervisor can use all of it.
+// its length, and whether the hypervisor can use all of it. Only virtual
+// machines have the other processor vendor's IOMMU.
 static int iommu_table_check(const uint8_t *table) {
     bool dmar = memcmp(table, "DMAR", 4) == 0;
     if (!dmar && memcmp(table, "IVRS", 4) != 0) {
         return FOUND_NONE;
+    }
+    if (dmar != (cpu_vendor() == CPU_VENDOR_INTEL)) {
+        panic(
+            "The firmware describes the other processor vendor's IOMMU in its %.4s table\n",
+            (const char *)table
+        );
     }
     size_t length = get32(table + SDT_LENGTH);
     if (length < IOMMU_TABLE_HEADER_SIZE || !checksum_ok(table, length)) {
@@ -182,11 +190,14 @@ static int iommu_table_check(const uint8_t *table) {
     return usable ? FOUND_USABLE : FOUND_UNUSABLE;
 }
 
+// Every table describing IOMMUs, all of which the hypervisor must be able to
+// use.
 static int sdt_find_iommu(const uint8_t *sdt, size_t entry_size) {
     size_t length = get32(sdt + SDT_LENGTH);
     if (length < SDT_HEADER_SIZE) {
         return FOUND_NONE;
     }
+    int result = FOUND_NONE;
     for (size_t offset = SDT_HEADER_SIZE; length - offset >= entry_size; offset += entry_size) {
         uintptr_t address = get32(sdt + offset);
         if (entry_size == 8) {
@@ -199,10 +210,12 @@ static int sdt_find_iommu(const uint8_t *sdt, size_t entry_size) {
                 "IOMMU described by the %.4s table at %#llx\n", (const char *)table,
                 (unsigned long long)address
             );
-            return found;
+        }
+        if (found == FOUND_UNUSABLE || (found == FOUND_USABLE && result == FOUND_NONE)) {
+            result = found;
         }
     }
-    return FOUND_NONE;
+    return result;
 }
 
 static int acpi_find_iommu(void) {

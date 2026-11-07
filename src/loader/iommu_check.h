@@ -23,7 +23,8 @@
 // Whether the firmware describes, in a DMAR or IVRS, an IOMMU the hypervisor
 // can use, which it cannot do without, and no integrated graphics that its
 // remapping breaks: if not, it says so on the console, whatever the log's
-// configuration, and leaves time to read it.
+// configuration, and leaves time to read it. It panics on the IOMMU of the
+// other processor vendor.
 bool iommu_check(void);
 
 #endif
