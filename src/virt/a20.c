@@ -36,8 +36,8 @@
 #define INIT_NOW 0x01
 
 static struct spinlock lock;
-// The guest's system control port, which never reaches the hardware, its
-// reserved bits as the hardware's were when the hypervisor took over.
+// The guest's system control port, which never reaches the hardware, from its
+// reset value of 00h (ICH10 datasheet 319973-003, 13.7.3).
 static uint8_t system_control;
 // The keyboard controller's A20 line. The chipset ORs it with the system
 // control port's A20 bit into the gate (PIIX4 datasheet 290562-001, Port 92h
@@ -114,12 +114,6 @@ void a20_kbc_set(bool open) {
 }
 
 void a20_init(void) {
-    // The keyboard controller's A20 line comes up raised, and the system
-    // control port as the hardware has it, whose own A20 bit then holds the
-    // host's gate open, whatever the keyboard controller's line.
-    system_control = inb(SYSTEM_CONTROL_A);
-    outb(SYSTEM_CONTROL_A, (uint8_t)(system_control | A20_BIT));
-
     struct io_handler handler = { SYSTEM_CONTROL_A, 1, system_control_a, NULL };
     io_register(&handler);
 }
