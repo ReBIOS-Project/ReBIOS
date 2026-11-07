@@ -793,19 +793,7 @@ static bool injection_valid(uint64_t event, bool fred) {
 }
 
 // A permission map's last byte is below the maximum physical address, which is
-// the last one MAXPHYADDR has (APM 24593 rev. 3.46, 15.10.1 and 15.11). Each
-// entry names one of the types 0, 1, 4, 5, 6, or 7 (APM 24593 rev. 3.46,
-// 7.8.1).
-static bool pat_valid(uint64_t pat) {
-    for (size_t i = 0; i < 8; i++) {
-        uint8_t type = pat >> (i * 8);
-        if (type > 7 || type == 2 || type == 3) {
-            return false;
-        }
-    }
-    return true;
-}
-
+// the last one MAXPHYADDR has (APM 24593 rev. 3.46, 15.10.1 and 15.11).
 static bool table_fits(uint64_t base, size_t size) {
     return (page_down(base) + size) >> phys_width == 0;
 }
@@ -871,7 +859,7 @@ static bool vmcb12_valid(struct vcpu *v, const struct vmcb *vmcb12) {
     bool npt = (c->np_enable & SVM_NP_ENABLE) != 0;
     if (npt
      && ((v->vmcb->save.cr0 & CR0_PG) == 0 || (c->n_cr3 >> phys_width) != 0
-      || !pat_valid(s->g_pat))) {
+      || !x86_pat_valid(s->g_pat))) {
         return false;
     }
     if ((s->efer & EFER_LME) != 0 && (s->cr0 & CR0_PG) != 0) {

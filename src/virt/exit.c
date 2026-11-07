@@ -196,12 +196,8 @@ bool exit_msr_write(struct vcpu *v, uint32_t msr, uint64_t value) {
         // The processor would have flushed them for the guest's own write.
         svm_flush_guest_tlb(v);
     } else if (!virt_vmx && msr == MSR_IA32_PAT) {
-        // Each entry must name one of the types 0, 1, 4, 5, 6, or 7.
-        for (size_t i = 0; i < 8; i++) {
-            uint8_t type = value >> (i * 8);
-            if (type > 7 || type == 2 || type == 3) {
-                return false;
-            }
+        if (!x86_pat_valid(value)) {
+            return false;
         }
         nsvm_set_pat(v, value);
     } else if (!virt_vmx && (msr == MSR_VM_HSAVE_PA || msr == MSR_VM_CR)) {

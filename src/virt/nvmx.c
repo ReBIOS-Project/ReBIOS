@@ -1049,16 +1049,6 @@ static bool canonical(uintptr_t address) {
     return (uint64_t)((int64_t)(address << (64 - bits)) >> (64 - bits)) == address;
 }
 
-static bool pat_valid(uint64_t pat) {
-    for (size_t i = 0; i < 8; i++) {
-        uint8_t type = pat >> (i * 8);
-        if (type > 7 || type == 2 || type == 3) {
-            return false;
-        }
-    }
-    return true;
-}
-
 // A list of MSR entries, 16 bytes each, its last byte within the address width
 // too (SDM 325462-093 Vol. 3C, 29.2.1.2, 29.2.1.3).
 static bool msr_list_valid(uintptr_t address, size_t count) {
@@ -1648,7 +1638,7 @@ static bool host_state_valid(const struct nvmx *n) {
             return false;
         }
     }
-    return (exit & EXIT_LOAD_PAT) == 0 || pat_valid(get12(n, VMCS_HOST_PAT));
+    return (exit & EXIT_LOAD_PAT) == 0 || x86_pat_valid(get12(n, VMCS_HOST_PAT));
 }
 
 // The MSRs a VMCS switches are the current VMCS's, the others as RDMSR and
@@ -1697,7 +1687,7 @@ static bool msr_write(struct vcpu *v, uint32_t msr, uint64_t value) {
             return true;
         }
         case MSR_IA32_PAT: {
-            if (!pat_valid(value)) {
+            if (!x86_pat_valid(value)) {
                 return false;
             }
             vmx_write(VMCS_GUEST_PAT, value);

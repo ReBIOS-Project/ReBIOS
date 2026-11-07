@@ -19,6 +19,7 @@
 #define SYS__X86_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdnoreturn.h>
 
@@ -394,6 +395,19 @@ static inline void wbinvd(void) {
 
 static inline void invlpg(uintptr_t addr) {
     asm volatile ("invlpg (%0)" :: "r"(addr) : "memory");
+}
+
+// Whether each entry of a PAT value names a memory type that the PAT takes: 0,
+// 1, 4, 5, 6, or 7 (SDM 325462-093 Vol. 3A, Table 14-10; APM 24593 rev. 3.46,
+// 7.8.1).
+static inline bool x86_pat_valid(uint64_t pat) {
+    for (size_t i = 0; i < 8; i++) {
+        uint8_t type = pat >> (i * 8);
+        if (type > 7 || type == 2 || type == 3) {
+            return false;
+        }
+    }
+    return true;
 }
 
 // Both halves of 16 aligned bytes at once, as a device that reads them in one
