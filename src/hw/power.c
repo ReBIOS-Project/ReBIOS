@@ -24,6 +24,7 @@
 #include <hw/power.h>
 #include <core.h>
 #include <hw/acpi.h>
+#include <hw/i8042.h>
 #include <lib/log.h>
 #include <lib/time.h>
 #include <sys/x86.h>
@@ -36,17 +37,17 @@ static void firmware_reset(EFI_RESET_TYPE type) {
     rt->ResetSystem(type, EFI_SUCCESS, 0, NULL);
 }
 
-// ACPI's reset register, then the keyboard controller's reset line, as Linux
-// 7.3 restarts, then the reset control register at CF9h. The firmware's
-// service comes after them, as a Dell Inspiron 7700's jumps to address 2 by
-// now.
+// ACPI's reset register, then the keyboard controller's reset line where
+// there is a controller, as Linux 7.3 restarts, then the reset control
+// register at CF9h. The firmware's service comes after them, as a Dell
+// Inspiron 7700's jumps to address 2 by now.
 void power_reset(bool warm) {
     printf("Resetting the machine\n");
     if (acpi_init()) {
         uacpi_reboot();
         time_udelay(RESET_WAIT_US);
     }
-    if (inb(0x64) != 0xff) {
+    if (i8042_present()) {
         for (size_t i = 0; i < 100000; i++) {
             if ((inb(0x64) & 2) == 0) {
                 break;
