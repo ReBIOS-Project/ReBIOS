@@ -24,25 +24,11 @@
 #include <hw/lapic_legacy.h>
 #include <core.h>
 #include <hw/acpi.h>
+#include <hw/lapic.h>
 #include <lib/log.h>
 #include <lib/printf.h>
 #include <memory.h>
-#include <sys/fixup.h>
 #include <sys/x86.h>
-
-#define MSR_X2APIC_FIRST 0x800
-
-#define APIC_ID 0x20
-#define APIC_VERSION 0x30
-#define APIC_TPR 0x80
-#define APIC_SVR 0xf0
-#define APIC_LVT_CMCI 0x2f0
-#define APIC_LVT_TIMER 0x320
-#define APIC_LVT_THERMAL 0x330
-#define APIC_LVT_PERF 0x340
-#define APIC_LVT_LINT0 0x350
-#define APIC_LVT_LINT1 0x360
-#define APIC_LVT_ERROR 0x370
 
 #define LVT_DELIVERY_SHIFT 8
 #define LVT_DELIVERY_FIXED 0
@@ -53,19 +39,12 @@
 #define LVT_ACTIVE_LOW ((uint32_t)1 << 13)
 #define LVT_REMOTE_IRR ((uint32_t)1 << 14)
 #define LVT_LEVEL ((uint32_t)1 << 15)
-#define LVT_MASKED ((uint32_t)1 << 16)
 
-#define SVR_APIC_ENABLED ((uint32_t)1 << 8)
 // The vector a legacy BIOS's IRQ 7 handler serves, which copes with spurious
 // interrupts.
 #define SPURIOUS_VECTOR 0x0f
 
 #define LVT_COUNT 7
-
-struct lapic {
-    bool x2apic;
-    uintptr_t base;
-};
 
 // Whether the firmware handed the boot processor's local APIC over in x2APIC
 // mode.
@@ -95,36 +74,19 @@ static const char *const lvt_names[LVT_COUNT] = {
 // The version register's maximum LVT entry from which each entry exists.
 static const uint8_t lvt_first_max_entry[LVT_COUNT] = { 0, 5, 4, 0, 0, 0, 6 };
 
-static uint32_t lapic_read(const struct lapic *lapic, uint32_t reg) {
-    if (lapic->x2apic) {
-        return (uint32_t)rdmsr(MSR_X2APIC_FIRST + reg / 16);
-    }
-    return *(volatile uint32_t *)(uintptr_t)(lapic->base + reg);
-}
-
-static void lapic_write(const struct lapic *lapic, uint32_t reg, uint32_t value) {
-    if (lapic->x2apic) {
-        wrmsr(MSR_X2APIC_FIRST + reg / 16, value);
-        return;
-    }
-    *(volatile uint32_t *)(uintptr_t)(lapic->base + reg) = value;
-}
-
-static uint32_t lapic_max_entry(const struct lapic *lapic) {
-    return (lapic_read(lapic, APIC_VERSION) >> 16) & 0xff;
+static uint32_t max_entry(void) {
+    return (lapic_read(APIC_VERSION) >> 16) & 0xff;
 }
 
 static bool lvt_exists(size_t index, uint32_t max_entry) {
     return max_entry >= lvt_first_max_entry[index];
 }
 
-static void lapic_read_regs(
-    const struct lapic *lapic, uint32_t max_entry, struct lapic_regs *regs
-) {
-    regs->tpr = lapic_read(lapic, APIC_TPR);
-    regs->svr = lapic_read(lapic, APIC_SVR);
+static void read_regs(uint32_t max, struct lapic_regs *regs) {
+    regs->tpr = lapic_read(APIC_TPR);
+    regs->svr = lapic_read(APIC_SVR);
     for (size_t i = 0; i < LVT_COUNT; i++) {
-        regs->lvt[i] = lvt_exists(i, max_entry) ? lapic_read(lapic, lvt_regs[i]) : 0;
+        regs->lvt[i] = lvt_exists(i, max) ? lapic_read(lvt_regs[i]) : 0;
     }
 }
 
@@ -146,29 +108,15 @@ static void log_regs(
     printf("Local APIC %#x: %s %s\n", apic_id, what, line);
 }
 
-static bool xapic_disabled(void) {
-    if (cpuid(0, 0).eax < 7 || (cpuid(7, 0).edx & ((uint32_t)1 << 29)) == 0) {
-        return false;
-    }
-    uint64_t caps;
-    if (!rdmsr_safe(MSR_IA32_ARCH_CAPABILITIES, &caps)
-     || (caps & ARCH_CAPABILITIES_XAPIC_DISABLE_STATUS) == 0) {
-        return false;
-    }
-    uint64_t status;
-    return rdmsr_safe(MSR_IA32_XAPIC_DISABLE_STATUS, &status)
-        && (status & LEGACY_XAPIC_DISABLED) != 0;
-}
-
-static uint32_t apic_id_of(const struct lapic *lapic) {
+static uint32_t apic_id_of(void) {
     if (cpuid(0, 0).eax >= 0xb) {
         struct cpuid_regs topology = cpuid(0xb, 0);
         if (topology.ebx != 0) {
             return topology.edx;
         }
     }
-    uint32_t id = lapic_read(lapic, APIC_ID);
-    return lapic->x2apic ? id : id >> 24;
+    uint32_t id = lapic_read(APIC_ID);
+    return lapic_x2apic() ? id : id >> 24;
 }
 
 // Advances *offset past the MADT entry it is at, which it returns, or returns
@@ -271,30 +219,25 @@ static bool madt_nmi_pin(uint32_t apic_id, struct nmi_pin *pin) {
 void lapic_legacy_init(void) {
     uint64_t found_base = rdmsr(MSR_IA32_APIC_BASE);
     firmware_x2apic = (found_base & APIC_BASE_EXTD) != 0;
-    struct lapic lapic = {
-        .x2apic = (found_base & APIC_BASE_EXTD) != 0 && xapic_disabled(),
-        .base = found_base & APIC_BASE_ADDRESS
-    };
-    if (!lapic.x2apic && lapic.base + 0x1000 > core_handoff->map_top) {
-        printf("Local APIC registers at %#llx are out of reach\n", (unsigned long long)lapic.base);
+    bool x2apic = firmware_x2apic && lapic_xapic_locked();
+    uintptr_t registers = found_base & APIC_BASE_ADDRESS;
+    if (!x2apic && registers + 0x1000 > core_handoff->map_top) {
+        printf("Local APIC registers at %#llx are out of reach\n", (unsigned long long)registers);
         return;
     }
 
-    // Read through the interface the mode found offers.
-    struct lapic found_lapic = {
-        .x2apic = (found_base & APIC_BASE_EXTD) != 0,
-        .base = lapic.base
-    };
+    // Read through the interface the mode found offers, which hw/lapic.c's
+    // accessors follow.
     bool found_enabled = (found_base & APIC_BASE_EN) != 0;
     uint32_t found_max_entry = 0;
     struct lapic_regs found = { 0 };
     if (found_enabled) {
-        found_max_entry = lapic_max_entry(&found_lapic);
-        lapic_read_regs(&found_lapic, found_max_entry, &found);
+        found_max_entry = max_entry();
+        read_regs(found_max_entry, &found);
     }
 
     uintptr_t base = found_base;
-    if ((base & APIC_BASE_EXTD) != 0 && !lapic.x2apic) {
+    if ((base & APIC_BASE_EXTD) != 0 && !x2apic) {
         // x2APIC mode can only be left for the disabled state.
         base &= ~(APIC_BASE_EN | APIC_BASE_EXTD);
         wrmsr(MSR_IA32_APIC_BASE, base);
@@ -304,13 +247,13 @@ void lapic_legacy_init(void) {
         wrmsr(MSR_IA32_APIC_BASE, base);
     }
 
-    uint32_t version = lapic_read(&lapic, APIC_VERSION);
+    uint32_t version = lapic_read(APIC_VERSION);
     uint32_t max_entry = (version >> 16) & 0xff;
-    uint32_t apic_id = apic_id_of(&lapic);
+    uint32_t apic_id = apic_id_of();
     printf(
         "Local APIC %#x: IA32_APIC_BASE %#llx -> %#llx, %s, version %#x\n", apic_id,
         (unsigned long long)found_base, (unsigned long long)rdmsr(MSR_IA32_APIC_BASE),
-        lapic.x2apic ? "x2APIC mode locked" : "xAPIC mode", version
+        x2apic ? "x2APIC mode locked" : "xAPIC mode", version
     );
     if (found_enabled) {
         log_regs(apic_id, "found", &found, found_max_entry);
@@ -325,7 +268,7 @@ void lapic_legacy_init(void) {
         nmi.level = false;
     }
 
-    lapic_write(&lapic, APIC_TPR, 0);
+    lapic_write(APIC_TPR, 0);
     for (size_t i = 0; i < LVT_COUNT; i++) {
         if (lvt_regs[i] == APIC_LVT_LINT0 || lvt_regs[i] == APIC_LVT_LINT1
          || !lvt_exists(i, max_entry)) {
@@ -333,28 +276,28 @@ void lapic_legacy_init(void) {
         }
         // Other delivery modes, such as SMI for thermal events, are the
         // firmware's.
-        uint32_t value = lapic_read(&lapic, lvt_regs[i]);
+        uint32_t value = lapic_read(lvt_regs[i]);
         unsigned int mode = (value >> LVT_DELIVERY_SHIFT) & 7;
         bool interrupt = mode == LVT_DELIVERY_FIXED || mode == LVT_DELIVERY_LOWEST
                       || mode == LVT_DELIVERY_NMI || mode == LVT_DELIVERY_EXTINT;
-        if (interrupt && (value & LVT_MASKED) == 0) {
+        if (interrupt && (value & APIC_LVT_MASKED) == 0) {
             lapic_write(
-                &lapic, lvt_regs[i], (value & ~(LVT_DELIVERY_STATUS | LVT_REMOTE_IRR)) | LVT_MASKED
+                lvt_regs[i], (value & ~(LVT_DELIVERY_STATUS | LVT_REMOTE_IRR)) | APIC_LVT_MASKED
             );
         }
     }
 
     // Before the LINT entries, as a software disabled APIC keeps them masked.
-    lapic_write(&lapic, APIC_SVR, SVR_APIC_ENABLED | SPURIOUS_VECTOR);
+    lapic_write(APIC_SVR, APIC_SVR_ENABLED | SPURIOUS_VECTOR);
 
     uint32_t nmi_lvt = (LVT_DELIVERY_NMI << LVT_DELIVERY_SHIFT)
                      | (nmi.active_low ? LVT_ACTIVE_LOW : 0) | (nmi.level ? LVT_LEVEL : 0);
     uint32_t extint_lvt = LVT_DELIVERY_EXTINT << LVT_DELIVERY_SHIFT;
-    lapic_write(&lapic, nmi.lint == 0 ? APIC_LVT_LINT0 : APIC_LVT_LINT1, nmi_lvt);
-    lapic_write(&lapic, nmi.lint == 0 ? APIC_LVT_LINT1 : APIC_LVT_LINT0, extint_lvt);
+    lapic_write(nmi.lint == 0 ? APIC_LVT_LINT0 : APIC_LVT_LINT1, nmi_lvt);
+    lapic_write(nmi.lint == 0 ? APIC_LVT_LINT1 : APIC_LVT_LINT0, extint_lvt);
 
     struct lapic_regs set;
-    lapic_read_regs(&lapic, max_entry, &set);
+    read_regs(max_entry, &set);
     log_regs(apic_id, "set", &set, max_entry);
     printf(
         "Local APIC %#x: NMIs on LINT%u, active %s, %s triggered, %s\n", apic_id, nmi.lint,
