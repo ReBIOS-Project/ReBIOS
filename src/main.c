@@ -60,7 +60,7 @@ static void reserve(uintptr_t base, size_t pages) {
 }
 
 uint64_t loader_alloc_reserved(size_t pages, uintptr_t max_addr) {
-    uintptr_t base = efi_alloc_pages(pages, max_addr);
+    uintptr_t base = efi_glue_alloc_pages(pages, max_addr);
     if (base != 0) {
         reserve(base, pages);
     }
@@ -100,7 +100,7 @@ static bool exit_boot_services(void) {
                 efi_bs->FreePages(buf, EFI_SIZE_TO_PAGES(buf_size));
             }
             buf_size = align_up(size + 16 * desc_size, EFI_PAGE_SIZE);
-            buf = efi_alloc_pages(EFI_SIZE_TO_PAGES(buf_size), 0);
+            buf = efi_glue_alloc_pages(EFI_SIZE_TO_PAGES(buf_size), 0);
             if (buf == 0) {
                 return false;
             }
@@ -111,7 +111,7 @@ static bool exit_boot_services(void) {
         }
 
         if (efi_bs->ExitBootServices(efi_image_handle, map_key) == EFI_SUCCESS) {
-            efi_boot_services_exited = true;
+            efi_glue_boot_services_exited = true;
             reserve(buf, EFI_SIZE_TO_PAGES(buf_size));
             loader_handoff->efi_mmap = buf;
             loader_handoff->efi_mmap_size = size;
@@ -142,7 +142,7 @@ static uintptr_t memory_map_top(uint64_t *ram) {
     efi_bs->GetMemoryMap(&size, NULL, &map_key, &desc_size, &desc_version);
     size += 16 * desc_size;
     size_t pages = EFI_SIZE_TO_PAGES(size);
-    uintptr_t buf = efi_alloc_pages(pages, 0);
+    uintptr_t buf = efi_glue_alloc_pages(pages, 0);
     if (buf == 0) {
         return top;
     }
@@ -197,7 +197,7 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     printf("ReBIOS\n");
     config_load();
 
-    uintptr_t handoff_addr = efi_alloc_pages(EFI_SIZE_TO_PAGES(sizeof(struct handoff)), 0);
+    uintptr_t handoff_addr = efi_glue_alloc_pages(EFI_SIZE_TO_PAGES(sizeof(struct handoff)), 0);
     if (handoff_addr == 0) {
         panic("Cannot allocate the handoff\n");
     }

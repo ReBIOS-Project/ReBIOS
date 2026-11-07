@@ -40,7 +40,7 @@ uintptr_t paging_build_identity_map(uintptr_t *map_top, size_t *pages) {
         return 0;
     }
 
-    uintptr_t tables = efi_alloc_pages(table_pages, UINT32_MAX);
+    uintptr_t tables = efi_glue_alloc_pages(table_pages, UINT32_MAX);
     if (tables == 0) {
         return 0;
     }

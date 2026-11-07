@@ -82,7 +82,7 @@ static void reserve_vram(struct handoff_video *video) {
 // it or else as the firmware found it.
 static void collect_edid(struct handoff_video *video) {
     size_t count;
-    EFI_HANDLE *handles = efi_locate_handles(&gop_guid, &count);
+    EFI_HANDLE *handles = efi_glue_locate_handles(&gop_guid, &count);
     if (handles == NULL) {
         return;
     }

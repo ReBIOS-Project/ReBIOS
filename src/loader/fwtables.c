@@ -193,7 +193,7 @@ static uint64_t smbios2_use(const struct smbios_entry32 *eps) {
         return eps_addr;
     }
 
-    uintptr_t copy = efi_alloc_pages_typed(
+    uintptr_t copy = efi_glue_alloc_pages_typed(
         EFI_SIZE_TO_PAGES(size + eps->table_length), UINT32_MAX, EfiRuntimeServicesData
     );
     if (copy == 0) {
@@ -275,7 +275,7 @@ static uint64_t smbios3_synthesise(const struct smbios3_entry *eps3) {
         );
     }
 
-    uintptr_t addr = efi_alloc_pages_typed(
+    uintptr_t addr = efi_glue_alloc_pages_typed(
         EFI_SIZE_TO_PAGES(sizeof(struct smbios_entry32) + walk.length), UINT32_MAX,
         EfiRuntimeServicesData
     );
@@ -594,7 +594,7 @@ static uint16_t bios_year(void) {
 // uACPI takes the XSDT wherever the RSDP gives one, so where only the RSDT is
 // sound, it gets an ACPI 1.0 RSDP, which gives the RSDT alone.
 static uint64_t rsdp_for_rsdt(const struct acpi_rsdp *rsdp) {
-    uintptr_t copy = efi_alloc_pages_typed(1, UINT32_MAX, EfiACPIReclaimMemory);
+    uintptr_t copy = efi_glue_alloc_pages_typed(1, UINT32_MAX, EfiACPIReclaimMemory);
     if (copy == 0) {
         return (uintptr_t)rsdp;
     }

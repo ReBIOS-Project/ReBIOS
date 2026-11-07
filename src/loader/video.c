@@ -181,7 +181,7 @@ static bool gop_of_configured_device(EFI_HANDLE handle) {
 // VGA device, or NULL if there is none.
 static EFI_HANDLE choose_gop(EFI_GRAPHICS_OUTPUT_PROTOCOL **chosen) {
     size_t count;
-    EFI_HANDLE *handles = efi_locate_handles(&gop_guid, &count);
+    EFI_HANDLE *handles = efi_glue_locate_handles(&gop_guid, &count);
     EFI_HANDLE found = NULL;
 
     for (size_t pass = 0; pass < 2 && found == NULL; pass++) {
@@ -488,10 +488,9 @@ static bool take_vga_decoding(const struct pci_io_device *dev) {
     struct pci_io_device *devices = pci_io_devices(&count);
     EFI_UINT64 *held;
     bool taken = false;
-    bool unlisted = devices == NULL
-                 || efi_bs->AllocatePool(EfiLoaderData, count * sizeof(EFI_UINT64), (void **)&held)
-                     != EFI_SUCCESS;
-    if (unlisted) {
+    if (devices == NULL
+     || efi_bs->AllocatePool(EfiLoaderData, count * sizeof(EFI_UINT64), (void **)&held)
+         != EFI_SUCCESS) {
         if (devices != NULL) {
             efi_bs->FreePool(devices);
         }
@@ -777,7 +776,7 @@ void video_exit_boot_services(void) {
         return;
     }
 
-    EFI_HANDLE *handles = efi_locate_handles(&gop_guid, &count);
+    EFI_HANDLE *handles = efi_glue_locate_handles(&gop_guid, &count);
     for (size_t i = 0; i < count && !driven; i++) {
         driven = gop_pci_device(handles[i], &dev)
               && pci_address_equal(dev.address, video->vga_device);

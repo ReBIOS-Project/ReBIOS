@@ -52,7 +52,7 @@ static void con_flush(struct con_buffer *buf) {
         return;
     }
     buf->chars[buf->count] = 0;
-    if (!efi_boot_services_exited) {
+    if (!efi_glue_boot_services_exited) {
         efi_st->ConOut->OutputString(efi_st->ConOut, buf->chars);
     }
     buf->count = 0;

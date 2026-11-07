@@ -62,7 +62,7 @@ static bool pci_io_device_get(EFI_HANDLE handle, struct pci_io_device *dev) {
 
 struct pci_io_device *pci_io_devices(EFI_UINTN *count) {
     size_t handle_count;
-    EFI_HANDLE *handles = efi_locate_handles(&pci_io_guid, &handle_count);
+    EFI_HANDLE *handles = efi_glue_locate_handles(&pci_io_guid, &handle_count);
     struct pci_io_device *devices = NULL;
 
     *count = 0;

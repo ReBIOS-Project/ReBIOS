@@ -475,7 +475,7 @@ static void nvme_model(EFI_DEVICE_PATH_PROTOCOL *path, char *out, size_t size) {
         return;
     }
     EFI_NVM_EXPRESS_PASS_THRU_PROTOCOL *nvme = protocol_get(handle, &nvme_guid);
-    uintptr_t buffer = efi_alloc_pages(1, 0);
+    uintptr_t buffer = efi_glue_alloc_pages(1, 0);
     if (nvme == NULL || buffer == 0) {
         return;
     }
@@ -525,7 +525,7 @@ static bool legacy_bootable(EFI_BLOCK_IO_PROTOCOL *block_io, bool optical) {
     if (!media->MediaPresent || media->BlockSize < 512 || media->BlockSize > 4096) {
         return false;
     }
-    uintptr_t buffer = efi_alloc_pages(1, 0);
+    uintptr_t buffer = efi_glue_alloc_pages(1, 0);
     if (buffer == 0) {
         return false;
     }
@@ -740,7 +740,7 @@ static bool driver_managed(EFI_HANDLE handle, EFI_GUID *protocol) {
 // that drivers manage has upset some firmware, so only the others are.
 void drives_connect(void) {
     size_t count;
-    EFI_HANDLE *handles = efi_locate_handles(&pci_io_guid, &count);
+    EFI_HANDLE *handles = efi_glue_locate_handles(&pci_io_guid, &count);
     for (size_t i = 0; handles != NULL && i < count; i++) {
         EFI_PCI_IO_PROTOCOL *pci_io = protocol_get(handles[i], &pci_io_guid);
         if (pci_io == NULL) {
@@ -761,7 +761,7 @@ void drives_collect(void) {
     drive_count = 0;
     EFI_DEVICE_PATH_PROTOCOL *own = own_path();
     size_t count;
-    EFI_HANDLE *handles = efi_locate_handles(&block_io_guid, &count);
+    EFI_HANDLE *handles = efi_glue_locate_handles(&block_io_guid, &count);
     for (size_t i = 0; handles != NULL && i < count; i++) {
         drive_add(handles[i], own);
     }
