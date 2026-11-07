@@ -19,18 +19,18 @@
 
 .text
 
-// switch_stack(stack_top, fn, arg) calls fn(arg) on the stack that ends at
+// cpu_switch_stack(stack_top, fn, arg) calls fn(arg) on the stack that ends at
 // stack_top, never to come back.
-.globl switch_stack
-.type switch_stack, %function
-switch_stack:
+.globl cpu_switch_stack
+.type cpu_switch_stack, %function
+cpu_switch_stack:
     movq %rdi, %rsp
     xorl %ebp, %ebp
     movq %rdx, %rdi
     // Keep the ABI's stack alignment for fn, as if it had been called.
     pushq $0
     jmpq *%rsi
-.size switch_stack, . - switch_stack
+.size cpu_switch_stack, . - cpu_switch_stack
 
 // cpu_halt() halts until an interrupt, unless the processor has been kicked.
 // The host's NMI handler restarts an NMI that arrives before the HLT, as it

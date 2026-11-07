@@ -18,9 +18,9 @@
 #ifndef SYS__CPU_H
 #define SYS__CPU_H
 
-#define GDT_CODE 0x08
-#define GDT_DATA 0x10
-#define GDT_TSS 0x18
+#define CPU_GDT_CODE 0x08
+#define CPU_GDT_DATA 0x10
+#define CPU_GDT_TSS 0x18
 
 // Each CPU has a naturally aligned area holding its struct cpu, its IST
 // stacks, and its stack, so that this_cpu() can find the struct from the stack
@@ -41,7 +41,7 @@
 #include <stdint.h>
 #include <stdnoreturn.h>
 
-struct tss64 {
+struct cpu_tss {
     uint32_t reserved0;
     uint64_t rsp[3];
     uint64_t reserved1;
@@ -64,7 +64,7 @@ struct cpu {
     // it must look again for before it enters the guest.
     _Atomic(bool) kicked;
     uint64_t gdt[5];
-    struct tss64 tss;
+    struct cpu_tss tss;
     struct vcpu *vcpu;
     _Atomic(bool) online;
     // Whether a kick's interrupt is on its way, which does for further kicks.
@@ -116,7 +116,7 @@ uintptr_t cpu_idt_base(void);
 uintptr_t cpu_stack_top(struct cpu *cpu);
 
 // Runs fn on the given stack, never returning.
-noreturn void switch_stack(uintptr_t stack_top, void (*fn)(void *), void *arg);
+noreturn void cpu_switch_stack(uintptr_t stack_top, void (*fn)(void *), void *arg);
 
 // Code an NMI that reaches the host restarts from start, if it interrupts it.
 void cpu_nmi_restart(uintptr_t start, uintptr_t end);

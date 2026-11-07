@@ -281,7 +281,7 @@ void exception_handler(struct exception_frame *frame) {
 
 static void idt_set(int vector, uintptr_t handler, uint8_t ist) {
     idt[vector].offset_low = handler & 0xffff;
-    idt[vector].selector = GDT_CODE;
+    idt[vector].selector = CPU_GDT_CODE;
     idt[vector].ist = ist;
     // Present, DPL 0, 64-bit interrupt gate.
     idt[vector].type_attr = 0x8e;
@@ -360,7 +360,7 @@ struct cpu *cpu_area_alloc(size_t index, uint32_t apic_id, bool bsp) {
     cpu->gdt[2] = 0x00cf93000000ffff;
 
     uintptr_t tss = (uintptr_t)&cpu->tss;
-    uint64_t limit = sizeof(struct tss64) - 1;
+    uint64_t limit = sizeof(struct cpu_tss) - 1;
     // Present, DPL 0, available 64-bit TSS.
     cpu->gdt[3] = (limit & 0xffff) | ((tss & 0xffffff) << 16) | ((uint64_t)0x89 << 40)
                 | ((limit & 0xf0000) << 32) | ((tss >> 24 & 0xff) << 56);
@@ -369,7 +369,7 @@ struct cpu *cpu_area_alloc(size_t index, uint32_t apic_id, bool bsp) {
     cpu->tss.ist[0] = base + CPU_IST_NMI_TOP;
     cpu->tss.ist[1] = base + CPU_IST_DF_TOP;
     cpu->tss.ist[2] = base + CPU_IST_MC_TOP;
-    cpu->tss.iomap_base = sizeof(struct tss64);
+    cpu->tss.iomap_base = sizeof(struct cpu_tss);
 
     return cpu;
 }
@@ -398,11 +398,11 @@ void cpu_tables_load(struct cpu *cpu, bool use_ist) {
         "movl %%eax, %%fs\n\t"
         "movl %%eax, %%gs"
         :
-        : "m"(gdtr), "m"(idtr), "i"(GDT_CODE), "i"(GDT_DATA)
+        : "m"(gdtr), "m"(idtr), "i"(CPU_GDT_CODE), "i"(CPU_GDT_DATA)
         : "rax", "memory"
     );
 
     // Busy TSS descriptors cannot be loaded, and this one may be reloaded.
     cpu->gdt[3] &= ~((uint64_t)0x2 << 40);
-    asm volatile ("ltrw %w0" :: "r"(GDT_TSS) : "memory");
+    asm volatile ("ltrw %w0" :: "r"(CPU_GDT_TSS) : "memory");
 }

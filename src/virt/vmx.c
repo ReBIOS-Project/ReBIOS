@@ -513,13 +513,13 @@ static void write_host_state(struct cpu *cpu) {
     vmx_write(VMCS_HOST_CR0, read_cr0());
     vmx_write(VMCS_HOST_CR3, read_cr3());
     vmx_write(VMCS_HOST_CR4, read_cr4());
-    vmx_write(VMCS_HOST_CS_SEL, GDT_CODE);
-    vmx_write(VMCS_HOST_SS_SEL, GDT_DATA);
-    vmx_write(VMCS_HOST_DS_SEL, GDT_DATA);
-    vmx_write(VMCS_HOST_ES_SEL, GDT_DATA);
+    vmx_write(VMCS_HOST_CS_SEL, CPU_GDT_CODE);
+    vmx_write(VMCS_HOST_SS_SEL, CPU_GDT_DATA);
+    vmx_write(VMCS_HOST_DS_SEL, CPU_GDT_DATA);
+    vmx_write(VMCS_HOST_ES_SEL, CPU_GDT_DATA);
     vmx_write(VMCS_HOST_FS_SEL, 0);
     vmx_write(VMCS_HOST_GS_SEL, 0);
-    vmx_write(VMCS_HOST_TR_SEL, GDT_TSS);
+    vmx_write(VMCS_HOST_TR_SEL, CPU_GDT_TSS);
     vmx_write(VMCS_HOST_FS_BASE, 0);
     vmx_write(VMCS_HOST_GS_BASE, 0);
     vmx_write(VMCS_HOST_TR_BASE, (uint64_t)(uintptr_t)&cpu->tss);
