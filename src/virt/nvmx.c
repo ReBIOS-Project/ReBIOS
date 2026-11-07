@@ -1765,7 +1765,7 @@ static void guest_msr_bit(uint8_t *merged, const uint8_t *bitmap, uint32_t msr, 
 // the hypervisor's intercepts added, as either may want the exits.
 static void merge_msr_bitmap(struct nvmx *n, uint64_t proc, uint64_t proc2) {
     if (n->msr_bitmap == NULL) {
-        n->msr_bitmap = page_alloc(1);
+        n->msr_bitmap = page_alloc(VMX_MSR_BITMAP_PAGES);
     }
     if ((proc & PROC_MSR_BITMAPS) == 0) {
         memset(n->msr_bitmap, 0xff, PAGE_SIZE);

@@ -67,8 +67,8 @@
 #define VIRQ_BITS \
     (SVM_VINTR_IRQ | SVM_VINTR_PRIO_MASK | SVM_VINTR_IGN_TPR | SVM_VINTR_VECTOR_MASK)
 
-#define IOPM_SIZE (3 * PAGE_SIZE)
-#define MSRPM_SIZE (2 * PAGE_SIZE)
+#define IOPM_SIZE (SVM_IOPM_PAGES * PAGE_SIZE)
+#define MSRPM_SIZE (SVM_MSRPM_PAGES * PAGE_SIZE)
 // The bytes of the I/O permission map the processor reads: a bit for each
 // port, and those for accesses past port FFFFh (APM 24593 rev. 3.46, 15.10.1).
 #define IOPM_USED (2 * PAGE_SIZE + 1)

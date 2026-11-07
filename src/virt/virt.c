@@ -75,18 +75,18 @@ bool virt_init(void) {
     if (intel && vmx_supported()) {
         virt_vmx = true;
         // I/O bitmaps A and B, then the MSR bitmap.
-        io_bitmap = page_alloc(2);
-        msr_bitmap = page_alloc(1);
-        msr_claimed = page_alloc(1);
+        io_bitmap = page_alloc(VMX_IO_BITMAP_PAGES);
+        msr_bitmap = page_alloc(VMX_MSR_BITMAP_PAGES);
+        msr_claimed = page_alloc(VMX_MSR_BITMAP_PAGES);
         // Only the MSRs the guest gets go to the processor (msr.c).
-        memset(msr_bitmap, 0xff, PAGE_SIZE);
+        memset(msr_bitmap, 0xff, VMX_MSR_BITMAP_PAGES * PAGE_SIZE);
         gpt_init(true, vmx_ept_huge_pages(), vmx_ept_dirty_flags());
     } else if (!intel && svm_supported()) {
         virt_vmx = false;
-        io_bitmap = page_alloc(3);
-        msr_bitmap = page_alloc(2);
-        msr_claimed = page_alloc(2);
-        memset(msr_bitmap, 0xff, 2 * PAGE_SIZE);
+        io_bitmap = page_alloc(SVM_IOPM_PAGES);
+        msr_bitmap = page_alloc(SVM_MSRPM_PAGES);
+        msr_claimed = page_alloc(SVM_MSRPM_PAGES);
+        memset(msr_bitmap, 0xff, SVM_MSRPM_PAGES * PAGE_SIZE);
         // Nested paging's tables keep dirty flags as page tables do (APM 24593
         // rev. 3.45, 15.25.5).
         gpt_init(false, svm_huge_pages(), true);
@@ -244,7 +244,7 @@ void virt_pass_msr(uint32_t msr) {
 }
 
 void virt_x2apic_msr_passed(uint32_t msr, bool read, bool write) {
-    size_t pages = virt_vmx ? 1 : 2;
+    size_t pages = virt_vmx ? VMX_MSR_BITMAP_PAGES : SVM_MSRPM_PAGES;
     if (msr_bitmap_x2apic == NULL) {
         msr_bitmap_x2apic = page_alloc(pages);
         memcpy(msr_bitmap_x2apic, msr_bitmap, pages * PAGE_SIZE);
@@ -262,7 +262,7 @@ void virt_x2apic_msr_passed(uint32_t msr, bool read, bool write) {
 }
 
 void virt_x2apic_icr_passed(uint32_t msr) {
-    size_t pages = virt_vmx ? 1 : 2;
+    size_t pages = virt_vmx ? VMX_MSR_BITMAP_PAGES : SVM_MSRPM_PAGES;
     msr_bitmap_x2apic_icr = page_alloc(pages);
     memcpy(msr_bitmap_x2apic_icr, msr_bitmap_x2apic, pages * PAGE_SIZE);
     unsigned int read_bit, write_bit;

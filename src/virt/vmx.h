@@ -456,6 +456,11 @@
 #define FEATURE_CONTROL_LOCK ((uint32_t)1 << 0)
 #define FEATURE_CONTROL_VMX_OUTSIDE_SMX ((uint32_t)1 << 2)
 
+// The pages of the I/O bitmaps A and B, and of the MSR bitmaps (SDM 325462-093
+// Vol. 3C, 27.6.4 and 27.6.9).
+#define VMX_IO_BITMAP_PAGES 2
+#define VMX_MSR_BITMAP_PAGES 1
+
 struct vcpu_segment;
 struct vcpu;
 struct vmcs_cache;

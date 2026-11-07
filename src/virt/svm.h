@@ -255,6 +255,11 @@ _Static_assert(offsetof(struct vmcb_save, fred_rsp) == 0x8c0, "VMCB layout");
 #define SVM_EXIT_PML_FULL 0x407
 #define SVM_EXIT_INVALID ((uint64_t)0xffffffffffffffff)
 
+// The I/O and MSR permission maps' pages (APM 24593 rev. 3.46, 15.10.1 and
+// 15.11).
+#define SVM_IOPM_PAGES 3
+#define SVM_MSRPM_PAGES 2
+
 // A nested page fault's error code (APM 24593 rev. 3.46, 15.25.7).
 #define NPF_P ((uint64_t)1 << 0)
 #define NPF_RW ((uint64_t)1 << 1)
