@@ -333,8 +333,21 @@ bool vtd_probe(const struct iommu_tables *tables, size_t *leaf_level) {
     for (size_t i = 0; i < unit_count; i++) {
         struct vtd_unit *u = &units[i];
         u->base = tables->units[i].base;
+        if (u->base == 0) {
+            printf("VT-d unit %zu has no registers: the DMAR table puts it at address 0\n", i);
+            return false;
+        }
         u->cap = reg_read64(u, REG_CAP);
         u->ecap = reg_read64(u, REG_ECAP);
+        // No unit answers there, which Linux 7.3 takes for a broken DMAR table
+        // (dmar_validate_one_drhd()).
+        if (u->cap == UINT64_MAX && u->ecap == UINT64_MAX) {
+            printf(
+                "VT-d unit %zu at %#llx reads all ones: the DMAR table puts it where none is\n",
+                i, (unsigned long long)u->base
+            );
+            return false;
+        }
         uint32_t version = reg_read32(u, REG_VER);
         uint32_t sagaw = (u->cap >> CAP_SAGAW_SHIFT) & 0x1f;
         uint32_t sslps = (u->cap >> CAP_SSLPS_SHIFT) & 0xf;
