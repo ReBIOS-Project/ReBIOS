@@ -255,9 +255,14 @@ _Static_assert(offsetof(struct vmcb_save, fred_rsp) == 0x8c0, "VMCB layout");
 #define SVM_EXIT_PML_FULL 0x407
 #define SVM_EXIT_INVALID ((uint64_t)0xffffffffffffffff)
 
-// Nested page fault error code: the access was a write, or a fetch.
-#define NPF_WRITE ((uint64_t)1 << 1)
-#define NPF_FETCH ((uint64_t)1 << 4)
+// A nested page fault's error code (APM 24593 rev. 3.46, 15.25.7).
+#define NPF_P ((uint64_t)1 << 0)
+#define NPF_RW ((uint64_t)1 << 1)
+#define NPF_US ((uint64_t)1 << 2)
+#define NPF_RSV ((uint64_t)1 << 3)
+#define NPF_ID ((uint64_t)1 << 4)
+#define NPF_FINAL ((uint64_t)1 << 32)
+#define NPF_TABLE ((uint64_t)1 << 33)
 
 // Virtual interrupt control, at offset 060h.
 #define SVM_VINTR_TPR_MASK ((uint64_t)0xf)

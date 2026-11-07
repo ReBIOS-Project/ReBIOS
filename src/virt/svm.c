@@ -956,7 +956,7 @@ static void svm_handle_exit(struct vcpu *v) {
                 v->fetched_count = sizeof(v->fetched);
                 v->fetched_rip = v->vmcb->save.rip;
             }
-            if ((c->exitinfo1 & NPF_FETCH) != 0) {
+            if ((c->exitinfo1 & NPF_ID) != 0) {
                 mmio_fetch(v, c->exitinfo2);
             } else {
                 mmio_fault(v, c->exitinfo2);

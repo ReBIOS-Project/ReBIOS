@@ -73,14 +73,6 @@
 // port, and those for accesses past port FFFFh (APM 24593 rev. 3.46, 15.10.1).
 #define IOPM_USED (2 * PAGE_SIZE + 1)
 
-// A nested page fault's error code (APM 24593 rev. 3.46, 15.25.7).
-#define NPF_P ((uint64_t)1 << 0)
-#define NPF_RW ((uint64_t)1 << 1)
-#define NPF_US ((uint64_t)1 << 2)
-#define NPF_RSV ((uint64_t)1 << 3)
-#define NPF_ID ((uint64_t)1 << 4)
-#define NPF_FINAL ((uint64_t)1 << 32)
-#define NPF_TABLE ((uint64_t)1 << 33)
 // What the walk of the guest's nested page tables gives where page
 // modification logging has no room for the page an access would dirty, which
 // is no error code's.
