@@ -79,10 +79,12 @@ bool guest_phys_write(uintptr_t gpa, const void *buf, size_t len) {
 }
 
 // gpa as the processor reaches it for an access, given as an EPT violation's
-// qualification would: through the guest's EPT where the vCPU runs the guest's
-// guest, else past the A20 gate.
+// qualification would, and whether the access is a user-mode one, which those
+// to page tables are for nested paging (APM 24593 rev. 3.46, 15.25.5): through
+// the guest's EPT or nested page tables where the vCPU runs the guest's guest,
+// else past the A20 gate.
 static bool reach(
-    struct vcpu *v, uintptr_t gpa, uint64_t access, uintptr_t linear, uint64_t *out,
+    struct vcpu *v, uintptr_t gpa, uint64_t access, bool user, uintptr_t linear, uint64_t *out,
     uint32_t *pf_error
 ) {
     if (nvmx_ept_active(v)) {
@@ -95,7 +97,7 @@ static bool reach(
     if (nsvm_npt_active(v)) {
         bool walk = (access & EPT_QUAL_LINEAR) != 0 && (access & EPT_QUAL_TRANSLATION) == 0;
         bool translated = nsvm_npt_translate(
-            v, gpa, (access & EPT_QUAL_WRITE) != 0, (access & EPT_QUAL_FETCH) != 0, walk, out
+            v, gpa, (access & EPT_QUAL_WRITE) != 0, (access & EPT_QUAL_FETCH) != 0, walk, user, out
         );
         if (!translated) {
             *pf_error = PF_ERROR_EXIT;
@@ -110,7 +112,7 @@ static bool reach(
 static bool read_entry(
     struct vcpu *v, uintptr_t gpa, uintptr_t linear, uint64_t *entry, bool wide, uint32_t *pf_error
 ) {
-    bool reached = reach(v, gpa, EPT_QUAL_READ | EPT_QUAL_LINEAR, linear, &gpa, pf_error);
+    bool reached = reach(v, gpa, EPT_QUAL_READ | EPT_QUAL_LINEAR, true, linear, &gpa, pf_error);
     if (!reached) {
         return false;
     }
@@ -134,7 +136,7 @@ static bool mark_entry(
 ) {
     uintptr_t hpa;
     uint32_t prot;
-    bool reached = reach(v, gpa, EPT_QUAL_WRITE | EPT_QUAL_LINEAR, linear, &gpa, pf_error);
+    bool reached = reach(v, gpa, EPT_QUAL_WRITE | EPT_QUAL_LINEAR, true, linear, &gpa, pf_error);
     if (!reached) {
         return false;
     }
@@ -251,7 +253,7 @@ retry: *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0)
     // executable (SDM 325462-093 Vol. 3C, Table 30-7).
     if ((cr0 & CR0_PG) == 0) {
         uint64_t access = data_access(write, fetch) | EPT_QUAL_USER | EPT_QUAL_WRITABLE;
-        return reach(v, linear & 0xffffffff, access, linear, gpa, pf_error);
+        return reach(v, linear & 0xffffffff, access, user, linear, gpa, pf_error);
     }
 
     size_t levels;
@@ -392,7 +394,7 @@ retry: *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0)
             if (!executable) {
                 access |= EPT_QUAL_XD;
             }
-            return reach(v, base | (linear & page_mask), access, linear, gpa, pf_error);
+            return reach(v, base | (linear & page_mask), access, user, linear, gpa, pf_error);
         }
         table = wide ? entry & PTE_ADDR : entry & 0xfffff000;
     }

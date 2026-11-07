@@ -121,6 +121,8 @@
 struct npt02 {
     uint64_t ncr3;
     uint32_t asid;
+    // Whether VMCB12 has GMET, which the leaves' U/S follows.
+    bool gmet;
     uint64_t *root;
 };
 
@@ -133,6 +135,7 @@ struct npt12_walk {
     uint64_t leaf;
     bool writable;
     bool executable;
+    bool user;
 };
 
 // SVM as the guest gets it.
@@ -200,6 +203,9 @@ struct nsvm {
     // page tables' level only where they set accessed or dirty flags, as
     // VMCB12 may have it (APM 24593 rev. 3.46, 15.25.6.1).
     bool rogpt;
+    // Whether VMCB12 has the guest's guest's supervisor fetches from user
+    // pages of the nested page tables fault (APM 24593 rev. 3.46, 15.25.14).
+    bool gmet;
     // Whether VMCB12 has the guest's guest's writes that set dirty flags log
     // their pages, and where.
     bool pml;
@@ -234,10 +240,11 @@ static size_t npt02_level_max;
 // The DebugCtl bits a guest's guest's last branch records may have: LBR, BTF,
 // and BLCKDB with bus lock traps (APM 24593 rev. 3.46, 13.1.1.6).
 static uint64_t debugctl_bits;
-// Whether the processor has read-only guest page tables, and page modification
-// logging.
+// Whether the processor has read-only guest page tables, page modification
+// logging, and GMET.
 static bool rogpt;
 static bool pml;
+static bool gmet;
 
 void nsvm_init(void) {
     if (virt_vmx) {
@@ -254,6 +261,7 @@ void nsvm_init(void) {
     npt02_budget = core_handoff->nested_heap_size / PAGE_SIZE / smp_cpu_count();
     npt02_level_max = svm_huge_pages() ? 2 : 1;
     rogpt = (cpuid(0x8000000a, 0).edx & SVM_FEATURE_ROGPT) != 0;
+    gmet = (cpuid(0x8000000a, 0).edx & SVM_FEATURE_GMET) != 0;
     pml = (cpuid(0x8000000a, 0).ecx & CPUID_8000000A_ECX_PML) != 0;
     debugctl_bits = DEBUGCTL_LBR | DEBUGCTL_BTF
                   | ((cpuid(7, 0).ecx & CPUID_7_0_ECX_BUSLOCKTRAP) != 0 ? DEBUGCTL_BLCKDB : 0);
@@ -425,7 +433,7 @@ struct cpuid_regs nsvm_cpuid(void) {
                       | SVM_FEATURE_FLUSH_BY_ASID | SVM_FEATURE_PAUSE_FILTER
                       | SVM_FEATURE_PAUSE_FILTER_THRESHOLD | SVM_FEATURE_LBRV | SVM_FEATURE_ROGPT
                       | SVM_FEATURE_TLBICTL | SVM_FEATURE_DECODE_ASSISTS | SVM_FEATURE_VGIF
-                      | SVM_FEATURE_VLS | (svm_vnmi ? SVM_FEATURE_VNMI : 0);
+                      | SVM_FEATURE_VLS | SVM_FEATURE_GMET | (svm_vnmi ? SVM_FEATURE_VNMI : 0);
     return (struct cpuid_regs){
         svm.eax & 0xff, nasid - 1, svm.ecx & CPUID_8000000A_ECX_PML,
         (svm.edx & features) | SVM_FEATURE_VMCB_ADDR_CHECK
@@ -871,17 +879,19 @@ static bool npt12_mark(const struct nsvm *n, void *at, uint64_t was, uint64_t se
 
 // The walk of the guest's nested page tables for an access of its guest's (APM
 // 24593 rev. 3.46, 15.25.5, 15.25.7, and 15.25.8), as the guest's own page
-// tables are walked in its paging mode at VMRUN, every access a user one: 0
-// where the walk maps the access, which sets its accessed flags and, for a
-// write, its dirty flag, else the nested page fault's error code.
+// tables are walked in its paging mode at VMRUN, every access a user one where
+// VMCB12 does not have GMET (15.25.14): 0 where the walk maps the access,
+// which sets its accessed flags and, for a write, its dirty flag, else the
+// nested page fault's error code.
 static uint64_t npt12_walk(
-    struct nsvm *n, uintptr_t gpa, bool write, bool fetch, struct npt12_walk *w
+    struct nsvm *n, uintptr_t gpa, bool write, bool fetch, bool user, struct npt12_walk *w
 ) {
     bool wide = n->npt_wide;
     // The fetch flag is defined only with SMEP or with PAE paging's NX (APM
     // 24593 rev. 3.46, 8.4.2), as for the guest's page faults (guest_mem.c).
     bool fetch_flag = fetch && (n->npt_smep || (wide && n->npt_nx));
-    uint64_t error = NPF_US | (write ? NPF_RW : 0) | (fetch_flag ? NPF_ID : 0);
+    uint64_t error = (n->gmet && !user ? 0 : NPF_US) | (write ? NPF_RW : 0)
+                   | (fetch_flag ? NPF_ID : 0);
 retry:;
     uintptr_t table;
     // The PDPT of PAE paging, which nested paging reads as it walks (APM 24593
@@ -914,7 +924,7 @@ retry:;
     void *used[5];
     uint64_t entries[5];
     bool writable = true;
-    bool user = true;
+    bool user_page = true;
     bool executable = true;
     for (size_t level = n->npt_levels; level-- > 0; ) {
         unsigned int shift = wide ? 12 + 9 * level : 12 + 10 * level;
@@ -929,13 +939,16 @@ retry:;
         }
         entries[level] = e;
         writable = writable && (e & NPT_RW) != 0;
-        user = user && (e & NPT_US) != 0;
+        user_page = user_page && (e & NPT_US) != 0;
         executable = executable && (!wide || !n->npt_nx || (e & NPT_NX) == 0);
         if (level > 0 && !large) {
             table = wide ? e & NPT_ADDRESS : e & 0xfffff000;
             continue;
         }
-        if (!user || (write && !writable) || (fetch && !executable)) {
+        // With GMET, U/S keeps the guest's guest's supervisor code off user
+        // pages, and nothing off pages for the supervisor.
+        bool denied = n->gmet ? fetch && !user && user_page : !user_page;
+        if (denied || (write && !writable) || (fetch && !executable)) {
             return error | NPF_P;
         }
         // A write that sets the dirty flag logs its 4-KByte page, where VMCB12
@@ -969,6 +982,7 @@ retry:;
         w->leaf = e | NPT_A | (write ? NPT_D : 0);
         w->writable = writable;
         w->executable = executable;
+        w->user = user_page;
         return 0;
     }
     return error;
@@ -1026,7 +1040,7 @@ static uintptr_t npt02_root(struct nsvm *n) {
     struct npt02 *r = NULL;
     for (size_t i = 0; i < NPT02_ROOTS && r == NULL; i++) {
         struct npt02 *at = &n->npt02[i];
-        if (at->root != NULL && at->ncr3 == n->ncr3 && at->asid == asid) {
+        if (at->root != NULL && at->ncr3 == n->ncr3 && at->asid == asid && at->gmet == n->gmet) {
             r = at;
         }
     }
@@ -1045,6 +1059,7 @@ static uintptr_t npt02_root(struct nsvm *n) {
     if (r->root == NULL) {
         r->ncr3 = n->ncr3;
         r->asid = asid;
+        r->gmet = n->gmet;
         r->root = npt02_table(n);
     }
     n->current02 = r;
@@ -1080,6 +1095,9 @@ static uint64_t npt02_leaf(
     e |= NPT_A | (writable ? NPT_D : 0);
     if (!w->executable) {
         e |= NPT_NX;
+    }
+    if (n->gmet && !w->user) {
+        e &= ~NPT_US;
     }
     return e;
 }
@@ -1177,6 +1195,7 @@ static void prepare_vmcb02(struct nsvm *n) {
         c->tlb_control = flush;
     }
     n->npt = (c12->np_enable & SVM_NP_ENABLE) != 0;
+    n->gmet = gmet && n->npt && (c12->np_enable & SVM_NP_GMET) != 0;
     // The predictor's entries from the guest are the guest's guest's to have
     // cleared, as Linux 7.3's KVM has it (nested.c,
     // nested_vmcb02_prepare_control()).
@@ -1216,6 +1235,9 @@ static void prepare_vmcb02(struct nsvm *n) {
         n->pml_index = c12->pml_index;
         if (n->rogpt) {
             c->np_enable |= SVM_NP_ROGPT;
+        }
+        if (n->gmet) {
+            c->np_enable |= SVM_NP_GMET;
         }
         // Its flushes drop the nested translations too, but for those of its
         // ASID's non-global translations alone, which a change of its nested
@@ -1604,8 +1626,13 @@ static void npt_fault(struct vcpu *v, struct nsvm *n) {
     bool walk = (info & NPF_TABLE) != 0;
     bool write = (walk && !n->rogpt) || (info & NPF_RW) != 0;
     bool fetch = !walk && (info & NPF_ID) != 0;
+    // Where VMCB02 has GMET, EXITINFO1 tells the access's privilege, which for
+    // a fetch is the CPL's, read from VMCB02 as some processors may tell user
+    // mode for supervisor mode (APM 24593 rev. 3.46, 15.25.14; 56323 rev. 1.03
+    // and 56683 rev. 1.08, erratum 1218).
+    bool user = fetch ? v->vmcb->save.cpl == 3 : (info & NPF_US) != 0;
     struct npt12_walk w;
-    uint64_t error = npt12_walk(n, gpa, write, fetch, &w);
+    uint64_t error = npt12_walk(n, gpa, write, fetch, user, &w);
     if (error == NPT12_PML_FULL) {
         exit_to_l1(v, n, SVM_EXIT_PML_FULL, 0, 0, c->exitintinfo, false);
         return;
@@ -1642,14 +1669,14 @@ bool nsvm_npt_active(struct vcpu *v) {
 }
 
 bool nsvm_npt_translate(
-    struct vcpu *v, uintptr_t gpa, bool write, bool fetch, bool walk, uint64_t *out
+    struct vcpu *v, uintptr_t gpa, bool write, bool fetch, bool walk, bool user, uint64_t *out
 ) {
     struct nsvm *n = v->nsvm;
     if (n->pending) {
         return false;
     }
     struct npt12_walk w;
-    uint64_t error = npt12_walk(n, gpa, write || (walk && !n->rogpt), fetch && !walk, &w);
+    uint64_t error = npt12_walk(n, gpa, write || (walk && !n->rogpt), fetch && !walk, user, &w);
     if (error == 0) {
         *out = w.gpa;
         return true;

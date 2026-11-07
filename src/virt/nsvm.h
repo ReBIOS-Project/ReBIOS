@@ -109,11 +109,11 @@ void nsvm_set_pat(struct vcpu *v, uint64_t pat);
 bool nsvm_npt_active(struct vcpu *v);
 // An address of the guest's guest through the guest's nested page tables, for
 // a data write, an instruction fetch, or neither, of the guest's guest's own
-// page table walks or else at the address it translates to: false where that
-// is a nested page fault of the guest's instead, which waits for the next
-// entry.
+// page table walks or else at the address it translates to, in user mode or
+// not: false where that is a nested page fault of the guest's instead, which
+// waits for the next entry.
 bool nsvm_npt_translate(
-    struct vcpu *v, uintptr_t gpa, bool write, bool fetch, bool walk, uint64_t *out
+    struct vcpu *v, uintptr_t gpa, bool write, bool fetch, bool walk, bool user, uint64_t *out
 );
 // The hypervisor's nested page tables changed: the translations of every ASID
 // the guest's guests ran in go too.
