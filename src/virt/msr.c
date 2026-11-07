@@ -378,7 +378,7 @@ static bool pebs_ept_friendly(void) {
      && PERF_CAPABILITIES_PEBS_FORMAT(capabilities) >= 5) {
         return true;
     }
-    struct cpu_signature s = cpu_signature();
+    struct x86_cpu_signature s = x86_cpu_signature();
     for (size_t i = 0; i < sizeof(pebs_format_4_models); i++) {
         if (s.family == 6 && s.model == pebs_format_4_models[i]) {
             return true;
@@ -442,7 +442,7 @@ void msr_init(void) {
             virt_intercept_msr(MSR_DC_CFG, false, true);
         }
         virt_intercept_msr(MSR_AMD_HWCR, true, true);
-        uint32_t family = cpu_signature().family;
+        uint32_t family = x86_cpu_signature().family;
         if (family == 0x15 || family == 0x16) {
             pstates_read_only = true;
             for (size_t msr = MSR_AMD_PSTATE_DEF0; msr <= MSR_AMD_PSTATE_DEF7; msr++) {
@@ -500,7 +500,7 @@ void msr_init(void) {
 }
 
 void msr_cpu_init(void) {
-    uint32_t family = cpu_signature().family;
+    uint32_t family = x86_cpu_signature().family;
     uint64_t hwcr;
     if (!virt_vmx && (family == 0x17 || family == 0x19 || family == 0x1a)
      && rdmsr_safe(MSR_AMD_HWCR, &hwcr) && (hwcr & HWCR_LOCK_TSC_TO_CURRENT_P0) == 0) {
@@ -544,7 +544,7 @@ static void pass_ranges(const struct msr_range *ranges, size_t count) {
 }
 
 void msr_allowed_init(void) {
-    struct cpu_signature s = cpu_signature();
+    struct x86_cpu_signature s = x86_cpu_signature();
     if (!virt_vmx) {
         for (size_t i = 0; i < msr_amd_family_count; i++) {
             if (msr_amd_families[i].family == s.family) {

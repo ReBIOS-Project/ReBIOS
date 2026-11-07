@@ -125,7 +125,7 @@ static int iommu_table_check(const uint8_t *table) {
     if (!dmar && memcmp(table, "IVRS", 4) != 0) {
         return FOUND_NONE;
     }
-    if (dmar != (cpu_vendor() == CPU_VENDOR_INTEL)) {
+    if (dmar != (x86_cpu_vendor() == X86_CPU_VENDOR_INTEL)) {
         panic(
             "The firmware describes the other processor vendor's IOMMU in its %.4s table\n",
             (const char *)table

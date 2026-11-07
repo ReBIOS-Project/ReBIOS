@@ -114,7 +114,7 @@ void virt_reset(bool shown) {
 }
 
 bool virt_init(void) {
-    bool intel = cpu_vendor() == CPU_VENDOR_INTEL;
+    bool intel = x86_cpu_vendor() == X86_CPU_VENDOR_INTEL;
 
     if (intel && vmx_supported()) {
         virt_vmx = true;
@@ -485,7 +485,7 @@ static void watchdog(struct vcpu *v) {
 void vcpu_before_entry(struct vcpu *v) {
     // The guest would draw over a panic's message.
     if (log_panicked()) {
-        halt_forever();
+        x86_halt_forever();
     }
     // Breakpoints only an instruction that completes reports.
     v->db_pending = 0;
@@ -606,7 +606,7 @@ void vcpu_wait(struct vcpu *v, bool (*ends)(struct vcpu *v), bool spin) {
             break;
         }
         if (log_panicked()) {
-            halt_forever();
+            x86_halt_forever();
         }
         acpi_slice();
         vga_refresh();

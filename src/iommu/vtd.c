@@ -350,7 +350,7 @@ bool vtd_probe(const struct iommu_tables *tables, size_t *leaf_level) {
     // Sandy Bridge's units claim large pages they do not have, and go wrong
     // when a walk's length changes under DMA in flight (as Xen 4.22's
     // quirk_iommu_caps() has it): small pages only, then.
-    struct cpu_signature s = cpu_signature();
+    struct x86_cpu_signature s = x86_cpu_signature();
     if (s.family == 6 && (s.model == MODEL_SANDY_BRIDGE || s.model == MODEL_SANDY_BRIDGE_X)) {
         leaf = 0;
     }
@@ -574,7 +574,7 @@ void vtd_remap_free(uint16_t index, size_t count) {
 // Both halves of an entry at once, as the units read it (D51397-019 rev. 5.20,
 // 5.1.4).
 static void irte_store(uint16_t index, uint64_t low, uint64_t high) {
-    store16(&remap_table[index * 2], low, high);
+    x86_store16(&remap_table[index * 2], low, high);
 }
 
 static void irte_write(uint16_t index, uint64_t low, uint64_t high) {

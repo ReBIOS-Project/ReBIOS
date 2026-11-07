@@ -86,7 +86,7 @@ void power_reset(bool warm) {
         :
         : "m"(null_idt)
     );
-    halt_forever();
+    x86_halt_forever();
 }
 
 // ACPI's S5, as Linux 7.3 powers off. The firmware's service comes after it,

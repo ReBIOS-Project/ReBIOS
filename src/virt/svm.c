@@ -160,7 +160,7 @@ static bool erratum_383_present(void) {
             return ((status >> OSVW_ERRATUM_383) & 1) != 0;
         }
     }
-    struct cpu_signature s = cpu_signature();
+    struct x86_cpu_signature s = x86_cpu_signature();
     uint32_t model_stepping = s.model << 4 | s.stepping;
     return (s.family == 0x10 && model_stepping >= 0x21)
         || (s.family == 0x12 && model_stepping <= 0x10);
@@ -253,7 +253,7 @@ bool svm_supported(void) {
     // with AVIC on a Zen 3+ processor without x2AVIC. Never on family 17h,
     // where AVIC may miss IPIs and AMD advises against it (56323 rev. 1.03 and
     // 55449 rev. 1.21, erratum 1235).
-    struct cpu_signature signature = cpu_signature();
+    struct x86_cpu_signature signature = x86_cpu_signature();
     bool zen4 = signature.family == 0x19
              && ((signature.model >= 0x10 && signature.model <= 0x1f)
               || (signature.model >= 0x60 && signature.model <= 0xaf));

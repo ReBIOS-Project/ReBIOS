@@ -193,31 +193,31 @@ static inline struct cpuid_regs cpuid(uint32_t leaf, uint32_t subleaf) {
 // The vendors whose processors the hypervisor runs on, as CPUID's vendor
 // string names them, "GenuineIntel" and "AuthenticAMD" in EBX, EDX, and ECX,
 // and 0 for another's.
-#define CPU_VENDOR_INTEL 1
-#define CPU_VENDOR_AMD 2
+#define X86_CPU_VENDOR_INTEL 1
+#define X86_CPU_VENDOR_AMD 2
 
-static inline int cpu_vendor(void) {
+static inline int x86_cpu_vendor(void) {
     struct cpuid_regs r = cpuid(0, 0);
     if (r.ebx == 0x756e6547 && r.edx == 0x49656e69 && r.ecx == 0x6c65746e) {
-        return CPU_VENDOR_INTEL;
+        return X86_CPU_VENDOR_INTEL;
     }
     if (r.ebx == 0x68747541 && r.edx == 0x69746e65 && r.ecx == 0x444d4163) {
-        return CPU_VENDOR_AMD;
+        return X86_CPU_VENDOR_AMD;
     }
     return 0;
 }
 
 // CPUID leaf 1's display family, model, and stepping, which both vendors
 // define alike: the extended model counts for base families 6 and 0Fh.
-struct cpu_signature {
+struct x86_cpu_signature {
     uint32_t family;
     uint32_t model;
     uint32_t stepping;
 };
 
-static inline struct cpu_signature cpu_signature(void) {
+static inline struct x86_cpu_signature x86_cpu_signature(void) {
     uint32_t eax = cpuid(1, 0).eax;
-    struct cpu_signature s = { (eax >> 8) & 0xf, (eax >> 4) & 0xf, eax & 0xf };
+    struct x86_cpu_signature s = { (eax >> 8) & 0xf, (eax >> 4) & 0xf, eax & 0xf };
     if (s.family == 6 || s.family == 0xf) {
         s.model |= ((eax >> 16) & 0xf) << 4;
     }
@@ -383,7 +383,7 @@ static inline void invlpg(uintptr_t addr) {
 // Both halves of 16 aligned bytes at once, as a device that reads them in one
 // go sees them: a locked CMPXCHG16B, where a 16-byte atomic of the compiler's
 // may take a lock that the device cannot see.
-static inline void store16(volatile void *p, uint64_t low, uint64_t high) {
+static inline void x86_store16(volatile void *p, uint64_t low, uint64_t high) {
     volatile uint64_t *q = p;
     uint64_t old_low = q[0];
     uint64_t old_high = q[1];
@@ -399,7 +399,7 @@ static inline void store16(volatile void *p, uint64_t low, uint64_t high) {
     } while (!stored);
 }
 
-static inline noreturn void halt_forever(void) {
+static inline noreturn void x86_halt_forever(void) {
     for (;;) {
         cli();
         hlt();

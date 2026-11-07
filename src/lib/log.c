@@ -212,7 +212,7 @@ void panic(const char *fmt, ...) {
     va_start(args, fmt);
     vprintf_unlocked(fmt, args);
     va_end(args);
-    halt_forever();
+    x86_halt_forever();
 }
 
 bool log_panicked(void) {

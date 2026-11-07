@@ -249,7 +249,7 @@ static uint8_t ga_vector;
 // miscellaneous clock is gated, which the firmware is to have turned off
 // (registers from the BKDG, 42300 rev. 3.12, D0F2xF0 and D0F2xF4_x90).
 static void erratum_746(struct pci_addr a) {
-    struct cpu_signature s = cpu_signature();
+    struct x86_cpu_signature s = x86_cpu_signature();
     if (s.family != 0x15 || s.model < 0x10 || s.model > 0x1f) {
         return;
     }
@@ -589,7 +589,7 @@ bool amdvi_remap_on(void) {
 // Erratum 1063 (Revision Guide for AMD Family 17h Models 00h-0Fh Processors
 // 55449 rev. 1.21): root ports send their own interrupts with requester ID 0.
 static bool erratum_1063(void) {
-    struct cpu_signature s = cpu_signature();
+    struct x86_cpu_signature s = x86_cpu_signature();
     return s.family == 0x17 && s.model <= 0x0f;
 }
 
@@ -741,7 +741,7 @@ static bool entry_write(struct remap_table *t, uint16_t index, uint64_t low, uin
     if (entry[0] == low && entry[1] == high) {
         return false;
     }
-    store16(entry, low, high);
+    x86_store16(entry, low, high);
     return true;
 }
 

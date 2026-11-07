@@ -94,10 +94,10 @@ static const struct deadline_microcode deadline_microcode[] = {
 // processor runs, which IA32_BIOS_SIGN_ID gives once cleared and filled by
 // CPUID (SDM 325462-093 Vol. 3A, 12.11.7.1).
 static bool deadline_microcode_ok(void) {
-    if (cpu_vendor() != CPU_VENDOR_INTEL) {
+    if (x86_cpu_vendor() != X86_CPU_VENDOR_INTEL) {
         return true;
     }
-    struct cpu_signature s = cpu_signature();
+    struct x86_cpu_signature s = x86_cpu_signature();
     if (s.family != 6) {
         return true;
     }
@@ -325,7 +325,7 @@ void lapic_timer_arm(uint64_t tsc) {
 // goes off instead, as Xen 4.22's disable_c1e() turns it off.
 static void c1e_off(void) {
     uint64_t pending;
-    if (cpu_vendor() != CPU_VENDOR_AMD || cpu_signature().family != 0x10
+    if (x86_cpu_vendor() != X86_CPU_VENDOR_AMD || x86_cpu_signature().family != 0x10
      || !rdmsr_safe(MSR_INTERRUPT_PENDING, &pending) || (pending & INTERRUPT_PENDING_C1E) == 0) {
         return;
     }
