@@ -202,7 +202,7 @@ static uint64_t list_total(const struct range_list *list) {
     return total;
 }
 
-// Free for the guest's RAM once the boot services are gone.
+// Free once the boot services are gone.
 static bool type_is_free(uint32_t type) {
     switch (type) {
         case EfiLoaderCode:
@@ -216,6 +216,15 @@ static bool type_is_free(uint32_t type) {
             return false;
         }
     }
+}
+
+// Free for the guest's RAM, but for what Linux 7.3's do_add_efi_memmap() keeps
+// from its own: specific-purpose memory (UEFI 2.11, 7.2.3), earmarked for
+// particular drivers or applications, and memory that cannot be cached
+// write-back.
+static bool desc_is_free(const EFI_MEMORY_DESCRIPTOR *d) {
+    return type_is_free(d->Type) && (d->Attribute & EFI_MEMORY_SP) == 0
+        && (d->Attribute & EFI_MEMORY_WB) != 0;
 }
 
 static uint8_t identity_memtype(const struct identity_range *r) {
@@ -450,22 +459,31 @@ void layout_init(void) {
                 "Firmware memory map: the descriptor at %#llx runs past the end of memory, so "
                 "it is ignored\n", (unsigned long long)d->PhysicalStart
             );
-        } else if (type_is_free(d->Type)) {
+        } else if (desc_is_free(d)) {
             uintptr_t base = align_up(d->PhysicalStart, PAGE_SIZE);
             list_add(&host_free, base, align_down(end, PAGE_SIZE));
+        } else if (type_is_free(d->Type)) {
+            const char *what = (d->Attribute & EFI_MEMORY_SP) != 0
+                             ? "specific-purpose memory"
+                             : "memory that cannot be cached write-back";
+            printf(
+                "Firmware memory map: the guest does not get the %s at %#llx-%#llx\n", what,
+                (unsigned long long)d->PhysicalStart, (unsigned long long)end
+            );
         }
     }
     for (size_t i = 0; (d = efi_desc(i)) != NULL; i++) {
         uintptr_t end;
-        if (type_is_free(d->Type) || !desc_end(d, &end)) {
+        if (desc_is_free(d) || !desc_end(d, &end)) {
             continue;
         }
         uintptr_t base = align_down(d->PhysicalStart, PAGE_SIZE);
         end = align_up(end, PAGE_SIZE);
         if (list_overlaps(&host_free, base, end)) {
             printf(
-                "Firmware memory map: type %u memory at %#llx-%#llx overlaps free memory and "
-                "keeps its type\n", d->Type, (unsigned long long)base, (unsigned long long)end
+                "Firmware memory map: type %u memory at %#llx-%#llx overlaps free memory, which "
+                "the guest does not get\n", d->Type, (unsigned long long)base,
+                (unsigned long long)end
             );
             list_remove(&host_free, base, end);
         }
