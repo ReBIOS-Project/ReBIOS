@@ -36,9 +36,11 @@
 #include <sys/x86.h>
 #include <virt/cpuid.h>
 #include <virt/event.h>
+#include <virt/ferr.h>
 #include <virt/gpt.h>
 #include <virt/hv_timer.h>
 #include <virt/insn.h>
+#include <virt/mmio.h>
 #include <virt/msr.h>
 #include <virt/mtrr.h>
 #include <virt/nsvm.h>
@@ -387,6 +389,14 @@ void vcpu_resume_others(void) {
     spinlock_release(&world_lock);
 }
 
+void vcpu_step_done(struct vcpu *v) {
+    if (ferr_stepping(v)) {
+        ferr_step_done(v);
+    } else {
+        mmio_step_done(v);
+    }
+}
+
 bool vcpu_can_single_step(void) {
     return !virt_vmx || vmx_monitor_trap_supported();
 }
@@ -484,6 +494,7 @@ void vcpu_before_entry(struct vcpu *v) {
     v->db_pending = 0;
     profile_entry(v);
     service_pause(v);
+    ferr_follow(v);
     acpi_slice();
     // Before the flush below, which the display's remapping may need.
     vga_refresh();
@@ -864,6 +875,7 @@ void vcpu_load_mode(struct vcpu *v, const struct vcpu_mode *mode) {
         vmx_write(VMCS_GUEST_CR4, vmx_cr4_real(mode->cr4));
         vmx_write(VMCS_GUEST_CR3, mode->cr3);
         vmx_write(VMCS_GUEST_EFER, mode->efer);
+        vmx_catch_mf(v);
         uint64_t entry = vmx_read(VMCS_ENTRY_CONTROLS) & ~(uint64_t)ENTRY_IA32E_MODE_GUEST;
         if ((mode->efer & EFER_LMA) != 0) {
             entry |= ENTRY_IA32E_MODE_GUEST;
@@ -1237,6 +1249,7 @@ void vcpu_set_real_mode(struct vcpu *v, uint16_t cs, uint16_t ip) {
         vmx_write(VMCS_GUEST_CR4, vmx_cr4_real(v->cr4_shadow));
         vmx_write(VMCS_GUEST_CR3, 0);
         vmx_write(VMCS_GUEST_EFER, 0);
+        vmx_catch_mf(v);
         vmx_write(
             VMCS_ENTRY_CONTROLS, vmx_read(VMCS_ENTRY_CONTROLS) & ~(uint64_t)ENTRY_IA32E_MODE_GUEST
         );

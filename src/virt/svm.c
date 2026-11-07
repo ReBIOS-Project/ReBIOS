@@ -486,7 +486,7 @@ static void svm_step_exception(struct vcpu *v, unsigned int vector) {
     if (vector == 1) {
         v->db_pending |= v->vmcb->save.dr6 & 0xf;
     }
-    mmio_step_done(v);
+    vcpu_step_done(v);
     if (vector == 1) {
         return;
     }

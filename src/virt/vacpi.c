@@ -1870,9 +1870,10 @@ static bool ps2_parent(struct path *out) {
 // The legacy devices ReBIOS gives the guest, as an OS looks for them in the
 // namespace, whatever the firmware says of the machine's: the 8259s with the
 // ELCR, the 8254, the RTC, the speaker's port 61h, the 8237s and their page
-// registers, and the 8042's keyboard and mouse. ACPI 1.0's resources: IO
-// (Decode16, base, base, 1, length) is 47h 01h base base 01h length,
-// IRQNoFlags () is 22h and a mask, DMA () is 2Ah, a mask, and its flags.
+// registers, the x87 error port, and the 8042's keyboard and mouse. ACPI 1.0's
+// resources: IO (Decode16, base, base, 1, length) is 47h 01h base base 01h
+// length, IRQNoFlags () is 22h and a mask, DMA () is 2Ah, a mask, and its
+// flags.
 static void emit_legacy_devices(struct aml *a) {
     static const uint8_t pic_crs[] = {
         0x47, 0x01, 0x20, 0x00, 0x20, 0x00, 0x01, 0x02, 0x47, 0x01, 0xa0, 0x00, 0xa0, 0x00, 0x01,
@@ -1892,6 +1893,9 @@ static void emit_legacy_devices(struct aml *a) {
         0x47, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01, 0x20, 0x47, 0x01, 0x81, 0x00, 0x81, 0x00, 0x01,
         0x0f, 0x47, 0x01, 0xc0, 0x00, 0xc0, 0x00, 0x01, 0x20, 0x2a, 0x10, 0x01, RES_END_TAG, 0x00
     };
+    static const uint8_t fpu_crs[] = {
+        0x47, 0x01, 0xf0, 0x00, 0xf0, 0x00, 0x01, 0x01, 0x22, 0x00, 0x20, RES_END_TAG, 0x00
+    };
     static const uint8_t keyboard_crs[] = {
         0x47, 0x01, 0x60, 0x00, 0x60, 0x00, 0x01, 0x01, 0x47, 0x01, 0x64, 0x00, 0x64, 0x00, 0x01,
         0x01, 0x22, 0x02, 0x00, RES_END_TAG, 0x00
@@ -1909,6 +1913,7 @@ static void emit_legacy_devices(struct aml *a) {
     emit_legacy_device(a, "RRTC", "PNP0B00", rtc_crs, sizeof(rtc_crs));
     emit_legacy_device(a, "RSPK", "PNP0800", speaker_crs, sizeof(speaker_crs));
     emit_legacy_device(a, "RDMA", "PNP0200", dma_crs, sizeof(dma_crs));
+    emit_legacy_device(a, "RFPU", "PNP0C04", fpu_crs, sizeof(fpu_crs));
     emit_legacy_device(a, "RBKB", "PNP0303", keyboard_crs, sizeof(keyboard_crs));
     emit_legacy_device(a, "RBMS", "PNP0F13", mouse_crs, sizeof(mouse_crs));
     aml_end(a);

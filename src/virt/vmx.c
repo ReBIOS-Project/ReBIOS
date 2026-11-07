@@ -31,6 +31,7 @@
 #include <virt/cpuid.h>
 #include <virt/event.h>
 #include <virt/exit.h>
+#include <virt/ferr.h>
 #include <virt/gpt.h>
 #include <virt/guest_mem.h>
 #include <virt/mmio.h>
@@ -50,6 +51,7 @@
 #define EPT_CAP_DIRTY ((uint64_t)1 << 21)
 #define EPT_CAP_INVEPT_ALL ((uint64_t)1 << 26)
 #define VPID_CAP_INVVPID ((uint64_t)1 << 32)
+#define VECTOR_MF 16
 #define VPID_CAP_INVVPID_ADDRESS ((uint64_t)1 << 40)
 #define VPID_CAP_INVVPID_SINGLE ((uint64_t)1 << 41)
 #define VPID_CAP_INVVPID_ALL ((uint64_t)1 << 42)
@@ -896,6 +898,12 @@ bool vmx_load_guest_cr3(uint64_t cr3, bool checked) {
     return true;
 }
 
+void vmx_catch_mf(struct vcpu *v) {
+    uint64_t bitmap = vmx_read(VMCS_EXCEPTION_BITMAP);
+    uint64_t mf = (uint64_t)1 << VECTOR_MF;
+    vmx_write(VMCS_EXCEPTION_BITMAP, ferr_catches(v) ? bitmap | mf : bitmap & ~mf);
+}
+
 void vmx_task_switched(struct vcpu *v, bool nmi) {
     v->cr0_shadow |= CR0_TS;
     vmx_write(VMCS_CR0_SHADOW, v->cr0_shadow);
@@ -1019,6 +1027,7 @@ static void cr_write(struct vcpu *v, unsigned int cr, uint64_t value) {
         v->cr0_shadow = value;
         vmx_write(VMCS_CR0_SHADOW, value);
         vmx_write(VMCS_GUEST_CR0, cr0);
+        vmx_catch_mf(v);
     } else {
         v->cr4_shadow = value;
         vmx_write(VMCS_CR4_SHADOW, value);
@@ -1161,9 +1170,12 @@ static void vmx_handle_exit(struct vcpu *v) {
             if ((info & ((uint32_t)7 << 8)) == INTR_TYPE_NMI) {
                 event_nmi(v);
             } else if ((info & ((uint32_t)7 << 8)) == INTR_TYPE_HW_EXCEPTION) {
-                // None the hypervisor asked for: the guest's after all.
+                // #MF is the hypervisor's while the guest's CR0.NE is clear;
+                // any other is the guest's after all.
                 uint32_t error = (uint32_t)vmx_read(VMCS_EXIT_INTR_ERROR);
-                if ((info & 0xff) == 14) {
+                if ((info & 0xff) == VECTOR_MF && ferr_catches(v)) {
+                    ferr_fault(v);
+                } else if ((info & 0xff) == 14) {
                     vcpu_inject_page_fault(v, qual, error);
                 } else {
                     vcpu_inject_exception_data(
@@ -1188,7 +1200,7 @@ static void vmx_handle_exit(struct vcpu *v) {
             break;
         }
         case EXIT_REASON_MONITOR_TRAP: {
-            mmio_step_done(v);
+            vcpu_step_done(v);
             break;
         }
         case EXIT_REASON_CPUID: {

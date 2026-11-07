@@ -37,6 +37,7 @@
 #include <sys/x86.h>
 #include <virt/a20.h>
 #include <virt/cpuid.h>
+#include <virt/ferr.h>
 #include <virt/hpet.h>
 #include <virt/igfx.h>
 #include <virt/io.h>
@@ -116,6 +117,7 @@ static void bsp_main(void *arg) {
     pit_init();
     rtc_init();
     isa_dma_init();
+    ferr_init();
     isa_ports_init();
     hpet_init();
     vacpi_init();

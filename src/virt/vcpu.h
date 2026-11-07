@@ -118,13 +118,19 @@ struct vcpu {
     struct nvmx *nvmx;
     struct nsvm *nsvm;
     // Whether the guest runs one instruction against emulated memory's values,
-    // which mmio.c sets up, and what SVM's stepping changed.
+    // which mmio.c sets up, or ignoring an x87 error (ferr.c), and what SVM's
+    // stepping changed.
     bool stepping;
     struct mmio_step *step;
     bool step_tf;
     uint64_t step_dr6;
     uint32_t step_exceptions;
     uint64_t step_debugctl;
+    // Whether FERR# reports an x87 error of its, whether an instruction steps
+    // ignoring one, and the status word's flags put aside meanwhile.
+    bool ferr;
+    bool ferr_step;
+    uint16_t ferr_flags;
     // DR6's B0-B3 bits for the guest's breakpoints that the accesses the
     // hypervisor carries out for it hit: a debug trap once the instruction, or
     // its string iteration, ends.
@@ -222,6 +228,8 @@ void vcpu_pause_others(void);
 void vcpu_resume_others(void);
 bool vcpu_can_single_step(void);
 void vcpu_single_step(struct vcpu *v, bool on);
+// The end of a step, mmio.c's or ferr.c's.
+void vcpu_step_done(struct vcpu *v);
 
 uint64_t vcpu_rip(struct vcpu *v);
 void vcpu_set_rip(struct vcpu *v, uintptr_t rip);
