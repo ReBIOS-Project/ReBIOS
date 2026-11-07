@@ -50,9 +50,86 @@
 #define TIMER_DIVIDE_BY_1 0xb
 #define TIMER_MEASURE_US 5000
 
+#define MSR_IA32_BIOS_SIGN_ID 0x8b
+
 static bool timer_tsc_deadline;
 // The rate of the timer's clock, measured once, as not every processor says.
 static uint64_t timer_hz;
+
+// The microcode that family 6 models need for a working TSC-deadline mode,
+// from Linux 7.3's deadline_match[] (arch/x86/kernel/apic/apic.c), whose first
+// match counts.
+struct deadline_microcode {
+    uint8_t model;
+    uint8_t first_stepping;
+    uint8_t last_stepping;
+    uint32_t revision;
+};
+
+static const struct deadline_microcode deadline_microcode[] = {
+    // Haswell-EP and -EX
+    { 0x3f, 0x2, 0x2, 0x3a },
+    { 0x3f, 0x4, 0x4, 0x0f },
+    // Broadwell-X
+    { 0x4f, 0x0, 0xf, 0x0b000020 },
+    // Broadwell-DE
+    { 0x56, 0x2, 0x2, 0x00000011 },
+    { 0x56, 0x3, 0x3, 0x0700000e },
+    { 0x56, 0x4, 0x4, 0x0f00000c },
+    { 0x56, 0x5, 0x5, 0x0e000003 },
+    // Skylake-X
+    { 0x55, 0x3, 0x3, 0x01000136 },
+    { 0x55, 0x4, 0x4, 0x02000014 },
+    { 0x55, 0x5, 0xf, 0 },
+    // Haswell
+    { 0x3c, 0x0, 0xf, 0x22 },
+    { 0x45, 0x0, 0xf, 0x20 },
+    { 0x46, 0x0, 0xf, 0x17 },
+    // Broadwell
+    { 0x3d, 0x0, 0xf, 0x25 },
+    { 0x47, 0x0, 0xf, 0x17 },
+    // Skylake
+    { 0x4e, 0x0, 0xf, 0xb2 },
+    { 0x5e, 0x0, 0xf, 0xb2 },
+    // Kaby Lake
+    { 0x8e, 0x0, 0xf, 0x52 },
+    { 0x9e, 0x0, 0xf, 0x52 }
+};
+
+// Whether the TSC-deadline mode can be trusted with the microcode the
+// processor runs, which IA32_BIOS_SIGN_ID gives once cleared and filled by
+// CPUID (SDM 325462-093 Vol. 3A, 12.11.7.1).
+static bool deadline_microcode_ok(void) {
+    if (cpu_vendor() != CPU_VENDOR_INTEL) {
+        return true;
+    }
+    struct cpu_signature s = cpu_signature();
+    if (s.family != 6) {
+        return true;
+    }
+    size_t count = sizeof(deadline_microcode) / sizeof(struct deadline_microcode);
+    for (size_t i = 0; i < count; i++) {
+        const struct deadline_microcode *d = &deadline_microcode[i];
+        if (s.model != d->model || s.stepping < d->first_stepping
+         || s.stepping > d->last_stepping) {
+            continue;
+        }
+        uint64_t signature;
+        if (!wrmsr_safe(MSR_IA32_BIOS_SIGN_ID, 0)) {
+            return true;
+        }
+        cpuid(1, 0);
+        if (!rdmsr_safe(MSR_IA32_BIOS_SIGN_ID, &signature) || signature >> 32 >= d->revision) {
+            return true;
+        }
+        printf(
+            "Local APIC timer: no TSC-deadline mode, as microcode %#llx is older than %#x\n",
+            (unsigned long long)(signature >> 32), d->revision
+        );
+        return false;
+    }
+    return true;
+}
 
 // RDMSR is an exit when the hypervisor itself runs nested.
 static uint64_t apic_base(void) {
@@ -226,7 +303,8 @@ static void timer_measure(uint8_t timer_vector) {
     uint64_t elapsed = rdtsc() - start;
     lapic_write(APIC_TIMER_INITIAL, 0);
     timer_hz = (UINT32_MAX - left) * time_tsc_hz() / elapsed;
-    timer_tsc_deadline = (cpuid(1, 0).ecx & CPUID_1_ECX_TSC_DEADLINE) != 0;
+    timer_tsc_deadline = (cpuid(1, 0).ecx & CPUID_1_ECX_TSC_DEADLINE) != 0
+                      && deadline_microcode_ok();
     printf(
         "Local APIC timer at %llu MHz%s\n", (unsigned long long)(timer_hz / 1000000),
         timer_tsc_deadline ? ", with a TSC-deadline mode" : ""
