@@ -44,6 +44,7 @@
 #define VECTOR_UD 6
 #define VECTOR_GP 13
 #define VECTOR_PF 14
+#define VECTOR_MC 18
 #define VECTOR_SX 30
 // The error code of the #SX that a redirected INIT raises (APM 24593 rev.
 // 3.46, 15.28).
@@ -1474,6 +1475,12 @@ static bool l1_wants(struct vcpu *v, struct nsvm *n, uint64_t code) {
         default: {
             break;
         }
+    }
+    // A machine check exits where the guest's guest lacks CR4.MCE whether
+    // intercepted or not, where the processor has HOST_MCE_OVERRIDE (APM 24593
+    // rev. 3.46, 15.12.18): it is the guest's only where VMCB12 intercepts it.
+    if (code == SVM_EXIT_EXCEPTION_BASE + VECTOR_MC) {
+        return (n->intercepts[2] & ((uint32_t)1 << VECTOR_MC)) != 0;
     }
     if (code >= SVM_EXIT_EXCEPTION_BASE && code < SVM_EXIT_EXCEPTION_BASE + 32) {
         uint32_t own = n->vmcb01->control.intercept_exceptions & ~((uint32_t)1 << VECTOR_UD);

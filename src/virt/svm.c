@@ -50,7 +50,10 @@
 #define MSR_MCG_STATUS 0x17a
 #define MCG_STATUS_MCIP ((uint64_t)1 << 2)
 #define MSR_MC0_STATUS 0x401
+#define MSR_MC0_ADDR 0x402
 #define MCI_STATUS_OVER ((uint64_t)1 << 62)
+#define MCI_STATUS_VAL ((uint64_t)1 << 63)
+#define MCI_STATUS_ADDRV ((uint64_t)1 << 58)
 #define MSR_OSVW_ID_LENGTH 0xc0010140
 #define MSR_OSVW_STATUS 0xc0010141
 #define OSVW_ERRATUM_383 3
@@ -73,6 +76,9 @@ static bool vmcb_clean_bits;
 // HLT exits only where no virtual interrupt waits, which the guest would take
 // at once (APM 24593 rev. 3.46, 15.9).
 static bool svm_idle_hlt;
+// With CR4.MCE set in the host, a machine check in a guest without it exits
+// rather than shutting the processor down (APM 24593 rev. 3.46, 15.12.18).
+static bool svm_host_mce_override;
 // The guest's INVLPGB and TLBSYNC, which TlbiCtl enables. TLBSYNC needs no
 // intercept, as INVLPGB's broadcast takes the guest's ASID, the same on every
 // vCPU (APM 24594 rev. 3.39, INVLPGB); INVLPGB itself exits, for its faults.
@@ -160,6 +166,24 @@ static bool erratum_383_present(void) {
         || (s.family == 0x12 && model_stepping <= 0x10);
 }
 
+// What the banks hold of a machine check, for the log.
+static void log_machine_check(void) {
+    uint64_t banks = rdmsr(MSR_MCG_CAP) & 0xff;
+    for (size_t i = 0; i < banks; i++) {
+        uint64_t status = rdmsr(MSR_MC0_STATUS + 4 * (uint32_t)i);
+        if ((status & MCI_STATUS_VAL) == 0) {
+            continue;
+        }
+        uint64_t address = (status & MCI_STATUS_ADDRV) != 0
+                         ? rdmsr(MSR_MC0_ADDR + 4 * (uint32_t)i)
+                         : 0;
+        printf(
+            "Machine check in bank %zu: status %#llx, address %#llx\n", i,
+            (unsigned long long)status, (unsigned long long)address
+        );
+    }
+}
+
 static void svm_machine_check(struct vcpu *v) {
     uint64_t status;
     if (rdmsr_safe(MSR_MC0_STATUS, &status)
@@ -172,6 +196,17 @@ static void svm_machine_check(struct vcpu *v) {
         printf("AMD erratum 383: a TLB multimatch machine check lost the guest's state\n");
         power_reset(false);
     }
+    // A guest without CR4.MCE shuts down instead, which the processor left to
+    // the hypervisor (APM 24593 rev. 3.46, 15.12.18), after the log has the
+    // banks.
+    if ((v->vmcb->save.cr4 & CR4_MCE) == 0) {
+        printf("Machine check in a guest without CR4.MCE\n");
+        log_machine_check();
+    }
+        if (!nsvm_shutdown(v)) {
+            svm_shutdown(v, "Guest shutdown");
+        }
+        return;
     // As the guest would have taken it without the intercept.
     vcpu_inject_exception(v, VECTOR_MC, false, 0);
 }
@@ -201,6 +236,7 @@ bool svm_supported(void) {
     vmcb_clean_bits = (features & SVM_FEATURE_VMCB_CLEAN) != 0;
     svm_tlbictl = (features & SVM_FEATURE_TLBICTL) != 0;
     svm_idle_hlt = (features & SVM_FEATURE_IDLE_HLT) != 0;
+    svm_host_mce_override = (features & SVM_FEATURE_HOST_MCE_OVERRIDE) != 0;
     struct cpuid_regs sizes = cpuid(0x80000008, 0);
     invlpgb = (sizes.ebx & CPUID_80000008_EBX_INVLPGB) != 0;
     invlpgb_count_max = sizes.edx & 0xffff;
@@ -251,6 +287,9 @@ void svm_cpu_init(void) {
     uint64_t nxe = (cpuid(0x80000001, 0).edx & CPUID_80000001_EDX_NX) != 0 ? EFER_NXE : 0;
     wrmsr(MSR_EFER, (rdmsr(MSR_EFER) & ~(uint64_t)EFER_TCE) | EFER_SVME | nxe);
     wrmsr(MSR_VM_HSAVE_PA, (uint64_t)(uintptr_t)page_alloc(1));
+    if (svm_host_mce_override) {
+        write_cr4(read_cr4() | CR4_MCE);
+    }
     // INITs become #SX, which the guest's intercept or the host's handler
     // takes, rather than resetting the processor under the hypervisor.
     uint64_t vm_cr = rdmsr(MSR_VM_CR);

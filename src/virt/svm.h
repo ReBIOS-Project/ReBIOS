@@ -279,6 +279,7 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 #define SVM_FEATURE_VGIF ((uint32_t)1 << 16)
 #define SVM_FEATURE_X2AVIC ((uint32_t)1 << 18)
 #define SVM_FEATURE_ROGPT ((uint32_t)1 << 21)
+#define SVM_FEATURE_HOST_MCE_OVERRIDE ((uint32_t)1 << 23)
 #define SVM_FEATURE_TLBICTL ((uint32_t)1 << 24)
 #define SVM_FEATURE_VNMI ((uint32_t)1 << 25)
 #define SVM_FEATURE_EXT_LVT_AVIC_ACCESS ((uint32_t)1 << 27)
