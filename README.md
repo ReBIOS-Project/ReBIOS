@@ -287,11 +287,17 @@ it adds back of the legacy PC:
   chipset lacks the 8259s or locks x2APIC mode on, and ReBIOS itself routes PCI
   interrupts to free ISA IRQs for PIC mode, whatever the firmware's PIC mode
   wiring.
-- **A legacy timer and keyboard controller on any machine.** The 8254 and the
-  8042 the OS sees are virtual, so it does not matter whether the chipset has
-  them, or has them working: real ones only back the speaker, where the
-  firmware's ACPI describes the 8254 and port 61h and the 8254 counts, and the
-  PS/2 devices actually plugged in.
+- **The PC's legacy devices on any machine.** The 8254, the 8042, the RTC with
+  its CMOS RAM, the 8237 DMA controllers, the x87 error report on IRQ13 with
+  port F0h, and the reset control register at CF9h that the OS sees are
+  virtual, and its ACPI describes them, so it does not matter whether the
+  chipset has them, or has them working: real ones only back the speaker,
+  where the firmware's ACPI describes the 8254 and port 61h and the 8254
+  counts, the clock, where the machine's RTC reads sanely, and the PS/2
+  devices actually plugged in. The machine's serial and parallel ports reach
+  the OS where the firmware's ACPI describes them, enabled or for the OS to
+  turn on, but for the one ReBIOS logs to; other legacy ports read as absent,
+  as on a board without those devices.
 - **USB as a BIOS's legacy support has it.** ReBIOS drives the USB controllers
   itself, with [Tendril](https://github.com/Mintsuki/Tendril), until the OS
   asks for them, as a BIOS's legacy USB support does: USB keyboards and mice
