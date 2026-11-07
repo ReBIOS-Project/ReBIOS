@@ -53,10 +53,6 @@ static uint64_t a20_filled[A20_LIMIT / A20_REGION / 64];
 static _Atomic(bool) masked;
 static struct spinlock gpt_lock;
 
-static size_t level_size(size_t level) {
-    return (uint64_t)1 << (12 + 9 * level);
-}
-
 static bool entry_present(uint64_t e) {
     if (use_ept) {
         return (e & (EPT_R | EPT_W | EPT_X)) != 0;
@@ -141,7 +137,7 @@ uint64_t gpt_npt_leaf(uintptr_t hpa, uint32_t prot, uint8_t memtype, size_t leve
 }
 
 static uintptr_t leaf_addr(uint64_t e, size_t level) {
-    return e & PTE_ADDRESS & ~(level_size(level) - 1);
+    return e & PTE_ADDRESS & ~(x86_level_size(level) - 1);
 }
 
 // The access rights and memory type of a leaf, to split it into smaller ones.
@@ -199,7 +195,7 @@ static uint64_t *table_for(uint64_t *top, uintptr_t gpa, size_t level) {
             uintptr_t base = leaf_addr(*e, l);
             uint64_t *next = page_alloc(1);
             for (size_t i = 0; i < 512; i++) {
-                next[i] = leaf_entry(base + i * level_size(l - 1), prot, memtype, l - 1);
+                next[i] = leaf_entry(base + i * x86_level_size(l - 1), prot, memtype, l - 1);
             }
             *e = table_entry((uintptr_t)next);
         }
@@ -243,7 +239,7 @@ static void share_upper(void) {
     }
     uint64_t *pdpt = (uint64_t *)(uintptr_t)(root[0] & PTE_ADDRESS);
     uint64_t *masked_pdpt = table_for(masked_root, 0, 2);
-    for (size_t i = A20_LIMIT / level_size(2); i < 512; i++) {
+    for (size_t i = A20_LIMIT / x86_level_size(2); i < 512; i++) {
         masked_pdpt[i] = pdpt[i];
     }
 }
@@ -256,7 +252,7 @@ void gpt_map(uintptr_t gpa, uintptr_t hpa, size_t size, uint32_t prot, uint8_t m
     for (size_t at = 0; at < size; ) {
         size_t level = 0;
         for (size_t l = (prot & GPT_DIRTY) != 0 ? 0 : have_huge_pages ? 2 : 1; l > 0; l--) {
-            uint64_t ls = level_size(l);
+            uint64_t ls = x86_level_size(l);
             if (((gpa + at) & (ls - 1)) == 0 && ((hpa + at) & (ls - 1)) == 0 && size - at >= ls) {
                 level = l;
                 break;
@@ -267,7 +263,7 @@ void gpt_map(uintptr_t gpa, uintptr_t hpa, size_t size, uint32_t prot, uint8_t m
         // A leaf that replaces a table leaks the table, as other CPUs may
         // still walk it until their next flush.
         table[((gpa + at) >> (12 + 9 * level)) & 511] = leaf_entry(hpa + at, prot, memtype, level);
-        at += level_size(level);
+        at += x86_level_size(level);
     }
 
     if (masked_root != NULL) {
@@ -336,7 +332,7 @@ bool gpt_translate_leaf(
             if (level != NULL) {
                 *level = l;
             }
-            *hpa = leaf_addr(e, l) | (gpa & (level_size(l) - 1));
+            *hpa = leaf_addr(e, l) | (gpa & (x86_level_size(l) - 1));
             return true;
         }
         table = (uint64_t *)(uintptr_t)(e & PTE_ADDRESS);

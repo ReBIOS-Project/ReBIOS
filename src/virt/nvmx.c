@@ -1087,10 +1087,6 @@ static bool ept12(const struct nvmx *n) {
 // The page-modification log's entries (SDM 325462-093 Vol. 3C, 31.3.6).
 #define PML_ENTRIES 512
 
-static size_t level_size(size_t level) {
-    return (uint64_t)1 << (12 + 9 * level);
-}
-
 // Whether VM entry takes the EPTP (SDM 325462-093 Vol. 3C, 29.2.1.1).
 static bool eptp_valid(uint64_t eptp) {
     uint64_t type = eptp & 7;
@@ -1128,7 +1124,7 @@ static bool ept12_misconfigured(uint64_t e, size_t level, bool leaf, bool mbec) 
      || (level == 2 && (cap_ept_vpid & EPT_CAP_1G) == 0)) {
         return true;
     }
-    return (e & PTE_ADDRESS & (level_size(level) - 1)) != 0;
+    return (e & PTE_ADDRESS & (x86_level_size(level) - 1)) != 0;
 }
 
 // What a walk of the guest's EPT made of an address of its guest.
@@ -1206,7 +1202,8 @@ static int ept12_walk(struct nvmx *n, uintptr_t gpa, uint64_t access, struct ept
         used[l] = p;
         w->entry[l] = e;
         if (leaf) {
-            w->gpa = (e & PTE_ADDRESS & ~(level_size(l) - 1)) | (gpa & (level_size(l) - 1));
+            w->gpa = (e & PTE_ADDRESS & ~(x86_level_size(l) - 1))
+                   | (gpa & (x86_level_size(l) - 1));
             w->level = l;
             w->leaf = e;
             break;
@@ -1340,7 +1337,7 @@ static uint64_t ept02_leaf(
     const struct nvmx *n, const struct ept12_walk *w, uintptr_t hpa, uint32_t prot,
     uint8_t memtype, size_t level
 ) {
-    uint64_t e = hpa & PTE_ADDRESS & ~(level_size(level) - 1);
+    uint64_t e = hpa & PTE_ADDRESS & ~(x86_level_size(level) - 1);
     if ((w->rights & EPT_R) != 0 && (prot & GPT_R) != 0) {
         e |= EPT_R;
     }

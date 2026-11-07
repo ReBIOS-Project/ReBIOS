@@ -54,10 +54,6 @@ static uint64_t *root;
 static bool enabled;
 static struct spinlock dma_lock;
 
-static size_t level_size(size_t level) {
-    return (uint64_t)1 << (12 + 9 * level);
-}
-
 static bool entry_present(uint64_t e) {
     if (kind == IOMMU_TABLES_KIND_AMD) {
         return (e & AMD_PR) != 0;
@@ -101,7 +97,7 @@ static uint32_t leaf_prot(uint64_t e) {
 }
 
 static uintptr_t leaf_addr(uint64_t e, size_t level) {
-    return e & PTE_ADDRESS & ~(level_size(level) - 1);
+    return e & PTE_ADDRESS & ~(x86_level_size(level) - 1);
 }
 
 // Returns the table that holds the entry for addr at level, creating the
@@ -119,7 +115,7 @@ static uint64_t *table_for(uintptr_t addr, size_t level) {
             uint32_t prot = leaf_prot(*e);
             uint64_t *next = page_alloc(1);
             for (size_t i = 0; i < 512; i++) {
-                next[i] = leaf_entry(base + i * level_size(l - 1), prot, l - 1);
+                next[i] = leaf_entry(base + i * x86_level_size(l - 1), prot, l - 1);
             }
             *e = table_entry((uintptr_t)next, l);
         }
@@ -132,7 +128,7 @@ static void map(uintptr_t addr, uintptr_t hpa, size_t size, uint32_t prot) {
     while (size != 0) {
         size_t level = 0;
         for (size_t l = leaf_level_max; l > 0; l--) {
-            uint64_t ls = level_size(l);
+            uint64_t ls = x86_level_size(l);
             if ((addr & (ls - 1)) == 0 && (hpa & (ls - 1)) == 0 && size >= ls) {
                 level = l;
                 break;
@@ -144,9 +140,9 @@ static void map(uintptr_t addr, uintptr_t hpa, size_t size, uint32_t prot) {
         // still walk it until their caches are flushed.
         table[(addr >> (12 + 9 * level)) & 511] = leaf_entry(hpa, prot, level);
 
-        addr += level_size(level);
-        hpa += level_size(level);
-        size -= level_size(level);
+        addr += x86_level_size(level);
+        hpa += x86_level_size(level);
+        size -= x86_level_size(level);
     }
 }
 

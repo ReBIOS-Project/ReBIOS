@@ -1084,10 +1084,6 @@ retry:;
     return error;
 }
 
-static size_t level_size(size_t level) {
-    return (uint64_t)1 << (12 + 9 * level);
-}
-
 static void npt02_free(struct nsvm *n, uint64_t *table, size_t level) {
     for (size_t i = 0; level > 0 && i < 512; i++) {
         uint64_t e = table[i];
@@ -1186,7 +1182,7 @@ static uint64_t npt02_leaf(
     }
     bool writable = w->writable && (prot & GPT_W) != 0 && (w->leaf & PTE_D) != 0;
     uint64_t e = gpt_npt_leaf(
-        hpa & ~(level_size(level) - 1), writable ? GPT_RWX : GPT_R | GPT_X, type, level
+        hpa & ~(x86_level_size(level) - 1), writable ? GPT_RWX : GPT_R | GPT_X, type, level
     );
     e |= PTE_A | (writable ? PTE_D : 0);
     if (!w->executable) {

@@ -410,6 +410,12 @@ static inline bool x86_pat_valid(uint64_t pat) {
     return true;
 }
 
+// The bytes an entry of a paging structure at level maps: 4 KiB at level 0,
+// the page table's, as in EPT's, nested paging's, and the IOMMUs' tables too.
+static inline size_t x86_level_size(size_t level) {
+    return (uint64_t)1 << (12 + 9 * level);
+}
+
 // Both halves of 16 aligned bytes at once, as a device that reads them in one
 // go sees them: a locked CMPXCHG16B, where a 16-byte atomic of the compiler's
 // may take a lock that the device cannot see.
