@@ -47,6 +47,12 @@
 #define INSN_MEM_WRITE 0x02
 #define INSN_MEM_MASKED 0x04
 
+// The REX prefix's fields that struct insn's rex and rex_upper hold (SDM
+// 325462-093 Vol. 2A, Table 2-4).
+#define INSN_REX_B 0x01
+#define INSN_REX_X 0x02
+#define INSN_REX_R 0x04
+
 struct insn {
     size_t length;
     unsigned int opcode;

@@ -190,10 +190,6 @@ static const uint8_t two_byte[256] = {
 #define MAP_0F3A 3
 #define MAP_EVEX4 4
 
-#define REX_B 0x01
-#define REX_X 0x02
-#define REX_R 0x04
-
 // EVEX map 4's immediates, those of its instructions' map 0 opcodes, and of
 // SHLD and SHRD at 24 and 2C (Intel APX 355828-009, 3.1.5).
 static unsigned int evex4_imm(uint8_t op) {
@@ -473,8 +469,9 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
         uint8_t p2 = bytes[i + 3];
         vex_rex(insn, p0, (p1 >> 7) != 0, long_mode);
         if (long_mode) {
-            insn->rex_upper = ((p0 & 0x10) == 0 ? REX_R : 0) | ((p1 & 0x04) == 0 ? REX_X : 0)
-                            | ((p0 & 0x08) != 0 ? REX_B : 0);
+            insn->rex_upper = ((p0 & 0x10) == 0 ? INSN_REX_R : 0)
+                            | ((p1 & 0x04) == 0 ? INSN_REX_X : 0)
+                            | ((p0 & 0x08) != 0 ? INSN_REX_B : 0);
         }
         insn->prefix = p1 & 3;
         insn->vector_length = (p2 >> 5) & 3;
@@ -631,8 +628,8 @@ static bool mem_linear(struct vcpu *v, const struct insn *insn, int64_t disp, ui
         unsigned int base = rm;
         if (insn->has_sib) {
             base = insn->sib & 7;
-            uint8_t index = ((insn->sib >> 3) & 7) | ((insn->rex & REX_X) != 0 ? 8 : 0)
-                          | ((insn->rex_upper & REX_X) != 0 ? 16 : 0);
+            uint8_t index = ((insn->sib >> 3) & 7) | ((insn->rex & INSN_REX_X) != 0 ? 8 : 0)
+                          | ((insn->rex_upper & INSN_REX_X) != 0 ? 16 : 0);
             if (index != 4) {
                 ea += vcpu_gpr(v, index) << (insn->sib >> 6);
             }
@@ -643,8 +640,8 @@ static bool mem_linear(struct vcpu *v, const struct insn *insn, int64_t disp, ui
                 ea += vcpu_rip(v) + insn->length;
             }
         } else {
-            unsigned int reg = base | ((insn->rex & REX_B) != 0 ? 8 : 0)
-                             | ((insn->rex_upper & REX_B) != 0 ? 16 : 0);
+            unsigned int reg = base | ((insn->rex & INSN_REX_B) != 0 ? 8 : 0)
+                             | ((insn->rex_upper & INSN_REX_B) != 0 ? 16 : 0);
             ea += vcpu_gpr(v, reg);
             if (base == 4 || base == 5) {
                 segment = SEG_SS;

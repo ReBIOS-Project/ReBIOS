@@ -24,8 +24,6 @@
 #include <virt/insn.h>
 #include <virt/vcpu.h>
 
-#define REX_R 0x04
-
 // Iterations of a repeated string instruction emulated at a time: the
 // instruction runs again for the rest, letting interrupts in between, as the
 // processor does.
@@ -54,8 +52,8 @@ static unsigned int group(const struct insn *insn) {
 }
 
 static unsigned int modrm_reg(const struct insn *insn) {
-    return group(insn) | ((insn->rex & REX_R) != 0 ? 8 : 0)
-         | ((insn->rex_upper & REX_R) != 0 ? 16 : 0);
+    return group(insn) | ((insn->rex & INSN_REX_R) != 0 ? 8 : 0)
+         | ((insn->rex_upper & INSN_REX_R) != 0 ? 16 : 0);
 }
 
 // Without a REX prefix, byte registers 4 to 7 are AH, CH, DH, and BH.
