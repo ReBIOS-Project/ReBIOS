@@ -29,27 +29,7 @@ import sys
 # c_layout.py sits beside the generators, which leave no bytecode in the tree.
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from c_layout import finish
-
-# The notice each generated file starts with.
-NOTICE = [
-    '// SPDX-License-Identifier: GPL-2.0-only',
-    '//',
-    '// This file is part of ReBIOS.',
-    '// Copyright (C) 2026 Mintsuki and contributors',
-    '//',
-    '// ReBIOS is free software: you can redistribute it and/or modify it under the',
-    '// terms of the GNU General Public License version 2 as published by the Free',
-    '// Software Foundation.',
-    '//',
-    '// ReBIOS is distributed in the hope that it will be useful, but WITHOUT ANY',
-    '// WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS',
-    '// FOR A PARTICULAR PURPOSE. See the GNU General Public License for more',
-    '// details.',
-    '//',
-    '// You should have received a copy of the GNU General Public License along',
-    '// with ReBIOS. If not, see <https://www.gnu.org/licenses/>.',
-]
+from c_layout import NOTICE, finish
 
 rom_path, log_path, out_path = sys.argv[1:4]
 rom = open(rom_path, 'rb').read()

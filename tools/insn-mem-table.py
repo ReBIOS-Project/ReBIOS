@@ -36,27 +36,7 @@ import sys
 # c_layout.py sits beside the generators, which leave no bytecode in the tree.
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from c_layout import finish
-
-# The notice each generated file starts with.
-NOTICE = [
-    '// SPDX-License-Identifier: GPL-2.0-only',
-    '//',
-    '// This file is part of ReBIOS.',
-    '// Copyright (C) 2026 Mintsuki and contributors',
-    '//',
-    '// ReBIOS is free software: you can redistribute it and/or modify it under the',
-    '// terms of the GNU General Public License version 2 as published by the Free',
-    '// Software Foundation.',
-    '//',
-    '// ReBIOS is distributed in the hope that it will be useful, but WITHOUT ANY',
-    '// WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS',
-    '// FOR A PARTICULAR PURPOSE. See the GNU General Public License for more',
-    '// details.',
-    '//',
-    '// You should have received a copy of the GNU General Public License along',
-    '// with ReBIOS. If not, see <https://www.gnu.org/licenses/>.',
-]
+from c_layout import NOTICE, count_decl, finish
 
 FOOTER = re.compile(r'(Vol\. 2[A-D] \d+-\d+|\d+-\d+ Vol\. 3C|Vol\. 3C \d+-\d+)\s*$')
 NAME_CHARS = re.compile(r'^[A-Za-z0-9/,()\[\] .-]+$')
@@ -123,15 +103,6 @@ W_IGNORED = set()
 
 # Loads and stores of only the elements a vector register's mask selects.
 VECTOR_MASKED = {'VMASKMOVPS', 'VMASKMOVPD', 'VPMASKMOVD', 'VPMASKMOVQ'}
-
-
-def count_decl(name, array):
-    """The declaration of an array's count, on one line where it fits in 99
-    columns, else with its call broken after the opening parenthesis."""
-    line = f'const size_t {name} = ARRAY_COUNT({array});'
-    if len(line) <= 99:
-        return [line]
-    return [f'const size_t {name} = ARRAY_COUNT(', f'    {array}', ');']
 
 
 def instruction_ranges(lines):

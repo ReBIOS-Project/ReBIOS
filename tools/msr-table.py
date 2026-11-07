@@ -37,27 +37,7 @@ import textwrap
 # c_layout.py sits beside the generators, which leave no bytecode in the tree.
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from c_layout import finish
-
-# The notice each generated file starts with.
-NOTICE = [
-    '// SPDX-License-Identifier: GPL-2.0-only',
-    '//',
-    '// This file is part of ReBIOS.',
-    '// Copyright (C) 2026 Mintsuki and contributors',
-    '//',
-    '// ReBIOS is free software: you can redistribute it and/or modify it under the',
-    '// terms of the GNU General Public License version 2 as published by the Free',
-    '// Software Foundation.',
-    '//',
-    '// ReBIOS is distributed in the hope that it will be useful, but WITHOUT ANY',
-    '// WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS',
-    '// FOR A PARTICULAR PURPOSE. See the GNU General Public License for more',
-    '// details.',
-    '//',
-    '// You should have received a copy of the GNU General Public License along',
-    '// with ReBIOS. If not, see <https://www.gnu.org/licenses/>.',
-]
+from c_layout import NOTICE, count_decl, finish
 
 # The architectural MSRs the guest gets, by address or range. Left out are
 # those modules of the hypervisor handle (APIC_BASE, FEATURE_CONTROL, the
@@ -361,15 +341,6 @@ AMD_HANDLED = r'NB_CFGn?|MmioCfgBaseAddr|MMIO Configuration Base Address( Regist
 ADDR = re.compile(r'^\s*Register Address: ([0-9A-F_]+)H(?:\s*[-\u2013\u2212]\s*([0-9A-F_]+)H)?'
                   r'(?:,\s*[0-9]+(?:\s*[-\u2013\u2212]\s*[0-9]+)?)?\s+(.*)$')
 HEADING = re.compile(r'^\s*Table (2-\d+)\.\s')
-
-
-def count_decl(name, array):
-    """The declaration of an array's count, on one line where it fits in 99
-    columns, else with its call broken after the opening parenthesis."""
-    line = f'const size_t {name} = ARRAY_COUNT({array});'
-    if len(line) <= 99:
-        return [line]
-    return [f'const size_t {name} = ARRAY_COUNT(', f'    {array}', ');']
 
 
 def parse_tables(lines):
