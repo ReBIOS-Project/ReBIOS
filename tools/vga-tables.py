@@ -81,14 +81,14 @@ if len(blocks) != 15:
 
 # Kind, width and height in pixels (graphics), and segment of each mode.
 MODES = {
-    0x00: ('MODE_TEXT', 0, 0, 0xb800), 0x01: ('MODE_TEXT', 0, 0, 0xb800),
-    0x02: ('MODE_TEXT', 0, 0, 0xb800), 0x03: ('MODE_TEXT', 0, 0, 0xb800),
-    0x04: ('MODE_CGA', 320, 200, 0xb800), 0x05: ('MODE_CGA', 320, 200, 0xb800),
-    0x06: ('MODE_CGA1', 640, 200, 0xb800), 0x07: ('MODE_TEXT', 0, 0, 0xb000),
-    0x0d: ('MODE_PLANAR', 320, 200, 0xa000), 0x0e: ('MODE_PLANAR', 640, 200, 0xa000),
-    0x0f: ('MODE_PLANAR', 640, 350, 0xa000), 0x10: ('MODE_PLANAR', 640, 350, 0xa000),
-    0x11: ('MODE_PLANAR', 640, 480, 0xa000), 0x12: ('MODE_PLANAR', 640, 480, 0xa000),
-    0x13: ('MODE_LINEAR', 320, 200, 0xa000),
+    0x00: ('VGABIOS_MODE_TEXT', 0, 0, 0xb800), 0x01: ('VGABIOS_MODE_TEXT', 0, 0, 0xb800),
+    0x02: ('VGABIOS_MODE_TEXT', 0, 0, 0xb800), 0x03: ('VGABIOS_MODE_TEXT', 0, 0, 0xb800),
+    0x04: ('VGABIOS_MODE_CGA', 320, 200, 0xb800), 0x05: ('VGABIOS_MODE_CGA', 320, 200, 0xb800),
+    0x06: ('VGABIOS_MODE_CGA1', 640, 200, 0xb800), 0x07: ('VGABIOS_MODE_TEXT', 0, 0, 0xb000),
+    0x0d: ('VGABIOS_MODE_PLANAR', 320, 200, 0xa000), 0x0e: ('VGABIOS_MODE_PLANAR', 640, 200, 0xa000),
+    0x0f: ('VGABIOS_MODE_PLANAR', 640, 350, 0xa000), 0x10: ('VGABIOS_MODE_PLANAR', 640, 350, 0xa000),
+    0x11: ('VGABIOS_MODE_PLANAR', 640, 480, 0xa000), 0x12: ('VGABIOS_MODE_PLANAR', 640, 480, 0xa000),
+    0x13: ('VGABIOS_MODE_LINEAR', 320, 200, 0xa000),
 }
 
 # QEMU's VGA BIOS leaves mode 7's palette registers 0 and 8 at values that
@@ -129,7 +129,7 @@ for b in blocks:
     if key not in palettes:
         palettes.append(key)
     kind, width, height, segment = MODES[mode]
-    lines = 400 if kind == 'MODE_TEXT' else height
+    lines = 400 if kind == 'VGABIOS_MODE_TEXT' else height
     modes.append((mode, kind, columns, rows, char_height, palettes.index(key), width, height,
                   segment, page_size, misc, seq[1:5], crtc, ac[:20], gc, lines))
     raw[mode] = (misc, seq, crtc)
@@ -184,7 +184,7 @@ o.append('#include <stdint.h>')
 o.append('#include <virt/vgabios.h>')
 o.append('')
 for name, data in (('font8', font8), ('font14', font14), ('font16', font16)):
-    o.append('const uint8_t vgabios_%s[%d] = {' % (name, len(data)))
+    o.append('const uint8_t vgabios_tables_%s[%d] = {' % (name, len(data)))
     o.append(hexrows(data))
     o.append('};')
     o.append('')
@@ -193,16 +193,16 @@ for i, p in enumerate(palettes):
     o.append(hexrows(p, 12))
     o.append('};')
     o.append('')
-o.append('const struct vgabios_palette vgabios_palettes[%d] = {' % len(palettes))
+o.append('const struct vgabios_palette vgabios_tables_palettes[%d] = {' % len(palettes))
 for i, p in enumerate(palettes):
     o.append('    { palette%d, %d },' % (i, len(p) // 3))
 o.append('};')
 o.append('')
-o.append('const size_t vgabios_palette_count = %d;' % len(palettes))
+o.append('const size_t vgabios_tables_palette_count = %d;' % len(palettes))
 o.append('')
-o.append('const size_t vgabios_mode_count = %d;' % len(modes))
+o.append('const size_t vgabios_tables_mode_count = %d;' % len(modes))
 o.append('')
-o.append('const struct vgabios_mode vgabios_modes[%d] = {' % len(modes))
+o.append('const struct vgabios_mode vgabios_tables_modes[%d] = {' % len(modes))
 for m in modes:
     (mode, kind, columns, rows, char_height, palette, width, height, segment, page_size, misc,
      seq, crtc, ac, gc, lines) = m

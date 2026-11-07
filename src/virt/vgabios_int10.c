@@ -47,66 +47,66 @@ static const uint8_t cga_mode_control[8] = {
 };
 
 static void seq_write(uint8_t index, uint8_t value) {
-    bios_out_indexed(SEQ_INDEX, index, value);
+    vgabios_out_indexed(SEQ_INDEX, index, value);
 }
 
 static uint8_t seq_read(uint8_t index) {
-    bios_out(SEQ_INDEX, index);
-    return bios_in(SEQ_INDEX + 1);
+    vgabios_out(SEQ_INDEX, index);
+    return vgabios_in(SEQ_INDEX + 1);
 }
 
 static void gc_write(uint8_t index, uint8_t value) {
-    bios_out_indexed(GC_INDEX, index, value);
+    vgabios_out_indexed(GC_INDEX, index, value);
 }
 
 static uint16_t crtc_port(void) {
-    return peekw(BDA, BDA_CRTC);
+    return vgabios_peekw(BDA, BDA_CRTC);
 }
 
 static void crtc_write(uint8_t index, uint8_t value) {
-    bios_out_indexed(crtc_port(), index, value);
+    vgabios_out_indexed(crtc_port(), index, value);
 }
 
 static uint8_t crtc_read(uint8_t index) {
     uint16_t port = crtc_port();
-    bios_out(port, index);
-    return bios_in(port + 1);
+    vgabios_out(port, index);
+    return vgabios_in(port + 1);
 }
 
 static void ac_flip_flop_reset(void) {
-    bios_in(crtc_port() + 6);
+    vgabios_in(crtc_port() + 6);
 }
 
 // Palette registers take writes only while the display does not read them, so
 // it blanks for the write.
 static void ac_write(uint8_t index, uint8_t value) {
     ac_flip_flop_reset();
-    bios_out(AC_INDEX, index);
-    bios_out(AC_INDEX, value);
-    bios_out(AC_INDEX, AC_PAS);
+    vgabios_out(AC_INDEX, index);
+    vgabios_out(AC_INDEX, value);
+    vgabios_out(AC_INDEX, AC_PAS);
 }
 
 static uint8_t ac_read(uint8_t index) {
     ac_flip_flop_reset();
-    bios_out(AC_INDEX, index | AC_PAS);
-    uint8_t value = bios_in(AC_READ);
+    vgabios_out(AC_INDEX, index | AC_PAS);
+    uint8_t value = vgabios_in(AC_READ);
     ac_flip_flop_reset();
-    bios_out(AC_INDEX, AC_PAS);
+    vgabios_out(AC_INDEX, AC_PAS);
     return value;
 }
 
 // The mode at a line count, or with any if lines is 0 or none has it.
 static const struct vgabios_mode *find_mode_lines(uint8_t number, uint16_t lines) {
     const struct vgabios_mode *any = NULL;
-    for (size_t i = 0; i < vgabios_mode_count; i++) {
-        if (vgabios_modes[i].mode != number) {
+    for (size_t i = 0; i < vgabios_tables_mode_count; i++) {
+        if (vgabios_tables_modes[i].mode != number) {
             continue;
         }
-        if (lines == 0 || vgabios_modes[i].scan_lines == lines) {
-            return &vgabios_modes[i];
+        if (lines == 0 || vgabios_tables_modes[i].scan_lines == lines) {
+            return &vgabios_tables_modes[i];
         }
         if (any == NULL) {
-            any = &vgabios_modes[i];
+            any = &vgabios_tables_modes[i];
         }
     }
     return any;
@@ -118,7 +118,7 @@ static const struct vgabios_mode *find_mode(uint8_t number) {
 
 // The line count INT 10h AH=12h BL=30h picked for the text modes.
 static uint16_t text_lines(void) {
-    uint8_t flags = peekb(BDA, BDA_VGA_FLAGS);
+    uint8_t flags = vgabios_peekb(BDA, BDA_VGA_FLAGS);
     if ((flags & BDA_VGA_FLAGS_200) != 0) {
         return 200;
     }
@@ -126,35 +126,35 @@ static uint16_t text_lines(void) {
 }
 
 static const struct vgabios_mode *current_mode(void) {
-    return find_mode(peekb(BDA, BDA_MODE) & 0x7f);
+    return find_mode(vgabios_peekb(BDA, BDA_MODE) & 0x7f);
 }
 
 static bool is_text(const struct vgabios_mode *m) {
-    return m->kind == MODE_TEXT;
+    return m->kind == VGABIOS_MODE_TEXT;
 }
 
 static void set_vector(uint8_t number, uint16_t segment, uint16_t offset) {
-    pokew(0, VECTOR(number), offset);
-    pokew(0, VECTOR(number) + 2, segment);
+    vgabios_pokew(0, VECTOR(number), offset);
+    vgabios_pokew(0, VECTOR(number) + 2, segment);
 }
 
 static uint16_t rom_font(uint8_t height) {
     if (height == 8) {
-        return ROM_FONT8;
+        return VGABIOS_ROM_FONT8;
     }
     if (height == 14) {
-        return ROM_FONT14;
+        return VGABIOS_ROM_FONT14;
     }
-    return ROM_FONT16;
+    return VGABIOS_ROM_FONT16;
 }
 
 static void load_palette(uint8_t index) {
-    const struct vgabios_palette *p = &vgabios_palettes[index];
+    const struct vgabios_palette *p = &vgabios_tables_palettes[index];
     const uint8_t *colours = p->colours;
     size_t bytes = p->count * (uint32_t)3;
-    bios_out(DAC_WRITE_INDEX, 0);
-    if ((peekb(BDA, BDA_VGA_FLAGS) & BDA_VGA_FLAGS_GREY) == 0) {
-        bios_dac_from_rom(vgabios_palette_offset(index), bytes);
+    vgabios_out(DAC_WRITE_INDEX, 0);
+    if ((vgabios_peekb(BDA, BDA_VGA_FLAGS) & BDA_VGA_FLAGS_GREY) == 0) {
+        vgabios_dac_from_rom(vgabios_palette_offset(index), bytes);
         return;
     }
     uint8_t dac[(uint32_t)256 * 3];
@@ -170,10 +170,10 @@ static void load_palette(uint8_t index) {
         dac[i + 1] = y;
         dac[i + 2] = y;
     }
-    bios_out_block(DAC_DATA, dac, sizeof(dac));
+    vgabios_out_block(DAC_DATA, dac, sizeof(dac));
 }
 
-void vgabios_load_palette_256(void) {
+void vgabios_int10_load_palette_256(void) {
     const struct vgabios_mode *m = find_mode(0x13);
     if (m != NULL) {
         load_palette(m->palette);
@@ -210,8 +210,8 @@ static void load_rom_font(
 ) {
     font_access_begin();
     uint16_t base = font_block(block);
-    far_fill8(0xa000, (uint16_t)(base + first * (uint32_t)32), 0, count * (uint32_t)32);
-    far_font(
+    vgabios_far_fill8(0xa000, (uint16_t)(base + first * (uint32_t)32), 0, count * (uint32_t)32);
+    vgabios_far_font(
         0xa000, (uint16_t)(base + first * (uint32_t)32), VGABIOS_SEGMENT,
         (uint16_t)(font + first * height), height, count
     );
@@ -224,25 +224,27 @@ static void load_user_font(
 ) {
     font_access_begin();
     uint16_t base = font_block(block);
-    far_font(0xa000, (uint16_t)(base + first * (uint32_t)32), segment, offset, height, count);
+    vgabios_far_font(
+        0xa000, (uint16_t)(base + first * (uint32_t)32), segment, offset, height, count
+    );
     font_access_end(m);
 }
 
 static void clear_screen(const struct vgabios_mode *m) {
     switch (m->kind) {
-        case MODE_TEXT: {
-            far_fill16(m->segment, 0, 0x0720, 0x4000);
+        case VGABIOS_MODE_TEXT: {
+            vgabios_far_fill16(m->segment, 0, 0x0720, 0x4000);
             break;
         }
-        case MODE_CGA:
-        case MODE_CGA1: {
-            far_fill16(0xb800, 0, 0, 0x4000);
+        case VGABIOS_MODE_CGA:
+        case VGABIOS_MODE_CGA1: {
+            vgabios_far_fill16(0xb800, 0, 0, 0x4000);
             break;
         }
         default: {
             uint8_t mask = seq_read(0x02);
             seq_write(0x02, 0x0f);
-            far_fill16(0xa000, 0, 0, 0x8000);
+            vgabios_far_fill16(0xa000, 0, 0, 0x8000);
             seq_write(0x02, mask);
             break;
         }
@@ -260,9 +262,9 @@ static void set_mode(uint8_t requested) {
     bool keep = (requested & 0x80) != 0;
     uint16_t port = (m->misc & 1) != 0 ? 0x3d4 : 0x3b4;
 
-    vbe_disable();
+    vgabios_vbe_disable();
     seq_write(0x01, m->seq[0] | SEQ_SCREEN_OFF);
-    bios_out(MISC_WRITE, m->misc);
+    vgabios_out(MISC_WRITE, m->misc);
     seq_write(0x00, 0x01);
     for (size_t i = 0; i < 4; i++) {
         seq_write((uint8_t)(i + 1), i == 0 ? (uint8_t)(m->seq[0] | SEQ_SCREEN_OFF) : m->seq[i]);
@@ -270,12 +272,12 @@ static void set_mode(uint8_t requested) {
     seq_write(0x00, 0x03);
 
     // Unprotected first, so that registers 0-7 take their values.
-    bios_out_indexed(port, 0x11, m->crtc[0x11] & 0x7f);
+    vgabios_out_indexed(port, 0x11, m->crtc[0x11] & 0x7f);
     for (size_t i = 0; i < 25; i++) {
-        bios_out_indexed(port, i, m->crtc[i]);
+        vgabios_out_indexed(port, i, m->crtc[i]);
     }
 
-    bios_in(port + 6);
+    vgabios_in(port + 6);
     uint8_t attributes[21 * 2];
     for (size_t i = 0; i < 20; i++) {
         attributes[i * 2] = i;
@@ -283,15 +285,15 @@ static void set_mode(uint8_t requested) {
     }
     attributes[20 * 2] = 0x14;
     attributes[20 * 2 + 1] = 0x00;
-    bios_out_block(AC_INDEX, attributes, sizeof(attributes));
+    vgabios_out_block(AC_INDEX, attributes, sizeof(attributes));
 
     for (size_t i = 0; i < 9; i++) {
         gc_write(i, m->gc[i]);
     }
 
-    pokew(BDA, BDA_CRTC, port);
-    bios_out(PEL_MASK, 0xff);
-    if ((peekb(BDA, BDA_VGA_FLAGS) & BDA_VGA_FLAGS_NO_PALETTE) == 0) {
+    vgabios_pokew(BDA, BDA_CRTC, port);
+    vgabios_out(PEL_MASK, 0xff);
+    if ((vgabios_peekb(BDA, BDA_VGA_FLAGS) & BDA_VGA_FLAGS_NO_PALETTE) == 0) {
         load_palette(m->palette);
     }
     if (!keep) {
@@ -301,58 +303,60 @@ static void set_mode(uint8_t requested) {
         load_rom_font(m, rom_font(m->char_height), m->char_height, 0, 256, 0);
     }
 
-    pokeb(BDA, BDA_MODE, m->mode);
-    pokew(BDA, BDA_COLUMNS, m->columns);
-    pokew(BDA, BDA_PAGE_SIZE, m->page_size);
-    pokew(BDA, BDA_PAGE_START, 0);
+    vgabios_pokeb(BDA, BDA_MODE, m->mode);
+    vgabios_pokew(BDA, BDA_COLUMNS, m->columns);
+    vgabios_pokew(BDA, BDA_PAGE_SIZE, m->page_size);
+    vgabios_pokew(BDA, BDA_PAGE_START, 0);
     for (size_t page = 0; page < 8; page++) {
-        pokew(BDA, (uint16_t)(BDA_CURSOR + page * 2), 0);
+        vgabios_pokew(BDA, (uint16_t)(BDA_CURSOR + page * 2), 0);
     }
-    pokew(BDA, BDA_CURSOR_TYPE, is_text(m) ? 0x0607 : 0);
-    pokeb(BDA, BDA_PAGE, 0);
-    pokeb(BDA, BDA_MODE_CONTROL, m->mode < 8 ? cga_mode_control[m->mode] : 0);
-    pokeb(BDA, BDA_PALETTE, m->mode == 6 ? 0x3f : 0x30);
-    pokeb(BDA, BDA_ROWS, (uint8_t)(m->rows - 1));
-    pokew(BDA, BDA_CHAR_HEIGHT, m->char_height);
-    uint8_t control = peekb(BDA, BDA_VIDEO_CONTROL) & (uint8_t)~BDA_VIDEO_CONTROL_KEPT;
-    pokeb(BDA, BDA_VIDEO_CONTROL, (uint8_t)(control | (keep ? BDA_VIDEO_CONTROL_KEPT : 0)));
-    uint16_t equipment = peekw(BDA, BDA_EQUIPMENT) & (uint16_t)~0x30;
-    pokew(BDA, BDA_EQUIPMENT, (uint16_t)(equipment | (port == 0x3b4 ? 0x30 : 0x20)));
+    vgabios_pokew(BDA, BDA_CURSOR_TYPE, is_text(m) ? 0x0607 : 0);
+    vgabios_pokeb(BDA, BDA_PAGE, 0);
+    vgabios_pokeb(BDA, BDA_MODE_CONTROL, m->mode < 8 ? cga_mode_control[m->mode] : 0);
+    vgabios_pokeb(BDA, BDA_PALETTE, m->mode == 6 ? 0x3f : 0x30);
+    vgabios_pokeb(BDA, BDA_ROWS, (uint8_t)(m->rows - 1));
+    vgabios_pokew(BDA, BDA_CHAR_HEIGHT, m->char_height);
+    uint8_t control = vgabios_peekb(BDA, BDA_VIDEO_CONTROL) & (uint8_t)~BDA_VIDEO_CONTROL_KEPT;
+    vgabios_pokeb(
+        BDA, BDA_VIDEO_CONTROL, (uint8_t)(control | (keep ? BDA_VIDEO_CONTROL_KEPT : 0))
+    );
+    uint16_t equipment = vgabios_peekw(BDA, BDA_EQUIPMENT) & (uint16_t)~0x30;
+    vgabios_pokew(BDA, BDA_EQUIPMENT, (uint16_t)(equipment | (port == 0x3b4 ? 0x30 : 0x20)));
 
-    uint16_t font = is_text(m) ? ROM_FONT8 : rom_font(m->char_height);
+    uint16_t font = is_text(m) ? VGABIOS_ROM_FONT8 : rom_font(m->char_height);
     set_vector(0x43, VGABIOS_SEGMENT, font);
-    set_vector(0x1f, VGABIOS_SEGMENT, ROM_FONT8 + 128 * 8);
+    set_vector(0x1f, VGABIOS_SEGMENT, VGABIOS_ROM_FONT8 + 128 * 8);
 
-    bios_in(port + 6);
-    bios_out(AC_INDEX, AC_PAS);
+    vgabios_in(port + 6);
+    vgabios_out(AC_INDEX, AC_PAS);
     seq_write(0x01, m->seq[0]);
 }
 
-void vgabios_set_mode(uint8_t mode) {
+void vgabios_int10_set_mode(uint8_t mode) {
     set_mode(mode);
 }
 
 static void set_cursor(uint8_t page, uint8_t row, uint8_t column) {
-    pokew(BDA, (uint16_t)(BDA_CURSOR + page * 2), (uint16_t)(row << 8 | column));
-    if (page != peekb(BDA, BDA_PAGE)) {
+    vgabios_pokew(BDA, (uint16_t)(BDA_CURSOR + page * 2), (uint16_t)(row << 8 | column));
+    if (page != vgabios_peekb(BDA, BDA_PAGE)) {
         return;
     }
-    uint16_t columns = peekw(BDA, BDA_COLUMNS);
-    uint16_t address = (uint16_t)(peekw(BDA, BDA_PAGE_START) / 2 + row * columns + column);
+    uint16_t columns = vgabios_peekw(BDA, BDA_COLUMNS);
+    uint16_t address = (uint16_t)(vgabios_peekw(BDA, BDA_PAGE_START) / 2 + row * columns + column);
     crtc_write(0x0e, (uint8_t)(address >> 8));
     crtc_write(0x0f, (uint8_t)address);
 }
 
 static uint16_t get_cursor(uint8_t page) {
-    return peekw(BDA, (uint16_t)(BDA_CURSOR + (page & 7) * 2));
+    return vgabios_peekw(BDA, (uint16_t)(BDA_CURSOR + (page & 7) * 2));
 }
 
 // The cursor's scan lines, from the CGA-style ones of an 8-line cell to those
 // of the font in use, unless the caller turned that off.
 static void set_cursor_type(uint8_t start, uint8_t end) {
-    pokew(BDA, BDA_CURSOR_TYPE, (uint16_t)(start << 8 | end));
-    uint8_t height = peekb(BDA, BDA_CHAR_HEIGHT);
-    if ((peekb(BDA, BDA_VIDEO_CONTROL) & BDA_VIDEO_CONTROL_NO_EMULATION) == 0 && height > 8
+    vgabios_pokew(BDA, BDA_CURSOR_TYPE, (uint16_t)(start << 8 | end));
+    uint8_t height = vgabios_peekb(BDA, BDA_CHAR_HEIGHT);
+    if ((vgabios_peekb(BDA, BDA_VIDEO_CONTROL) & BDA_VIDEO_CONTROL_NO_EMULATION) == 0 && height > 8
      && (start & 0x20) == 0 && start < 8 && end < 8) {
         if (start == 6 && end == 7) {
             start = (uint8_t)(height - 3);
@@ -371,9 +375,9 @@ static void set_page(uint8_t page) {
     if (m == NULL || page > 7) {
         return;
     }
-    uint16_t start = (uint16_t)(page * peekw(BDA, BDA_PAGE_SIZE));
-    pokeb(BDA, BDA_PAGE, page);
-    pokew(BDA, BDA_PAGE_START, start);
+    uint16_t start = (uint16_t)(page * vgabios_peekw(BDA, BDA_PAGE_SIZE));
+    vgabios_pokeb(BDA, BDA_PAGE, page);
+    vgabios_pokew(BDA, BDA_PAGE_START, start);
     // Text modes count the start in words.
     uint16_t address = is_text(m) ? start / 2 : start;
     crtc_write(0x0c, (uint8_t)(address >> 8));
@@ -383,8 +387,8 @@ static void set_page(uint8_t page) {
 }
 
 static uint16_t text_offset(uint8_t page, uint8_t row, uint8_t column) {
-    return (uint16_t)(page * peekw(BDA, BDA_PAGE_SIZE)
-                    + (row * peekw(BDA, BDA_COLUMNS) + column) * (uint32_t)2);
+    return (uint16_t)(page * vgabios_peekw(BDA, BDA_PAGE_SIZE)
+                    + (row * vgabios_peekw(BDA, BDA_COLUMNS) + column) * (uint32_t)2);
 }
 
 // A CGA mode's byte holding pixel x of scan line y: even lines in the first 8
@@ -394,20 +398,20 @@ static uint16_t cga_offset(uint16_t x_byte, uint16_t y) {
 }
 
 static uint16_t font_segment(void) {
-    return peekw(0, VECTOR(0x43) + 2);
+    return vgabios_peekw(0, VECTOR(0x43) + 2);
 }
 
 static uint16_t glyph_offset(const struct vgabios_mode *m, uint8_t c, uint8_t height) {
     // CGA modes find characters 128-255 through INT 1Fh.
-    if ((m->kind == MODE_CGA || m->kind == MODE_CGA1) && c >= 128) {
-        return (uint16_t)(peekw(0, VECTOR(0x1f)) + (c - 128) * height);
+    if ((m->kind == VGABIOS_MODE_CGA || m->kind == VGABIOS_MODE_CGA1) && c >= 128) {
+        return (uint16_t)(vgabios_peekw(0, VECTOR(0x1f)) + (c - 128) * height);
     }
-    return (uint16_t)(peekw(0, VECTOR(0x43)) + c * height);
+    return (uint16_t)(vgabios_peekw(0, VECTOR(0x43)) + c * height);
 }
 
 static uint16_t glyph_segment(const struct vgabios_mode *m, uint8_t c) {
-    if ((m->kind == MODE_CGA || m->kind == MODE_CGA1) && c >= 128) {
-        return peekw(0, VECTOR(0x1f) + 2);
+    if ((m->kind == VGABIOS_MODE_CGA || m->kind == VGABIOS_MODE_CGA1) && c >= 128) {
+        return vgabios_peekw(0, VECTOR(0x1f) + 2);
     }
     return font_segment();
 }
@@ -415,14 +419,14 @@ static uint16_t glyph_segment(const struct vgabios_mode *m, uint8_t c) {
 static void draw_char(
     const struct vgabios_mode *m, uint8_t row, uint8_t column, uint8_t c, uint8_t colour
 ) {
-    uint8_t height = peekb(BDA, BDA_CHAR_HEIGHT);
+    uint8_t height = vgabios_peekb(BDA, BDA_CHAR_HEIGHT);
     uint16_t segment = glyph_segment(m, c);
     uint16_t offset = glyph_offset(m, c, height);
     bool xor = (colour & 0x80) != 0;
     switch (m->kind) {
-        case MODE_CGA: {
+        case VGABIOS_MODE_CGA: {
             for (size_t r = 0; r < height; r++) {
-                uint8_t bits = peekb(segment, (uint16_t)(offset + r));
+                uint8_t bits = vgabios_peekb(segment, (uint16_t)(offset + r));
                 uint16_t pixels = 0;
                 for (size_t b = 0; b < 8; b++) {
                     if ((bits & (0x80 >> b)) != 0) {
@@ -433,41 +437,43 @@ static void draw_char(
                 uint8_t high = (uint8_t)(pixels >> 8);
                 uint8_t low = (uint8_t)pixels;
                 if (xor) {
-                    high ^= peekb(0xb800, at);
-                    low ^= peekb(0xb800, (uint16_t)(at + 1));
+                    high ^= vgabios_peekb(0xb800, at);
+                    low ^= vgabios_peekb(0xb800, (uint16_t)(at + 1));
                 }
-                pokeb(0xb800, at, high);
-                pokeb(0xb800, (uint16_t)(at + 1), low);
+                vgabios_pokeb(0xb800, at, high);
+                vgabios_pokeb(0xb800, (uint16_t)(at + 1), low);
             }
             break;
         }
-        case MODE_CGA1: {
+        case VGABIOS_MODE_CGA1: {
             for (size_t r = 0; r < height; r++) {
-                uint8_t bits = (colour & 1) != 0 ? peekb(segment, (uint16_t)(offset + r)) : 0;
+                uint8_t bits = (colour & 1) != 0
+                             ? vgabios_peekb(segment, (uint16_t)(offset + r))
+                             : 0;
                 uint16_t at = cga_offset(column, (uint16_t)(row * height + r));
                 if (xor) {
-                    bits ^= peekb(0xb800, at);
+                    bits ^= vgabios_peekb(0xb800, at);
                 }
-                pokeb(0xb800, at, bits);
+                vgabios_pokeb(0xb800, at, bits);
             }
             break;
         }
-        case MODE_PLANAR: {
+        case VGABIOS_MODE_PLANAR: {
             uint16_t line = m->width / 8;
             gc_write(0x00, colour & 0x0f);
             gc_write(0x01, 0x0f);
             gc_write(0x03, xor ? 0x18 : 0x00);
             for (size_t r = 0; r < height; r++) {
-                uint8_t bits = peekb(segment, (uint16_t)(offset + r));
+                uint8_t bits = vgabios_peekb(segment, (uint16_t)(offset + r));
                 uint16_t at = (uint16_t)((row * height + r) * line + column);
                 gc_write(0x08, bits);
-                (void)peekb(0xa000, at);
-                pokeb(0xa000, at, 0xff);
+                (void)vgabios_peekb(0xa000, at);
+                vgabios_pokeb(0xa000, at, 0xff);
                 if (!xor) {
                     gc_write(0x00, 0x00);
                     gc_write(0x08, (uint8_t)~bits);
-                    (void)peekb(0xa000, at);
-                    pokeb(0xa000, at, 0xff);
+                    (void)vgabios_peekb(0xa000, at);
+                    vgabios_pokeb(0xa000, at, 0xff);
                     gc_write(0x00, colour & 0x0f);
                 }
             }
@@ -479,10 +485,12 @@ static void draw_char(
         }
         default: {
             for (size_t r = 0; r < height; r++) {
-                uint8_t bits = peekb(segment, (uint16_t)(offset + r));
+                uint8_t bits = vgabios_peekb(segment, (uint16_t)(offset + r));
                 uint16_t at = (uint16_t)((row * height + r) * m->width + column * (uint32_t)8);
                 for (size_t b = 0; b < 8; b++) {
-                    pokeb(0xa000, (uint16_t)(at + b), (bits & (0x80 >> b)) != 0 ? colour : 0);
+                    vgabios_pokeb(
+                        0xa000, (uint16_t)(at + b), (bits & (0x80 >> b)) != 0 ? colour : 0
+                    );
                 }
             }
             break;
@@ -499,7 +507,7 @@ static void write_chars(uint8_t c, uint8_t page, uint8_t attribute, size_t count
     uint16_t cursor = get_cursor(page);
     uint8_t row = (uint8_t)(cursor >> 8);
     uint8_t column = (uint8_t)cursor;
-    uint16_t columns = peekw(BDA, BDA_COLUMNS);
+    uint16_t columns = vgabios_peekw(BDA, BDA_COLUMNS);
     for (size_t i = 0; i < count && column < columns; i++) {
         draw_char(m, row, column++, c, attribute);
     }
@@ -517,7 +525,7 @@ static void scroll_text(
         n = height;
     }
     size_t kept = height - n;
-    uint16_t columns = peekw(BDA, BDA_COLUMNS);
+    uint16_t columns = vgabios_peekw(BDA, BDA_COLUMNS);
     uint16_t first = text_offset(page, top, left);
     size_t line = columns * (size_t)2;
     // Whole lines lie one after another, and go at once.
@@ -526,23 +534,27 @@ static void scroll_text(
     size_t bytes = moved_at_once * width * 2;
     if (lines >= 0) {
         for (size_t r = 0; r < kept; r += moved_at_once) {
-            far_move(
+            vgabios_far_move(
                 m->segment, (uint16_t)(first + r * line), (uint16_t)(first + (r + n) * line), bytes
             );
         }
         for (size_t r = kept; r < height; r += filled_at_once) {
-            far_fill16(m->segment, (uint16_t)(first + r * line), blank, filled_at_once * width);
+            vgabios_far_fill16(
+                m->segment, (uint16_t)(first + r * line), blank, filled_at_once * width
+            );
         }
     } else {
         for (size_t r = kept; r > 0; r -= moved_at_once) {
             size_t from = r - moved_at_once;
-            far_move(
+            vgabios_far_move(
                 m->segment, (uint16_t)(first + (from + n) * line), (uint16_t)(first + from * line),
                 bytes
             );
         }
         for (size_t r = 0; r < n; r += filled_at_once) {
-            far_fill16(m->segment, (uint16_t)(first + r * line), blank, filled_at_once * width);
+            vgabios_far_fill16(
+                m->segment, (uint16_t)(first + r * line), blank, filled_at_once * width
+            );
         }
     }
 }
@@ -551,11 +563,11 @@ static void scroll_text(
 // character takes in it.
 static uint16_t pixel_line(const struct vgabios_mode *m, uint16_t x, uint16_t y) {
     switch (m->kind) {
-        case MODE_CGA:
-        case MODE_CGA1: {
+        case VGABIOS_MODE_CGA:
+        case VGABIOS_MODE_CGA1: {
             return cga_offset(x, y);
         }
-        case MODE_PLANAR: {
+        case VGABIOS_MODE_PLANAR: {
             return (uint16_t)(y * (m->width / (uint32_t)8) + x);
         }
         default: {
@@ -566,10 +578,10 @@ static uint16_t pixel_line(const struct vgabios_mode *m, uint16_t x, uint16_t y)
 
 static size_t char_bytes(const struct vgabios_mode *m) {
     switch (m->kind) {
-        case MODE_CGA: {
+        case VGABIOS_MODE_CGA: {
             return 2;
         }
-        case MODE_LINEAR: {
+        case VGABIOS_MODE_LINEAR: {
             return 8;
         }
         default: {
@@ -580,25 +592,25 @@ static size_t char_bytes(const struct vgabios_mode *m) {
 
 static void fill_line(const struct vgabios_mode *m, uint16_t at, size_t bytes, uint8_t colour) {
     switch (m->kind) {
-        case MODE_CGA: {
+        case VGABIOS_MODE_CGA: {
             uint8_t c = colour & 3;
-            far_fill8(0xb800, at, (uint8_t)(c | c << 2 | c << 4 | c << 6), bytes);
+            vgabios_far_fill8(0xb800, at, (uint8_t)(c | c << 2 | c << 4 | c << 6), bytes);
             break;
         }
-        case MODE_CGA1: {
-            far_fill8(0xb800, at, (colour & 1) != 0 ? 0xff : 0x00, bytes);
+        case VGABIOS_MODE_CGA1: {
+            vgabios_far_fill8(0xb800, at, (colour & 1) != 0 ? 0xff : 0x00, bytes);
             break;
         }
-        case MODE_PLANAR: {
+        case VGABIOS_MODE_PLANAR: {
             gc_write(0x00, colour & 0x0f);
             gc_write(0x01, 0x0f);
-            far_fill8(0xa000, at, 0xff, bytes);
+            vgabios_far_fill8(0xa000, at, 0xff, bytes);
             gc_write(0x00, 0x00);
             gc_write(0x01, 0x00);
             break;
         }
         default: {
-            far_fill8(0xa000, at, colour, bytes);
+            vgabios_far_fill8(0xa000, at, colour, bytes);
             break;
         }
     }
@@ -608,8 +620,10 @@ static void scroll_graphics(
     const struct vgabios_mode *m, int lines, uint8_t top, uint8_t left, uint8_t bottom,
     uint8_t right, uint8_t colour
 ) {
-    uint8_t height = peekb(BDA, BDA_CHAR_HEIGHT);
-    uint16_t segment = m->kind == MODE_CGA || m->kind == MODE_CGA1 ? 0xb800 : 0xa000;
+    uint8_t height = vgabios_peekb(BDA, BDA_CHAR_HEIGHT);
+    uint16_t segment = m->kind == VGABIOS_MODE_CGA || m->kind == VGABIOS_MODE_CGA1
+                     ? 0xb800
+                     : 0xa000;
     uint8_t per_char = char_bytes(m);
     uint16_t x = (uint16_t)(left * per_char);
     size_t bytes = (uint16_t)((right - left + 1) * per_char);
@@ -619,13 +633,13 @@ static void scroll_graphics(
         n = rows;
     }
     // Planes move together through the latches.
-    if (m->kind == MODE_PLANAR) {
+    if (m->kind == VGABIOS_MODE_PLANAR) {
         gc_write(0x05, (uint8_t)((m->gc[5] & ~3) | 1));
     }
     if (lines >= 0) {
         for (size_t r = top; r + n <= bottom; r++) {
             for (size_t s = 0; s < height; s++) {
-                far_move(
+                vgabios_far_move(
                     segment, pixel_line(m, x, (uint16_t)(r * height + s)),
                     pixel_line(m, x, (uint16_t)((r + n) * height + s)), bytes
                 );
@@ -634,14 +648,14 @@ static void scroll_graphics(
     } else {
         for (size_t r = bottom; r >= top + n; r--) {
             for (size_t s = 0; s < height; s++) {
-                far_move(
+                vgabios_far_move(
                     segment, pixel_line(m, x, (uint16_t)(r * height + s)),
                     pixel_line(m, x, (uint16_t)((r - n) * height + s)), bytes
                 );
             }
         }
     }
-    if (m->kind == MODE_PLANAR) {
+    if (m->kind == VGABIOS_MODE_PLANAR) {
         gc_write(0x05, m->gc[5]);
     }
     size_t first = lines >= 0 ? bottom - n + 1 : top;
@@ -659,8 +673,8 @@ static void scroll(
     if (m == NULL) {
         return;
     }
-    uint8_t rows = (uint8_t)(peekb(BDA, BDA_ROWS) + 1);
-    uint8_t columns = (uint8_t)peekw(BDA, BDA_COLUMNS);
+    uint8_t rows = (uint8_t)(vgabios_peekb(BDA, BDA_ROWS) + 1);
+    uint8_t columns = (uint8_t)vgabios_peekw(BDA, BDA_COLUMNS);
     if (bottom >= rows) {
         bottom = (uint8_t)(rows - 1);
     }
@@ -671,7 +685,7 @@ static void scroll(
         return;
     }
     if (is_text(m)) {
-        scroll_text(m, peekb(BDA, BDA_PAGE), lines, top, left, bottom, right, attribute);
+        scroll_text(m, vgabios_peekb(BDA, BDA_PAGE), lines, top, left, bottom, right, attribute);
     } else {
         scroll_graphics(m, lines, top, left, bottom, right, attribute);
     }
@@ -682,12 +696,12 @@ static void teletype(uint8_t c, uint8_t colour) {
     if (m == NULL) {
         return;
     }
-    uint8_t page = peekb(BDA, BDA_PAGE);
+    uint8_t page = vgabios_peekb(BDA, BDA_PAGE);
     uint16_t cursor = get_cursor(page);
     uint8_t row = (uint8_t)(cursor >> 8);
     uint8_t column = (uint8_t)cursor;
-    uint8_t columns = (uint8_t)peekw(BDA, BDA_COLUMNS);
-    uint8_t rows = (uint8_t)(peekb(BDA, BDA_ROWS) + 1);
+    uint8_t columns = (uint8_t)vgabios_peekw(BDA, BDA_COLUMNS);
+    uint8_t rows = (uint8_t)(vgabios_peekb(BDA, BDA_ROWS) + 1);
     switch (c) {
         case 7: {
             return;
@@ -708,7 +722,7 @@ static void teletype(uint8_t c, uint8_t colour) {
         }
         default: {
             if (is_text(m)) {
-                pokeb(m->segment, text_offset(page, row, column), c);
+                vgabios_pokeb(m->segment, text_offset(page, row, column), c);
             } else {
                 draw_char(m, row, column, c, colour);
             }
@@ -723,7 +737,7 @@ static void teletype(uint8_t c, uint8_t colour) {
         // The new line takes the attribute where the cursor is.
         uint8_t attribute = 0;
         if (is_text(m)) {
-            attribute = peekb(
+            attribute = vgabios_peekb(
                 m->segment, (uint16_t)(text_offset(page, (uint8_t)(rows - 1), column) + 1)
             );
         }
@@ -740,46 +754,46 @@ static void write_pixel(uint16_t x, uint16_t y, uint8_t colour) {
     }
     bool xor = (colour & 0x80) != 0;
     switch (m->kind) {
-        case MODE_CGA: {
+        case VGABIOS_MODE_CGA: {
             uint16_t at = cga_offset(x / 4, y);
             uint8_t shift = (uint8_t)((3 - (x & 3)) * 2);
-            uint8_t v = peekb(0xb800, at);
+            uint8_t v = vgabios_peekb(0xb800, at);
             if (xor) {
                 v ^= (uint8_t)((colour & 3) << shift);
             } else {
                 v = (uint8_t)((v & ~(3 << shift)) | ((colour & 3) << shift));
             }
-            pokeb(0xb800, at, v);
+            vgabios_pokeb(0xb800, at, v);
             break;
         }
-        case MODE_CGA1: {
+        case VGABIOS_MODE_CGA1: {
             uint16_t at = cga_offset(x / 8, y);
             uint8_t bit = (uint8_t)(0x80 >> (x & 7));
-            uint8_t v = peekb(0xb800, at);
+            uint8_t v = vgabios_peekb(0xb800, at);
             if (xor) {
                 v ^= (colour & 1) != 0 ? bit : 0;
             } else {
                 v = (uint8_t)((v & ~bit) | ((colour & 1) != 0 ? bit : 0));
             }
-            pokeb(0xb800, at, v);
+            vgabios_pokeb(0xb800, at, v);
             break;
         }
-        case MODE_PLANAR: {
+        case VGABIOS_MODE_PLANAR: {
             uint16_t at = (uint16_t)(y * (m->width / (uint32_t)8) + x / 8);
             gc_write(0x08, (uint8_t)(0x80 >> (x & 7)));
             gc_write(0x05, (uint8_t)((m->gc[5] & ~3) | 2));
             if (xor) {
                 gc_write(0x03, 0x18);
             }
-            (void)peekb(0xa000, at);
-            pokeb(0xa000, at, colour);
+            (void)vgabios_peekb(0xa000, at);
+            vgabios_pokeb(0xa000, at, colour);
             gc_write(0x03, 0x00);
             gc_write(0x05, m->gc[5]);
             gc_write(0x08, 0xff);
             break;
         }
         default: {
-            pokeb(0xa000, (uint16_t)(y * m->width + x), colour);
+            vgabios_pokeb(0xa000, (uint16_t)(y * m->width + x), colour);
             break;
         }
     }
@@ -791,18 +805,19 @@ static uint8_t read_pixel(uint16_t x, uint16_t y) {
         return 0;
     }
     switch (m->kind) {
-        case MODE_CGA: {
-            return (uint8_t)((peekb(0xb800, cga_offset(x / 4, y)) >> ((3 - (x & 3)) * 2)) & 3);
+        case VGABIOS_MODE_CGA: {
+            uint8_t pixels = vgabios_peekb(0xb800, cga_offset(x / 4, y));
+            return (uint8_t)((pixels >> ((3 - (x & 3)) * 2)) & 3);
         }
-        case MODE_CGA1: {
-            return (uint8_t)((peekb(0xb800, cga_offset(x / 8, y)) >> (7 - (x & 7))) & 1);
+        case VGABIOS_MODE_CGA1: {
+            return (uint8_t)((vgabios_peekb(0xb800, cga_offset(x / 8, y)) >> (7 - (x & 7))) & 1);
         }
-        case MODE_PLANAR: {
+        case VGABIOS_MODE_PLANAR: {
             uint16_t at = (uint16_t)(y * (m->width / (uint32_t)8) + x / 8);
             uint8_t colour = 0;
             for (size_t p = 0; p < 4; p++) {
                 gc_write(0x04, p);
-                if (((peekb(0xa000, at) >> (7 - (x & 7))) & 1) != 0) {
+                if (((vgabios_peekb(0xa000, at) >> (7 - (x & 7))) & 1) != 0) {
                     colour |= (uint8_t)(1 << p);
                 }
             }
@@ -810,7 +825,7 @@ static uint8_t read_pixel(uint16_t x, uint16_t y) {
             return colour;
         }
         default: {
-            return peekb(0xa000, (uint16_t)(y * m->width + x));
+            return vgabios_peekb(0xa000, (uint16_t)(y * m->width + x));
         }
     }
 }
@@ -818,17 +833,17 @@ static uint8_t read_pixel(uint16_t x, uint16_t y) {
 static void write_string(struct vgabios_regs *r) {
     uint8_t page = r->bh & 7;
     uint16_t saved = get_cursor(page);
-    uint8_t active = peekb(BDA, BDA_PAGE);
+    uint8_t active = vgabios_peekb(BDA, BDA_PAGE);
     // The string goes to its page through the active page's teletype.
-    pokeb(BDA, BDA_PAGE, page);
+    vgabios_pokeb(BDA, BDA_PAGE, page);
     set_cursor(page, r->dh, r->dl);
     bool attributes = (r->al & 2) != 0;
     uint16_t at = r->bp;
     for (size_t i = 0; i < r->cx; i++) {
-        uint8_t c = peekb(r->es, at++);
+        uint8_t c = vgabios_peekb(r->es, at++);
         uint8_t attribute = r->bl;
         if (attributes) {
-            attribute = peekb(r->es, at++);
+            attribute = vgabios_peekb(r->es, at++);
         }
         if (c == 7 || c == 8 || c == 10 || c == 13) {
             teletype(c, attribute);
@@ -837,7 +852,7 @@ static void write_string(struct vgabios_regs *r) {
         const struct vgabios_mode *m = current_mode();
         if (m != NULL && is_text(m)) {
             uint16_t cursor = get_cursor(page);
-            pokew(
+            vgabios_pokew(
                 m->segment, text_offset(page, (uint8_t)(cursor >> 8), (uint8_t)cursor),
                 (uint16_t)(attribute << 8 | c)
             );
@@ -850,7 +865,7 @@ static void write_string(struct vgabios_regs *r) {
     if ((r->al & 1) == 0) {
         set_cursor(page, (uint8_t)(saved >> 8), (uint8_t)saved);
     }
-    pokeb(BDA, BDA_PAGE, active);
+    vgabios_pokeb(BDA, BDA_PAGE, active);
 }
 
 static void palette_functions(struct vgabios_regs *r) {
@@ -865,9 +880,9 @@ static void palette_functions(struct vgabios_regs *r) {
         }
         case 0x02: {
             for (size_t i = 0; i < 16; i++) {
-                ac_write(i, peekb(r->es, (uint16_t)(r->dx + i)));
+                ac_write(i, vgabios_peekb(r->es, (uint16_t)(r->dx + i)));
             }
-            ac_write(0x11, peekb(r->es, (uint16_t)(r->dx + 16)));
+            ac_write(0x11, vgabios_peekb(r->es, (uint16_t)(r->dx + 16)));
             break;
         }
         case 0x03: {
@@ -885,22 +900,22 @@ static void palette_functions(struct vgabios_regs *r) {
         }
         case 0x09: {
             for (size_t i = 0; i < 16; i++) {
-                pokeb(r->es, (uint16_t)(r->dx + i), ac_read(i));
+                vgabios_pokeb(r->es, (uint16_t)(r->dx + i), ac_read(i));
             }
-            pokeb(r->es, (uint16_t)(r->dx + 16), ac_read(0x11));
+            vgabios_pokeb(r->es, (uint16_t)(r->dx + 16), ac_read(0x11));
             break;
         }
         case 0x10: {
-            bios_out(DAC_WRITE_INDEX, r->bl);
-            bios_out(DAC_DATA, r->dh);
-            bios_out(DAC_DATA, r->ch);
-            bios_out(DAC_DATA, r->cl);
+            vgabios_out(DAC_WRITE_INDEX, r->bl);
+            vgabios_out(DAC_DATA, r->dh);
+            vgabios_out(DAC_DATA, r->ch);
+            vgabios_out(DAC_DATA, r->cl);
             break;
         }
         case 0x12: {
-            bios_out(DAC_WRITE_INDEX, r->bl);
+            vgabios_out(DAC_WRITE_INDEX, r->bl);
             for (size_t i = 0; i < r->cx * (uint32_t)3; i++) {
-                bios_out(DAC_DATA, peekb(r->es, (uint16_t)(r->dx + i)));
+                vgabios_out(DAC_DATA, vgabios_peekb(r->es, (uint16_t)(r->dx + i)));
             }
             break;
         }
@@ -917,25 +932,25 @@ static void palette_functions(struct vgabios_regs *r) {
             break;
         }
         case 0x15: {
-            bios_out(DAC_READ_INDEX, r->bl);
-            r->dh = bios_in(DAC_DATA);
-            r->ch = bios_in(DAC_DATA);
-            r->cl = bios_in(DAC_DATA);
+            vgabios_out(DAC_READ_INDEX, r->bl);
+            r->dh = vgabios_in(DAC_DATA);
+            r->ch = vgabios_in(DAC_DATA);
+            r->cl = vgabios_in(DAC_DATA);
             break;
         }
         case 0x17: {
-            bios_out(DAC_READ_INDEX, r->bl);
+            vgabios_out(DAC_READ_INDEX, r->bl);
             for (size_t i = 0; i < r->cx * (uint32_t)3; i++) {
-                pokeb(r->es, (uint16_t)(r->dx + i), bios_in(DAC_DATA));
+                vgabios_pokeb(r->es, (uint16_t)(r->dx + i), vgabios_in(DAC_DATA));
             }
             break;
         }
         case 0x18: {
-            bios_out(PEL_MASK, r->bl);
+            vgabios_out(PEL_MASK, r->bl);
             break;
         }
         case 0x19: {
-            r->bl = bios_in(PEL_MASK);
+            r->bl = vgabios_in(PEL_MASK);
             break;
         }
         case 0x1a: {
@@ -946,23 +961,23 @@ static void palette_functions(struct vgabios_regs *r) {
             break;
         }
         case 0x1b: {
-            uint8_t flags = peekb(BDA, BDA_VGA_FLAGS);
-            pokeb(BDA, BDA_VGA_FLAGS, (uint8_t)(flags | BDA_VGA_FLAGS_GREY));
+            uint8_t flags = vgabios_peekb(BDA, BDA_VGA_FLAGS);
+            vgabios_pokeb(BDA, BDA_VGA_FLAGS, (uint8_t)(flags | BDA_VGA_FLAGS_GREY));
             for (size_t i = 0; i < r->cx; i++) {
                 uint8_t index = (uint8_t)(r->bl + i);
-                bios_out(DAC_READ_INDEX, index);
-                uint8_t red = bios_in(DAC_DATA);
-                uint8_t green = bios_in(DAC_DATA);
-                uint8_t blue = bios_in(DAC_DATA);
+                vgabios_out(DAC_READ_INDEX, index);
+                uint8_t red = vgabios_in(DAC_DATA);
+                uint8_t green = vgabios_in(DAC_DATA);
+                uint8_t blue = vgabios_in(DAC_DATA);
                 uint32_t luminance = red * (uint32_t)77 + green * (uint32_t)151
                                    + blue * (uint32_t)28 + (uint32_t)128;
                 uint8_t y = (uint8_t)(luminance >> 8);
-                bios_out(DAC_WRITE_INDEX, index);
-                bios_out(DAC_DATA, y);
-                bios_out(DAC_DATA, y);
-                bios_out(DAC_DATA, y);
+                vgabios_out(DAC_WRITE_INDEX, index);
+                vgabios_out(DAC_DATA, y);
+                vgabios_out(DAC_DATA, y);
+                vgabios_out(DAC_DATA, y);
             }
-            pokeb(BDA, BDA_VGA_FLAGS, flags);
+            vgabios_pokeb(BDA, BDA_VGA_FLAGS, flags);
             break;
         }
         default: {
@@ -984,9 +999,9 @@ static void text_rows(const struct vgabios_mode *m, uint8_t height) {
     uint16_t vde = (uint16_t)(vde_low | ((overflow & 0x02) << 7) | ((overflow & 0x40) << 3));
     uint16_t lines = (uint16_t)(vde + 1);
     uint8_t rows = (uint8_t)(lines / height);
-    pokeb(BDA, BDA_ROWS, (uint8_t)(rows - 1));
-    pokew(BDA, BDA_CHAR_HEIGHT, height);
-    pokew(
+    vgabios_pokeb(BDA, BDA_ROWS, (uint8_t)(rows - 1));
+    vgabios_pokew(BDA, BDA_CHAR_HEIGHT, height);
+    vgabios_pokew(
         BDA, BDA_PAGE_SIZE, (uint16_t)((rows * m->columns * (uint32_t)2 + 0xff) & ~(uint32_t)0xff)
     );
     crtc_write(0x0a, (uint8_t)(height - 3));
@@ -1009,7 +1024,7 @@ static void font_functions(struct vgabios_regs *r) {
         }
         case 0x01:
         case 0x11: {
-            load_rom_font(m, ROM_FONT14, 14, 0, 256, r->bl);
+            load_rom_font(m, VGABIOS_ROM_FONT14, 14, 0, 256, r->bl);
             if (r->al == 0x11) {
                 text_rows(m, 14);
             }
@@ -1017,7 +1032,7 @@ static void font_functions(struct vgabios_regs *r) {
         }
         case 0x02:
         case 0x12: {
-            load_rom_font(m, ROM_FONT8, 8, 0, 256, r->bl);
+            load_rom_font(m, VGABIOS_ROM_FONT8, 8, 0, 256, r->bl);
             if (r->al == 0x12) {
                 text_rows(m, 8);
             }
@@ -1025,7 +1040,7 @@ static void font_functions(struct vgabios_regs *r) {
         }
         case 0x04:
         case 0x14: {
-            load_rom_font(m, ROM_FONT16, 16, 0, 256, r->bl);
+            load_rom_font(m, VGABIOS_ROM_FONT16, 16, 0, 256, r->bl);
             if (r->al == 0x14) {
                 text_rows(m, 16);
             }
@@ -1049,10 +1064,10 @@ static void font_functions(struct vgabios_regs *r) {
             } else {
                 set_vector(0x43, VGABIOS_SEGMENT, rom_font(height));
             }
-            pokew(BDA, BDA_CHAR_HEIGHT, height);
+            vgabios_pokew(BDA, BDA_CHAR_HEIGHT, height);
             uint8_t rows = r->bl == 1 ? 14 : r->bl == 2 ? 25 : r->bl == 3 ? 43 : r->dl;
             if (rows != 0) {
-                pokeb(BDA, BDA_ROWS, (uint8_t)(rows - 1));
+                vgabios_pokeb(BDA, BDA_ROWS, (uint8_t)(rows - 1));
             }
             break;
         }
@@ -1061,37 +1076,37 @@ static void font_functions(struct vgabios_regs *r) {
             uint16_t offset = 0;
             switch (r->bh) {
                 case 0x00: {
-                    segment = peekw(0, VECTOR(0x1f) + 2);
-                    offset = peekw(0, VECTOR(0x1f));
+                    segment = vgabios_peekw(0, VECTOR(0x1f) + 2);
+                    offset = vgabios_peekw(0, VECTOR(0x1f));
                     break;
                 }
                 case 0x01: {
-                    segment = peekw(0, VECTOR(0x43) + 2);
-                    offset = peekw(0, VECTOR(0x43));
+                    segment = vgabios_peekw(0, VECTOR(0x43) + 2);
+                    offset = vgabios_peekw(0, VECTOR(0x43));
                     break;
                 }
                 case 0x02:
                 case 0x05: {
-                    offset = ROM_FONT14;
+                    offset = VGABIOS_ROM_FONT14;
                     break;
                 }
                 case 0x03: {
-                    offset = ROM_FONT8;
+                    offset = VGABIOS_ROM_FONT8;
                     break;
                 }
                 case 0x04: {
-                    offset = ROM_FONT8 + 128 * 8;
+                    offset = VGABIOS_ROM_FONT8 + 128 * 8;
                     break;
                 }
                 default: {
-                    offset = ROM_FONT16;
+                    offset = VGABIOS_ROM_FONT16;
                     break;
                 }
             }
             r->es = segment;
             r->bp = offset;
-            r->cx = peekw(BDA, BDA_CHAR_HEIGHT);
-            r->dl = peekb(BDA, BDA_ROWS);
+            r->cx = vgabios_peekw(BDA, BDA_CHAR_HEIGHT);
+            r->dl = vgabios_peekb(BDA, BDA_ROWS);
             break;
         }
         default: {
@@ -1106,44 +1121,46 @@ static void alternate_select(struct vgabios_regs *r) {
             r->bh = crtc_port() == 0x3b4 ? 1 : 0;
             r->bl = 0x03;
             r->ch = 0;
-            r->cl = peekb(BDA, BDA_SWITCHES) & 0x0f;
+            r->cl = vgabios_peekb(BDA, BDA_SWITCHES) & 0x0f;
             break;
         }
         case 0x30: {
-            uint8_t flags = peekb(BDA, BDA_VGA_FLAGS)
+            uint8_t flags = vgabios_peekb(BDA, BDA_VGA_FLAGS)
                           & (uint8_t)~(BDA_VGA_FLAGS_200 | BDA_VGA_FLAGS_400);
             if (r->al == 0) {
                 flags |= BDA_VGA_FLAGS_200;
             } else if (r->al == 2) {
                 flags |= BDA_VGA_FLAGS_400;
             }
-            pokeb(BDA, BDA_VGA_FLAGS, flags);
+            vgabios_pokeb(BDA, BDA_VGA_FLAGS, flags);
             r->al = 0x12;
             break;
         }
         case 0x31: {
-            uint8_t flags = peekb(BDA, BDA_VGA_FLAGS) & (uint8_t)~BDA_VGA_FLAGS_NO_PALETTE;
-            pokeb(
+            uint8_t flags = vgabios_peekb(BDA, BDA_VGA_FLAGS) & (uint8_t)~BDA_VGA_FLAGS_NO_PALETTE;
+            vgabios_pokeb(
                 BDA, BDA_VGA_FLAGS, (uint8_t)(flags | (r->al != 0 ? BDA_VGA_FLAGS_NO_PALETTE : 0))
             );
             r->al = 0x12;
             break;
         }
         case 0x32: {
-            bios_out(VGA_ENABLE, r->al != 0 ? 0x00 : 0x01);
+            vgabios_out(VGA_ENABLE, r->al != 0 ? 0x00 : 0x01);
             r->al = 0x12;
             break;
         }
         case 0x33: {
-            uint8_t flags = peekb(BDA, BDA_VGA_FLAGS) & (uint8_t)~BDA_VGA_FLAGS_GREY;
-            pokeb(BDA, BDA_VGA_FLAGS, (uint8_t)(flags | (r->al != 0 ? 0 : BDA_VGA_FLAGS_GREY)));
+            uint8_t flags = vgabios_peekb(BDA, BDA_VGA_FLAGS) & (uint8_t)~BDA_VGA_FLAGS_GREY;
+            vgabios_pokeb(
+                BDA, BDA_VGA_FLAGS, (uint8_t)(flags | (r->al != 0 ? 0 : BDA_VGA_FLAGS_GREY))
+            );
             r->al = 0x12;
             break;
         }
         case 0x34: {
-            uint8_t control = peekb(BDA, BDA_VIDEO_CONTROL)
+            uint8_t control = vgabios_peekb(BDA, BDA_VIDEO_CONTROL)
                             & (uint8_t)~BDA_VIDEO_CONTROL_NO_EMULATION;
-            pokeb(
+            vgabios_pokeb(
                 BDA, BDA_VIDEO_CONTROL,
                 (uint8_t)(control | (r->al != 0 ? BDA_VIDEO_CONTROL_NO_EMULATION : 0))
             );
@@ -1170,53 +1187,54 @@ static void state_information(struct vgabios_regs *r) {
     const struct vgabios_mode *m = current_mode();
     uint16_t to = r->di;
     uint16_t es = r->es;
-    pokew(es, to, ROM_FUNCTIONALITY);
-    pokew(es, (uint16_t)(to + 2), VGABIOS_SEGMENT);
-    pokeb(es, (uint16_t)(to + 4), peekb(BDA, BDA_MODE));
-    pokew(es, (uint16_t)(to + 5), peekw(BDA, BDA_COLUMNS));
-    pokew(es, (uint16_t)(to + 7), peekw(BDA, BDA_PAGE_SIZE));
-    pokew(es, (uint16_t)(to + 9), peekw(BDA, BDA_PAGE_START));
+    vgabios_pokew(es, to, VGABIOS_ROM_FUNCTIONALITY);
+    vgabios_pokew(es, (uint16_t)(to + 2), VGABIOS_SEGMENT);
+    vgabios_pokeb(es, (uint16_t)(to + 4), vgabios_peekb(BDA, BDA_MODE));
+    vgabios_pokew(es, (uint16_t)(to + 5), vgabios_peekw(BDA, BDA_COLUMNS));
+    vgabios_pokew(es, (uint16_t)(to + 7), vgabios_peekw(BDA, BDA_PAGE_SIZE));
+    vgabios_pokew(es, (uint16_t)(to + 9), vgabios_peekw(BDA, BDA_PAGE_START));
     for (size_t i = 0; i < 16; i++) {
-        pokeb(es, (uint16_t)(to + 11 + i), peekb(BDA, (uint16_t)(BDA_CURSOR + i)));
+        vgabios_pokeb(es, (uint16_t)(to + 11 + i), vgabios_peekb(BDA, (uint16_t)(BDA_CURSOR + i)));
     }
-    pokew(es, (uint16_t)(to + 27), peekw(BDA, BDA_CURSOR_TYPE));
-    pokeb(es, (uint16_t)(to + 29), peekb(BDA, BDA_PAGE));
-    pokew(es, (uint16_t)(to + 30), crtc_port());
-    pokeb(es, (uint16_t)(to + 32), peekb(BDA, BDA_MODE_CONTROL));
-    pokeb(es, (uint16_t)(to + 33), peekb(BDA, BDA_PALETTE));
-    pokeb(es, (uint16_t)(to + 34), (uint8_t)(peekb(BDA, BDA_ROWS) + 1));
-    pokew(es, (uint16_t)(to + 35), peekw(BDA, BDA_CHAR_HEIGHT));
-    pokeb(es, (uint16_t)(to + 37), crtc_port() == 0x3b4 ? DCC_VGA_MONO : DCC_VGA_COLOR);
-    pokeb(es, (uint16_t)(to + 38), 0);
+    vgabios_pokew(es, (uint16_t)(to + 27), vgabios_peekw(BDA, BDA_CURSOR_TYPE));
+    vgabios_pokeb(es, (uint16_t)(to + 29), vgabios_peekb(BDA, BDA_PAGE));
+    vgabios_pokew(es, (uint16_t)(to + 30), crtc_port());
+    vgabios_pokeb(es, (uint16_t)(to + 32), vgabios_peekb(BDA, BDA_MODE_CONTROL));
+    vgabios_pokeb(es, (uint16_t)(to + 33), vgabios_peekb(BDA, BDA_PALETTE));
+    vgabios_pokeb(es, (uint16_t)(to + 34), (uint8_t)(vgabios_peekb(BDA, BDA_ROWS) + 1));
+    vgabios_pokew(es, (uint16_t)(to + 35), vgabios_peekw(BDA, BDA_CHAR_HEIGHT));
+    vgabios_pokeb(es, (uint16_t)(to + 37), crtc_port() == 0x3b4 ? DCC_VGA_MONO : DCC_VGA_COLOR);
+    vgabios_pokeb(es, (uint16_t)(to + 38), 0);
     uint16_t colours = 16;
     size_t pages = 1;
     uint8_t lines = 2;
     if (m != NULL) {
-        if (m->kind == MODE_LINEAR) {
+        if (m->kind == VGABIOS_MODE_LINEAR) {
             colours = 256;
-        } else if (m->kind == MODE_CGA) {
+        } else if (m->kind == VGABIOS_MODE_CGA) {
             colours = 4;
-        } else if (m->kind == MODE_CGA1 || m->mode == 0x07 || m->mode == 0x0f || m->mode == 0x11) {
+        } else if (m->kind == VGABIOS_MODE_CGA1 || m->mode == 0x07 || m->mode == 0x0f
+                || m->mode == 0x11) {
             colours = 2;
         }
         if (m->page_size != 0) {
-            pages = (uint8_t)(m->kind == MODE_TEXT
+            pages = (uint8_t)(m->kind == VGABIOS_MODE_TEXT
                             ? (uint32_t)0x8000 / m->page_size
                             : (uint32_t)0x10000 / m->page_size);
         }
         lines = m->height == 200 ? 0 : m->height == 350 ? 1 : m->height == 480 ? 3 : 2;
     }
-    pokew(es, (uint16_t)(to + 39), colours);
-    pokeb(es, (uint16_t)(to + 41), pages);
-    pokeb(es, (uint16_t)(to + 42), lines);
+    vgabios_pokew(es, (uint16_t)(to + 39), colours);
+    vgabios_pokeb(es, (uint16_t)(to + 41), pages);
+    vgabios_pokeb(es, (uint16_t)(to + 42), lines);
     uint8_t map = seq_read(0x03);
-    pokeb(es, (uint16_t)(to + 43), (uint8_t)(((map >> 3) & 4) | ((map >> 2) & 3)));
-    pokeb(es, (uint16_t)(to + 44), (uint8_t)(((map >> 2) & 4) | (map & 3)));
-    pokeb(es, (uint16_t)(to + 45), (uint8_t)(peekb(BDA, BDA_VGA_FLAGS) & 0x0f));
+    vgabios_pokeb(es, (uint16_t)(to + 43), (uint8_t)(((map >> 3) & 4) | ((map >> 2) & 3)));
+    vgabios_pokeb(es, (uint16_t)(to + 44), (uint8_t)(((map >> 2) & 4) | (map & 3)));
+    vgabios_pokeb(es, (uint16_t)(to + 45), (uint8_t)(vgabios_peekb(BDA, BDA_VGA_FLAGS) & 0x0f));
     for (size_t i = 46; i < 64; i++) {
-        pokeb(es, (uint16_t)(to + i), 0);
+        vgabios_pokeb(es, (uint16_t)(to + i), 0);
     }
-    pokeb(es, (uint16_t)(to + 49), 3);
+    vgabios_pokeb(es, (uint16_t)(to + 49), 3);
     r->al = 0x1b;
 }
 
@@ -1318,11 +1336,11 @@ void vgabios_int10(struct vgabios_regs *r) {
             break;
         }
         case 0x1c: {
-            vbe_vga_state(r);
+            vgabios_vbe_vga_state(r);
             break;
         }
         case 0x4f: {
-            vbe_int10(r);
+            vgabios_vbe_int10(r);
             break;
         }
         default: {
@@ -1331,12 +1349,12 @@ void vgabios_int10(struct vgabios_regs *r) {
     }
 }
 
-void vgabios_init_call(void) {
+void vgabios_int10_init_call(void) {
     set_vector(0x10, VGABIOS_SEGMENT, vgabios_int10_offset());
-    pokeb(BDA, BDA_VIDEO_CONTROL, 0x60);
-    pokeb(BDA, BDA_SWITCHES, 0xf9);
-    pokeb(BDA, BDA_VGA_FLAGS, 0x51);
-    pokeb(BDA, BDA_DCC, 0x08);
-    pokew(BDA, BDA_CRTC, 0x3d4);
+    vgabios_pokeb(BDA, BDA_VIDEO_CONTROL, 0x60);
+    vgabios_pokeb(BDA, BDA_SWITCHES, 0xf9);
+    vgabios_pokeb(BDA, BDA_VGA_FLAGS, 0x51);
+    vgabios_pokeb(BDA, BDA_DCC, 0x08);
+    vgabios_pokew(BDA, BDA_CRTC, 0x3d4);
     set_mode(0x03);
 }

@@ -208,8 +208,8 @@ static uintptr_t lfb_address(void) {
 }
 
 static void wait_retrace(void) {
-    while ((bios_in(INPUT_STATUS1) & STATUS1_RETRACE) == 0) {
-        bios_relax();
+    while ((vgabios_in(INPUT_STATUS1) & STATUS1_RETRACE) == 0) {
+        vgabios_relax();
     }
 }
 
@@ -288,8 +288,8 @@ static size_t list_modes(uint16_t *list, size_t count, bool uncommon) {
 }
 
 static void controller_info(struct vgabios_regs *r) {
-    bool vbe2 = peekw(r->es, r->di) == ('V' | 'B' << 8)
-             && peekw(r->es, (uint16_t)(r->di + 2)) == ('E' | '2' << 8);
+    bool vbe2 = vgabios_peekw(r->es, r->di) == ('V' | 'B' << 8)
+             && vgabios_peekw(r->es, (uint16_t)(r->di + 2)) == ('E' | '2' << 8);
     struct controller_info_block b;
     memset(&b, 0, sizeof(struct controller_info_block));
     b.signature[0] = 'V';
@@ -297,16 +297,16 @@ static void controller_info(struct vgabios_regs *r) {
     b.signature[2] = 'S';
     b.signature[3] = 'A';
     b.version = 0x0300;
-    b.oem_string = far_pointer(ROM_OEM_STRING);
+    b.oem_string = far_pointer(VGABIOS_ROM_OEM_STRING);
     // The DAC can take 8 bits per primary.
     b.capabilities = 0x00000001;
     b.total_memory = dispi_read(DISPI_VIDEO_MEMORY_64K);
     if (vbe2) {
-        b.vendor_name = far_pointer(ROM_VENDOR_NAME);
-        b.product_name = far_pointer(ROM_PRODUCT_NAME);
-        b.product_revision = far_pointer(ROM_PRODUCT_REVISION);
+        b.vendor_name = far_pointer(VGABIOS_ROM_VENDOR_NAME);
+        b.product_name = far_pointer(VGABIOS_ROM_PRODUCT_NAME);
+        b.product_revision = far_pointer(VGABIOS_ROM_PRODUCT_REVISION);
     }
-    far_fill8(r->es, r->di, 0, vbe2 ? 512 : 256);
+    vgabios_far_fill8(r->es, r->di, 0, vbe2 ? 512 : 256);
     // The mode list goes in the block, as some callers see nothing else of
     // real-mode memory: Windows on x86-64, through its emulator. Should more
     // modes fit than the block holds, 15 and 24 bpp ones are left out first.
@@ -315,9 +315,9 @@ static void controller_info(struct vgabios_regs *r) {
     size_t count = list_modes(list, 0, false);
     count = list_modes(list, count, true);
     list[count] = 0xffff;
-    poke_block(r->es, at, list, (count + 1) * sizeof(uint16_t));
+    vgabios_poke_block(r->es, at, list, (count + 1) * sizeof(uint16_t));
     b.mode_list = (uint32_t)r->es << 16 | at;
-    poke_block(r->es, r->di, &b, sizeof(struct controller_info_block));
+    vgabios_poke_block(r->es, r->di, &b, sizeof(struct controller_info_block));
     r->ax = STATUS_SUCCESS;
 }
 
@@ -368,12 +368,12 @@ static void mode_info(struct vgabios_regs *r) {
     b.linear_bytes_per_line = (uint16_t)pitch;
     b.banked_image_pages = images;
     b.linear_image_pages = images;
-    far_fill8(r->es, r->di, 0, 256);
-    poke_block(r->es, r->di, &b, sizeof(struct mode_info_block));
+    vgabios_far_fill8(r->es, r->di, 0, 256);
+    vgabios_poke_block(r->es, r->di, &b, sizeof(struct mode_info_block));
     r->ax = STATUS_SUCCESS;
 }
 
-void vbe_disable(void) {
+void vgabios_vbe_disable(void) {
     if (present()) {
         dispi_write(DISPI_ENABLE, 0);
     }
@@ -383,7 +383,7 @@ static void set_mode(struct vgabios_regs *r) {
     uint16_t number = r->bx & MODE_NUMBER;
     bool keep = (r->bx & MODE_KEEP) != 0;
     if (number < 0x100) {
-        vgabios_set_mode((uint8_t)((number & 0x7f) | (keep ? 0x80 : 0)));
+        vgabios_int10_set_mode((uint8_t)((number & 0x7f) | (keep ? 0x80 : 0)));
         r->ax = STATUS_SUCCESS;
         return;
     }
@@ -404,18 +404,20 @@ static void set_mode(struct vgabios_regs *r) {
         (uint16_t)(DISPI_ENABLED | (lfb ? DISPI_LFB_ENABLED : 0) | (keep ? DISPI_NOCLEARMEM : 0))
     );
     if (m.bpp == 8) {
-        vgabios_load_palette_256();
+        vgabios_int10_load_palette_256();
     }
-    uint8_t control = peekb(BDA, BDA_VIDEO_CONTROL) & (uint8_t)~BDA_VIDEO_CONTROL_KEPT;
-    pokeb(BDA, BDA_VIDEO_CONTROL, (uint8_t)(control | (keep ? BDA_VIDEO_CONTROL_KEPT : 0)));
+    uint8_t control = vgabios_peekb(BDA, BDA_VIDEO_CONTROL) & (uint8_t)~BDA_VIDEO_CONTROL_KEPT;
+    vgabios_pokeb(
+        BDA, BDA_VIDEO_CONTROL, (uint8_t)(control | (keep ? BDA_VIDEO_CONTROL_KEPT : 0))
+    );
     r->ax = STATUS_SUCCESS;
 }
 
 static void current_mode(struct vgabios_regs *r) {
     uint16_t enable = dispi_read(DISPI_ENABLE);
     if ((enable & DISPI_ENABLED) == 0) {
-        bool kept = (peekb(BDA, BDA_VIDEO_CONTROL) & BDA_VIDEO_CONTROL_KEPT) != 0;
-        r->bx = (uint16_t)(peekb(BDA, BDA_MODE) | (kept ? MODE_KEEP : 0));
+        bool kept = (vgabios_peekb(BDA, BDA_VIDEO_CONTROL) & BDA_VIDEO_CONTROL_KEPT) != 0;
+        r->bx = (uint16_t)(vgabios_peekb(BDA, BDA_MODE) | (kept ? MODE_KEEP : 0));
         r->ax = STATUS_SUCCESS;
         return;
     }
@@ -436,132 +438,132 @@ static void current_mode(struct vgabios_regs *r) {
 }
 
 static uint16_t crtc_base(void) {
-    return (bios_in(0x3cc) & 1) != 0 ? 0x3d4 : 0x3b4;
+    return (vgabios_in(0x3cc) & 1) != 0 ? 0x3d4 : 0x3b4;
 }
 
 static void hardware_save(uint16_t seg, uint16_t at) {
     uint16_t crtc = crtc_base();
-    pokeb(seg, at, bios_in(0x3cc));
-    pokeb(seg, (uint16_t)(at + 1), bios_in(0x3c4));
+    vgabios_pokeb(seg, at, vgabios_in(0x3cc));
+    vgabios_pokeb(seg, (uint16_t)(at + 1), vgabios_in(0x3c4));
     for (size_t i = 0; i < 5; i++) {
-        bios_out(0x3c4, i);
-        pokeb(seg, (uint16_t)(at + 2 + i), bios_in(0x3c5));
+        vgabios_out(0x3c4, i);
+        vgabios_pokeb(seg, (uint16_t)(at + 2 + i), vgabios_in(0x3c5));
     }
-    bios_out(0x3c4, peekb(seg, (uint16_t)(at + 1)));
-    pokeb(seg, (uint16_t)(at + 7), bios_in(crtc));
+    vgabios_out(0x3c4, vgabios_peekb(seg, (uint16_t)(at + 1)));
+    vgabios_pokeb(seg, (uint16_t)(at + 7), vgabios_in(crtc));
     for (size_t i = 0; i < 25; i++) {
-        bios_out(crtc, i);
-        pokeb(seg, (uint16_t)(at + 8 + i), bios_in((uint16_t)(crtc + 1)));
+        vgabios_out(crtc, i);
+        vgabios_pokeb(seg, (uint16_t)(at + 8 + i), vgabios_in((uint16_t)(crtc + 1)));
     }
-    bios_out(crtc, peekb(seg, (uint16_t)(at + 7)));
-    pokeb(seg, (uint16_t)(at + 33), bios_in(0x3ce));
+    vgabios_out(crtc, vgabios_peekb(seg, (uint16_t)(at + 7)));
+    vgabios_pokeb(seg, (uint16_t)(at + 33), vgabios_in(0x3ce));
     for (size_t i = 0; i < 9; i++) {
-        bios_out(0x3ce, i);
-        pokeb(seg, (uint16_t)(at + 34 + i), bios_in(0x3cf));
+        vgabios_out(0x3ce, i);
+        vgabios_pokeb(seg, (uint16_t)(at + 34 + i), vgabios_in(0x3cf));
     }
-    bios_out(0x3ce, peekb(seg, (uint16_t)(at + 33)));
-    bios_in((uint16_t)(crtc + 6));
-    pokeb(seg, (uint16_t)(at + 43), bios_in(0x3c0));
+    vgabios_out(0x3ce, vgabios_peekb(seg, (uint16_t)(at + 33)));
+    vgabios_in((uint16_t)(crtc + 6));
+    vgabios_pokeb(seg, (uint16_t)(at + 43), vgabios_in(0x3c0));
     for (size_t i = 0; i < 21; i++) {
-        bios_in((uint16_t)(crtc + 6));
-        bios_out(0x3c0, i);
-        pokeb(seg, (uint16_t)(at + 44 + i), bios_in(0x3c1));
+        vgabios_in((uint16_t)(crtc + 6));
+        vgabios_out(0x3c0, i);
+        vgabios_pokeb(seg, (uint16_t)(at + 44 + i), vgabios_in(0x3c1));
     }
-    bios_in((uint16_t)(crtc + 6));
-    bios_out(0x3c0, (uint8_t)(peekb(seg, (uint16_t)(at + 43)) | 0x20));
-    bios_in((uint16_t)(crtc + 6));
-    pokeb(seg, (uint16_t)(at + 65), bios_in(0x3ca));
+    vgabios_in((uint16_t)(crtc + 6));
+    vgabios_out(0x3c0, (uint8_t)(vgabios_peekb(seg, (uint16_t)(at + 43)) | 0x20));
+    vgabios_in((uint16_t)(crtc + 6));
+    vgabios_pokeb(seg, (uint16_t)(at + 65), vgabios_in(0x3ca));
 }
 
 static void hardware_restore(uint16_t seg, uint16_t at) {
-    bios_out(0x3c2, peekb(seg, at));
+    vgabios_out(0x3c2, vgabios_peekb(seg, at));
     uint16_t crtc = crtc_base();
     for (size_t i = 0; i < 5; i++) {
-        bios_out_indexed(0x3c4, i, peekb(seg, (uint16_t)(at + 2 + i)));
+        vgabios_out_indexed(0x3c4, i, vgabios_peekb(seg, (uint16_t)(at + 2 + i)));
     }
-    bios_out(0x3c4, peekb(seg, (uint16_t)(at + 1)));
+    vgabios_out(0x3c4, vgabios_peekb(seg, (uint16_t)(at + 1)));
     // Unprotected first, so that registers 0-7 take their values.
-    bios_out_indexed(crtc, 0x11, peekb(seg, (uint16_t)(at + 8 + 0x11)) & 0x7f);
+    vgabios_out_indexed(crtc, 0x11, vgabios_peekb(seg, (uint16_t)(at + 8 + 0x11)) & 0x7f);
     for (size_t i = 0; i < 25; i++) {
-        bios_out_indexed(crtc, i, peekb(seg, (uint16_t)(at + 8 + i)));
+        vgabios_out_indexed(crtc, i, vgabios_peekb(seg, (uint16_t)(at + 8 + i)));
     }
-    bios_out(crtc, peekb(seg, (uint16_t)(at + 7)));
+    vgabios_out(crtc, vgabios_peekb(seg, (uint16_t)(at + 7)));
     for (size_t i = 0; i < 9; i++) {
-        bios_out_indexed(0x3ce, i, peekb(seg, (uint16_t)(at + 34 + i)));
+        vgabios_out_indexed(0x3ce, i, vgabios_peekb(seg, (uint16_t)(at + 34 + i)));
     }
-    bios_out(0x3ce, peekb(seg, (uint16_t)(at + 33)));
-    bios_in((uint16_t)(crtc + 6));
+    vgabios_out(0x3ce, vgabios_peekb(seg, (uint16_t)(at + 33)));
+    vgabios_in((uint16_t)(crtc + 6));
     for (size_t i = 0; i < 21; i++) {
-        bios_out(0x3c0, i);
-        bios_out(0x3c0, peekb(seg, (uint16_t)(at + 44 + i)));
+        vgabios_out(0x3c0, i);
+        vgabios_out(0x3c0, vgabios_peekb(seg, (uint16_t)(at + 44 + i)));
     }
-    bios_out(0x3c0, (uint8_t)(peekb(seg, (uint16_t)(at + 43)) | 0x20));
-    bios_in((uint16_t)(crtc + 6));
-    bios_out((uint16_t)(crtc + 6), peekb(seg, (uint16_t)(at + 65)));
+    vgabios_out(0x3c0, (uint8_t)(vgabios_peekb(seg, (uint16_t)(at + 43)) | 0x20));
+    vgabios_in((uint16_t)(crtc + 6));
+    vgabios_out((uint16_t)(crtc + 6), vgabios_peekb(seg, (uint16_t)(at + 65)));
 }
 
 static void bios_data_copy(uint16_t seg, uint16_t at, bool save) {
     for (size_t i = 0; i < 30; i++) {
         uint16_t bda = (uint16_t)(0x49 + i);
         if (save) {
-            pokeb(seg, (uint16_t)(at + i), peekb(BDA, bda));
+            vgabios_pokeb(seg, (uint16_t)(at + i), vgabios_peekb(BDA, bda));
         } else {
-            pokeb(BDA, bda, peekb(seg, (uint16_t)(at + i)));
+            vgabios_pokeb(BDA, bda, vgabios_peekb(seg, (uint16_t)(at + i)));
         }
     }
     for (size_t i = 0; i < 7; i++) {
         uint16_t bda = (uint16_t)(0x84 + i);
         if (save) {
-            pokeb(seg, (uint16_t)(at + 30 + i), peekb(BDA, bda));
+            vgabios_pokeb(seg, (uint16_t)(at + 30 + i), vgabios_peekb(BDA, bda));
         } else {
-            pokeb(BDA, bda, peekb(seg, (uint16_t)(at + 30 + i)));
+            vgabios_pokeb(BDA, bda, vgabios_peekb(seg, (uint16_t)(at + 30 + i)));
         }
     }
     // The vectors of the graphics font, INT 1Fh's and 43h's.
     for (size_t i = 0; i < 4; i++) {
         uint16_t vector = (uint16_t)((i < 2 ? 0x1f * 4 : 0x43 * 4) + (i & 1) * 2);
         if (save) {
-            pokew(seg, (uint16_t)(at + 37 + i * 2), peekw(0, vector));
+            vgabios_pokew(seg, (uint16_t)(at + 37 + i * 2), vgabios_peekw(0, vector));
         } else {
-            pokew(0, vector, peekw(seg, (uint16_t)(at + 37 + i * 2)));
+            vgabios_pokew(0, vector, vgabios_peekw(seg, (uint16_t)(at + 37 + i * 2)));
         }
     }
 }
 
 static void dac_save(uint16_t seg, uint16_t at) {
-    pokeb(seg, at, bios_in(0x3c6));
-    pokeb(seg, (uint16_t)(at + 1), bios_in(0x3c7));
-    pokeb(seg, (uint16_t)(at + 2), bios_in(0x3c8));
-    bios_out(0x3c7, 0);
+    vgabios_pokeb(seg, at, vgabios_in(0x3c6));
+    vgabios_pokeb(seg, (uint16_t)(at + 1), vgabios_in(0x3c7));
+    vgabios_pokeb(seg, (uint16_t)(at + 2), vgabios_in(0x3c8));
+    vgabios_out(0x3c7, 0);
     for (size_t i = 0; i < 768; i++) {
-        pokeb(seg, (uint16_t)(at + 3 + i), bios_in(0x3c9));
+        vgabios_pokeb(seg, (uint16_t)(at + 3 + i), vgabios_in(0x3c9));
     }
 }
 
 static void dac_restore(uint16_t seg, uint16_t at) {
-    bios_out(0x3c6, peekb(seg, at));
-    bios_out(0x3c8, 0);
+    vgabios_out(0x3c6, vgabios_peekb(seg, at));
+    vgabios_out(0x3c8, 0);
     for (size_t i = 0; i < 768; i++) {
-        bios_out(0x3c9, peekb(seg, (uint16_t)(at + 3 + i)));
+        vgabios_out(0x3c9, vgabios_peekb(seg, (uint16_t)(at + 3 + i)));
     }
-    uint8_t index = peekb(seg, (uint16_t)(at + 2));
-    if ((peekb(seg, (uint16_t)(at + 1)) & 3) != 0) {
-        bios_out(0x3c7, index);
+    uint8_t index = vgabios_peekb(seg, (uint16_t)(at + 2));
+    if ((vgabios_peekb(seg, (uint16_t)(at + 1)) & 3) != 0) {
+        vgabios_out(0x3c7, index);
     } else {
-        bios_out(0x3c8, index);
+        vgabios_out(0x3c8, index);
     }
 }
 
 static void dispi_save(uint16_t seg, uint16_t at) {
     for (size_t i = 0; i < 8; i++) {
-        pokew(seg, (uint16_t)(at + i * 2), dispi_read(state_dispi[i]));
+        vgabios_pokew(seg, (uint16_t)(at + i * 2), dispi_read(state_dispi[i]));
     }
 }
 
 static void dispi_restore(uint16_t seg, uint16_t at) {
     dispi_write(DISPI_ENABLE, 0);
     for (size_t i = 0; i < 8; i++) {
-        uint16_t value = peekw(seg, (uint16_t)(at + i * 2));
+        uint16_t value = vgabios_peekw(seg, (uint16_t)(at + i * 2));
         if (state_dispi[i] == DISPI_ENABLE) {
             // Turned on without clearing the video memory, then as it was.
             dispi_write(DISPI_ENABLE, (uint16_t)(value | DISPI_NOCLEARMEM));
@@ -629,7 +631,7 @@ static void vbe_state(struct vgabios_regs *r) {
     r->ax = STATUS_SUCCESS;
 }
 
-void vbe_vga_state(struct vgabios_regs *r) {
+void vgabios_vbe_vga_state(struct vgabios_regs *r) {
     struct vgabios_regs call = *r;
     call.dl = r->al;
     call.cx = r->cx & 7;
@@ -755,7 +757,7 @@ static void display_start(struct vgabios_regs *r) {
             if ((r->bl & 0x80) != 0) {
                 wait_retrace();
             }
-            uint32_t start = bios_ecx(r);
+            uint32_t start = vgabios_ecx(r);
             dispi_write(DISPI_X_OFFSET, (uint16_t)(start % line / bytes));
             dispi_write(DISPI_Y_OFFSET, (uint16_t)(start / line));
             r->ax = STATUS_SUCCESS;
@@ -812,24 +814,24 @@ static void palette_data(struct vgabios_regs *r) {
             if ((r->bl & 0x80) != 0) {
                 wait_retrace();
             }
-            bios_out(0x3c8, (uint8_t)r->dx);
+            vgabios_out(0x3c8, (uint8_t)r->dx);
             for (size_t i = 0; i < r->cx; i++) {
                 uint16_t at = (uint16_t)(off + i * 4);
-                bios_out(0x3c9, peekb(seg, (uint16_t)(at + 2)));
-                bios_out(0x3c9, peekb(seg, (uint16_t)(at + 1)));
-                bios_out(0x3c9, peekb(seg, at));
+                vgabios_out(0x3c9, vgabios_peekb(seg, (uint16_t)(at + 2)));
+                vgabios_out(0x3c9, vgabios_peekb(seg, (uint16_t)(at + 1)));
+                vgabios_out(0x3c9, vgabios_peekb(seg, at));
             }
             r->ax = STATUS_SUCCESS;
             break;
         }
         case 0x01: {
-            bios_out(0x3c7, (uint8_t)r->dx);
+            vgabios_out(0x3c7, (uint8_t)r->dx);
             for (size_t i = 0; i < r->cx; i++) {
                 uint16_t at = (uint16_t)(off + i * 4);
-                pokeb(seg, (uint16_t)(at + 2), bios_in(0x3c9));
-                pokeb(seg, (uint16_t)(at + 1), bios_in(0x3c9));
-                pokeb(seg, at, bios_in(0x3c9));
-                pokeb(seg, (uint16_t)(at + 3), 0);
+                vgabios_pokeb(seg, (uint16_t)(at + 2), vgabios_in(0x3c9));
+                vgabios_pokeb(seg, (uint16_t)(at + 1), vgabios_in(0x3c9));
+                vgabios_pokeb(seg, at, vgabios_in(0x3c9));
+                vgabios_pokeb(seg, (uint16_t)(at + 3), 0);
             }
             r->ax = STATUS_SUCCESS;
             break;
@@ -865,7 +867,7 @@ static void ddc(struct vgabios_regs *r) {
                 r->ax = STATUS_FAILED;
                 break;
             }
-            poke_block(r->es, r->di, vgabios_display.edid + at, 128);
+            vgabios_poke_block(r->es, r->di, vgabios_display.edid + at, 128);
             r->ax = STATUS_SUCCESS;
             break;
         }
@@ -876,7 +878,7 @@ static void ddc(struct vgabios_regs *r) {
     }
 }
 
-void vbe_int10(struct vgabios_regs *r) {
+void vgabios_vbe_int10(struct vgabios_regs *r) {
     if (!present()) {
         return;
     }

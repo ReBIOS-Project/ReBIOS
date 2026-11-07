@@ -178,7 +178,7 @@ static void direct_write(uint16_t segment, uint16_t offset, uint16_t value, size
     mmio_write_linear(current->v, linear(segment, offset), &value, size);
 }
 
-uint8_t bios_in(uint16_t port) {
+uint8_t vgabios_in(uint16_t port) {
     if (current->direct) {
         return (uint8_t)direct_port(port, 1, true, 0);
     }
@@ -188,7 +188,7 @@ uint8_t bios_in(uint16_t port) {
     return (uint8_t)value;
 }
 
-void bios_out(uint16_t port, uint8_t value) {
+void vgabios_out(uint16_t port, uint8_t value) {
     if (current->direct) {
         direct_port(port, 1, false, value);
         return;
@@ -197,7 +197,7 @@ void bios_out(uint16_t port, uint8_t value) {
     exchange(&head, 1, NULL, 0, NULL, 0);
 }
 
-void bios_out_indexed(uint16_t port, uint8_t index, uint8_t value) {
+void vgabios_out_indexed(uint16_t port, uint8_t index, uint8_t value) {
     uint16_t both = (uint16_t)(value << 8 | index);
     if (current->direct) {
         direct_port(port, 2, false, both);
@@ -215,7 +215,7 @@ void bios_out_indexed(uint16_t port, uint8_t index, uint8_t value) {
     exchange(&head, 1, NULL, 0, NULL, 0);
 }
 
-void bios_out_block(uint16_t port, const uint8_t *bytes, size_t count) {
+void vgabios_out_block(uint16_t port, const uint8_t *bytes, size_t count) {
     if (current->direct) {
         for (size_t i = 0; i < count; i++) {
             direct_port(port, 1, false, bytes[i]);
@@ -227,11 +227,11 @@ void bios_out_block(uint16_t port, const uint8_t *bytes, size_t count) {
     uint16_t head[3] = { OP_OUT_BLOCK, port, (uint16_t)words };
     exchange(head, 3, bytes, words, NULL, 0);
     if ((count & 1) != 0) {
-        bios_out(port, bytes[count - 1]);
+        vgabios_out(port, bytes[count - 1]);
     }
 }
 
-void bios_dac_from_rom(uint16_t offset, size_t count) {
+void vgabios_dac_from_rom(uint16_t offset, size_t count) {
     if (current->direct) {
         for (size_t i = 0; i < (size_t)256 * 3; i++) {
             direct_port(VGA_DAC_DATA, 1, false, i < count ? rom_image[offset + i] : 0);
@@ -248,7 +248,7 @@ static bool in_rom(uint16_t segment, uint16_t offset, size_t size) {
     return segment == VGABIOS_SEGMENT && offset + size <= VGABIOS_ROM_SIZE;
 }
 
-uint8_t peekb(uint16_t segment, uint16_t offset) {
+uint8_t vgabios_peekb(uint16_t segment, uint16_t offset) {
     if (in_rom(segment, offset, 1)) {
         return rom_image[offset];
     }
@@ -266,7 +266,7 @@ uint8_t peekb(uint16_t segment, uint16_t offset) {
     return (uint8_t)value;
 }
 
-uint16_t peekw(uint16_t segment, uint16_t offset) {
+uint16_t vgabios_peekw(uint16_t segment, uint16_t offset) {
     if (in_rom(segment, offset, 2)) {
         return (uint16_t)(rom_image[offset] | rom_image[offset + 1] << 8);
     }
@@ -284,7 +284,7 @@ uint16_t peekw(uint16_t segment, uint16_t offset) {
     return value;
 }
 
-void pokeb(uint16_t segment, uint16_t offset, uint8_t value) {
+void vgabios_pokeb(uint16_t segment, uint16_t offset, uint8_t value) {
     if (current->direct) {
         direct_write(segment, offset, value, 1);
         return;
@@ -298,7 +298,7 @@ void pokeb(uint16_t segment, uint16_t offset, uint8_t value) {
     }
 }
 
-void pokew(uint16_t segment, uint16_t offset, uint16_t value) {
+void vgabios_pokew(uint16_t segment, uint16_t offset, uint16_t value) {
     if (current->direct) {
         direct_write(segment, offset, value, 2);
         return;
@@ -312,7 +312,7 @@ void pokew(uint16_t segment, uint16_t offset, uint16_t value) {
     }
 }
 
-void poke_block(uint16_t segment, uint16_t offset, const void *bytes, size_t count) {
+void vgabios_poke_block(uint16_t segment, uint16_t offset, const void *bytes, size_t count) {
     const uint8_t *p = bytes;
     if (current->direct) {
         for (size_t i = 0; i + 2 <= count; i += 2) {
@@ -325,7 +325,7 @@ void poke_block(uint16_t segment, uint16_t offset, const void *bytes, size_t cou
     exchange(head, 4, p, count / 2, NULL, 0);
 }
 
-void far_fill8(uint16_t segment, uint16_t offset, uint8_t value, size_t count) {
+void vgabios_far_fill8(uint16_t segment, uint16_t offset, uint8_t value, size_t count) {
     if (count == 0) {
         return;
     }
@@ -340,7 +340,7 @@ void far_fill8(uint16_t segment, uint16_t offset, uint8_t value, size_t count) {
     exchange(head, 4, NULL, 0, NULL, 0);
 }
 
-void far_fill16(uint16_t segment, uint16_t offset, uint16_t value, size_t count) {
+void vgabios_far_fill16(uint16_t segment, uint16_t offset, uint16_t value, size_t count) {
     if (count == 0) {
         return;
     }
@@ -355,7 +355,7 @@ void far_fill16(uint16_t segment, uint16_t offset, uint16_t value, size_t count)
     exchange(head, 5, NULL, 0, NULL, 0);
 }
 
-void far_move(uint16_t segment, uint16_t to, uint16_t from, size_t count) {
+void vgabios_far_move(uint16_t segment, uint16_t to, uint16_t from, size_t count) {
     if (count == 0) {
         return;
     }
@@ -378,7 +378,7 @@ void far_move(uint16_t segment, uint16_t to, uint16_t from, size_t count) {
     exchange(head, 6, NULL, 0, NULL, 0);
 }
 
-void far_font(
+void vgabios_far_font(
     uint16_t to_segment, uint16_t to, uint16_t from_segment, uint16_t from, uint8_t height,
     size_t count
 ) {
@@ -390,7 +390,7 @@ void far_font(
             for (size_t i = 0; i < height; i++) {
                 uint16_t source = (uint16_t)(from + c * height + i);
                 direct_write(
-                    to_segment, (uint16_t)(to + c * 32 + i), peekb(from_segment, source), 1
+                    to_segment, (uint16_t)(to + c * 32 + i), vgabios_peekb(from_segment, source), 1
                 );
             }
             slice_end();
@@ -403,7 +403,7 @@ void far_font(
     exchange(head, 6, NULL, 0, NULL, 0);
 }
 
-uint32_t bios_ecx(const struct vgabios_regs *r) {
+uint32_t vgabios_ecx(const struct vgabios_regs *r) {
     if (current->direct) {
         return (uint32_t)current->v->gprs.rcx;
     }
@@ -413,16 +413,16 @@ uint32_t bios_ecx(const struct vgabios_regs *r) {
     return (uint32_t)high << 16 | r->cx;
 }
 
-void bios_relax(void) {
+void vgabios_relax(void) {
     if (current->direct) {
         slice_end();
     }
 }
 
 uint16_t vgabios_palette_offset(size_t index) {
-    size_t at = ROM_PALETTES;
+    size_t at = VGABIOS_ROM_PALETTES;
     for (size_t i = 0; i < index; i++) {
-        at += vgabios_palettes[i].count * 3;
+        at += vgabios_tables_palettes[i].count * 3;
     }
     return (uint16_t)at;
 }
@@ -480,7 +480,7 @@ static void call_main(void *arg) {
         }
         struct vgabios_regs before = c->regs;
         if (c->init) {
-            vgabios_init_call();
+            vgabios_int10_init_call();
         } else {
             vgabios_int10(&c->regs);
         }
@@ -700,28 +700,28 @@ static void display_fill(void) {
 
 void vgabios_rom_fill(uint8_t *image) {
     size_t stub = (size_t)(vgabios_stub_end - vgabios_stub);
-    if (stub > ROM_FONT8) {
+    if (stub > VGABIOS_ROM_FONT8) {
         panic("The video BIOS's program is larger than its room\n");
     }
     display_fill();
     memset(rom_image, 0, sizeof(rom_image));
     memcpy(rom_image, vgabios_stub, stub);
     rom_image[2] = VGABIOS_ROM_SIZE / 512;
-    memcpy(rom_image + ROM_FONT8, vgabios_font8, sizeof(vgabios_font8));
-    memcpy(rom_image + ROM_FONT14, vgabios_font14, sizeof(vgabios_font14));
-    memcpy(rom_image + ROM_FONT16, vgabios_font16, sizeof(vgabios_font16));
-    memcpy(rom_image + ROM_FUNCTIONALITY, functionality, sizeof(functionality));
-    rom_string(ROM_OEM_STRING, "ReBIOS VBE");
-    rom_string(ROM_VENDOR_NAME, "ReBIOS");
-    rom_string(ROM_PRODUCT_NAME, "ReBIOS VGA");
-    rom_string(ROM_PRODUCT_REVISION, "");
-    for (size_t i = 0; i < vgabios_palette_count; i++) {
-        size_t bytes = vgabios_palettes[i].count * 3;
+    memcpy(rom_image + VGABIOS_ROM_FONT8, vgabios_tables_font8, sizeof(vgabios_tables_font8));
+    memcpy(rom_image + VGABIOS_ROM_FONT14, vgabios_tables_font14, sizeof(vgabios_tables_font14));
+    memcpy(rom_image + VGABIOS_ROM_FONT16, vgabios_tables_font16, sizeof(vgabios_tables_font16));
+    memcpy(rom_image + VGABIOS_ROM_FUNCTIONALITY, functionality, sizeof(functionality));
+    rom_string(VGABIOS_ROM_OEM_STRING, "ReBIOS VBE");
+    rom_string(VGABIOS_ROM_VENDOR_NAME, "ReBIOS");
+    rom_string(VGABIOS_ROM_PRODUCT_NAME, "ReBIOS VGA");
+    rom_string(VGABIOS_ROM_PRODUCT_REVISION, "");
+    for (size_t i = 0; i < vgabios_tables_palette_count; i++) {
+        size_t bytes = vgabios_tables_palettes[i].count * 3;
         size_t at = vgabios_palette_offset(i);
         if (at + bytes > VGABIOS_ROM_SIZE) {
             panic("The video BIOS's palettes are larger than their room\n");
         }
-        memcpy(rom_image + at, vgabios_palettes[i].colours, bytes);
+        memcpy(rom_image + at, vgabios_tables_palettes[i].colours, bytes);
     }
     memcpy(image, rom_image, VGABIOS_ROM_SIZE);
 }

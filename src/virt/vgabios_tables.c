@@ -21,7 +21,7 @@
 #include <stdint.h>
 #include <virt/vgabios.h>
 
-const uint8_t vgabios_font8[2048] = {
+const uint8_t vgabios_tables_font8[2048] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7e, 0x81, 0xa5, 0x81, 0xbd, 0x99, 0x81, 0x7e,
     0x7e, 0xff, 0xdb, 0xff, 0xc3, 0xe7, 0xff, 0x7e, 0x6c, 0xfe, 0xfe, 0xfe, 0x7c, 0x38, 0x10, 0x00,
     0x10, 0x38, 0x7c, 0xfe, 0x7c, 0x38, 0x10, 0x00, 0x38, 0x7c, 0x38, 0xfe, 0xfe, 0x7c, 0x38, 0x7c,
@@ -152,7 +152,7 @@ const uint8_t vgabios_font8[2048] = {
     0x00, 0x00, 0x3c, 0x3c, 0x3c, 0x3c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
 
-const uint8_t vgabios_font14[3584] = {
+const uint8_t vgabios_tables_font14[3584] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x7e, 0x81, 0xa5, 0x81, 0x81, 0xbd, 0x99, 0x81, 0x7e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7e, 0xff,
     0xdb, 0xff, 0xff, 0xc3, 0xe7, 0xff, 0x7e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x6c, 0xfe, 0xfe,
@@ -379,7 +379,7 @@ const uint8_t vgabios_font14[3584] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
 
-const uint8_t vgabios_font16[4096] = {
+const uint8_t vgabios_tables_font16[4096] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x7e, 0x81, 0xa5, 0x81, 0x81, 0xbd, 0x99, 0x81, 0x81, 0x7e, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x7e, 0xff, 0xdb, 0xff, 0xff, 0xc3, 0xe7, 0xff, 0xff, 0x7e, 0x00, 0x00, 0x00, 0x00,
@@ -762,21 +762,21 @@ static const uint8_t palette3[768] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
 
-const struct vgabios_palette vgabios_palettes[4] = {
+const struct vgabios_palette vgabios_tables_palettes[4] = {
     { palette0, 64 },
     { palette1, 64 },
     { palette2, 64 },
     { palette3, 256 }
 };
 
-const size_t vgabios_palette_count = 4;
+const size_t vgabios_tables_palette_count = 4;
 
-const size_t vgabios_mode_count = 24;
+const size_t vgabios_tables_mode_count = 24;
 
-const struct vgabios_mode vgabios_modes[24] = {
+const struct vgabios_mode vgabios_tables_modes[24] = {
     {
         .mode = 0x00,
-        .kind = MODE_TEXT,
+        .kind = VGABIOS_MODE_TEXT,
         .columns = 40,
         .rows = 25,
         .char_height = 16,
@@ -800,7 +800,7 @@ const struct vgabios_mode vgabios_modes[24] = {
     },
     {
         .mode = 0x01,
-        .kind = MODE_TEXT,
+        .kind = VGABIOS_MODE_TEXT,
         .columns = 40,
         .rows = 25,
         .char_height = 16,
@@ -824,7 +824,7 @@ const struct vgabios_mode vgabios_modes[24] = {
     },
     {
         .mode = 0x02,
-        .kind = MODE_TEXT,
+        .kind = VGABIOS_MODE_TEXT,
         .columns = 80,
         .rows = 25,
         .char_height = 16,
@@ -848,7 +848,7 @@ const struct vgabios_mode vgabios_modes[24] = {
     },
     {
         .mode = 0x03,
-        .kind = MODE_TEXT,
+        .kind = VGABIOS_MODE_TEXT,
         .columns = 80,
         .rows = 25,
         .char_height = 16,
@@ -872,7 +872,7 @@ const struct vgabios_mode vgabios_modes[24] = {
     },
     {
         .mode = 0x04,
-        .kind = MODE_CGA,
+        .kind = VGABIOS_MODE_CGA,
         .columns = 40,
         .rows = 25,
         .char_height = 8,
@@ -896,7 +896,7 @@ const struct vgabios_mode vgabios_modes[24] = {
     },
     {
         .mode = 0x05,
-        .kind = MODE_CGA,
+        .kind = VGABIOS_MODE_CGA,
         .columns = 40,
         .rows = 25,
         .char_height = 8,
@@ -920,7 +920,7 @@ const struct vgabios_mode vgabios_modes[24] = {
     },
     {
         .mode = 0x06,
-        .kind = MODE_CGA1,
+        .kind = VGABIOS_MODE_CGA1,
         .columns = 80,
         .rows = 25,
         .char_height = 8,
@@ -944,7 +944,7 @@ const struct vgabios_mode vgabios_modes[24] = {
     },
     {
         .mode = 0x07,
-        .kind = MODE_TEXT,
+        .kind = VGABIOS_MODE_TEXT,
         .columns = 80,
         .rows = 25,
         .char_height = 16,
@@ -968,7 +968,7 @@ const struct vgabios_mode vgabios_modes[24] = {
     },
     {
         .mode = 0x0d,
-        .kind = MODE_PLANAR,
+        .kind = VGABIOS_MODE_PLANAR,
         .columns = 40,
         .rows = 25,
         .char_height = 8,
@@ -992,7 +992,7 @@ const struct vgabios_mode vgabios_modes[24] = {
     },
     {
         .mode = 0x0e,
-        .kind = MODE_PLANAR,
+        .kind = VGABIOS_MODE_PLANAR,
         .columns = 80,
         .rows = 25,
         .char_height = 8,
@@ -1016,7 +1016,7 @@ const struct vgabios_mode vgabios_modes[24] = {
     },
     {
         .mode = 0x0f,
-        .kind = MODE_PLANAR,
+        .kind = VGABIOS_MODE_PLANAR,
         .columns = 80,
         .rows = 25,
         .char_height = 14,
@@ -1040,7 +1040,7 @@ const struct vgabios_mode vgabios_modes[24] = {
     },
     {
         .mode = 0x10,
-        .kind = MODE_PLANAR,
+        .kind = VGABIOS_MODE_PLANAR,
         .columns = 80,
         .rows = 25,
         .char_height = 14,
@@ -1064,7 +1064,7 @@ const struct vgabios_mode vgabios_modes[24] = {
     },
     {
         .mode = 0x11,
-        .kind = MODE_PLANAR,
+        .kind = VGABIOS_MODE_PLANAR,
         .columns = 80,
         .rows = 30,
         .char_height = 16,
@@ -1088,7 +1088,7 @@ const struct vgabios_mode vgabios_modes[24] = {
     },
     {
         .mode = 0x12,
-        .kind = MODE_PLANAR,
+        .kind = VGABIOS_MODE_PLANAR,
         .columns = 80,
         .rows = 30,
         .char_height = 16,
@@ -1112,7 +1112,7 @@ const struct vgabios_mode vgabios_modes[24] = {
     },
     {
         .mode = 0x13,
-        .kind = MODE_LINEAR,
+        .kind = VGABIOS_MODE_LINEAR,
         .columns = 40,
         .rows = 25,
         .char_height = 8,
@@ -1136,7 +1136,7 @@ const struct vgabios_mode vgabios_modes[24] = {
     },
     {
         .mode = 0x00,
-        .kind = MODE_TEXT,
+        .kind = VGABIOS_MODE_TEXT,
         .columns = 40,
         .rows = 25,
         .char_height = 14,
@@ -1160,7 +1160,7 @@ const struct vgabios_mode vgabios_modes[24] = {
     },
     {
         .mode = 0x00,
-        .kind = MODE_TEXT,
+        .kind = VGABIOS_MODE_TEXT,
         .columns = 40,
         .rows = 25,
         .char_height = 8,
@@ -1184,7 +1184,7 @@ const struct vgabios_mode vgabios_modes[24] = {
     },
     {
         .mode = 0x01,
-        .kind = MODE_TEXT,
+        .kind = VGABIOS_MODE_TEXT,
         .columns = 40,
         .rows = 25,
         .char_height = 14,
@@ -1208,7 +1208,7 @@ const struct vgabios_mode vgabios_modes[24] = {
     },
     {
         .mode = 0x01,
-        .kind = MODE_TEXT,
+        .kind = VGABIOS_MODE_TEXT,
         .columns = 40,
         .rows = 25,
         .char_height = 8,
@@ -1232,7 +1232,7 @@ const struct vgabios_mode vgabios_modes[24] = {
     },
     {
         .mode = 0x02,
-        .kind = MODE_TEXT,
+        .kind = VGABIOS_MODE_TEXT,
         .columns = 80,
         .rows = 25,
         .char_height = 14,
@@ -1256,7 +1256,7 @@ const struct vgabios_mode vgabios_modes[24] = {
     },
     {
         .mode = 0x02,
-        .kind = MODE_TEXT,
+        .kind = VGABIOS_MODE_TEXT,
         .columns = 80,
         .rows = 25,
         .char_height = 8,
@@ -1280,7 +1280,7 @@ const struct vgabios_mode vgabios_modes[24] = {
     },
     {
         .mode = 0x03,
-        .kind = MODE_TEXT,
+        .kind = VGABIOS_MODE_TEXT,
         .columns = 80,
         .rows = 25,
         .char_height = 14,
@@ -1304,7 +1304,7 @@ const struct vgabios_mode vgabios_modes[24] = {
     },
     {
         .mode = 0x03,
-        .kind = MODE_TEXT,
+        .kind = VGABIOS_MODE_TEXT,
         .columns = 80,
         .rows = 25,
         .char_height = 8,
@@ -1328,7 +1328,7 @@ const struct vgabios_mode vgabios_modes[24] = {
     },
     {
         .mode = 0x07,
-        .kind = MODE_TEXT,
+        .kind = VGABIOS_MODE_TEXT,
         .columns = 80,
         .rows = 25,
         .char_height = 14,
