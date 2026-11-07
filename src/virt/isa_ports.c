@@ -32,6 +32,7 @@
 #include <hw/pci_enum.h>
 #include <lib/log.h>
 #include <virt/io.h>
+#include <virt/irq.h>
 
 // The standard PC serial and parallel ports' IDs that Linux 7.3's 8250_pnp and
 // parport_pc drivers take.
@@ -39,24 +40,40 @@ static const char *const port_ids[] = { "PNP0500", "PNP0501", "PNP0400", "PNP040
 
 #define UART_PORTS 8
 #define MAX_RANGES 4
+#define MAX_LINES 4
+#define ISA_IRQS 16
 
-// An IDE controller's channels in compatibility mode, at the PC/AT's ports
-// (ICH10 datasheet 319973-003, 14.1.6).
+// An IDE controller's channels in compatibility mode, at the PC/AT's ports and
+// on its IRQs (ICH10 datasheet 319973-003, 14.1.6).
 #define CLASS_STORAGE 0x01
 #define SUBCLASS_IDE 0x01
 #define IDE_PRIMARY_NATIVE 0x01
 #define IDE_SECONDARY_NATIVE 0x04
 #define IDE_PRIMARY_BASE 0x1f0
 #define IDE_PRIMARY_CONTROL 0x3f6
+#define IDE_PRIMARY_IRQ 14
 #define IDE_SECONDARY_BASE 0x170
 #define IDE_SECONDARY_CONTROL 0x376
+#define IDE_SECONDARY_IRQ 15
 #define IDE_CHANNEL_PORTS 8
 
 struct device_ports {
     uint16_t base[MAX_RANGES];
     uint16_t count[MAX_RANGES];
     size_t ranges;
+    // ISA IRQs, and GSIs where an extended descriptor gives them.
+    uint32_t lines[MAX_LINES];
+    bool line_is_gsi[MAX_LINES];
+    size_t line_count;
 };
+
+static void add_line(struct device_ports *d, uint32_t line, bool gsi) {
+    if (d->line_count < MAX_LINES) {
+        d->lines[d->line_count] = line;
+        d->line_is_gsi[d->line_count] = gsi;
+        d->line_count++;
+    }
+}
 
 static uacpi_iteration_decision collect_range(void *user, uacpi_resource *resource) {
     struct device_ports *d = user;
@@ -72,6 +89,18 @@ static uacpi_iteration_decision collect_range(void *user, uacpi_resource *resour
             base = resource->fixed_io.address;
             count = resource->fixed_io.length;
             break;
+        }
+        case UACPI_RESOURCE_TYPE_IRQ: {
+            for (size_t i = 0; i < resource->irq.num_irqs; i++) {
+                add_line(d, resource->irq.irqs[i], false);
+            }
+            return UACPI_ITERATION_DECISION_CONTINUE;
+        }
+        case UACPI_RESOURCE_TYPE_EXTENDED_IRQ: {
+            for (size_t i = 0; i < resource->extended_irq.num_irqs; i++) {
+                add_line(d, resource->extended_irq.irqs[i], true);
+            }
+            return UACPI_ITERATION_DECISION_CONTINUE;
         }
         default: {
             return UACPI_ITERATION_DECISION_CONTINUE;
@@ -95,7 +124,7 @@ static uacpi_iteration_decision give_device(
      || (sta & ACPI_STA_RESULT_DEVICE_ENABLED) == 0) {
         return UACPI_ITERATION_DECISION_CONTINUE;
     }
-    struct device_ports d = { .ranges = 0 };
+    struct device_ports d = { .ranges = 0, .line_count = 0 };
     uacpi_for_each_device_resource(node, "_CRS", collect_range, &d);
     const struct handoff_config *config = &core_handoff->config;
     uint16_t log = config->serial != 0 ? config->serial_port : 0;
@@ -111,6 +140,13 @@ static uacpi_iteration_decision give_device(
             d.base[i], d.base[i] + d.count[i] - 1
         );
     }
+    for (size_t i = 0; i < d.line_count; i++) {
+        if (d.line_is_gsi[i]) {
+            irq_give_gsi(d.lines[i]);
+        } else if (d.lines[i] < ISA_IRQS) {
+            irq_give_isa_line(d.lines[i]);
+        }
+    }
     return UACPI_ITERATION_DECISION_CONTINUE;
 }
 
@@ -124,10 +160,12 @@ static void give_ide_channels(void) {
         if ((f->prog_if & IDE_PRIMARY_NATIVE) == 0) {
             io_pass(IDE_PRIMARY_BASE, IDE_CHANNEL_PORTS);
             io_pass(IDE_PRIMARY_CONTROL, 1);
+            irq_give_isa_line(IDE_PRIMARY_IRQ);
         }
         if ((f->prog_if & IDE_SECONDARY_NATIVE) == 0) {
             io_pass(IDE_SECONDARY_BASE, IDE_CHANNEL_PORTS);
             io_pass(IDE_SECONDARY_CONTROL, 1);
+            irq_give_isa_line(IDE_SECONDARY_IRQ);
         }
     }
 }

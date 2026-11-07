@@ -57,6 +57,9 @@ uint32_t irq_isa_gsi(unsigned int irq);
 
 // After the guest changed an I/O APIC entry.
 void irq_gsi_changed(uint32_t gsi);
+// After the guest's HPET took IRQs 0 and 8 or gave them back to the 8254 and
+// the RTC (hpet_replaces_pit()).
+void irq_hpet_route_changed(void);
 
 // Whether the guest's 8259 interrupts the vCPU, through LINT0 or an I/O APIC
 // ExtINT entry, and the interrupt acknowledge that answers it.
@@ -127,6 +130,11 @@ void irq_isa_pulse(unsigned int irq);
 // A change of the level of such a device's line: its 8259 input has the level,
 // and a rise reaches the I/O APIC entry for the IRQ, while unmasked.
 void irq_isa_set(unsigned int irq, bool level);
+
+// Lets the host's line reach the guest: one that an ISA IRQ stands for stays
+// masked at the host unless a legacy device the guest gets has it.
+void irq_give_gsi(uint32_t gsi);
+void irq_give_isa_line(unsigned int irq);
 
 // The level of a line the hypervisor drives for the guest on a GSI, which
 // reaches the guest's I/O APIC entry or 8259 input for the GSI as a device's

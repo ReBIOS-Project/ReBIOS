@@ -29,6 +29,7 @@
 #include <memory.h>
 #include <sys/mm.h>
 #include <virt/gpt.h>
+#include <virt/irq.h>
 #include <virt/layout.h>
 #include <virt/mmio.h>
 #include <virt/vcpu.h>
@@ -46,6 +47,14 @@
 #define TIMER_INT_ENABLE ((uint32_t)1 << 2)
 #define TIMER_FSB_ENABLE ((uint32_t)1 << 14)
 #define TIMER_FSB_CAP ((uint32_t)1 << 15)
+// The upper half of a timer's configuration register: the I/O APIC inputs it
+// can interrupt on (2.3.8).
+#define TIMER_ROUTE_CAP ((uint32_t)4)
+#define ROUTE_LINES 32
+// What legacy replacement routes timers 0 and 1 to (2.3.9.1), which the
+// guest's interrupts follow on their own (irq.c's reaches_guest()).
+#define LEGACY_TIMER_IRQ 0
+#define LEGACY_RTC_IRQ 8
 #define MAX_HIDDEN 8
 
 static uint64_t hidden[MAX_HIDDEN];
@@ -94,10 +103,11 @@ static void hide(uintptr_t base) {
     );
 }
 
-static void follow_route(void) {
+// Whether the route changed.
+static bool follow_route(void) {
     uint32_t route = CONFIG_ENABLE | CONFIG_LEGACY_ROUTE;
     bool on = (read32(guest_base + CONFIG) & route) == route;
-    atomic_store_explicit(&legacy_route, on, memory_order_release);
+    return atomic_exchange_explicit(&legacy_route, on, memory_order_acq_rel) != on;
 }
 
 static uint64_t guest_read(struct vcpu *v, void *ctx, uint64_t offset, size_t size) {
@@ -110,10 +120,12 @@ static void guest_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size,
     uintptr_t address = (uintptr_t)ctx + offset;
     spinlock_acquire(&lock);
     mmio_write_host(address, size, value);
-    if (address < guest_base + CONFIG + 8 && address + size > guest_base + CONFIG) {
-        follow_route();
-    }
+    bool changed = address < guest_base + CONFIG + 8 && address + size > guest_base + CONFIG
+                && follow_route();
     spinlock_release(&lock);
+    if (changed) {
+        irq_hpet_route_changed();
+    }
 }
 
 static const struct mmio_ops guest_ops = { guest_read, guest_write, false };
@@ -127,6 +139,22 @@ static void trap_writes(uintptr_t base) {
     mmio_register(page, PAGE_SIZE, &guest_ops, (void *)page);
     gpt_map(page, page, PAGE_SIZE, GPT_R, MT_UC);
     gpt_flush();
+}
+
+// The lines the guest's HPET can raise, which reach the guest then, but for
+// those of IRQs 0 and 8, which the 8254 and the RTC may drive.
+static void give_lines(uintptr_t base) {
+    uint32_t legacy_timer = irq_isa_gsi(LEGACY_TIMER_IRQ);
+    uint32_t legacy_rtc = irq_isa_gsi(LEGACY_RTC_IRQ);
+    for (size_t n = 0; n < timers(base); n++) {
+        uint32_t routes = read32(base + TIMER_BASE + n * TIMER_STRIDE + TIMER_ROUTE_CAP);
+        for (size_t gsi = 0; gsi < ROUTE_LINES; gsi++) {
+            if ((routes & ((uint32_t)1 << gsi)) != 0 && gsi != legacy_timer
+             && gsi != legacy_rtc) {
+                irq_give_gsi((uint32_t)gsi);
+            }
+        }
+    }
 }
 
 void hpet_init(void) {
@@ -144,6 +172,7 @@ void hpet_init(void) {
             } else if (hpet.address.address_space_id == ACPI_AS_ID_SYS_MEM && guest_base == 0) {
                 guest_base = base;
                 trap_writes(base);
+                give_lines(base);
             }
         }
         uacpi_table_unref(&table);

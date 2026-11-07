@@ -692,7 +692,9 @@ void rtc_init(void) {
         day_alarm_index = fadt->day_alrm;
         month_alarm_index = fadt->mon_alrm;
     }
-    if (!real) {
+    if (real) {
+        irq_give_isa_line(IRQ_RTC);
+    } else {
         // Register D keeps the date alarm (13.6.2.4).
         century = RAM_CENTURY;
         day_alarm_index = REG_D;

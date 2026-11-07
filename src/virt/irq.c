@@ -36,6 +36,7 @@
 #include <sys/cpu.h>
 #include <sys/smp.h>
 #include <sys/x86.h>
+#include <virt/hpet.h>
 #include <virt/io.h>
 #include <virt/pic.h>
 #include <virt/pit.h>
@@ -45,6 +46,7 @@
 
 #define ISA_IRQS 16
 #define IRQ_TIMER 0
+#define IRQ_RTC 8
 #define CASCADE_IRQ 2
 // The highest APIC ID an 8-bit destination names alone, FFh being the
 // broadcast (SDM 325462-093 Vol. 3A, 13.6.2.1).
@@ -106,6 +108,9 @@ struct route {
     bool virtual_held;
     // What a guest's edge-triggered entry last saw.
     bool virtual_edge_seen;
+    // Whether the line reaches the guest: a PCI device's, or one of a legacy
+    // device the guest gets, while those of ISA IRQs nobody gave stay masked.
+    bool given;
     // The vector the host's entry has while it mirrors the guest's, and the
     // hypervisor's own while it has the line.
     struct irq_slot slot;
@@ -218,6 +223,16 @@ bool irq_host_vector(uint8_t vector) {
     return false;
 }
 
+// Whether the host's line reaches the guest: a given one, and those of IRQs 0
+// and 8 while the guest's HPET routes its first timers there in place of the
+// 8254's and the RTC's interrupts (IA-PC HPET Specification 1.0a, 2.4.2.1).
+static bool reaches_guest(uint32_t gsi, const struct route *r) {
+    if (r->given) {
+        return true;
+    }
+    return (gsi == irq_isa_gsi(IRQ_TIMER) || gsi == irq_isa_gsi(IRQ_RTC)) && hpet_replaces_pit();
+}
+
 // What the host's entry for a GSI is to hold, and who owns it.
 static uint64_t desired(uint32_t gsi, struct route *r, int *owner) {
     uint64_t rte;
@@ -226,7 +241,7 @@ static uint64_t desired(uint32_t gsi, struct route *r, int *owner) {
         return irq_slot_rte(&r->own, r->level, r->active_low);
     }
     // A line the hypervisor drives has none at the host.
-    if (r->virtual_line) {
+    if (r->virtual_line || !reaches_guest(gsi, r)) {
         *owner = OWNER_NONE;
         return IOAPIC_RTE_MASKED;
     }
@@ -454,6 +469,7 @@ void irq_route_pci(const struct irq_pci_line *lines, size_t count, uint16_t isa_
         }
         struct route *r = &routes[gsi];
         r->irq = pool[next++ % pool_size];
+        r->given = true;
         r->level = lines[i].level;
         r->active_low = lines[i].active_low;
         printf("GSI %u is ISA IRQ %d for PCI\n", gsi, r->irq);
@@ -477,6 +493,13 @@ uint32_t irq_isa_gsi(unsigned int irq) {
 
 void irq_gsi_changed(uint32_t gsi) {
     (void)gsi;
+    spinlock_acquire(&lock);
+    update();
+    spinlock_release(&lock);
+    kick_after_update();
+}
+
+void irq_hpet_route_changed(void) {
     spinlock_acquire(&lock);
     update();
     spinlock_release(&lock);
@@ -751,6 +774,24 @@ void irq_device_interrupt(void) {
     spinlock_release(&lock);
 }
 
+void irq_give_gsi(uint32_t gsi) {
+    if (gsi >= route_count) {
+        return;
+    }
+    spinlock_acquire(&lock);
+    routes[gsi].given = true;
+    update();
+    spinlock_release(&lock);
+    kick_after_update();
+}
+
+void irq_give_isa_line(unsigned int irq) {
+    uint32_t gsi = irq_isa_gsi(irq);
+    if (gsi != UINT32_MAX) {
+        irq_give_gsi(gsi);
+    }
+}
+
 void irq_virtual_line(uint32_t gsi, bool asserted) {
     if (gsi >= route_count) {
         return;
@@ -874,6 +915,10 @@ void irq_init(void) {
     }
 
     routes_init();
+    // Lines no ISA IRQ stands for are PCI devices', which the guest gets.
+    for (size_t gsi = 0; gsi < route_count; gsi++) {
+        routes[gsi].given = routes[gsi].irq < 0;
+    }
     pic_reset();
     elcr_init();
     slot_table = kmalloc(smp_cpu_count() * sizeof(*slot_table));
