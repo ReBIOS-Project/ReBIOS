@@ -25,6 +25,9 @@
 
 // Whether the vCPUs run under VMX, else SVM.
 extern bool virt_vmx;
+// How many of DR0-DR3 have AMD's address masks for data breakpoints (APM 24593
+// rev. 3.46, 13.1.7): DR0 with DataBkptExt, all four with AddrMaskExt.
+extern unsigned int virt_breakpoint_masks;
 
 // Picks VMX or SVM and sets up what all vCPUs share. Returns false if neither
 // is usable on this processor.
