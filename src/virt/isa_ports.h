@@ -41,4 +41,7 @@ bool isa_ports_settable(const uint8_t *template, size_t length);
 // AML task.
 void isa_ports_changed(const void *node);
 
+// The PNP IDs of the serial and parallel ports' devices.
+extern const char *const isa_ports_ids[];
+
 #endif

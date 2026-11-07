@@ -1162,7 +1162,6 @@ static const char *const legacy_ids[] = {
     "ACPI000E", "PNP0200", "PNP0800", "PNP0C04", "PNP0700", "PNP0701", "PNPB02F", "PNPB006",
     NULL
 };
-static const char *const port_ids[] = { "PNP0500", "PNP0501", "PNP0400", "PNP0401", NULL };
 
 // The devices the guest does not get, known before anything refers to them.
 static uacpi_iteration_decision hide_found(
@@ -1176,7 +1175,7 @@ static uacpi_iteration_decision hide_found(
     } else if (uacpi_device_matches_pnp_id(node, legacy_ids)
             || uacpi_device_matches_pnp_id(node, i8042_keyboard_ids)
             || uacpi_device_matches_pnp_id(node, i8042_mouse_ids)
-            || (uacpi_device_matches_pnp_id(node, port_ids) && !isa_ports_shown(node))) {
+            || (uacpi_device_matches_pnp_id(node, isa_ports_ids) && !isa_ports_shown(node))) {
         dropped_add(node);
     }
     return UACPI_ITERATION_DECISION_CONTINUE;

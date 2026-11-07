@@ -39,7 +39,7 @@
 
 // The standard PC serial and parallel ports' IDs that Linux 7.3's 8250_pnp and
 // parport_pc drivers take.
-static const char *const port_ids[] = { "PNP0500", "PNP0501", "PNP0400", "PNP0401", NULL };
+const char *const isa_ports_ids[] = { "PNP0500", "PNP0501", "PNP0400", "PNP0401", NULL };
 
 #define UART_PORTS 8
 #define MAX_DEVICES 8
@@ -376,6 +376,6 @@ void isa_ports_init(void) {
         return;
     }
     acpi_lock();
-    uacpi_find_devices_at(uacpi_namespace_root(), port_ids, find_device, NULL);
+    uacpi_find_devices_at(uacpi_namespace_root(), isa_ports_ids, find_device, NULL);
     acpi_unlock();
 }
