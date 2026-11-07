@@ -349,7 +349,7 @@ bool amdvi_probe(const struct iommu_tables *tables, size_t *leaf_level) {
             printf("AMD-Vi unit %zu has no registers\n", i);
             return false;
         }
-        const struct iommu_unit *t = &tables->units[i];
+        const struct iommu_tables_unit *t = &tables->units[i];
         uint16_t rid = t->amd_rid;
         u->function = (struct pci_cfg_addr){
             t->segment, (uint8_t)(rid >> 8), (uint8_t)(rid >> 3 & 0x1f), (uint8_t)(rid & 7)
@@ -371,26 +371,27 @@ bool amdvi_probe(const struct iommu_tables *tables, size_t *leaf_level) {
 // rev. 3.11, Table 106).
 static uint64_t pass_bits(uint8_t settings) {
     uint64_t pass = 0;
-    if ((settings & IOMMU_AMD_INIT_PASS) != 0) {
+    if ((settings & IOMMU_TABLES_AMD_INIT_PASS) != 0) {
         pass |= DTE_INIT_PASS;
     }
-    if ((settings & IOMMU_AMD_EINT_PASS) != 0) {
+    if ((settings & IOMMU_TABLES_AMD_EINT_PASS) != 0) {
         pass |= DTE_EINT_PASS;
     }
-    if ((settings & IOMMU_AMD_NMI_PASS) != 0) {
+    if ((settings & IOMMU_TABLES_AMD_NMI_PASS) != 0) {
         pass |= DTE_NMI_PASS;
     }
-    if ((settings & IOMMU_AMD_LINT0_PASS) != 0) {
+    if ((settings & IOMMU_TABLES_AMD_LINT0_PASS) != 0) {
         pass |= DTE_LINT0_PASS;
     }
-    if ((settings & IOMMU_AMD_LINT1_PASS) != 0) {
+    if ((settings & IOMMU_TABLES_AMD_LINT1_PASS) != 0) {
         pass |= DTE_LINT1_PASS;
     }
     return pass;
 }
 
 static void device_settings(uint32_t id, uint8_t settings) {
-    uint64_t sys_mgt = (settings & IOMMU_AMD_SYS_MGT_MASK) >> IOMMU_AMD_SYS_MGT_SHIFT;
+    uint64_t sys_mgt = (settings & IOMMU_TABLES_AMD_SYS_MGT_MASK)
+                    >> IOMMU_TABLES_AMD_SYS_MGT_SHIFT;
     device_table[id * 4 + 1] = DMA_DOMAIN_ID | sys_mgt << DTE_SYS_MGT_SHIFT;
     device_table[id * 4 + 2] = pass_bits(settings);
 }
@@ -403,7 +404,7 @@ static void device_table_build(const struct iommu_tables *tables) {
         device_table[id * 4 + 1] = DMA_DOMAIN_ID;
     }
     for (size_t i = 0; i < tables->range_count; i++) {
-        const struct iommu_device_range *r = &tables->ranges[i];
+        const struct iommu_tables_device_range *r = &tables->ranges[i];
         for (size_t id = r->first; id <= r->last; id++) {
             device_settings(id, r->amd_settings);
         }
@@ -531,7 +532,7 @@ static bool ga_log_start(struct amdvi_unit *u, uint32_t apic_id, uint8_t vector)
 void amdvi_remap_start(bool guest_vapic, uint8_t vector) {
     for (size_t i = 0; i < ioapic_count(); i++) {
         uint8_t id = ioapic_get(i)->id;
-        if (iommu_special_for(IOMMU_SPECIAL_IOAPIC, id) == NULL) {
+        if (iommu_tables_special_for(IOMMU_TABLES_SPECIAL_IOAPIC, id) == NULL) {
             printf(
                 "AMD-Vi: interrupts are not remapped, as the IVRS gives I/O APIC %u no device "
                 "ID\n", id
@@ -603,7 +604,7 @@ static void alias_add(uint16_t *ids, size_t *n, uint16_t id) {
 static unsigned int aliases(uint16_t id, uint16_t *ids) {
     size_t n = 0;
     alias_add(ids, &n, id);
-    const struct iommu_device_range *range = iommu_range_for(0, id);
+    const struct iommu_tables_device_range *range = iommu_tables_range_for(0, id);
     if (range != NULL && range->has_alias) {
         alias_add(ids, &n, range->alias);
     }

@@ -137,7 +137,7 @@ struct builder {
     uint32_t reserved_capacity;
     // Ranges of every requester ID a unit translates, which only apply to what
     // no other range lists, so they go last.
-    struct iommu_device_range *fallbacks;
+    struct iommu_tables_device_range *fallbacks;
     size_t fallback_count;
     uint32_t fallback_capacity;
 };
@@ -161,21 +161,21 @@ struct range_start {
 };
 
 static const uint8_t special_types[] = {
-    [ACPI_DSS_IOAPIC] = IOMMU_SPECIAL_IOAPIC,
-    [ACPI_DSS_MSI_CAPABLE_HPET] = IOMMU_SPECIAL_HPET,
-    [ACPI_DSS_ACPI_NAMESPACE_DEVICE] = IOMMU_SPECIAL_ACPI
+    [ACPI_DSS_IOAPIC] = IOMMU_TABLES_SPECIAL_IOAPIC,
+    [ACPI_DSS_MSI_CAPABLE_HPET] = IOMMU_TABLES_SPECIAL_HPET,
+    [ACPI_DSS_ACPI_NAMESPACE_DEVICE] = IOMMU_TABLES_SPECIAL_ACPI
 };
 
 static const char *const special_names[] = {
-    [IOMMU_SPECIAL_IOAPIC] = "I/O APIC",
-    [IOMMU_SPECIAL_HPET] = "HPET",
-    [IOMMU_SPECIAL_ACPI] = "ACPI device"
+    [IOMMU_TABLES_SPECIAL_IOAPIC] = "I/O APIC",
+    [IOMMU_TABLES_SPECIAL_HPET] = "HPET",
+    [IOMMU_TABLES_SPECIAL_ACPI] = "ACPI device"
 };
 
 static const char *const kind_names[] = {
-    [IOMMU_KIND_NONE] = "none",
-    [IOMMU_KIND_VTD] = "Intel VT-d",
-    [IOMMU_KIND_AMD] = "AMD-Vi"
+    [IOMMU_TABLES_KIND_NONE] = "none",
+    [IOMMU_TABLES_KIND_VTD] = "Intel VT-d",
+    [IOMMU_TABLES_KIND_AMD] = "AMD-Vi"
 };
 
 static struct iommu_tables tables;
@@ -196,45 +196,48 @@ static void *grow(void *array, size_t count, uint32_t *capacity, size_t size) {
     return grown;
 }
 
-static bool add_unit(struct builder *b, const struct iommu_unit *unit, uint16_t *index) {
+static bool add_unit(struct builder *b, const struct iommu_tables_unit *unit, uint16_t *index) {
     struct iommu_tables *t = b->t;
     // Ranges and special devices name their unit in 16 bits.
     if (t->unit_count > UINT16_MAX) {
         return false;
     }
-    t->units = grow(t->units, t->unit_count, &b->unit_capacity, sizeof(struct iommu_unit));
+    t->units = grow(t->units, t->unit_count, &b->unit_capacity, sizeof(struct iommu_tables_unit));
     *index = (uint16_t)t->unit_count;
     t->units[t->unit_count++] = *unit;
     return true;
 }
 
-static void add_range(struct builder *b, const struct iommu_device_range *range) {
+static void add_range(struct builder *b, const struct iommu_tables_device_range *range) {
     struct iommu_tables *t = b->t;
     t->ranges = grow(
-        t->ranges, t->range_count, &b->range_capacity, sizeof(struct iommu_device_range)
+        t->ranges, t->range_count, &b->range_capacity, sizeof(struct iommu_tables_device_range)
     );
     t->ranges[t->range_count++] = *range;
 }
 
-static void add_fallback(struct builder *b, const struct iommu_device_range *range) {
+static void add_fallback(struct builder *b, const struct iommu_tables_device_range *range) {
     b->fallbacks = grow(
-        b->fallbacks, b->fallback_count, &b->fallback_capacity, sizeof(struct iommu_device_range)
+        b->fallbacks, b->fallback_count, &b->fallback_capacity,
+        sizeof(struct iommu_tables_device_range)
     );
     b->fallbacks[b->fallback_count++] = *range;
 }
 
-static void add_special(struct builder *b, const struct iommu_special_device *special) {
+static void add_special(struct builder *b, const struct iommu_tables_special_device *special) {
     struct iommu_tables *t = b->t;
     t->specials = grow(
-        t->specials, t->special_count, &b->special_capacity, sizeof(struct iommu_special_device)
+        t->specials, t->special_count, &b->special_capacity,
+        sizeof(struct iommu_tables_special_device)
     );
     t->specials[t->special_count++] = *special;
 }
 
-static void add_reserved(struct builder *b, const struct iommu_reserved_region *region) {
+static void add_reserved(struct builder *b, const struct iommu_tables_reserved_region *region) {
     struct iommu_tables *t = b->t;
     t->reserved = grow(
-        t->reserved, t->reserved_count, &b->reserved_capacity, sizeof(struct iommu_reserved_region)
+        t->reserved, t->reserved_count, &b->reserved_capacity,
+        sizeof(struct iommu_tables_reserved_region)
     );
     t->reserved[t->reserved_count++] = *region;
 }
@@ -413,7 +416,7 @@ static bool scope_resolve(
 static bool dmar_drhd(struct builder *b, const uint8_t *dmar, size_t offset, size_t length) {
     struct acpi_dmar_drhd drhd;
     memcpy(&drhd, dmar + offset, sizeof(struct acpi_dmar_drhd));
-    struct iommu_unit unit = {
+    struct iommu_tables_unit unit = {
         .base = drhd.address,
         .vtd_size = (uint64_t)4096 << (drhd.size & DRHD_SIZE_MASK),
         .segment = drhd.segment,
@@ -425,7 +428,7 @@ static bool dmar_drhd(struct builder *b, const uint8_t *dmar, size_t offset, siz
         return false;
     }
     if (unit.include_all) {
-        struct iommu_device_range all = {
+        struct iommu_tables_device_range all = {
             .segment = unit.segment,
             .first = 0,
             .last = 0xffff,
@@ -448,7 +451,7 @@ static bool dmar_drhd(struct builder *b, const uint8_t *dmar, size_t offset, siz
             switch (scope[0]) {
                 case ACPI_DSS_PCI_ENDPOINT:
                 case ACPI_DSS_PCI_BRIDGE: {
-                    struct iommu_device_range range = {
+                    struct iommu_tables_device_range range = {
                         .segment = unit.segment,
                         .first = target.rid,
                         .last = target.rid,
@@ -463,7 +466,7 @@ static bool dmar_drhd(struct builder *b, const uint8_t *dmar, size_t offset, siz
                     break;
                 }
                 default: {
-                    struct iommu_special_device special = {
+                    struct iommu_tables_special_device special = {
                         .type = special_types[scope[0]],
                         .id = scope[4],
                         .segment = unit.segment,
@@ -509,7 +512,7 @@ static bool dmar_rmrr(struct builder *b, const uint8_t *dmar, size_t offset, siz
         if (!scope_type_known(scope[0])) {
             scope_skip("RMRR", at, scope, "unknown type");
         } else if (scope_resolve("RMRR", at, scope, rmrr.segment, &target)) {
-            struct iommu_reserved_region region = {
+            struct iommu_tables_reserved_region region = {
                 .base = rmrr.base,
                 .last = rmrr.limit,
                 .readable = true,
@@ -697,10 +700,10 @@ static size_t ivhd_entry_size(const uint8_t *ivrs, size_t offset, size_t end) {
 }
 
 static void ivhd_entry(
-    struct builder *b, const struct iommu_unit *unit, uint16_t index, const uint8_t *entry,
+    struct builder *b, const struct iommu_tables_unit *unit, uint16_t index, const uint8_t *entry,
     size_t offset, struct range_start *start
 ) {
-    struct iommu_device_range range = {
+    struct iommu_tables_device_range range = {
         .segment = unit->segment,
         .first = read_le16(entry + 1),
         .last = read_le16(entry + 1),
@@ -762,7 +765,7 @@ static void ivhd_entry(
             break;
         }
         case IVHD_ENTRY_SPECIAL: {
-            struct iommu_special_device special = {
+            struct iommu_tables_special_device special = {
                 .id = entry[4],
                 .segment = unit->segment,
                 .rid = read_le16(entry + 5),
@@ -770,9 +773,9 @@ static void ivhd_entry(
                 .amd_settings = entry[3]
             };
             if (entry[7] == IVHD_SPECIAL_IOAPIC) {
-                special.type = IOMMU_SPECIAL_IOAPIC;
+                special.type = IOMMU_TABLES_SPECIAL_IOAPIC;
             } else if (entry[7] == IVHD_SPECIAL_HPET) {
-                special.type = IOMMU_SPECIAL_HPET;
+                special.type = IOMMU_TABLES_SPECIAL_HPET;
             } else {
                 printf(
                     "IVHD special device entry at offset %#zx has unknown variety %u, skipped\n",
@@ -810,7 +813,7 @@ static bool ivhd_parse(struct builder *b, const uint8_t *ivrs, size_t offset, si
     size_t header_size = type == IVHD_TYPE_10H ? IVHD_10H_SIZE : sizeof(struct ivhd);
     struct ivhd ivhd = { 0 };
     memcpy(&ivhd, ivrs + offset, header_size);
-    struct iommu_unit unit = {
+    struct iommu_tables_unit unit = {
         .base = ivhd.base,
         .segment = ivhd.segment,
         .amd_ivhd_type = ivhd.type,
@@ -852,7 +855,7 @@ static void ivmd_parse(struct builder *b, const uint8_t *ivrs, size_t offset) {
     struct ivmd ivmd;
     memcpy(&ivmd, ivrs + offset, sizeof(struct ivmd));
 
-    struct iommu_reserved_region region = { 0 };
+    struct iommu_tables_reserved_region region = { 0 };
     switch (ivmd.type) {
         case IVMD_TYPE_ALL: {
             // Every device in the system: its DeviceID and segment fields are
@@ -965,7 +968,7 @@ static void finish(struct builder *b) {
     b->fallbacks = NULL;
     b->fallback_count = 0;
 
-    if (t->kind != IOMMU_KIND_NONE && t->unit_count == 0) {
+    if (t->kind != IOMMU_TABLES_KIND_NONE && t->unit_count == 0) {
         printf("No remapping hardware unit in the table\n");
         kfree(t->units);
         kfree(t->ranges);
@@ -976,8 +979,8 @@ static void finish(struct builder *b) {
 }
 
 static void log_unit(const struct iommu_tables *t, size_t index) {
-    const struct iommu_unit *u = &t->units[index];
-    if (t->kind == IOMMU_KIND_VTD) {
+    const struct iommu_tables_unit *u = &t->units[index];
+    if (t->kind == IOMMU_TABLES_KIND_VTD) {
         printf(
             "IOMMU unit %zu: VT-d registers at %#llx, %llu KiB, segment %u%s\n", index,
             (unsigned long long)u->base, (unsigned long long)(u->vtd_size / 1024), u->segment,
@@ -996,11 +999,11 @@ static void log_unit(const struct iommu_tables *t, size_t index) {
 }
 
 static void log_range(const struct iommu_tables *t, size_t index) {
-    const struct iommu_device_range *r = &t->ranges[index];
+    const struct iommu_tables_device_range *r = &t->ranges[index];
     char rids[32];
     format_rids(rids, sizeof(rids), r->segment, r->first, r->last);
     char extra[48] = "";
-    if (t->kind == IOMMU_KIND_AMD) {
+    if (t->kind == IOMMU_TABLES_KIND_AMD) {
         int len = snprintf(extra, sizeof(extra), ", settings %#x", r->amd_settings);
         if (r->has_alias && len >= 0 && (size_t)len < sizeof(extra)) {
             snprintf(
@@ -1012,9 +1015,9 @@ static void log_range(const struct iommu_tables *t, size_t index) {
 }
 
 static void log_special(const struct iommu_tables *t, size_t index) {
-    const struct iommu_special_device *s = &t->specials[index];
+    const struct iommu_tables_special_device *s = &t->specials[index];
     char extra[24] = "";
-    if (t->kind == IOMMU_KIND_AMD) {
+    if (t->kind == IOMMU_TABLES_KIND_AMD) {
         snprintf(extra, sizeof(extra), ", settings %#x", s->amd_settings);
     }
     printf(
@@ -1024,7 +1027,7 @@ static void log_special(const struct iommu_tables *t, size_t index) {
 }
 
 static void log_reserved(const struct iommu_tables *t, size_t index) {
-    const struct iommu_reserved_region *r = &t->reserved[index];
+    const struct iommu_tables_reserved_region *r = &t->reserved[index];
     char devices[40] = "all devices";
     if (!r->all_devices) {
         format_rids(devices, sizeof(devices), r->segment, r->first, r->last_rid);
@@ -1103,7 +1106,7 @@ const struct iommu_tables *iommu_tables_parse(void) {
         if (length < sizeof(struct acpi_dmar)) {
             printf("DMAR table of %zu bytes is too short\n", length);
         } else {
-            tables.kind = IOMMU_KIND_VTD;
+            tables.kind = IOMMU_TABLES_KIND_VTD;
             dmar_parse(&b, dmar.ptr, length);
         }
         uacpi_table_unref(&dmar);
@@ -1112,7 +1115,7 @@ const struct iommu_tables *iommu_tables_parse(void) {
         if (length < sizeof(struct ivrs)) {
             printf("IVRS table of %zu bytes is too short\n", length);
         } else {
-            tables.kind = IOMMU_KIND_AMD;
+            tables.kind = IOMMU_TABLES_KIND_AMD;
             ivrs_parse(&b, ivrs.ptr, length);
         }
         uacpi_table_unref(&ivrs);
@@ -1125,9 +1128,9 @@ const struct iommu_tables *iommu_tables_parse(void) {
     return &tables;
 }
 
-const struct iommu_device_range *iommu_range_for(uint16_t segment, uint16_t rid) {
+const struct iommu_tables_device_range *iommu_tables_range_for(uint16_t segment, uint16_t rid) {
     for (size_t i = 0; i < tables.range_count; i++) {
-        const struct iommu_device_range *r = &tables.ranges[i];
+        const struct iommu_tables_device_range *r = &tables.ranges[i];
         if (r->segment == segment && rid >= r->first && rid <= r->last) {
             return r;
         }
@@ -1135,9 +1138,9 @@ const struct iommu_device_range *iommu_range_for(uint16_t segment, uint16_t rid)
     return NULL;
 }
 
-const struct iommu_special_device *iommu_special_for(uint8_t type, uint8_t id) {
+const struct iommu_tables_special_device *iommu_tables_special_for(uint8_t type, uint8_t id) {
     for (size_t i = 0; i < tables.special_count; i++) {
-        const struct iommu_special_device *d = &tables.specials[i];
+        const struct iommu_tables_special_device *d = &tables.specials[i];
         if (d->type == type && d->id == id) {
             return d;
         }
@@ -1149,7 +1152,7 @@ void iommu_tables_forget_reserved(bool (*unneeded)(uint16_t segment, uint16_t ri
     iommu_tables_parse();
     uint32_t kept = 0;
     for (size_t i = 0; i < tables.reserved_count; i++) {
-        struct iommu_reserved_region r = tables.reserved[i];
+        struct iommu_tables_reserved_region r = tables.reserved[i];
         bool forget = !r.exclusion && (r.readable || r.writable) && !r.all_devices;
         for (size_t rid = r.first; forget && rid <= r.last_rid; rid++) {
             forget = unneeded(r.segment, (uint16_t)rid);

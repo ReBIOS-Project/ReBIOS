@@ -25,7 +25,7 @@
 
 // VT-d's one table serves every requester, AMD-Vi has one per device.
 static bool amd(void) {
-    return iommu_tables_parse()->kind == IOMMU_KIND_AMD;
+    return iommu_tables_parse()->kind == IOMMU_TABLES_KIND_AMD;
 }
 
 void remap_init(bool guest_vapic, uint8_t vector) {
@@ -39,7 +39,7 @@ bool remap_on(void) {
 }
 
 int32_t remap_requester(uint8_t type, uint8_t id) {
-    const struct iommu_special_device *d = iommu_special_for(type, id);
+    const struct iommu_tables_special_device *d = iommu_tables_special_for(type, id);
     return d != NULL ? d->rid : -1;
 }
 

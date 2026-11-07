@@ -22,22 +22,22 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define IOMMU_KIND_NONE 0
-#define IOMMU_KIND_VTD 1
-#define IOMMU_KIND_AMD 2
+#define IOMMU_TABLES_KIND_NONE 0
+#define IOMMU_TABLES_KIND_VTD 1
+#define IOMMU_TABLES_KIND_AMD 2
 
-// Bits of iommu_device_range.amd_settings, from an IVHD device entry's DTE
-// setting byte (AMD IOMMU 48882 rev. 3.11, Table 106).
-#define IOMMU_AMD_INIT_PASS ((uint32_t)1 << 0)
-#define IOMMU_AMD_EINT_PASS ((uint32_t)1 << 1)
-#define IOMMU_AMD_NMI_PASS ((uint32_t)1 << 2)
-#define IOMMU_AMD_ATC_PERMIT ((uint32_t)1 << 3)
-#define IOMMU_AMD_SYS_MGT_SHIFT 4
-#define IOMMU_AMD_SYS_MGT_MASK ((uint32_t)3 << 4)
-#define IOMMU_AMD_LINT0_PASS ((uint32_t)1 << 6)
-#define IOMMU_AMD_LINT1_PASS ((uint32_t)1 << 7)
+// Bits of iommu_tables_device_range.amd_settings, from an IVHD device entry's
+// DTE setting byte (AMD IOMMU 48882 rev. 3.11, Table 106).
+#define IOMMU_TABLES_AMD_INIT_PASS ((uint32_t)1 << 0)
+#define IOMMU_TABLES_AMD_EINT_PASS ((uint32_t)1 << 1)
+#define IOMMU_TABLES_AMD_NMI_PASS ((uint32_t)1 << 2)
+#define IOMMU_TABLES_AMD_ATC_PERMIT ((uint32_t)1 << 3)
+#define IOMMU_TABLES_AMD_SYS_MGT_SHIFT 4
+#define IOMMU_TABLES_AMD_SYS_MGT_MASK ((uint32_t)3 << 4)
+#define IOMMU_TABLES_AMD_LINT0_PASS ((uint32_t)1 << 6)
+#define IOMMU_TABLES_AMD_LINT1_PASS ((uint32_t)1 << 7)
 
-struct iommu_unit {
+struct iommu_tables_unit {
     // The register block's physical address.
     uintptr_t base;
     // VT-d: the register block's size in bytes, from the DRHD's Size field.
@@ -64,7 +64,7 @@ struct iommu_unit {
 // Requester IDs first to last of a segment, which the unit translates, in
 // order of precedence: the first range listing a requester ID is the one that
 // applies to it.
-struct iommu_device_range {
+struct iommu_tables_device_range {
     uint16_t segment;
     uint16_t first;
     uint16_t last;
@@ -79,11 +79,11 @@ struct iommu_device_range {
 // A device the firmware names by another identity than its requester ID: an
 // I/O APIC (by its APIC ID), an HPET (by its number), or, for VT-d, an ACPI
 // namespace device (by its ANDD number).
-#define IOMMU_SPECIAL_IOAPIC 1
-#define IOMMU_SPECIAL_HPET 2
-#define IOMMU_SPECIAL_ACPI 3
+#define IOMMU_TABLES_SPECIAL_IOAPIC 1
+#define IOMMU_TABLES_SPECIAL_HPET 2
+#define IOMMU_TABLES_SPECIAL_ACPI 3
 
-struct iommu_special_device {
+struct iommu_tables_special_device {
     uint8_t type;
     uint8_t id;
     uint16_t segment;
@@ -98,7 +98,7 @@ struct iommu_special_device {
 // - otherwise, with readable or writable, memory to map one to one for them,
 //   with that access (VT-d RMRRs, AMD IVMDs);
 // - otherwise, memory that must never be mapped for them (AMD IVMDs).
-struct iommu_reserved_region {
+struct iommu_tables_reserved_region {
     uintptr_t base;
     // Inclusive.
     uintptr_t last;
@@ -125,13 +125,13 @@ struct iommu_tables {
     // regions that the rest of the table describes are missing.
     bool truncated;
     size_t unit_count;
-    struct iommu_unit *units;
+    struct iommu_tables_unit *units;
     size_t range_count;
-    struct iommu_device_range *ranges;
+    struct iommu_tables_device_range *ranges;
     size_t special_count;
-    struct iommu_special_device *specials;
+    struct iommu_tables_special_device *specials;
     size_t reserved_count;
-    struct iommu_reserved_region *reserved;
+    struct iommu_tables_reserved_region *reserved;
 };
 
 // Parses DMAR or IVRS (kind NONE if neither is there or usable). Needs
@@ -140,11 +140,11 @@ const struct iommu_tables *iommu_tables_parse(void);
 
 // The range that applies to the requester ID, of those iommu_tables_parse()
 // found, or NULL if no unit translates it.
-const struct iommu_device_range *iommu_range_for(uint16_t segment, uint16_t rid);
+const struct iommu_tables_device_range *iommu_tables_range_for(uint16_t segment, uint16_t rid);
 
 // The special device of a type and identity, of those iommu_tables_parse()
 // found, or NULL.
-const struct iommu_special_device *iommu_special_for(uint8_t type, uint8_t id);
+const struct iommu_tables_special_device *iommu_tables_special_for(uint8_t type, uint8_t id);
 
 // Forgets the regions to map one to one for devices of which unneeded says, of
 // each requester ID the region covers, that it no longer needs them.

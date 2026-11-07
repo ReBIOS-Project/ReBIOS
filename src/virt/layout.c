@@ -469,7 +469,7 @@ void layout_init(void) {
     // stays so for the guest too.
     const struct iommu_tables *tables = iommu_tables_parse();
     for (size_t i = 0; i < tables->reserved_count; i++) {
-        const struct iommu_reserved_region *r = &tables->reserved[i];
+        const struct iommu_tables_reserved_region *r = &tables->reserved[i];
         uintptr_t base = page_down(r->base);
         uintptr_t end = page_down(r->last) + PAGE_SIZE;
         if (base < ONE_MIB) {
@@ -531,7 +531,7 @@ void layout_init(void) {
         list_add(&pinned, identity[i].base, identity[i].end);
     }
     list_init(&holes);
-    if (tables->kind == IOMMU_KIND_AMD) {
+    if (tables->kind == IOMMU_TABLES_KIND_AMD) {
         list_add(&holes, HT_BASE, HT_END);
     }
     struct range_list avoid;

@@ -59,7 +59,7 @@ static size_t level_size(size_t level) {
 }
 
 static bool entry_present(uint64_t e) {
-    if (kind == IOMMU_KIND_AMD) {
+    if (kind == IOMMU_TABLES_KIND_AMD) {
         return (e & AMD_PR) != 0;
     }
     return (e & (VTD_R | VTD_W)) != 0;
@@ -69,7 +69,7 @@ static bool entry_leaf(uint64_t e, size_t level) {
     if (level == 0) {
         return true;
     }
-    if (kind == IOMMU_KIND_AMD) {
+    if (kind == IOMMU_TABLES_KIND_AMD) {
         return (e & AMD_NEXT_LEVEL_MASK) == 0;
     }
     return (e & VTD_PS) != 0;
@@ -77,7 +77,7 @@ static bool entry_leaf(uint64_t e, size_t level) {
 
 // The entry at level that points to the table below it.
 static uint64_t table_entry(uintptr_t table, size_t level) {
-    if (kind == IOMMU_KIND_AMD) {
+    if (kind == IOMMU_TABLES_KIND_AMD) {
         return table | AMD_PR | (uint64_t)level << AMD_NEXT_LEVEL_SHIFT | AMD_IR | AMD_IW;
     }
     return table | VTD_R | VTD_W;
@@ -89,14 +89,14 @@ static uint64_t leaf_entry(uintptr_t hpa, uint32_t prot, size_t level) {
         return 0;
     }
     bool write = (prot & GPT_W) != 0;
-    if (kind == IOMMU_KIND_AMD) {
+    if (kind == IOMMU_TABLES_KIND_AMD) {
         return hpa | AMD_PR | AMD_IR | (write ? AMD_IW : 0);
     }
     return hpa | VTD_R | (write ? VTD_W : 0) | (level > 0 ? VTD_PS : 0);
 }
 
 static uint32_t leaf_prot(uint64_t e) {
-    bool write = (e & (kind == IOMMU_KIND_AMD ? AMD_IW : VTD_W)) != 0;
+    bool write = (e & (kind == IOMMU_TABLES_KIND_AMD ? AMD_IW : VTD_W)) != 0;
     return write ? GPT_R | GPT_W : GPT_R;
 }
 
@@ -151,7 +151,7 @@ static void map(uintptr_t addr, uintptr_t hpa, size_t size, uint32_t prot) {
 }
 
 static void flush(void) {
-    if (kind == IOMMU_KIND_AMD) {
+    if (kind == IOMMU_TABLES_KIND_AMD) {
         amdvi_flush();
     } else {
         vtd_flush();
@@ -163,12 +163,12 @@ void dma_init(void) {
     kind = tables->kind;
 
     bool usable = false;
-    if (kind == IOMMU_KIND_VTD) {
+    if (kind == IOMMU_TABLES_KIND_VTD) {
         usable = vtd_probe(tables, &leaf_level_max);
         if (usable) {
             vtd_start();
         }
-    } else if (kind == IOMMU_KIND_AMD) {
+    } else if (kind == IOMMU_TABLES_KIND_AMD) {
         usable = amdvi_probe(tables, &leaf_level_max);
         if (usable) {
             amdvi_start();
@@ -200,7 +200,7 @@ void dma_map(uintptr_t gpa, uintptr_t hpa, size_t size, uint32_t prot) {
 // first MiB, the guest's own memory.
 static void reserved_regions_apply(const struct iommu_tables *tables) {
     for (size_t i = 0; i < tables->reserved_count; i++) {
-        const struct iommu_reserved_region *r = &tables->reserved[i];
+        const struct iommu_tables_reserved_region *r = &tables->reserved[i];
         if (r->last >= DMA_ADDRESS_LIMIT) {
             printf(
                 "IOMMU region %#llx-%#llx is beyond the tables' reach\n",
@@ -231,7 +231,7 @@ void dma_enable(void) {
 
     spinlock_acquire(&dma_lock);
     reserved_regions_apply(tables);
-    if (kind == IOMMU_KIND_AMD) {
+    if (kind == IOMMU_TABLES_KIND_AMD) {
         amdvi_enable((uintptr_t)root);
     } else {
         vtd_enable((uintptr_t)root);
@@ -245,7 +245,7 @@ void dma_report_faults(void) {
     if (!enabled) {
         return;
     }
-    if (kind == IOMMU_KIND_AMD) {
+    if (kind == IOMMU_TABLES_KIND_AMD) {
         amdvi_report_faults();
     } else {
         vtd_report_faults();

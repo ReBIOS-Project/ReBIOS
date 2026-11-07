@@ -179,7 +179,7 @@ static void routes_init(void) {
         if (io != NULL) {
             routes[gsi].io = io;
             routes[gsi].pin = pin;
-            routes[gsi].slot.requester = remap_requester(IOMMU_SPECIAL_IOAPIC, io->id);
+            routes[gsi].slot.requester = remap_requester(IOMMU_TABLES_SPECIAL_IOAPIC, io->id);
             routes[gsi].own.requester = routes[gsi].slot.requester;
         }
     }

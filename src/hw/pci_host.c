@@ -283,10 +283,10 @@ static void claim_hpets(struct scan *r) {
 static void private_iommus(struct scan *r) {
     const struct iommu_tables *tables = iommu_tables_parse();
     for (size_t i = 0; i < tables->unit_count; i++) {
-        const struct iommu_unit *u = &tables->units[i];
-        if (tables->kind == IOMMU_KIND_VTD) {
+        const struct iommu_tables_unit *u = &tables->units[i];
+        if (tables->kind == IOMMU_TABLES_KIND_VTD) {
             claim_into(&r->private, u->base, u->vtd_size);
-        } else if (tables->kind == IOMMU_KIND_AMD) {
+        } else if (tables->kind == IOMMU_TABLES_KIND_AMD) {
             claim_into(
                 &r->private, u->base,
                 u->base % AMD_IOMMU_MMIO_LARGE == 0 ? AMD_IOMMU_MMIO_LARGE : AMD_IOMMU_MMIO_SMALL

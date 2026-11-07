@@ -312,7 +312,7 @@ static bool keep_translating(const struct iommu_tables *tables, uint32_t index, 
     }
     bool listed = false;
     for (size_t i = 0; i < tables->range_count; i++) {
-        const struct iommu_device_range *r = &tables->ranges[i];
+        const struct iommu_tables_device_range *r = &tables->ranges[i];
         if (r->unit != index) {
             continue;
         }

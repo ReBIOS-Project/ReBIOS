@@ -339,7 +339,7 @@ void vlapic_init(void) {
     // itself, the guest is not offered it, as Linux 7.3 (dmar_x2apic_optout())
     // and Limine keep to xAPIC mode there.
     const struct iommu_tables *tables = iommu_tables_parse();
-    x2apic_withheld = tables->kind == IOMMU_KIND_VTD
+    x2apic_withheld = tables->kind == IOMMU_TABLES_KIND_VTD
                    && (tables->vtd_flags & DMAR_X2APIC_OPT_OUT_FLAGS) == DMAR_X2APIC_OPT_OUT_FLAGS
                    && !lapic_legacy_firmware_x2apic();
     if (x2apic_withheld) {
