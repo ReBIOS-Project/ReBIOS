@@ -31,6 +31,7 @@
 #include <lib/util.h>
 #include <memory.h>
 #include <sys/mm.h>
+#include <sys/x86.h>
 #include <virt/gpt.h>
 #include <virt/igfx.h>
 #include <virt/mmio.h>

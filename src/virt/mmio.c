@@ -26,6 +26,7 @@
 #include <lib/util.h>
 #include <memory.h>
 #include <sys/mm.h>
+#include <sys/x86.h>
 #include <virt/emulate.h>
 #include <virt/gpt.h>
 #include <virt/guest_mem.h>

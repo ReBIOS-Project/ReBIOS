@@ -29,6 +29,7 @@
 #include <memory.h>
 #include <sys/cpu.h>
 #include <sys/mm.h>
+#include <sys/x86.h>
 #include <virt/dispi.h>
 #include <virt/gpt.h>
 #include <virt/io.h>

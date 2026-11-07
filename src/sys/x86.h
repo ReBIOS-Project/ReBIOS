@@ -173,6 +173,14 @@
 #define PTE_NX ((uint64_t)1 << 63)
 #define PTE_ADDRESS ((uint64_t)0x000ffffffffff000)
 
+// Memory types, as the MTRRs, the PAT, and EPT encode them (SDM 325462-093
+// Vol. 3A, Tables 14-8 and 14-10).
+#define MT_UC 0
+#define MT_WC 1
+#define MT_WT 4
+#define MT_WP 5
+#define MT_WB 6
+
 struct cpuid_regs {
     uint32_t eax;
     uint32_t ebx;

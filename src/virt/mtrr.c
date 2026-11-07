@@ -47,8 +47,6 @@
 #define PHYSMASK_VALID ((uint64_t)1 << 11)
 #define PHYSMASK_RESERVED_LOW ((uint64_t)0x7ff)
 
-#define TYPE_UC 0
-#define TYPE_WB 6
 #define FIXED_WB ((uint64_t)0x0606060606060606)
 #define FIXED_UC 0
 
@@ -57,9 +55,9 @@
 // Bits MAXPHYADDR-1:12.
 static uint64_t address_mask;
 
-// SDM 325462-093 Vol. 3A, 14.11.2.1: 0, 1, 4, 5, and 6.
+// The memory types the MTRRs take (SDM 325462-093 Vol. 3A, 14.11.2.1).
 static bool type_valid(uint8_t type) {
-    return type == 0 || type == 1 || type == 4 || type == 5 || type == 6;
+    return type == MT_UC || type == MT_WC || type == MT_WT || type == MT_WP || type == MT_WB;
 }
 
 static int fixed_index(uint32_t msr) {
@@ -102,7 +100,7 @@ void mtrr_init(void) {
 }
 
 void mtrr_vcpu_init(struct vcpu *v) {
-    v->mtrr_def_type = DEF_TYPE_E | DEF_TYPE_FE | TYPE_WB;
+    v->mtrr_def_type = DEF_TYPE_E | DEF_TYPE_FE | MT_WB;
     for (size_t i = 0; i < MTRR_FIXED_COUNT; i++) {
         v->mtrr_fixed[i] = FIXED_WB;
     }
@@ -118,7 +116,7 @@ void mtrr_vcpu_init(struct vcpu *v) {
         while (base + size > FOUR_GIB) {
             size >>= 1;
         }
-        v->mtrr_variable[2 * n] = base | TYPE_UC;
+        v->mtrr_variable[2 * n] = base | MT_UC;
         v->mtrr_variable[2 * n + 1] = (~(size - 1) & address_mask) | PHYSMASK_VALID;
         base += size;
     }
