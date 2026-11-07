@@ -26,17 +26,8 @@
 #include <sys/fixup.h>
 #include <sys/x86.h>
 
-#define MSR_IA32_ARCH_CAPABILITIES 0x10a
-#define MSR_IA32_XAPIC_DISABLE_STATUS 0xbd
 #define MSR_X2APIC_FIRST 0x800
 #define MSR_X2APIC_ICR 0x830
-
-#define ARCH_CAPABILITIES_XAPIC_DISABLE_STATUS ((uint64_t)1 << 21)
-#define LEGACY_XAPIC_DISABLED ((uint64_t)1 << 0)
-
-#define APIC_BASE_EXTD ((uint64_t)1 << 10)
-#define APIC_BASE_EN ((uint64_t)1 << 11)
-#define APIC_BASE_ADDRESS ((uint64_t)0x000ffffffffff000)
 
 // CMCI has an LVT entry where the version register's maximum entry is this or
 // more.
@@ -44,8 +35,6 @@
 
 #define IPI_TIMEOUT_NS ((uint64_t)100000000)
 
-#define MSR_IA32_TSC_DEADLINE 0x6e0
-#define CPUID_1_ECX_TSC_DEADLINE ((uint32_t)1 << 24)
 #define LVT_TIMER_TSC_DEADLINE ((uint32_t)1 << 18)
 // The divide configuration register's value for dividing by 1.
 #define TIMER_DIVIDE_BY_1 0xb

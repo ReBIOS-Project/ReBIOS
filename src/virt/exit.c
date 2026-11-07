@@ -43,8 +43,6 @@
 #include <virt/vlapic.h>
 #include <virt/vmx.h>
 
-#define MSR_IA32_CR_PAT 0x277
-
 void exit_cpuid(struct vcpu *v) {
     struct cpuid_regs r = cpuid_guest(v, (uint32_t)v->gprs.rax, (uint32_t)v->gprs.rcx);
     v->gprs.rax = r.eax;
@@ -152,7 +150,7 @@ bool exit_msr_read(struct vcpu *v, uint32_t msr, uint64_t *value) {
         *value = vcpu_efer(v);
         return true;
     }
-    if (!virt_vmx && msr == MSR_IA32_CR_PAT) {
+    if (!virt_vmx && msr == MSR_IA32_PAT) {
         *value = v->vmcb->save.g_pat;
         return true;
     }
@@ -196,7 +194,7 @@ bool exit_msr_write(struct vcpu *v, uint32_t msr, uint64_t value) {
         nsvm_set_svme(v, (value & EFER_SVME) != 0);
         // The processor would have flushed them for the guest's own write.
         svm_flush_guest_tlb(v);
-    } else if (!virt_vmx && msr == MSR_IA32_CR_PAT) {
+    } else if (!virt_vmx && msr == MSR_IA32_PAT) {
         // Each entry must name one of the types 0, 1, 4, 5, 6, or 7.
         for (size_t i = 0; i < 8; i++) {
             uint8_t type = value >> (i * 8);

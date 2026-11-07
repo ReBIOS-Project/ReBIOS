@@ -68,14 +68,33 @@
 #define CR3_LAM_U57 ((uint64_t)1 << 61)
 #define CR3_LAM_U48 ((uint64_t)1 << 62)
 
+#define MSR_IA32_TSC 0x10
 #define MSR_IA32_APIC_BASE 0x1b
 #define MSR_IA32_FEATURE_CONTROL 0x3a
+#define MSR_IA32_XAPIC_DISABLE_STATUS 0xbd
+#define MSR_IA32_ARCH_CAPABILITIES 0x10a
+#define MSR_IA32_MCG_CAP 0x179
 #define MSR_IA32_MISC_ENABLE 0x1a0
+#define MSR_IA32_DEBUGCTL 0x1d9
 #define MSR_IA32_PAT 0x277
 #define MSR_IA32_PERF_GLOBAL_CTRL 0x38f
 #define MSR_IA32_RTIT_STATUS 0x571
 #define MSR_IA32_U_CET 0x6a0
+#define MSR_IA32_TSC_DEADLINE 0x6e0
 #define MSR_EFER 0xc0000080
+#define MSR_AMD_NODE_ID 0xc001100c
+
+#define APIC_BASE_BSP ((uint64_t)1 << 8)
+#define APIC_BASE_EXTD ((uint64_t)1 << 10)
+#define APIC_BASE_EN ((uint64_t)1 << 11)
+#define APIC_BASE_ADDRESS ((uint64_t)0x000ffffffffff000)
+
+#define LEGACY_XAPIC_DISABLED ((uint64_t)1 << 0)
+#define ARCH_CAPABILITIES_XAPIC_DISABLE_STATUS ((uint64_t)1 << 21)
+
+#define DEBUGCTL_LBR ((uint64_t)1 << 0)
+#define DEBUGCTL_BTF ((uint64_t)1 << 1)
+#define DEBUGCTL_BLCKDB ((uint64_t)1 << 2)
 
 // SDM 325462-093 Vol. 4, Tables 2-2 and 2-3.
 #define MISC_ENABLE_LIMIT_CPUID ((uint64_t)1 << 22)
@@ -114,6 +133,45 @@
 #define RFLAGS_VIF ((uint32_t)1 << 19)
 #define RFLAGS_VIP ((uint32_t)1 << 20)
 #define RFLAGS_ID ((uint32_t)1 << 21)
+
+#define CPUID_1_ECX_TSC_DEADLINE ((uint32_t)1 << 24)
+#define CPUID_7_EBX_MPX ((uint32_t)1 << 14)
+#define CPUID_7_EBX_PT ((uint32_t)1 << 25)
+#define CPUID_D_1_EAX_XSAVES ((uint32_t)1 << 3)
+#define CPUID_80000001_EDX_NX ((uint32_t)1 << 20)
+
+#define VECTOR_DB 1
+#define VECTOR_NMI 2
+#define VECTOR_BP 3
+#define VECTOR_OF 4
+#define VECTOR_UD 6
+#define VECTOR_DF 8
+#define VECTOR_TS 10
+#define VECTOR_NP 11
+#define VECTOR_SS 12
+#define VECTOR_GP 13
+#define VECTOR_PF 14
+#define VECTOR_MF 16
+#define VECTOR_MC 18
+#define VECTOR_VE 20
+#define VECTOR_CP 21
+#define VECTOR_SX 30
+
+// The bits of paging-structure entries, which AMD's nested paging uses too,
+// and whose address bits EPT's and the IOMMUs' tables share.
+#define PTE_P ((uint64_t)1 << 0)
+#define PTE_W ((uint64_t)1 << 1)
+#define PTE_U ((uint64_t)1 << 2)
+#define PTE_PWT ((uint64_t)1 << 3)
+#define PTE_PCD ((uint64_t)1 << 4)
+#define PTE_A ((uint64_t)1 << 5)
+#define PTE_D ((uint64_t)1 << 6)
+#define PTE_PS ((uint64_t)1 << 7)
+#define PTE_PAT_4K ((uint64_t)1 << 7)
+#define PTE_PAT_LARGE ((uint64_t)1 << 12)
+#define PTE_PKEY_SHIFT 59
+#define PTE_NX ((uint64_t)1 << 63)
+#define PTE_ADDRESS ((uint64_t)0x000ffffffffff000)
 
 struct cpuid_regs {
     uint32_t eax;

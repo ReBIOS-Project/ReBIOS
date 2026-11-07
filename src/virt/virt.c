@@ -56,13 +56,9 @@
 #include <virt/vlapic.h>
 #include <virt/vmx.h>
 
-#define MSR_IA32_CR_PAT 0x277
-#define MSR_DEBUGCTL 0x1d9
 #define MSR_DR1_ADDR_MASK 0xc0011019
 #define MSR_DR0_ADDR_MASK 0xc0011027
 
-#define DEBUGCTL_LBR ((uint32_t)1 << 0)
-#define DEBUGCTL_BTF ((uint32_t)1 << 1)
 #define DR6_BS ((uint64_t)1 << 14)
 // The bits FRED's event data for a debug exception has where DR6 does: B3-B0,
 // BD, and BS (SDM 325462-093 Vol. 3A, 8.3.2.1).
@@ -140,7 +136,7 @@ bool virt_init(void) {
         gpt_init(false, svm_huge_pages(), true);
         // Only nested paging gives the guest its own view of these.
         virt_intercept_msr(MSR_EFER, true, true);
-        virt_intercept_msr(MSR_IA32_CR_PAT, true, true);
+        virt_intercept_msr(MSR_IA32_PAT, true, true);
         virt_intercept_msr(MSR_VM_CR, true, true);
         virt_intercept_msr(MSR_VM_HSAVE_PA, true, true);
         uint32_t features = cpuid(0x80000001, 0).ecx;
@@ -408,7 +404,7 @@ static uint64_t guest_debugctl(struct vcpu *v) {
     if (virt_vmx) {
         return vmx_read(VMCS_GUEST_DEBUGCTL);
     }
-    return svm_lbr_virtualisation ? v->vmcb->save.dbgctl : rdmsr(MSR_DEBUGCTL);
+    return svm_lbr_virtualisation ? v->vmcb->save.dbgctl : rdmsr(MSR_IA32_DEBUGCTL);
 }
 
 static void set_guest_debugctl(struct vcpu *v, uint64_t value) {
@@ -417,7 +413,7 @@ static void set_guest_debugctl(struct vcpu *v, uint64_t value) {
     } else if (svm_lbr_virtualisation) {
         v->vmcb->save.dbgctl = value;
     } else {
-        wrmsr(MSR_DEBUGCTL, value);
+        wrmsr(MSR_IA32_DEBUGCTL, value);
     }
 }
 

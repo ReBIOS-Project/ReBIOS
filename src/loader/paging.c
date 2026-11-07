@@ -25,13 +25,6 @@
 #include <memory.h>
 #include <sys/x86.h>
 
-#define PTE_P ((uint64_t)1 << 0)
-#define PTE_W ((uint64_t)1 << 1)
-#define PTE_PWT ((uint64_t)1 << 3)
-#define PTE_PCD ((uint64_t)1 << 4)
-#define PTE_PS ((uint64_t)1 << 7)
-#define PTE_ADDRESS ((uint64_t)0x000ffffffffff000)
-
 uintptr_t paging_build_identity_map(uintptr_t *map_top, size_t *pages) {
     bool huge_pages = cpuid(0x80000000, 0).eax >= 0x80000001
                    && (cpuid(0x80000001, 0).edx & ((uint32_t)1 << 26)) != 0;

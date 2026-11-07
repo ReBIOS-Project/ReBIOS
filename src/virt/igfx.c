@@ -108,9 +108,9 @@
 // Gen8 to Gen10 but Gen9 LP. Broxton's and Gemini Lake's device IDs are
 // include/drm/intel/pciids.h INTEL_BXT_IDS and INTEL_GLK_IDS.
 #define GGTT_OFFSET ((uint64_t)0x800000)
-#define PTE_PRESENT ((uint64_t)1)
-#define PTE_LM ((uint64_t)1 << 1)
-#define PTE_ADDRESS ((uint64_t)0x3ffffffff000)
+#define GGTT_PTE_PRESENT ((uint64_t)1)
+#define GGTT_PTE_LM ((uint64_t)1 << 1)
+#define GGTT_PTE_ADDRESS ((uint64_t)0x3ffffffff000)
 #define MMIO_FLSH_CNTL ((uint32_t)0x101008)
 #define FLSH_CNTL_EN ((uint32_t)1)
 // A few frames, for the display to fetch the GGTT's entries anew before their
@@ -593,15 +593,16 @@ void igfx_switch_end(void) {
     unsigned int elsewhere = 0;
     for (uintptr_t at = ggtt; at < ggtt + igfx.gsm_size; at += 8) {
         uint64_t pte = mmio_read_host(at, 8);
-        if ((pte & PTE_PRESENT) == 0 || (igfx.kind == STOLEN_DSMBASE && (pte & PTE_LM) != 0)) {
+        if ((pte & GGTT_PTE_PRESENT) == 0
+         || (igfx.kind == STOLEN_DSMBASE && (pte & GGTT_PTE_LM) != 0)) {
             continue;
         }
-        uintptr_t address = pte & PTE_ADDRESS;
+        uintptr_t address = pte & GGTT_PTE_ADDRESS;
         if (address < igfx.dsm || address - igfx.dsm >= igfx.dsm_size) {
             elsewhere++;
             continue;
         }
-        mmio_write_host(at, 8, (pte & ~PTE_ADDRESS) | (igfx.alias + (address - igfx.dsm)));
+        mmio_write_host(at, 8, (pte & ~GGTT_PTE_ADDRESS) | (igfx.alias + (address - igfx.dsm)));
         moved++;
     }
     (void)mmio_read_host(ggtt, 8);

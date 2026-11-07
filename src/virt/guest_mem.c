@@ -30,15 +30,6 @@
 #include <virt/vcpu.h>
 #include <virt/vmx.h>
 
-#define PTE_P ((uint64_t)1 << 0)
-#define PTE_W ((uint64_t)1 << 1)
-#define PTE_U ((uint64_t)1 << 2)
-#define PTE_A ((uint64_t)1 << 5)
-#define PTE_D ((uint64_t)1 << 6)
-#define PTE_PS ((uint64_t)1 << 7)
-#define PTE_NX ((uint64_t)1 << 63)
-#define PTE_ADDR ((uint64_t)0x000ffffffffff000)
-#define PTE_PKEY_SHIFT 59
 #define MSR_IA32_PKRS 0x6e1
 #define CPUID_1_EDX_PSE36 ((uint32_t)1 << 17)
 #define CPUID_80000001_EDX_1G_PAGES ((uint32_t)1 << 26)
@@ -263,7 +254,7 @@ retry: *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0)
     if ((efer & EFER_LMA) != 0) {
         levels = (cr4 & CR4_LA57) != 0 ? 5 : 4;
         wide = true;
-        table = vcpu_cr3(v) & PTE_ADDR;
+        table = vcpu_cr3(v) & PTE_ADDRESS;
     } else if ((cr4 & CR4_PAE) != 0) {
         // The PDPT, of 4 entries, is reached through CR3 bits 31:5; with EPT,
         // VMX keeps the PDPTE registers in the VMCS.
@@ -289,7 +280,7 @@ retry: *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0)
         levels = 2;
         wide = true;
         pae = true;
-        table = pdpte & PTE_ADDR;
+        table = pdpte & PTE_ADDRESS;
     } else {
         levels = 2;
         wide = false;
@@ -332,7 +323,7 @@ retry: *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0)
             uint64_t page_mask = ((uint64_t)1 << shift) - 1;
             uintptr_t base;
             if (wide) {
-                base = entry & PTE_ADDR & ~page_mask;
+                base = entry & PTE_ADDRESS & ~page_mask;
             } else if (large) {
                 // PSE-36 puts physical address bits 39:32 in PDE bits 20:13.
                 base = (entry & 0xffc00000) | ((entry >> 13) & 0xff) << 32;
@@ -396,7 +387,7 @@ retry: *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0)
             }
             return reach(v, base | (linear & page_mask), access, user, linear, gpa, pf_error);
         }
-        table = wide ? entry & PTE_ADDR : entry & 0xfffff000;
+        table = wide ? entry & PTE_ADDRESS : entry & 0xfffff000;
     }
     return false;
 }

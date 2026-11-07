@@ -30,16 +30,7 @@
 #include <sys/fixup.h>
 #include <sys/x86.h>
 
-#define MSR_IA32_XAPIC_DISABLE_STATUS 0xbd
-#define MSR_IA32_ARCH_CAPABILITIES 0x10a
 #define MSR_X2APIC_FIRST 0x800
-
-#define ARCH_CAPABILITIES_XAPIC_DISABLE_STATUS ((uint64_t)1 << 21)
-#define LEGACY_XAPIC_DISABLED ((uint64_t)1 << 0)
-
-#define APIC_BASE_EXTD ((uint64_t)1 << 10)
-#define APIC_BASE_EN ((uint64_t)1 << 11)
-#define APIC_BASE_ADDRESS ((uint64_t)0x000ffffffffff000)
 
 #define APIC_ID 0x20
 #define APIC_VERSION 0x30

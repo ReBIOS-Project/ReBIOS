@@ -29,8 +29,6 @@
 #include <sys/x86.h>
 #include <virt/vcpu.h>
 
-#define ENTRY_ADDR_MASK ((uint64_t)0x000ffffffffff000)
-
 // EPT entry bits.
 #define EPT_R ((uint64_t)1 << 0)
 #define EPT_W ((uint64_t)1 << 1)
@@ -39,18 +37,6 @@
 #define EPT_LARGE ((uint64_t)1 << 7)
 // Where the EPT pointer enables it (SDM 325462-093 Vol. 3C, 31.3.5).
 #define EPT_DIRTY ((uint64_t)1 << 9)
-
-// Nested paging uses the AMD64 page table format, where guest accesses count
-// as user accesses.
-#define NPT_P ((uint64_t)1 << 0)
-#define NPT_RW ((uint64_t)1 << 1)
-#define NPT_US ((uint64_t)1 << 2)
-#define NPT_PWT ((uint64_t)1 << 3)
-#define NPT_PCD ((uint64_t)1 << 4)
-#define NPT_DIRTY ((uint64_t)1 << 6)
-#define NPT_PS ((uint64_t)1 << 7)
-#define NPT_PAT_4K ((uint64_t)1 << 7)
-#define NPT_PAT_LARGE ((uint64_t)1 << 12)
 
 // What a closed A20 gate folds, up to where a legacy guest reaches.
 #define A20_BIT ((uint64_t)0x100000)
@@ -83,21 +69,21 @@ static bool entry_present(uint64_t e) {
     if (use_ept) {
         return (e & (EPT_R | EPT_W | EPT_X)) != 0;
     }
-    return (e & NPT_P) != 0;
+    return (e & PTE_P) != 0;
 }
 
 static bool entry_large(uint64_t e, size_t level) {
     if (level == 0) {
         return true;
     }
-    return (e & (use_ept ? EPT_LARGE : NPT_PS)) != 0;
+    return (e & (use_ept ? EPT_LARGE : PTE_PS)) != 0;
 }
 
 static uint64_t table_entry(uintptr_t table) {
     if (use_ept) {
         return table | EPT_R | EPT_W | EPT_X;
     }
-    return table | NPT_P | NPT_RW | NPT_US;
+    return table | PTE_P | PTE_W | PTE_U;
 }
 
 static uint64_t leaf_entry(uintptr_t hpa, uint32_t prot, uint8_t memtype, size_t level) {
@@ -122,34 +108,36 @@ static uint64_t leaf_entry(uintptr_t hpa, uint32_t prot, uint8_t memtype, size_t
         return e;
     }
 
-    uint64_t e = hpa | NPT_P | NPT_US;
+    // Nested paging uses the AMD64 page table format, where guest accesses
+    // count as user accesses.
+    uint64_t e = hpa | PTE_P | PTE_U;
     if ((prot & GPT_W) != 0) {
-        e |= NPT_RW;
+        e |= PTE_W;
     }
     if (level > 0) {
-        e |= NPT_PS;
+        e |= PTE_PS;
     }
 
     // Indices into HOST_PAT.
-    uint64_t pat = level > 0 ? NPT_PAT_LARGE : NPT_PAT_4K;
+    uint64_t pat = level > 0 ? PTE_PAT_LARGE : PTE_PAT_4K;
     switch (memtype) {
         case MT_WB: {
             break;
         }
         case MT_WC: {
-            e |= NPT_PWT;
+            e |= PTE_PWT;
             break;
         }
         case MT_WP: {
-            e |= pat | NPT_PWT;
+            e |= pat | PTE_PWT;
             break;
         }
         case MT_WT: {
-            e |= pat | NPT_PCD | NPT_PWT;
+            e |= pat | PTE_PCD | PTE_PWT;
             break;
         }
         default: {
-            e |= NPT_PCD | NPT_PWT;
+            e |= PTE_PCD | PTE_PWT;
             break;
         }
     }
@@ -161,7 +149,7 @@ uint64_t gpt_npt_leaf(uintptr_t hpa, uint32_t prot, uint8_t memtype, size_t leve
 }
 
 static uintptr_t leaf_addr(uint64_t e, size_t level) {
-    return e & ENTRY_ADDR_MASK & ~(level_size(level) - 1);
+    return e & PTE_ADDRESS & ~(level_size(level) - 1);
 }
 
 // The access rights and memory type of a leaf, to split it into smaller ones.
@@ -182,12 +170,12 @@ static void leaf_decode(uint64_t e, size_t level, uint32_t *prot, uint8_t *memty
     }
 
     *prot = GPT_R | GPT_X;
-    if ((e & NPT_RW) != 0) {
+    if ((e & PTE_W) != 0) {
         *prot |= GPT_W;
     }
-    uint64_t pat = level > 0 ? NPT_PAT_LARGE : NPT_PAT_4K;
-    uint8_t index = ((e & pat) != 0 ? 4 : 0) | ((e & NPT_PCD) != 0 ? 2 : 0)
-                  | ((e & NPT_PWT) != 0 ? 1 : 0);
+    uint64_t pat = level > 0 ? PTE_PAT_LARGE : PTE_PAT_4K;
+    uint8_t index = ((e & pat) != 0 ? 4 : 0) | ((e & PTE_PCD) != 0 ? 2 : 0)
+                  | ((e & PTE_PWT) != 0 ? 1 : 0);
     *memtype = (HOST_PAT >> (index * 8)) & 7;
 }
 
@@ -223,7 +211,7 @@ static uint64_t *table_for(uint64_t *top, uintptr_t gpa, size_t level) {
             }
             *e = table_entry((uintptr_t)next);
         }
-        table = (uint64_t *)(uintptr_t)(*e & ENTRY_ADDR_MASK);
+        table = (uint64_t *)(uintptr_t)(*e & PTE_ADDRESS);
     }
     return table;
 }
@@ -261,7 +249,7 @@ static void share_upper(void) {
     for (size_t i = 1; i < 512; i++) {
         masked_root[i] = root[i];
     }
-    uint64_t *pdpt = (uint64_t *)(uintptr_t)(root[0] & ENTRY_ADDR_MASK);
+    uint64_t *pdpt = (uint64_t *)(uintptr_t)(root[0] & PTE_ADDRESS);
     uint64_t *masked_pdpt = table_for(masked_root, 0, 2);
     for (size_t i = A20_LIMIT / level_size(2); i < 512; i++) {
         masked_pdpt[i] = pdpt[i];
@@ -359,7 +347,7 @@ bool gpt_translate_leaf(
             *hpa = leaf_addr(e, l) | (gpa & (level_size(l) - 1));
             return true;
         }
-        table = (uint64_t *)(uintptr_t)(e & ENTRY_ADDR_MASK);
+        table = (uint64_t *)(uintptr_t)(e & PTE_ADDRESS);
     }
     return false;
 }
@@ -392,13 +380,13 @@ static uint64_t *page_entry(uint64_t *top, uintptr_t gpa) {
         if (!entry_present(e) || entry_large(e, l)) {
             return NULL;
         }
-        table = (uint64_t *)(uintptr_t)(e & ENTRY_ADDR_MASK);
+        table = (uint64_t *)(uintptr_t)(e & PTE_ADDRESS);
     }
     return &table[(gpa >> 12) & 511];
 }
 
 static bool take_dirty(uint64_t *e, bool clear) {
-    uint64_t dirty = use_ept ? EPT_DIRTY : NPT_DIRTY;
+    uint64_t dirty = use_ept ? EPT_DIRTY : PTE_D;
     if (e == NULL
      || (atomic_load_explicit((_Atomic(uint64_t) *)e, memory_order_relaxed) & dirty) == 0) {
         return false;

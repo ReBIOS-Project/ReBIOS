@@ -48,18 +48,13 @@
 #include <virt/virt.h>
 #include <virt/vmx.h>
 
-#define MSR_IA32_XAPIC_DISABLE_STATUS 0xbd
 #define MSR_X2APIC_FIRST 0x800
 #define MSR_X2APIC_LAST 0x8ff
 #define MSR_X2APIC_ICR 0x830
 #define MSR_X2APIC_SELF_IPI 0x83f
 
-#define APIC_BASE_BSP ((uint64_t)1 << 8)
-#define APIC_BASE_EXTD ((uint64_t)1 << 10)
 // VT-d D51397-019 rev. 5.20, 8.1: INTR_REMAP and X2APIC_OPT_OUT.
 #define DMAR_X2APIC_OPT_OUT_FLAGS 0x03
-#define APIC_BASE_EN ((uint64_t)1 << 11)
-#define APIC_BASE_ADDRESS ((uint64_t)0x000ffffffffff000)
 
 #define APIC_APR 0x90
 #define APIC_PPR 0xa0
@@ -82,7 +77,6 @@
 #define LVT_TIMER_MODE_MASK ((uint32_t)3 << 17)
 #define LVT_TIMER_PERIODIC ((uint32_t)1 << 17)
 #define LVT_TIMER_TSC_DEADLINE ((uint32_t)2 << 17)
-#define CPUID_1_ECX_TSC_DEADLINE ((uint32_t)1 << 24)
 // What AMD's extended feature register says the space has, each turned on by
 // the control register's bit at its position (APM 24593 rev. 3.46, 16.3.5,
 // 16.3.6): the interrupt enable registers, specific EOIs, and 8-bit APIC IDs.

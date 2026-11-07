@@ -46,9 +46,7 @@
 #include <virt/vlapic.h>
 
 #define CPUID_80000001_ECX_OSVW ((uint32_t)1 << 9)
-#define CPUID_80000001_EDX_NX ((uint32_t)1 << 20)
 #define CPUID_80000008_EBX_INVLPGB ((uint32_t)1 << 3)
-#define MSR_MCG_CAP 0x179
 #define MSR_MCG_STATUS 0x17a
 #define MCG_STATUS_MCIP ((uint64_t)1 << 2)
 #define MSR_MC0_STATUS 0x401
@@ -60,11 +58,6 @@
 #define MSR_OSVW_STATUS 0xc0010141
 #define OSVW_ERRATUM_383 3
 #define ERRATUM_383_SIGNATURE ((uint64_t)0xb600000000010015)
-#define VECTOR_UD 6
-#define VECTOR_DF 8
-#define VECTOR_GP 13
-#define VECTOR_MF 16
-#define VECTOR_MC 18
 
 bool svm_lbr_virtualisation;
 bool svm_nrips;
@@ -175,7 +168,7 @@ static bool erratum_383_present(void) {
 
 // What the banks hold of a machine check, for the log.
 static void log_machine_check(void) {
-    uint64_t banks = rdmsr(MSR_MCG_CAP) & 0xff;
+    uint64_t banks = rdmsr(MSR_IA32_MCG_CAP) & 0xff;
     for (size_t i = 0; i < banks; i++) {
         uint64_t status = rdmsr(MSR_MC0_STATUS + 4 * (uint32_t)i);
         if ((status & MCI_STATUS_VAL) == 0) {
@@ -195,7 +188,7 @@ static void svm_machine_check(struct vcpu *v) {
     uint64_t status;
     if (rdmsr_safe(MSR_MC0_STATUS, &status)
      && (status & ~MCI_STATUS_OVER) == ERRATUM_383_SIGNATURE) {
-        uint64_t banks = rdmsr(MSR_MCG_CAP) & 0xff;
+        uint64_t banks = rdmsr(MSR_IA32_MCG_CAP) & 0xff;
         for (size_t i = 0; i < banks; i++) {
             wrmsr(MSR_MC0_STATUS + 4 * (uint32_t)i, 0);
         }

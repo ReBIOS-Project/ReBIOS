@@ -42,13 +42,6 @@
 #include <virt/virt.h>
 #include <virt/vlapic.h>
 
-#define VECTOR_DB 1
-#define VECTOR_UD 6
-#define VECTOR_GP 13
-#define VECTOR_PF 14
-#define VECTOR_MF 16
-#define VECTOR_MC 18
-#define VECTOR_SX 30
 // The error code of the #SX that a redirected INIT raises (APM 24593 rev.
 // 3.46, 15.28).
 #define SX_INIT 1
@@ -86,21 +79,6 @@
 // port, and those for accesses past port FFFFh (APM 24593 rev. 3.46, 15.10.1).
 #define IOPM_USED (2 * PAGE_SIZE + 1)
 
-// Nested paging's tables, in the formats of the guest's page tables (APM 24593
-// rev. 3.46, 15.25.3 and 15.25.5).
-#define NPT_P ((uint64_t)1 << 0)
-#define NPT_RW ((uint64_t)1 << 1)
-#define NPT_US ((uint64_t)1 << 2)
-#define NPT_PWT ((uint64_t)1 << 3)
-#define NPT_PCD ((uint64_t)1 << 4)
-#define NPT_A ((uint64_t)1 << 5)
-#define NPT_D ((uint64_t)1 << 6)
-#define NPT_PS ((uint64_t)1 << 7)
-#define NPT_PAT_4K ((uint64_t)1 << 7)
-#define NPT_PAT_LARGE ((uint64_t)1 << 12)
-#define NPT_NX ((uint64_t)1 << 63)
-#define NPT_ADDRESS ((uint64_t)0x000ffffffffff000)
-
 // A nested page fault's error code (APM 24593 rev. 3.46, 15.25.7).
 #define NPF_P ((uint64_t)1 << 0)
 #define NPF_RW ((uint64_t)1 << 1)
@@ -120,9 +98,6 @@
 
 #define NPT02_ROOTS 4
 
-#define DEBUGCTL_LBR ((uint64_t)1 << 0)
-#define DEBUGCTL_BTF ((uint64_t)1 << 1)
-#define DEBUGCTL_BLCKDB ((uint64_t)1 << 2)
 #define CPUID_7_0_ECX_BUSLOCKTRAP ((uint32_t)1 << 24)
 
 // A shadow of one of the guest's nested page tables, for one ASID of its
@@ -803,7 +778,6 @@ static void vmrun_failed(struct vcpu *v, struct nsvm *n, struct vmcb *vmcb12) {
 // (nested.c, nested_svm_event_inj_valid_exept()), #CP with shadow stacks, and
 // the guest not having SEV-ES (APM 24593 rev. 3.46, 15.20).
 #define INJECTABLE_EXCEPTIONS ((uint32_t)0x500f7dfb)
-#define VECTOR_CP 21
 
 static bool injection_valid(uint64_t event, bool fred) {
     if ((event & SVM_EVENT_VALID) == 0) {
@@ -990,8 +964,9 @@ static uintptr_t merge_msrpm(struct nsvm *n, uint64_t base12) {
     return (uintptr_t)n->msrpm02;
 }
 
-// An entry of the guest's nested page tables, which reads as all ones where
-// nothing decodes, its reserved bits set.
+// An entry of the guest's nested page tables, in the formats of its page
+// tables (APM 24593 rev. 3.46, 15.25.3 and 15.25.5), which reads as all ones
+// where nothing decodes, its reserved bits set.
 static uint64_t npt12_read(const struct nsvm *n, uintptr_t gpa, void **at) {
     uint8_t *page = guest_page(page_down(gpa));
     *at = NULL;
@@ -1049,13 +1024,13 @@ retry:;
             return error;
         }
         uint64_t pdpte = npt12_read(n, (n->ncr3 & ~(uint64_t)0x1f) + ((gpa >> 30) & 3) * 8, &at);
-        if ((pdpte & NPT_P) == 0) {
+        if ((pdpte & PTE_P) == 0) {
             return error;
         }
         if (!guest_pdpte_valid(pdpte)) {
             return error | NPF_P | NPF_RSV;
         }
-        table = pdpte & NPT_ADDRESS;
+        table = pdpte & PTE_ADDRESS;
     } else if (!wide) {
         if ((gpa >> 32) != 0) {
             return error;
@@ -1065,7 +1040,7 @@ retry:;
         if ((gpa >> (12 + 9 * n->npt_levels)) != 0) {
             return error;
         }
-        table = n->ncr3 & NPT_ADDRESS;
+        table = n->ncr3 & PTE_ADDRESS;
     }
     void *used[5];
     uint64_t entries[5];
@@ -1076,19 +1051,19 @@ retry:;
         unsigned int shift = wide ? 12 + 9 * level : 12 + 10 * level;
         size_t index = (gpa >> shift) & (wide ? 511 : 1023);
         uint64_t e = npt12_read(n, table + index * (wide ? 8 : 4), &used[level]);
-        if ((e & NPT_P) == 0) {
+        if ((e & PTE_P) == 0) {
             return error;
         }
-        bool large = level > 0 && (e & NPT_PS) != 0 && (wide || n->npt_pse);
+        bool large = level > 0 && (e & PTE_PS) != 0 && (wide || n->npt_pse);
         if ((e & guest_pte_reserved(wide, n->npt_pae, level, large, n->npt_nx)) != 0) {
             return error | NPF_P | NPF_RSV;
         }
         entries[level] = e;
-        writable = writable && (e & NPT_RW) != 0;
-        user_page = user_page && (e & NPT_US) != 0;
-        executable = executable && (!wide || !n->npt_nx || (e & NPT_NX) == 0);
+        writable = writable && (e & PTE_W) != 0;
+        user_page = user_page && (e & PTE_U) != 0;
+        executable = executable && (!wide || !n->npt_nx || (e & PTE_NX) == 0);
         if (level > 0 && !large) {
-            table = wide ? e & NPT_ADDRESS : e & 0xfffff000;
+            table = wide ? e & PTE_ADDRESS : e & 0xfffff000;
             continue;
         }
         // With GMET, U/S keeps the guest's guest's supervisor code off user
@@ -1100,12 +1075,12 @@ retry:;
         // A write that sets the dirty flag logs its 4-KByte page, where VMCB12
         // has it, or is not done for want of room (APM 24593 rev. 3.46,
         // 15.25.16).
-        bool logs = n->pml && write && (e & NPT_D) == 0;
+        bool logs = n->pml && write && (e & PTE_D) == 0;
         if (logs && n->pml_index > PML_LAST) {
             return NPT12_PML_FULL;
         }
         for (size_t l = n->npt_levels; l-- > level; ) {
-            uint64_t set = NPT_A | (l == level && write ? NPT_D : 0);
+            uint64_t set = PTE_A | (l == level && write ? PTE_D : 0);
             if ((entries[l] & set) != set && !npt12_mark(n, used[l], entries[l], set)) {
                 goto retry;
             }
@@ -1117,7 +1092,7 @@ retry:;
         }
         uint64_t page_mask = ((uint64_t)1 << shift) - 1;
         if (wide) {
-            w->gpa = (e & NPT_ADDRESS & ~page_mask) | (gpa & page_mask);
+            w->gpa = (e & PTE_ADDRESS & ~page_mask) | (gpa & page_mask);
         } else if (large) {
             // PSE-36 puts physical address bits 39:32 in PDE bits 20:13.
             w->gpa = (e & 0xffc00000) | ((e >> 13) & 0xff) << 32 | (gpa & page_mask);
@@ -1125,7 +1100,7 @@ retry:;
             w->gpa = (e & 0xfffff000) | (gpa & page_mask);
         }
         w->level = level;
-        w->leaf = e | NPT_A | (write ? NPT_D : 0);
+        w->leaf = e | PTE_A | (write ? PTE_D : 0);
         w->writable = writable;
         w->executable = executable;
         w->user = user_page;
@@ -1141,8 +1116,8 @@ static size_t level_size(size_t level) {
 static void npt02_free(struct nsvm *n, uint64_t *table, size_t level) {
     for (size_t i = 0; level > 0 && i < 512; i++) {
         uint64_t e = table[i];
-        if ((e & NPT_P) != 0 && (e & NPT_PS) == 0) {
-            npt02_free(n, (uint64_t *)(uintptr_t)(e & NPT_ADDRESS), level - 1);
+        if ((e & PTE_P) != 0 && (e & PTE_PS) == 0) {
+            npt02_free(n, (uint64_t *)(uintptr_t)(e & PTE_ADDRESS), level - 1);
         }
     }
     page_free(table, 1);
@@ -1215,9 +1190,9 @@ static uintptr_t npt02_root(struct nsvm *n) {
 // The memory type of a leaf of the guest's nested page tables, through its PAT
 // (APM 24593 rev. 3.46, 15.25.9).
 static uint8_t npt12_memtype(const struct nsvm *n, const struct npt12_walk *w) {
-    uint64_t pat = w->level > 0 ? NPT_PAT_LARGE : NPT_PAT_4K;
-    size_t index = ((w->leaf & pat) != 0 ? 4 : 0) | ((w->leaf & NPT_PCD) != 0 ? 2 : 0)
-                 | ((w->leaf & NPT_PWT) != 0 ? 1 : 0);
+    uint64_t pat = w->level > 0 ? PTE_PAT_LARGE : PTE_PAT_4K;
+    size_t index = ((w->leaf & pat) != 0 ? 4 : 0) | ((w->leaf & PTE_PCD) != 0 ? 2 : 0)
+                 | ((w->leaf & PTE_PWT) != 0 ? 1 : 0);
     return (uint8_t)((n->npt_pat >> (index * 8)) & 7);
 }
 
@@ -1234,16 +1209,16 @@ static uint64_t npt02_leaf(
     if (memtype != MT_WB && type != MT_UC) {
         type = memtype;
     }
-    bool writable = w->writable && (prot & GPT_W) != 0 && (w->leaf & NPT_D) != 0;
+    bool writable = w->writable && (prot & GPT_W) != 0 && (w->leaf & PTE_D) != 0;
     uint64_t e = gpt_npt_leaf(
         hpa & ~(level_size(level) - 1), writable ? GPT_RWX : GPT_R | GPT_X, type, level
     );
-    e |= NPT_A | (writable ? NPT_D : 0);
+    e |= PTE_A | (writable ? PTE_D : 0);
     if (!w->executable) {
-        e |= NPT_NX;
+        e |= PTE_NX;
     }
     if (n->gmet && !w->user) {
-        e &= ~NPT_US;
+        e &= ~PTE_U;
     }
     return e;
 }
@@ -1275,22 +1250,22 @@ static uint64_t npt02_fill(struct nsvm *n, uintptr_t gpa, const struct npt12_wal
     uint64_t *table = n->current02->root;
     for (size_t l = 3; l > level; l--) {
         uint64_t *slot = &table[(gpa >> (12 + 9 * l)) & 511];
-        if ((*slot & NPT_P) == 0 || (*slot & NPT_PS) != 0) {
-            *slot = (uint64_t)(uintptr_t)npt02_table(n) | NPT_P | NPT_RW | NPT_US | NPT_A;
+        if ((*slot & PTE_P) == 0 || (*slot & PTE_PS) != 0) {
+            *slot = (uint64_t)(uintptr_t)npt02_table(n) | PTE_P | PTE_W | PTE_U | PTE_A;
         }
-        table = (uint64_t *)(uintptr_t)(*slot & NPT_ADDRESS);
+        table = (uint64_t *)(uintptr_t)(*slot & PTE_ADDRESS);
     }
     uint64_t *slot = &table[(gpa >> (12 + 9 * level)) & 511];
-    if ((*slot & NPT_P) != 0 && (*slot & NPT_PS) == 0 && level > 0) {
-        npt02_free(n, (uint64_t *)(uintptr_t)(*slot & NPT_ADDRESS), level - 1);
+    if ((*slot & PTE_P) != 0 && (*slot & PTE_PS) == 0 && level > 0) {
+        npt02_free(n, (uint64_t *)(uintptr_t)(*slot & PTE_ADDRESS), level - 1);
     }
     *slot = npt02_leaf(n, w, hpa, prot, memtype, level);
     return *slot;
 }
 
 static bool npt02_allows(uint64_t leaf, bool write, bool fetch) {
-    return (leaf & NPT_P) != 0 && (!write || (leaf & NPT_RW) != 0)
-        && (!fetch || (leaf & NPT_NX) == 0);
+    return (leaf & PTE_P) != 0 && (!write || (leaf & PTE_W) != 0)
+        && (!fetch || (leaf & PTE_NX) == 0);
 }
 
 // VMCB02 from VMCB12 and the hypervisor's own controls in VMCB01 (APM 24594

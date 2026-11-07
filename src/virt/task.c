@@ -57,15 +57,6 @@
 #define DESC_ACCESSED ((uint32_t)1 << 0)
 #define DESC_G ((uint32_t)1 << 11)
 
-#define VECTOR_DF 8
-#define VECTOR_TS 10
-#define VECTOR_NP 11
-#define VECTOR_SS 12
-#define VECTOR_GP 13
-#define VECTOR_PF 14
-#define VECTOR_VE 20
-#define VECTOR_CP 21
-
 #define SELECTOR_TI ((uint32_t)1 << 2)
 #define SELECTOR_RPL ((uint32_t)3)
 

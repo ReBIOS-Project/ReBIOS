@@ -365,8 +365,6 @@ static const struct last_subleaf amd_last_subleaves[] = {
 #define CPUID_1_ECX_OSXSAVE ((uint32_t)1 << 27)
 #define CPUID_1_EDX_APIC ((uint32_t)1 << 9)
 #define CPUID_7_EBX_INVPCID ((uint32_t)1 << 10)
-#define CPUID_7_EBX_MPX ((uint32_t)1 << 14)
-#define CPUID_7_EBX_PT ((uint32_t)1 << 25)
 #define CPUID_7_ECX_PKU ((uint32_t)1 << 3)
 #define CPUID_7_ECX_OSPKE ((uint32_t)1 << 4)
 #define CPUID_7_ECX_WAITPKG ((uint32_t)1 << 5)
@@ -374,7 +372,6 @@ static const struct last_subleaf amd_last_subleaves[] = {
 #define CPUID_7_ECX_RDPID ((uint32_t)1 << 22)
 #define CPUID_7_EDX_ARCH_LBR ((uint32_t)1 << 19)
 #define CPUID_7_1_EAX_FRED ((uint32_t)1 << 17)
-#define CPUID_D_1_EAX_XSAVES ((uint32_t)1 << 3)
 #define CPUID_PT 0x14
 #define CPUID_ARCH_LBR 0x1c
 #define CPUID_PERFMON_EXT 0x23
@@ -383,7 +380,6 @@ static const struct last_subleaf amd_last_subleaves[] = {
 #define CPUID_80000001_ECX_SVM ((uint32_t)1 << 2)
 #define CPUID_80000001_EDX_APIC ((uint32_t)1 << 9)
 #define CPUID_80000001_EDX_SYSCALL ((uint32_t)1 << 11)
-#define CPUID_80000001_EDX_NX ((uint32_t)1 << 20)
 #define CPUID_80000001_EDX_FFXSR ((uint32_t)1 << 25)
 #define CPUID_80000001_EDX_RDTSCP ((uint32_t)1 << 27)
 #define CPUID_80000001_EDX_LM ((uint32_t)1 << 29)
@@ -396,7 +392,6 @@ static const struct last_subleaf amd_last_subleaves[] = {
 #define CPUID_80000007_EDX_RAPL ((uint32_t)1 << 14)
 #define CPUID_80000008_EBX_PPIN ((uint32_t)1 << 23)
 #define CPUID_80000022_EBX_UMC_COUNTERS ((uint32_t)0x3f << 16)
-#define MSR_AMD_NODE_ID 0xc001100c
 #define MSR_AMD_RAPL_PWR_UNIT 0xc0010299
 #define MSR_AMD_PPIN_CTL 0xc00102f0
 #define MSR_AMD_UMC_PERF_CTL0 0xc0010800

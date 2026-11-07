@@ -137,7 +137,6 @@
 // Domain 0 is reserved under caching mode.
 #define DOMAIN_ID ((uint64_t)1)
 
-#define ENTRY_ADDR_MASK ((uint64_t)0x000ffffffffff000)
 #define TIMEOUT_NS ((uint64_t)1000000000)
 
 struct vtd_unit {
@@ -455,7 +454,7 @@ static void unit_enable(struct vtd_unit *u, uintptr_t pml4) {
     // A 3-level table is the 4-level one's first 512GiB.
     uintptr_t table = pml4;
     if (!u->four_levels) {
-        table = *(uint64_t *)(uintptr_t)pml4 & ENTRY_ADDR_MASK;
+        table = *(uint64_t *)(uintptr_t)pml4 & PTE_ADDRESS;
     }
 
     // Every device of every bus gets the one domain.

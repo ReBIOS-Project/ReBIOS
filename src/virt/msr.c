@@ -43,10 +43,7 @@
 
 // SDM 325462-093 Vol. 1, Tables 21-16, 21-19, 21-23, and 21-35.
 #define CPUID_6_EAX_HW_FEEDBACK ((uint32_t)1 << 19)
-#define CPUID_7_EBX_MPX ((uint32_t)1 << 14)
-#define CPUID_7_EBX_PT ((uint32_t)1 << 25)
 #define CPUID_7_1_EBX_CPUIDMAXVAL_LIM_RMV ((uint32_t)1 << 3)
-#define CPUID_D_1_EAX_XSAVES ((uint32_t)1 << 3)
 
 // SDM 325462-093 Vol. 3B, 17.6.4 and 17.6.5.
 #define MSR_IA32_HW_FEEDBACK_PTR 0x17d0
@@ -68,11 +65,8 @@
 #define MSR_IA32_XSS 0xda0
 
 // SDM 325462-093 Vol. 3B, 20.17.3, and Vol. 3A, 13.5.4.1.
-#define CPUID_1_ECX_TSC_DEADLINE ((uint32_t)1 << 24)
 #define CPUID_7_EBX_TSC_ADJUST ((uint32_t)1 << 1)
-#define MSR_IA32_TSC 0x10
 #define MSR_IA32_TSC_ADJUST 0x3b
-#define MSR_IA32_TSC_DEADLINE 0x6e0
 
 // IA32_MCG_CTL, where IA32_MCG_CAP's MCG_CTL_P says there is one: Intel
 // defines only all 0s and all 1s (SDM 325462-093 Vol. 3B, 18.3.1.3), and a
@@ -80,7 +74,6 @@
 // 0x00000000ffffffff. The guest keeps what it wrote, and the processor gets
 // the defined value meaning the same. AMD's bits each enable a bank (APM 24593
 // rev. 3.45, 9.3.1.3), so there the guest's value is the processor's.
-#define MSR_IA32_MCG_CAP 0x179
 #define MSR_IA32_MCG_CTL 0x17b
 #define MCG_CAP_CTL_P ((uint64_t)1 << 8)
 
@@ -97,7 +90,6 @@
 // and split-lock disables' support; 2 enumerates MSR_INTEGRITY_CAPABILITIES,
 // which the guest lacks.
 #define MSR_IA32_CORE_CAPABILITIES 0xcf
-#define MSR_IA32_ARCH_CAPABILITIES 0x10a
 #define ARCH_CAPABILITIES_KNOWN ((uint64_t)0x17f9efdff)
 #define CORE_CAPABILITIES_KNOWN ((uint64_t)0x38)
 
@@ -168,10 +160,6 @@
 #define MSR_AMD_PSTATE_DEF7 0xc001006b
 #define HWCR_LOCK_TSC_TO_CURRENT_P0 ((uint32_t)1 << 21)
 
-// AMD's node ID (BKDG 31116 rev. 3.62, MSRC001_100C), read-only: the
-// northbridge routes by what firmware wrote there.
-#define MSR_AMD_NODE_ID 0xc001100c
-
 // AMD's northbridge configuration (BKDG 31116 rev. 3.62, 42301 rev. 3.14,
 // MSRC001_001F): the processor's, of which the guest may change only
 // EnableCf8ExtCfg, which Linux 7.3 sets on every family for extended
@@ -191,10 +179,8 @@
 // (APM 24593 rev. 3.45, 13.1.1.6, 13.1.1.7, and 15.23): hidden where SVM lacks
 // it, as they would record the hypervisor's branches. DebugCtl's other bits,
 // on in the hypervisor too there, act on nothing it does at CPL 0 without TF.
-#define MSR_DEBUGCTL 0x1d9
 #define MSR_LAST_BRANCH_FROM_IP 0x1db
 #define MSR_LAST_INT_TO_IP 0x1de
-#define DEBUGCTL_LBR ((uint32_t)1)
 
 // The assignable bandwidth monitoring configuration (APM 24593 rev. 3.45,
 // 19.4.5): SDCI allocation enforcement's bit as reserved, as the guest does
@@ -465,7 +451,7 @@ void msr_init(void) {
         }
         if (!svm_lbr_virtualisation) {
             lbr_hidden = true;
-            virt_intercept_msr(MSR_DEBUGCTL, false, true);
+            virt_intercept_msr(MSR_IA32_DEBUGCTL, false, true);
             for (size_t msr = MSR_LAST_BRANCH_FROM_IP; msr <= MSR_LAST_INT_TO_IP; msr++) {
                 virt_intercept_msr(msr, true, true);
             }
@@ -1040,7 +1026,7 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
             }
             return true;
         }
-        case MSR_DEBUGCTL: {
+        case MSR_IA32_DEBUGCTL: {
             if (!lbr_hidden) {
                 return false;
             }
@@ -1048,6 +1034,8 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
             return true;
         }
         case MSR_AMD_NODE_ID: {
+            // AMD's node ID (BKDG 31116 rev. 3.62, MSRC001_100C) is read-only:
+            // the northbridge routes by what firmware wrote there.
             if (virt_vmx) {
                 return false;
             }

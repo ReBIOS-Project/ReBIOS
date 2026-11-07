@@ -52,7 +52,6 @@
 #define EPT_CAP_DIRTY ((uint64_t)1 << 21)
 #define EPT_CAP_INVEPT_ALL ((uint64_t)1 << 26)
 #define VPID_CAP_INVVPID ((uint64_t)1 << 32)
-#define VECTOR_MF 16
 #define VPID_CAP_INVVPID_ADDRESS ((uint64_t)1 << 40)
 #define VPID_CAP_INVVPID_SINGLE ((uint64_t)1 << 41)
 #define VPID_CAP_INVVPID_ALL ((uint64_t)1 << 42)

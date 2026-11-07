@@ -114,14 +114,6 @@ void page_free(void *pages, size_t count) {
     spinlock_release(&mm_lock);
 }
 
-#define PTE_P ((uint64_t)1 << 0)
-#define PTE_W ((uint64_t)1 << 1)
-#define PTE_PWT ((uint64_t)1 << 3)
-#define PTE_PCD ((uint64_t)1 << 4)
-#define PTE_PS ((uint64_t)1 << 7)
-#define PTE_PAT_4K ((uint64_t)1 << 7)
-#define PTE_PAT_LARGE ((uint64_t)1 << 12)
-#define PTE_ADDRESS ((uint64_t)0x000ffffffffff000)
 #define PTE_LARGE_FLAGS ((uint64_t)0x0fff)
 
 static uint64_t *table_of(uint64_t entry) {

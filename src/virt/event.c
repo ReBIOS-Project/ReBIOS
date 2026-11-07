@@ -50,10 +50,6 @@
 #define EVENT_NESTED ((uint32_t)1 << 13)
 #define EVENT_VALID ((uint32_t)1 << 31)
 
-#define VECTOR_NMI 2
-#define VECTOR_BP 3
-#define VECTOR_OF 4
-
 // UINV, the vector of user-interrupt notifications (SDM 325462-093 Vol. 3A,
 // 9.4).
 #define MSR_IA32_UINTR_MISC 0x988

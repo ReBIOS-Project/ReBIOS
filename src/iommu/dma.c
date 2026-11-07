@@ -29,7 +29,6 @@
 #include <sys/x86.h>
 #include <virt/gpt.h>
 
-#define ENTRY_ADDR_MASK ((uint64_t)0x000ffffffffff000)
 // What 4-level tables translate.
 #define DMA_ADDRESS_LIMIT ((uint64_t)1 << 48)
 #define LEGACY_END ((uint64_t)0x100000)
@@ -102,7 +101,7 @@ static uint32_t leaf_prot(uint64_t e) {
 }
 
 static uintptr_t leaf_addr(uint64_t e, size_t level) {
-    return e & ENTRY_ADDR_MASK & ~(level_size(level) - 1);
+    return e & PTE_ADDRESS & ~(level_size(level) - 1);
 }
 
 // Returns the table that holds the entry for addr at level, creating the
@@ -124,7 +123,7 @@ static uint64_t *table_for(uintptr_t addr, size_t level) {
             }
             *e = table_entry((uintptr_t)next, l);
         }
-        table = (uint64_t *)(uintptr_t)(*e & ENTRY_ADDR_MASK);
+        table = (uint64_t *)(uintptr_t)(*e & PTE_ADDRESS);
     }
     return table;
 }
