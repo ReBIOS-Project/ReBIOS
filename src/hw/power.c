@@ -32,6 +32,14 @@
 
 #define RESET_WAIT_US 100000
 
+// The reset control register (ICH10 datasheet 319973-003, 13.7.5), and what
+// Linux 7.3 writes to it: a hard reset, and for a cold one, the power cycled.
+#define PORT_RST_CNT 0xcf9
+#define RST_CNT_SYS_RST 0x02
+#define RST_CNT_WARM 0x06
+#define RST_CNT_COLD 0x0e
+#define RST_CNT_SETUP_US 50
+
 // Returns only if the firmware fails to.
 static void firmware_reset(EFI_RESET_TYPE type) {
     EFI_RUNTIME_SERVICES *rt = (EFI_RUNTIME_SERVICES *)(uintptr_t)core_handoff->efi_rt;
@@ -60,8 +68,11 @@ void power_reset(bool warm) {
         time_udelay(RESET_WAIT_US);
     }
     if (pci_cfg_ports_answer()) {
-        outb(0xcf9, 0x02);
-        outb(0xcf9, 0x06);
+        uint8_t code = warm ? RST_CNT_WARM : RST_CNT_COLD;
+        uint8_t other = (uint8_t)(inb(PORT_RST_CNT) & ~code);
+        outb(PORT_RST_CNT, (uint8_t)(other | RST_CNT_SYS_RST));
+        time_udelay(RST_CNT_SETUP_US);
+        outb(PORT_RST_CNT, (uint8_t)(other | code));
         time_udelay(RESET_WAIT_US);
     }
     firmware_reset(warm ? EfiResetWarm : EfiResetCold);
