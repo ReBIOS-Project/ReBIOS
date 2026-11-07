@@ -69,6 +69,7 @@ bool svm_vnmi;
 bool svm_vgif;
 bool svm_vls;
 bool svm_vmcb_addr_check;
+bool svm_svml;
 bool svm_avic;
 bool svm_x2avic;
 bool svm_avic_ext_lvt_reads;
@@ -247,6 +248,7 @@ bool svm_supported(void) {
     svm_vgif = (features & SVM_FEATURE_VGIF) != 0;
     svm_vls = (features & SVM_FEATURE_VLS) != 0;
     svm_vmcb_addr_check = (features & SVM_FEATURE_VMCB_ADDR_CHECK) != 0;
+    svm_svml = (features & SVM_FEATURE_SVML) != 0;
     svm_vnmi = svm_vgif && (features & SVM_FEATURE_VNMI) != 0;
     // Unless the avic setting says otherwise, AVIC serves only from Zen 4 on,
     // with x2AVIC, as Linux 7.3's KVM has it by default
@@ -614,11 +616,12 @@ static void svm_gp_erratum(struct vcpu *v) {
 
 // A #GP of a guest whose own EFER.SVME is clear: an SVM instruction's is #UD
 // (APM 24594 rev. 3.39, VMRUN, VMLOAD, VMSAVE, STGI, CLGI, SKINIT, INVLPGA),
-// which the processor, finding EFER.SVME set as VMRUN needs it (APM 24593 rev.
-// 3.46, 15.5.1), has as #GP outside CPL 0, before their intercepts (Table
-// 15-7). Others are the guest's, or its hypervisor's where that intercepts
-// them, but one that interrupts the delivery of an exception, which makes a
-// double fault, or after one a shutdown (8.2.9).
+// but STGI's and SKINIT's where the processor has SVM-Lock, which the
+// processor, finding EFER.SVME set as VMRUN needs it (APM 24593 rev. 3.46,
+// 15.5.1), has as #GP outside CPL 0, before their intercepts (Table 15-7).
+// Others are the guest's, or its hypervisor's where that intercepts them, but
+// one that interrupts the delivery of an exception, which makes a double
+// fault, or after one a shutdown (8.2.9).
 static void exit_general_protection(struct vcpu *v) {
     struct vmcb_control *c = &v->vmcb->control;
     uint64_t event = c->exitintinfo;
@@ -630,7 +633,8 @@ static void exit_general_protection(struct vcpu *v) {
         if (!insn_decode(v, &insn)) {
             return;
         }
-        if (insn.opcode == (INSN_OPCODE_0F | 0x01) && (insn.modrm & 0xf8) == 0xd8) {
+        bool lockable = svm_svml && (insn.modrm == 0xdc || insn.modrm == 0xde);
+        if (insn.opcode == (INSN_OPCODE_0F | 0x01) && (insn.modrm & 0xf8) == 0xd8 && !lockable) {
             vcpu_inject_exception(v, VECTOR_UD, false, 0);
             return;
         }

@@ -226,7 +226,6 @@
 #define MSR_AMD_SMM_ADDR 0xc0010112
 #define MSR_AMD_SMM_MASK 0xc0010113
 #define MSR_AMD_SMM_CTL 0xc0010116
-#define MSR_AMD_SVM_KEY 0xc0010118
 #define MSR_AMD_SMM_KEY 0xc0010119
 #define SYSCFG_MTRR_FIX_DRAM_EN ((uint32_t)1 << 18)
 #define SYSCFG_MTRR_VAR_DRAM_EN ((uint32_t)1 << 20)
@@ -495,7 +494,7 @@ void msr_init(void) {
         virt_intercept_msr(MSR_AMD_SMM_ADDR, true, true);
         virt_intercept_msr(MSR_AMD_SMM_MASK, true, true);
         virt_intercept_msr(MSR_AMD_SMM_CTL, true, true);
-        virt_intercept_msr(MSR_AMD_SVM_KEY, true, true);
+        virt_intercept_msr(MSR_SVM_KEY, true, true);
         virt_intercept_msr(MSR_AMD_SMM_KEY, true, true);
     }
     if (virt_vmx) {
@@ -704,9 +703,8 @@ static bool amd_memory_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool
         *value = v->amd_top_mem2;
     } else if (msr == MSR_AMD_MMIO_CFG_BASE) {
         *value = v->amd_mmio_cfg_base;
-    } else if (msr == MSR_AMD_SMM_ADDR || msr == MSR_AMD_SMM_MASK || msr == MSR_AMD_SVM_KEY
-            || msr == MSR_AMD_SMM_KEY) {
-        // No SMRAM, and keys read as 0.
+    } else if (msr == MSR_AMD_SMM_ADDR || msr == MSR_AMD_SMM_MASK || msr == MSR_AMD_SMM_KEY) {
+        // No SMRAM, and the key reads as 0.
         *value = 0;
     } else if (msr == MSR_AMD_SMM_CTL) {
         // Write-only.
@@ -745,8 +743,8 @@ static bool amd_memory_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool 
     } else if (msr == MSR_AMD_SMM_ADDR || msr == MSR_AMD_SMM_MASK || msr == MSR_AMD_SMM_CTL) {
         // Locked, as SmmLock has them.
         *fault = true;
-    } else if (msr == MSR_AMD_SVM_KEY || msr == MSR_AMD_SMM_KEY) {
-        // Keys that match none, as a zero key does.
+    } else if (msr == MSR_AMD_SMM_KEY) {
+        // A key that matches none, as a zero key does.
     } else {
         return false;
     }

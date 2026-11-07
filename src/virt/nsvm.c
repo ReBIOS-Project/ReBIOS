@@ -150,6 +150,8 @@ struct nsvm {
     bool svme;
     bool svme02;
     uint64_t vm_cr;
+    // The key that clears VM_CR.LOCK (APM 24593 rev. 3.46, 15.31.1).
+    uint64_t svm_key;
     uint64_t hsave;
     // The global interrupt flag, one for the vCPU, which the guest's guest's
     // CLGI and STGI change too where the guest does not intercept them.
@@ -447,7 +449,7 @@ struct cpuid_regs nsvm_cpuid(void) {
                       | SVM_FEATURE_PAUSE_FILTER_THRESHOLD | SVM_FEATURE_LBRV | SVM_FEATURE_ROGPT
                       | SVM_FEATURE_TLBICTL | SVM_FEATURE_DECODE_ASSISTS | SVM_FEATURE_VGIF
                       | SVM_FEATURE_VLS | SVM_FEATURE_GMET | SVM_FEATURE_TSC_RATIO
-                      | (svm_vnmi ? SVM_FEATURE_VNMI : 0);
+                      | SVM_FEATURE_SVML | (svm_vnmi ? SVM_FEATURE_VNMI : 0);
     return (struct cpuid_regs){
         svm.eax & 0xff, nasid - 1, svm.ecx & CPUID_8000000A_ECX_PML,
         (svm.edx & features) | SVM_FEATURE_VMCB_ADDR_CHECK
@@ -499,6 +501,11 @@ bool nsvm_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
         *value = n->vm_cr;
         return true;
     }
+    // The key is kept secret (APM 24593 rev. 3.46, 15.31.1).
+    if (msr == MSR_SVM_KEY && svm_svml) {
+        *value = 0;
+        return true;
+    }
     if (msr == MSR_VM_HSAVE_PA) {
         *value = n->hsave;
         return true;
@@ -535,6 +542,16 @@ bool nsvm_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
         *fault = !valid_page(value);
         if (!*fault) {
             n->hsave = value;
+        }
+        return true;
+    }
+    // A write sets the key while VM_CR.LOCK is clear, and else clears LOCK
+    // where it matches a key other than 0 (APM 24593 rev. 3.46, 15.31.1).
+    if (msr == MSR_SVM_KEY && svm_svml) {
+        if ((n->vm_cr & VM_CR_LOCK) == 0) {
+            n->svm_key = value;
+        } else if (value == n->svm_key && value != 0) {
+            n->vm_cr &= ~(uint64_t)VM_CR_LOCK;
         }
         return true;
     }
@@ -1358,11 +1375,12 @@ static uint64_t rax_address(struct vcpu *v, const struct insn *insn) {
 }
 
 // The faults the SVM instructions raise ahead of their intercepts (APM 24594
-// rev. 3.39, VMRUN): #UD without EFER.SVME or outside protected mode, #GP
-// above CPL 0.
-static bool allowed(struct vcpu *v) {
+// rev. 3.39, VMRUN, STGI): #UD without EFER.SVME, but for STGI where the
+// processor has SVM-Lock, or outside protected mode, #GP above CPL 0.
+static bool allowed(struct vcpu *v, bool lockable) {
     struct vmcb_save *s = &v->vmcb->save;
-    if (!nsvm_svme(v) || (s->cr0 & CR0_PE) == 0 || (s->rflags & RFLAGS_VM) != 0) {
+    bool svme = nsvm_svme(v) || (lockable && svm_svml);
+    if (!svme || (s->cr0 & CR0_PE) == 0 || (s->rflags & RFLAGS_VM) != 0) {
         vcpu_inject_exception(v, VECTOR_UD, false, 0);
         return false;
     }
@@ -1388,7 +1406,7 @@ static bool decode(struct vcpu *v, struct insn *insn) {
 // where the guest goes on at the #VMEXIT.
 static void vmrun(struct vcpu *v, struct nsvm *n) {
     struct insn insn;
-    if (!allowed(v) || !decode(v, &insn)) {
+    if (!allowed(v, false) || !decode(v, &insn)) {
         return;
     }
     uint64_t gpa = rax_address(v, &insn);
@@ -1433,7 +1451,7 @@ static void vmrun(struct vcpu *v, struct nsvm *n) {
 // of its that runs them, with addresses in the guest's physical memory.
 static void vmload_vmsave(struct vcpu *v, bool load) {
     struct insn insn;
-    if (!allowed(v) || !decode(v, &insn)) {
+    if (!allowed(v, false) || !decode(v, &insn)) {
         return;
     }
     uint64_t gpa = rax_address(v, &insn);
@@ -1455,7 +1473,7 @@ static void vmload_vmsave(struct vcpu *v, bool load) {
 // translations.
 static void invlpga(struct vcpu *v) {
     struct insn insn;
-    if (!allowed(v) || !decode(v, &insn)) {
+    if (!allowed(v, false) || !decode(v, &insn)) {
         return;
     }
     uint32_t asid = (uint32_t)v->gprs.rcx;
@@ -1508,8 +1526,8 @@ bool nsvm_invlpgb_asid(struct vcpu *v, bool named, uint32_t asid, uint32_t *proc
 void nsvm_instruction(struct vcpu *v, uint64_t code) {
     struct nsvm *n = v->nsvm;
     // Without SVM for the guest, they are all #UD, and so is SKINIT, which the
-    // hypervisor cannot run for the guest, where the guest's own EFER.SVME
-    // enables it whatever CPUID says (APM 24594 rev. 3.39, SKINIT).
+    // hypervisor cannot run for the guest, where the guest's own EFER.SVME or
+    // SVM-Lock enables it whatever CPUID says (APM 24594 rev. 3.39, SKINIT).
     if (n == NULL || code == SVM_EXIT_SKINIT) {
         vcpu_inject_exception(v, VECTOR_UD, false, 0);
         return;
@@ -1526,7 +1544,7 @@ void nsvm_instruction(struct vcpu *v, uint64_t code) {
         }
         case SVM_EXIT_STGI:
         case SVM_EXIT_CLGI: {
-            if (allowed(v)) {
+            if (allowed(v, code == SVM_EXIT_STGI)) {
                 set_gif(v, n, code == SVM_EXIT_STGI);
                 vcpu_skip_instruction(v);
             }
@@ -1763,10 +1781,12 @@ bool nsvm_l2_exit(struct vcpu *v) {
     }
     // Where the guest's guest's own EFER.SVME is clear, the SVM instructions
     // raise #UD before their intercepts, but VMMCALL, whose intercept comes
-    // first (APM 24593 rev. 3.46, Table 15-7), and their #GP outside CPL 0 is
-    // #UD too (svm.c); the guest may intercept #UD instead.
-    if (!n->svme02 && (code == SVM_EXIT_VMRUN || code == SVM_EXIT_INVLPGA
-                    || (code >= SVM_EXIT_VMLOAD && code <= SVM_EXIT_SKINIT))) {
+    // first (APM 24593 rev. 3.46, Table 15-7), and STGI and SKINIT where the
+    // processor has SVM-Lock (15.31), and their #GP outside CPL 0 is #UD too
+    // (svm.c); the guest may intercept #UD instead.
+    bool lockable = svm_svml && (code == SVM_EXIT_STGI || code == SVM_EXIT_SKINIT);
+    if (!n->svme02 && !lockable && (code == SVM_EXIT_VMRUN || code == SVM_EXIT_INVLPGA
+                                 || (code >= SVM_EXIT_VMLOAD && code <= SVM_EXIT_SKINIT))) {
         vcpu_inject_exception(v, VECTOR_UD, false, 0);
         return true;
     }

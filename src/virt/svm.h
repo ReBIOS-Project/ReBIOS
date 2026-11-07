@@ -269,6 +269,7 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 // CPUID Fn8000_000A_EDX (APM 24594 rev. 3.39, E.4.9).
 #define SVM_FEATURE_NP ((uint32_t)1 << 0)
 #define SVM_FEATURE_LBRV ((uint32_t)1 << 1)
+#define SVM_FEATURE_SVML ((uint32_t)1 << 2)
 #define SVM_FEATURE_NRIPS ((uint32_t)1 << 3)
 #define SVM_FEATURE_TSC_RATIO ((uint32_t)1 << 4)
 #define SVM_FEATURE_VMCB_CLEAN ((uint32_t)1 << 5)
@@ -315,6 +316,7 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 #define DC_CFG_ERRATUM_383 ((uint64_t)1 << 47)
 #define MSR_VM_CR 0xc0010114
 #define MSR_VM_HSAVE_PA 0xc0010117
+#define MSR_SVM_KEY 0xc0010118
 #define MSR_TSC_RATIO 0xc0000104
 #define VM_CR_DPD ((uint32_t)1 << 0)
 #define VM_CR_R_INIT ((uint32_t)1 << 1)
@@ -348,6 +350,9 @@ extern bool svm_vls;
 // VMRUN, VMLOAD, and VMSAVE exit on their intercepts whatever their address,
 // rather than raising #GP at addresses the processor reserves.
 extern bool svm_vmcb_addr_check;
+// SVM-Lock: the SVM key can clear VM_CR.LOCK, and STGI and SKINIT need no
+// EFER.SVME (APM 24593 rev. 3.46, 15.31).
+extern bool svm_svml;
 // The processor's AVIC (APM 24593 rev. 3.45, 15.29), where it can be used, and
 // whether it runs x2APIC mode's MSRs too (APM 24593 rev. 3.45, 15.29.10).
 extern bool svm_avic;
