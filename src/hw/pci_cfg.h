@@ -41,4 +41,8 @@ void pci_cfg_write(struct pci_addr addr, uint32_t offset, size_t size, uint32_t 
 // The configuration space window covering the segment and bus, or 0.
 uintptr_t pci_cfg_ecam_base(uint16_t segment, uint8_t bus);
 
+// Whether the configuration ports at CF8h and CFCh answer, as pci_cfg_init()
+// found.
+bool pci_cfg_ports_answer(void);
+
 #endif

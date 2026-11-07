@@ -46,6 +46,7 @@ static struct ecam_window *windows;
 static _Atomic(size_t) window_count;
 static bool mcfg_done;
 static struct spinlock legacy_lock;
+static bool ports_answer;
 
 static bool access_valid(struct pci_addr addr, uint32_t offset, size_t size) {
     if (size != 1 && size != 2 && size != 4) {
@@ -196,10 +197,28 @@ void pci_cfg_write(struct pci_addr addr, uint32_t offset, size_t size, uint32_t 
     spinlock_release(&legacy_lock);
 }
 
+// As Linux 7.3's pci_check_type1() has it: CONFIG_ADDRESS holds what is
+// written to it, and a device answers on bus 0.
+static bool check_ports(void) {
+    spinlock_acquire(&legacy_lock);
+    uint32_t saved = inl(CONFIG_ADDRESS);
+    outl(CONFIG_ADDRESS, CONFIG_ENABLE);
+    bool holds = inl(CONFIG_ADDRESS) == CONFIG_ENABLE;
+    bool device = holds && inw(CONFIG_DATA) != 0xffff;
+    outl(CONFIG_ADDRESS, saved);
+    spinlock_release(&legacy_lock);
+    return device;
+}
+
+bool pci_cfg_ports_answer(void) {
+    return ports_answer;
+}
+
 void pci_cfg_init(void) {
     if (mcfg_done) {
         return;
     }
+    ports_answer = check_ports();
     if (!acpi_tables_ready()) {
         printf("PCI configuration space through ports only, without ACPI tables\n");
         return;
