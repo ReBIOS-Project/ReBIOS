@@ -885,11 +885,11 @@ static bool vmcb12_valid(struct vcpu *v, const struct vmcb *vmcb12) {
     // not set reserved bits (APM 24593 rev. 3.46, 15.5.1).
     if (!npt && (s->cr0 & CR0_PG) != 0 && (s->cr4 & CR4_PAE) != 0) {
         uint64_t pdpte[4];
-        if (!guest_phys_read(s->cr3 & 0xffffffe0, pdpte, sizeof(pdpte))) {
+        if (!guest_mem_phys_read(s->cr3 & 0xffffffe0, pdpte, sizeof(pdpte))) {
             return false;
         }
         for (size_t i = 0; i < 4; i++) {
-            if (!guest_pdpte_valid(pdpte[i])) {
+            if (!guest_mem_pdpte_valid(pdpte[i])) {
                 return false;
             }
         }
@@ -1014,7 +1014,7 @@ retry:;
         if ((pdpte & PTE_P) == 0) {
             return error;
         }
-        if (!guest_pdpte_valid(pdpte)) {
+        if (!guest_mem_pdpte_valid(pdpte)) {
             return error | NPF_P | NPF_RSV;
         }
         table = pdpte & PTE_ADDRESS;
@@ -1042,7 +1042,7 @@ retry:;
             return error;
         }
         bool large = level > 0 && (e & PTE_PS) != 0 && (wide || n->npt_pse);
-        if ((e & guest_pte_reserved(wide, n->npt_pae, level, large, n->npt_nx)) != 0) {
+        if ((e & guest_mem_pte_reserved(wide, n->npt_pae, level, large, n->npt_nx)) != 0) {
             return error | NPF_P | NPF_RSV;
         }
         entries[level] = e;
@@ -1074,7 +1074,7 @@ retry:;
         }
         if (logs) {
             uint64_t page = page_down(gpa);
-            guest_phys_write(page_down(n->pml_base) + n->pml_index * 8, &page, 8);
+            guest_mem_phys_write(page_down(n->pml_base) + n->pml_index * 8, &page, 8);
             n->pml_index--;
         }
         uint64_t page_mask = ((uint64_t)1 << shift) - 1;

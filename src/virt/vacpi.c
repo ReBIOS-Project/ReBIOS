@@ -2273,9 +2273,9 @@ static void write_result(uacpi_object *obj, uint32_t status) {
             }
         }
     }
-    guest_phys_write(vacpi.mailbox + MBX_STATUS, header, sizeof(header));
+    guest_mem_phys_write(vacpi.mailbox + MBX_STATUS, header, sizeof(header));
     if (view.length != 0) {
-        guest_phys_write(vacpi.mailbox + MBX_RDATA, view.const_bytes, view.length);
+        guest_mem_phys_write(vacpi.mailbox + MBX_RDATA, view.const_bytes, view.length);
     }
 }
 
@@ -2283,7 +2283,7 @@ static void write_result(uacpi_object *obj, uint32_t status) {
 static uacpi_object *slot_object(size_t slot) {
     uintptr_t base = vacpi.mailbox + MBX_SLOTS + slot * MBX_SLOT_SIZE;
     uint32_t head[3];
-    guest_phys_read(base, head, sizeof(head));
+    guest_mem_phys_read(base, head, sizeof(head));
     uint32_t type = head[0];
     size_t length = head[1];
     uint8_t data[MBX_SLOT_DATA_SIZE];
@@ -2296,14 +2296,14 @@ static uacpi_object *slot_object(size_t slot) {
         }
         case TYPE_STRING:
         case TYPE_BUFFER: {
-            guest_phys_read(base + MBX_SLOT_DATA, data, length);
+            guest_mem_phys_read(base + MBX_SLOT_DATA, data, length);
             uacpi_data_view view = { .const_bytes = data, .length = length };
             return type == TYPE_STRING
                  ? uacpi_object_create_string(view)
                  : uacpi_object_create_buffer(view);
         }
         case TYPE_PACKAGE: {
-            guest_phys_read(base + MBX_SLOT_DATA, data, MBX_SLOT_DATA_SIZE);
+            guest_mem_phys_read(base + MBX_SLOT_DATA, data, MBX_SLOT_DATA_SIZE);
             uacpi_object *elements[MAX_PACKAGE];
             size_t count = 0;
             size_t off = 0;
@@ -2507,8 +2507,8 @@ static void mailbox_notification(void) {
         vacpi.queue_count--;
     }
     spinlock_release(&vacpi.lock);
-    guest_phys_write(vacpi.mailbox + MBX_INDEX, &target, sizeof(uint32_t));
-    guest_phys_write(vacpi.mailbox + MBX_STATUS, header, sizeof(header));
+    guest_mem_phys_write(vacpi.mailbox + MBX_INDEX, &target, sizeof(uint32_t));
+    guest_mem_phys_write(vacpi.mailbox + MBX_STATUS, header, sizeof(header));
     sci_update();
 }
 
@@ -2528,7 +2528,7 @@ static void doorbell_write(
     (void)size;
     (void)value;
     uint32_t header[8];
-    if (!guest_phys_read(vacpi.mailbox, header, sizeof(header))) {
+    if (!guest_mem_phys_read(vacpi.mailbox, header, sizeof(header))) {
         return;
     }
     switch (header[MBX_FUNCTION / 4]) {

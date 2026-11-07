@@ -146,7 +146,7 @@ static void fault(struct switcher *s, uint8_t vector, uint32_t error) {
 static bool system_read(struct switcher *s, uintptr_t linear, void *buf, size_t len) {
     uint32_t pf_error;
     uintptr_t pf_linear;
-    if (guest_system_read(s->v, linear, buf, len, &pf_error, &pf_linear)) {
+    if (guest_mem_system_read(s->v, linear, buf, len, &pf_error, &pf_linear)) {
         return true;
     }
     deliver(s, VECTOR_PF, pf_error, pf_linear);
@@ -156,7 +156,7 @@ static bool system_read(struct switcher *s, uintptr_t linear, void *buf, size_t 
 static bool system_write(struct switcher *s, uintptr_t linear, const void *buf, size_t len) {
     uint32_t pf_error;
     uintptr_t pf_linear;
-    if (guest_system_write(s->v, linear, buf, len, &pf_error, &pf_linear)) {
+    if (guest_mem_system_write(s->v, linear, buf, len, &pf_error, &pf_linear)) {
         return true;
     }
     deliver(s, VECTOR_PF, pf_error, pf_linear);

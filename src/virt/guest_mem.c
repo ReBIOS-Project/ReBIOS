@@ -61,11 +61,11 @@ static bool guest_phys_access(uintptr_t gpa, void *buf, size_t len, bool write) 
     return true;
 }
 
-bool guest_phys_read(uintptr_t gpa, void *buf, size_t len) {
+bool guest_mem_phys_read(uintptr_t gpa, void *buf, size_t len) {
     return guest_phys_access(gpa, buf, len, false);
 }
 
-bool guest_phys_write(uintptr_t gpa, const void *buf, size_t len) {
+bool guest_mem_phys_write(uintptr_t gpa, const void *buf, size_t len) {
     return guest_phys_access(gpa, (void *)buf, len, true);
 }
 
@@ -80,7 +80,7 @@ static bool reach(
 ) {
     if (nvmx_ept_active(v)) {
         if (!nvmx_ept_translate(v, gpa, access, linear, out)) {
-            *pf_error = PF_ERROR_EXIT;
+            *pf_error = GUEST_MEM_PF_ERROR_EXIT;
             return false;
         }
         return true;
@@ -91,7 +91,7 @@ static bool reach(
             v, gpa, (access & EPT_QUAL_WRITE) != 0, (access & EPT_QUAL_FETCH) != 0, walk, user, out
         );
         if (!translated) {
-            *pf_error = PF_ERROR_EXIT;
+            *pf_error = GUEST_MEM_PF_ERROR_EXIT;
             return false;
         }
         return true;
@@ -108,10 +108,10 @@ static bool read_entry(
         return false;
     }
     if (wide) {
-        return guest_phys_read(gpa, entry, 8);
+        return guest_mem_phys_read(gpa, entry, 8);
     }
     uint32_t e;
-    if (!guest_phys_read(gpa, &e, 4)) {
+    if (!guest_mem_phys_read(gpa, &e, 4)) {
         return false;
     }
     *entry = e;
@@ -164,7 +164,7 @@ static uint32_t guest_pkru(void) {
 // As Linux 7.3's KVM finds them (mmu.c, __reset_rsvds_bits_mask()), but for
 // 32-bit paging's 4 MiB pages, which reserve bit 21 and the address bits past
 // MAXPHYADDR, up to 40, alone.
-uint64_t guest_pte_reserved(bool wide, bool pae, size_t level, bool large, bool nx) {
+uint64_t guest_mem_pte_reserved(bool wide, bool pae, size_t level, bool large, bool nx) {
     static unsigned int phys_bits;
     static bool gb_pages;
     static bool pse36;
@@ -208,8 +208,9 @@ uint64_t guest_pte_reserved(bool wide, bool pae, size_t level, bool large, bool 
     }
 }
 
-bool guest_pdpte_valid(uint64_t pdpte) {
-    return (pdpte & PTE_P) == 0 || (pdpte & guest_pte_reserved(true, true, 2, false, true)) == 0;
+bool guest_mem_pdpte_valid(uint64_t pdpte) {
+    return (pdpte & PTE_P) == 0
+        || (pdpte & guest_mem_pte_reserved(true, true, 2, false, true)) == 0;
 }
 
 static uint64_t data_access(bool write, bool fetch) {
@@ -273,7 +274,7 @@ retry: *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0)
         if ((pdpte & PTE_P) == 0) {
             return false;
         }
-        if ((pdpte & guest_pte_reserved(true, true, 2, false, (efer & EFER_NXE) != 0)) != 0) {
+        if ((pdpte & guest_mem_pte_reserved(true, true, 2, false, (efer & EFER_NXE) != 0)) != 0) {
             *pf_error |= PF_ERROR_P | PF_ERROR_RSVD;
             return false;
         }
@@ -307,7 +308,7 @@ retry: *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0)
             return false;
         }
         bool large = level > 0 && (entry & PTE_PS) != 0 && (wide || (cr4 & CR4_PSE) != 0);
-        if ((entry & guest_pte_reserved(wide, pae, (unsigned int)level, large, nx)) != 0) {
+        if ((entry & guest_mem_pte_reserved(wide, pae, (unsigned int)level, large, nx)) != 0) {
             *pf_error |= PF_ERROR_P | PF_ERROR_RSVD;
             return false;
         }
@@ -369,7 +370,7 @@ retry: *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0)
                                     v, entry_gpas[i], linear, entries[i], set, wide, pf_error
                                 );
                 if (unmarked) {
-                    if ((*pf_error & PF_ERROR_EXIT) != 0) {
+                    if ((*pf_error & GUEST_MEM_PF_ERROR_EXIT) != 0) {
                         return false;
                     }
                     goto retry;
@@ -392,7 +393,7 @@ retry: *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0)
     return false;
 }
 
-bool guest_linear_to_phys(
+bool guest_mem_linear_to_phys(
     struct vcpu *v, uintptr_t linear, bool write, bool fetch, uint64_t *gpa, uint32_t *pf_error
 ) {
     struct segment ss;
@@ -427,33 +428,33 @@ static bool system_access(
     return true;
 }
 
-bool guest_system_read(
+bool guest_mem_system_read(
     struct vcpu *v, uintptr_t linear, void *buf, size_t len, uint32_t *pf_error,
     uint64_t *pf_linear
 ) {
     return system_access(v, linear, buf, len, false, pf_error, pf_linear);
 }
 
-bool guest_system_write(
+bool guest_mem_system_write(
     struct vcpu *v, uintptr_t linear, const void *buf, size_t len, uint32_t *pf_error,
     uint64_t *pf_linear
 ) {
     return system_access(v, linear, (void *)buf, len, true, pf_error, pf_linear);
 }
 
-bool guest_linear_read(struct vcpu *v, uintptr_t linear, void *buf, size_t len, bool fetch) {
+bool guest_mem_linear_read(struct vcpu *v, uintptr_t linear, void *buf, size_t len, bool fetch) {
     uint8_t *p = buf;
     while (len != 0) {
         uintptr_t gpa;
         uint32_t pf_error;
-        if (!guest_linear_to_phys(v, linear, false, fetch, &gpa, &pf_error)) {
+        if (!guest_mem_linear_to_phys(v, linear, false, fetch, &gpa, &pf_error)) {
             return false;
         }
         size_t chunk = PAGE_SIZE - (linear & (PAGE_SIZE - 1));
         if (chunk > len) {
             chunk = len;
         }
-        if (!guest_phys_read(gpa, p, chunk)) {
+        if (!guest_mem_phys_read(gpa, p, chunk)) {
             return false;
         }
         linear += chunk;

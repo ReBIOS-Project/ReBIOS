@@ -56,10 +56,10 @@ unsigned int insn_length_intercepted(struct vcpu *v) {
     }
 
     uint8_t bytes[15];
-    if (!guest_linear_read(v, linear, bytes, sizeof(bytes), true)) {
+    if (!guest_mem_linear_read(v, linear, bytes, sizeof(bytes), true)) {
         // The instruction may end before a page that is not mapped.
         unsigned int avail = 4096 - (linear & 4095);
-        if (avail >= sizeof(bytes) || !guest_linear_read(v, linear, bytes, avail, true)) {
+        if (avail >= sizeof(bytes) || !guest_mem_linear_read(v, linear, bytes, avail, true)) {
             return 0;
         }
     }
@@ -324,9 +324,9 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
     uint8_t bytes[INSN_MAX_LENGTH + 4] = { 0 };
     if (v->fetched_count == INSN_MAX_LENGTH && v->fetched_rip == vcpu_rip(v)) {
         memcpy(bytes, v->fetched, INSN_MAX_LENGTH);
-    } else if (!guest_linear_read(v, linear, bytes, INSN_MAX_LENGTH, true)) {
+    } else if (!guest_mem_linear_read(v, linear, bytes, INSN_MAX_LENGTH, true)) {
         unsigned int avail = 4096 - (linear & 4095);
-        if (avail >= INSN_MAX_LENGTH || !guest_linear_read(v, linear, bytes, avail, true)) {
+        if (avail >= INSN_MAX_LENGTH || !guest_mem_linear_read(v, linear, bytes, avail, true)) {
             return false;
         }
     }

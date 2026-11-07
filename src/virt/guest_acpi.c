@@ -360,8 +360,8 @@ bool guest_acpi_build(uint8_t rsdp[GUEST_ACPI_RSDP_SIZE]) {
 
     uint8_t facs_table[VACPI_FACS_SIZE];
     vacpi_facs(facs_table);
-    guest_phys_write(facs, facs_table, sizeof(facs_table));
-    guest_phys_write(base, copy, total);
+    guest_mem_phys_write(facs, facs_table, sizeof(facs_table));
+    guest_mem_phys_write(base, copy, total);
     kfree(copy);
     kfree(pieces);
     kfree(dsdt);

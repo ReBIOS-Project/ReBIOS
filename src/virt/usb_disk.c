@@ -189,7 +189,7 @@ static uint32_t disk_info(const struct usb_disk *d, uint32_t gpa) {
         info.description, sizeof(info.description), "USB %s %s", tendril_msc_vendor(lun),
         tendril_msc_product(lun)
     );
-    bool written = guest_phys_write(gpa, &info, sizeof(struct hypercall_usb_disk_info));
+    bool written = guest_mem_phys_write(gpa, &info, sizeof(struct hypercall_usb_disk_info));
     return written ? HYPERCALL_USB_DISK_STATUS_OK : HYPERCALL_USB_DISK_STATUS_FAILED;
 }
 
@@ -199,7 +199,7 @@ static uint32_t disk_start(struct usb_disk *d, const struct hypercall_usb_disk *
     if (d->state != DISK_IDLE || call->count == 0 || bytes > BUFFER_SIZE) {
         return HYPERCALL_USB_DISK_STATUS_FAILED;
     }
-    if (!read && !guest_phys_read(call->buffer, d->buffer, bytes)) {
+    if (!read && !guest_mem_phys_read(call->buffer, d->buffer, bytes)) {
         return HYPERCALL_USB_DISK_STATUS_FAILED;
     }
     d->read = read;
@@ -223,7 +223,7 @@ static uint32_t disk_poll(struct usb_disk *d) {
     d->state = DISK_IDLE;
     uint32_t status = status_of(d->status);
     if (status == HYPERCALL_USB_DISK_STATUS_OK && d->read
-     && !guest_phys_write(d->guest_buffer, d->buffer, d->bytes)) {
+     && !guest_mem_phys_write(d->guest_buffer, d->buffer, d->bytes)) {
         return HYPERCALL_USB_DISK_STATUS_FAILED;
     }
     return status;
@@ -231,12 +231,12 @@ static uint32_t disk_poll(struct usb_disk *d) {
 
 void usb_disk_call(uint32_t gpa) {
     struct hypercall_usb_disk call;
-    if (!guest_phys_read(gpa, &call, sizeof(struct hypercall_usb_disk))) {
+    if (!guest_mem_phys_read(gpa, &call, sizeof(struct hypercall_usb_disk))) {
         return;
     }
     if (call.function == HYPERCALL_USB_DISK_READY) {
         call.status = usb_ready() ? 1 : 0;
-        guest_phys_write(gpa, &call, sizeof(struct hypercall_usb_disk));
+        guest_mem_phys_write(gpa, &call, sizeof(struct hypercall_usb_disk));
         return;
     }
     spinlock_acquire(&lock);
@@ -268,7 +268,7 @@ void usb_disk_call(uint32_t gpa) {
         }
     }
     spinlock_release(&lock);
-    guest_phys_write(gpa, &call, sizeof(struct hypercall_usb_disk));
+    guest_mem_phys_write(gpa, &call, sizeof(struct hypercall_usb_disk));
     // The transfer's next step, whichever that is, comes sooner.
     usb_kick();
 }

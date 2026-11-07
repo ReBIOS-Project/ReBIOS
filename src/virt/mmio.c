@@ -185,8 +185,8 @@ static bool translate(
     while (size != 0) {
         uintptr_t gpa;
         uint32_t pf_error;
-        if (!guest_linear_to_phys(v, linear, write, false, &gpa, &pf_error)) {
-            if ((pf_error & PF_ERROR_EXIT) == 0) {
+        if (!guest_mem_linear_to_phys(v, linear, write, false, &gpa, &pf_error)) {
+            if ((pf_error & GUEST_MEM_PF_ERROR_EXIT) == 0) {
                 vcpu_inject_page_fault(v, linear, pf_error);
             }
             return false;
@@ -210,8 +210,8 @@ void mmio_phys_access(struct vcpu *v, uintptr_t gpa, void *buf, size_t len, bool
         region_access(v, r, gpa, buf, len, write);
     } else if (write) {
         // What is neither RAM nor emulated decodes nothing.
-        guest_phys_write(gpa, buf, len);
-    } else if (!guest_phys_read(gpa, buf, len)) {
+        guest_mem_phys_write(gpa, buf, len);
+    } else if (!guest_mem_phys_read(gpa, buf, len)) {
         memset(buf, 0xff, len);
     }
 }

@@ -806,9 +806,9 @@ static void vmx_dump_guest(void) {
 // refuses with #GP(0) (SDM 325462-093 Vol. 2B, MOV to/from Control Registers).
 static bool load_pdptes(uint64_t cr3, bool checked) {
     uint64_t pdptes[4] = { 0 };
-    guest_phys_read(cr3 & 0xffffffe0, pdptes, sizeof(pdptes));
+    guest_mem_phys_read(cr3 & 0xffffffe0, pdptes, sizeof(pdptes));
     for (size_t i = 0; checked && i < 4; i++) {
-        if (!guest_pdpte_valid(pdptes[i])) {
+        if (!guest_mem_pdpte_valid(pdptes[i])) {
             return false;
         }
     }

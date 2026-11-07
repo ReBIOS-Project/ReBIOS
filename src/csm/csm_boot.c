@@ -162,7 +162,7 @@ static uint32_t smbios_copy(size_t *table_length) {
     struct smbios_entry32 *copy_entry = (struct smbios_entry32 *)copy;
     copy_entry->table_address = (uint32_t)(base + SMBIOS_ENTRY32_MAX_LENGTH);
     smbios_entry32_checksum(copy_entry);
-    guest_phys_write(base, copy, size);
+    guest_mem_phys_write(base, copy, size);
     kfree(copy);
     *table_length = length;
     return base;

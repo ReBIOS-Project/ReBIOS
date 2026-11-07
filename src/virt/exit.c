@@ -129,7 +129,7 @@ void exit_invalid_opcode(struct vcpu *v) {
 
     vcpu_get_seg(v, SEG_CS, &cs);
     uintptr_t rip = vcpu_rip(v);
-    if (guest_linear_read(v, cs.base + rip, insn, sizeof(insn), true)
+    if (guest_mem_linear_read(v, cs.base + rip, insn, sizeof(insn), true)
      && memcmp(insn, vmcall, sizeof(vmcall)) == 0) {
         if (hypercall(v)) {
             vcpu_set_rip(v, rip + sizeof(vmcall));

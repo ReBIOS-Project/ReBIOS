@@ -565,7 +565,7 @@ static void deliver_message(uint32_t upper, uint32_t address, uint32_t data) {
         vlapic_deliver_msi(address, data);
         return;
     }
-    guest_phys_write((uint64_t)upper << 32 | address, &data, sizeof(uint32_t));
+    guest_mem_phys_write((uint64_t)upper << 32 | address, &data, sizeof(uint32_t));
 }
 
 // A function sending a multiple message's index puts it in the data's low bits
