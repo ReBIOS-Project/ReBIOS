@@ -276,6 +276,7 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 #define SVM_FEATURE_PAUSE_FILTER ((uint32_t)1 << 10)
 #define SVM_FEATURE_PAUSE_FILTER_THRESHOLD ((uint32_t)1 << 12)
 #define SVM_FEATURE_AVIC ((uint32_t)1 << 13)
+#define SVM_FEATURE_VLS ((uint32_t)1 << 15)
 #define SVM_FEATURE_VGIF ((uint32_t)1 << 16)
 #define SVM_FEATURE_X2AVIC ((uint32_t)1 << 18)
 #define SVM_FEATURE_ROGPT ((uint32_t)1 << 21)
@@ -293,6 +294,7 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 
 // Virtualisation extensions, at offset 0B8h.
 #define SVM_VIRT_EXT_LBR ((uint64_t)1 << 0)
+#define SVM_VIRT_EXT_VLS ((uint64_t)1 << 1)
 #define SVM_VIRT_EXT_FRED ((uint64_t)1 << 4)
 
 // Event injection.
@@ -327,6 +329,10 @@ extern bool svm_nrips;
 // the guest can (APM 24593 rev. 3.45, 15.21.10), with GIF virtualised, as
 // Linux 7.3's KVM has it.
 extern bool svm_vnmi;
+// The guest's VMLOAD and VMSAVE run on the processor where they do not exit,
+// with addresses in the guest's physical memory (APM 24593 rev. 3.46,
+// 15.33.1).
+extern bool svm_vls;
 // The processor's AVIC (APM 24593 rev. 3.45, 15.29), where it can be used, and
 // whether it runs x2APIC mode's MSRs too (APM 24593 rev. 3.45, 15.29.10).
 extern bool svm_avic;

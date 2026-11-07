@@ -66,6 +66,7 @@
 bool svm_lbr_virtualisation;
 bool svm_nrips;
 bool svm_vnmi;
+bool svm_vls;
 bool svm_avic;
 bool svm_x2avic;
 bool svm_avic_ext_lvt_reads;
@@ -241,6 +242,7 @@ bool svm_supported(void) {
     invlpgb = (sizes.ebx & CPUID_80000008_EBX_INVLPGB) != 0;
     invlpgb_count_max = sizes.edx & 0xffff;
     decode_assists = (features & SVM_FEATURE_DECODE_ASSISTS) != 0;
+    svm_vls = (features & SVM_FEATURE_VLS) != 0;
     svm_vnmi = (features & (SVM_FEATURE_VNMI | SVM_FEATURE_VGIF))
             == (SVM_FEATURE_VNMI | SVM_FEATURE_VGIF);
     // Unless the avic setting says otherwise, AVIC serves only from Zen 4 on,
@@ -354,6 +356,11 @@ void svm_vcpu_init(struct vcpu *v) {
     // power-on zeros, are its own (APM 24593 rev. 3.45, 15.23.1).
     if (svm_lbr_virtualisation) {
         c->virt_ext |= SVM_VIRT_EXT_LBR;
+    }
+    // While the guest's EFER.SVME is set, its VMLOAD and VMSAVE run on the
+    // processor (nsvm.c).
+    if (svm_vls) {
+        c->virt_ext |= SVM_VIRT_EXT_VLS;
     }
     // The guest's FRED MSRs, from the save area's zeros, are switched with the
     // VMCB, all but FRED_RSP0, which the host leaves alone (AMD 69191 rev.

@@ -308,6 +308,18 @@ bool nsvm_gif(struct vcpu *v) {
     return v->nsvm == NULL || v->nsvm->gif;
 }
 
+// While the guest's EFER.SVME is set, its VMLOAD and VMSAVE run on the
+// processor where it virtualises them (APM 24593 rev. 3.46, 15.33.1).
+static void l1_intercepts(struct nsvm *n) {
+    const uint32_t vls = SVM_INTERCEPT_VMLOAD | SVM_INTERCEPT_VMSAVE;
+    struct vmcb_control *c = &n->vmcb01->control;
+    uint32_t misc = c->intercept_misc2 & ~vls;
+    if (!n->svme || !svm_vls) {
+        misc |= vls;
+    }
+    c->intercept_misc2 = misc;
+}
+
 bool nsvm_svme(struct vcpu *v) {
     struct nsvm *n = v->nsvm;
     if (n == NULL) {
@@ -719,7 +731,9 @@ static bool vmcb12_valid(struct vcpu *v, const struct vmcb *vmcb12) {
 // opens for the guest itself, the hypercalls of the legacy BIOS, which are #UD
 // and VMMCALL, and the guest's guest's CR8, which is its own where VMCB12
 // masks interrupts virtually and is the guest's TPR otherwise (APM 24593 rev.
-// 3.46, 15.21.2).
+// 3.46, 15.21.2). The guest's guest's VMLOAD and VMSAVE, which the hypervisor
+// runs for it where the guest does not intercept them, always exit, whatever
+// the guest's own do.
 static void merge_intercepts(struct nsvm *n) {
     uint32_t own[SVM_INTERCEPT_VECTORS];
     uint32_t to[SVM_INTERCEPT_VECTORS];
@@ -729,7 +743,8 @@ static void merge_intercepts(struct nsvm *n) {
     }
     to[2] = (own[2] & ~((uint32_t)1 << VECTOR_UD)) | n->intercepts[2];
     to[3] = (own[3] & ~SVM_INTERCEPT_VINTR) | n->intercepts[3];
-    to[4] = (own[4] & ~SVM_INTERCEPT_VMMCALL) | n->intercepts[4];
+    to[4] = (own[4] & ~SVM_INTERCEPT_VMMCALL) | n->intercepts[4] | SVM_INTERCEPT_VMLOAD
+          | SVM_INTERCEPT_VMSAVE;
     if ((n->vintr12 & SVM_VINTR_MASKING) == 0) {
         to[0] |= SVM_INTERCEPT_CR8_READ | SVM_INTERCEPT_CR8_WRITE;
     }
@@ -1768,7 +1783,11 @@ static uint64_t cut_short(struct vcpu *v) {
 // guest's guest goes on, taking what the guest does not intercept.
 bool nsvm_before_entry(struct vcpu *v) {
     struct nsvm *n = v->nsvm;
-    if (n == NULL || !n->in_l2) {
+    if (n == NULL) {
+        return false;
+    }
+    if (!n->in_l2) {
+        l1_intercepts(n);
         return false;
     }
     if (n->pending) {
