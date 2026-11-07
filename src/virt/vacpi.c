@@ -2713,7 +2713,6 @@ void vacpi_init(void) {
     if (!acpi_init()) {
         return;
     }
-    acpi_namespace_start();
     vacpi.active = true;
 
     // The guest's PM1 and GPE registers are where the host's are, trapped.

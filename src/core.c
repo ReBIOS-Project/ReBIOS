@@ -102,6 +102,10 @@ static void bsp_main(void *arg) {
     remap_init(!virt_vmx && svm_avic, VLAPIC_KICK_VECTOR);
     vioapic_init();
     irq_init();
+    // The legacy devices' emulations ask the namespace which real ones exist.
+    if (acpi_init()) {
+        acpi_namespace_start();
+    }
     kbc_init();
     pit_init();
     hpet_init();
