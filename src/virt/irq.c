@@ -849,11 +849,27 @@ static void pic_access(
     kick_after_update();
 }
 
+// Whether the MADT says the machine has the PC/AT's 8259s, which then are to
+// be masked for the I/O APICs (ACPI 6.6, Table 5.20).
+static bool host_has_8259s(void) {
+    struct uacpi_table table;
+    if (!acpi_tables_ready()
+     || uacpi_table_find_by_signature(ACPI_MADT_SIGNATURE, &table) != UACPI_STATUS_OK) {
+        return false;
+    }
+    const struct acpi_madt *madt = table.ptr;
+    bool pcat_compat = (madt->flags & ACPI_PCAT_COMPAT) != 0;
+    uacpi_table_unref(&table);
+    return pcat_compat;
+}
+
 void irq_init(void) {
     bsp = this_cpu();
     // The guest's 8259s stand in for the host's from now on.
-    outb(PIC_MASTER_DATA, 0xff);
-    outb(PIC_SLAVE_DATA, 0xff);
+    if (host_has_8259s()) {
+        outb(PIC_MASTER_DATA, 0xff);
+        outb(PIC_SLAVE_DATA, 0xff);
+    }
     uacpi_status status = uacpi_set_interrupt_model(UACPI_INTERRUPT_MODEL_IOAPIC);
     if (status != UACPI_STATUS_OK) {
         printf("Cannot put the firmware in APIC mode: %s\n", uacpi_status_to_string(status));
