@@ -28,7 +28,6 @@
 #include <lib/log.h>
 #include <lib/printf.h>
 #include <memory.h>
-#include <sys/x86.h>
 
 #define IVRS_SIGNATURE "IVRS"
 
@@ -1080,17 +1079,6 @@ static void log_tables(const struct iommu_tables *t) {
     }
 }
 
-// Fills vendor with the processor's vendor string, and returns whether that
-// vendor's platforms have AMD's IOMMU.
-static bool vendor_is_amd(char vendor[13]) {
-    struct cpuid_regs regs = cpuid(0, 0);
-    memcpy(vendor, &regs.ebx, 4);
-    memcpy(vendor + 4, &regs.edx, 4);
-    memcpy(vendor + 8, &regs.ecx, 4);
-    vendor[12] = '\0';
-    return memcmp(vendor, "AuthenticAMD", 12) == 0 || memcmp(vendor, "HygonGenuine", 12) == 0;
-}
-
 static bool table_find(const char *signature, struct uacpi_table *table) {
     uacpi_status status = uacpi_table_find_by_signature(signature, table);
     if (status == UACPI_STATUS_OK) {
@@ -1112,25 +1100,12 @@ const struct iommu_tables *iommu_tables_parse(void) {
     }
     parse_done = true;
 
+    // The loader panics on the other processor vendor's IOMMU table, so that
+    // this is one or the other.
     struct uacpi_table dmar;
     struct uacpi_table ivrs;
     bool have_dmar = table_find(ACPI_DMAR_SIGNATURE, &dmar);
-    bool have_ivrs = table_find(IVRS_SIGNATURE, &ivrs);
-    if (have_dmar && have_ivrs) {
-        char vendor[13];
-        bool amd = vendor_is_amd(vendor);
-        printf(
-            "Both DMAR and IVRS tables, using the %s for the %s processor\n",
-            amd ? "IVRS" : "DMAR", vendor
-        );
-        if (amd) {
-            uacpi_table_unref(&dmar);
-            have_dmar = false;
-        } else {
-            uacpi_table_unref(&ivrs);
-            have_ivrs = false;
-        }
-    }
+    bool have_ivrs = !have_dmar && table_find(IVRS_SIGNATURE, &ivrs);
 
     struct builder b = { .t = &tables };
     if (have_dmar) {
