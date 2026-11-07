@@ -40,63 +40,13 @@ struct vcpu;
 // input reaches the guest through it either way, in the format the guest asked
 // for.
 
-#define PORT_DATA 0x60
-#define PORT_COMMAND 0x64
-
 #define IRQ_KEYBOARD 1
 #define IRQ_AUX 12
 
-#define STATUS_OUTPUT_FULL 0x01
-#define STATUS_SYSTEM 0x04
-#define STATUS_COMMAND 0x08
-#define STATUS_NOT_INHIBITED 0x10
-#define STATUS_AUX_DATA 0x20
-
-#define CCB_KBD_INTERRUPT 0x01
-#define CCB_AUX_INTERRUPT 0x02
-#define CCB_SYSTEM 0x04
-#define CCB_KBD_DISABLED 0x10
-#define CCB_AUX_DISABLED 0x20
-#define CCB_TRANSLATE 0x40
-
-#define COMMAND_READ_RAM_FIRST 0x20
-#define COMMAND_READ_RAM_LAST 0x3f
-#define COMMAND_WRITE_RAM_FIRST 0x60
-#define COMMAND_WRITE_RAM_LAST 0x7f
-#define COMMAND_RAM_MASK 0x1f
-#define COMMAND_VERSION 0xa1
-#define COMMAND_PASSWORD_TEST 0xa4
-#define COMMAND_PASSWORD_LOAD 0xa5
-#define COMMAND_PASSWORD_ENABLE 0xa6
-#define COMMAND_AUX_DISABLE 0xa7
-#define COMMAND_AUX_ENABLE 0xa8
-#define COMMAND_AUX_TEST 0xa9
-#define COMMAND_SELF_TEST 0xaa
-#define COMMAND_KBD_TEST 0xab
-#define COMMAND_KBD_DISABLE 0xad
-#define COMMAND_KBD_ENABLE 0xae
-#define COMMAND_READ_INPUT 0xc0
-#define COMMAND_READ_OUTPUT 0xd0
-#define COMMAND_WRITE_OUTPUT 0xd1
-#define COMMAND_WRITE_KBD_BUFFER 0xd2
-#define COMMAND_WRITE_AUX_BUFFER 0xd3
-#define COMMAND_WRITE_AUX 0xd4
-#define COMMAND_A20_DISABLE 0xdd
-#define COMMAND_A20_ENABLE 0xdf
-#define COMMAND_READ_TEST 0xe0
-#define COMMAND_PULSE_FIRST 0xf0
-
-#define PASSWORD_NOT_INSTALLED 0xf1
-#define SELF_TEST_PASSED 0x55
-#define INTERFACE_TEST_PASSED 0x00
 // Both data lines idle, and the keyboard not inhibited, as AT controllers had
 // it.
 #define INPUT_PORT 0x83
 
-#define OUTPUT_RESET_HIGH 0x01
-#define OUTPUT_A20 0x02
-#define OUTPUT_KBD_FULL 0x10
-#define OUTPUT_AUX_FULL 0x20
 #define OUTPUT_LINES_HIGH 0xcc
 
 #define EXPECT_NOTHING 0
@@ -107,9 +57,6 @@ struct vcpu;
 #define EXPECT_AUX 5
 #define EXPECT_PASSWORD 6
 
-#define DEVICE_ACK 0xfa
-#define DEVICE_RESEND 0xfe
-#define DEVICE_SELF_TEST_PASSED 0xaa
 #define DEVICE_ID_KEYBOARD_1 0xab
 #define DEVICE_ID_KEYBOARD_2 0x83
 
@@ -218,14 +165,14 @@ struct queue {
 };
 
 static struct spinlock lock;
-static uint8_t ram[COMMAND_RAM_MASK + 1];
+static uint8_t ram[I8042_COMMAND_RAM_MASK + 1];
 static uint8_t output;
 static bool output_full;
 static bool output_aux;
 static bool keyboard_line;
 static bool aux_line;
 static bool last_was_command;
-static uint8_t output_port = OUTPUT_RESET_HIGH | OUTPUT_A20;
+static uint8_t output_port = I8042_OUTPUT_RESET_HIGH | I8042_OUTPUT_A20;
 // RCIN#, which the output port's reset line drives: INIT# as it goes low, and
 // again only once it went high (ICH10 datasheet 319973-003, 5.12.1.2, Table
 // 5-22). The legacy BIOS then resumes where the CMOS shutdown byte asks it to,
@@ -333,8 +280,8 @@ static bool queue_take(struct queue *q, uint8_t *byte) {
 // The lines follow the output buffer, so that a byte read by polling leaves no
 // request behind.
 static void lines_update(void) {
-    bool keyboard = output_full && !output_aux && (ram[0] & CCB_KBD_INTERRUPT) != 0;
-    bool aux = output_full && output_aux && (ram[0] & CCB_AUX_INTERRUPT) != 0;
+    bool keyboard = output_full && !output_aux && (ram[0] & I8042_CCB_KBD_INTERRUPT) != 0;
+    bool aux = output_full && output_aux && (ram[0] & I8042_CCB_AUX_INTERRUPT) != 0;
     if (keyboard != keyboard_line) {
         keyboard_line = keyboard;
         irq_isa_set(IRQ_KEYBOARD, keyboard);
@@ -354,8 +301,8 @@ static void output_refill(void) {
         if (queue_take(&loopback_queue, &byte)) {
             aux = true;
         } else if (!queue_take(&controller_queue, &byte)) {
-            if ((ram[0] & CCB_KBD_DISABLED) == 0 && queue_take(&keyboard_queue, &byte)) {
-                if ((ram[0] & CCB_TRANSLATE) != 0) {
+            if ((ram[0] & I8042_CCB_KBD_DISABLED) == 0 && queue_take(&keyboard_queue, &byte)) {
+                if ((ram[0] & I8042_CCB_TRANSLATE) != 0) {
                     if (byte == SCAN_BREAK) {
                         translate_break = true;
                         continue;
@@ -363,7 +310,7 @@ static void output_refill(void) {
                     byte = translation[byte] | (translate_break ? SET1_BREAK : 0);
                     translate_break = false;
                 }
-            } else if ((ram[0] & CCB_AUX_DISABLED) == 0 && queue_take(&aux_queue, &byte)) {
+            } else if ((ram[0] & I8042_CCB_AUX_DISABLED) == 0 && queue_take(&aux_queue, &byte)) {
                 aux = true;
             } else {
                 return;
@@ -416,14 +363,14 @@ static void kbd_command(uint8_t byte) {
         case KBD_EXPECT_LEDS: {
             if (byte < KBD_LEDS) {
                 kbd_leds_set = byte & PS2_LEDS;
-                kbd_answer(DEVICE_ACK);
+                kbd_answer(I8042_DEVICE_ACK);
                 return;
             }
             break;
         }
         case KBD_EXPECT_SCAN_SET: {
             if (byte < KBD_LEDS) {
-                kbd_answer(DEVICE_ACK);
+                kbd_answer(I8042_DEVICE_ACK);
                 // Set 3 is an option real keyboards go without, which then
                 // stay in set 2, as the guest finds out by asking.
                 if (byte == 0) {
@@ -438,7 +385,7 @@ static void kbd_command(uint8_t byte) {
         case KBD_EXPECT_TYPEMATIC: {
             if (byte < KBD_LEDS) {
                 kbd_typematic = byte;
-                kbd_answer(DEVICE_ACK);
+                kbd_answer(I8042_DEVICE_ACK);
                 return;
             }
             break;
@@ -450,7 +397,7 @@ static void kbd_command(uint8_t byte) {
     switch (byte) {
         case KBD_LEDS: {
             kbd_expecting = KBD_EXPECT_LEDS;
-            kbd_answer(DEVICE_ACK);
+            kbd_answer(I8042_DEVICE_ACK);
             break;
         }
         case KBD_ECHO: {
@@ -459,18 +406,18 @@ static void kbd_command(uint8_t byte) {
         }
         case KBD_SCAN_SET: {
             kbd_expecting = KBD_EXPECT_SCAN_SET;
-            kbd_answer(DEVICE_ACK);
+            kbd_answer(I8042_DEVICE_ACK);
             break;
         }
         case KBD_IDENTIFY: {
-            kbd_answer(DEVICE_ACK);
+            kbd_answer(I8042_DEVICE_ACK);
             kbd_answer(DEVICE_ID_KEYBOARD_1);
             kbd_answer(DEVICE_ID_KEYBOARD_2);
             break;
         }
         case KBD_TYPEMATIC: {
             kbd_expecting = KBD_EXPECT_TYPEMATIC;
-            kbd_answer(DEVICE_ACK);
+            kbd_answer(I8042_DEVICE_ACK);
             break;
         }
         case KBD_ENABLE: {
@@ -478,7 +425,7 @@ static void kbd_command(uint8_t byte) {
             if (!real_keyboard) {
                 keyboard_queue.count = 0;
             }
-            kbd_answer(DEVICE_ACK);
+            kbd_answer(I8042_DEVICE_ACK);
             break;
         }
         case KBD_DISABLE: {
@@ -488,7 +435,7 @@ static void kbd_command(uint8_t byte) {
             if (!real_keyboard) {
                 keyboard_queue.count = 0;
             }
-            kbd_answer(DEVICE_ACK);
+            kbd_answer(I8042_DEVICE_ACK);
             break;
         }
         case KBD_DEFAULTS: {
@@ -497,7 +444,7 @@ static void kbd_command(uint8_t byte) {
             if (!real_keyboard) {
                 keyboard_queue.count = 0;
             }
-            kbd_answer(DEVICE_ACK);
+            kbd_answer(I8042_DEVICE_ACK);
             break;
         }
         case KBD_RESEND: {
@@ -513,16 +460,16 @@ static void kbd_command(uint8_t byte) {
             if (!real_keyboard) {
                 keyboard_queue.count = 0;
             }
-            kbd_answer(DEVICE_ACK);
-            kbd_answer(DEVICE_SELF_TEST_PASSED);
+            kbd_answer(I8042_DEVICE_ACK);
+            kbd_answer(I8042_DEVICE_SELF_TEST_PASSED);
             break;
         }
         default: {
             // Set 3's per-key attributes, which set 2 does not heed.
             if (byte >= KBD_SET3_FIRST && byte <= KBD_SET3_LAST) {
-                kbd_answer(DEVICE_ACK);
+                kbd_answer(I8042_DEVICE_ACK);
             } else {
-                kbd_answer(DEVICE_RESEND);
+                kbd_answer(I8042_DEVICE_RESEND);
             }
             break;
         }
@@ -623,28 +570,28 @@ static void aux_command(uint8_t byte) {
     aux_expecting = AUX_EXPECT_COMMAND;
     if (was == AUX_EXPECT_RESOLUTION) {
         aux_resolution = byte & 3;
-        aux_answer(DEVICE_ACK);
+        aux_answer(I8042_DEVICE_ACK);
         return;
     }
     if (was == AUX_EXPECT_SAMPLE_RATE) {
         aux_rate_set(byte);
-        aux_answer(DEVICE_ACK);
+        aux_answer(I8042_DEVICE_ACK);
         return;
     }
     switch (byte) {
         case AUX_SCALING_1_1: {
             aux_scaled = false;
-            aux_answer(DEVICE_ACK);
+            aux_answer(I8042_DEVICE_ACK);
             break;
         }
         case AUX_SCALING_2_1: {
             aux_scaled = true;
-            aux_answer(DEVICE_ACK);
+            aux_answer(I8042_DEVICE_ACK);
             break;
         }
         case AUX_RESOLUTION: {
             aux_expecting = AUX_EXPECT_RESOLUTION;
-            aux_answer(DEVICE_ACK);
+            aux_answer(I8042_DEVICE_ACK);
             break;
         }
         case AUX_STATUS: {
@@ -654,7 +601,7 @@ static void aux_command(uint8_t byte) {
                                      | ((aux_buttons & 1) != 0 ? STATUS_BUTTONS_LEFT : 0)
                                      | ((aux_buttons & 2) != 0 ? STATUS_BUTTONS_RIGHT : 0)
                                      | ((aux_buttons & 4) != 0 ? STATUS_BUTTONS_MIDDLE : 0));
-            aux_answer(DEVICE_ACK);
+            aux_answer(I8042_DEVICE_ACK);
             aux_answer(status);
             aux_answer(aux_resolution);
             aux_answer(aux_rate);
@@ -662,11 +609,11 @@ static void aux_command(uint8_t byte) {
         }
         case AUX_STREAM: {
             aux_remote = false;
-            aux_answer(DEVICE_ACK);
+            aux_answer(I8042_DEVICE_ACK);
             break;
         }
         case AUX_READ_DATA: {
-            aux_answer(DEVICE_ACK);
+            aux_answer(I8042_DEVICE_ACK);
             if (!real_aux) {
                 aux_packet(false);
             }
@@ -674,43 +621,43 @@ static void aux_command(uint8_t byte) {
         }
         case AUX_WRAP_OFF: {
             aux_wrap = false;
-            aux_answer(DEVICE_ACK);
+            aux_answer(I8042_DEVICE_ACK);
             break;
         }
         case AUX_WRAP_ON: {
             aux_wrap = true;
-            aux_answer(DEVICE_ACK);
+            aux_answer(I8042_DEVICE_ACK);
             break;
         }
         case AUX_REMOTE: {
             aux_remote = true;
-            aux_answer(DEVICE_ACK);
+            aux_answer(I8042_DEVICE_ACK);
             break;
         }
         case AUX_IDENTIFY: {
             aux_awaiting_id = real_aux;
-            aux_answer(DEVICE_ACK);
+            aux_answer(I8042_DEVICE_ACK);
             aux_answer(aux_id);
             break;
         }
         case AUX_SAMPLE_RATE: {
             aux_expecting = AUX_EXPECT_SAMPLE_RATE;
-            aux_answer(DEVICE_ACK);
+            aux_answer(I8042_DEVICE_ACK);
             break;
         }
         case AUX_ENABLE: {
             aux_enabled = true;
-            aux_answer(DEVICE_ACK);
+            aux_answer(I8042_DEVICE_ACK);
             break;
         }
         case AUX_DISABLE: {
             aux_enabled = false;
-            aux_answer(DEVICE_ACK);
+            aux_answer(I8042_DEVICE_ACK);
             break;
         }
         case AUX_DEFAULTS: {
             aux_defaults();
-            aux_answer(DEVICE_ACK);
+            aux_answer(I8042_DEVICE_ACK);
             break;
         }
         case AUX_RESEND: {
@@ -726,13 +673,13 @@ static void aux_command(uint8_t byte) {
             if (!real_aux) {
                 aux_queue.count = 0;
             }
-            aux_answer(DEVICE_ACK);
-            aux_answer(DEVICE_SELF_TEST_PASSED);
+            aux_answer(I8042_DEVICE_ACK);
+            aux_answer(I8042_DEVICE_SELF_TEST_PASSED);
             aux_answer(AUX_ID_STANDARD);
             break;
         }
         default: {
-            aux_answer(DEVICE_RESEND);
+            aux_answer(I8042_DEVICE_RESEND);
             break;
         }
     }
@@ -747,110 +694,111 @@ static void reset_line(bool high) {
 
 static void output_port_write(uint8_t value) {
     output_port = value;
-    a20_kbc_set((value & OUTPUT_A20) != 0);
-    reset_line((value & OUTPUT_RESET_HIGH) != 0);
+    a20_kbc_set((value & I8042_OUTPUT_A20) != 0);
+    reset_line((value & I8042_OUTPUT_RESET_HIGH) != 0);
 }
 
 static uint8_t output_port_read(void) {
-    uint8_t value = (output_port & (OUTPUT_RESET_HIGH | OUTPUT_A20)) | OUTPUT_LINES_HIGH;
+    uint8_t value = (output_port & (I8042_OUTPUT_RESET_HIGH | I8042_OUTPUT_A20))
+                  | OUTPUT_LINES_HIGH;
     if (output_full) {
-        value |= output_aux ? OUTPUT_AUX_FULL : OUTPUT_KBD_FULL;
+        value |= output_aux ? I8042_OUTPUT_AUX_FULL : I8042_OUTPUT_KBD_FULL;
     }
     return value;
 }
 
 static void command_write(uint8_t value) {
     expecting = EXPECT_NOTHING;
-    if (value >= COMMAND_READ_RAM_FIRST && value <= COMMAND_READ_RAM_LAST) {
-        controller_answer(ram[value & COMMAND_RAM_MASK]);
+    if (value >= I8042_COMMAND_READ_RAM_FIRST && value <= I8042_COMMAND_READ_RAM_LAST) {
+        controller_answer(ram[value & I8042_COMMAND_RAM_MASK]);
         return;
     }
-    if (value >= COMMAND_WRITE_RAM_FIRST && value <= COMMAND_WRITE_RAM_LAST) {
+    if (value >= I8042_COMMAND_WRITE_RAM_FIRST && value <= I8042_COMMAND_WRITE_RAM_LAST) {
         expecting = EXPECT_RAM;
-        expected_ram = value & COMMAND_RAM_MASK;
+        expected_ram = value & I8042_COMMAND_RAM_MASK;
         return;
     }
-    if (value >= COMMAND_PULSE_FIRST) {
+    if (value >= I8042_COMMAND_PULSE_FIRST) {
         // Only the reset line reaches anything still, which goes back up.
-        if ((value & OUTPUT_RESET_HIGH) == 0) {
+        if ((value & I8042_OUTPUT_RESET_HIGH) == 0) {
             reset_line(false);
             reset_line(true);
         }
         return;
     }
     switch (value) {
-        case COMMAND_VERSION:
-        case COMMAND_READ_TEST: {
+        case I8042_COMMAND_VERSION:
+        case I8042_COMMAND_READ_TEST: {
             controller_answer(0);
             break;
         }
-        case COMMAND_PASSWORD_TEST: {
-            controller_answer(PASSWORD_NOT_INSTALLED);
+        case I8042_COMMAND_PASSWORD_TEST: {
+            controller_answer(I8042_PASSWORD_NOT_INSTALLED);
             break;
         }
-        case COMMAND_PASSWORD_LOAD: {
+        case I8042_COMMAND_PASSWORD_LOAD: {
             expecting = EXPECT_PASSWORD;
             break;
         }
-        case COMMAND_AUX_DISABLE: {
-            ram[0] |= CCB_AUX_DISABLED;
+        case I8042_COMMAND_AUX_DISABLE: {
+            ram[0] |= I8042_CCB_AUX_DISABLED;
             break;
         }
-        case COMMAND_AUX_ENABLE: {
-            ram[0] &= (uint8_t)~CCB_AUX_DISABLED;
+        case I8042_COMMAND_AUX_ENABLE: {
+            ram[0] &= (uint8_t)~I8042_CCB_AUX_DISABLED;
             output_refill();
             break;
         }
-        case COMMAND_AUX_TEST:
-        case COMMAND_KBD_TEST: {
-            controller_answer(INTERFACE_TEST_PASSED);
+        case I8042_COMMAND_AUX_TEST:
+        case I8042_COMMAND_KBD_TEST: {
+            controller_answer(I8042_INTERFACE_TEST_PASSED);
             break;
         }
-        case COMMAND_SELF_TEST: {
-            ram[0] |= CCB_SYSTEM;
-            controller_answer(SELF_TEST_PASSED);
+        case I8042_COMMAND_SELF_TEST: {
+            ram[0] |= I8042_CCB_SYSTEM;
+            controller_answer(I8042_SELF_TEST_PASSED);
             break;
         }
-        case COMMAND_KBD_DISABLE: {
-            ram[0] |= CCB_KBD_DISABLED;
+        case I8042_COMMAND_KBD_DISABLE: {
+            ram[0] |= I8042_CCB_KBD_DISABLED;
             break;
         }
-        case COMMAND_KBD_ENABLE: {
-            ram[0] &= (uint8_t)~CCB_KBD_DISABLED;
+        case I8042_COMMAND_KBD_ENABLE: {
+            ram[0] &= (uint8_t)~I8042_CCB_KBD_DISABLED;
             output_refill();
             break;
         }
-        case COMMAND_READ_INPUT: {
+        case I8042_COMMAND_READ_INPUT: {
             controller_answer(INPUT_PORT);
             break;
         }
-        case COMMAND_READ_OUTPUT: {
+        case I8042_COMMAND_READ_OUTPUT: {
             controller_answer(output_port_read());
             break;
         }
-        case COMMAND_WRITE_OUTPUT: {
+        case I8042_COMMAND_WRITE_OUTPUT: {
             expecting = EXPECT_OUTPUT;
             break;
         }
-        case COMMAND_WRITE_KBD_BUFFER: {
+        case I8042_COMMAND_WRITE_KBD_BUFFER: {
             expecting = EXPECT_KBD_BUFFER;
             break;
         }
-        case COMMAND_WRITE_AUX_BUFFER: {
+        case I8042_COMMAND_WRITE_AUX_BUFFER: {
             expecting = EXPECT_AUX_BUFFER;
             break;
         }
-        case COMMAND_WRITE_AUX: {
+        case I8042_COMMAND_WRITE_AUX: {
             expecting = EXPECT_AUX;
             break;
         }
-        case COMMAND_A20_DISABLE: {
-            output_port &= (uint8_t)~OUTPUT_A20;
+        case I8042_COMMAND_A20_DISABLE: {
+            output_port &= (uint8_t)~I8042_OUTPUT_A20;
             a20_kbc_set(false);
             break;
         }
-        case COMMAND_A20_ENABLE: {
-            output_port |= OUTPUT_A20;
+        case I8042_COMMAND_A20_ENABLE: {
+            output_port |= I8042_OUTPUT_A20;
             a20_kbc_set(true);
             break;
         }
@@ -908,7 +856,7 @@ static void data_write(uint8_t value) {
         }
         case EXPECT_AUX: {
             // Sending data reenables the interface, as in QEMU 11.1.2's 8042.
-            ram[0] &= (uint8_t)~CCB_AUX_DISABLED;
+            ram[0] &= (uint8_t)~I8042_CCB_AUX_DISABLED;
             aux_command(value);
             if (real_aux) {
                 real_send(true, value);
@@ -917,7 +865,7 @@ static void data_write(uint8_t value) {
             break;
         }
         default: {
-            ram[0] &= (uint8_t)~CCB_KBD_DISABLED;
+            ram[0] &= (uint8_t)~I8042_CCB_KBD_DISABLED;
             kbd_command(value);
             if (real_keyboard) {
                 real_send(false, value);
@@ -960,10 +908,10 @@ static void command_access(
     (void)size;
     spinlock_acquire(&lock);
     if (in) {
-        uint8_t status = STATUS_NOT_INHIBITED | (ram[0] & CCB_SYSTEM)
-                       | (last_was_command ? STATUS_COMMAND : 0)
-                       | (output_full ? STATUS_OUTPUT_FULL : 0)
-                       | (output_full && output_aux ? STATUS_AUX_DATA : 0);
+        uint8_t status = I8042_STATUS_NOT_INHIBITED | (ram[0] & I8042_CCB_SYSTEM)
+                       | (last_was_command ? I8042_STATUS_COMMAND : 0)
+                       | (output_full ? I8042_STATUS_OUTPUT_FULL : 0)
+                       | (output_full && output_aux ? I8042_STATUS_AUX_DATA : 0);
         *value = (*value & ~(uint32_t)0xff) | status;
     } else {
         last_was_command = true;
@@ -1126,7 +1074,7 @@ static void real_receive(void) {
         if (aux) {
             // The chipset's mouse may not take what it was asked to, which the
             // USB one's reports need to know.
-            if (aux_awaiting_id && byte != DEVICE_ACK) {
+            if (aux_awaiting_id && byte != I8042_DEVICE_ACK) {
                 aux_id = byte;
                 aux_awaiting_id = false;
             }
@@ -1155,7 +1103,7 @@ static void real_poll_fired(void *ctx) {
 }
 
 void kbc_init(void) {
-    ram[0] = CCB_KBD_INTERRUPT | CCB_SYSTEM | CCB_TRANSLATE;
+    ram[0] = I8042_CCB_KBD_INTERRUPT | I8042_CCB_SYSTEM | I8042_CCB_TRANSLATE;
     i8042_init();
     real_keyboard = i8042_keyboard();
     real_aux = i8042_aux();
@@ -1174,8 +1122,8 @@ void kbc_init(void) {
         hv_timer_set(&real_poll, rdtsc() + MS_TSC(REAL_POLL_MS));
     }
 
-    struct io_handler data = { PORT_DATA, 1, data_access, NULL, true };
+    struct io_handler data = { I8042_PORT_DATA, 1, data_access, NULL, true };
     io_register(&data);
-    struct io_handler command = { PORT_COMMAND, 1, command_access, NULL, true };
+    struct io_handler command = { I8042_PORT_COMMAND, 1, command_access, NULL, true };
     io_register(&command);
 }
