@@ -26,6 +26,8 @@
 #include <hw/lapic_legacy.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
+#include <hw/pm_timer.h>
+#include <hw/tsc.h>
 #include <hw/usb_handoff.h>
 #include <iommu/dma.h>
 #include <iommu/remap.h>
@@ -71,6 +73,8 @@ static void bsp_main(void *arg) {
     struct cpu *cpu = this_cpu();
 
     acpi_init();
+    pm_timer_init();
+    tsc_calibrate();
     rtc_sample();
     pci_cfg_init();
     pci_enum_scan();
@@ -144,7 +148,6 @@ void core_main(struct handoff *handoff) {
 
     mm_init(handoff->heap_base, handoff->heap_size);
     time_init(handoff->tsc_hz);
-    printf("TSC at %llu MHz\n", (unsigned long long)(handoff->tsc_hz / 1000000));
 
     struct cpu *bsp = cpu_area_alloc(0, 0, true);
     cpu_switch_stack(cpu_stack_top(bsp), bsp_main, handoff);

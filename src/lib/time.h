@@ -21,6 +21,8 @@
 #include <stdint.h>
 
 void time_init(uint64_t tsc_hz);
+// A better rate, from before anything times with the TSC.
+void time_set_tsc_hz(uint64_t tsc_hz);
 uint64_t time_tsc_hz(void);
 
 // Nanoseconds since the core started.

@@ -38,6 +38,7 @@
 #include <hw/pci_cfg.h>
 #include <hw/pci_host.h>
 #include <hw/pci_regs.h>
+#include <hw/pm_timer.h>
 #include <hw/power.h>
 #include <lib/aml.h>
 #include <lib/heap.h>
@@ -182,11 +183,9 @@ static struct {
     uint32_t sci_gsi;
     uint16_t pm1_evt;
     uint16_t pm1_cnt;
-    uint16_t pm_tmr;
     uint16_t gpe0;
     bool pm1;
     bool gpe;
-    bool pm_tmr_32;
     bool power_button;
 
     uint16_t pm1_sts;
@@ -2185,10 +2184,10 @@ void vacpi_fadt(uint8_t fadt[VACPI_FADT_SIZE], uint32_t facs, uint32_t dsdt) {
         fadt[FADT_PM1_EVT_LEN] = 4;
         fadt[FADT_PM1_CNT_LEN] = 2;
     }
-    if (vacpi.pm_tmr != 0) {
-        write_le32(fadt + FADT_PM_TMR_BLK, vacpi.pm_tmr);
+    if (pm_timer_port() != 0) {
+        write_le32(fadt + FADT_PM_TMR_BLK, pm_timer_port());
         fadt[FADT_PM_TM_LEN] = 4;
-        if (vacpi.pm_tmr_32) {
+        if (pm_timer_mask() == UINT32_MAX) {
             flags |= FADT_TMR_VAL_EXT;
         }
     }
@@ -2748,9 +2747,6 @@ void vacpi_init(void) {
         vacpi.pm1 = fadt_port(&fadt->x_pm1a_evt_blk, &vacpi.pm1_evt)
                  && fadt_port(&fadt->x_pm1a_cnt_blk, &vacpi.pm1_cnt);
         vacpi.gpe = fadt_port(&fadt->x_gpe0_blk, &vacpi.gpe0);
-        if (fadt_port(&fadt->x_pm_tmr_blk, &vacpi.pm_tmr)) {
-            vacpi.pm_tmr_32 = (fadt->flags & ACPI_TMR_VAL_EXT) != 0;
-        }
         vacpi.power_button = vacpi.pm1 && (fadt->flags & ACPI_PWR_BUTTON) == 0;
         block_fadt_ports(&fadt->x_pm1a_evt_blk, fadt->pm1_evt_len);
         block_fadt_ports(&fadt->x_pm1b_evt_blk, fadt->pm1_evt_len);
@@ -2763,8 +2759,8 @@ void vacpi_init(void) {
             io_block((uint16_t)fadt->smi_cmd, 1);
         }
         // The guest's PM timer is the machine's.
-        if (vacpi.pm_tmr != 0) {
-            io_pass(vacpi.pm_tmr, 4);
+        if (pm_timer_port() != 0) {
+            io_pass(pm_timer_port(), 4);
         }
     }
     if (vacpi.pm1) {
@@ -2790,7 +2786,7 @@ void vacpi_init(void) {
     printf(
         "Guest ACPI: SCI on GSI %d, PM1 at %#x/%#x, GPE0 at %#x, PM timer at %#x%s\n",
         vacpi.sci ? (int)vacpi.sci_gsi : -1, vacpi.pm1_evt, vacpi.pm1_cnt, vacpi.gpe0,
-        vacpi.pm_tmr, vacpi.power_button ? ", power button" : ""
+        pm_timer_port(), vacpi.power_button ? ", power button" : ""
     );
 
     acpi_lock();

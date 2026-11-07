@@ -27,6 +27,10 @@ void time_init(uint64_t hz) {
     tsc_start = rdtsc();
 }
 
+void time_set_tsc_hz(uint64_t hz) {
+    tsc_hz = hz;
+}
+
 uint64_t time_tsc_hz(void) {
     return tsc_hz;
 }
