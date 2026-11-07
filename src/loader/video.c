@@ -142,9 +142,16 @@ static bool gop_prepare(EFI_GRAPHICS_OUTPUT_PROTOCOL *gop) {
         gop->SetMode(gop, 0);
         status = gop->QueryMode(gop, gop->Mode->Mode, &info_size, &info);
     }
+    // A GPU with no display attached can give a current mode of 0x0, and its
+    // firmware can hang when set to another: there is nothing to draw on.
+    bool blank = status == EFI_SUCCESS && info != NULL
+              && (info->HorizontalResolution == 0 || info->VerticalResolution == 0);
     // The buffer is the caller's, unless the firmware handed out its own.
     if (status == EFI_SUCCESS && info != NULL && info != gop->Mode->Info) {
         efi_bs->FreePool(info);
+    }
+    if (blank) {
+        return false;
     }
 
     if (gop_mode_usable(gop)) {
