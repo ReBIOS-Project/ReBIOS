@@ -610,7 +610,7 @@ static uintptr_t high_base(
 static size_t vga_container(const struct pci_topology *t, const uint32_t *parents) {
     const struct handoff_pci_address *vga = &core_handoff->video.vga_device;
     for (size_t i = 0; i < t->function_count; i++) {
-        const struct pci_addr addr = t->functions[i].addr;
+        const struct pci_cfg_addr addr = t->functions[i].addr;
         if (addr.segment == vga->segment && addr.bus == vga->bus && addr.device == vga->devfn >> 3
          && addr.function == (vga->devfn & 7) && parents[i] != NO_CONTAINER) {
             return parents[i];

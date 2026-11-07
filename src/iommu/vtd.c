@@ -292,7 +292,7 @@ static const uint8_t keep_translating_ids[] = {
 static const uint16_t remap_broken_ids[] = { 0x3403, 0x3405, 0x3406 };
 
 static bool remapping_broken(void) {
-    struct pci_addr host = { 0, 0, 0, 0 };
+    struct pci_cfg_addr host = { 0, 0, 0, 0 };
     uint32_t id = pci_cfg_read(host, 0, 4);
     uint32_t class_revision = pci_cfg_read(host, PCI_CLASS_REVISION, 4);
     if ((id & 0xffff) != PCI_VENDOR_ID_INTEL || class_revision >> 16 != PCI_CLASS_BRIDGE_HOST) {
@@ -319,7 +319,7 @@ static bool keep_translating(const struct iommu_tables *tables, uint32_t index, 
             continue;
         }
         for (size_t rid = r->first; rid <= r->last; rid++) {
-            struct pci_addr a = {
+            struct pci_cfg_addr a = {
                 r->segment, (uint8_t)(rid >> 8), (uint8_t)(rid >> 3 & 0x1f), (uint8_t)(rid & 7)
             };
             uint32_t id = pci_cfg_read(a, 0, 4);

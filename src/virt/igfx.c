@@ -278,12 +278,12 @@ static bool rmrr_unneeded(uint16_t segment, uint16_t rid) {
 }
 
 void igfx_scan(void) {
-    struct pci_function *f = pci_enum_find((struct pci_addr){ 0, 0, IGFX_DEVICE, 0 });
+    struct pci_function *f = pci_enum_find((struct pci_cfg_addr){ 0, 0, IGFX_DEVICE, 0 });
     if (f == NULL || f->vendor_id != VENDOR_INTEL || f->base_class != CLASS_DISPLAY) {
         return;
     }
     igfx.f = f;
-    struct pci_function *h = pci_enum_find((struct pci_addr){ 0, 0, HOST_BRIDGE_DEVICE, 0 });
+    struct pci_function *h = pci_enum_find((struct pci_cfg_addr){ 0, 0, HOST_BRIDGE_DEVICE, 0 });
     if (h != NULL && h->vendor_id == VENDOR_INTEL) {
         igfx.host_bridge = h;
     }

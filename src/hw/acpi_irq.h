@@ -24,7 +24,7 @@
 #include <hw/pci_cfg.h>
 
 struct acpi_irq_pci_route {
-    struct pci_addr addr;
+    struct pci_cfg_addr addr;
     // The function's Interrupt Pin register: 1 for INTA# to 4 for INTD#.
     uint8_t pin;
     uint32_t gsi;

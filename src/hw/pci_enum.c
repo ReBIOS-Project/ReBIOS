@@ -180,7 +180,7 @@ static void decode_restore(const struct pci_function *f, uint16_t command, uint1
 }
 
 static void bar_sample_read(
-    struct pci_addr addr, uint8_t reg, bool last_slot, struct bar_sample *s
+    struct pci_cfg_addr addr, uint8_t reg, bool last_slot, struct bar_sample *s
 ) {
     *s = (struct bar_sample){ .reg = reg };
     s->low = pci_cfg_read(addr, reg, 4);
@@ -200,7 +200,7 @@ static void bar_sample_read(
     }
 }
 
-static void rom_sample_read(struct pci_addr addr, uint8_t reg, struct bar_sample *s) {
+static void rom_sample_read(struct pci_cfg_addr addr, uint8_t reg, struct bar_sample *s) {
     *s = (struct bar_sample){ .reg = reg, .kind = PCI_BAR_MEM32, .rom = true };
     s->low = pci_cfg_read(addr, reg, 4);
 }
@@ -209,7 +209,7 @@ static void rom_sample_read(struct pci_addr addr, uint8_t reg, struct bar_sample
 // decodes the transient addresses: setting a 64-bit BAR's upper register first
 // and restoring it last keeps those above 4 GiB. The expansion ROM BAR is
 // written with its enable bit clear.
-static void bar_sample_probe(struct pci_addr addr, struct bar_sample *s) {
+static void bar_sample_probe(struct pci_cfg_addr addr, struct bar_sample *s) {
     if (s->kind == PCI_BAR_NONE) {
         return;
     }
@@ -533,7 +533,7 @@ static struct pci_function *function_list_add(struct function_list *list) {
     return &list->items[list->count++];
 }
 
-static void scan_function(struct function_list *list, struct pci_addr addr, uint32_t id) {
+static void scan_function(struct function_list *list, struct pci_cfg_addr addr, uint32_t id) {
     struct pci_function *f = function_list_add(list);
     f->addr = addr;
     f->vendor_id = (uint16_t)id;
@@ -577,7 +577,7 @@ static void scan_function(struct function_list *list, struct pci_addr addr, uint
 
 static void scan_bus(struct function_list *list, uint16_t segment, uint8_t bus) {
     for (size_t device = 0; device < 32; device++) {
-        struct pci_addr addr = {
+        struct pci_cfg_addr addr = {
             .segment = segment,
             .bus = bus,
             .device = (uint8_t)device,
@@ -755,12 +755,12 @@ const struct pci_topology *pci_enum_topology(void) {
     return atomic_load_explicit(&scanned, memory_order_acquire) ? &topology : NULL;
 }
 
-static uint32_t addr_key(struct pci_addr addr) {
+static uint32_t addr_key(struct pci_cfg_addr addr) {
     return (uint32_t)addr.segment << 16 | (uint32_t)addr.bus << 8 | (uint32_t)addr.device << 3
          | addr.function;
 }
 
-struct pci_function *pci_enum_find(struct pci_addr addr) {
+struct pci_function *pci_enum_find(struct pci_cfg_addr addr) {
     if (!atomic_load_explicit(&scanned, memory_order_acquire) || addr.device >= 32
      || addr.function >= 8) {
         return NULL;

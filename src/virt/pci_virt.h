@@ -40,7 +40,7 @@ struct pci_virt_hook {
 
 // Hands the function's registers to hook before anything else, or no longer
 // for NULL. After pci_virt_init().
-void pci_virt_hook(struct pci_addr addr, const struct pci_virt_hook *hook, void *ctx);
+void pci_virt_hook(struct pci_cfg_addr addr, const struct pci_virt_hook *hook, void *ctx);
 
 // Hands the guest's accesses to the pages holding [offset, offset + size) of a
 // memory BAR of the function to ops, wherever the guest puts the BAR, with
@@ -49,12 +49,12 @@ void pci_virt_hook(struct pci_addr addr, const struct pci_virt_hook *hook, void 
 // ranges as it can take. The range of a BAR smaller than a page is all of it.
 // After pci_virt_init().
 bool pci_virt_trap(
-    struct pci_addr addr, unsigned int bar, uint64_t offset, size_t size,
+    struct pci_cfg_addr addr, unsigned int bar, uint64_t offset, size_t size,
     const struct mmio_ops *ops, void *ctx
 );
 // Gives the guest the pages of the range at offset back, mapped as the rest of
 // the BAR is.
-void pci_virt_untrap(struct pci_addr addr, unsigned int bar, uint64_t offset);
+void pci_virt_untrap(struct pci_cfg_addr addr, unsigned int bar, uint64_t offset);
 
 // Routes the guest's messages again after its local APICs changed in a way
 // that decides where they can be posted (vlapic_post_changed()).

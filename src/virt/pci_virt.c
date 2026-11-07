@@ -199,11 +199,11 @@ static uint32_t all_ones(size_t size) {
 }
 
 // In the topology's order.
-static uint32_t addr_key(struct pci_addr a) {
+static uint32_t addr_key(struct pci_cfg_addr a) {
     return (uint32_t)a.segment << 16 | (uint32_t)a.bus << 8 | (uint32_t)a.device << 3 | a.function;
 }
 
-static struct vfunction *vfunction_find(struct pci_addr a) {
+static struct vfunction *vfunction_find(struct pci_cfg_addr a) {
     uint32_t key = addr_key(a);
     uint32_t low = 0;
     uint32_t high = virt.count;
@@ -312,7 +312,7 @@ static void bar_log(const struct vbar *b, const char *what) {
         if (b < vf->bars || b > &vf->bars[BAR_COUNT]) {
             continue;
         }
-        struct pci_addr a = vf->f->addr;
+        struct pci_cfg_addr a = vf->f->addr;
         size_t k = (unsigned int)(b - vf->bars);
         char name[8] = "ROM";
         if (k != ROM_INDEX) {
@@ -596,7 +596,7 @@ static void message_route(struct irq_slot *s, uint32_t upper, uint32_t address, 
 // Enable cut to what it can send.
 static void msi_update(struct vfunction *vf) {
     struct vmsi *m = &vf->msi;
-    struct pci_addr a = vf->f->addr;
+    struct pci_cfg_addr a = vf->f->addr;
     uint32_t cap = vf->f->msi_cap;
     atomic_store_explicit(
         &m->message, (uint64_t)m->address << 32 | (m->data & 0xffff), memory_order_release
@@ -681,7 +681,7 @@ static void msix_sync(struct vfunction *vf, size_t i) {
         return;
     }
     if (e->slot.cpu == NULL) {
-        struct pci_addr a = vf->f->addr;
+        struct pci_cfg_addr a = vf->f->addr;
         if (!irq_slot_place(&e->slot, vlapic_msi_target(e->address), 1)) {
             printf(
                 "PCI %04x:%02x:%02x.%x: no room for MSI-X entry %zu\n", a.segment, a.bus, a.device,
@@ -899,7 +899,7 @@ static bool page_arbitrate(uintptr_t page) {
 // before the function may send, and lose them after it may not.
 static void msix_control(struct vfunction *vf, uint32_t value) {
     struct vmsix *x = &vf->msix;
-    struct pci_addr a = vf->f->addr;
+    struct pci_cfg_addr a = vf->f->addr;
     uint32_t reg = vf->f->msix_cap;
     bool enable = (value >> 16 & PCI_MSIX_FLAGS_ENABLE) != 0;
     if (enable == x->enabled) {
@@ -966,7 +966,7 @@ static void msix_init(struct vfunction *vf) {
 
 static void msi_init(struct vfunction *vf) {
     struct vmsi *m = &vf->msi;
-    struct pci_addr a = vf->f->addr;
+    struct pci_cfg_addr a = vf->f->addr;
     uint32_t cap = vf->f->msi_cap;
     uint16_t control = (uint16_t)pci_cfg_read(a, cap + PCI_MSI_FLAGS, 2);
     m->wide = (control & PCI_MSI_FLAGS_64BIT) != 0;
@@ -1040,7 +1040,7 @@ static void legacy_io_follow(struct vfunction *vf) {
     vcpu_resume_others();
 }
 
-static uint32_t function_read(struct pci_addr a, uint32_t offset, size_t size) {
+static uint32_t function_read(struct pci_cfg_addr a, uint32_t offset, size_t size) {
     struct vfunction *vf = vfunction_find(a);
     if (vf != NULL && vf->hidden) {
         return all_ones(size);
@@ -1062,7 +1062,7 @@ static uint32_t function_read(struct pci_addr a, uint32_t offset, size_t size) {
 // The function whose BAR registers the guest wrote to, for legacy_io_follow():
 // NULL for other writes.
 static struct vfunction *function_write(
-    struct pci_addr a, uint32_t offset, size_t size, uint32_t value
+    struct pci_cfg_addr a, uint32_t offset, size_t size, uint32_t value
 ) {
     struct vfunction *vf = vfunction_find(a);
     if (vf != NULL && (vf->hidden || in_rebar(vf, offset))) {
@@ -1104,7 +1104,7 @@ static uint32_t guest_read(
     if (!b->present) {
         return all_ones(size);
     }
-    struct pci_addr a = { b->segment, b->bus, device, function };
+    struct pci_cfg_addr a = { b->segment, b->bus, device, function };
     return function_read(a, offset, size);
 }
 
@@ -1121,7 +1121,7 @@ static struct vfunction *guest_write(
     if (!b->present) {
         return NULL;
     }
-    struct pci_addr a = { b->segment, b->bus, device, function };
+    struct pci_cfg_addr a = { b->segment, b->bus, device, function };
     return function_write(a, offset, size, value);
 }
 
@@ -1399,7 +1399,7 @@ void pci_virt_init(void) {
     printf("PCI: %u of the guest's BARs mapped onto the host's\n", mapped);
 }
 
-void pci_virt_hook(struct pci_addr addr, const struct pci_virt_hook *hook, void *ctx) {
+void pci_virt_hook(struct pci_cfg_addr addr, const struct pci_virt_hook *hook, void *ctx) {
     struct vfunction *vf = vfunction_find(addr);
     if (vf != NULL) {
         vf->hook_ctx = ctx;
@@ -1408,7 +1408,7 @@ void pci_virt_hook(struct pci_addr addr, const struct pci_virt_hook *hook, void 
 }
 
 bool pci_virt_trap(
-    struct pci_addr addr, unsigned int bar, uint64_t offset, size_t size,
+    struct pci_cfg_addr addr, unsigned int bar, uint64_t offset, size_t size,
     const struct mmio_ops *ops, void *ctx
 ) {
     struct vfunction *vf = vfunction_find(addr);
@@ -1466,7 +1466,7 @@ bool pci_virt_trap(
     return true;
 }
 
-void pci_virt_untrap(struct pci_addr addr, unsigned int bar, uint64_t offset) {
+void pci_virt_untrap(struct pci_cfg_addr addr, unsigned int bar, uint64_t offset) {
     struct vfunction *vf = vfunction_find(addr);
     if (vf == NULL || bar >= BAR_COUNT) {
         return;

@@ -376,7 +376,7 @@ void csm_boot_returned(struct vcpu *v) {
 
 #define PCI_INTERRUPT_LINE_NONE 0xff
 
-static bool same_function(struct pci_addr a, struct pci_addr b) {
+static bool same_function(struct pci_cfg_addr a, struct pci_cfg_addr b) {
     return a.segment == b.segment && a.bus == b.bus && a.device == b.device
         && a.function == b.function;
 }

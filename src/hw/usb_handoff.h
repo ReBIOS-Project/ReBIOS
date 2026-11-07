@@ -33,6 +33,6 @@ void usb_handoff(void);
 // controller's in its registers at base, an EHCI controller's in its
 // configuration space.
 uint32_t usb_xhci_legacy_cap(uintptr_t base, size_t size);
-uint32_t usb_ehci_legacy_cap(struct pci_addr a, uintptr_t base);
+uint32_t usb_ehci_legacy_cap(struct pci_cfg_addr a, uintptr_t base);
 
 #endif

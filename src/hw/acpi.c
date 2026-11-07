@@ -156,7 +156,7 @@ void uacpi_kernel_log(uacpi_log_level level, const uacpi_char *message) {
 }
 
 uacpi_status uacpi_kernel_pci_device_open(uacpi_pci_address address, uacpi_handle *out_handle) {
-    struct pci_addr *addr = kmalloc(sizeof(struct pci_addr));
+    struct pci_cfg_addr *addr = kmalloc(sizeof(struct pci_cfg_addr));
     addr->segment = address.segment;
     addr->bus = address.bus;
     addr->device = address.device;
@@ -175,7 +175,7 @@ static uacpi_status pci_read(
     if (offset >= 4096 || offset % size != 0) {
         return UACPI_STATUS_INVALID_ARGUMENT;
     }
-    const struct pci_addr *addr = device;
+    const struct pci_cfg_addr *addr = device;
     *value = pci_cfg_read(*addr, (uint32_t)offset, size);
     return UACPI_STATUS_OK;
 }
@@ -186,7 +186,7 @@ static uacpi_status pci_write(
     if (offset >= 4096 || offset % size != 0) {
         return UACPI_STATUS_INVALID_ARGUMENT;
     }
-    const struct pci_addr *addr = device;
+    const struct pci_cfg_addr *addr = device;
     pci_cfg_write(*addr, (uint32_t)offset, size, value);
     return UACPI_STATUS_OK;
 }

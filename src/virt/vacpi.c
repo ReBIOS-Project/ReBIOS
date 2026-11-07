@@ -1839,7 +1839,7 @@ static uacpi_namespace_node *isa_bridge_below(const struct pci_host_bridge *brid
         if (uacpi_eval_simple_integer(iter, "_ADR", &adr) != UACPI_STATUS_OK) {
             continue;
         }
-        struct pci_addr addr = {
+        struct pci_cfg_addr addr = {
             bridge->segment, bridge->bus, (uint8_t)(adr >> 16), (uint8_t)adr
         };
         if (pci_cfg_read(addr, PCI_CLASS_DEVICE, 2) == PCI_CLASS_BRIDGE_ISA) {

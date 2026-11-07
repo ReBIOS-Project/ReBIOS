@@ -170,7 +170,7 @@ static bool vga_below(const struct pci_topology *t, size_t root, bool *decode_16
     if (!video->vga_present) {
         return false;
     }
-    struct pci_addr a = {
+    struct pci_cfg_addr a = {
         video->vga_device.segment, video->vga_device.bus, (uint8_t)(video->vga_device.devfn >> 3),
         (uint8_t)(video->vga_device.devfn & 7)
     };

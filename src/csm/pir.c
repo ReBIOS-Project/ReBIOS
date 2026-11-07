@@ -72,7 +72,7 @@ static bool slot_fill(
     const struct acpi_irq_pci_route *routes, size_t count, size_t *index, uint8_t bus,
     struct pir_slot *slot
 ) {
-    const struct pci_addr first = routes[*index].addr;
+    const struct pci_cfg_addr first = routes[*index].addr;
     // Slot number 0, built in, as which devices sit in slots is not known.
     *slot = (struct pir_slot){ .bus = bus, .devfn = (uint8_t)(first.device << 3) };
     bool any = false;
@@ -104,7 +104,7 @@ uint32_t pir_build(void *buf, size_t size) {
     size_t slots = 0;
     for (size_t i = 0; i < count; ) {
         struct pir_slot slot;
-        const struct pci_addr a = routes[i].addr;
+        const struct pci_cfg_addr a = routes[i].addr;
         int bus = pci_plan_guest_bus(a.segment, a.bus);
         if (bus < 0) {
             i++;
@@ -129,7 +129,7 @@ uint32_t pir_build(void *buf, size_t size) {
     uint16_t exclusive = 0;
     for (size_t i = 0; i < count; ) {
         struct pir_slot slot;
-        const struct pci_addr a = routes[i].addr;
+        const struct pci_cfg_addr a = routes[i].addr;
         int bus = pci_plan_guest_bus(a.segment, a.bus);
         if (bus < 0) {
             i++;

@@ -354,7 +354,7 @@ static bool route_find(
     }
 }
 
-static void format_addr(char *buf, size_t size, struct pci_addr addr) {
+static void format_addr(char *buf, size_t size, struct pci_cfg_addr addr) {
     if (addr.segment != 0) {
         snprintf(
             buf, size, "%04x:%02x:%02x.%x", addr.segment, addr.bus, addr.device, addr.function

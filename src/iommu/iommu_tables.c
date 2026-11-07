@@ -252,7 +252,7 @@ static void format_rids(char *buf, size_t size, uint16_t segment, uint16_t first
     }
 }
 
-static uint16_t rid_of(struct pci_addr addr) {
+static uint16_t rid_of(struct pci_cfg_addr addr) {
     return (uint16_t)(addr.bus << 8 | addr.device << 3 | addr.function);
 }
 
@@ -330,7 +330,9 @@ static void scope_skip(const char *owner, size_t offset, const uint8_t *scope, c
 
 // Why the function at addr cannot be a bridge on a scope's path, or NULL with
 // the buses behind it.
-static const char *bridge_buses(struct pci_addr addr, uint8_t *secondary, uint8_t *subordinate) {
+static const char *bridge_buses(
+    struct pci_cfg_addr addr, uint8_t *secondary, uint8_t *subordinate
+) {
     if (pci_cfg_read(addr, PCI_VENDOR_ID, 2) == 0xffff) {
         return "reads all ones";
     }
@@ -366,7 +368,7 @@ static bool scope_resolve(
     const uint8_t *path = scope + SCOPE_HEADER_SIZE;
 
     char why[96];
-    struct pci_addr addr = { .segment = segment, .bus = scope[5] };
+    struct pci_cfg_addr addr = { .segment = segment, .bus = scope[5] };
     uint8_t secondary = 0;
     uint8_t subordinate = 0;
     for (size_t i = 0; i < entries; i++) {

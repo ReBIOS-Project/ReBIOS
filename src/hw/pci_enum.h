@@ -41,7 +41,7 @@ struct pci_bar {
 };
 
 struct pci_function {
-    struct pci_addr addr;
+    struct pci_cfg_addr addr;
     uint16_t vendor_id;
     uint16_t device_id;
     uint8_t base_class;
@@ -110,7 +110,7 @@ const struct pci_topology *pci_enum_scan(void);
 // The topology, or NULL before pci_enum_scan().
 const struct pci_topology *pci_enum_topology(void);
 
-struct pci_function *pci_enum_find(struct pci_addr addr);
+struct pci_function *pci_enum_find(struct pci_cfg_addr addr);
 
 // Shrinks each Resizable BAR above max_size, and records its new size.
 void pci_enum_shrink_rebars(size_t max_size);

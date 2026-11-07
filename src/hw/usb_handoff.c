@@ -113,7 +113,7 @@
 
 #define MAX_TAKEN 64
 
-static struct pci_addr taken[MAX_TAKEN];
+static struct pci_cfg_addr taken[MAX_TAKEN];
 static size_t taken_count;
 
 static volatile uint32_t *reg(uintptr_t base, uint64_t offset) {
@@ -134,7 +134,7 @@ static bool reg_wait(uintptr_t base, uint64_t offset, uint32_t mask, uint32_t wa
 }
 
 static bool cfg_wait(
-    struct pci_addr a, uint32_t offset, uint32_t mask, uint32_t want, uint64_t us
+    struct pci_cfg_addr a, uint32_t offset, uint32_t mask, uint32_t want, uint64_t us
 ) {
     for (size_t waited = 0; ; waited += POLL_US) {
         if ((pci_cfg_read(a, offset, 4) & mask) == want) {
@@ -166,7 +166,7 @@ uint32_t usb_xhci_legacy_cap(uintptr_t base, size_t size) {
     return 0;
 }
 
-uint32_t usb_ehci_legacy_cap(struct pci_addr a, uintptr_t base) {
+uint32_t usb_ehci_legacy_cap(struct pci_cfg_addr a, uintptr_t base) {
     uint32_t at = *reg(base, EHCI_HCCPARAMS) >> 8 & 0xff;
     for (size_t n = 0; at >= EHCI_EECP_MIN && n < MAX_CAPABILITIES; n++) {
         uint32_t cap = pci_cfg_read(a, at, 4);
@@ -205,7 +205,7 @@ static bool xhci_take(uintptr_t base, size_t size, struct release *r) {
 }
 
 // EHCI 1.0, 5.1.
-static bool ehci_take(struct pci_addr a, uintptr_t base, struct release *r) {
+static bool ehci_take(struct pci_cfg_addr a, uintptr_t base, struct release *r) {
     uint32_t at = *reg(base, EHCI_HCCPARAMS) >> 8 & 0xff;
     for (size_t n = 0; at >= EHCI_EECP_MIN && n < MAX_CAPABILITIES; n++) {
         uint32_t cap = pci_cfg_read(a, at, 4);
@@ -265,7 +265,7 @@ static bool ohci_take(uintptr_t base, struct release *r) {
     return reset;
 }
 
-static bool uhci_take(struct pci_addr a, uint16_t port, struct release *r) {
+static bool uhci_take(struct pci_cfg_addr a, uint16_t port, struct release *r) {
     r->owned = (pci_cfg_read(a, UHCI_LEGSUP, 2) & UHCI_LEGSUP_ENABLES) != 0;
     pci_cfg_write(a, UHCI_LEGSUP, 2, UHCI_LEGSUP_RWC);
     outw(port + UHCI_USBCMD, UHCI_USBCMD_HCRESET);
@@ -314,7 +314,7 @@ static void take(const struct pci_function *f) {
             return;
         }
     }
-    struct pci_addr a = f->addr;
+    struct pci_cfg_addr a = f->addr;
     uint32_t command = pci_cfg_read(a, PCI_COMMAND, 2);
     bool io = f->prog_if == USB_UHCI;
     const struct pci_bar *bar = first_bar(f, io);
@@ -357,7 +357,7 @@ static void take(const struct pci_function *f) {
 
 static bool unneeded(uint16_t segment, uint16_t rid) {
     for (size_t i = 0; i < taken_count; i++) {
-        const struct pci_addr *a = &taken[i];
+        const struct pci_cfg_addr *a = &taken[i];
         if (a->segment == segment && a->bus == rid >> 8 && a->device == (rid >> 3 & 0x1f)
          && a->function == (rid & 7)) {
             return true;

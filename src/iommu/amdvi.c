@@ -169,7 +169,7 @@
 struct amdvi_unit {
     uintptr_t base;
     // The function whose MSI capability the unit's own interrupts use.
-    struct pci_addr function;
+    struct pci_cfg_addr function;
     uint32_t *commands;
     uint32_t command_tail;
     uint32_t *events;
@@ -240,7 +240,7 @@ static uint8_t ga_vector;
 // 48931 rev. 3.08): logging can stall the IOMMU's translations while the L2B
 // miscellaneous clock is gated, which the firmware is to have turned off
 // (registers from the BKDG, 42300 rev. 3.12, D0F2xF0 and D0F2xF4_x90).
-static void erratum_746(struct pci_addr a) {
+static void erratum_746(struct pci_cfg_addr a) {
     struct x86_cpu_signature s = x86_cpu_signature();
     if (s.family != 0x15 || s.model < 0x10 || s.model > 0x1f) {
         return;
@@ -353,7 +353,7 @@ bool amdvi_probe(const struct iommu_tables *tables, size_t *leaf_level) {
         }
         const struct iommu_unit *t = &tables->units[i];
         uint16_t rid = t->amd_rid;
-        u->function = (struct pci_addr){
+        u->function = (struct pci_cfg_addr){
             t->segment, (uint8_t)(rid >> 8), (uint8_t)(rid >> 3 & 0x1f), (uint8_t)(rid & 7)
         };
         erratum_746(u->function);
@@ -609,9 +609,10 @@ static unsigned int aliases(uint16_t id, uint16_t *ids) {
     if (range != NULL && range->has_alias) {
         alias_add(ids, &n, range->alias);
     }
-    const struct pci_function *f = pci_enum_find(
-        (struct pci_addr){ 0, (uint8_t)(id >> 8), (uint8_t)(id >> 3 & 0x1f), (uint8_t)(id & 7) }
-    );
+    struct pci_cfg_addr addr = {
+        0, (uint8_t)(id >> 8), (uint8_t)(id >> 3 & 0x1f), (uint8_t)(id & 7)
+    };
+    const struct pci_function *f = pci_enum_find(addr);
     if (f != NULL && f->pcie_cap != 0 && f->pcie_port_type == PCIE_ROOT_PORT && erratum_1063()) {
         alias_add(ids, &n, 0);
     }

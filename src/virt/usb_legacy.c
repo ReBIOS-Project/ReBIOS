@@ -154,7 +154,7 @@ static const struct mmio_ops range_ops = { range_read, range_write, false };
 
 // The low half of the register at reg, as the guest wrote it.
 static void low_half_keep(
-    struct pci_addr a, uint32_t reg, uint32_t value, uint32_t mask, bool *kept, uint16_t *low
+    struct pci_cfg_addr a, uint32_t reg, uint32_t value, uint32_t mask, bool *kept, uint16_t *low
 ) {
     uint32_t real = pci_cfg_read(a, reg, 4);
     uint32_t shown = *kept ? *low : real & COMMAND_BITS;
@@ -166,7 +166,7 @@ static void low_half_keep(
 
 static bool hook_read(void *ctx, uint32_t reg, uint32_t *value) {
     struct usb_controller *c = ctx;
-    struct pci_addr a = c->f->addr;
+    struct pci_cfg_addr a = c->f->addr;
     if (reg == PCI_COMMAND && c->command_kept) {
         *value = (pci_cfg_read(a, reg, 4) & ~COMMAND_BITS) | c->command;
         return true;
@@ -191,7 +191,7 @@ static bool hook_read(void *ctx, uint32_t reg, uint32_t *value) {
 // the stack: those registers wait until the OS has it.
 static bool hook_write(void *ctx, uint32_t reg, uint32_t value, uint32_t mask) {
     struct usb_controller *c = ctx;
-    struct pci_addr a = c->f->addr;
+    struct pci_cfg_addr a = c->f->addr;
     if (reg == PCI_COMMAND) {
         low_half_keep(a, reg, value, mask, &c->command_kept, &c->command);
         return true;

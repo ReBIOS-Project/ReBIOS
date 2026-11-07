@@ -57,7 +57,7 @@ static bool mcfg_done;
 static struct spinlock legacy_lock;
 static bool ports_answer;
 
-static bool access_valid(struct pci_addr addr, uint32_t offset, size_t size) {
+static bool access_valid(struct pci_cfg_addr addr, uint32_t offset, size_t size) {
     if (size != 1 && size != 2 && size != 4) {
         return false;
     }
@@ -89,22 +89,22 @@ uintptr_t pci_cfg_ecam_base(uint16_t segment, uint8_t bus) {
     return 0;
 }
 
-static uintptr_t ecam_address(uintptr_t base, struct pci_addr addr, uint32_t offset) {
+static uintptr_t ecam_address(uintptr_t base, struct pci_cfg_addr addr, uint32_t offset) {
     return (uintptr_t)(base
                      + (((uint64_t)addr.bus << 20) | ((uint64_t)addr.device << 15)
                       | ((uint64_t)addr.function << 12) | offset));
 }
 
-static uint32_t legacy_address(struct pci_addr addr, uint32_t offset) {
+static uint32_t legacy_address(struct pci_cfg_addr addr, uint32_t offset) {
     return PCI_CFG_ENABLE | ((uint32_t)addr.bus << 16) | ((uint32_t)addr.device << 11)
          | ((uint32_t)addr.function << 8) | (offset & 0xfc);
 }
 
-static bool legacy_reachable(struct pci_addr addr, uint32_t offset) {
+static bool legacy_reachable(struct pci_cfg_addr addr, uint32_t offset) {
     return addr.segment == 0 && offset < 256;
 }
 
-uint32_t pci_cfg_read(struct pci_addr addr, uint32_t offset, size_t size) {
+uint32_t pci_cfg_read(struct pci_cfg_addr addr, uint32_t offset, size_t size) {
     if (!access_valid(addr, offset, size)) {
         return all_ones(size);
     }
@@ -155,7 +155,7 @@ uint32_t pci_cfg_read(struct pci_addr addr, uint32_t offset, size_t size) {
     return value;
 }
 
-void pci_cfg_write(struct pci_addr addr, uint32_t offset, size_t size, uint32_t value) {
+void pci_cfg_write(struct pci_cfg_addr addr, uint32_t offset, size_t size, uint32_t value) {
     if (!access_valid(addr, offset, size)) {
         return;
     }
