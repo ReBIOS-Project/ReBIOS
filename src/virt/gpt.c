@@ -136,10 +136,6 @@ uint64_t gpt_npt_leaf(uintptr_t hpa, uint32_t prot, uint8_t memtype, size_t leve
     return leaf_entry(hpa, prot, memtype, level);
 }
 
-static uintptr_t leaf_addr(uint64_t e, size_t level) {
-    return e & PTE_ADDRESS & ~(x86_level_size(level) - 1);
-}
-
 // The access rights and memory type of a leaf, to split it into smaller ones.
 static void leaf_decode(uint64_t e, size_t level, uint32_t *prot, uint8_t *memtype) {
     if (use_ept) {
@@ -184,7 +180,7 @@ uintptr_t gpt_root(void) {
 static uint64_t *table_for(uint64_t *top, uintptr_t gpa, size_t level) {
     uint64_t *table = top;
     for (size_t l = 3; l > level; l--) {
-        uint64_t *e = &table[(gpa >> (12 + 9 * l)) & 511];
+        uint64_t *e = &table[x86_level_index(gpa, l)];
         if (!entry_present(*e)) {
             uint64_t *next = page_alloc(1);
             *e = table_entry((uintptr_t)next);
@@ -192,7 +188,7 @@ static uint64_t *table_for(uint64_t *top, uintptr_t gpa, size_t level) {
             uint32_t prot;
             uint8_t memtype;
             leaf_decode(*e, l, &prot, &memtype);
-            uintptr_t base = leaf_addr(*e, l);
+            uintptr_t base = x86_leaf_address(*e, l);
             uint64_t *next = page_alloc(1);
             for (size_t i = 0; i < 512; i++) {
                 next[i] = leaf_entry(base + i * x86_level_size(l - 1), prot, memtype, l - 1);
@@ -208,7 +204,7 @@ static uint64_t *table_for(uint64_t *top, uintptr_t gpa, size_t level) {
 // page a MiB above it.
 static void mirror(uintptr_t gpa, uint64_t entry) {
     uint64_t *table = table_for(masked_root, gpa, 0);
-    size_t i = (gpa >> 12) & 511;
+    size_t i = x86_level_index(gpa, 0);
     table[i] = entry;
     table[i + 256] = entry;
 }
@@ -262,7 +258,7 @@ void gpt_map(uintptr_t gpa, uintptr_t hpa, size_t size, uint32_t prot, uint8_t m
         uint64_t *table = table_for(root, gpa + at, level);
         // A leaf that replaces a table leaks the table, as other CPUs may
         // still walk it until their next flush.
-        table[((gpa + at) >> (12 + 9 * level)) & 511] = leaf_entry(hpa + at, prot, memtype, level);
+        table[x86_level_index(gpa + at, level)] = leaf_entry(hpa + at, prot, memtype, level);
         at += x86_level_size(level);
     }
 
@@ -319,7 +315,7 @@ bool gpt_translate_leaf(
 ) {
     uint64_t *table = root;
     for (size_t l = 4; l-- > 0; ) {
-        uint64_t e = table[(gpa >> (12 + 9 * l)) & 511];
+        uint64_t e = table[x86_level_index(gpa, l)];
         if (!entry_present(e)) {
             return false;
         }
@@ -332,7 +328,7 @@ bool gpt_translate_leaf(
             if (level != NULL) {
                 *level = l;
             }
-            *hpa = leaf_addr(e, l) | (gpa & (x86_level_size(l) - 1));
+            *hpa = x86_leaf_address(e, l) | (gpa & (x86_level_size(l) - 1));
             return true;
         }
         table = (uint64_t *)(uintptr_t)(e & PTE_ADDRESS);
@@ -364,13 +360,13 @@ bool gpt_dirty_tracked(void) {
 static uint64_t *page_entry(uint64_t *top, uintptr_t gpa) {
     uint64_t *table = top;
     for (size_t l = 3; l > 0; l--) {
-        uint64_t e = table[(gpa >> (12 + 9 * l)) & 511];
+        uint64_t e = table[x86_level_index(gpa, l)];
         if (!entry_present(e) || entry_large(e, l)) {
             return NULL;
         }
         table = (uint64_t *)(uintptr_t)(e & PTE_ADDRESS);
     }
-    return &table[(gpa >> 12) & 511];
+    return &table[x86_level_index(gpa, 0)];
 }
 
 static bool take_dirty(uint64_t *e, bool clear) {

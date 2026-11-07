@@ -1175,7 +1175,7 @@ static int ept12_walk(struct nvmx *n, uintptr_t gpa, uint64_t access, struct ept
     uintptr_t table = eptp & PTE_ADDRESS;
     size_t l;
     for (l = levels - 1; ; l--) {
-        uint64_t *p = ept12_entry(table + ((gpa >> (12 + 9 * l)) & 511) * 8);
+        uint64_t *p = ept12_entry(table + x86_level_index(gpa, l) * 8);
         uint64_t e = p == NULL
                    ? ~(uint64_t)0
                    : atomic_load_explicit((_Atomic(uint64_t) *)p, memory_order_relaxed);
@@ -1190,8 +1190,7 @@ static int ept12_walk(struct nvmx *n, uintptr_t gpa, uint64_t access, struct ept
         used[l] = p;
         w->entry[l] = e;
         if (leaf) {
-            w->gpa = (e & PTE_ADDRESS & ~(x86_level_size(l) - 1))
-                   | (gpa & (x86_level_size(l) - 1));
+            w->gpa = x86_leaf_address(e, l) | (gpa & (x86_level_size(l) - 1));
             w->level = l;
             w->leaf = e;
             break;
@@ -1395,7 +1394,7 @@ static uint64_t ept02_fill(struct nvmx *n, uintptr_t gpa, const struct ept12_wal
     }
     uint64_t *table = n->current02->root;
     for (size_t l = top; l > 0; l--) {
-        size_t i = (gpa >> (12 + 9 * l)) & 511;
+        size_t i = x86_level_index(gpa, l);
         uint64_t *slot = &table[i];
         if (l >= w->level) {
             table[512 + i] = w->entry[l];
@@ -1411,8 +1410,8 @@ static uint64_t ept02_fill(struct nvmx *n, uintptr_t gpa, const struct ept12_wal
         table = (uint64_t *)(uintptr_t)(*slot & PTE_ADDRESS);
     }
     leaf = ept02_leaf(n, w, hpa, prot, memtype, 0);
-    table[(gpa >> 12) & 511] = leaf;
-    table[512 + ((gpa >> 12) & 511)] = w->entry[0];
+    table[x86_level_index(gpa, 0)] = leaf;
+    table[512 + x86_level_index(gpa, 0)] = w->entry[0];
     return leaf & EPT_RIGHTS;
 }
 
@@ -1457,7 +1456,7 @@ static void ept02_forget(struct nvmx *n, uintptr_t gpa) {
     }
     uint64_t *table = n->current02->root;
     for (size_t l = EPTP_LEVELS(n->current02->eptp12); l-- > 0; ) {
-        uint64_t *slot = &table[(gpa >> (12 + 9 * l)) & 511];
+        uint64_t *slot = &table[x86_level_index(gpa, l)];
         if ((*slot & EPT_RIGHTS) == 0) {
             return;
         }

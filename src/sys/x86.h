@@ -416,6 +416,16 @@ static inline size_t x86_level_size(size_t level) {
     return (uint64_t)1 << (12 + 9 * level);
 }
 
+// The index of the entry for addr in a paging structure at level.
+static inline size_t x86_level_index(uintptr_t addr, size_t level) {
+    return (addr >> (12 + 9 * level)) & 511;
+}
+
+// The base of the page that a leaf entry at level maps.
+static inline uintptr_t x86_leaf_address(uint64_t entry, size_t level) {
+    return entry & PTE_ADDRESS & ~(x86_level_size(level) - 1);
+}
+
 // Both halves of 16 aligned bytes at once, as a device that reads them in one
 // go sees them: a locked CMPXCHG16B, where a 16-byte atomic of the compiler's
 // may take a lock that the device cannot see.

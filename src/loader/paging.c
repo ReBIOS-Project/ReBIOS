@@ -90,11 +90,11 @@ static uint64_t *next_table(uint64_t *entry) {
 bool paging_map_device(uintptr_t pml4, uintptr_t base, size_t size) {
     uintptr_t end = align_up(base + size, TWO_MIB);
     for (uintptr_t a = align_down(base, TWO_MIB); a < end; a += TWO_MIB) {
-        uint64_t *pdpt = next_table((uint64_t *)(uintptr_t)pml4 + (a >> 39 & 511));
+        uint64_t *pdpt = next_table((uint64_t *)(uintptr_t)pml4 + x86_level_index(a, 3));
         if (pdpt == NULL) {
             return false;
         }
-        uint64_t *pdpte = pdpt + (a >> 30 & 511);
+        uint64_t *pdpte = pdpt + x86_level_index(a, 2);
         if ((*pdpte & PTE_PS) != 0) {
             continue;
         }
@@ -102,7 +102,7 @@ bool paging_map_device(uintptr_t pml4, uintptr_t base, size_t size) {
         if (pd == NULL) {
             return false;
         }
-        uint64_t *pde = pd + (a >> 21 & 511);
+        uint64_t *pde = pd + x86_level_index(a, 1);
         if ((*pde & PTE_P) == 0) {
             *pde = a | PTE_P | PTE_W | PTE_PS | PTE_PCD | PTE_PWT;
         }

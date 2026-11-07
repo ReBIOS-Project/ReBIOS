@@ -1209,13 +1209,13 @@ static uint64_t npt02_fill(struct nsvm *n, uintptr_t gpa, const struct npt12_wal
     }
     uint64_t *table = n->current02->root;
     for (size_t l = 3; l > level; l--) {
-        uint64_t *slot = &table[(gpa >> (12 + 9 * l)) & 511];
+        uint64_t *slot = &table[x86_level_index(gpa, l)];
         if ((*slot & PTE_P) == 0 || (*slot & PTE_PS) != 0) {
             *slot = (uint64_t)(uintptr_t)npt02_table(n) | PTE_P | PTE_W | PTE_U | PTE_A;
         }
         table = (uint64_t *)(uintptr_t)(*slot & PTE_ADDRESS);
     }
-    uint64_t *slot = &table[(gpa >> (12 + 9 * level)) & 511];
+    uint64_t *slot = &table[x86_level_index(gpa, level)];
     if ((*slot & PTE_P) != 0 && (*slot & PTE_PS) == 0 && level > 0) {
         npt02_free(n, (uint64_t *)(uintptr_t)(*slot & PTE_ADDRESS), level - 1);
     }

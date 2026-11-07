@@ -164,11 +164,11 @@ void mm_map_device(uintptr_t base, size_t size) {
     }
     spinlock_acquire(&map_lock);
     for (uintptr_t a = align_down(base, TWO_MIB); a < end; a += TWO_MIB) {
-        uint64_t *pdpte = &next_table(&top[(a >> 39) & 511])[(a >> 30) & 511];
+        uint64_t *pdpte = &next_table(&top[x86_level_index(a, 3)])[x86_level_index(a, 2)];
         if ((*pdpte & PTE_PS) != 0) {
             continue;
         }
-        uint64_t *pde = &next_table(pdpte)[(a >> 21) & 511];
+        uint64_t *pde = &next_table(pdpte)[x86_level_index(a, 1)];
         if ((*pde & PTE_P) == 0) {
             *pde = a | PTE_P | PTE_W | PTE_PS | PTE_PCD | PTE_PWT;
         }
@@ -184,11 +184,11 @@ void mm_write_combining(uintptr_t base, size_t size) {
         top = table_of(top[0]);
     }
     for (uintptr_t a = start; a < end; ) {
-        uint64_t *pml4e = &top[(a >> 39) & 511];
+        uint64_t *pml4e = &top[x86_level_index(a, 3)];
         if ((*pml4e & PTE_P) == 0) {
             return;
         }
-        uint64_t *pdpte = &table_of(*pml4e)[(a >> 30) & 511];
+        uint64_t *pdpte = &table_of(*pml4e)[x86_level_index(a, 2)];
         if ((*pdpte & PTE_P) == 0) {
             return;
         }
@@ -200,7 +200,7 @@ void mm_write_combining(uintptr_t base, size_t size) {
             }
             split(pdpte, ONE_GIB, false);
         }
-        uint64_t *pde = &table_of(*pdpte)[(a >> 21) & 511];
+        uint64_t *pde = &table_of(*pdpte)[x86_level_index(a, 1)];
         if ((*pde & PTE_PS) != 0) {
             if (a % TWO_MIB == 0 && end - a >= TWO_MIB) {
                 *pde = write_combining(*pde, PTE_PAT_LARGE);
@@ -209,7 +209,7 @@ void mm_write_combining(uintptr_t base, size_t size) {
             }
             split(pde, TWO_MIB, true);
         }
-        uint64_t *pte = &table_of(*pde)[(a >> 12) & 511];
+        uint64_t *pte = &table_of(*pde)[x86_level_index(a, 0)];
         *pte = write_combining(*pte, PTE_PAT_4K);
         a += PAGE_SIZE;
     }

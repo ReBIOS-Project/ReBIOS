@@ -96,22 +96,18 @@ static uint32_t leaf_prot(uint64_t e) {
     return write ? GPT_R | GPT_W : GPT_R;
 }
 
-static uintptr_t leaf_addr(uint64_t e, size_t level) {
-    return e & PTE_ADDRESS & ~(x86_level_size(level) - 1);
-}
-
 // Returns the table that holds the entry for addr at level, creating the
 // tables on the way, and splitting large leaves into tables of the same
 // mappings.
 static uint64_t *table_for(uintptr_t addr, size_t level) {
     uint64_t *table = root;
     for (size_t l = 3; l > level; l--) {
-        uint64_t *e = &table[(addr >> (12 + 9 * l)) & 511];
+        uint64_t *e = &table[x86_level_index(addr, l)];
         if (!entry_present(*e)) {
             uint64_t *next = page_alloc(1);
             *e = table_entry((uintptr_t)next, l);
         } else if (entry_leaf(*e, l)) {
-            uintptr_t base = leaf_addr(*e, l);
+            uintptr_t base = x86_leaf_address(*e, l);
             uint32_t prot = leaf_prot(*e);
             uint64_t *next = page_alloc(1);
             for (size_t i = 0; i < 512; i++) {
@@ -138,7 +134,7 @@ static void map(uintptr_t addr, uintptr_t hpa, size_t size, uint32_t prot) {
         uint64_t *table = table_for(addr, level);
         // A leaf that replaces a table leaks the table, as the IOMMUs may
         // still walk it until their caches are flushed.
-        table[(addr >> (12 + 9 * level)) & 511] = leaf_entry(hpa, prot, level);
+        table[x86_level_index(addr, level)] = leaf_entry(hpa, prot, level);
 
         addr += x86_level_size(level);
         hpa += x86_level_size(level);
