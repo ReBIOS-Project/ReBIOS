@@ -25,6 +25,7 @@
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
 #include <hw/pci_regs.h>
+#include <iommu/dma.h>
 #include <iommu/iommu_tables.h>
 #include <iommu/remap.h>
 #include <lib/heap.h>
@@ -120,7 +121,6 @@
 #define DTE_LINT0_PASS ((uint64_t)1 << 62)
 #define DTE_LINT1_PASS ((uint64_t)1 << 63)
 #define DTE_PASS (DTE_INIT_PASS | DTE_EINT_PASS | DTE_NMI_PASS | DTE_LINT0_PASS | DTE_LINT1_PASS)
-#define DOMAIN_ID ((uint64_t)1)
 
 // A device's interrupt remapping table: 512 entries, as many as a fixed or
 // arbitrated message's data bits 8:0 name, in the basic format or in the guest
@@ -307,7 +307,7 @@ static void invalidate_pages(struct amdvi_unit *u) {
     // Every address of the domain, its page size encoded in the address.
     spinlock_acquire(&command_lock);
     command_submit(
-        u, 0, CMD_INVALIDATE_IOMMU_PAGES << CMD_SHIFT | (uint32_t)DOMAIN_ID,
+        u, 0, CMD_INVALIDATE_IOMMU_PAGES << CMD_SHIFT | (uint32_t)DMA_DOMAIN_ID,
         (uint32_t)0xfffff000 | CMD_PAGES_PDE | CMD_PAGES_SIZE, (uint32_t)0x7fffffff
     );
     command_sync(u);
@@ -391,7 +391,7 @@ static uint64_t pass_bits(uint8_t settings) {
 
 static void device_settings(uint32_t id, uint8_t settings) {
     uint64_t sys_mgt = (settings & IOMMU_AMD_SYS_MGT_MASK) >> IOMMU_AMD_SYS_MGT_SHIFT;
-    device_table[id * 4 + 1] = DOMAIN_ID | sys_mgt << DTE_SYS_MGT_SHIFT;
+    device_table[id * 4 + 1] = DMA_DOMAIN_ID | sys_mgt << DTE_SYS_MGT_SHIFT;
     device_table[id * 4 + 2] = pass_bits(settings);
 }
 
@@ -400,7 +400,7 @@ static void device_settings(uint32_t id, uint8_t settings) {
 static void device_table_build(const struct iommu_tables *tables) {
     device_table = page_alloc(DEVICE_IDS * 32 / PAGE_SIZE);
     for (size_t id = 0; id < DEVICE_IDS; id++) {
-        device_table[id * 4 + 1] = DOMAIN_ID;
+        device_table[id * 4 + 1] = DMA_DOMAIN_ID;
     }
     for (size_t i = 0; i < tables->range_count; i++) {
         const struct iommu_device_range *r = &tables->ranges[i];

@@ -21,6 +21,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// The domain that the IOMMUs translate in: not 0, which VT-d reserves under
+// caching mode (VT-d D51397-019 rev. 5.20, 9.3).
+#define DMA_DOMAIN_ID ((uint64_t)1)
+
 // Device DMA sees the guest's physical address space, through the IOMMU, whose
 // tables mirror every mapping gpt_map() makes. Needs acpi_init() and
 // pci_cfg_init(), and comes before any gpt_map().

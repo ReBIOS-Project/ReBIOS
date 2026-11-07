@@ -24,6 +24,7 @@
 #include <hw/lapic.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_regs.h>
+#include <iommu/dma.h>
 #include <iommu/iommu_tables.h>
 #include <lib/heap.h>
 #include <lib/log.h>
@@ -129,8 +130,6 @@
 #define CONTEXT_AW_39 ((uint64_t)1)
 #define CONTEXT_AW_48 ((uint64_t)2)
 #define CONTEXT_DID_SHIFT 8
-// Domain 0 is reserved under caching mode.
-#define DOMAIN_ID ((uint64_t)1)
 
 #define TIMEOUT_NS ((uint64_t)1000000000)
 
@@ -457,7 +456,7 @@ static void unit_enable(struct vtd_unit *u, uintptr_t pml4) {
     for (size_t i = 0; i < 256; i++) {
         u->context_table[i * 2] = table | CONTEXT_P;
         u->context_table[i * 2 + 1] = (u->four_levels ? CONTEXT_AW_48 : CONTEXT_AW_39)
-                                    | DOMAIN_ID << CONTEXT_DID_SHIFT;
+                                    | DMA_DOMAIN_ID << CONTEXT_DID_SHIFT;
     }
     u->root_table = page_alloc(1);
     for (size_t i = 0; i < 256; i++) {
