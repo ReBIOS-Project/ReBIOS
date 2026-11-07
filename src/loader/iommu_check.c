@@ -91,24 +91,6 @@ static const uint8_t *config_table(const EFI_GUID *guid) {
     return NULL;
 }
 
-static uint32_t get32(const uint8_t *p) {
-    uint32_t value;
-    memcpy(&value, p, sizeof(uint32_t));
-    return value;
-}
-
-static uint64_t get64(const uint8_t *p) {
-    uint64_t value;
-    memcpy(&value, p, sizeof(uint64_t));
-    return value;
-}
-
-static uint16_t get16(const uint8_t *p) {
-    uint16_t value;
-    memcpy(&value, p, sizeof(uint16_t));
-    return value;
-}
-
 // What the core needs of a VT-d unit, as boot services are the last chance to
 // go back: queued invalidation, and second-stage tables of 3 or 4 levels.
 static bool vtd_unit_usable(uintptr_t base) {
@@ -149,7 +131,7 @@ static int iommu_table_check(const uint8_t *table) {
             (const char *)table
         );
     }
-    size_t length = get32(table + SDT_LENGTH);
+    size_t length = read_le32(table + SDT_LENGTH);
     if (length < IOMMU_TABLE_HEADER_SIZE || checksum8(table, length) != 0) {
         printf("The %.4s table is malformed\n", (const char *)table);
         return FOUND_NONE;
@@ -158,18 +140,18 @@ static int iommu_table_check(const uint8_t *table) {
     uint32_t units = 0;
     bool usable = true;
     for (size_t offset = IOMMU_TABLE_HEADER_SIZE; length - offset >= 4; ) {
-        size_t entry_length = get16(table + offset + 2);
+        size_t entry_length = read_le16(table + offset + 2);
         if (entry_length < 4 || entry_length > length - offset) {
             break;
         }
         uint8_t type = table[offset];
-        if (dmar && get16(table + offset) == DMAR_DRHD && entry_length >= DRHD_BASE + 8) {
+        if (dmar && read_le16(table + offset) == DMAR_DRHD && entry_length >= DRHD_BASE + 8) {
             units++;
-            usable &= vtd_unit_usable(get64(table + offset + DRHD_BASE));
+            usable &= vtd_unit_usable(read_le64(table + offset + DRHD_BASE));
         } else if (!dmar && (type == IVHD_10H || type == IVHD_11H || type == IVHD_40H)
                 && entry_length >= IVHD_BASE + 8) {
             units++;
-            if (get64(table + offset + IVHD_BASE) == 0) {
+            if (read_le64(table + offset + IVHD_BASE) == 0) {
                 printf("An AMD-Vi unit has no register base\n");
                 usable = false;
             }
@@ -186,16 +168,13 @@ static int iommu_table_check(const uint8_t *table) {
 // Every table describing IOMMUs, all of which the hypervisor must be able to
 // use.
 static int sdt_find_iommu(const uint8_t *sdt, size_t entry_size) {
-    size_t length = get32(sdt + SDT_LENGTH);
+    size_t length = read_le32(sdt + SDT_LENGTH);
     if (length < SDT_HEADER_SIZE) {
         return FOUND_NONE;
     }
     int result = FOUND_NONE;
     for (size_t offset = SDT_HEADER_SIZE; length - offset >= entry_size; offset += entry_size) {
-        uintptr_t address = get32(sdt + offset);
-        if (entry_size == 8) {
-            address |= (uint64_t)get32(sdt + offset + 4) << 32;
-        }
+        uintptr_t address = entry_size == 8 ? read_le64(sdt + offset) : read_le32(sdt + offset);
         const uint8_t *table = (const uint8_t *)(uintptr_t)address;
         int found = table != NULL ? iommu_table_check(table) : FOUND_NONE;
         if (found != FOUND_NONE) {
@@ -221,12 +200,12 @@ static int acpi_find_iommu(void) {
         return FOUND_NONE;
     }
     if (rsdp[RSDP_REVISION] >= 2) {
-        uintptr_t xsdt = get32(rsdp + RSDP_XSDT) | (uint64_t)get32(rsdp + RSDP_XSDT + 4) << 32;
+        uintptr_t xsdt = read_le64(rsdp + RSDP_XSDT);
         if (xsdt != 0) {
             return sdt_find_iommu((const uint8_t *)(uintptr_t)xsdt, 8);
         }
     }
-    uint32_t rsdt = get32(rsdp + RSDP_RSDT);
+    uint32_t rsdt = read_le32(rsdp + RSDP_RSDT);
     return rsdt != 0 ? sdt_find_iommu((const uint8_t *)(uintptr_t)rsdt, 4) : FOUND_NONE;
 }
 

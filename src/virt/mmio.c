@@ -335,7 +335,7 @@ static struct step_page *step_map(struct vcpu *v, uintptr_t gpa, size_t len) {
         for (size_t offset = 0; offset < PAGE_SIZE; offset += 8) {
             uintptr_t base = atomic_load_explicit(&r->base, memory_order_relaxed);
             uint64_t value = r->ops->read(v, r->ctx, page + offset - base, 8);
-            memcpy(p->scratch + offset, &value, 8);
+            write_le64(p->scratch + offset, value);
         }
     } else {
         memset(p->scratch, 0xff, PAGE_SIZE);

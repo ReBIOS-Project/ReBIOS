@@ -2190,58 +2190,50 @@ uint8_t *vacpi_dsdt(size_t *length) {
     return a.data;
 }
 
-static void put16(uint8_t *p, uint16_t v) {
-    memcpy(p, &v, 2);
-}
-
-static void put32(uint8_t *p, uint32_t v) {
-    memcpy(p, &v, 4);
-}
-
 // The guest has no sleep state to resume from, and no firmware to share the
 // global lock with.
 void vacpi_facs(uint8_t facs[VACPI_FACS_SIZE]) {
     memset(facs, 0, VACPI_FACS_SIZE);
     memcpy(facs, "FACS", 4);
-    put32(facs + 4, VACPI_FACS_SIZE);
+    write_le32(facs + 4, VACPI_FACS_SIZE);
 }
 
 void vacpi_fadt(uint8_t fadt[VACPI_FADT_SIZE], uint32_t facs, uint32_t dsdt) {
     memset(fadt, 0, VACPI_FADT_SIZE);
-    put32(fadt + FADT_FIRMWARE_CTRL, facs);
-    put32(fadt + FADT_DSDT, dsdt);
+    write_le32(fadt + FADT_FIRMWARE_CTRL, facs);
+    write_le32(fadt + FADT_DSDT, dsdt);
     // Dual 8259s or I/O APICs, the MADT telling which the guest has.
     fadt[FADT_INT_MODEL] = 1;
     uint32_t flags = FADT_WBINVD | FADT_PROC_C1 | FADT_SLP_BUTTON | FADT_FIX_RTC;
     rtc_fadt_indexes(fadt + FADT_CENTURY, fadt + FADT_DAY_ALRM, fadt + FADT_MON_ALRM);
     struct acpi_fadt *host;
     if (uacpi_table_fadt(&host) == UACPI_STATUS_OK) {
-        put16(fadt + FADT_SCI_INT, host->sci_int);
+        write_le16(fadt + FADT_SCI_INT, host->sci_int);
     }
     if (vacpi.pm1) {
-        put32(fadt + FADT_PM1A_EVT_BLK, vacpi.pm1_evt);
-        put32(fadt + FADT_PM1A_CNT_BLK, vacpi.pm1_cnt);
+        write_le32(fadt + FADT_PM1A_EVT_BLK, vacpi.pm1_evt);
+        write_le32(fadt + FADT_PM1A_CNT_BLK, vacpi.pm1_cnt);
         fadt[FADT_PM1_EVT_LEN] = 4;
         fadt[FADT_PM1_CNT_LEN] = 2;
     }
     if (vacpi.pm_tmr != 0) {
-        put32(fadt + FADT_PM_TMR_BLK, vacpi.pm_tmr);
+        write_le32(fadt + FADT_PM_TMR_BLK, vacpi.pm_tmr);
         fadt[FADT_PM_TM_LEN] = 4;
         if (vacpi.pm_tmr_32) {
             flags |= FADT_TMR_VAL_EXT;
         }
     }
     if (vacpi.gpe) {
-        put32(fadt + FADT_GPE0_BLK, vacpi.gpe0);
+        write_le32(fadt + FADT_GPE0_BLK, vacpi.gpe0);
         fadt[FADT_GPE0_BLK_LEN] = 2;
     }
     if (!vacpi.power_button) {
         flags |= FADT_PWR_BUTTON;
     }
     // Neither C2 nor C3.
-    put16(fadt + FADT_P_LVL2_LAT, 101);
-    put16(fadt + FADT_P_LVL3_LAT, 1001);
-    put32(fadt + FADT_FLAGS, flags);
+    write_le16(fadt + FADT_P_LVL2_LAT, 101);
+    write_le16(fadt + FADT_P_LVL3_LAT, 1001);
+    write_le32(fadt + FADT_FLAGS, flags);
 
     char oem_id[6];
     char oem_table_id[8];
@@ -2338,8 +2330,7 @@ static uacpi_object *slot_object(size_t slot) {
                     break;
                 }
                 if (etype == TYPE_INTEGER && elength == 4) {
-                    uint32_t v;
-                    memcpy(&v, data + off + 4, 4);
+                    uint32_t v = read_le32(data + off + 4);
                     elements[count++] = uacpi_object_create_integer(v);
                 } else if (etype == TYPE_BUFFER) {
                     uacpi_data_view view = { .const_bytes = data + off + 4, .length = elength };

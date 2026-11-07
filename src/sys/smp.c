@@ -194,8 +194,7 @@ static uint32_t madt_aps(uint32_t **ids_out) {
 }
 
 static void patch32(uint8_t *page, const uint8_t *field, uint64_t value) {
-    uint32_t v = (uint32_t)value;
-    memcpy(page + (field - ap_boot_start), &v, sizeof(uint32_t));
+    write_le32(page + (field - ap_boot_start), (uint32_t)value);
 }
 
 void smp_init(void) {

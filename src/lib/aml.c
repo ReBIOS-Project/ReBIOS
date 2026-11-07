@@ -259,14 +259,14 @@ void aml_table_header(
     const char oem_table_id[8], uint32_t oem_revision
 ) {
     memcpy(table, signature, 4);
-    memcpy(table + 4, &length, 4);
+    write_le32(table + 4, (uint32_t)length);
     table[8] = revision;
     table[9] = 0;
     memcpy(table + 10, oem_id, 6);
     memcpy(table + 16, oem_table_id, 8);
-    memcpy(table + 24, &oem_revision, 4);
+    write_le32(table + 24, oem_revision);
     memcpy(table + 28, "RBIO", 4);
     uint32_t creator_revision = 1;
-    memcpy(table + 32, &creator_revision, 4);
+    write_le32(table + 32, creator_revision);
     table[9] = (uint8_t)-checksum8(table, length);
 }

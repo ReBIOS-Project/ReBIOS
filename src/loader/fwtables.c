@@ -439,8 +439,7 @@ static bool root_sound(uintptr_t address, const char *signature) {
     if (root == NULL || memcmp(root, signature, 4) != 0) {
         return false;
     }
-    uint32_t length;
-    memcpy(&length, root + ACPI_TABLE_LENGTH, sizeof(uint32_t));
+    uint32_t length = read_le32(root + ACPI_TABLE_LENGTH);
     return length >= ACPI_TABLE_HEADER_SIZE && checksum8(root, length) == 0;
 }
 
@@ -471,8 +470,7 @@ bool fwtables_fadt_pm_profile(uint8_t *profile) {
         return false;
     }
 
-    uint32_t length;
-    memcpy(&length, root + ACPI_TABLE_LENGTH, sizeof(uint32_t));
+    uint32_t length = read_le32(root + ACPI_TABLE_LENGTH);
     for (size_t off = ACPI_TABLE_HEADER_SIZE; off + entry_size <= length; off += entry_size) {
         uintptr_t address = 0;
         memcpy(&address, root + off, entry_size);
@@ -480,8 +478,7 @@ bool fwtables_fadt_pm_profile(uint8_t *profile) {
         if (table == NULL || memcmp(table, "FACP", 4) != 0) {
             continue;
         }
-        uint32_t table_length;
-        memcpy(&table_length, table + ACPI_TABLE_LENGTH, sizeof(uint32_t));
+        uint32_t table_length = read_le32(table + ACPI_TABLE_LENGTH);
         if (table_length <= FADT_PREFERRED_PM_PROFILE) {
             return false;
         }
@@ -505,8 +502,7 @@ static const uint8_t *acpi_table(const char *signature) {
     if (root == NULL) {
         return NULL;
     }
-    uint32_t length;
-    memcpy(&length, root + ACPI_TABLE_LENGTH, sizeof(uint32_t));
+    uint32_t length = read_le32(root + ACPI_TABLE_LENGTH);
     for (size_t off = ACPI_TABLE_HEADER_SIZE; off + entry_size <= length; off += entry_size) {
         uintptr_t address = 0;
         memcpy(&address, root + off, entry_size);
@@ -514,8 +510,7 @@ static const uint8_t *acpi_table(const char *signature) {
         if (table == NULL || memcmp(table, signature, 4) != 0) {
             continue;
         }
-        uint32_t table_length;
-        memcpy(&table_length, table + ACPI_TABLE_LENGTH, sizeof(uint32_t));
+        uint32_t table_length = read_le32(table + ACPI_TABLE_LENGTH);
         if (table_length < ACPI_TABLE_HEADER_SIZE || checksum8(table, table_length) != 0) {
             return NULL;
         }
@@ -525,15 +520,12 @@ static const uint8_t *acpi_table(const char *signature) {
 }
 
 static uint32_t table_length(const uint8_t *table) {
-    uint32_t length;
-    memcpy(&length, table + ACPI_TABLE_LENGTH, sizeof(uint32_t));
-    return length;
+    return read_le32(table + ACPI_TABLE_LENGTH);
 }
 
 // The port a Generic Address Structure gives, if it is one.
 static uint16_t gas_port(const uint8_t *gas) {
-    uint64_t address;
-    memcpy(&address, gas + GAS_ADDRESS, sizeof(uint64_t));
+    uint64_t address = read_le64(gas + GAS_ADDRESS);
     if (gas[GAS_SPACE] != GAS_SPACE_SYSTEM_IO || address == 0 || address > 0xfff8) {
         return 0;
     }
@@ -557,20 +549,14 @@ static uint16_t dbg2_port(void) {
         return 0;
     }
     uint32_t length = table_length(dbg2);
-    uint32_t offset;
-    uint32_t count;
-    memcpy(&offset, dbg2 + DBG2_DEVICE_OFFSET, sizeof(uint32_t));
-    memcpy(&count, dbg2 + DBG2_DEVICE_COUNT, sizeof(uint32_t));
+    uint32_t offset = read_le32(dbg2 + DBG2_DEVICE_OFFSET);
+    uint32_t count = read_le32(dbg2 + DBG2_DEVICE_COUNT);
     for (size_t i = 0; i < count && offset <= length - DBG2_DEVICE_MIN_LENGTH; i++) {
         const uint8_t *device = dbg2 + offset;
-        uint16_t size;
-        uint16_t type;
-        uint16_t subtype;
-        uint16_t base;
-        memcpy(&size, device + DBG2_DEVICE_LENGTH, sizeof(uint16_t));
-        memcpy(&type, device + DBG2_DEVICE_PORT_TYPE, sizeof(uint16_t));
-        memcpy(&subtype, device + DBG2_DEVICE_PORT_SUBTYPE, sizeof(uint16_t));
-        memcpy(&base, device + DBG2_DEVICE_BASE_OFFSET, sizeof(uint16_t));
+        uint16_t size = read_le16(device + DBG2_DEVICE_LENGTH);
+        uint16_t type = read_le16(device + DBG2_DEVICE_PORT_TYPE);
+        uint16_t subtype = read_le16(device + DBG2_DEVICE_PORT_SUBTYPE);
+        uint16_t base = read_le16(device + DBG2_DEVICE_BASE_OFFSET);
         if (size < DBG2_DEVICE_MIN_LENGTH || size > length - offset) {
             return 0;
         }

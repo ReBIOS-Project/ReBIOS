@@ -20,7 +20,7 @@
 #include <stdint.h>
 #include <virt/ferr.h>
 #include <lib/spinlock.h>
-#include <memory.h>
+#include <lib/util.h>
 #include <sys/x86.h>
 #include <virt/event.h>
 #include <virt/io.h>
@@ -129,17 +129,15 @@ bool ferr_stepping(struct vcpu *v) {
 
 void ferr_step_done(struct vcpu *v) {
     uint8_t env[ENV_SIZE];
-    uint16_t control;
-    uint16_t status;
     // FNSTENV masks every exception, which FLDENV's control word undoes.
     asm volatile ("fnstenv %0" : "=m"(env));
-    memcpy(&control, &env[ENV_CONTROL], sizeof(uint16_t));
-    memcpy(&status, &env[ENV_STATUS], sizeof(uint16_t));
+    uint16_t control = read_le16(&env[ENV_CONTROL]);
+    uint16_t status = read_le16(&env[ENV_STATUS]);
     status |= v->ferr_flags;
     if ((status & ~control & FCW_MASKS) != 0) {
         status |= FSW_ES | FSW_B;
     }
-    memcpy(&env[ENV_STATUS], &status, sizeof(uint16_t));
+    write_le16(&env[ENV_STATUS], status);
     asm volatile ("fldenv %0" :: "m"(env));
     v->ferr_step = false;
     v->stepping = false;

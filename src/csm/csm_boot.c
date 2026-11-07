@@ -151,10 +151,8 @@ static uint32_t smbios_copy(size_t *table_length) {
     }
     const uint8_t *entry = (const void *)(uintptr_t)core_handoff->smbios_entry;
     size_t entry_length = entry[SMBIOS2_LENGTH];
-    size_t length = 0;
-    uintptr_t table = 0;
-    memcpy(&length, entry + SMBIOS2_TABLE_LENGTH, sizeof(uint16_t));
-    memcpy(&table, entry + SMBIOS2_TABLE_ADDRESS, sizeof(uint32_t));
+    size_t length = read_le16(entry + SMBIOS2_TABLE_LENGTH);
+    uintptr_t table = read_le32(entry + SMBIOS2_TABLE_ADDRESS);
     if (entry_length > SMBIOS2_ENTRY_SPACE) {
         printf("SMBIOS entry point of %zu bytes\n", entry_length);
         return 0;
@@ -170,7 +168,7 @@ static uint32_t smbios_copy(size_t *table_length) {
     memcpy(copy, entry, entry_length);
     memcpy(copy + SMBIOS2_ENTRY_SPACE, (const void *)(uintptr_t)table, length);
     uintptr_t guest_table = base + SMBIOS2_ENTRY_SPACE;
-    memcpy(copy + SMBIOS2_TABLE_ADDRESS, &guest_table, sizeof(uint32_t));
+    write_le32(copy + SMBIOS2_TABLE_ADDRESS, (uint32_t)guest_table);
     copy[SMBIOS2_INTERMEDIATE_CHECKSUM] = 0;
     copy[SMBIOS2_INTERMEDIATE_CHECKSUM] = (uint8_t)-checksum8(
         copy + SMBIOS2_INTERMEDIATE, SMBIOS2_INTERMEDIATE_SIZE

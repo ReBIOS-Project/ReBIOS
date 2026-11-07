@@ -27,6 +27,7 @@
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/printf.h>
+#include <lib/util.h>
 #include <memory.h>
 
 #define IVRS_SIGNATURE "IVRS"
@@ -186,12 +187,6 @@ static const char *const kind_names[] = {
 
 static struct iommu_tables tables;
 static bool parse_done;
-
-static uint16_t get16(const uint8_t *p) {
-    uint16_t value;
-    memcpy(&value, p, sizeof(uint16_t));
-    return value;
-}
 
 // Returns the array, with room for one more element than count.
 static void *grow(void *array, size_t count, uint32_t *capacity, size_t size) {
@@ -712,8 +707,8 @@ static void ivhd_entry(
 ) {
     struct iommu_device_range range = {
         .segment = unit->segment,
-        .first = get16(entry + 1),
-        .last = get16(entry + 1),
+        .first = read_le16(entry + 1),
+        .last = read_le16(entry + 1),
         .unit = index,
         .amd_settings = entry[3]
     };
@@ -734,7 +729,7 @@ static void ivhd_entry(
         }
         case IVHD_ENTRY_ALIAS_SELECT: {
             range.has_alias = true;
-            range.alias = get16(entry + 5);
+            range.alias = read_le16(entry + 5);
             add_range(b, &range);
             break;
         }
@@ -746,7 +741,7 @@ static void ivhd_entry(
             start->first = range.first;
             start->settings = entry[3];
             start->has_alias = entry[0] == IVHD_ENTRY_ALIAS_START;
-            start->alias = start->has_alias ? get16(entry + 5) : 0;
+            start->alias = start->has_alias ? read_le16(entry + 5) : 0;
             break;
         }
         case IVHD_ENTRY_END: {
@@ -775,7 +770,7 @@ static void ivhd_entry(
             struct iommu_special_device special = {
                 .id = entry[4],
                 .segment = unit->segment,
-                .rid = get16(entry + 5),
+                .rid = read_le16(entry + 5),
                 .unit = index,
                 .amd_settings = entry[3]
             };

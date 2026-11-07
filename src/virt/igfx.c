@@ -174,12 +174,9 @@ static void scan_opregion(struct pci_function *f) {
         return;
     }
     uintptr_t end = (uint64_t)asls + OPREGION_SIZE;
-    uint32_t mboxes;
-    uint64_t rvda;
-    uint32_t rvds;
-    memcpy(&mboxes, op + HEADER_MBOXES, sizeof(uint32_t));
-    memcpy(&rvda, op + ASLE_RVDA, sizeof(uint64_t));
-    memcpy(&rvds, op + ASLE_RVDS, sizeof(uint32_t));
+    uint32_t mboxes = read_le32(op + HEADER_MBOXES);
+    uint64_t rvda = read_le64(op + ASLE_RVDA);
+    uint32_t rvds = read_le32(op + ASLE_RVDS);
     uint8_t major = op[HEADER_OVER_MAJOR];
     uint8_t minor = op[HEADER_OVER_MINOR];
     if (major >= 2 && (mboxes & MBOX_ASLE) != 0 && rvda != 0 && rvds != 0 && rvds <= RAW_VBT_MAX) {

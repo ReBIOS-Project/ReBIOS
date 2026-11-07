@@ -20,6 +20,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <memory.h>
 #include <sys/mm.h>
 
 #define ARRAY_COUNT(a) (sizeof(a) / sizeof((a)[0]))
@@ -44,6 +45,38 @@ static inline uint64_t page_up(uint64_t value) {
 
 static inline uint64_t page_down(uint64_t value) {
     return align_down(value, PAGE_SIZE);
+}
+
+// Little-endian values at any alignment, as tables and memory images hold
+// them.
+static inline uint16_t read_le16(const void *p) {
+    uint16_t value;
+    memcpy(&value, p, sizeof(uint16_t));
+    return value;
+}
+
+static inline uint32_t read_le32(const void *p) {
+    uint32_t value;
+    memcpy(&value, p, sizeof(uint32_t));
+    return value;
+}
+
+static inline uint64_t read_le64(const void *p) {
+    uint64_t value;
+    memcpy(&value, p, sizeof(uint64_t));
+    return value;
+}
+
+static inline void write_le16(void *p, uint16_t value) {
+    memcpy(p, &value, sizeof(uint16_t));
+}
+
+static inline void write_le32(void *p, uint32_t value) {
+    memcpy(p, &value, sizeof(uint32_t));
+}
+
+static inline void write_le64(void *p, uint64_t value) {
+    memcpy(p, &value, sizeof(uint64_t));
 }
 
 // The sum of size bytes at data, modulo 256: 0 over a table, ACPI's, SMBIOS's,

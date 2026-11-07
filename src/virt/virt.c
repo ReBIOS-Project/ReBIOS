@@ -29,6 +29,7 @@
 #include <lib/printf.h>
 #include <lib/spinlock.h>
 #include <lib/time.h>
+#include <lib/util.h>
 #include <memory.h>
 #include <sys/cpu.h>
 #include <sys/mm.h>
@@ -682,8 +683,7 @@ static bool egprs_save(uint8_t *area) {
     }
     memset(area + XSAVE_HEADER, 0, XSAVE_HEADER_SIZE);
     xsave(area, XCR0_APX);
-    uint64_t state;
-    memcpy(&state, area + XSAVE_HEADER, sizeof(uint64_t));
+    uint64_t state = read_le64(area + XSAVE_HEADER);
     if ((state & XCR0_APX) == 0) {
         memset(area + XSAVE_APX_OFFSET, 0, XSAVE_APX_SIZE);
     }
@@ -700,7 +700,7 @@ uint64_t vcpu_gpr(struct vcpu *v, unsigned int reg) {
     alignas(64) uint8_t area[XSAVE_APX_OFFSET + XSAVE_APX_SIZE];
     uint64_t value = 0;
     if (egprs_save(area)) {
-        memcpy(&value, area + XSAVE_APX_OFFSET + (reg - 16) * 8, sizeof(uint64_t));
+        value = read_le64(area + XSAVE_APX_OFFSET + (reg - 16) * 8);
     }
     return value;
 }
@@ -718,9 +718,8 @@ void vcpu_set_gpr(struct vcpu *v, unsigned int reg, uint64_t value) {
     if (!egprs_save(area)) {
         return;
     }
-    memcpy(area + XSAVE_APX_OFFSET + (reg - 16) * 8, &value, sizeof(uint64_t));
-    uint64_t state = XCR0_APX;
-    memcpy(area + XSAVE_HEADER, &state, sizeof(uint64_t));
+    write_le64(area + XSAVE_APX_OFFSET + (reg - 16) * 8, value);
+    write_le64(area + XSAVE_HEADER, XCR0_APX);
     xrstor(area, XCR0_APX);
 }
 

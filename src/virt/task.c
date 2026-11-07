@@ -19,6 +19,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <virt/task.h>
+#include <lib/util.h>
 #include <memory.h>
 #include <sys/x86.h>
 #include <virt/guest_mem.h>
@@ -374,28 +375,26 @@ void task_switch(
     uint16_t sels[6] = { 0 };
     uint16_t ldt;
     if (new32) {
-        memcpy(&cr3, image + TSS32_CR3, 4);
-        memcpy(&new_eip, image + TSS32_EIP, 4);
-        memcpy(&new_eflags, image + TSS32_EFLAGS, 4);
+        cr3 = read_le32(image + TSS32_CR3);
+        new_eip = read_le32(image + TSS32_EIP);
+        new_eflags = read_le32(image + TSS32_EFLAGS);
         memcpy(new_regs, image + TSS32_GPRS, sizeof(new_regs));
         for (size_t i = 0; i < 6; i++) {
-            memcpy(&sels[i], image + TSS32_SEGS + i * 4, 2);
+            sels[i] = read_le16(image + TSS32_SEGS + i * 4);
         }
-        memcpy(&ldt, image + TSS32_LDT, 2);
+        ldt = read_le16(image + TSS32_LDT);
     } else {
         uint16_t words[2];
         memcpy(words, image + TSS16_IP, sizeof(words));
         new_eip = words[0];
         new_eflags = words[1];
         for (size_t i = 0; i < 8; i++) {
-            uint16_t value;
-            memcpy(&value, image + TSS16_GPRS + i * 2, 2);
-            new_regs[i] = value;
+            new_regs[i] = read_le16(image + TSS16_GPRS + i * 2);
         }
         for (size_t i = 0; i < 4; i++) {
-            memcpy(&sels[i], image + TSS16_SEGS + i * 2, 2);
+            sels[i] = read_le16(image + TSS16_SEGS + i * 2);
         }
-        memcpy(&ldt, image + TSS16_LDT, 2);
+        ldt = read_le16(image + TSS16_LDT);
     }
     new_eflags = (new_eflags & EFLAGS_DEFINED) | RFLAGS_FIXED;
     if (source == TASK_CALL || source == TASK_GATE) {
@@ -420,15 +419,13 @@ void task_switch(
     bool old32 = (tr.attrib & DESC_TYPE_32BIT) != 0;
     if (old32) {
         uint8_t state[TSS32_LDT - TSS32_EIP];
-        uint32_t eip = (uint32_t)rip;
-        memcpy(state, &eip, 4);
-        memcpy(state + 4, &eflags, 4);
+        write_le32(state, (uint32_t)rip);
+        write_le32(state + 4, eflags);
         memcpy(state + TSS32_GPRS - TSS32_EIP, regs, sizeof(regs));
         for (size_t i = 0; i < 6; i++) {
             struct segment seg;
             vcpu_get_seg(v, tss_segs[i], &seg);
-            uint32_t value = seg.selector;
-            memcpy(state + TSS32_SEGS - TSS32_EIP + i * 4, &value, 4);
+            write_le32(state + TSS32_SEGS - TSS32_EIP + i * 4, seg.selector);
         }
         if (!system_write(&s, tr.base + TSS32_EIP, state, sizeof(state))) {
             return;
@@ -438,13 +435,12 @@ void task_switch(
         uint16_t words[2] = { (uint16_t)rip, (uint16_t)eflags };
         memcpy(state, words, sizeof(words));
         for (size_t i = 0; i < 8; i++) {
-            uint16_t value = (uint16_t)regs[i];
-            memcpy(state + TSS16_GPRS - TSS16_IP + i * 2, &value, 2);
+            write_le16(state + TSS16_GPRS - TSS16_IP + i * 2, (uint16_t)regs[i]);
         }
         for (size_t i = 0; i < 4; i++) {
             struct segment seg;
             vcpu_get_seg(v, tss_segs[i], &seg);
-            memcpy(state + TSS16_SEGS - TSS16_IP + i * 2, &seg.selector, 2);
+            write_le16(state + TSS16_SEGS - TSS16_IP + i * 2, seg.selector);
         }
         if (!system_write(&s, tr.base + TSS16_IP, state, sizeof(state))) {
             return;

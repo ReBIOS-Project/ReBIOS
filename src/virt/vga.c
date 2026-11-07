@@ -1538,8 +1538,7 @@ static uint64_t line_hash(const uint8_t *p, size_t bytes) {
     uint64_t h = (uint64_t)0xcbf29ce484222325 ^ bytes;
     size_t i = 0;
     for (; i + 8 <= bytes; i += 8) {
-        uint64_t w;
-        memcpy(&w, p + i, 8);
+        uint64_t w = read_le64(p + i);
         h = (h ^ w) * (uint64_t)0x100000001b3;
         h ^= h >> 29;
     }
