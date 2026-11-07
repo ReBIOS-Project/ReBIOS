@@ -36,6 +36,7 @@
 #include <hw/acpi.h>
 #include <core.h>
 #include <handoff.h>
+#include <hw/cmos.h>
 #include <hw/ec.h>
 #include <hw/pci_cfg.h>
 #include <lib/heap.h>
@@ -247,12 +248,61 @@ static bool io_port(uacpi_handle handle, uacpi_size offset, size_t size, uint16_
     return true;
 }
 
+// The RTC's ports go through hw/cmos, which the guest's RTC shares, a byte at
+// a time, as the chipset runs them.
+#define CMOS_FIRST 0x70
+#define CMOS_LAST 0x77
+
+static uint32_t io_access(uint16_t port, size_t size, bool in, uint32_t value) {
+    if (port + size <= CMOS_FIRST || port > CMOS_LAST) {
+        switch (size) {
+            case 1: {
+                if (in) {
+                    return inb(port);
+                }
+                outb(port, (uint8_t)value);
+                break;
+            }
+            case 2: {
+                if (in) {
+                    return inw(port);
+                }
+                outw(port, (uint16_t)value);
+                break;
+            }
+            default: {
+                if (in) {
+                    return inl(port);
+                }
+                outl(port, value);
+                break;
+            }
+        }
+        return value;
+    }
+    for (size_t i = 0; i < size; i++) {
+        uint16_t p = (uint16_t)(port + i);
+        uint8_t byte = (uint8_t)(value >> (8 * i));
+        if (p >= CMOS_FIRST && p <= CMOS_LAST) {
+            cmos_host_io(p, in, &byte);
+        } else if (in) {
+            byte = inb(p);
+        } else {
+            outb(p, byte);
+        }
+        if (in) {
+            value = (value & ~((uint32_t)0xff << (8 * i))) | (uint32_t)byte << (8 * i);
+        }
+    }
+    return value;
+}
+
 uacpi_status uacpi_kernel_io_read8(uacpi_handle handle, uacpi_size offset, uacpi_u8 *out_value) {
     uint16_t port;
     if (!io_port(handle, offset, 1, &port)) {
         return UACPI_STATUS_INVALID_ARGUMENT;
     }
-    *out_value = inb(port);
+    *out_value = (uacpi_u8)io_access(port, 1, true, 0);
     return UACPI_STATUS_OK;
 }
 
@@ -261,7 +311,7 @@ uacpi_status uacpi_kernel_io_read16(uacpi_handle handle, uacpi_size offset, uacp
     if (!io_port(handle, offset, 2, &port)) {
         return UACPI_STATUS_INVALID_ARGUMENT;
     }
-    *out_value = inw(port);
+    *out_value = (uacpi_u16)io_access(port, 2, true, 0);
     return UACPI_STATUS_OK;
 }
 
@@ -270,7 +320,7 @@ uacpi_status uacpi_kernel_io_read32(uacpi_handle handle, uacpi_size offset, uacp
     if (!io_port(handle, offset, 4, &port)) {
         return UACPI_STATUS_INVALID_ARGUMENT;
     }
-    *out_value = inl(port);
+    *out_value = io_access(port, 4, true, 0);
     return UACPI_STATUS_OK;
 }
 
@@ -279,7 +329,7 @@ uacpi_status uacpi_kernel_io_write8(uacpi_handle handle, uacpi_size offset, uacp
     if (!io_port(handle, offset, 1, &port)) {
         return UACPI_STATUS_INVALID_ARGUMENT;
     }
-    outb(port, in_value);
+    io_access(port, 1, false, in_value);
     return UACPI_STATUS_OK;
 }
 
@@ -288,7 +338,7 @@ uacpi_status uacpi_kernel_io_write16(uacpi_handle handle, uacpi_size offset, uac
     if (!io_port(handle, offset, 2, &port)) {
         return UACPI_STATUS_INVALID_ARGUMENT;
     }
-    outw(port, in_value);
+    io_access(port, 2, false, in_value);
     return UACPI_STATUS_OK;
 }
 
@@ -297,7 +347,7 @@ uacpi_status uacpi_kernel_io_write32(uacpi_handle handle, uacpi_size offset, uac
     if (!io_port(handle, offset, 4, &port)) {
         return UACPI_STATUS_INVALID_ARGUMENT;
     }
-    outl(port, in_value);
+    io_access(port, 4, false, in_value);
     return UACPI_STATUS_OK;
 }
 
