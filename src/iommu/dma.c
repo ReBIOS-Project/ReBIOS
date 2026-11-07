@@ -26,7 +26,7 @@
 #include <lib/spinlock.h>
 #include <lib/util.h>
 #include <sys/mm.h>
-#include <sys/x86.h>
+#include <sys/ptable.h>
 #include <virt/gpt.h>
 
 // What 4-level tables translate.
@@ -61,10 +61,7 @@ static bool entry_present(uint64_t e) {
     return (e & (VTD_R | VTD_W)) != 0;
 }
 
-static bool entry_leaf(uint64_t e, size_t level) {
-    if (level == 0) {
-        return true;
-    }
+static bool entry_leaf(uint64_t e) {
     if (kind == IOMMU_TABLES_KIND_AMD) {
         return (e & AMD_NEXT_LEVEL_MASK) == 0;
     }
@@ -80,7 +77,7 @@ static uint64_t table_entry(uintptr_t table, size_t level) {
 }
 
 // As in EPT, write access comes with read access.
-static uint64_t leaf_entry(uintptr_t hpa, uint32_t prot, size_t level) {
+static uint64_t leaf_entry(uintptr_t hpa, uint64_t prot, size_t level) {
     if ((prot & (GPT_R | GPT_W)) == 0) {
         return 0;
     }
@@ -91,56 +88,15 @@ static uint64_t leaf_entry(uintptr_t hpa, uint32_t prot, size_t level) {
     return hpa | VTD_R | (write ? VTD_W : 0) | (level > 0 ? VTD_PS : 0);
 }
 
-static uint32_t leaf_prot(uint64_t e) {
+static uint64_t leaf_prot(uint64_t e, size_t level) {
+    (void)level;
     bool write = (e & (kind == IOMMU_TABLES_KIND_AMD ? AMD_IW : VTD_W)) != 0;
     return write ? GPT_R | GPT_W : GPT_R;
 }
 
-// Returns the table that holds the entry for addr at level, creating the
-// tables on the way, and splitting large leaves into tables of the same
-// mappings.
-static uint64_t *table_for(uintptr_t addr, size_t level) {
-    uint64_t *table = root;
-    for (size_t l = 3; l > level; l--) {
-        uint64_t *e = &table[x86_level_index(addr, l)];
-        if (!entry_present(*e)) {
-            uint64_t *next = page_alloc(1);
-            *e = table_entry((uintptr_t)next, l);
-        } else if (entry_leaf(*e, l)) {
-            uintptr_t base = x86_leaf_address(*e, l);
-            uint32_t prot = leaf_prot(*e);
-            uint64_t *next = page_alloc(1);
-            for (size_t i = 0; i < 512; i++) {
-                next[i] = leaf_entry(base + i * x86_level_size(l - 1), prot, l - 1);
-            }
-            *e = table_entry((uintptr_t)next, l);
-        }
-        table = (uint64_t *)(uintptr_t)(*e & PTE_ADDRESS);
-    }
-    return table;
-}
-
-static void map(uintptr_t addr, uintptr_t hpa, size_t size, uint32_t prot) {
-    while (size != 0) {
-        size_t level = 0;
-        for (size_t l = leaf_level_max; l > 0; l--) {
-            uint64_t ls = x86_level_size(l);
-            if ((addr & (ls - 1)) == 0 && (hpa & (ls - 1)) == 0 && size >= ls) {
-                level = l;
-                break;
-            }
-        }
-
-        uint64_t *table = table_for(addr, level);
-        // A leaf that replaces a table leaks the table, as the IOMMUs may
-        // still walk it until their caches are flushed.
-        table[x86_level_index(addr, level)] = leaf_entry(hpa, prot, level);
-
-        addr += x86_level_size(level);
-        hpa += x86_level_size(level);
-        size -= x86_level_size(level);
-    }
-}
+static const struct ptable_format table_format = {
+    entry_present, entry_leaf, table_entry, leaf_entry, leaf_prot
+};
 
 static void flush(void) {
     if (kind == IOMMU_TABLES_KIND_AMD) {
@@ -180,7 +136,7 @@ void dma_map(uintptr_t gpa, uintptr_t hpa, size_t size, uint32_t prot) {
         panic("Guest memory mapped before the IOMMU tables\n");
     }
     spinlock_acquire(&dma_lock);
-    map(gpa, hpa, size, prot);
+    ptable_map(&table_format, root, gpa, hpa, size, prot, leaf_level_max);
     if (enabled) {
         flush();
     }
@@ -214,7 +170,7 @@ static void reserved_regions_apply(const struct iommu_tables *tables) {
         } else if (r->readable) {
             prot = GPT_R;
         }
-        map(base, base, last - base + 1, prot);
+        ptable_map(&table_format, root, base, base, last - base + 1, prot, leaf_level_max);
     }
 }
 
