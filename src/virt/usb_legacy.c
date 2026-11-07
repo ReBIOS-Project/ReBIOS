@@ -48,7 +48,7 @@
 #define PM_CONTROL 4
 
 static bool owned(const struct usb_controller *c) {
-    return atomic_load_explicit(&c->state, memory_order_acquire) != USB_STATE_RELEASED;
+    return atomic_load_explicit(&c->state, memory_order_acquire) != USB_CONTROLLER_STATE_RELEASED;
 }
 
 static uint32_t legsup_shown(const struct usb_controller *c, uint32_t value) {
@@ -88,7 +88,7 @@ static uint32_t access_into_dword(
 
 static uint64_t range_read(struct vcpu *v, void *ctx, uint64_t offset, size_t size) {
     (void)v;
-    struct usb_legacy_range *r = ctx;
+    struct usb_controller_legacy_range *r = ctx;
     struct usb_controller *c = r->c;
     uint64_t at = r->offset + offset;
     uint64_t value = mmio_read_host((uintptr_t)c->mmio + at, size);
@@ -108,7 +108,7 @@ static uint64_t range_read(struct vcpu *v, void *ctx, uint64_t offset, size_t si
 }
 
 static void range_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value) {
-    struct usb_legacy_range *r = ctx;
+    struct usb_controller_legacy_range *r = ctx;
     struct usb_controller *c = r->c;
     uint64_t at = r->offset + offset;
     if (!owned(c)) {
@@ -248,8 +248,8 @@ static bool trap_range(struct usb_controller *c, size_t offset, size_t size) {
     if (size == 0) {
         return true;
     }
-    struct usb_legacy_range *r = &c->ranges[c->range_count];
-    *r = (struct usb_legacy_range){ c, offset, size };
+    struct usb_controller_legacy_range *r = &c->ranges[c->range_count];
+    *r = (struct usb_controller_legacy_range){ c, offset, size };
     if (!pci_virt_trap(c->f->addr, 0, offset, size, &range_ops, r)) {
         return false;
     }

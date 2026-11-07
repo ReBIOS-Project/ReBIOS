@@ -387,7 +387,7 @@ static void controller_let_go(struct usb_controller *c) {
             pci_cfg_write(c->f->addr, INTEL_XUSB2PR, 4, 0);
         }
     }
-    atomic_store_explicit(&c->state, USB_STATE_RELEASED, memory_order_release);
+    atomic_store_explicit(&c->state, USB_CONTROLLER_STATE_RELEASED, memory_order_release);
     usb_legacy_disown(c);
     // An OS without xHCI's driver wants the ports its EHCI driver can reach,
     // as a BIOS's setting that leaves them to the OS gives it.
@@ -417,7 +417,7 @@ static void controller_take(struct usb_controller *c) {
         controller_let_go(c);
         return;
     }
-    atomic_store_explicit(&c->state, USB_STATE_OWNED, memory_order_release);
+    atomic_store_explicit(&c->state, USB_CONTROLLER_STATE_OWNED, memory_order_release);
 }
 
 static void usb_main(void *arg) {
@@ -430,14 +430,14 @@ static void usb_main(void *arg) {
         for (size_t i = 0; i < controller_count; i++) {
             struct usb_controller *c = &controllers[i];
             int state = atomic_load_explicit(&c->state, memory_order_acquire);
-            if (state == USB_STATE_RELEASED) {
+            if (state == USB_CONTROLLER_STATE_RELEASED) {
                 continue;
             }
             if (atomic_load_explicit(&c->release_wanted, memory_order_acquire)) {
                 controller_let_go(c);
                 continue;
             }
-            if (state == USB_STATE_WAITING) {
+            if (state == USB_CONTROLLER_STATE_WAITING) {
                 controller_take(c);
             }
             if (c->hc != NULL) {
@@ -550,7 +550,7 @@ void usb_init(void) {
                 "USB: controller %02x:%02x.%x stays the guest's\n", c->f->addr.bus,
                 c->f->addr.device, c->f->addr.function
             );
-            atomic_store_explicit(&c->state, USB_STATE_RELEASED, memory_order_relaxed);
+            atomic_store_explicit(&c->state, USB_CONTROLLER_STATE_RELEASED, memory_order_relaxed);
         }
     }
     tick.fired = tick_fired;

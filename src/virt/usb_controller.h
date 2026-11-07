@@ -26,16 +26,16 @@ struct pci_enum_function;
 struct tendril_hc;
 
 // Who has it: the stack is yet to take it, has it, or the guest does.
-#define USB_STATE_WAITING 0
-#define USB_STATE_OWNED 1
-#define USB_STATE_RELEASED 2
+#define USB_CONTROLLER_STATE_WAITING 0
+#define USB_CONTROLLER_STATE_OWNED 1
+#define USB_CONTROLLER_STATE_RELEASED 2
 
-#define USB_LEGACY_RANGES 2
+#define USB_CONTROLLER_LEGACY_RANGES 2
 
 struct usb_controller;
 
 // Registers of the controller the guest reaches through the hypervisor.
-struct usb_legacy_range {
+struct usb_controller_legacy_range {
     struct usb_controller *c;
     size_t offset;
     size_t size;
@@ -67,7 +67,7 @@ struct usb_controller {
     uint16_t command;
     bool power_kept;
     uint16_t power;
-    struct usb_legacy_range ranges[USB_LEGACY_RANGES];
+    struct usb_controller_legacy_range ranges[USB_CONTROLLER_LEGACY_RANGES];
     size_t range_count;
 };
 
