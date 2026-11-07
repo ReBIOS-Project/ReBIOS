@@ -27,7 +27,6 @@
 #include <hw/lapic.h>
 #include <lib/log.h>
 #include <lib/printf.h>
-#include <memory.h>
 #include <sys/x86.h>
 
 // The vector a legacy BIOS's IRQ 7 handler serves, which copes with spurious
@@ -111,22 +110,12 @@ static bool madt_uid(const uint8_t *madt, size_t length, uint32_t apic_id, uint3
     size_t offset = sizeof(struct acpi_madt);
     const struct acpi_entry_hdr *entry;
     while ((entry = acpi_madt_next(madt, length, &offset)) != NULL) {
-        if (entry->type == ACPI_MADT_ENTRY_TYPE_LAPIC
-         && entry->length >= sizeof(struct acpi_madt_lapic)) {
-            struct acpi_madt_lapic lapic;
-            memcpy(&lapic, entry, sizeof(struct acpi_madt_lapic));
-            if (lapic.id == apic_id) {
-                *uid = lapic.uid;
-                return true;
-            }
-        } else if (entry->type == ACPI_MADT_ENTRY_TYPE_LOCAL_X2APIC
-                && entry->length >= sizeof(struct acpi_madt_x2apic)) {
-            struct acpi_madt_x2apic x2apic;
-            memcpy(&x2apic, entry, sizeof(struct acpi_madt_x2apic));
-            if (x2apic.id == apic_id) {
-                *uid = x2apic.uid;
-                return true;
-            }
+        uint32_t id;
+        uint32_t entry_uid;
+        uint32_t flags;
+        if (acpi_madt_processor(entry, &id, &entry_uid, &flags) && id == apic_id) {
+            *uid = entry_uid;
+            return true;
         }
     }
     return false;
@@ -153,29 +142,14 @@ static bool madt_nmi_pin(uint32_t apic_id, struct nmi_pin *pin) {
     size_t offset = sizeof(struct acpi_madt);
     const struct acpi_entry_hdr *entry;
     while (!specific && (entry = acpi_madt_next(madt, length, &offset)) != NULL) {
+        uint32_t nmi_uid;
         bool all;
-        bool mine;
-        uint16_t flags;
         uint8_t lint;
-        if (entry->type == ACPI_MADT_ENTRY_TYPE_LAPIC_NMI
-         && entry->length >= sizeof(struct acpi_madt_lapic_nmi)) {
-            struct acpi_madt_lapic_nmi nmi;
-            memcpy(&nmi, entry, sizeof(struct acpi_madt_lapic_nmi));
-            all = nmi.uid == 0xff;
-            mine = have_uid && nmi.uid == uid;
-            flags = nmi.flags;
-            lint = nmi.lint;
-        } else if (entry->type == ACPI_MADT_ENTRY_TYPE_LOCAL_X2APIC_NMI
-                && entry->length >= sizeof(struct acpi_madt_x2apic_nmi)) {
-            struct acpi_madt_x2apic_nmi nmi;
-            memcpy(&nmi, entry, sizeof(struct acpi_madt_x2apic_nmi));
-            all = nmi.uid == 0xffffffff;
-            mine = have_uid && nmi.uid == uid;
-            flags = nmi.flags;
-            lint = nmi.lint;
-        } else {
+        uint16_t flags;
+        if (!acpi_madt_lapic_nmi(entry, &nmi_uid, &all, &lint, &flags)) {
             continue;
         }
+        bool mine = have_uid && nmi_uid == uid;
 
         if (lint > 1 || !(mine || (all && !found))) {
             continue;

@@ -69,9 +69,6 @@
 #define MP_ALL_APICS 0xff
 #define MP_MAX_APIC_ID 0xfe
 
-#define MADT_ALL_UIDS ((uint32_t)0xff)
-#define MADT_ALL_X2APIC_UIDS ((uint32_t)0xffffffff)
-
 struct mp_floating_pointer {
     char signature[4];
     uint32_t config_table;
@@ -447,22 +444,12 @@ static bool uid_apic_id(const struct mp_input *in, uint32_t uid, uint32_t *apic_
     size_t offset = sizeof(struct acpi_madt);
     const struct acpi_entry_hdr *entry;
     while ((entry = acpi_madt_next(in->madt, in->madt_length, &offset)) != NULL) {
-        if (entry->type == ACPI_MADT_ENTRY_TYPE_LAPIC
-         && entry->length >= sizeof(struct acpi_madt_lapic)) {
-            struct acpi_madt_lapic lapic;
-            memcpy(&lapic, entry, sizeof(struct acpi_madt_lapic));
-            if (lapic.uid == uid) {
-                *apic_id = lapic.id;
-                return true;
-            }
-        } else if (entry->type == ACPI_MADT_ENTRY_TYPE_LOCAL_X2APIC
-                && entry->length >= sizeof(struct acpi_madt_x2apic)) {
-            struct acpi_madt_x2apic x2apic;
-            memcpy(&x2apic, entry, sizeof(struct acpi_madt_x2apic));
-            if (x2apic.uid == uid) {
-                *apic_id = x2apic.id;
-                return true;
-            }
+        uint32_t id;
+        uint32_t entry_uid;
+        uint32_t flags;
+        if (acpi_madt_processor(entry, &id, &entry_uid, &flags) && entry_uid == uid) {
+            *apic_id = id;
+            return true;
         }
     }
     return false;
@@ -477,26 +464,10 @@ static void local_interrupts_emit(struct mp_writer *w, const struct mp_input *in
     const struct acpi_entry_hdr *entry;
     while ((entry = acpi_madt_next(in->madt, in->madt_length, &offset)) != NULL) {
         uint32_t uid;
-        uint16_t flags;
-        uint8_t lint;
         bool all;
-        if (entry->type == ACPI_MADT_ENTRY_TYPE_LAPIC_NMI
-         && entry->length >= sizeof(struct acpi_madt_lapic_nmi)) {
-            struct acpi_madt_lapic_nmi nmi;
-            memcpy(&nmi, entry, sizeof(struct acpi_madt_lapic_nmi));
-            uid = nmi.uid;
-            flags = nmi.flags;
-            lint = nmi.lint;
-            all = nmi.uid == MADT_ALL_UIDS;
-        } else if (entry->type == ACPI_MADT_ENTRY_TYPE_LOCAL_X2APIC_NMI
-                && entry->length >= sizeof(struct acpi_madt_x2apic_nmi)) {
-            struct acpi_madt_x2apic_nmi nmi;
-            memcpy(&nmi, entry, sizeof(struct acpi_madt_x2apic_nmi));
-            uid = nmi.uid;
-            flags = nmi.flags;
-            lint = nmi.lint;
-            all = nmi.uid == MADT_ALL_X2APIC_UIDS;
-        } else {
+        uint8_t lint;
+        uint16_t flags;
+        if (!acpi_madt_lapic_nmi(entry, &uid, &all, &lint, &flags)) {
             continue;
         }
         madt_nmis = true;

@@ -44,6 +44,7 @@
 #include <lib/log.h>
 #include <lib/spinlock.h>
 #include <lib/time.h>
+#include <memory.h>
 #include <sys/cpu.h>
 #include <sys/task.h>
 #include <sys/x86.h>
@@ -928,4 +929,54 @@ const struct acpi_entry_hdr *acpi_madt_next(const void *madt, size_t length, siz
     }
     *offset += entry->length;
     return entry;
+}
+
+bool acpi_madt_processor(
+    const struct acpi_entry_hdr *entry, uint32_t *apic_id, uint32_t *uid, uint32_t *flags
+) {
+    if (entry->type == ACPI_MADT_ENTRY_TYPE_LAPIC
+     && entry->length >= sizeof(struct acpi_madt_lapic)) {
+        struct acpi_madt_lapic lapic;
+        memcpy(&lapic, entry, sizeof(struct acpi_madt_lapic));
+        *apic_id = lapic.id;
+        *uid = lapic.uid;
+        *flags = lapic.flags;
+        return true;
+    }
+    if (entry->type == ACPI_MADT_ENTRY_TYPE_LOCAL_X2APIC
+     && entry->length >= sizeof(struct acpi_madt_x2apic)) {
+        struct acpi_madt_x2apic x2apic;
+        memcpy(&x2apic, entry, sizeof(struct acpi_madt_x2apic));
+        *apic_id = x2apic.id;
+        *uid = x2apic.uid;
+        *flags = x2apic.flags;
+        return true;
+    }
+    return false;
+}
+
+bool acpi_madt_lapic_nmi(
+    const struct acpi_entry_hdr *entry, uint32_t *uid, bool *all, uint8_t *lint, uint16_t *flags
+) {
+    if (entry->type == ACPI_MADT_ENTRY_TYPE_LAPIC_NMI
+     && entry->length >= sizeof(struct acpi_madt_lapic_nmi)) {
+        struct acpi_madt_lapic_nmi nmi;
+        memcpy(&nmi, entry, sizeof(struct acpi_madt_lapic_nmi));
+        *uid = nmi.uid;
+        *all = nmi.uid == 0xff;
+        *lint = nmi.lint;
+        *flags = nmi.flags;
+        return true;
+    }
+    if (entry->type == ACPI_MADT_ENTRY_TYPE_LOCAL_X2APIC_NMI
+     && entry->length >= sizeof(struct acpi_madt_x2apic_nmi)) {
+        struct acpi_madt_x2apic_nmi nmi;
+        memcpy(&nmi, entry, sizeof(struct acpi_madt_x2apic_nmi));
+        *uid = nmi.uid;
+        *all = nmi.uid == 0xffffffff;
+        *lint = nmi.lint;
+        *flags = nmi.flags;
+        return true;
+    }
+    return false;
 }

@@ -117,4 +117,16 @@ bool acpi_eval_optional(
 // first is at sizeof(struct acpi_madt).
 const struct acpi_entry_hdr *acpi_madt_next(const void *madt, size_t length, size_t *offset);
 
+// The processor that a Processor Local APIC or x2APIC structure describes: its
+// APIC ID, ACPI Processor UID, and flags. False for other structures.
+bool acpi_madt_processor(
+    const struct acpi_entry_hdr *entry, uint32_t *apic_id, uint32_t *uid, uint32_t *flags
+);
+// What a Local APIC NMI or Local x2APIC NMI structure says: the ACPI Processor
+// UID of the processor it is for, whether it is for all of them instead, its
+// LINTn pin, and its MPS INTI flags. False for other structures.
+bool acpi_madt_lapic_nmi(
+    const struct acpi_entry_hdr *entry, uint32_t *uid, bool *all, uint8_t *lint, uint16_t *flags
+);
+
 #endif

@@ -168,20 +168,12 @@ static uint32_t madt_aps(uint32_t **ids_out) {
     size_t offset = sizeof(struct acpi_madt);
     const struct acpi_entry_hdr *hdr;
     while ((hdr = acpi_madt_next(madt, length, &offset)) != NULL) {
-        if (hdr->type == ACPI_MADT_ENTRY_TYPE_LAPIC
-         && hdr->length >= sizeof(struct acpi_madt_lapic)) {
-            struct acpi_madt_lapic entry;
-            memcpy(&entry, hdr, sizeof(struct acpi_madt_lapic));
-            if ((entry.flags & ACPI_PIC_ENABLED) != 0 && entry.id != self) {
-                add_id(ids, &count, entry.id);
-            }
-        } else if (hdr->type == ACPI_MADT_ENTRY_TYPE_LOCAL_X2APIC
-                && hdr->length >= sizeof(struct acpi_madt_x2apic)) {
-            struct acpi_madt_x2apic entry;
-            memcpy(&entry, hdr, sizeof(struct acpi_madt_x2apic));
-            if ((entry.flags & ACPI_PIC_ENABLED) != 0 && entry.id != self) {
-                add_id(ids, &count, entry.id);
-            }
+        uint32_t id;
+        uint32_t uid;
+        uint32_t flags;
+        if (acpi_madt_processor(hdr, &id, &uid, &flags) && (flags & ACPI_PIC_ENABLED) != 0
+         && id != self) {
+            add_id(ids, &count, id);
         }
     }
     uacpi_table_unref(&table);
