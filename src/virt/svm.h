@@ -128,6 +128,13 @@ struct vmcb_save {
     uint64_t br_to;
     uint64_t last_excp_from;
     uint64_t last_excp_to;
+    uint8_t reserved5[0x8c0 - 0x298];
+    // The FRED MSRs that the processor switches with the VMCB, all but
+    // FRED_RSP0 (AMD 69191 rev. 1.10).
+    uint64_t fred_rsp[3];
+    uint64_t fred_stklvls;
+    uint64_t fred_ssp[3];
+    uint64_t fred_config;
 } __attribute__((packed));
 
 struct vmcb {
@@ -158,6 +165,7 @@ _Static_assert(offsetof(struct vmcb_save, rsp) == 0x1d8, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_save, rax) == 0x1f8, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_save, cr2) == 0x240, "VMCB layout");
 _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
+_Static_assert(offsetof(struct vmcb_save, fred_rsp) == 0x8c0, "VMCB layout");
 
 // The intercept vectors, 32 bits each from offset 000h, in which an exit code
 // below C0h is the number of its intercept's bit (APM 24593 rev. 3.46, Table

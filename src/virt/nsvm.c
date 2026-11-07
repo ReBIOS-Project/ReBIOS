@@ -41,6 +41,7 @@
 #include <virt/virt.h>
 #include <virt/vlapic.h>
 
+#define VECTOR_DB 1
 #define VECTOR_UD 6
 #define VECTOR_GP 13
 #define VECTOR_PF 14
@@ -64,6 +65,13 @@
 #define EVENT_RESERVED ((uint64_t)0x7ffff000)
 #define EVENT_TYPE_NMI ((uint64_t)2 << 8)
 #define EVENT_TYPE_SOFT_INT ((uint64_t)4 << 8)
+// FRED's event types and nested-exception bit, in the events of a guest with
+// CR4.FRED, and the bits of FRED_CONFIG that VMRUN refuses (AMD 69191 rev.
+// 1.10).
+#define EVENT_TYPE_INT1 ((uint64_t)5 << 8)
+#define EVENT_TYPE_SYSCALL ((uint64_t)7 << 8)
+#define EVENT_NESTED ((uint64_t)1 << 13)
+#define FRED_CONFIG_RESERVED ((uint64_t)0x834)
 
 // The virtual interrupt the guest gives its guest, which the hypervisor's own
 // windows take the place of (APM 24593 rev. 3.46, 15.21.4).
@@ -75,11 +83,6 @@
 // The bytes of the I/O permission map the processor reads: a bit for each
 // port, and those for accesses past port FFFFh (APM 24593 rev. 3.46, 15.10.1).
 #define IOPM_USED (2 * PAGE_SIZE + 1)
-
-// The VMCB's FRED state, from FRED_RSP1 to FRED_CONFIG, in the state save area
-// (AMD 69191 rev. 1.10).
-#define VMCB_FRED_STATE 0xcc0
-#define VMCB_FRED_SIZE 0x40
 
 // Nested paging's tables, in the formats of the guest's page tables (APM 24593
 // rev. 3.46, 15.25.3 and 15.25.5).
@@ -192,6 +195,9 @@ struct nsvm {
     bool vnmi12;
     bool vgif12;
     bool vls12;
+    // Whether VMCB12 has the processor switch the guest's guest's FRED MSRs
+    // (AMD 69191 rev. 1.10).
+    bool fred12;
     // Whether VMCB12 has the processor virtualise VMLOAD and VMSAVE where its
     // checks refuse to, which has them exit (APM 24593 rev. 3.46, 15.33.1).
     bool vls12_refused;
@@ -606,15 +612,21 @@ static void copy_lbrs(struct vmcb_save *to, const struct vmcb_save *from) {
     to->last_excp_to = from->last_excp_to;
 }
 
-// What else the guest and its guest share, as the processor keeps it but for
-// VMCB12's controls, which the guest is not offered yet: FRED's state.
-static void copy_shared_state(struct vmcb *to, const struct vmcb *from) {
+static void copy_fred_state(struct vmcb_save *to, const struct vmcb_save *from) {
+    for (size_t i = 0; i < 3; i++) {
+        to->fred_rsp[i] = from->fred_rsp[i];
+        to->fred_ssp[i] = from->fred_ssp[i];
+    }
+    to->fred_stklvls = from->fred_stklvls;
+    to->fred_config = from->fred_config;
+}
+
+// What else the guest and its guest share, as the processor keeps it: FRED's
+// state too, but where VMCB12 has the processor switch it.
+static void copy_shared_state(struct vmcb *to, const struct vmcb *from, bool fred) {
     copy_vmload_state(&to->save, &from->save);
-    if (vcpu_fred()) {
-        memcpy(
-            (uint8_t *)to + VMCB_FRED_STATE, (const uint8_t *)from + VMCB_FRED_STATE,
-            VMCB_FRED_SIZE
-        );
+    if (vcpu_fred() && fred) {
+        copy_fred_state(&to->save, &from->save);
     }
 }
 
@@ -692,6 +704,9 @@ static void exit_to_l1(
         s12->ssp = s02->ssp;
         s12->isst_addr = s02->isst_addr;
     }
+    if (n->fred12) {
+        copy_fred_state(s12, s02);
+    }
     s12->dr7 = s02->dr7;
     s12->dr6 = s02->dr6;
     s12->cpl = s02->cpl;
@@ -721,6 +736,13 @@ static void exit_to_l1(
     c12->exitinfo1 = info1;
     c12->exitinfo2 = info2;
     c12->exitintinfo = intinfo;
+    // FRED's event data of the event cut short: the processor's for the event
+    // it gives, the hypervisor's for one it was delivering itself (AMD 69191
+    // rev. 1.10).
+    c12->exitintdata = 0;
+    if ((intinfo & SVM_EVENT_VALID) != 0) {
+        c12->exitintdata = intinfo == c02->exitintinfo ? c02->exitintdata : v->redeliver_data;
+    }
     c12->eventinj = 0;
     // The next RIP of an exit the processor made, which it saves for the
     // instructions it intercepts, and 0 for the hypervisor's own exits (APM
@@ -752,7 +774,7 @@ static void exit_to_l1(
                               | (c02->vintr & SVM_VINTR_NMI_MASK);
     }
     copy_lbrs(n->lbrv ? s12 : &vmcb01->save, s02);
-    copy_shared_state(vmcb01, vmcb02);
+    copy_shared_state(vmcb01, vmcb02, !n->fred12);
     if (svm_eraps) {
         vmcb01->control.rap_control |= SVM_RAP_CLEAR;
     }
@@ -781,12 +803,23 @@ static void vmrun_failed(struct vcpu *v, struct nsvm *n, struct vmcb *vmcb12) {
 #define INJECTABLE_EXCEPTIONS ((uint32_t)0x500f7dfb)
 #define VECTOR_CP 21
 
-static bool injection_valid(uint64_t event) {
+static bool injection_valid(uint64_t event, bool fred) {
     if ((event & SVM_EVENT_VALID) == 0) {
         return true;
     }
     uint64_t type = event & SVM_EVENT_TYPE_MASK;
     unsigned int vector = event & SVM_EVENT_VECTOR_MASK;
+    // For a guest with FRED, INT1 and SYSCALL have vector 1, and only
+    // exceptions have error codes or nest (AMD 69191 rev. 1.10).
+    if (fred) {
+        if ((event & (SVM_EVENT_ERROR_VALID | EVENT_NESTED)) != 0
+         && type != SVM_EVENT_TYPE_EXCEPTION) {
+            return false;
+        }
+        if (type == EVENT_TYPE_INT1 || type == EVENT_TYPE_SYSCALL) {
+            return vector == 1;
+        }
+    }
     if (type == SVM_EVENT_TYPE_EXCEPTION) {
         if (vector == VECTOR_CP) {
             return (cpuid_cr4_allowed() & CR4_CET) != 0;
@@ -823,7 +856,8 @@ static bool vmcb12_valid(struct vcpu *v, const struct vmcb *vmcb12) {
     const struct vmcb_save *s = &vmcb12->save;
     if ((c->intercept_misc2 & SVM_INTERCEPT_VMRUN) == 0 || c->guest_asid == 0
      || c->guest_asid >= nasid - 1 || !table_fits(c->msrpm_base_pa, MSRPM_SIZE)
-     || !table_fits(c->iopm_base_pa, IOPM_USED) || !injection_valid(c->eventinj)) {
+     || !table_fits(c->iopm_base_pa, IOPM_USED)
+     || !injection_valid(c->eventinj, (s->cr4 & CR4_FRED) != 0)) {
         return false;
     }
     // S_CET has bits 1:0 alone, and shadow stacks need CR0.WP and, for user
@@ -844,6 +878,30 @@ static bool vmcb12_valid(struct vcpu *v, const struct vmcb *vmcb12) {
     if (svm_vnmi && (c->vintr & SVM_VINTR_NMI_ENABLE) != 0
      && (c->intercept_misc1 & SVM_INTERCEPT_NMI) == 0) {
         return false;
+    }
+    // A guest's guest with FRED runs at CPL 0 in 64-bit mode or at CPL 3 with
+    // IOPL 0, and its SS.DPL is 0 in 64-bit mode or 3 with IOPL 0 too; FRED's
+    // MSRs, where VMCB12 has the processor switch them, clear FRED_CONFIG's
+    // reserved bits, the stack pointers' bits 5:0, and the shadow stack
+    // pointers' bits 2:0 (AMD 69191 rev. 1.10).
+    if ((s->cr4 & CR4_FRED) != 0) {
+        unsigned int ss_dpl = (s->ss.attrib >> 5) & 3;
+        bool long_cs = (s->cs.attrib & SEG_L) != 0;
+        bool iopl0 = (s->rflags & RFLAGS_IOPL) == 0;
+        if (((s->cpl != 0 || !long_cs) && (s->cpl != 3 || !iopl0))
+         || ((ss_dpl != 0 || !long_cs) && (ss_dpl != 3 || !iopl0))) {
+            return false;
+        }
+    }
+    if (vcpu_fred() && (c->virt_ext & SVM_VIRT_EXT_FRED) != 0) {
+        if ((s->fred_config & FRED_CONFIG_RESERVED) != 0) {
+            return false;
+        }
+        for (size_t i = 0; i < 3; i++) {
+            if ((s->fred_rsp[i] & 0x3f) != 0 || (s->fred_ssp[i] & 7) != 0) {
+                return false;
+            }
+        }
     }
     // Nested paging takes the guest's paging, and a valid nCR3 and guest PAT
     // (APM 24593 rev. 3.46, 15.25.3 and 15.25.4).
@@ -1264,6 +1322,7 @@ static void prepare_vmcb02(struct nsvm *n) {
     n->vls12 = vls && (c12->np_enable & SVM_NP_ENABLE) != 0 && (vmcb01->save.efer & EFER_LMA) != 0
             && (vmcb01->save.cs.attrib & SEG_L) != 0;
     n->vls12_refused = vls && !n->vls12;
+    n->fred12 = vcpu_fred() && (c12->virt_ext & SVM_VIRT_EXT_FRED) != 0;
     merge_intercepts(n);
 
     // The guest's PAUSE filter, as the hypervisor intercepts no PAUSE itself
@@ -1343,14 +1402,17 @@ static void prepare_vmcb02(struct nsvm *n) {
         }
         c->n_cr3 = npt02_root(n);
     }
-    c->eventinj = c12->eventinj & ~EVENT_RESERVED;
+    // FRED's nested-exception bit is not reserved where the guest's guest has
+    // CR4.FRED (AMD 69191 rev. 1.10).
+    uint64_t reserved = EVENT_RESERVED & ~((s12->cr4 & CR4_FRED) != 0 ? EVENT_NESTED : 0);
+    c->eventinj = c12->eventinj & ~reserved;
     // Software interrupts injected take their return address from here (APM
     // 24593 rev. 3.46, 15.20): VMCB12's where the guest has NRIP saving, else
     // its RIP, which the guest moved past the instruction itself.
     c->nrip = svm_nrips ? c12->nrip : s12->rip;
     c->virt_ext = vmcb01->control.virt_ext;
     c->exitintdata = 0;
-    c->eventinjdata = 0;
+    c->eventinjdata = c12->eventinjdata;
 
     s->es = s12->es;
     s->cs = s12->cs;
@@ -1384,7 +1446,10 @@ static void prepare_vmcb02(struct nsvm *n) {
     if (n->lbrv) {
         s->dbgctl &= debugctl_bits;
     }
-    copy_shared_state(vmcb02, vmcb01);
+    copy_shared_state(vmcb02, vmcb01, !n->fred12);
+    if (n->fred12) {
+        copy_fred_state(s, s12);
+    }
 }
 
 // The address in rAX, as wide as the instruction's addresses.
@@ -1851,12 +1916,14 @@ bool nsvm_exception(
     if (((n->intercepts[2] >> vector) & 1) == 0) {
         return false;
     }
-    // EXITINFO1 has the error code, and EXITINFO2 a page fault's address, the
-    // rest being undefined (APM 24593 rev. 3.46, 15.12).
+    // EXITINFO1 has the error code, and EXITINFO2 a page fault's address or,
+    // in a guest's guest with FRED, a debug exception's event data, the rest
+    // being undefined (APM 24593 rev. 3.46, 15.12; AMD 69191 rev. 1.10).
+    bool event_data = vector == VECTOR_DB && (v->vmcb->save.cr4 & CR4_FRED) != 0;
     n->pending = true;
     n->pending_code = SVM_EXIT_EXCEPTION_BASE + vector;
     n->pending_info1 = has_error ? error : 0;
-    n->pending_info2 = vector == VECTOR_PF ? info2 : 0;
+    n->pending_info2 = vector == VECTOR_PF || event_data ? info2 : 0;
     return true;
 }
 
