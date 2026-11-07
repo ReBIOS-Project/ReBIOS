@@ -23,10 +23,6 @@
 #include <efi.h>
 #include <handoff.h>
 
-// For printf(), as segment:bus:device.function.
-#define PCI_ADDRESS_FMT "%04x:%02x:%02x.%x"
-#define PCI_ADDRESS_ARGS(a) (a).segment, (a).bus, (a).devfn >> 3, (a).devfn & 7
-
 // A PCI function the firmware enumerated.
 struct pci_io_device {
     EFI_HANDLE handle;
@@ -60,15 +56,5 @@ void pci_io_enable_device(const struct pci_io_device *dev);
 // Whether a port above the function says it leads to a slot, as those above a
 // card's own bridges do.
 bool pci_io_device_in_slot(const struct pci_io_device *dev);
-
-static inline bool pci_address_equal(struct handoff_pci_address a, struct handoff_pci_address b) {
-    return a.segment == b.segment && a.bus == b.bus && a.devfn == b.devfn;
-}
-
-static inline int pci_address_compare(struct handoff_pci_address a, struct handoff_pci_address b) {
-    uint32_t ka = (uint32_t)a.segment << 16 | (uint32_t)a.bus << 8 | a.devfn;
-    uint32_t kb = (uint32_t)b.segment << 16 | (uint32_t)b.bus << 8 | b.devfn;
-    return ka < kb ? -1 : ka > kb;
-}
 
 #endif

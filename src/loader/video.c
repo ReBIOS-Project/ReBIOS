@@ -174,7 +174,7 @@ static bool gop_pci_device(EFI_HANDLE handle, struct pci_io_device *dev) {
 static bool gop_of_configured_device(EFI_HANDLE handle) {
     struct pci_io_device dev;
     return config.vga_specified && gop_pci_device(handle, &dev)
-        && pci_address_equal(dev.address, config.vga_device);
+        && handoff_pci_address_equal(dev.address, config.vga_device);
 }
 
 // Returns the first usable graphics output, preferring those of the configured
@@ -504,7 +504,7 @@ static bool take_vga_decoding(const struct pci_io_device *dev) {
         EFI_PCI_IO_PROTOCOL *io = devices[i].io;
         EFI_UINT64 attributes;
         held[i] = 0;
-        if (pci_address_equal(devices[i].address, dev->address)
+        if (handoff_pci_address_equal(devices[i].address, dev->address)
          || io->Attributes(io, EfiPciIoAttributeOperationGet, 0, &attributes) != EFI_SUCCESS
          || (attributes & VGA_ATTRIBUTES) == 0) {
             continue;
@@ -524,8 +524,9 @@ static bool take_vga_decoding(const struct pci_io_device *dev) {
         }
         if (taken) {
             printf(
-                "Legacy VGA decoding moves from " PCI_ADDRESS_FMT " to " PCI_ADDRESS_FMT "\n",
-                PCI_ADDRESS_ARGS(devices[i].address), PCI_ADDRESS_ARGS(dev->address)
+                "Legacy VGA decoding moves from " HANDOFF_PCI_ADDRESS_FMT " to "
+                HANDOFF_PCI_ADDRESS_FMT "\n", HANDOFF_PCI_ADDRESS_ARGS(devices[i].address),
+                HANDOFF_PCI_ADDRESS_ARGS(dev->address)
             );
         } else {
             devices[i].io->Attributes(
@@ -552,10 +553,10 @@ static bool try_device(
         size = user->size;
     } else if (config.vga_emulation != HANDOFF_VGA_EMULATION_NEVER && !vbios_trusted(dev)) {
         printf(
-            "Skipping the VBIOS of " PCI_ADDRESS_FMT
+            "Skipping the VBIOS of " HANDOFF_PCI_ADDRESS_FMT
             " (%04x:%04x, revision %02x), not of a card in a slot or graphics from before 2018, "
-            "but with vga_emulation = never\n", PCI_ADDRESS_ARGS(dev->address), dev->vendor_id,
-            dev->device_id, dev->revision
+            "but with vga_emulation = never\n", HANDOFF_PCI_ADDRESS_ARGS(dev->address),
+            dev->vendor_id, dev->device_id, dev->revision
         );
         return false;
     } else {
@@ -564,8 +565,9 @@ static bool try_device(
         );
         if (!legacy) {
             printf(
-                "No legacy VBIOS in the expansion ROM of " PCI_ADDRESS_FMT " (%04x:%04x)\n",
-                PCI_ADDRESS_ARGS(dev->address), dev->vendor_id, dev->device_id
+                "No legacy VBIOS in the expansion ROM of " HANDOFF_PCI_ADDRESS_FMT
+                " (%04x:%04x)\n", HANDOFF_PCI_ADDRESS_ARGS(dev->address), dev->vendor_id,
+                dev->device_id
             );
             return false;
         }
@@ -573,9 +575,9 @@ static bool try_device(
 
     if (!take_vga_decoding(dev)) {
         printf(
-            "Skipping the VBIOS of " PCI_ADDRESS_FMT
+            "Skipping the VBIOS of " HANDOFF_PCI_ADDRESS_FMT
             " (%04x:%04x), as its legacy VGA decoding cannot be enabled\n",
-            PCI_ADDRESS_ARGS(dev->address), dev->vendor_id, dev->device_id
+            HANDOFF_PCI_ADDRESS_ARGS(dev->address), dev->vendor_id, dev->device_id
         );
         return false;
     }
@@ -585,8 +587,8 @@ static bool try_device(
     uint16_t command = 0;
     dev->io->Pci.Read(dev->io, EfiPciIoWidthUint16, 0x04, 1, &command);
     printf(
-        "VGA device " PCI_ADDRESS_FMT " decodes, command %#x\n",
-        PCI_ADDRESS_ARGS(dev->address), command
+        "VGA device " HANDOFF_PCI_ADDRESS_FMT " decodes, command %#x\n",
+        HANDOFF_PCI_ADDRESS_ARGS(dev->address), command
     );
 
     choice->dev = *dev;
@@ -602,7 +604,7 @@ static bool find_pci_device(struct handoff_pci_address address, struct pci_io_de
     bool found = false;
 
     for (size_t i = 0; i < count && !found; i++) {
-        if (pci_address_equal(devices[i].address, address)) {
+        if (handoff_pci_address_equal(devices[i].address, address)) {
             *dev = devices[i];
             found = true;
         }
@@ -681,8 +683,8 @@ static bool install_vbios(const struct vbios_choice *choice) {
     video->vbios.image = copy;
 
     printf(
-        "VGA device " PCI_ADDRESS_FMT " (%04x:%04x), VBIOS from %s, %zu bytes\n",
-        PCI_ADDRESS_ARGS(dev->address), dev->vendor_id, dev->device_id, choice->source,
+        "VGA device " HANDOFF_PCI_ADDRESS_FMT " (%04x:%04x), VBIOS from %s, %zu bytes\n",
+        HANDOFF_PCI_ADDRESS_ARGS(dev->address), dev->vendor_id, dev->device_id, choice->source,
         choice->size
     );
     return true;
@@ -725,8 +727,8 @@ void video_init(void) {
             found = !skip && try_device(&dev, user_vbios, &choice);
         } else {
             printf(
-                "The configured VGA device " PCI_ADDRESS_FMT " does not exist\n",
-                PCI_ADDRESS_ARGS(config.vga_device)
+                "The configured VGA device " HANDOFF_PCI_ADDRESS_FMT " does not exist\n",
+                HANDOFF_PCI_ADDRESS_ARGS(config.vga_device)
             );
         }
     } else if (gop_handle != NULL && gop_pci_device(gop_handle, &dev)) {
@@ -782,7 +784,7 @@ void video_exit_boot_services(void) {
     EFI_HANDLE *handles = efi_glue_locate_handles(&gop_guid, &count);
     for (size_t i = 0; i < count && !driven; i++) {
         driven = gop_pci_device(handles[i], &dev)
-              && pci_address_equal(dev.address, video->vga_device);
+              && handoff_pci_address_equal(dev.address, video->vga_device);
     }
     if (handles != NULL) {
         efi_bs->FreePool(handles);
@@ -803,8 +805,8 @@ void video_exit_boot_services(void) {
     status = efi_bs->DisconnectController(dev.handle, NULL, NULL);
     if (status != EFI_SUCCESS) {
         printf(
-            "Cannot stop the firmware's graphics driver for " PCI_ADDRESS_FMT ", status %#llx\n",
-            PCI_ADDRESS_ARGS(dev.address), (unsigned long long)status
+            "Cannot stop the firmware's graphics driver for " HANDOFF_PCI_ADDRESS_FMT
+            ", status %#llx\n", HANDOFF_PCI_ADDRESS_ARGS(dev.address), (unsigned long long)status
         );
         return;
     }
@@ -813,9 +815,9 @@ void video_exit_boot_services(void) {
                       != EFI_SUCCESS;
     if (undecoded) {
         printf(
-            "Cannot restore the decoding of " PCI_ADDRESS_FMT
+            "Cannot restore the decoding of " HANDOFF_PCI_ADDRESS_FMT
             " after stopping its graphics driver\n",
-            PCI_ADDRESS_ARGS(dev.address)
+            HANDOFF_PCI_ADDRESS_ARGS(dev.address)
         );
     }
 }

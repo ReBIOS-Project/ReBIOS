@@ -41,6 +41,24 @@ struct handoff_pci_address {
     uint8_t devfn;
 };
 
+// For printf(), as segment:bus:device.function.
+#define HANDOFF_PCI_ADDRESS_FMT "%04x:%02x:%02x.%x"
+#define HANDOFF_PCI_ADDRESS_ARGS(a) (a).segment, (a).bus, (a).devfn >> 3, (a).devfn & 7
+
+static inline bool handoff_pci_address_equal(
+    struct handoff_pci_address a, struct handoff_pci_address b
+) {
+    return a.segment == b.segment && a.bus == b.bus && a.devfn == b.devfn;
+}
+
+static inline int handoff_pci_address_compare(
+    struct handoff_pci_address a, struct handoff_pci_address b
+) {
+    uint32_t ka = (uint32_t)a.segment << 16 | (uint32_t)a.bus << 8 | a.devfn;
+    uint32_t kb = (uint32_t)b.segment << 16 | (uint32_t)b.bus << 8 | b.devfn;
+    return ka < kb ? -1 : ka > kb;
+}
+
 // How a picture is turned on a framebuffer whose panel is mounted turned in
 // its casing, so as to stand upright: a quarter turn clockwise or
 // anticlockwise.

@@ -221,8 +221,8 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     }
     if (serial_on_card) {
         printf(
-            "Serial port %#x: on PCI " PCI_ADDRESS_FMT "\n",
-            config.serial_port, PCI_ADDRESS_ARGS(serial_card)
+            "Serial port %#x: on PCI " HANDOFF_PCI_ADDRESS_FMT "\n",
+            config.serial_port, HANDOFF_PCI_ADDRESS_ARGS(serial_card)
         );
     }
 

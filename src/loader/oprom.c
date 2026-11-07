@@ -39,8 +39,9 @@ struct found_rom {
 static void sort_by_address(struct found_rom *roms, size_t count) {
     for (size_t i = 1; i < count; i++) {
         struct found_rom rom = roms[i];
+        struct handoff_pci_address address = rom.dev->address;
         size_t j = i;
-        for (; j > 0 && pci_address_compare(roms[j - 1].dev->address, rom.dev->address) > 0; j--) {
+        for (; j > 0 && handoff_pci_address_compare(roms[j - 1].dev->address, address) > 0; j--) {
             roms[j] = roms[j - 1];
         }
         roms[j] = rom;
@@ -73,7 +74,7 @@ void oprom_collect(void) {
         const struct pci_io_device *dev = &devices[i];
         if (dev->io->RomImage == NULL || dev->io->RomSize == 0
          || dev->base_class == PCI_BASE_CLASS_DISPLAY
-         || (video->vga_present && pci_address_equal(dev->address, video->vga_device))) {
+         || (video->vga_present && handoff_pci_address_equal(dev->address, video->vga_device))) {
             continue;
         }
         bool legacy = pci_rom_find_legacy_image(
@@ -91,8 +92,9 @@ void oprom_collect(void) {
     sort_by_address(roms, count);
     for (size_t i = HANDOFF_MAX_PCI_ROMS; i < count; i++) {
         printf(
-            "Too many option ROMs, skipping that of " PCI_ADDRESS_FMT " (%04x:%04x)\n",
-            PCI_ADDRESS_ARGS(roms[i].dev->address), roms[i].dev->vendor_id, roms[i].dev->device_id
+            "Too many option ROMs, skipping that of " HANDOFF_PCI_ADDRESS_FMT " (%04x:%04x)\n",
+            HANDOFF_PCI_ADDRESS_ARGS(roms[i].dev->address), roms[i].dev->vendor_id,
+            roms[i].dev->device_id
         );
     }
     if (count > HANDOFF_MAX_PCI_ROMS) {
@@ -129,8 +131,8 @@ void oprom_collect(void) {
         rom->image = at;
 
         printf(
-            "Option ROM of " PCI_ADDRESS_FMT " (%04x:%04x), %zu bytes\n",
-            PCI_ADDRESS_ARGS(dev->address), dev->vendor_id, dev->device_id, roms[i].size
+            "Option ROM of " HANDOFF_PCI_ADDRESS_FMT " (%04x:%04x), %zu bytes\n",
+            HANDOFF_PCI_ADDRESS_ARGS(dev->address), dev->vendor_id, dev->device_id, roms[i].size
         );
         at += space;
     }
