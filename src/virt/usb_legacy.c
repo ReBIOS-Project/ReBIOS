@@ -285,9 +285,9 @@ bool usb_legacy_own(struct usb_controller *c) {
         uint32_t command = pci_cfg_read(f->addr, PCI_COMMAND, 2);
         pci_cfg_write(f->addr, PCI_COMMAND, 2, command | PCI_COMMAND_MEMORY);
         if (c->type == TENDRIL_HC_XHCI) {
-            c->legacy_cap = usb_xhci_legacy_cap((uintptr_t)c->mmio, c->mmio_size);
+            c->legacy_cap = usb_handoff_xhci_legacy_cap((uintptr_t)c->mmio, c->mmio_size);
         } else if (c->type == TENDRIL_HC_EHCI) {
-            c->legacy_cap = usb_ehci_legacy_cap(f->addr, (uintptr_t)c->mmio);
+            c->legacy_cap = usb_handoff_ehci_legacy_cap(f->addr, (uintptr_t)c->mmio);
         }
         if (!trap_registers(c)) {
             for (size_t i = 0; i < c->range_count; i++) {

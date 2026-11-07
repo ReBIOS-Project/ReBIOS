@@ -32,7 +32,7 @@ void usb_handoff(void);
 // Where a controller's USB legacy support capability is, or 0: an xHCI
 // controller's in its registers at base, an EHCI controller's in its
 // configuration space.
-uint32_t usb_xhci_legacy_cap(uintptr_t base, size_t size);
-uint32_t usb_ehci_legacy_cap(struct pci_cfg_addr a, uintptr_t base);
+uint32_t usb_handoff_xhci_legacy_cap(uintptr_t base, size_t size);
+uint32_t usb_handoff_ehci_legacy_cap(struct pci_cfg_addr a, uintptr_t base);
 
 #endif

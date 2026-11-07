@@ -90,7 +90,7 @@ struct release {
     bool forced;
 };
 
-uint32_t usb_xhci_legacy_cap(uintptr_t base, size_t size) {
+uint32_t usb_handoff_xhci_legacy_cap(uintptr_t base, size_t size) {
     uint64_t at = (uint64_t)(*reg(base, XHCI_HCCPARAMS1) >> 16) * 4;
     for (size_t n = 0; at != 0 && at + 8 <= size && n < MAX_CAPABILITIES; n++) {
         uint32_t cap = *reg(base, at);
@@ -103,7 +103,7 @@ uint32_t usb_xhci_legacy_cap(uintptr_t base, size_t size) {
     return 0;
 }
 
-uint32_t usb_ehci_legacy_cap(struct pci_cfg_addr a, uintptr_t base) {
+uint32_t usb_handoff_ehci_legacy_cap(struct pci_cfg_addr a, uintptr_t base) {
     uint32_t at = *reg(base, EHCI_HCCPARAMS) >> 8 & 0xff;
     for (size_t n = 0; at >= EHCI_EECP_MIN && n < MAX_CAPABILITIES; n++) {
         uint32_t cap = pci_cfg_read(a, at, 4);
@@ -120,7 +120,7 @@ uint32_t usb_ehci_legacy_cap(struct pci_cfg_addr a, uintptr_t base) {
 
 // xHCI 1.2, 4.22.1.
 static bool xhci_take(uintptr_t base, size_t size, struct release *r) {
-    uint32_t at = usb_xhci_legacy_cap(base, size);
+    uint32_t at = usb_handoff_xhci_legacy_cap(base, size);
     if (at != 0) {
         uint32_t cap = *reg(base, at);
         if ((cap & USBLEGSUP_BIOS_OWNED) != 0) {
