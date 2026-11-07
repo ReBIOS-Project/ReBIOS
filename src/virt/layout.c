@@ -234,28 +234,9 @@ static uint8_t identity_memtype(const struct identity_range *r) {
     return (r->attribute & EFI_MEMORY_WB) != 0 ? MT_WB : MT_UC;
 }
 
-static const EFI_MEMORY_DESCRIPTOR *efi_desc(size_t index) {
-    const struct handoff *h = core_handoff;
-    if ((index + 1) * h->efi_mmap_desc_size > h->efi_mmap_size) {
-        return NULL;
-    }
-    return (const void *)(uintptr_t)(h->efi_mmap + index * h->efi_mmap_desc_size);
-}
-
-// Where a descriptor ends, or false where its pages run past the end of the
-// address space, which makes it one that Linux 7.3's efi_memmap_entry_valid()
-// drops.
-static bool desc_end(const EFI_MEMORY_DESCRIPTOR *d, uintptr_t *end) {
-    if (d->NumberOfPages > (UINT64_MAX - d->PhysicalStart) / PAGE_SIZE) {
-        return false;
-    }
-    *end = d->PhysicalStart + d->NumberOfPages * PAGE_SIZE;
-    return true;
-}
-
 static uint64_t efi_attribute_at(uintptr_t addr) {
     const EFI_MEMORY_DESCRIPTOR *d;
-    for (size_t i = 0; (d = efi_desc(i)) != NULL; i++) {
+    for (size_t i = 0; (d = handoff_efi_desc(core_handoff, i)) != NULL; i++) {
         if (addr >= d->PhysicalStart && addr - d->PhysicalStart < d->NumberOfPages * PAGE_SIZE) {
             return d->Attribute;
         }
@@ -452,9 +433,9 @@ void layout_init(void) {
     identity = kmalloc(MAX_RANGES * sizeof(struct identity_range));
 
     const EFI_MEMORY_DESCRIPTOR *d;
-    for (size_t i = 0; (d = efi_desc(i)) != NULL; i++) {
+    for (size_t i = 0; (d = handoff_efi_desc(core_handoff, i)) != NULL; i++) {
         uintptr_t end;
-        if (!desc_end(d, &end)) {
+        if (!handoff_efi_desc_end(d, &end)) {
             printf(
                 "Firmware memory map: the descriptor at %#llx runs past the end of memory, so "
                 "it is ignored\n", (unsigned long long)d->PhysicalStart
@@ -472,9 +453,9 @@ void layout_init(void) {
             );
         }
     }
-    for (size_t i = 0; (d = efi_desc(i)) != NULL; i++) {
+    for (size_t i = 0; (d = handoff_efi_desc(core_handoff, i)) != NULL; i++) {
         uintptr_t end;
-        if (desc_is_free(d) || !desc_end(d, &end)) {
+        if (desc_is_free(d) || !handoff_efi_desc_end(d, &end)) {
             continue;
         }
         uintptr_t base = align_down(d->PhysicalStart, PAGE_SIZE);

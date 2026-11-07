@@ -19,7 +19,9 @@
 #define HANDOFF_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
+#include <efi.h>
 
 #define HANDOFF_MAX_RESERVED 16
 #define HANDOFF_MAX_PCI_ROMS 16
@@ -219,6 +221,8 @@ struct handoff {
     // An SMBIOS 2.x entry point below 4GiB, with the structure table below
     // 4GiB, or 0.
     uint64_t smbios_entry;
+    // The year of the firmware's release, which SMBIOS gives, or 0.
+    uint16_t bios_year;
 
     struct handoff_config config;
     struct handoff_video video;
@@ -232,5 +236,26 @@ struct handoff {
     // bootorder file name them, the first to be tried first; NUL-terminated.
     char boot_order[HANDOFF_MAX_BOOT_ORDER];
 };
+
+// The firmware's memory map descriptor at index, or NULL past the last.
+static inline const EFI_MEMORY_DESCRIPTOR *handoff_efi_desc(
+    const struct handoff *h, size_t index
+) {
+    if ((index + 1) * h->efi_mmap_desc_size > h->efi_mmap_size) {
+        return NULL;
+    }
+    return (const void *)(uintptr_t)(h->efi_mmap + index * h->efi_mmap_desc_size);
+}
+
+// Where a descriptor ends, or false where its pages run past the end of the
+// address space, which makes it one that Linux 7.3's efi_memmap_entry_valid()
+// drops.
+static inline bool handoff_efi_desc_end(const EFI_MEMORY_DESCRIPTOR *d, uint64_t *end) {
+    if (d->NumberOfPages > (UINT64_MAX - d->PhysicalStart) / EFI_PAGE_SIZE) {
+        return false;
+    }
+    *end = d->PhysicalStart + d->NumberOfPages * EFI_PAGE_SIZE;
+    return true;
+}
 
 #endif

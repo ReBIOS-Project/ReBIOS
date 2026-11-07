@@ -794,6 +794,75 @@ static uacpi_iteration_decision device_claims(
     return claim->claimed ? UACPI_ITERATION_DECISION_BREAK : UACPI_ITERATION_DECISION_CONTINUE;
 }
 
+struct memory_claim {
+    uint64_t base;
+    uint64_t end;
+    bool claimed;
+};
+
+// The memory descriptors Linux 7.3's check_mcfg_resource() reads.
+static uacpi_iteration_decision memory_claims(void *user, uacpi_resource *resource) {
+    struct memory_claim *claim = user;
+    uint64_t base;
+    uint64_t length;
+    switch (resource->type) {
+        case UACPI_RESOURCE_TYPE_FIXED_MEMORY32: {
+            base = resource->fixed_memory32.address;
+            length = resource->fixed_memory32.length;
+            break;
+        }
+        case UACPI_RESOURCE_TYPE_ADDRESS32: {
+            if (resource->address32.common.type != UACPI_RANGE_MEMORY) {
+                return UACPI_ITERATION_DECISION_CONTINUE;
+            }
+            base = resource->address32.minimum;
+            length = resource->address32.address_length;
+            break;
+        }
+        case UACPI_RESOURCE_TYPE_ADDRESS64: {
+            if (resource->address64.common.type != UACPI_RANGE_MEMORY) {
+                return UACPI_ITERATION_DECISION_CONTINUE;
+            }
+            base = resource->address64.minimum;
+            length = resource->address64.address_length;
+            break;
+        }
+        default: {
+            return UACPI_ITERATION_DECISION_CONTINUE;
+        }
+    }
+    if (claim->base >= base && claim->end - base <= length) {
+        claim->claimed = true;
+        return UACPI_ITERATION_DECISION_BREAK;
+    }
+    return UACPI_ITERATION_DECISION_CONTINUE;
+}
+
+static uacpi_iteration_decision board_claims(
+    void *user, uacpi_namespace_node *node, uacpi_u32 depth
+) {
+    (void)depth;
+    struct memory_claim *claim = user;
+    uacpi_for_each_device_resource(node, "_CRS", memory_claims, claim);
+    return claim->claimed ? UACPI_ITERATION_DECISION_BREAK : UACPI_ITERATION_DECISION_CONTINUE;
+}
+
+bool acpi_motherboard_reserves(uint64_t base, uint64_t end) {
+    if (!init_ok) {
+        return false;
+    }
+    static const char *const system_board[] = { "PNP0C01", NULL };
+    static const char *const motherboard[] = { "PNP0C02", NULL };
+    struct memory_claim claim = { base, end, false };
+    acpi_lock();
+    uacpi_find_devices_at(uacpi_namespace_root(), system_board, board_claims, &claim);
+    if (!claim.claimed) {
+        uacpi_find_devices_at(uacpi_namespace_root(), motherboard, board_claims, &claim);
+    }
+    acpi_unlock();
+    return claim.claimed;
+}
+
 bool acpi_claims_port(uint16_t port) {
     if (!init_ok) {
         return false;

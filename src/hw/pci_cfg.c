@@ -19,11 +19,13 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <efi.h>
 #include <uacpi/acpi.h>
 #include <uacpi/status.h>
 #include <uacpi/tables.h>
 #include <hw/pci_cfg.h>
 #include <core.h>
+#include <handoff.h>
 #include <hw/acpi.h>
 #include <lib/heap.h>
 #include <lib/log.h>
@@ -35,6 +37,13 @@
 #define CONFIG_DATA 0xcfc
 #define CONFIG_ENABLE ((uint32_t)1 << 31)
 
+// No smaller reserved part of a window is kept, as in Linux 7.3's
+// is_mmconf_reserved().
+#define ECAM_MIN_RESERVED ((uint64_t)16 << 20)
+// Firmware from that year on has its MCFG taken as it is by Linux 7.3's early
+// pci_mmcfg_reserved().
+#define ECAM_TRUSTED_YEAR 2016
+
 struct ecam_window {
     uintptr_t base;
     uint16_t segment;
@@ -44,6 +53,10 @@ struct ecam_window {
 
 static struct ecam_window *windows;
 static _Atomic(size_t) window_count;
+// The MCFG's windows, waiting for pci_cfg_verify() where the memory map does
+// not reserve them.
+static struct ecam_window *pending;
+static size_t pending_count;
 static bool mcfg_done;
 static struct spinlock legacy_lock;
 static bool ports_answer;
@@ -197,6 +210,103 @@ void pci_cfg_write(struct pci_addr addr, uint32_t offset, size_t size, uint32_t 
     spinlock_release(&legacy_lock);
 }
 
+// The types Linux 7.3's do_add_efi_memmap() makes reserved E820 entries.
+static bool type_reserved(uint32_t type) {
+    switch (type) {
+        case EfiLoaderCode:
+        case EfiLoaderData:
+        case EfiBootServicesCode:
+        case EfiBootServicesData:
+        case EfiConventionalMemory:
+        case EfiUnusableMemory:
+        case EfiACPIReclaimMemory:
+        case EfiACPIMemoryNVS:
+        case EfiPersistentMemory: {
+            return false;
+        }
+        default: {
+            return true;
+        }
+    }
+}
+
+// Whether reserved descriptors cover all of [base, end), as Linux 7.3's
+// e820__mapped_all() asks of its reserved entries.
+static bool memmap_reserves(uint64_t base, uint64_t end) {
+    uint64_t at = base;
+    bool advanced = true;
+    while (at < end && advanced) {
+        advanced = false;
+        const EFI_MEMORY_DESCRIPTOR *d;
+        for (size_t i = 0; (d = handoff_efi_desc(core_handoff, i)) != NULL; i++) {
+            uint64_t stop;
+            if (handoff_efi_desc_end(d, &stop) && type_reserved(d->Type) && d->PhysicalStart <= at
+             && at < stop) {
+                at = stop;
+                advanced = true;
+            }
+        }
+    }
+    return at >= end;
+}
+
+// Whether one EfiMemoryMappedIO descriptor covers all of [base, end), which
+// Linux 7.3's is_efi_mmio() takes for an ECAM reservation where the system
+// board devices make none.
+static bool memmap_mmio(uint64_t base, uint64_t end) {
+    const EFI_MEMORY_DESCRIPTOR *d;
+    for (size_t i = 0; (d = handoff_efi_desc(core_handoff, i)) != NULL; i++) {
+        uint64_t stop;
+        if (handoff_efi_desc_end(d, &stop) && d->Type == EfiMemoryMappedIO
+         && d->PhysicalStart <= base && end <= stop) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static uint64_t window_start(const struct ecam_window *w) {
+    return w->base + ((uint64_t)w->start_bus << 20);
+}
+
+static uint64_t window_end(const struct ecam_window *w) {
+    return w->base + (((uint64_t)w->end_bus + 1) << 20);
+}
+
+// Whether something reserves the window's buses, or the first of them in a
+// part no smaller than 16 MiB, to which the window is cut, as Linux 7.3's
+// is_mmconf_reserved() does.
+static bool window_reserved(struct ecam_window *w, bool (*reserves)(uint64_t, uint64_t)) {
+    uint64_t start = window_start(w);
+    uint64_t full = window_end(w) - start;
+    uint64_t size = full;
+    while (!reserves(start, start + size)) {
+        size >>= 1;
+        if (size < ECAM_MIN_RESERVED) {
+            break;
+        }
+    }
+    if (size < ECAM_MIN_RESERVED && size != full) {
+        return false;
+    }
+    w->end_bus = (uint8_t)(w->start_bus + (size >> 20) - 1);
+    return true;
+}
+
+static void log_cut(const struct ecam_window *w, uint8_t end_bus) {
+    if (w->end_bus != end_bus) {
+        printf(
+            "PCI segment %u: configuration space cut to buses %02x-%02x, as only those are "
+            "reserved\n", w->segment, w->start_bus, w->end_bus
+        );
+    }
+}
+
+static void publish(struct ecam_window *list, size_t count) {
+    windows = list;
+    atomic_store_explicit(&window_count, count, memory_order_release);
+}
+
 // As Linux 7.3's pci_check_type1() has it: CONFIG_ADDRESS holds what is
 // written to it, and a device answers on bus 0.
 static bool check_ports(void) {
@@ -275,6 +385,54 @@ void pci_cfg_init(void) {
         kfree(list);
         return;
     }
-    windows = list;
-    atomic_store_explicit(&window_count, used, memory_order_release);
+    // Before the namespace can show what reserves ECAM space, Linux 7.3's
+    // pci_mmcfg_reserved() asks the memory map to only for firmware dated
+    // before 2016, an undated one among it, and where the map does not, waits
+    // for the system board devices.
+    if (core_handoff->bios_year < ECAM_TRUSTED_YEAR && ports_answer) {
+        struct ecam_window *cut = kmalloc(used * sizeof(struct ecam_window));
+        memcpy(cut, list, used * sizeof(struct ecam_window));
+        for (size_t i = 0; i < used; i++) {
+            if (!window_reserved(&cut[i], memmap_reserves)) {
+                printf(
+                    "PCI configuration space through ports until the ACPI namespace runs, as "
+                    "the memory map does not reserve segment %u's\n", list[i].segment
+                );
+                kfree(cut);
+                pending = list;
+                pending_count = used;
+                return;
+            }
+        }
+        for (size_t i = 0; i < used; i++) {
+            log_cut(&cut[i], list[i].end_bus);
+        }
+        kfree(list);
+        list = cut;
+    }
+    publish(list, used);
+}
+
+void pci_cfg_verify(void) {
+    struct ecam_window *list = pending;
+    if (list == NULL) {
+        return;
+    }
+    pending = NULL;
+    for (size_t i = 0; i < pending_count; i++) {
+        struct ecam_window *w = &list[i];
+        uint8_t end_bus = w->end_bus;
+        if (window_reserved(w, acpi_motherboard_reserves)) {
+            log_cut(w, end_bus);
+        } else if (!memmap_mmio(window_start(w), window_end(w))) {
+            printf(
+                "PCI configuration space through ports only, as nothing reserves segment %u's "
+                "at %#llx\n", w->segment, (unsigned long long)window_start(w)
+            );
+            kfree(list);
+            return;
+        }
+    }
+    printf("PCI configuration space reserved by the ACPI namespace or the memory map\n");
+    publish(list, pending_count);
 }

@@ -121,6 +121,8 @@ struct smbios3_entry {
 _Static_assert(sizeof(struct smbios3_entry) == 0x18, "SMBIOS 3.0 entry point layout");
 
 #define SMBIOS_END_OF_TABLE 127
+#define SMBIOS_TYPE_FIRMWARE 0
+#define SMBIOS_FIRMWARE_RELEASE_DATE 0x08
 
 static const EFI_GUID acpi_20_guid = EFI_ACPI_20_TABLE_GUID;
 static const EFI_GUID acpi_10_guid = EFI_ACPI_10_TABLE_GUID;
@@ -642,6 +644,34 @@ static uint64_t smbios_find(void) {
     return 0;
 }
 
+// The year of the firmware's release date, mm/dd/yy or mm/dd/yyyy (DSP0134
+// 3.9.0, 7.1), read as Linux 7.3's dmi_get_date() reads it: the digits after
+// the last slash, a one or two-digit year 19xx, but 20xx before 1996.
+static uint16_t bios_year(void) {
+    const char *date = fwtables_smbios_string(SMBIOS_TYPE_FIRMWARE, SMBIOS_FIRMWARE_RELEASE_DATE);
+    if (date == NULL) {
+        return 0;
+    }
+    const char *digits = NULL;
+    for (const char *c = date; *c != 0; c++) {
+        if (*c == '/') {
+            digits = c + 1;
+        }
+    }
+    if (digits == NULL) {
+        return 0;
+    }
+    uint32_t year = 0;
+    size_t count = 0;
+    for (; digits[count] >= '0' && digits[count] <= '9' && year <= 9999; count++) {
+        year = year * 10 + (uint32_t)(digits[count] - '0');
+    }
+    if (count != 0 && year < 100) {
+        year += year < 96 ? 2000 : 1900;
+    }
+    return year > 9999 ? 0 : (uint16_t)year;
+}
+
 // uACPI takes the XSDT wherever the RSDP gives one, so where only the RSDT is
 // sound, it gets an ACPI 1.0 RSDP, which gives the RSDT alone.
 static uint64_t rsdp_for_rsdt(const struct rsdp *rsdp) {
@@ -678,6 +708,7 @@ void fwtables_collect(void) {
     loader_handoff->acpi_rsdp = rsdp;
 
     loader_handoff->smbios_entry = smbios_find();
+    loader_handoff->bios_year = bios_year();
     if (loader_handoff->smbios_entry == 0) {
         printf("No usable SMBIOS entry point\n");
     }

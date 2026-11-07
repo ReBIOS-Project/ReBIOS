@@ -52,6 +52,10 @@ bool acpi_has_device(const char *const *ids);
 // Whether a device the firmware shows has the I/O port among its current
 // resources.
 bool acpi_claims_port(uint16_t port);
+// Whether a system board device, PNP0C01 or PNP0C02, has all of [base, end) in
+// one memory range of its current resources, as firmware reserves ECAM space
+// (Linux 7.3's is_acpi_reserved()).
+bool acpi_motherboard_reserves(uint64_t base, uint64_t end);
 
 // The SCI's interrupt as the FADT has it, which the caller connects to
 // acpi_sci_interrupt(). Returns false if uACPI has no SCI handler.

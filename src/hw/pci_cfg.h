@@ -32,6 +32,10 @@ struct pci_addr {
 // Uses the MCFG table's configuration space windows once acpi_init() has run,
 // and the legacy configuration mechanism otherwise.
 void pci_cfg_init(void);
+// Once the namespace runs, uses the windows that pci_cfg_init() left unused
+// for want of a reservation in the memory map, where the system board devices
+// or the memory map's MMIO reserve them.
+void pci_cfg_verify(void);
 
 // size is 1, 2, or 4, and offset a multiple of it. Reads from a function that
 // cannot be reached return all ones, and writes to it are dropped.

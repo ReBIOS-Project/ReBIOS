@@ -112,6 +112,7 @@ static void bsp_main(void *arg) {
     // The legacy devices' emulations ask the namespace which real ones exist.
     if (acpi_init()) {
         acpi_namespace_start();
+        pci_cfg_verify();
     }
     kbc_init();
     pit_init();
