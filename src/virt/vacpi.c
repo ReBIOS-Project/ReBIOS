@@ -2594,6 +2594,13 @@ static void power_button_pressed(bool guest) {
     }
 }
 
+bool vacpi_guest_ospm(void) {
+    spinlock_acquire(&vacpi.lock);
+    bool ospm = (vacpi.gpe0_en & 1) != 0 || (vacpi.pm1_en & PM1_PWRBTN) != 0;
+    spinlock_release(&vacpi.lock);
+    return ospm;
+}
+
 static uacpi_status notify(uacpi_handle ctx, uacpi_namespace_node *node, uacpi_u64 value) {
     (void)ctx;
     // A control-method power button reaches the guest as a notification.

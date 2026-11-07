@@ -52,6 +52,7 @@
 #include <virt/mtrr.h>
 #include <virt/nsvm.h>
 #include <virt/nvmx.h>
+#include <virt/ospm.h>
 #include <virt/pci_plan.h>
 #include <virt/pci_virt.h>
 #include <virt/pit.h>
@@ -126,6 +127,7 @@ static void bsp_main(void *arg) {
     isa_ports_init();
     hpet_init();
     vacpi_init();
+    ospm_init();
     profile_init();
 
     struct vcpu *v = vcpu_create(cpu);

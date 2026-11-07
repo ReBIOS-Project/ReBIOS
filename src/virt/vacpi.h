@@ -18,6 +18,7 @@
 #ifndef VIRT__VACPI_H
 #define VIRT__VACPI_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -29,6 +30,9 @@
 // through PM1 and GPE registers the hypervisor emulates where the host has its
 // own.
 void vacpi_init(void);
+// Whether the guest has an ACPI OS that takes its events: the GPE of its
+// notifications, or the power button.
+bool vacpi_guest_ospm(void);
 
 // The guest's DSDT, generated from the firmware's namespace in ACPI 1.0 AML,
 // and the device its methods call the firmware's through, which this places in
