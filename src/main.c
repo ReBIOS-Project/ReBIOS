@@ -46,26 +46,7 @@
 #define NESTED_HEAP_SHARE 32
 #define NESTED_HEAP_MAX ((uint64_t)128 << 20)
 
-struct handoff *loader_handoff;
-
 static EFI_GUID loaded_image_guid = EFI_LOADED_IMAGE_PROTOCOL_GUID;
-
-static void reserve(uintptr_t base, size_t pages) {
-    if (loader_handoff->reserved_count == HANDOFF_MAX_RESERVED) {
-        panic("Too many hypervisor memory ranges\n");
-    }
-    loader_handoff->reserved[loader_handoff->reserved_count].base = base;
-    loader_handoff->reserved[loader_handoff->reserved_count].size = pages * 4096;
-    loader_handoff->reserved_count++;
-}
-
-uint64_t loader_alloc_reserved(size_t pages, uintptr_t max_addr) {
-    uintptr_t base = efi_glue_alloc_pages(pages, max_addr);
-    if (base != 0) {
-        reserve(base, pages);
-    }
-    return base;
-}
 
 // Timed against the firmware's delay service, whatever the TSC's frequency
 // enumeration says, which not every processor provides.
@@ -112,7 +93,7 @@ static bool exit_boot_services(void) {
 
         if (efi_bs->ExitBootServices(efi_image_handle, map_key) == EFI_SUCCESS) {
             efi_glue_boot_services_exited = true;
-            reserve(buf, EFI_SIZE_TO_PAGES(buf_size));
+            loader_reserve(buf, EFI_SIZE_TO_PAGES(buf_size));
             loader_handoff->efi_mmap = buf;
             loader_handoff->efi_mmap_size = size;
             loader_handoff->efi_mmap_desc_size = desc_size;
@@ -203,7 +184,7 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     }
     loader_handoff = (struct handoff *)(uintptr_t)handoff_addr;
     memset(loader_handoff, 0, sizeof(struct handoff));
-    reserve(handoff_addr, EFI_SIZE_TO_PAGES(sizeof(struct handoff)));
+    loader_reserve(handoff_addr, EFI_SIZE_TO_PAGES(sizeof(struct handoff)));
 
     video_find_framebuffer();
     console_init();
@@ -241,7 +222,7 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     if (status != EFI_SUCCESS) {
         panic("Cannot find where ReBIOS is loaded\n");
     }
-    reserve((uintptr_t)image->ImageBase, EFI_SIZE_TO_PAGES(image->ImageSize));
+    loader_reserve((uintptr_t)image->ImageBase, EFI_SIZE_TO_PAGES(image->ImageSize));
 
     uint64_t ram;
     uintptr_t map_top = memory_map_top(&ram);
@@ -250,7 +231,7 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     if (pml4 == 0) {
         panic("Cannot build the core's page tables\n");
     }
-    reserve(pml4, table_pages);
+    loader_reserve(pml4, table_pages);
 
     // Long mode on the firmware's terms: under 5-level paging, the tables are
     // reached through a PML5 of one entry, as LA57 cannot change in long mode.

@@ -25,6 +25,10 @@
 // What the core is told, filled in by the loader's modules.
 extern struct handoff *loader_handoff;
 
+// Records pages that the hypervisor keeps for itself, which the guest never
+// sees.
+void loader_reserve(uintptr_t base, size_t pages);
+
 // Memory for the hypervisor, which the guest never sees. Returns 0 on failure.
 // max_addr is inclusive; 0 means anywhere.
 uint64_t loader_alloc_reserved(size_t pages, uintptr_t max_addr);
