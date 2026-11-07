@@ -70,6 +70,9 @@ bool svm_avic_ext_lvt_reads;
 // 15-9), sparing the host's translations.
 bool svm_flush_by_asid;
 static bool vmcb_clean_bits;
+// HLT exits only where no virtual interrupt waits, which the guest would take
+// at once (APM 24593 rev. 3.46, 15.9).
+static bool svm_idle_hlt;
 // The guest's INVLPGB and TLBSYNC, which TlbiCtl enables. TLBSYNC needs no
 // intercept, as INVLPGB's broadcast takes the guest's ASID, the same on every
 // vCPU (APM 24594 rev. 3.39, INVLPGB); INVLPGB itself exits, for its faults.
@@ -197,6 +200,7 @@ bool svm_supported(void) {
     svm_flush_by_asid = (features & SVM_FEATURE_FLUSH_BY_ASID) != 0;
     vmcb_clean_bits = (features & SVM_FEATURE_VMCB_CLEAN) != 0;
     svm_tlbictl = (features & SVM_FEATURE_TLBICTL) != 0;
+    svm_idle_hlt = (features & SVM_FEATURE_IDLE_HLT) != 0;
     struct cpuid_regs sizes = cpuid(0x80000008, 0);
     invlpgb = (sizes.ebx & CPUID_80000008_EBX_INVLPGB) != 0;
     invlpgb_count_max = sizes.edx & 0xffff;
@@ -277,8 +281,9 @@ void svm_vcpu_init(struct vcpu *v) {
     // INVLPGA too, which the processor would carry out for the guest whatever
     // its own EFER.SVME (nsvm.c).
     c->intercept_misc1 = SVM_INTERCEPT_INTR | SVM_INTERCEPT_NMI | SVM_INTERCEPT_CPUID
-                       | SVM_INTERCEPT_HLT | SVM_INTERCEPT_INVD | SVM_INTERCEPT_INVLPGA
-                       | SVM_INTERCEPT_IOIO | SVM_INTERCEPT_MSR | SVM_INTERCEPT_SHUTDOWN;
+                       | SVM_INTERCEPT_INVD | SVM_INTERCEPT_INVLPGA | SVM_INTERCEPT_IOIO
+                       | SVM_INTERCEPT_MSR | SVM_INTERCEPT_SHUTDOWN
+                       | (svm_idle_hlt ? 0 : SVM_INTERCEPT_HLT);
     // Physical interrupts exit whatever the guest's IF, and CR8 is the virtual
     // local APIC's TPR.
     c->vintr = SVM_VINTR_MASKING;
@@ -288,7 +293,8 @@ void svm_vcpu_init(struct vcpu *v) {
     c->intercept_misc2 = SVM_INTERCEPT_VMRUN | SVM_INTERCEPT_VMMCALL | SVM_INTERCEPT_VMLOAD
                        | SVM_INTERCEPT_VMSAVE | SVM_INTERCEPT_STGI | SVM_INTERCEPT_CLGI
                        | SVM_INTERCEPT_SKINIT;
-    c->intercept_misc3 = invlpgb ? SVM_INTERCEPT_INVLPGB : 0;
+    c->intercept_misc3 = (invlpgb ? SVM_INTERCEPT_INVLPGB : 0)
+                       | (svm_idle_hlt ? SVM_INTERCEPT_IDLE_HLT : 0);
     // The legacy BIOS's VMCALL hypercalls raise #UD here, INITs #SX, and the
     // SVM instructions #GP while the guest's own EFER.SVME is clear (nsvm.c).
     c->intercept_exceptions = (uint32_t)1 << 6 | (uint32_t)1 << VECTOR_GP | (uint32_t)1 << 30;
@@ -608,7 +614,8 @@ static void svm_handle_exit(struct vcpu *v) {
             svm_handle_cr4_write(v);
             break;
         }
-        case SVM_EXIT_HLT: {
+        case SVM_EXIT_HLT:
+        case SVM_EXIT_IDLE_HLT: {
             vcpu_halt(v);
             break;
         }

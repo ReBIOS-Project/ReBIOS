@@ -196,6 +196,7 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 #define SVM_INTERCEPT_INVLPGB_ILLEGAL ((uint32_t)1 << 1)
 #define SVM_INTERCEPT_INVPCID ((uint32_t)1 << 2)
 #define SVM_INTERCEPT_TLBSYNC ((uint32_t)1 << 4)
+#define SVM_INTERCEPT_IDLE_HLT ((uint32_t)1 << 6)
 
 // Exit codes (APM 24593 rev. 3.45, Appendix C).
 #define SVM_EXIT_CR8_READ 0x08
@@ -227,6 +228,7 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 #define SVM_EXIT_XSETBV 0x8d
 #define SVM_EXIT_INVLPGB 0xa0
 #define SVM_EXIT_INVLPGB_ILLEGAL 0xa1
+#define SVM_EXIT_IDLE_HLT 0xa6
 #define SVM_EXIT_NPF 0x400
 #define SVM_EXIT_AVIC_INCOMPLETE_IPI 0x401
 #define SVM_EXIT_AVIC_NOACCEL 0x402
@@ -280,6 +282,7 @@ _Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
 #define SVM_FEATURE_TLBICTL ((uint32_t)1 << 24)
 #define SVM_FEATURE_VNMI ((uint32_t)1 << 25)
 #define SVM_FEATURE_EXT_LVT_AVIC_ACCESS ((uint32_t)1 << 27)
+#define SVM_FEATURE_IDLE_HLT ((uint32_t)1 << 30)
 
 // Nested paging and what goes with it, at offset 090h.
 #define SVM_NP_ENABLE ((uint64_t)1 << 0)
