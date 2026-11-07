@@ -134,7 +134,7 @@ exception_common:
     // The frame is not 16-byte aligned in general.
     movq %rsp, %rbx
     andq $-16, %rsp
-    callq exception_handler
+    callq cpu_exception_handler
     movq %rbx, %rsp
     popq %r15
     popq %r14

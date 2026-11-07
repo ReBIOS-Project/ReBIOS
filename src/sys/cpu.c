@@ -71,7 +71,7 @@ static const char *exception_names[32] = {
     "(24)", "(25)", "(26)", "(27)", "#HV", "#VC", "#SX", "(31)"
 };
 
-void exception_handler(struct exception_frame *frame);
+void cpu_exception_handler(struct exception_frame *frame);
 
 struct fixup {
     int32_t insn;
@@ -175,7 +175,7 @@ void cpu_nmi_restart(uintptr_t start, uintptr_t end) {
 
 extern const char cpu_halt_restart_end[];
 
-void exception_handler(struct exception_frame *frame) {
+void cpu_exception_handler(struct exception_frame *frame) {
     if (frame->vector == 2) {
         struct cpu *cpu = this_cpu();
         // The guest's, which arrived while the host ran.
