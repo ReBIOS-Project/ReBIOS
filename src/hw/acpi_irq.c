@@ -76,9 +76,6 @@ struct link_search {
     bool found;
 };
 
-static const char *const host_bridge_ids[] = { "PNP0A03", "PNP0A08", NULL };
-static const char *const link_ids[] = { "PNP0C0F", NULL };
-
 static struct acpi_irq_pci_route *routes;
 static size_t route_count;
 static bool routes_done;
@@ -121,7 +118,7 @@ static uacpi_iteration_decision host_bridge_found(
 ) {
     (void)depth;
     struct lookup *l = user;
-    if (!uacpi_device_matches_pnp_id(node, host_bridge_ids)) {
+    if (!uacpi_device_matches_pnp_id(node, acpi_host_bridge_ids)) {
         return UACPI_ITERATION_DECISION_CONTINUE;
     }
     uint64_t segment;
@@ -426,7 +423,7 @@ static uacpi_iteration_decision claim_device(
     void *user, uacpi_namespace_node *node, uacpi_u32 depth
 ) {
     (void)depth;
-    if (uacpi_device_matches_pnp_id(node, link_ids)) {
+    if (uacpi_device_matches_pnp_id(node, acpi_link_ids)) {
         return UACPI_ITERATION_DECISION_CONTINUE;
     }
     uacpi_u32 sta;

@@ -757,10 +757,8 @@ static void emit_prt(struct aml *a, uacpi_namespace_node *bridge) {
 static void emit_children(struct aml *a, uacpi_namespace_node *parent, bool in_processor);
 static void emit_scopes(struct aml *a, uacpi_namespace_node *parent);
 
-static const char *const link_ids[] = { "PNP0C0F", NULL };
 static const char *const ec_ids[] = { "PNP0C09", NULL };
 static const char *const hpet_ids[] = { "PNP0103", NULL };
-static const char *const host_bridge_ids[] = { "PNP0A03", "PNP0A08", NULL };
 static const char *const motherboard_ids[] = { "PNP0C01", "PNP0C02", NULL };
 
 // A producer's fixed window, readable and writable, uncached or cacheable.
@@ -932,7 +930,7 @@ static bool overlaps_private(uintptr_t base, uintptr_t end) {
 }
 
 static bool crs_replaced(uacpi_namespace_node *device) {
-    return uacpi_device_matches_pnp_id(device, host_bridge_ids)
+    return uacpi_device_matches_pnp_id(device, acpi_host_bridge_ids)
         || uacpi_device_matches_pnp_id(device, motherboard_ids);
 }
 
@@ -1047,7 +1045,7 @@ static bool crs_copy(struct crs *c, uacpi_namespace_node *device, int kind) {
 // the guest's PCI plan, and the other host bridges' I/O.
 static void emit_crs(struct aml *a, uacpi_namespace_node *device) {
     const struct pci_plan *plan = pci_plan();
-    bool bridge = uacpi_device_matches_pnp_id(device, host_bridge_ids);
+    bool bridge = uacpi_device_matches_pnp_id(device, acpi_host_bridge_ids);
     bool primary = bridge && plan != NULL && device == vacpi.primary;
     size_t roots = primary ? plan->root_count : 0;
     size_t merged = primary ? vacpi.merged_count : 0;
@@ -1172,7 +1170,8 @@ static uacpi_iteration_decision hide_found(
 ) {
     (void)user;
     (void)depth;
-    if (uacpi_device_matches_pnp_id(node, link_ids) || uacpi_device_matches_pnp_id(node, ec_ids)) {
+    if (uacpi_device_matches_pnp_id(node, acpi_link_ids)
+     || uacpi_device_matches_pnp_id(node, ec_ids)) {
         hidden_add(node);
     } else if (uacpi_device_matches_pnp_id(node, legacy_ids)
             || uacpi_device_matches_pnp_id(node, i8042_keyboard_ids)
@@ -1228,7 +1227,7 @@ static void emit_object(struct aml *a, uacpi_namespace_node *node, bool in_proce
     switch (type) {
         case UACPI_OBJECT_DEVICE: {
             // One HPET is all an in-scope machine has.
-            if (uacpi_device_matches_pnp_id(node, link_ids)
+            if (uacpi_device_matches_pnp_id(node, acpi_link_ids)
              || (hpet_any_hidden() && uacpi_device_matches_pnp_id(node, hpet_ids))) {
                 return;
             }

@@ -88,8 +88,6 @@ struct crs_scan {
     uint64_t bus;
 };
 
-static const char *const host_bridge_ids[] = { "PNP0A03", "PNP0A08", NULL };
-
 static struct pci_host host;
 static bool scanned;
 
@@ -485,7 +483,7 @@ static uacpi_iteration_decision device_found(
 ) {
     (void)depth;
     struct scan *r = user;
-    bool host_bridge = uacpi_device_matches_pnp_id(node, host_bridge_ids);
+    bool host_bridge = uacpi_device_matches_pnp_id(node, acpi_host_bridge_ids);
     uacpi_u32 sta;
     uacpi_status status = uacpi_eval_sta(node, &sta);
     if (status != UACPI_STATUS_OK) {

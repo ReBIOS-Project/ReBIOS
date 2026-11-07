@@ -890,3 +890,6 @@ void acpi_path_free(const char *path) {
         uacpi_free_absolute_path(path);
     }
 }
+
+const char *const acpi_host_bridge_ids[] = { "PNP0A03", "PNP0A08", NULL };
+const char *const acpi_link_ids[] = { "PNP0C0F", NULL };

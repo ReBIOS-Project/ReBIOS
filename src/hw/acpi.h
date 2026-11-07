@@ -98,4 +98,8 @@ void acpi_sci_interrupt(void *ctx);
 const char *acpi_path(uacpi_namespace_node *node);
 void acpi_path_free(const char *path);
 
+// The PNP IDs of PCI host bridges, and of PCI interrupt link devices.
+extern const char *const acpi_host_bridge_ids[];
+extern const char *const acpi_link_ids[];
+
 #endif
