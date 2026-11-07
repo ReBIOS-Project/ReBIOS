@@ -18,8 +18,13 @@
 #ifndef HW__LAPIC_LEGACY_H
 #define HW__LAPIC_LEGACY_H
 
+#include <stdbool.h>
+
 // Puts the calling processor's local APIC in the state a legacy BIOS hands
 // over. Needs acpi_init().
 void lapic_legacy_init(void);
+// Whether the firmware handed the boot processor's local APIC over in x2APIC
+// mode, as lapic_legacy_init() found it.
+bool lapic_legacy_firmware_x2apic(void);
 
 #endif

@@ -359,6 +359,7 @@ static const struct last_subleaf amd_last_subleaves[] = {
 };
 
 #define CPUID_1_ECX_VMX ((uint32_t)1 << 5)
+#define CPUID_1_ECX_X2APIC ((uint32_t)1 << 21)
 #define CPUID_1_ECX_XSAVE ((uint32_t)1 << 26)
 #define CPUID_1_ECX_OSXSAVE ((uint32_t)1 << 27)
 #define CPUID_1_EDX_APIC ((uint32_t)1 << 9)
@@ -490,6 +491,9 @@ static struct cpuid_regs masked(uint32_t leaf, uint32_t subleaf) {
     r.ebx &= bits->keep[1];
     r.ecx &= bits->keep[2];
     r.edx &= bits->keep[3];
+    if (leaf == 1 && vlapic_x2apic_withheld()) {
+        r.ecx &= ~CPUID_1_ECX_X2APIC;
+    }
     // SVM's FRED needs its NMI virtualisation (AMD 69191 rev. 1.10).
     if (leaf == 7 && subleaf == 1 && !virt_vmx && !svm_vnmi) {
         r.eax &= ~CPUID_7_1_EAX_FRED;

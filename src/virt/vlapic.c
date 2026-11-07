@@ -21,7 +21,9 @@
 #include <stdint.h>
 #include <virt/vlapic.h>
 #include <hw/lapic.h>
+#include <hw/lapic_legacy.h>
 #include <hw/power.h>
+#include <iommu/iommu_tables.h>
 #include <iommu/remap.h>
 #include <lib/heap.h>
 #include <lib/log.h>
@@ -53,6 +55,8 @@
 
 #define APIC_BASE_BSP ((uint64_t)1 << 8)
 #define APIC_BASE_EXTD ((uint64_t)1 << 10)
+// VT-d D51397-019 rev. 5.20, 8.1: INTR_REMAP and X2APIC_OPT_OUT.
+#define DMAR_X2APIC_OPT_OUT_FLAGS 0x03
 #define APIC_BASE_EN ((uint64_t)1 << 11)
 #define APIC_BASE_ADDRESS ((uint64_t)0x000ffffffffff000)
 
@@ -201,6 +205,8 @@ static void regs_and(struct vlapic *vl, uint32_t offset, uint32_t bits) {
 
 static uint32_t host_version;
 static bool tsc_deadline_mode;
+// Whether the guest is kept from x2APIC mode, as the DMAR table asks.
+static bool x2apic_withheld;
 // AMD's extended APIC space, where the processor has one: its feature register
 // as the guest reads it, and its extended LVT entries.
 static bool ext_space;
@@ -346,7 +352,23 @@ bool vlapic_access_page(uintptr_t hpa) {
     return apic_access_page != 0 && hpa == apic_access_page;
 }
 
+bool vlapic_x2apic_withheld(void) {
+    return x2apic_withheld;
+}
+
 void vlapic_init(void) {
+    // The DMAR's X2APIC_OPT_OUT, valid with INTR_REMAP, asks system software
+    // not to turn x2APIC mode on, for firmware that cannot cope with it (VT-d
+    // D51397-019 rev. 5.20, 8.1). Where the firmware has not turned it on
+    // itself, the guest is not offered it, as Linux 7.3 (dmar_x2apic_optout())
+    // and Limine keep to xAPIC mode there.
+    const struct iommu_tables *tables = iommu_tables_parse();
+    x2apic_withheld = tables->kind == IOMMU_KIND_VTD
+                   && (tables->vtd_flags & DMAR_X2APIC_OPT_OUT_FLAGS) == DMAR_X2APIC_OPT_OUT_FLAGS
+                   && !lapic_legacy_firmware_x2apic();
+    if (x2apic_withheld) {
+        printf("The DMAR table opts out of x2APIC mode, so the guest gets xAPIC mode only\n");
+    }
     tsc_deadline_mode = (cpuid(1, 0).ecx & CPUID_1_ECX_TSC_DEADLINE) != 0;
     host_version = lapic_read(APIC_VERSION);
     legacy_svr = lapic_read(APIC_SVR);
@@ -2144,7 +2166,7 @@ static bool apic_base_write(struct vcpu *v, uint64_t value) {
     struct vlapic *vl = v->vlapic;
     uint64_t reserved = 0xff | ((uint64_t)1 << 9)
                       | ~(((uint64_t)1 << cpu_physical_address_bits()) - 1);
-    if (!lapic_x2apic_supported()) {
+    if (!lapic_x2apic_supported() || x2apic_withheld) {
         reserved |= APIC_BASE_EXTD;
     }
     if ((value & reserved) != 0) {

@@ -76,6 +76,10 @@ struct lapic {
     uintptr_t base;
 };
 
+// Whether the firmware handed the boot processor's local APIC over in x2APIC
+// mode.
+static bool firmware_x2apic;
+
 struct lapic_regs {
     uint32_t tpr;
     uint32_t svr;
@@ -275,6 +279,7 @@ static bool madt_nmi_pin(uint32_t apic_id, struct nmi_pin *pin) {
 
 void lapic_legacy_init(void) {
     uint64_t found_base = rdmsr(MSR_IA32_APIC_BASE);
+    firmware_x2apic = (found_base & APIC_BASE_EXTD) != 0;
     struct lapic lapic = {
         .x2apic = (found_base & APIC_BASE_EXTD) != 0 && xapic_disabled(),
         .base = found_base & APIC_BASE_ADDRESS
@@ -365,4 +370,8 @@ void lapic_legacy_init(void) {
         nmi.active_low ? "low" : "high", nmi.level ? "level" : "edge",
         from_madt ? "from the MADT" : "by default"
     );
+}
+
+bool lapic_legacy_firmware_x2apic(void) {
+    return firmware_x2apic;
 }
