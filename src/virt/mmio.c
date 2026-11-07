@@ -526,6 +526,9 @@ static void step_abort(struct vcpu *v) {
 
 // A data access, or a fetch, to emulated memory.
 static bool fault(struct vcpu *v, uintptr_t gpa, bool fetch) {
+    if (gpt_a20_fill(gpa)) {
+        return true;
+    }
     gpa = gpt_cpu_gpa(gpa);
     const struct region *r = find(gpa);
     if (r == NULL) {

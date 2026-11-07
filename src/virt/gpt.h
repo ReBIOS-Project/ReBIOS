@@ -55,6 +55,9 @@ void gpt_map(uintptr_t gpa, uintptr_t hpa, size_t size, uint32_t prot, uint8_t m
 // Has the processor, but not device DMA, see guest-physical memory below 4 GiB
 // with address bit 20 clear, as a closed A20 gate makes it, or as it is.
 void gpt_mask_a20(bool on);
+// A fault of the processor's at gpa: whether it reached a region the masked
+// view did not have yet, which it has now, the access to run again.
+bool gpt_a20_fill(uintptr_t gpa);
 // The guest-physical address the processor reaches for gpa, A20 included.
 uintptr_t gpt_cpu_gpa(uintptr_t gpa);
 

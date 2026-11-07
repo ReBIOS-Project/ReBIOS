@@ -64,8 +64,13 @@ static bool track_dirty;
 static uint64_t *root;
 // The processor's view while the guest's A20 gate is closed: below A20_LIMIT,
 // every odd MiB is the even one before it, and above it, root's own tables.
-// Built when first needed.
+// Made when first needed, it has below A20_LIMIT only the 2 MiB regions, an
+// even MiB each with the odd one after it, that the guest reached since, as
+// filling all of them at once would keep the processor from the guest too
+// long.
+#define A20_REGION (2 * A20_BIT)
 static uint64_t *masked_root;
+static uint64_t a20_filled[A20_LIMIT / A20_REGION / 64];
 static _Atomic(bool) masked;
 static struct spinlock gpt_lock;
 
@@ -231,6 +236,26 @@ static void mirror(uintptr_t gpa, uint64_t entry) {
     table[i + 256] = entry;
 }
 
+static bool region_filled(uintptr_t gpa) {
+    size_t region = gpa / A20_REGION;
+    return ((a20_filled[region / 64] >> (region % 64)) & 1) != 0;
+}
+
+// Under gpt_lock.
+static void fill_region(uintptr_t gpa) {
+    uintptr_t base = gpa & ~(A20_REGION - 1);
+    for (uintptr_t at = base; at < base + A20_BIT; at += PAGE_SIZE) {
+        uintptr_t hpa;
+        uint32_t prot;
+        uint8_t memtype;
+        if (gpt_translate(at, &hpa, &prot, &memtype)) {
+            mirror(at, leaf_entry(hpa, prot, memtype, 0));
+        }
+    }
+    size_t region = base / A20_REGION;
+    a20_filled[region / 64] |= (uint64_t)1 << (region % 64);
+}
+
 static void share_upper(void) {
     for (size_t i = 1; i < 512; i++) {
         masked_root[i] = root[i];
@@ -266,7 +291,7 @@ void gpt_map(uintptr_t gpa, uintptr_t hpa, size_t size, uint32_t prot, uint8_t m
 
     if (masked_root != NULL) {
         for (size_t at = 0; at < size && gpa + at < A20_LIMIT; at += PAGE_SIZE) {
-            if (((gpa + at) & A20_BIT) == 0) {
+            if (((gpa + at) & A20_BIT) == 0 && region_filled(gpa + at)) {
                 mirror(gpa + at, leaf_entry(hpa + at, prot, memtype, 0));
             }
         }
@@ -282,21 +307,27 @@ void gpt_mask_a20(bool on) {
     spinlock_acquire(&gpt_lock);
     if (on && masked_root == NULL) {
         masked_root = page_alloc(1);
-        for (uintptr_t mib = 0; mib < A20_LIMIT; mib += 2 * A20_BIT) {
-            for (uintptr_t gpa = mib; gpa < mib + A20_BIT; gpa += PAGE_SIZE) {
-                uintptr_t hpa;
-                uint32_t prot;
-                uint8_t memtype;
-                if (gpt_translate(gpa, &hpa, &prot, &memtype)) {
-                    mirror(gpa, leaf_entry(hpa, prot, memtype, 0));
-                }
-            }
-        }
+        // All that real mode reaches with the gate closed.
+        fill_region(0);
         share_upper();
     }
     atomic_store_explicit(&masked, on, memory_order_release);
     spinlock_release(&gpt_lock);
     gpt_flush();
+}
+
+bool gpt_a20_fill(uintptr_t gpa) {
+    if (gpa >= A20_LIMIT || !atomic_load_explicit(&masked, memory_order_acquire)) {
+        return false;
+    }
+    spinlock_acquire(&gpt_lock);
+    // New entries where there were none need no flush.
+    bool filled = !region_filled(gpa);
+    if (filled) {
+        fill_region(gpa);
+    }
+    spinlock_release(&gpt_lock);
+    return filled;
 }
 
 uintptr_t gpt_cpu_gpa(uintptr_t gpa) {
