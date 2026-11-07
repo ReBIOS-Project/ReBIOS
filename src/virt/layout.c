@@ -38,10 +38,6 @@
 #include <virt/vcpu.h>
 #include <virt/vga.h>
 
-#define ONE_MIB ((uint64_t)0x100000)
-#define TWO_MIB ((uint64_t)0x200000)
-#define ONE_GIB ((uint64_t)0x40000000)
-#define FOUR_GIB ((uint64_t)0x100000000)
 // AMD's IOMMUs give guest-physical DMA addresses from FD_0000_0000h to 1 TiB
 // special meanings where they do not ignore the HyperTransport range (AMD
 // IOMMU 48882 rev. 3.11, 2.1.2, Table 3; erratum 1155, 57095 rev. 1.05): the

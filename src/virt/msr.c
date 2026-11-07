@@ -236,7 +236,6 @@
 #define SYSCFG_GUEST ((uint32_t)0x1f << 18)
 #define IORR_BASE_RD_WR ((uint32_t)3 << 3)
 #define IORR_MASK_VALID ((uint32_t)1 << 11)
-#define FOUR_GIB ((uint64_t)0x100000000)
 #define TOP_MEM_UNIT ((uint64_t)8 << 20)
 #define MMIO_CFG_ENABLE ((uint32_t)1)
 #define MMIO_CFG_BUS_RANGE ((uint32_t)0x3c)

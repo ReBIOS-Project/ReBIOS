@@ -25,9 +25,6 @@
 #include <lib/util.h>
 #include <memory.h>
 
-#define MIB ((uint64_t)1 << 20)
-#define GIB ((uint64_t)1 << 30)
-
 // A range by its last byte, which, unlike its end, always fits in 64 bits.
 struct span {
     uintptr_t base;
@@ -186,7 +183,7 @@ bool e820_set_low_memory(struct e820_map *map) {
     };
 
     // Cleared first, so that no step needs more entries than the result.
-    bool ok = e820_set(map, 0, 1 * MIB, 0);
+    bool ok = e820_set(map, 0, ONE_MIB, 0);
     for (size_t i = 0; i < ARRAY_COUNT(layout); i++) {
         if (!e820_set(map, layout[i].base, layout[i].size, layout[i].type)) {
             ok = false;
@@ -222,15 +219,15 @@ void e820_cmos(const struct e820_map *map, struct e820_cmos *cmos) {
         if (e->type != E820_RAM) {
             continue;
         }
-        if (e->base <= 1 * MIB && entry_last(e) >= 1 * MIB) {
-            uintptr_t end = saturate(ram_run_last(map, i), 4 * GIB - 1) + 1;
-            cmos->extended_kib = saturate((end - 1 * MIB) / 1024, 65535);
-            if (end > 16 * MIB) {
-                cmos->above_16m = saturate((end - 16 * MIB) / (64 * 1024), 65535);
+        if (e->base <= ONE_MIB && entry_last(e) >= ONE_MIB) {
+            uintptr_t end = saturate(ram_run_last(map, i), FOUR_GIB - 1) + 1;
+            cmos->extended_kib = saturate((end - ONE_MIB) / 1024, 65535);
+            if (end > 16 * ONE_MIB) {
+                cmos->above_16m = saturate((end - 16 * ONE_MIB) / (64 * 1024), 65535);
             }
         }
-        if (e->base == 4 * GIB) {
-            size_t size = ram_run_last(map, i) - 4 * GIB + 1;
+        if (e->base == FOUR_GIB) {
+            size_t size = ram_run_last(map, i) - FOUR_GIB + 1;
             cmos->above_4g = saturate(size / (64 * 1024), 0xffffff);
         }
     }

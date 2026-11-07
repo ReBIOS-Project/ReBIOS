@@ -19,6 +19,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <virt/mtrr.h>
+#include <lib/util.h>
 #include <sys/x86.h>
 #include <virt/pci_plan.h>
 #include <virt/vcpu.h>
@@ -52,7 +53,6 @@
 #define FIXED_UC 0
 
 #define FIXED_VGA 2
-#define FOUR_GIB ((uint64_t)0x100000000)
 
 // Bits MAXPHYADDR-1:12.
 static uint64_t address_mask;

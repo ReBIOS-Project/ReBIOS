@@ -34,8 +34,6 @@
 #include <memory.h>
 #include <sys/mm.h>
 
-#define ONE_MIB ((uint64_t)0x100000)
-#define FOUR_GIB ((uint64_t)0x100000000)
 // PCI-to-PCI Bridge Architecture Specification 1.1, 3.2.5.8 and 3.2.5.9:
 // memory windows come in 1 MiB granules.
 #define WINDOW_GRANULE ONE_MIB

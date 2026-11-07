@@ -22,11 +22,10 @@
 #include <loader/fwtables.h>
 #include <handoff.h>
 #include <lib/log.h>
+#include <lib/util.h>
 #include <loader/efi_glue.h>
 #include <loader/loader.h>
 #include <memory.h>
-
-#define FOUR_GIB ((uint64_t)1 << 32)
 
 struct rsdp {
     char signature[8];

@@ -34,6 +34,7 @@
 #include <lib/log.h>
 #include <lib/spinlock.h>
 #include <lib/time.h>
+#include <lib/util.h>
 #include <sys/x86.h>
 #include <virt/hv_timer.h>
 #include <virt/io.h>
@@ -107,7 +108,6 @@
 #define EQUIPMENT_FPU 0x02
 #define BASE_MEMORY_KIB 640
 #define EXT_MEMORY_KIB_MAX 0xffff
-#define ONE_MIB ((uintptr_t)0x100000)
 
 #define IRQ_RTC 8
 // The update starts within this of UIP's rise (13.6.2.1).

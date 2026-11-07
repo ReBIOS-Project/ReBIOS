@@ -136,7 +136,7 @@ static uintptr_t memory_map_top(uint64_t *ram) {
     EFI_UINTN map_key;
     size_t desc_size;
     EFI_UINT32 desc_version;
-    uintptr_t top = (uint64_t)1 << 32;
+    uintptr_t top = FOUR_GIB;
 
     *ram = 0;
     efi_bs->GetMemoryMap(&size, NULL, &map_key, &desc_size, &desc_version);

@@ -35,8 +35,6 @@
 #include <lib/util.h>
 #include <memory.h>
 
-#define ONE_MIB ((uint64_t)0x100000)
-#define FOUR_GIB ((uint64_t)0x100000000)
 #define CLAIM_GRANULE ((uint64_t)0x1000)
 
 // AMD IOMMU 48882 rev. 3.11, Capability Offset 04h.

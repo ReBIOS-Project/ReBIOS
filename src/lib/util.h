@@ -24,6 +24,11 @@
 
 #define ARRAY_COUNT(a) (sizeof(a) / sizeof((a)[0]))
 
+#define ONE_MIB ((uint64_t)0x100000)
+#define TWO_MIB ((uint64_t)0x200000)
+#define ONE_GIB ((uint64_t)0x40000000)
+#define FOUR_GIB ((uint64_t)0x100000000)
+
 // Rounds value up or down to a multiple of alignment, a power of two.
 static inline uint64_t align_up(uint64_t value, uint64_t alignment) {
     return (value + alignment - 1) & ~(alignment - 1);

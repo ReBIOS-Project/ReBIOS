@@ -32,15 +32,12 @@
 #define PTE_PS ((uint64_t)1 << 7)
 #define PTE_ADDRESS ((uint64_t)0x000ffffffffff000)
 
-#define MIB2 ((uint64_t)1 << 21)
-#define GIB ((uint64_t)1 << 30)
-
 uintptr_t paging_build_identity_map(uintptr_t *map_top, size_t *pages) {
     bool huge_pages = cpuid(0x80000000, 0).eax >= 0x80000001
                    && (cpuid(0x80000001, 0).edx & ((uint32_t)1 << 26)) != 0;
 
-    uintptr_t top = align_up(*map_top, GIB);
-    size_t gib_count = top / GIB;
+    uintptr_t top = align_up(*map_top, ONE_GIB);
+    size_t gib_count = top / ONE_GIB;
     size_t pdpt_count = (gib_count + 511) / 512;
     size_t pd_count = huge_pages ? 0 : gib_count;
     size_t table_pages = 1 + pdpt_count + pd_count;
@@ -67,14 +64,14 @@ uintptr_t paging_build_identity_map(uintptr_t *map_top, size_t *pages) {
     for (size_t gib = 0; gib < gib_count; gib++) {
         uint64_t *pdpte = (uint64_t *)(uintptr_t)(pdpt_base) + gib;
         if (huge_pages) {
-            *pdpte = gib * GIB | PTE_P | PTE_W | PTE_PS;
+            *pdpte = gib * ONE_GIB | PTE_P | PTE_W | PTE_PS;
             continue;
         }
         uintptr_t pd_addr = pd_base + gib * 4096;
         uint64_t *pd = (uint64_t *)(uintptr_t)pd_addr;
         *pdpte = pd_addr | PTE_P | PTE_W;
         for (size_t j = 0; j < 512; j++) {
-            pd[j] = (gib * GIB + j * 0x200000) | PTE_P | PTE_W | PTE_PS;
+            pd[j] = (gib * ONE_GIB + j * TWO_MIB) | PTE_P | PTE_W | PTE_PS;
         }
     }
 
@@ -97,8 +94,8 @@ static uint64_t *next_table(uint64_t *entry) {
 }
 
 bool paging_map_device(uintptr_t pml4, uintptr_t base, size_t size) {
-    uintptr_t end = align_up(base + size, MIB2);
-    for (uintptr_t a = align_down(base, MIB2); a < end; a += MIB2) {
+    uintptr_t end = align_up(base + size, TWO_MIB);
+    for (uintptr_t a = align_down(base, TWO_MIB); a < end; a += TWO_MIB) {
         uint64_t *pdpt = next_table((uint64_t *)(uintptr_t)pml4 + (a >> 39 & 511));
         if (pdpt == NULL) {
             return false;

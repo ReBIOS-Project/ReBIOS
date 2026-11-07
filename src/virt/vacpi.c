@@ -42,6 +42,7 @@
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
+#include <lib/util.h>
 #include <memory.h>
 #include <sys/mm.h>
 #include <virt/gpt.h>
@@ -796,7 +797,6 @@ static const char *const motherboard_ids[] = { "PNP0C01", "PNP0C02", NULL };
 #define CRS_MAX 2048
 #define CRS_RANGES 64
 #define WINDOW_SIZE_MAX 46
-#define ONE_MIB ((uint64_t)0x100000)
 
 // How the guest's _CRS of a device keeps the firmware's.
 #define CRS_MOTHERBOARD 0

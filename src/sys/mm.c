@@ -123,8 +123,6 @@ void page_free(void *pages, size_t count) {
 #define PTE_PAT_LARGE ((uint64_t)1 << 12)
 #define PTE_ADDRESS ((uint64_t)0x000ffffffffff000)
 #define PTE_LARGE_FLAGS ((uint64_t)0x0fff)
-#define SIZE_2M ((uint64_t)0x200000)
-#define SIZE_1G ((uint64_t)0x40000000)
 
 static uint64_t *table_of(uint64_t entry) {
     return (uint64_t *)(uintptr_t)(entry & PTE_ADDRESS);
@@ -167,13 +165,13 @@ void mm_map_device(uintptr_t base, size_t size) {
     if ((read_cr4() & CR4_LA57) != 0) {
         top = table_of(top[0]);
     }
-    uintptr_t end = align_up(base + size, SIZE_2M);
+    uintptr_t end = align_up(base + size, TWO_MIB);
     if (end > (uint64_t)1 << 48) {
         printf("Cannot map device registers at %#llx\n", (unsigned long long)base);
         return;
     }
     spinlock_acquire(&map_lock);
-    for (uintptr_t a = align_down(base, SIZE_2M); a < end; a += SIZE_2M) {
+    for (uintptr_t a = align_down(base, TWO_MIB); a < end; a += TWO_MIB) {
         uint64_t *pdpte = &next_table(&top[(a >> 39) & 511])[(a >> 30) & 511];
         if ((*pdpte & PTE_PS) != 0) {
             continue;
@@ -203,21 +201,21 @@ void mm_write_combining(uintptr_t base, size_t size) {
             return;
         }
         if ((*pdpte & PTE_PS) != 0) {
-            if (a % SIZE_1G == 0 && end - a >= SIZE_1G) {
+            if (a % ONE_GIB == 0 && end - a >= ONE_GIB) {
                 *pdpte = write_combining(*pdpte, PTE_PAT_LARGE);
-                a += SIZE_1G;
+                a += ONE_GIB;
                 continue;
             }
-            split(pdpte, SIZE_1G, false);
+            split(pdpte, ONE_GIB, false);
         }
         uint64_t *pde = &table_of(*pdpte)[(a >> 21) & 511];
         if ((*pde & PTE_PS) != 0) {
-            if (a % SIZE_2M == 0 && end - a >= SIZE_2M) {
+            if (a % TWO_MIB == 0 && end - a >= TWO_MIB) {
                 *pde = write_combining(*pde, PTE_PAT_LARGE);
-                a += SIZE_2M;
+                a += TWO_MIB;
                 continue;
             }
-            split(pde, SIZE_2M, true);
+            split(pde, TWO_MIB, true);
         }
         uint64_t *pte = &table_of(*pde)[(a >> 12) & 511];
         *pte = write_combining(*pte, PTE_PAT_4K);

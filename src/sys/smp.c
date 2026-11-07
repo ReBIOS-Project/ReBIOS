@@ -31,6 +31,7 @@
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/time.h>
+#include <lib/util.h>
 #include <memory.h>
 #include <sys/cpu.h>
 #include <sys/x86.h>
@@ -223,7 +224,7 @@ void smp_start_aps(void) {
         return;
     }
     uintptr_t page = core_handoff->ap_boot;
-    if (read_cr3() >= ((uint64_t)1 << 32)) {
+    if (read_cr3() >= FOUR_GIB) {
         panic("The page tables are beyond the other processors' reach\n");
     }
 
