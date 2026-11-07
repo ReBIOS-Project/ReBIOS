@@ -1125,13 +1125,9 @@ static struct vfunction *guest_write(
     return function_write(a, offset, size, value);
 }
 
-// The reset control register at CF9h (ICH10 datasheet 319973-003, 13.7.5): its
-// RST_CPU's rise resets the machine, or with SYS_RST clear, is INIT#.
-#define PORT_RST_CNT 0xcf9
-#define RST_CNT_SYS_RST 0x02
-#define RST_CNT_RST_CPU 0x04
-#define RST_CNT_FULL_RST 0x08
-#define RST_CNT_WRITABLE 0x0e
+// What the guest may write of the reset control register, whose RST_CPU's rise
+// resets the machine, or with SYS_RST clear, is INIT#.
+#define RST_CNT_WRITABLE (RST_CNT_SYS_RST | RST_CNT_RST_CPU | RST_CNT_FULL_RST)
 
 static struct spinlock rst_cnt_lock;
 static uint8_t rst_cnt;
@@ -1165,7 +1161,7 @@ static void config_ports(
     (void)v;
     (void)ctx;
     uint16_t port = (uint16_t)(PCI_CFG_ADDRESS + offset);
-    if (port == PORT_RST_CNT && size == 1) {
+    if (port == RST_CNT && size == 1) {
         rst_cnt_access(in, value);
         return;
     }
