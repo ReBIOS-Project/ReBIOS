@@ -142,8 +142,6 @@
 // The highest APIC ID an 8-bit physical destination names, 0xff being
 // broadcast.
 #define MAX_DEST_ID 0xfe
-#define RTE_ACTIVE_LOW ((uint64_t)1 << 13)
-#define RTE_LEVEL ((uint64_t)1 << 15)
 // PCI Express Capabilities register Device/Port Types.
 #define PCIE_ROOT_PORT 0x4
 #define PCIE_TO_PCI_BRIDGE 0x7
@@ -940,8 +938,8 @@ void amdvi_remap_message(uint16_t index, uint32_t *address, uint32_t *data) {
 // the vector field and the delivery mode's low bit, fixed and arbitrated being
 // remapped alike.
 uint64_t amdvi_remap_rte(uint16_t index, bool level, bool active_low) {
-    return ((uint64_t)index & (REMAP_ENTRIES - 1)) | (level ? RTE_LEVEL : 0)
-         | (active_low ? RTE_ACTIVE_LOW : 0);
+    return ((uint64_t)index & (REMAP_ENTRIES - 1)) | (level ? IOAPIC_RTE_LEVEL : 0)
+         | (active_low ? IOAPIC_RTE_ACTIVE_LOW : 0);
 }
 
 void amdvi_flush(void) {

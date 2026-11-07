@@ -20,6 +20,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <iommu/vtd.h>
+#include <hw/ioapic.h>
 #include <hw/lapic.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_regs.h>
@@ -119,8 +120,6 @@
 #define MSI_REMAPPABLE ((uint32_t)1 << 4)
 #define MSI_SHV ((uint32_t)1 << 3)
 #define RTE_REMAPPABLE ((uint64_t)1 << 48)
-#define RTE_ACTIVE_LOW ((uint64_t)1 << 13)
-#define RTE_LEVEL ((uint64_t)1 << 15)
 
 // One page of 128-bit descriptors.
 #define QUEUE_ENTRIES 256
@@ -659,8 +658,8 @@ void vtd_remap_message(uint16_t index, uint32_t *address, uint32_t *data) {
 
 uint64_t vtd_remap_rte(uint16_t index, uint8_t vector, bool level, bool active_low) {
     return vector | (uint64_t)((uint32_t)index & 0x7fff) << 49 | RTE_REMAPPABLE
-         | (uint64_t)((uint32_t)index >> 15 & 1) << 11 | (level ? RTE_LEVEL : 0)
-         | (active_low ? RTE_ACTIVE_LOW : 0);
+         | (uint64_t)((uint32_t)index >> 15 & 1) << 11 | (level ? IOAPIC_RTE_LEVEL : 0)
+         | (active_low ? IOAPIC_RTE_ACTIVE_LOW : 0);
 }
 
 void vtd_enable(uintptr_t pml4) {
