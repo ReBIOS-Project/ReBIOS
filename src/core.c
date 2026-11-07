@@ -40,6 +40,7 @@
 #include <virt/hpet.h>
 #include <virt/igfx.h>
 #include <virt/irq.h>
+#include <virt/isa_dma.h>
 #include <virt/kbc.h>
 #include <virt/layout.h>
 #include <virt/msr.h>
@@ -111,6 +112,7 @@ static void bsp_main(void *arg) {
     kbc_init();
     pit_init();
     rtc_init();
+    isa_dma_init();
     hpet_init();
     vacpi_init();
     profile_init();
