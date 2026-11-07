@@ -34,6 +34,7 @@
 #include <virt/vacpi.h>
 #include <csm/e820.h>
 #include <hw/acpi.h>
+#include <hw/i8042.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_host.h>
 #include <hw/power.h>
@@ -1774,16 +1775,6 @@ static void emit_rcal(struct aml *a) {
     aml_end(a);
 }
 
-// What Linux 7.3's i8042 driver takes for the 8042's devices.
-static const char *const keyboard_ids[] = {
-    "PNP0300", "PNP0301", "PNP0302", "PNP0303", "PNP0304", "PNP0305", "PNP0306", "PNP0309",
-    "PNP030A", "PNP030B", "PNP0320", "PNP0343", "PNP0344", "PNP0345", "CPQA0D7", NULL
-};
-static const char *const mouse_ids[] = {
-    "AUI0200", "FJC6000", "FJC6001", "PNP0F03", "PNP0F0B", "PNP0F0E", "PNP0F12", "PNP0F13",
-    "PNP0F19", "PNP0F1C", "SYN0801", NULL
-};
-
 static uacpi_iteration_decision device_shown(
     void *user, uacpi_namespace_node *node, uacpi_u32 depth
 ) {
@@ -1885,10 +1876,10 @@ static void emit_ps2_devices(struct aml *a) {
     } else {
         aml_name(a, "\\_SB");
     }
-    if (!firmware_shows(keyboard_ids)) {
+    if (!firmware_shows(i8042_keyboard_ids)) {
         emit_ps2_device(a, "RBKB", "PNP0303", keyboard_crs, sizeof(keyboard_crs));
     }
-    if (!firmware_shows(mouse_ids)) {
+    if (!firmware_shows(i8042_mouse_ids)) {
         emit_ps2_device(a, "RBMS", "PNP0F13", mouse_crs, sizeof(mouse_crs));
     }
     aml_end(a);

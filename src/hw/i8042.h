@@ -21,10 +21,16 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+// The IDs of the devices behind the controller, NULL-ended, as Linux 7.3's
+// i8042 driver takes them.
+extern const char *const i8042_keyboard_ids[];
+extern const char *const i8042_mouse_ids[];
+
 // The chipset's keyboard controller, as a source of bytes from whatever is
 // plugged into it: untranslated, with its interrupts on. Finds out what there
 // is without resetting it, which firmware on some machines does not take well.
 void i8042_init(void);
+bool i8042_present(void);
 bool i8042_keyboard(void);
 bool i8042_aux(void);
 // Queues a byte for a device, which goes when the controller takes it: nobody

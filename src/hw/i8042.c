@@ -18,7 +18,11 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <uacpi/acpi.h>
+#include <uacpi/status.h>
+#include <uacpi/tables.h>
 #include <hw/i8042.h>
+#include <hw/acpi.h>
 #include <lib/log.h>
 #include <lib/time.h>
 #include <sys/x86.h>
@@ -30,6 +34,8 @@
 #define STATUS_INPUT_FULL 0x02
 #define STATUS_AUX_DATA 0x20
 #define STATUS_ABSENT 0xff
+// What ACPI 2.0's FADTs are first, Linux 7.3's FADT2_REVISION_ID.
+#define FADT_REVISION_ACPI_2 3
 
 #define COMMAND_READ_CCB 0x20
 #define COMMAND_WRITE_CCB 0x60
@@ -60,6 +66,15 @@
 struct send {
     uint8_t byte;
     bool aux;
+};
+
+const char *const i8042_keyboard_ids[] = {
+    "PNP0300", "PNP0301", "PNP0302", "PNP0303", "PNP0304", "PNP0305", "PNP0306", "PNP0309",
+    "PNP030A", "PNP030B", "PNP0320", "PNP0343", "PNP0344", "PNP0345", "CPQA0D7", NULL
+};
+const char *const i8042_mouse_ids[] = {
+    "AUI0200", "FJC6000", "FJC6001", "PNP0F03", "PNP0F0B", "PNP0F0E", "PNP0F12", "PNP0F13",
+    "PNP0F19", "PNP0F1C", "SYN0801", NULL
 };
 
 static bool present;
@@ -130,7 +145,28 @@ static bool identify(bool aux) {
     return true;
 }
 
+// Whether the firmware's ACPI leaves room for a controller, as Linux 7.3's
+// i8042 driver decides before probing one: either of its devices in the
+// namespace, or else an FADT from before ACPI 2.0 or one with the 8042 flag
+// (ACPI 6.6, Table 5.11). Firmware errs both ways, declaring the devices of a
+// controller it lacks and flagging one it disabled, so the probe decides.
+static bool firmware_allows(void) {
+    if (acpi_has_device(i8042_keyboard_ids) || acpi_has_device(i8042_mouse_ids)) {
+        return true;
+    }
+    struct acpi_fadt *fadt;
+    if (!acpi_tables_ready() || uacpi_table_fadt(&fadt) != UACPI_STATUS_OK) {
+        return false;
+    }
+    return fadt->hdr.revision < FADT_REVISION_ACPI_2
+        || (fadt->iapc_boot_arch & ACPI_IA_PC_8042) != 0;
+}
+
 void i8042_init(void) {
+    if (!firmware_allows()) {
+        printf("No keyboard controller, as the firmware's ACPI has it\n");
+        return;
+    }
     if (!flush() || !command(COMMAND_KBD_DISABLE) || !command(COMMAND_AUX_DISABLE) || !flush()
      || !command(COMMAND_READ_CCB)) {
         printf("No keyboard controller\n");
@@ -169,6 +205,10 @@ void i8042_init(void) {
         "Keyboard controller, %s keyboard, %s mouse\n", keyboard ? "with a" : "with no",
         aux_device ? "a" : "no"
     );
+}
+
+bool i8042_present(void) {
+    return present;
 }
 
 bool i8042_keyboard(void) {
