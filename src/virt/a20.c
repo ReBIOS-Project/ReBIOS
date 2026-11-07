@@ -20,7 +20,6 @@
 #include <stdint.h>
 #include <virt/a20.h>
 #include <lib/spinlock.h>
-#include <sys/x86.h>
 #include <virt/gpt.h>
 #include <virt/io.h>
 #include <virt/vcpu.h>
@@ -51,27 +50,16 @@ static void update_gate(void) {
     gpt_mask_a20(!gate_open);
 }
 
-// The rest of an access wider than the port goes to the hardware as it is.
-static void pass_rest(uint16_t port, size_t size, bool in, uint32_t *value) {
-    for (size_t i = 1; i < size; i++) {
-        if (in) {
-            *value = (*value & ~((uint32_t)0xff << (8 * i)))
-                   | (uint32_t)inb((uint16_t)(port + i)) << (8 * i);
-        } else {
-            outb((uint16_t)(port + i), (uint8_t)(*value >> (8 * i)));
-        }
-    }
-}
-
 static void system_control_a(
     struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
 ) {
     (void)v;
     (void)ctx;
     (void)offset;
+    (void)size;
     spinlock_acquire(&lock);
     if (in) {
-        *value = system_control;
+        *value = (*value & ~(uint32_t)0xff) | system_control;
     } else {
         uint8_t old = system_control;
         uint8_t written = (uint8_t)*value & (INIT_NOW | A20_BIT);
@@ -84,7 +72,6 @@ static void system_control_a(
         }
         update_gate();
     }
-    pass_rest(SYSTEM_CONTROL_A, size, in, value);
     spinlock_release(&lock);
 }
 
@@ -96,6 +83,6 @@ void a20_kbc_set(bool open) {
 }
 
 void a20_init(void) {
-    struct io_handler handler = { SYSTEM_CONTROL_A, 1, system_control_a, NULL };
+    struct io_handler handler = { SYSTEM_CONTROL_A, 1, system_control_a, NULL, true };
     io_register(&handler);
 }

@@ -486,27 +486,15 @@ static void counters_access(
 ) {
     (void)v;
     (void)ctx;
+    (void)size;
     spinlock_acquire(&lock);
-    for (size_t i = 0; i < size; i++) {
-        size_t port = offset + i;
-        if (in) {
-            uint8_t byte = 0;
-            if (port < OFFSET_CONTROL) {
-                byte = counter_read(port);
-            } else if (port > OFFSET_CONTROL) {
-                byte = inb((uint16_t)(PORT_COUNTER_FIRST + port));
-            }
-            *value = (*value & ~((uint32_t)0xff << (8 * i))) | (uint32_t)byte << (8 * i);
-            continue;
-        }
-        uint8_t byte = (uint8_t)(*value >> (8 * i));
-        if (port < OFFSET_CONTROL) {
-            counter_write(port, byte);
-        } else if (port == OFFSET_CONTROL) {
-            control_write(byte);
-        } else {
-            outb((uint16_t)(PORT_COUNTER_FIRST + port), byte);
-        }
+    if (in) {
+        uint8_t byte = offset < OFFSET_CONTROL ? counter_read(offset) : 0;
+        *value = (*value & ~(uint32_t)0xff) | byte;
+    } else if (offset < OFFSET_CONTROL) {
+        counter_write(offset, (uint8_t)*value);
+    } else {
+        control_write((uint8_t)*value);
     }
     spinlock_release(&lock);
 }
@@ -558,6 +546,7 @@ static void nmi_status_access(
     (void)v;
     (void)ctx;
     (void)offset;
+    (void)size;
     spinlock_acquire(&lock);
     uint64_t now = rdtsc();
     if (in) {
@@ -577,15 +566,6 @@ static void nmi_status_access(
         if (real_port_61h) {
             uint8_t bits = real_speaker ? NMI_WRITABLE : NMI_ENABLES;
             outb(PORT_NMI_STATUS, (uint8_t)(nmi_written & bits));
-        }
-    }
-    // Wider accesses go on to ports that are no business of this one's.
-    for (size_t i = 1; i < size; i++) {
-        uint16_t port = (uint16_t)(PORT_NMI_STATUS + i);
-        if (in) {
-            *value = (*value & ~((uint32_t)0xff << (8 * i))) | (uint32_t)inb(port) << (8 * i);
-        } else {
-            outb(port, (uint8_t)(*value >> (8 * i)));
         }
     }
     spinlock_release(&lock);
@@ -637,8 +617,8 @@ void pit_init(void) {
     tick.fired = tick_fired;
     hv_timer_add(&tick);
 
-    struct io_handler counters = { PORT_COUNTER_FIRST, PORT_COUNT, counters_access, NULL };
+    struct io_handler counters = { PORT_COUNTER_FIRST, PORT_COUNT, counters_access, NULL, true };
     io_register(&counters);
-    struct io_handler nmi_status = { PORT_NMI_STATUS, 1, nmi_status_access, NULL };
+    struct io_handler nmi_status = { PORT_NMI_STATUS, 1, nmi_status_access, NULL, true };
     io_register(&nmi_status);
 }

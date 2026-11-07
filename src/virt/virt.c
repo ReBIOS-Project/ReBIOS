@@ -202,6 +202,10 @@ void virt_intercept_io(uint16_t port, size_t count, bool intercept) {
     }
 }
 
+bool virt_io_intercepted(uint16_t port) {
+    return (io_bitmap[port / 8] & (1 << (port % 8))) != 0;
+}
+
 static void bitmap_set(uint8_t *bitmap, unsigned int bit, bool set) {
     if (set) {
         bitmap[bit / 8] |= 1 << (bit % 8);

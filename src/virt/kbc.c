@@ -924,6 +924,7 @@ static void data_access(
     (void)v;
     (void)ctx;
     (void)offset;
+    (void)size;
     spinlock_acquire(&lock);
     if (in) {
         // Without anything new, the last byte reads again.
@@ -937,14 +938,6 @@ static void data_access(
         last_was_command = false;
         data_write((uint8_t)*value);
     }
-    for (size_t i = 1; i < size; i++) {
-        uint16_t port = (uint16_t)(PORT_DATA + i);
-        if (in) {
-            *value = (*value & ~((uint32_t)0xff << (8 * i))) | (uint32_t)inb(port) << (8 * i);
-        } else {
-            outb(port, (uint8_t)(*value >> (8 * i)));
-        }
-    }
     spinlock_release(&lock);
 }
 
@@ -954,6 +947,7 @@ static void command_access(
     (void)v;
     (void)ctx;
     (void)offset;
+    (void)size;
     spinlock_acquire(&lock);
     if (in) {
         uint8_t status = STATUS_NOT_INHIBITED | (ram[0] & CCB_SYSTEM)
@@ -964,14 +958,6 @@ static void command_access(
     } else {
         last_was_command = true;
         command_write((uint8_t)*value);
-    }
-    for (size_t i = 1; i < size; i++) {
-        uint16_t port = (uint16_t)(PORT_COMMAND + i);
-        if (in) {
-            *value = (*value & ~((uint32_t)0xff << (8 * i))) | (uint32_t)inb(port) << (8 * i);
-        } else {
-            outb(port, (uint8_t)(*value >> (8 * i)));
-        }
     }
     spinlock_release(&lock);
 }
@@ -1178,8 +1164,8 @@ void kbc_init(void) {
         hv_timer_set(&real_poll, rdtsc() + MS_TSC(REAL_POLL_MS));
     }
 
-    struct io_handler data = { PORT_DATA, 1, data_access, NULL };
+    struct io_handler data = { PORT_DATA, 1, data_access, NULL, true };
     io_register(&data);
-    struct io_handler command = { PORT_COMMAND, 1, command_access, NULL };
+    struct io_handler command = { PORT_COMMAND, 1, command_access, NULL, true };
     io_register(&command);
 }

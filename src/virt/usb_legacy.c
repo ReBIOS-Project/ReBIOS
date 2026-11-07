@@ -297,7 +297,7 @@ static bool trap_registers(struct usb_controller *c) {
 bool usb_legacy_own(struct usb_controller *c) {
     const struct pci_function *f = c->f;
     if (c->type == TENDRIL_HC_UHCI) {
-        struct io_handler ports = { c->port, c->port_count, port_access, c };
+        struct io_handler ports = { c->port, c->port_count, port_access, c, false };
         io_register(&ports);
     } else {
         // Firmware that used no USB may have left it off.

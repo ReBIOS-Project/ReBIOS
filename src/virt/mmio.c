@@ -25,7 +25,6 @@
 #include <lib/spinlock.h>
 #include <memory.h>
 #include <sys/mm.h>
-#include <sys/x86.h>
 #include <virt/emulate.h>
 #include <virt/gpt.h>
 #include <virt/guest_mem.h>
@@ -264,23 +263,7 @@ static bool mem_ins(
 
 static void mem_outs(struct vcpu *v, uint16_t port, size_t size, uint32_t value) {
     vcpu_io_access(v, port, size);
-    if (io_dispatch(v, port, size, false, &value)) {
-        return;
-    }
-    switch (size) {
-        case 1: {
-            outb(port, (uint8_t)value);
-            break;
-        }
-        case 2: {
-            outw(port, (uint16_t)value);
-            break;
-        }
-        default: {
-            outl(port, value);
-            break;
-        }
-    }
+    io_dispatch(v, port, size, false, &value);
 }
 
 static const struct emulate_mem guest_mem = {

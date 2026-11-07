@@ -1378,7 +1378,7 @@ void pci_virt_init(void) {
         }
     }
 
-    struct io_handler ports = { CONFIG_ADDRESS, CONFIG_PORTS, config_ports, NULL };
+    struct io_handler ports = { CONFIG_ADDRESS, CONFIG_PORTS, config_ports, NULL, false };
     io_register(&ports);
     if (plan->ecam != 0) {
         size_t size = ((size_t)plan->bus_end + 1) * BUS_SIZE;

@@ -1878,7 +1878,7 @@ static void vbe_init(void) {
     }
     out.vbe_hashes = page_alloc((DISPI_MAX_YRES * sizeof(uint64_t) + PAGE_SIZE - 1) / PAGE_SIZE);
     out.vbe_line = page_alloc((DISPI_MAX_XRES * sizeof(uint32_t) + PAGE_SIZE - 1) / PAGE_SIZE);
-    struct io_handler ports = { DISPI_PORT, DISPI_PORT_COUNT, dispi_ports, NULL };
+    struct io_handler ports = { DISPI_PORT, DISPI_PORT_COUNT, dispi_ports, NULL, false };
     io_register(&ports);
     vbe.present = true;
 
@@ -1973,7 +1973,7 @@ bool vga_init(void) {
 
     // The video BIOS has ports among the VGA's, which its come before.
     vgabios_init();
-    struct io_handler ports = { PORT_BASE, PORT_COUNT, ports_access, NULL };
+    struct io_handler ports = { PORT_BASE, PORT_COUNT, ports_access, NULL, false };
     io_register(&ports);
     mmio_register(WINDOW_BASE, WINDOW_SIZE, &window_ops, NULL);
     gpt_map(WINDOW_BASE, 0, WINDOW_SIZE, 0, 0);

@@ -34,6 +34,7 @@ void virt_cpu_init(void);
 uintptr_t virt_io_bitmap(void);
 uintptr_t virt_msr_bitmap(void);
 void virt_intercept_io(uint16_t port, size_t count, bool intercept);
+bool virt_io_intercepted(uint16_t port);
 // Makes the guest's reads, writes, or both of an MSR exit, for a module to
 // handle them, whatever virt_pass_msr() says; the others follow that.
 void virt_intercept_msr(uint32_t msr, bool read, bool write);

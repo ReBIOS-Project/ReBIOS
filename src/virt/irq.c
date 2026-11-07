@@ -830,18 +830,16 @@ static void pic_access(
     struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
 ) {
     (void)v;
-    uint16_t base = (uint16_t)(uintptr_t)ctx;
+    (void)size;
+    uint16_t port = (uint16_t)((uint16_t)(uintptr_t)ctx + offset);
     spinlock_acquire(&lock);
-    for (size_t i = 0; i < size; i++) {
-        uint16_t port = (uint16_t)(base + offset + i);
-        if (in) {
-            *value = (*value & ~((uint32_t)0xff << (8 * i))) | (uint32_t)pic_read(port) << (8 * i);
-        } else {
-            bool ticking = pic_in_service(IRQ_TIMER);
-            pic_write(port, (uint8_t)(*value >> (8 * i)));
-            if (ticking && !pic_in_service(IRQ_TIMER)) {
-                pit_tick_ended();
-            }
+    if (in) {
+        *value = (*value & ~(uint32_t)0xff) | pic_read(port);
+    } else {
+        bool ticking = pic_in_service(IRQ_TIMER);
+        pic_write(port, (uint8_t)*value);
+        if (ticking && !pic_in_service(IRQ_TIMER)) {
+            pit_tick_ended();
         }
     }
     update();
@@ -889,7 +887,8 @@ void irq_init(void) {
             .base = ports[i],
             .count = 2,
             .access = pic_access,
-            .ctx = (void *)(uintptr_t)ports[i]
+            .ctx = (void *)(uintptr_t)ports[i],
+            .bytes = true
         };
         io_register(&handler);
     }

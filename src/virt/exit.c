@@ -234,49 +234,9 @@ void exit_xsetbv(struct vcpu *v) {
     vcpu_skip_instruction(v);
 }
 
-// The guest's guest's accesses all exit, those to ports nobody traps too.
-static void port_native(uint16_t port, size_t size, bool in, uint32_t *value) {
-    switch (size) {
-        case 1: {
-            if (in) {
-                *value = inb(port);
-            } else {
-                outb(port, (uint8_t)*value);
-            }
-            break;
-        }
-        case 2: {
-            if (in) {
-                *value = inw(port);
-            } else {
-                outw(port, (uint16_t)*value);
-            }
-            break;
-        }
-        default: {
-            if (in) {
-                *value = inl(port);
-            } else {
-                outl(port, *value);
-            }
-            break;
-        }
-    }
-}
-
 static void port_access(struct vcpu *v, uint16_t port, size_t size, bool in, uint32_t *value) {
     vcpu_io_access(v, port, size);
-    if (io_dispatch(v, port, size, in, value)) {
-        return;
-    }
-    if (nvmx_in_l2(v) || nsvm_in_l2(v)) {
-        port_native(port, size, in, value);
-        return;
-    }
-    printf("Unexpected trapped I/O to port %#x\n", port);
-    if (in) {
-        *value = 0xffffffff;
-    }
+    io_dispatch(v, port, size, in, value);
 }
 
 void exit_io(struct vcpu *v, uint16_t port, size_t size, bool in, uint32_t *value) {

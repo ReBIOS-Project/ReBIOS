@@ -161,9 +161,7 @@ static uintptr_t linear(uint16_t segment, uint16_t offset) {
 
 static uint32_t direct_port(uint16_t port, size_t size, bool in, uint32_t out) {
     uint32_t value = out;
-    if (!io_dispatch(current->v, port, size, in, &value)) {
-        return 0xffffffff;
-    }
+    io_dispatch(current->v, port, size, in, &value);
     return value;
 }
 
@@ -658,9 +656,9 @@ static void vga_ports_access(
 }
 
 void vgabios_init(void) {
-    struct io_handler ports = { PORT_ALLOCATE, PORT_COUNT, ports_access, NULL };
+    struct io_handler ports = { PORT_ALLOCATE, PORT_COUNT, ports_access, NULL, false };
     io_register(&ports);
-    struct io_handler vga_ports = { PORT_VGA, PORT_VGA_COUNT, vga_ports_access, NULL };
+    struct io_handler vga_ports = { PORT_VGA, PORT_VGA_COUNT, vga_ports_access, NULL, false };
     io_register(&vga_ports);
 }
 

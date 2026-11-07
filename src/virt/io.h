@@ -32,11 +32,18 @@ struct io_handler {
         struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
     );
     void *ctx;
+    // An 8-bit device's, which takes a wider access as an ISA bus runs it, one
+    // byte at a time, each to the port it is for.
+    bool bytes;
 };
 
 // Traps the ports and routes them to the handler, for every vCPU.
 void io_register(const struct io_handler *handler);
 
-bool io_dispatch(struct vcpu *v, uint16_t port, size_t size, bool in, uint32_t *value);
+// Runs an access the guest made: through the handler of its first port, or a
+// byte at a time where that is an 8-bit device's or nobody's, each byte going
+// to its port's handler, else to the machine for a port the guest is given,
+// else nowhere, reading all ones.
+void io_dispatch(struct vcpu *v, uint16_t port, size_t size, bool in, uint32_t *value);
 
 #endif
