@@ -132,6 +132,23 @@ static inline struct cpuid_regs cpuid(uint32_t leaf, uint32_t subleaf) {
     return r;
 }
 
+// The vendors whose processors the hypervisor runs on, as CPUID's vendor
+// string names them, "GenuineIntel" and "AuthenticAMD" in EBX, EDX, and ECX,
+// and 0 for another's.
+#define CPU_VENDOR_INTEL 1
+#define CPU_VENDOR_AMD 2
+
+static inline int cpu_vendor(void) {
+    struct cpuid_regs r = cpuid(0, 0);
+    if (r.ebx == 0x756e6547 && r.edx == 0x49656e69 && r.ecx == 0x6c65746e) {
+        return CPU_VENDOR_INTEL;
+    }
+    if (r.ebx == 0x68747541 && r.edx == 0x69746e65 && r.ecx == 0x444d4163) {
+        return CPU_VENDOR_AMD;
+    }
+    return 0;
+}
+
 // CPUID leaf 1's display family, model, and stepping, which both vendors
 // define alike: the extended model counts for base families 6 and 0Fh.
 struct cpu_signature {

@@ -190,6 +190,9 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     console_init();
     log_init(config.serial ? config.serial_port : 0, config.serial_baud, config.verbose);
 
+    if (cpu_vendor() == 0) {
+        panic("ReBIOS runs on Intel's and AMD's processors alone\n");
+    }
     if (!iommu_check()) {
         return EFI_UNSUPPORTED;
     }
