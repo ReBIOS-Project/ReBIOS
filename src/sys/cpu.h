@@ -72,6 +72,11 @@ struct cpu {
     _Atomic(bool) nmi_pending;
     // An INIT that SVM redirected while the host ran.
     _Atomic(bool) init_pending;
+    // The IA32_CLOCK_MODULATION that a thermal zone's passive cooling wants,
+    // which the processor writes before it next enters the guest, and the one
+    // it last wrote.
+    _Atomic(uint64_t) clock_modulation;
+    uint64_t clock_modulation_set;
     // Whether the host is taking interrupts, as SVM has it do.
     _Atomic(bool) taking_interrupts;
     // IA32_APIC_BASE, once lapic_host_mode() set it for good, else 0.

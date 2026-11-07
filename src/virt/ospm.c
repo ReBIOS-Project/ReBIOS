@@ -19,11 +19,14 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <uacpi/acpi.h>
 #include <uacpi/kernel_api.h>
 #include <uacpi/namespace.h>
 #include <uacpi/notify.h>
 #include <uacpi/platform/types.h>
+#include <uacpi/resources.h>
 #include <uacpi/status.h>
+#include <uacpi/tables.h>
 #include <uacpi/types.h>
 #include <uacpi/uacpi.h>
 #include <virt/ospm.h>
@@ -33,9 +36,12 @@
 #include <lib/time.h>
 #include <lib/util.h>
 #include <memory.h>
+#include <sys/cpu.h>
+#include <sys/smp.h>
 #include <sys/x86.h>
 #include <virt/hv_timer.h>
 #include <virt/vacpi.h>
+#include <virt/vcpu.h>
 
 // How often the zones that give no _TZP are polled, and how often the guest is
 // looked at while it has an OSPM, in tenths of a second.
@@ -43,9 +49,10 @@
 #define MAX_ZONES 16
 
 // A thermal zone's notifications (ACPI 6.6, Table 5.230): its temperature
-// changed, and its trip points did.
+// changed, its trip points did, and its lists of devices did.
 #define NOTIFY_ZONE_STATUS 0x80
 #define NOTIFY_ZONE_TRIP_POINTS 0x81
+#define NOTIFY_ZONE_DEVICES 0x82
 
 // 0 C, in the tenths of a kelvin that ACPI gives temperatures in.
 #define ZERO_CELSIUS 2732
@@ -54,6 +61,16 @@
 // power resources that ReBIOS keeps count of.
 #define ACTIVE_LEVELS 10
 #define MAX_RESOURCES 32
+
+// The steps that a zone throttles its processors by at most, and P_CNT's
+// throttling enable, at the start of a P_BLK (ACPI 6.6, 4.8.1.5 and 8.1.1).
+#define PASSIVE_STEPS_MAX 15
+#define P_BLK_LENGTH 6
+#define P_CNT_THT_EN ((uint32_t)1 << 4)
+// The fields of a _TSS state (ACPI 6.6, 8.4.4.2).
+#define TSS_PERCENT 0
+#define TSS_CONTROL 3
+#define TSS_FIELDS 5
 
 struct zone {
     uacpi_namespace_node *node;
@@ -66,6 +83,18 @@ struct zone {
     uint64_t active[ACTIVE_LEVELS];
     size_t active_count;
     bool active_on[ACTIVE_LEVELS];
+    // Its passive trip point, the constants of its trend (ACPI 6.6, 11.1.5.1),
+    // the period to sample it at meanwhile, the slowest that its processors
+    // may run at, in percent, by its _MTL, the steps that ReBIOS throttles
+    // them by, and the last temperature it read, 0 before the first.
+    uint64_t passive;
+    int64_t tc1;
+    int64_t tc2;
+    uint64_t sample_ds;
+    uint64_t min_percent;
+    size_t steps;
+    size_t steps_max;
+    uint64_t last;
 };
 
 // A power resource that ReBIOS turned on, and the lists that want it, as lists
@@ -105,6 +134,15 @@ static void read_trip_points(struct zone *z) {
     if (z->poll_ds == 0) {
         z->poll_ds = DEFAULT_POLL_DS;
     }
+    z->passive = zone_integer(z, "_PSV");
+    z->tc1 = (int64_t)zone_integer(z, "_TC1");
+    z->tc2 = (int64_t)zone_integer(z, "_TC2");
+    z->sample_ds = zone_integer(z, "_TSP");
+    if (z->sample_ds == 0) {
+        z->sample_ds = z->poll_ds;
+    }
+    z->min_percent = zone_integer(z, "_MTL");
+    z->steps_max = PASSIVE_STEPS_MAX;
     z->active_count = 0;
     for (size_t x = 0; x < ACTIVE_LEVELS; x++) {
         char name[5] = { '_', 'A', 'C', (char)('0' + x), '\0' };
@@ -226,6 +264,278 @@ static void cool_actively(struct zone *z, uint64_t now) {
     }
 }
 
+// A field of a _TSS state.
+static bool tss_field(uacpi_object *state, size_t field, uint64_t *value) {
+    uacpi_object_array fields;
+    return uacpi_object_get_package(state, &fields) == UACPI_STATUS_OK
+        && fields.count >= TSS_FIELDS
+        && uacpi_object_get_integer(fields.objects[field], value) == UACPI_STATUS_OK;
+}
+
+// What a Processor() gives: its ACPI Processor ID, and its P_BLK.
+static bool processor_info(uacpi_namespace_node *processor, uacpi_processor_info *info) {
+    uacpi_object *object;
+    uacpi_status status = uacpi_eval_typed(
+        processor, NULL, NULL, UACPI_OBJECT_PROCESSOR_BIT, &object
+    );
+    if (status != UACPI_STATUS_OK) {
+        return false;
+    }
+    bool got = uacpi_object_get_processor_info(object, info) == UACPI_STATUS_OK;
+    uacpi_object_unref(object);
+    return got;
+}
+
+// The processor's CPU, by the ACPI Processor UID that its Processor() or its
+// _UID gives, as the MADT has it.
+static struct cpu *processor_cpu(uacpi_namespace_node *processor, uacpi_object_type type) {
+    uint64_t uid;
+    uacpi_processor_info info;
+    if (type == UACPI_OBJECT_PROCESSOR) {
+        if (!processor_info(processor, &info)) {
+            return NULL;
+        }
+        uid = info.id;
+    } else if (uacpi_eval_simple_integer(processor, "_UID", &uid) != UACPI_STATUS_OK) {
+        return NULL;
+    }
+    struct uacpi_table table;
+    if (uacpi_table_find_by_signature(ACPI_MADT_SIGNATURE, &table) != UACPI_STATUS_OK) {
+        return NULL;
+    }
+    struct cpu *cpu = NULL;
+    size_t offset = sizeof(struct acpi_madt);
+    const struct acpi_entry_hdr *entry;
+    while (cpu == NULL
+        && (entry = acpi_madt_next(table.ptr, table.hdr->length, &offset)) != NULL) {
+        uint32_t apic_id;
+        uint32_t entry_uid;
+        uint32_t flags;
+        if (acpi_madt_processor(entry, &apic_id, &entry_uid, &flags) && entry_uid == uid) {
+            cpu = smp_cpu_by_apic_id(apic_id);
+        }
+    }
+    uacpi_table_unref(&table);
+    return cpu;
+}
+
+// The register that the processor's _PTC names to control its T-states (ACPI
+// 6.6, 8.4.4.1), if it has one.
+static bool tstate_register(
+    uacpi_namespace_node *processor, uacpi_resource_generic_register *reg
+) {
+    uacpi_object *ptc;
+    if (uacpi_eval_simple_package(processor, "_PTC", &ptc) != UACPI_STATUS_OK) {
+        return false;
+    }
+    bool found = false;
+    uacpi_object_array registers;
+    uacpi_data_view buffer;
+    uacpi_resource *resource;
+    if (uacpi_object_get_package(ptc, &registers) == UACPI_STATUS_OK && registers.count >= 1
+     && uacpi_object_get_buffer(registers.objects[0], &buffer) == UACPI_STATUS_OK
+     && uacpi_get_resource_from_buffer(buffer, &resource) == UACPI_STATUS_OK) {
+        found = resource->type == UACPI_RESOURCE_TYPE_GENERIC_REGISTER;
+        if (found) {
+            *reg = resource->generic_register;
+        }
+        uacpi_free_resource(resource);
+    }
+    uacpi_object_unref(ptc);
+    return found;
+}
+
+// A T-state's control value into the register, as Linux 7.3 writes it
+// (processor_throttling.c, acpi_write_throttling_state()): a port's bits, or
+// for Intel's functional fixed hardware, the processor's
+// IA32_CLOCK_MODULATION, which it writes itself.
+static bool tstate_write(
+    const uacpi_resource_generic_register *reg, uacpi_namespace_node *processor,
+    uacpi_object_type type, uint64_t control
+) {
+    if (reg->address_space_id == UACPI_ADDRESS_SPACE_SYSTEM_IO && reg->address != 0
+     && reg->address <= 0xfffc && reg->bit_width + reg->bit_offset <= 32) {
+        uint16_t port = (uint16_t)reg->address;
+        uint32_t mask = reg->bit_width < 32 ? ((uint32_t)1 << reg->bit_width) - 1 : UINT32_MAX;
+        uint32_t value = ((uint32_t)control & mask) << reg->bit_offset;
+        size_t width = reg->bit_width + reg->bit_offset;
+        if (width <= 8) {
+            outb(port, (uint8_t)value);
+        } else if (width <= 16) {
+            outw(port, (uint16_t)value);
+        } else {
+            outl(port, value);
+        }
+        return true;
+    }
+    if (reg->address_space_id != UACPI_ADDRESS_SPACE_FFIXEDHW
+     || x86_cpu_vendor() != X86_CPU_VENDOR_INTEL || (cpuid(1, 0).edx & CPUID_1_EDX_ACPI) == 0) {
+        return false;
+    }
+    struct cpu *cpu = processor_cpu(processor, type);
+    if (cpu == NULL) {
+        return false;
+    }
+    atomic_store_explicit(&cpu->clock_modulation, control, memory_order_release);
+    vcpu_kick(cpu);
+    return true;
+}
+
+// The T-state of the processor's _TSS that is steps slower than the fastest
+// that its _TPC allows, or its slowest, but none slower than min_percent (ACPI
+// 6.6, 8.4.4), if it has them, and how many steps slower than the fastest the
+// slowest is.
+static bool tstate(
+    uacpi_namespace_node *processor, uacpi_object_type type, size_t steps, uint64_t min_percent,
+    size_t *most
+) {
+    uacpi_resource_generic_register reg;
+    uacpi_object *tss;
+    if (!tstate_register(processor, &reg)
+     || uacpi_eval_simple_package(processor, "_TSS", &tss) != UACPI_STATUS_OK) {
+        return false;
+    }
+    bool done = false;
+    uacpi_object_array states;
+    if (uacpi_object_get_package(tss, &states) == UACPI_STATUS_OK && states.count != 0) {
+        uint64_t first;
+        bool found;
+        if (!acpi_eval_optional(processor, "_TPC", &first, &found) || first >= states.count) {
+            first = 0;
+        }
+        size_t slowest = states.count - 1;
+        uint64_t percent;
+        while (slowest > first && tss_field(states.objects[slowest], TSS_PERCENT, &percent)
+            && percent < min_percent) {
+            slowest--;
+        }
+        *most = slowest - first;
+        size_t index = first + steps < slowest ? first + steps : slowest;
+        uint64_t control;
+        done = tss_field(states.objects[index], TSS_CONTROL, &control)
+            && tstate_write(&reg, processor, type, control);
+    }
+    uacpi_object_unref(tss);
+    return done;
+}
+
+// The duty cycle of the processor's P_CNT, at the start of its P_BLK, where
+// the FADT's DUTY_OFFSET and DUTY_WIDTH place it, which changes only while
+// THT_EN is clear (ACPI 6.6, 4.8.1.5 and 8.1.1): steps settings slower than
+// full speed, but none slower than min_percent, if it has one, and how many
+// steps slower than full speed the slowest is.
+static bool duty_cycle(
+    uacpi_namespace_node *processor, uacpi_object_type type, size_t steps, uint64_t min_percent,
+    size_t *most
+) {
+    struct acpi_fadt *fadt;
+    uacpi_processor_info info;
+    if (type != UACPI_OBJECT_PROCESSOR || uacpi_table_fadt(&fadt) != UACPI_STATUS_OK
+     || fadt->duty_width == 0 || fadt->duty_offset + fadt->duty_width > 32
+     || !processor_info(processor, &info)) {
+        return false;
+    }
+    uint32_t settings = (uint32_t)1 << fadt->duty_width;
+    uint32_t mask = (settings - 1) << fadt->duty_offset;
+    if (info.block_length < P_BLK_LENGTH || info.block_address == 0 || info.block_address > 0xfffc
+     || (mask & P_CNT_THT_EN) != 0) {
+        return false;
+    }
+    uint32_t slowest = (uint32_t)((min_percent * settings + 99) / 100);
+    if (slowest == 0) {
+        slowest = 1;
+    } else if (slowest >= settings) {
+        slowest = settings - 1;
+    }
+    *most = settings - slowest;
+    uint16_t port = (uint16_t)info.block_address;
+    uint32_t value = inl(port) & ~P_CNT_THT_EN;
+    outl(port, value);
+    if (steps == 0) {
+        return true;
+    }
+    uint32_t duty = steps < settings - slowest ? settings - (uint32_t)steps : slowest;
+    value = (value & ~mask) | duty << fadt->duty_offset;
+    outl(port, value);
+    outl(port, value | P_CNT_THT_EN);
+    return true;
+}
+
+// The processors that the zone's _PSL names, throttled by its steps: the most
+// steps that any of them can take.
+static size_t throttle(const struct zone *z) {
+    size_t most = 0;
+    uacpi_object *list;
+    uacpi_status status = uacpi_eval_simple_package(z->node, "_PSL", &list);
+    if (status != UACPI_STATUS_OK) {
+        acpi_log_failure(z->node, "_PSL", status);
+        return most;
+    }
+    uacpi_object_array elements;
+    if (uacpi_object_get_package(list, &elements) == UACPI_STATUS_OK) {
+        for (size_t i = 0; i < elements.count; i++) {
+            uacpi_namespace_node *node = element_node(elements.objects[i], z->node);
+            uacpi_object_type type;
+            if (node == NULL || uacpi_namespace_node_type(node, &type) != UACPI_STATUS_OK
+             || (type != UACPI_OBJECT_PROCESSOR && type != UACPI_OBJECT_DEVICE)) {
+                continue;
+            }
+            size_t its = 0;
+            if (!tstate(node, type, z->steps, z->min_percent, &its)
+             && !duty_cycle(node, type, z->steps, z->min_percent, &its)) {
+                const char *path = acpi_path(node);
+                printf("Processor %s has no throttling that ReBIOS can use\n", path);
+                acpi_path_free(path);
+            }
+            if (its > most) {
+                most = its;
+            }
+        }
+    }
+    uacpi_object_unref(list);
+    return most;
+}
+
+// The zone's processors are throttled a step at a time as the trend of ACPI
+// 6.6's equation 1 goes (11.1.5.1), as Linux 7.3's step-wise governor does
+// (thermal.c, thermal_get_trend(), and gov_step_wise.c, get_target_state()):
+// a step slower as it rises past the trip point, and one faster as it falls,
+// but no less than one, and all of them back once it falls below it.
+static void cool_passively(struct zone *z, uint64_t now) {
+    if (z->passive == 0) {
+        return;
+    }
+    int64_t rise = z->last != 0 ? (int64_t)now - (int64_t)z->last : 0;
+    int64_t trend = z->tc1 * rise + z->tc2 * ((int64_t)now - (int64_t)z->passive);
+    z->last = now;
+    size_t steps = z->steps;
+    if (now >= z->passive && trend > 0 && steps < z->steps_max) {
+        steps++;
+    } else if (now >= z->passive && trend < 0 && steps > 1) {
+        steps--;
+    } else if (now < z->passive && trend < 0) {
+        steps = 0;
+    }
+    if (steps == z->steps) {
+        return;
+    }
+    size_t before = z->steps;
+    z->steps = steps;
+    z->steps_max = throttle(z);
+    if (z->steps > z->steps_max) {
+        z->steps = z->steps_max;
+    }
+    if (z->steps == before) {
+        return;
+    }
+    const char *path = acpi_path(z->node);
+    printf(
+        "Thermal zone %s at %lld C, its processors' throttling at step %zu\n", path, celsius(now),
+        z->steps
+    );
+    acpi_path_free(path);
+}
+
 // Past its critical trip point, an OSPM shuts the machine down at once (ACPI
 // 6.6, 11.1.6), and past its hot one, where a guest without one could not go
 // to sleep, so does ReBIOS.
@@ -255,6 +565,7 @@ static void check(struct zone *z) {
         power_off();
     }
     cool_actively(z, now);
+    cool_passively(z, now);
 }
 
 // In the AML task.
@@ -266,19 +577,30 @@ static void poll(uacpi_handle ctx) {
     if (guest != guest_watches) {
         guest_watches = guest;
         printf("The thermal zones are the %s's to watch\n", guest ? "guest" : "hypervisor");
-        // The guest's OSPM finds the devices as ReBIOS left them.
+        // The guest's OSPM finds the devices as ReBIOS left them, but for its
+        // processors at full speed.
         if (guest) {
             for (size_t i = 0; i < zone_count; i++) {
-                memset(zones[i].active_on, 0, sizeof(zones[i].active_on));
+                struct zone *z = &zones[i];
+                memset(z->active_on, 0, sizeof(z->active_on));
+                if (z->steps != 0) {
+                    z->steps = 0;
+                    z->steps_max = throttle(z);
+                }
+                z->last = 0;
             }
             resource_count = 0;
         }
     }
     if (!guest) {
         for (size_t i = 0; i < zone_count; i++) {
-            check(&zones[i]);
-            if (zones[i].poll_ds < next_ds) {
-                next_ds = zones[i].poll_ds;
+            struct zone *z = &zones[i];
+            check(z);
+            // Passive cooling samples the zone at its own period meanwhile.
+            bool sampling = z->passive != 0 && (z->steps != 0 || z->last >= z->passive);
+            uint64_t period = sampling ? z->sample_ds : z->poll_ds;
+            if (period < next_ds) {
+                next_ds = period;
             }
         }
     }
@@ -296,10 +618,11 @@ static void poll_soon(void *ctx) {
 static uacpi_status zone_notified(uacpi_handle ctx, uacpi_namespace_node *node, uacpi_u64 value) {
     (void)node;
     struct zone *z = ctx;
-    if (value == NOTIFY_ZONE_TRIP_POINTS) {
+    if (value == NOTIFY_ZONE_TRIP_POINTS || value == NOTIFY_ZONE_DEVICES) {
         read_trip_points(z);
     }
-    if (value == NOTIFY_ZONE_STATUS || value == NOTIFY_ZONE_TRIP_POINTS) {
+    if (value == NOTIFY_ZONE_STATUS || value == NOTIFY_ZONE_TRIP_POINTS
+     || value == NOTIFY_ZONE_DEVICES) {
         poll_soon(NULL);
     }
     return UACPI_STATUS_OK;

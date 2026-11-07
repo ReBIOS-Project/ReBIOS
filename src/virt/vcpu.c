@@ -31,6 +31,7 @@
 #include <lib/util.h>
 #include <memory.h>
 #include <sys/cpu.h>
+#include <sys/fixup.h>
 #include <sys/smp.h>
 #include <sys/x86.h>
 #include <virt/cpuid.h>
@@ -251,6 +252,16 @@ void vcpu_before_entry(struct vcpu *v) {
     service_pause(v);
     ferr_follow(v);
     acpi_slice();
+    uint64_t modulation = atomic_load_explicit(&v->cpu->clock_modulation, memory_order_acquire);
+    if (modulation != v->cpu->clock_modulation_set) {
+        v->cpu->clock_modulation_set = modulation;
+        if (!wrmsr_safe(MSR_IA32_CLOCK_MODULATION, modulation)) {
+            printf(
+                "CPU %u refuses IA32_CLOCK_MODULATION %#llx\n", v->cpu->index,
+                (unsigned long long)modulation
+            );
+        }
+    }
     // Before the flush below, which the display's remapping may need.
     vga_refresh();
     nvmx_wait(v);

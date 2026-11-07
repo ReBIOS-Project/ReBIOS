@@ -75,6 +75,7 @@
 #define MSR_IA32_XAPIC_DISABLE_STATUS 0xbd
 #define MSR_IA32_ARCH_CAPABILITIES 0x10a
 #define MSR_IA32_MCG_CAP 0x179
+#define MSR_IA32_CLOCK_MODULATION 0x19a
 #define MSR_IA32_MISC_ENABLE 0x1a0
 #define MSR_IA32_DEBUGCTL 0x1d9
 #define MSR_IA32_PAT 0x277
@@ -136,6 +137,7 @@
 #define RFLAGS_ID ((uint32_t)1 << 21)
 
 #define CPUID_1_ECX_TSC_DEADLINE ((uint32_t)1 << 24)
+#define CPUID_1_EDX_ACPI ((uint32_t)1 << 22)
 #define CPUID_7_EBX_MPX ((uint32_t)1 << 14)
 #define CPUID_7_EBX_PT ((uint32_t)1 << 25)
 #define CPUID_D_1_EAX_XSAVES ((uint32_t)1 << 3)
