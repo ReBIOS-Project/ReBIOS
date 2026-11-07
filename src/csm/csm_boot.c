@@ -159,8 +159,8 @@ static uint32_t smbios_copy(size_t *table_length) {
     }
     const uint8_t *entry = (const void *)(uintptr_t)core_handoff->smbios_entry;
     size_t entry_length = entry[SMBIOS2_LENGTH];
-    size_t length;
-    uintptr_t table;
+    size_t length = 0;
+    uintptr_t table = 0;
     memcpy(&length, entry + SMBIOS2_TABLE_LENGTH, sizeof(uint16_t));
     memcpy(&table, entry + SMBIOS2_TABLE_ADDRESS, sizeof(uint32_t));
     if (entry_length > SMBIOS2_ENTRY_SPACE) {
