@@ -20,7 +20,6 @@
 #include <stdint.h>
 #include <virt/kbc.h>
 #include <hw/i8042.h>
-#include <hw/power.h>
 #include <lib/spinlock.h>
 #include <lib/time.h>
 #include <sys/x86.h>
@@ -29,6 +28,7 @@
 #include <virt/io.h>
 #include <virt/irq.h>
 #include <virt/kbc_keys.h>
+#include <virt/vcpu.h>
 
 struct vcpu;
 
@@ -226,6 +226,11 @@ static bool keyboard_line;
 static bool aux_line;
 static bool last_was_command;
 static uint8_t output_port = OUTPUT_RESET_HIGH | OUTPUT_A20;
+// RCIN#, which the output port's reset line drives: INIT# as it goes low, and
+// again only once it went high (ICH10 datasheet 319973-003, 5.12.1.2, Table
+// 5-22). The legacy BIOS then resumes where the CMOS shutdown byte asks it to,
+// or resets the machine.
+static bool rcin_high = true;
 static int expecting;
 static size_t expected_ram;
 static bool translate_break;
@@ -733,13 +738,17 @@ static void aux_command(uint8_t byte) {
     }
 }
 
+static void reset_line(bool high) {
+    if (!high && rcin_high) {
+        vcpu_init_all();
+    }
+    rcin_high = high;
+}
+
 static void output_port_write(uint8_t value) {
     output_port = value;
     a20_kbc_set((value & OUTPUT_A20) != 0);
-    // Held in reset while it stays low, for which there is no coming back.
-    if ((value & OUTPUT_RESET_HIGH) == 0) {
-        power_reset(false);
-    }
+    reset_line((value & OUTPUT_RESET_HIGH) != 0);
 }
 
 static uint8_t output_port_read(void) {
@@ -762,9 +771,10 @@ static void command_write(uint8_t value) {
         return;
     }
     if (value >= COMMAND_PULSE_FIRST) {
-        // Only the reset line reaches anything still.
+        // Only the reset line reaches anything still, which goes back up.
         if ((value & OUTPUT_RESET_HIGH) == 0) {
-            power_reset(false);
+            reset_line(false);
+            reset_line(true);
         }
         return;
     }
