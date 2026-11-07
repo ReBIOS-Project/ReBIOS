@@ -37,12 +37,6 @@ void vgabios_rom_fill(uint8_t *image);
 
 #define VGABIOS_SEGMENT 0xc000
 
-// The BIOS data area, and what more than one part of the video BIOS reads.
-#define BDA 0x0040
-#define BDA_MODE 0x49
-#define BDA_VIDEO_CONTROL 0x87
-#define VIDEO_CONTROL_KEPT 0x80
-
 // What the ROM holds besides the program, for callers that get far pointers.
 #define ROM_FONT8 0x0800
 #define ROM_FONT14 0x1000

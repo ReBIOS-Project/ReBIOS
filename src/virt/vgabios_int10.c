@@ -18,29 +18,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <virt/bda.h>
 #include <virt/vgabios.h>
-
-#define BDA_EQUIPMENT 0x10
-#define BDA_COLUMNS 0x4a
-#define BDA_PAGE_SIZE 0x4c
-#define BDA_PAGE_START 0x4e
-#define BDA_CURSOR 0x50
-#define BDA_CURSOR_TYPE 0x60
-#define BDA_PAGE 0x62
-#define BDA_CRTC 0x63
-#define BDA_MODE_CONTROL 0x65
-#define BDA_PALETTE 0x66
-#define BDA_ROWS 0x84
-#define BDA_CHAR_HEIGHT 0x85
-#define BDA_SWITCHES 0x88
-#define BDA_VGA_FLAGS 0x89
-#define BDA_DCC 0x8a
-
-#define VIDEO_CONTROL_NO_EMULATION 0x01
-#define VGA_FLAGS_GREY 0x02
-#define VGA_FLAGS_NO_PALETTE 0x08
-#define VGA_FLAGS_400 0x10
-#define VGA_FLAGS_200 0x80
 
 #define VECTOR(n) ((uint16_t)((n) * 4))
 
@@ -140,10 +119,10 @@ static const struct vgabios_mode *find_mode(uint8_t number) {
 // The line count INT 10h AH=12h BL=30h picked for the text modes.
 static uint16_t text_lines(void) {
     uint8_t flags = peekb(BDA, BDA_VGA_FLAGS);
-    if ((flags & VGA_FLAGS_200) != 0) {
+    if ((flags & BDA_VGA_FLAGS_200) != 0) {
         return 200;
     }
-    return (flags & VGA_FLAGS_400) != 0 ? 400 : 350;
+    return (flags & BDA_VGA_FLAGS_400) != 0 ? 400 : 350;
 }
 
 static const struct vgabios_mode *current_mode(void) {
@@ -174,7 +153,7 @@ static void load_palette(uint8_t index) {
     const uint8_t *colours = p->colours;
     size_t bytes = p->count * (uint32_t)3;
     bios_out(DAC_WRITE_INDEX, 0);
-    if ((peekb(BDA, BDA_VGA_FLAGS) & VGA_FLAGS_GREY) == 0) {
+    if ((peekb(BDA, BDA_VGA_FLAGS) & BDA_VGA_FLAGS_GREY) == 0) {
         bios_dac_from_rom(vgabios_palette_offset(index), bytes);
         return;
     }
@@ -312,7 +291,7 @@ static void set_mode(uint8_t requested) {
 
     pokew(BDA, BDA_CRTC, port);
     bios_out(PEL_MASK, 0xff);
-    if ((peekb(BDA, BDA_VGA_FLAGS) & VGA_FLAGS_NO_PALETTE) == 0) {
+    if ((peekb(BDA, BDA_VGA_FLAGS) & BDA_VGA_FLAGS_NO_PALETTE) == 0) {
         load_palette(m->palette);
     }
     if (!keep) {
@@ -335,8 +314,8 @@ static void set_mode(uint8_t requested) {
     pokeb(BDA, BDA_PALETTE, m->mode == 6 ? 0x3f : 0x30);
     pokeb(BDA, BDA_ROWS, (uint8_t)(m->rows - 1));
     pokew(BDA, BDA_CHAR_HEIGHT, m->char_height);
-    uint8_t control = peekb(BDA, BDA_VIDEO_CONTROL) & (uint8_t)~VIDEO_CONTROL_KEPT;
-    pokeb(BDA, BDA_VIDEO_CONTROL, (uint8_t)(control | (keep ? VIDEO_CONTROL_KEPT : 0)));
+    uint8_t control = peekb(BDA, BDA_VIDEO_CONTROL) & (uint8_t)~BDA_VIDEO_CONTROL_KEPT;
+    pokeb(BDA, BDA_VIDEO_CONTROL, (uint8_t)(control | (keep ? BDA_VIDEO_CONTROL_KEPT : 0)));
     uint16_t equipment = peekw(BDA, BDA_EQUIPMENT) & (uint16_t)~0x30;
     pokew(BDA, BDA_EQUIPMENT, (uint16_t)(equipment | (port == 0x3b4 ? 0x30 : 0x20)));
 
@@ -373,7 +352,7 @@ static uint16_t get_cursor(uint8_t page) {
 static void set_cursor_type(uint8_t start, uint8_t end) {
     pokew(BDA, BDA_CURSOR_TYPE, (uint16_t)(start << 8 | end));
     uint8_t height = peekb(BDA, BDA_CHAR_HEIGHT);
-    if ((peekb(BDA, BDA_VIDEO_CONTROL) & VIDEO_CONTROL_NO_EMULATION) == 0 && height > 8
+    if ((peekb(BDA, BDA_VIDEO_CONTROL) & BDA_VIDEO_CONTROL_NO_EMULATION) == 0 && height > 8
      && (start & 0x20) == 0 && start < 8 && end < 8) {
         if (start == 6 && end == 7) {
             start = (uint8_t)(height - 3);
@@ -968,7 +947,7 @@ static void palette_functions(struct vgabios_regs *r) {
         }
         case 0x1b: {
             uint8_t flags = peekb(BDA, BDA_VGA_FLAGS);
-            pokeb(BDA, BDA_VGA_FLAGS, (uint8_t)(flags | VGA_FLAGS_GREY));
+            pokeb(BDA, BDA_VGA_FLAGS, (uint8_t)(flags | BDA_VGA_FLAGS_GREY));
             for (size_t i = 0; i < r->cx; i++) {
                 uint8_t index = (uint8_t)(r->bl + i);
                 bios_out(DAC_READ_INDEX, index);
@@ -1131,19 +1110,22 @@ static void alternate_select(struct vgabios_regs *r) {
             break;
         }
         case 0x30: {
-            uint8_t flags = peekb(BDA, BDA_VGA_FLAGS) & (uint8_t)~(VGA_FLAGS_200 | VGA_FLAGS_400);
+            uint8_t flags = peekb(BDA, BDA_VGA_FLAGS)
+                          & (uint8_t)~(BDA_VGA_FLAGS_200 | BDA_VGA_FLAGS_400);
             if (r->al == 0) {
-                flags |= VGA_FLAGS_200;
+                flags |= BDA_VGA_FLAGS_200;
             } else if (r->al == 2) {
-                flags |= VGA_FLAGS_400;
+                flags |= BDA_VGA_FLAGS_400;
             }
             pokeb(BDA, BDA_VGA_FLAGS, flags);
             r->al = 0x12;
             break;
         }
         case 0x31: {
-            uint8_t flags = peekb(BDA, BDA_VGA_FLAGS) & (uint8_t)~VGA_FLAGS_NO_PALETTE;
-            pokeb(BDA, BDA_VGA_FLAGS, (uint8_t)(flags | (r->al != 0 ? VGA_FLAGS_NO_PALETTE : 0)));
+            uint8_t flags = peekb(BDA, BDA_VGA_FLAGS) & (uint8_t)~BDA_VGA_FLAGS_NO_PALETTE;
+            pokeb(
+                BDA, BDA_VGA_FLAGS, (uint8_t)(flags | (r->al != 0 ? BDA_VGA_FLAGS_NO_PALETTE : 0))
+            );
             r->al = 0x12;
             break;
         }
@@ -1153,16 +1135,17 @@ static void alternate_select(struct vgabios_regs *r) {
             break;
         }
         case 0x33: {
-            uint8_t flags = peekb(BDA, BDA_VGA_FLAGS) & (uint8_t)~VGA_FLAGS_GREY;
-            pokeb(BDA, BDA_VGA_FLAGS, (uint8_t)(flags | (r->al != 0 ? 0 : VGA_FLAGS_GREY)));
+            uint8_t flags = peekb(BDA, BDA_VGA_FLAGS) & (uint8_t)~BDA_VGA_FLAGS_GREY;
+            pokeb(BDA, BDA_VGA_FLAGS, (uint8_t)(flags | (r->al != 0 ? 0 : BDA_VGA_FLAGS_GREY)));
             r->al = 0x12;
             break;
         }
         case 0x34: {
-            uint8_t control = peekb(BDA, BDA_VIDEO_CONTROL) & (uint8_t)~VIDEO_CONTROL_NO_EMULATION;
+            uint8_t control = peekb(BDA, BDA_VIDEO_CONTROL)
+                            & (uint8_t)~BDA_VIDEO_CONTROL_NO_EMULATION;
             pokeb(
                 BDA, BDA_VIDEO_CONTROL,
-                (uint8_t)(control | (r->al != 0 ? VIDEO_CONTROL_NO_EMULATION : 0))
+                (uint8_t)(control | (r->al != 0 ? BDA_VIDEO_CONTROL_NO_EMULATION : 0))
             );
             r->al = 0x12;
             break;

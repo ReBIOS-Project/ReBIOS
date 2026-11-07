@@ -26,6 +26,7 @@
 #include <memory.h>
 #include <sys/task.h>
 #include <sys/x86.h>
+#include <virt/bda.h>
 #include <virt/edid.h>
 #include <virt/io.h>
 #include <virt/mmio.h>

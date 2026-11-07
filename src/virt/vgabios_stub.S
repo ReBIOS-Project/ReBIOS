@@ -24,6 +24,8 @@
 // keeps to the 8086's simplest instructions, as those emulators have been seen
 // to get others wrong. This is data to the hypervisor.
 
+#include <virt/bda.h>
+
 .section .rodata.vgabios_stub, "a"
 .code16
 .arch i8086
@@ -33,18 +35,6 @@
 #define KNOCK 0x5242
 #define KNOCK_INIT 0x5243
 #define VGA_PORTS 0x3b0
-
-#define BDA 0x40
-#define BDA_MODE 0x49
-#define BDA_COLUMNS 0x4a
-#define BDA_PAGE_SIZE 0x4c
-#define BDA_PAGE_START 0x4e
-#define BDA_CURSOR 0x50
-#define BDA_CURSOR_TYPE 0x60
-#define BDA_PAGE 0x62
-#define BDA_CRTC 0x63
-#define BDA_ROWS 0x84
-#define BDA_VIDEO_CONTROL 0x87
 
 #define FRAME_AX 0
 #define FRAME_BX 2

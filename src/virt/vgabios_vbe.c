@@ -23,6 +23,7 @@
 #include <stdint.h>
 #include <lib/util.h>
 #include <memory.h>
+#include <virt/bda.h>
 #include <virt/dispi.h>
 #include <virt/vga.h>
 #include <virt/vgabios.h>
@@ -405,15 +406,15 @@ static void set_mode(struct vgabios_regs *r) {
     if (m.bpp == 8) {
         vgabios_load_palette_256();
     }
-    uint8_t control = peekb(BDA, BDA_VIDEO_CONTROL) & (uint8_t)~VIDEO_CONTROL_KEPT;
-    pokeb(BDA, BDA_VIDEO_CONTROL, (uint8_t)(control | (keep ? VIDEO_CONTROL_KEPT : 0)));
+    uint8_t control = peekb(BDA, BDA_VIDEO_CONTROL) & (uint8_t)~BDA_VIDEO_CONTROL_KEPT;
+    pokeb(BDA, BDA_VIDEO_CONTROL, (uint8_t)(control | (keep ? BDA_VIDEO_CONTROL_KEPT : 0)));
     r->ax = STATUS_SUCCESS;
 }
 
 static void current_mode(struct vgabios_regs *r) {
     uint16_t enable = dispi_read(DISPI_ENABLE);
     if ((enable & DISPI_ENABLED) == 0) {
-        bool kept = (peekb(BDA, BDA_VIDEO_CONTROL) & VIDEO_CONTROL_KEPT) != 0;
+        bool kept = (peekb(BDA, BDA_VIDEO_CONTROL) & BDA_VIDEO_CONTROL_KEPT) != 0;
         r->bx = (uint16_t)(peekb(BDA, BDA_MODE) | (kept ? MODE_KEEP : 0));
         r->ax = STATUS_SUCCESS;
         return;
