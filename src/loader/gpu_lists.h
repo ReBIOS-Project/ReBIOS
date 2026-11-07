@@ -21,11 +21,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define GPU_ANY_REVISION (-1)
+#define GPU_LISTS_ANY_REVISION (-1)
 
 // PCI device IDs of a vendor from first to last, of one PCI revision or of
 // any.
-struct gpu_id {
+struct gpu_lists_id {
     uint16_t vendor;
     uint16_t first;
     uint16_t last;
@@ -34,11 +34,11 @@ struct gpu_id {
 
 // Integrated graphics and GPUs soldered to the board from 2018 on, whose Video
 // BIOS does not run on its own, and takes precedence over the allowlist.
-extern const struct gpu_id vbios_blocklist[];
-extern const size_t vbios_blocklist_count;
+extern const struct gpu_lists_id gpu_lists_vbios_blocklist[];
+extern const size_t gpu_lists_vbios_blocklist_count;
 
 // Those from before 2018, and cards for slots, whose Video BIOS runs.
-extern const struct gpu_id vbios_allowlist[];
-extern const size_t vbios_allowlist_count;
+extern const struct gpu_lists_id gpu_lists_vbios_allowlist[];
+extern const size_t gpu_lists_vbios_allowlist_count;
 
 #endif

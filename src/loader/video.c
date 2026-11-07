@@ -410,12 +410,14 @@ static bool load_user_vbios(struct user_vbios *vbios) {
     return true;
 }
 
-static bool gpu_listed(const struct gpu_id *list, size_t count, const struct pci_io_device *dev) {
+static bool gpu_listed(
+    const struct gpu_lists_id *list, size_t count, const struct pci_io_device *dev
+) {
     for (size_t i = 0; i < count; i++) {
-        const struct gpu_id *id = &list[i];
+        const struct gpu_lists_id *id = &list[i];
         if (id->vendor == dev->vendor_id && id->first <= dev->device_id
          && id->last >= dev->device_id
-         && (id->revision == GPU_ANY_REVISION || id->revision == dev->revision)) {
+         && (id->revision == GPU_LISTS_ANY_REVISION || id->revision == dev->revision)) {
             return true;
         }
     }
@@ -447,10 +449,11 @@ static bool slotted_card(const struct pci_io_device *dev) {
 }
 
 static bool vbios_trusted(const struct pci_io_device *dev) {
-    if (gpu_listed(vbios_blocklist, vbios_blocklist_count, dev)) {
+    if (gpu_listed(gpu_lists_vbios_blocklist, gpu_lists_vbios_blocklist_count, dev)) {
         return false;
     }
-    return gpu_listed(vbios_allowlist, vbios_allowlist_count, dev) || slotted_card(dev);
+    return gpu_listed(gpu_lists_vbios_allowlist, gpu_lists_vbios_allowlist_count, dev)
+        || slotted_card(dev);
 }
 
 // The aliased variant of the I/O decoding is preferred, as legacy software

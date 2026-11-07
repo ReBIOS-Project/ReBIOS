@@ -23,606 +23,446 @@
 #include <loader/gpu_lists.h>
 #include <lib/util.h>
 
-const struct gpu_id vbios_blocklist[] = {
-    // Coffee Lake-S GT2 [UHD Graphics P630].
-    { 0x8086, 0x3e94, 0x3e94, GPU_ANY_REVISION },
-    // CoffeeLake-H GT2 [UHD Graphics 630].
-    { 0x8086, 0x3e9b, 0x3e9b, GPU_ANY_REVISION },
-    // Coffee Lake-S GT1 [UHD Graphics 610].
-    { 0x8086, 0x3e9c, 0x3e9c, GPU_ANY_REVISION },
-    // WhiskeyLake-U GT2 [UHD Graphics 620].
-    { 0x8086, 0x3ea0, 0x3ea0, GPU_ANY_REVISION },
-    // Whiskey Lake-U GT1 [UHD Graphics 610].
-    { 0x8086, 0x3ea1, 0x3ea1, GPU_ANY_REVISION },
-    { 0x8086, 0x3ea2, 0x3ea2, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x3ea3, 0x3ea3, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x3ea4, 0x3ea4, GPU_ANY_REVISION }, // Intel graphics.
+#define ANY GPU_LISTS_ANY_REVISION
+
+const struct gpu_lists_id gpu_lists_vbios_blocklist[] = {
+    { 0x8086, 0x3e94, 0x3e94, ANY }, // Coffee Lake-S GT2 [UHD Graphics P630].
+    { 0x8086, 0x3e9b, 0x3e9b, ANY }, // CoffeeLake-H GT2 [UHD Graphics 630].
+    { 0x8086, 0x3e9c, 0x3e9c, ANY }, // Coffee Lake-S GT1 [UHD Graphics 610].
+    { 0x8086, 0x3ea0, 0x3ea0, ANY }, // WhiskeyLake-U GT2 [UHD Graphics 620].
+    { 0x8086, 0x3ea1, 0x3ea1, ANY }, // Whiskey Lake-U GT1 [UHD Graphics 610].
+    { 0x8086, 0x3ea2, 0x3ea2, ANY }, // Intel graphics.
+    { 0x8086, 0x3ea3, 0x3ea3, ANY }, // Intel graphics.
+    { 0x8086, 0x3ea4, 0x3ea4, ANY }, // Intel graphics.
     // CoffeeLake-U GT3e [Iris Plus Graphics 655].
-    { 0x8086, 0x3ea5, 0x3ea5, GPU_ANY_REVISION },
+    { 0x8086, 0x3ea5, 0x3ea5, ANY },
     // Coffee Lake-U GT3 [Iris Plus Graphics 645].
-    { 0x8086, 0x3ea6, 0x3ea6, GPU_ANY_REVISION },
-    { 0x8086, 0x3ea7, 0x3ea7, GPU_ANY_REVISION }, // Intel graphics.
+    { 0x8086, 0x3ea6, 0x3ea6, ANY },
+    { 0x8086, 0x3ea7, 0x3ea7, ANY }, // Intel graphics.
     // Coffee Lake-U GT3 [Iris Plus Graphics 655].
-    { 0x8086, 0x3ea8, 0x3ea8, GPU_ANY_REVISION },
-    // Coffee Lake-U GT2 [UHD Graphics 620].
-    { 0x8086, 0x3ea9, 0x3ea9, GPU_ANY_REVISION },
-    { 0x8086, 0x4541, 0x4541, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x4551, 0x4551, GPU_ANY_REVISION }, // Intel graphics.
-    // Elkhart Lake [UHD Graphics Gen11 16EU].
-    { 0x8086, 0x4555, 0x4555, GPU_ANY_REVISION },
-    { 0x8086, 0x4557, 0x4557, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x4570, 0x4570, GPU_ANY_REVISION }, // Intel graphics.
-    // Elkhart Lake [UHD Graphics Gen11 32EU].
-    { 0x8086, 0x4571, 0x4571, GPU_ANY_REVISION },
+    { 0x8086, 0x3ea8, 0x3ea8, ANY },
+    { 0x8086, 0x3ea9, 0x3ea9, ANY }, // Coffee Lake-U GT2 [UHD Graphics 620].
+    { 0x8086, 0x4541, 0x4541, ANY }, // Intel graphics.
+    { 0x8086, 0x4551, 0x4551, ANY }, // Intel graphics.
+    { 0x8086, 0x4555, 0x4555, ANY }, // Elkhart Lake [UHD Graphics Gen11 16EU].
+    { 0x8086, 0x4557, 0x4557, ANY }, // Intel graphics.
+    { 0x8086, 0x4570, 0x4570, ANY }, // Intel graphics.
+    { 0x8086, 0x4571, 0x4571, ANY }, // Elkhart Lake [UHD Graphics Gen11 32EU].
     // Alder Lake-P Integrated Graphics Controller.
-    { 0x8086, 0x4626, 0x4626, GPU_ANY_REVISION },
-    // Alder Lake-UP3 GT2 [UHD Graphics].
-    { 0x8086, 0x4628, 0x4628, GPU_ANY_REVISION },
-    // AlderLake-P [UHD Graphics].
-    { 0x8086, 0x462a, 0x462a, GPU_ANY_REVISION },
-    // Alder Lake-S GT1 [UHD Graphics 770].
-    { 0x8086, 0x4680, 0x4680, GPU_ANY_REVISION },
-    // Alder Lake-S GT1 [UHD Graphics 730].
-    { 0x8086, 0x4682, 0x4682, GPU_ANY_REVISION },
-    // Alder Lake-HX GT1 [UHD Graphics 770].
-    { 0x8086, 0x4688, 0x4688, GPU_ANY_REVISION },
-    // Alder Lake-S [UHD Graphics].
-    { 0x8086, 0x468a, 0x468a, GPU_ANY_REVISION },
-    // Alder Lake-S [UHD Graphics].
-    { 0x8086, 0x468b, 0x468b, GPU_ANY_REVISION },
-    // Alder Lake-S GT1 [UHD Graphics 770].
-    { 0x8086, 0x4690, 0x4690, GPU_ANY_REVISION },
-    // Alder Lake-S GT1 [UHD Graphics 730].
-    { 0x8086, 0x4692, 0x4692, GPU_ANY_REVISION },
-    // Alder Lake-S GT1 [UHD Graphics 710].
-    { 0x8086, 0x4693, 0x4693, GPU_ANY_REVISION },
-    { 0x8086, 0x46a0, 0x46a0, GPU_ANY_REVISION }, // AlderLake-P GT2.
-    { 0x8086, 0x46a1, 0x46a1, GPU_ANY_REVISION }, // UHD Graphics.
-    { 0x8086, 0x46a2, 0x46a2, GPU_ANY_REVISION }, // Intel graphics.
-    // Alder Lake-P GT1 [UHD Graphics].
-    { 0x8086, 0x46a3, 0x46a3, GPU_ANY_REVISION },
-    // Alder Lake-P GT2 [Iris Xe Graphics].
-    { 0x8086, 0x46a6, 0x46a6, GPU_ANY_REVISION },
-    // Alder Lake-UP3 GT2 [Iris Xe Graphics].
-    { 0x8086, 0x46a8, 0x46a8, GPU_ANY_REVISION },
-    // Alder Lake-UP4 GT2 [Iris Xe Graphics].
-    { 0x8086, 0x46aa, 0x46aa, GPU_ANY_REVISION },
-    // AlderLake-P [Iris Xe Graphics].
-    { 0x8086, 0x46b0, 0x46b0, GPU_ANY_REVISION },
-    // AlderLake-P [Iris Xe Graphics].
-    { 0x8086, 0x46b1, 0x46b1, GPU_ANY_REVISION },
-    { 0x8086, 0x46b2, 0x46b2, GPU_ANY_REVISION }, // Intel graphics.
-    // Alder Lake-UP3 GT1 [UHD Graphics].
-    { 0x8086, 0x46b3, 0x46b3, GPU_ANY_REVISION },
-    { 0x8086, 0x46c0, 0x46c0, GPU_ANY_REVISION }, // AlderLake-M GT1.
-    // AlderLake-M [Iris Xe Graphics].
-    { 0x8086, 0x46c1, 0x46c1, GPU_ANY_REVISION },
-    { 0x8086, 0x46c2, 0x46c2, GPU_ANY_REVISION }, // Intel graphics.
-    // Alder Lake-UP4 GT1 [UHD Graphics].
-    { 0x8086, 0x46c3, 0x46c3, GPU_ANY_REVISION },
-    // Alder Lake-N [UHD Graphics].
-    { 0x8086, 0x46d0, 0x46d0, GPU_ANY_REVISION },
-    // Alder Lake-N [UHD Graphics].
-    { 0x8086, 0x46d1, 0x46d1, GPU_ANY_REVISION },
-    // Alder Lake-N [UHD Graphics].
-    { 0x8086, 0x46d2, 0x46d2, GPU_ANY_REVISION },
-    // Alder Lake-N [Intel Graphics].
-    { 0x8086, 0x46d3, 0x46d3, GPU_ANY_REVISION },
-    // Alder Lake-N [Intel Graphics].
-    { 0x8086, 0x46d4, 0x46d4, GPU_ANY_REVISION },
-    { 0x8086, 0x4c80, 0x4c80, GPU_ANY_REVISION }, // Intel graphics.
-    // RocketLake-S GT1 [UHD Graphics 750].
-    { 0x8086, 0x4c8a, 0x4c8a, GPU_ANY_REVISION },
-    // RocketLake-S GT1 [UHD Graphics 730].
-    { 0x8086, 0x4c8b, 0x4c8b, GPU_ANY_REVISION },
-    { 0x8086, 0x4c8c, 0x4c8c, GPU_ANY_REVISION }, // Intel graphics.
-    // RocketLake-S GT1 [UHD Graphics P750].
-    { 0x8086, 0x4c90, 0x4c90, GPU_ANY_REVISION },
-    // RocketLake-S [UHD Graphics].
-    { 0x8086, 0x4c9a, 0x4c9a, GPU_ANY_REVISION },
-    { 0x8086, 0x4e51, 0x4e51, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x4e55, 0x4e55, GPU_ANY_REVISION }, // JasperLake [UHD Graphics].
-    { 0x8086, 0x4e57, 0x4e57, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x4e61, 0x4e61, GPU_ANY_REVISION }, // JasperLake [UHD Graphics].
-    { 0x8086, 0x4e71, 0x4e71, GPU_ANY_REVISION }, // JasperLake [UHD Graphics].
-    { 0x8086, 0x591c, 0x591c, GPU_ANY_REVISION }, // UHD Graphics 615.
-    { 0x8086, 0x5a40, 0x5a40, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x5a41, 0x5a41, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x5a42, 0x5a42, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x5a44, 0x5a44, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x5a49, 0x5a49, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x5a4a, 0x5a4a, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x5a4c, 0x5a4c, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x5a50, 0x5a50, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x5a51, 0x5a51, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x5a52, 0x5a52, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x5a54, 0x5a54, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x5a59, 0x5a59, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x5a5a, 0x5a5a, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x5a5c, 0x5a5c, GPU_ANY_REVISION }, // Intel graphics.
-    // Lunar Lake [Intel Graphics].
-    { 0x8086, 0x6420, 0x6420, GPU_ANY_REVISION },
+    { 0x8086, 0x4626, 0x4626, ANY },
+    { 0x8086, 0x4628, 0x4628, ANY }, // Alder Lake-UP3 GT2 [UHD Graphics].
+    { 0x8086, 0x462a, 0x462a, ANY }, // AlderLake-P [UHD Graphics].
+    { 0x8086, 0x4680, 0x4680, ANY }, // Alder Lake-S GT1 [UHD Graphics 770].
+    { 0x8086, 0x4682, 0x4682, ANY }, // Alder Lake-S GT1 [UHD Graphics 730].
+    { 0x8086, 0x4688, 0x4688, ANY }, // Alder Lake-HX GT1 [UHD Graphics 770].
+    { 0x8086, 0x468a, 0x468a, ANY }, // Alder Lake-S [UHD Graphics].
+    { 0x8086, 0x468b, 0x468b, ANY }, // Alder Lake-S [UHD Graphics].
+    { 0x8086, 0x4690, 0x4690, ANY }, // Alder Lake-S GT1 [UHD Graphics 770].
+    { 0x8086, 0x4692, 0x4692, ANY }, // Alder Lake-S GT1 [UHD Graphics 730].
+    { 0x8086, 0x4693, 0x4693, ANY }, // Alder Lake-S GT1 [UHD Graphics 710].
+    { 0x8086, 0x46a0, 0x46a0, ANY }, // AlderLake-P GT2.
+    { 0x8086, 0x46a1, 0x46a1, ANY }, // UHD Graphics.
+    { 0x8086, 0x46a2, 0x46a2, ANY }, // Intel graphics.
+    { 0x8086, 0x46a3, 0x46a3, ANY }, // Alder Lake-P GT1 [UHD Graphics].
+    { 0x8086, 0x46a6, 0x46a6, ANY }, // Alder Lake-P GT2 [Iris Xe Graphics].
+    { 0x8086, 0x46a8, 0x46a8, ANY }, // Alder Lake-UP3 GT2 [Iris Xe Graphics].
+    { 0x8086, 0x46aa, 0x46aa, ANY }, // Alder Lake-UP4 GT2 [Iris Xe Graphics].
+    { 0x8086, 0x46b0, 0x46b0, ANY }, // AlderLake-P [Iris Xe Graphics].
+    { 0x8086, 0x46b1, 0x46b1, ANY }, // AlderLake-P [Iris Xe Graphics].
+    { 0x8086, 0x46b2, 0x46b2, ANY }, // Intel graphics.
+    { 0x8086, 0x46b3, 0x46b3, ANY }, // Alder Lake-UP3 GT1 [UHD Graphics].
+    { 0x8086, 0x46c0, 0x46c0, ANY }, // AlderLake-M GT1.
+    { 0x8086, 0x46c1, 0x46c1, ANY }, // AlderLake-M [Iris Xe Graphics].
+    { 0x8086, 0x46c2, 0x46c2, ANY }, // Intel graphics.
+    { 0x8086, 0x46c3, 0x46c3, ANY }, // Alder Lake-UP4 GT1 [UHD Graphics].
+    { 0x8086, 0x46d0, 0x46d0, ANY }, // Alder Lake-N [UHD Graphics].
+    { 0x8086, 0x46d1, 0x46d1, ANY }, // Alder Lake-N [UHD Graphics].
+    { 0x8086, 0x46d2, 0x46d2, ANY }, // Alder Lake-N [UHD Graphics].
+    { 0x8086, 0x46d3, 0x46d3, ANY }, // Alder Lake-N [Intel Graphics].
+    { 0x8086, 0x46d4, 0x46d4, ANY }, // Alder Lake-N [Intel Graphics].
+    { 0x8086, 0x4c80, 0x4c80, ANY }, // Intel graphics.
+    { 0x8086, 0x4c8a, 0x4c8a, ANY }, // RocketLake-S GT1 [UHD Graphics 750].
+    { 0x8086, 0x4c8b, 0x4c8b, ANY }, // RocketLake-S GT1 [UHD Graphics 730].
+    { 0x8086, 0x4c8c, 0x4c8c, ANY }, // Intel graphics.
+    { 0x8086, 0x4c90, 0x4c90, ANY }, // RocketLake-S GT1 [UHD Graphics P750].
+    { 0x8086, 0x4c9a, 0x4c9a, ANY }, // RocketLake-S [UHD Graphics].
+    { 0x8086, 0x4e51, 0x4e51, ANY }, // Intel graphics.
+    { 0x8086, 0x4e55, 0x4e55, ANY }, // JasperLake [UHD Graphics].
+    { 0x8086, 0x4e57, 0x4e57, ANY }, // Intel graphics.
+    { 0x8086, 0x4e61, 0x4e61, ANY }, // JasperLake [UHD Graphics].
+    { 0x8086, 0x4e71, 0x4e71, ANY }, // JasperLake [UHD Graphics].
+    { 0x8086, 0x591c, 0x591c, ANY }, // UHD Graphics 615.
+    { 0x8086, 0x5a40, 0x5a40, ANY }, // Intel graphics.
+    { 0x8086, 0x5a41, 0x5a41, ANY }, // Intel graphics.
+    { 0x8086, 0x5a42, 0x5a42, ANY }, // Intel graphics.
+    { 0x8086, 0x5a44, 0x5a44, ANY }, // Intel graphics.
+    { 0x8086, 0x5a49, 0x5a49, ANY }, // Intel graphics.
+    { 0x8086, 0x5a4a, 0x5a4a, ANY }, // Intel graphics.
+    { 0x8086, 0x5a4c, 0x5a4c, ANY }, // Intel graphics.
+    { 0x8086, 0x5a50, 0x5a50, ANY }, // Intel graphics.
+    { 0x8086, 0x5a51, 0x5a51, ANY }, // Intel graphics.
+    { 0x8086, 0x5a52, 0x5a52, ANY }, // Intel graphics.
+    { 0x8086, 0x5a54, 0x5a54, ANY }, // Intel graphics.
+    { 0x8086, 0x5a59, 0x5a59, ANY }, // Intel graphics.
+    { 0x8086, 0x5a5a, 0x5a5a, ANY }, // Intel graphics.
+    { 0x8086, 0x5a5c, 0x5a5c, ANY }, // Intel graphics.
+    { 0x8086, 0x6420, 0x6420, ANY }, // Lunar Lake [Intel Graphics].
     // Core Ultra 200V Series Processors Arc Graphics 130V/140V GPU.
-    { 0x8086, 0x64a0, 0x64a0, GPU_ANY_REVISION },
-    // Lunar Lake [Intel Graphics].
-    { 0x8086, 0x64b0, 0x64b0, GPU_ANY_REVISION },
-    // Meteor Lake-M [Intel Graphics].
-    { 0x8086, 0x7d40, 0x7d40, GPU_ANY_REVISION },
-    // Arrow Lake-U [Intel Graphics].
-    { 0x8086, 0x7d41, 0x7d41, GPU_ANY_REVISION },
-    // Meteor Lake-P [Intel Graphics].
-    { 0x8086, 0x7d45, 0x7d45, GPU_ANY_REVISION },
-    // Arrow Lake-P [Arc Pro 130T/140T].
-    { 0x8086, 0x7d51, 0x7d51, GPU_ANY_REVISION },
-    // Meteor Lake-P [Intel Arc Graphics].
-    { 0x8086, 0x7d55, 0x7d55, GPU_ANY_REVISION },
-    // Meteor Lake-M [Intel Graphics].
-    { 0x8086, 0x7d60, 0x7d60, GPU_ANY_REVISION },
-    // Arrow Lake-S [Intel Graphics].
-    { 0x8086, 0x7d67, 0x7d67, GPU_ANY_REVISION },
-    // Arrow Lake-P [Intel Graphics].
-    { 0x8086, 0x7dd1, 0x7dd1, GPU_ANY_REVISION },
-    // Meteor Lake-P [Intel Graphics].
-    { 0x8086, 0x7dd5, 0x7dd5, GPU_ANY_REVISION },
-    { 0x8086, 0x87c0, 0x87c0, GPU_ANY_REVISION }, // UHD Graphics 617.
-    { 0x8086, 0x87ca, 0x87ca, GPU_ANY_REVISION }, // UHD Graphics 617.
-    { 0x8086, 0x8a50, 0x8a50, GPU_ANY_REVISION }, // Intel graphics.
-    // Iris Plus Graphics G7 (Ice Lake).
-    { 0x8086, 0x8a51, 0x8a51, GPU_ANY_REVISION },
-    { 0x8086, 0x8a52, 0x8a52, GPU_ANY_REVISION }, // Iris Plus Graphics G7.
-    { 0x8086, 0x8a53, 0x8a53, GPU_ANY_REVISION }, // Iris Plus Graphics G7.
-    { 0x8086, 0x8a54, 0x8a54, GPU_ANY_REVISION }, // Intel graphics.
-    // Iris Plus Graphics G1 (Ice Lake).
-    { 0x8086, 0x8a56, 0x8a56, GPU_ANY_REVISION },
-    { 0x8086, 0x8a57, 0x8a57, GPU_ANY_REVISION }, // Intel graphics.
-    // Ice Lake-Y GT1 [UHD Graphics G1].
-    { 0x8086, 0x8a58, 0x8a58, GPU_ANY_REVISION },
-    { 0x8086, 0x8a59, 0x8a59, GPU_ANY_REVISION }, // Intel graphics.
-    // Iris Plus Graphics G4 (Ice Lake).
-    { 0x8086, 0x8a5a, 0x8a5a, GPU_ANY_REVISION },
-    { 0x8086, 0x8a5b, 0x8a5b, GPU_ANY_REVISION }, // Intel graphics.
-    // Iris Plus Graphics G4 (Ice Lake).
-    { 0x8086, 0x8a5c, 0x8a5c, GPU_ANY_REVISION },
-    { 0x8086, 0x8a5d, 0x8a5d, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x8a70, 0x8a70, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x8a71, 0x8a71, GPU_ANY_REVISION }, // Intel graphics.
-    // Tiger Lake-UP4 GT2 [Iris Xe Graphics].
-    { 0x8086, 0x9a40, 0x9a40, GPU_ANY_REVISION },
-    // TigerLake-LP GT2 [Iris Xe Graphics].
-    { 0x8086, 0x9a49, 0x9a49, GPU_ANY_REVISION },
-    { 0x8086, 0x9a59, 0x9a59, GPU_ANY_REVISION }, // Intel graphics.
-    // TigerLake-H GT1 [UHD Graphics].
-    { 0x8086, 0x9a60, 0x9a60, GPU_ANY_REVISION },
-    // TigerLake-H GT1 [UHD Graphics].
-    { 0x8086, 0x9a68, 0x9a68, GPU_ANY_REVISION },
-    // Tiger Lake-H GT1 [UHD Graphics].
-    { 0x8086, 0x9a70, 0x9a70, GPU_ANY_REVISION },
-    // Tiger Lake-LP GT2 [UHD Graphics G4].
-    { 0x8086, 0x9a78, 0x9a78, GPU_ANY_REVISION },
-    { 0x8086, 0x9ac0, 0x9ac0, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x9ac9, 0x9ac9, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x9ad9, 0x9ad9, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x9af8, 0x9af8, GPU_ANY_REVISION }, // Intel graphics.
-    // Comet Lake-U GT2 [UHD Graphics 620].
-    { 0x8086, 0x9b21, 0x9b21, GPU_ANY_REVISION },
-    // CometLake-U GT2 [UHD Graphics].
-    { 0x8086, 0x9b41, 0x9b41, GPU_ANY_REVISION },
-    { 0x8086, 0x9ba2, 0x9ba2, GPU_ANY_REVISION }, // Intel graphics.
-    // Comet Lake-H GT1 [UHD Graphics 610].
-    { 0x8086, 0x9ba4, 0x9ba4, GPU_ANY_REVISION },
-    { 0x8086, 0x9ba5, 0x9ba5, GPU_ANY_REVISION }, // Intel graphics.
-    // CometLake-S GT1 [UHD Graphics 610].
-    { 0x8086, 0x9ba8, 0x9ba8, GPU_ANY_REVISION },
-    { 0x8086, 0x9baa, 0x9baa, GPU_ANY_REVISION }, // Comet Lake UHD Graphics.
-    { 0x8086, 0x9bac, 0x9bac, GPU_ANY_REVISION }, // Comet Lake UHD Graphics.
-    { 0x8086, 0x9bc2, 0x9bc2, GPU_ANY_REVISION }, // Intel graphics.
-    // CometLake-H GT2 [UHD Graphics].
-    { 0x8086, 0x9bc4, 0x9bc4, GPU_ANY_REVISION },
-    // CometLake-S GT2 [UHD Graphics 630].
-    { 0x8086, 0x9bc5, 0x9bc5, GPU_ANY_REVISION },
-    // Comet Lake-S GT2 [UHD Graphics P630].
-    { 0x8086, 0x9bc6, 0x9bc6, GPU_ANY_REVISION },
-    // CometLake-S GT2 [UHD Graphics 630].
-    { 0x8086, 0x9bc8, 0x9bc8, GPU_ANY_REVISION },
-    { 0x8086, 0x9bca, 0x9bca, GPU_ANY_REVISION }, // Comet Lake UHD Graphics.
-    { 0x8086, 0x9bcc, 0x9bcc, GPU_ANY_REVISION }, // Comet Lake UHD Graphics.
-    // Comet Lake-S GT2 [UHD Graphics P630].
-    { 0x8086, 0x9be6, 0x9be6, GPU_ANY_REVISION },
-    // Coffee Lake-S GT2 [UHD Graphics P630].
-    { 0x8086, 0x9bf6, 0x9bf6, GPU_ANY_REVISION },
-    // Raptor Lake-P [UHD Graphics].
-    { 0x8086, 0xa720, 0xa720, GPU_ANY_REVISION },
-    // Raptor Lake-P [UHD Graphics].
-    { 0x8086, 0xa721, 0xa721, GPU_ANY_REVISION },
-    // Raptor Lake-S GT1 [UHD Graphics 770].
-    { 0x8086, 0xa780, 0xa780, GPU_ANY_REVISION },
-    // Raptor Lake-S UHD Graphics.
-    { 0x8086, 0xa781, 0xa781, GPU_ANY_REVISION },
-    // Raptor Lake-S UHD Graphics.
-    { 0x8086, 0xa782, 0xa782, GPU_ANY_REVISION },
-    // Raptor Lake-S UHD Graphics.
-    { 0x8086, 0xa783, 0xa783, GPU_ANY_REVISION },
-    // Raptor Lake-S UHD Graphics.
-    { 0x8086, 0xa788, 0xa788, GPU_ANY_REVISION },
-    // Raptor Lake-S UHD Graphics.
-    { 0x8086, 0xa789, 0xa789, GPU_ANY_REVISION },
-    // Raptor Lake-S UHD Graphics.
-    { 0x8086, 0xa78a, 0xa78a, GPU_ANY_REVISION },
-    // Raptor Lake-S UHD Graphics.
-    { 0x8086, 0xa78b, 0xa78b, GPU_ANY_REVISION },
-    // Raptor Lake-P [Iris Xe Graphics].
-    { 0x8086, 0xa7a0, 0xa7a0, GPU_ANY_REVISION },
-    // Raptor Lake-P [Iris Xe Graphics].
-    { 0x8086, 0xa7a1, 0xa7a1, GPU_ANY_REVISION },
-    // Raptor Lake-P [UHD Graphics].
-    { 0x8086, 0xa7a8, 0xa7a8, GPU_ANY_REVISION },
-    // Raptor Lake-P [UHD Graphics].
-    { 0x8086, 0xa7a9, 0xa7a9, GPU_ANY_REVISION },
-    // Raptor Lake-P [Intel Graphics].
-    { 0x8086, 0xa7aa, 0xa7aa, GPU_ANY_REVISION },
-    // Raptor Lake-P [Intel Graphics].
-    { 0x8086, 0xa7ab, 0xa7ab, GPU_ANY_REVISION },
-    // Raptor Lake-U [Intel Graphics].
-    { 0x8086, 0xa7ac, 0xa7ac, GPU_ANY_REVISION },
-    // Raptor Lake-U [Intel Graphics].
-    { 0x8086, 0xa7ad, 0xa7ad, GPU_ANY_REVISION },
-    { 0x8086, 0xb080, 0xb080, GPU_ANY_REVISION }, // Panther Lake [Arc B390].
-    { 0x8086, 0xb081, 0xb081, GPU_ANY_REVISION }, // Panther Lake [Arc B370].
-    { 0x8086, 0xb082, 0xb082, GPU_ANY_REVISION }, // Panther Lake [Arc B390].
-    { 0x8086, 0xb083, 0xb083, GPU_ANY_REVISION }, // Panther Lake [Arc B370].
-    // Panther Lake [Arc Pro B390].
-    { 0x8086, 0xb084, 0xb084, GPU_ANY_REVISION },
-    // Panther Lake [Arc Pro B370].
-    { 0x8086, 0xb085, 0xb085, GPU_ANY_REVISION },
-    // Panther Lake [Arc Pro B390].
-    { 0x8086, 0xb086, 0xb086, GPU_ANY_REVISION },
-    // Panther Lake [Arc Pro B370].
-    { 0x8086, 0xb087, 0xb087, GPU_ANY_REVISION },
-    // Panther Lake [Intel Graphics].
-    { 0x8086, 0xb08f, 0xb08f, GPU_ANY_REVISION },
-    // Panther Lake [Intel Graphics].
-    { 0x8086, 0xb090, 0xb090, GPU_ANY_REVISION },
-    // Panther Lake [Intel Graphics].
-    { 0x8086, 0xb0a0, 0xb0a0, GPU_ANY_REVISION },
-    // Panther Lake [Intel Graphics].
-    { 0x8086, 0xb0b0, 0xb0b0, GPU_ANY_REVISION },
-    // Arrow Lake-H [Intel Graphics].
-    { 0x8086, 0xb640, 0xb640, GPU_ANY_REVISION },
-    { 0x8086, 0xd740, 0xd740, GPU_ANY_REVISION }, // NVL-S.
-    { 0x8086, 0xd741, 0xd741, GPU_ANY_REVISION }, // NVL-U.
-    { 0x8086, 0xd742, 0xd742, GPU_ANY_REVISION }, // NVL-H.
-    { 0x8086, 0xd743, 0xd743, GPU_ANY_REVISION }, // NVL-HX.
-    { 0x8086, 0xd745, 0xd745, GPU_ANY_REVISION }, // NVL-HX.
-    { 0x8086, 0xd74a, 0xd74a, GPU_ANY_REVISION }, // NVL-S.
-    { 0x8086, 0xd74b, 0xd74b, GPU_ANY_REVISION }, // NVL-S.
-    { 0x8086, 0xd750, 0xd750, GPU_ANY_REVISION }, // NVL-P.
-    { 0x8086, 0xd751, 0xd751, GPU_ANY_REVISION }, // NVL-P.
-    { 0x8086, 0xd752, 0xd752, GPU_ANY_REVISION }, // NVL-P.
-    { 0x8086, 0xd753, 0xd753, GPU_ANY_REVISION }, // NVL-P.
-    { 0x8086, 0xd75f, 0xd75f, GPU_ANY_REVISION }, // NVL-P.
-    // Wildcat Lake [Intel Graphics].
-    { 0x8086, 0xfd80, 0xfd80, GPU_ANY_REVISION },
-    // Wildcat Lake [Intel Graphics].
-    { 0x8086, 0xfd81, 0xfd81, GPU_ANY_REVISION },
-    // DG1 [Iris Xe MAX Graphics].
-    { 0x8086, 0x4905, 0x4905, GPU_ANY_REVISION },
-    { 0x8086, 0x4909, 0x4909, GPU_ANY_REVISION }, // DG1 [Iris Xe MAX 100].
-    { 0x8086, 0x5690, 0x5690, GPU_ANY_REVISION }, // DG2 [Arc A770M].
-    { 0x8086, 0x5691, 0x5691, GPU_ANY_REVISION }, // DG2 [Arc A730M].
-    { 0x8086, 0x5692, 0x5692, GPU_ANY_REVISION }, // DG2 [Arc A550M].
-    { 0x8086, 0x5693, 0x5693, GPU_ANY_REVISION }, // DG2 [Arc A370M].
-    { 0x8086, 0x5694, 0x5694, GPU_ANY_REVISION }, // DG2 [Arc A350M].
-    { 0x8086, 0x5695, 0x5695, GPU_ANY_REVISION }, // DG2 [Iris Xe MAX A200M].
-    { 0x8086, 0x5696, 0x5696, GPU_ANY_REVISION }, // DG2 [Arc A570M].
-    { 0x8086, 0x5697, 0x5697, GPU_ANY_REVISION }, // DG2 [Arc A530M].
-    { 0x8086, 0x56b0, 0x56b0, GPU_ANY_REVISION }, // DG2 [Arc Pro A30M].
-    { 0x8086, 0x56b2, 0x56b2, GPU_ANY_REVISION }, // DG2 [Arc Pro A60M].
-    // GP104GLM [Quadro P5200 Mobile].
-    { 0x10de, 0x1bb5, 0x1bb5, GPU_ANY_REVISION },
-    // GP104GLM [Quadro P4200 Mobile].
-    { 0x10de, 0x1bb9, 0x1bb9, GPU_ANY_REVISION },
-    // GP104GLM [Quadro P3200 Mobile].
-    { 0x10de, 0x1bbb, 0x1bbb, GPU_ANY_REVISION },
-    // GP107M [GeForce GTX 1050 Ti Max-Q].
-    { 0x10de, 0x1c8f, 0x1c8f, GPU_ANY_REVISION },
-    // GP107M [GeForce GTX 1050 3 GB Max-Q].
-    { 0x10de, 0x1c91, 0x1c91, GPU_ANY_REVISION },
-    { 0x10de, 0x1c94, 0x1c94, GPU_ANY_REVISION }, // GP107M [GeForce MX350].
-    { 0x10de, 0x1c96, 0x1c96, GPU_ANY_REVISION }, // GP107M [GeForce MX350].
-    // GP107GLM [Quadro P600 Mobile].
-    { 0x10de, 0x1cbc, 0x1cbc, GPU_ANY_REVISION },
-    { 0x10de, 0x1cbd, 0x1cbd, GPU_ANY_REVISION }, // GP107GLM [Quadro P620].
-    { 0x10de, 0x1d11, 0x1d11, GPU_ANY_REVISION }, // GP108M [GeForce MX230].
-    { 0x10de, 0x1d13, 0x1d13, GPU_ANY_REVISION }, // GP108M [GeForce MX250].
-    { 0x10de, 0x1d16, 0x1d16, GPU_ANY_REVISION }, // GP108M [GeForce MX330].
-    // GP108GLM [Quadro P500 Mobile].
-    { 0x10de, 0x1d33, 0x1d33, GPU_ANY_REVISION },
-    { 0x10de, 0x1d34, 0x1d34, GPU_ANY_REVISION }, // GP108GLM [Quadro P520].
-    { 0x10de, 0x1d52, 0x1d52, GPU_ANY_REVISION }, // GP108BM [GeForce MX250].
-    { 0x10de, 0x1d56, 0x1d56, GPU_ANY_REVISION }, // GP108BM [GeForce MX330].
-    // TU104M [GeForce RTX 2080 Mobile].
-    { 0x10de, 0x1e90, 0x1e90, GPU_ANY_REVISION },
+    { 0x8086, 0x64a0, 0x64a0, ANY },
+    { 0x8086, 0x64b0, 0x64b0, ANY }, // Lunar Lake [Intel Graphics].
+    { 0x8086, 0x7d40, 0x7d40, ANY }, // Meteor Lake-M [Intel Graphics].
+    { 0x8086, 0x7d41, 0x7d41, ANY }, // Arrow Lake-U [Intel Graphics].
+    { 0x8086, 0x7d45, 0x7d45, ANY }, // Meteor Lake-P [Intel Graphics].
+    { 0x8086, 0x7d51, 0x7d51, ANY }, // Arrow Lake-P [Arc Pro 130T/140T].
+    { 0x8086, 0x7d55, 0x7d55, ANY }, // Meteor Lake-P [Intel Arc Graphics].
+    { 0x8086, 0x7d60, 0x7d60, ANY }, // Meteor Lake-M [Intel Graphics].
+    { 0x8086, 0x7d67, 0x7d67, ANY }, // Arrow Lake-S [Intel Graphics].
+    { 0x8086, 0x7dd1, 0x7dd1, ANY }, // Arrow Lake-P [Intel Graphics].
+    { 0x8086, 0x7dd5, 0x7dd5, ANY }, // Meteor Lake-P [Intel Graphics].
+    { 0x8086, 0x87c0, 0x87c0, ANY }, // UHD Graphics 617.
+    { 0x8086, 0x87ca, 0x87ca, ANY }, // UHD Graphics 617.
+    { 0x8086, 0x8a50, 0x8a50, ANY }, // Intel graphics.
+    { 0x8086, 0x8a51, 0x8a51, ANY }, // Iris Plus Graphics G7 (Ice Lake).
+    { 0x8086, 0x8a52, 0x8a52, ANY }, // Iris Plus Graphics G7.
+    { 0x8086, 0x8a53, 0x8a53, ANY }, // Iris Plus Graphics G7.
+    { 0x8086, 0x8a54, 0x8a54, ANY }, // Intel graphics.
+    { 0x8086, 0x8a56, 0x8a56, ANY }, // Iris Plus Graphics G1 (Ice Lake).
+    { 0x8086, 0x8a57, 0x8a57, ANY }, // Intel graphics.
+    { 0x8086, 0x8a58, 0x8a58, ANY }, // Ice Lake-Y GT1 [UHD Graphics G1].
+    { 0x8086, 0x8a59, 0x8a59, ANY }, // Intel graphics.
+    { 0x8086, 0x8a5a, 0x8a5a, ANY }, // Iris Plus Graphics G4 (Ice Lake).
+    { 0x8086, 0x8a5b, 0x8a5b, ANY }, // Intel graphics.
+    { 0x8086, 0x8a5c, 0x8a5c, ANY }, // Iris Plus Graphics G4 (Ice Lake).
+    { 0x8086, 0x8a5d, 0x8a5d, ANY }, // Intel graphics.
+    { 0x8086, 0x8a70, 0x8a70, ANY }, // Intel graphics.
+    { 0x8086, 0x8a71, 0x8a71, ANY }, // Intel graphics.
+    { 0x8086, 0x9a40, 0x9a40, ANY }, // Tiger Lake-UP4 GT2 [Iris Xe Graphics].
+    { 0x8086, 0x9a49, 0x9a49, ANY }, // TigerLake-LP GT2 [Iris Xe Graphics].
+    { 0x8086, 0x9a59, 0x9a59, ANY }, // Intel graphics.
+    { 0x8086, 0x9a60, 0x9a60, ANY }, // TigerLake-H GT1 [UHD Graphics].
+    { 0x8086, 0x9a68, 0x9a68, ANY }, // TigerLake-H GT1 [UHD Graphics].
+    { 0x8086, 0x9a70, 0x9a70, ANY }, // Tiger Lake-H GT1 [UHD Graphics].
+    { 0x8086, 0x9a78, 0x9a78, ANY }, // Tiger Lake-LP GT2 [UHD Graphics G4].
+    { 0x8086, 0x9ac0, 0x9ac0, ANY }, // Intel graphics.
+    { 0x8086, 0x9ac9, 0x9ac9, ANY }, // Intel graphics.
+    { 0x8086, 0x9ad9, 0x9ad9, ANY }, // Intel graphics.
+    { 0x8086, 0x9af8, 0x9af8, ANY }, // Intel graphics.
+    { 0x8086, 0x9b21, 0x9b21, ANY }, // Comet Lake-U GT2 [UHD Graphics 620].
+    { 0x8086, 0x9b41, 0x9b41, ANY }, // CometLake-U GT2 [UHD Graphics].
+    { 0x8086, 0x9ba2, 0x9ba2, ANY }, // Intel graphics.
+    { 0x8086, 0x9ba4, 0x9ba4, ANY }, // Comet Lake-H GT1 [UHD Graphics 610].
+    { 0x8086, 0x9ba5, 0x9ba5, ANY }, // Intel graphics.
+    { 0x8086, 0x9ba8, 0x9ba8, ANY }, // CometLake-S GT1 [UHD Graphics 610].
+    { 0x8086, 0x9baa, 0x9baa, ANY }, // Comet Lake UHD Graphics.
+    { 0x8086, 0x9bac, 0x9bac, ANY }, // Comet Lake UHD Graphics.
+    { 0x8086, 0x9bc2, 0x9bc2, ANY }, // Intel graphics.
+    { 0x8086, 0x9bc4, 0x9bc4, ANY }, // CometLake-H GT2 [UHD Graphics].
+    { 0x8086, 0x9bc5, 0x9bc5, ANY }, // CometLake-S GT2 [UHD Graphics 630].
+    { 0x8086, 0x9bc6, 0x9bc6, ANY }, // Comet Lake-S GT2 [UHD Graphics P630].
+    { 0x8086, 0x9bc8, 0x9bc8, ANY }, // CometLake-S GT2 [UHD Graphics 630].
+    { 0x8086, 0x9bca, 0x9bca, ANY }, // Comet Lake UHD Graphics.
+    { 0x8086, 0x9bcc, 0x9bcc, ANY }, // Comet Lake UHD Graphics.
+    { 0x8086, 0x9be6, 0x9be6, ANY }, // Comet Lake-S GT2 [UHD Graphics P630].
+    { 0x8086, 0x9bf6, 0x9bf6, ANY }, // Coffee Lake-S GT2 [UHD Graphics P630].
+    { 0x8086, 0xa720, 0xa720, ANY }, // Raptor Lake-P [UHD Graphics].
+    { 0x8086, 0xa721, 0xa721, ANY }, // Raptor Lake-P [UHD Graphics].
+    { 0x8086, 0xa780, 0xa780, ANY }, // Raptor Lake-S GT1 [UHD Graphics 770].
+    { 0x8086, 0xa781, 0xa781, ANY }, // Raptor Lake-S UHD Graphics.
+    { 0x8086, 0xa782, 0xa782, ANY }, // Raptor Lake-S UHD Graphics.
+    { 0x8086, 0xa783, 0xa783, ANY }, // Raptor Lake-S UHD Graphics.
+    { 0x8086, 0xa788, 0xa788, ANY }, // Raptor Lake-S UHD Graphics.
+    { 0x8086, 0xa789, 0xa789, ANY }, // Raptor Lake-S UHD Graphics.
+    { 0x8086, 0xa78a, 0xa78a, ANY }, // Raptor Lake-S UHD Graphics.
+    { 0x8086, 0xa78b, 0xa78b, ANY }, // Raptor Lake-S UHD Graphics.
+    { 0x8086, 0xa7a0, 0xa7a0, ANY }, // Raptor Lake-P [Iris Xe Graphics].
+    { 0x8086, 0xa7a1, 0xa7a1, ANY }, // Raptor Lake-P [Iris Xe Graphics].
+    { 0x8086, 0xa7a8, 0xa7a8, ANY }, // Raptor Lake-P [UHD Graphics].
+    { 0x8086, 0xa7a9, 0xa7a9, ANY }, // Raptor Lake-P [UHD Graphics].
+    { 0x8086, 0xa7aa, 0xa7aa, ANY }, // Raptor Lake-P [Intel Graphics].
+    { 0x8086, 0xa7ab, 0xa7ab, ANY }, // Raptor Lake-P [Intel Graphics].
+    { 0x8086, 0xa7ac, 0xa7ac, ANY }, // Raptor Lake-U [Intel Graphics].
+    { 0x8086, 0xa7ad, 0xa7ad, ANY }, // Raptor Lake-U [Intel Graphics].
+    { 0x8086, 0xb080, 0xb080, ANY }, // Panther Lake [Arc B390].
+    { 0x8086, 0xb081, 0xb081, ANY }, // Panther Lake [Arc B370].
+    { 0x8086, 0xb082, 0xb082, ANY }, // Panther Lake [Arc B390].
+    { 0x8086, 0xb083, 0xb083, ANY }, // Panther Lake [Arc B370].
+    { 0x8086, 0xb084, 0xb084, ANY }, // Panther Lake [Arc Pro B390].
+    { 0x8086, 0xb085, 0xb085, ANY }, // Panther Lake [Arc Pro B370].
+    { 0x8086, 0xb086, 0xb086, ANY }, // Panther Lake [Arc Pro B390].
+    { 0x8086, 0xb087, 0xb087, ANY }, // Panther Lake [Arc Pro B370].
+    { 0x8086, 0xb08f, 0xb08f, ANY }, // Panther Lake [Intel Graphics].
+    { 0x8086, 0xb090, 0xb090, ANY }, // Panther Lake [Intel Graphics].
+    { 0x8086, 0xb0a0, 0xb0a0, ANY }, // Panther Lake [Intel Graphics].
+    { 0x8086, 0xb0b0, 0xb0b0, ANY }, // Panther Lake [Intel Graphics].
+    { 0x8086, 0xb640, 0xb640, ANY }, // Arrow Lake-H [Intel Graphics].
+    { 0x8086, 0xd740, 0xd740, ANY }, // NVL-S.
+    { 0x8086, 0xd741, 0xd741, ANY }, // NVL-U.
+    { 0x8086, 0xd742, 0xd742, ANY }, // NVL-H.
+    { 0x8086, 0xd743, 0xd743, ANY }, // NVL-HX.
+    { 0x8086, 0xd745, 0xd745, ANY }, // NVL-HX.
+    { 0x8086, 0xd74a, 0xd74a, ANY }, // NVL-S.
+    { 0x8086, 0xd74b, 0xd74b, ANY }, // NVL-S.
+    { 0x8086, 0xd750, 0xd750, ANY }, // NVL-P.
+    { 0x8086, 0xd751, 0xd751, ANY }, // NVL-P.
+    { 0x8086, 0xd752, 0xd752, ANY }, // NVL-P.
+    { 0x8086, 0xd753, 0xd753, ANY }, // NVL-P.
+    { 0x8086, 0xd75f, 0xd75f, ANY }, // NVL-P.
+    { 0x8086, 0xfd80, 0xfd80, ANY }, // Wildcat Lake [Intel Graphics].
+    { 0x8086, 0xfd81, 0xfd81, ANY }, // Wildcat Lake [Intel Graphics].
+    { 0x8086, 0x4905, 0x4905, ANY }, // DG1 [Iris Xe MAX Graphics].
+    { 0x8086, 0x4909, 0x4909, ANY }, // DG1 [Iris Xe MAX 100].
+    { 0x8086, 0x5690, 0x5690, ANY }, // DG2 [Arc A770M].
+    { 0x8086, 0x5691, 0x5691, ANY }, // DG2 [Arc A730M].
+    { 0x8086, 0x5692, 0x5692, ANY }, // DG2 [Arc A550M].
+    { 0x8086, 0x5693, 0x5693, ANY }, // DG2 [Arc A370M].
+    { 0x8086, 0x5694, 0x5694, ANY }, // DG2 [Arc A350M].
+    { 0x8086, 0x5695, 0x5695, ANY }, // DG2 [Iris Xe MAX A200M].
+    { 0x8086, 0x5696, 0x5696, ANY }, // DG2 [Arc A570M].
+    { 0x8086, 0x5697, 0x5697, ANY }, // DG2 [Arc A530M].
+    { 0x8086, 0x56b0, 0x56b0, ANY }, // DG2 [Arc Pro A30M].
+    { 0x8086, 0x56b2, 0x56b2, ANY }, // DG2 [Arc Pro A60M].
+    { 0x10de, 0x1bb5, 0x1bb5, ANY }, // GP104GLM [Quadro P5200 Mobile].
+    { 0x10de, 0x1bb9, 0x1bb9, ANY }, // GP104GLM [Quadro P4200 Mobile].
+    { 0x10de, 0x1bbb, 0x1bbb, ANY }, // GP104GLM [Quadro P3200 Mobile].
+    { 0x10de, 0x1c8f, 0x1c8f, ANY }, // GP107M [GeForce GTX 1050 Ti Max-Q].
+    { 0x10de, 0x1c91, 0x1c91, ANY }, // GP107M [GeForce GTX 1050 3 GB Max-Q].
+    { 0x10de, 0x1c94, 0x1c94, ANY }, // GP107M [GeForce MX350].
+    { 0x10de, 0x1c96, 0x1c96, ANY }, // GP107M [GeForce MX350].
+    { 0x10de, 0x1cbc, 0x1cbc, ANY }, // GP107GLM [Quadro P600 Mobile].
+    { 0x10de, 0x1cbd, 0x1cbd, ANY }, // GP107GLM [Quadro P620].
+    { 0x10de, 0x1d11, 0x1d11, ANY }, // GP108M [GeForce MX230].
+    { 0x10de, 0x1d13, 0x1d13, ANY }, // GP108M [GeForce MX250].
+    { 0x10de, 0x1d16, 0x1d16, ANY }, // GP108M [GeForce MX330].
+    { 0x10de, 0x1d33, 0x1d33, ANY }, // GP108GLM [Quadro P500 Mobile].
+    { 0x10de, 0x1d34, 0x1d34, ANY }, // GP108GLM [Quadro P520].
+    { 0x10de, 0x1d52, 0x1d52, ANY }, // GP108BM [GeForce MX250].
+    { 0x10de, 0x1d56, 0x1d56, ANY }, // GP108BM [GeForce MX330].
+    { 0x10de, 0x1e90, 0x1e90, ANY }, // TU104M [GeForce RTX 2080 Mobile].
     // TU104M [GeForce RTX 2070 SUPER Mobile / Max-Q].
-    { 0x10de, 0x1e91, 0x1e91, GPU_ANY_REVISION },
+    { 0x10de, 0x1e91, 0x1e91, ANY },
     // TU104M [GeForce RTX 2080 SUPER Mobile / Max-Q].
-    { 0x10de, 0x1e93, 0x1e93, GPU_ANY_REVISION },
-    { 0x10de, 0x1eab, 0x1eab, GPU_ANY_REVISION }, // TU104M.
+    { 0x10de, 0x1e93, 0x1e93, ANY },
+    { 0x10de, 0x1eab, 0x1eab, ANY }, // TU104M.
     // TU104M [GeForce GTX 2080 Engineering Sample].
-    { 0x10de, 0x1eae, 0x1eae, GPU_ANY_REVISION },
+    { 0x10de, 0x1eae, 0x1eae, ANY },
     // TU104GLM [Quadro RTX 5000 Mobile / Max-Q].
-    { 0x10de, 0x1eb5, 0x1eb5, GPU_ANY_REVISION },
+    { 0x10de, 0x1eb5, 0x1eb5, ANY },
     // TU104GLM [Quadro RTX 4000 Mobile / Max-Q].
-    { 0x10de, 0x1eb6, 0x1eb6, GPU_ANY_REVISION },
-    // TU104BM [GeForce RTX 2080 Mobile].
-    { 0x10de, 0x1ed0, 0x1ed0, GPU_ANY_REVISION },
+    { 0x10de, 0x1eb6, 0x1eb6, ANY },
+    { 0x10de, 0x1ed0, 0x1ed0, ANY }, // TU104BM [GeForce RTX 2080 Mobile].
     // TU104BM [GeForce RTX 2070 SUPER Mobile / Max-Q].
-    { 0x10de, 0x1ed1, 0x1ed1, GPU_ANY_REVISION },
+    { 0x10de, 0x1ed1, 0x1ed1, ANY },
     // TU104BM [GeForce RTX 2080 SUPER Mobile / Max-Q].
-    { 0x10de, 0x1ed3, 0x1ed3, GPU_ANY_REVISION },
+    { 0x10de, 0x1ed3, 0x1ed3, ANY },
     // TU104GLM [Quadro RTX 5000 Mobile Refresh].
-    { 0x10de, 0x1ef5, 0x1ef5, GPU_ANY_REVISION },
-    // TU106M [GeForce RTX 2070 Mobile].
-    { 0x10de, 0x1f10, 0x1f10, GPU_ANY_REVISION },
-    // TU106M [GeForce RTX 2060 Mobile].
-    { 0x10de, 0x1f11, 0x1f11, GPU_ANY_REVISION },
-    // TU106M [GeForce RTX 2060 Max-Q].
-    { 0x10de, 0x1f12, 0x1f12, GPU_ANY_REVISION },
+    { 0x10de, 0x1ef5, 0x1ef5, ANY },
+    { 0x10de, 0x1f10, 0x1f10, ANY }, // TU106M [GeForce RTX 2070 Mobile].
+    { 0x10de, 0x1f11, 0x1f11, ANY }, // TU106M [GeForce RTX 2060 Mobile].
+    { 0x10de, 0x1f12, 0x1f12, ANY }, // TU106M [GeForce RTX 2060 Max-Q].
     // TU106M [GeForce RTX 2070 Mobile / Max-Q Refresh].
-    { 0x10de, 0x1f14, 0x1f14, GPU_ANY_REVISION },
-    // TU106M [GeForce RTX 2060 Mobile].
-    { 0x10de, 0x1f15, 0x1f15, GPU_ANY_REVISION },
-    { 0x10de, 0x1f2e, 0x1f2e, GPU_ANY_REVISION }, // TU106M.
+    { 0x10de, 0x1f14, 0x1f14, ANY },
+    { 0x10de, 0x1f15, 0x1f15, ANY }, // TU106M [GeForce RTX 2060 Mobile].
+    { 0x10de, 0x1f2e, 0x1f2e, ANY }, // TU106M.
     // TU106GLM [Quadro RTX 3000 Mobile / Max-Q].
-    { 0x10de, 0x1f36, 0x1f36, GPU_ANY_REVISION },
+    { 0x10de, 0x1f36, 0x1f36, ANY },
     // TU106BM [GeForce RTX 2070 Mobile / Max-Q].
-    { 0x10de, 0x1f50, 0x1f50, GPU_ANY_REVISION },
-    // TU106BM [GeForce RTX 2060 Mobile].
-    { 0x10de, 0x1f51, 0x1f51, GPU_ANY_REVISION },
-    // TU106BM [GeForce RTX 2070 Mobile].
-    { 0x10de, 0x1f54, 0x1f54, GPU_ANY_REVISION },
-    // TU106BM [GeForce RTX 2060 Mobile].
-    { 0x10de, 0x1f55, 0x1f55, GPU_ANY_REVISION },
+    { 0x10de, 0x1f50, 0x1f50, ANY },
+    { 0x10de, 0x1f51, 0x1f51, ANY }, // TU106BM [GeForce RTX 2060 Mobile].
+    { 0x10de, 0x1f54, 0x1f54, ANY }, // TU106BM [GeForce RTX 2070 Mobile].
+    { 0x10de, 0x1f55, 0x1f55, ANY }, // TU106BM [GeForce RTX 2060 Mobile].
     // TU106GLM [Quadro RTX 3000 Mobile Refresh].
-    { 0x10de, 0x1f76, 0x1f76, GPU_ANY_REVISION },
+    { 0x10de, 0x1f76, 0x1f76, ANY },
     // TU117M [GeForce GTX 1650 Mobile / Max-Q].
-    { 0x10de, 0x1f91, 0x1f91, GPU_ANY_REVISION },
-    // TU117M [GeForce GTX 1650 Mobile].
-    { 0x10de, 0x1f92, 0x1f92, GPU_ANY_REVISION },
-    // TU117M [GeForce GTX 1650 Mobile].
-    { 0x10de, 0x1f94, 0x1f94, GPU_ANY_REVISION },
-    // TU117M [GeForce GTX 1650 Ti Mobile].
-    { 0x10de, 0x1f95, 0x1f95, GPU_ANY_REVISION },
+    { 0x10de, 0x1f91, 0x1f91, ANY },
+    { 0x10de, 0x1f92, 0x1f92, ANY }, // TU117M [GeForce GTX 1650 Mobile].
+    { 0x10de, 0x1f94, 0x1f94, ANY }, // TU117M [GeForce GTX 1650 Mobile].
+    { 0x10de, 0x1f95, 0x1f95, ANY }, // TU117M [GeForce GTX 1650 Ti Mobile].
     // TU117M [GeForce GTX 1650 Mobile / Max-Q].
-    { 0x10de, 0x1f96, 0x1f96, GPU_ANY_REVISION },
-    { 0x10de, 0x1f97, 0x1f97, GPU_ANY_REVISION }, // TU117M [GeForce MX450].
-    { 0x10de, 0x1f98, 0x1f98, GPU_ANY_REVISION }, // TU117M [GeForce MX450].
+    { 0x10de, 0x1f96, 0x1f96, ANY },
+    { 0x10de, 0x1f97, 0x1f97, ANY }, // TU117M [GeForce MX450].
+    { 0x10de, 0x1f98, 0x1f98, ANY }, // TU117M [GeForce MX450].
     // TU117M [GeForce GTX 1650 Mobile / Max-Q].
-    { 0x10de, 0x1f99, 0x1f99, GPU_ANY_REVISION },
-    { 0x10de, 0x1f9c, 0x1f9c, GPU_ANY_REVISION }, // TU117M [GeForce MX450].
+    { 0x10de, 0x1f99, 0x1f99, ANY },
+    { 0x10de, 0x1f9c, 0x1f9c, ANY }, // TU117M [GeForce MX450].
     // TU117M [GeForce GTX 1650 Mobile / Max-Q].
-    { 0x10de, 0x1f9d, 0x1f9d, GPU_ANY_REVISION },
-    { 0x10de, 0x1f9f, 0x1f9f, GPU_ANY_REVISION }, // TU117M [GeForce MX550].
-    { 0x10de, 0x1fa0, 0x1fa0, GPU_ANY_REVISION }, // TU117M [GeForce MX550].
-    { 0x10de, 0x1fa1, 0x1fa1, GPU_ANY_REVISION }, // TU117M.
-    // TU117GLM [Quadro T1000 Mobile].
-    { 0x10de, 0x1fb0, 0x1fb0, GPU_ANY_REVISION },
-    // TU117GLM [Quadro T400 Mobile].
-    { 0x10de, 0x1fb2, 0x1fb2, GPU_ANY_REVISION },
-    // TU117GLM [T600 Laptop GPU].
-    { 0x10de, 0x1fb6, 0x1fb6, GPU_ANY_REVISION },
-    // TU117GLM [T550 Laptop GPU].
-    { 0x10de, 0x1fb7, 0x1fb7, GPU_ANY_REVISION },
-    // TU117GLM [Quadro T2000 Mobile / Max-Q].
-    { 0x10de, 0x1fb8, 0x1fb8, GPU_ANY_REVISION },
-    // TU117GLM [Quadro T1000 Mobile].
-    { 0x10de, 0x1fb9, 0x1fb9, GPU_ANY_REVISION },
-    { 0x10de, 0x1fba, 0x1fba, GPU_ANY_REVISION }, // TU117GLM [T600 Mobile].
-    // TU117GLM [Quadro T500 Mobile].
-    { 0x10de, 0x1fbb, 0x1fbb, GPU_ANY_REVISION },
-    // TU117GLM [T1200 Laptop GPU].
-    { 0x10de, 0x1fbc, 0x1fbc, GPU_ANY_REVISION },
+    { 0x10de, 0x1f9d, 0x1f9d, ANY },
+    { 0x10de, 0x1f9f, 0x1f9f, ANY }, // TU117M [GeForce MX550].
+    { 0x10de, 0x1fa0, 0x1fa0, ANY }, // TU117M [GeForce MX550].
+    { 0x10de, 0x1fa1, 0x1fa1, ANY }, // TU117M.
+    { 0x10de, 0x1fb0, 0x1fb0, ANY }, // TU117GLM [Quadro T1000 Mobile].
+    { 0x10de, 0x1fb2, 0x1fb2, ANY }, // TU117GLM [Quadro T400 Mobile].
+    { 0x10de, 0x1fb6, 0x1fb6, ANY }, // TU117GLM [T600 Laptop GPU].
+    { 0x10de, 0x1fb7, 0x1fb7, ANY }, // TU117GLM [T550 Laptop GPU].
+    { 0x10de, 0x1fb8, 0x1fb8, ANY }, // TU117GLM [Quadro T2000 Mobile / Max-Q].
+    { 0x10de, 0x1fb9, 0x1fb9, ANY }, // TU117GLM [Quadro T1000 Mobile].
+    { 0x10de, 0x1fba, 0x1fba, ANY }, // TU117GLM [T600 Mobile].
+    { 0x10de, 0x1fbb, 0x1fbb, ANY }, // TU117GLM [Quadro T500 Mobile].
+    { 0x10de, 0x1fbc, 0x1fbc, ANY }, // TU117GLM [T1200 Laptop GPU].
     // TU117BM [GeForce GTX 1650 Mobile Refresh].
-    { 0x10de, 0x1fd9, 0x1fd9, GPU_ANY_REVISION },
+    { 0x10de, 0x1fd9, 0x1fd9, ANY },
     // TU117BM [GeForce GTX 1650 Mobile Refresh].
-    { 0x10de, 0x1fdd, 0x1fdd, GPU_ANY_REVISION },
-    // TU117GLM [Quadro T1000 Mobile].
-    { 0x10de, 0x1ff9, 0x1ff9, GPU_ANY_REVISION },
-    // TU116M [GeForce GTX 1660 Ti Mobile].
-    { 0x10de, 0x2191, 0x2191, GPU_ANY_REVISION },
-    // TU116M [GeForce GTX 1650 Ti Mobile].
-    { 0x10de, 0x2192, 0x2192, GPU_ANY_REVISION },
-    // TU116BM [GeForce GTX 1660 Ti Mobile].
-    { 0x10de, 0x21d1, 0x21d1, GPU_ANY_REVISION },
-    // GA103M [GeForce RTX 3080 Ti Mobile].
-    { 0x10de, 0x2420, 0x2420, GPU_ANY_REVISION },
-    // GA103GLM [RTX A5500 Laptop GPU].
-    { 0x10de, 0x2438, 0x2438, GPU_ANY_REVISION },
+    { 0x10de, 0x1fdd, 0x1fdd, ANY },
+    { 0x10de, 0x1ff9, 0x1ff9, ANY }, // TU117GLM [Quadro T1000 Mobile].
+    { 0x10de, 0x2191, 0x2191, ANY }, // TU116M [GeForce GTX 1660 Ti Mobile].
+    { 0x10de, 0x2192, 0x2192, ANY }, // TU116M [GeForce GTX 1650 Ti Mobile].
+    { 0x10de, 0x21d1, 0x21d1, ANY }, // TU116BM [GeForce GTX 1660 Ti Mobile].
+    { 0x10de, 0x2420, 0x2420, ANY }, // GA103M [GeForce RTX 3080 Ti Mobile].
+    { 0x10de, 0x2438, 0x2438, ANY }, // GA103GLM [RTX A5500 Laptop GPU].
     // GA103M [GeForce RTX 3080 Ti Laptop GPU].
-    { 0x10de, 0x2460, 0x2460, GPU_ANY_REVISION },
+    { 0x10de, 0x2460, 0x2460, ANY },
     // GA104M [GeForce RTX 3080 Mobile / Max-Q 8GB/16GB].
-    { 0x10de, 0x249c, 0x249c, GPU_ANY_REVISION },
+    { 0x10de, 0x249c, 0x249c, ANY },
     // GA104M [GeForce RTX 3070 Mobile / Max-Q].
-    { 0x10de, 0x249d, 0x249d, GPU_ANY_REVISION },
-    { 0x10de, 0x249f, 0x249f, GPU_ANY_REVISION }, // GA104M.
-    // GA104 [Geforce RTX 3070 Ti Laptop GPU].
-    { 0x10de, 0x24a0, 0x24a0, GPU_ANY_REVISION },
-    { 0x10de, 0x24a4, 0x24a4, GPU_ANY_REVISION }, // GA104M.
-    // GA104GLM [RTX A5000 Mobile].
-    { 0x10de, 0x24b6, 0x24b6, GPU_ANY_REVISION },
-    // GA104GLM [RTX A4000 Mobile].
-    { 0x10de, 0x24b7, 0x24b7, GPU_ANY_REVISION },
-    // GA104GLM [RTX A3000 Mobile].
-    { 0x10de, 0x24b8, 0x24b8, GPU_ANY_REVISION },
-    // GA104GLM [RTX A3000 12GB Laptop GPU].
-    { 0x10de, 0x24b9, 0x24b9, GPU_ANY_REVISION },
-    // GA104GLM [RTX A4500 Laptop GPU].
-    { 0x10de, 0x24ba, 0x24ba, GPU_ANY_REVISION },
-    // GA104GLM [RTX A3000 Laptop GPU].
-    { 0x10de, 0x24bb, 0x24bb, GPU_ANY_REVISION },
+    { 0x10de, 0x249d, 0x249d, ANY },
+    { 0x10de, 0x249f, 0x249f, ANY }, // GA104M.
+    { 0x10de, 0x24a0, 0x24a0, ANY }, // GA104 [Geforce RTX 3070 Ti Laptop GPU].
+    { 0x10de, 0x24a4, 0x24a4, ANY }, // GA104M.
+    { 0x10de, 0x24b6, 0x24b6, ANY }, // GA104GLM [RTX A5000 Mobile].
+    { 0x10de, 0x24b7, 0x24b7, ANY }, // GA104GLM [RTX A4000 Mobile].
+    { 0x10de, 0x24b8, 0x24b8, ANY }, // GA104GLM [RTX A3000 Mobile].
+    { 0x10de, 0x24b9, 0x24b9, ANY }, // GA104GLM [RTX A3000 12GB Laptop GPU].
+    { 0x10de, 0x24ba, 0x24ba, ANY }, // GA104GLM [RTX A4500 Laptop GPU].
+    { 0x10de, 0x24bb, 0x24bb, ANY }, // GA104GLM [RTX A3000 Laptop GPU].
     // GA104M [GeForce RTX 3080 Mobile / Max-Q 8GB/16GB].
-    { 0x10de, 0x24dc, 0x24dc, GPU_ANY_REVISION },
+    { 0x10de, 0x24dc, 0x24dc, ANY },
     // GA104M [GeForce RTX 3070 Mobile / Max-Q].
-    { 0x10de, 0x24dd, 0x24dd, GPU_ANY_REVISION },
-    { 0x10de, 0x24df, 0x24df, GPU_ANY_REVISION }, // GA104M.
+    { 0x10de, 0x24dd, 0x24dd, ANY },
+    { 0x10de, 0x24df, 0x24df, ANY }, // GA104M.
     // GA104M [Geforce RTX 3070 Ti Laptop GPU].
-    { 0x10de, 0x24e0, 0x24e0, GPU_ANY_REVISION },
-    // GA104 [RTX A4500 Embedded GPU].
-    { 0x10de, 0x24fa, 0x24fa, GPU_ANY_REVISION },
+    { 0x10de, 0x24e0, 0x24e0, ANY },
+    { 0x10de, 0x24fa, 0x24fa, ANY }, // GA104 [RTX A4500 Embedded GPU].
     // GA106M [GeForce RTX 3060 Mobile / Max-Q].
-    { 0x10de, 0x2520, 0x2520, GPU_ANY_REVISION },
-    // GA106M [GeForce RTX 3060 Laptop GPU].
-    { 0x10de, 0x2521, 0x2521, GPU_ANY_REVISION },
+    { 0x10de, 0x2520, 0x2520, ANY },
+    { 0x10de, 0x2521, 0x2521, ANY }, // GA106M [GeForce RTX 3060 Laptop GPU].
     // GA106M [GeForce RTX 3050 Ti Mobile / Max-Q].
-    { 0x10de, 0x2523, 0x2523, GPU_ANY_REVISION },
+    { 0x10de, 0x2523, 0x2523, ANY },
     // GA106M [GeForce RTX 3060 Mobile / Max-Q].
-    { 0x10de, 0x2560, 0x2560, GPU_ANY_REVISION },
-    // GA106M [GeForce RTX 3060 Laptop GPU].
-    { 0x10de, 0x2561, 0x2561, GPU_ANY_REVISION },
+    { 0x10de, 0x2560, 0x2560, ANY },
+    { 0x10de, 0x2561, 0x2561, ANY }, // GA106M [GeForce RTX 3060 Laptop GPU].
     // GA106M [GeForce RTX 3050 Ti Mobile / Max-Q].
-    { 0x10de, 0x2563, 0x2563, GPU_ANY_REVISION },
-    // GA107M [GeForce RTX 3050 Ti Mobile].
-    { 0x10de, 0x25a0, 0x25a0, GPU_ANY_REVISION },
-    // GA107M [GeForce RTX 3050 Mobile].
-    { 0x10de, 0x25a2, 0x25a2, GPU_ANY_REVISION },
-    // GA107M [GeForce RTX 3050 Mobile].
-    { 0x10de, 0x25a5, 0x25a5, GPU_ANY_REVISION },
-    { 0x10de, 0x25a6, 0x25a6, GPU_ANY_REVISION }, // GA107M [GeForce MX570].
-    { 0x10de, 0x25a7, 0x25a7, GPU_ANY_REVISION }, // GA107M [GeForce MX570].
-    { 0x10de, 0x25a9, 0x25a9, GPU_ANY_REVISION }, // GA107M [GeForce RTX 2050].
-    { 0x10de, 0x25aa, 0x25aa, GPU_ANY_REVISION }, // GA107M [GeForce MX570 A].
+    { 0x10de, 0x2563, 0x2563, ANY },
+    { 0x10de, 0x25a0, 0x25a0, ANY }, // GA107M [GeForce RTX 3050 Ti Mobile].
+    { 0x10de, 0x25a2, 0x25a2, ANY }, // GA107M [GeForce RTX 3050 Mobile].
+    { 0x10de, 0x25a5, 0x25a5, ANY }, // GA107M [GeForce RTX 3050 Mobile].
+    { 0x10de, 0x25a6, 0x25a6, ANY }, // GA107M [GeForce MX570].
+    { 0x10de, 0x25a7, 0x25a7, ANY }, // GA107M [GeForce MX570].
+    { 0x10de, 0x25a9, 0x25a9, ANY }, // GA107M [GeForce RTX 2050].
+    { 0x10de, 0x25aa, 0x25aa, ANY }, // GA107M [GeForce MX570 A].
     // GA107M [GeForce RTX 3050 4GB Laptop GPU].
-    { 0x10de, 0x25ab, 0x25ab, GPU_ANY_REVISION },
+    { 0x10de, 0x25ab, 0x25ab, ANY },
     // GA107BM / GN20-P0-R-K2 [GeForce RTX 3050 6GB Laptop GPU].
-    { 0x10de, 0x25ac, 0x25ac, GPU_ANY_REVISION },
-    { 0x10de, 0x25b5, 0x25b5, GPU_ANY_REVISION }, // GA107GLM [RTX A4 Mobile].
-    // GA107GLM [RTX A2000 Mobile].
-    { 0x10de, 0x25b8, 0x25b8, GPU_ANY_REVISION },
-    // GA107GLM [RTX A1000 Laptop GPU].
-    { 0x10de, 0x25b9, 0x25b9, GPU_ANY_REVISION },
-    // GA107GLM [RTX A2000 8GB Laptop GPU].
-    { 0x10de, 0x25ba, 0x25ba, GPU_ANY_REVISION },
-    // GA107GLM [RTX A500 Laptop GPU].
-    { 0x10de, 0x25bb, 0x25bb, GPU_ANY_REVISION },
-    // GA107GLM [RTX A1000 6GB Laptop GPU].
-    { 0x10de, 0x25bc, 0x25bc, GPU_ANY_REVISION },
-    // GA107GLM [RTX A500 Laptop GPU].
-    { 0x10de, 0x25bd, 0x25bd, GPU_ANY_REVISION },
-    // GA107BM [GeForce RTX 3050 Ti Mobile].
-    { 0x10de, 0x25e0, 0x25e0, GPU_ANY_REVISION },
-    // GA107BM [GeForce RTX 3050 Mobile].
-    { 0x10de, 0x25e2, 0x25e2, GPU_ANY_REVISION },
-    // GA107BM [GeForce RTX 3050 Mobile].
-    { 0x10de, 0x25e5, 0x25e5, GPU_ANY_REVISION },
+    { 0x10de, 0x25ac, 0x25ac, ANY },
+    { 0x10de, 0x25b5, 0x25b5, ANY }, // GA107GLM [RTX A4 Mobile].
+    { 0x10de, 0x25b8, 0x25b8, ANY }, // GA107GLM [RTX A2000 Mobile].
+    { 0x10de, 0x25b9, 0x25b9, ANY }, // GA107GLM [RTX A1000 Laptop GPU].
+    { 0x10de, 0x25ba, 0x25ba, ANY }, // GA107GLM [RTX A2000 8GB Laptop GPU].
+    { 0x10de, 0x25bb, 0x25bb, ANY }, // GA107GLM [RTX A500 Laptop GPU].
+    { 0x10de, 0x25bc, 0x25bc, ANY }, // GA107GLM [RTX A1000 6GB Laptop GPU].
+    { 0x10de, 0x25bd, 0x25bd, ANY }, // GA107GLM [RTX A500 Laptop GPU].
+    { 0x10de, 0x25e0, 0x25e0, ANY }, // GA107BM [GeForce RTX 3050 Ti Mobile].
+    { 0x10de, 0x25e2, 0x25e2, ANY }, // GA107BM [GeForce RTX 3050 Mobile].
+    { 0x10de, 0x25e5, 0x25e5, ANY }, // GA107BM [GeForce RTX 3050 Mobile].
     // GA107BM / GN20-P0-R-K2 [GeForce RTX 3050 6GB Laptop GPU].
-    { 0x10de, 0x25ec, 0x25ec, GPU_ANY_REVISION },
-    // GA107 [RTX A1000 Embedded GPU].
-    { 0x10de, 0x25f9, 0x25f9, GPU_ANY_REVISION },
-    // GA107 [RTX A2000 Embedded GPU].
-    { 0x10de, 0x25fa, 0x25fa, GPU_ANY_REVISION },
-    // GA107 [RTX A500 Embedded GPU].
-    { 0x10de, 0x25fb, 0x25fb, GPU_ANY_REVISION },
+    { 0x10de, 0x25ec, 0x25ec, ANY },
+    { 0x10de, 0x25f9, 0x25f9, ANY }, // GA107 [RTX A1000 Embedded GPU].
+    { 0x10de, 0x25fa, 0x25fa, ANY }, // GA107 [RTX A2000 Embedded GPU].
+    { 0x10de, 0x25fb, 0x25fb, ANY }, // GA107 [RTX A500 Embedded GPU].
     // AD103M / GN21-X11 [GeForce RTX 4090 Laptop GPU].
-    { 0x10de, 0x2717, 0x2717, GPU_ANY_REVISION },
+    { 0x10de, 0x2717, 0x2717, ANY },
     // AD103GLM [RTX 5000 Ada Generation Laptop GPU].
-    { 0x10de, 0x2730, 0x2730, GPU_ANY_REVISION },
+    { 0x10de, 0x2730, 0x2730, ANY },
     // AD103M / GN21-X11 [GeForce RTX 4090 Laptop GPU].
-    { 0x10de, 0x2757, 0x2757, GPU_ANY_REVISION },
+    { 0x10de, 0x2757, 0x2757, ANY },
     // AD103GLM [RTX 5000 Ada Generation Embedded GPU].
-    { 0x10de, 0x2770, 0x2770, GPU_ANY_REVISION },
+    { 0x10de, 0x2770, 0x2770, ANY },
     // AD104M [GeForce RTX 4080 Max-Q / Mobile].
-    { 0x10de, 0x27a0, 0x27a0, GPU_ANY_REVISION },
+    { 0x10de, 0x27a0, 0x27a0, ANY },
     // AD104GLM [RTX 4000 Ada Generation Laptop GPU].
-    { 0x10de, 0x27ba, 0x27ba, GPU_ANY_REVISION },
+    { 0x10de, 0x27ba, 0x27ba, ANY },
     // AD104GLM [RTX 3500 Ada Generation Laptop GPU].
-    { 0x10de, 0x27bb, 0x27bb, GPU_ANY_REVISION },
+    { 0x10de, 0x27bb, 0x27bb, ANY },
     // AD104M [GeForce RTX 4080 Max-Q / Mobile].
-    { 0x10de, 0x27e0, 0x27e0, GPU_ANY_REVISION },
+    { 0x10de, 0x27e0, 0x27e0, ANY },
     // AD104GLM [RTX 4000 Ada Generation Embedded GPU].
-    { 0x10de, 0x27fa, 0x27fa, GPU_ANY_REVISION },
+    { 0x10de, 0x27fa, 0x27fa, ANY },
     // AD104GLM [RTX 3500 Ada Generation Embedded GPU].
-    { 0x10de, 0x27fb, 0x27fb, GPU_ANY_REVISION },
+    { 0x10de, 0x27fb, 0x27fb, ANY },
     // AD106M [GeForce RTX 4070 Max-Q / Mobile].
-    { 0x10de, 0x2820, 0x2820, GPU_ANY_REVISION },
-    // AD106M [GeForce RTX 3050 A Laptop GPU].
-    { 0x10de, 0x2822, 0x2822, GPU_ANY_REVISION },
+    { 0x10de, 0x2820, 0x2820, ANY },
+    { 0x10de, 0x2822, 0x2822, ANY }, // AD106M [GeForce RTX 3050 A Laptop GPU].
     // AD106GLM [RTX 3000 Ada Generation Laptop GPU].
-    { 0x10de, 0x2838, 0x2838, GPU_ANY_REVISION },
+    { 0x10de, 0x2838, 0x2838, ANY },
     // AD106M [GeForce RTX 4070 Max-Q / Mobile].
-    { 0x10de, 0x2860, 0x2860, GPU_ANY_REVISION },
+    { 0x10de, 0x2860, 0x2860, ANY },
     // AD106GLM [RTX 3000 Ada Generation Embedded GPU].
-    { 0x10de, 0x2878, 0x2878, GPU_ANY_REVISION },
+    { 0x10de, 0x2878, 0x2878, ANY },
     // AD107M [GeForce RTX 4060 Max-Q / Mobile].
-    { 0x10de, 0x28a0, 0x28a0, GPU_ANY_REVISION },
+    { 0x10de, 0x28a0, 0x28a0, ANY },
     // AD107M [GeForce RTX 4050 Max-Q / Mobile].
-    { 0x10de, 0x28a1, 0x28a1, GPU_ANY_REVISION },
-    // AD107M [GeForce RTX 3050 A Laptop GPU].
-    { 0x10de, 0x28a3, 0x28a3, GPU_ANY_REVISION },
+    { 0x10de, 0x28a1, 0x28a1, ANY },
+    { 0x10de, 0x28a3, 0x28a3, ANY }, // AD107M [GeForce RTX 3050 A Laptop GPU].
     // AD107GLM [RTX 2000 Ada Generation Laptop GPU].
-    { 0x10de, 0x28b8, 0x28b8, GPU_ANY_REVISION },
+    { 0x10de, 0x28b8, 0x28b8, ANY },
     // AD107GLM [RTX 1000 Ada Generation Laptop GPU].
-    { 0x10de, 0x28b9, 0x28b9, GPU_ANY_REVISION },
+    { 0x10de, 0x28b9, 0x28b9, ANY },
     // AD107GLM [RTX 500 Ada Generation Laptop GPU].
-    { 0x10de, 0x28ba, 0x28ba, GPU_ANY_REVISION },
+    { 0x10de, 0x28ba, 0x28ba, ANY },
     // AD107GLM [RTX 500 Ada Generation Laptop GPU].
-    { 0x10de, 0x28bb, 0x28bb, GPU_ANY_REVISION },
+    { 0x10de, 0x28bb, 0x28bb, ANY },
     // AD107M [GeForce RTX 4060 Max-Q / Mobile].
-    { 0x10de, 0x28e0, 0x28e0, GPU_ANY_REVISION },
+    { 0x10de, 0x28e0, 0x28e0, ANY },
     // AD107M [GeForce RTX 4050 Max-Q / Mobile].
-    { 0x10de, 0x28e1, 0x28e1, GPU_ANY_REVISION },
-    // AD107M [GeForce RTX 3050 A Laptop GPU].
-    { 0x10de, 0x28e3, 0x28e3, GPU_ANY_REVISION },
+    { 0x10de, 0x28e1, 0x28e1, ANY },
+    { 0x10de, 0x28e3, 0x28e3, ANY }, // AD107M [GeForce RTX 3050 A Laptop GPU].
     // AD107GLM [RTX 2000 Ada Generation Embedded GPU].
-    { 0x10de, 0x28f8, 0x28f8, GPU_ANY_REVISION },
+    { 0x10de, 0x28f8, 0x28f8, ANY },
     // GB202GL [RTX PRO 6000 Blackwell Max-Q Workstation Edition].
-    { 0x10de, 0x2bb4, 0x2bb4, GPU_ANY_REVISION },
+    { 0x10de, 0x2bb4, 0x2bb4, ANY },
     // GB202GL [RTX PRO 6000D Blackwell Max-Q Workstation Edition].
-    { 0x10de, 0x2bbc, 0x2bbc, GPU_ANY_REVISION },
+    { 0x10de, 0x2bbc, 0x2bbc, ANY },
     // GB203M / GN22 [GeForce RTX 5090 Max-Q / Mobile].
-    { 0x10de, 0x2c18, 0x2c18, GPU_ANY_REVISION },
+    { 0x10de, 0x2c18, 0x2c18, ANY },
     // GB203M / GN22 [GeForce RTX 5080 Max-Q / Mobile].
-    { 0x10de, 0x2c19, 0x2c19, GPU_ANY_REVISION },
+    { 0x10de, 0x2c19, 0x2c19, ANY },
     // GB203GLM [RTX PRO 5000 Blackwell Generation Laptop GPU].
-    { 0x10de, 0x2c38, 0x2c38, GPU_ANY_REVISION },
+    { 0x10de, 0x2c38, 0x2c38, ANY },
     // GB203GLM [RTX PRO 4000 Blackwell Generation Laptop GPU].
-    { 0x10de, 0x2c39, 0x2c39, GPU_ANY_REVISION },
+    { 0x10de, 0x2c39, 0x2c39, ANY },
     // GB203M / GN22-X11 [GeForce RTX 5090 Max-Q / Mobile].
-    { 0x10de, 0x2c58, 0x2c58, GPU_ANY_REVISION },
+    { 0x10de, 0x2c58, 0x2c58, ANY },
     // GB203M / GN22-X9 [GeForce RTX 5080 Max-Q / Mobile].
-    { 0x10de, 0x2c59, 0x2c59, GPU_ANY_REVISION },
+    { 0x10de, 0x2c59, 0x2c59, ANY },
     // GB203GLM [RTX PRO 5000 Blackwell Embedded GPU].
-    { 0x10de, 0x2c77, 0x2c77, GPU_ANY_REVISION },
+    { 0x10de, 0x2c77, 0x2c77, ANY },
     // GB203GLM [RTX PRO 4000 Blackwell Embedded GPU].
-    { 0x10de, 0x2c79, 0x2c79, GPU_ANY_REVISION },
+    { 0x10de, 0x2c79, 0x2c79, ANY },
     // GB206M [GeForce RTX 5070 Max-Q / Mobile].
-    { 0x10de, 0x2d18, 0x2d18, GPU_ANY_REVISION },
+    { 0x10de, 0x2d18, 0x2d18, ANY },
     // GB206M [GeForce RTX 5060 Max-Q / Mobile].
-    { 0x10de, 0x2d19, 0x2d19, GPU_ANY_REVISION },
+    { 0x10de, 0x2d19, 0x2d19, ANY },
     // GB206GLM [RTX PRO 2000 Blackwell Generation Laptop GPU].
-    { 0x10de, 0x2d39, 0x2d39, GPU_ANY_REVISION },
+    { 0x10de, 0x2d39, 0x2d39, ANY },
     // GB206M [GeForce RTX 5070 Max-Q / Mobile].
-    { 0x10de, 0x2d58, 0x2d58, GPU_ANY_REVISION },
+    { 0x10de, 0x2d58, 0x2d58, ANY },
     // GB206M [GeForce RTX 5060 Max-Q / Mobile].
-    { 0x10de, 0x2d59, 0x2d59, GPU_ANY_REVISION },
+    { 0x10de, 0x2d59, 0x2d59, ANY },
     // GB206GLM [RTX PRO 2000 Blackwell Embedded GPU].
-    { 0x10de, 0x2d79, 0x2d79, GPU_ANY_REVISION },
+    { 0x10de, 0x2d79, 0x2d79, ANY },
     // GB207M [GeForce RTX 5050 Max-Q / Mobile].
-    { 0x10de, 0x2d98, 0x2d98, GPU_ANY_REVISION },
+    { 0x10de, 0x2d98, 0x2d98, ANY },
     // GB207GLM [RTX PRO 1000 Blackwell Generation Laptop GPU].
-    { 0x10de, 0x2db8, 0x2db8, GPU_ANY_REVISION },
+    { 0x10de, 0x2db8, 0x2db8, ANY },
     // GB207GLM [RTX PRO 500 Blackwell Generation Laptop GPU].
-    { 0x10de, 0x2db9, 0x2db9, GPU_ANY_REVISION },
+    { 0x10de, 0x2db9, 0x2db9, ANY },
     // GB207M [GeForce RTX 5050 Max-Q / Mobile].
-    { 0x10de, 0x2dd8, 0x2dd8, GPU_ANY_REVISION },
+    { 0x10de, 0x2dd8, 0x2dd8, ANY },
     // GB207GLM [RTX PRO 500 Blackwell Embedded GPU].
-    { 0x10de, 0x2df9, 0x2df9, GPU_ANY_REVISION },
-    // GB205M [GeForce RTX 5070 Ti Mobile].
-    { 0x10de, 0x2f18, 0x2f18, GPU_ANY_REVISION },
+    { 0x10de, 0x2df9, 0x2df9, ANY },
+    { 0x10de, 0x2f18, 0x2f18, ANY }, // GB205M [GeForce RTX 5070 Ti Mobile].
     // GB205GLM [RTX PRO 3000 Blackwell Generation Laptop GPU].
-    { 0x10de, 0x2f38, 0x2f38, GPU_ANY_REVISION },
-    // GB205M [GeForce RTX 5070 Ti Mobile].
-    { 0x10de, 0x2f58, 0x2f58, GPU_ANY_REVISION },
-    // Integrated graphics after Kaveri.
-    { 0x1002, 0x1320, 0x1fff, GPU_ANY_REVISION },
+    { 0x10de, 0x2f38, 0x2f38, ANY },
+    { 0x10de, 0x2f58, 0x2f58, ANY }, // GB205M [GeForce RTX 5070 Ti Mobile].
+    { 0x1002, 0x1320, 0x1fff, ANY }, // Integrated graphics after Kaveri.
     { 0x1002, 0x67ef, 0x67ef, 0xe2 }, // AMD Radeon RX 560X.
     { 0x1002, 0x694c, 0x694c, 0xc0 }, // AMD Radeon RX Vega M GH Graphics.
     { 0x1002, 0x694e, 0x694e, 0xc0 }, // AMD Radeon RX Vega M GL Graphics.
@@ -662,675 +502,547 @@ const struct gpu_id vbios_blocklist[] = {
     { 0x1002, 0x7483, 0x7483, 0xcf } // AMD Radeon RX 7600M.
 };
 
-const size_t vbios_blocklist_count = ARRAY_COUNT(vbios_blocklist);
+const size_t gpu_lists_vbios_blocklist_count = ARRAY_COUNT(gpu_lists_vbios_blocklist);
 
-const struct gpu_id vbios_allowlist[] = {
+const struct gpu_lists_id gpu_lists_vbios_allowlist[] = {
     // Core Processor Integrated Graphics Controller.
-    { 0x8086, 0x0042, 0x0042, GPU_ANY_REVISION },
+    { 0x8086, 0x0042, 0x0042, ANY },
     // Core Processor Integrated Graphics Controller.
-    { 0x8086, 0x0046, 0x0046, GPU_ANY_REVISION },
+    { 0x8086, 0x0046, 0x0046, ANY },
     // 2nd Generation Core Processor Family Integrated Graphics Controller.
-    { 0x8086, 0x0102, 0x0102, GPU_ANY_REVISION },
+    { 0x8086, 0x0102, 0x0102, ANY },
     // 2nd Generation Core Processor Family Integrated Graphics Controller.
-    { 0x8086, 0x0106, 0x0106, GPU_ANY_REVISION },
+    { 0x8086, 0x0106, 0x0106, ANY },
     // Xeon E3-1200 Processor Family Integrated Graphics Controller.
-    { 0x8086, 0x010a, 0x010a, GPU_ANY_REVISION },
+    { 0x8086, 0x010a, 0x010a, ANY },
     // 2nd Generation Core Processor Family Integrated Graphics Controller.
-    { 0x8086, 0x0112, 0x0112, GPU_ANY_REVISION },
+    { 0x8086, 0x0112, 0x0112, ANY },
     // 2nd Generation Core Processor Family Integrated Graphics Controller.
-    { 0x8086, 0x0116, 0x0116, GPU_ANY_REVISION },
+    { 0x8086, 0x0116, 0x0116, ANY },
     // 2nd Generation Core Processor Family Integrated Graphics Controller.
-    { 0x8086, 0x0122, 0x0122, GPU_ANY_REVISION },
+    { 0x8086, 0x0122, 0x0122, ANY },
     // 2nd Generation Core Processor Family Integrated Graphics Controller.
-    { 0x8086, 0x0126, 0x0126, GPU_ANY_REVISION },
+    { 0x8086, 0x0126, 0x0126, ANY },
     // Xeon E3-1200 v2/3rd Gen Core processor Graphics Controller.
-    { 0x8086, 0x0152, 0x0152, GPU_ANY_REVISION },
-    // Ivy Bridge mobile GT1 [HD Graphics].
-    { 0x8086, 0x0156, 0x0156, GPU_ANY_REVISION },
+    { 0x8086, 0x0152, 0x0152, ANY },
+    { 0x8086, 0x0156, 0x0156, ANY }, // Ivy Bridge mobile GT1 [HD Graphics].
     // Xeon E3-1200 v2/Ivy Bridge Graphics Controller.
-    { 0x8086, 0x015a, 0x015a, GPU_ANY_REVISION },
-    // IvyBridge GT2 [HD Graphics 4000].
-    { 0x8086, 0x0162, 0x0162, GPU_ANY_REVISION },
+    { 0x8086, 0x015a, 0x015a, ANY },
+    { 0x8086, 0x0162, 0x0162, ANY }, // IvyBridge GT2 [HD Graphics 4000].
     // Ivy Bridge mobile GT2 [HD Graphics 4000].
-    { 0x8086, 0x0166, 0x0166, GPU_ANY_REVISION },
+    { 0x8086, 0x0166, 0x0166, ANY },
     // Xeon E3-1200 v2/3rd Gen Core processor Graphics Controller.
-    { 0x8086, 0x016a, 0x016a, GPU_ANY_REVISION },
+    { 0x8086, 0x016a, 0x016a, ANY },
     // Xeon E3-1200 v3/4th Gen Core Processor Integrated Graphics Controller.
-    { 0x8086, 0x0402, 0x0402, GPU_ANY_REVISION },
-    // Haswell Integrated Graphics Controller.
-    { 0x8086, 0x0406, 0x0406, GPU_ANY_REVISION },
+    { 0x8086, 0x0402, 0x0402, ANY },
+    { 0x8086, 0x0406, 0x0406, ANY }, // Haswell Integrated Graphics Controller.
     // Xeon E3-1200 v3 Processor Integrated Graphics Controller.
-    { 0x8086, 0x040a, 0x040a, GPU_ANY_REVISION },
-    { 0x8086, 0x040b, 0x040b, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x040e, 0x040e, GPU_ANY_REVISION }, // Intel graphics.
+    { 0x8086, 0x040a, 0x040a, ANY },
+    { 0x8086, 0x040b, 0x040b, ANY }, // Intel graphics.
+    { 0x8086, 0x040e, 0x040e, ANY }, // Intel graphics.
     // Xeon E3-1200 v3/4th Gen Core Processor Integrated Graphics Controller.
-    { 0x8086, 0x0412, 0x0412, GPU_ANY_REVISION },
+    { 0x8086, 0x0412, 0x0412, ANY },
     // 4th Gen Core Processor Integrated Graphics Controller.
-    { 0x8086, 0x0416, 0x0416, GPU_ANY_REVISION },
+    { 0x8086, 0x0416, 0x0416, ANY },
     // Xeon E3-1200 v3 Processor Integrated Graphics Controller.
-    { 0x8086, 0x041a, 0x041a, GPU_ANY_REVISION },
-    { 0x8086, 0x041b, 0x041b, GPU_ANY_REVISION }, // Intel graphics.
+    { 0x8086, 0x041a, 0x041a, ANY },
+    { 0x8086, 0x041b, 0x041b, ANY }, // Intel graphics.
     // 4th Generation Core Processor Family Integrated Graphics Controller.
-    { 0x8086, 0x041e, 0x041e, GPU_ANY_REVISION },
-    { 0x8086, 0x0422, 0x0422, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0426, 0x0426, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x042a, 0x042a, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x042b, 0x042b, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x042e, 0x042e, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0a02, 0x0a02, GPU_ANY_REVISION }, // Intel graphics.
+    { 0x8086, 0x041e, 0x041e, ANY },
+    { 0x8086, 0x0422, 0x0422, ANY }, // Intel graphics.
+    { 0x8086, 0x0426, 0x0426, ANY }, // Intel graphics.
+    { 0x8086, 0x042a, 0x042a, ANY }, // Intel graphics.
+    { 0x8086, 0x042b, 0x042b, ANY }, // Intel graphics.
+    { 0x8086, 0x042e, 0x042e, ANY }, // Intel graphics.
+    { 0x8086, 0x0a02, 0x0a02, ANY }, // Intel graphics.
     // Haswell-ULT Integrated Graphics Controller.
-    { 0x8086, 0x0a06, 0x0a06, GPU_ANY_REVISION },
-    { 0x8086, 0x0a0a, 0x0a0a, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0a0b, 0x0a0b, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0a0e, 0x0a0e, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0a12, 0x0a12, GPU_ANY_REVISION }, // Intel graphics.
+    { 0x8086, 0x0a06, 0x0a06, ANY },
+    { 0x8086, 0x0a0a, 0x0a0a, ANY }, // Intel graphics.
+    { 0x8086, 0x0a0b, 0x0a0b, ANY }, // Intel graphics.
+    { 0x8086, 0x0a0e, 0x0a0e, ANY }, // Intel graphics.
+    { 0x8086, 0x0a12, 0x0a12, ANY }, // Intel graphics.
     // Haswell-ULT Integrated Graphics Controller.
-    { 0x8086, 0x0a16, 0x0a16, GPU_ANY_REVISION },
-    { 0x8086, 0x0a1a, 0x0a1a, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0a1b, 0x0a1b, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0a1e, 0x0a1e, GPU_ANY_REVISION }, // Intel graphics.
+    { 0x8086, 0x0a16, 0x0a16, ANY },
+    { 0x8086, 0x0a1a, 0x0a1a, ANY }, // Intel graphics.
+    { 0x8086, 0x0a1b, 0x0a1b, ANY }, // Intel graphics.
+    { 0x8086, 0x0a1e, 0x0a1e, ANY }, // Intel graphics.
     // Haswell-ULT Integrated Graphics Controller.
-    { 0x8086, 0x0a22, 0x0a22, GPU_ANY_REVISION },
+    { 0x8086, 0x0a22, 0x0a22, ANY },
     // Haswell-ULT Integrated Graphics Controller.
-    { 0x8086, 0x0a26, 0x0a26, GPU_ANY_REVISION },
+    { 0x8086, 0x0a26, 0x0a26, ANY },
     // Haswell-ULT Integrated Graphics Controller.
-    { 0x8086, 0x0a2a, 0x0a2a, GPU_ANY_REVISION },
-    { 0x8086, 0x0a2b, 0x0a2b, GPU_ANY_REVISION }, // Intel graphics.
+    { 0x8086, 0x0a2a, 0x0a2a, ANY },
+    { 0x8086, 0x0a2b, 0x0a2b, ANY }, // Intel graphics.
     // Haswell-ULT Integrated Graphics Controller.
-    { 0x8086, 0x0a2e, 0x0a2e, GPU_ANY_REVISION },
-    { 0x8086, 0x0a84, 0x0a84, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0c02, 0x0c02, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0c06, 0x0c06, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0c0a, 0x0c0a, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0c0b, 0x0c0b, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0c0e, 0x0c0e, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0c12, 0x0c12, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0c16, 0x0c16, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0c1a, 0x0c1a, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0c1b, 0x0c1b, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0c1e, 0x0c1e, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0c22, 0x0c22, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0c26, 0x0c26, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0c2a, 0x0c2a, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0c2b, 0x0c2b, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0c2e, 0x0c2e, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0d02, 0x0d02, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0d06, 0x0d06, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0d0a, 0x0d0a, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0d0b, 0x0d0b, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0d0e, 0x0d0e, GPU_ANY_REVISION }, // Intel graphics.
+    { 0x8086, 0x0a2e, 0x0a2e, ANY },
+    { 0x8086, 0x0a84, 0x0a84, ANY }, // Intel graphics.
+    { 0x8086, 0x0c02, 0x0c02, ANY }, // Intel graphics.
+    { 0x8086, 0x0c06, 0x0c06, ANY }, // Intel graphics.
+    { 0x8086, 0x0c0a, 0x0c0a, ANY }, // Intel graphics.
+    { 0x8086, 0x0c0b, 0x0c0b, ANY }, // Intel graphics.
+    { 0x8086, 0x0c0e, 0x0c0e, ANY }, // Intel graphics.
+    { 0x8086, 0x0c12, 0x0c12, ANY }, // Intel graphics.
+    { 0x8086, 0x0c16, 0x0c16, ANY }, // Intel graphics.
+    { 0x8086, 0x0c1a, 0x0c1a, ANY }, // Intel graphics.
+    { 0x8086, 0x0c1b, 0x0c1b, ANY }, // Intel graphics.
+    { 0x8086, 0x0c1e, 0x0c1e, ANY }, // Intel graphics.
+    { 0x8086, 0x0c22, 0x0c22, ANY }, // Intel graphics.
+    { 0x8086, 0x0c26, 0x0c26, ANY }, // Intel graphics.
+    { 0x8086, 0x0c2a, 0x0c2a, ANY }, // Intel graphics.
+    { 0x8086, 0x0c2b, 0x0c2b, ANY }, // Intel graphics.
+    { 0x8086, 0x0c2e, 0x0c2e, ANY }, // Intel graphics.
+    { 0x8086, 0x0d02, 0x0d02, ANY }, // Intel graphics.
+    { 0x8086, 0x0d06, 0x0d06, ANY }, // Intel graphics.
+    { 0x8086, 0x0d0a, 0x0d0a, ANY }, // Intel graphics.
+    { 0x8086, 0x0d0b, 0x0d0b, ANY }, // Intel graphics.
+    { 0x8086, 0x0d0e, 0x0d0e, ANY }, // Intel graphics.
     // Crystal Well Integrated Graphics Controller.
-    { 0x8086, 0x0d12, 0x0d12, GPU_ANY_REVISION },
+    { 0x8086, 0x0d12, 0x0d12, ANY },
     // Crystal Well Integrated Graphics Controller.
-    { 0x8086, 0x0d16, 0x0d16, GPU_ANY_REVISION },
-    { 0x8086, 0x0d1a, 0x0d1a, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0d1b, 0x0d1b, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0d1e, 0x0d1e, GPU_ANY_REVISION }, // Intel graphics.
+    { 0x8086, 0x0d16, 0x0d16, ANY },
+    { 0x8086, 0x0d1a, 0x0d1a, ANY }, // Intel graphics.
+    { 0x8086, 0x0d1b, 0x0d1b, ANY }, // Intel graphics.
+    { 0x8086, 0x0d1e, 0x0d1e, ANY }, // Intel graphics.
     // Crystal Well Integrated Iris Pro Graphics 5200.
-    { 0x8086, 0x0d22, 0x0d22, GPU_ANY_REVISION },
+    { 0x8086, 0x0d22, 0x0d22, ANY },
     // Crystal Well Integrated Graphics Controller.
-    { 0x8086, 0x0d26, 0x0d26, GPU_ANY_REVISION },
-    { 0x8086, 0x0d2a, 0x0d2a, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0d2b, 0x0d2b, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x0d2e, 0x0d2e, GPU_ANY_REVISION }, // Intel graphics.
-    // Broadwell-U Integrated Graphics.
-    { 0x8086, 0x1602, 0x1602, GPU_ANY_REVISION },
-    // Broadwell-U GT1 [HD Graphics].
-    { 0x8086, 0x1606, 0x1606, GPU_ANY_REVISION },
-    // Broadwell-U Integrated Graphics.
-    { 0x8086, 0x160a, 0x160a, GPU_ANY_REVISION },
-    // Broadwell-U Integrated Graphics.
-    { 0x8086, 0x160b, 0x160b, GPU_ANY_REVISION },
-    // Broadwell-U Integrated Graphics.
-    { 0x8086, 0x160d, 0x160d, GPU_ANY_REVISION },
-    // Broadwell-U Integrated Graphics.
-    { 0x8086, 0x160e, 0x160e, GPU_ANY_REVISION },
-    // Broadwell-H GT2 [HD Graphics 5600].
-    { 0x8086, 0x1612, 0x1612, GPU_ANY_REVISION },
-    // Broadwell-U GT2 [HD Graphics 5500].
-    { 0x8086, 0x1616, 0x1616, GPU_ANY_REVISION },
-    // Broadwell-U Integrated Graphics.
-    { 0x8086, 0x161a, 0x161a, GPU_ANY_REVISION },
-    // Broadwell-U Integrated Graphics.
-    { 0x8086, 0x161b, 0x161b, GPU_ANY_REVISION },
-    // Broadwell-U Integrated Graphics.
-    { 0x8086, 0x161d, 0x161d, GPU_ANY_REVISION },
-    // Broadwell-Y GT2 [HD Graphics 5300].
-    { 0x8086, 0x161e, 0x161e, GPU_ANY_REVISION },
+    { 0x8086, 0x0d26, 0x0d26, ANY },
+    { 0x8086, 0x0d2a, 0x0d2a, ANY }, // Intel graphics.
+    { 0x8086, 0x0d2b, 0x0d2b, ANY }, // Intel graphics.
+    { 0x8086, 0x0d2e, 0x0d2e, ANY }, // Intel graphics.
+    { 0x8086, 0x1602, 0x1602, ANY }, // Broadwell-U Integrated Graphics.
+    { 0x8086, 0x1606, 0x1606, ANY }, // Broadwell-U GT1 [HD Graphics].
+    { 0x8086, 0x160a, 0x160a, ANY }, // Broadwell-U Integrated Graphics.
+    { 0x8086, 0x160b, 0x160b, ANY }, // Broadwell-U Integrated Graphics.
+    { 0x8086, 0x160d, 0x160d, ANY }, // Broadwell-U Integrated Graphics.
+    { 0x8086, 0x160e, 0x160e, ANY }, // Broadwell-U Integrated Graphics.
+    { 0x8086, 0x1612, 0x1612, ANY }, // Broadwell-H GT2 [HD Graphics 5600].
+    { 0x8086, 0x1616, 0x1616, ANY }, // Broadwell-U GT2 [HD Graphics 5500].
+    { 0x8086, 0x161a, 0x161a, ANY }, // Broadwell-U Integrated Graphics.
+    { 0x8086, 0x161b, 0x161b, ANY }, // Broadwell-U Integrated Graphics.
+    { 0x8086, 0x161d, 0x161d, ANY }, // Broadwell-U Integrated Graphics.
+    { 0x8086, 0x161e, 0x161e, ANY }, // Broadwell-Y GT2 [HD Graphics 5300].
     // Broadwell-DT/H GT3 [Iris Pro Graphics 6200].
-    { 0x8086, 0x1622, 0x1622, GPU_ANY_REVISION },
-    // Broadwell-U GT3 [HD Graphics 6000].
-    { 0x8086, 0x1626, 0x1626, GPU_ANY_REVISION },
+    { 0x8086, 0x1622, 0x1622, ANY },
+    { 0x8086, 0x1626, 0x1626, ANY }, // Broadwell-U GT3 [HD Graphics 6000].
     // Broadwell-DT GT3 [Iris Pro Graphics P6300].
-    { 0x8086, 0x162a, 0x162a, GPU_ANY_REVISION },
-    // Broadwell-U GT3 [Iris Graphics 6100].
-    { 0x8086, 0x162b, 0x162b, GPU_ANY_REVISION },
-    // Broadwell-U Integrated Graphics.
-    { 0x8086, 0x162d, 0x162d, GPU_ANY_REVISION },
-    // Broadwell-U Integrated Graphics.
-    { 0x8086, 0x162e, 0x162e, GPU_ANY_REVISION },
-    // Broadwell-U Integrated Graphics.
-    { 0x8086, 0x1632, 0x1632, GPU_ANY_REVISION },
-    // Broadwell-U Integrated Graphics.
-    { 0x8086, 0x1636, 0x1636, GPU_ANY_REVISION },
-    // Broadwell-U Integrated Graphics.
-    { 0x8086, 0x163a, 0x163a, GPU_ANY_REVISION },
-    // Broadwell-U Integrated Graphics.
-    { 0x8086, 0x163b, 0x163b, GPU_ANY_REVISION },
-    // Broadwell-U Integrated Graphics.
-    { 0x8086, 0x163d, 0x163d, GPU_ANY_REVISION },
-    // Broadwell-U Integrated Graphics.
-    { 0x8086, 0x163e, 0x163e, GPU_ANY_REVISION },
-    // Skylake-S GT1 [HD Graphics 510].
-    { 0x8086, 0x1902, 0x1902, GPU_ANY_REVISION },
-    // Skylake-U GT1 [HD Graphics 510].
-    { 0x8086, 0x1906, 0x1906, GPU_ANY_REVISION },
-    { 0x8086, 0x190a, 0x190a, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x190b, 0x190b, GPU_ANY_REVISION }, // HD Graphics 510.
-    { 0x8086, 0x190e, 0x190e, GPU_ANY_REVISION }, // Intel graphics.
-    // Skylake-S GT2 [HD Graphics 530].
-    { 0x8086, 0x1912, 0x1912, GPU_ANY_REVISION },
-    { 0x8086, 0x1913, 0x1913, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x1915, 0x1915, GPU_ANY_REVISION }, // Intel graphics.
-    // Skylake-U GT2 [HD Graphics 520].
-    { 0x8086, 0x1916, 0x1916, GPU_ANY_REVISION },
-    { 0x8086, 0x1917, 0x1917, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x191a, 0x191a, GPU_ANY_REVISION }, // Intel graphics.
-    // Skylake-H GT2 [HD Graphics 530].
-    { 0x8086, 0x191b, 0x191b, GPU_ANY_REVISION },
-    // Skylake-DT/H GT2 [HD Graphics P530].
-    { 0x8086, 0x191d, 0x191d, GPU_ANY_REVISION },
-    // Skylake-Y GT2 [HD Graphics 515].
-    { 0x8086, 0x191e, 0x191e, GPU_ANY_REVISION },
-    { 0x8086, 0x1921, 0x1921, GPU_ANY_REVISION }, // HD Graphics 520.
-    { 0x8086, 0x1923, 0x1923, GPU_ANY_REVISION }, // HD Graphics 535.
-    // Skylake-U GT3 [Iris Graphics 540].
-    { 0x8086, 0x1926, 0x1926, GPU_ANY_REVISION },
-    // Skylake-U GT3 [Iris Graphics 550].
-    { 0x8086, 0x1927, 0x1927, GPU_ANY_REVISION },
-    { 0x8086, 0x192a, 0x192a, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x192b, 0x192b, GPU_ANY_REVISION }, // Iris Graphics 555.
-    // Skylake-H GT3 [Iris Graphics P555].
-    { 0x8086, 0x192d, 0x192d, GPU_ANY_REVISION },
-    { 0x8086, 0x1932, 0x1932, GPU_ANY_REVISION }, // Iris Pro Graphics 580.
-    // Skylake-H GT4 [Iris Pro Graphics P580].
-    { 0x8086, 0x193a, 0x193a, GPU_ANY_REVISION },
-    // Skylake-H GT4 [Iris Pro Graphics 580].
-    { 0x8086, 0x193b, 0x193b, GPU_ANY_REVISION },
-    // Skylake-H GT4 [Iris Pro Graphics P580].
-    { 0x8086, 0x193d, 0x193d, GPU_ANY_REVISION },
-    { 0x8086, 0x1a84, 0x1a84, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x1a85, 0x1a85, GPU_ANY_REVISION }, // Intel graphics.
-    // GeminiLake [UHD Graphics 605].
-    { 0x8086, 0x3184, 0x3184, GPU_ANY_REVISION },
-    // GeminiLake [UHD Graphics 600].
-    { 0x8086, 0x3185, 0x3185, GPU_ANY_REVISION },
-    // CoffeeLake-S GT1 [UHD Graphics 610].
-    { 0x8086, 0x3e90, 0x3e90, GPU_ANY_REVISION },
-    // CoffeeLake-S GT2 [UHD Graphics 630].
-    { 0x8086, 0x3e91, 0x3e91, GPU_ANY_REVISION },
-    // CoffeeLake-S GT2 [UHD Graphics 630].
-    { 0x8086, 0x3e92, 0x3e92, GPU_ANY_REVISION },
-    // CoffeeLake-S GT1 [UHD Graphics 610].
-    { 0x8086, 0x3e93, 0x3e93, GPU_ANY_REVISION },
-    // CoffeeLake-S GT2 [UHD Graphics P630].
-    { 0x8086, 0x3e96, 0x3e96, GPU_ANY_REVISION },
-    // CoffeeLake-S GT2 [UHD Graphics 630].
-    { 0x8086, 0x3e98, 0x3e98, GPU_ANY_REVISION },
-    { 0x8086, 0x3e99, 0x3e99, GPU_ANY_REVISION }, // Intel graphics.
-    // Coffee Lake-S GT2 [UHD Graphics P630].
-    { 0x8086, 0x3e9a, 0x3e9a, GPU_ANY_REVISION },
-    // Kaby Lake-S GT1 [HD Graphics 610].
-    { 0x8086, 0x5902, 0x5902, GPU_ANY_REVISION },
-    // Kaby Lake-U GT1 [HD Graphics 610].
-    { 0x8086, 0x5906, 0x5906, GPU_ANY_REVISION },
-    { 0x8086, 0x5908, 0x5908, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x590a, 0x590a, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x590b, 0x590b, GPU_ANY_REVISION }, // HD Graphics 610.
-    { 0x8086, 0x590e, 0x590e, GPU_ANY_REVISION }, // Intel graphics.
-    // Kaby Lake-S GT2 [HD Graphics 630].
-    { 0x8086, 0x5912, 0x5912, GPU_ANY_REVISION },
-    { 0x8086, 0x5913, 0x5913, GPU_ANY_REVISION }, // Intel graphics.
-    { 0x8086, 0x5915, 0x5915, GPU_ANY_REVISION }, // Intel graphics.
-    // Kaby Lake-U GT2 [HD Graphics 620].
-    { 0x8086, 0x5916, 0x5916, GPU_ANY_REVISION },
-    // Kaby Lake-R GT2 [UHD Graphics 620].
-    { 0x8086, 0x5917, 0x5917, GPU_ANY_REVISION },
-    { 0x8086, 0x591a, 0x591a, GPU_ANY_REVISION }, // Intel graphics.
-    // Kaby Lake-H GT2 [HD Graphics 630].
-    { 0x8086, 0x591b, 0x591b, GPU_ANY_REVISION },
-    // Kaby Lake-DT GT2 [HD Graphics P630].
-    { 0x8086, 0x591d, 0x591d, GPU_ANY_REVISION },
-    // Kaby Lake-Y GT2 [HD Graphics 615].
-    { 0x8086, 0x591e, 0x591e, GPU_ANY_REVISION },
-    { 0x8086, 0x5921, 0x5921, GPU_ANY_REVISION }, // HD Graphics 620.
-    { 0x8086, 0x5923, 0x5923, GPU_ANY_REVISION }, // HD Graphics 635.
+    { 0x8086, 0x162a, 0x162a, ANY },
+    { 0x8086, 0x162b, 0x162b, ANY }, // Broadwell-U GT3 [Iris Graphics 6100].
+    { 0x8086, 0x162d, 0x162d, ANY }, // Broadwell-U Integrated Graphics.
+    { 0x8086, 0x162e, 0x162e, ANY }, // Broadwell-U Integrated Graphics.
+    { 0x8086, 0x1632, 0x1632, ANY }, // Broadwell-U Integrated Graphics.
+    { 0x8086, 0x1636, 0x1636, ANY }, // Broadwell-U Integrated Graphics.
+    { 0x8086, 0x163a, 0x163a, ANY }, // Broadwell-U Integrated Graphics.
+    { 0x8086, 0x163b, 0x163b, ANY }, // Broadwell-U Integrated Graphics.
+    { 0x8086, 0x163d, 0x163d, ANY }, // Broadwell-U Integrated Graphics.
+    { 0x8086, 0x163e, 0x163e, ANY }, // Broadwell-U Integrated Graphics.
+    { 0x8086, 0x1902, 0x1902, ANY }, // Skylake-S GT1 [HD Graphics 510].
+    { 0x8086, 0x1906, 0x1906, ANY }, // Skylake-U GT1 [HD Graphics 510].
+    { 0x8086, 0x190a, 0x190a, ANY }, // Intel graphics.
+    { 0x8086, 0x190b, 0x190b, ANY }, // HD Graphics 510.
+    { 0x8086, 0x190e, 0x190e, ANY }, // Intel graphics.
+    { 0x8086, 0x1912, 0x1912, ANY }, // Skylake-S GT2 [HD Graphics 530].
+    { 0x8086, 0x1913, 0x1913, ANY }, // Intel graphics.
+    { 0x8086, 0x1915, 0x1915, ANY }, // Intel graphics.
+    { 0x8086, 0x1916, 0x1916, ANY }, // Skylake-U GT2 [HD Graphics 520].
+    { 0x8086, 0x1917, 0x1917, ANY }, // Intel graphics.
+    { 0x8086, 0x191a, 0x191a, ANY }, // Intel graphics.
+    { 0x8086, 0x191b, 0x191b, ANY }, // Skylake-H GT2 [HD Graphics 530].
+    { 0x8086, 0x191d, 0x191d, ANY }, // Skylake-DT/H GT2 [HD Graphics P530].
+    { 0x8086, 0x191e, 0x191e, ANY }, // Skylake-Y GT2 [HD Graphics 515].
+    { 0x8086, 0x1921, 0x1921, ANY }, // HD Graphics 520.
+    { 0x8086, 0x1923, 0x1923, ANY }, // HD Graphics 535.
+    { 0x8086, 0x1926, 0x1926, ANY }, // Skylake-U GT3 [Iris Graphics 540].
+    { 0x8086, 0x1927, 0x1927, ANY }, // Skylake-U GT3 [Iris Graphics 550].
+    { 0x8086, 0x192a, 0x192a, ANY }, // Intel graphics.
+    { 0x8086, 0x192b, 0x192b, ANY }, // Iris Graphics 555.
+    { 0x8086, 0x192d, 0x192d, ANY }, // Skylake-H GT3 [Iris Graphics P555].
+    { 0x8086, 0x1932, 0x1932, ANY }, // Iris Pro Graphics 580.
+    { 0x8086, 0x193a, 0x193a, ANY }, // Skylake-H GT4 [Iris Pro Graphics P580].
+    { 0x8086, 0x193b, 0x193b, ANY }, // Skylake-H GT4 [Iris Pro Graphics 580].
+    { 0x8086, 0x193d, 0x193d, ANY }, // Skylake-H GT4 [Iris Pro Graphics P580].
+    { 0x8086, 0x1a84, 0x1a84, ANY }, // Intel graphics.
+    { 0x8086, 0x1a85, 0x1a85, ANY }, // Intel graphics.
+    { 0x8086, 0x3184, 0x3184, ANY }, // GeminiLake [UHD Graphics 605].
+    { 0x8086, 0x3185, 0x3185, ANY }, // GeminiLake [UHD Graphics 600].
+    { 0x8086, 0x3e90, 0x3e90, ANY }, // CoffeeLake-S GT1 [UHD Graphics 610].
+    { 0x8086, 0x3e91, 0x3e91, ANY }, // CoffeeLake-S GT2 [UHD Graphics 630].
+    { 0x8086, 0x3e92, 0x3e92, ANY }, // CoffeeLake-S GT2 [UHD Graphics 630].
+    { 0x8086, 0x3e93, 0x3e93, ANY }, // CoffeeLake-S GT1 [UHD Graphics 610].
+    { 0x8086, 0x3e96, 0x3e96, ANY }, // CoffeeLake-S GT2 [UHD Graphics P630].
+    { 0x8086, 0x3e98, 0x3e98, ANY }, // CoffeeLake-S GT2 [UHD Graphics 630].
+    { 0x8086, 0x3e99, 0x3e99, ANY }, // Intel graphics.
+    { 0x8086, 0x3e9a, 0x3e9a, ANY }, // Coffee Lake-S GT2 [UHD Graphics P630].
+    { 0x8086, 0x5902, 0x5902, ANY }, // Kaby Lake-S GT1 [HD Graphics 610].
+    { 0x8086, 0x5906, 0x5906, ANY }, // Kaby Lake-U GT1 [HD Graphics 610].
+    { 0x8086, 0x5908, 0x5908, ANY }, // Intel graphics.
+    { 0x8086, 0x590a, 0x590a, ANY }, // Intel graphics.
+    { 0x8086, 0x590b, 0x590b, ANY }, // HD Graphics 610.
+    { 0x8086, 0x590e, 0x590e, ANY }, // Intel graphics.
+    { 0x8086, 0x5912, 0x5912, ANY }, // Kaby Lake-S GT2 [HD Graphics 630].
+    { 0x8086, 0x5913, 0x5913, ANY }, // Intel graphics.
+    { 0x8086, 0x5915, 0x5915, ANY }, // Intel graphics.
+    { 0x8086, 0x5916, 0x5916, ANY }, // Kaby Lake-U GT2 [HD Graphics 620].
+    { 0x8086, 0x5917, 0x5917, ANY }, // Kaby Lake-R GT2 [UHD Graphics 620].
+    { 0x8086, 0x591a, 0x591a, ANY }, // Intel graphics.
+    { 0x8086, 0x591b, 0x591b, ANY }, // Kaby Lake-H GT2 [HD Graphics 630].
+    { 0x8086, 0x591d, 0x591d, ANY }, // Kaby Lake-DT GT2 [HD Graphics P630].
+    { 0x8086, 0x591e, 0x591e, ANY }, // Kaby Lake-Y GT2 [HD Graphics 615].
+    { 0x8086, 0x5921, 0x5921, ANY }, // HD Graphics 620.
+    { 0x8086, 0x5923, 0x5923, ANY }, // HD Graphics 635.
     // Kaby Lake-U GT3 [Iris Plus Graphics 640].
-    { 0x8086, 0x5926, 0x5926, GPU_ANY_REVISION },
+    { 0x8086, 0x5926, 0x5926, ANY },
     // Kaby Lake-U GT3 [Iris Plus Graphics 650].
-    { 0x8086, 0x5927, 0x5927, GPU_ANY_REVISION },
-    { 0x8086, 0x593b, 0x593b, GPU_ANY_REVISION }, // Intel graphics.
-    // Apollo Lake [HD Graphics 505].
-    { 0x8086, 0x5a84, 0x5a84, GPU_ANY_REVISION },
-    // Apollo Lake GT1 [HD Graphics 500].
-    { 0x8086, 0x5a85, 0x5a85, GPU_ANY_REVISION },
-    { 0x8086, 0x4906, 0x4906, GPU_ANY_REVISION }, // DG1 [Iris Xe Pod].
-    { 0x8086, 0x4908, 0x4908, GPU_ANY_REVISION }, // DG1 [Iris Xe Graphics].
-    { 0x8086, 0x56a0, 0x56a0, GPU_ANY_REVISION }, // DG2 [Arc A770].
-    { 0x8086, 0x56a1, 0x56a1, GPU_ANY_REVISION }, // DG2 [Arc A750].
-    { 0x8086, 0x56a2, 0x56a2, GPU_ANY_REVISION }, // DG2 [Arc A580].
-    { 0x8086, 0x56a5, 0x56a5, GPU_ANY_REVISION }, // DG2 [Arc A380].
-    { 0x8086, 0x56a6, 0x56a6, GPU_ANY_REVISION }, // DG2 [Arc A310].
-    { 0x8086, 0x56b1, 0x56b1, GPU_ANY_REVISION }, // DG2 [Arc Pro A40/A50].
-    { 0x8086, 0x56b3, 0x56b3, GPU_ANY_REVISION }, // DG2 [Arc Pro A60].
-    { 0x8086, 0x56ba, 0x56ba, GPU_ANY_REVISION }, // DG2 [Arc A380E].
-    { 0x8086, 0x56bb, 0x56bb, GPU_ANY_REVISION }, // DG2 [Arc A310E].
-    { 0x8086, 0x56bc, 0x56bc, GPU_ANY_REVISION }, // DG2 [Arc A370E].
-    { 0x8086, 0x56bd, 0x56bd, GPU_ANY_REVISION }, // DG2 [Arc A350E].
-    { 0x8086, 0x56be, 0x56be, GPU_ANY_REVISION }, // DG2 [Arc A750E].
-    { 0x8086, 0x56bf, 0x56bf, GPU_ANY_REVISION }, // DG2 [Arc A580E].
-    { 0x8086, 0xe20b, 0xe20b, GPU_ANY_REVISION }, // Battlemage G21 [Arc B580].
-    { 0x8086, 0xe20c, 0xe20c, GPU_ANY_REVISION }, // Battlemage G21 [Arc B570].
-    // Battlemage G21 [Arc Pro B60].
-    { 0x8086, 0xe211, 0xe211, GPU_ANY_REVISION },
-    // Battlemage G21 [Arc Pro B50].
-    { 0x8086, 0xe212, 0xe212, GPU_ANY_REVISION },
-    // Battlemage G31 [Arc Pro B65].
-    { 0x8086, 0xe222, 0xe222, GPU_ANY_REVISION },
-    // Battlemage G31 [Arc Pro B70].
-    { 0x8086, 0xe223, 0xe223, GPU_ANY_REVISION },
-    // Up to Pascal, but for those blocked.
-    { 0x10de, 0x0000, 0x1dff, GPU_ANY_REVISION },
-    { 0x10de, 0x1e02, 0x1e02, GPU_ANY_REVISION }, // TU102 [TITAN RTX].
-    // TU102 [GeForce RTX 2080 Ti 12GB].
-    { 0x10de, 0x1e03, 0x1e03, GPU_ANY_REVISION },
-    // TU102 [GeForce RTX 2080 Ti].
-    { 0x10de, 0x1e04, 0x1e04, GPU_ANY_REVISION },
-    // TU102 [GeForce RTX 2080 Ti Rev. A].
-    { 0x10de, 0x1e07, 0x1e07, GPU_ANY_REVISION },
-    { 0x10de, 0x1e09, 0x1e09, GPU_ANY_REVISION }, // TU102 [CMP 50HX].
+    { 0x8086, 0x5927, 0x5927, ANY },
+    { 0x8086, 0x593b, 0x593b, ANY }, // Intel graphics.
+    { 0x8086, 0x5a84, 0x5a84, ANY }, // Apollo Lake [HD Graphics 505].
+    { 0x8086, 0x5a85, 0x5a85, ANY }, // Apollo Lake GT1 [HD Graphics 500].
+    { 0x8086, 0x4906, 0x4906, ANY }, // DG1 [Iris Xe Pod].
+    { 0x8086, 0x4908, 0x4908, ANY }, // DG1 [Iris Xe Graphics].
+    { 0x8086, 0x56a0, 0x56a0, ANY }, // DG2 [Arc A770].
+    { 0x8086, 0x56a1, 0x56a1, ANY }, // DG2 [Arc A750].
+    { 0x8086, 0x56a2, 0x56a2, ANY }, // DG2 [Arc A580].
+    { 0x8086, 0x56a5, 0x56a5, ANY }, // DG2 [Arc A380].
+    { 0x8086, 0x56a6, 0x56a6, ANY }, // DG2 [Arc A310].
+    { 0x8086, 0x56b1, 0x56b1, ANY }, // DG2 [Arc Pro A40/A50].
+    { 0x8086, 0x56b3, 0x56b3, ANY }, // DG2 [Arc Pro A60].
+    { 0x8086, 0x56ba, 0x56ba, ANY }, // DG2 [Arc A380E].
+    { 0x8086, 0x56bb, 0x56bb, ANY }, // DG2 [Arc A310E].
+    { 0x8086, 0x56bc, 0x56bc, ANY }, // DG2 [Arc A370E].
+    { 0x8086, 0x56bd, 0x56bd, ANY }, // DG2 [Arc A350E].
+    { 0x8086, 0x56be, 0x56be, ANY }, // DG2 [Arc A750E].
+    { 0x8086, 0x56bf, 0x56bf, ANY }, // DG2 [Arc A580E].
+    { 0x8086, 0xe20b, 0xe20b, ANY }, // Battlemage G21 [Arc B580].
+    { 0x8086, 0xe20c, 0xe20c, ANY }, // Battlemage G21 [Arc B570].
+    { 0x8086, 0xe211, 0xe211, ANY }, // Battlemage G21 [Arc Pro B60].
+    { 0x8086, 0xe212, 0xe212, ANY }, // Battlemage G21 [Arc Pro B50].
+    { 0x8086, 0xe222, 0xe222, ANY }, // Battlemage G31 [Arc Pro B65].
+    { 0x8086, 0xe223, 0xe223, ANY }, // Battlemage G31 [Arc Pro B70].
+    { 0x10de, 0x0000, 0x1dff, ANY }, // Up to Pascal, but for those blocked.
+    { 0x10de, 0x1e02, 0x1e02, ANY }, // TU102 [TITAN RTX].
+    { 0x10de, 0x1e03, 0x1e03, ANY }, // TU102 [GeForce RTX 2080 Ti 12GB].
+    { 0x10de, 0x1e04, 0x1e04, ANY }, // TU102 [GeForce RTX 2080 Ti].
+    { 0x10de, 0x1e07, 0x1e07, ANY }, // TU102 [GeForce RTX 2080 Ti Rev. A].
+    { 0x10de, 0x1e09, 0x1e09, ANY }, // TU102 [CMP 50HX].
     // TU102 [GeForce RTX 2080 Ti Engineering Sample].
-    { 0x10de, 0x1e2d, 0x1e2d, GPU_ANY_REVISION },
+    { 0x10de, 0x1e2d, 0x1e2d, ANY },
     // TU102 [GeForce RTX 2080 Ti 12GB Engineering Sample].
-    { 0x10de, 0x1e2e, 0x1e2e, GPU_ANY_REVISION },
-    // TU102GL [Quadro RTX 6000/8000].
-    { 0x10de, 0x1e30, 0x1e30, GPU_ANY_REVISION },
-    { 0x10de, 0x1e35, 0x1e35, GPU_ANY_REVISION }, // TU102GL [Tesla T10].
-    { 0x10de, 0x1e36, 0x1e36, GPU_ANY_REVISION }, // TU102GL [Quadro RTX 6000].
+    { 0x10de, 0x1e2e, 0x1e2e, ANY },
+    { 0x10de, 0x1e30, 0x1e30, ANY }, // TU102GL [Quadro RTX 6000/8000].
+    { 0x10de, 0x1e35, 0x1e35, ANY }, // TU102GL [Tesla T10].
+    { 0x10de, 0x1e36, 0x1e36, ANY }, // TU102GL [Quadro RTX 6000].
     // TU102GL [Tesla T10 16GB / GRID RTX T10-2/T10-4/T10-8].
-    { 0x10de, 0x1e37, 0x1e37, GPU_ANY_REVISION },
-    { 0x10de, 0x1e38, 0x1e38, GPU_ANY_REVISION }, // TU102GL [Tesla T40 24GB].
-    { 0x10de, 0x1e3c, 0x1e3c, GPU_ANY_REVISION }, // TU102GL.
-    { 0x10de, 0x1e3d, 0x1e3d, GPU_ANY_REVISION }, // TU102GL.
-    { 0x10de, 0x1e3e, 0x1e3e, GPU_ANY_REVISION }, // TU102GL.
-    // TU102GL [Quadro RTX 6000/8000].
-    { 0x10de, 0x1e78, 0x1e78, GPU_ANY_REVISION },
-    // TU104 [GeForce RTX 2080 SUPER].
-    { 0x10de, 0x1e81, 0x1e81, GPU_ANY_REVISION },
-    { 0x10de, 0x1e82, 0x1e82, GPU_ANY_REVISION }, // TU104 [GeForce RTX 2080].
-    // TU104 [GeForce RTX 2070 SUPER].
-    { 0x10de, 0x1e84, 0x1e84, GPU_ANY_REVISION },
-    // TU104 [GeForce RTX 2080 Rev. A].
-    { 0x10de, 0x1e87, 0x1e87, GPU_ANY_REVISION },
-    { 0x10de, 0x1e89, 0x1e89, GPU_ANY_REVISION }, // TU104 [GeForce RTX 2060].
-    { 0x10de, 0x1eb0, 0x1eb0, GPU_ANY_REVISION }, // TU104GL [Quadro RTX 5000].
-    { 0x10de, 0x1eb1, 0x1eb1, GPU_ANY_REVISION }, // TU104GL [Quadro RTX 4000].
-    { 0x10de, 0x1eb4, 0x1eb4, GPU_ANY_REVISION }, // TU104GL [T4G].
-    { 0x10de, 0x1eb8, 0x1eb8, GPU_ANY_REVISION }, // TU104GL [Tesla T4].
-    { 0x10de, 0x1eb9, 0x1eb9, GPU_ANY_REVISION }, // TU104GL.
-    { 0x10de, 0x1eba, 0x1eba, GPU_ANY_REVISION }, // TU104GL [PG189 SKU600].
-    { 0x10de, 0x1ebe, 0x1ebe, GPU_ANY_REVISION }, // TU104GL.
-    // TU104 [GeForce RTX 2070 SUPER].
-    { 0x10de, 0x1ec2, 0x1ec2, GPU_ANY_REVISION },
-    // TU104 [GeForce RTX 2070 SUPER].
-    { 0x10de, 0x1ec7, 0x1ec7, GPU_ANY_REVISION },
-    { 0x10de, 0x1f02, 0x1f02, GPU_ANY_REVISION }, // TU106 [GeForce RTX 2070].
-    // TU106 [GeForce RTX 2060 12GB].
-    { 0x10de, 0x1f03, 0x1f03, GPU_ANY_REVISION },
-    { 0x10de, 0x1f04, 0x1f04, GPU_ANY_REVISION }, // TU106.
-    // TU106 [GeForce RTX 2060 SUPER].
-    { 0x10de, 0x1f06, 0x1f06, GPU_ANY_REVISION },
-    // TU106 [GeForce RTX 2070 Rev. A].
-    { 0x10de, 0x1f07, 0x1f07, GPU_ANY_REVISION },
-    // TU106 [GeForce RTX 2060 Rev. A].
-    { 0x10de, 0x1f08, 0x1f08, GPU_ANY_REVISION },
-    // TU106 [GeForce GTX 1660 SUPER].
-    { 0x10de, 0x1f09, 0x1f09, GPU_ANY_REVISION },
-    { 0x10de, 0x1f0a, 0x1f0a, GPU_ANY_REVISION }, // TU106 [GeForce GTX 1650].
-    { 0x10de, 0x1f0b, 0x1f0b, GPU_ANY_REVISION }, // TU106 [CMP 40HX].
-    // TU106 [GeForce RTX 2060 SUPER].
-    { 0x10de, 0x1f42, 0x1f42, GPU_ANY_REVISION },
-    // TU106 [GeForce RTX 2060 SUPER].
-    { 0x10de, 0x1f47, 0x1f47, GPU_ANY_REVISION },
-    { 0x10de, 0x1f81, 0x1f81, GPU_ANY_REVISION }, // TU117.
-    { 0x10de, 0x1f82, 0x1f82, GPU_ANY_REVISION }, // TU117 [GeForce GTX 1650].
-    { 0x10de, 0x1f83, 0x1f83, GPU_ANY_REVISION }, // TU117 [GeForce GTX 1630].
-    { 0x10de, 0x1fae, 0x1fae, GPU_ANY_REVISION }, // TU117GL.
-    { 0x10de, 0x1fb1, 0x1fb1, GPU_ANY_REVISION }, // TU117GL [T600].
-    { 0x10de, 0x1fbf, 0x1fbf, GPU_ANY_REVISION }, // TU117GL.
-    { 0x10de, 0x1ff0, 0x1ff0, GPU_ANY_REVISION }, // TU117GL [T1000 8GB].
-    // TU117GL [T400 4GB / T400E].
-    { 0x10de, 0x1ff2, 0x1ff2, GPU_ANY_REVISION },
-    { 0x10de, 0x2080, 0x2080, GPU_ANY_REVISION }, // GA100.
-    { 0x10de, 0x2081, 0x2081, GPU_ANY_REVISION }, // GA100.
-    { 0x10de, 0x2082, 0x2082, GPU_ANY_REVISION }, // GA100 [CMP 170HX].
-    { 0x10de, 0x20b0, 0x20b0, GPU_ANY_REVISION }, // GA100 [A100 SXM4 40GB].
-    { 0x10de, 0x20b1, 0x20b1, GPU_ANY_REVISION }, // GA100 [A100 PCIe 40GB].
-    { 0x10de, 0x20b2, 0x20b2, GPU_ANY_REVISION }, // GA100 [A100 SXM4 80GB].
-    { 0x10de, 0x20b3, 0x20b3, GPU_ANY_REVISION }, // GA100 [A100-SXM-64GB].
-    { 0x10de, 0x20b4, 0x20b4, GPU_ANY_REVISION }, // GA100.
-    { 0x10de, 0x20b5, 0x20b5, GPU_ANY_REVISION }, // GA100 [A100 PCIe 80GB].
-    { 0x10de, 0x20b6, 0x20b6, GPU_ANY_REVISION }, // GA100GL [PG506-232].
-    { 0x10de, 0x20b7, 0x20b7, GPU_ANY_REVISION }, // GA100GL [A30 PCIe].
-    { 0x10de, 0x20b8, 0x20b8, GPU_ANY_REVISION }, // GA100 [A100X].
-    { 0x10de, 0x20b9, 0x20b9, GPU_ANY_REVISION }, // GA100 [A30X].
-    { 0x10de, 0x20bb, 0x20bb, GPU_ANY_REVISION }, // GA100 [DRIVE A100 PROD].
-    { 0x10de, 0x20bd, 0x20bd, GPU_ANY_REVISION }, // GA100 [A800 SXM4 40GB].
-    { 0x10de, 0x20be, 0x20be, GPU_ANY_REVISION }, // GA100 [GRID A100A].
-    { 0x10de, 0x20bf, 0x20bf, GPU_ANY_REVISION }, // GA100 [GRID A100B].
-    { 0x10de, 0x20c0, 0x20c0, GPU_ANY_REVISION }, // GA100 [Initial DevID].
-    { 0x10de, 0x20c2, 0x20c2, GPU_ANY_REVISION }, // GA100 [CMP 170HX].
-    { 0x10de, 0x20f0, 0x20f0, GPU_ANY_REVISION }, // GA100 [A100-PG506-207].
-    { 0x10de, 0x20f1, 0x20f1, GPU_ANY_REVISION }, // GA100 [A100 PCIe 40GB].
-    { 0x10de, 0x20f2, 0x20f2, GPU_ANY_REVISION }, // GA100 [A100-PG506-217].
-    { 0x10de, 0x20f3, 0x20f3, GPU_ANY_REVISION }, // GA100 [A800-SXM4-80GB].
-    { 0x10de, 0x20f5, 0x20f5, GPU_ANY_REVISION }, // GA100 [A800 80GB PCIe].
-    { 0x10de, 0x20f6, 0x20f6, GPU_ANY_REVISION }, // GA100 [A800 40GB PCIe].
-    // GA100 [AX800 Converged Accelerator].
-    { 0x10de, 0x20fd, 0x20fd, GPU_ANY_REVISION },
-    { 0x10de, 0x20fe, 0x20fe, GPU_ANY_REVISION }, // GA100 [INT SKU].
-    { 0x10de, 0x20ff, 0x20ff, GPU_ANY_REVISION }, // GA100.
-    // TU116 [GeForce GTX 1660 Ti].
-    { 0x10de, 0x2182, 0x2182, GPU_ANY_REVISION },
-    { 0x10de, 0x2183, 0x2183, GPU_ANY_REVISION }, // TU116.
-    { 0x10de, 0x2184, 0x2184, GPU_ANY_REVISION }, // TU116 [GeForce GTX 1660].
-    { 0x10de, 0x2186, 0x2186, GPU_ANY_REVISION }, // TU116 [PG160 SKU18].
-    // TU116 [GeForce GTX 1650 SUPER].
-    { 0x10de, 0x2187, 0x2187, GPU_ANY_REVISION },
-    { 0x10de, 0x2188, 0x2188, GPU_ANY_REVISION }, // TU116 [GeForce GTX 1650].
-    { 0x10de, 0x2189, 0x2189, GPU_ANY_REVISION }, // TU116 [CMP 30HX].
-    { 0x10de, 0x21ae, 0x21ae, GPU_ANY_REVISION }, // TU116GL.
-    { 0x10de, 0x21bf, 0x21bf, GPU_ANY_REVISION }, // TU116GL.
-    { 0x10de, 0x21c2, 0x21c2, GPU_ANY_REVISION }, // TU116.
-    { 0x10de, 0x21c3, 0x21c3, GPU_ANY_REVISION }, // TU116.
-    // TU116 [GeForce GTX 1660 SUPER].
-    { 0x10de, 0x21c4, 0x21c4, GPU_ANY_REVISION },
-    { 0x10de, 0x2200, 0x2200, GPU_ANY_REVISION }, // GA102.
-    // GA102 [GeForce RTX 3090 Ti].
-    { 0x10de, 0x2203, 0x2203, GPU_ANY_REVISION },
-    { 0x10de, 0x2204, 0x2204, GPU_ANY_REVISION }, // GA102 [GeForce RTX 3090].
-    // GA102 [GeForce RTX 3080 Ti 20GB].
-    { 0x10de, 0x2205, 0x2205, GPU_ANY_REVISION },
-    { 0x10de, 0x2206, 0x2206, GPU_ANY_REVISION }, // GA102 [GeForce RTX 3080].
-    // GA102 [GeForce RTX 3070 Ti].
-    { 0x10de, 0x2207, 0x2207, GPU_ANY_REVISION },
-    // GA102 [GeForce RTX 3080 Ti].
-    { 0x10de, 0x2208, 0x2208, GPU_ANY_REVISION },
-    // GA102 [GeForce RTX 3080 12GB].
-    { 0x10de, 0x220a, 0x220a, GPU_ANY_REVISION },
-    { 0x10de, 0x220d, 0x220d, GPU_ANY_REVISION }, // GA102 [CMP 90HX].
+    { 0x10de, 0x1e37, 0x1e37, ANY },
+    { 0x10de, 0x1e38, 0x1e38, ANY }, // TU102GL [Tesla T40 24GB].
+    { 0x10de, 0x1e3c, 0x1e3c, ANY }, // TU102GL.
+    { 0x10de, 0x1e3d, 0x1e3d, ANY }, // TU102GL.
+    { 0x10de, 0x1e3e, 0x1e3e, ANY }, // TU102GL.
+    { 0x10de, 0x1e78, 0x1e78, ANY }, // TU102GL [Quadro RTX 6000/8000].
+    { 0x10de, 0x1e81, 0x1e81, ANY }, // TU104 [GeForce RTX 2080 SUPER].
+    { 0x10de, 0x1e82, 0x1e82, ANY }, // TU104 [GeForce RTX 2080].
+    { 0x10de, 0x1e84, 0x1e84, ANY }, // TU104 [GeForce RTX 2070 SUPER].
+    { 0x10de, 0x1e87, 0x1e87, ANY }, // TU104 [GeForce RTX 2080 Rev. A].
+    { 0x10de, 0x1e89, 0x1e89, ANY }, // TU104 [GeForce RTX 2060].
+    { 0x10de, 0x1eb0, 0x1eb0, ANY }, // TU104GL [Quadro RTX 5000].
+    { 0x10de, 0x1eb1, 0x1eb1, ANY }, // TU104GL [Quadro RTX 4000].
+    { 0x10de, 0x1eb4, 0x1eb4, ANY }, // TU104GL [T4G].
+    { 0x10de, 0x1eb8, 0x1eb8, ANY }, // TU104GL [Tesla T4].
+    { 0x10de, 0x1eb9, 0x1eb9, ANY }, // TU104GL.
+    { 0x10de, 0x1eba, 0x1eba, ANY }, // TU104GL [PG189 SKU600].
+    { 0x10de, 0x1ebe, 0x1ebe, ANY }, // TU104GL.
+    { 0x10de, 0x1ec2, 0x1ec2, ANY }, // TU104 [GeForce RTX 2070 SUPER].
+    { 0x10de, 0x1ec7, 0x1ec7, ANY }, // TU104 [GeForce RTX 2070 SUPER].
+    { 0x10de, 0x1f02, 0x1f02, ANY }, // TU106 [GeForce RTX 2070].
+    { 0x10de, 0x1f03, 0x1f03, ANY }, // TU106 [GeForce RTX 2060 12GB].
+    { 0x10de, 0x1f04, 0x1f04, ANY }, // TU106.
+    { 0x10de, 0x1f06, 0x1f06, ANY }, // TU106 [GeForce RTX 2060 SUPER].
+    { 0x10de, 0x1f07, 0x1f07, ANY }, // TU106 [GeForce RTX 2070 Rev. A].
+    { 0x10de, 0x1f08, 0x1f08, ANY }, // TU106 [GeForce RTX 2060 Rev. A].
+    { 0x10de, 0x1f09, 0x1f09, ANY }, // TU106 [GeForce GTX 1660 SUPER].
+    { 0x10de, 0x1f0a, 0x1f0a, ANY }, // TU106 [GeForce GTX 1650].
+    { 0x10de, 0x1f0b, 0x1f0b, ANY }, // TU106 [CMP 40HX].
+    { 0x10de, 0x1f42, 0x1f42, ANY }, // TU106 [GeForce RTX 2060 SUPER].
+    { 0x10de, 0x1f47, 0x1f47, ANY }, // TU106 [GeForce RTX 2060 SUPER].
+    { 0x10de, 0x1f81, 0x1f81, ANY }, // TU117.
+    { 0x10de, 0x1f82, 0x1f82, ANY }, // TU117 [GeForce GTX 1650].
+    { 0x10de, 0x1f83, 0x1f83, ANY }, // TU117 [GeForce GTX 1630].
+    { 0x10de, 0x1fae, 0x1fae, ANY }, // TU117GL.
+    { 0x10de, 0x1fb1, 0x1fb1, ANY }, // TU117GL [T600].
+    { 0x10de, 0x1fbf, 0x1fbf, ANY }, // TU117GL.
+    { 0x10de, 0x1ff0, 0x1ff0, ANY }, // TU117GL [T1000 8GB].
+    { 0x10de, 0x1ff2, 0x1ff2, ANY }, // TU117GL [T400 4GB / T400E].
+    { 0x10de, 0x2080, 0x2080, ANY }, // GA100.
+    { 0x10de, 0x2081, 0x2081, ANY }, // GA100.
+    { 0x10de, 0x2082, 0x2082, ANY }, // GA100 [CMP 170HX].
+    { 0x10de, 0x20b0, 0x20b0, ANY }, // GA100 [A100 SXM4 40GB].
+    { 0x10de, 0x20b1, 0x20b1, ANY }, // GA100 [A100 PCIe 40GB].
+    { 0x10de, 0x20b2, 0x20b2, ANY }, // GA100 [A100 SXM4 80GB].
+    { 0x10de, 0x20b3, 0x20b3, ANY }, // GA100 [A100-SXM-64GB].
+    { 0x10de, 0x20b4, 0x20b4, ANY }, // GA100.
+    { 0x10de, 0x20b5, 0x20b5, ANY }, // GA100 [A100 PCIe 80GB].
+    { 0x10de, 0x20b6, 0x20b6, ANY }, // GA100GL [PG506-232].
+    { 0x10de, 0x20b7, 0x20b7, ANY }, // GA100GL [A30 PCIe].
+    { 0x10de, 0x20b8, 0x20b8, ANY }, // GA100 [A100X].
+    { 0x10de, 0x20b9, 0x20b9, ANY }, // GA100 [A30X].
+    { 0x10de, 0x20bb, 0x20bb, ANY }, // GA100 [DRIVE A100 PROD].
+    { 0x10de, 0x20bd, 0x20bd, ANY }, // GA100 [A800 SXM4 40GB].
+    { 0x10de, 0x20be, 0x20be, ANY }, // GA100 [GRID A100A].
+    { 0x10de, 0x20bf, 0x20bf, ANY }, // GA100 [GRID A100B].
+    { 0x10de, 0x20c0, 0x20c0, ANY }, // GA100 [Initial DevID].
+    { 0x10de, 0x20c2, 0x20c2, ANY }, // GA100 [CMP 170HX].
+    { 0x10de, 0x20f0, 0x20f0, ANY }, // GA100 [A100-PG506-207].
+    { 0x10de, 0x20f1, 0x20f1, ANY }, // GA100 [A100 PCIe 40GB].
+    { 0x10de, 0x20f2, 0x20f2, ANY }, // GA100 [A100-PG506-217].
+    { 0x10de, 0x20f3, 0x20f3, ANY }, // GA100 [A800-SXM4-80GB].
+    { 0x10de, 0x20f5, 0x20f5, ANY }, // GA100 [A800 80GB PCIe].
+    { 0x10de, 0x20f6, 0x20f6, ANY }, // GA100 [A800 40GB PCIe].
+    { 0x10de, 0x20fd, 0x20fd, ANY }, // GA100 [AX800 Converged Accelerator].
+    { 0x10de, 0x20fe, 0x20fe, ANY }, // GA100 [INT SKU].
+    { 0x10de, 0x20ff, 0x20ff, ANY }, // GA100.
+    { 0x10de, 0x2182, 0x2182, ANY }, // TU116 [GeForce GTX 1660 Ti].
+    { 0x10de, 0x2183, 0x2183, ANY }, // TU116.
+    { 0x10de, 0x2184, 0x2184, ANY }, // TU116 [GeForce GTX 1660].
+    { 0x10de, 0x2186, 0x2186, ANY }, // TU116 [PG160 SKU18].
+    { 0x10de, 0x2187, 0x2187, ANY }, // TU116 [GeForce GTX 1650 SUPER].
+    { 0x10de, 0x2188, 0x2188, ANY }, // TU116 [GeForce GTX 1650].
+    { 0x10de, 0x2189, 0x2189, ANY }, // TU116 [CMP 30HX].
+    { 0x10de, 0x21ae, 0x21ae, ANY }, // TU116GL.
+    { 0x10de, 0x21bf, 0x21bf, ANY }, // TU116GL.
+    { 0x10de, 0x21c2, 0x21c2, ANY }, // TU116.
+    { 0x10de, 0x21c3, 0x21c3, ANY }, // TU116.
+    { 0x10de, 0x21c4, 0x21c4, ANY }, // TU116 [GeForce GTX 1660 SUPER].
+    { 0x10de, 0x2200, 0x2200, ANY }, // GA102.
+    { 0x10de, 0x2203, 0x2203, ANY }, // GA102 [GeForce RTX 3090 Ti].
+    { 0x10de, 0x2204, 0x2204, ANY }, // GA102 [GeForce RTX 3090].
+    { 0x10de, 0x2205, 0x2205, ANY }, // GA102 [GeForce RTX 3080 Ti 20GB].
+    { 0x10de, 0x2206, 0x2206, ANY }, // GA102 [GeForce RTX 3080].
+    { 0x10de, 0x2207, 0x2207, ANY }, // GA102 [GeForce RTX 3070 Ti].
+    { 0x10de, 0x2208, 0x2208, ANY }, // GA102 [GeForce RTX 3080 Ti].
+    { 0x10de, 0x220a, 0x220a, ANY }, // GA102 [GeForce RTX 3080 12GB].
+    { 0x10de, 0x220d, 0x220d, ANY }, // GA102 [CMP 90HX].
     // GA102 [GeForce RTX 3080 Lite Hash Rate].
-    { 0x10de, 0x2216, 0x2216, GPU_ANY_REVISION },
+    { 0x10de, 0x2216, 0x2216, ANY },
     // GA102 [GeForce RTX 3090 Engineering Sample].
-    { 0x10de, 0x222b, 0x222b, GPU_ANY_REVISION },
+    { 0x10de, 0x222b, 0x222b, ANY },
     // GA102 [GeForce RTX 3080 11GB / 12GB Engineering Sample].
-    { 0x10de, 0x222f, 0x222f, GPU_ANY_REVISION },
-    { 0x10de, 0x2230, 0x2230, GPU_ANY_REVISION }, // GA102GL [RTX A6000].
-    { 0x10de, 0x2231, 0x2231, GPU_ANY_REVISION }, // GA102GL [RTX A5000].
-    { 0x10de, 0x2232, 0x2232, GPU_ANY_REVISION }, // GA102GL [RTX A4500].
-    { 0x10de, 0x2233, 0x2233, GPU_ANY_REVISION }, // GA102GL [RTX A5500].
-    { 0x10de, 0x2235, 0x2235, GPU_ANY_REVISION }, // GA102GL [A40].
-    { 0x10de, 0x2236, 0x2236, GPU_ANY_REVISION }, // GA102GL [A10].
-    { 0x10de, 0x2237, 0x2237, GPU_ANY_REVISION }, // GA102GL [A10G].
-    { 0x10de, 0x2238, 0x2238, GPU_ANY_REVISION }, // GA102GL [A10M].
-    { 0x10de, 0x223f, 0x223f, GPU_ANY_REVISION }, // GA102GL.
-    // Tegra PCIe Endpoint Virtual Network.
-    { 0x10de, 0x2296, 0x2296, GPU_ANY_REVISION },
-    { 0x10de, 0x2302, 0x2302, GPU_ANY_REVISION }, // GH100.
-    { 0x10de, 0x230c, 0x230c, GPU_ANY_REVISION }, // GH100 [H20 NVL16].
-    { 0x10de, 0x230e, 0x230e, GPU_ANY_REVISION }, // GH100 [H20 NVL16].
-    { 0x10de, 0x2313, 0x2313, GPU_ANY_REVISION }, // GH100 [H100 CNX].
-    { 0x10de, 0x2321, 0x2321, GPU_ANY_REVISION }, // GH100 [H100L 94GB].
-    { 0x10de, 0x2322, 0x2322, GPU_ANY_REVISION }, // GH100 [H800 PCIe].
-    { 0x10de, 0x2324, 0x2324, GPU_ANY_REVISION }, // GH100 [H800].
-    { 0x10de, 0x2328, 0x2328, GPU_ANY_REVISION }, // GH100 [H20B].
-    { 0x10de, 0x2329, 0x2329, GPU_ANY_REVISION }, // GH100 [H20].
-    { 0x10de, 0x232c, 0x232c, GPU_ANY_REVISION }, // GH100 [H20 HBM3e].
-    { 0x10de, 0x2330, 0x2330, GPU_ANY_REVISION }, // GH100 [H100 SXM5 80GB].
-    { 0x10de, 0x2331, 0x2331, GPU_ANY_REVISION }, // GH100 [H100 PCIe].
-    { 0x10de, 0x2335, 0x2335, GPU_ANY_REVISION }, // GH100 [H200 SXM 141GB].
-    { 0x10de, 0x2336, 0x2336, GPU_ANY_REVISION }, // GH100 [H100].
-    { 0x10de, 0x2337, 0x2337, GPU_ANY_REVISION }, // GH100 [H100 SXM5 64GB].
-    { 0x10de, 0x2338, 0x2338, GPU_ANY_REVISION }, // GH100 [H100 SXM5 96GB].
-    { 0x10de, 0x2339, 0x2339, GPU_ANY_REVISION }, // GH100 [H100 SXM5 94GB].
-    { 0x10de, 0x233a, 0x233a, GPU_ANY_REVISION }, // GH100 [H800L 94GB].
-    { 0x10de, 0x233b, 0x233b, GPU_ANY_REVISION }, // GH100 [H200 NVL].
-    { 0x10de, 0x233d, 0x233d, GPU_ANY_REVISION }, // GH100 [H100 96GB].
-    // GH100 [GH200 120GB / 480GB].
-    { 0x10de, 0x2342, 0x2342, GPU_ANY_REVISION },
-    { 0x10de, 0x2343, 0x2343, GPU_ANY_REVISION }, // GH100.
-    { 0x10de, 0x2345, 0x2345, GPU_ANY_REVISION }, // GH100 [GH100-88K-A1].
-    { 0x10de, 0x2348, 0x2348, GPU_ANY_REVISION }, // GH100 [GH200 144G HBM3e].
-    { 0x10de, 0x237e, 0x237e, GPU_ANY_REVISION }, // GH100 [H100 GH3].
-    { 0x10de, 0x237f, 0x237f, GPU_ANY_REVISION }, // GH100 [Skinny Joe].
-    { 0x10de, 0x23b0, 0x23b0, GPU_ANY_REVISION }, // GH100.
-    { 0x10de, 0x23f0, 0x23f0, GPU_ANY_REVISION }, // GH100.
-    // GA103 [GeForce RTX 3060 Ti].
-    { 0x10de, 0x2414, 0x2414, GPU_ANY_REVISION },
-    { 0x10de, 0x2480, 0x2480, GPU_ANY_REVISION }, // GA104 [Reserved Dev ID A].
-    // GA104 [GeForce RTX 3070 Ti].
-    { 0x10de, 0x2482, 0x2482, GPU_ANY_REVISION },
-    { 0x10de, 0x2483, 0x2483, GPU_ANY_REVISION }, // GA104.
-    { 0x10de, 0x2484, 0x2484, GPU_ANY_REVISION }, // GA104 [GeForce RTX 3070].
-    // GA104 [GeForce RTX 3060 Ti].
-    { 0x10de, 0x2486, 0x2486, GPU_ANY_REVISION },
-    { 0x10de, 0x2487, 0x2487, GPU_ANY_REVISION }, // GA104 [GeForce RTX 3060].
+    { 0x10de, 0x222f, 0x222f, ANY },
+    { 0x10de, 0x2230, 0x2230, ANY }, // GA102GL [RTX A6000].
+    { 0x10de, 0x2231, 0x2231, ANY }, // GA102GL [RTX A5000].
+    { 0x10de, 0x2232, 0x2232, ANY }, // GA102GL [RTX A4500].
+    { 0x10de, 0x2233, 0x2233, ANY }, // GA102GL [RTX A5500].
+    { 0x10de, 0x2235, 0x2235, ANY }, // GA102GL [A40].
+    { 0x10de, 0x2236, 0x2236, ANY }, // GA102GL [A10].
+    { 0x10de, 0x2237, 0x2237, ANY }, // GA102GL [A10G].
+    { 0x10de, 0x2238, 0x2238, ANY }, // GA102GL [A10M].
+    { 0x10de, 0x223f, 0x223f, ANY }, // GA102GL.
+    { 0x10de, 0x2296, 0x2296, ANY }, // Tegra PCIe Endpoint Virtual Network.
+    { 0x10de, 0x2302, 0x2302, ANY }, // GH100.
+    { 0x10de, 0x230c, 0x230c, ANY }, // GH100 [H20 NVL16].
+    { 0x10de, 0x230e, 0x230e, ANY }, // GH100 [H20 NVL16].
+    { 0x10de, 0x2313, 0x2313, ANY }, // GH100 [H100 CNX].
+    { 0x10de, 0x2321, 0x2321, ANY }, // GH100 [H100L 94GB].
+    { 0x10de, 0x2322, 0x2322, ANY }, // GH100 [H800 PCIe].
+    { 0x10de, 0x2324, 0x2324, ANY }, // GH100 [H800].
+    { 0x10de, 0x2328, 0x2328, ANY }, // GH100 [H20B].
+    { 0x10de, 0x2329, 0x2329, ANY }, // GH100 [H20].
+    { 0x10de, 0x232c, 0x232c, ANY }, // GH100 [H20 HBM3e].
+    { 0x10de, 0x2330, 0x2330, ANY }, // GH100 [H100 SXM5 80GB].
+    { 0x10de, 0x2331, 0x2331, ANY }, // GH100 [H100 PCIe].
+    { 0x10de, 0x2335, 0x2335, ANY }, // GH100 [H200 SXM 141GB].
+    { 0x10de, 0x2336, 0x2336, ANY }, // GH100 [H100].
+    { 0x10de, 0x2337, 0x2337, ANY }, // GH100 [H100 SXM5 64GB].
+    { 0x10de, 0x2338, 0x2338, ANY }, // GH100 [H100 SXM5 96GB].
+    { 0x10de, 0x2339, 0x2339, ANY }, // GH100 [H100 SXM5 94GB].
+    { 0x10de, 0x233a, 0x233a, ANY }, // GH100 [H800L 94GB].
+    { 0x10de, 0x233b, 0x233b, ANY }, // GH100 [H200 NVL].
+    { 0x10de, 0x233d, 0x233d, ANY }, // GH100 [H100 96GB].
+    { 0x10de, 0x2342, 0x2342, ANY }, // GH100 [GH200 120GB / 480GB].
+    { 0x10de, 0x2343, 0x2343, ANY }, // GH100.
+    { 0x10de, 0x2345, 0x2345, ANY }, // GH100 [GH100-88K-A1].
+    { 0x10de, 0x2348, 0x2348, ANY }, // GH100 [GH200 144G HBM3e].
+    { 0x10de, 0x237e, 0x237e, ANY }, // GH100 [H100 GH3].
+    { 0x10de, 0x237f, 0x237f, ANY }, // GH100 [Skinny Joe].
+    { 0x10de, 0x23b0, 0x23b0, ANY }, // GH100.
+    { 0x10de, 0x23f0, 0x23f0, ANY }, // GH100.
+    { 0x10de, 0x2414, 0x2414, ANY }, // GA103 [GeForce RTX 3060 Ti].
+    { 0x10de, 0x2480, 0x2480, ANY }, // GA104 [Reserved Dev ID A].
+    { 0x10de, 0x2482, 0x2482, ANY }, // GA104 [GeForce RTX 3070 Ti].
+    { 0x10de, 0x2483, 0x2483, ANY }, // GA104.
+    { 0x10de, 0x2484, 0x2484, ANY }, // GA104 [GeForce RTX 3070].
+    { 0x10de, 0x2486, 0x2486, ANY }, // GA104 [GeForce RTX 3060 Ti].
+    { 0x10de, 0x2487, 0x2487, ANY }, // GA104 [GeForce RTX 3060].
     // GA104 [GeForce RTX 3070 Lite Hash Rate].
-    { 0x10de, 0x2488, 0x2488, GPU_ANY_REVISION },
+    { 0x10de, 0x2488, 0x2488, ANY },
     // GA104 [GeForce RTX 3060 Ti Lite Hash Rate].
-    { 0x10de, 0x2489, 0x2489, GPU_ANY_REVISION },
-    { 0x10de, 0x248a, 0x248a, GPU_ANY_REVISION }, // GA104 [CMP 70HX].
-    // GA104 [GeForce RTX 3070 Ti].
-    { 0x10de, 0x248c, 0x248c, GPU_ANY_REVISION },
-    { 0x10de, 0x248d, 0x248d, GPU_ANY_REVISION }, // GA104 [GeForce RTX 3070].
-    // GA104 [GeForce RTX 3060 Ti].
-    { 0x10de, 0x248e, 0x248e, GPU_ANY_REVISION },
+    { 0x10de, 0x2489, 0x2489, ANY },
+    { 0x10de, 0x248a, 0x248a, ANY }, // GA104 [CMP 70HX].
+    { 0x10de, 0x248c, 0x248c, ANY }, // GA104 [GeForce RTX 3070 Ti].
+    { 0x10de, 0x248d, 0x248d, ANY }, // GA104 [GeForce RTX 3070].
+    { 0x10de, 0x248e, 0x248e, ANY }, // GA104 [GeForce RTX 3060 Ti].
     // GA104 [GeForce RTX 30x0 Engineering Sample].
-    { 0x10de, 0x24ac, 0x24ac, GPU_ANY_REVISION },
+    { 0x10de, 0x24ac, 0x24ac, ANY },
     // GA104 [GeForce RTX 3060 Engineering Sample].
-    { 0x10de, 0x24ad, 0x24ad, GPU_ANY_REVISION },
+    { 0x10de, 0x24ad, 0x24ad, ANY },
     // GA104 [GeForce RTX 3070 Engineering Sample].
-    { 0x10de, 0x24af, 0x24af, GPU_ANY_REVISION },
-    { 0x10de, 0x24b0, 0x24b0, GPU_ANY_REVISION }, // GA104GL [RTX A4000].
-    { 0x10de, 0x24b1, 0x24b1, GPU_ANY_REVISION }, // GA104GL [RTX A4000H].
+    { 0x10de, 0x24af, 0x24af, ANY },
+    { 0x10de, 0x24b0, 0x24b0, ANY }, // GA104GL [RTX A4000].
+    { 0x10de, 0x24b1, 0x24b1, ANY }, // GA104GL [RTX A4000H].
     // GA104 [GeForce RTX 3070 Engineering Sample].
-    { 0x10de, 0x24bf, 0x24bf, GPU_ANY_REVISION },
-    { 0x10de, 0x24c0, 0x24c0, GPU_ANY_REVISION }, // GA104 [Initial Dev ID B].
-    // GA104 [GeForce RTX 3060 8GB].
-    { 0x10de, 0x24c7, 0x24c7, GPU_ANY_REVISION },
-    // GA104 [GeForce RTX 3070 GDDR6X].
-    { 0x10de, 0x24c8, 0x24c8, GPU_ANY_REVISION },
-    // GA104 [GeForce RTX 3060 Ti GDDR6X].
-    { 0x10de, 0x24c9, 0x24c9, GPU_ANY_REVISION },
-    { 0x10de, 0x2501, 0x2501, GPU_ANY_REVISION }, // GA106 [GeForce RTX 3060].
-    { 0x10de, 0x2503, 0x2503, GPU_ANY_REVISION }, // GA106 [GeForce RTX 3060].
+    { 0x10de, 0x24bf, 0x24bf, ANY },
+    { 0x10de, 0x24c0, 0x24c0, ANY }, // GA104 [Initial Dev ID B].
+    { 0x10de, 0x24c7, 0x24c7, ANY }, // GA104 [GeForce RTX 3060 8GB].
+    { 0x10de, 0x24c8, 0x24c8, ANY }, // GA104 [GeForce RTX 3070 GDDR6X].
+    { 0x10de, 0x24c9, 0x24c9, ANY }, // GA104 [GeForce RTX 3060 Ti GDDR6X].
+    { 0x10de, 0x2501, 0x2501, ANY }, // GA106 [GeForce RTX 3060].
+    { 0x10de, 0x2503, 0x2503, ANY }, // GA106 [GeForce RTX 3060].
     // GA106 [GeForce RTX 3060 Lite Hash Rate].
-    { 0x10de, 0x2504, 0x2504, GPU_ANY_REVISION },
-    { 0x10de, 0x2505, 0x2505, GPU_ANY_REVISION }, // GA106.
-    { 0x10de, 0x2507, 0x2507, GPU_ANY_REVISION }, // GA106 [Geforce RTX 3050].
-    // GA106 [GeForce RTX 3050 OEM].
-    { 0x10de, 0x2508, 0x2508, GPU_ANY_REVISION },
-    // GA106 [GeForce RTX 3060 12GB Rev. 2].
-    { 0x10de, 0x2509, 0x2509, GPU_ANY_REVISION },
+    { 0x10de, 0x2504, 0x2504, ANY },
+    { 0x10de, 0x2505, 0x2505, ANY }, // GA106.
+    { 0x10de, 0x2507, 0x2507, ANY }, // GA106 [Geforce RTX 3050].
+    { 0x10de, 0x2508, 0x2508, ANY }, // GA106 [GeForce RTX 3050 OEM].
+    { 0x10de, 0x2509, 0x2509, ANY }, // GA106 [GeForce RTX 3060 12GB Rev. 2].
     // GA106 [GeForce RTX 3060 Engineering Sample].
-    { 0x10de, 0x252f, 0x252f, GPU_ANY_REVISION },
-    { 0x10de, 0x2531, 0x2531, GPU_ANY_REVISION }, // GA106 [RTX A2000].
-    { 0x10de, 0x2544, 0x2544, GPU_ANY_REVISION }, // GA106 [GeForce RTX 3060].
-    { 0x10de, 0x2571, 0x2571, GPU_ANY_REVISION }, // GA106 [RTX A2000 12GB].
-    // GA107 [GeForce RTX 3050 8GB].
-    { 0x10de, 0x2582, 0x2582, GPU_ANY_REVISION },
-    // GA107 [GeForce RTX 3050 4GB].
-    { 0x10de, 0x2583, 0x2583, GPU_ANY_REVISION },
-    // GA107 [GeForce RTX 3050 6GB].
-    { 0x10de, 0x2584, 0x2584, GPU_ANY_REVISION },
-    { 0x10de, 0x25a3, 0x25a3, GPU_ANY_REVISION }, // GA107.
-    { 0x10de, 0x25a4, 0x25a4, GPU_ANY_REVISION }, // GA107.
-    { 0x10de, 0x25ad, 0x25ad, GPU_ANY_REVISION }, // GA107 [GeForce RTX 2050].
+    { 0x10de, 0x252f, 0x252f, ANY },
+    { 0x10de, 0x2531, 0x2531, ANY }, // GA106 [RTX A2000].
+    { 0x10de, 0x2544, 0x2544, ANY }, // GA106 [GeForce RTX 3060].
+    { 0x10de, 0x2571, 0x2571, ANY }, // GA106 [RTX A2000 12GB].
+    { 0x10de, 0x2582, 0x2582, ANY }, // GA107 [GeForce RTX 3050 8GB].
+    { 0x10de, 0x2583, 0x2583, ANY }, // GA107 [GeForce RTX 3050 4GB].
+    { 0x10de, 0x2584, 0x2584, ANY }, // GA107 [GeForce RTX 3050 6GB].
+    { 0x10de, 0x25a3, 0x25a3, ANY }, // GA107.
+    { 0x10de, 0x25a4, 0x25a4, ANY }, // GA107.
+    { 0x10de, 0x25ad, 0x25ad, ANY }, // GA107 [GeForce RTX 2050].
     // GA107 [GeForce RTX 3050 Engineering Sample].
-    { 0x10de, 0x25af, 0x25af, GPU_ANY_REVISION },
-    { 0x10de, 0x25b0, 0x25b0, GPU_ANY_REVISION }, // GA107GL [RTX A1000].
-    { 0x10de, 0x25b2, 0x25b2, GPU_ANY_REVISION }, // GA107GL [RTX A400].
-    { 0x10de, 0x25b6, 0x25b6, GPU_ANY_REVISION }, // GA107GL [A2 / A16].
-    { 0x10de, 0x25ed, 0x25ed, GPU_ANY_REVISION }, // GA107 [GeForce RTX 2050].
-    { 0x10de, 0x2681, 0x2681, GPU_ANY_REVISION }, // AD102 [RTX TITAN Ada].
-    { 0x10de, 0x2684, 0x2684, GPU_ANY_REVISION }, // AD102 [GeForce RTX 4090].
-    // AD102 [GeForce RTX 4090 D].
-    { 0x10de, 0x2685, 0x2685, GPU_ANY_REVISION },
-    // AD102 [GeForce RTX 4070 Ti SUPER].
-    { 0x10de, 0x2689, 0x2689, GPU_ANY_REVISION },
-    { 0x10de, 0x26af, 0x26af, GPU_ANY_REVISION }, // AD102 [PG137].
-    // AD102GL [RTX 6000 Ada Generation].
-    { 0x10de, 0x26b1, 0x26b1, GPU_ANY_REVISION },
-    // AD102GL [RTX 5000 Ada Generation].
-    { 0x10de, 0x26b2, 0x26b2, GPU_ANY_REVISION },
-    // AD102GL [RTX 5880 Ada Generation].
-    { 0x10de, 0x26b3, 0x26b3, GPU_ANY_REVISION },
-    { 0x10de, 0x26b5, 0x26b5, GPU_ANY_REVISION }, // AD102GL [L40].
-    { 0x10de, 0x26b7, 0x26b7, GPU_ANY_REVISION }, // AD102GL [L20].
-    { 0x10de, 0x26b8, 0x26b8, GPU_ANY_REVISION }, // AD102GL [L40G].
-    { 0x10de, 0x26b9, 0x26b9, GPU_ANY_REVISION }, // AD102GL [L40S].
-    { 0x10de, 0x26ba, 0x26ba, GPU_ANY_REVISION }, // AD102GL [L20].
-    { 0x10de, 0x26bb, 0x26bb, GPU_ANY_REVISION }, // AD102GL [L30].
-    { 0x10de, 0x26f5, 0x26f5, GPU_ANY_REVISION }, // AD102GL [L40 CNX].
-    // AD103 [GeForce RTX 4080 SUPER].
-    { 0x10de, 0x2702, 0x2702, GPU_ANY_REVISION },
-    // AD103 [GeForce RTX 4080 SUPER].
-    { 0x10de, 0x2703, 0x2703, GPU_ANY_REVISION },
-    { 0x10de, 0x2704, 0x2704, GPU_ANY_REVISION }, // AD103 [GeForce RTX 4080].
-    // AD103 [GeForce RTX 4070 Ti SUPER].
-    { 0x10de, 0x2705, 0x2705, GPU_ANY_REVISION },
-    { 0x10de, 0x2709, 0x2709, GPU_ANY_REVISION }, // AD103 [GeForce RTX 4070].
-    // AD104 [GeForce RTX 4070 Ti].
-    { 0x10de, 0x2782, 0x2782, GPU_ANY_REVISION },
-    // AD104 [GeForce RTX 4070 SUPER].
-    { 0x10de, 0x2783, 0x2783, GPU_ANY_REVISION },
-    { 0x10de, 0x2785, 0x2785, GPU_ANY_REVISION }, // AD104 [AC AD104 20GB].
-    { 0x10de, 0x2786, 0x2786, GPU_ANY_REVISION }, // AD104 [GeForce RTX 4070].
-    // AD104 [GeForce RTX 4060 Ti].
-    { 0x10de, 0x2788, 0x2788, GPU_ANY_REVISION },
-    // AD104GL [RTX 4000 SFF Ada Generation].
-    { 0x10de, 0x27b0, 0x27b0, GPU_ANY_REVISION },
-    // AD104GL [RTX 4500 Ada Generation].
-    { 0x10de, 0x27b1, 0x27b1, GPU_ANY_REVISION },
-    // AD104GL [RTX 4000 Ada Generation].
-    { 0x10de, 0x27b2, 0x27b2, GPU_ANY_REVISION },
-    { 0x10de, 0x27b6, 0x27b6, GPU_ANY_REVISION }, // AD104GL [L2].
-    { 0x10de, 0x27b7, 0x27b7, GPU_ANY_REVISION }, // AD104GL [L16].
-    { 0x10de, 0x27b8, 0x27b8, GPU_ANY_REVISION }, // AD104GL [L4].
-    // AD106 [GeForce RTX 4060 Ti].
-    { 0x10de, 0x2803, 0x2803, GPU_ANY_REVISION },
-    // AD106 [GeForce RTX 4060 Ti 16GB].
-    { 0x10de, 0x2805, 0x2805, GPU_ANY_REVISION },
-    { 0x10de, 0x2808, 0x2808, GPU_ANY_REVISION }, // AD106 [GeForce RTX 4060].
-    { 0x10de, 0x2882, 0x2882, GPU_ANY_REVISION }, // AD107 [GeForce RTX 4060].
+    { 0x10de, 0x25af, 0x25af, ANY },
+    { 0x10de, 0x25b0, 0x25b0, ANY }, // GA107GL [RTX A1000].
+    { 0x10de, 0x25b2, 0x25b2, ANY }, // GA107GL [RTX A400].
+    { 0x10de, 0x25b6, 0x25b6, ANY }, // GA107GL [A2 / A16].
+    { 0x10de, 0x25ed, 0x25ed, ANY }, // GA107 [GeForce RTX 2050].
+    { 0x10de, 0x2681, 0x2681, ANY }, // AD102 [RTX TITAN Ada].
+    { 0x10de, 0x2684, 0x2684, ANY }, // AD102 [GeForce RTX 4090].
+    { 0x10de, 0x2685, 0x2685, ANY }, // AD102 [GeForce RTX 4090 D].
+    { 0x10de, 0x2689, 0x2689, ANY }, // AD102 [GeForce RTX 4070 Ti SUPER].
+    { 0x10de, 0x26af, 0x26af, ANY }, // AD102 [PG137].
+    { 0x10de, 0x26b1, 0x26b1, ANY }, // AD102GL [RTX 6000 Ada Generation].
+    { 0x10de, 0x26b2, 0x26b2, ANY }, // AD102GL [RTX 5000 Ada Generation].
+    { 0x10de, 0x26b3, 0x26b3, ANY }, // AD102GL [RTX 5880 Ada Generation].
+    { 0x10de, 0x26b5, 0x26b5, ANY }, // AD102GL [L40].
+    { 0x10de, 0x26b7, 0x26b7, ANY }, // AD102GL [L20].
+    { 0x10de, 0x26b8, 0x26b8, ANY }, // AD102GL [L40G].
+    { 0x10de, 0x26b9, 0x26b9, ANY }, // AD102GL [L40S].
+    { 0x10de, 0x26ba, 0x26ba, ANY }, // AD102GL [L20].
+    { 0x10de, 0x26bb, 0x26bb, ANY }, // AD102GL [L30].
+    { 0x10de, 0x26f5, 0x26f5, ANY }, // AD102GL [L40 CNX].
+    { 0x10de, 0x2702, 0x2702, ANY }, // AD103 [GeForce RTX 4080 SUPER].
+    { 0x10de, 0x2703, 0x2703, ANY }, // AD103 [GeForce RTX 4080 SUPER].
+    { 0x10de, 0x2704, 0x2704, ANY }, // AD103 [GeForce RTX 4080].
+    { 0x10de, 0x2705, 0x2705, ANY }, // AD103 [GeForce RTX 4070 Ti SUPER].
+    { 0x10de, 0x2709, 0x2709, ANY }, // AD103 [GeForce RTX 4070].
+    { 0x10de, 0x2782, 0x2782, ANY }, // AD104 [GeForce RTX 4070 Ti].
+    { 0x10de, 0x2783, 0x2783, ANY }, // AD104 [GeForce RTX 4070 SUPER].
+    { 0x10de, 0x2785, 0x2785, ANY }, // AD104 [AC AD104 20GB].
+    { 0x10de, 0x2786, 0x2786, ANY }, // AD104 [GeForce RTX 4070].
+    { 0x10de, 0x2788, 0x2788, ANY }, // AD104 [GeForce RTX 4060 Ti].
+    { 0x10de, 0x27b0, 0x27b0, ANY }, // AD104GL [RTX 4000 SFF Ada Generation].
+    { 0x10de, 0x27b1, 0x27b1, ANY }, // AD104GL [RTX 4500 Ada Generation].
+    { 0x10de, 0x27b2, 0x27b2, ANY }, // AD104GL [RTX 4000 Ada Generation].
+    { 0x10de, 0x27b6, 0x27b6, ANY }, // AD104GL [L2].
+    { 0x10de, 0x27b7, 0x27b7, ANY }, // AD104GL [L16].
+    { 0x10de, 0x27b8, 0x27b8, ANY }, // AD104GL [L4].
+    { 0x10de, 0x2803, 0x2803, ANY }, // AD106 [GeForce RTX 4060 Ti].
+    { 0x10de, 0x2805, 0x2805, ANY }, // AD106 [GeForce RTX 4060 Ti 16GB].
+    { 0x10de, 0x2808, 0x2808, ANY }, // AD106 [GeForce RTX 4060].
+    { 0x10de, 0x2882, 0x2882, ANY }, // AD107 [GeForce RTX 4060].
     // AD107GL [RTX 2000 / 2000E Ada Generation].
-    { 0x10de, 0x28b0, 0x28b0, GPU_ANY_REVISION },
-    { 0x10de, 0x2900, 0x2900, GPU_ANY_REVISION }, // GB100 [Reserved Dev ID A].
-    { 0x10de, 0x2901, 0x2901, GPU_ANY_REVISION }, // GB100 [B200].
-    { 0x10de, 0x2909, 0x2909, GPU_ANY_REVISION }, // GB100 [HGX B200 168GB].
-    { 0x10de, 0x290a, 0x290a, GPU_ANY_REVISION }, // GB100 [B200].
-    { 0x10de, 0x2920, 0x2920, GPU_ANY_REVISION }, // GB100 [TS4 / B100].
-    { 0x10de, 0x2924, 0x2924, GPU_ANY_REVISION }, // GB100.
-    { 0x10de, 0x2925, 0x2925, GPU_ANY_REVISION }, // GB100.
-    { 0x10de, 0x293d, 0x293d, GPU_ANY_REVISION }, // GB100.
-    { 0x10de, 0x2940, 0x2940, GPU_ANY_REVISION }, // GB100 [Reserved Dev ID B].
-    { 0x10de, 0x2941, 0x2941, GPU_ANY_REVISION }, // GB100 [HGX GB200].
-    { 0x10de, 0x297e, 0x297e, GPU_ANY_REVISION }, // GB100.
-    { 0x10de, 0x2980, 0x2980, GPU_ANY_REVISION }, // GB102 [Reserved Dev ID A].
-    { 0x10de, 0x29bb, 0x29bb, GPU_ANY_REVISION }, // GB102 [DRIVE P2021].
-    { 0x10de, 0x29bc, 0x29bc, GPU_ANY_REVISION }, // GB102 [B100].
-    { 0x10de, 0x29c0, 0x29c0, GPU_ANY_REVISION }, // GB102 [Reserved Dev ID B].
-    { 0x10de, 0x29f1, 0x29f1, GPU_ANY_REVISION }, // GB102.
-    { 0x10de, 0x2b00, 0x2b00, GPU_ANY_REVISION }, // GB10B [Jetson AGX Thor].
-    { 0x10de, 0x2b85, 0x2b85, GPU_ANY_REVISION }, // GB202 [GeForce RTX 5090].
-    // GB202 [GeForce RTX 5090 D].
-    { 0x10de, 0x2b87, 0x2b87, GPU_ANY_REVISION },
-    // GB202 [GeForce RTX 5090 D V2].
-    { 0x10de, 0x2b8c, 0x2b8c, GPU_ANY_REVISION },
+    { 0x10de, 0x28b0, 0x28b0, ANY },
+    { 0x10de, 0x2900, 0x2900, ANY }, // GB100 [Reserved Dev ID A].
+    { 0x10de, 0x2901, 0x2901, ANY }, // GB100 [B200].
+    { 0x10de, 0x2909, 0x2909, ANY }, // GB100 [HGX B200 168GB].
+    { 0x10de, 0x290a, 0x290a, ANY }, // GB100 [B200].
+    { 0x10de, 0x2920, 0x2920, ANY }, // GB100 [TS4 / B100].
+    { 0x10de, 0x2924, 0x2924, ANY }, // GB100.
+    { 0x10de, 0x2925, 0x2925, ANY }, // GB100.
+    { 0x10de, 0x293d, 0x293d, ANY }, // GB100.
+    { 0x10de, 0x2940, 0x2940, ANY }, // GB100 [Reserved Dev ID B].
+    { 0x10de, 0x2941, 0x2941, ANY }, // GB100 [HGX GB200].
+    { 0x10de, 0x297e, 0x297e, ANY }, // GB100.
+    { 0x10de, 0x2980, 0x2980, ANY }, // GB102 [Reserved Dev ID A].
+    { 0x10de, 0x29bb, 0x29bb, ANY }, // GB102 [DRIVE P2021].
+    { 0x10de, 0x29bc, 0x29bc, ANY }, // GB102 [B100].
+    { 0x10de, 0x29c0, 0x29c0, ANY }, // GB102 [Reserved Dev ID B].
+    { 0x10de, 0x29f1, 0x29f1, ANY }, // GB102.
+    { 0x10de, 0x2b00, 0x2b00, ANY }, // GB10B [Jetson AGX Thor].
+    { 0x10de, 0x2b85, 0x2b85, ANY }, // GB202 [GeForce RTX 5090].
+    { 0x10de, 0x2b87, 0x2b87, ANY }, // GB202 [GeForce RTX 5090 D].
+    { 0x10de, 0x2b8c, 0x2b8c, ANY }, // GB202 [GeForce RTX 5090 D V2].
     // GB202GL [RTX PRO 6000 Blackwell Workstation Edition].
-    { 0x10de, 0x2bb1, 0x2bb1, GPU_ANY_REVISION },
+    { 0x10de, 0x2bb1, 0x2bb1, ANY },
     // GB202GL [RTX PRO 6000D Blackwell Workstation Edition].
-    { 0x10de, 0x2bb2, 0x2bb2, GPU_ANY_REVISION },
+    { 0x10de, 0x2bb2, 0x2bb2, ANY },
     // GB202GL [RTX PRO 5000 Blackwell / RTX PRO 5000 72GB Blackwell].
-    { 0x10de, 0x2bb3, 0x2bb3, GPU_ANY_REVISION },
+    { 0x10de, 0x2bb3, 0x2bb3, ANY },
     // GB202GL [RTX PRO 6000 Blackwell Server Edition].
-    { 0x10de, 0x2bb5, 0x2bb5, GPU_ANY_REVISION },
-    { 0x10de, 0x2bb9, 0x2bb9, GPU_ANY_REVISION }, // GB202GL [RTX 6000D].
-    { 0x10de, 0x2c02, 0x2c02, GPU_ANY_REVISION }, // GB203 [GeForce RTX 5080].
-    // GB203 [GeForce RTX 5070 Ti].
-    { 0x10de, 0x2c05, 0x2c05, GPU_ANY_REVISION },
-    { 0x10de, 0x2c09, 0x2c09, GPU_ANY_REVISION }, // GB203 [GeForce RTX 5070].
-    { 0x10de, 0x2c2c, 0x2c2c, GPU_ANY_REVISION }, // GB6-256(N22W-ES-A1).
-    // GB203GL [RTX PRO 4500 Blackwell].
-    { 0x10de, 0x2c31, 0x2c31, GPU_ANY_REVISION },
+    { 0x10de, 0x2bb5, 0x2bb5, ANY },
+    { 0x10de, 0x2bb9, 0x2bb9, ANY }, // GB202GL [RTX 6000D].
+    { 0x10de, 0x2c02, 0x2c02, ANY }, // GB203 [GeForce RTX 5080].
+    { 0x10de, 0x2c05, 0x2c05, ANY }, // GB203 [GeForce RTX 5070 Ti].
+    { 0x10de, 0x2c09, 0x2c09, ANY }, // GB203 [GeForce RTX 5070].
+    { 0x10de, 0x2c2c, 0x2c2c, ANY }, // GB6-256(N22W-ES-A1).
+    { 0x10de, 0x2c31, 0x2c31, ANY }, // GB203GL [RTX PRO 4500 Blackwell].
     // GB203GL [RTX PRO 4000 Blackwell SFF Edition].
-    { 0x10de, 0x2c33, 0x2c33, GPU_ANY_REVISION },
-    // GB203GL [RTX PRO 4000 Blackwell].
-    { 0x10de, 0x2c34, 0x2c34, GPU_ANY_REVISION },
+    { 0x10de, 0x2c33, 0x2c33, ANY },
+    { 0x10de, 0x2c34, 0x2c34, ANY }, // GB203GL [RTX PRO 4000 Blackwell].
     // GB203GL [RTX PRO 4500 Blackwell Server Edition].
-    { 0x10de, 0x2c3a, 0x2c3a, GPU_ANY_REVISION },
-    // GB206 [GeForce RTX 5060 Ti].
-    { 0x10de, 0x2d04, 0x2d04, GPU_ANY_REVISION },
-    { 0x10de, 0x2d05, 0x2d05, GPU_ANY_REVISION }, // GB206 [GeForce RTX 5060].
-    { 0x10de, 0x2d2c, 0x2d2c, GPU_ANY_REVISION }, // GB6-128 (N22Y-ES-A1).
-    // GB206GL [RTX PRO 2000 Blackwell].
-    { 0x10de, 0x2d30, 0x2d30, GPU_ANY_REVISION },
-    { 0x10de, 0x2d83, 0x2d83, GPU_ANY_REVISION }, // GB207 [GeForce RTX 5050].
+    { 0x10de, 0x2c3a, 0x2c3a, ANY },
+    { 0x10de, 0x2d04, 0x2d04, ANY }, // GB206 [GeForce RTX 5060 Ti].
+    { 0x10de, 0x2d05, 0x2d05, ANY }, // GB206 [GeForce RTX 5060].
+    { 0x10de, 0x2d2c, 0x2d2c, ANY }, // GB6-128 (N22Y-ES-A1).
+    { 0x10de, 0x2d30, 0x2d30, ANY }, // GB206GL [RTX PRO 2000 Blackwell].
+    { 0x10de, 0x2d83, 0x2d83, ANY }, // GB207 [GeForce RTX 5050].
     // GB20B [RTX Spark N1X (6144-core Blackwell RTX GPU)].
-    { 0x10de, 0x2e03, 0x2e03, GPU_ANY_REVISION },
+    { 0x10de, 0x2e03, 0x2e03, ANY },
     // GB20B [RTX Spark N1X (5120-core Blackwell RTX GPU)].
-    { 0x10de, 0x2e06, 0x2e06, GPU_ANY_REVISION },
-    { 0x10de, 0x2e12, 0x2e12, GPU_ANY_REVISION }, // GB20B [GB10].
+    { 0x10de, 0x2e06, 0x2e06, ANY },
+    { 0x10de, 0x2e12, 0x2e12, ANY }, // GB20B [GB10].
     // GB20B [RTX Spark N1X (6144-core Blackwell RTX GPU)].
-    { 0x10de, 0x2e13, 0x2e13, GPU_ANY_REVISION },
-    // GB20B [JMJWOA-Generic-GPU].
-    { 0x10de, 0x2e2a, 0x2e2a, GPU_ANY_REVISION },
-    { 0x10de, 0x2f04, 0x2f04, GPU_ANY_REVISION }, // GB205 [GeForce RTX 5070].
-    { 0x10de, 0x2f06, 0x2f06, GPU_ANY_REVISION }, // GB205 [GeForce RTX 5060].
-    { 0x10de, 0x2f95, 0x2f95, GPU_ANY_REVISION }, // TB500 RP x16.
-    { 0x10de, 0x2f96, 0x2f96, GPU_ANY_REVISION }, // TB500 RP x8.
-    { 0x10de, 0x2f97, 0x2f97, GPU_ANY_REVISION }, // TB500 RP x4.
-    { 0x10de, 0x2f98, 0x2f98, GPU_ANY_REVISION }, // TB500 RP x2.
-    { 0x10de, 0x2f99, 0x2f99, GPU_ANY_REVISION }, // TB500 RP x1.
-    { 0x10de, 0x3000, 0x3000, GPU_ANY_REVISION }, // GR100 [Reserved Dev ID A].
-    { 0x10de, 0x3002, 0x3002, GPU_ANY_REVISION }, // GR100.
-    { 0x10de, 0x3021, 0x3021, GPU_ANY_REVISION }, // GR100 [PCIe Faber].
-    { 0x10de, 0x3040, 0x3040, GPU_ANY_REVISION }, // GR100 [Reserved Dev ID B].
-    { 0x10de, 0x3041, 0x3041, GPU_ANY_REVISION }, // GR100.
-    { 0x10de, 0x307e, 0x307e, GPU_ANY_REVISION }, // GR100.
-    { 0x10de, 0x3080, 0x3080, GPU_ANY_REVISION }, // GR102 [Reserved Dev ID A].
-    { 0x10de, 0x30c0, 0x30c0, GPU_ANY_REVISION }, // GR102 [Reserved Dev ID B].
-    { 0x10de, 0x30ff, 0x30ff, GPU_ANY_REVISION }, // GR102.
-    { 0x10de, 0x3180, 0x3180, GPU_ANY_REVISION }, // GB110 [Reserved Dev ID A].
-    { 0x10de, 0x3182, 0x3182, GPU_ANY_REVISION }, // GB110 [B300 SXM6 AC].
-    { 0x10de, 0x3183, 0x3183, GPU_ANY_REVISION }, // GB110.
-    { 0x10de, 0x3184, 0x3184, GPU_ANY_REVISION }, // GB110.
-    { 0x10de, 0x31a1, 0x31a1, GPU_ANY_REVISION }, // GB110 [GB300 MaxQ].
-    { 0x10de, 0x31c0, 0x31c0, GPU_ANY_REVISION }, // GB110 [Reserved Dev ID B].
-    { 0x10de, 0x31c2, 0x31c2, GPU_ANY_REVISION }, // GB110 [GB300].
-    { 0x10de, 0x31c3, 0x31c3, GPU_ANY_REVISION }, // GB110 [GB300].
-    { 0x10de, 0x31fe, 0x31fe, GPU_ANY_REVISION }, // GB110.
-    { 0x10de, 0x3200, 0x3200, GPU_ANY_REVISION }, // GB112.
-    { 0x10de, 0x3224, 0x3224, GPU_ANY_REVISION }, // GB112.
-    { 0x10de, 0x323e, 0x323e, GPU_ANY_REVISION }, // GB112.
-    { 0x10de, 0x3340, 0x3340, GPU_ANY_REVISION }, // GB120.
-    { 0x10de, 0x3400, 0x3400, GPU_ANY_REVISION }, // GB10B [Tegra RP iGPU].
+    { 0x10de, 0x2e13, 0x2e13, ANY },
+    { 0x10de, 0x2e2a, 0x2e2a, ANY }, // GB20B [JMJWOA-Generic-GPU].
+    { 0x10de, 0x2f04, 0x2f04, ANY }, // GB205 [GeForce RTX 5070].
+    { 0x10de, 0x2f06, 0x2f06, ANY }, // GB205 [GeForce RTX 5060].
+    { 0x10de, 0x2f95, 0x2f95, ANY }, // TB500 RP x16.
+    { 0x10de, 0x2f96, 0x2f96, ANY }, // TB500 RP x8.
+    { 0x10de, 0x2f97, 0x2f97, ANY }, // TB500 RP x4.
+    { 0x10de, 0x2f98, 0x2f98, ANY }, // TB500 RP x2.
+    { 0x10de, 0x2f99, 0x2f99, ANY }, // TB500 RP x1.
+    { 0x10de, 0x3000, 0x3000, ANY }, // GR100 [Reserved Dev ID A].
+    { 0x10de, 0x3002, 0x3002, ANY }, // GR100.
+    { 0x10de, 0x3021, 0x3021, ANY }, // GR100 [PCIe Faber].
+    { 0x10de, 0x3040, 0x3040, ANY }, // GR100 [Reserved Dev ID B].
+    { 0x10de, 0x3041, 0x3041, ANY }, // GR100.
+    { 0x10de, 0x307e, 0x307e, ANY }, // GR100.
+    { 0x10de, 0x3080, 0x3080, ANY }, // GR102 [Reserved Dev ID A].
+    { 0x10de, 0x30c0, 0x30c0, ANY }, // GR102 [Reserved Dev ID B].
+    { 0x10de, 0x30ff, 0x30ff, ANY }, // GR102.
+    { 0x10de, 0x3180, 0x3180, ANY }, // GB110 [Reserved Dev ID A].
+    { 0x10de, 0x3182, 0x3182, ANY }, // GB110 [B300 SXM6 AC].
+    { 0x10de, 0x3183, 0x3183, ANY }, // GB110.
+    { 0x10de, 0x3184, 0x3184, ANY }, // GB110.
+    { 0x10de, 0x31a1, 0x31a1, ANY }, // GB110 [GB300 MaxQ].
+    { 0x10de, 0x31c0, 0x31c0, ANY }, // GB110 [Reserved Dev ID B].
+    { 0x10de, 0x31c2, 0x31c2, ANY }, // GB110 [GB300].
+    { 0x10de, 0x31c3, 0x31c3, ANY }, // GB110 [GB300].
+    { 0x10de, 0x31fe, 0x31fe, ANY }, // GB110.
+    { 0x10de, 0x3200, 0x3200, ANY }, // GB112.
+    { 0x10de, 0x3224, 0x3224, ANY }, // GB112.
+    { 0x10de, 0x323e, 0x323e, ANY }, // GB112.
+    { 0x10de, 0x3340, 0x3340, ANY }, // GB120.
+    { 0x10de, 0x3400, 0x3400, ANY }, // GB10B [Tegra RP iGPU].
     // Up to Fiji and Vega, but for those blocked.
-    { 0x1002, 0x0000, 0x72ff, GPU_ANY_REVISION },
+    { 0x1002, 0x0000, 0x72ff, ANY },
     // Up to Fiji and Vega, but for those blocked.
-    { 0x1002, 0x7300, 0x730f, GPU_ANY_REVISION },
+    { 0x1002, 0x7300, 0x730f, ANY },
     // Up to Fiji and Vega, but for those blocked.
-    { 0x1002, 0x9000, 0x9fff, GPU_ANY_REVISION },
+    { 0x1002, 0x9000, 0x9fff, ANY },
     { 0x1002, 0x7312, 0x7312, 0x00 }, // AMD Radeon Pro W5700.
     { 0x1002, 0x731e, 0x731e, 0xc6 }, // AMD Radeon RX 5700XTB.
     { 0x1002, 0x731e, 0x731e, 0xc7 }, // AMD Radeon RX 5700B.
@@ -1426,21 +1138,20 @@ const struct gpu_id vbios_allowlist[] = {
     { 0x1002, 0x75a3, 0x75a3, 0x00 }, // AMD Instinct MI355X.
     { 0x1002, 0x75b0, 0x75b0, 0x00 }, // AMD Instinct MI350X VF.
     { 0x1002, 0x75b3, 0x75b3, 0x00 }, // AMD Instinct MI355X VF.
-    { 0x1234, 0x1111, 0x1111, GPU_ANY_REVISION }, // QEMU standard VGA.
-    { 0x1af4, 0x1050, 0x1050, GPU_ANY_REVISION }, // virtio-vga.
-    { 0x1b36, 0x0100, 0x0100, GPU_ANY_REVISION }, // QXL.
-    { 0x15ad, 0x0405, 0x0405, GPU_ANY_REVISION }, // VMware SVGA II.
-    { 0x80ee, 0xbeef, 0xbeef, GPU_ANY_REVISION }, // VirtualBox.
-    { 0x1013, 0x0000, 0xffff, GPU_ANY_REVISION }, // Cirrus Logic.
-    { 0x1023, 0x0000, 0xffff, GPU_ANY_REVISION }, // Trident.
-    { 0x1039, 0x0000, 0xffff, GPU_ANY_REVISION }, // SiS.
-    { 0x102b, 0x0000, 0xffff, GPU_ANY_REVISION }, // Matrox.
-    { 0x121a, 0x0000, 0xffff, GPU_ANY_REVISION }, // 3dfx.
-    { 0x126f, 0x0000, 0xffff, GPU_ANY_REVISION }, // Silicon Motion.
-    { 0x18ca, 0x0000, 0xffff, GPU_ANY_REVISION }, // XGI.
-    // ASPEED, on servers' boards.
-    { 0x1a03, 0x2000, 0x2000, GPU_ANY_REVISION },
-    { 0x5333, 0x0000, 0xffff, GPU_ANY_REVISION } // S3.
+    { 0x1234, 0x1111, 0x1111, ANY }, // QEMU standard VGA.
+    { 0x1af4, 0x1050, 0x1050, ANY }, // virtio-vga.
+    { 0x1b36, 0x0100, 0x0100, ANY }, // QXL.
+    { 0x15ad, 0x0405, 0x0405, ANY }, // VMware SVGA II.
+    { 0x80ee, 0xbeef, 0xbeef, ANY }, // VirtualBox.
+    { 0x1013, 0x0000, 0xffff, ANY }, // Cirrus Logic.
+    { 0x1023, 0x0000, 0xffff, ANY }, // Trident.
+    { 0x1039, 0x0000, 0xffff, ANY }, // SiS.
+    { 0x102b, 0x0000, 0xffff, ANY }, // Matrox.
+    { 0x121a, 0x0000, 0xffff, ANY }, // 3dfx.
+    { 0x126f, 0x0000, 0xffff, ANY }, // Silicon Motion.
+    { 0x18ca, 0x0000, 0xffff, ANY }, // XGI.
+    { 0x1a03, 0x2000, 0x2000, ANY }, // ASPEED, on servers' boards.
+    { 0x5333, 0x0000, 0xffff, ANY } // S3.
 };
 
-const size_t vbios_allowlist_count = ARRAY_COUNT(vbios_allowlist);
+const size_t gpu_lists_vbios_allowlist_count = ARRAY_COUNT(gpu_lists_vbios_allowlist);
