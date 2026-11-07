@@ -19,6 +19,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <virt/ferr.h>
+#include <hw/isa.h>
 #include <lib/spinlock.h>
 #include <lib/util.h>
 #include <sys/x86.h>
@@ -41,7 +42,6 @@
 #define ENV_STATUS 4
 
 #define PORT_COPROC_ERR 0xf0
-#define IRQ_FPU 13
 
 static struct spinlock lock;
 // The vCPUs whose error FERR# reports, IGNNE#, and the latch on IRQ13.
@@ -61,7 +61,7 @@ static uint16_t status_word(void) {
 static void latch(bool up) {
     if (up != irq_up) {
         irq_up = up;
-        irq_isa_set(IRQ_FPU, up);
+        irq_isa_set(ISA_IRQ_FPU, up);
     }
 }
 

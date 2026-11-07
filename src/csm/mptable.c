@@ -25,6 +25,7 @@
 #include <hw/acpi.h>
 #include <hw/acpi_irq.h>
 #include <hw/ioapic.h>
+#include <hw/isa.h>
 #include <hw/lapic.h>
 #include <hw/pci_enum.h>
 #include <hw/pci_regs.h>
@@ -70,9 +71,6 @@
 
 #define MADT_ALL_UIDS ((uint32_t)0xff)
 #define MADT_ALL_X2APIC_UIDS ((uint32_t)0xffffffff)
-
-#define ISA_IRQS 16
-#define CASCADE_IRQ 2
 
 struct mp_floating_pointer {
     char signature[4];
@@ -409,7 +407,7 @@ static void io_interrupts_emit(struct mp_writer *w, const struct mp_input *in) {
     bool gsi0_taken = false;
     if (in->isa) {
         for (size_t irq = 0; irq < ISA_IRQS; irq++) {
-            if (irq == CASCADE_IRQ) {
+            if (irq == ISA_IRQ_CASCADE) {
                 continue;
             }
             uint32_t gsi = in->isa_gsi[irq];

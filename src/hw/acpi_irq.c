@@ -26,6 +26,7 @@
 #include <uacpi/uacpi.h>
 #include <uacpi/utilities.h>
 #include <hw/acpi_irq.h>
+#include <hw/isa.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
 #include <lib/heap.h>
@@ -39,7 +40,6 @@
 #define PRT_ANY_FUNCTION ((uint32_t)0xffff)
 #define STA_PRESENT ((uint32_t)1 << 0)
 #define STA_ENABLED ((uint32_t)1 << 1)
-#define ISA_IRQS 16
 #define ADDR_TEXT_SIZE 16
 
 struct host_bridge {

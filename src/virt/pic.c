@@ -19,6 +19,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <virt/pic.h>
+#include <hw/isa.h>
 
 #define ICW1 0x10
 #define ICW1_IC4 0x01
@@ -33,7 +34,6 @@
 #define OCW3_ESMM 0x40
 #define POLL_INTERRUPT 0x80
 
-#define CASCADE_IRQ 2
 #define DEFAULT_IRQ 7
 
 // Inputs that cannot be level-triggered: IRQs 0, 1, and 2, and 8 and 13.
@@ -113,8 +113,8 @@ static int request(const struct chip *c) {
     }
     // In the special fully nested mode, the slave in service does not lock the
     // slave's further requests out.
-    if (c == &chips[0] && c->special_nested && irq == CASCADE_IRQ) {
-        in_service &= ~((uint32_t)1 << CASCADE_IRQ);
+    if (c == &chips[0] && c->special_nested && irq == ISA_IRQ_CASCADE) {
+        in_service &= ~((uint32_t)1 << ISA_IRQ_CASCADE);
     }
     int current = highest(c, in_service);
     if (current >= 0 && priority(c, (unsigned int)current) <= priority(c, (unsigned int)irq)) {
@@ -133,7 +133,7 @@ static void set_line(struct chip *c, unsigned int irq, bool level) {
 }
 
 static void update(void) {
-    set_line(&chips[0], CASCADE_IRQ, request(&chips[1]) >= 0);
+    set_line(&chips[0], ISA_IRQ_CASCADE, request(&chips[1]) >= 0);
 }
 
 static void acknowledge(struct chip *c, unsigned int irq) {
@@ -351,7 +351,7 @@ uint8_t pic_acknowledge(void) {
         vector = master->base + DEFAULT_IRQ;
     } else {
         acknowledge(master, (unsigned int)irq);
-        if (irq == CASCADE_IRQ) {
+        if (irq == ISA_IRQ_CASCADE) {
             int slave_irq = request(slave);
             if (slave_irq < 0) {
                 vector = slave->base + DEFAULT_IRQ;
@@ -368,7 +368,7 @@ uint8_t pic_acknowledge(void) {
 }
 
 bool pic_masked(unsigned int irq) {
-    if (irq >= 8 && (chips[0].imr & ((uint32_t)1 << CASCADE_IRQ)) != 0) {
+    if (irq >= 8 && (chips[0].imr & ((uint32_t)1 << ISA_IRQ_CASCADE)) != 0) {
         return true;
     }
     return ((chips[irq >> 3].imr >> (irq & 7)) & 1) != 0;

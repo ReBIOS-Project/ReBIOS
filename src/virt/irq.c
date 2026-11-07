@@ -26,6 +26,7 @@
 #include <virt/irq.h>
 #include <hw/acpi.h>
 #include <hw/ioapic.h>
+#include <hw/isa.h>
 #include <hw/lapic.h>
 #include <iommu/iommu_tables.h>
 #include <iommu/remap.h>
@@ -45,10 +46,6 @@
 #include <virt/vioapic.h>
 #include <virt/vlapic.h>
 
-#define ISA_IRQS 16
-#define IRQ_TIMER 0
-#define IRQ_RTC 8
-#define CASCADE_IRQ 2
 // The highest APIC ID an 8-bit destination names alone, FFh being the
 // broadcast (SDM 325462-093 Vol. 3A, 13.6.2.1).
 #define XAPIC_MAX_ID 0xfe
@@ -187,7 +184,7 @@ static void routes_init(void) {
         }
     }
     for (size_t irq = 0; irq < ISA_IRQS && (uint32_t)irq < route_count; irq++) {
-        if (irq != CASCADE_IRQ && routes[irq].io != NULL) {
+        if (irq != ISA_IRQ_CASCADE && routes[irq].io != NULL) {
             routes[irq].irq = irq;
         }
     }
@@ -231,7 +228,8 @@ static bool reaches_guest(uint32_t gsi, const struct route *r) {
     if (r->given) {
         return true;
     }
-    return (gsi == irq_isa_gsi(IRQ_TIMER) || gsi == irq_isa_gsi(IRQ_RTC)) && hpet_replaces_pit();
+    return (gsi == irq_isa_gsi(ISA_IRQ_TIMER) || gsi == irq_isa_gsi(ISA_IRQ_RTC))
+        && hpet_replaces_pit();
 }
 
 // What the host's entry for a GSI is to hold, and who owns it.
@@ -415,7 +413,7 @@ void irq_host_interrupt(uint8_t vector) {
         }
         level = true;
     }
-    if (edge && irq == IRQ_TIMER && pit_tick_held(pic_in_service(IRQ_TIMER))) {
+    if (edge && irq == ISA_IRQ_TIMER && pit_tick_held(pic_in_service(ISA_IRQ_TIMER))) {
         edge = false;
     }
     if (edge) {
@@ -822,7 +820,7 @@ static void isa_apic_deliver(uint64_t vrte) {
 bool irq_tick_in_service(void) {
     uint64_t vrte = 0;
     spinlock_acquire(&lock);
-    bool in_service = !isa_apic_entry(IRQ_TIMER, &vrte) && pic_in_service(IRQ_TIMER);
+    bool in_service = !isa_apic_entry(ISA_IRQ_TIMER, &vrte) && pic_in_service(ISA_IRQ_TIMER);
     spinlock_release(&lock);
     return in_service;
 }
@@ -858,9 +856,9 @@ void irq_isa_set(unsigned int irq, bool level) {
 
 uint8_t irq_extint_acknowledge(void) {
     spinlock_acquire(&lock);
-    bool ticking = pic_in_service(IRQ_TIMER);
+    bool ticking = pic_in_service(ISA_IRQ_TIMER);
     uint8_t vector = pic_acknowledge();
-    if (!ticking && pic_in_service(IRQ_TIMER)) {
+    if (!ticking && pic_in_service(ISA_IRQ_TIMER)) {
         pit_tick_begun();
     }
     atomic_store_explicit(&extint_asserted, pic_output(), memory_order_release);
@@ -878,9 +876,9 @@ static void pic_access(
     if (in) {
         *value = (*value & ~(uint32_t)0xff) | pic_read(port);
     } else {
-        bool ticking = pic_in_service(IRQ_TIMER);
+        bool ticking = pic_in_service(ISA_IRQ_TIMER);
         pic_write(port, (uint8_t)*value);
-        if (ticking && !pic_in_service(IRQ_TIMER)) {
+        if (ticking && !pic_in_service(ISA_IRQ_TIMER)) {
             pit_tick_ended();
         }
     }

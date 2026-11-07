@@ -24,6 +24,7 @@
 #include <uacpi/status.h>
 #include <uacpi/tables.h>
 #include <virt/hpet.h>
+#include <hw/isa.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
 #include <lib/util.h>
@@ -52,10 +53,6 @@
 // can interrupt on (2.3.8).
 #define TIMER_ROUTE_CAP ((uint32_t)4)
 #define ROUTE_LINES 32
-// What legacy replacement routes timers 0 and 1 to (2.3.9.1), which the
-// guest's interrupts follow on their own (irq.c's reaches_guest()).
-#define LEGACY_TIMER_IRQ 0
-#define LEGACY_RTC_IRQ 8
 #define MAX_HIDDEN 8
 
 static uint64_t hidden[MAX_HIDDEN];
@@ -145,8 +142,10 @@ static void trap_writes(uintptr_t base) {
 // The lines the guest's HPET can raise, which reach the guest then, but for
 // those of IRQs 0 and 8, which the 8254 and the RTC may drive.
 static void give_lines(uintptr_t base) {
-    uint32_t legacy_timer = irq_isa_gsi(LEGACY_TIMER_IRQ);
-    uint32_t legacy_rtc = irq_isa_gsi(LEGACY_RTC_IRQ);
+    // What legacy replacement routes timers 0 and 1 to (2.3.9.1), which the
+    // guest's interrupts follow on their own (irq.c's reaches_guest()).
+    uint32_t legacy_timer = irq_isa_gsi(ISA_IRQ_TIMER);
+    uint32_t legacy_rtc = irq_isa_gsi(ISA_IRQ_RTC);
     for (size_t n = 0; n < timers(base); n++) {
         uint32_t routes = read32(base + TIMER_BASE + n * TIMER_STRIDE + TIMER_ROUTE_CAP);
         for (size_t gsi = 0; gsi < ROUTE_LINES; gsi++) {

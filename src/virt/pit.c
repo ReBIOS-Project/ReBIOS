@@ -21,6 +21,7 @@
 #include <stdint.h>
 #include <virt/pit.h>
 #include <hw/acpi.h>
+#include <hw/isa.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
 #include <lib/time.h>
@@ -47,7 +48,6 @@ struct vcpu;
 #define PIT_HZ 1193182
 #define CHANNELS 3
 #define CHANNEL_SPEAKER 2
-#define IRQ_TIMER 0
 // How often a held tick's timer looks again, for a guest that leaves a tick in
 // service and moves on to an I/O APIC.
 #define TICK_RECHECK_HZ 64
@@ -340,7 +340,7 @@ static void tick_fired(void *ctx) {
     host_edge = false;
     spinlock_release(&lock);
     if (waited || (edge && !hpet_replaces_pit())) {
-        irq_isa_pulse(IRQ_TIMER);
+        irq_isa_pulse(ISA_IRQ_TIMER);
     }
 }
 

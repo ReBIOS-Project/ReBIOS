@@ -20,6 +20,7 @@
 #include <stdint.h>
 #include <csm/pir.h>
 #include <hw/acpi_irq.h>
+#include <hw/isa.h>
 #include <hw/pci_cfg.h>
 #include <lib/log.h>
 #include <lib/util.h>
@@ -31,7 +32,6 @@
 
 #define PIR_VERSION 0x0100
 #define PIR_PINS 4
-#define ISA_IRQS 16
 
 struct pir_header {
     char signature[4];

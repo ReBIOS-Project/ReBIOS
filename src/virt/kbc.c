@@ -20,6 +20,7 @@
 #include <stdint.h>
 #include <virt/kbc.h>
 #include <hw/i8042.h>
+#include <hw/isa.h>
 #include <lib/spinlock.h>
 #include <lib/time.h>
 #include <sys/x86.h>
@@ -39,9 +40,6 @@ struct vcpu;
 // one, whose bytes and commands pass through, and otherwise emulated. USB
 // input reaches the guest through it either way, in the format the guest asked
 // for.
-
-#define IRQ_KEYBOARD 1
-#define IRQ_AUX 12
 
 // Both data lines idle, and the keyboard not inhibited, as AT controllers had
 // it.
@@ -284,11 +282,11 @@ static void lines_update(void) {
     bool aux = output_full && output_aux && (ram[0] & I8042_CCB_AUX_INTERRUPT) != 0;
     if (keyboard != keyboard_line) {
         keyboard_line = keyboard;
-        irq_isa_set(IRQ_KEYBOARD, keyboard);
+        irq_isa_set(ISA_IRQ_KEYBOARD, keyboard);
     }
     if (aux != aux_line) {
         aux_line = aux;
-        irq_isa_set(IRQ_AUX, aux);
+        irq_isa_set(ISA_IRQ_AUX, aux);
     }
 }
 
@@ -1112,10 +1110,10 @@ void kbc_init(void) {
     hv_timer_add(&kbd_repeat);
     if (real_keyboard || real_aux) {
         if (real_keyboard) {
-            irq_take_host_line(irq_isa_gsi(IRQ_KEYBOARD), real_interrupt, NULL);
+            irq_take_host_line(irq_isa_gsi(ISA_IRQ_KEYBOARD), real_interrupt, NULL);
         }
         if (real_aux) {
-            irq_take_host_line(irq_isa_gsi(IRQ_AUX), real_interrupt, NULL);
+            irq_take_host_line(irq_isa_gsi(ISA_IRQ_AUX), real_interrupt, NULL);
         }
         real_poll.fired = real_poll_fired;
         hv_timer_add(&real_poll);

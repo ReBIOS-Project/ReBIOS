@@ -31,6 +31,7 @@
 #include <handoff.h>
 #include <hw/acpi.h>
 #include <hw/cmos.h>
+#include <hw/isa.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
 #include <lib/time.h>
@@ -109,7 +110,6 @@
 #define BASE_MEMORY_KIB 640
 #define EXT_MEMORY_KIB_MAX 0xffff
 
-#define IRQ_RTC 8
 // The update starts within this of UIP's rise (13.6.2.1).
 #define UIP_US 244
 // How long an update may hold the time registers, and the seconds of the
@@ -270,7 +270,7 @@ static bool irq_wanted(void) {
 static void update_line(void) {
     bool wanted = irq_wanted();
     reg_c = (uint8_t)((reg_c & ~C_IRQF) | (wanted ? C_IRQF : 0));
-    irq_isa_set(IRQ_RTC, wanted);
+    irq_isa_set(ISA_IRQ_RTC, wanted);
 }
 
 // Brings the clock to now, its updates setting UF, and AF where the alarm
@@ -693,7 +693,7 @@ void rtc_init(void) {
         month_alarm_index = fadt->mon_alrm;
     }
     if (real) {
-        irq_give_isa_line(IRQ_RTC);
+        irq_give_isa_line(ISA_IRQ_RTC);
     } else {
         // Register D keeps the date alarm (13.6.2.4).
         century = RAM_CENTURY;

@@ -29,6 +29,7 @@
 #include <core.h>
 #include <handoff.h>
 #include <hw/acpi.h>
+#include <hw/isa.h>
 #include <hw/pci_enum.h>
 #include <hw/pci_regs.h>
 #include <lib/log.h>
@@ -44,7 +45,6 @@ static const char *const port_ids[] = { "PNP0500", "PNP0501", "PNP0400", "PNP040
 #define MAX_DEVICES 8
 #define MAX_RANGES 4
 #define MAX_LINES 4
-#define ISA_IRQS 16
 
 // An IDE controller's channels in compatibility mode, at the PC/AT's ports and
 // on its IRQs (ICH10 datasheet 319973-003, 14.1.6).
