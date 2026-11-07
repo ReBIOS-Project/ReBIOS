@@ -33,10 +33,6 @@
 #include <memory.h>
 #include <sys/x86.h>
 
-#define CONFIG_ADDRESS 0xcf8
-#define CONFIG_DATA 0xcfc
-#define CONFIG_ENABLE ((uint32_t)1 << 31)
-
 // No smaller reserved part of a window is kept, as in Linux 7.3's
 // is_mmconf_reserved().
 #define ECAM_MIN_RESERVED ((uint64_t)16 << 20)
@@ -100,7 +96,7 @@ static uintptr_t ecam_address(uintptr_t base, struct pci_addr addr, uint32_t off
 }
 
 static uint32_t legacy_address(struct pci_addr addr, uint32_t offset) {
-    return CONFIG_ENABLE | ((uint32_t)addr.bus << 16) | ((uint32_t)addr.device << 11)
+    return PCI_CFG_ENABLE | ((uint32_t)addr.bus << 16) | ((uint32_t)addr.device << 11)
          | ((uint32_t)addr.function << 8) | (offset & 0xfc);
 }
 
@@ -133,13 +129,13 @@ uint32_t pci_cfg_read(struct pci_addr addr, uint32_t offset, size_t size) {
         return all_ones(size);
     }
 
-    uint16_t port = CONFIG_DATA + (offset & 3);
+    uint16_t port = PCI_CFG_DATA + (offset & 3);
     uint32_t value;
     spinlock_acquire(&legacy_lock);
     // The guest may be between its own write to CONFIG_ADDRESS and the data
     // access that goes with it.
-    uint32_t saved = inl(CONFIG_ADDRESS);
-    outl(CONFIG_ADDRESS, legacy_address(addr, offset));
+    uint32_t saved = inl(PCI_CFG_ADDRESS);
+    outl(PCI_CFG_ADDRESS, legacy_address(addr, offset));
     switch (size) {
         case 1: {
             value = inb(port);
@@ -154,7 +150,7 @@ uint32_t pci_cfg_read(struct pci_addr addr, uint32_t offset, size_t size) {
             break;
         }
     }
-    outl(CONFIG_ADDRESS, saved);
+    outl(PCI_CFG_ADDRESS, saved);
     spinlock_release(&legacy_lock);
     return value;
 }
@@ -188,10 +184,10 @@ void pci_cfg_write(struct pci_addr addr, uint32_t offset, size_t size, uint32_t 
         return;
     }
 
-    uint16_t port = CONFIG_DATA + (offset & 3);
+    uint16_t port = PCI_CFG_DATA + (offset & 3);
     spinlock_acquire(&legacy_lock);
-    uint32_t saved = inl(CONFIG_ADDRESS);
-    outl(CONFIG_ADDRESS, legacy_address(addr, offset));
+    uint32_t saved = inl(PCI_CFG_ADDRESS);
+    outl(PCI_CFG_ADDRESS, legacy_address(addr, offset));
     switch (size) {
         case 1: {
             outb(port, (uint8_t)value);
@@ -206,7 +202,7 @@ void pci_cfg_write(struct pci_addr addr, uint32_t offset, size_t size, uint32_t 
             break;
         }
     }
-    outl(CONFIG_ADDRESS, saved);
+    outl(PCI_CFG_ADDRESS, saved);
     spinlock_release(&legacy_lock);
 }
 
@@ -311,11 +307,11 @@ static void publish(struct ecam_window *list, size_t count) {
 // written to it, and a device answers on bus 0.
 static bool check_ports(void) {
     spinlock_acquire(&legacy_lock);
-    uint32_t saved = inl(CONFIG_ADDRESS);
-    outl(CONFIG_ADDRESS, CONFIG_ENABLE);
-    bool holds = inl(CONFIG_ADDRESS) == CONFIG_ENABLE;
-    bool device = holds && inw(CONFIG_DATA) != 0xffff;
-    outl(CONFIG_ADDRESS, saved);
+    uint32_t saved = inl(PCI_CFG_ADDRESS);
+    outl(PCI_CFG_ADDRESS, PCI_CFG_ENABLE);
+    bool holds = inl(PCI_CFG_ADDRESS) == PCI_CFG_ENABLE;
+    bool device = holds && inw(PCI_CFG_DATA) != 0xffff;
+    outl(PCI_CFG_ADDRESS, saved);
     spinlock_release(&legacy_lock);
     return device;
 }

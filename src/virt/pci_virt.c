@@ -45,10 +45,7 @@
 #include <virt/vcpu.h>
 #include <virt/vlapic.h>
 
-#define CONFIG_ADDRESS 0xcf8
-#define CONFIG_DATA 0xcfc
 #define CONFIG_PORTS 8
-#define CONFIG_ENABLE ((uint32_t)0x80000000)
 
 #define FUNCTION_SIZE ((uint32_t)0x1000)
 #define BUS_SIZE ((uint64_t)0x100000)
@@ -1167,13 +1164,13 @@ static void config_ports(
 ) {
     (void)v;
     (void)ctx;
-    uint16_t port = (uint16_t)(CONFIG_ADDRESS + offset);
+    uint16_t port = (uint16_t)(PCI_CFG_ADDRESS + offset);
     if (port == PORT_RST_CNT && size == 1) {
         rst_cnt_access(in, value);
         return;
     }
     spinlock_acquire(&virt.lock);
-    if (port == CONFIG_ADDRESS && size == 4) {
+    if (port == PCI_CFG_ADDRESS && size == 4) {
         if (in) {
             *value = virt.config_address;
         } else {
@@ -1183,8 +1180,8 @@ static void config_ports(
         return;
     }
     uint32_t address = virt.config_address;
-    unsigned int byte = (unsigned int)(port - CONFIG_DATA);
-    if (port < CONFIG_DATA || (address & CONFIG_ENABLE) == 0 || byte + size > 4) {
+    unsigned int byte = (unsigned int)(port - PCI_CFG_DATA);
+    if (port < PCI_CFG_DATA || (address & PCI_CFG_ENABLE) == 0 || byte + size > 4) {
         if (in) {
             *value = 0xffffffff;
         }
@@ -1391,7 +1388,7 @@ void pci_virt_init(void) {
         }
     }
 
-    struct io_handler ports = { CONFIG_ADDRESS, CONFIG_PORTS, config_ports, NULL, false };
+    struct io_handler ports = { PCI_CFG_ADDRESS, CONFIG_PORTS, config_ports, NULL, false };
     io_register(&ports);
     if (plan->ecam != 0) {
         size_t size = ((size_t)plan->bus_end + 1) * BUS_SIZE;

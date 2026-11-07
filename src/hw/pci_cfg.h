@@ -22,6 +22,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// The configuration mechanism's ports, CONFIG_ADDRESS and CONFIG_DATA, and
+// CONFIG_ADDRESS's enable bit (PCI Local Bus Specification 3.0, 3.2.2.3.2).
+#define PCI_CFG_ADDRESS 0xcf8
+#define PCI_CFG_DATA 0xcfc
+#define PCI_CFG_ENABLE ((uint32_t)1 << 31)
+
 struct pci_addr {
     uint16_t segment;
     uint8_t bus;
