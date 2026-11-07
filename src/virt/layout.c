@@ -28,6 +28,7 @@
 #include <iommu/iommu_tables.h>
 #include <lib/heap.h>
 #include <lib/log.h>
+#include <lib/range.h>
 #include <lib/util.h>
 #include <memory.h>
 #include <sys/mm.h>
@@ -53,17 +54,6 @@
 #define MAX_TAKEN 8
 // What layout_contiguous() may take of the hypervisor's memory.
 #define MAX_MOVED_PAGES 64
-
-struct range {
-    uintptr_t base;
-    uintptr_t end;
-};
-
-// Sorted, without overlaps.
-struct range_list {
-    struct range *r;
-    size_t count;
-};
 
 // A host range the guest finds at its own address, with the firmware's type
 // for it.
@@ -106,83 +96,6 @@ static uint8_t *low;
 // What absent memory reads as.
 static uintptr_t ones_page;
 static size_t moved_pages;
-
-static void list_init(struct range_list *list) {
-    list->r = kmalloc(MAX_RANGES * sizeof(struct range));
-    list->count = 0;
-}
-
-// Adds [base, end), merged with the ranges it overlaps or touches.
-static void list_add(struct range_list *list, uintptr_t base, uintptr_t end) {
-    if (base >= end) {
-        return;
-    }
-    size_t first = 0;
-    while (first < list->count && list->r[first].end < base) {
-        first++;
-    }
-    size_t last = first;
-    while (last < list->count && list->r[last].base <= end) {
-        if (list->r[last].base < base) {
-            base = list->r[last].base;
-        }
-        if (list->r[last].end > end) {
-            end = list->r[last].end;
-        }
-        last++;
-    }
-    if (last == first) {
-        if (list->count == MAX_RANGES) {
-            panic("Too many memory ranges\n");
-        }
-        memmove(
-            &list->r[first + 1], &list->r[first], (list->count - first) * sizeof(struct range)
-        );
-        list->count++;
-    } else {
-        memmove(&list->r[first + 1], &list->r[last], (list->count - last) * sizeof(struct range));
-        list->count -= last - first - 1;
-    }
-    list->r[first].base = base;
-    list->r[first].end = end;
-}
-
-static void list_remove(struct range_list *list, uintptr_t base, uintptr_t end) {
-    size_t i = 0;
-    while (base < end && i < list->count) {
-        struct range *r = &list->r[i];
-        if (r->end <= base || r->base >= end) {
-            i++;
-        } else if (r->base < base && r->end > end) {
-            if (list->count == MAX_RANGES) {
-                panic("Too many memory ranges\n");
-            }
-            memmove(&list->r[i + 1], r, (list->count - i) * sizeof(struct range));
-            list->count++;
-            list->r[i].end = base;
-            list->r[i + 1].base = end;
-            return;
-        } else if (r->base < base) {
-            r->end = base;
-            i++;
-        } else if (r->end > end) {
-            r->base = end;
-            i++;
-        } else {
-            memmove(r, r + 1, (list->count - i - 1) * sizeof(struct range));
-            list->count--;
-        }
-    }
-}
-
-static bool list_overlaps(const struct range_list *list, uintptr_t base, uintptr_t end) {
-    for (size_t i = 0; i < list->count; i++) {
-        if (list->r[i].base < end && base < list->r[i].end) {
-            return true;
-        }
-    }
-    return false;
-}
 
 static uint64_t list_total(const struct range_list *list) {
     size_t total = 0;
@@ -291,7 +204,7 @@ static uintptr_t take_top(
             base = fit_top(lo, hi < avoid_base ? hi : avoid_base, size, align);
         }
         if (base != 0) {
-            list_remove(list, base, base + size);
+            range_list_remove(list, base, base + size);
             return base;
         }
     }
@@ -303,7 +216,7 @@ static bool take_block(struct range_list *list, size_t size, uint64_t *block) {
     for (size_t i = 0; i < list->count; i++) {
         uintptr_t base = align_up(list->r[i].base, size);
         if (base < list->r[i].end && list->r[i].end - base >= size) {
-            list_remove(list, base, base + size);
+            range_list_remove(list, base, base + size);
             *block = base;
             return true;
         }
@@ -319,10 +232,8 @@ static void map_ram(uintptr_t gpa, uintptr_t hpa, size_t size) {
 // order, until either list runs out, so that they can be mapped with pages
 // that large, and takes them off both lists.
 static void assign_blocks(struct range_list *guest, struct range_list *host, size_t size) {
-    struct range_list guest_done;
-    struct range_list host_done;
-    list_init(&guest_done);
-    list_init(&host_done);
+    struct range_list guest_done = { 0 };
+    struct range_list host_done = { 0 };
 
     uint32_t h = 0;
     uintptr_t hpa = host->count != 0 ? align_up(host->r[0].base, size) : 0;
@@ -346,21 +257,21 @@ static void assign_blocks(struct range_list *guest, struct range_list *host, siz
                 len = gend - gpa;
             }
             map_ram(gpa, hpa, len);
-            list_add(&guest_done, gpa, gpa + len);
-            list_add(&host_done, hpa, hpa + len);
+            range_list_add(&guest_done, gpa, gpa + len);
+            range_list_add(&host_done, hpa, hpa + len);
             gpa += len;
             hpa += len;
         }
     }
 
     for (size_t i = 0; i < guest_done.count; i++) {
-        list_remove(guest, guest_done.r[i].base, guest_done.r[i].end);
+        range_list_remove(guest, guest_done.r[i].base, guest_done.r[i].end);
     }
     for (size_t i = 0; i < host_done.count; i++) {
-        list_remove(host, host_done.r[i].base, host_done.r[i].end);
+        range_list_remove(host, host_done.r[i].base, host_done.r[i].end);
     }
-    kfree(guest_done.r);
-    kfree(host_done.r);
+    range_list_free(&guest_done);
+    range_list_free(&host_done);
 }
 
 // Backs the rest of guest with what is left of host, in order. host must hold
@@ -401,8 +312,8 @@ static uint64_t add_high(struct range_list *fill, size_t size, const struct rang
         }
         size_t len = stop - at < size ? stop - at : size;
         if (fill != NULL) {
-            list_add(&ram, at, at + len);
-            list_add(fill, at, at + len);
+            range_list_add(&ram, at, at + len);
+            range_list_add(fill, at, at + len);
         }
         size -= len;
         at += len;
@@ -415,11 +326,6 @@ static uint64_t add_high(struct range_list *fill, size_t size, const struct rang
 
 void layout_init(void) {
     const struct handoff *h = core_handoff;
-    list_init(&host_free);
-    list_init(&pinned);
-    list_init(&ram);
-    list_init(&takeable);
-    list_init(&kept);
     identity = kmalloc(MAX_RANGES * sizeof(struct identity_range));
 
     const EFI_MEMORY_DESCRIPTOR *d;
@@ -432,7 +338,7 @@ void layout_init(void) {
             );
         } else if (desc_is_free(d)) {
             uintptr_t base = page_up(d->PhysicalStart);
-            list_add(&host_free, base, page_down(end));
+            range_list_add(&host_free, base, page_down(end));
         } else if (type_is_free(d->Type)) {
             const char *what = (d->Attribute & EFI_MEMORY_SP) != 0
                              ? "specific-purpose memory"
@@ -450,19 +356,18 @@ void layout_init(void) {
         }
         uintptr_t base = page_down(d->PhysicalStart);
         end = page_up(end);
-        if (list_overlaps(&host_free, base, end)) {
+        if (range_list_overlaps(&host_free, base, end)) {
             printf(
                 "Firmware memory map: type %u memory at %#llx-%#llx overlaps free memory, which "
                 "the guest does not get\n", d->Type, (unsigned long long)base,
                 (unsigned long long)end
             );
-            list_remove(&host_free, base, end);
+            range_list_remove(&host_free, base, end);
         }
     }
-    struct range_list free_ram;
-    list_init(&free_ram);
+    struct range_list free_ram = { 0 };
     for (size_t i = 0; i < host_free.count; i++) {
-        list_add(&free_ram, host_free.r[i].base, host_free.r[i].end);
+        range_list_add(&free_ram, host_free.r[i].base, host_free.r[i].end);
     }
 
     // One domain serves every device, so what one device needs one to one
@@ -528,31 +433,31 @@ void layout_init(void) {
     }
 
     for (size_t i = 0; i < identity_count; i++) {
-        list_add(&pinned, identity[i].base, identity[i].end);
+        range_list_add(&pinned, identity[i].base, identity[i].end);
     }
-    list_init(&holes);
     if (tables->kind == IOMMU_TABLES_KIND_AMD) {
-        list_add(&holes, HT_BASE, HT_END);
+        range_list_add(&holes, HT_BASE, HT_END);
     }
-    struct range_list avoid;
-    list_init(&avoid);
+    struct range_list avoid = { 0 };
     for (size_t i = 0; i < pinned.count; i++) {
-        list_add(&avoid, pinned.r[i].base, pinned.r[i].end);
+        range_list_add(&avoid, pinned.r[i].base, pinned.r[i].end);
     }
     for (size_t i = 0; i < holes.count; i++) {
-        list_add(&avoid, holes.r[i].base, holes.r[i].end);
+        range_list_add(&avoid, holes.r[i].base, holes.r[i].end);
     }
     for (size_t i = 0; i < h->reserved_count; i++) {
-        list_remove(&free_ram, h->reserved[i].base, h->reserved[i].base + h->reserved[i].size);
+        range_list_remove(
+            &free_ram, h->reserved[i].base, h->reserved[i].base + h->reserved[i].size
+        );
     }
     for (size_t i = 0; i < pinned.count; i++) {
-        list_remove(&free_ram, pinned.r[i].base, pinned.r[i].end);
+        range_list_remove(&free_ram, pinned.r[i].base, pinned.r[i].end);
     }
     // The host's own legacy region is left alone, for its shadowing to be
     // probed after the guest programs the chipset, and so is its page 0, whose
     // address is the null pointer to the hypervisor's accesses.
-    list_remove(&free_ram, VGA_BASE, ONE_MIB);
-    list_remove(&free_ram, 0, PAGE_SIZE);
+    range_list_remove(&free_ram, VGA_BASE, ONE_MIB);
+    range_list_remove(&free_ram, 0, PAGE_SIZE);
 
     uintptr_t low_hpa;
     if (!take_block(&free_ram, TWO_MIB, &low_hpa)) {
@@ -581,9 +486,9 @@ void layout_init(void) {
 
     // From 1 MiB to the PCI hole, around what must keep its address, then
     // above 4 GiB what the host's memory has left.
-    list_add(&ram, ONE_MIB, plan->tolud);
+    range_list_add(&ram, ONE_MIB, plan->tolud);
     for (size_t i = 0; i < pinned.count; i++) {
-        list_remove(&ram, pinned.r[i].base, pinned.r[i].end);
+        range_list_remove(&ram, pinned.r[i].base, pinned.r[i].end);
     }
     lfb = plan->lfb;
 
@@ -602,16 +507,15 @@ void layout_init(void) {
             identity_add(
                 clear_base, clear_end, EfiReservedMemoryType, efi_attribute_at(stolen_hpa)
             );
-            list_add(&pinned, clear_base, clear_end);
-            list_remove(&ram, clear_base, clear_end);
+            range_list_add(&pinned, clear_base, clear_end);
+            range_list_remove(&ram, clear_base, clear_end);
         }
     }
-    struct range_list fill;
-    list_init(&fill);
+    struct range_list fill = { 0 };
     for (size_t i = 0; i < ram.count; i++) {
-        list_add(&fill, ram.r[i].base, ram.r[i].end);
+        range_list_add(&fill, ram.r[i].base, ram.r[i].end);
     }
-    list_remove(&fill, 0, TWO_MIB);
+    range_list_remove(&fill, 0, TWO_MIB);
     uint64_t wanted = list_total(&fill);
     if (wanted < available) {
         add_high(&fill, available - wanted, &avoid);
@@ -627,11 +531,13 @@ void layout_init(void) {
                 // does, for an OS not to take it for room for devices.
                 for (size_t j = 0; j < ram.count; j++) {
                     if (ram.r[j].end > cut) {
-                        list_add(&kept, ram.r[j].base > cut ? ram.r[j].base : cut, ram.r[j].end);
+                        range_list_add(
+                            &kept, ram.r[j].base > cut ? ram.r[j].base : cut, ram.r[j].end
+                        );
                     }
                 }
-                list_remove(&fill, cut, UINT64_MAX);
-                list_remove(&ram, cut, UINT64_MAX);
+                range_list_remove(&fill, cut, UINT64_MAX);
+                range_list_remove(&ram, cut, UINT64_MAX);
                 break;
             }
             sum += size;
@@ -671,7 +577,7 @@ void layout_init(void) {
     uint64_t above = 0;
     for (size_t i = 0; i < ram.count; i++) {
         if (ram.r[i].base < FOUR_GIB) {
-            list_add(&takeable, ram.r[i].base, ram.r[i].end);
+            range_list_add(&takeable, ram.r[i].base, ram.r[i].end);
             below += ram.r[i].end - ram.r[i].base;
         } else {
             above += ram.r[i].end - ram.r[i].base;
@@ -684,9 +590,9 @@ void layout_init(void) {
         (unsigned long long)(above >> 20)
     );
 
-    kfree(fill.r);
-    kfree(free_ram.r);
-    kfree(avoid.r);
+    range_list_free(&fill);
+    range_list_free(&free_ram);
+    range_list_free(&avoid);
 }
 
 uintptr_t layout_lfb(void) {
@@ -742,7 +648,7 @@ uintptr_t layout_high_ram_end(void) {
 }
 
 bool layout_host_kept(uintptr_t base, uintptr_t end) {
-    return !list_overlaps(&host_free, base, end);
+    return !range_list_overlaps(&host_free, base, end);
 }
 
 bool layout_ram(uintptr_t gpa, size_t size) {
@@ -846,7 +752,7 @@ uint32_t layout_take(size_t size, uint32_t align, uint32_t e820_type) {
             taken[taken_count].e820_type = e820_type;
             taken_count++;
         }
-        list_remove(&takeable, base, end);
+        range_list_remove(&takeable, base, end);
         return (uint32_t)base;
     }
     return 0;

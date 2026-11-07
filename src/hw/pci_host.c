@@ -31,6 +31,7 @@
 #include <iommu/iommu_tables.h>
 #include <lib/heap.h>
 #include <lib/log.h>
+#include <lib/range.h>
 #include <lib/util.h>
 #include <memory.h>
 
@@ -46,18 +47,6 @@
 // range for an interrupt message.
 #define MSI_BASE ((uint64_t)0xfee00000)
 #define MSI_SIZE ((uint64_t)0x100000)
-
-struct range {
-    uintptr_t base;
-    uintptr_t end;
-};
-
-// Sorted, neither overlapping nor touching.
-struct range_list {
-    struct range *r;
-    size_t count;
-    size_t capacity;
-};
 
 struct host_bridge {
     uacpi_namespace_node *node;
@@ -94,76 +83,6 @@ static uintptr_t range_end(uintptr_t base, size_t size) {
     return size > UINT64_MAX - base ? UINT64_MAX : base + size;
 }
 
-static void list_grow(struct range_list *l) {
-    l->r = heap_grow(l->r, l->count, &l->capacity, sizeof(struct range), 32);
-}
-
-static void list_free(struct range_list *l) {
-    kfree(l->r);
-    l->r = NULL;
-    l->count = 0;
-    l->capacity = 0;
-}
-
-// Adds [base, end), merged with the ranges it overlaps or touches.
-static void list_add(struct range_list *l, uintptr_t base, uintptr_t end) {
-    if (base >= end) {
-        return;
-    }
-    size_t first = 0;
-    while (first < l->count && l->r[first].end < base) {
-        first++;
-    }
-    size_t last = first;
-    while (last < l->count && l->r[last].base <= end) {
-        if (l->r[last].base < base) {
-            base = l->r[last].base;
-        }
-        if (l->r[last].end > end) {
-            end = l->r[last].end;
-        }
-        last++;
-    }
-    if (last == first) {
-        list_grow(l);
-        memmove(&l->r[first + 1], &l->r[first], (l->count - first) * sizeof(struct range));
-        l->count++;
-    } else {
-        memmove(&l->r[first + 1], &l->r[last], (l->count - last) * sizeof(struct range));
-        l->count -= last - first - 1;
-    }
-    l->r[first].base = base;
-    l->r[first].end = end;
-}
-
-static void list_remove(struct range_list *l, uintptr_t base, uintptr_t end) {
-    size_t i = 0;
-    while (base < end && i < l->count) {
-        struct range *x = &l->r[i];
-        if (x->end <= base || x->base >= end) {
-            i++;
-        } else if (x->base < base && x->end > end) {
-            uintptr_t old_end = x->end;
-            x->end = base;
-            list_grow(l);
-            memmove(&l->r[i + 2], &l->r[i + 1], (l->count - i - 1) * sizeof(struct range));
-            l->count++;
-            l->r[i + 1].base = end;
-            l->r[i + 1].end = old_end;
-            return;
-        } else if (x->base < base) {
-            x->end = base;
-            i++;
-        } else if (x->end > end) {
-            x->base = end;
-            i++;
-        } else {
-            memmove(x, x + 1, (l->count - i - 1) * sizeof(struct range));
-            l->count--;
-        }
-    }
-}
-
 static void claim_into(struct range_list *list, uintptr_t base, size_t size) {
     if (size == 0) {
         return;
@@ -173,7 +92,7 @@ static void claim_into(struct range_list *list, uintptr_t base, size_t size) {
     if (end < last) {
         end = UINT64_MAX;
     }
-    list_add(list, align_down(base, CLAIM_GRANULE), end);
+    range_list_add(list, align_down(base, CLAIM_GRANULE), end);
 }
 
 static void claim(struct scan *r, uintptr_t base, size_t size) {
@@ -512,7 +431,7 @@ const struct pci_host *pci_host_scan(void) {
     );
     // Devices may list them among what they use, as motherboard resources do.
     for (size_t i = 0; i < r.private.count; i++) {
-        list_remove(&r.claimed, r.private.r[i].base, r.private.r[i].end);
+        range_list_remove(&r.claimed, r.private.r[i].base, r.private.r[i].end);
     }
     printf(
         "PCI: %zu ranges of memory claimed, %u devices whose _CRS fails\n", r.claimed.count,
@@ -536,7 +455,7 @@ const struct pci_host *pci_host_scan(void) {
     }
     host.bridge_count = r.bridge_count;
     kfree(r.bridges);
-    list_free(&r.claimed);
-    list_free(&r.private);
+    range_list_free(&r.claimed);
+    range_list_free(&r.private);
     return &host;
 }
