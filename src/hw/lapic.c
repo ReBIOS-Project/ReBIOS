@@ -26,16 +26,12 @@
 #include <sys/fixup.h>
 #include <sys/x86.h>
 
-#define MSR_X2APIC_FIRST 0x800
-#define MSR_X2APIC_ICR 0x830
-
 // CMCI has an LVT entry where the version register's maximum entry is this or
 // more.
 #define LVT_CMCI_MIN_MAX_ENTRY 6
 
 #define IPI_TIMEOUT_NS ((uint64_t)100000000)
 
-#define LVT_TIMER_TSC_DEADLINE ((uint32_t)1 << 18)
 // The divide configuration register's value for dividing by 1.
 #define TIMER_DIVIDE_BY_1 0xb
 #define TIMER_MEASURE_US 5000
@@ -348,7 +344,8 @@ void lapic_host_init(uint8_t spurious_vector, uint8_t timer_vector) {
     if (timer_tsc_deadline) {
         wrmsr(MSR_IA32_TSC_DEADLINE, 0);
     }
-    lapic_write(APIC_LVT_TIMER, timer_vector | (timer_tsc_deadline ? LVT_TIMER_TSC_DEADLINE : 0));
+    uint32_t mode = timer_tsc_deadline ? APIC_LVT_TIMER_TSC_DEADLINE : 0;
+    lapic_write(APIC_LVT_TIMER, timer_vector | mode);
     // Before any WRMSR to the deadline (SDM 325462-093 Vol. 3A, 13.5.4.1).
     asm volatile ("mfence" ::: "memory");
     // In-service interrupts end one EOI each, highest first.

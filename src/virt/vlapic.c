@@ -48,35 +48,17 @@
 #include <virt/virt.h>
 #include <virt/vmx.h>
 
-#define MSR_X2APIC_FIRST 0x800
-#define MSR_X2APIC_LAST 0x8ff
-#define MSR_X2APIC_ICR 0x830
-#define MSR_X2APIC_SELF_IPI 0x83f
-
 // VT-d D51397-019 rev. 5.20, 8.1: INTR_REMAP and X2APIC_OPT_OUT.
 #define DMAR_X2APIC_OPT_OUT_FLAGS 0x03
-
-#define APIC_APR 0x90
-#define APIC_PPR 0xa0
-#define APIC_RRD 0xc0
-#define APIC_SELF_IPI 0x3f0
 
 #define VERSION_EOI_SUPPRESSION ((uint32_t)1 << 24)
 #define SVR_WRITABLE 0x1ff
 #define SVR_SUPPRESS_EOI_BROADCAST ((uint32_t)1 << 12)
-#define LVT_DELIVERY_MASK ((uint32_t)7 << 8)
-#define LVT_DELIVERY_FIXED ((uint32_t)0 << 8)
-#define LVT_DELIVERY_SMI ((uint32_t)2 << 8)
-#define LVT_DELIVERY_NMI ((uint32_t)4 << 8)
-#define LVT_DELIVERY_EXTINT ((uint32_t)7 << 8)
 #define DFR_FLAT ((uint32_t)0xf0000000)
 #define ESR_RECEIVE_ILLEGAL_VECTOR ((uint32_t)1 << 6)
 #define XAPIC_BROADCAST ((uint32_t)0xff)
 #define X2APIC_BROADCAST ((uint32_t)0xffffffff)
 #define TIMER_DIVIDE_WRITABLE ((uint32_t)0xb)
-#define LVT_TIMER_MODE_MASK ((uint32_t)3 << 17)
-#define LVT_TIMER_PERIODIC ((uint32_t)1 << 17)
-#define LVT_TIMER_TSC_DEADLINE ((uint32_t)2 << 17)
 // What AMD's extended feature register says the space has, each turned on by
 // the control register's bit at its position (APM 24593 rev. 3.46, 16.3.5,
 // 16.3.6): the interrupt enable registers, specific EOIs, and 8-bit APIC IDs.
@@ -110,9 +92,8 @@
 #define LVT_LINT0 4
 #define LVT_LINT1 5
 #define LVT_ERROR 6
-#define LVT_COUNT 7
 
-static const uint32_t lvt_regs[LVT_COUNT] = {
+static const uint32_t lvt_regs[LAPIC_LVT_COUNT] = {
     APIC_LVT_CMCI, APIC_LVT_TIMER, APIC_LVT_THERMAL, APIC_LVT_PERF,
     APIC_LVT_LINT0, APIC_LVT_LINT1, APIC_LVT_ERROR
 };
@@ -120,7 +101,7 @@ static const uint32_t lvt_regs[LVT_COUNT] = {
 // The bits of each entry that software writes: the vector and mask, the
 // delivery mode where there is one, the timer mode, and LINT's polarity and
 // trigger mode.
-static const uint32_t lvt_writable[LVT_COUNT] = {
+static const uint32_t lvt_writable[LAPIC_LVT_COUNT] = {
     0x107ff, 0x700ff, 0x107ff, 0x107ff, 0x1a7ff, 0x1a7ff, 0x100ff
 };
 
@@ -210,14 +191,14 @@ static size_t eilvt_count;
 
 // The Max LVT Entry of the version register each LVT entry needs (SDM
 // 325462-093 Vol. 3A, 13.4.8): those beyond it are not there.
-static const uint8_t lvt_max_needed[LVT_COUNT] = { 6, 0, 5, 4, 0, 0, 0 };
+static const uint8_t lvt_max_needed[LAPIC_LVT_COUNT] = { 6, 0, 5, 4, 0, 0, 0 };
 
 static bool lvt_present(size_t i) {
     return ((host_version >> 16) & 0xff) >= lvt_max_needed[i];
 }
 
 static bool lvt_reg_present(uint32_t reg) {
-    for (size_t i = 0; i < LVT_COUNT; i++) {
+    for (size_t i = 0; i < LAPIC_LVT_COUNT; i++) {
         if (reg == lvt_regs[i]) {
             return lvt_present(i);
         }
@@ -630,7 +611,7 @@ static void mirror_logical(const struct vlapic *vl) {
 }
 
 static uint32_t timer_mode(const struct vlapic *vl) {
-    return regs_get(vl, APIC_LVT_TIMER) & LVT_TIMER_MODE_MASK;
+    return regs_get(vl, APIC_LVT_TIMER) & APIC_LVT_TIMER_MODE_MASK;
 }
 
 // The divide configuration register's bits 3, 1, and 0 (SDM 325462-093 Vol.
@@ -657,7 +638,7 @@ static void timer_expire(struct vcpu *v, uint64_t now) {
         vlapic_accept(v, (uint8_t)lvt, false);
     }
     uint64_t span = timer_span(vl);
-    if ((lvt & LVT_TIMER_MODE_MASK) != LVT_TIMER_PERIODIC || span == 0) {
+    if ((lvt & APIC_LVT_TIMER_MODE_MASK) != APIC_LVT_TIMER_PERIODIC || span == 0) {
         timer_stop(vl);
         return;
     }
@@ -670,7 +651,7 @@ static void timer_expire(struct vcpu *v, uint64_t now) {
 }
 
 static uint32_t timer_current(const struct vlapic *vl) {
-    if (timer_mode(vl) == LVT_TIMER_TSC_DEADLINE || vl->timer_deadline == 0) {
+    if (timer_mode(vl) == APIC_LVT_TIMER_TSC_DEADLINE || vl->timer_deadline == 0) {
         return 0;
     }
     uint64_t now = rdtsc();
@@ -685,7 +666,8 @@ static uint32_t timer_current(const struct vlapic *vl) {
 // Leaving or entering TSC-deadline mode disarms the timer (SDM 325462-093 Vol.
 // 3A, 13.5.4.1), and, as in Linux 7.3's KVM, clears the initial count.
 static void timer_mode_changed(struct vlapic *vl, uint32_t old_mode) {
-    if ((old_mode == LVT_TIMER_TSC_DEADLINE) != (timer_mode(vl) == LVT_TIMER_TSC_DEADLINE)) {
+    if ((old_mode == APIC_LVT_TIMER_TSC_DEADLINE)
+     != (timer_mode(vl) == APIC_LVT_TIMER_TSC_DEADLINE)) {
         regs_set(vl, APIC_TIMER_INITIAL, 0);
         timer_stop(vl);
     }
@@ -697,12 +679,12 @@ static void timer_mode_changed(struct vlapic *vl, uint32_t old_mode) {
 // entry has them.
 static void host_lvt(const struct vlapic *vl, uint32_t reg, uint8_t vector) {
     uint32_t lvt = regs_get(vl, reg);
-    uint32_t mode = lvt & LVT_DELIVERY_MASK;
+    uint32_t mode = lvt & APIC_LVT_DELIVERY_MASK;
     uint32_t host = APIC_LVT_MASKED;
-    if (mode == LVT_DELIVERY_SMI) {
+    if (mode == APIC_LVT_DELIVERY_SMI) {
         host = lvt;
     } else if ((lvt & APIC_LVT_MASKED) == 0
-            && (mode == LVT_DELIVERY_FIXED || mode == LVT_DELIVERY_NMI)) {
+            && (mode == APIC_LVT_DELIVERY_FIXED || mode == APIC_LVT_DELIVERY_NMI)) {
         host = vector;
     }
     lapic_write(reg, host);
@@ -1045,7 +1027,7 @@ static void reset_registers(struct vcpu *v) {
     atomic_store_explicit(&vl->esr_pending, 0, memory_order_relaxed);
     regs_set(vl, APIC_ICR_LOW, 0);
     regs_set(vl, APIC_ICR_HIGH, 0);
-    for (size_t i = 0; i < LVT_COUNT; i++) {
+    for (size_t i = 0; i < LAPIC_LVT_COUNT; i++) {
         regs_set(vl, lvt_regs[i], lvt_present(i) ? APIC_LVT_MASKED : 0);
     }
     regs_set(vl, APIC_TIMER_INITIAL, 0);
@@ -1276,14 +1258,14 @@ void vlapic_timer_program(struct vcpu *v) {
 
 uint64_t vlapic_tsc_deadline(struct vcpu *v) {
     struct vlapic *vl = v->vlapic;
-    return timer_mode(vl) == LVT_TIMER_TSC_DEADLINE && vl->timer_deadline != 0
+    return timer_mode(vl) == APIC_LVT_TIMER_TSC_DEADLINE && vl->timer_deadline != 0
          ? vl->timer_guest_deadline
          : 0;
 }
 
 void vlapic_tsc_deadline_set(struct vcpu *v, uint64_t deadline) {
     struct vlapic *vl = v->vlapic;
-    if (timer_mode(vl) != LVT_TIMER_TSC_DEADLINE) {
+    if (timer_mode(vl) != APIC_LVT_TIMER_TSC_DEADLINE) {
         return;
     }
     if (deadline == 0) {
@@ -1308,9 +1290,9 @@ static void local_interrupt(struct vcpu *v, uint32_t lvt) {
     if ((lvt & APIC_LVT_MASKED) != 0) {
         return;
     }
-    if ((lvt & LVT_DELIVERY_MASK) == LVT_DELIVERY_FIXED) {
+    if ((lvt & APIC_LVT_DELIVERY_MASK) == APIC_LVT_DELIVERY_FIXED) {
         vlapic_accept(v, (uint8_t)lvt, false);
-    } else if ((lvt & LVT_DELIVERY_MASK) == LVT_DELIVERY_NMI) {
+    } else if ((lvt & APIC_LVT_DELIVERY_MASK) == APIC_LVT_DELIVERY_NMI) {
         atomic_store_explicit(&v->cpu->nmi_pending, true, memory_order_release);
     }
 }
@@ -1387,7 +1369,8 @@ bool vlapic_extint_open(struct vcpu *v) {
         return true;
     }
     uint32_t lvt = regs_get(vl, APIC_LVT_LINT0);
-    return (lvt & APIC_LVT_MASKED) == 0 && (lvt & LVT_DELIVERY_MASK) == LVT_DELIVERY_EXTINT;
+    return (lvt & APIC_LVT_MASKED) == 0
+        && (lvt & APIC_LVT_DELIVERY_MASK) == APIC_LVT_DELIVERY_EXTINT;
 }
 
 // The processor takes the requested and in-service vectors from the registers,
@@ -1790,7 +1773,7 @@ static void ext_write(struct vlapic *vl, uint32_t reg, uint32_t value) {
 static bool reg_read(struct vcpu *v, uint32_t reg, uint32_t *value) {
     struct vlapic *vl = v->vlapic;
     bool x2 = x2apic(vl);
-    for (size_t i = 0; i < LVT_COUNT; i++) {
+    for (size_t i = 0; i < LAPIC_LVT_COUNT; i++) {
         if (reg == lvt_regs[i] && lvt_present(i)) {
             *value = regs_get(vl, reg);
             return true;
@@ -1861,7 +1844,7 @@ static bool reg_read(struct vcpu *v, uint32_t reg, uint32_t *value) {
 static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
     struct vlapic *vl = v->vlapic;
     bool x2 = x2apic(vl);
-    for (size_t i = 0; i < LVT_COUNT; i++) {
+    for (size_t i = 0; i < LAPIC_LVT_COUNT; i++) {
         if (reg == lvt_regs[i] && lvt_present(i)) {
             value &= lvt_writable[i];
             // A software disabled local APIC keeps them masked.
@@ -1870,7 +1853,7 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
             }
             uint32_t old_mode = timer_mode(vl);
             if (i == LVT_TIMER && !tsc_deadline_mode) {
-                value &= ~LVT_TIMER_TSC_DEADLINE;
+                value &= ~APIC_LVT_TIMER_TSC_DEADLINE;
             }
             regs_set(vl, reg, value);
             if (i == LVT_TIMER) {
@@ -1910,7 +1893,7 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
             }
             regs_set(vl, APIC_SVR, value & writable);
             if (!sw_enabled(vl)) {
-                for (size_t i = 0; i < LVT_COUNT; i++) {
+                for (size_t i = 0; i < LAPIC_LVT_COUNT; i++) {
                     if (lvt_present(i)) {
                         regs_set(vl, lvt_regs[i], regs_get(vl, lvt_regs[i]) | APIC_LVT_MASKED);
                     }
@@ -1934,7 +1917,7 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
         case APIC_TIMER_INITIAL: {
             // The IA32_TSC_DEADLINE MSR runs that mode (SDM 325462-093 Vol.
             // 3A, 13.5.4.1).
-            if (timer_mode(vl) != LVT_TIMER_TSC_DEADLINE) {
+            if (timer_mode(vl) != APIC_LVT_TIMER_TSC_DEADLINE) {
                 regs_set(vl, APIC_TIMER_INITIAL, value);
                 vl->timer_deadline = value != 0 ? rdtsc() + timer_span(vl) : 0;
             }
@@ -1944,7 +1927,7 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
             uint32_t old_divisor = timer_divisor(vl);
             regs_set(vl, APIC_TIMER_DIVIDE, value & TIMER_DIVIDE_WRITABLE);
             uint64_t now = rdtsc();
-            if (timer_mode(vl) != LVT_TIMER_TSC_DEADLINE && vl->timer_deadline > now) {
+            if (timer_mode(vl) != APIC_LVT_TIMER_TSC_DEADLINE && vl->timer_deadline > now) {
                 vl->timer_deadline = now
                                    + (vl->timer_deadline - now) * timer_divisor(vl) / old_divisor;
             }

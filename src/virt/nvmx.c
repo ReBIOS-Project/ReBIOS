@@ -23,6 +23,7 @@
 #include <virt/nvmx.h>
 #include <core.h>
 #include <handoff.h>
+#include <hw/lapic.h>
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/util.h>
@@ -78,11 +79,6 @@
 #define MSR_IA32_SMM_MONITOR_CTL 0x9b
 #define MSR_FS_BASE 0xc0000100
 #define MSR_GS_BASE 0xc0000101
-#define MSR_X2APIC_FIRST 0x800
-#define MSR_X2APIC_LAST 0x8ff
-#define MSR_X2APIC_TPR 0x808
-#define MSR_X2APIC_EOI 0x80b
-#define MSR_X2APIC_SELF_IPI 0x83f
 
 #define VMX_RESULT_FLAGS \
     (RFLAGS_CF | RFLAGS_PF | RFLAGS_AF | RFLAGS_ZF | RFLAGS_SF | RFLAGS_OF)

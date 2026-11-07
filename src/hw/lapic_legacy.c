@@ -30,21 +30,9 @@
 #include <memory.h>
 #include <sys/x86.h>
 
-#define LVT_DELIVERY_SHIFT 8
-#define LVT_DELIVERY_FIXED 0
-#define LVT_DELIVERY_LOWEST 1
-#define LVT_DELIVERY_NMI 4
-#define LVT_DELIVERY_EXTINT 7
-#define LVT_DELIVERY_STATUS ((uint32_t)1 << 12)
-#define LVT_ACTIVE_LOW ((uint32_t)1 << 13)
-#define LVT_REMOTE_IRR ((uint32_t)1 << 14)
-#define LVT_LEVEL ((uint32_t)1 << 15)
-
 // The vector a legacy BIOS's IRQ 7 handler serves, which copes with spurious
 // interrupts.
 #define SPURIOUS_VECTOR 0x0f
-
-#define LVT_COUNT 7
 
 // Whether the firmware handed the boot processor's local APIC over in x2APIC
 // mode.
@@ -53,7 +41,7 @@ static bool firmware_x2apic;
 struct lapic_regs {
     uint32_t tpr;
     uint32_t svr;
-    uint32_t lvt[LVT_COUNT];
+    uint32_t lvt[LAPIC_LVT_COUNT];
 };
 
 struct nmi_pin {
@@ -62,17 +50,17 @@ struct nmi_pin {
     bool level;
 };
 
-static const uint32_t lvt_regs[LVT_COUNT] = {
+static const uint32_t lvt_regs[LAPIC_LVT_COUNT] = {
     APIC_LVT_TIMER, APIC_LVT_THERMAL, APIC_LVT_PERF, APIC_LVT_LINT0,
     APIC_LVT_LINT1, APIC_LVT_ERROR, APIC_LVT_CMCI
 };
 
-static const char *const lvt_names[LVT_COUNT] = {
+static const char *const lvt_names[LAPIC_LVT_COUNT] = {
     "timer", "thermal", "perfmon", "LINT0", "LINT1", "error", "CMCI"
 };
 
 // The version register's maximum LVT entry from which each entry exists.
-static const uint8_t lvt_first_max_entry[LVT_COUNT] = { 0, 5, 4, 0, 0, 0, 6 };
+static const uint8_t lvt_first_max_entry[LAPIC_LVT_COUNT] = { 0, 5, 4, 0, 0, 0, 6 };
 
 static uint32_t max_entry(void) {
     return (lapic_read(APIC_VERSION) >> 16) & 0xff;
@@ -85,7 +73,7 @@ static bool lvt_exists(size_t index, uint32_t max_entry) {
 static void read_regs(uint32_t max, struct lapic_regs *regs) {
     regs->tpr = lapic_read(APIC_TPR);
     regs->svr = lapic_read(APIC_SVR);
-    for (size_t i = 0; i < LVT_COUNT; i++) {
+    for (size_t i = 0; i < LAPIC_LVT_COUNT; i++) {
         regs->lvt[i] = lvt_exists(i, max) ? lapic_read(lvt_regs[i]) : 0;
     }
 }
@@ -95,7 +83,7 @@ static void log_regs(
 ) {
     char line[256];
     int len = snprintf(line, sizeof(line), "TPR %#x SVR %#x", regs->tpr, regs->svr);
-    for (size_t i = 0; i < LVT_COUNT; i++) {
+    for (size_t i = 0; i < LAPIC_LVT_COUNT; i++) {
         if (len < 0 || (size_t)len >= sizeof(line)) {
             break;
         }
@@ -269,7 +257,7 @@ void lapic_legacy_init(void) {
     }
 
     lapic_write(APIC_TPR, 0);
-    for (size_t i = 0; i < LVT_COUNT; i++) {
+    for (size_t i = 0; i < LAPIC_LVT_COUNT; i++) {
         if (lvt_regs[i] == APIC_LVT_LINT0 || lvt_regs[i] == APIC_LVT_LINT1
          || !lvt_exists(i, max_entry)) {
             continue;
@@ -277,22 +265,22 @@ void lapic_legacy_init(void) {
         // Other delivery modes, such as SMI for thermal events, are the
         // firmware's.
         uint32_t value = lapic_read(lvt_regs[i]);
-        unsigned int mode = (value >> LVT_DELIVERY_SHIFT) & 7;
-        bool interrupt = mode == LVT_DELIVERY_FIXED || mode == LVT_DELIVERY_LOWEST
-                      || mode == LVT_DELIVERY_NMI || mode == LVT_DELIVERY_EXTINT;
+        uint32_t mode = value & APIC_LVT_DELIVERY_MASK;
+        bool interrupt = mode == APIC_LVT_DELIVERY_FIXED || mode == ICR_DELIVERY_LOWEST
+                      || mode == APIC_LVT_DELIVERY_NMI || mode == APIC_LVT_DELIVERY_EXTINT;
         if (interrupt && (value & APIC_LVT_MASKED) == 0) {
-            lapic_write(
-                lvt_regs[i], (value & ~(LVT_DELIVERY_STATUS | LVT_REMOTE_IRR)) | APIC_LVT_MASKED
-            );
+            uint32_t masked = (value & ~(APIC_LVT_DELIVERY_STATUS | APIC_LVT_REMOTE_IRR))
+                            | APIC_LVT_MASKED;
+            lapic_write(lvt_regs[i], masked);
         }
     }
 
     // Before the LINT entries, as a software disabled APIC keeps them masked.
     lapic_write(APIC_SVR, APIC_SVR_ENABLED | SPURIOUS_VECTOR);
 
-    uint32_t nmi_lvt = (LVT_DELIVERY_NMI << LVT_DELIVERY_SHIFT)
-                     | (nmi.active_low ? LVT_ACTIVE_LOW : 0) | (nmi.level ? LVT_LEVEL : 0);
-    uint32_t extint_lvt = LVT_DELIVERY_EXTINT << LVT_DELIVERY_SHIFT;
+    uint32_t nmi_lvt = APIC_LVT_DELIVERY_NMI | (nmi.active_low ? APIC_LVT_ACTIVE_LOW : 0)
+                     | (nmi.level ? APIC_LVT_LEVEL : 0);
+    uint32_t extint_lvt = APIC_LVT_DELIVERY_EXTINT;
     lapic_write(nmi.lint == 0 ? APIC_LVT_LINT0 : APIC_LVT_LINT1, nmi_lvt);
     lapic_write(nmi.lint == 0 ? APIC_LVT_LINT1 : APIC_LVT_LINT0, extint_lvt);
 

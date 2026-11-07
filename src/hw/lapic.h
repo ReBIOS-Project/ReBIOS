@@ -25,7 +25,10 @@
 #define APIC_ID 0x20
 #define APIC_VERSION 0x30
 #define APIC_TPR 0x80
+#define APIC_APR 0x90
+#define APIC_PPR 0xa0
 #define APIC_EOI 0xb0
+#define APIC_RRD 0xc0
 #define APIC_LDR 0xd0
 #define APIC_DFR 0xe0
 #define APIC_SVR 0xf0
@@ -45,6 +48,13 @@
 #define APIC_TIMER_INITIAL 0x380
 #define APIC_TIMER_CURRENT 0x390
 #define APIC_TIMER_DIVIDE 0x3e0
+#define APIC_SELF_IPI 0x3f0
+#define MSR_X2APIC_FIRST 0x800
+#define MSR_X2APIC_TPR 0x808
+#define MSR_X2APIC_EOI 0x80b
+#define MSR_X2APIC_ICR 0x830
+#define MSR_X2APIC_SELF_IPI 0x83f
+#define MSR_X2APIC_LAST 0x8ff
 // AMD's extended APIC space, there where the version register's bit 31 says,
 // with up to eight extended LVT entries (APM 24593 rev. 3.46, 16.3.4 to
 // 16.3.6, 16.4.5).
@@ -57,7 +67,23 @@
 
 #define APIC_VERSION_EXT_SPACE ((uint32_t)1 << 31)
 #define APIC_SVR_ENABLED ((uint32_t)1 << 8)
+#define APIC_LVT_DELIVERY_MASK ((uint32_t)7 << 8)
+#define APIC_LVT_DELIVERY_FIXED ((uint32_t)0 << 8)
+#define APIC_LVT_DELIVERY_SMI ((uint32_t)2 << 8)
+#define APIC_LVT_DELIVERY_NMI ((uint32_t)4 << 8)
+#define APIC_LVT_DELIVERY_EXTINT ((uint32_t)7 << 8)
+#define APIC_LVT_DELIVERY_STATUS ((uint32_t)1 << 12)
+#define APIC_LVT_ACTIVE_LOW ((uint32_t)1 << 13)
+#define APIC_LVT_REMOTE_IRR ((uint32_t)1 << 14)
+#define APIC_LVT_LEVEL ((uint32_t)1 << 15)
 #define APIC_LVT_MASKED ((uint32_t)1 << 16)
+#define APIC_LVT_TIMER_MODE_MASK ((uint32_t)3 << 17)
+#define APIC_LVT_TIMER_PERIODIC ((uint32_t)1 << 17)
+#define APIC_LVT_TIMER_TSC_DEADLINE ((uint32_t)2 << 17)
+
+// The LVT entries: CMCI, the timer, thermal, the performance counters, LINT0,
+// LINT1, and error.
+#define LAPIC_LVT_COUNT 7
 
 // Interrupt command register fields.
 #define ICR_VECTOR_MASK ((uint32_t)0xff)
