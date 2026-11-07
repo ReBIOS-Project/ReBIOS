@@ -25,6 +25,7 @@
 #include <handoff.h>
 #include <lib/heap.h>
 #include <lib/log.h>
+#include <lib/util.h>
 #include <memory.h>
 #include <sys/cpu.h>
 #include <sys/mm.h>
@@ -132,7 +133,7 @@ static const uint16_t fields[] = {
     0x6c10, 0x6c12, 0x6c14, 0x6c16
 };
 
-#define FIELD_COUNT (sizeof(fields) / sizeof(uint16_t))
+#define FIELD_COUNT ARRAY_COUNT(fields)
 #define MAX_INDEX 64
 
 _Static_assert(VMCS12_FIELDS + FIELD_COUNT * 8 <= 4096, "VMCS12 layout");
@@ -943,8 +944,6 @@ static const uint16_t exit_fields[] = {
     VMCS_IDT_VECTORING_ERROR, VMCS_EXIT_INSTR_LEN, VMCS_EXIT_INSTR_INFO,
     VMCS_GUEST_LINEAR_ADDR, VMCS_GUEST_PHYS_ADDR
 };
-
-#define ARRAY_COUNT(a) (sizeof(a) / sizeof((a)[0]))
 
 // VMCS shadowing for the guest (SDM 325462-093 Vol. 3C, 27.10): where the
 // processor has it, the guest's VMREADs and VMWRITEs of the fields its

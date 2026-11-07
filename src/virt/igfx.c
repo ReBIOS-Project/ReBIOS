@@ -28,6 +28,7 @@
 #include <iommu/iommu_tables.h>
 #include <lib/log.h>
 #include <lib/time.h>
+#include <lib/util.h>
 #include <memory.h>
 #include <sys/mm.h>
 #include <virt/gpt.h>
@@ -260,7 +261,7 @@ static void scan_stolen(struct pci_function *f) {
 
 static bool gen9_lp(uint16_t id) {
     static const uint16_t ids[] = { 0x0a84, 0x1a84, 0x1a85, 0x5a84, 0x5a85, 0x3184, 0x3185 };
-    for (size_t i = 0; i < sizeof(ids) / sizeof(uint16_t); i++) {
+    for (size_t i = 0; i < ARRAY_COUNT(ids); i++) {
         if (id == ids[i]) {
             return true;
         }
@@ -275,7 +276,7 @@ static bool fbc_kept_off(uint16_t id) {
         0x192a, 0x192b, 0x192d, 0x1932, 0x193a, 0x193b, 0x193d, 0x0a84, 0x1a84,
         0x1a85, 0x5a84, 0x5a85
     };
-    for (size_t i = 0; i < sizeof(ids) / sizeof(uint16_t); i++) {
+    for (size_t i = 0; i < ARRAY_COUNT(ids); i++) {
         if (id == ids[i]) {
             return true;
         }
@@ -438,7 +439,7 @@ static uint64_t mmio_translated(uint32_t reg) {
 
 static bool mmio_own(uint32_t reg, uint32_t *base) {
     static const uint32_t regs[] = { MMIO_DSMBASE, MMIO_GSMBASE, MMIO_STOLEN_RESERVED };
-    for (size_t i = 0; i < sizeof(regs) / sizeof(uint32_t); i++) {
+    for (size_t i = 0; i < ARRAY_COUNT(regs); i++) {
         if (reg >= regs[i] && reg < regs[i] + 8) {
             *base = regs[i];
             return true;

@@ -24,6 +24,7 @@
 #include <handoff.h>
 #include <lib/log.h>
 #include <lib/printf.h>
+#include <lib/util.h>
 #include <loader/efi_glue.h>
 #include <memory.h>
 
@@ -461,7 +462,7 @@ static void apply_line(struct span line) {
         return;
     }
 
-    for (size_t i = 0; i < sizeof(settings) / sizeof(struct setting); i++) {
+    for (size_t i = 0; i < ARRAY_COUNT(settings); i++) {
         if (!equals_ignoring_case(key, settings[i].name)) {
             continue;
         }
@@ -678,7 +679,7 @@ static bool apply_files_on_volume(
         return false;
     }
     bool applied = false;
-    for (size_t i = 0; i < sizeof(file_names) / sizeof(char *) && !applied; i++) {
+    for (size_t i = 0; i < ARRAY_COUNT(file_names) && !applied; i++) {
         EFI_CHAR16 *path = sibling_path(image_path, file_names[i]);
         if (path == NULL) {
             break;

@@ -22,6 +22,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <virt/msr_table.h>
+#include <lib/util.h>
 
 // SDM 325462-093 Vol. 4, Table 2-2, as reviewed.
 const struct msr_range msr_intel_architectural[] = {
@@ -107,8 +108,7 @@ const struct msr_range msr_intel_architectural[] = {
     { 0xc0000080, 0xc0000084 }, // IA32_EFER to IA32_FMASK.
     { 0xc0000100, 0xc0000103 } // IA32_FS_BASE to IA32_TSC_AUX.
 };
-const size_t msr_intel_architectural_count = sizeof(msr_intel_architectural)
-                                           / sizeof(struct msr_range);
+const size_t msr_intel_architectural_count = ARRAY_COUNT(msr_intel_architectural);
 
 // SDM 325462-093 Vol. 4, Table 2-6: C-states, perfmon, thermal.
 static const struct msr_range ranges_2_6[] = {
@@ -121,7 +121,7 @@ static const struct msr_range ranges_2_6[] = {
     { 0x660, 0x660 } // MSR_CORE_C1_RESIDENCY.
 };
 static const struct msr_ranges table_2_6 = {
-    ranges_2_6, sizeof(ranges_2_6) / sizeof(struct msr_range)
+    ranges_2_6, ARRAY_COUNT(ranges_2_6)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-12: C-states, architectural, perfmon, power,
@@ -151,7 +151,7 @@ static const struct msr_range ranges_2_12[] = {
     { 0x6c0, 0x6df } // MSR_LASTBRANCH_0_TO_IP to MSR_LASTBRANCH_31_TO_IP.
 };
 static const struct msr_ranges table_2_12 = {
-    ranges_2_12, sizeof(ranges_2_12) / sizeof(struct msr_range)
+    ranges_2_12, ARRAY_COUNT(ranges_2_12)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-13: perfmon.
@@ -161,7 +161,7 @@ static const struct msr_range ranges_2_13[] = {
     { 0xdc0, 0xddf } // MSR_LASTBRANCH_INFO_0 to MSR_LASTBRANCH_INFO_31.
 };
 static const struct msr_ranges table_2_13 = {
-    ranges_2_13, sizeof(ranges_2_13) / sizeof(struct msr_range)
+    ranges_2_13, ARRAY_COUNT(ranges_2_13)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-14: bus locks.
@@ -169,7 +169,7 @@ static const struct msr_range ranges_2_14[] = {
     { 0x33, 0x33 } // MSR_MEMORY_CTRL.
 };
 static const struct msr_ranges table_2_14 = {
-    ranges_2_14, sizeof(ranges_2_14) / sizeof(struct msr_range)
+    ranges_2_14, ARRAY_COUNT(ranges_2_14)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-15: C-states, architectural, perfmon, power,
@@ -197,7 +197,7 @@ static const struct msr_range ranges_2_15[] = {
     { 0x6c0, 0x6cf } // MSR_LASTBRANCH_0_TO_IP to MSR_LASTBRANCH_15_TO_IP.
 };
 static const struct msr_ranges table_2_15 = {
-    ranges_2_15, sizeof(ranges_2_15) / sizeof(struct msr_range)
+    ranges_2_15, ARRAY_COUNT(ranges_2_15)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-16: perfmon, turbo.
@@ -209,7 +209,7 @@ static const struct msr_range ranges_2_16[] = {
     { 0x3c0, 0x3c7 } // MSR_UNCORE_PERFEVTSEL0 to MSR_UNCORE_PERFEVTSEL7.
 };
 static const struct msr_ranges table_2_16 = {
-    ranges_2_16, sizeof(ranges_2_16) / sizeof(struct msr_range)
+    ranges_2_16, ARRAY_COUNT(ranges_2_16)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-18: perfmon, turbo.
@@ -218,7 +218,7 @@ static const struct msr_range ranges_2_18[] = {
     { 0x1ad, 0x1ad } // MSR_TURBO_RATIO_LIMIT.
 };
 static const struct msr_ranges table_2_18 = {
-    ranges_2_18, sizeof(ranges_2_18) / sizeof(struct msr_range)
+    ranges_2_18, ARRAY_COUNT(ranges_2_18)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-19: perfmon, turbo.
@@ -231,7 +231,7 @@ static const struct msr_range ranges_2_19[] = {
     { 0xfd0, 0xfdb } // MSR_C9_PMON_EVNT_SEL0 to MSR_C9_PMON_CTR5.
 };
 static const struct msr_ranges table_2_19 = {
-    ranges_2_19, sizeof(ranges_2_19) / sizeof(struct msr_range)
+    ranges_2_19, ARRAY_COUNT(ranges_2_19)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-20: C-states, perfmon, power, thermal, turbo.
@@ -260,7 +260,7 @@ static const struct msr_range ranges_2_20[] = {
     { 0x6c0, 0x6cf } // MSR_LASTBRANCH_0_TO_IP to MSR_LASTBRANCH_15_TO_IP.
 };
 static const struct msr_ranges table_2_20 = {
-    ranges_2_20, sizeof(ranges_2_20) / sizeof(struct msr_range)
+    ranges_2_20, ARRAY_COUNT(ranges_2_20)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-21: C-states, power, turbo.
@@ -271,7 +271,7 @@ static const struct msr_range ranges_2_21[] = {
     { 0x640, 0x642 } // MSR_PP1_POWER_LIMIT to MSR_PP1_POLICY.
 };
 static const struct msr_ranges table_2_21 = {
-    ranges_2_21, sizeof(ranges_2_21) / sizeof(struct msr_range)
+    ranges_2_21, ARRAY_COUNT(ranges_2_21)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-22: perfmon.
@@ -297,7 +297,7 @@ static const struct msr_range ranges_2_22[] = {
     { 0x745, 0x749 } // MSR_UNC_CBO_4_UNIT_STATUS to MSR_UNC_CBO_4_PERFCTR3.
 };
 static const struct msr_ranges table_2_22 = {
-    ranges_2_22, sizeof(ranges_2_22) / sizeof(struct msr_range)
+    ranges_2_22, ARRAY_COUNT(ranges_2_22)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-23: perfmon, power, turbo.
@@ -310,7 +310,7 @@ static const struct msr_range ranges_2_23[] = {
     { 0x639, 0x639 } // MSR_PP0_ENERGY_STATUS.
 };
 static const struct msr_ranges table_2_23 = {
-    ranges_2_23, sizeof(ranges_2_23) / sizeof(struct msr_range)
+    ranges_2_23, ARRAY_COUNT(ranges_2_23)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-24: perfmon.
@@ -348,7 +348,7 @@ static const struct msr_range ranges_2_24[] = {
     { 0xdf6, 0xdf9 } // MSR_C7_PMON_CTR0 to MSR_C7_PMON_CTR3.
 };
 static const struct msr_ranges table_2_24 = {
-    ranges_2_24, sizeof(ranges_2_24) / sizeof(struct msr_range)
+    ranges_2_24, ARRAY_COUNT(ranges_2_24)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-25: C-states, power, turbo.
@@ -359,7 +359,7 @@ static const struct msr_range ranges_2_25[] = {
     { 0x648, 0x64c } // MSR_CONFIG_TDP_NOMINAL to MSR_TURBO_ACTIVATION_RATIO.
 };
 static const struct msr_ranges table_2_25 = {
-    ranges_2_25, sizeof(ranges_2_25) / sizeof(struct msr_range)
+    ranges_2_25, ARRAY_COUNT(ranges_2_25)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-26: C-states, power, thermal, turbo.
@@ -374,7 +374,7 @@ static const struct msr_range ranges_2_26[] = {
     { 0x639, 0x639 } // MSR_PP0_ENERGY_STATUS.
 };
 static const struct msr_ranges table_2_26 = {
-    ranges_2_26, sizeof(ranges_2_26) / sizeof(struct msr_range)
+    ranges_2_26, ARRAY_COUNT(ranges_2_26)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-27: turbo.
@@ -382,7 +382,7 @@ static const struct msr_range ranges_2_27[] = {
     { 0x1ae, 0x1ae } // MSR_TURBO_RATIO_LIMIT1.
 };
 static const struct msr_ranges table_2_27 = {
-    ranges_2_27, sizeof(ranges_2_27) / sizeof(struct msr_range)
+    ranges_2_27, ARRAY_COUNT(ranges_2_27)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-28: perfmon.
@@ -422,7 +422,7 @@ static const struct msr_range ranges_2_28[] = {
     { 0xed6, 0xeda } // MSR_C14_PMON_CTR0 to MSR_C14_PMON_BOX_FILTER1.
 };
 static const struct msr_ranges table_2_28 = {
-    ranges_2_28, sizeof(ranges_2_28) / sizeof(struct msr_range)
+    ranges_2_28, ARRAY_COUNT(ranges_2_28)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-29: C-states, perfmon, power, turbo.
@@ -436,7 +436,7 @@ static const struct msr_range ranges_2_29[] = {
     { 0x648, 0x64c } // MSR_CONFIG_TDP_NOMINAL to MSR_TURBO_ACTIVATION_RATIO.
 };
 static const struct msr_ranges table_2_29 = {
-    ranges_2_29, sizeof(ranges_2_29) / sizeof(struct msr_range)
+    ranges_2_29, ARRAY_COUNT(ranges_2_29)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-30: C-states, perfmon, power, turbo.
@@ -467,7 +467,7 @@ static const struct msr_range ranges_2_30[] = {
     { 0x736, 0x737 } // MSR_UNC_CBO_3_PERFCTR0 to MSR_UNC_CBO_3_PERFCTR1.
 };
 static const struct msr_ranges table_2_30 = {
-    ranges_2_30, sizeof(ranges_2_30) / sizeof(struct msr_range)
+    ranges_2_30, ARRAY_COUNT(ranges_2_30)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-31: C-states.
@@ -476,7 +476,7 @@ static const struct msr_range ranges_2_31[] = {
     { 0x630, 0x632 } // MSR_PKG_C8_RESIDENCY to MSR_PKG_C10_RESIDENCY.
 };
 static const struct msr_ranges table_2_31 = {
-    ranges_2_31, sizeof(ranges_2_31) / sizeof(struct msr_range)
+    ranges_2_31, ARRAY_COUNT(ranges_2_31)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-32: C-states, power, turbo.
@@ -491,7 +491,7 @@ static const struct msr_range ranges_2_32[] = {
     { 0x690, 0x690 } // MSR_CORE_PERF_LIMIT_REASONS.
 };
 static const struct msr_ranges table_2_32 = {
-    ranges_2_32, sizeof(ranges_2_32) / sizeof(struct msr_range)
+    ranges_2_32, ARRAY_COUNT(ranges_2_32)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-33: perfmon.
@@ -520,7 +520,7 @@ static const struct msr_range ranges_2_33[] = {
     { 0xf10, 0xf1b } // MSR_C17_PMON_BOX_CTL to MSR_C17_PMON_CTR3.
 };
 static const struct msr_ranges table_2_33 = {
-    ranges_2_33, sizeof(ranges_2_33) / sizeof(struct msr_range)
+    ranges_2_33, ARRAY_COUNT(ranges_2_33)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-34: turbo.
@@ -528,7 +528,7 @@ static const struct msr_range ranges_2_34[] = {
     { 0x620, 0x620 } // MSR_UNCORE_RATIO_LIMIT.
 };
 static const struct msr_ranges table_2_34 = {
-    ranges_2_34, sizeof(ranges_2_34) / sizeof(struct msr_range)
+    ranges_2_34, ARRAY_COUNT(ranges_2_34)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-35: C-states, power, turbo.
@@ -538,7 +538,7 @@ static const struct msr_range ranges_2_35[] = {
     { 0x639, 0x639 } // MSR_PP0_ENERGY_STATUS.
 };
 static const struct msr_ranges table_2_35 = {
-    ranges_2_35, sizeof(ranges_2_35) / sizeof(struct msr_range)
+    ranges_2_35, ARRAY_COUNT(ranges_2_35)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-36: C-states, power, thermal, turbo.
@@ -555,7 +555,7 @@ static const struct msr_range ranges_2_36[] = {
     { 0x690, 0x690 } // MSR_CORE_PERF_LIMIT_REASONS.
 };
 static const struct msr_ranges table_2_36 = {
-    ranges_2_36, sizeof(ranges_2_36) / sizeof(struct msr_range)
+    ranges_2_36, ARRAY_COUNT(ranges_2_36)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-37: turbo.
@@ -563,7 +563,7 @@ static const struct msr_range ranges_2_37[] = {
     { 0x1ac, 0x1ac } // MSR_TURBO_RATIO_LIMIT3.
 };
 static const struct msr_ranges table_2_37 = {
-    ranges_2_37, sizeof(ranges_2_37) / sizeof(struct msr_range)
+    ranges_2_37, ARRAY_COUNT(ranges_2_37)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-38: turbo.
@@ -571,7 +571,7 @@ static const struct msr_range ranges_2_38[] = {
     { 0x1ac, 0x1ac } // MSR_TURBO_RATIO_LIMIT3.
 };
 static const struct msr_ranges table_2_38 = {
-    ranges_2_38, sizeof(ranges_2_38) / sizeof(struct msr_range)
+    ranges_2_38, ARRAY_COUNT(ranges_2_38)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-39: C-states, perfmon, power, turbo.
@@ -595,7 +595,7 @@ static const struct msr_range ranges_2_39[] = {
     { 0xdc0, 0xddf } // MSR_LBR_INFO_0 to MSR_LBR_INFO_31.
 };
 static const struct msr_ranges table_2_39 = {
-    ranges_2_39, sizeof(ranges_2_39) / sizeof(struct msr_range)
+    ranges_2_39, ARRAY_COUNT(ranges_2_39)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-40: perfmon.
@@ -618,7 +618,7 @@ static const struct msr_range ranges_2_40[] = {
     { 0xe01, 0xe02 }
 };
 static const struct msr_ranges table_2_40 = {
-    ranges_2_40, sizeof(ranges_2_40) / sizeof(struct msr_range)
+    ranges_2_40, ARRAY_COUNT(ranges_2_40)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-41: turbo.
@@ -626,7 +626,7 @@ static const struct msr_range ranges_2_41[] = {
     { 0x620, 0x620 } // MSR_RING_RATIO_LIMIT.
 };
 static const struct msr_ranges table_2_41 = {
-    ranges_2_41, sizeof(ranges_2_41) / sizeof(struct msr_range)
+    ranges_2_41, ARRAY_COUNT(ranges_2_41)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-42: C-states, turbo.
@@ -637,7 +637,7 @@ static const struct msr_range ranges_2_42[] = {
     { 0x662, 0x662 } // MSR_CORE_C3_RESIDENCY.
 };
 static const struct msr_ranges table_2_42 = {
-    ranges_2_42, sizeof(ranges_2_42) / sizeof(struct msr_range)
+    ranges_2_42, ARRAY_COUNT(ranges_2_42)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-43: perfmon.
@@ -656,7 +656,7 @@ static const struct msr_range ranges_2_43[] = {
     { 0xe01, 0xe02 }
 };
 static const struct msr_ranges table_2_43 = {
-    ranges_2_43, sizeof(ranges_2_43) / sizeof(struct msr_range)
+    ranges_2_43, ARRAY_COUNT(ranges_2_43)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-44: bus locks, perfmon.
@@ -666,7 +666,7 @@ static const struct msr_range ranges_2_44[] = {
     { 0x3f2, 0x3f2 } // MSR_PEBS_DATA_CFG.
 };
 static const struct msr_ranges table_2_44 = {
-    ranges_2_44, sizeof(ranges_2_44) / sizeof(struct msr_range)
+    ranges_2_44, ARRAY_COUNT(ranges_2_44)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-45: power.
@@ -674,7 +674,7 @@ static const struct msr_range ranges_2_45[] = {
     { 0x601, 0x601 } // MSR_VR_CURRENT_CONFIG.
 };
 static const struct msr_ranges table_2_45 = {
-    ranges_2_45, sizeof(ranges_2_45) / sizeof(struct msr_range)
+    ranges_2_45, ARRAY_COUNT(ranges_2_45)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-46: C-states, bus locks, turbo.
@@ -685,7 +685,7 @@ static const struct msr_range ranges_2_46[] = {
     { 0x664, 0x664 } // MSR_MC6_RESIDENCY_COUNTER.
 };
 static const struct msr_ranges table_2_46 = {
-    ranges_2_46, sizeof(ranges_2_46) / sizeof(struct msr_range)
+    ranges_2_46, ARRAY_COUNT(ranges_2_46)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-47: perfmon.
@@ -693,7 +693,7 @@ static const struct msr_range ranges_2_47[] = {
     { 0x3f7, 0x3f7 } // MSR_PEBS_FRONTEND.
 };
 static const struct msr_ranges table_2_47 = {
-    ranges_2_47, sizeof(ranges_2_47) / sizeof(struct msr_range)
+    ranges_2_47, ARRAY_COUNT(ranges_2_47)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-48: perfmon.
@@ -702,7 +702,7 @@ static const struct msr_range ranges_2_48[] = {
     { 0x14c1, 0x14c6 } // MSR_RELOAD_PMCx to MSR_RELOAD_PMCx.
 };
 static const struct msr_ranges table_2_48 = {
-    ranges_2_48, sizeof(ranges_2_48) / sizeof(struct msr_range)
+    ranges_2_48, ARRAY_COUNT(ranges_2_48)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-49: perfmon.
@@ -725,7 +725,7 @@ static const struct msr_range ranges_2_49[] = {
     { 0x2ff2, 0x2ff2 } // MSR_UNC_PERF_GLOBAL_STATUS.
 };
 static const struct msr_ranges table_2_49 = {
-    ranges_2_49, sizeof(ranges_2_49) / sizeof(struct msr_range)
+    ranges_2_49, ARRAY_COUNT(ranges_2_49)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-50: C-states, power, thermal, turbo.
@@ -741,7 +741,7 @@ static const struct msr_range ranges_2_50[] = {
     { 0x639, 0x639 } // MSR_PP0_ENERGY_STATUS.
 };
 static const struct msr_ranges table_2_50 = {
-    ranges_2_50, sizeof(ranges_2_50) / sizeof(struct msr_range)
+    ranges_2_50, ARRAY_COUNT(ranges_2_50)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-51: power.
@@ -751,7 +751,7 @@ static const struct msr_range ranges_2_51[] = {
     { 0x61b, 0x61c } // MSR_DRAM_PERF_STATUS to MSR_DRAM_POWER_INFO.
 };
 static const struct msr_ranges table_2_51 = {
-    ranges_2_51, sizeof(ranges_2_51) / sizeof(struct msr_range)
+    ranges_2_51, ARRAY_COUNT(ranges_2_51)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-52: bus locks, perfmon, power, turbo.
@@ -768,7 +768,7 @@ static const struct msr_range ranges_2_52[] = {
     { 0xc82, 0xc82 } // MSR_W_PMON_BOX_OVF_CTRL.
 };
 static const struct msr_ranges table_2_52 = {
-    ranges_2_52, sizeof(ranges_2_52) / sizeof(struct msr_range)
+    ranges_2_52, ARRAY_COUNT(ranges_2_52)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-53: C-states, CPUID faulting, bus locks,
@@ -792,7 +792,7 @@ static const struct msr_range ranges_2_53[] = {
     { 0x6b1, 0x6b1 } // MSR_RING_PERF_LIMIT_REASONS.
 };
 static const struct msr_ranges table_2_53 = {
-    ranges_2_53, sizeof(ranges_2_53) / sizeof(struct msr_range)
+    ranges_2_53, ARRAY_COUNT(ranges_2_53)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-54: perfmon.
@@ -800,7 +800,7 @@ static const struct msr_range ranges_2_54[] = {
     { 0x329, 0x329 } // MSR_PERF_METRICS.
 };
 static const struct msr_ranges table_2_54 = {
-    ranges_2_54, sizeof(ranges_2_54) / sizeof(struct msr_range)
+    ranges_2_54, ARRAY_COUNT(ranges_2_54)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-55: perfmon.
@@ -809,7 +809,7 @@ static const struct msr_range ranges_2_55[] = {
     { 0x14c1, 0x14c8 } // MSR_RELOAD_PMCx to MSR_RELOAD_PMCx.
 };
 static const struct msr_ranges table_2_55 = {
-    ranges_2_55, sizeof(ranges_2_55) / sizeof(struct msr_range)
+    ranges_2_55, ARRAY_COUNT(ranges_2_55)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-56: C-states, CPUID faulting, bus locks,
@@ -820,7 +820,7 @@ static const struct msr_range ranges_2_56[] = {
     { 0x664, 0x664 } // MSR_MC6_RESIDENCY.
 };
 static const struct msr_ranges table_2_56 = {
-    ranges_2_56, sizeof(ranges_2_56) / sizeof(struct msr_range)
+    ranges_2_56, ARRAY_COUNT(ranges_2_56)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-57: C-states, CPUID faulting, bus locks,
@@ -834,7 +834,7 @@ static const struct msr_range ranges_2_57[] = {
     { 0x664, 0x664 } // MSR_MC6_RESIDENCY.
 };
 static const struct msr_ranges table_2_57 = {
-    ranges_2_57, sizeof(ranges_2_57) / sizeof(struct msr_range)
+    ranges_2_57, ARRAY_COUNT(ranges_2_57)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-58: C-states, power, turbo.
@@ -845,7 +845,7 @@ static const struct msr_range ranges_2_58[] = {
     { 0x658, 0x65b } // MSR_WEIGHTED_CORE_C0 to MSR_CORE_GFXE_OVERLAP_C0.
 };
 static const struct msr_ranges table_2_58 = {
-    ranges_2_58, sizeof(ranges_2_58) / sizeof(struct msr_range)
+    ranges_2_58, ARRAY_COUNT(ranges_2_58)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-59: perfmon.
@@ -853,7 +853,7 @@ static const struct msr_range ranges_2_59[] = {
     { 0x329, 0x329 } // MSR_PERF_METRICS.
 };
 static const struct msr_ranges table_2_59 = {
-    ranges_2_59, sizeof(ranges_2_59) / sizeof(struct msr_range)
+    ranges_2_59, ARRAY_COUNT(ranges_2_59)
 };
 
 // 06_25H, 06_2CH: SDM 325462-093 Vol. 4, Tables 2-15, 2-16, 2-18.
@@ -1083,7 +1083,7 @@ const struct msr_model msr_intel_models[] = {
     { 0x6, 0xb6, model_tables_29, 1 },
     { 0x6, 0xbe, model_tables_29, 1 }
 };
-const size_t msr_intel_model_count = sizeof(msr_intel_models) / sizeof(struct msr_model);
+const size_t msr_intel_model_count = ARRAY_COUNT(msr_intel_models);
 
 // APM 24593 rev. 3.46, Table A-1, and what every family has, as reviewed.
 const struct msr_range msr_amd_architectural[] = {
@@ -1132,8 +1132,7 @@ const struct msr_range msr_amd_architectural[] = {
     { 0xc0011019, 0xc001101b }, // Breakpoint address masks 1 to 3.
     { 0xc0011027, 0xc0011027 } // Breakpoint address mask 0.
 };
-const size_t msr_amd_architectural_count = sizeof(msr_amd_architectural)
-                                         / sizeof(struct msr_range);
+const size_t msr_amd_architectural_count = ARRAY_COUNT(msr_amd_architectural);
 
 // Family 10h, BKDG 31116 rev. 3.62: C-states, configuration, identification,
 // machine checks, power, thermal.
@@ -1253,11 +1252,11 @@ static const struct msr_range family_1ah[] = {
 
 // By display family.
 const struct msr_family msr_amd_families[] = {
-    { 0x10, family_10h, sizeof(family_10h) / sizeof(struct msr_range) },
-    { 0x15, family_15h, sizeof(family_15h) / sizeof(struct msr_range) },
-    { 0x16, family_16h, sizeof(family_16h) / sizeof(struct msr_range) },
-    { 0x17, family_17h, sizeof(family_17h) / sizeof(struct msr_range) },
-    { 0x19, family_19h, sizeof(family_19h) / sizeof(struct msr_range) },
-    { 0x1a, family_1ah, sizeof(family_1ah) / sizeof(struct msr_range) }
+    { 0x10, family_10h, ARRAY_COUNT(family_10h) },
+    { 0x15, family_15h, ARRAY_COUNT(family_15h) },
+    { 0x16, family_16h, ARRAY_COUNT(family_16h) },
+    { 0x17, family_17h, ARRAY_COUNT(family_17h) },
+    { 0x19, family_19h, ARRAY_COUNT(family_19h) },
+    { 0x1a, family_1ah, ARRAY_COUNT(family_1ah) }
 };
-const size_t msr_amd_family_count = sizeof(msr_amd_families) / sizeof(struct msr_family);
+const size_t msr_amd_family_count = ARRAY_COUNT(msr_amd_families);

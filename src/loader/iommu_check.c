@@ -21,6 +21,7 @@
 #include <efi.h>
 #include <loader/iommu_check.h>
 #include <lib/log.h>
+#include <lib/util.h>
 #include <loader/efi_glue.h>
 #include <loader/pci_io.h>
 #include <memory.h>
@@ -267,16 +268,14 @@ static bool igfx_broken(uint16_t *igfx_id) {
     bool broken = false;
     if (igfx != NULL) {
         *igfx_id = igfx->device_id;
-        broken = listed(
-            igfx->device_id, broadwell_igfx, sizeof(broadwell_igfx) / sizeof(uint16_t)
-        );
+        broken = listed(igfx->device_id, broadwell_igfx, ARRAY_COUNT(broadwell_igfx));
         if (host_bridge != NULL && host_bridge->device_id == ARRANDALE_HOST_BRIDGE) {
             broken = true;
         }
         bool calpella = host_bridge != NULL
                      && listed(
                             host_bridge->device_id, calpella_host_bridges,
-                            sizeof(calpella_host_bridges) / sizeof(uint16_t)
+                            ARRAY_COUNT(calpella_host_bridges)
                         );
         if (calpella) {
             uint16_t ggc;

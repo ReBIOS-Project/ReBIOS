@@ -21,6 +21,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <loader/gpu_lists.h>
+#include <lib/util.h>
 
 const struct gpu_id vbios_blocklist[] = {
     // Coffee Lake-S GT2 [UHD Graphics P630].
@@ -661,7 +662,7 @@ const struct gpu_id vbios_blocklist[] = {
     { 0x1002, 0x7483, 0x7483, 0xcf } // AMD Radeon RX 7600M.
 };
 
-const size_t vbios_blocklist_count = sizeof(vbios_blocklist) / sizeof(struct gpu_id);
+const size_t vbios_blocklist_count = ARRAY_COUNT(vbios_blocklist);
 
 const struct gpu_id vbios_allowlist[] = {
     // Core Processor Integrated Graphics Controller.
@@ -1442,4 +1443,4 @@ const struct gpu_id vbios_allowlist[] = {
     { 0x5333, 0x0000, 0xffff, GPU_ANY_REVISION } // S3.
 };
 
-const size_t vbios_allowlist_count = sizeof(vbios_allowlist) / sizeof(struct gpu_id);
+const size_t vbios_allowlist_count = ARRAY_COUNT(vbios_allowlist);

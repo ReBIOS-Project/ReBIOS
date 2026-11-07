@@ -23,6 +23,7 @@
 #include <handoff.h>
 #include <lib/log.h>
 #include <lib/printf.h>
+#include <lib/util.h>
 #include <loader/cbfs.h>
 #include <loader/config.h>
 #include <loader/display.h>
@@ -436,7 +437,7 @@ static bool slotted_card(const struct pci_io_device *dev) {
     value = 0;
     fwtables_smbios_byte(SMBIOS_CHASSIS, SMBIOS_CHASSIS_TYPE, &value);
     value &= SMBIOS_CHASSIS_TYPE_MASK;
-    for (size_t i = 0; i < sizeof(slotless_chassis) / sizeof(uint8_t); i++) {
+    for (size_t i = 0; i < ARRAY_COUNT(slotless_chassis); i++) {
         if (value == slotless_chassis[i]) {
             return false;
         }

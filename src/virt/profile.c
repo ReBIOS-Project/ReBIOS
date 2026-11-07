@@ -24,6 +24,7 @@
 #include <handoff.h>
 #include <lib/log.h>
 #include <lib/time.h>
+#include <lib/util.h>
 #include <memory.h>
 #include <sys/cpu.h>
 #include <sys/mm.h>
@@ -239,7 +240,7 @@ static void report(uint64_t elapsed_ns) {
         const char *name = NULL;
         if (!virt_vmx) {
             name = svm_name(top[i].slot);
-        } else if (top[i].slot < sizeof(vmx_names) / sizeof(char *)) {
+        } else if (top[i].slot < ARRAY_COUNT(vmx_names)) {
             name = vmx_names[top[i].slot];
         }
         printf(

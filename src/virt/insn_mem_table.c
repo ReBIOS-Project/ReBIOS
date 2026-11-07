@@ -22,6 +22,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <virt/insn_mem_table.h>
+#include <lib/util.h>
 
 #define LEGACY INSN_SPACE_LEGACY
 #define VEX INSN_SPACE_VEX
@@ -5341,4 +5342,4 @@ const struct insn_mem_form insn_mem_forms[] = {
     { XOP | 10, 0x12, P_NONE, 1, W_ANY, 0, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 }
 };
 
-const size_t insn_mem_form_count = sizeof(insn_mem_forms) / sizeof(struct insn_mem_form);
+const size_t insn_mem_form_count = ARRAY_COUNT(insn_mem_forms);

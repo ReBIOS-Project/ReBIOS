@@ -125,14 +125,13 @@ W_IGNORED = set()
 VECTOR_MASKED = {'VMASKMOVPS', 'VMASKMOVPD', 'VPMASKMOVD', 'VPMASKMOVQ'}
 
 
-def count_decl(name, array, kind):
+def count_decl(name, array):
     """The declaration of an array's count, on one line where it fits in 99
-    columns, else broken before its division, lined up under its value."""
-    head = f'const size_t {name} = '
-    line = f'{head}sizeof({array}) / sizeof({kind});'
+    columns, else with its call broken after the opening parenthesis."""
+    line = f'const size_t {name} = ARRAY_COUNT({array});'
     if len(line) <= 99:
         return [line]
-    return [f'{head}sizeof({array})', ' ' * (len(head) - 2) + f'/ sizeof({kind});']
+    return [f'const size_t {name} = ARRAY_COUNT(', f'    {array}', ');']
 
 
 def instruction_ranges(lines):
@@ -1053,6 +1052,7 @@ def emit(entries, path):
     out.append('#include <stddef.h>')
     out.append('#include <stdint.h>')
     out.append('#include <virt/insn_mem_table.h>')
+    out.append('#include <lib/util.h>')
     out.append('')
     out.append('#define LEGACY INSN_SPACE_LEGACY')
     out.append('#define VEX INSN_SPACE_VEX')
@@ -1098,7 +1098,7 @@ def emit(entries, path):
             size if kind in ('S_FIXED', 'S_VECTOR') else 0, e['bcst'], e['scale'], e['syntax']))
     out.append('};')
     out.append('')
-    out += count_decl('insn_mem_form_count', 'insn_mem_forms', 'struct insn_mem_form')
+    out += count_decl('insn_mem_form_count', 'insn_mem_forms')
     open(path, 'w').write(finish('\n'.join(out) + '\n'))
 
 

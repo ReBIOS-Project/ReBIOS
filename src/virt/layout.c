@@ -28,6 +28,7 @@
 #include <iommu/iommu_tables.h>
 #include <lib/heap.h>
 #include <lib/log.h>
+#include <lib/util.h>
 #include <memory.h>
 #include <sys/mm.h>
 #include <virt/gpt.h>
@@ -722,7 +723,7 @@ bool layout_mmio_free(uintptr_t base, size_t size) {
         }
     }
     const struct range_list *lists[] = { &ram, &pinned, &kept, &holes };
-    for (size_t l = 0; l < sizeof(lists) / sizeof(struct range_list *); l++) {
+    for (size_t l = 0; l < ARRAY_COUNT(lists); l++) {
         for (size_t i = 0; i < lists[l]->count; i++) {
             if (base < lists[l]->r[i].end && end > lists[l]->r[i].base) {
                 return false;

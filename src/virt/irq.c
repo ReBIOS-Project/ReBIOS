@@ -32,6 +32,7 @@
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
+#include <lib/util.h>
 #include <memory.h>
 #include <sys/cpu.h>
 #include <sys/smp.h>
@@ -447,9 +448,9 @@ void irq_route_pci(const struct irq_pci_line *lines, size_t count, uint16_t isa_
     if (uacpi_table_fadt(&fadt) == UACPI_STATUS_OK && fadt->sci_int < ISA_IRQS) {
         taken |= (uint32_t)1 << fadt->sci_int;
     }
-    uint8_t pool[sizeof(pci_irqs)];
+    uint8_t pool[ARRAY_COUNT(pci_irqs)];
     size_t pool_size = 0;
-    for (size_t i = 0; i < sizeof(pci_irqs); i++) {
+    for (size_t i = 0; i < ARRAY_COUNT(pci_irqs); i++) {
         if ((taken & ((uint32_t)1 << pci_irqs[i])) == 0) {
             pool[pool_size++] = pci_irqs[i];
         }
@@ -927,7 +928,7 @@ void irq_init(void) {
     memset(slot_next, SLOT_FIRST, smp_cpu_count());
 
     static const uint16_t ports[] = { PIC_MASTER_CMD, PIC_SLAVE_CMD, PIC_ELCR_MASTER };
-    for (size_t i = 0; i < sizeof(ports) / sizeof(uint16_t); i++) {
+    for (size_t i = 0; i < ARRAY_COUNT(ports); i++) {
         struct io_handler handler = {
             .base = ports[i],
             .count = 2,

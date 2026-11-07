@@ -363,14 +363,13 @@ ADDR = re.compile(r'^\s*Register Address: ([0-9A-F_]+)H(?:\s*[-\u2013\u2212]\s*(
 HEADING = re.compile(r'^\s*Table (2-\d+)\.\s')
 
 
-def count_decl(name, array, kind):
+def count_decl(name, array):
     """The declaration of an array's count, on one line where it fits in 99
-    columns, else broken before its division, lined up under its value."""
-    head = f'const size_t {name} = '
-    line = f'{head}sizeof({array}) / sizeof({kind});'
+    columns, else with its call broken after the opening parenthesis."""
+    line = f'const size_t {name} = ARRAY_COUNT({array});'
     if len(line) <= 99:
         return [line]
-    return [f'{head}sizeof({array})', ' ' * (len(head) - 2) + f'/ sizeof({kind});']
+    return [f'const size_t {name} = ARRAY_COUNT(', f'    {array}', ');']
 
 
 def parse_tables(lines):
@@ -465,8 +464,7 @@ def intel(specs):
            'const struct msr_range msr_intel_architectural[] = {']
     for lo, hi in ranges(arch):
         out.append(f'    {{ {lo:#x}, {hi:#x} }}, // {label(names, lo, hi)}')
-    out += ['};'] + count_decl('msr_intel_architectural_count', 'msr_intel_architectural',
-                               'struct msr_range')
+    out += ['};'] + count_decl('msr_intel_architectural_count', 'msr_intel_architectural')
     # Tables that give the guest nothing more are left out.
     used = [t for t in used if passed[t]]
     models = [(signatures, [t for t in ts if passed[t]]) for signatures, ts in MODELS]
@@ -485,7 +483,7 @@ def intel(specs):
             out.append(f'    {{ {lo:#x}, {hi:#x} }}, // {label(tnames, lo, hi)}')
         out += ['};',
                 f'static const struct msr_ranges table_{name} = {{',
-                f'    ranges_{name}, sizeof(ranges_{name}) / sizeof(struct msr_range),',
+                f'    ranges_{name}, ARRAY_COUNT(ranges_{name}),',
                 '};']
     for i, (signatures, ts) in enumerate(models):
         heading = (', '.join(sig + 'H' for sig in signatures) + ': SDM 325462-093 Vol. 4, Tables '
@@ -501,7 +499,7 @@ def intel(specs):
         for sig in signatures:
             family, model = (int(x, 16) for x in sig.split('_'))
             out.append(f'    {{ {family:#x}, {model:#x}, model_tables_{i}, {len(ts)} }},')
-    out += ['};'] + count_decl('msr_intel_model_count', 'msr_intel_models', 'struct msr_model')
+    out += ['};'] + count_decl('msr_intel_model_count', 'msr_intel_models')
     order = sorted(left_out.items(), key=lambda x: (int(x[0][0].split('-')[1]), min(x[1])))
     left = [f'left out: Table {t} {min(addrs):#x} {name}' for (t, name), addrs in order]
     return out, left
@@ -651,8 +649,7 @@ def amd(specs):
            'const struct msr_range msr_amd_architectural[] = {']
     for lo, hi, what in AMD_ARCH:
         out.append(f'    {{ {lo:#x}, {hi:#x} }}, // {what[:1].upper() + what[1:]}')
-    out += ['};'] + count_decl('msr_amd_architectural_count', 'msr_amd_architectural',
-                               'struct msr_range')
+    out += ['};'] + count_decl('msr_amd_architectural_count', 'msr_amd_architectural')
     left = []
     for family, docs in AMD_FAMILIES:
         passed = {}
@@ -700,9 +697,8 @@ def amd(specs):
                  for a, n in sorted(left_out.items())]
     out += ['', '// By display family.', 'const struct msr_family msr_amd_families[] = {']
     for family, _ in AMD_FAMILIES:
-        out.append(f'    {{ {family:#x}, family_{family:x}h, '
-                   f'sizeof(family_{family:x}h) / sizeof(struct msr_range) }},')
-    out += ['};'] + count_decl('msr_amd_family_count', 'msr_amd_families', 'struct msr_family')
+        out.append(f'    {{ {family:#x}, family_{family:x}h, ARRAY_COUNT(family_{family:x}h) }},')
+    out += ['};'] + count_decl('msr_amd_family_count', 'msr_amd_families')
     return out, left
 
 
@@ -720,6 +716,7 @@ def main():
             '#include <stddef.h>',
             '#include <stdint.h>',
             '#include <virt/msr_table.h>',
+            '#include <lib/util.h>',
             '']
     out += intel_out + amd_out + ['']
     open(output, 'w').write(finish('\n'.join(out)))

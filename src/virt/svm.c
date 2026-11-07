@@ -25,6 +25,7 @@
 #include <handoff.h>
 #include <hw/power.h>
 #include <lib/log.h>
+#include <lib/util.h>
 #include <memory.h>
 #include <sys/cpu.h>
 #include <sys/fixup.h>
@@ -1022,7 +1023,7 @@ static void clean_before_entry(struct vcpu *v) {
     }
     const uint8_t *now = (const uint8_t *)v->vmcb;
     uint32_t clean = CLEAN_TRACKED;
-    for (size_t i = 0; i < sizeof(clean_ranges) / sizeof(clean_ranges[0]); i++) {
+    for (size_t i = 0; i < ARRAY_COUNT(clean_ranges); i++) {
         uint16_t at = clean_ranges[i].offset;
         if (memcmp(now + at, v->vmcb_seen + at, clean_ranges[i].size) != 0) {
             clean &= ~clean_ranges[i].bit;
@@ -1039,7 +1040,7 @@ static void clean_after_exit(struct vcpu *v) {
         v->vmcb_seen = page_alloc(1);
     }
     const uint8_t *now = (const uint8_t *)v->vmcb;
-    for (size_t i = 0; i < sizeof(clean_ranges) / sizeof(clean_ranges[0]); i++) {
+    for (size_t i = 0; i < ARRAY_COUNT(clean_ranges); i++) {
         uint16_t at = clean_ranges[i].offset;
         memcpy(v->vmcb_seen + at, now + at, clean_ranges[i].size);
     }

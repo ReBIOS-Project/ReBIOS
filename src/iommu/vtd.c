@@ -26,6 +26,7 @@
 #include <lib/log.h>
 #include <lib/spinlock.h>
 #include <lib/time.h>
+#include <lib/util.h>
 #include <sys/mm.h>
 #include <sys/x86.h>
 
@@ -304,7 +305,7 @@ static bool remapping_broken(void) {
     }
     uint16_t device = (uint16_t)(id >> 16);
     uint8_t revision = (uint8_t)class_revision;
-    for (size_t i = 0; i < sizeof(remap_broken_ids) / sizeof(uint16_t); i++) {
+    for (size_t i = 0; i < ARRAY_COUNT(remap_broken_ids); i++) {
         if (device == remap_broken_ids[i]) {
             return revision <= 0x13 || (device == 0x3405 && revision == 0x22);
         }
@@ -333,7 +334,7 @@ static bool keep_translating(const struct iommu_tables *tables, uint32_t index, 
             if (pci_cfg_read(a, 0x0b, 1) != PCI_BASE_CLASS_DISPLAY) {
                 return false;
             }
-            for (size_t j = 0; j < sizeof(keep_translating_ids); j++) {
+            for (size_t j = 0; j < ARRAY_COUNT(keep_translating_ids); j++) {
                 if ((id & 0xffff) == PCI_VENDOR_INTEL && id >> 24 == keep_translating_ids[j]) {
                     listed = true;
                 }

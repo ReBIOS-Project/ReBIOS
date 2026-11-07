@@ -26,6 +26,7 @@
 #include <hw/serial.h>
 #include <lib/printf.h>
 #include <lib/spinlock.h>
+#include <lib/util.h>
 #include <loader/efi_glue.h>
 #include <sys/x86.h>
 
@@ -58,7 +59,7 @@ static void con_flush(struct con_buffer *buf) {
 }
 
 static void con_put(struct con_buffer *buf, EFI_CHAR16 c) {
-    if (buf->count == sizeof(buf->chars) / sizeof(EFI_CHAR16) - 1) {
+    if (buf->count == ARRAY_COUNT(buf->chars) - 1) {
         con_flush(buf);
     }
     buf->chars[buf->count++] = c;

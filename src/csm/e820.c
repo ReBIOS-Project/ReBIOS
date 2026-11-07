@@ -22,6 +22,7 @@
 #include <csm/e820.h>
 #include <lib/log.h>
 #include <lib/printf.h>
+#include <lib/util.h>
 #include <memory.h>
 
 #define MIB ((uint64_t)1 << 20)
@@ -186,7 +187,7 @@ bool e820_set_low_memory(struct e820_map *map) {
 
     // Cleared first, so that no step needs more entries than the result.
     bool ok = e820_set(map, 0, 1 * MIB, 0);
-    for (size_t i = 0; i < sizeof(layout) / sizeof(struct e820_entry); i++) {
+    for (size_t i = 0; i < ARRAY_COUNT(layout); i++) {
         if (!e820_set(map, layout[i].base, layout[i].size, layout[i].type)) {
             ok = false;
         }

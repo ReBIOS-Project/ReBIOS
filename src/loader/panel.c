@@ -21,6 +21,7 @@
 #include <loader/panel.h>
 #include <handoff.h>
 #include <lib/log.h>
+#include <lib/util.h>
 #include <loader/fwtables.h>
 
 // The SMBIOS strings that Linux 7.3's DMI quirks match on
@@ -436,7 +437,7 @@ static bool dmi_matches(const struct dmi_match *matches) {
 }
 
 void panel_fix_framebuffer(struct handoff_framebuffer *fb) {
-    for (size_t i = 0; i < sizeof(swap_quirks) / sizeof(struct swap_quirk); i++) {
+    for (size_t i = 0; i < ARRAY_COUNT(swap_quirks); i++) {
         const struct swap_quirk *q = &swap_quirks[i];
         if (!dmi_matches(q->matches)) {
             continue;
@@ -477,7 +478,7 @@ static bool date_listed(const char *const *dates) {
 // efifb.c turns the console: clockwise on a right side up panel, anticlockwise
 // on a left side up one.
 uint8_t panel_rotation(const struct handoff_framebuffer *fb) {
-    for (size_t i = 0; i < sizeof(orientation_quirks) / sizeof(struct orientation_quirk); i++) {
+    for (size_t i = 0; i < ARRAY_COUNT(orientation_quirks); i++) {
         const struct orientation_quirk *q = &orientation_quirks[i];
         if (!dmi_matches(q->matches) || fb->width != q->width || fb->height != q->height) {
             continue;

@@ -21,6 +21,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <lib/util.h>
 #include <memory.h>
 #include <virt/vga.h>
 #include <virt/vgabios.h>
@@ -79,7 +80,7 @@ static const struct resolution resolutions[] = {
     { 3440, 1440 }, { 3840, 2160 }, { 3840, 2400 }, { 4096, 2160 }
 };
 
-#define RESOLUTION_COUNT (sizeof(resolutions) / sizeof(struct resolution))
+#define RESOLUTION_COUNT ARRAY_COUNT(resolutions)
 #define MODE_COUNT (RESOLUTION_COUNT * 5 + 5)
 
 // VBE 1.2's numbers where it has them, the others from 140h, and the display's

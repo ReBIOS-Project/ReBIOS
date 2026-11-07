@@ -25,6 +25,7 @@
 #include <lib/log.h>
 #include <lib/spinlock.h>
 #include <lib/time.h>
+#include <lib/util.h>
 #include <memory.h>
 #include <sys/cpu.h>
 #include <sys/mm.h>
@@ -1968,7 +1969,7 @@ static const struct pci_id real_dispi_vgas[] = {
 };
 
 static bool decodes_dispi(uint16_t vendor, uint16_t device) {
-    for (size_t i = 0; i < sizeof(real_dispi_vgas) / sizeof(struct pci_id); i++) {
+    for (size_t i = 0; i < ARRAY_COUNT(real_dispi_vgas); i++) {
         if (real_dispi_vgas[i].vendor == vendor && real_dispi_vgas[i].device == device) {
             return true;
         }

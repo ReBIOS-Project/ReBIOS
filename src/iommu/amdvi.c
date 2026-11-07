@@ -30,6 +30,7 @@
 #include <lib/log.h>
 #include <lib/spinlock.h>
 #include <lib/time.h>
+#include <lib/util.h>
 #include <sys/cpu.h>
 #include <sys/mm.h>
 #include <sys/smp.h>
@@ -663,7 +664,7 @@ static void invalidate_table(const struct remap_table *t) {
 }
 
 static void table_install(uint16_t id, struct remap_table *t) {
-    if (t->user_count == sizeof(t->users) / sizeof(uint16_t)) {
+    if (t->user_count == ARRAY_COUNT(t->users)) {
         printf("AMD-Vi: no room for device ID %04x in an interrupt remapping table\n", id);
         return;
     }

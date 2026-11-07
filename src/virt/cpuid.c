@@ -19,6 +19,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <virt/cpuid.h>
+#include <lib/util.h>
 #include <sys/x86.h>
 #include <virt/msr.h>
 #include <virt/nsvm.h>
@@ -466,8 +467,8 @@ static const struct {
 static const struct leaf_bits *find(uint32_t leaf, uint32_t subleaf) {
     const struct leaf_bits *table = virt_vmx ? intel_leaves : amd_leaves;
     size_t count = virt_vmx
-                 ? sizeof(intel_leaves) / sizeof(struct leaf_bits)
-                 : sizeof(amd_leaves) / sizeof(struct leaf_bits);
+                 ? ARRAY_COUNT(intel_leaves)
+                 : ARRAY_COUNT(amd_leaves);
     const struct leaf_bits *any = NULL;
     for (size_t i = 0; i < count; i++) {
         if (table[i].leaf == leaf && table[i].subleaf == subleaf) {
@@ -508,8 +509,8 @@ static uint32_t min32(uint32_t a, uint32_t b) {
 static uint32_t last_subleaf(uint32_t leaf, uint32_t eax) {
     const struct last_subleaf *table = virt_vmx ? intel_last_subleaves : amd_last_subleaves;
     size_t count = virt_vmx
-                 ? sizeof(intel_last_subleaves) / sizeof(struct last_subleaf)
-                 : sizeof(amd_last_subleaves) / sizeof(struct last_subleaf);
+                 ? ARRAY_COUNT(intel_last_subleaves)
+                 : ARRAY_COUNT(amd_last_subleaves);
     for (size_t i = 0; i < count; i++) {
         if (table[i].leaf == leaf) {
             return min32(eax, table[i].last);
@@ -576,7 +577,7 @@ void cpuid_init(void) {
         regs[i][3] = r.edx;
     }
     cr4_allowed = CR4_PCE;
-    for (size_t i = 0; i < sizeof(cr4_features) / sizeof(cr4_features[0]); i++) {
+    for (size_t i = 0; i < ARRAY_COUNT(cr4_features); i++) {
         if (((regs[cr4_features[i].leaf][cr4_features[i].reg] >> cr4_features[i].bit) & 1) != 0) {
             cr4_allowed |= cr4_features[i].cr4;
         }

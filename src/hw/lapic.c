@@ -21,6 +21,7 @@
 #include <hw/lapic.h>
 #include <lib/log.h>
 #include <lib/time.h>
+#include <lib/util.h>
 #include <sys/cpu.h>
 #include <sys/fixup.h>
 #include <sys/x86.h>
@@ -111,7 +112,7 @@ static bool deadline_microcode_ok(void) {
     if (s.family != 6) {
         return true;
     }
-    size_t count = sizeof(deadline_microcode) / sizeof(struct deadline_microcode);
+    size_t count = ARRAY_COUNT(deadline_microcode);
     for (size_t i = 0; i < count; i++) {
         const struct deadline_microcode *d = &deadline_microcode[i];
         if (s.model != d->model || s.stepping < d->first_stepping
@@ -253,9 +254,9 @@ static bool host_mode(bool x2apic) {
         APIC_SVR, APIC_TPR, APIC_LVT_TIMER, APIC_LVT_THERMAL, APIC_LVT_PERF,
         APIC_LVT_LINT0, APIC_LVT_LINT1, APIC_LVT_ERROR, APIC_TIMER_DIVIDE
     };
-    uint32_t regs[sizeof(kept) / sizeof(uint32_t) + 2 + APIC_EILVT_MAX];
+    uint32_t regs[ARRAY_COUNT(kept) + 2 + APIC_EILVT_MAX];
     size_t count = 0;
-    for (size_t i = 0; i < sizeof(kept) / sizeof(uint32_t); i++) {
+    for (size_t i = 0; i < ARRAY_COUNT(kept); i++) {
         regs[count++] = kept[i];
     }
     if (max_entry() >= LVT_CMCI_MIN_MAX_ENTRY) {
@@ -268,7 +269,7 @@ static bool host_mode(bool x2apic) {
             regs[count++] = APIC_EILVT + (uint32_t)i * 0x10;
         }
     }
-    uint32_t values[sizeof(regs) / sizeof(uint32_t)];
+    uint32_t values[ARRAY_COUNT(regs)];
     for (size_t i = 0; i < count; i++) {
         values[i] = lapic_read(regs[i]);
     }

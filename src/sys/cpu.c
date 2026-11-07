@@ -27,6 +27,7 @@
 #include <lib/log.h>
 #include <lib/printf.h>
 #include <lib/time.h>
+#include <lib/util.h>
 #include <memory.h>
 #include <sys/fixup.h>
 #include <sys/mm.h>
@@ -145,7 +146,7 @@ unsigned int cpu_package_shift(void) {
     // 325462-093 Vol. 1, Tables 21-31 and 21-70).
     uint32_t max = cpuid(0, 0).eax;
     static const uint32_t leaves[] = { 0x1f, 0xb };
-    for (size_t i = 0; i < sizeof(leaves) / sizeof(uint32_t); i++) {
+    for (size_t i = 0; i < ARRAY_COUNT(leaves); i++) {
         if (max < leaves[i] || (cpuid(leaves[i], 0).ebx & 0xffff) == 0) {
             continue;
         }

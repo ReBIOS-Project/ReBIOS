@@ -26,6 +26,7 @@
 #include <hw/ioapic.h>
 #include <lib/heap.h>
 #include <lib/log.h>
+#include <lib/util.h>
 #include <memory.h>
 #include <sys/smp.h>
 #include <virt/guest_mem.h>
@@ -304,7 +305,7 @@ static bool table_made(const uint8_t *table, uint8_t **made, size_t *length) {
 }
 
 static bool table_kept(const uint8_t *table) {
-    for (size_t i = 0; i < sizeof(kept) / sizeof(char *); i++) {
+    for (size_t i = 0; i < ARRAY_COUNT(kept); i++) {
         if (memcmp(table, kept[i], 4) == 0) {
             return true;
         }

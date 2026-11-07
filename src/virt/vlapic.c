@@ -28,6 +28,7 @@
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
+#include <lib/util.h>
 #include <memory.h>
 #include <sys/cpu.h>
 #include <sys/fixup.h>
@@ -434,7 +435,7 @@ void vlapic_init(void) {
         virt_intercept_msr(msr, true, true);
     }
     if (x2apic_virtualisation || svm_x2avic) {
-        for (size_t i = 0; i < sizeof(x2apic_passed_reads) / sizeof(uint32_t); i++) {
+        for (size_t i = 0; i < ARRAY_COUNT(x2apic_passed_reads); i++) {
             uint32_t reg = x2apic_passed_reads[i];
             if (lvt_reg_present(reg)) {
                 virt_x2apic_msr_passed(MSR_X2APIC_FIRST + (reg >> 4), true, false);
@@ -443,7 +444,7 @@ void vlapic_init(void) {
         for (size_t reg = APIC_ISR; reg < APIC_IRR + 0x80; reg += 0x10) {
             virt_x2apic_msr_passed(MSR_X2APIC_FIRST + (reg >> 4), true, false);
         }
-        for (size_t i = 0; i < sizeof(x2apic_passed_writes) / sizeof(uint32_t); i++) {
+        for (size_t i = 0; i < ARRAY_COUNT(x2apic_passed_writes); i++) {
             virt_x2apic_msr_passed(MSR_X2APIC_FIRST + (x2apic_passed_writes[i] >> 4), false, true);
         }
         if (svm_x2avic) {
@@ -2051,7 +2052,7 @@ static bool avic_trapped(uint32_t offset) {
     if (svm_avic_ext_lvt_reads && offset >= APIC_EILVT && offset < eilvt_reg(APIC_EILVT_MAX)) {
         return true;
     }
-    for (size_t i = 0; i < sizeof(avic_trapped_writes) / sizeof(uint32_t); i++) {
+    for (size_t i = 0; i < ARRAY_COUNT(avic_trapped_writes); i++) {
         if (avic_trapped_writes[i] == offset) {
             return true;
         }
