@@ -68,9 +68,6 @@
 #define LOG_LINE_MAX 180
 #define LOG_ITEM_MAX 64
 
-#define ADDR_FMT "%04x:%02x:%02x.%x"
-#define ADDR_ARGS(a) (a).segment, (a).bus, (a).device, (a).function
-
 struct segment_buses {
     uint16_t segment;
     uint64_t buses[4];
@@ -284,15 +281,16 @@ static void bar_record(
 ) {
     if (s->malformed) {
         printf(
-            "PCI " ADDR_FMT " BAR at %#x: 64-bit BAR in the last slot, taken as unimplemented\n",
-            ADDR_ARGS(f->addr), s->reg
+            "PCI " PCI_CFG_ADDR_FMT
+            " BAR at %#x: 64-bit BAR in the last slot, taken as unimplemented\n",
+            PCI_CFG_ADDR_ARGS(f->addr), s->reg
         );
     }
     if (!bar_sample_result(s, bar)) {
         printf(
-            "PCI " ADDR_FMT
+            "PCI " PCI_CFG_ADDR_FMT
             " BAR at %#x: read back 0x%llx with gaps in its address bits, sized 0x%llx from the "
-            "lowest\n", ADDR_ARGS(f->addr), s->reg, (unsigned long long)s->readback,
+            "lowest\n", PCI_CFG_ADDR_ARGS(f->addr), s->reg, (unsigned long long)s->readback,
             (unsigned long long)bar->size
         );
     }
@@ -485,7 +483,7 @@ static void line_add_window(
 
 static void log_function(const struct pci_enum_function *f) {
     struct log_line line;
-    line_start(&line, "PCI " ADDR_FMT, ADDR_ARGS(f->addr));
+    line_start(&line, "PCI " PCI_CFG_ADDR_FMT, PCI_CFG_ADDR_ARGS(f->addr));
     line_add(
         &line, " %04x:%04x class %02x%02x%02x type %u", f->vendor_id, f->device_id, f->base_class,
         f->subclass, f->prog_if, f->header_type
@@ -678,9 +676,9 @@ static void link_topology(void) {
             struct pci_enum_function *other = bridges[f->secondary_bus];
             if (other != NULL) {
                 printf(
-                    "PCI " ADDR_FMT ": secondary bus %02x is already behind " ADDR_FMT
-                    ", ignoring this bridge for it\n", ADDR_ARGS(f->addr), f->secondary_bus,
-                    ADDR_ARGS(other->addr)
+                    "PCI " PCI_CFG_ADDR_FMT ": secondary bus %02x is already behind "
+                    PCI_CFG_ADDR_FMT ", ignoring this bridge for it\n",
+                    PCI_CFG_ADDR_ARGS(f->addr), f->secondary_bus, PCI_CFG_ADDR_ARGS(other->addr)
                 );
                 continue;
             }
@@ -819,20 +817,23 @@ static void rebar_resize(
     unsigned int now = (pci_cfg_read(f->addr, control_reg, 4) >> REBAR_SIZE_SHIFT) & REBAR_SIZE;
     if (now != encoding) {
         printf(
-            "PCI " ADDR_FMT " BAR%u: Resizable BAR control reads size %u after writing size %u\n",
-            ADDR_ARGS(f->addr), index, now, encoding
+            "PCI " PCI_CFG_ADDR_FMT
+            " BAR%u: Resizable BAR control reads size %u after writing size %u\n",
+            PCI_CFG_ADDR_ARGS(f->addr), index, now, encoding
         );
     }
     size_bars(f, index, index + 1, 0);
     if (bar->size != new_size) {
         printf(
-            "PCI " ADDR_FMT " BAR%u: sizes to 0x%llx after resizing to 0x%llx\n",
-            ADDR_ARGS(f->addr), index, (unsigned long long)bar->size, (unsigned long long)new_size
+            "PCI " PCI_CFG_ADDR_FMT " BAR%u: sizes to 0x%llx after resizing to 0x%llx\n",
+            PCI_CFG_ADDR_ARGS(f->addr), index, (unsigned long long)bar->size,
+            (unsigned long long)new_size
         );
     }
     printf(
-        "PCI " ADDR_FMT " BAR%u: Resizable BAR resized from 0x%llx to 0x%llx\n",
-        ADDR_ARGS(f->addr), index, (unsigned long long)old_size, (unsigned long long)bar->size
+        "PCI " PCI_CFG_ADDR_FMT " BAR%u: Resizable BAR resized from 0x%llx to 0x%llx\n",
+        PCI_CFG_ADDR_ARGS(f->addr), index, (unsigned long long)old_size,
+        (unsigned long long)bar->size
     );
 }
 
@@ -843,9 +844,9 @@ static void rebar_shrink(
     uint8_t index = control & REBAR_INDEX;
     if (index >= f->bar_count) {
         printf(
-            "PCI " ADDR_FMT
+            "PCI " PCI_CFG_ADDR_FMT
             ": Resizable BAR control for BAR%u, which the function does not have\n",
-            ADDR_ARGS(f->addr), index
+            PCI_CFG_ADDR_ARGS(f->addr), index
         );
         return;
     }
@@ -857,8 +858,8 @@ static void rebar_shrink(
     unsigned int current = (control >> REBAR_SIZE_SHIFT) & REBAR_SIZE;
     if (current > REBAR_SIZE_LAST) {
         printf(
-            "PCI " ADDR_FMT " BAR%u: Resizable BAR size %u is out of range, leaving it\n",
-            ADDR_ARGS(f->addr), index, current
+            "PCI " PCI_CFG_ADDR_FMT " BAR%u: Resizable BAR size %u is out of range, leaving it\n",
+            PCI_CFG_ADDR_ARGS(f->addr), index, current
         );
         return;
     }
@@ -880,9 +881,9 @@ static void rebar_shrink(
     }
     if (pick < 0 || rebar_size((unsigned int)pick) >= current_size) {
         printf(
-            "PCI " ADDR_FMT
+            "PCI " PCI_CFG_ADDR_FMT
             " BAR%u: Resizable BAR of 0x%llx supports no smaller size, leaving it\n",
-            ADDR_ARGS(f->addr), index, (unsigned long long)current_size
+            PCI_CFG_ADDR_ARGS(f->addr), index, (unsigned long long)current_size
         );
         return;
     }
@@ -901,9 +902,9 @@ static void rebar_shrink(
         }
         if (fit < 0 || rebar_size((unsigned int)fit) >= current_size) {
             printf(
-                "PCI " ADDR_FMT
+                "PCI " PCI_CFG_ADDR_FMT
                 " BAR%u: Resizable BAR of 0x%llx holds the framebuffer at 0x%llx+0x%llx, leaving "
-                "it\n", ADDR_ARGS(f->addr), index, (unsigned long long)current_size,
+                "it\n", PCI_CFG_ADDR_ARGS(f->addr), index, (unsigned long long)current_size,
                 (unsigned long long)fb->base, (unsigned long long)fb->size
             );
             return;
@@ -929,8 +930,8 @@ void pci_enum_shrink_rebars(size_t max_size) {
         unsigned int pairs = (first_control >> REBAR_PAIRS_SHIFT) & REBAR_PAIRS;
         if (pairs == 0 || pairs > REBAR_MAX_PAIRS) {
             printf(
-                "PCI " ADDR_FMT ": Resizable BAR capability with %u BARs, ignoring it\n",
-                ADDR_ARGS(f->addr), pairs
+                "PCI " PCI_CFG_ADDR_FMT ": Resizable BAR capability with %u BARs, ignoring it\n",
+                PCI_CFG_ADDR_ARGS(f->addr), pairs
             );
             continue;
         }

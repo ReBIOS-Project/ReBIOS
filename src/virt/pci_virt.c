@@ -319,8 +319,8 @@ static void bar_log(const struct vbar *b, const char *what) {
             snprintf(name, sizeof(name), "BAR%zu", k);
         }
         printf(
-            "PCI %04x:%02x:%02x.%x %s at %#llx: %s\n", a.segment, a.bus, a.device, a.function,
-            name, (unsigned long long)b->guest, what
+            "PCI " PCI_CFG_ADDR_FMT " %s at %#llx: %s\n", PCI_CFG_ADDR_ARGS(a), name,
+            (unsigned long long)b->guest, what
         );
         return;
     }
@@ -619,8 +619,8 @@ static void msi_update(struct vfunction *vf) {
         pci_cfg_write(a, cap + PCI_MSI_FLAGS, 2, control);
         if (!irq_slot_place(&m->slot, vlapic_msi_target(m->address), count)) {
             printf(
-                "PCI %04x:%02x:%02x.%x: no room for %zu MSI vectors\n", a.segment, a.bus, a.device,
-                a.function, count
+                "PCI " PCI_CFG_ADDR_FMT ": no room for %zu MSI vectors\n", PCI_CFG_ADDR_ARGS(a),
+                count
             );
             return;
         }
@@ -684,8 +684,7 @@ static void msix_sync(struct vfunction *vf, size_t i) {
         struct pci_cfg_addr a = vf->f->addr;
         if (!irq_slot_place(&e->slot, vlapic_msi_target(e->address), 1)) {
             printf(
-                "PCI %04x:%02x:%02x.%x: no room for MSI-X entry %zu\n", a.segment, a.bus, a.device,
-                a.function, i
+                "PCI " PCI_CFG_ADDR_FMT ": no room for MSI-X entry %zu\n", PCI_CFG_ADDR_ARGS(a), i
             );
             return;
         }

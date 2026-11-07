@@ -55,4 +55,8 @@ uintptr_t pci_cfg_ecam_base(uint16_t segment, uint8_t bus);
 // found.
 bool pci_cfg_ports_answer(void);
 
+// For printf(), as segment:bus:device.function.
+#define PCI_CFG_ADDR_FMT "%04x:%02x:%02x.%x"
+#define PCI_CFG_ADDR_ARGS(a) (a).segment, (a).bus, (a).device, (a).function
+
 #endif

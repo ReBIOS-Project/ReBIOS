@@ -278,9 +278,8 @@ static void next_rom(struct vcpu *v) {
         int bus = pci_plan_guest_bus(rom->address.segment, rom->address.bus);
         if (bus < 0) {
             printf(
-                "Not running the option ROM of %04x:%02x:%02x.%x, which the guest does not have\n",
-                rom->address.segment, rom->address.bus, rom->address.devfn >> 3,
-                rom->address.devfn & 7
+                "Not running the option ROM of " HANDOFF_PCI_ADDRESS_FMT
+                ", which the guest does not have\n", HANDOFF_PCI_ADDRESS_ARGS(rom->address)
             );
             continue;
         }

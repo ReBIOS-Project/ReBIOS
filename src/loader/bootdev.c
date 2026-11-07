@@ -126,9 +126,9 @@ static bool controller_resolve(EFI_DEVICE_PATH_PROTOCOL *path, struct handoff_bl
 
 static void device_log(const char *what, const struct handoff_block_device *dev) {
     printf(
-        "%s %04x:%02x:%02x.%x, %s, class %02x:%02x%s\n", what, dev->address.segment,
-        dev->address.bus, dev->address.devfn >> 3, dev->address.devfn & 7,
-        bbs_type_name(dev->bbs_type), dev->base_class, dev->subclass, dev->boot ? ", boot" : ""
+        "%s " HANDOFF_PCI_ADDRESS_FMT ", %s, class %02x:%02x%s\n", what,
+        HANDOFF_PCI_ADDRESS_ARGS(dev->address), bbs_type_name(dev->bbs_type), dev->base_class,
+        dev->subclass, dev->boot ? ", boot" : ""
     );
 }
 

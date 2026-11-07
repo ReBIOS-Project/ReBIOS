@@ -257,8 +257,8 @@ static void take(const struct pci_enum_function *f) {
     const struct pci_enum_bar *bar = first_bar(f, io);
     if (bar == NULL || (command & (io ? PCI_COMMAND_IO : PCI_COMMAND_MEMORY)) == 0) {
         printf(
-            "USB %04x:%02x:%02x.%x: %s left alone, as its registers are not decoded\n", a.segment,
-            a.bus, a.device, a.function, name
+            "USB " PCI_CFG_ADDR_FMT ": %s left alone, as its registers are not decoded\n",
+            PCI_CFG_ADDR_ARGS(a), name
         );
         return;
     }
@@ -284,7 +284,7 @@ static void take(const struct pci_enum_function *f) {
                          ? " taken from the firmware, which did not let go, and"
                          : " taken from the firmware and";
     printf(
-        "USB %04x:%02x:%02x.%x: %s%s %s\n", a.segment, a.bus, a.device, a.function, name, from,
+        "USB " PCI_CFG_ADDR_FMT ": %s%s %s\n", PCI_CFG_ADDR_ARGS(a), name, from,
         stopped ? "stopped" : "not stopped"
     );
     if (stopped && taken_count < MAX_TAKEN) {
