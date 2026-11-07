@@ -48,6 +48,13 @@
 // (E-EDID A2, 3.7) give them.
 static const uint8_t srgb[10] = { 0xee, 0x91, 0xa3, 0x54, 0x4c, 0x99, 0x26, 0x0f, 0x50, 0x54 };
 
+// What every EDID starts with (E-EDID A2, 3.3).
+static const uint8_t header[8] = { 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00 };
+
+// The tag of CTA-861 extension blocks (E-EDID A2, Table 2.7), whose checksums
+// Linux 7.3 overlooks.
+#define TAG_CTA 0x02
+
 static void display_descriptor(uint8_t *d, uint8_t tag) {
     memset(d, 0, 18);
     d[3] = tag;
@@ -97,7 +104,6 @@ bool edid_synthesize(uint8_t *edid, uint32_t width, uint32_t height) {
     }
 
     memset(edid, 0, EDID_BLOCK_SIZE);
-    static const uint8_t header[8] = { 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00 };
     memcpy(edid, header, sizeof(header));
     edid[0x08] = MANUFACTURER_ID >> 8;
     edid[0x09] = MANUFACTURER_ID & 0xff;
@@ -162,4 +168,40 @@ bool edid_synthesize(uint8_t *edid, uint32_t width, uint32_t height) {
 
     edid[EDID_BLOCK_SIZE - 1] = (uint8_t)-checksum8(edid, EDID_BLOCK_SIZE - 1);
     return true;
+}
+
+size_t edid_sanitise(uint8_t *edid, size_t size) {
+    if (size < EDID_BLOCK_SIZE) {
+        return 0;
+    }
+    size_t right = 0;
+    for (size_t i = 0; i < sizeof(header); i++) {
+        if (edid[i] == header[i]) {
+            right++;
+        }
+    }
+    if (right < sizeof(header) - 2) {
+        return 0;
+    }
+    memcpy(edid, header, sizeof(header));
+    if (checksum8(edid, EDID_BLOCK_SIZE) != 0 || edid[0x12] != 1) {
+        return 0;
+    }
+
+    // The extension blocks follow the base block (E-EDID A2, 3.11).
+    size_t count = edid[0x7e];
+    if (count > size / EDID_BLOCK_SIZE - 1) {
+        count = size / EDID_BLOCK_SIZE - 1;
+    }
+    size_t kept = 0;
+    for (size_t i = 1; i <= count; i++) {
+        uint8_t *block = edid + i * EDID_BLOCK_SIZE;
+        if (checksum8(block, EDID_BLOCK_SIZE) == 0 || block[0] == TAG_CTA) {
+            kept++;
+            memmove(edid + kept * EDID_BLOCK_SIZE, block, EDID_BLOCK_SIZE);
+        }
+    }
+    edid[0x7e] = (uint8_t)kept;
+    edid[EDID_BLOCK_SIZE - 1] = (uint8_t)-checksum8(edid, EDID_BLOCK_SIZE - 1);
+    return (kept + 1) * EDID_BLOCK_SIZE;
 }

@@ -19,6 +19,7 @@
 #define VIRT__EDID_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #define EDID_BLOCK_SIZE 128
@@ -27,5 +28,12 @@
 // when the firmware has none: width by height pixels at 60 Hz, as its
 // preferred timing. Returns false if a detailed timing cannot describe that.
 bool edid_synthesize(uint8_t *edid, uint32_t width, uint32_t height);
+
+// Keeps of the size bytes of an EDID what Linux 7.3's drm_edid.c takes: a base
+// block of version 1 with a sound checksum, its header put right where at most
+// two bytes are off, and of the extension blocks it counts, those with sound
+// checksums or of CTA-861, with its count and checksum made to match. Returns
+// the size kept, 0 where the base block is unusable.
+size_t edid_sanitise(uint8_t *edid, size_t size);
 
 #endif

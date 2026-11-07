@@ -644,15 +644,17 @@ static void display_fill(void) {
     d->lfb = (uint32_t)vga_lfb();
     // A turned panel's own EDID describes it unturned.
     if (video->framebuffer.rotation == HANDOFF_ROTATE_0) {
-        d->edid_size = (uint16_t)video->edid_size;
         memcpy(d->edid, video->edid, video->edid_size);
+        d->edid_size = (uint16_t)edid_sanitise(d->edid, video->edid_size);
     }
     // Without one, guests would not know the display's resolution.
     if (d->edid_size == 0 && edid_synthesize(d->edid, width, height)) {
         d->edid_size = EDID_BLOCK_SIZE;
-        const char *reason = video->edid_size != 0
-                           ? "The panel's EDID describes it unturned"
-                           : "No EDID from the firmware";
+        const char *reason = video->edid_size == 0
+                           ? "No EDID from the firmware"
+                           : video->framebuffer.rotation != HANDOFF_ROTATE_0
+                               ? "The panel's EDID describes it unturned"
+                               : "The firmware's EDID is unusable";
         printf(
             "%s, so the emulated VGA's display reports %ux%u at 60 Hz\n", reason, width, height
         );
