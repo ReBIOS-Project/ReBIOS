@@ -25,13 +25,13 @@
 #define KBC_KEYS 0xe8
 
 // A usage no scan code stands for has none in either set.
-struct kbc_key {
+struct kbc_keys_entry {
     uint8_t set1;
     uint8_t set2;
     // Comes after an E0.
     bool extended;
 };
 
-extern const struct kbc_key kbc_keys[KBC_KEYS];
+extern const struct kbc_keys_entry kbc_keys[KBC_KEYS];
 
 #endif

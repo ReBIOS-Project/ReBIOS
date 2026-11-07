@@ -21,7 +21,7 @@
 #include <stdbool.h>
 #include <virt/kbc_keys.h>
 
-const struct kbc_key kbc_keys[KBC_KEYS] = {
+const struct kbc_keys_entry kbc_keys[KBC_KEYS] = {
     [0x04] = { 0x1e, 0x1c, false }, // aA.
     [0x05] = { 0x30, 0x32, false }, // bB.
     [0x06] = { 0x2e, 0x21, false }, // cC.

@@ -949,7 +949,7 @@ static void key_bytes(uint16_t usage, bool pressed, uint8_t modifiers) {
         }
         return;
     }
-    struct kbc_key key = usage < KBC_KEYS ? kbc_keys[usage] : (struct kbc_key){ 0 };
+    struct kbc_keys_entry key = usage < KBC_KEYS ? kbc_keys[usage] : (struct kbc_keys_entry){ 0 };
     uint8_t code = set1 ? key.set1 : key.set2;
     if (code == 0) {
         return;
