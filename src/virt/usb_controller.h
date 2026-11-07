@@ -71,23 +71,7 @@ struct usb_controller {
     size_t range_count;
 };
 
-// The guest wants the controller: the stack lets go as soon as it can.
-void usb_release(struct usb_controller *c);
-
-// Whether the guest has to be kept from the controller, as the stack has it or
-// is about to.
-bool usb_legacy_own(struct usb_controller *c);
-// The controller is the guest's from now on.
-void usb_legacy_disown(struct usb_controller *c);
-
 // The controller a host of Tendril's is, or NULL.
 struct usb_controller *usb_controller_of(const struct tendril_hc *hc);
-
-// Pages of the memory devices reach, or NULL, which usb_dma_free() takes back.
-void *usb_dma_alloc(size_t size, size_t align, uintptr_t *bus);
-void usb_dma_free(void *ptr, size_t size);
-
-// Makes the stack run its next slice soon.
-void usb_kick(void);
 
 #endif

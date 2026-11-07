@@ -20,6 +20,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <tendril/tendril.h>
+#include <virt/usb_legacy.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
 #include <hw/pci_regs.h>
@@ -30,6 +31,7 @@
 #include <virt/io.h>
 #include <virt/mmio.h>
 #include <virt/pci_virt.h>
+#include <virt/usb.h>
 #include <virt/usb_controller.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>

@@ -42,6 +42,7 @@
 #include <virt/layout.h>
 #include <virt/usb_controller.h>
 #include <virt/usb_disk.h>
+#include <virt/usb_legacy.h>
 #include <virt/vcpu.h>
 
 // USB legacy support, as a BIOS's is to a PC: the hypervisor has the machine's
