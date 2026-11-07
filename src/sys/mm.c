@@ -144,36 +144,59 @@ static void split(uint64_t *entry, size_t size, bool to_4k) {
 
 static struct spinlock map_lock;
 
-static uint64_t *next_table(uint64_t *entry) {
+static uint64_t *next_table(uint64_t *entry, void *(*alloc_table)(void)) {
     if ((*entry & PTE_P) == 0) {
-        *entry = (uint64_t)(uintptr_t)page_alloc(1) | PTE_P | PTE_W;
+        void *table = alloc_table();
+        if (table == NULL) {
+            return NULL;
+        }
+        *entry = (uint64_t)(uintptr_t)table | PTE_P | PTE_W;
     }
     return table_of(*entry);
 }
 
-// 2 MiB pages, as the loader maps a framebuffer, in the first 256 TiB.
+// 2 MiB pages, in the first 256 TiB.
+bool mm_map_device_under(uint64_t *top, uintptr_t base, size_t size, void *(*alloc_table)(void)) {
+    uintptr_t end = align_up(base + size, TWO_MIB);
+    if (end > (uint64_t)1 << 48) {
+        return false;
+    }
+    for (uintptr_t a = align_down(base, TWO_MIB); a < end; a += TWO_MIB) {
+        uint64_t *pdpt = next_table(&top[x86_level_index(a, 3)], alloc_table);
+        if (pdpt == NULL) {
+            return false;
+        }
+        uint64_t *pdpte = &pdpt[x86_level_index(a, 2)];
+        if ((*pdpte & PTE_PS) != 0) {
+            continue;
+        }
+        uint64_t *pd = next_table(pdpte, alloc_table);
+        if (pd == NULL) {
+            return false;
+        }
+        uint64_t *pde = &pd[x86_level_index(a, 1)];
+        if ((*pde & PTE_P) == 0) {
+            *pde = a | PTE_P | PTE_W | PTE_PS | PTE_PCD | PTE_PWT;
+        }
+    }
+    return true;
+}
+
+static void *heap_table(void) {
+    return page_alloc(1);
+}
+
 void mm_map_device(uintptr_t base, size_t size) {
     uint64_t *top = table_of(read_cr3());
     if ((read_cr4() & CR4_LA57) != 0) {
         top = table_of(top[0]);
     }
-    uintptr_t end = align_up(base + size, TWO_MIB);
-    if (end > (uint64_t)1 << 48) {
-        printf("Cannot map device registers at %#llx\n", (unsigned long long)base);
-        return;
-    }
     spinlock_acquire(&map_lock);
-    for (uintptr_t a = align_down(base, TWO_MIB); a < end; a += TWO_MIB) {
-        uint64_t *pdpte = &next_table(&top[x86_level_index(a, 3)])[x86_level_index(a, 2)];
-        if ((*pdpte & PTE_PS) != 0) {
-            continue;
-        }
-        uint64_t *pde = &next_table(pdpte)[x86_level_index(a, 1)];
-        if ((*pde & PTE_P) == 0) {
-            *pde = a | PTE_P | PTE_W | PTE_PS | PTE_PCD | PTE_PWT;
-        }
-    }
+    bool mapped = mm_map_device_under(top, base, size, heap_table);
     spinlock_release(&map_lock);
+    if (!mapped) {
+        printf("Cannot map device registers at %#llx\n", (unsigned long long)base);
+    }
 }
 
 void mm_write_combining(uintptr_t base, size_t size) {

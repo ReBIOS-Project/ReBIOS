@@ -24,6 +24,7 @@
 #include <loader/efi_glue.h>
 #include <loader/loader.h>
 #include <memory.h>
+#include <sys/mm.h>
 #include <sys/x86.h>
 
 uintptr_t paging_build_identity_map(uintptr_t *map_top, size_t *pages) {
@@ -75,37 +76,15 @@ uintptr_t paging_build_identity_map(uintptr_t *map_top, size_t *pages) {
 }
 
 // Below 4GiB, as the tables paging_build_identity_map() makes.
-static uint64_t *next_table(uint64_t *entry) {
-    if ((*entry & PTE_P) == 0) {
-        uintptr_t table = loader_alloc_reserved(1, UINT32_MAX);
-        if (table == 0) {
-            return NULL;
-        }
-        memset((void *)(uintptr_t)table, 0, EFI_PAGE_SIZE);
-        *entry = table | PTE_P | PTE_W;
+static void *table_page(void) {
+    uintptr_t table = loader_alloc_reserved(1, UINT32_MAX);
+    if (table == 0) {
+        return NULL;
     }
-    return (uint64_t *)(uintptr_t)(*entry & PTE_ADDRESS);
+    memset((void *)(uintptr_t)table, 0, EFI_PAGE_SIZE);
+    return (void *)(uintptr_t)table;
 }
 
 bool paging_map_device(uintptr_t pml4, uintptr_t base, size_t size) {
-    uintptr_t end = align_up(base + size, TWO_MIB);
-    for (uintptr_t a = align_down(base, TWO_MIB); a < end; a += TWO_MIB) {
-        uint64_t *pdpt = next_table((uint64_t *)(uintptr_t)pml4 + x86_level_index(a, 3));
-        if (pdpt == NULL) {
-            return false;
-        }
-        uint64_t *pdpte = pdpt + x86_level_index(a, 2);
-        if ((*pdpte & PTE_PS) != 0) {
-            continue;
-        }
-        uint64_t *pd = next_table(pdpte);
-        if (pd == NULL) {
-            return false;
-        }
-        uint64_t *pde = pd + x86_level_index(a, 1);
-        if ((*pde & PTE_P) == 0) {
-            *pde = a | PTE_P | PTE_W | PTE_PS | PTE_PCD | PTE_PWT;
-        }
-    }
-    return true;
+    return mm_map_device_under((uint64_t *)(uintptr_t)pml4, base, size, table_page);
 }

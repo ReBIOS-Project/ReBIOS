@@ -29,7 +29,8 @@
 uintptr_t paging_build_identity_map(uintptr_t *map_top, size_t *pages);
 
 // Adds [base, base + size) to those tables, uncached, for device memory the
-// core reaches beyond *map_top. False if a table cannot be allocated.
+// core reaches beyond *map_top. False if a table cannot be allocated, or if
+// the range is beyond the tables' reach.
 bool paging_map_device(uintptr_t pml4, uintptr_t base, size_t size);
 
 #endif

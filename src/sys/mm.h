@@ -18,6 +18,7 @@
 #ifndef SYS__MM_H
 #define SYS__MM_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -39,5 +40,9 @@ void mm_write_combining(uintptr_t base, size_t size);
 // its identity map has nothing yet, such as registers of a device above the
 // RAM it covers.
 void mm_map_device(uintptr_t base, size_t size);
+// As mm_map_device() does, under the PML4 at top, with zeroed pages for new
+// tables from alloc_table, which returns NULL when out of them. False if it
+// did, or if the range is beyond the reach of 4-level paging.
+bool mm_map_device_under(uint64_t *top, uintptr_t base, size_t size, void *(*alloc_table)(void));
 
 #endif
