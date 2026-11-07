@@ -32,7 +32,6 @@
 #define IOAPIC_REGSEL 0x00
 #define IOAPIC_WINDOW 0x10
 #define IOAPIC_EOI 0x40
-#define IOAPIC_PAGE_SIZE 0x1000
 
 static struct ioapic *ioapics;
 static size_t count;
@@ -94,7 +93,7 @@ static void add(const struct acpi_madt_ioapic *entry) {
         printf("I/O APIC %u at address 0 is left out\n", entry->id);
         return;
     }
-    if (base + IOAPIC_PAGE_SIZE > core_handoff->map_top) {
+    if (base + IOAPIC_MMIO_SIZE > core_handoff->map_top) {
         printf("I/O APIC %u at %#llx is out of reach\n", entry->id, (unsigned long long)base);
         return;
     }

@@ -23,6 +23,9 @@
 #include <stdint.h>
 #include <lib/spinlock.h>
 
+// The page an I/O APIC's registers are in, from its base.
+#define IOAPIC_MMIO_SIZE 0x1000
+
 #define IOAPIC_REG_ID 0x00
 #define IOAPIC_REG_VERSION 0x01
 #define IOAPIC_REG_ARBITRATION 0x02

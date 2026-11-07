@@ -28,6 +28,8 @@
 #include <uacpi/utilities.h>
 #include <hw/pci_host.h>
 #include <hw/acpi.h>
+#include <hw/ioapic.h>
+#include <hw/lapic.h>
 #include <iommu/iommu_tables.h>
 #include <lib/heap.h>
 #include <lib/log.h>
@@ -41,7 +43,6 @@
 #define AMD_IOMMU_MMIO_LARGE ((uint64_t)0x80000)
 #define AMD_IOMMU_MMIO_SMALL ((uint64_t)0x4000)
 
-#define APIC_MMIO_SIZE ((uint64_t)0x1000)
 #define HPET_MMIO_SIZE ((uint64_t)0x1000)
 // SDM 325462-093 Vol. 3A, 13.11.1: the processors take every access to this
 // range for an interrupt message.
@@ -146,7 +147,7 @@ static void claim_madt(struct scan *r) {
          && entry_length >= sizeof(struct acpi_madt_ioapic)) {
             struct acpi_madt_ioapic entry;
             memcpy(&entry, madt + off, sizeof(struct acpi_madt_ioapic));
-            claim(r, entry.address, APIC_MMIO_SIZE);
+            claim(r, entry.address, IOAPIC_MMIO_SIZE);
         } else if (type == ACPI_MADT_ENTRY_TYPE_LAPIC_ADDRESS_OVERRIDE
                 && entry_length >= sizeof(struct acpi_madt_lapic_address_override)) {
             struct acpi_madt_lapic_address_override entry;
@@ -155,7 +156,7 @@ static void claim_madt(struct scan *r) {
         }
         off += entry_length;
     }
-    claim(r, lapic, APIC_MMIO_SIZE);
+    claim(r, lapic, LAPIC_MMIO_SIZE);
     uacpi_table_unref(&table);
 }
 

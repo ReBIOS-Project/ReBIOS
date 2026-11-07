@@ -85,6 +85,9 @@
 // LINT1, and error.
 #define LAPIC_LVT_COUNT 7
 
+// The local APIC's registers, from its base (SDM 325462-093 Vol. 3A, 13.4.1).
+#define LAPIC_MMIO_SIZE 0x1000
+
 // Interrupt command register fields.
 #define ICR_VECTOR_MASK ((uint32_t)0xff)
 #define ICR_DELIVERY_MASK ((uint32_t)7 << 8)

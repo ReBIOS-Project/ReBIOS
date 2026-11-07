@@ -170,7 +170,7 @@ void lapic_legacy_init(void) {
     firmware_x2apic = (found_base & APIC_BASE_EXTD) != 0;
     bool x2apic = firmware_x2apic && lapic_xapic_locked();
     uintptr_t registers = found_base & APIC_BASE_ADDRESS;
-    if (!x2apic && registers + 0x1000 > core_handoff->map_top) {
+    if (!x2apic && registers + LAPIC_MMIO_SIZE > core_handoff->map_top) {
         printf("Local APIC registers at %#llx are out of reach\n", (unsigned long long)registers);
         return;
     }
