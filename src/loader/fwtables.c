@@ -23,6 +23,7 @@
 #include <loader/fwtables.h>
 #include <handoff.h>
 #include <hw/acpi.h>
+#include <hw/smbios.h>
 #include <lib/log.h>
 #include <lib/util.h>
 #include <loader/efi_glue.h>
@@ -58,33 +59,6 @@
 #define UART_FULL_16550 0x0000
 #define UART_16550_SUBSET 0x0001
 #define UART_16550_GAS 0x0012
-
-struct smbios2_entry {
-    char anchor[4];
-    uint8_t checksum;
-    uint8_t length;
-    uint8_t major;
-    uint8_t minor;
-    uint16_t max_struct_size;
-    uint8_t revision;
-    uint8_t formatted[5];
-    char intermediate_anchor[5];
-    uint8_t intermediate_checksum;
-    uint16_t table_length;
-    uint32_t table_address;
-    uint16_t struct_count;
-    uint8_t bcd_revision;
-} __attribute__((packed));
-
-_Static_assert(sizeof(struct smbios2_entry) == 0x1f, "SMBIOS 2.1 entry point layout");
-
-// SMBIOS 2.1 gave the entry point's length as 1Eh, short of its BCD revision,
-// so 2.1 entry points may say 1Eh or 1Fh (DSP0134 3.9.0, 5.2.1), and Linux
-// 7.3's dmi_present() takes 1Eh to 20h. The intermediate checksum covers 0Fh
-// bytes from 10h, the BCD revision among them, whatever the length says.
-#define SMBIOS2_MIN_LENGTH 0x1e
-#define SMBIOS2_MAX_LENGTH 0x20
-#define SMBIOS2_INTERMEDIATE_SIZE 0x0f
 
 struct smbios3_entry {
     char anchor[5];
@@ -159,12 +133,12 @@ static uint64_t rsdp_find(const EFI_GUID *guid, const char *version) {
 }
 
 // Returns why the entry point is invalid, or NULL.
-static const char *smbios2_check(const struct smbios2_entry *eps) {
-    size_t intermediate = offsetof(struct smbios2_entry, intermediate_anchor);
+static const char *smbios2_check(const struct smbios_entry32 *eps) {
+    size_t intermediate = offsetof(struct smbios_entry32, intermediate_anchor);
     if (memcmp(eps->anchor, "_SM_", sizeof(eps->anchor)) != 0) {
         return "bad anchor";
     }
-    if (eps->length < SMBIOS2_MIN_LENGTH || eps->length > SMBIOS2_MAX_LENGTH) {
+    if (eps->length < SMBIOS_ENTRY32_MIN_LENGTH || eps->length > SMBIOS_ENTRY32_MAX_LENGTH) {
         return "bad length";
     }
     if (checksum8(eps, eps->length) != 0) {
@@ -174,7 +148,7 @@ static const char *smbios2_check(const struct smbios2_entry *eps) {
     if (anchor != 0) {
         return "bad intermediate anchor";
     }
-    uint8_t sum = checksum8((const uint8_t *)eps + intermediate, SMBIOS2_INTERMEDIATE_SIZE);
+    uint8_t sum = checksum8((const uint8_t *)eps + intermediate, SMBIOS_ENTRY32_INTERMEDIATE_SIZE);
     if (sum != 0) {
         return "bad intermediate checksum";
     }
@@ -195,17 +169,7 @@ static const char *smbios3_check(const struct smbios3_entry *eps) {
     return NULL;
 }
 
-static void smbios2_checksum(struct smbios2_entry *eps) {
-    size_t intermediate = offsetof(struct smbios2_entry, intermediate_anchor);
-    eps->intermediate_checksum = 0;
-    eps->intermediate_checksum = (uint8_t)-checksum8(
-        (uint8_t *)eps + intermediate, SMBIOS2_INTERMEDIATE_SIZE
-    );
-    eps->checksum = 0;
-    eps->checksum = (uint8_t)-checksum8(eps, eps->length);
-}
-
-static void smbios_log(const char *how, const struct smbios2_entry *eps) {
+static void smbios_log(const char *how, const struct smbios_entry32 *eps) {
     printf(
         "SMBIOS %u.%u, 32-bit entry point %s %#llx, structure table at %#llx (%u bytes, %u "
         "structure%s)\n", eps->major, eps->minor, how, (unsigned long long)(uintptr_t)eps,
@@ -214,15 +178,15 @@ static void smbios_log(const char *how, const struct smbios2_entry *eps) {
     );
 }
 
-static uint64_t smbios2_use(const struct smbios2_entry *eps) {
+static uint64_t smbios2_use(const struct smbios_entry32 *eps) {
     uintptr_t eps_addr = (uintptr_t)eps;
     uintptr_t table = eps->table_address;
     // A 1Eh-byte entry point goes to a copy with its BCD revision, past that
     // length, and the length that 2.2 corrected, from which SeaBIOS's checks
     // take the intermediate checksum's size.
-    size_t size = eps->length > sizeof(struct smbios2_entry)
+    size_t size = eps->length > sizeof(struct smbios_entry32)
                 ? eps->length
-                : sizeof(struct smbios2_entry);
+                : sizeof(struct smbios_entry32);
     if (eps->length == size && eps_addr + size <= FOUR_GIB
      && table + eps->table_length <= FOUR_GIB) {
         smbios_log("at", eps);
@@ -236,12 +200,12 @@ static uint64_t smbios2_use(const struct smbios2_entry *eps) {
         printf("Cannot allocate memory below 4GiB for the SMBIOS tables\n");
         return 0;
     }
-    struct smbios2_entry *new_eps = (struct smbios2_entry *)(uintptr_t)copy;
+    struct smbios_entry32 *new_eps = (struct smbios_entry32 *)(uintptr_t)copy;
     memcpy(new_eps, eps, size);
     memcpy((uint8_t *)new_eps + size, (const void *)(uintptr_t)table, eps->table_length);
     new_eps->length = (uint8_t)size;
     new_eps->table_address = copy + size;
-    smbios2_checksum(new_eps);
+    smbios_entry32_checksum(new_eps);
     smbios_log("copied to", new_eps);
     return copy;
 }
@@ -312,7 +276,7 @@ static uint64_t smbios3_synthesise(const struct smbios3_entry *eps3) {
     }
 
     uintptr_t addr = efi_alloc_pages_typed(
-        EFI_SIZE_TO_PAGES(sizeof(struct smbios2_entry) + walk.length), UINT32_MAX,
+        EFI_SIZE_TO_PAGES(sizeof(struct smbios_entry32) + walk.length), UINT32_MAX,
         EfiRuntimeServicesData
     );
     if (addr == 0) {
@@ -320,22 +284,22 @@ static uint64_t smbios3_synthesise(const struct smbios3_entry *eps3) {
         return 0;
     }
 
-    struct smbios2_entry *eps = (struct smbios2_entry *)(uintptr_t)addr;
-    memset(eps, 0, sizeof(struct smbios2_entry));
+    struct smbios_entry32 *eps = (struct smbios_entry32 *)(uintptr_t)addr;
+    memset(eps, 0, sizeof(struct smbios_entry32));
     memcpy(eps->anchor, "_SM_", sizeof(eps->anchor));
-    eps->length = sizeof(struct smbios2_entry);
+    eps->length = sizeof(struct smbios_entry32);
     eps->major = eps3->major;
     eps->minor = eps3->minor;
     eps->max_struct_size = walk.largest;
     memcpy(eps->intermediate_anchor, "_DMI_", sizeof(eps->intermediate_anchor));
     eps->table_length = walk.length;
-    eps->table_address = addr + sizeof(struct smbios2_entry);
+    eps->table_address = addr + sizeof(struct smbios_entry32);
     eps->struct_count = walk.count;
     eps->bcd_revision = (eps3->major % 10) << 4 | eps3->minor % 10;
     memcpy(
-        (uint8_t *)eps + sizeof(struct smbios2_entry), (const void *)(uintptr_t)table, walk.length
+        (uint8_t *)eps + sizeof(struct smbios_entry32), (const void *)(uintptr_t)table, walk.length
     );
-    smbios2_checksum(eps);
+    smbios_entry32_checksum(eps);
     smbios_log("synthesised at", eps);
     return addr;
 }
@@ -348,7 +312,7 @@ static const uint8_t *smbios_structures(uint64_t *size) {
         *size = eps3->table_max_size;
         return (const uint8_t *)(uintptr_t)eps3->table_address;
     }
-    const struct smbios2_entry *eps2 = config_table_find(&smbios_guid);
+    const struct smbios_entry32 *eps2 = config_table_find(&smbios_guid);
     if (eps2 != NULL && smbios2_check(eps2) == NULL) {
         *size = eps2->table_length;
         return (const uint8_t *)(uintptr_t)eps2->table_address;
@@ -572,7 +536,7 @@ bool fwtables_smbios_byte(uint8_t type, uint8_t offset, uint8_t *value) {
 }
 
 static uint64_t smbios_find(void) {
-    const struct smbios2_entry *eps2 = config_table_find(&smbios_guid);
+    const struct smbios_entry32 *eps2 = config_table_find(&smbios_guid);
     if (eps2 != NULL) {
         const char *problem = smbios2_check(eps2);
         if (problem == NULL) {

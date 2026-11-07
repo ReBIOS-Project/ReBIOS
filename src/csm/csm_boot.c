@@ -29,6 +29,7 @@
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
 #include <hw/pci_regs.h>
+#include <hw/smbios.h>
 #include <iommu/dma.h>
 #include <lib/heap.h>
 #include <lib/log.h>
@@ -83,17 +84,6 @@ extern const uint8_t csm_thunk_end[];
 #define HIGH_PMM_SIZE ((uint32_t)8 << 20)
 #define HIGH_PMM_ALIGN 0x10000
 
-// The 2.x SMBIOS entry point's fields. The structure table goes right after
-// the longest entry point there is.
-#define SMBIOS2_CHECKSUM 0x04
-#define SMBIOS2_LENGTH 0x05
-#define SMBIOS2_INTERMEDIATE 0x10
-#define SMBIOS2_INTERMEDIATE_SIZE 0x0f
-#define SMBIOS2_INTERMEDIATE_CHECKSUM 0x15
-#define SMBIOS2_TABLE_LENGTH 0x16
-#define SMBIOS2_TABLE_ADDRESS 0x18
-#define SMBIOS2_ENTRY_SPACE 0x20
-
 _Static_assert(
     E820_TABLE + E820_MAX_ENTRIES * sizeof(struct e820_entry) <= BBS_TABLE,
     "E820 table overlaps the BBS table"
@@ -144,22 +134,23 @@ static uint32_t e820_build(void) {
 }
 
 // The firmware's SMBIOS tables need not be in memory the guest sees, so the
-// guest gets a copy, at the top of its RAM. Returns the copy's entry point.
+// guest gets a copy, at the top of its RAM, the structure table right after
+// the longest entry point there is. Returns the copy's entry point.
 static uint32_t smbios_copy(size_t *table_length) {
     *table_length = 0;
     if (core_handoff->smbios_entry == 0) {
         return 0;
     }
-    const uint8_t *entry = (const void *)(uintptr_t)core_handoff->smbios_entry;
-    size_t entry_length = entry[SMBIOS2_LENGTH];
-    size_t length = read_le16(entry + SMBIOS2_TABLE_LENGTH);
-    uintptr_t table = read_le32(entry + SMBIOS2_TABLE_ADDRESS);
-    if (entry_length > SMBIOS2_ENTRY_SPACE) {
+    const struct smbios_entry32 *entry = (const void *)(uintptr_t)core_handoff->smbios_entry;
+    size_t entry_length = entry->length;
+    size_t length = entry->table_length;
+    uintptr_t table = entry->table_address;
+    if (entry_length > SMBIOS_ENTRY32_MAX_LENGTH) {
         printf("SMBIOS entry point of %zu bytes\n", entry_length);
         return 0;
     }
 
-    size_t size = SMBIOS2_ENTRY_SPACE + length;
+    size_t size = SMBIOS_ENTRY32_MAX_LENGTH + length;
     uintptr_t base = layout_take(size, 16, E820_RESERVED);
     if (base == 0) {
         printf("No room in the guest's memory for the SMBIOS tables\n");
@@ -167,15 +158,10 @@ static uint32_t smbios_copy(size_t *table_length) {
     }
     uint8_t *copy = kmalloc(size);
     memcpy(copy, entry, entry_length);
-    memcpy(copy + SMBIOS2_ENTRY_SPACE, (const void *)(uintptr_t)table, length);
-    uintptr_t guest_table = base + SMBIOS2_ENTRY_SPACE;
-    write_le32(copy + SMBIOS2_TABLE_ADDRESS, (uint32_t)guest_table);
-    copy[SMBIOS2_INTERMEDIATE_CHECKSUM] = 0;
-    copy[SMBIOS2_INTERMEDIATE_CHECKSUM] = (uint8_t)-checksum8(
-        copy + SMBIOS2_INTERMEDIATE, SMBIOS2_INTERMEDIATE_SIZE
-    );
-    copy[SMBIOS2_CHECKSUM] = 0;
-    copy[SMBIOS2_CHECKSUM] = (uint8_t)-checksum8(copy, entry_length);
+    memcpy(copy + SMBIOS_ENTRY32_MAX_LENGTH, (const void *)(uintptr_t)table, length);
+    struct smbios_entry32 *copy_entry = (struct smbios_entry32 *)copy;
+    copy_entry->table_address = (uint32_t)(base + SMBIOS_ENTRY32_MAX_LENGTH);
+    smbios_entry32_checksum(copy_entry);
     guest_phys_write(base, copy, size);
     kfree(copy);
     *table_length = length;
