@@ -15,29 +15,38 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <virt/a20.h>
 #include <lib/spinlock.h>
+#include <sys/cpu.h>
+#include <sys/smp.h>
 #include <sys/x86.h>
 #include <virt/gpt.h>
 #include <virt/io.h>
+#include <virt/vcpu.h>
 
 #define SYSTEM_CONTROL_A 0x92
 
 // In the output port and the system control port alike.
 #define A20_BIT 0x02
+// The system control port's INIT_NOW (ICH10 datasheet 319973-003, 13.7.3).
+#define INIT_NOW 0x01
 
 static struct spinlock lock;
-// The chipset ORs the two into the gate (PIIX4 datasheet 290562-001, Port 92h
+// The guest's system control port, which never reaches the hardware, its
+// reserved bits as the hardware's were when the hypervisor took over.
+static uint8_t system_control;
+// The keyboard controller's A20 line. The chipset ORs it with the system
+// control port's A20 bit into the gate (PIIX4 datasheet 290562-001, Port 92h
 // register): each reads back as the guest set it.
-static bool port92_open;
 static bool kbc_open = true;
 static bool gate_open = true;
 
 static void update_gate(void) {
-    bool want_open = port92_open || kbc_open;
+    bool want_open = (system_control & A20_BIT) != 0 || kbc_open;
     if (want_open == gate_open) {
         return;
     }
@@ -57,8 +66,19 @@ static void pass_rest(uint16_t port, size_t size, bool in, uint32_t *value) {
     }
 }
 
-static uint8_t with_a20(uint8_t value, bool open) {
-    return (uint8_t)((value & ~A20_BIT) | (open ? A20_BIT : 0));
+// INIT# reaches every processor, as an INIT IPI does, which leaves one that
+// waits for a start-up IPI waiting.
+static void init_processors(void) {
+    for (size_t i = 0; i < smp_cpu_count(); i++) {
+        struct cpu *cpu = smp_cpu(i);
+        struct vcpu *to = cpu->vcpu;
+        if (to == NULL
+         || atomic_load_explicit(&to->sipi, memory_order_acquire) != VCPU_SIPI_RUNNING) {
+            continue;
+        }
+        atomic_store_explicit(&cpu->init_pending, true, memory_order_release);
+        vcpu_kick(cpu);
+    }
 }
 
 static void system_control_a(
@@ -69,11 +89,18 @@ static void system_control_a(
     (void)offset;
     spinlock_acquire(&lock);
     if (in) {
-        *value = with_a20(inb(SYSTEM_CONTROL_A), port92_open);
+        *value = system_control;
     } else {
-        port92_open = (*value & A20_BIT) != 0;
+        uint8_t old = system_control;
+        uint8_t written = (uint8_t)*value & (INIT_NOW | A20_BIT);
+        system_control = (uint8_t)((system_control & ~(INIT_NOW | A20_BIT)) | written);
+        // INIT_NOW's rise asserts INIT#, which sets the A20 bit (ICH10
+        // datasheet 319973-003, 13.7.3).
+        if ((old & INIT_NOW) == 0 && (written & INIT_NOW) != 0) {
+            system_control |= A20_BIT;
+            init_processors();
+        }
         update_gate();
-        outb(SYSTEM_CONTROL_A, (uint8_t)(*value | A20_BIT));
     }
     pass_rest(SYSTEM_CONTROL_A, size, in, value);
     spinlock_release(&lock);
@@ -87,10 +114,12 @@ void a20_kbc_set(bool open) {
 }
 
 void a20_init(void) {
-    // The keyboard controller's A20 line comes up raised, port 92h's bit as
-    // the hardware has it.
-    port92_open = (inb(SYSTEM_CONTROL_A) & A20_BIT) != 0;
+    // The keyboard controller's A20 line comes up raised, and the system
+    // control port as the hardware has it, whose own A20 bit then holds the
+    // host's gate open, whatever the keyboard controller's line.
+    system_control = inb(SYSTEM_CONTROL_A);
+    outb(SYSTEM_CONTROL_A, (uint8_t)(system_control | A20_BIT));
 
-    struct io_handler system_control = { SYSTEM_CONTROL_A, 1, system_control_a, NULL };
-    io_register(&system_control);
+    struct io_handler handler = { SYSTEM_CONTROL_A, 1, system_control_a, NULL };
+    io_register(&handler);
 }
