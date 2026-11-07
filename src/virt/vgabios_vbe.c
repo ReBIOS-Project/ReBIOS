@@ -23,24 +23,9 @@
 #include <stdint.h>
 #include <lib/util.h>
 #include <memory.h>
+#include <virt/dispi.h>
 #include <virt/vga.h>
 #include <virt/vgabios.h>
-
-#define DISPI_XRES 0x1
-#define DISPI_YRES 0x2
-#define DISPI_BPP 0x3
-#define DISPI_ENABLE 0x4
-#define DISPI_BANK 0x5
-#define DISPI_VIRT_WIDTH 0x6
-#define DISPI_VIRT_HEIGHT 0x7
-#define DISPI_X_OFFSET 0x8
-#define DISPI_Y_OFFSET 0x9
-#define DISPI_VIDEO_MEMORY_64K 0xa
-#define DISPI_ENABLED 0x01
-#define DISPI_8BIT_DAC 0x20
-#define DISPI_LFB_ENABLED 0x40
-#define DISPI_NOCLEARMEM 0x80
-#define DISPI_MAX_XRES 16000
 
 #define STATUS_SUCCESS 0x004f
 #define STATUS_FAILED 0x014f
