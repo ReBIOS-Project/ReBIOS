@@ -274,14 +274,11 @@ bool lapic_host_mode(bool x2apic) {
 }
 
 uint64_t lapic_timer_to_tsc(uint64_t ticks) {
-    uint64_t hz = time_tsc_hz();
-    // Split, so that the product cannot overflow.
-    return ticks / timer_hz * hz + ticks % timer_hz * hz / timer_hz;
+    return mul_div(ticks, time_tsc_hz(), timer_hz);
 }
 
 uint64_t lapic_timer_from_tsc(uint64_t tsc) {
-    uint64_t hz = time_tsc_hz();
-    return tsc / hz * timer_hz + tsc % hz * timer_hz / hz;
+    return mul_div(tsc, timer_hz, time_tsc_hz());
 }
 
 static void timer_measure(uint8_t timer_vector) {

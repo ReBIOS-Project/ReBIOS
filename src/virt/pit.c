@@ -25,6 +25,7 @@
 #include <lib/log.h>
 #include <lib/spinlock.h>
 #include <lib/time.h>
+#include <lib/util.h>
 #include <sys/cpu.h>
 #include <sys/x86.h>
 #include <virt/hpet.h>
@@ -139,9 +140,7 @@ static uint64_t ticks_since(uint64_t start, uint64_t now) {
         return 0;
     }
     uint64_t elapsed = now - start;
-    uint64_t hz = time_tsc_hz();
-    // Split, so that the product cannot overflow.
-    return elapsed / hz * PIT_HZ + elapsed % hz * PIT_HZ / hz;
+    return mul_div(elapsed, PIT_HZ, time_tsc_hz());
 }
 
 static uint64_t ticks_to_tsc(uint64_t ticks) {

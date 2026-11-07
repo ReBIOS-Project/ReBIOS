@@ -17,6 +17,7 @@
 
 #include <stdint.h>
 #include <lib/time.h>
+#include <lib/util.h>
 #include <sys/x86.h>
 
 static uint64_t tsc_hz;
@@ -36,9 +37,7 @@ uint64_t time_tsc_hz(void) {
 }
 
 uint64_t time_ns(void) {
-    uint64_t ticks = rdtsc() - tsc_start;
-    // Split, so that the product cannot overflow.
-    return ticks / tsc_hz * 1000000000 + ticks % tsc_hz * 1000000000 / tsc_hz;
+    return mul_div(rdtsc() - tsc_start, 1000000000, tsc_hz);
 }
 
 void time_udelay(uint64_t us) {

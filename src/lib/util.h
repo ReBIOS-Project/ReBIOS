@@ -79,6 +79,12 @@ static inline void write_le64(void *p, uint64_t value) {
     memcpy(p, &value, sizeof(uint64_t));
 }
 
+// value * multiplier / divisor, rounded down, split so that it is exact
+// wherever multiplier * divisor fits in 64 bits, however large value is.
+static inline uint64_t mul_div(uint64_t value, uint64_t multiplier, uint64_t divisor) {
+    return value / divisor * multiplier + value % divisor * multiplier / divisor;
+}
+
 // The sum of size bytes at data, modulo 256: 0 over a table, ACPI's, SMBIOS's,
 // and the like, whose checksum is right.
 static inline uint8_t checksum8(const void *data, size_t size) {
