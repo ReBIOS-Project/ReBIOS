@@ -277,7 +277,11 @@ it adds back of the legacy PC:
   tables of its own, in AML that ACPI 1.0 interpreters such as Windows 98's
   understand, whose methods call into ReBIOS to run the firmware's: the OS
   still sees the machine's devices and gets their events, and the memory the
-  firmware keeps for its AML no longer breaks up the OS's.
+  firmware keeps for its AML no longer breaks up the OS's. An OS without ACPI
+  gets what the firmware gives one outside ACPI mode: the power button powers
+  the machine off, and ReBIOS watches the thermal zones for it, powering the
+  machine off past their critical trip points, running their fans, and
+  slowing their processors down past their passive ones.
 - **A real VGA without a legacy Video BIOS.** Where CSMWrap has to fall back to
   SeaVGABIOS, with which only text written through the BIOS shows, ReBIOS
   emulates a complete VGA, with VBE modes up to the screen's resolution (see
