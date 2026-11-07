@@ -28,6 +28,7 @@
 #include <hw/acpi_irq.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
+#include <hw/pci_regs.h>
 #include <iommu/dma.h>
 #include <lib/heap.h>
 #include <lib/log.h>
@@ -373,7 +374,6 @@ void csm_boot_returned(struct vcpu *v) {
     }
 }
 
-#define PCI_INTERRUPT_LINE 0x3c
 #define PCI_INTERRUPT_LINE_NONE 0xff
 
 static bool same_function(struct pci_addr a, struct pci_addr b) {

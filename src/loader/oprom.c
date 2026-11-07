@@ -21,6 +21,7 @@
 #include <efi.h>
 #include <loader/oprom.h>
 #include <handoff.h>
+#include <hw/pci_regs.h>
 #include <lib/log.h>
 #include <lib/util.h>
 #include <loader/efi_glue.h>
@@ -71,7 +72,7 @@ void oprom_collect(void) {
     for (size_t i = 0; i < dev_count; i++) {
         const struct pci_io_device *dev = &devices[i];
         if (dev->io->RomImage == NULL || dev->io->RomSize == 0
-         || dev->base_class == PCI_CLASS_DISPLAY
+         || dev->base_class == PCI_BASE_CLASS_DISPLAY
          || (video->vga_present && pci_address_equal(dev->address, video->vga_device))) {
             continue;
         }

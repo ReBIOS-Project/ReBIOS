@@ -21,6 +21,7 @@
 #include <efi.h>
 #include <loader/video.h>
 #include <handoff.h>
+#include <hw/pci_regs.h>
 #include <lib/log.h>
 #include <lib/printf.h>
 #include <lib/util.h>
@@ -634,7 +635,7 @@ static bool try_display_devices(struct vbios_choice *choice) {
     bool found = false;
 
     for (size_t i = 0; i < count && !found; i++) {
-        if (devices[i].base_class == PCI_CLASS_DISPLAY) {
+        if (devices[i].base_class == PCI_BASE_CLASS_DISPLAY) {
             found = try_device(&devices[i], NULL, choice);
         }
     }

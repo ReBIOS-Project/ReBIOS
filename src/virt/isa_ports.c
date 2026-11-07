@@ -30,6 +30,7 @@
 #include <handoff.h>
 #include <hw/acpi.h>
 #include <hw/pci_enum.h>
+#include <hw/pci_regs.h>
 #include <lib/log.h>
 #include <virt/io.h>
 #include <virt/irq.h>
@@ -47,8 +48,6 @@ static const char *const port_ids[] = { "PNP0500", "PNP0501", "PNP0400", "PNP040
 
 // An IDE controller's channels in compatibility mode, at the PC/AT's ports and
 // on its IRQs (ICH10 datasheet 319973-003, 14.1.6).
-#define CLASS_STORAGE 0x01
-#define SUBCLASS_IDE 0x01
 #define IDE_PRIMARY_NATIVE 0x01
 #define IDE_SECONDARY_NATIVE 0x04
 #define IDE_PRIMARY_BASE 0x1f0
@@ -361,7 +360,7 @@ static void give_ide_channels(void) {
     const struct pci_topology *t = pci_enum_topology();
     for (size_t i = 0; t != NULL && i < t->function_count; i++) {
         const struct pci_function *f = &t->functions[i];
-        if (f->base_class != CLASS_STORAGE || f->subclass != SUBCLASS_IDE) {
+        if (f->base_class != PCI_BASE_CLASS_STORAGE || f->subclass != PCI_SUBCLASS_STORAGE_IDE) {
             continue;
         }
         if ((f->prog_if & IDE_PRIMARY_NATIVE) == 0) {

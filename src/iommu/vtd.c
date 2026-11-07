@@ -20,7 +20,9 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <iommu/vtd.h>
+#include <hw/lapic.h>
 #include <hw/pci_cfg.h>
+#include <hw/pci_regs.h>
 #include <iommu/iommu_tables.h>
 #include <lib/heap.h>
 #include <lib/log.h>
@@ -57,11 +59,6 @@
 #define CAP_DWD ((uint64_t)1 << 54)
 #define CAP_DRD ((uint64_t)1 << 55)
 #define CAP_PI ((uint64_t)1 << 59)
-
-#define PCI_VENDOR_INTEL 0x8086
-#define PCI_CLASS_REVISION 0x08
-#define PCI_BASE_CLASS_DISPLAY 0x03
-#define PCI_CLASS_BRIDGE_HOST 0x0600
 
 #define MODEL_SANDY_BRIDGE 0x2a
 #define MODEL_SANDY_BRIDGE_X 0x2d
@@ -119,7 +116,6 @@
 #define IRTE_VECTOR_SHIFT 16
 #define IRTE_DEST_SHIFT 40
 // Remappable format messages (5.1.5.2) and I/O APIC entries (5.1.5.1).
-#define MSI_ADDRESS ((uint32_t)0xfee00000)
 #define MSI_REMAPPABLE ((uint32_t)1 << 4)
 #define MSI_SHV ((uint32_t)1 << 3)
 #define RTE_REMAPPABLE ((uint64_t)1 << 48)
@@ -299,7 +295,7 @@ static bool remapping_broken(void) {
     struct pci_addr host = { 0, 0, 0, 0 };
     uint32_t id = pci_cfg_read(host, 0, 4);
     uint32_t class_revision = pci_cfg_read(host, PCI_CLASS_REVISION, 4);
-    if ((id & 0xffff) != PCI_VENDOR_INTEL || class_revision >> 16 != PCI_CLASS_BRIDGE_HOST) {
+    if ((id & 0xffff) != PCI_VENDOR_ID_INTEL || class_revision >> 16 != PCI_CLASS_BRIDGE_HOST) {
         return false;
     }
     uint16_t device = (uint16_t)(id >> 16);
@@ -334,7 +330,7 @@ static bool keep_translating(const struct iommu_tables *tables, uint32_t index, 
                 return false;
             }
             for (size_t j = 0; j < ARRAY_COUNT(keep_translating_ids); j++) {
-                if ((id & 0xffff) == PCI_VENDOR_INTEL && id >> 24 == keep_translating_ids[j]) {
+                if ((id & 0xffff) == PCI_VENDOR_ID_INTEL && id >> 24 == keep_translating_ids[j]) {
                     listed = true;
                 }
             }
@@ -656,7 +652,7 @@ void vtd_remap_x2apic(bool on) {
 }
 
 void vtd_remap_message(uint16_t index, uint32_t *address, uint32_t *data) {
-    *address = MSI_ADDRESS | ((uint32_t)index & 0x7fff) << 5 | MSI_REMAPPABLE | MSI_SHV
+    *address = MSI_ADDRESS_BASE | ((uint32_t)index & 0x7fff) << 5 | MSI_REMAPPABLE | MSI_SHV
              | ((uint32_t)index >> 15 & 1) << 2;
     *data = 0;
 }

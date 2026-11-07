@@ -23,6 +23,7 @@
 #include <handoff.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
+#include <hw/pci_regs.h>
 #include <lib/heap.h>
 #include <memory.h>
 #include <virt/pci_plan.h>
@@ -31,50 +32,21 @@
 // 1.1, 3.2, and the capabilities' registers as Linux 7.3's
 // include/uapi/linux/pci_regs.h lays them out.
 #define CONFIG_SIZE 256
-#define REG_VENDOR 0x00
-#define REG_DEVICE 0x02
-#define REG_COMMAND 0x04
-#define REG_STATUS 0x06
-#define REG_CLASS_REVISION 0x08
-#define REG_CACHE_LINE 0x0c
-#define REG_HEADER_TYPE 0x0e
-#define REG_BUS_NUMBERS 0x18
-#define REG_IO_BASE 0x1c
-#define REG_IO_LIMIT 0x1d
-#define REG_MEMORY_BASE 0x20
-#define REG_MEMORY_LIMIT 0x22
-#define REG_PREF_BASE 0x24
-#define REG_PREF_LIMIT 0x26
-#define REG_PREF_BASE_UPPER 0x28
-#define REG_PREF_LIMIT_UPPER 0x2c
-#define REG_CAPABILITIES 0x34
-#define REG_INTERRUPT_LINE 0x3c
-#define REG_BRIDGE_CONTROL 0x3e
 
 #define CLASS_BRIDGE_PCI ((uint32_t)0x060400)
 // PCI-to-PCI Bridge Architecture Specification 1.1, 4.6: class code 060401h,
 // subtractive decode.
 #define CLASS_SUBTRACTIVE ((uint32_t)0x01)
-#define CLASS_BRIDGE 0x06
-#define SUBCLASS_ISA 0x01
-#define HEADER_BRIDGE 0x01
-#define HEADER_MULTI_FUNCTION 0x80
-#define STATUS_CAPABILITIES 0x0010
 // I/O, memory, bus master, parity error response, SERR#, INTx disable.
 #define COMMAND_WRITABLE 0x0547
 // Parity error response, SERR#, ISA, VGA, VGA 16-bit decode, secondary bus
 // reset.
 #define BRIDGE_CONTROL_WRITABLE 0x005f
-#define BRIDGE_CONTROL_VGA 0x0008
-#define BRIDGE_CONTROL_VGA_16 0x0010
 #define IO_WINDOW 0xf0
 #define MEMORY_WINDOW 0xfff0
-#define WINDOW_PREF_64 0x0001
 
 #define CAP_PCIE 0x40
 #define CAP_PM 0x80
-#define CAP_ID_PCIE 0x10
-#define CAP_ID_PM 0x01
 // PCI_EXP_FLAGS: version 2, the upstream port of a switch, the one kind of
 // bridge below which an OS looks for every device and reaches their extended
 // configuration space: it looks for device 0 alone below a root or downstream
@@ -207,7 +179,7 @@ static bool vga_below(const struct pci_topology *t, size_t root, bool *decode_16
         return false;
     }
     if (f->parent != NULL) {
-        *decode_16 = (f->parent->bridge_control & BRIDGE_CONTROL_VGA_16) != 0;
+        *decode_16 = (f->parent->bridge_control & PCI_BRIDGE_CTL_VGA_16BIT) != 0;
     }
     return true;
 }
@@ -218,7 +190,7 @@ static bool vga_below(const struct pci_topology *t, size_t root, bool *decode_16
 static bool isa_below(const struct pci_topology *t, size_t root) {
     for (size_t i = 0; i < t->function_count; i++) {
         const struct pci_function *f = &t->functions[i];
-        if (f->base_class == CLASS_BRIDGE && f->subclass == SUBCLASS_ISA
+        if (f->base_class == PCI_BASE_CLASS_BRIDGE && f->subclass == PCI_SUBCLASS_BRIDGE_ISA
          && root_of(t, f) == root) {
             return true;
         }
@@ -245,31 +217,32 @@ static void port_build(
     uint8_t *w = p->writable;
     memset(p, 0, sizeof(struct port));
 
-    put(c, REG_VENDOR, 2, vendor);
-    put(c, REG_DEVICE, 2, PORT_DEVICE_ID);
-    put(c, REG_STATUS, 2, STATUS_CAPABILITIES);
+    put(c, PCI_VENDOR_ID, 2, vendor);
+    put(c, PCI_DEVICE_ID, 2, PORT_DEVICE_ID);
+    put(c, PCI_STATUS, 2, PCI_STATUS_CAP_LIST);
     uint32_t class = CLASS_BRIDGE_PCI | (isa_below(t, pp->root) ? CLASS_SUBTRACTIVE : 0);
-    put(c, REG_CLASS_REVISION, 4, class << 8);
-    put(c, REG_HEADER_TYPE, 1, HEADER_BRIDGE | (multi ? HEADER_MULTI_FUNCTION : 0));
-    put(c, REG_BUS_NUMBERS, 3, (uint32_t)pp->secondary << 8 | (uint32_t)pp->subordinate << 16);
-    put(c, REG_IO_BASE, 1, (pp->io_base >> 8) & IO_WINDOW);
-    put(c, REG_IO_LIMIT, 1, (pp->io_limit >> 8) & IO_WINDOW);
-    put(c, REG_MEMORY_BASE, 2, window_word(pp->mem_base));
-    put(c, REG_MEMORY_LIMIT, 2, window_word(pp->mem_limit));
-    put(c, REG_PREF_BASE, 2, window_word(pp->pref_base) | WINDOW_PREF_64);
-    put(c, REG_PREF_LIMIT, 2, window_word(pp->pref_limit) | WINDOW_PREF_64);
-    put(c, REG_PREF_BASE_UPPER, 4, (uint32_t)(pp->pref_base >> 32));
-    put(c, REG_PREF_LIMIT_UPPER, 4, (uint32_t)(pp->pref_limit >> 32));
-    put(c, REG_CAPABILITIES, 1, CAP_PCIE);
+    put(c, PCI_CLASS_REVISION, 4, class << 8);
+    put(c, PCI_HEADER_TYPE, 1, PCI_HEADER_TYPE_BRIDGE | (multi ? PCI_HEADER_TYPE_MFD : 0));
+    put(c, PCI_PRIMARY_BUS, 3, (uint32_t)pp->secondary << 8 | (uint32_t)pp->subordinate << 16);
+    put(c, PCI_IO_BASE, 1, (pp->io_base >> 8) & IO_WINDOW);
+    put(c, PCI_IO_LIMIT, 1, (pp->io_limit >> 8) & IO_WINDOW);
+    put(c, PCI_MEMORY_BASE, 2, window_word(pp->mem_base));
+    put(c, PCI_MEMORY_LIMIT, 2, window_word(pp->mem_limit));
+    put(c, PCI_PREF_MEMORY_BASE, 2, window_word(pp->pref_base) | PCI_PREF_RANGE_TYPE_64);
+    put(c, PCI_PREF_MEMORY_LIMIT, 2, window_word(pp->pref_limit) | PCI_PREF_RANGE_TYPE_64);
+    put(c, PCI_PREF_BASE_UPPER32, 4, (uint32_t)(pp->pref_base >> 32));
+    put(c, PCI_PREF_LIMIT_UPPER32, 4, (uint32_t)(pp->pref_limit >> 32));
+    put(c, PCI_CAPABILITY_LIST, 1, CAP_PCIE);
     bool decode_16;
     if (vga_below(t, pp->root, &decode_16)) {
         put(
-            c, REG_BRIDGE_CONTROL, 2, BRIDGE_CONTROL_VGA | (decode_16 ? BRIDGE_CONTROL_VGA_16 : 0)
+            c, PCI_BRIDGE_CONTROL, 2,
+            PCI_BRIDGE_CTL_VGA | (decode_16 ? PCI_BRIDGE_CTL_VGA_16BIT : 0)
         );
     }
 
     struct below b = below_port(t, &t->root_buses[pp->root]);
-    put(c, CAP_PCIE, 1, CAP_ID_PCIE);
+    put(c, CAP_PCIE, 1, PCI_CAP_ID_EXP);
     put(c, CAP_PCIE + 1, 1, CAP_PM);
     put(c, CAP_PCIE + 2, 2, PCIE_FLAGS);
     put(c, CAP_PCIE + PCIE_DEVCAP, 4, b.payload_max | DEVCAP_RBER);
@@ -282,23 +255,23 @@ static void port_build(
     put(c, CAP_PCIE + PCIE_LNKSTA, 2, b.speed | b.width << LNKCAP_MLW_SHIFT);
     put(c, CAP_PCIE + PCIE_LNKCAP2, 4, (((uint32_t)1 << b.speed) - 1) << 1);
     put(c, CAP_PCIE + PCIE_LNKCTL2, 2, b.speed);
-    put(c, CAP_PM, 1, CAP_ID_PM);
+    put(c, CAP_PM, 1, PCI_CAP_ID_PM);
     put(c, CAP_PM + PM_PMC, 2, PMC_VERSION);
     put(c, CAP_PM + PM_CTRL, 2, PM_CTRL_NO_SOFT_RESET);
 
-    put(w, REG_COMMAND, 2, COMMAND_WRITABLE);
-    put(w, REG_CACHE_LINE, 1, 0xff);
-    put(w, REG_BUS_NUMBERS, 3, 0xffffff);
-    put(w, REG_IO_BASE, 1, IO_WINDOW);
-    put(w, REG_IO_LIMIT, 1, IO_WINDOW);
-    put(w, REG_MEMORY_BASE, 2, MEMORY_WINDOW);
-    put(w, REG_MEMORY_LIMIT, 2, MEMORY_WINDOW);
-    put(w, REG_PREF_BASE, 2, MEMORY_WINDOW);
-    put(w, REG_PREF_LIMIT, 2, MEMORY_WINDOW);
-    put(w, REG_PREF_BASE_UPPER, 4, 0xffffffff);
-    put(w, REG_PREF_LIMIT_UPPER, 4, 0xffffffff);
-    put(w, REG_INTERRUPT_LINE, 1, 0xff);
-    put(w, REG_BRIDGE_CONTROL, 2, BRIDGE_CONTROL_WRITABLE);
+    put(w, PCI_COMMAND, 2, COMMAND_WRITABLE);
+    put(w, PCI_CACHE_LINE_SIZE, 1, 0xff);
+    put(w, PCI_PRIMARY_BUS, 3, 0xffffff);
+    put(w, PCI_IO_BASE, 1, IO_WINDOW);
+    put(w, PCI_IO_LIMIT, 1, IO_WINDOW);
+    put(w, PCI_MEMORY_BASE, 2, MEMORY_WINDOW);
+    put(w, PCI_MEMORY_LIMIT, 2, MEMORY_WINDOW);
+    put(w, PCI_PREF_MEMORY_BASE, 2, MEMORY_WINDOW);
+    put(w, PCI_PREF_MEMORY_LIMIT, 2, MEMORY_WINDOW);
+    put(w, PCI_PREF_BASE_UPPER32, 4, 0xffffffff);
+    put(w, PCI_PREF_LIMIT_UPPER32, 4, 0xffffffff);
+    put(w, PCI_INTERRUPT_LINE, 1, 0xff);
+    put(w, PCI_BRIDGE_CONTROL, 2, BRIDGE_CONTROL_WRITABLE);
     put(w, CAP_PCIE + PCIE_DEVCTL, 2, DEVCTL_WRITABLE);
     put(w, CAP_PCIE + PCIE_LNKCTL, 2, LNKCTL_WRITABLE);
     put(w, CAP_PCIE + PCIE_LNKCTL2, 2, LNKCTL2_WRITABLE);

@@ -27,6 +27,7 @@
 #include <handoff.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
+#include <hw/pci_regs.h>
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/time.h>
@@ -51,8 +52,6 @@
 #define MAX_CONTROLLERS 16
 #define MAX_KEYBOARDS 8
 
-#define PCI_CLASS_SERIAL_BUS 0x0c
-#define PCI_SUBCLASS_USB 0x03
 #define UHCI_BAR 4
 
 // Enough for a controller's rings and scratchpad, and a transfer's bounce
@@ -522,7 +521,7 @@ void usb_init(void) {
         int type;
         uint32_t class_code = (uint32_t)f->base_class << 16 | (uint32_t)f->subclass << 8
                             | f->prog_if;
-        if (f->base_class == PCI_CLASS_SERIAL_BUS && f->subclass == PCI_SUBCLASS_USB
+        if (f->base_class == PCI_BASE_CLASS_SERIAL && f->subclass == PCI_SUBCLASS_SERIAL_USB
          && tendril_pci_hc_type(class_code, &type)) {
             controller_add(f, type);
         }

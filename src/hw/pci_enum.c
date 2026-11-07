@@ -28,45 +28,13 @@
 #include <handoff.h>
 #include <hw/acpi.h>
 #include <hw/pci_cfg.h>
+#include <hw/pci_regs.h>
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/printf.h>
 #include <memory.h>
 
-#define PCI_ID 0x00
-#define PCI_COMMAND 0x04
-#define PCI_STATUS 0x06
-#define PCI_CLASS_REVISION 0x08
-#define PCI_HEADER_TYPE 0x0e
-#define PCI_BARS 0x10
-#define PCI_ROM 0x30
-#define PCI_CAPABILITIES 0x34
-#define PCI_INTERRUPT 0x3c
-
-#define BRIDGE_BUSES 0x18
-#define BRIDGE_IO 0x1c
-#define BRIDGE_MEMORY 0x20
-#define BRIDGE_PREF 0x24
-#define BRIDGE_PREF_BASE_UPPER 0x28
-#define BRIDGE_PREF_LIMIT_UPPER 0x2c
-#define BRIDGE_IO_UPPER 0x30
-#define BRIDGE_ROM 0x38
-#define BRIDGE_CONTROL 0x3e
-
 #define CARDBUS_CAPABILITIES 0x14
-
-#define HEADER_NORMAL 0
-#define HEADER_BRIDGE 1
-#define HEADER_CARDBUS 2
-#define HEADER_LAYOUT 0x7f
-#define HEADER_MULTI_FUNCTION 0x80
-
-#define CLASS_BRIDGE 0x06
-#define SUBCLASS_HOST_BRIDGE 0x00
-
-#define COMMAND_IO ((uint32_t)1 << 0)
-#define COMMAND_MEMORY ((uint32_t)1 << 1)
-#define STATUS_CAPABILITIES ((uint32_t)1 << 4)
 
 #define BAR_IO ((uint32_t)1 << 0)
 #define BAR_TYPE ((uint32_t)3 << 1)
@@ -74,23 +42,11 @@
 #define BAR_PREFETCHABLE ((uint32_t)1 << 3)
 #define BAR_IO_ADDRESS ((uint32_t)0xfffffffc)
 #define BAR_MEMORY_ADDRESS ((uint32_t)0xfffffff0)
-#define ROM_ADDRESS ((uint32_t)0xfffff800)
 #define UPPER_32 ((uint64_t)0xffffffff00000000)
 #define UPPER_48 ((uint64_t)0xffffffffffff0000)
 
 #define WINDOW_WIDTH ((uint32_t)0xf)
 #define WINDOW_IO_32 ((uint32_t)0x1)
-#define WINDOW_PREF_64 ((uint32_t)0x1)
-#define IO_GRANULE ((uint32_t)0x1000)
-#define MEMORY_GRANULE ((uint32_t)0x100000)
-
-#define CAP_PM 0x01
-#define CAP_MSI 0x05
-#define CAP_PCIE 0x10
-#define CAP_MSIX 0x11
-#define CAP_MIN_OFFSET 0x40
-#define CAP_MAX_ENTRIES 48
-#define PCIE_CAPABILITIES 0x02
 
 #define EXT_CAP_FIRST 0x100
 #define EXT_CAP_MAX_ENTRIES 512
@@ -200,7 +156,7 @@ __attribute__((format(printf, 2, 3))) static void line_add(
 }
 
 static bool is_host_bridge(const struct pci_function *f) {
-    return f->base_class == CLASS_BRIDGE && f->subclass == SUBCLASS_HOST_BRIDGE;
+    return f->base_class == PCI_BASE_CLASS_BRIDGE && f->subclass == PCI_SUBCLASS_BRIDGE_HOST;
 }
 
 // Clears the bits of the command register, and returns what decode_restore()
@@ -261,7 +217,7 @@ static void bar_sample_probe(struct pci_addr addr, struct bar_sample *s) {
     if (wide) {
         pci_cfg_write(addr, s->reg + 4, 4, 0xffffffff);
     }
-    pci_cfg_write(addr, s->reg, 4, s->rom ? ROM_ADDRESS : 0xffffffff);
+    pci_cfg_write(addr, s->reg, 4, s->rom ? PCI_ROM_ADDRESS_MASK : 0xffffffff);
     s->readback = pci_cfg_read(addr, s->reg, 4);
     if (wide) {
         s->readback |= (uint64_t)pci_cfg_read(addr, s->reg + 4, 4) << 32;
@@ -290,7 +246,7 @@ static bool bar_sample_result(const struct bar_sample *s, struct pci_bar *bar) {
             break;
         }
         case PCI_BAR_MEM32: {
-            uint32_t address = s->rom ? ROM_ADDRESS : BAR_MEMORY_ADDRESS;
+            uint32_t address = s->rom ? PCI_ROM_ADDRESS_MASK : BAR_MEMORY_ADDRESS;
             bits = s->readback & address;
             above = UPPER_32;
             base = s->low & address;
@@ -352,22 +308,24 @@ static void size_bars(
     struct bar_sample rom = { .kind = PCI_BAR_NONE };
 
     for (size_t i = first; i < end; i++) {
-        bar_sample_read(f->addr, (uint8_t)(PCI_BARS + 4 * i), i + 1 == f->bar_count, &samples[i]);
+        bar_sample_read(
+            f->addr, (uint8_t)(PCI_BASE_ADDRESS_0 + 4 * i), i + 1 == f->bar_count, &samples[i]
+        );
         if (samples[i].kind == PCI_BAR_MEM64 && i + 1 < end) {
             i++;
-            samples[i] = (struct bar_sample){ .reg = (uint8_t)(PCI_BARS + 4 * i) };
+            samples[i] = (struct bar_sample){ .reg = (uint8_t)(PCI_BASE_ADDRESS_0 + 4 * i) };
         }
     }
     if (rom_reg != 0) {
         rom_sample_read(f->addr, rom_reg, &rom);
     }
 
-    uint16_t command = decode_disable(f, COMMAND_IO | COMMAND_MEMORY);
+    uint16_t command = decode_disable(f, PCI_COMMAND_IO | PCI_COMMAND_MEMORY);
     for (size_t i = first; i < end; i++) {
         bar_sample_probe(f->addr, &samples[i]);
     }
     bar_sample_probe(f->addr, &rom);
-    decode_restore(f, command, COMMAND_IO | COMMAND_MEMORY);
+    decode_restore(f, command, PCI_COMMAND_IO | PCI_COMMAND_MEMORY);
 
     for (size_t i = first; i < end; i++) {
         bar_record(f, &samples[i], &f->bars[i]);
@@ -379,29 +337,31 @@ static void size_bars(
 
 static void walk_capabilities(struct pci_function *f) {
     uint16_t status = (uint16_t)pci_cfg_read(f->addr, PCI_STATUS, 2);
-    if ((status & STATUS_CAPABILITIES) == 0) {
+    if ((status & PCI_STATUS_CAP_LIST) == 0) {
         return;
     }
 
-    uint32_t pointer = f->header_type == HEADER_CARDBUS ? CARDBUS_CAPABILITIES : PCI_CAPABILITIES;
+    uint32_t pointer = f->header_type == PCI_HEADER_TYPE_CARDBUS
+                     ? CARDBUS_CAPABILITIES
+                     : PCI_CAPABILITY_LIST;
     uint32_t offset = pci_cfg_read(f->addr, pointer, 1) & 0xfc;
-    for (size_t i = 0; i < CAP_MAX_ENTRIES && offset >= CAP_MIN_OFFSET; i++) {
+    for (size_t i = 0; i < PCI_FIND_CAP_TTL && offset >= PCI_STD_HEADER_SIZEOF; i++) {
         uint32_t entry = pci_cfg_read(f->addr, offset, 2);
         uint8_t *found;
         switch (entry & 0xff) {
-            case CAP_PM: {
+            case PCI_CAP_ID_PM: {
                 found = &f->pm_cap;
                 break;
             }
-            case CAP_MSI: {
+            case PCI_CAP_ID_MSI: {
                 found = &f->msi_cap;
                 break;
             }
-            case CAP_PCIE: {
+            case PCI_CAP_ID_EXP: {
                 found = &f->pcie_cap;
                 break;
             }
-            case CAP_MSIX: {
+            case PCI_CAP_ID_MSIX: {
                 found = &f->msix_cap;
                 break;
             }
@@ -417,7 +377,7 @@ static void walk_capabilities(struct pci_function *f) {
     }
 
     if (f->pcie_cap != 0) {
-        uint32_t capabilities = pci_cfg_read(f->addr, f->pcie_cap + PCIE_CAPABILITIES, 2);
+        uint32_t capabilities = pci_cfg_read(f->addr, f->pcie_cap + PCI_EXP_FLAGS, 2);
         f->pcie_port_type = (capabilities >> 4) & 0xf;
     }
 }
@@ -448,53 +408,53 @@ static void walk_extended_capabilities(struct pci_function *f) {
 }
 
 static void read_bridge(struct pci_function *f) {
-    uint32_t buses = pci_cfg_read(f->addr, BRIDGE_BUSES, 4);
+    uint32_t buses = pci_cfg_read(f->addr, PCI_PRIMARY_BUS, 4);
     f->primary_bus = (uint8_t)buses;
     f->secondary_bus = (uint8_t)(buses >> 8);
     f->subordinate_bus = (uint8_t)(buses >> 16);
-    if (f->header_type != HEADER_BRIDGE) {
+    if (f->header_type != PCI_HEADER_TYPE_BRIDGE) {
         return;
     }
 
     // The I/O and prefetchable windows are optional, and a bridge without one
     // has its base and limit registers read as 0, which would otherwise be
     // taken for an open window at 0.
-    uint32_t io = pci_cfg_read(f->addr, BRIDGE_IO, 2);
+    uint32_t io = pci_cfg_read(f->addr, PCI_IO_BASE, 2);
     if (io == 0) {
-        f->io_base = IO_GRANULE;
-        f->io_limit = IO_GRANULE - 1;
+        f->io_base = PCI_IO_GRANULE;
+        f->io_limit = PCI_IO_GRANULE - 1;
     } else {
         f->io_base = (io & 0xf0) << 8;
-        f->io_limit = (((io >> 8) & 0xf0) << 8) | (IO_GRANULE - 1);
+        f->io_limit = (((io >> 8) & 0xf0) << 8) | (PCI_IO_GRANULE - 1);
         if ((io & WINDOW_WIDTH) == WINDOW_IO_32) {
-            uint32_t upper = pci_cfg_read(f->addr, BRIDGE_IO_UPPER, 4);
+            uint32_t upper = pci_cfg_read(f->addr, PCI_IO_BASE_UPPER16, 4);
             f->io_base |= (upper & 0xffff) << 16;
             f->io_limit |= upper & 0xffff0000;
         }
     }
 
-    uint32_t memory = pci_cfg_read(f->addr, BRIDGE_MEMORY, 4);
+    uint32_t memory = pci_cfg_read(f->addr, PCI_MEMORY_BASE, 4);
     f->mem_base = (memory & 0xfff0) << 16;
-    f->mem_limit = (memory & 0xfff00000) | (MEMORY_GRANULE - 1);
+    f->mem_limit = (memory & 0xfff00000) | (PCI_MEMORY_GRANULE - 1);
 
-    uint32_t pref = pci_cfg_read(f->addr, BRIDGE_PREF, 4);
+    uint32_t pref = pci_cfg_read(f->addr, PCI_PREF_MEMORY_BASE, 4);
     if (pref == 0) {
-        f->pref_base = MEMORY_GRANULE;
-        f->pref_limit = MEMORY_GRANULE - 1;
+        f->pref_base = PCI_MEMORY_GRANULE;
+        f->pref_limit = PCI_MEMORY_GRANULE - 1;
     } else {
         f->pref_base = (uint64_t)(pref & 0xfff0) << 16;
-        f->pref_limit = (pref & 0xfff00000) | (MEMORY_GRANULE - 1);
-        if ((pref & WINDOW_WIDTH) == WINDOW_PREF_64) {
-            f->pref_base |= (uint64_t)pci_cfg_read(f->addr, BRIDGE_PREF_BASE_UPPER, 4) << 32;
-            f->pref_limit |= (uint64_t)pci_cfg_read(f->addr, BRIDGE_PREF_LIMIT_UPPER, 4) << 32;
+        f->pref_limit = (pref & 0xfff00000) | (PCI_MEMORY_GRANULE - 1);
+        if ((pref & WINDOW_WIDTH) == PCI_PREF_RANGE_TYPE_64) {
+            f->pref_base |= (uint64_t)pci_cfg_read(f->addr, PCI_PREF_BASE_UPPER32, 4) << 32;
+            f->pref_limit |= (uint64_t)pci_cfg_read(f->addr, PCI_PREF_LIMIT_UPPER32, 4) << 32;
         }
     }
 
-    f->bridge_control = (uint16_t)pci_cfg_read(f->addr, BRIDGE_CONTROL, 2);
+    f->bridge_control = (uint16_t)pci_cfg_read(f->addr, PCI_BRIDGE_CONTROL, 2);
 }
 
 static bool is_bridge(const struct pci_function *f) {
-    return f->header_type == HEADER_BRIDGE || f->header_type == HEADER_CARDBUS;
+    return f->header_type == PCI_HEADER_TYPE_BRIDGE || f->header_type == PCI_HEADER_TYPE_CARDBUS;
 }
 
 static const char *bar_kind_name(const struct pci_bar *bar) {
@@ -551,7 +511,7 @@ static void log_function(const struct pci_function *f) {
             f->subordinate_bus
         );
     }
-    if (f->header_type == HEADER_BRIDGE) {
+    if (f->header_type == PCI_HEADER_TYPE_BRIDGE) {
         line_add_window(&line, "io", f->io_base, f->io_limit);
         line_add_window(&line, "mem", f->mem_base, f->mem_limit);
         line_add_window(&line, "pref", f->pref_base, f->pref_limit);
@@ -583,8 +543,8 @@ static void scan_function(struct function_list *list, struct pci_addr addr, uint
     f->prog_if = (uint8_t)(class_revision >> 8);
     f->subclass = (uint8_t)(class_revision >> 16);
     f->base_class = (uint8_t)(class_revision >> 24);
-    f->header_type = pci_cfg_read(addr, PCI_HEADER_TYPE, 1) & HEADER_LAYOUT;
-    uint32_t interrupt = pci_cfg_read(addr, PCI_INTERRUPT, 2);
+    f->header_type = pci_cfg_read(addr, PCI_HEADER_TYPE, 1) & PCI_HEADER_TYPE_MASK;
+    uint32_t interrupt = pci_cfg_read(addr, PCI_INTERRUPT_LINE, 2);
     f->interrupt_line = (uint8_t)interrupt;
     f->interrupt_pin = (uint8_t)(interrupt >> 8);
 
@@ -592,18 +552,18 @@ static void scan_function(struct function_list *list, struct pci_addr addr, uint
     walk_extended_capabilities(f);
 
     switch (f->header_type) {
-        case HEADER_NORMAL: {
+        case PCI_HEADER_TYPE_NORMAL: {
             f->bar_count = 6;
-            size_bars(f, 0, f->bar_count, PCI_ROM);
+            size_bars(f, 0, f->bar_count, PCI_ROM_ADDRESS);
             break;
         }
-        case HEADER_BRIDGE: {
+        case PCI_HEADER_TYPE_BRIDGE: {
             f->bar_count = 2;
-            size_bars(f, 0, f->bar_count, BRIDGE_ROM);
+            size_bars(f, 0, f->bar_count, PCI_ROM_ADDRESS1);
             read_bridge(f);
             break;
         }
-        case HEADER_CARDBUS: {
+        case PCI_HEADER_TYPE_CARDBUS: {
             read_bridge(f);
             break;
         }
@@ -623,17 +583,17 @@ static void scan_bus(struct function_list *list, uint16_t segment, uint8_t bus) 
             .device = (uint8_t)device,
             .function = 0
         };
-        uint32_t id = pci_cfg_read(addr, PCI_ID, 4);
+        uint32_t id = pci_cfg_read(addr, PCI_VENDOR_ID, 4);
         if ((id & 0xffff) == 0xffff) {
             continue;
         }
         uint32_t header = pci_cfg_read(addr, PCI_HEADER_TYPE, 1);
-        unsigned int functions = (header & HEADER_MULTI_FUNCTION) != 0 ? 8 : 1;
+        unsigned int functions = (header & PCI_HEADER_TYPE_MFD) != 0 ? 8 : 1;
         scan_function(list, addr, id);
 
         for (size_t function = 1; function < functions; function++) {
             addr.function = (uint8_t)function;
-            id = pci_cfg_read(addr, PCI_ID, 4);
+            id = pci_cfg_read(addr, PCI_VENDOR_ID, 4);
             if ((id & 0xffff) != 0xffff) {
                 scan_function(list, addr, id);
             }
@@ -849,7 +809,7 @@ static void rebar_resize(
 
     uint32_t low = pci_cfg_read(f->addr, bar->reg, 4);
     uint32_t high = wide ? pci_cfg_read(f->addr, bar->reg + 4, 4) : 0;
-    uint16_t command = decode_disable(f, COMMAND_MEMORY);
+    uint16_t command = decode_disable(f, PCI_COMMAND_MEMORY);
     uint32_t control = pci_cfg_read(f->addr, control_reg, 4);
     control &= ~(REBAR_SIZE << REBAR_SIZE_SHIFT);
     control |= encoding << REBAR_SIZE_SHIFT;
@@ -861,7 +821,7 @@ static void rebar_resize(
         pci_cfg_write(f->addr, bar->reg + 4, 4, high);
     }
     pci_cfg_write(f->addr, bar->reg, 4, low);
-    decode_restore(f, command, COMMAND_MEMORY);
+    decode_restore(f, command, PCI_COMMAND_MEMORY);
 
     unsigned int now = (pci_cfg_read(f->addr, control_reg, 4) >> REBAR_SIZE_SHIFT) & REBAR_SIZE;
     if (now != encoding) {

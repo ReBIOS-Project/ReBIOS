@@ -24,6 +24,7 @@
 #include <iommu/iommu_tables.h>
 #include <hw/acpi.h>
 #include <hw/pci_cfg.h>
+#include <hw/pci_regs.h>
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/printf.h>
@@ -36,14 +37,6 @@
 #define RID_ARGS(rid) \
     (unsigned int)((rid) >> 8), (unsigned int)(((rid) >> 3) & 0x1f), \
     (unsigned int)((rid) & 7)
-
-#define PCI_VENDOR_ID 0x00
-#define PCI_HEADER_TYPE 0x0e
-#define PCI_HEADER_TYPE_MASK 0x7f
-#define PCI_HEADER_TYPE_BRIDGE 1
-#define PCI_HEADER_TYPE_CARDBUS 2
-#define PCI_SECONDARY_BUS 0x19
-#define PCI_SUBORDINATE_BUS 0x1a
 
 // A device scope's type, length, flags, reserved, enumeration ID, and start
 // bus bytes, ahead of its path of device and function pairs (VT-d D51397-019

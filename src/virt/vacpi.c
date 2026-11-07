@@ -37,6 +37,7 @@
 #include <hw/i8042.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_host.h>
+#include <hw/pci_regs.h>
 #include <hw/power.h>
 #include <lib/aml.h>
 #include <lib/heap.h>
@@ -123,9 +124,6 @@
 
 #define PS2_PORT_FIRST 0x60
 #define PS2_PORT_LAST 0x64
-
-#define PCI_CLASS 0x0a
-#define PCI_CLASS_ISA_BRIDGE 0x0601
 
 // The FADT's fields, ACPI 1.0b, Table 5-6.
 #define FADT_FIRMWARE_CTRL 36
@@ -1844,7 +1842,7 @@ static uacpi_namespace_node *isa_bridge_below(const struct pci_host_bridge *brid
         struct pci_addr addr = {
             bridge->segment, bridge->bus, (uint8_t)(adr >> 16), (uint8_t)adr
         };
-        if (pci_cfg_read(addr, PCI_CLASS, 2) == PCI_CLASS_ISA_BRIDGE) {
+        if (pci_cfg_read(addr, PCI_CLASS_DEVICE, 2) == PCI_CLASS_BRIDGE_ISA) {
             return iter;
         }
     }

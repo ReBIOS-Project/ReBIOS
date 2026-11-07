@@ -23,6 +23,7 @@
 #include <hw/lapic.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
+#include <hw/pci_regs.h>
 #include <hw/power.h>
 #include <iommu/remap.h>
 #include <lib/heap.h>
@@ -54,23 +55,8 @@
 
 // PCI Local Bus Specification 3.0, 6.1 and 6.2.5, and PCI-to-PCI Bridge
 // Architecture Specification 1.1, 3.2.
-#define REG_HEADER_END 0x40
-#define REG_BAR0 0x10
-#define REG_BUS_NUMBERS 0x18
-#define REG_MEMORY 0x20
-#define REG_PREF 0x24
-#define REG_PREF_BASE_UPPER 0x28
-#define REG_PREF_LIMIT_UPPER 0x2c
-#define REG_ROM 0x30
-#define REG_BRIDGE_ROM 0x38
-#define HEADER_DEVICE 0
-#define HEADER_BRIDGE 1
 #define BAR_ADDRESS ((uint32_t)0xfffffff0)
-#define ROM_ADDRESS ((uint32_t)0xfffff800)
-#define ROM_ENABLE ((uint32_t)0x1)
 #define WINDOW_ADDRESS ((uint32_t)0xfff0)
-#define WINDOW_PREF_64 ((uint32_t)0x1)
-#define WINDOW_GRANULE ((uint64_t)0x100000)
 // The latency timer of a bridge's bus number register is the hardware's.
 #define BUS_NUMBERS_VIRTUAL ((uint32_t)0x00ffffff)
 
@@ -78,42 +64,13 @@
 // capability and a control register for each of up to six BARs.
 #define REBAR_SIZE ((uint32_t)0x34)
 
-// An AMD IOMMU's function, whose capability holds its registers' address.
-#define CLASS_SYSTEM 0x08
-#define SUBCLASS_IOMMU 0x06
-
 #define BAR_COUNT 6
 #define ROM_INDEX 6
 
 // PCI Local Bus Specification 3.0, 6.8.1: MSI's Message Control register and
 // the registers after it, where the address is 64 bits wide.
-#define MSI_CONTROL 2
-#define MSI_ENABLE ((uint32_t)0x0001)
 #define MSI_MMC_SHIFT 1
 #define MSI_MME_SHIFT 4
-#define MSI_MME_MASK ((uint32_t)0x0070)
-#define MSI_WIDE ((uint32_t)0x0080)
-#define MSI_ADDRESS 4
-#define MSI_UPPER 8
-#define MSI_DATA_NARROW 8
-#define MSI_DATA_WIDE 0xc
-
-// PCI Local Bus Specification 3.0, 6.8.2: MSI-X's Message Control register,
-// where its table is, and a table entry's fields.
-#define MSIX_CONTROL 2
-#define MSIX_SIZE_MASK ((uint32_t)0x07ff)
-#define MSIX_ENABLE ((uint32_t)0x8000)
-#define MSIX_TABLE 4
-#define MSIX_BIR_MASK ((uint32_t)7)
-#define MSIX_ENTRY_SIZE 16
-#define MSIX_ENTRY_ADDRESS 0
-#define MSIX_ENTRY_UPPER 4
-#define MSIX_ENTRY_DATA 8
-#define MSIX_ENTRY_CONTROL 12
-#define MSIX_ENTRY_MASKED ((uint32_t)1)
-
-#define REG_COMMAND 4
-#define COMMAND_MEMORY ((uint32_t)0x2)
 
 // A memory BAR or expansion ROM BAR as the guest has it.
 #define BAR_TRAPS 4
@@ -442,16 +399,18 @@ static void bar_update(struct vbar *b, bool is_rom) {
 // The register at reg, if the hypervisor keeps it: its BAR, and whether it is
 // the upper half of a 64-bit one.
 static struct vbar *bar_at(struct vfunction *vf, uint32_t reg, bool *upper) {
-    unsigned int bars = vf->f->header_type == HEADER_BRIDGE ? 2 : BAR_COUNT;
-    uint32_t rom = vf->f->header_type == HEADER_BRIDGE ? REG_BRIDGE_ROM : REG_ROM;
+    unsigned int bars = vf->f->header_type == PCI_HEADER_TYPE_BRIDGE ? 2 : BAR_COUNT;
+    uint32_t rom = vf->f->header_type == PCI_HEADER_TYPE_BRIDGE
+                 ? PCI_ROM_ADDRESS1
+                 : PCI_ROM_ADDRESS;
     *upper = false;
     if (reg == rom) {
         return vf->bars[ROM_INDEX].kind == PCI_BAR_MEM32 ? &vf->bars[ROM_INDEX] : NULL;
     }
-    if (reg < REG_BAR0 || reg >= REG_BAR0 + 4 * bars) {
+    if (reg < PCI_BASE_ADDRESS_0 || reg >= PCI_BASE_ADDRESS_0 + 4 * bars) {
         return NULL;
     }
-    size_t i = (reg - REG_BAR0) / 4;
+    size_t i = (reg - PCI_BASE_ADDRESS_0) / 4;
     struct vbar *b = &vf->bars[i];
     if (b->kind == PCI_BAR_MEM32 || b->kind == PCI_BAR_MEM64) {
         return b;
@@ -464,13 +423,13 @@ static struct vbar *bar_at(struct vfunction *vf, uint32_t reg, bool *upper) {
 }
 
 static bool is_bridge(const struct vfunction *vf) {
-    return vf->f->header_type == HEADER_BRIDGE;
+    return vf->f->header_type == PCI_HEADER_TYPE_BRIDGE;
 }
 
 static bool window_reg(const struct vfunction *vf, uint32_t reg) {
     return is_bridge(vf)
-        && (reg == REG_MEMORY || reg == REG_PREF || reg == REG_PREF_BASE_UPPER
-         || reg == REG_PREF_LIMIT_UPPER);
+        && (reg == PCI_MEMORY_BASE || reg == PCI_PREF_MEMORY_BASE || reg == PCI_PREF_BASE_UPPER32
+         || reg == PCI_PREF_LIMIT_UPPER32);
 }
 
 static uint32_t window_word(uintptr_t address) {
@@ -483,8 +442,8 @@ static uint32_t kept_read(struct vfunction *vf, uint32_t reg) {
     struct vbar *b = bar_at(vf, reg, &upper);
     if (b != NULL) {
         if (b == &vf->bars[ROM_INDEX]) {
-            return ((uint32_t)b->guest & ROM_ADDRESS & (uint32_t)bar_mask(b))
-                 | (b->enabled ? ROM_ENABLE : 0);
+            return ((uint32_t)b->guest & PCI_ROM_ADDRESS_MASK & (uint32_t)bar_mask(b))
+                 | (b->enabled ? PCI_ROM_ADDRESS_ENABLE : 0);
         }
         if (upper) {
             return (uint32_t)((b->guest & bar_mask(b)) >> 32);
@@ -492,19 +451,19 @@ static uint32_t kept_read(struct vfunction *vf, uint32_t reg) {
         return ((uint32_t)b->guest & BAR_ADDRESS & (uint32_t)bar_mask(b)) | b->type_bits;
     }
     switch (reg) {
-        case REG_BUS_NUMBERS: {
+        case PCI_PRIMARY_BUS: {
             return (vf->bus_numbers & BUS_NUMBERS_VIRTUAL)
                  | (pci_cfg_read(vf->f->addr, reg, 4) & ~BUS_NUMBERS_VIRTUAL);
         }
-        case REG_MEMORY: {
+        case PCI_MEMORY_BASE: {
             return window_word(vf->mem_base) | window_word(vf->mem_limit) << 16;
         }
-        case REG_PREF: {
-            uint32_t width = vf->pref_64 ? WINDOW_PREF_64 : 0;
+        case PCI_PREF_MEMORY_BASE: {
+            uint32_t width = vf->pref_64 ? PCI_PREF_RANGE_TYPE_64 : 0;
             return (window_word(vf->pref_base) | width)
                  | (window_word(vf->pref_limit) | width) << 16;
         }
-        case REG_PREF_BASE_UPPER: {
+        case PCI_PREF_BASE_UPPER32: {
             return vf->pref_64 ? (uint32_t)(vf->pref_base >> 32) : 0;
         }
         default: {
@@ -518,12 +477,12 @@ static void kept_write(struct vfunction *vf, uint32_t reg, uint32_t value) {
     struct vbar *b = bar_at(vf, reg, &upper);
     if (b != NULL) {
         if (b == &vf->bars[ROM_INDEX]) {
-            b->guest = value & ROM_ADDRESS & (uint32_t)bar_mask(b);
-            b->enabled = (value & ROM_ENABLE) != 0;
+            b->guest = value & PCI_ROM_ADDRESS_MASK & (uint32_t)bar_mask(b);
+            b->enabled = (value & PCI_ROM_ADDRESS_ENABLE) != 0;
             // The function decodes its ROM where the host has it.
+            uint32_t enable = b->enabled ? PCI_ROM_ADDRESS_ENABLE : 0;
             pci_cfg_write(
-                vf->f->addr, reg, 4,
-                ((uint32_t)b->host & ROM_ADDRESS) | (b->enabled ? ROM_ENABLE : 0)
+                vf->f->addr, reg, 4, ((uint32_t)b->host & PCI_ROM_ADDRESS_MASK) | enable
             );
             bar_update(b, true);
         } else if (upper) {
@@ -536,23 +495,25 @@ static void kept_write(struct vfunction *vf, uint32_t reg, uint32_t value) {
         return;
     }
     switch (reg) {
-        case REG_BUS_NUMBERS: {
+        case PCI_PRIMARY_BUS: {
             pci_cfg_write(vf->f->addr, reg + 3, 1, value >> 24);
             break;
         }
-        case REG_MEMORY: {
+        case PCI_MEMORY_BASE: {
             vf->mem_base = (uint64_t)(value & WINDOW_ADDRESS) << 16;
-            vf->mem_limit = (uint64_t)(value >> 16 & WINDOW_ADDRESS) << 16 | (WINDOW_GRANULE - 1);
+            vf->mem_limit = (uint64_t)(value >> 16 & WINDOW_ADDRESS) << 16
+                          | (PCI_MEMORY_GRANULE - 1);
             break;
         }
-        case REG_PREF: {
+        case PCI_PREF_MEMORY_BASE: {
             vf->pref_base = (vf->pref_base & ~(uint64_t)0xffffffff)
                           | (uint64_t)(value & WINDOW_ADDRESS) << 16;
             vf->pref_limit = (vf->pref_limit & ~(uint64_t)0xffffffff)
-                           | (uint64_t)(value >> 16 & WINDOW_ADDRESS) << 16 | (WINDOW_GRANULE - 1);
+                           | (uint64_t)(value >> 16 & WINDOW_ADDRESS) << 16
+                           | (PCI_MEMORY_GRANULE - 1);
             break;
         }
-        case REG_PREF_BASE_UPPER: {
+        case PCI_PREF_BASE_UPPER32: {
             if (vf->pref_64) {
                 vf->pref_base = (vf->pref_base & (uint64_t)0xffffffff) | (uint64_t)value << 32;
             }
@@ -570,29 +531,29 @@ static void kept_write(struct vfunction *vf, uint32_t reg, uint32_t value) {
 static bool is_kept(struct vfunction *vf, uint32_t reg) {
     bool upper;
     return bar_at(vf, reg, &upper) != NULL || window_reg(vf, reg)
-        || (is_bridge(vf) && reg == REG_BUS_NUMBERS);
+        || (is_bridge(vf) && reg == PCI_PRIMARY_BUS);
 }
 
 static uint32_t msi_data_reg(const struct vfunction *vf) {
-    return vf->f->msi_cap + (vf->msi.wide ? MSI_DATA_WIDE : MSI_DATA_NARROW);
+    return vf->f->msi_cap + (vf->msi.wide ? PCI_MSI_DATA_64 : PCI_MSI_DATA_32);
 }
 
 // Whether the guest has its own of the MSI register at reg.
 static bool msi_reg(const struct vfunction *vf, uint32_t reg) {
     uint32_t cap = vf->f->msi_cap;
     return cap != 0
-        && (reg == cap || reg == cap + MSI_ADDRESS || reg == msi_data_reg(vf)
-         || (vf->msi.wide && reg == cap + MSI_UPPER));
+        && (reg == cap || reg == cap + PCI_MSI_ADDRESS_LO || reg == msi_data_reg(vf)
+         || (vf->msi.wide && reg == cap + PCI_MSI_ADDRESS_HI));
 }
 
 static uint32_t msi_read(struct vfunction *vf, uint32_t reg) {
     uint32_t cap = vf->f->msi_cap;
     if (reg == cap) {
         uint32_t hardware = pci_cfg_read(vf->f->addr, reg, 4);
-        return (hardware & ~((uint32_t)(MSI_ENABLE | MSI_MME_MASK) << 16))
+        return (hardware & ~((uint32_t)(PCI_MSI_FLAGS_ENABLE | PCI_MSI_FLAGS_QSIZE) << 16))
              | (uint32_t)vf->msi.control << 16;
     }
-    if (reg == cap + MSI_ADDRESS) {
+    if (reg == cap + PCI_MSI_ADDRESS_LO) {
         return vf->msi.address;
     }
     return reg == msi_data_reg(vf)
@@ -643,22 +604,22 @@ static void msi_update(struct vfunction *vf) {
     atomic_store_explicit(
         &m->message, (uint64_t)m->address << 32 | (m->data & 0xffff), memory_order_release
     );
-    uint16_t hardware = (uint16_t)pci_cfg_read(a, cap + MSI_CONTROL, 2);
+    uint16_t hardware = (uint16_t)pci_cfg_read(a, cap + PCI_MSI_FLAGS, 2);
     unsigned int capable = (hardware >> MSI_MMC_SHIFT) & 7;
-    unsigned int enable = (m->control & MSI_MME_MASK) >> MSI_MME_SHIFT;
+    unsigned int enable = (m->control & PCI_MSI_FLAGS_QSIZE) >> MSI_MME_SHIFT;
     if (enable > capable) {
         enable = capable;
     }
-    uint16_t control = (uint16_t)((hardware & ~(MSI_ENABLE | MSI_MME_MASK))
+    uint16_t control = (uint16_t)((hardware & ~(PCI_MSI_FLAGS_ENABLE | PCI_MSI_FLAGS_QSIZE))
                                 | enable << MSI_MME_SHIFT);
     size_t count = (uint32_t)1 << enable;
-    if ((m->control & MSI_ENABLE) == 0) {
-        pci_cfg_write(a, cap + MSI_CONTROL, 2, control);
+    if ((m->control & PCI_MSI_FLAGS_ENABLE) == 0) {
+        pci_cfg_write(a, cap + PCI_MSI_FLAGS, 2, control);
         irq_slot_free(&m->slot);
         return;
     }
     if (m->slot.cpu == NULL || m->slot.count != count) {
-        pci_cfg_write(a, cap + MSI_CONTROL, 2, control);
+        pci_cfg_write(a, cap + PCI_MSI_FLAGS, 2, control);
         if (!irq_slot_place(&m->slot, vlapic_msi_target(m->address), count)) {
             printf(
                 "PCI %04x:%02x:%02x.%x: no room for %zu MSI vectors\n", a.segment, a.bus, a.device,
@@ -669,22 +630,22 @@ static void msi_update(struct vfunction *vf) {
         uint32_t address;
         uint32_t data;
         irq_slot_message(&m->slot, &address, &data);
-        pci_cfg_write(a, cap + MSI_ADDRESS, 4, address);
+        pci_cfg_write(a, cap + PCI_MSI_ADDRESS_LO, 4, address);
         if (m->wide) {
-            pci_cfg_write(a, cap + MSI_UPPER, 4, 0);
+            pci_cfg_write(a, cap + PCI_MSI_ADDRESS_HI, 4, 0);
         }
         pci_cfg_write(a, msi_data_reg(vf), 2, data);
     }
     uint32_t upper = atomic_load_explicit(&m->upper, memory_order_relaxed);
     message_route(&m->slot, upper, m->address, m->data);
-    pci_cfg_write(a, cap + MSI_CONTROL, 2, control | MSI_ENABLE);
+    pci_cfg_write(a, cap + PCI_MSI_FLAGS, 2, control | PCI_MSI_FLAGS_ENABLE);
 }
 
 static void msi_write(struct vfunction *vf, uint32_t reg, uint32_t value) {
     uint32_t cap = vf->f->msi_cap;
     if (reg == cap) {
-        vf->msi.control = (uint16_t)(value >> 16) & (MSI_ENABLE | MSI_MME_MASK);
-    } else if (reg == cap + MSI_ADDRESS) {
+        vf->msi.control = (uint16_t)(value >> 16) & (PCI_MSI_FLAGS_ENABLE | PCI_MSI_FLAGS_QSIZE);
+    } else if (reg == cap + PCI_MSI_ADDRESS_LO) {
         vf->msi.address = value & ~(uint32_t)3;
     } else if (reg == msi_data_reg(vf)) {
         vf->msi.data = value & 0xffff;
@@ -709,12 +670,14 @@ static void msix_taken(void *ctx, size_t index) {
 static void msix_sync(struct vfunction *vf, size_t i) {
     struct vmsix *x = &vf->msix;
     struct vmsix_entry *e = &x->entries[i];
-    uint64_t at = x->table + (uint64_t)i * MSIX_ENTRY_SIZE;
+    uint64_t at = x->table + (uint64_t)i * PCI_MSIX_ENTRY_SIZE;
     atomic_store_explicit(&e->message, (uint64_t)e->address << 32 | e->data, memory_order_release);
-    uint32_t control = (uint32_t)mmio_read_host(at + MSIX_ENTRY_CONTROL, 4);
-    if (!x->enabled || (e->control & MSIX_ENTRY_MASKED) != 0) {
+    uint32_t control = (uint32_t)mmio_read_host(at + PCI_MSIX_ENTRY_VECTOR_CTRL, 4);
+    if (!x->enabled || (e->control & PCI_MSIX_ENTRY_CTRL_MASKBIT) != 0) {
         if (e->armed) {
-            mmio_write_host(at + MSIX_ENTRY_CONTROL, 4, control | MSIX_ENTRY_MASKED);
+            mmio_write_host(
+                at + PCI_MSIX_ENTRY_VECTOR_CTRL, 4, control | PCI_MSIX_ENTRY_CTRL_MASKBIT
+            );
             e->armed = false;
         }
         irq_slot_free(&e->slot);
@@ -732,14 +695,16 @@ static void msix_sync(struct vfunction *vf, size_t i) {
         uint32_t address;
         uint32_t data;
         irq_slot_message(&e->slot, &address, &data);
-        mmio_write_host(at + MSIX_ENTRY_ADDRESS, 4, address);
-        mmio_write_host(at + MSIX_ENTRY_UPPER, 4, 0);
-        mmio_write_host(at + MSIX_ENTRY_DATA, 4, data);
+        mmio_write_host(at + PCI_MSIX_ENTRY_LOWER_ADDR, 4, address);
+        mmio_write_host(at + PCI_MSIX_ENTRY_UPPER_ADDR, 4, 0);
+        mmio_write_host(at + PCI_MSIX_ENTRY_DATA, 4, data);
     }
     uint32_t upper = atomic_load_explicit(&e->upper, memory_order_relaxed);
     message_route(&e->slot, upper, e->address, e->data);
     if (!e->armed) {
-        mmio_write_host(at + MSIX_ENTRY_CONTROL, 4, control & ~MSIX_ENTRY_MASKED);
+        mmio_write_host(
+            at + PCI_MSIX_ENTRY_VECTOR_CTRL, 4, control & ~PCI_MSIX_ENTRY_CTRL_MASKBIT
+        );
         e->armed = true;
     }
 }
@@ -751,16 +716,16 @@ static uint64_t msix_read(struct vcpu *v, void *ctx, uint64_t offset, size_t siz
     struct vmsix *x = &vf->msix;
     uintptr_t hpa = x->page + offset;
     uint64_t at = hpa - x->table;
-    if (at >= (uint64_t)x->count * MSIX_ENTRY_SIZE) {
+    if (at >= (uint64_t)x->count * PCI_MSIX_ENTRY_SIZE) {
         return mmio_read_host(hpa, size);
     }
     spinlock_acquire(&virt.lock);
-    const struct vmsix_entry *e = &x->entries[at / MSIX_ENTRY_SIZE];
+    const struct vmsix_entry *e = &x->entries[at / PCI_MSIX_ENTRY_SIZE];
     uint32_t upper = atomic_load_explicit(&e->upper, memory_order_relaxed);
     uint32_t words[4] = { e->address, upper, e->data, e->control };
     spinlock_release(&virt.lock);
     uint64_t value = 0;
-    memcpy(&value, (const uint8_t *)words + at % MSIX_ENTRY_SIZE, size);
+    memcpy(&value, (const uint8_t *)words + at % PCI_MSIX_ENTRY_SIZE, size);
     return value;
 }
 
@@ -770,16 +735,16 @@ static void msix_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, 
     struct vmsix *x = &vf->msix;
     uintptr_t hpa = x->page + offset;
     uint64_t at = hpa - x->table;
-    if (at >= (uint64_t)x->count * MSIX_ENTRY_SIZE) {
+    if (at >= (uint64_t)x->count * PCI_MSIX_ENTRY_SIZE) {
         mmio_write_host(hpa, size, value);
         return;
     }
     spinlock_acquire(&virt.lock);
-    size_t i = (unsigned int)(at / MSIX_ENTRY_SIZE);
+    size_t i = (unsigned int)(at / PCI_MSIX_ENTRY_SIZE);
     struct vmsix_entry *e = &x->entries[i];
     uint32_t upper = atomic_load_explicit(&e->upper, memory_order_relaxed);
     uint32_t words[4] = { e->address, upper, e->data, e->control };
-    memcpy((uint8_t *)words + at % MSIX_ENTRY_SIZE, &value, size);
+    memcpy((uint8_t *)words + at % PCI_MSIX_ENTRY_SIZE, &value, size);
     e->address = words[0] & ~(uint32_t)3;
     atomic_store_explicit(&e->upper, words[1], memory_order_relaxed);
     e->data = words[2];
@@ -939,7 +904,7 @@ static void msix_control(struct vfunction *vf, uint32_t value) {
     struct vmsix *x = &vf->msix;
     struct pci_addr a = vf->f->addr;
     uint32_t reg = vf->f->msix_cap;
-    bool enable = (value >> 16 & MSIX_ENABLE) != 0;
+    bool enable = (value >> 16 & PCI_MSIX_FLAGS_ENABLE) != 0;
     if (enable == x->enabled) {
         pci_cfg_write(a, reg, 4, value);
         return;
@@ -961,13 +926,13 @@ static void msix_control(struct vfunction *vf, uint32_t value) {
 static void msix_init(struct vfunction *vf) {
     struct pci_function *f = vf->f;
     struct vmsix *x = &vf->msix;
-    uint32_t control = pci_cfg_read(f->addr, f->msix_cap + MSIX_CONTROL, 2);
-    uint32_t table = pci_cfg_read(f->addr, f->msix_cap + MSIX_TABLE, 4);
-    unsigned int bir = table & MSIX_BIR_MASK;
+    uint32_t control = pci_cfg_read(f->addr, f->msix_cap + PCI_MSIX_FLAGS, 2);
+    uint32_t table = pci_cfg_read(f->addr, f->msix_cap + PCI_MSIX_TABLE, 4);
+    unsigned int bir = table & PCI_MSIX_TABLE_BIR;
     struct vbar *b = bir < BAR_COUNT ? &vf->bars[bir] : NULL;
-    x->count = (control & MSIX_SIZE_MASK) + 1;
-    uint64_t offset = table & ~MSIX_BIR_MASK;
-    if (b == NULL || b->size == 0 || offset + (uint64_t)x->count * MSIX_ENTRY_SIZE > b->size) {
+    x->count = (control & PCI_MSIX_FLAGS_QSIZE) + 1;
+    uint64_t offset = table & ~PCI_MSIX_TABLE_BIR;
+    if (b == NULL || b->size == 0 || offset + (uint64_t)x->count * PCI_MSIX_ENTRY_SIZE > b->size) {
         x->count = 0;
         return;
     }
@@ -977,27 +942,28 @@ static void msix_init(struct vfunction *vf) {
         x->count = 0;
         return;
     }
-    pci_cfg_write(f->addr, f->msix_cap + MSIX_CONTROL, 2, control & ~MSIX_ENABLE);
+    pci_cfg_write(f->addr, f->msix_cap + PCI_MSIX_FLAGS, 2, control & ~PCI_MSIX_FLAGS_ENABLE);
     x->table = b->host + offset;
     x->page = page_down(x->table);
-    mm_map_device(x->page, page_up(x->table + (uint64_t)x->count * MSIX_ENTRY_SIZE) - x->page);
+    mm_map_device(x->page, page_up(x->table + (uint64_t)x->count * PCI_MSIX_ENTRY_SIZE) - x->page);
     x->entries = kmalloc(x->count * sizeof(struct vmsix_entry));
-    uint32_t command = pci_cfg_read(f->addr, REG_COMMAND, 2);
-    pci_cfg_write(f->addr, REG_COMMAND, 2, command | COMMAND_MEMORY);
+    uint32_t command = pci_cfg_read(f->addr, PCI_COMMAND, 2);
+    pci_cfg_write(f->addr, PCI_COMMAND, 2, command | PCI_COMMAND_MEMORY);
     for (size_t i = 0; i < x->count; i++) {
         struct vmsix_entry *e = &x->entries[i];
-        uint64_t at = x->table + (uint64_t)i * MSIX_ENTRY_SIZE;
-        e->address = (uint32_t)mmio_read_host(at + MSIX_ENTRY_ADDRESS, 4);
-        atomic_store_explicit(
-            &e->upper, (uint32_t)mmio_read_host(at + MSIX_ENTRY_UPPER, 4), memory_order_relaxed
+        uint64_t at = x->table + (uint64_t)i * PCI_MSIX_ENTRY_SIZE;
+        e->address = (uint32_t)mmio_read_host(at + PCI_MSIX_ENTRY_LOWER_ADDR, 4);
+        uint32_t upper = (uint32_t)mmio_read_host(at + PCI_MSIX_ENTRY_UPPER_ADDR, 4);
+        atomic_store_explicit(&e->upper, upper, memory_order_relaxed);
+        e->data = (uint32_t)mmio_read_host(at + PCI_MSIX_ENTRY_DATA, 4);
+        e->control = (uint32_t)mmio_read_host(at + PCI_MSIX_ENTRY_VECTOR_CTRL, 4);
+        mmio_write_host(
+            at + PCI_MSIX_ENTRY_VECTOR_CTRL, 4, e->control | PCI_MSIX_ENTRY_CTRL_MASKBIT
         );
-        e->data = (uint32_t)mmio_read_host(at + MSIX_ENTRY_DATA, 4);
-        e->control = (uint32_t)mmio_read_host(at + MSIX_ENTRY_CONTROL, 4);
-        mmio_write_host(at + MSIX_ENTRY_CONTROL, 4, e->control | MSIX_ENTRY_MASKED);
         e->slot = (struct irq_slot){ .taken = msix_taken, .ctx = e, .requester = requester(f) };
     }
-    pci_cfg_write(f->addr, REG_COMMAND, 2, command);
-    b->traps[0] = (struct bar_trap){ offset, (uint64_t)x->count * MSIX_ENTRY_SIZE, region };
+    pci_cfg_write(f->addr, PCI_COMMAND, 2, command);
+    b->traps[0] = (struct bar_trap){ offset, (uint64_t)x->count * PCI_MSIX_ENTRY_SIZE, region };
     b->trap_count = 1;
 }
 
@@ -1005,13 +971,13 @@ static void msi_init(struct vfunction *vf) {
     struct vmsi *m = &vf->msi;
     struct pci_addr a = vf->f->addr;
     uint32_t cap = vf->f->msi_cap;
-    uint16_t control = (uint16_t)pci_cfg_read(a, cap + MSI_CONTROL, 2);
-    m->wide = (control & MSI_WIDE) != 0;
+    uint16_t control = (uint16_t)pci_cfg_read(a, cap + PCI_MSI_FLAGS, 2);
+    m->wide = (control & PCI_MSI_FLAGS_64BIT) != 0;
     // Disabled, as after a reset: the guest enables what it uses.
-    m->control = control & MSI_MME_MASK;
-    pci_cfg_write(a, cap + MSI_CONTROL, 2, control & ~MSI_ENABLE);
-    m->address = pci_cfg_read(a, cap + MSI_ADDRESS, 4);
-    uint32_t upper = m->wide ? pci_cfg_read(a, cap + MSI_UPPER, 4) : 0;
+    m->control = control & PCI_MSI_FLAGS_QSIZE;
+    pci_cfg_write(a, cap + PCI_MSI_FLAGS, 2, control & ~PCI_MSI_FLAGS_ENABLE);
+    m->address = pci_cfg_read(a, cap + PCI_MSI_ADDRESS_LO, 4);
+    uint32_t upper = m->wide ? pci_cfg_read(a, cap + PCI_MSI_ADDRESS_HI, 4) : 0;
     atomic_store_explicit(&m->upper, upper, memory_order_relaxed);
     m->data = pci_cfg_read(a, msi_data_reg(vf), 2);
     m->slot = (struct irq_slot){ .taken = msi_taken, .ctx = vf, .requester = requester(vf->f) };
@@ -1090,7 +1056,7 @@ static uint32_t function_read(struct pci_addr a, uint32_t offset, size_t size) {
     if (vf != NULL && msi_reg(vf, reg)) {
         return (msi_read(vf, reg) >> (8 * (offset & 3))) & all_ones(size);
     }
-    if (vf == NULL || offset >= REG_HEADER_END || !is_kept(vf, reg)) {
+    if (vf == NULL || offset >= PCI_STD_HEADER_SIZEOF || !is_kept(vf, reg)) {
         return pci_cfg_read(a, offset, size);
     }
     return (kept_read(vf, reg) >> (8 * (offset & 3))) & all_ones(size);
@@ -1120,9 +1086,9 @@ static struct vfunction *function_write(
         msix_control(vf, (pci_cfg_read(a, reg, 4) & ~mask) | ((value << shift) & mask));
         return NULL;
     }
-    if (vf == NULL || offset >= REG_HEADER_END || !is_kept(vf, reg)) {
+    if (vf == NULL || offset >= PCI_STD_HEADER_SIZEOF || !is_kept(vf, reg)) {
         pci_cfg_write(a, offset, size, value);
-        return reg >= REG_BAR0 && reg < REG_BAR0 + 4 * BAR_COUNT ? vf : NULL;
+        return reg >= PCI_BASE_ADDRESS_0 && reg < PCI_BASE_ADDRESS_0 + 4 * BAR_COUNT ? vf : NULL;
     }
     kept_write(vf, reg, (kept_read(vf, reg) & ~mask) | ((value << shift) & mask));
     return NULL;
@@ -1335,11 +1301,12 @@ static void vfunction_init(
     struct vfunction *vf, struct pci_function *f, const struct pci_plan_function *pf
 ) {
     *vf = (struct vfunction){ .f = f };
-    if (f->base_class == CLASS_SYSTEM && f->subclass == SUBCLASS_IOMMU) {
+    // An AMD IOMMU's function, whose capability holds its registers' address.
+    if (f->base_class == PCI_BASE_CLASS_SYSTEM && f->subclass == PCI_SUBCLASS_SYSTEM_IOMMU) {
         vf->hidden = true;
         return;
     }
-    if (f->header_type != HEADER_DEVICE && f->header_type != HEADER_BRIDGE) {
+    if (f->header_type != PCI_HEADER_TYPE_NORMAL && f->header_type != PCI_HEADER_TYPE_BRIDGE) {
         return;
     }
     if (f->msi_cap != 0) {
@@ -1362,13 +1329,15 @@ static void vfunction_init(
         }
     }
     if (f->rom.kind == PCI_BAR_MEM32 && f->rom.size != 0) {
-        uint32_t reg = f->header_type == HEADER_BRIDGE ? REG_BRIDGE_ROM : REG_ROM;
+        uint32_t reg = f->header_type == PCI_HEADER_TYPE_BRIDGE
+                     ? PCI_ROM_ADDRESS1
+                     : PCI_ROM_ADDRESS;
         vf->bars[ROM_INDEX] = (struct vbar){
             .kind = PCI_BAR_MEM32,
             .size = f->rom.size,
             .host = f->rom.base,
             .guest = pf->rom,
-            .enabled = (pci_cfg_read(f->addr, reg, 4) & ROM_ENABLE) != 0
+            .enabled = (pci_cfg_read(f->addr, reg, 4) & PCI_ROM_ADDRESS_ENABLE) != 0
         };
         if (f->rom.size < PAGE_SIZE) {
             mm_map_device(page_down(f->rom.base), PAGE_SIZE);
@@ -1377,13 +1346,14 @@ static void vfunction_init(
     if (f->msix_cap != 0) {
         msix_init(vf);
     }
-    if (f->header_type == HEADER_BRIDGE) {
-        vf->bus_numbers = guest_bus_numbers(f, pci_cfg_read(f->addr, REG_BUS_NUMBERS, 4));
+    if (f->header_type == PCI_HEADER_TYPE_BRIDGE) {
+        vf->bus_numbers = guest_bus_numbers(f, pci_cfg_read(f->addr, PCI_PRIMARY_BUS, 4));
         vf->mem_base = pf->mem_base;
         vf->mem_limit = pf->mem_limit;
         vf->pref_base = pf->pref_base;
         vf->pref_limit = pf->pref_limit;
-        vf->pref_64 = (pci_cfg_read(f->addr, REG_PREF, 4) & 0xf) == WINDOW_PREF_64;
+        vf->pref_64 = (pci_cfg_read(f->addr, PCI_PREF_MEMORY_BASE, 4) & 0xf)
+                   == PCI_PREF_RANGE_TYPE_64;
     }
 }
 

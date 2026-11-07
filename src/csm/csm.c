@@ -21,11 +21,9 @@
 #include <uacpi/acpi.h>
 #include <csm/csm.h>
 #include <handoff.h>
+#include <hw/pci_regs.h>
 #include <lib/util.h>
 #include <memory.h>
-
-#define PCI_CLASS_MASS_STORAGE 0x01
-#define PCI_SUBCLASS_IDE 0x01
 
 // A sanity bound, well above the 36 bytes of every ACPI revision so far.
 #define RSDP_MAX_SIZE 64
@@ -136,8 +134,8 @@ size_t csm_fill_bbs_table(
                 continue;
             }
             uint16_t priority = boot_pass ? 0 : next_priority++;
-            if (ide == NULL && device->base_class == PCI_CLASS_MASS_STORAGE
-             && device->subclass == PCI_SUBCLASS_IDE) {
+            if (ide == NULL && device->base_class == PCI_BASE_CLASS_STORAGE
+             && device->subclass == PCI_SUBCLASS_STORAGE_IDE) {
                 ide = device;
                 ide_priority = priority;
             }

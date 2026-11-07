@@ -20,34 +20,14 @@
 #include <stdint.h>
 #include <efi.h>
 #include <loader/pci_io.h>
+#include <hw/pci_regs.h>
 #include <lib/log.h>
 #include <loader/efi_glue.h>
 
-#define PCI_COMMAND 0x04
-#define PCI_COMMAND_IO 0x0001
-#define PCI_COMMAND_MEMORY 0x0002
-#define PCI_COMMAND_MASTER 0x0004
-#define PCI_STATUS 0x06
-#define PCI_HEADER_TYPE 0x0e
-#define PCI_HEADER_TYPE_MASK 0x7f
-#define PCI_BAR0 0x10
-#define PCI_BARS 6
-#define PCI_BAR_IO 0x01
-#define PCI_BAR_IO_MASK 0xfffffffc
 // A 16550 UART's registers.
 #define UART_REGISTERS 8
-#define PCI_STATUS_CAPABILITIES 0x10
-#define PCI_CLASS_BRIDGE 0x06
-#define PCI_SUBCLASS_PCI_BRIDGE 0x04
-#define PCI_SECONDARY_BUS 0x19
-#define PCI_CAPABILITIES 0x34
-#define PCI_FIRST_CAPABILITY 0x40
-#define PCI_CAPABILITIES_MAX 48
-#define PCI_CAPABILITY_EXPRESS 0x10
-#define PCI_BUSES 256
 
 // Linux 7.3's include/uapi/linux/pci_regs.h, PCI_EXP_FLAGS.
-#define PCI_EXPRESS_FLAGS 0x02
 #define PCI_EXPRESS_FLAGS_TYPE 0x00f0
 #define PCI_EXPRESS_TYPE_ROOT_PORT 0x0040
 #define PCI_EXPRESS_TYPE_DOWNSTREAM 0x0060
@@ -126,19 +106,19 @@ static bool port_to_slot(EFI_PCI_IO_PROTOCOL *io) {
     uint16_t status = 0;
     uint8_t next = 0;
     io->Pci.Read(io, EfiPciIoWidthUint16, PCI_STATUS, 1, &status);
-    if ((status & PCI_STATUS_CAPABILITIES) != 0) {
-        io->Pci.Read(io, EfiPciIoWidthUint8, PCI_CAPABILITIES, 1, &next);
+    if ((status & PCI_STATUS_CAP_LIST) != 0) {
+        io->Pci.Read(io, EfiPciIoWidthUint8, PCI_CAPABILITY_LIST, 1, &next);
     }
 
-    for (size_t i = 0; i < PCI_CAPABILITIES_MAX; i++) {
-        if (next < PCI_FIRST_CAPABILITY) {
+    for (size_t i = 0; i < PCI_FIND_CAP_TTL; i++) {
+        if (next < PCI_STD_HEADER_SIZEOF) {
             return false;
         }
         uint8_t id = 0;
         io->Pci.Read(io, EfiPciIoWidthUint8, next, 1, &id);
-        if (id == PCI_CAPABILITY_EXPRESS) {
+        if (id == PCI_CAP_ID_EXP) {
             uint16_t flags = 0;
-            io->Pci.Read(io, EfiPciIoWidthUint16, next + PCI_EXPRESS_FLAGS, 1, &flags);
+            io->Pci.Read(io, EfiPciIoWidthUint16, next + PCI_EXP_FLAGS, 1, &flags);
             uint16_t type = flags & PCI_EXPRESS_FLAGS_TYPE;
             bool port = type == PCI_EXPRESS_TYPE_ROOT_PORT || type == PCI_EXPRESS_TYPE_DOWNSTREAM;
             return port && (flags & PCI_EXPRESS_FLAGS_SLOT) != 0;
@@ -160,8 +140,8 @@ bool pci_io_device_in_slot(const struct pci_io_device *dev) {
         const struct pci_io_device *bridge = NULL;
         for (size_t i = 0; i < count && bridge == NULL; i++) {
             uint8_t secondary = 0;
-            if (devices[i].base_class != PCI_CLASS_BRIDGE
-             || devices[i].subclass != PCI_SUBCLASS_PCI_BRIDGE
+            if (devices[i].base_class != PCI_BASE_CLASS_BRIDGE
+             || devices[i].subclass != PCI_SUBCLASS_BRIDGE_PCI
              || devices[i].address.segment != dev->address.segment) {
                 continue;
             }
@@ -191,8 +171,8 @@ static const struct pci_io_device *upstream_bridge(
 ) {
     for (size_t i = 0; i < count; i++) {
         uint8_t secondary = 0;
-        if (devices[i].base_class != PCI_CLASS_BRIDGE
-         || devices[i].subclass != PCI_SUBCLASS_PCI_BRIDGE
+        if (devices[i].base_class != PCI_BASE_CLASS_BRIDGE
+         || devices[i].subclass != PCI_SUBCLASS_BRIDGE_PCI
          || devices[i].address.segment != dev->address.segment) {
             continue;
         }
@@ -212,14 +192,14 @@ static bool io_bar_holds(EFI_PCI_IO_PROTOCOL *io, uint16_t port) {
     if ((header_type & PCI_HEADER_TYPE_MASK) != 0) {
         return false;
     }
-    uint32_t bars[PCI_BARS];
-    if (io->Pci.Read(io, EfiPciIoWidthUint32, PCI_BAR0, PCI_BARS, bars)
+    uint32_t bars[PCI_STD_NUM_BARS];
+    if (io->Pci.Read(io, EfiPciIoWidthUint32, PCI_BASE_ADDRESS_0, PCI_STD_NUM_BARS, bars)
      != EFI_SUCCESS) {
         return false;
     }
-    for (size_t i = 0; i < PCI_BARS; i++) {
-        uint32_t base = bars[i] & PCI_BAR_IO_MASK;
-        if ((bars[i] & PCI_BAR_IO) != 0 && base != 0
+    for (size_t i = 0; i < PCI_STD_NUM_BARS; i++) {
+        uint32_t base = bars[i] & PCI_BASE_ADDRESS_IO_MASK;
+        if ((bars[i] & PCI_BASE_ADDRESS_SPACE_IO) != 0 && base != 0
          && port >= base && port < base + UART_REGISTERS) {
             return true;
         }

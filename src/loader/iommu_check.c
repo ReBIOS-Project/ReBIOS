@@ -20,6 +20,7 @@
 #include <stdint.h>
 #include <efi.h>
 #include <loader/iommu_check.h>
+#include <hw/pci_regs.h>
 #include <lib/log.h>
 #include <lib/util.h>
 #include <loader/efi_glue.h>
@@ -57,7 +58,6 @@
 
 #define NOTICE_SECONDS 10
 
-#define PCI_VENDOR_INTEL 0x8086
 #define IGFX_DEVFN (2 << 3)
 #define HOST_BRIDGE_GGC 0x52
 // The memory size encodings the firmware picks when it allocates a shadow GTT
@@ -226,10 +226,11 @@ static bool igfx_broken(uint16_t *igfx_id) {
     const struct pci_io_device *host_bridge = NULL;
     for (size_t i = 0; i < count; i++) {
         const struct pci_io_device *d = &devices[i];
-        if (d->vendor_id != PCI_VENDOR_INTEL || d->address.segment != 0 || d->address.bus != 0) {
+        if (d->vendor_id != PCI_VENDOR_ID_INTEL || d->address.segment != 0
+         || d->address.bus != 0) {
             continue;
         }
-        if (d->address.devfn == IGFX_DEVFN && d->base_class == PCI_CLASS_DISPLAY) {
+        if (d->address.devfn == IGFX_DEVFN && d->base_class == PCI_BASE_CLASS_DISPLAY) {
             igfx = d;
         } else if (d->address.devfn == 0) {
             host_bridge = d;
@@ -276,7 +277,7 @@ bool iommu_check(void) {
             "ReBIOS cannot run with this machine's integrated graphics, %04x:%04x, which\n"
             "malfunctions when the IOMMU remaps its memory accesses. If another\n"
             "graphics card is installed, disable the integrated graphics in the\n"
-            "firmware setup.\n", PCI_VENDOR_INTEL, igfx_id
+            "firmware setup.\n", PCI_VENDOR_ID_INTEL, igfx_id
         );
     } else if (found == FOUND_UNUSABLE) {
         log_notice("ReBIOS cannot use the IOMMU the firmware reports.\n");

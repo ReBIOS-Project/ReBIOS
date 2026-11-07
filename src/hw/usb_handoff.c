@@ -21,22 +21,17 @@
 #include <hw/usb_handoff.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
+#include <hw/pci_regs.h>
 #include <iommu/iommu_tables.h>
 #include <lib/log.h>
 #include <lib/time.h>
 #include <sys/mm.h>
 #include <sys/x86.h>
 
-#define PCI_CLASS_SERIAL_BUS 0x0c
-#define PCI_SUBCLASS_USB 0x03
 #define USB_UHCI 0x00
 #define USB_OHCI 0x10
 #define USB_EHCI 0x20
 #define USB_XHCI 0x30
-
-#define PCI_COMMAND 0x04
-#define PCI_COMMAND_IO ((uint32_t)1 << 0)
-#define PCI_COMMAND_MEMORY ((uint32_t)1 << 1)
 
 // UHCI 1.1, 5.2.1: the enables of the firmware's keyboard emulation, and the
 // R/WC status bits, which writing ones clears.
@@ -375,7 +370,7 @@ void usb_handoff(void) {
     const struct pci_topology *t = pci_enum_topology();
     for (size_t i = 0; t != NULL && i < t->function_count; i++) {
         const struct pci_function *f = &t->functions[i];
-        if (f->base_class == PCI_CLASS_SERIAL_BUS && f->subclass == PCI_SUBCLASS_USB) {
+        if (f->base_class == PCI_BASE_CLASS_SERIAL && f->subclass == PCI_SUBCLASS_SERIAL_USB) {
             take(f);
         }
     }

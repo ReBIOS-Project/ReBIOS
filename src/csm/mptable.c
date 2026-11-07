@@ -27,6 +27,7 @@
 #include <hw/ioapic.h>
 #include <hw/lapic.h>
 #include <hw/pci_enum.h>
+#include <hw/pci_regs.h>
 #include <lib/log.h>
 #include <lib/util.h>
 #include <memory.h>
@@ -70,9 +71,6 @@
 #define MADT_ALL_UIDS ((uint32_t)0xff)
 #define MADT_ALL_X2APIC_UIDS ((uint32_t)0xffffffff)
 
-#define PCI_HEADER_BRIDGE 1
-#define PCI_HEADER_CARDBUS 2
-#define PCI_BUSES 256
 #define ISA_IRQS 16
 #define CASCADE_IRQ 2
 
@@ -218,7 +216,8 @@ static void pci_buses_find(struct mp_input *in) {
     }
     for (size_t i = 0; i < topology->function_count; i++) {
         const struct pci_function *f = &topology->functions[i];
-        bool bridge = f->header_type == PCI_HEADER_BRIDGE || f->header_type == PCI_HEADER_CARDBUS;
+        bool bridge = f->header_type == PCI_HEADER_TYPE_BRIDGE
+                   || f->header_type == PCI_HEADER_TYPE_CARDBUS;
         // A bridge whose secondary bus is not above its own has not been given
         // one.
         if (!bridge || f->secondary_bus <= f->addr.bus) {

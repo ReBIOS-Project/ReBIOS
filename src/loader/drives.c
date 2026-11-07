@@ -22,6 +22,7 @@
 #include <efi.h>
 #include <loader/drives.h>
 #include <handoff.h>
+#include <hw/pci_regs.h>
 #include <lib/log.h>
 #include <lib/printf.h>
 #include <loader/config.h>
@@ -92,9 +93,6 @@ struct disk_info {
 #define NVME_MODEL_OFFSET 24
 #define NVME_MODEL_LENGTH 40
 #define NVME_TIMEOUT_100NS 10000000
-
-#define PCI_BASE_CLASS_STORAGE 0x01
-#define PCI_CLASS_SERIAL_USB 0x0c03
 
 // El Torito 1.0, figure 7: the Boot Record Volume Descriptor, in sector 17.
 #define EL_TORITO_SECTOR 17

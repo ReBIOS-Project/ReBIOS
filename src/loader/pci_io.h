@@ -23,8 +23,6 @@
 #include <efi.h>
 #include <handoff.h>
 
-#define PCI_CLASS_DISPLAY 0x03
-
 // For printf(), as segment:bus:device.function.
 #define PCI_ADDRESS_FMT "%04x:%02x:%02x.%x"
 #define PCI_ADDRESS_ARGS(a) (a).segment, (a).bus, (a).devfn >> 3, (a).devfn & 7

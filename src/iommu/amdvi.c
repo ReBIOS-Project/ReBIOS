@@ -24,6 +24,7 @@
 #include <hw/lapic.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
+#include <hw/pci_regs.h>
 #include <iommu/iommu_tables.h>
 #include <iommu/remap.h>
 #include <lib/heap.h>
@@ -141,7 +142,6 @@
 // The highest APIC ID an 8-bit physical destination names, 0xff being
 // broadcast.
 #define MAX_DEST_ID 0xfe
-#define MSI_ADDRESS ((uint32_t)0xfee00000)
 #define RTE_ACTIVE_LOW ((uint64_t)1 << 13)
 #define RTE_LEVEL ((uint64_t)1 << 15)
 // PCI Express Capabilities register Device/Port Types.
@@ -161,14 +161,6 @@
 
 // PCI Local Bus Specification 3.0, 6.8.1: MSI's Message Control register and
 // the registers after it.
-#define MSI_CONTROL 2
-#define MSI_ENABLE ((uint32_t)0x0001)
-#define MSI_MME_MASK ((uint32_t)0x0070)
-#define MSI_WIDE ((uint32_t)0x0080)
-#define MSI_ADDRESS_LOW 4
-#define MSI_ADDRESS_HIGH 8
-#define MSI_DATA_NARROW 8
-#define MSI_DATA_WIDE 0xc
 
 #define TIMEOUT_NS ((uint64_t)1000000000)
 // As long as Linux 7.3's iommu_ga_log_enable() waits for the log to start.
@@ -486,19 +478,20 @@ static bool unit_msi(const struct amdvi_unit *u, uint32_t apic_id, uint8_t vecto
         return false;
     }
     uint32_t cap = f->msi_cap;
-    uint32_t control = pci_cfg_read(u->function, cap + MSI_CONTROL, 2)
-                     & ~(MSI_ENABLE | MSI_MME_MASK);
-    pci_cfg_write(u->function, cap + MSI_CONTROL, 2, control);
+    uint32_t control = pci_cfg_read(u->function, cap + PCI_MSI_FLAGS, 2)
+                     & ~(PCI_MSI_FLAGS_ENABLE | PCI_MSI_FLAGS_QSIZE);
+    pci_cfg_write(u->function, cap + PCI_MSI_FLAGS, 2, control);
     pci_cfg_write(
-        u->function, cap + MSI_ADDRESS_LOW, 4, MSI_ADDRESS | apic_id << MSI_ADDRESS_DEST_SHIFT
+        u->function, cap + PCI_MSI_ADDRESS_LO, 4,
+        MSI_ADDRESS_BASE | apic_id << MSI_ADDRESS_DEST_SHIFT
     );
-    uint32_t data = MSI_DATA_NARROW;
-    if ((control & MSI_WIDE) != 0) {
-        pci_cfg_write(u->function, cap + MSI_ADDRESS_HIGH, 4, 0);
-        data = MSI_DATA_WIDE;
+    uint32_t data = PCI_MSI_DATA_32;
+    if ((control & PCI_MSI_FLAGS_64BIT) != 0) {
+        pci_cfg_write(u->function, cap + PCI_MSI_ADDRESS_HI, 4, 0);
+        data = PCI_MSI_DATA_64;
     }
     pci_cfg_write(u->function, cap + data, 2, vector);
-    pci_cfg_write(u->function, cap + MSI_CONTROL, 2, control | MSI_ENABLE);
+    pci_cfg_write(u->function, cap + PCI_MSI_FLAGS, 2, control | PCI_MSI_FLAGS_ENABLE);
     return true;
 }
 
@@ -938,7 +931,7 @@ void amdvi_poll(void (*woken)(uint32_t tag)) {
 }
 
 void amdvi_remap_message(uint16_t index, uint32_t *address, uint32_t *data) {
-    *address = MSI_ADDRESS;
+    *address = MSI_ADDRESS_BASE;
     *data = (uint32_t)index;
 }
 

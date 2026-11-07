@@ -28,25 +28,13 @@
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
 #include <hw/pci_host.h>
+#include <hw/pci_regs.h>
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/util.h>
 #include <memory.h>
 #include <sys/mm.h>
 
-// PCI-to-PCI Bridge Architecture Specification 1.1, 3.2.5.8 and 3.2.5.9:
-// memory windows come in 1 MiB granules.
-#define WINDOW_GRANULE ONE_MIB
-
-#define HEADER_BRIDGE 1
-#define HEADER_CARDBUS 2
-#define BRIDGE_PREF 0x24
-#define WINDOW_PREF_64 ((uint32_t)0x1)
-// PCI-to-PCI Bridge Architecture Specification 1.1, 3.2.5.6: I/O windows come
-// in 4 KiB granules.
-#define IO_GRANULE ((uint32_t)0x1000)
-
-#define BUSES 256
 #define DEVICES 32
 #define PORT_FUNCTIONS 8
 #define NO_ROOT UINT32_MAX
@@ -165,26 +153,26 @@ static void window_add(
     if (c->size[side_inside] == 0) {
         return;
     }
-    uint64_t align = c->align[side_inside] > WINDOW_GRANULE
+    uint64_t align = c->align[side_inside] > PCI_MEMORY_GRANULE
                    ? c->align[side_inside]
-                   : WINDOW_GRANULE;
+                   : PCI_MEMORY_GRANULE;
     element_add(
         parent,
         (struct element){
-            function, kind, 0, side, align_up(c->size[side_inside], WINDOW_GRANULE), align, 0
+            function, kind, 0, side, align_up(c->size[side_inside], PCI_MEMORY_GRANULE), align, 0
         }
     );
 }
 
 static bool is_bridge(const struct pci_function *f) {
-    return f->header_type == HEADER_BRIDGE && f->secondary_bus > f->addr.bus;
+    return f->header_type == PCI_HEADER_TYPE_BRIDGE && f->secondary_bus > f->addr.bus;
 }
 
 // The last bus number the function's bus or, for a bridge, the buses behind it
 // take.
 static uint8_t last_bus(const struct pci_function *f) {
-    bool bridge = (f->header_type == HEADER_BRIDGE || f->header_type == HEADER_CARDBUS)
-               && f->secondary_bus > f->addr.bus;
+    bool bridge = (f->header_type == PCI_HEADER_TYPE_BRIDGE
+                || f->header_type == PCI_HEADER_TYPE_CARDBUS) && f->secondary_bus > f->addr.bus;
     return bridge && f->subordinate_bus > f->addr.bus ? f->subordinate_bus : f->addr.bus;
 }
 
@@ -221,7 +209,8 @@ static bool path_reaches_high(
     const struct pci_topology *t, const struct pci_function *f, bool prefetchable
 ) {
     for (const struct pci_function *b = f->parent; b != NULL; b = b->parent) {
-        if (!prefetchable || (pci_cfg_read(b->addr, BRIDGE_PREF, 4) & 0xf) != WINDOW_PREF_64) {
+        if (!prefetchable
+         || (pci_cfg_read(b->addr, PCI_PREF_MEMORY_BASE, 4) & 0xf) != PCI_PREF_RANGE_TYPE_64) {
             return false;
         }
     }
@@ -246,7 +235,8 @@ static bool pref_window_low(
         return port;
     }
     for (const struct pci_function *b = bridge; b != NULL; b = b->parent) {
-        if (high_windows[b - t->functions] || pci_cfg_read(b->addr, BRIDGE_PREF, 4) == 0) {
+        if (high_windows[b - t->functions]
+         || pci_cfg_read(b->addr, PCI_PREF_MEMORY_BASE, 4) == 0) {
             return false;
         }
     }
@@ -345,7 +335,7 @@ static void mark(bool *used, size_t first, size_t last) {
 }
 
 static bool numbers_free(const bool *used, size_t base, size_t count) {
-    if (base + count > BUSES) {
+    if (base + count > PCI_BUSES) {
         return false;
     }
     for (size_t i = 0; i < count; i++) {
@@ -362,8 +352,8 @@ static bool numbers_free(const bool *used, size_t base, size_t count) {
 // Gives each root bus's guest number, -1 where it has none, and returns the
 // highest in use.
 static uint8_t number_buses(const struct pci_topology *t, const uint8_t *ends, int *guest_roots) {
-    bool used[BUSES];
-    memset(used, 0, BUSES * sizeof(bool));
+    bool used[PCI_BUSES];
+    memset(used, 0, PCI_BUSES * sizeof(bool));
     for (size_t i = 0; i < t->function_count; i++) {
         const struct pci_function *f = &t->functions[i];
         if (f->addr.segment == 0) {
@@ -402,10 +392,10 @@ static uint8_t number_buses(const struct pci_topology *t, const uint8_t *ends, i
         }
         size_t count = (size_t)ends[r] - rb->bus + 1;
         size_t base = r == plan.primary ? 0 : 1;
-        while (r != plan.primary && base < BUSES && !numbers_free(used, base, count)) {
+        while (r != plan.primary && base < PCI_BUSES && !numbers_free(used, base, count)) {
             base++;
         }
-        if (base == BUSES) {
+        if (base == PCI_BUSES) {
             printf(
                 "PCI root bus %04x:%02x: no room for its %zu buses among the guest's bus "
                 "numbers\n", rb->segment, rb->bus, count
@@ -422,7 +412,7 @@ static uint8_t number_buses(const struct pci_topology *t, const uint8_t *ends, i
     }
 
     uint8_t last = 0;
-    for (size_t bus = 0; bus < BUSES; bus++) {
+    for (size_t bus = 0; bus < PCI_BUSES; bus++) {
         if (used[bus]) {
             last = (uint8_t)bus;
         }
@@ -531,7 +521,7 @@ static void io_window(const struct pci_topology *t, size_t root, uint32_t *base,
                 high = (uint32_t)(bar->base + bar->size);
             }
         }
-        if (f->header_type == HEADER_BRIDGE && f->io_limit >= f->io_base) {
+        if (f->header_type == PCI_HEADER_TYPE_BRIDGE && f->io_limit >= f->io_base) {
             if (f->io_base < low) {
                 low = f->io_base;
             }
@@ -541,19 +531,19 @@ static void io_window(const struct pci_topology *t, size_t root, uint32_t *base,
         }
     }
     if (high == 0) {
-        *base = IO_GRANULE;
-        *limit = IO_GRANULE - 1;
+        *base = PCI_IO_GRANULE;
+        *limit = PCI_IO_GRANULE - 1;
         return;
     }
-    *base = align_down(low, IO_GRANULE);
-    *limit = align_up(high, IO_GRANULE) - 1;
+    *base = align_down(low, PCI_IO_GRANULE);
+    *limit = align_up(high, PCI_IO_GRANULE) - 1;
 }
 
 // A window from a range, closed where it is empty.
 static void window_of(struct pci_plan_range r, uintptr_t *base, uint64_t *limit) {
     if (r.end == r.base) {
-        *base = WINDOW_GRANULE;
-        *limit = WINDOW_GRANULE - 1;
+        *base = PCI_MEMORY_GRANULE;
+        *limit = PCI_MEMORY_GRANULE - 1;
     } else {
         *base = r.base;
         *limit = r.end - 1;
@@ -652,16 +642,16 @@ const struct pci_plan *pci_plan_make(
     plan.primary = primary_root(t);
     for (size_t i = 0; i < n; i++) {
         plan.functions[i] = (struct pci_plan_function){
-            .mem_base = WINDOW_GRANULE,
-            .mem_limit = WINDOW_GRANULE - 1,
-            .pref_base = WINDOW_GRANULE,
-            .pref_limit = WINDOW_GRANULE - 1
+            .mem_base = PCI_MEMORY_GRANULE,
+            .mem_limit = PCI_MEMORY_GRANULE - 1,
+            .pref_base = PCI_MEMORY_GRANULE,
+            .pref_limit = PCI_MEMORY_GRANULE - 1
         };
     }
 
     // The guest's bus numbers, and the ports in place of the root buses but
     // the primary.
-    for (size_t bus = 0; bus < BUSES; bus++) {
+    for (size_t bus = 0; bus < PCI_BUSES; bus++) {
         plan.buses[bus] = (struct pci_plan_bus){ true, 0, (uint8_t)bus };
     }
     uint8_t *ends = kmalloc((roots != 0 ? roots : 1) * sizeof(uint8_t));
@@ -986,7 +976,7 @@ int pci_plan_guest_bus(uint16_t segment, uint8_t bus) {
     if (!made) {
         return segment == 0 ? bus : -1;
     }
-    for (size_t g = 0; g < BUSES; g++) {
+    for (size_t g = 0; g < PCI_BUSES; g++) {
         const struct pci_plan_bus *b = &plan.buses[g];
         if (b->present && b->segment == segment && b->bus == bus) {
             return (int)g;

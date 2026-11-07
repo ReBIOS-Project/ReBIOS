@@ -22,6 +22,7 @@
 #include <tendril/tendril.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
+#include <hw/pci_regs.h>
 #include <hw/usb_handoff.h>
 #include <lib/util.h>
 #include <sys/x86.h>
@@ -38,18 +39,10 @@
 // BIOS gives it, a little later, and one that just starts writing gets it
 // first.
 
-#define REG_COMMAND 0x04
 #define COMMAND_BITS ((uint32_t)0xffff)
-#define COMMAND_MEMORY ((uint32_t)1 << 1)
 
 // PCI Power Management Interface 1.2, 3.2.4.
 #define PM_CONTROL 4
-
-#define MSIX_CONTROL 2
-#define MSIX_TABLE 4
-#define MSIX_SIZE_MASK 0x7ff
-#define MSIX_BIR_MASK ((uint32_t)7)
-#define MSIX_ENTRY_SIZE 16
 
 // xHCI 1.2, 7.1.1, and EHCI 1.0, 2.1.7.
 #define LEGSUP_BIOS ((uint32_t)1 << 16)
@@ -174,7 +167,7 @@ static void low_half_keep(
 static bool hook_read(void *ctx, uint32_t reg, uint32_t *value) {
     struct usb_controller *c = ctx;
     struct pci_addr a = c->f->addr;
-    if (reg == REG_COMMAND && c->command_kept) {
+    if (reg == PCI_COMMAND && c->command_kept) {
         *value = (pci_cfg_read(a, reg, 4) & ~COMMAND_BITS) | c->command;
         return true;
     }
@@ -199,7 +192,7 @@ static bool hook_read(void *ctx, uint32_t reg, uint32_t *value) {
 static bool hook_write(void *ctx, uint32_t reg, uint32_t value, uint32_t mask) {
     struct usb_controller *c = ctx;
     struct pci_addr a = c->f->addr;
-    if (reg == REG_COMMAND) {
+    if (reg == PCI_COMMAND) {
         low_half_keep(a, reg, value, mask, &c->command_kept, &c->command);
         return true;
     }
@@ -282,12 +275,13 @@ static bool trap_registers(struct usb_controller *c) {
     size_t first = c->mmio_size;
     size_t end = c->mmio_size;
     if (f->msix_cap != 0) {
-        uint32_t table = pci_cfg_read(f->addr, f->msix_cap + MSIX_TABLE, 4);
-        size_t count = (pci_cfg_read(f->addr, f->msix_cap + MSIX_CONTROL, 2) & MSIX_SIZE_MASK) + 1;
-        if ((table & MSIX_BIR_MASK) == 0) {
-            size_t offset = table & ~MSIX_BIR_MASK;
+        uint32_t table = pci_cfg_read(f->addr, f->msix_cap + PCI_MSIX_TABLE, 4);
+        uint32_t flags = pci_cfg_read(f->addr, f->msix_cap + PCI_MSIX_FLAGS, 2);
+        size_t count = (flags & PCI_MSIX_FLAGS_QSIZE) + 1;
+        if ((table & PCI_MSIX_TABLE_BIR) == 0) {
+            size_t offset = table & ~PCI_MSIX_TABLE_BIR;
             first = page_down(offset);
-            end = page_up(offset + count * MSIX_ENTRY_SIZE);
+            end = page_up(offset + count * PCI_MSIX_ENTRY_SIZE);
         }
     }
     return trap_range(c, 0, first)
@@ -301,8 +295,8 @@ bool usb_legacy_own(struct usb_controller *c) {
         io_register(&ports);
     } else {
         // Firmware that used no USB may have left it off.
-        uint32_t command = pci_cfg_read(f->addr, REG_COMMAND, 2);
-        pci_cfg_write(f->addr, REG_COMMAND, 2, command | COMMAND_MEMORY);
+        uint32_t command = pci_cfg_read(f->addr, PCI_COMMAND, 2);
+        pci_cfg_write(f->addr, PCI_COMMAND, 2, command | PCI_COMMAND_MEMORY);
         if (c->type == TENDRIL_HC_XHCI) {
             c->legacy_cap = usb_xhci_legacy_cap((uintptr_t)c->mmio, c->mmio_size);
         } else if (c->type == TENDRIL_HC_EHCI) {
@@ -326,7 +320,7 @@ void usb_legacy_disown(struct usb_controller *c) {
         pci_cfg_write(f->addr, f->pm_cap + PM_CONTROL, 2, c->power);
     }
     if (c->command_kept) {
-        pci_cfg_write(f->addr, REG_COMMAND, 2, c->command);
+        pci_cfg_write(f->addr, PCI_COMMAND, 2, c->command);
     }
     for (size_t i = 0; i < c->range_count; i++) {
         pci_virt_untrap(f->addr, 0, c->ranges[i].offset);
