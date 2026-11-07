@@ -414,7 +414,7 @@ struct cpuid_regs nsvm_cpuid(void) {
     uint32_t features = SVM_FEATURE_NP | SVM_FEATURE_NRIPS | SVM_FEATURE_VMCB_CLEAN
                       | SVM_FEATURE_FLUSH_BY_ASID | SVM_FEATURE_PAUSE_FILTER
                       | SVM_FEATURE_PAUSE_FILTER_THRESHOLD | SVM_FEATURE_LBRV | SVM_FEATURE_ROGPT
-                      | SVM_FEATURE_TLBICTL;
+                      | SVM_FEATURE_TLBICTL | SVM_FEATURE_DECODE_ASSISTS;
     return (struct cpuid_regs){
         svm.eax & 0xff, nasid - 1, svm.ecx & CPUID_8000000A_ECX_PML,
         (svm.edx & features) | SVM_FEATURE_VMCB_ADDR_CHECK
@@ -624,6 +624,18 @@ static void exit_to_l1(
     // 24593 rev. 3.46, 15.7.1).
     if (svm_nrips) {
         c12->nrip = hardware ? c02->nrip : 0;
+    }
+    // The bytes of the instruction whose data access made a nested page fault
+    // or a page fault, which the processor fetched for the exit that led here;
+    // every other exit clears their count (APM 24593 rev. 3.46, 15.8.4).
+    if (svm_decode_assists) {
+        bool fault = code == SVM_EXIT_NPF || code == SVM_EXIT_EXCEPTION_BASE + VECTOR_PF;
+        bool fetched = v->last_exit == SVM_EXIT_NPF
+                    || v->last_exit == SVM_EXIT_EXCEPTION_BASE + VECTOR_PF;
+        c12->insn_len = fault && fetched ? c02->insn_len : 0;
+        if (fault && fetched) {
+            memcpy(c12->insn_bytes, c02->insn_bytes, sizeof(c12->insn_bytes));
+        }
     }
 
     // What the guest's guest left of NMIs: blocked as the processor still has

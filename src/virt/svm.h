@@ -326,6 +326,9 @@ extern bool svm_erratum_383;
 // Whether VMRUN and #VMEXIT switch DebugCtl and the last branch records.
 extern bool svm_lbr_virtualisation;
 extern bool svm_nrips;
+// Exits report the operands of the instructions they intercept, and the bytes
+// of those whose data accesses fault (APM 24593 rev. 3.46, 15.8).
+extern bool svm_decode_assists;
 // The processor keeps the guest's NMI blocking and takes a virtual NMI when
 // the guest can (APM 24593 rev. 3.45, 15.21.10), with GIF virtualised, as
 // Linux 7.3's KVM has it.

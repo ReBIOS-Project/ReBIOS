@@ -90,7 +90,7 @@ static bool invlpgb;
 static uint32_t invlpgb_count_max;
 // Nested page faults bring the guest's instruction bytes along (APM 24593 rev.
 // 3.45, 15.8.4).
-static bool decode_assists;
+bool svm_decode_assists;
 // With ERAPS the guest counts on the processor to clear the return address
 // predictor wherever its TLB is flushed (APM 24593 rev. 3.45, 3.2.9): VMRUN
 // clears it where the hypervisor changes the guest's paging, and the guest
@@ -243,7 +243,7 @@ bool svm_supported(void) {
     struct cpuid_regs sizes = cpuid(0x80000008, 0);
     invlpgb = (sizes.ebx & CPUID_80000008_EBX_INVLPGB) != 0;
     invlpgb_count_max = sizes.edx & 0xffff;
-    decode_assists = (features & SVM_FEATURE_DECODE_ASSISTS) != 0;
+    svm_decode_assists = (features & SVM_FEATURE_DECODE_ASSISTS) != 0;
     svm_vgif = (features & SVM_FEATURE_VGIF) != 0;
     svm_vls = (features & SVM_FEATURE_VLS) != 0;
     svm_vmcb_addr_check = (features & SVM_FEATURE_VMCB_ADDR_CHECK) != 0;
@@ -441,7 +441,7 @@ static void svm_handle_io(struct vcpu *v) {
 // (15.8.1), else the instruction does: 0F 22 /r, its ModRM.rm.
 static void svm_handle_cr4_write(struct vcpu *v) {
     struct vmcb_control *c = &v->vmcb->control;
-    bool assisted = decode_assists && (c->exitinfo1 >> 63) != 0;
+    bool assisted = svm_decode_assists && (c->exitinfo1 >> 63) != 0;
     // Without next RIP saving, its length comes from the instruction too.
     struct insn insn = { 0 };
     if (!assisted || !svm_nrips) {
@@ -792,7 +792,7 @@ static void svm_handle_exit(struct vcpu *v) {
             }
             // Only where they could all be fetched, or the instruction may be
             // longer.
-            if (decode_assists && (c->insn_len & 0xf) == sizeof(v->fetched)) {
+            if (svm_decode_assists && (c->insn_len & 0xf) == sizeof(v->fetched)) {
                 memcpy(v->fetched, c->insn_bytes, sizeof(v->fetched));
                 v->fetched_count = sizeof(v->fetched);
                 v->fetched_rip = v->vmcb->save.rip;
