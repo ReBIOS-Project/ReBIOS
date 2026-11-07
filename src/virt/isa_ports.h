@@ -20,7 +20,8 @@
 
 // Gives the guest the machine's serial and parallel ports that the firmware's
 // ACPI describes as enabled, but for the UART of ReBIOS's log, which the guest
-// never reaches. After acpi_namespace_start().
+// never reaches, and the IDE channels in compatibility mode. After
+// acpi_namespace_start().
 void isa_ports_init(void);
 
 #endif

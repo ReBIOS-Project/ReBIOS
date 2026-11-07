@@ -39,6 +39,7 @@
 #include <virt/cpuid.h>
 #include <virt/hpet.h>
 #include <virt/igfx.h>
+#include <virt/io.h>
 #include <virt/irq.h>
 #include <virt/isa_dma.h>
 #include <virt/isa_ports.h>
@@ -81,6 +82,7 @@ static void bsp_main(void *arg) {
         panic("Neither VMX nor SVM is usable on this processor\n");
     }
     cpu_tables_load(cpu, virt_vmx);
+    io_init();
     virt_cpu_init();
     msr_init();
     cpuid_init();

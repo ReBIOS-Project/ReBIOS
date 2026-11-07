@@ -29,6 +29,7 @@
 #include <core.h>
 #include <handoff.h>
 #include <hw/acpi.h>
+#include <hw/pci_enum.h>
 #include <lib/log.h>
 #include <virt/io.h>
 
@@ -38,6 +39,18 @@ static const char *const port_ids[] = { "PNP0500", "PNP0501", "PNP0400", "PNP040
 
 #define UART_PORTS 8
 #define MAX_RANGES 4
+
+// An IDE controller's channels in compatibility mode, at the PC/AT's ports
+// (ICH10 datasheet 319973-003, 14.1.6).
+#define CLASS_STORAGE 0x01
+#define SUBCLASS_IDE 0x01
+#define IDE_PRIMARY_NATIVE 0x01
+#define IDE_SECONDARY_NATIVE 0x04
+#define IDE_PRIMARY_BASE 0x1f0
+#define IDE_PRIMARY_CONTROL 0x3f6
+#define IDE_SECONDARY_BASE 0x170
+#define IDE_SECONDARY_CONTROL 0x376
+#define IDE_CHANNEL_PORTS 8
 
 struct device_ports {
     uint16_t base[MAX_RANGES];
@@ -101,7 +114,26 @@ static uacpi_iteration_decision give_device(
     return UACPI_ITERATION_DECISION_CONTINUE;
 }
 
+static void give_ide_channels(void) {
+    const struct pci_topology *t = pci_enum_topology();
+    for (size_t i = 0; t != NULL && i < t->function_count; i++) {
+        const struct pci_function *f = &t->functions[i];
+        if (f->base_class != CLASS_STORAGE || f->subclass != SUBCLASS_IDE) {
+            continue;
+        }
+        if ((f->prog_if & IDE_PRIMARY_NATIVE) == 0) {
+            io_pass(IDE_PRIMARY_BASE, IDE_CHANNEL_PORTS);
+            io_pass(IDE_PRIMARY_CONTROL, 1);
+        }
+        if ((f->prog_if & IDE_SECONDARY_NATIVE) == 0) {
+            io_pass(IDE_SECONDARY_BASE, IDE_CHANNEL_PORTS);
+            io_pass(IDE_SECONDARY_CONTROL, 1);
+        }
+    }
+}
+
 void isa_ports_init(void) {
+    give_ide_channels();
     const struct handoff_config *config = &core_handoff->config;
     if (config->serial != 0 && config->serial_port != 0) {
         io_block(config->serial_port, UART_PORTS);

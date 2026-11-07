@@ -197,6 +197,9 @@ struct vfunction {
     uintptr_t pref_base;
     uintptr_t pref_limit;
     bool pref_64;
+    // Where its I/O BARs below 1000h are, whose ports the guest is given: 0
+    // for the others.
+    uint16_t legacy_io[BAR_COUNT];
 };
 
 static struct {
@@ -1027,6 +1030,60 @@ static bool in_rebar(const struct vfunction *vf, uint32_t offset) {
     return cap != 0 && offset >= cap && offset < cap + REBAR_SIZE;
 }
 
+// The I/O BARs below 1000h, where ports are absent unless given.
+#define LEGACY_PORTS_END 0x1000
+#define IO_BAR_ADDRESS ((uint32_t)0xfffffffc)
+
+// Where the function's I/O BAR decodes, if below 1000h: 0 where not.
+static uint16_t legacy_io_base(const struct pci_function *f, size_t i) {
+    const struct pci_bar *bar = &f->bars[i];
+    if (bar->kind != PCI_BAR_IO || bar->size == 0) {
+        return 0;
+    }
+    uint32_t base = pci_cfg_read(f->addr, bar->reg, 4) & IO_BAR_ADDRESS;
+    return base < LEGACY_PORTS_END ? (uint16_t)base : 0;
+}
+
+static bool legacy_io_moved(const struct vfunction *vf) {
+    for (size_t i = 0; i < vf->f->bar_count && i < BAR_COUNT; i++) {
+        if (legacy_io_base(vf->f, i) != vf->legacy_io[i]) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Gives the guest the ports of the function's I/O BARs below 1000h, and takes
+// back those of the ones that left.
+static void legacy_io_update(struct vfunction *vf) {
+    const struct pci_function *f = vf->f;
+    for (size_t i = 0; i < f->bar_count && i < BAR_COUNT; i++) {
+        uint16_t base = legacy_io_base(f, i);
+        if (base == vf->legacy_io[i]) {
+            continue;
+        }
+        if (vf->legacy_io[i] != 0) {
+            io_unpass(vf->legacy_io[i], (size_t)f->bars[i].size);
+        }
+        if (base != 0) {
+            io_pass(base, (size_t)f->bars[i].size);
+        }
+        vf->legacy_io[i] = base;
+    }
+}
+
+// After the guest wrote to the function's BARs, outside virt.lock, as the
+// other vCPUs may wait for it: where their ports moved, with those vCPUs out
+// of the guest.
+static void legacy_io_follow(struct vfunction *vf) {
+    if (vf == NULL || !legacy_io_moved(vf)) {
+        return;
+    }
+    vcpu_pause_others();
+    legacy_io_update(vf);
+    vcpu_resume_others();
+}
+
 static uint32_t function_read(struct pci_addr a, uint32_t offset, size_t size) {
     struct vfunction *vf = vfunction_find(a);
     if (vf != NULL && vf->hidden) {
@@ -1046,31 +1103,36 @@ static uint32_t function_read(struct pci_addr a, uint32_t offset, size_t size) {
     return (kept_read(vf, reg) >> (8 * (offset & 3))) & all_ones(size);
 }
 
-static void function_write(struct pci_addr a, uint32_t offset, size_t size, uint32_t value) {
+// The function whose BAR registers the guest wrote to, for legacy_io_follow():
+// NULL for other writes.
+static struct vfunction *function_write(
+    struct pci_addr a, uint32_t offset, size_t size, uint32_t value
+) {
     struct vfunction *vf = vfunction_find(a);
     if (vf != NULL && (vf->hidden || in_rebar(vf, offset))) {
-        return;
+        return NULL;
     }
     uint32_t reg = offset & ~(uint32_t)3;
     unsigned int shift = 8 * (offset & 3);
     uint32_t mask = all_ones(size) << shift;
     if (vf != NULL && vf->hook != NULL
      && vf->hook->write(vf->hook_ctx, reg, value << shift, mask)) {
-        return;
+        return NULL;
     }
     if (vf != NULL && msi_reg(vf, reg)) {
         msi_write(vf, reg, (msi_read(vf, reg) & ~mask) | ((value << shift) & mask));
-        return;
+        return NULL;
     }
     if (vf != NULL && vf->msix.count != 0 && reg == vf->f->msix_cap) {
         msix_control(vf, (pci_cfg_read(a, reg, 4) & ~mask) | ((value << shift) & mask));
-        return;
+        return NULL;
     }
     if (vf == NULL || offset >= REG_HEADER_END || !is_kept(vf, reg)) {
         pci_cfg_write(a, offset, size, value);
-        return;
+        return reg >= REG_BAR0 && reg < REG_BAR0 + 4 * BAR_COUNT ? vf : NULL;
     }
     kept_write(vf, reg, (kept_read(vf, reg) & ~mask) | ((value << shift) & mask));
+    return NULL;
 }
 
 // The guest's bus numbers are the PCI plan's: a port of the plan's, or a
@@ -1090,48 +1152,21 @@ static uint32_t guest_read(
     return function_read(a, offset, size);
 }
 
-static void guest_write(
+// As function_write().
+static struct vfunction *guest_write(
     uint8_t bus, uint8_t device, uint8_t function, uint32_t offset, size_t size, uint32_t value
 ) {
     int port = bus == 0 ? pci_port_at(device, function) : -1;
     if (port >= 0) {
         pci_port_write((size_t)port, offset, size, value);
-        return;
+        return NULL;
     }
     const struct pci_plan_bus *b = &pci_plan()->buses[bus];
-    if (b->present) {
-        struct pci_addr a = { b->segment, b->bus, device, function };
-        function_write(a, offset, size, value);
+    if (!b->present) {
+        return NULL;
     }
-}
-
-static void port_native(uint16_t port, size_t size, bool in, uint32_t *value) {
-    switch (size) {
-        case 1: {
-            if (in) {
-                *value = inb(port);
-            } else {
-                outb(port, (uint8_t)*value);
-            }
-            break;
-        }
-        case 2: {
-            if (in) {
-                *value = inw(port);
-            } else {
-                outw(port, (uint16_t)*value);
-            }
-            break;
-        }
-        default: {
-            if (in) {
-                *value = inl(port);
-            } else {
-                outl(port, *value);
-            }
-            break;
-        }
-    }
+    struct pci_addr a = { b->segment, b->bus, device, function };
+    return function_write(a, offset, size, value);
 }
 
 // The reset control register at CF9h (ICH10 datasheet 319973-003, 13.7.5): its
@@ -1167,7 +1202,7 @@ static void rst_cnt_access(bool in, uint32_t *value) {
 
 // Only dword accesses to CF8h are the configuration address: the others, but
 // for the reset control register, and data accesses with the address disabled,
-// go on to the hardware.
+// reach nothing, as on a chipset without other devices there.
 static void config_ports(
     struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
 ) {
@@ -1191,7 +1226,9 @@ static void config_ports(
     uint32_t address = virt.config_address;
     unsigned int byte = (unsigned int)(port - CONFIG_DATA);
     if (port < CONFIG_DATA || (address & CONFIG_ENABLE) == 0 || byte + size > 4) {
-        port_native(port, size, in, value);
+        if (in) {
+            *value = 0xffffffff;
+        }
         spinlock_release(&virt.lock);
         return;
     }
@@ -1200,11 +1237,12 @@ static void config_ports(
     uint8_t function = (address >> 8) & 7;
     // Bits 27:24 extend the register number where the chipset allows it.
     uint32_t reg = (address & 0xfc) | ((address >> 16) & 0xf00);
+    struct vfunction *wrote = NULL;
     if (byte % size == 0) {
         if (in) {
             *value = guest_read(bus, device, function, reg + byte, size);
         } else {
-            guest_write(bus, device, function, reg + byte, size, *value);
+            wrote = guest_write(bus, device, function, reg + byte, size, *value);
         }
     } else {
         uint32_t result = 0;
@@ -1213,7 +1251,10 @@ static void config_ports(
             if (in) {
                 result |= guest_read(bus, device, function, at, 1) << (8 * i);
             } else {
-                guest_write(bus, device, function, at, 1, (*value >> (8 * i)) & 0xff);
+                struct vfunction *vf = guest_write(
+                    bus, device, function, at, 1, (*value >> (8 * i)) & 0xff
+                );
+                wrote = vf != NULL ? vf : wrote;
             }
         }
         if (in) {
@@ -1221,6 +1262,7 @@ static void config_ports(
         }
     }
     spinlock_release(&virt.lock);
+    legacy_io_follow(wrote);
 }
 
 static uint32_t ecam_reg(uint64_t offset) {
@@ -1266,13 +1308,18 @@ static void ecam_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, 
     uint8_t function = ecam_function(offset);
     uint32_t reg = ecam_reg(offset);
     spinlock_acquire(&virt.lock);
+    struct vfunction *wrote;
     if (size == 8) {
-        guest_write(bus, device, function, reg, 4, (uint32_t)value);
-        guest_write(bus, device, function, reg + 4, 4, (uint32_t)(value >> 32));
+        wrote = guest_write(bus, device, function, reg, 4, (uint32_t)value);
+        struct vfunction *upper = guest_write(
+            bus, device, function, reg + 4, 4, (uint32_t)(value >> 32)
+        );
+        wrote = upper != NULL ? upper : wrote;
     } else {
-        guest_write(bus, device, function, reg, size, (uint32_t)value);
+        wrote = guest_write(bus, device, function, reg, size, (uint32_t)value);
     }
     spinlock_release(&virt.lock);
+    legacy_io_follow(wrote);
 }
 
 static const struct mmio_ops ecam_ops = { ecam_read, ecam_write, false };
@@ -1366,6 +1413,9 @@ void pci_virt_init(void) {
     virt.functions = kmalloc((virt.count != 0 ? virt.count : 1) * sizeof(struct vfunction));
     for (size_t i = 0; i < virt.count; i++) {
         vfunction_init(&virt.functions[i], &t->functions[i], &plan->functions[i]);
+        if (!virt.functions[i].hidden) {
+            legacy_io_update(&virt.functions[i]);
+        }
     }
     uint32_t mapped = 0;
     for (size_t i = 0; i < virt.count; i++) {

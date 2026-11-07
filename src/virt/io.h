@@ -37,12 +37,23 @@ struct io_handler {
     bool bytes;
 };
 
+// Keeps the guest from the ports below 1000h, the ISA bus's and the chipset's
+// legacy devices', but where io_register() or io_pass() say: the others read
+// all ones and drop writes, as on a board without those devices. Before
+// either.
+void io_init(void);
+
 // Traps the ports and routes them to the handler, for every vCPU.
 void io_register(const struct io_handler *handler);
 
-// Lets the guest reach the machine's ports, where no handler has them, or
-// keeps it from them, which then read all ones and drop writes.
+// Lets the guest reach the machine's ports, where no handler has them and
+// io_block() did not keep it from them; undoes that, for a device whose ports
+// moved; or keeps it from them for good, so that they read all ones and drop
+// writes. While the guest runs, only between vcpu_pause_others() and
+// vcpu_resume_others(), as the I/O bitmaps may change only with no vCPU in the
+// guest (SDM 325462-093 Vol. 3C, 27.11.4).
 void io_pass(uint16_t base, size_t count);
+void io_unpass(uint16_t base, size_t count);
 void io_block(uint16_t base, size_t count);
 
 // Runs an access the guest made: through the handler of its first port, or a

@@ -1940,14 +1940,63 @@ size_t vga_lfb_size(void) {
     return h->video.vram_size;
 }
 
+// Where nothing stands in for it, the card that has the legacy VGA's resources
+// decodes its ports, which the guest then reaches.
+#define REAL_MONOCHROME_BASE 0x3b0
+#define REAL_MONOCHROME_COUNT 0x0c
+#define REAL_COLOUR_BASE 0x3c0
+#define REAL_COLOUR_COUNT 0x20
+// QEMU's VGAs decode the Bochs display interface too, through which their
+// Video BIOSes leave and set graphics modes, and its 16-bit data port reaches
+// 1D0h.
+#define REAL_DISPI_COUNT (DISPI_PORT_COUNT + 1)
+
+struct pci_id {
+    uint16_t vendor;
+    uint16_t device;
+};
+
+static const struct pci_id real_dispi_vgas[] = {
+    // QEMU standard VGA
+    { 0x1234, 0x1111 },
+    // virtio-vga
+    { 0x1af4, 0x1050 },
+    // QXL
+    { 0x1b36, 0x0100 },
+    // VMware SVGA II
+    { 0x15ad, 0x0405 }
+};
+
+static bool decodes_dispi(uint16_t vendor, uint16_t device) {
+    for (size_t i = 0; i < sizeof(real_dispi_vgas) / sizeof(struct pci_id); i++) {
+        if (real_dispi_vgas[i].vendor == vendor && real_dispi_vgas[i].device == device) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void give_real_vga(void) {
+    const struct handoff_video *video = &core_handoff->video;
+    if (video->vga_present) {
+        io_pass(REAL_MONOCHROME_BASE, REAL_MONOCHROME_COUNT);
+        io_pass(REAL_COLOUR_BASE, REAL_COLOUR_COUNT);
+        if (decodes_dispi(video->vga_vendor_id, video->vga_device_id)) {
+            io_pass(DISPI_PORT, REAL_DISPI_COUNT);
+        }
+    }
+}
+
 bool vga_init(void) {
     const struct handoff *h = core_handoff;
     if (!emulation_wanted()) {
+        give_real_vga();
         return false;
     }
     const struct handoff_framebuffer *fb = &h->video.framebuffer;
     if (!framebuffer_usable(fb)) {
         printf("No framebuffer to show an emulated VGA on\n");
+        give_real_vga();
         return false;
     }
 

@@ -2690,6 +2690,17 @@ static void gpe0_access(
     }
 }
 
+static bool fadt_port(const struct acpi_gas *gas, uint16_t *port);
+
+// One of the firmware's fixed hardware blocks, which stays the host's: the
+// guest's own are the virtual ones.
+static void block_fadt_ports(const struct acpi_gas *gas, size_t length) {
+    uint16_t port;
+    if (length != 0 && fadt_port(gas, &port)) {
+        io_block(port, length);
+    }
+}
+
 static bool fadt_port(const struct acpi_gas *gas, uint16_t *port) {
     if (gas->address == 0 || gas->address_space_id != UACPI_ADDRESS_SPACE_SYSTEM_IO
      || gas->address > 0xfffc) {
@@ -2715,6 +2726,20 @@ void vacpi_init(void) {
             vacpi.pm_tmr_32 = (fadt->flags & ACPI_TMR_VAL_EXT) != 0;
         }
         vacpi.power_button = vacpi.pm1 && (fadt->flags & ACPI_PWR_BUTTON) == 0;
+        block_fadt_ports(&fadt->x_pm1a_evt_blk, fadt->pm1_evt_len);
+        block_fadt_ports(&fadt->x_pm1b_evt_blk, fadt->pm1_evt_len);
+        block_fadt_ports(&fadt->x_pm1a_cnt_blk, fadt->pm1_cnt_len);
+        block_fadt_ports(&fadt->x_pm1b_cnt_blk, fadt->pm1_cnt_len);
+        block_fadt_ports(&fadt->x_pm2_cnt_blk, fadt->pm2_cnt_len);
+        block_fadt_ports(&fadt->x_gpe0_blk, fadt->gpe0_blk_len);
+        block_fadt_ports(&fadt->x_gpe1_blk, fadt->gpe1_blk_len);
+        if (fadt->smi_cmd != 0 && fadt->smi_cmd <= 0xffff) {
+            io_block((uint16_t)fadt->smi_cmd, 1);
+        }
+        // The guest's PM timer is the machine's.
+        if (vacpi.pm_tmr != 0) {
+            io_pass(vacpi.pm_tmr, 4);
+        }
     }
     if (vacpi.pm1) {
         struct io_handler evt = { .base = vacpi.pm1_evt, .count = 4, .access = pm1_evt_access };

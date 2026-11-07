@@ -24,9 +24,19 @@
 #include <virt/virt.h>
 
 #define MAX_IO_HANDLERS 32
+#define LEGACY_PORTS 0x1000
+#define PORTS 0x10000
 
 static struct io_handler handlers[MAX_IO_HANDLERS];
 static size_t handler_count;
+// The ports io_block() keeps from the guest, whatever gives them.
+static uint8_t denied[PORTS / 8];
+// How many of what the guest gets have each port below 1000h.
+static uint8_t users[LEGACY_PORTS];
+
+void io_init(void) {
+    virt_intercept_io(0, LEGACY_PORTS, true);
+}
 
 void io_register(const struct io_handler *handler) {
     if (handler_count == MAX_IO_HANDLERS) {
@@ -38,17 +48,41 @@ void io_register(const struct io_handler *handler) {
 
 static const struct io_handler *handler_for(uint16_t port);
 
+// Traps the port where a handler has it, where the guest is kept from it, and
+// below 1000h where nothing the guest gets has it.
+static void settle(uint16_t port) {
+    bool trapped = handler_for(port) != NULL || (denied[port / 8] & (1 << (port % 8))) != 0
+                || (port < LEGACY_PORTS && users[port] == 0);
+    virt_intercept_io(port, 1, trapped);
+}
+
 void io_pass(uint16_t base, size_t count) {
     for (size_t i = 0; i < count; i++) {
         uint16_t port = (uint16_t)(base + i);
-        if (handler_for(port) == NULL) {
-            virt_intercept_io(port, 1, false);
+        if (port < LEGACY_PORTS && users[port] != UINT8_MAX) {
+            users[port]++;
         }
+        settle(port);
     }
 }
 
 void io_block(uint16_t base, size_t count) {
-    virt_intercept_io(base, count, true);
+    for (size_t i = 0; i < count; i++) {
+        uint16_t port = (uint16_t)(base + i);
+        denied[port / 8] |= (uint8_t)(1 << (port % 8));
+        settle(port);
+    }
+}
+
+void io_unpass(uint16_t base, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        uint16_t port = (uint16_t)(base + i);
+        // A count that ran out stays.
+        if (port < LEGACY_PORTS && users[port] != 0 && users[port] != UINT8_MAX) {
+            users[port]--;
+        }
+        settle(port);
+    }
 }
 
 static const struct io_handler *handler_for(uint16_t port) {
