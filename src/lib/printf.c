@@ -30,7 +30,7 @@
 #include <nanoprintf.h>
 #include <lib/printf.h>
 
-int format(void (*putc)(int c, void *ctx), void *ctx, const char *fmt, va_list args) {
+int printf_format(void (*putc)(int c, void *ctx), void *ctx, const char *fmt, va_list args) {
     return npf_vpprintf(putc, ctx, fmt, args);
 }
 

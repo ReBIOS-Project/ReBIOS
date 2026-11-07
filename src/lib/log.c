@@ -129,7 +129,7 @@ static void log_putc(int c, void *ctx) {
 static void vprintf_unlocked(const char *fmt, va_list args) {
     struct con_buffer buf;
     buf.count = 0;
-    format(log_putc, &buf, fmt, args);
+    printf_format(log_putc, &buf, fmt, args);
     screen_flush(&buf);
 }
 
