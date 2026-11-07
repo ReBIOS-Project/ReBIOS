@@ -172,9 +172,11 @@ _Static_assert(offsetof(struct vmcb_save, fred_rsp) == 0x8c0, "VMCB layout");
 // B-1 and Table C-1).
 #define SVM_INTERCEPT_VECTORS 6
 
-// Intercept vector 0, at offset 000h: reads and writes of CR8, and writes of
-// CR4 (APM 24593 rev. 3.46, Table B-1).
+// Intercept vector 0, at offset 000h: reads and writes of CR0 and CR8, and
+// writes of CR4 (APM 24593 rev. 3.46, Table B-1).
+#define SVM_INTERCEPT_CR0_READ ((uint32_t)1 << 0)
 #define SVM_INTERCEPT_CR8_READ ((uint32_t)1 << 8)
+#define SVM_INTERCEPT_CR0_WRITE ((uint32_t)1 << 16)
 #define SVM_INTERCEPT_CR4_WRITE ((uint32_t)1 << 20)
 #define SVM_INTERCEPT_CR8_WRITE ((uint32_t)1 << 24)
 
@@ -184,6 +186,8 @@ _Static_assert(offsetof(struct vmcb_save, fred_rsp) == 0x8c0, "VMCB layout");
 #define SVM_INTERCEPT_SMI ((uint32_t)1 << 2)
 #define SVM_INTERCEPT_INIT ((uint32_t)1 << 3)
 #define SVM_INTERCEPT_VINTR ((uint32_t)1 << 4)
+// Writes of CR0 that change bits other than TS and MP.
+#define SVM_INTERCEPT_CR0_SEL_WRITE ((uint32_t)1 << 5)
 #define SVM_INTERCEPT_CPUID ((uint32_t)1 << 18)
 #define SVM_INTERCEPT_RSM ((uint32_t)1 << 19)
 #define SVM_INTERCEPT_INVD ((uint32_t)1 << 22)
@@ -213,6 +217,7 @@ _Static_assert(offsetof(struct vmcb_save, fred_rsp) == 0x8c0, "VMCB layout");
 #define SVM_INTERCEPT_IDLE_HLT ((uint32_t)1 << 6)
 
 // Exit codes (APM 24593 rev. 3.45, Appendix C).
+#define SVM_EXIT_CR0_READ 0x00
 #define SVM_EXIT_CR8_READ 0x08
 #define SVM_EXIT_CR0_WRITE 0x10
 #define SVM_EXIT_CR4_WRITE 0x14
@@ -223,6 +228,7 @@ _Static_assert(offsetof(struct vmcb_save, fred_rsp) == 0x8c0, "VMCB layout");
 #define SVM_EXIT_SMI 0x62
 #define SVM_EXIT_INIT 0x63
 #define SVM_EXIT_VINTR 0x64
+#define SVM_EXIT_CR0_SEL_WRITE 0x65
 #define SVM_EXIT_CPUID 0x72
 #define SVM_EXIT_RSM 0x73
 #define SVM_EXIT_INVD 0x76
@@ -394,6 +400,11 @@ void svm_flush_guest_tlb(struct vcpu *v);
 bool svm_huge_pages(void);
 void svm_cpu_init(void);
 void svm_vcpu_init(struct vcpu *v);
+// The guest's CR0 as it has it: the processor's but for NE, which the guest's
+// x87 errors follow (ferr.c), and which the processor keeps set, the guest's
+// own being in cr0_shadow; and the loading of CR0 so.
+uint64_t svm_guest_cr0(struct vcpu *v);
+void svm_set_cr0(struct vcpu *v, uint64_t value);
 noreturn void svm_run(struct vcpu *v);
 // The guest got where the processor cannot go on from, as a triple fault does.
 noreturn void svm_shutdown(struct vcpu *v, const char *why);

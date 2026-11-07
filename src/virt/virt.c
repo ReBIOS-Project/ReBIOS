@@ -736,12 +736,20 @@ void vcpu_set_rflags(struct vcpu *v, uint64_t rflags) {
     }
 }
 
+#define CR0_DEFINED \
+    (CR0_PE | CR0_MP | CR0_EM | CR0_TS | CR0_ET | CR0_NE | CR0_WP | CR0_AM | CR0_NW | CR0_CD \
+   | CR0_PG)
+
+uint64_t vcpu_cr0_written(uint64_t value) {
+    return (value & CR0_DEFINED) | CR0_ET;
+}
+
 uint64_t vcpu_cr0(struct vcpu *v) {
     if (virt_vmx) {
         uint64_t mask = vmx_cr0_mask();
         return (vmx_read(VMCS_GUEST_CR0) & ~mask) | (v->cr0_shadow & mask);
     }
-    return v->vmcb->save.cr0;
+    return svm_guest_cr0(v);
 }
 
 uint64_t vcpu_cr3(struct vcpu *v) {
@@ -886,7 +894,7 @@ void vcpu_load_mode(struct vcpu *v, const struct vcpu_mode *mode) {
     }
 
     struct vmcb_save *s = &v->vmcb->save;
-    s->cr0 = mode->cr0;
+    svm_set_cr0(v, mode->cr0);
     s->cr3 = mode->cr3;
     s->cr4 = mode->cr4;
     s->efer = mode->efer | EFER_SVME;
@@ -1265,7 +1273,7 @@ void vcpu_set_real_mode(struct vcpu *v, uint16_t cs, uint16_t ip) {
     }
 
     struct vmcb_save *s = &v->vmcb->save;
-    s->cr0 = v->cr0_shadow;
+    svm_set_cr0(v, v->cr0_shadow);
     s->cr3 = 0;
     s->cr4 = 0;
     s->efer = EFER_SVME;

@@ -45,6 +45,7 @@
 #define VECTOR_UD 6
 #define VECTOR_GP 13
 #define VECTOR_PF 14
+#define VECTOR_MF 16
 #define VECTOR_MC 18
 #define VECTOR_SX 30
 // The error code of the #SX that a redirected INIT raises (APM 24593 rev.
@@ -936,13 +937,14 @@ static bool vmcb12_valid(struct vcpu *v, const struct vmcb *vmcb12) {
 
 // VMCB02's intercepts: VMCB12's, and the hypervisor's but for the windows it
 // opens for the guest itself, the hypercalls of the legacy BIOS, which are #UD
-// and VMMCALL, and the guest's guest's CR8, which is its own where VMCB12
-// masks interrupts virtually and is the guest's TPR otherwise (APM 24593 rev.
-// 3.46, 15.21.2). The guest's guest's VMLOAD, VMSAVE, CLGI, and STGI, which
-// the hypervisor runs for it where the guest does not intercept them, exit
-// whatever the guest's own do, but where VMCB12 has the processor virtualise
-// them: the guest's nested paging then translates VMLOAD's and VMSAVE's
-// addresses.
+// and VMMCALL, those that keep the guest's own CR0.NE, which are its CR0 reads
+// and writes and its #MF, and the guest's guest's CR8, which is its own where
+// VMCB12 masks interrupts virtually and is the guest's TPR otherwise (APM
+// 24593 rev. 3.46, 15.21.2). The guest's guest's VMLOAD, VMSAVE, CLGI, and
+// STGI, which the hypervisor runs for it where the guest does not intercept
+// them, exit whatever the guest's own do, but where VMCB12 has the processor
+// virtualise them: the guest's nested paging then translates VMLOAD's and
+// VMSAVE's addresses.
 static void merge_intercepts(struct nsvm *n) {
     uint32_t own[SVM_INTERCEPT_VECTORS];
     uint32_t to[SVM_INTERCEPT_VECTORS];
@@ -950,8 +952,9 @@ static void merge_intercepts(struct nsvm *n) {
     for (size_t i = 0; i < SVM_INTERCEPT_VECTORS; i++) {
         to[i] = own[i] | n->intercepts[i];
     }
-    to[2] = (own[2] & ~((uint32_t)1 << VECTOR_UD)) | n->intercepts[2];
-    to[3] = (own[3] & ~SVM_INTERCEPT_VINTR) | n->intercepts[3];
+    to[0] = (own[0] & ~(SVM_INTERCEPT_CR0_READ | SVM_INTERCEPT_CR0_WRITE)) | n->intercepts[0];
+    to[2] = (own[2] & ~((uint32_t)1 << VECTOR_UD | (uint32_t)1 << VECTOR_MF)) | n->intercepts[2];
+    to[3] = (own[3] & ~(SVM_INTERCEPT_VINTR | SVM_INTERCEPT_CR0_SEL_WRITE)) | n->intercepts[3];
     uint32_t svm = SVM_INTERCEPT_VMLOAD | SVM_INTERCEPT_VMSAVE | SVM_INTERCEPT_STGI
                  | SVM_INTERCEPT_CLGI;
     to[4] = (own[4] & ~(SVM_INTERCEPT_VMMCALL | svm)) | n->intercepts[4]
@@ -1759,7 +1762,8 @@ static bool l1_wants(struct vcpu *v, struct nsvm *n, uint64_t code) {
         return (n->intercepts[2] & ((uint32_t)1 << VECTOR_MC)) != 0;
     }
     if (code >= SVM_EXIT_EXCEPTION_BASE && code < SVM_EXIT_EXCEPTION_BASE + 32) {
-        uint32_t own = n->vmcb01->control.intercept_exceptions & ~((uint32_t)1 << VECTOR_UD);
+        uint32_t own = n->vmcb01->control.intercept_exceptions
+                     & ~((uint32_t)1 << VECTOR_UD | (uint32_t)1 << VECTOR_MF);
         return ((own >> (code - SVM_EXIT_EXCEPTION_BASE)) & 1) == 0;
     }
     // VMLOAD and VMSAVE that VMCB12 has virtualised where the processor's

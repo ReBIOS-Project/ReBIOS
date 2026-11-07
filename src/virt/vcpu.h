@@ -242,6 +242,9 @@ void vcpu_set_gpr(struct vcpu *v, unsigned int reg, uint64_t value);
 uint64_t vcpu_rflags(struct vcpu *v);
 void vcpu_set_rflags(struct vcpu *v, uint64_t rflags);
 uint64_t vcpu_cr0(struct vcpu *v);
+// What a write of value leaves in CR0: its reserved bits ignore writes, and ET
+// reads as 1, as Linux 7.3's KVM has them (regs.c, kvm_set_cr0()).
+uint64_t vcpu_cr0_written(uint64_t value);
 uint64_t vcpu_cr3(struct vcpu *v);
 uint64_t vcpu_cr4(struct vcpu *v);
 uint64_t vcpu_efer(struct vcpu *v);

@@ -996,10 +996,6 @@ static bool cr_valid(uint64_t old0, uint64_t old4, uint64_t cr0, uint64_t cr4) {
     return true;
 }
 
-#define CR0_DEFINED \
-    (CR0_PE | CR0_MP | CR0_EM | CR0_TS | CR0_ET | CR0_NE | CR0_WP | CR0_AM | CR0_NW | CR0_CD \
-   | CR0_PG)
-
 // What a write of CR0 or CR4 does, with the bits the host owns as the guest
 // believes them.
 static void cr_write(struct vcpu *v, unsigned int cr, uint64_t value) {
@@ -1010,10 +1006,8 @@ static void cr_write(struct vcpu *v, unsigned int cr, uint64_t value) {
         vcpu_inject_exception(v, 13, true, 0);
         return;
     }
-    // CR0's reserved bits ignore writes and ET reads as 1, as Linux 7.3's KVM
-    // has them (regs.c, kvm_set_cr0()).
     if (cr == 0) {
-        value = (value & CR0_DEFINED) | CR0_ET;
+        value = vcpu_cr0_written(value);
     }
     uint64_t real0 = vmx_read(VMCS_GUEST_CR0);
     uint64_t real4 = vmx_read(VMCS_GUEST_CR4);

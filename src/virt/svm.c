@@ -33,6 +33,7 @@
 #include <virt/cpuid.h>
 #include <virt/event.h>
 #include <virt/exit.h>
+#include <virt/ferr.h>
 #include <virt/gpt.h>
 #include <virt/insn.h>
 #include <virt/mmio.h>
@@ -61,6 +62,7 @@
 #define VECTOR_UD 6
 #define VECTOR_DF 8
 #define VECTOR_GP 13
+#define VECTOR_MF 16
 #define VECTOR_MC 18
 
 bool svm_lbr_virtualisation;
@@ -324,10 +326,11 @@ void svm_vcpu_init(struct vcpu *v) {
     // For the CR4 bits of features the guest does not get (cpuid.c).
     c->intercept_cr = SVM_INTERCEPT_CR4_WRITE;
     // INVLPGA too, which the processor would carry out for the guest whatever
-    // its own EFER.SVME (nsvm.c).
-    c->intercept_misc1 = SVM_INTERCEPT_INTR | SVM_INTERCEPT_NMI | SVM_INTERCEPT_CPUID
-                       | SVM_INTERCEPT_INVD | SVM_INTERCEPT_INVLPGA | SVM_INTERCEPT_IOIO
-                       | SVM_INTERCEPT_MSR | SVM_INTERCEPT_SHUTDOWN
+    // its own EFER.SVME (nsvm.c), and CR0 writes that would clear NE
+    // (svm_set_cr0()).
+    c->intercept_misc1 = SVM_INTERCEPT_INTR | SVM_INTERCEPT_NMI | SVM_INTERCEPT_CR0_SEL_WRITE
+                       | SVM_INTERCEPT_CPUID | SVM_INTERCEPT_INVD | SVM_INTERCEPT_INVLPGA
+                       | SVM_INTERCEPT_IOIO | SVM_INTERCEPT_MSR | SVM_INTERCEPT_SHUTDOWN
                        | (svm_idle_hlt ? 0 : SVM_INTERCEPT_HLT);
     // Physical interrupts exit whatever the guest's IF, and CR8 is the virtual
     // local APIC's TPR.
@@ -476,6 +479,148 @@ static void svm_handle_cr4_write(struct vcpu *v) {
     } else {
         vcpu_advance(v, insn.length);
     }
+}
+
+// Whether the guest's code is 64-bit.
+static bool code64(struct vcpu *v) {
+    struct segment cs;
+    vcpu_get_seg(v, SEG_CS, &cs);
+    return (v->vmcb->save.efer & EFER_LMA) != 0 && (cs.attrib & SEG_L) != 0;
+}
+
+uint64_t svm_guest_cr0(struct vcpu *v) {
+    if (nsvm_in_l2(v)) {
+        return v->vmcb->save.cr0;
+    }
+    return (v->vmcb->save.cr0 & ~(uint64_t)CR0_NE) | (v->cr0_shadow & CR0_NE);
+}
+
+// While the guest's NE is clear, its reads of CR0 exit, which show it so, its
+// writes, any of which may set it without changing the processor's CR0, and
+// its #MF, which ferr.c reports as FERR# (APM 24593 rev. 3.46, Table 15-7).
+void svm_set_cr0(struct vcpu *v, uint64_t value) {
+    struct vmcb_control *c = &v->vmcb->control;
+    uint32_t cr0 = SVM_INTERCEPT_CR0_READ | SVM_INTERCEPT_CR0_WRITE;
+    uint32_t mf = (uint32_t)1 << VECTOR_MF;
+    v->cr0_shadow = value;
+    v->vmcb->save.cr0 = value | CR0_NE;
+    if ((value & CR0_NE) == 0) {
+        c->intercept_cr |= cr0;
+        c->intercept_exceptions |= mf;
+    } else {
+        c->intercept_cr &= ~cr0;
+        c->intercept_exceptions &= ~mf;
+    }
+}
+
+static void skip(struct vcpu *v, const struct insn *insn) {
+    if (svm_nrips) {
+        vcpu_skip_instruction(v);
+    } else {
+        vcpu_advance(v, insn->length);
+    }
+}
+
+// MOV from CR0 and SMSW, which exit while the guest's NE is clear. Decode
+// assists name MOV's destination (APM 24593 rev. 3.46, 15.8.1); SMSW, 0F 01
+// /4, needs its ModRM, and stores 16 bits to memory, or as many as its
+// register has (APM 24594 rev. 3.39, SMSW).
+static void svm_handle_cr0_read(struct vcpu *v) {
+    struct vmcb_control *c = &v->vmcb->control;
+    bool assisted = svm_decode_assists && (c->exitinfo1 >> 63) != 0;
+    struct insn insn = { 0 };
+    bool decoded = (assisted && svm_nrips) || insn_decode(v, &insn);
+    bool mov = assisted || insn.opcode == (INSN_OPCODE_0F | 0x20);
+    bool smsw = !assisted && insn.opcode == (INSN_OPCODE_0F | 0x01);
+    if (!decoded || (!mov && !smsw)) {
+        // One the hypervisor cannot read runs again.
+        printf("Cannot decode the CR0 read at %#llx\n", (unsigned long long)v->vmcb->save.rip);
+        return;
+    }
+    uint64_t cr0 = svm_guest_cr0(v);
+    unsigned int reg = assisted ? c->exitinfo1 & 15 : (insn.modrm & 7) | (insn.rex & 1) << 3;
+    if (mov) {
+        // Outside 64-bit mode the move writes the register's low 32 bits.
+        vcpu_set_gpr(v, reg, code64(v) ? cr0 : (uint32_t)cr0);
+    } else if ((insn.modrm & 0xc0) == 0xc0) {
+        uint64_t value;
+        switch (insn.operand_size) {
+            case 8: {
+                value = cr0;
+                break;
+            }
+            case 4: {
+                value = (uint32_t)cr0;
+                break;
+            }
+            default: {
+                value = (vcpu_gpr(v, reg) & ~(uint64_t)0xffff) | (uint16_t)cr0;
+                break;
+            }
+        }
+        vcpu_set_gpr(v, reg, value);
+    } else {
+        uint16_t msw = (uint16_t)cr0;
+        uint64_t linear;
+        if (!insn_mem_linear(v, &insn, &linear)
+         || !mmio_write_linear(v, linear, &msw, sizeof(uint16_t))) {
+            return;
+        }
+    }
+    skip(v, &insn);
+}
+
+// MOV to CR0 and LMSW that change bits other than TS and MP, NE among them,
+// and any CR0 write while the guest's NE is clear, CLTS too: the processor
+// faults on what the write refuses itself before the intercept (APM 24593 rev.
+// 3.46, Table 15-7), and turning paging on or off with EFER.LME set turns long
+// mode on or off (14.6.1). Decode assists name MOV's source (15.8.1); LMSW, 0F
+// 01 /6, loads its operand's bits 3:0, PE only to set it, and CLTS, 0F 06,
+// clears TS (APM 24594 rev. 3.39, LMSW and CLTS).
+static void svm_handle_cr0_write(struct vcpu *v) {
+    struct vmcb_control *c = &v->vmcb->control;
+    bool assisted = svm_decode_assists && (c->exitinfo1 >> 63) != 0;
+    struct insn insn = { 0 };
+    bool decoded = (assisted && svm_nrips) || insn_decode(v, &insn);
+    bool mov = assisted || insn.opcode == (INSN_OPCODE_0F | 0x22);
+    bool lmsw = !assisted && insn.opcode == (INSN_OPCODE_0F | 0x01);
+    bool clts = !assisted && insn.opcode == (INSN_OPCODE_0F | 0x06);
+    if (!decoded || (!mov && !lmsw && !clts)) {
+        printf("Cannot decode the CR0 write at %#llx\n", (unsigned long long)v->vmcb->save.rip);
+        return;
+    }
+    uint64_t old = svm_guest_cr0(v);
+    unsigned int reg = assisted ? c->exitinfo1 & 15 : (insn.modrm & 7) | (insn.rex & 1) << 3;
+    uint64_t value;
+    if (mov) {
+        value = vcpu_gpr(v, reg);
+        if (!code64(v)) {
+            value = (uint32_t)value;
+        }
+    } else if (clts) {
+        value = old & ~(uint64_t)CR0_TS;
+    } else {
+        uint16_t source;
+        uint64_t linear;
+        if ((insn.modrm & 0xc0) == 0xc0) {
+            source = (uint16_t)vcpu_gpr(v, reg);
+        } else if (!insn_mem_linear(v, &insn, &linear)
+                || !mmio_read_linear(v, linear, &source, sizeof(uint16_t))) {
+            return;
+        }
+        value = (old & ~(uint64_t)(CR0_MP | CR0_EM | CR0_TS)) | (source & 0xf);
+    }
+    value = vcpu_cr0_written(value);
+    struct vmcb_save *s = &v->vmcb->save;
+    svm_set_cr0(v, value);
+    if ((s->efer & EFER_LME) != 0 && ((old ^ value) & CR0_PG) != 0) {
+        s->efer = (value & CR0_PG) != 0 ? s->efer | EFER_LMA : s->efer & ~(uint64_t)EFER_LMA;
+    }
+    // The guest's translations go, as the move would have dropped them.
+    if (((old ^ value) & (CR0_PE | CR0_PG | CR0_WP | CR0_CD | CR0_NW)) != 0) {
+        svm_flush_guest_tlb(v);
+    }
+    skip(v, &insn);
 }
 
 // The single-step trap ends a step, and so does a fault, which goes on to the
@@ -714,6 +859,15 @@ static void svm_handle_exit(struct vcpu *v) {
             exit_cpuid(v);
             break;
         }
+        case SVM_EXIT_CR0_READ: {
+            svm_handle_cr0_read(v);
+            break;
+        }
+        case SVM_EXIT_CR0_WRITE:
+        case SVM_EXIT_CR0_SEL_WRITE: {
+            svm_handle_cr0_write(v);
+            break;
+        }
         case SVM_EXIT_CR4_WRITE: {
             svm_handle_cr4_write(v);
             break;
@@ -733,6 +887,14 @@ static void svm_handle_exit(struct vcpu *v) {
         }
         case SVM_EXIT_EXCEPTION_BASE + VECTOR_MC: {
             svm_machine_check(v);
+            break;
+        }
+        case SVM_EXIT_EXCEPTION_BASE + VECTOR_MF: {
+            if (ferr_catches(v)) {
+                ferr_fault(v);
+            } else {
+                vcpu_inject_exception(v, VECTOR_MF, false, 0);
+            }
             break;
         }
         // An INIT, which the guest's global interrupt flag and its guest's
