@@ -25,7 +25,7 @@
 #include <lib/util.h>
 
 // SDM 325462-093 Vol. 4, Table 2-2, as reviewed.
-const struct msr_range msr_intel_architectural[] = {
+const struct msr_table_range msr_table_intel_architectural[] = {
     { 0x0, 0x1 }, // IA32_P5_MC_ADDR to IA32_P5_MC_TYPE.
     { 0x6, 0x6 }, // IA32_MONITOR_FILTER_SIZE.
     { 0x10, 0x10 }, // IA32_TIME_STAMP_COUNTER.
@@ -108,10 +108,10 @@ const struct msr_range msr_intel_architectural[] = {
     { 0xc0000080, 0xc0000084 }, // IA32_EFER to IA32_FMASK.
     { 0xc0000100, 0xc0000103 } // IA32_FS_BASE to IA32_TSC_AUX.
 };
-const size_t msr_intel_architectural_count = ARRAY_COUNT(msr_intel_architectural);
+const size_t msr_table_intel_architectural_count = ARRAY_COUNT(msr_table_intel_architectural);
 
 // SDM 325462-093 Vol. 4, Table 2-6: C-states, perfmon, thermal.
-static const struct msr_range ranges_2_6[] = {
+static const struct msr_table_range ranges_2_6[] = {
     { 0x34, 0x34 }, // MSR_SMI_COUNT.
     { 0xe4, 0xe4 }, // MSR_PMG_IO_CAPTURE_BASE.
     { 0x1a2, 0x1a2 }, // MSR_TEMPERATURE_TARGET.
@@ -120,13 +120,13 @@ static const struct msr_range ranges_2_6[] = {
     { 0x3fd, 0x3fd }, // MSR_CORE_C6_RESIDENCY.
     { 0x660, 0x660 } // MSR_CORE_C1_RESIDENCY.
 };
-static const struct msr_ranges table_2_6 = {
+static const struct msr_table_ranges table_2_6 = {
     ranges_2_6, ARRAY_COUNT(ranges_2_6)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-12: C-states, architectural, perfmon, power,
 // turbo.
-static const struct msr_range ranges_2_12[] = {
+static const struct msr_table_range ranges_2_12[] = {
     { 0x17, 0x17 }, // MSR_PLATFORM_ID.
     { 0xce, 0xce }, // MSR_PLATFORM_INFO.
     { 0xe2, 0xe2 }, // MSR_PKG_CST_CONFIG_CONTROL.
@@ -150,31 +150,31 @@ static const struct msr_range ranges_2_12[] = {
     { 0x680, 0x69f }, // MSR_LASTBRANCH_0_FROM_IP to MSR_LASTBRANCH_31_FROM_IP.
     { 0x6c0, 0x6df } // MSR_LASTBRANCH_0_TO_IP to MSR_LASTBRANCH_31_TO_IP.
 };
-static const struct msr_ranges table_2_12 = {
+static const struct msr_table_ranges table_2_12 = {
     ranges_2_12, ARRAY_COUNT(ranges_2_12)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-13: perfmon.
-static const struct msr_range ranges_2_13[] = {
+static const struct msr_table_range ranges_2_13[] = {
     { 0x680, 0x680 }, // MSR_LASTBRANCH_0_FROM_IP.
     { 0x6c0, 0x6c0 }, // MSR_LASTBRANCH_0_TO_IP.
     { 0xdc0, 0xddf } // MSR_LASTBRANCH_INFO_0 to MSR_LASTBRANCH_INFO_31.
 };
-static const struct msr_ranges table_2_13 = {
+static const struct msr_table_ranges table_2_13 = {
     ranges_2_13, ARRAY_COUNT(ranges_2_13)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-14: bus locks.
-static const struct msr_range ranges_2_14[] = {
+static const struct msr_table_range ranges_2_14[] = {
     { 0x33, 0x33 } // MSR_MEMORY_CTRL.
 };
-static const struct msr_ranges table_2_14 = {
+static const struct msr_table_ranges table_2_14 = {
     ranges_2_14, ARRAY_COUNT(ranges_2_14)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-15: C-states, architectural, perfmon, power,
 // thermal, turbo.
-static const struct msr_range ranges_2_15[] = {
+static const struct msr_table_range ranges_2_15[] = {
     { 0x17, 0x17 }, // IA32_PLATFORM_ID.
     { 0x34, 0x34 }, // MSR_SMI_COUNT.
     { 0xce, 0xce }, // MSR_PLATFORM_INFO.
@@ -196,33 +196,33 @@ static const struct msr_range ranges_2_15[] = {
     { 0x680, 0x68f }, // MSR_LASTBRANCH_0_FROM_IP to MSR_LASTBRANCH_15_FROM_IP.
     { 0x6c0, 0x6cf } // MSR_LASTBRANCH_0_TO_IP to MSR_LASTBRANCH_15_TO_IP.
 };
-static const struct msr_ranges table_2_15 = {
+static const struct msr_table_ranges table_2_15 = {
     ranges_2_15, ARRAY_COUNT(ranges_2_15)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-16: perfmon, turbo.
-static const struct msr_range ranges_2_16[] = {
+static const struct msr_table_range ranges_2_16[] = {
     { 0x1ad, 0x1ad }, // MSR_TURBO_RATIO_LIMIT.
     // MSR_UNCORE_PERF_GLOBAL_CTRL to MSR_UNCORE_ADDR_OPCODE_MATCH.
     { 0x391, 0x396 },
     { 0x3b0, 0x3b7 }, // MSR_UNCORE_PMC0 to MSR_UNCORE_PMC7.
     { 0x3c0, 0x3c7 } // MSR_UNCORE_PERFEVTSEL0 to MSR_UNCORE_PERFEVTSEL7.
 };
-static const struct msr_ranges table_2_16 = {
+static const struct msr_table_ranges table_2_16 = {
     ranges_2_16, ARRAY_COUNT(ranges_2_16)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-18: perfmon, turbo.
-static const struct msr_range ranges_2_18[] = {
+static const struct msr_table_range ranges_2_18[] = {
     { 0x1a7, 0x1a7 }, // MSR_OFFCORE_RSP_1.
     { 0x1ad, 0x1ad } // MSR_TURBO_RATIO_LIMIT.
 };
-static const struct msr_ranges table_2_18 = {
+static const struct msr_table_ranges table_2_18 = {
     ranges_2_18, ARRAY_COUNT(ranges_2_18)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-19: perfmon, turbo.
-static const struct msr_range ranges_2_19[] = {
+static const struct msr_table_range ranges_2_19[] = {
     { 0x1a7, 0x1a7 }, // MSR_OFFCORE_RSP_1.
     { 0x1ad, 0x1ad }, // MSR_TURBO_RATIO_LIMIT.
     { 0xf40, 0xf42 }, // MSR_C8_PMON_BOX_CTRL to MSR_C8_PMON_BOX_OVF_CTRL.
@@ -230,12 +230,12 @@ static const struct msr_range ranges_2_19[] = {
     { 0xfc0, 0xfc2 }, // MSR_C9_PMON_BOX_CTRL to MSR_C9_PMON_BOX_OVF_CTRL.
     { 0xfd0, 0xfdb } // MSR_C9_PMON_EVNT_SEL0 to MSR_C9_PMON_CTR5.
 };
-static const struct msr_ranges table_2_19 = {
+static const struct msr_table_ranges table_2_19 = {
     ranges_2_19, ARRAY_COUNT(ranges_2_19)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-20: C-states, perfmon, power, thermal, turbo.
-static const struct msr_range ranges_2_20[] = {
+static const struct msr_table_range ranges_2_20[] = {
     { 0x34, 0x34 }, // MSR_SMI_COUNT.
     { 0xce, 0xce }, // MSR_PLATFORM_INFO.
     { 0xe2, 0xe2 }, // MSR_PKG_CST_CONFIG_CONTROL.
@@ -259,23 +259,23 @@ static const struct msr_range ranges_2_20[] = {
     { 0x680, 0x68f }, // MSR_LASTBRANCH_0_FROM_IP to MSR_LASTBRANCH_15_FROM_IP.
     { 0x6c0, 0x6cf } // MSR_LASTBRANCH_0_TO_IP to MSR_LASTBRANCH_15_TO_IP.
 };
-static const struct msr_ranges table_2_20 = {
+static const struct msr_table_ranges table_2_20 = {
     ranges_2_20, ARRAY_COUNT(ranges_2_20)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-21: C-states, power, turbo.
-static const struct msr_range ranges_2_21[] = {
+static const struct msr_table_range ranges_2_21[] = {
     { 0x1ad, 0x1ad }, // MSR_TURBO_RATIO_LIMIT.
     { 0x60c, 0x60c }, // MSR_PKGC7_IRTL.
     { 0x639, 0x63a }, // MSR_PP0_ENERGY_STATUS to MSR_PP0_POLICY.
     { 0x640, 0x642 } // MSR_PP1_POWER_LIMIT to MSR_PP1_POLICY.
 };
-static const struct msr_ranges table_2_21 = {
+static const struct msr_table_ranges table_2_21 = {
     ranges_2_21, ARRAY_COUNT(ranges_2_21)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-22: perfmon.
-static const struct msr_range ranges_2_22[] = {
+static const struct msr_table_range ranges_2_22[] = {
     // MSR_UNC_PERF_GLOBAL_CTRL to MSR_UNC_PERF_GLOBAL_STATUS.
     { 0x391, 0x392 },
     { 0x394, 0x396 }, // MSR_UNC_PERF_FIXED_CTRL to MSR_UNC_CBO_CONFIG.
@@ -296,12 +296,12 @@ static const struct msr_range ranges_2_22[] = {
     { 0x740, 0x743 },
     { 0x745, 0x749 } // MSR_UNC_CBO_4_UNIT_STATUS to MSR_UNC_CBO_4_PERFCTR3.
 };
-static const struct msr_ranges table_2_22 = {
+static const struct msr_table_ranges table_2_22 = {
     ranges_2_22, ARRAY_COUNT(ranges_2_22)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-23: perfmon, power, turbo.
-static const struct msr_range ranges_2_23[] = {
+static const struct msr_table_range ranges_2_23[] = {
     { 0x1ad, 0x1ad }, // MSR_TURBO_RATIO_LIMIT.
     { 0x39c, 0x39c }, // MSR_PEBS_NUM_ALT.
     { 0x613, 0x613 }, // MSR_PKG_PERF_STATUS.
@@ -309,12 +309,12 @@ static const struct msr_range ranges_2_23[] = {
     { 0x61b, 0x61c }, // MSR_DRAM_PERF_STATUS to MSR_DRAM_POWER_INFO.
     { 0x639, 0x639 } // MSR_PP0_ENERGY_STATUS.
 };
-static const struct msr_ranges table_2_23 = {
+static const struct msr_table_ranges table_2_23 = {
     ranges_2_23, ARRAY_COUNT(ranges_2_23)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-24: perfmon.
-static const struct msr_range ranges_2_24[] = {
+static const struct msr_table_range ranges_2_24[] = {
     // MSR_U_PMON_UCLK_FIXED_CTL to MSR_U_PMON_UCLK_FIXED_CTR.
     { 0xc08, 0xc09 },
     { 0xc10, 0xc11 }, // MSR_U_PMON_EVNTSEL0 to MSR_U_PMON_EVNTSEL1.
@@ -347,23 +347,23 @@ static const struct msr_range ranges_2_24[] = {
     { 0xdf0, 0xdf4 }, // MSR_C7_PMON_EVNTSEL0 to MSR_C7_PMON_BOX_FILTER.
     { 0xdf6, 0xdf9 } // MSR_C7_PMON_CTR0 to MSR_C7_PMON_CTR3.
 };
-static const struct msr_ranges table_2_24 = {
+static const struct msr_table_ranges table_2_24 = {
     ranges_2_24, ARRAY_COUNT(ranges_2_24)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-25: C-states, power, turbo.
-static const struct msr_range ranges_2_25[] = {
+static const struct msr_table_range ranges_2_25[] = {
     { 0xce, 0xce }, // MSR_PLATFORM_INFO.
     { 0xe2, 0xe2 }, // MSR_PKG_CST_CONFIG_CONTROL.
     { 0x639, 0x639 }, // MSR_PP0_ENERGY_STATUS.
     { 0x648, 0x64c } // MSR_CONFIG_TDP_NOMINAL to MSR_TURBO_ACTIVATION_RATIO.
 };
-static const struct msr_ranges table_2_25 = {
+static const struct msr_table_ranges table_2_25 = {
     ranges_2_25, ARRAY_COUNT(ranges_2_25)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-26: C-states, power, thermal, turbo.
-static const struct msr_range ranges_2_26[] = {
+static const struct msr_table_range ranges_2_26[] = {
     { 0xce, 0xce }, // MSR_PLATFORM_INFO.
     { 0xe2, 0xe2 }, // MSR_PKG_CST_CONFIG_CONTROL.
     { 0x1a2, 0x1a2 }, // MSR_TEMPERATURE_TARGET.
@@ -373,20 +373,20 @@ static const struct msr_range ranges_2_26[] = {
     { 0x61b, 0x61c }, // MSR_DRAM_PERF_STATUS to MSR_DRAM_POWER_INFO.
     { 0x639, 0x639 } // MSR_PP0_ENERGY_STATUS.
 };
-static const struct msr_ranges table_2_26 = {
+static const struct msr_table_ranges table_2_26 = {
     ranges_2_26, ARRAY_COUNT(ranges_2_26)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-27: turbo.
-static const struct msr_range ranges_2_27[] = {
+static const struct msr_table_range ranges_2_27[] = {
     { 0x1ae, 0x1ae } // MSR_TURBO_RATIO_LIMIT1.
 };
-static const struct msr_ranges table_2_27 = {
+static const struct msr_table_ranges table_2_27 = {
     ranges_2_27, ARRAY_COUNT(ranges_2_27)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-28: perfmon.
-static const struct msr_range ranges_2_28[] = {
+static const struct msr_table_range ranges_2_28[] = {
     { 0xc00, 0xc01 }, // MSR_PMON_GLOBAL_CTL to MSR_PMON_GLOBAL_STATUS.
     { 0xc06, 0xc06 }, // MSR_PMON_GLOBAL_CONFIG.
     { 0xc15, 0xc15 }, // MSR_U_PMON_BOX_STATUS.
@@ -421,12 +421,12 @@ static const struct msr_range ranges_2_28[] = {
     { 0xed0, 0xed4 }, // MSR_C14_PMON_EVNTSEL0 to MSR_C14_PMON_BOX_FILTER.
     { 0xed6, 0xeda } // MSR_C14_PMON_CTR0 to MSR_C14_PMON_BOX_FILTER1.
 };
-static const struct msr_ranges table_2_28 = {
+static const struct msr_table_ranges table_2_28 = {
     ranges_2_28, ARRAY_COUNT(ranges_2_28)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-29: C-states, perfmon, power, turbo.
-static const struct msr_range ranges_2_29[] = {
+static const struct msr_table_range ranges_2_29[] = {
     { 0xce, 0xce }, // MSR_PLATFORM_INFO.
     { 0x1c8, 0x1c8 }, // MSR_LBR_SELECT.
     { 0x60b, 0x60c }, // MSR_PKGC_IRTL1 to MSR_PKGC_IRTL2.
@@ -435,12 +435,12 @@ static const struct msr_range ranges_2_29[] = {
     { 0x61b, 0x61b }, // MSR_DRAM_PERF_STATUS.
     { 0x648, 0x64c } // MSR_CONFIG_TDP_NOMINAL to MSR_TURBO_ACTIVATION_RATIO.
 };
-static const struct msr_ranges table_2_29 = {
+static const struct msr_table_ranges table_2_29 = {
     ranges_2_29, ARRAY_COUNT(ranges_2_29)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-30: C-states, perfmon, power, turbo.
-static const struct msr_range ranges_2_30[] = {
+static const struct msr_table_range ranges_2_30[] = {
     { 0xe2, 0xe2 }, // MSR_PKG_CST_CONFIG_CONTROL.
     { 0x1ad, 0x1ad }, // MSR_TURBO_RATIO_LIMIT.
     // MSR_UNC_PERF_GLOBAL_CTRL to MSR_UNC_PERF_GLOBAL_STATUS.
@@ -466,21 +466,21 @@ static const struct msr_range ranges_2_30[] = {
     { 0x730, 0x731 },
     { 0x736, 0x737 } // MSR_UNC_CBO_3_PERFCTR0 to MSR_UNC_CBO_3_PERFCTR1.
 };
-static const struct msr_ranges table_2_30 = {
+static const struct msr_table_ranges table_2_30 = {
     ranges_2_30, ARRAY_COUNT(ranges_2_30)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-31: C-states.
-static const struct msr_range ranges_2_31[] = {
+static const struct msr_table_range ranges_2_31[] = {
     { 0xe2, 0xe2 }, // MSR_PKG_CST_CONFIG_CONTROL.
     { 0x630, 0x632 } // MSR_PKG_C8_RESIDENCY to MSR_PKG_C10_RESIDENCY.
 };
-static const struct msr_ranges table_2_31 = {
+static const struct msr_table_ranges table_2_31 = {
     ranges_2_31, ARRAY_COUNT(ranges_2_31)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-32: C-states, power, turbo.
-static const struct msr_range ranges_2_32[] = {
+static const struct msr_table_range ranges_2_32[] = {
     { 0xe2, 0xe2 }, // MSR_PKG_CST_CONFIG_CONTROL.
     { 0x1ad, 0x1af }, // MSR_TURBO_RATIO_LIMIT to MSR_TURBO_RATIO_LIMIT2.
     { 0x606, 0x606 }, // MSR_RAPL_POWER_UNIT.
@@ -490,12 +490,12 @@ static const struct msr_range ranges_2_32[] = {
     { 0x639, 0x639 }, // MSR_PP0_ENERGY_STATUS.
     { 0x690, 0x690 } // MSR_CORE_PERF_LIMIT_REASONS.
 };
-static const struct msr_ranges table_2_32 = {
+static const struct msr_table_ranges table_2_32 = {
     ranges_2_32, ARRAY_COUNT(ranges_2_32)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-33: perfmon.
-static const struct msr_range ranges_2_33[] = {
+static const struct msr_table_range ranges_2_33[] = {
     { 0x700, 0x706 }, // MSR_PMON_GLOBAL_CTL to MSR_U_PMON_EVNTSEL1.
     { 0x708, 0x70a }, // MSR_U_PMON_BOX_STATUS to MSR_U_PMON_CTR1.
     { 0x710, 0x71a }, // MSR_PCU_PMON_BOX_CTL to MSR_PCU_PMON_CTR3.
@@ -519,30 +519,30 @@ static const struct msr_range ranges_2_33[] = {
     { 0xf00, 0xf0b }, // MSR_C16_PMON_BOX_CTL to MSR_C16_PMON_CTR3.
     { 0xf10, 0xf1b } // MSR_C17_PMON_BOX_CTL to MSR_C17_PMON_CTR3.
 };
-static const struct msr_ranges table_2_33 = {
+static const struct msr_table_ranges table_2_33 = {
     ranges_2_33, ARRAY_COUNT(ranges_2_33)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-34: turbo.
-static const struct msr_range ranges_2_34[] = {
+static const struct msr_table_range ranges_2_34[] = {
     { 0x620, 0x620 } // MSR_UNCORE_RATIO_LIMIT.
 };
-static const struct msr_ranges table_2_34 = {
+static const struct msr_table_ranges table_2_34 = {
     ranges_2_34, ARRAY_COUNT(ranges_2_34)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-35: C-states, power, turbo.
-static const struct msr_range ranges_2_35[] = {
+static const struct msr_table_range ranges_2_35[] = {
     { 0xe2, 0xe2 }, // MSR_PKG_CST_CONFIG_CONTROL.
     { 0x1ad, 0x1ad }, // MSR_TURBO_RATIO_LIMIT.
     { 0x639, 0x639 } // MSR_PP0_ENERGY_STATUS.
 };
-static const struct msr_ranges table_2_35 = {
+static const struct msr_table_ranges table_2_35 = {
     ranges_2_35, ARRAY_COUNT(ranges_2_35)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-36: C-states, power, thermal, turbo.
-static const struct msr_range ranges_2_36[] = {
+static const struct msr_table_range ranges_2_36[] = {
     { 0xce, 0xce }, // MSR_PLATFORM_INFO.
     { 0xe2, 0xe2 }, // MSR_PKG_CST_CONFIG_CONTROL.
     { 0x1a2, 0x1a2 }, // MSR_TEMPERATURE_TARGET.
@@ -554,28 +554,28 @@ static const struct msr_range ranges_2_36[] = {
     { 0x639, 0x639 }, // MSR_PP0_ENERGY_STATUS.
     { 0x690, 0x690 } // MSR_CORE_PERF_LIMIT_REASONS.
 };
-static const struct msr_ranges table_2_36 = {
+static const struct msr_table_ranges table_2_36 = {
     ranges_2_36, ARRAY_COUNT(ranges_2_36)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-37: turbo.
-static const struct msr_range ranges_2_37[] = {
+static const struct msr_table_range ranges_2_37[] = {
     { 0x1ac, 0x1ac } // MSR_TURBO_RATIO_LIMIT3.
 };
-static const struct msr_ranges table_2_37 = {
+static const struct msr_table_ranges table_2_37 = {
     ranges_2_37, ARRAY_COUNT(ranges_2_37)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-38: turbo.
-static const struct msr_range ranges_2_38[] = {
+static const struct msr_table_range ranges_2_38[] = {
     { 0x1ac, 0x1ac } // MSR_TURBO_RATIO_LIMIT3.
 };
-static const struct msr_ranges table_2_38 = {
+static const struct msr_table_ranges table_2_38 = {
     ranges_2_38, ARRAY_COUNT(ranges_2_38)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-39: C-states, perfmon, power, turbo.
-static const struct msr_range ranges_2_39[] = {
+static const struct msr_table_range ranges_2_39[] = {
     { 0x1ad, 0x1ad }, // MSR_TURBO_RATIO_LIMIT.
     { 0x1c9, 0x1c9 }, // MSR_LASTBRANCH_TOS.
     { 0x1fc, 0x1fc }, // MSR_POWER_CTL.
@@ -594,12 +594,12 @@ static const struct msr_range ranges_2_39[] = {
     { 0x6d0, 0x6df }, // MSR_LASTBRANCH_16_TO_IP to MSR_LASTBRANCH_31_TO_IP.
     { 0xdc0, 0xddf } // MSR_LBR_INFO_0 to MSR_LBR_INFO_31.
 };
-static const struct msr_ranges table_2_39 = {
+static const struct msr_table_ranges table_2_39 = {
     ranges_2_39, ARRAY_COUNT(ranges_2_39)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-40: perfmon.
-static const struct msr_range ranges_2_40[] = {
+static const struct msr_table_range ranges_2_40[] = {
     { 0x394, 0x396 }, // MSR_UNC_PERF_FIXED_CTRL to MSR_UNC_CBO_CONFIG.
     { 0x3b0, 0x3b3 }, // MSR_UNC_ARB_PERFCTR0 to MSR_UNC_ARB_PERFEVTSEL1.
     // MSR_UNC_CBO_0_PERFEVTSEL0 to MSR_UNC_CBO_0_PERFEVTSEL1.
@@ -617,31 +617,31 @@ static const struct msr_range ranges_2_40[] = {
     // MSR_UNC_PERF_GLOBAL_CTRL to MSR_UNC_PERF_GLOBAL_STATUS.
     { 0xe01, 0xe02 }
 };
-static const struct msr_ranges table_2_40 = {
+static const struct msr_table_ranges table_2_40 = {
     ranges_2_40, ARRAY_COUNT(ranges_2_40)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-41: turbo.
-static const struct msr_range ranges_2_41[] = {
+static const struct msr_table_range ranges_2_41[] = {
     { 0x620, 0x620 } // MSR_RING_RATIO_LIMIT.
 };
-static const struct msr_ranges table_2_41 = {
+static const struct msr_table_ranges table_2_41 = {
     ranges_2_41, ARRAY_COUNT(ranges_2_41)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-42: C-states, turbo.
-static const struct msr_range ranges_2_42[] = {
+static const struct msr_table_range ranges_2_42[] = {
     { 0x3f8, 0x3f8 }, // MSR_PKG_C3_RESIDENCY.
     { 0x620, 0x620 }, // MSR_RING_RATIO_LIMIT.
     { 0x660, 0x660 }, // MSR_CORE_C1_RESIDENCY.
     { 0x662, 0x662 } // MSR_CORE_C3_RESIDENCY.
 };
-static const struct msr_ranges table_2_42 = {
+static const struct msr_table_ranges table_2_42 = {
     ranges_2_42, ARRAY_COUNT(ranges_2_42)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-43: perfmon.
-static const struct msr_range ranges_2_43[] = {
+static const struct msr_table_range ranges_2_43[] = {
     { 0x394, 0x396 }, // MSR_UNC_PERF_FIXED_CTRL to MSR_UNC_CBO_CONFIG.
     { 0x3b0, 0x3b3 }, // MSR_UNC_ARB_PERFCTR0 to MSR_UNC_ARB_PERFEVTSEL1.
     { 0x700, 0x703 }, // MSR_UNC_CBO_0_PERFEVTSEL0 to MSR_UNC_CBO_0_PERFCTR1.
@@ -655,58 +655,58 @@ static const struct msr_range ranges_2_43[] = {
     // MSR_UNC_PERF_GLOBAL_CTRL to MSR_UNC_PERF_GLOBAL_STATUS.
     { 0xe01, 0xe02 }
 };
-static const struct msr_ranges table_2_43 = {
+static const struct msr_table_ranges table_2_43 = {
     ranges_2_43, ARRAY_COUNT(ranges_2_43)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-44: bus locks, perfmon.
-static const struct msr_range ranges_2_44[] = {
+static const struct msr_table_range ranges_2_44[] = {
     { 0x33, 0x33 }, // MSR_MEMORY_CTRL.
     { 0x329, 0x329 }, // MSR_PERF_METRICS.
     { 0x3f2, 0x3f2 } // MSR_PEBS_DATA_CFG.
 };
-static const struct msr_ranges table_2_44 = {
+static const struct msr_table_ranges table_2_44 = {
     ranges_2_44, ARRAY_COUNT(ranges_2_44)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-45: power.
-static const struct msr_range ranges_2_45[] = {
+static const struct msr_table_range ranges_2_45[] = {
     { 0x601, 0x601 } // MSR_VR_CURRENT_CONFIG.
 };
-static const struct msr_ranges table_2_45 = {
+static const struct msr_table_ranges table_2_45 = {
     ranges_2_45, ARRAY_COUNT(ranges_2_45)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-46: C-states, bus locks, turbo.
-static const struct msr_range ranges_2_46[] = {
+static const struct msr_table_range ranges_2_46[] = {
     { 0x33, 0x33 }, // MSR_MEMORY_CTRL.
     { 0x1ad, 0x1ad }, // MSR_PRIMARY_TURBO_RATIO_LIMIT.
     { 0x650, 0x650 }, // MSR_SECONDARY_TURBO_RATIO_LIMIT.
     { 0x664, 0x664 } // MSR_MC6_RESIDENCY_COUNTER.
 };
-static const struct msr_ranges table_2_46 = {
+static const struct msr_table_ranges table_2_46 = {
     ranges_2_46, ARRAY_COUNT(ranges_2_46)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-47: perfmon.
-static const struct msr_range ranges_2_47[] = {
+static const struct msr_table_range ranges_2_47[] = {
     { 0x3f7, 0x3f7 } // MSR_PEBS_FRONTEND.
 };
-static const struct msr_ranges table_2_47 = {
+static const struct msr_table_ranges table_2_47 = {
     ranges_2_47, ARRAY_COUNT(ranges_2_47)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-48: perfmon.
-static const struct msr_range ranges_2_48[] = {
+static const struct msr_table_range ranges_2_48[] = {
     { 0x1309, 0x130b }, // MSR_RELOAD_FIXED_CTRx to MSR_RELOAD_FIXED_CTRx.
     { 0x14c1, 0x14c6 } // MSR_RELOAD_PMCx to MSR_RELOAD_PMCx.
 };
-static const struct msr_ranges table_2_48 = {
+static const struct msr_table_ranges table_2_48 = {
     ranges_2_48, ARRAY_COUNT(ranges_2_48)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-49: perfmon.
-static const struct msr_range ranges_2_49[] = {
+static const struct msr_table_range ranges_2_49[] = {
     { 0x396, 0x396 }, // MSR_UNC_CBO_CONFIG.
     { 0x2000, 0x2003 }, // MSR_UNC_CBO_0_PERFEVTSEL0 to MSR_UNC_CBO_0_PERFCTR1.
     { 0x2008, 0x200b }, // MSR_UNC_CBO_1_PERFEVTSEL0 to MSR_UNC_CBO_1_PERFCTR1.
@@ -724,12 +724,12 @@ static const struct msr_range ranges_2_49[] = {
     { 0x2ff0, 0x2ff0 }, // MSR_UNC_PERF_GLOBAL_CTRL.
     { 0x2ff2, 0x2ff2 } // MSR_UNC_PERF_GLOBAL_STATUS.
 };
-static const struct msr_ranges table_2_49 = {
+static const struct msr_table_ranges table_2_49 = {
     ranges_2_49, ARRAY_COUNT(ranges_2_49)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-50: C-states, power, thermal, turbo.
-static const struct msr_range ranges_2_50[] = {
+static const struct msr_table_range ranges_2_50[] = {
     { 0xce, 0xce }, // MSR_PLATFORM_INFO.
     { 0xe2, 0xe2 }, // MSR_PKG_CST_CONFIG_CONTROL.
     { 0x1a2, 0x1a2 }, // MSR_TEMPERATURE_TARGET.
@@ -740,22 +740,22 @@ static const struct msr_range ranges_2_50[] = {
     { 0x620, 0x620 }, // MSR_UNCORE_RATIO_LIMIT.
     { 0x639, 0x639 } // MSR_PP0_ENERGY_STATUS.
 };
-static const struct msr_ranges table_2_50 = {
+static const struct msr_table_ranges table_2_50 = {
     ranges_2_50, ARRAY_COUNT(ranges_2_50)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-51: power.
-static const struct msr_range ranges_2_51[] = {
+static const struct msr_table_range ranges_2_51[] = {
     { 0x612, 0x612 }, // MSR_PACKAGE_ENERGY_TIME_STATUS.
     { 0x618, 0x619 }, // MSR_DRAM_POWER_LIMIT to MSR_DRAM_ENERGY_STATUS.
     { 0x61b, 0x61c } // MSR_DRAM_PERF_STATUS to MSR_DRAM_POWER_INFO.
 };
-static const struct msr_ranges table_2_51 = {
+static const struct msr_table_ranges table_2_51 = {
     ranges_2_51, ARRAY_COUNT(ranges_2_51)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-52: bus locks, perfmon, power, turbo.
-static const struct msr_range ranges_2_52[] = {
+static const struct msr_table_range ranges_2_52[] = {
     { 0x33, 0x33 }, // MSR_MEMORY_CTRL.
     // MSR_PRIMARY_TURBO_RATIO_LIMIT to MSR_TURBO_RATIO_LIMIT_CORES.
     { 0x1ad, 0x1ae },
@@ -767,13 +767,13 @@ static const struct msr_range ranges_2_52[] = {
     { 0xc70, 0xc77 }, // MSR_B1_PMON_EVNT_SEL0 to MSR_B1_PMON_CTR3.
     { 0xc82, 0xc82 } // MSR_W_PMON_BOX_OVF_CTRL.
 };
-static const struct msr_ranges table_2_52 = {
+static const struct msr_table_ranges table_2_52 = {
     ranges_2_52, ARRAY_COUNT(ranges_2_52)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-53: C-states, CPUID faulting, bus locks,
 // perfmon, power, thermal, turbo.
-static const struct msr_range ranges_2_53[] = {
+static const struct msr_table_range ranges_2_53[] = {
     { 0x33, 0x33 }, // MSR_MEMORY_CTRL.
     { 0xe2, 0xe2 }, // MSR_PKG_CST_CONFIG_CONTROL.
     { 0xe4, 0xe4 }, // MSR_IO_CAPTURE_BASE.
@@ -791,41 +791,41 @@ static const struct msr_range ranges_2_53[] = {
     { 0x65c, 0x65c }, // MSR_PLATFORM_POWER_LIMIT.
     { 0x6b1, 0x6b1 } // MSR_RING_PERF_LIMIT_REASONS.
 };
-static const struct msr_ranges table_2_53 = {
+static const struct msr_table_ranges table_2_53 = {
     ranges_2_53, ARRAY_COUNT(ranges_2_53)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-54: perfmon.
-static const struct msr_range ranges_2_54[] = {
+static const struct msr_table_range ranges_2_54[] = {
     { 0x329, 0x329 } // MSR_PERF_METRICS.
 };
-static const struct msr_ranges table_2_54 = {
+static const struct msr_table_ranges table_2_54 = {
     ranges_2_54, ARRAY_COUNT(ranges_2_54)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-55: perfmon.
-static const struct msr_range ranges_2_55[] = {
+static const struct msr_table_range ranges_2_55[] = {
     { 0x1309, 0x130b }, // MSR_RELOAD_FIXED_CTRx to MSR_RELOAD_FIXED_CTRx.
     { 0x14c1, 0x14c8 } // MSR_RELOAD_PMCx to MSR_RELOAD_PMCx.
 };
-static const struct msr_ranges table_2_55 = {
+static const struct msr_table_ranges table_2_55 = {
     ranges_2_55, ARRAY_COUNT(ranges_2_55)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-56: C-states, CPUID faulting, bus locks,
 // perfmon.
-static const struct msr_range ranges_2_56[] = {
+static const struct msr_table_range ranges_2_56[] = {
     { 0x33, 0x34 }, // MSR_MEMORY_CONTROL to MSR_SMI_COUNT.
     { 0x140, 0x140 }, // MSR_FEATURE_ENABLES.
     { 0x664, 0x664 } // MSR_MC6_RESIDENCY.
 };
-static const struct msr_ranges table_2_56 = {
+static const struct msr_table_ranges table_2_56 = {
     ranges_2_56, ARRAY_COUNT(ranges_2_56)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-57: C-states, CPUID faulting, bus locks,
 // perfmon, turbo.
-static const struct msr_range ranges_2_57[] = {
+static const struct msr_table_range ranges_2_57[] = {
     { 0x33, 0x34 }, // MSR_MEMORY_CONTROL to MSR_SMI_COUNT.
     { 0xce, 0xce }, // MSR_PLATFORM_INFO.
     { 0x140, 0x140 }, // MSR_FEATURE_ENABLES.
@@ -833,203 +833,203 @@ static const struct msr_range ranges_2_57[] = {
     { 0x3fc, 0x3fe }, // MSR_CORE_C3_RESIDENCY to MSR_CORE_C7_RESIDENCY.
     { 0x664, 0x664 } // MSR_MC6_RESIDENCY.
 };
-static const struct msr_ranges table_2_57 = {
+static const struct msr_table_ranges table_2_57 = {
     ranges_2_57, ARRAY_COUNT(ranges_2_57)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-58: C-states, power, turbo.
-static const struct msr_range ranges_2_58[] = {
+static const struct msr_table_range ranges_2_58[] = {
     { 0x601, 0x601 }, // MSR_PKG_POWER_LIMIT_4.
     { 0x630, 0x632 }, // MSR_PKG_C8_RESIDENCY to MSR_PKG_C10_RESIDENCY.
     { 0x651, 0x651 }, // MSR_SECONDARY_TURBO_RATIO_LIMIT_CORES.
     { 0x658, 0x65b } // MSR_WEIGHTED_CORE_C0 to MSR_CORE_GFXE_OVERLAP_C0.
 };
-static const struct msr_ranges table_2_58 = {
+static const struct msr_table_ranges table_2_58 = {
     ranges_2_58, ARRAY_COUNT(ranges_2_58)
 };
 
 // SDM 325462-093 Vol. 4, Table 2-59: perfmon.
-static const struct msr_range ranges_2_59[] = {
+static const struct msr_table_range ranges_2_59[] = {
     { 0x329, 0x329 } // MSR_PERF_METRICS.
 };
-static const struct msr_ranges table_2_59 = {
+static const struct msr_table_ranges table_2_59 = {
     ranges_2_59, ARRAY_COUNT(ranges_2_59)
 };
 
 // 06_25H, 06_2CH: SDM 325462-093 Vol. 4, Tables 2-15, 2-16, 2-18.
-static const struct msr_ranges *const model_tables_0[] = {
+static const struct msr_table_ranges *const model_tables_0[] = {
     &table_2_15, &table_2_16, &table_2_18
 };
 
 // 06_2FH: SDM 325462-093 Vol. 4, Tables 2-15, 2-16, 2-19.
-static const struct msr_ranges *const model_tables_1[] = {
+static const struct msr_table_ranges *const model_tables_1[] = {
     &table_2_15, &table_2_16, &table_2_19
 };
 
 // 06_2AH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-22.
-static const struct msr_ranges *const model_tables_2[] = {
+static const struct msr_table_ranges *const model_tables_2[] = {
     &table_2_20, &table_2_21, &table_2_22
 };
 
 // 06_2DH: SDM 325462-093 Vol. 4, Tables 2-20, 2-23, 2-24.
-static const struct msr_ranges *const model_tables_3[] = {
+static const struct msr_table_ranges *const model_tables_3[] = {
     &table_2_20, &table_2_23, &table_2_24
 };
 
 // 06_3AH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-22, 2-25.
-static const struct msr_ranges *const model_tables_4[] = {
+static const struct msr_table_ranges *const model_tables_4[] = {
     &table_2_20, &table_2_21, &table_2_22, &table_2_25
 };
 
 // 06_3EH: SDM 325462-093 Vol. 4, Tables 2-20, 2-24, 2-26, 2-27, 2-28.
-static const struct msr_ranges *const model_tables_5[] = {
+static const struct msr_table_ranges *const model_tables_5[] = {
     &table_2_20, &table_2_24, &table_2_26, &table_2_27, &table_2_28
 };
 
 // 06_3CH, 06_46H: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-22, 2-29, 2-30.
-static const struct msr_ranges *const model_tables_6[] = {
+static const struct msr_table_ranges *const model_tables_6[] = {
     &table_2_20, &table_2_21, &table_2_22, &table_2_29, &table_2_30
 };
 
 // 06_45H: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-22, 2-29, 2-30, 2-31.
-static const struct msr_ranges *const model_tables_7[] = {
+static const struct msr_table_ranges *const model_tables_7[] = {
     &table_2_20, &table_2_21, &table_2_22, &table_2_29, &table_2_30, &table_2_31
 };
 
 // 06_3FH: SDM 325462-093 Vol. 4, Tables 2-20, 2-29, 2-32, 2-33.
-static const struct msr_ranges *const model_tables_8[] = {
+static const struct msr_table_ranges *const model_tables_8[] = {
     &table_2_20, &table_2_29, &table_2_32, &table_2_33
 };
 
 // 06_3DH, 06_47H: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-22, 2-25, 2-29,
 // 2-30, 2-34, 2-35.
-static const struct msr_ranges *const model_tables_9[] = {
+static const struct msr_table_ranges *const model_tables_9[] = {
     &table_2_20, &table_2_21, &table_2_22, &table_2_25, &table_2_29, &table_2_30, &table_2_34,
     &table_2_35
 };
 
 // 06_56H: SDM 325462-093 Vol. 4, Tables 2-20, 2-29, 2-34, 2-36, 2-37.
-static const struct msr_ranges *const model_tables_10[] = {
+static const struct msr_table_ranges *const model_tables_10[] = {
     &table_2_20, &table_2_29, &table_2_34, &table_2_36, &table_2_37
 };
 
 // 06_4FH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-29, 2-34, 2-36, 2-38.
-static const struct msr_ranges *const model_tables_11[] = {
+static const struct msr_table_ranges *const model_tables_11[] = {
     &table_2_20, &table_2_21, &table_2_29, &table_2_34, &table_2_36, &table_2_38
 };
 
 // 06_4EH, 06_5EH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35,
 // 2-39, 2-40.
-static const struct msr_ranges *const model_tables_12[] = {
+static const struct msr_table_ranges *const model_tables_12[] = {
     &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35, &table_2_39, &table_2_40
 };
 
 // 06_8EH, 06_9EH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35,
 // 2-39, 2-40, 2-41.
-static const struct msr_ranges *const model_tables_13[] = {
+static const struct msr_table_ranges *const model_tables_13[] = {
     &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35, &table_2_39, &table_2_40,
     &table_2_41
 };
 
 // 06_66H: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35, 2-39,
 // 2-40, 2-42, 2-43.
-static const struct msr_ranges *const model_tables_14[] = {
+static const struct msr_table_ranges *const model_tables_14[] = {
     &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35, &table_2_39, &table_2_40,
     &table_2_42, &table_2_43
 };
 
 // 06_A5H, 06_A6H, 06_A7H, 06_B5H, 06_C5H, 06_C6H: SDM 325462-093 Vol. 4,
 // Tables 2-20, 2-21, 2-25, 2-29, 2-35, 2-39.
-static const struct msr_ranges *const model_tables_15[] = {
+static const struct msr_table_ranges *const model_tables_15[] = {
     &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35, &table_2_39
 };
 
 // 06_7EH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35, 2-39,
 // 2-44.
-static const struct msr_ranges *const model_tables_16[] = {
+static const struct msr_table_ranges *const model_tables_16[] = {
     &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35, &table_2_39, &table_2_44
 };
 
 // 06_8CH, 06_8DH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35,
 // 2-39, 2-44, 2-45.
-static const struct msr_ranges *const model_tables_17[] = {
+static const struct msr_table_ranges *const model_tables_17[] = {
     &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35, &table_2_39, &table_2_44,
     &table_2_45
 };
 
 // 06_97H, 06_9AH, 06_B7H, 06_BAH, 06_BFH: SDM 325462-093 Vol. 4, Tables 2-20,
 // 2-21, 2-25, 2-29, 2-35, 2-39, 2-44, 2-45, 2-46, 2-47, 2-48, 2-49.
-static const struct msr_ranges *const model_tables_18[] = {
+static const struct msr_table_ranges *const model_tables_18[] = {
     &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35, &table_2_39, &table_2_44,
     &table_2_45, &table_2_46, &table_2_47, &table_2_48, &table_2_49
 };
 
 // 06_55H: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35, 2-39,
 // 2-50.
-static const struct msr_ranges *const model_tables_19[] = {
+static const struct msr_table_ranges *const model_tables_19[] = {
     &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35, &table_2_39, &table_2_50
 };
 
 // 06_6AH, 06_6CH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35,
 // 2-39, 2-51.
-static const struct msr_ranges *const model_tables_20[] = {
+static const struct msr_table_ranges *const model_tables_20[] = {
     &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35, &table_2_39, &table_2_51
 };
 
 // 06_8FH, 06_CFH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35,
 // 2-39, 2-52.
-static const struct msr_ranges *const model_tables_21[] = {
+static const struct msr_table_ranges *const model_tables_21[] = {
     &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35, &table_2_39, &table_2_52
 };
 
 // 06_AAH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35, 2-39,
 // 2-53, 2-54, 2-55.
-static const struct msr_ranges *const model_tables_22[] = {
+static const struct msr_table_ranges *const model_tables_22[] = {
     &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35, &table_2_39, &table_2_53,
     &table_2_54, &table_2_55
 };
 
 // 06_ADH, 06_AEH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35,
 // 2-39, 2-56.
-static const struct msr_ranges *const model_tables_23[] = {
+static const struct msr_table_ranges *const model_tables_23[] = {
     &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35, &table_2_39, &table_2_56
 };
 
 // 06_AFH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35, 2-39,
 // 2-57.
-static const struct msr_ranges *const model_tables_24[] = {
+static const struct msr_table_ranges *const model_tables_24[] = {
     &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35, &table_2_39, &table_2_57
 };
 
 // 06_BDH: SDM 325462-093 Vol. 4, Tables 2-20, 2-21, 2-25, 2-29, 2-35, 2-39,
 // 2-58, 2-59.
-static const struct msr_ranges *const model_tables_25[] = {
+static const struct msr_table_ranges *const model_tables_25[] = {
     &table_2_20, &table_2_21, &table_2_25, &table_2_29, &table_2_35, &table_2_39, &table_2_58,
     &table_2_59
 };
 
 // 06_5CH, 06_5FH: SDM 325462-093 Vol. 4, Tables 2-6, 2-12.
-static const struct msr_ranges *const model_tables_26[] = {
+static const struct msr_table_ranges *const model_tables_26[] = {
     &table_2_6, &table_2_12
 };
 
 // 06_7AH: SDM 325462-093 Vol. 4, Tables 2-6, 2-12, 2-13.
-static const struct msr_ranges *const model_tables_27[] = {
+static const struct msr_table_ranges *const model_tables_27[] = {
     &table_2_6, &table_2_12, &table_2_13
 };
 
 // 06_86H, 06_96H, 06_9CH: SDM 325462-093 Vol. 4, Tables 2-6, 2-12, 2-13, 2-14.
-static const struct msr_ranges *const model_tables_28[] = {
+static const struct msr_table_ranges *const model_tables_28[] = {
     &table_2_6, &table_2_12, &table_2_13, &table_2_14
 };
 
 // 06_B6H, 06_BEH: SDM 325462-093 Vol. 4, Tables 2-6.
-static const struct msr_ranges *const model_tables_29[] = {
+static const struct msr_table_ranges *const model_tables_29[] = {
     &table_2_6
 };
 
 // By display family and model.
-const struct msr_model msr_intel_models[] = {
+const struct msr_table_model msr_table_intel_models[] = {
     { 0x6, 0x25, model_tables_0, 3 },
     { 0x6, 0x2c, model_tables_0, 3 },
     { 0x6, 0x2f, model_tables_1, 3 },
@@ -1083,10 +1083,10 @@ const struct msr_model msr_intel_models[] = {
     { 0x6, 0xb6, model_tables_29, 1 },
     { 0x6, 0xbe, model_tables_29, 1 }
 };
-const size_t msr_intel_model_count = ARRAY_COUNT(msr_intel_models);
+const size_t msr_table_intel_model_count = ARRAY_COUNT(msr_table_intel_models);
 
 // APM 24593 rev. 3.46, Table A-1, and what every family has, as reviewed.
-const struct msr_range msr_amd_architectural[] = {
+const struct msr_table_range msr_table_amd_architectural[] = {
     { 0x0, 0x1 }, // Load-store MCA address and status.
     { 0x10, 0x10 }, // TSC.
     { 0x2a, 0x2a }, // Cluster ID.
@@ -1132,11 +1132,11 @@ const struct msr_range msr_amd_architectural[] = {
     { 0xc0011019, 0xc001101b }, // Breakpoint address masks 1 to 3.
     { 0xc0011027, 0xc0011027 } // Breakpoint address mask 0.
 };
-const size_t msr_amd_architectural_count = ARRAY_COUNT(msr_amd_architectural);
+const size_t msr_table_amd_architectural_count = ARRAY_COUNT(msr_table_amd_architectural);
 
 // Family 10h, BKDG 31116 rev. 3.62: C-states, configuration, identification,
 // machine checks, power, thermal.
-static const struct msr_range family_10h[] = {
+static const struct msr_table_range family_10h[] = {
     { 0xc001003e, 0xc001003e }, // HTC.
     { 0xc0010044, 0xc0010049 }, // Machine Check Control Mask.
     { 0xc0010055, 0xc0010055 }, // Interrupt Pending and CMP-Halt.
@@ -1150,7 +1150,7 @@ static const struct msr_range family_10h[] = {
 // Family 15h, BKDGs 42301 rev. 3.14, 42300 rev. 3.12, 49125 rev. 3.06, 50742
 // rev. 3.05, and 55072 rev. 3.09: C-states, configuration, identification,
 // machine checks, power, thermal.
-static const struct msr_range family_15h[] = {
+static const struct msr_table_range family_15h[] = {
     { 0xc001003e, 0xc001003e }, // HTC.
     { 0xc0010044, 0xc0010046 }, // MC0_CTL_MASK to MC2_CTL_MASK.
     { 0xc0010048, 0xc001004a }, // MC4_CTL_MASK to MC6_CTL_MASK.
@@ -1173,7 +1173,7 @@ static const struct msr_range family_15h[] = {
 
 // Family 16h, BKDGs 48751 rev. 3.03 and 52740 rev. 3.06: C-states,
 // configuration, identification, machine checks, power, thermal.
-static const struct msr_range family_16h[] = {
+static const struct msr_table_range family_16h[] = {
     { 0xc001003e, 0xc001003e }, // HTC.
     // DC Machine Check Control Mask to BU Machine Check Control Mask.
     { 0xc0010044, 0xc0010046 },
@@ -1200,7 +1200,7 @@ static const struct msr_range family_16h[] = {
 // Family 17h, PPRs 54945 rev. 3.03, 55570 rev. 3.16, 55772 rev. 3.08, 55803
 // rev. 0.93, 55922 rev. 3.06, and 56176 rev. 3.06: C-states, configuration,
 // identification, machine checks, perfmon, power.
-static const struct msr_range family_17h[] = {
+static const struct msr_table_range family_17h[] = {
     { 0xc0010064, 0xc001006b }, // PStateDef.
     { 0xc0010073, 0xc0010073 }, // CStateBaseAddr.
     { 0xc0010238, 0xc001023b }, // ChL3PmcCfg to ChL3Pmc.
@@ -1219,7 +1219,7 @@ static const struct msr_range family_17h[] = {
 // Family 19h, PPRs 55898 rev. 0.50, 55901 rev. 0.47, 56214 rev. 3.05, 56569
 // rev. 3.03, 56713 rev. 3.05, 57019 rev. 3.00, and 57228 rev. 0.45: C-states,
 // configuration, identification, machine checks, perfmon, power.
-static const struct msr_range family_19h[] = {
+static const struct msr_table_range family_19h[] = {
     { 0xc0010064, 0xc001006b }, // PStateDef.
     { 0xc0010073, 0xc0010073 }, // CStateBaseAddr.
     { 0xc0010238, 0xc001023b }, // ChL3PmcCfg to ChL3Pmc.
@@ -1236,7 +1236,7 @@ static const struct msr_range family_19h[] = {
 // Family 1Ah, PPRs 57238 rev. 0.49, 57883 rev. 0.51, 57930 rev. 3.00, 58264
 // rev. 0.45, and 58655 rev. 0.42: C-states, configuration, identification,
 // machine checks, perfmon, power.
-static const struct msr_range family_1ah[] = {
+static const struct msr_table_range family_1ah[] = {
     { 0xc0010064, 0xc001006b }, // PStateDef.
     { 0xc0010073, 0xc0010073 }, // CStateBaseAddr.
     { 0xc0010238, 0xc001023b }, // ChL3PmcCfg to ChL3Pmc.
@@ -1251,7 +1251,7 @@ static const struct msr_range family_1ah[] = {
 };
 
 // By display family.
-const struct msr_family msr_amd_families[] = {
+const struct msr_table_family msr_table_amd_families[] = {
     { 0x10, family_10h, ARRAY_COUNT(family_10h) },
     { 0x15, family_15h, ARRAY_COUNT(family_15h) },
     { 0x16, family_16h, ARRAY_COUNT(family_16h) },
@@ -1259,4 +1259,4 @@ const struct msr_family msr_amd_families[] = {
     { 0x19, family_19h, ARRAY_COUNT(family_19h) },
     { 0x1a, family_1ah, ARRAY_COUNT(family_1ah) }
 };
-const size_t msr_amd_family_count = ARRAY_COUNT(msr_amd_families);
+const size_t msr_table_amd_family_count = ARRAY_COUNT(msr_table_amd_families);

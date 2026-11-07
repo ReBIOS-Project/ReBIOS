@@ -283,8 +283,8 @@ static bool pstates_read_only;
 static bool tsc_adjust;
 static bool tsc_deadline;
 // The tables of the processor's model-specific MSRs, where it has any.
-static const struct msr_model *model;
-static const struct msr_family *family_msrs;
+static const struct msr_table_model *model;
+static const struct msr_table_family *family_msrs;
 // Physical address bits the processor lacks, for the guest's AMD addresses.
 static uint64_t address_reserved;
 
@@ -508,7 +508,7 @@ void msr_cpu_init(void) {
     }
 }
 
-static bool in_ranges(const struct msr_range *ranges, size_t count, uint32_t msr) {
+static bool in_ranges(const struct msr_table_range *ranges, size_t count, uint32_t msr) {
     for (size_t i = 0; i < count; i++) {
         if (msr >= ranges[i].first && msr <= ranges[i].last) {
             return true;
@@ -519,10 +519,12 @@ static bool in_ranges(const struct msr_range *ranges, size_t count, uint32_t msr
 
 bool msr_allowed(uint32_t msr) {
     if (!virt_vmx) {
-        return in_ranges(msr_amd_architectural, msr_amd_architectural_count, msr)
+        return in_ranges(msr_table_amd_architectural, msr_table_amd_architectural_count, msr)
             || (family_msrs != NULL && in_ranges(family_msrs->ranges, family_msrs->count, msr));
     }
-    bool architectural = in_ranges(msr_intel_architectural, msr_intel_architectural_count, msr);
+    bool architectural = in_ranges(
+        msr_table_intel_architectural, msr_table_intel_architectural_count, msr
+    );
     if (architectural) {
         return true;
     }
@@ -535,7 +537,7 @@ bool msr_allowed(uint32_t msr) {
     return false;
 }
 
-static void pass_ranges(const struct msr_range *ranges, size_t count) {
+static void pass_ranges(const struct msr_table_range *ranges, size_t count) {
     for (size_t i = 0; i < count; i++) {
         for (size_t msr = ranges[i].first; msr <= ranges[i].last; msr++) {
             virt_pass_msr((uint32_t)msr);
@@ -546,23 +548,24 @@ static void pass_ranges(const struct msr_range *ranges, size_t count) {
 void msr_allowed_init(void) {
     struct x86_cpu_signature s = x86_cpu_signature();
     if (!virt_vmx) {
-        for (size_t i = 0; i < msr_amd_family_count; i++) {
-            if (msr_amd_families[i].family == s.family) {
-                family_msrs = &msr_amd_families[i];
+        for (size_t i = 0; i < msr_table_amd_family_count; i++) {
+            if (msr_table_amd_families[i].family == s.family) {
+                family_msrs = &msr_table_amd_families[i];
             }
         }
-        pass_ranges(msr_amd_architectural, msr_amd_architectural_count);
+        pass_ranges(msr_table_amd_architectural, msr_table_amd_architectural_count);
         if (family_msrs != NULL) {
             pass_ranges(family_msrs->ranges, family_msrs->count);
         }
         return;
     }
-    for (size_t i = 0; i < msr_intel_model_count; i++) {
-        if (msr_intel_models[i].family == s.family && msr_intel_models[i].model == s.model) {
-            model = &msr_intel_models[i];
+    for (size_t i = 0; i < msr_table_intel_model_count; i++) {
+        if (msr_table_intel_models[i].family == s.family
+         && msr_table_intel_models[i].model == s.model) {
+            model = &msr_table_intel_models[i];
         }
     }
-    pass_ranges(msr_intel_architectural, msr_intel_architectural_count);
+    pass_ranges(msr_table_intel_architectural, msr_table_intel_architectural_count);
     for (size_t i = 0; model != NULL && i < model->count; i++) {
         pass_ranges(model->tables[i]->ranges, model->tables[i]->count);
     }
