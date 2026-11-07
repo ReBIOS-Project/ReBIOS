@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -24,9 +25,13 @@
 #include <uacpi/tables.h>
 #include <virt/hpet.h>
 #include <lib/log.h>
+#include <lib/spinlock.h>
 #include <memory.h>
 #include <sys/mm.h>
+#include <virt/gpt.h>
 #include <virt/layout.h>
+#include <virt/mmio.h>
+#include <virt/vcpu.h>
 
 // IA-PC HPET Specification 1.0a, 2.3: the capabilities and configuration
 // registers, and each timer's configuration register.
@@ -47,6 +52,10 @@ static uint64_t hidden[MAX_HIDDEN];
 static size_t hidden_count;
 // Where the guest's is: the first it gets, the only one a PC has.
 static uintptr_t guest_base;
+// Whether its legacy replacement route is on, as the guest's writes to its
+// configuration register, which pass through the hypervisor, leave it.
+static _Atomic(bool) legacy_route;
+static struct spinlock lock;
 
 static uint32_t read32(uintptr_t address) {
     return *(volatile uint32_t *)(uintptr_t)address;
@@ -85,6 +94,41 @@ static void hide(uintptr_t base) {
     );
 }
 
+static void follow_route(void) {
+    uint32_t route = CONFIG_ENABLE | CONFIG_LEGACY_ROUTE;
+    bool on = (read32(guest_base + CONFIG) & route) == route;
+    atomic_store_explicit(&legacy_route, on, memory_order_release);
+}
+
+static uint64_t guest_read(struct vcpu *v, void *ctx, uint64_t offset, size_t size) {
+    (void)v;
+    return mmio_read_host((uintptr_t)ctx + offset, size);
+}
+
+static void guest_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value) {
+    (void)v;
+    uintptr_t address = (uintptr_t)ctx + offset;
+    spinlock_acquire(&lock);
+    mmio_write_host(address, size, value);
+    if (address < guest_base + CONFIG + 8 && address + size > guest_base + CONFIG) {
+        follow_route();
+    }
+    spinlock_release(&lock);
+}
+
+static const struct mmio_ops guest_ops = { guest_read, guest_write, false };
+
+// The guest reads its registers where they are, but its writes pass through
+// the hypervisor, which so knows whether the 8254 and the RTC interrupt or
+// timers 0 and 1 in their place (IA-PC HPET Specification 1.0a, 2.4.2.1).
+static void trap_writes(uintptr_t base) {
+    uintptr_t page = base & ~(uintptr_t)(PAGE_SIZE - 1);
+    follow_route();
+    mmio_register(page, PAGE_SIZE, &guest_ops, (void *)page);
+    gpt_map(page, page, PAGE_SIZE, GPT_R, MT_UC);
+    gpt_flush();
+}
+
 void hpet_init(void) {
     struct uacpi_table table;
     for (size_t n = 0;
@@ -99,6 +143,7 @@ void hpet_init(void) {
                 hide(base);
             } else if (hpet.address.address_space_id == ACPI_AS_ID_SYS_MEM && guest_base == 0) {
                 guest_base = base;
+                trap_writes(base);
             }
         }
         uacpi_table_unref(&table);
@@ -127,6 +172,5 @@ bool hpet_block_id(uintptr_t base, uint32_t *id) {
 }
 
 bool hpet_replaces_pit(void) {
-    uint32_t route = CONFIG_ENABLE | CONFIG_LEGACY_ROUTE;
-    return guest_base != 0 && (read32(guest_base + CONFIG) & route) == route;
+    return atomic_load_explicit(&legacy_route, memory_order_acquire);
 }
