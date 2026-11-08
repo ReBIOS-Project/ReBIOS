@@ -32,6 +32,27 @@ cpu_switch_stack:
     jmpq *%rsi
 .size cpu_switch_stack, . - cpu_switch_stack
 
+// cpu_resume_save(resume) saves where its caller goes on and returns 0; an
+// exception the host recovers from by resuming there makes it return 1.
+.globl cpu_resume_save
+.type cpu_resume_save, %function
+cpu_resume_save:
+    movq %rbx, CPU_RESUME_RBX(%rdi)
+    movq %rbp, CPU_RESUME_RBP(%rdi)
+    movq %r12, CPU_RESUME_R12(%rdi)
+    movq %r13, CPU_RESUME_R13(%rdi)
+    movq %r14, CPU_RESUME_R14(%rdi)
+    movq %r15, CPU_RESUME_R15(%rdi)
+    leaq 8(%rsp), %rax
+    movq %rax, CPU_RESUME_RSP(%rdi)
+    movq (%rsp), %rax
+    movq %rax, CPU_RESUME_RIP(%rdi)
+    pushfq
+    popq CPU_RESUME_RFLAGS(%rdi)
+    xorl %eax, %eax
+    retq
+.size cpu_resume_save, . - cpu_resume_save
+
 // cpu_halt() halts until an interrupt, unless the processor has been kicked.
 // The host's NMI handler restarts an NMI that arrives before the HLT, as it
 // would halt with the NMI's work left undone otherwise.

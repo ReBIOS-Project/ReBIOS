@@ -34,12 +34,36 @@
 // The offset of struct cpu's kicked.
 #define CPU_KICKED 17
 
+// The offsets of struct cpu_resume's fields.
+#define CPU_RESUME_RBX 0
+#define CPU_RESUME_RBP 8
+#define CPU_RESUME_R12 16
+#define CPU_RESUME_R13 24
+#define CPU_RESUME_R14 32
+#define CPU_RESUME_R15 40
+#define CPU_RESUME_RSP 48
+#define CPU_RESUME_RIP 56
+#define CPU_RESUME_RFLAGS 64
+
 #ifndef __ASSEMBLER__
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdnoreturn.h>
+
+// Where a caller of cpu_resume_save() goes on: the registers its callers keep,
+// its stack, and its return address.
+struct cpu_resume {
+    uint64_t rbx, rbp, r12, r13, r14, r15;
+    uint64_t rsp, rip, rflags;
+};
+
+_Static_assert(offsetof(struct cpu_resume, rflags) == CPU_RESUME_RFLAGS, "cpu.S has CPU_RESUME_*");
+
+// Returns 0, and 1 again once an exception the host recovers from resumes
+// there, as long as the caller has not returned.
+__attribute__((returns_twice)) int cpu_resume_save(struct cpu_resume *resume);
 
 struct cpu_tss {
     uint32_t reserved0;
@@ -94,6 +118,10 @@ struct cpu {
     uint64_t shortest_exit;
     // When the watchdog may report the CPU again.
     uint64_t watchdog_next;
+    // During a call to the firmware's runtime services, where a page fault in
+    // them resumes, else NULL, and the address the last such fault was at.
+    struct cpu_resume *firmware_resume;
+    uint64_t firmware_fault;
 };
 
 _Static_assert(sizeof(struct cpu) <= 0x1000, "struct cpu overlaps the IST stacks");

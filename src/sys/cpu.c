@@ -157,7 +157,34 @@ void cpu_nmi_restart(uintptr_t start, uintptr_t end) {
 
 extern const char cpu_halt_restart_end[];
 
+// A page fault in the firmware's runtime services ends the call to them, which
+// goes on where cpu_resume_save() returns 1, as Linux 7.3's
+// efi_crash_gracefully_on_page_fault() ends it.
+static bool firmware_fault(struct exception_frame *frame) {
+    struct cpu *cpu = this_cpu();
+    const struct cpu_resume *resume = cpu->firmware_resume;
+    if (frame->vector != 14 || resume == NULL) {
+        return false;
+    }
+    cpu->firmware_resume = NULL;
+    cpu->firmware_fault = read_cr2();
+    frame->rbx = resume->rbx;
+    frame->rbp = resume->rbp;
+    frame->r12 = resume->r12;
+    frame->r13 = resume->r13;
+    frame->r14 = resume->r14;
+    frame->r15 = resume->r15;
+    frame->rsp = resume->rsp;
+    frame->rip = resume->rip;
+    frame->rflags = resume->rflags;
+    frame->rax = 1;
+    return true;
+}
+
 void cpu_exception_handler(struct exception_frame *frame) {
+    if (firmware_fault(frame)) {
+        return;
+    }
     if (frame->vector == 2) {
         struct cpu *cpu = this_cpu();
         // The guest's, which arrived while the host ran.

@@ -15,15 +15,18 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <efi.h>
 #include <sys/efi_runtime.h>
 #include <core.h>
+#include <lib/log.h>
 #include <lib/spinlock.h>
 #include <lib/util.h>
 #include <memory.h>
+#include <sys/cpu.h>
 #include <sys/fixup.h>
 #include <sys/mm.h>
 #include <sys/x86.h>
@@ -37,6 +40,10 @@
     (offsetof(EFI_RUNTIME_SERVICES, QueryVariableInfo) + sizeof(EFI_QUERY_VARIABLE_INFO))
 
 static struct spinlock lock;
+// Whether a page fault in the services ended a call to them, which leaves them
+// unusable, as Linux 7.3 takes them to be (quirks.c,
+// efi_crash_gracefully_on_page_fault()).
+static _Atomic(bool) broken;
 static uint8_t *fpu_area;
 static bool fpu_xsave;
 // XCR0 as the guest has it, while a call runs.
@@ -98,19 +105,72 @@ static void end(void) {
     spinlock_release(&lock);
 }
 
+// Runs call(ctx), which calls a service, and ends it with EFI_ABORTED if the
+// firmware's code takes a page fault (sys/cpu.c, firmware_fault()).
+static EFI_STATUS guarded(EFI_STATUS (*call)(void *ctx), void *ctx) {
+    struct cpu_resume resume;
+    if (cpu_resume_save(&resume) != 0) {
+        atomic_store_explicit(&broken, true, memory_order_release);
+        // A panic's processor may hold the log's lock.
+        if (!log_panicked()) {
+            printf(
+                "The firmware's runtime services took a page fault at %#llx, and are not called "
+                "again\n", (unsigned long long)this_cpu()->firmware_fault
+            );
+        }
+        return EFI_ABORTED;
+    }
+    this_cpu()->firmware_resume = &resume;
+    EFI_STATUS status = call(ctx);
+    this_cpu()->firmware_resume = NULL;
+    return status;
+}
+
+struct query_variable_info_args {
+    EFI_UINT32 attributes;
+    EFI_UINT64 *storage;
+    EFI_UINT64 *remaining;
+    EFI_UINT64 *max_size;
+};
+
+static EFI_STATUS query_variable_info(void *ctx) {
+    const struct query_variable_info_args *a = ctx;
+    return services()->QueryVariableInfo(a->attributes, a->storage, a->remaining, a->max_size);
+}
+
+struct set_variable_args {
+    EFI_CHAR16 *name;
+    EFI_GUID *guid;
+    EFI_UINT32 attributes;
+    EFI_UINTN size;
+    void *data;
+};
+
+static EFI_STATUS set_variable(void *ctx) {
+    const struct set_variable_args *a = ctx;
+    return services()->SetVariable(a->name, a->guid, a->attributes, a->size, a->data);
+}
+
+static EFI_STATUS reset_system(void *ctx) {
+    services()->ResetSystem(*(const EFI_RESET_TYPE *)ctx, EFI_SUCCESS, 0, NULL);
+    return EFI_DEVICE_ERROR;
+}
+
 EFI_STATUS efi_runtime_query_variable_info(
     EFI_UINT32 attributes, EFI_UINT64 *storage, EFI_UINT64 *remaining, EFI_UINT64 *max_size,
     bool wait
 ) {
     const EFI_RUNTIME_SERVICES *rt = services();
     if (rt == NULL || rt->Hdr.Revision < EFI_2_00_SYSTEM_TABLE_REVISION
-     || rt->Hdr.HeaderSize < QUERY_VARIABLE_INFO_END) {
+     || rt->Hdr.HeaderSize < QUERY_VARIABLE_INFO_END
+     || atomic_load_explicit(&broken, memory_order_acquire)) {
         return EFI_UNSUPPORTED;
     }
     if (!begin(wait)) {
         return EFI_NOT_READY;
     }
-    EFI_STATUS status = rt->QueryVariableInfo(attributes, storage, remaining, max_size);
+    struct query_variable_info_args args = { attributes, storage, remaining, max_size };
+    EFI_STATUS status = guarded(query_variable_info, &args);
     end();
     return status;
 }
@@ -118,10 +178,22 @@ EFI_STATUS efi_runtime_query_variable_info(
 EFI_STATUS efi_runtime_set_variable(
     EFI_CHAR16 *name, EFI_GUID *guid, EFI_UINT32 attributes, EFI_UINTN size, void *data, bool wait
 ) {
+    if (atomic_load_explicit(&broken, memory_order_acquire)) {
+        return EFI_UNSUPPORTED;
+    }
     if (!begin(wait)) {
         return EFI_NOT_READY;
     }
-    EFI_STATUS status = services()->SetVariable(name, guid, attributes, size, data);
+    struct set_variable_args args = { name, guid, attributes, size, data };
+    EFI_STATUS status = guarded(set_variable, &args);
     end();
     return status;
+}
+
+// With the guest gone, its registers are not kept, nor are other calls waited
+// for.
+void efi_runtime_reset_system(EFI_RESET_TYPE type) {
+    if (services() != NULL && !atomic_load_explicit(&broken, memory_order_acquire)) {
+        guarded(reset_system, &type);
+    }
 }

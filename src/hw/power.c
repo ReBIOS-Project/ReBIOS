@@ -22,12 +22,12 @@
 #include <uacpi/sleep.h>
 #include <uacpi/status.h>
 #include <hw/power.h>
-#include <core.h>
 #include <hw/acpi.h>
 #include <hw/i8042.h>
 #include <hw/pci_cfg.h>
 #include <lib/log.h>
 #include <lib/time.h>
+#include <sys/efi_runtime.h>
 #include <sys/x86.h>
 
 #define RESET_WAIT_US 100000
@@ -37,12 +37,6 @@
 #define RST_CNT_WARM (RST_CNT_SYS_RST | RST_CNT_RST_CPU)
 #define RST_CNT_COLD (RST_CNT_SYS_RST | RST_CNT_RST_CPU | RST_CNT_FULL_RST)
 #define RST_CNT_SETUP_US 50
-
-// Returns only if the firmware fails to.
-static void firmware_reset(EFI_RESET_TYPE type) {
-    EFI_RUNTIME_SERVICES *rt = (EFI_RUNTIME_SERVICES *)(uintptr_t)core_handoff->efi_rt;
-    rt->ResetSystem(type, EFI_SUCCESS, 0, NULL);
-}
 
 // ACPI's reset register, then the keyboard controller's reset line where there
 // is a controller, then the reset control register at CF9h where the
@@ -74,7 +68,7 @@ void power_reset(bool warm) {
         outb(RST_CNT, (uint8_t)(other | code));
         time_udelay(RESET_WAIT_US);
     }
-    firmware_reset(warm ? EfiResetWarm : EfiResetCold);
+    efi_runtime_reset_system(warm ? EfiResetWarm : EfiResetCold);
     struct {
         uint16_t limit;
         uint64_t base;
@@ -100,6 +94,6 @@ void power_off(void) {
         }
         printf("Cannot enter ACPI S5: %s\n", uacpi_status_to_string(status));
     }
-    firmware_reset(EfiResetShutdown);
+    efi_runtime_reset_system(EfiResetShutdown);
     panic("Cannot power the machine off\n");
 }
