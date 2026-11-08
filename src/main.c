@@ -31,6 +31,7 @@
 #include <loader/efi_glue.h>
 #include <loader/fwtables.h>
 #include <loader/iommu_check.h>
+#include <loader/last_log.h>
 #include <loader/loader.h>
 #include <loader/oprom.h>
 #include <loader/paging.h>
@@ -206,6 +207,7 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
             config.serial_port, HANDOFF_PCI_ADDRESS_ARGS(serial_card)
         );
     }
+    last_log_write();
 
     if (x86_cpu_vendor() == 0) {
         panic("ReBIOS runs on Intel's and AMD's processors alone\n");
