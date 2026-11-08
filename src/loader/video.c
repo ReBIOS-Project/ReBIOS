@@ -723,8 +723,7 @@ void video_init(void) {
     const struct user_vbios *user_vbios = have_user ? &user : NULL;
     bool automatic = config.vga_emulation == HANDOFF_VGA_EMULATION_AUTO && !have_user;
     bool apple = automatic && apple_firmware();
-    // A VBIOS draws as the panel scans, sideways on one mounted sideways, and
-    // the firmware's driver stopped for one left a Lenovo D330's panel dark.
+    // A VBIOS draws as the panel scans, sideways on one mounted sideways.
     bool sideways = automatic && loader_handoff->video.framebuffer.rotation != HANDOFF_ROTATE_0;
     bool skip = apple || sideways;
 
@@ -784,14 +783,22 @@ void video_exit_boot_services(void) {
         return;
     }
     if (efi_bs->Hdr.Revision < EFI_1_10_SYSTEM_TABLE_REVISION) {
-        printf("Cannot stop the firmware's graphics driver before EFI 1.10\n");
+        printf("Cannot stop the firmware's graphics output before EFI 1.10\n");
         return;
     }
 
+    // What draws through the graphics output stops, the graphics driver itself
+    // staying bound to its device, which a driver stopped can turn off: the
+    // graphics output's own handle is the one disconnected, which is a child
+    // of the device's where the driver makes one.
+    EFI_HANDLE gop = NULL;
     EFI_HANDLE *handles = efi_glue_locate_handles(&gop_guid, &count);
     for (size_t i = 0; i < count && !driven; i++) {
         driven = gop_pci_device(handles[i], &dev)
               && handoff_pci_address_equal(dev.address, video->vga_device);
+        if (driven) {
+            gop = handles[i];
+        }
     }
     if (handles != NULL) {
         efi_bs->FreePool(handles);
@@ -800,7 +807,8 @@ void video_exit_boot_services(void) {
         return;
     }
 
-    // A stopped driver restores the attributes the device had before it
+    // Where the graphics output is the device's own handle, the driver stops,
+    // and a stopped driver restores the attributes the device had before it
     // started, and a VGA controller starts with its decoding off.
     EFI_UINT64 attributes;
     EFI_STATUS status = dev.io->Attributes(dev.io, EfiPciIoAttributeOperationGet, 0, &attributes);
@@ -809,10 +817,10 @@ void video_exit_boot_services(void) {
     }
     attributes &= VGA_DECODE_ATTRIBUTES;
 
-    status = efi_bs->DisconnectController(dev.handle, NULL, NULL);
+    status = efi_bs->DisconnectController(gop, NULL, NULL);
     if (status != EFI_SUCCESS) {
         printf(
-            "Cannot stop the firmware's graphics driver for " HANDOFF_PCI_ADDRESS_FMT
+            "Cannot stop the firmware's graphics output for " HANDOFF_PCI_ADDRESS_FMT
             ", status %#llx\n", HANDOFF_PCI_ADDRESS_ARGS(dev.address), (unsigned long long)status
         );
         return;
@@ -823,7 +831,7 @@ void video_exit_boot_services(void) {
     if (undecoded) {
         printf(
             "Cannot restore the decoding of " HANDOFF_PCI_ADDRESS_FMT
-            " after stopping its graphics driver\n",
+            " after stopping its graphics output\n",
             HANDOFF_PCI_ADDRESS_ARGS(dev.address)
         );
     }
