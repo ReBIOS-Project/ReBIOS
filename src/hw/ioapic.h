@@ -35,6 +35,7 @@
 #define IOAPIC_RTE_DELIVERY_MASK ((uint64_t)7 << 8)
 #define IOAPIC_RTE_DELIVERY_FIXED ((uint64_t)0 << 8)
 #define IOAPIC_RTE_DELIVERY_LOWEST ((uint64_t)1 << 8)
+#define IOAPIC_RTE_DELIVERY_NMI ((uint64_t)4 << 8)
 #define IOAPIC_RTE_DELIVERY_EXTINT ((uint64_t)7 << 8)
 #define IOAPIC_RTE_LOGICAL ((uint64_t)1 << 11)
 #define IOAPIC_RTE_PENDING ((uint64_t)1 << 12)

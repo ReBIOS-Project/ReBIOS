@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <uacpi/acpi.h>
@@ -89,6 +90,26 @@ struct ioapic *ioapic_for_gsi(uint32_t gsi, uint32_t *pin) {
     return NULL;
 }
 
+// A remote IRR that an interrupt the firmware never acknowledged left set,
+// which blocks the pin: an EOI ends it while the entry reads as level
+// triggered, or else a change to edge does, as Linux 7.3's clear_IO_APIC_pin()
+// clears it.
+static void remote_irr_clear(struct ioapic *io, uint32_t pin, uint32_t low) {
+    reg_write(io, IOAPIC_REG_REDIR(pin), low | (uint32_t)IOAPIC_RTE_LEVEL);
+    if ((io->version & 0xff) >= IOAPIC_VERSION_EOI) {
+        *(volatile uint32_t *)(uintptr_t)(io->base + IOAPIC_EOI) = low & IOAPIC_RTE_VECTOR_MASK;
+    } else {
+        reg_write(io, IOAPIC_REG_REDIR(pin), low & ~(uint32_t)IOAPIC_RTE_LEVEL);
+    }
+    reg_write(io, IOAPIC_REG_REDIR(pin), low);
+}
+
+static bool interrupt_mode(uint32_t low) {
+    uint32_t mode = low & IOAPIC_RTE_DELIVERY_MASK;
+    return mode == IOAPIC_RTE_DELIVERY_FIXED || mode == IOAPIC_RTE_DELIVERY_LOWEST
+        || mode == IOAPIC_RTE_DELIVERY_NMI || mode == IOAPIC_RTE_DELIVERY_EXTINT;
+}
+
 static void add(const struct acpi_madt_ioapic *entry) {
     uintptr_t base = entry->address;
     // A zero address is a field the firmware left unfilled, not an I/O APIC,
@@ -134,12 +155,21 @@ static void add(const struct acpi_madt_ioapic *entry) {
     }
     count++;
 
+    // Other delivery modes, such as SMI, are the firmware's.
     uint32_t masked = 0;
     for (size_t i = 0; i < io->pins; i++) {
         uint32_t low = reg_read(io, IOAPIC_REG_REDIR(i));
+        if (!interrupt_mode(low)) {
+            continue;
+        }
         if ((low & IOAPIC_RTE_MASKED) == 0) {
             reg_write(io, IOAPIC_REG_REDIR(i), low | (uint32_t)IOAPIC_RTE_MASKED);
             masked++;
+            // Read back, as the pin stays live while the write is posted.
+            low = reg_read(io, IOAPIC_REG_REDIR(i));
+        }
+        if ((low & IOAPIC_RTE_REMOTE_IRR) != 0) {
+            remote_irr_clear(io, (uint32_t)i, low);
         }
     }
     printf(
