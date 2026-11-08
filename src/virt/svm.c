@@ -243,7 +243,6 @@ bool svm_supported(void) {
     invlpgb_count_max = sizes.edx & 0xffff;
     svm_decode_assists = (features & SVM_FEATURE_DECODE_ASSISTS) != 0;
     svm_vgif = (features & SVM_FEATURE_VGIF) != 0;
-    svm_vls = (features & SVM_FEATURE_VLS) != 0;
     svm_vmcb_addr_check = (features & SVM_FEATURE_VMCB_ADDR_CHECK) != 0;
     svm_svml = (features & SVM_FEATURE_SVML) != 0;
     svm_vnmi = svm_vgif && (features & SVM_FEATURE_VNMI) != 0;
@@ -257,6 +256,13 @@ bool svm_supported(void) {
     struct x86_cpu_signature signature = x86_cpu_signature();
     unsigned int zen = errata_amd_zen();
     divider_clear = zen == 1;
+    // Not on the Zen 4 models whose virtualised VMLOAD and VMSAVE may reset
+    // the machine, as Linux 7.3 has it (arch/x86/kernel/cpu/amd.c,
+    // init_amd_zen4()).
+    bool vls_broken = signature.family == 0x19
+                   && ((signature.model >= 0x18 && signature.model <= 0x1f)
+                    || (signature.model >= 0x60 && signature.model <= 0x7f));
+    svm_vls = (features & SVM_FEATURE_VLS) != 0 && !vls_broken;
     uint8_t setting = core_handoff->config.avic;
     svm_avic = (features & SVM_FEATURE_AVIC) != 0 && signature.family != 0x17
             && (setting == HANDOFF_AVIC_ALWAYS

@@ -413,9 +413,9 @@ struct cpuid_regs nsvm_cpuid(void) {
                       | SVM_FEATURE_FLUSH_BY_ASID | SVM_FEATURE_PAUSE_FILTER
                       | SVM_FEATURE_PAUSE_FILTER_THRESHOLD | SVM_FEATURE_LBRV | SVM_FEATURE_ROGPT
                       | SVM_FEATURE_TLBICTL | SVM_FEATURE_DECODE_ASSISTS | SVM_FEATURE_VGIF
-                      | SVM_FEATURE_VLS | SVM_FEATURE_GMET | SVM_FEATURE_TSC_RATIO
-                      | SVM_FEATURE_SVML | SVM_FEATURE_IDLE_HLT | SVM_FEATURE_BUS_LOCK_THRESHOLD
-                      | (svm_vnmi ? SVM_FEATURE_VNMI : 0);
+                      | SVM_FEATURE_GMET | SVM_FEATURE_TSC_RATIO | SVM_FEATURE_SVML
+                      | SVM_FEATURE_IDLE_HLT | SVM_FEATURE_BUS_LOCK_THRESHOLD
+                      | (svm_vls ? SVM_FEATURE_VLS : 0) | (svm_vnmi ? SVM_FEATURE_VNMI : 0);
     return (struct cpuid_regs){
         svm.eax & 0xff, nasid - 1, svm.ecx & CPUID_8000000A_ECX_PML,
         (svm.edx & features) | SVM_FEATURE_VMCB_ADDR_CHECK
