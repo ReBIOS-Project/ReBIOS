@@ -29,7 +29,7 @@ struct vcpu;
 // The guest gets MTRRs of its own, which describe its memory, not the host's,
 // and which nothing applies to guest-physical addresses: SDM 325462-093 Vol.
 // 3C, 31.3.7.2, "The MTRRs have no effect on the memory type used for an
-// access to a guest-physical address", and APM 40332 rev. 4.10, 15.25.8,
+// access to a guest-physical address", and APM 40332 rev. 4.11, 15.25.9,
 // "there is no hardware support for guest MTRRs". Needs virt_init().
 void mtrr_init(void);
 
