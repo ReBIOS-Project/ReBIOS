@@ -49,11 +49,16 @@
 #define DBG2_DEVICE_BASE_OFFSET 18
 #define DBG2_DEVICE_MIN_LENGTH 22
 #define DBG2_PORT_SERIAL 0x8000
-// A Generic Address Structure: its address space, then its address.
+// A Generic Address Structure: its address space, register width and offset,
+// access size, and address (ACPI 6.6, 5.2.3.2).
 #define GAS_SIZE 12
 #define GAS_SPACE 0
+#define GAS_BIT_WIDTH 1
+#define GAS_BIT_OFFSET 2
+#define GAS_ACCESS_SIZE 3
 #define GAS_ADDRESS 4
 #define GAS_SPACE_SYSTEM_IO 1
+#define GAS_ACCESS_BYTE 1
 // What 16550s and 16450s a table may name: the full one, the subset that
 // DBGP's revision 1 describes, and one with its parameters in the GAS, as
 // DBG2's Table 3 has them, which the SPCR's revisions after 1 share. Its
@@ -471,10 +476,13 @@ static uint32_t table_length(const uint8_t *table) {
     return read_le32(table + ACPI_SDT_LENGTH);
 }
 
-// The port a Generic Address Structure gives, if it is one.
+// The port a Generic Address Structure gives, if it is the first of a UART's
+// byte-wide registers: below 100h are the motherboard's fixed ports.
 static uint16_t gas_port(const uint8_t *gas) {
     uint64_t address = read_le64(gas + GAS_ADDRESS);
-    if (gas[GAS_SPACE] != GAS_SPACE_SYSTEM_IO || address == 0 || address > 0xfff8) {
+    if (gas[GAS_SPACE] != GAS_SPACE_SYSTEM_IO || gas[GAS_BIT_WIDTH] != 8
+     || gas[GAS_BIT_OFFSET] != 0 || gas[GAS_ACCESS_SIZE] > GAS_ACCESS_BYTE || address < 0x100
+     || address > 0xfff8) {
         return 0;
     }
     return (uint16_t)address;
