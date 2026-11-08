@@ -129,6 +129,20 @@ static volatile uint32_t *xapic_reg(uint32_t reg) {
     return (volatile uint32_t *)(uintptr_t)((apic_base() & APIC_BASE_ADDRESS) + reg);
 }
 
+// A WRMSR to an x2APIC register may complete before older stores are globally
+// visible, which MFENCE then LFENCE prevent (SDM 325462-093 Vol. 3A, 13.12.3;
+// APM 24593 rev. 3.46, 16.11.2).
+static void x2apic_write(uint32_t msr, uint64_t value) {
+    asm volatile (
+        "mfence\n\t"
+        "lfence"
+        :
+        :
+        : "memory"
+    );
+    wrmsr(msr, value);
+}
+
 uint32_t lapic_read(uint32_t reg) {
     if (lapic_x2apic()) {
         return (uint32_t)rdmsr(MSR_X2APIC_FIRST + (reg >> 4));
@@ -138,7 +152,7 @@ uint32_t lapic_read(uint32_t reg) {
 
 void lapic_write(uint32_t reg, uint32_t value) {
     if (lapic_x2apic()) {
-        wrmsr(MSR_X2APIC_FIRST + (reg >> 4), value);
+        x2apic_write(MSR_X2APIC_FIRST + (reg >> 4), value);
         return;
     }
     *xapic_reg(reg) = value;
@@ -179,7 +193,7 @@ bool lapic_xapic_locked(void) {
 
 void lapic_send_ipi(uint32_t dest, uint32_t command) {
     if (lapic_x2apic()) {
-        wrmsr(MSR_X2APIC_ICR, (uint64_t)dest << 32 | command);
+        x2apic_write(MSR_X2APIC_ICR, (uint64_t)dest << 32 | command);
         return;
     }
     uint64_t deadline = time_ns() + IPI_TIMEOUT_NS;
