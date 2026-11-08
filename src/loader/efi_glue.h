@@ -33,6 +33,9 @@ extern bool efi_glue_boot_services_exited;
 uintptr_t efi_glue_alloc_pages(size_t count, uintptr_t max_addr);
 uintptr_t efi_glue_alloc_pages_typed(size_t count, uintptr_t max_addr, EFI_MEMORY_TYPE type);
 
+// Loader data, to free with FreePool(), or NULL on failure.
+void *efi_glue_alloc_pool(size_t size);
+
 // Returns the handles with the protocol, in handle order, in pool memory to
 // free with FreePool(), or NULL if there are none.
 EFI_HANDLE *efi_glue_locate_handles(EFI_GUID *protocol, EFI_UINTN *count);

@@ -46,6 +46,14 @@ uintptr_t efi_glue_alloc_pages_typed(size_t count, uintptr_t max_addr, EFI_MEMOR
     return addr;
 }
 
+void *efi_glue_alloc_pool(size_t size) {
+    void *buf;
+    if (efi_bs->AllocatePool(EfiLoaderData, size, &buf) != EFI_SUCCESS) {
+        return NULL;
+    }
+    return buf;
+}
+
 EFI_HANDLE *efi_glue_locate_handles(EFI_GUID *protocol, EFI_UINTN *count) {
     EFI_HANDLE *handles;
 

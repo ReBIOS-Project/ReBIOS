@@ -26,6 +26,7 @@
 #include <lib/printf.h>
 #include <lib/util.h>
 #include <loader/efi_glue.h>
+#include <loader/files.h>
 #include <memory.h>
 
 #define CONFIG_MAX_SIZE 65536
@@ -54,8 +55,6 @@ struct setting {
 
 static unsigned int current_line;
 
-static EFI_GUID loaded_image_guid = EFI_LOADED_IMAGE_PROTOCOL_GUID;
-static EFI_GUID simple_file_system_guid = EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID;
 static EFI_GUID file_info_guid = EFI_FILE_INFO_ID;
 
 static const char *const file_names[] = { "rebios.ini", "csmwrap.ini" };
@@ -495,97 +494,6 @@ static void apply_text(const char *text, size_t size, const char *source) {
     }
 }
 
-static void *pool_alloc(size_t size) {
-    void *buf;
-    if (efi_bs->AllocatePool(EfiLoaderData, size, &buf) != EFI_SUCCESS) {
-        return NULL;
-    }
-    return buf;
-}
-
-// Device path nodes are byte-packed, so their fields may be unaligned.
-static uint16_t read_u16(const uint8_t *p) {
-    return (uint16_t)(p[0] | p[1] << 8);
-}
-
-static size_t node_length(const uint8_t *node) {
-    return read_u16(node + 2);
-}
-
-static bool is_file_path_node(const uint8_t *node) {
-    return node[0] == EFI_MEDIA_DEVICE_PATH && node[1] == EFI_MEDIA_FILEPATH_DP;
-}
-
-// The room for the path name in a file path node, in characters.
-static size_t node_path_chars(const uint8_t *node) {
-    return (node_length(node) - EFI_SIZE_OF_FILEPATH_DEVICE_PATH) / sizeof(EFI_CHAR16);
-}
-
-// The absolute path of name in the directory of the image's file path, in a
-// pool allocation, or NULL if that directory is unknown.
-static EFI_CHAR16 *sibling_path(const EFI_DEVICE_PATH_PROTOCOL *image_path, const char *name) {
-    if (image_path == NULL) {
-        return NULL;
-    }
-
-    size_t path_chars = 0;
-    bool found = false;
-    const uint8_t *node = (const uint8_t *)image_path;
-    for (; node[0] != EFI_END_DEVICE_PATH_TYPE; node += node_length(node)) {
-        if (node_length(node) < sizeof(EFI_DEVICE_PATH_PROTOCOL)) {
-            return NULL;
-        }
-        if (is_file_path_node(node)) {
-            path_chars += node_path_chars(node);
-            found = true;
-        }
-    }
-    if (!found) {
-        return NULL;
-    }
-
-    size_t name_len = 0;
-    while (name[name_len] != 0) {
-        name_len++;
-    }
-    // A leading separator, the image's path, the name, and a NUL.
-    EFI_CHAR16 *path = pool_alloc((path_chars + name_len + 2) * sizeof(EFI_CHAR16));
-    if (path == NULL) {
-        return NULL;
-    }
-
-    // Open() only knows backslashes, and the nodes may each begin and end with
-    // one, so separators become single backslashes.
-    size_t len = 1;
-    size_t dir_len = 1;
-    path[0] = '\\';
-    node = (const uint8_t *)image_path;
-    for (; node[0] != EFI_END_DEVICE_PATH_TYPE; node += node_length(node)) {
-        if (!is_file_path_node(node)) {
-            continue;
-        }
-        for (size_t i = 0; i < node_path_chars(node); i++) {
-            EFI_CHAR16 c = read_u16(node + EFI_SIZE_OF_FILEPATH_DEVICE_PATH + i * 2);
-            if (c == 0) {
-                break;
-            }
-            if (c == '/' || c == '\\') {
-                if (path[len - 1] == '\\') {
-                    continue;
-                }
-                c = '\\';
-                dir_len = len + 1;
-            }
-            path[len++] = c;
-        }
-    }
-
-    for (size_t i = 0; i <= name_len; i++) {
-        path[dir_len + i] = (unsigned char)name[i];
-    }
-    return path;
-}
-
 // For the log, cut short to fit.
 static void path_to_ascii(char *out, size_t size, const EFI_CHAR16 *path) {
     size_t i = 0;
@@ -620,7 +528,7 @@ static char *read_file(EFI_FILE_PROTOCOL *file, const char *source, size_t *size
     }
 
     size_t file_size = (EFI_UINTN)buf.info.FileSize;
-    char *text = pool_alloc(file_size);
+    char *text = efi_glue_alloc_pool(file_size);
     if (text == NULL) {
         printf("Skipping %s, out of memory\n", source);
         return NULL;
@@ -671,16 +579,15 @@ static bool apply_file(EFI_FILE_PROTOCOL *root, EFI_CHAR16 *path) {
     return true;
 }
 
-static bool apply_files_on_volume(
-    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *volume, const EFI_DEVICE_PATH_PROTOCOL *image_path
-) {
+static bool apply_files(void) {
     EFI_FILE_PROTOCOL *root;
-    if (volume->OpenVolume(volume, &root) != EFI_SUCCESS) {
+    const EFI_DEVICE_PATH_PROTOCOL *image_path;
+    if (!files_open_image_volume(&root, &image_path)) {
         return false;
     }
     bool applied = false;
     for (size_t i = 0; i < ARRAY_COUNT(file_names) && !applied; i++) {
-        EFI_CHAR16 *path = sibling_path(image_path, file_names[i]);
+        EFI_CHAR16 *path = files_sibling_path(image_path, file_names[i]);
         if (path == NULL) {
             break;
         }
@@ -689,24 +596,6 @@ static bool apply_files_on_volume(
     }
     root->Close(root);
     return applied;
-}
-
-static bool apply_files(void) {
-    EFI_LOADED_IMAGE_PROTOCOL *image;
-    EFI_STATUS status = efi_bs->HandleProtocol(
-        efi_image_handle, &loaded_image_guid, (void **)&image
-    );
-    if (status != EFI_SUCCESS || image == NULL || image->DeviceHandle == NULL) {
-        return false;
-    }
-    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *volume;
-    status = efi_bs->HandleProtocol(
-        image->DeviceHandle, &simple_file_system_guid, (void **)&volume
-    );
-    if (status != EFI_SUCCESS || volume == NULL) {
-        return false;
-    }
-    return apply_files_on_volume(volume, image->FilePath);
 }
 
 // Returns the contents of a variable fit to apply in a pool allocation, or
@@ -729,7 +618,7 @@ static char *read_variable(EFI_CHAR16 *name, EFI_GUID *guid, const char *source,
         return NULL;
     }
 
-    char *text = pool_alloc(data_size);
+    char *text = efi_glue_alloc_pool(data_size);
     if (text == NULL) {
         printf("Skipping %s, out of memory\n", source);
         return NULL;
