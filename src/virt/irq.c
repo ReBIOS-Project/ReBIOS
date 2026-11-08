@@ -153,9 +153,15 @@ static void override(const struct acpi_madt_interrupt_source_override *iso) {
     }
     struct route *r = &routes[iso->gsi];
     r->irq = iso->source;
-    // What conforms to ISA is active high and edge-triggered.
-    r->active_low = (iso->flags & ACPI_MADT_POLARITY_MASK) == ACPI_MADT_POLARITY_ACTIVE_LOW;
-    r->level = (iso->flags & ACPI_MADT_TRIGGERING_MASK) == ACPI_MADT_TRIGGERING_LEVEL;
+    // What conforms to ISA is active high and edge-triggered, and a reserved
+    // value means active low or level-triggered, as Linux 7.3's
+    // irq_active_low() and irq_is_level() take them.
+    uint16_t polarity = iso->flags & ACPI_MADT_POLARITY_MASK;
+    uint16_t triggering = iso->flags & ACPI_MADT_TRIGGERING_MASK;
+    r->active_low = polarity != ACPI_MADT_POLARITY_CONFORMING
+                 && polarity != ACPI_MADT_POLARITY_ACTIVE_HIGH;
+    r->level = triggering != ACPI_MADT_TRIGGERING_CONFORMING
+            && triggering != ACPI_MADT_TRIGGERING_EDGE;
     printf(
         "ISA IRQ %u is GSI %u, active %s, %s-triggered\n", iso->source, iso->gsi,
         r->active_low ? "low" : "high", r->level ? "level" : "edge"
