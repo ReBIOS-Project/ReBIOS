@@ -33,6 +33,7 @@
 #include <loader/loader.h>
 #include <loader/oprom.h>
 #include <loader/paging.h>
+#include <loader/pci_io.h>
 #include <loader/video.h>
 #include <memory.h>
 #include <sys/x86.h>
@@ -188,7 +189,17 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
 
     video_find_framebuffer();
     console_init();
+    // A serial card's port only answers once its I/O decoding is on.
+    struct handoff_pci_address serial_card;
+    bool serial_on_card = config.serial
+        && pci_io_enable_io_port(config.serial_port, &serial_card);
     log_init(config.serial ? config.serial_port : 0, config.serial_baud, config.verbose);
+    if (serial_on_card) {
+        printf(
+            "Serial port %#x: on PCI " PCI_ADDRESS_FMT "\n",
+            config.serial_port, PCI_ADDRESS_ARGS(serial_card)
+        );
+    }
 
     if (cpu_vendor() == 0) {
         panic("ReBIOS runs on Intel's and AMD's processors alone\n");
