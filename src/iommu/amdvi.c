@@ -426,7 +426,9 @@ static void device_table_build(const struct iommu_tables *tables) {
         }
     }
     for (size_t i = 0; i < tables->special_count; i++) {
-        device_settings(tables->specials[i].rid, tables->specials[i].amd_settings);
+        if (!tables->specials[i].quirk) {
+            device_settings(tables->specials[i].rid, tables->specials[i].amd_settings);
+        }
     }
 }
 

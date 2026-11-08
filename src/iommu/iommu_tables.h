@@ -90,6 +90,8 @@ struct iommu_tables_special_device {
     uint16_t rid;
     uint16_t unit;
     uint8_t amd_settings;
+    // Added for a machine whose table leaves it out, without settings.
+    bool quirk;
 };
 
 // Memory that the devices given need handled specially, of one of three kinds:

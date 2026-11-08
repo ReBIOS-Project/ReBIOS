@@ -22,6 +22,7 @@
 #include <uacpi/status.h>
 #include <uacpi/tables.h>
 #include <iommu/iommu_tables.h>
+#include <core.h>
 #include <hw/acpi.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_regs.h>
@@ -796,6 +797,61 @@ static void range_start_drop(struct range_start *start) {
     start->pending = false;
 }
 
+// The I/O APICs that machines' IVRS tables leave out, and their device IDs, as
+// Linux 7.3 adds them (drivers/iommu/amd/quirks.c, ivrs_quirks[]).
+struct ivrs_ioapic_quirk {
+    const char *sys_vendor;
+    const char *product_name;
+    uint8_t ids[2];
+    uint16_t rids[2];
+};
+
+static const struct ivrs_ioapic_quirk ivrs_ioapic_quirks[] = {
+    { "Dell Inc.", "Inspiron 7375", { 4, 5 }, { 0x00a0, 0x0002 } },
+    { "Dell Inc.", "Latitude 5495", { 4, 0 }, { 0x00a0, 0 } },
+    { "Acer", "Aspire A315-41", { 4, 0 }, { 0x00a0, 0 } },
+    { "LENOVO", "81FB", { 32, 0 }, { 0x00a0, 0 } }
+};
+
+// Whether want is part of field, as Linux 7.3's DMI_MATCH() matches.
+static bool dmi_contains(const char *field, const char *want) {
+    for (size_t at = 0; field[at] != 0; at++) {
+        size_t i = 0;
+        while (want[i] != 0 && field[at + i] == want[i]) {
+            i++;
+        }
+        if (want[i] == 0) {
+            return true;
+        }
+    }
+    return want[0] == 0;
+}
+
+// Before the IVHD's own entries, which an added I/O APIC takes the place of.
+static void ivrs_quirks_apply(struct builder *b, uint16_t unit) {
+    for (size_t i = 0; i < ARRAY_COUNT(ivrs_ioapic_quirks); i++) {
+        const struct ivrs_ioapic_quirk *q = &ivrs_ioapic_quirks[i];
+        if (!dmi_contains(core_handoff->dmi_sys_vendor, q->sys_vendor)
+         || !dmi_contains(core_handoff->dmi_product_name, q->product_name)) {
+            continue;
+        }
+        for (size_t j = 0; j < ARRAY_COUNT(q->ids) && q->ids[j] != 0; j++) {
+            struct iommu_tables_special_device special = {
+                .type = IOMMU_TABLES_SPECIAL_IOAPIC,
+                .id = q->ids[j],
+                .rid = q->rids[j],
+                .unit = unit,
+                .quirk = true
+            };
+            add_special(b, &special);
+            printf(
+                "IVRS: I/O APIC %u is " RID_FMT ", which the %s %s's table leaves out\n",
+                q->ids[j], RID_ARGS(q->rids[j]), q->sys_vendor, q->product_name
+            );
+        }
+    }
+}
+
 static bool ivhd_parse(struct builder *b, const uint8_t *ivrs, size_t offset, size_t length) {
     uint32_t type = ivrs[offset];
     size_t header_size = type == IVHD_TYPE_10H ? IVHD_10H_SIZE : sizeof(struct ivhd);
@@ -817,6 +873,9 @@ static bool ivhd_parse(struct builder *b, const uint8_t *ivrs, size_t offset, si
     if (!add_unit(b, &unit, &index)) {
         stop(b, "IVRS IVHD", offset, "makes too many units");
         return false;
+    }
+    if (index == 0) {
+        ivrs_quirks_apply(b, index);
     }
 
     struct range_start start = { 0 };
