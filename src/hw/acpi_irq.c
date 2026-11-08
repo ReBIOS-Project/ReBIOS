@@ -23,6 +23,7 @@
 #include <uacpi/platform/types.h>
 #include <uacpi/resources.h>
 #include <uacpi/status.h>
+#include <uacpi/tables.h>
 #include <uacpi/types.h>
 #include <uacpi/uacpi.h>
 #include <uacpi/utilities.h>
@@ -34,6 +35,7 @@
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/printf.h>
+#include <memory.h>
 
 #define PCI_PINS 4
 // The function number of every _PRT entry's Address: all functions, ACPI 6.6,
@@ -461,4 +463,41 @@ uint16_t acpi_irq_isa_claimed(void) {
         printf("ACPI devices use ISA IRQs %s\n", text);
     }
     return isa_claimed;
+}
+
+bool acpi_irq_sci(uint32_t *irq, bool *active_low, bool *level) {
+    // A hardware-reduced machine's FADT gives no SCI (ACPI 6.6, 5.2.9).
+    struct acpi_fadt *fadt;
+    if (!acpi_tables_ready() || uacpi_table_fadt(&fadt) != UACPI_STATUS_OK
+     || (fadt->flags & ACPI_HW_REDUCED_ACPI) != 0) {
+        return false;
+    }
+    *irq = fadt->sci_int;
+
+    uint16_t flags = 0;
+    struct uacpi_table table;
+    if (uacpi_table_find_by_signature(ACPI_MADT_SIGNATURE, &table) == UACPI_STATUS_OK) {
+        const uint8_t *madt = table.ptr;
+        size_t length = table.hdr->length;
+        size_t offset = sizeof(struct acpi_madt);
+        const struct acpi_entry_hdr *hdr;
+        while ((hdr = acpi_madt_next(madt, length, &offset)) != NULL) {
+            if (hdr->type == ACPI_MADT_ENTRY_TYPE_INTERRUPT_SOURCE_OVERRIDE
+             && hdr->length >= sizeof(struct acpi_madt_interrupt_source_override)) {
+                struct acpi_madt_interrupt_source_override iso;
+                memcpy(&iso, hdr, sizeof(struct acpi_madt_interrupt_source_override));
+                if (iso.bus == 0 && iso.source == *irq) {
+                    flags = iso.flags;
+                }
+            }
+        }
+        uacpi_table_unref(&table);
+    }
+    // The SCI is active low and level-triggered where no override says
+    // otherwise, conforming to ACPI (ACPI 6.6, 5.2.9 and 5.2.12.5), and a
+    // reserved value means so too, as Linux 7.3's acpi_sci_ioapic_setup(),
+    // irq_active_low(), and irq_is_level() take them.
+    *active_low = (flags & ACPI_MADT_POLARITY_MASK) != ACPI_MADT_POLARITY_ACTIVE_HIGH;
+    *level = (flags & ACPI_MADT_TRIGGERING_MASK) != ACPI_MADT_TRIGGERING_EDGE;
+    return true;
 }

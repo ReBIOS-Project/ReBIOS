@@ -25,6 +25,7 @@
 #include <uacpi/utilities.h>
 #include <virt/irq.h>
 #include <hw/acpi.h>
+#include <hw/acpi_irq.h>
 #include <hw/ioapic.h>
 #include <hw/isa.h>
 #include <hw/lapic.h>
@@ -207,6 +208,23 @@ static void routes_init(void) {
         }
     }
     uacpi_table_unref(&table);
+
+    // The SCI conforms to ACPI rather than ISA.
+    uint32_t sci;
+    bool active_low;
+    bool level;
+    if (acpi_irq_sci(&sci, &active_low, &level)) {
+        uint32_t gsi = sci < ISA_IRQS ? irq_isa_gsi(sci) : sci;
+        if (gsi < route_count && routes[gsi].io != NULL
+         && (routes[gsi].active_low != active_low || routes[gsi].level != level)) {
+            routes[gsi].active_low = active_low;
+            routes[gsi].level = level;
+            printf(
+                "The SCI is GSI %u, active %s, %s-triggered\n", gsi, active_low ? "low" : "high",
+                level ? "level" : "edge"
+            );
+        }
+    }
 }
 
 bool irq_host_vector(uint8_t vector) {

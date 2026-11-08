@@ -42,4 +42,9 @@ const struct acpi_irq_pci_route *acpi_irq_pci_routes(size_t *count);
 // enabled use, by their current resources: bit n for IRQ n.
 uint16_t acpi_irq_isa_claimed(void);
 
+// The SCI's ISA IRQ, or GSI where it is 16 or more (the FADT's SCI_INT), and
+// whether it is active low and level-triggered, as the MADT's override of it
+// has it. False on a machine without one.
+bool acpi_irq_sci(uint32_t *irq, bool *active_low, bool *level);
+
 #endif
