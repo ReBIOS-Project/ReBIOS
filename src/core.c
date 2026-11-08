@@ -72,6 +72,7 @@ static void bsp_main(void *arg) {
     (void)arg;
     struct cpu *cpu = this_cpu();
 
+    msr_misc_enable_clear();
     acpi_init();
     pm_timer_init();
     tsc_calibrate();

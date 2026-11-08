@@ -288,15 +288,24 @@ static const struct msr_table_family *family_msrs;
 // Physical address bits the processor lacks, for the guest's AMD addresses.
 static uint64_t address_reserved;
 
-static void misc_enable_init(void) {
-    // IA32_MISC_ENABLE is Intel's, and VMX runs only on Intel's processors.
-    uint64_t misc;
-    if (!virt_vmx || !rdmsr_safe(MSR_IA32_MISC_ENABLE, &misc)) {
+void msr_misc_enable_clear(void) {
+    // IA32_MISC_ENABLE is architectural on Intel's processors (SDM 325462-093
+    // Vol. 4, Table 2-2), and this runs before the host's IDT can recover from
+    // a fault.
+    if (x86_cpu_vendor() != X86_CPU_VENDOR_INTEL) {
         return;
     }
+    uint64_t misc = rdmsr(MSR_IA32_MISC_ENABLE);
     misc_enable_firmware = misc & MISC_ENABLE_COPIED;
     if (misc_enable_firmware != 0) {
         wrmsr(MSR_IA32_MISC_ENABLE, misc & ~MISC_ENABLE_COPIED);
+    }
+    misc_enable_copied = true;
+}
+
+static void misc_enable_init(void) {
+    if (!misc_enable_copied) {
+        return;
     }
     // The limit where leaves go past 2 and it can still be set; XD disable is
     // model-specific, known to exist only where the firmware set it.
@@ -305,7 +314,6 @@ static void misc_enable_init(void) {
         misc_enable_supported |= MISC_ENABLE_LIMIT_CPUID;
     }
     misc_enable_supported |= misc_enable_firmware & MISC_ENABLE_XD_DISABLE;
-    misc_enable_copied = true;
     virt_intercept_msr(MSR_IA32_MISC_ENABLE, true, true);
 }
 
@@ -428,7 +436,6 @@ static void tsc_offset_set(struct vcpu *v, uint64_t offset) {
 }
 
 void msr_init(void) {
-    // First, as the CPUID limit hides the leaves the rest reads.
     misc_enable_init();
     tsc_init();
     mcg_ctl_init();

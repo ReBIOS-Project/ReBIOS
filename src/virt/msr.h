@@ -23,8 +23,15 @@
 
 struct vcpu;
 
+// Clears the CPUID limit and the XD disable Intel's firmware may have set in
+// the boot processor's IA32_MISC_ENABLE, before anything reads CPUID's leaves
+// past 2, as Linux 7.3's intel_unlock_cpuid_leafs() does; the AP start-up code
+// clears them on the other processors.
+void msr_misc_enable_clear(void);
+
 // The guest gets copies of the MSRs, or of their bits, that would change the
-// processor under the hypervisor too. Needs virt_init() and cpu_tables_load().
+// processor under the hypervisor too. Needs virt_init(), cpu_tables_load(),
+// and msr_misc_enable_clear().
 void msr_init(void);
 void msr_vcpu_init(struct vcpu *v);
 // Sets each processor up as it starts for the MSRs the guest gets: on AMD's
