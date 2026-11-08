@@ -697,7 +697,23 @@ static void exit_invlpgb(struct vcpu *v) {
     uint32_t asid;
     bool one = nsvm_invlpgb_asid(v, (rax & INVLPGB_ASID) != 0, edx & 0xffff, &asid);
     rax = (rax & ~(INVLPGB_PCID | INVLPGB_ASID)) | (one ? INVLPGB_ASID : 0);
-    asm volatile ("invlpgb" :: "a"(rax), "c"(ecx), "d"(asid) : "memory");
+    bool done = false;
+    asm volatile (
+        "1: invlpgb\n\t"
+        "movb $1, %0\n\t"
+        "2:\n\t"
+        FIXUP_ENTRY("1b", "2b")
+        : "+r"(done)
+        : "a"(rax), "c"(ecx), "d"(asid)
+        : "memory"
+    );
+    // A processor whose CPUID claims INVLPGB without having it, as Linux 7.3
+    // finds of some of Zen 2's (arch/x86/kernel/cpu/amd.c, init_amd_zen2()),
+    // has the guest's raise #UD, as on bare metal.
+    if (!done) {
+        vcpu_inject_exception(v, 6, false, 0);
+        return;
+    }
     vcpu_advance(v, insn.length);
 }
 
