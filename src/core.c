@@ -53,6 +53,7 @@
 #include <virt/nvmx.h>
 #include <virt/ospm.h>
 #include <virt/pci_plan.h>
+#include <virt/pci_quirks.h>
 #include <virt/pci_virt.h>
 #include <virt/pit.h>
 #include <virt/profile.h>
@@ -99,6 +100,7 @@ static void bsp_main(void *arg) {
     igfx_init();
     a20_init();
     vga_init();
+    pci_quirks_init();
     usb_init();
     // The guest's boot processor gets its local APIC as a legacy BIOS hands it
     // over, the hypervisor the processor's.

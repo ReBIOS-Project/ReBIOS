@@ -20,7 +20,9 @@
 
 #include <stdint.h>
 
-// The configuration space of a PCI Express function, which ECAM maps whole.
+// The configuration space of a conventional function, and that of a PCI
+// Express function, which ECAM maps whole.
+#define PCI_CFG_SPACE_SIZE 256
 #define PCI_CFG_SPACE_EXP_SIZE 4096
 
 // A function's configuration header (PCI Local Bus Specification 3.0, 6.1 and
@@ -124,6 +126,8 @@
 #define PCI_BASE_CLASS_SERIAL 0x0c
 #define PCI_SUBCLASS_SERIAL_USB 0x03
 #define PCI_CLASS_SERIAL_USB 0x0c03
+#define PCI_VENDOR_ID_ATI 0x1002
+#define PCI_VENDOR_ID_NVIDIA 0x10de
 #define PCI_VENDOR_ID_INTEL 0x8086
 
 // The buses of a segment, which bus numbers' eight bits give.
