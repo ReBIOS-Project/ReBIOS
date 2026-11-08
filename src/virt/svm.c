@@ -28,6 +28,7 @@
 #include <lib/util.h>
 #include <memory.h>
 #include <sys/cpu.h>
+#include <sys/errata.h>
 #include <sys/fixup.h>
 #include <sys/mm.h>
 #include <sys/x86.h>
@@ -249,14 +250,12 @@ bool svm_supported(void) {
     // where AVIC may miss IPIs and AMD advises against it (56323 rev. 1.03 and
     // 55449 rev. 1.21, erratum 1235).
     struct x86_cpu_signature signature = x86_cpu_signature();
-    bool zen4 = signature.family == 0x19
-             && ((signature.model >= 0x10 && signature.model <= 0x1f)
-              || (signature.model >= 0x60 && signature.model <= 0xaf));
+    unsigned int zen = errata_amd_zen();
     uint8_t setting = core_handoff->config.avic;
     svm_avic = (features & SVM_FEATURE_AVIC) != 0 && signature.family != 0x17
             && (setting == HANDOFF_AVIC_ALWAYS
              || (setting == HANDOFF_AVIC_AUTO && (features & SVM_FEATURE_X2AVIC) != 0
-              && (zen4 || signature.family >= 0x1a)));
+              && (zen == 4 || signature.family >= 0x1a)));
     svm_x2avic = svm_avic && (features & SVM_FEATURE_X2AVIC) != 0;
     svm_avic_ext_lvt_reads = svm_avic && (features & SVM_FEATURE_EXT_LVT_AVIC_ACCESS) != 0;
     svm_eraps = cpuid(0x80000000, 0).eax >= 0x80000021
