@@ -33,8 +33,9 @@ const char *fwtables_smbios_string(uint8_t type, uint8_t offset);
 bool fwtables_fadt_pm_profile(uint8_t *profile);
 
 // The I/O port of the 16550 or 16450 the firmware's SPCR table, or else its
-// DBG2 table, describes, or 0. Needs no fwtables_collect().
-uint16_t fwtables_serial_port(void);
+// DBG2 table, describes, or 0, and its clock if the table gives it, else 0.
+// Needs no fwtables_collect().
+uint16_t fwtables_serial_port(uint32_t *clock);
 
 // Gets the byte at offset in the firmware's first SMBIOS structure of type, if
 // there is such a structure and field.

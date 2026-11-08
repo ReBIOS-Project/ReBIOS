@@ -168,8 +168,8 @@ static void log_start(void) {
     }
 }
 
-void log_init(uint16_t serial_port, uint32_t serial_baud, bool console) {
-    if (serial_port != 0 && serial_init(serial_port, serial_baud)) {
+void log_init(uint16_t serial_port, uint32_t serial_baud, uint32_t serial_clock, bool console) {
+    if (serial_port != 0 && serial_init(serial_port, serial_baud, serial_clock)) {
         log_serial_port = serial_port;
     }
     log_console = console;

@@ -21,7 +21,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-bool serial_init(uint16_t port, uint32_t baud);
+// A clock of 0 is the ISA part's.
+bool serial_init(uint16_t port, uint32_t baud, uint32_t clock);
 void serial_putc(uint16_t port, char c);
 
 #endif

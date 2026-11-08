@@ -37,9 +37,10 @@
 #define UART_FCR_SETUP 0xc7
 #define UART_MCR_SETUP 0x0b
 
-#define UART_CLOCK 115200
+// The ISA part's crystal, where the firmware's tables give no other.
+#define UART_CLOCK_ISA 1843200
 
-bool serial_init(uint16_t port, uint32_t baud) {
+bool serial_init(uint16_t port, uint32_t baud, uint32_t clock) {
     // Below 100h are the motherboard's fixed ports, which the probe writes.
     if (port < 0x100 || port > 0xfff8) {
         return false;
@@ -55,9 +56,11 @@ bool serial_init(uint16_t port, uint32_t baud) {
         return false;
     }
 
-    uint32_t divisor = baud == 0 ? 1 : UART_CLOCK / baud;
+    uint32_t divisor = baud == 0 ? 1 : (clock != 0 ? clock : UART_CLOCK_ISA) / (16 * baud);
     if (divisor == 0) {
         divisor = 1;
+    } else if (divisor > UINT16_MAX) {
+        divisor = UINT16_MAX;
     }
 
     // The IER shares its port with the DLM while LCR.DLAB is set.

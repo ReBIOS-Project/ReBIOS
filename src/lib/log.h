@@ -28,7 +28,7 @@ struct flanterm_context;
 
 // Until this is called, the log is kept, to be written out here. A serial port
 // of 0 means none.
-void log_init(uint16_t serial_port, uint32_t serial_baud, bool console);
+void log_init(uint16_t serial_port, uint32_t serial_baud, uint32_t serial_clock, bool console);
 // What the log shows goes to this console from now on, rather than the
 // firmware's, as it lasts beyond ExitBootServices().
 void log_set_screen(struct flanterm_context *screen);

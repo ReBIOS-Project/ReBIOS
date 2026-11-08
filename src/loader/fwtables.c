@@ -39,6 +39,8 @@
 // Microsoft's SPCR (table revision 4) and DBG2 (2023-04-10) specifications.
 #define SPCR_INTERFACE_TYPE 36
 #define SPCR_BASE_ADDRESS 40
+#define SPCR_UART_CLOCK 76
+#define SPCR_CLOCK_REVISION 3
 #define DBG2_DEVICE_OFFSET 36
 #define DBG2_DEVICE_COUNT 40
 #define DBG2_DEVICE_LENGTH 1
@@ -478,7 +480,8 @@ static uint16_t gas_port(const uint8_t *gas) {
     return (uint16_t)address;
 }
 
-static uint16_t spcr_port(void) {
+// The SPCR gives its UART's clock from its revision 3 on, 0 where unknown.
+static uint16_t spcr_port(uint32_t *clock) {
     const uint8_t *spcr = acpi_table("SPCR");
     if (spcr == NULL || table_length(spcr) < SPCR_BASE_ADDRESS + GAS_SIZE) {
         return 0;
@@ -486,7 +489,12 @@ static uint16_t spcr_port(void) {
     uint8_t type = spcr[SPCR_INTERFACE_TYPE];
     bool uart = type == UART_FULL_16550 || type == UART_16550_SUBSET
              || (spcr[ACPI_SDT_REVISION] > 1 && type == UART_16550_GAS);
-    return uart ? gas_port(spcr + SPCR_BASE_ADDRESS) : 0;
+    uint16_t port = uart ? gas_port(spcr + SPCR_BASE_ADDRESS) : 0;
+    if (port != 0 && spcr[ACPI_SDT_REVISION] >= SPCR_CLOCK_REVISION
+     && table_length(spcr) >= SPCR_UART_CLOCK + sizeof(uint32_t)) {
+        *clock = read_le32(spcr + SPCR_UART_CLOCK);
+    }
+    return port;
 }
 
 static uint16_t dbg2_port(void) {
@@ -520,8 +528,9 @@ static uint16_t dbg2_port(void) {
     return 0;
 }
 
-uint16_t fwtables_serial_port(void) {
-    uint16_t port = spcr_port();
+uint16_t fwtables_serial_port(uint32_t *clock) {
+    *clock = 0;
+    uint16_t port = spcr_port(clock);
     return port != 0 ? port : dbg2_port();
 }
 
