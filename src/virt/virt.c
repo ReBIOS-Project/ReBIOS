@@ -110,16 +110,21 @@ bool virt_init(void) {
 }
 
 void virt_cpu_init(void) {
-    // The host needs none of the protections the firmware may have turned on,
-    // and control-flow enforcement would need shadow stacks it lacks.
-    uintptr_t cr4 = read_cr4();
-    cr4 &= ~(uintptr_t)(CR4_CET | CR4_SMEP | CR4_SMAP | CR4_PKE | CR4_UMIP | CR4_PCIDE);
-    // The host executes XSETBV for the guest.
+    // The same control registers on every processor, whatever the firmware
+    // left on each: caching on; x87 and SSE usable with x87 errors raising
+    // #MF, as VMX needs and as UEFI 2.11, 2.3.4.1, has its runtime services
+    // called; machine checks taken, which with SVM's HOST_MCE_OVERRIDE also
+    // makes those in a guest whose CR4.MCE is clear exit rather than shut the
+    // processor down (APM 24593 rev. 3.46, 15.12.18); XSETBV, which the host
+    // executes for the guest; and the paging mode, which cannot change. The
+    // host needs none of the protections the firmware may have turned on, and
+    // control-flow enforcement would need shadow stacks it lacks.
+    uintptr_t cr4 = CR4_PAE | CR4_MCE | CR4_OSFXSR | CR4_OSXMMEXCPT | (read_cr4() & CR4_LA57);
     if ((cpuid(1, 0).ecx & ((uint32_t)1 << 26)) != 0) {
         cr4 |= CR4_OSXSAVE;
     }
     write_cr4(cr4);
-    write_cr0(read_cr0() & ~(uintptr_t)(CR0_CD | CR0_NW));
+    write_cr0(CR0_PE | CR0_MP | CR0_ET | CR0_NE | CR0_WP | CR0_PG);
     wrmsr(MSR_IA32_PAT, GPT_HOST_PAT);
 
     if (virt_vmx) {

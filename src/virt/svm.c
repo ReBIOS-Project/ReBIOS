@@ -75,9 +75,6 @@ static bool vmcb_clean_bits;
 // HLT exits only where no virtual interrupt waits, which the guest would take
 // at once (APM 24593 rev. 3.46, 15.9).
 static bool svm_idle_hlt;
-// With CR4.MCE set in the host, a machine check in a guest without it exits
-// rather than shutting the processor down (APM 24593 rev. 3.46, 15.12.18).
-static bool svm_host_mce_override;
 // The guest's INVLPGB and TLBSYNC, which TlbiCtl enables. TLBSYNC needs no
 // intercept, as INVLPGB's broadcast takes the guest's ASID, the same on every
 // vCPU (APM 24594 rev. 3.39, INVLPGB); INVLPGB itself exits, for its faults.
@@ -235,7 +232,6 @@ bool svm_supported(void) {
     vmcb_clean_bits = (features & SVM_FEATURE_VMCB_CLEAN) != 0;
     svm_tlbictl = (features & SVM_FEATURE_TLBICTL) != 0;
     svm_idle_hlt = (features & SVM_FEATURE_IDLE_HLT) != 0;
-    svm_host_mce_override = (features & SVM_FEATURE_HOST_MCE_OVERRIDE) != 0;
     struct cpuid_regs sizes = cpuid(0x80000008, 0);
     invlpgb = (sizes.ebx & CPUID_80000008_EBX_INVLPGB) != 0;
     invlpgb_count_max = sizes.edx & 0xffff;
@@ -288,9 +284,6 @@ void svm_cpu_init(void) {
     uint64_t nxe = (cpuid(0x80000001, 0).edx & CPUID_80000001_EDX_NX) != 0 ? EFER_NXE : 0;
     wrmsr(MSR_EFER, (rdmsr(MSR_EFER) & ~(uint64_t)EFER_TCE) | EFER_SVME | nxe);
     wrmsr(MSR_VM_HSAVE_PA, (uint64_t)(uintptr_t)page_alloc(1));
-    if (svm_host_mce_override) {
-        write_cr4(read_cr4() | CR4_MCE);
-    }
     // INITs become #SX, which the guest's intercept or the host's handler
     // takes, rather than resetting the processor under the hypervisor.
     uint64_t vm_cr = rdmsr(MSR_VM_CR);
