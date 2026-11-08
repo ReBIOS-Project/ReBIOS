@@ -23,7 +23,17 @@
 #include <lib/log.h>
 #include <loader/efi_glue.h>
 
+#define PCI_COMMAND 0x04
+#define PCI_COMMAND_IO 0x0001
 #define PCI_STATUS 0x06
+#define PCI_HEADER_TYPE 0x0e
+#define PCI_HEADER_TYPE_MASK 0x7f
+#define PCI_BAR0 0x10
+#define PCI_BARS 6
+#define PCI_BAR_IO 0x01
+#define PCI_BAR_IO_MASK 0xfffffffc
+// A 16550 UART's registers.
+#define UART_REGISTERS 8
 #define PCI_STATUS_CAPABILITIES 0x10
 #define PCI_CLASS_BRIDGE 0x06
 #define PCI_SUBCLASS_PCI_BRIDGE 0x04
@@ -170,4 +180,89 @@ bool pci_io_device_in_slot(const struct pci_io_device *dev) {
         efi_bs->FreePool(devices);
     }
     return slot;
+}
+
+// The upstream bridge of a function, or NULL.
+static const struct pci_io_device *upstream_bridge(
+    const struct pci_io_device *devices, EFI_UINTN count,
+    const struct pci_io_device *dev
+) {
+    for (size_t i = 0; i < count; i++) {
+        uint8_t secondary = 0;
+        if (devices[i].base_class != PCI_CLASS_BRIDGE
+         || devices[i].subclass != PCI_SUBCLASS_PCI_BRIDGE
+         || devices[i].address.segment != dev->address.segment) {
+            continue;
+        }
+        EFI_PCI_IO_PROTOCOL *io = devices[i].io;
+        io->Pci.Read(io, EfiPciIoWidthUint8, PCI_SECONDARY_BUS, 1, &secondary);
+        if (secondary != 0 && secondary == dev->address.bus) {
+            return &devices[i];
+        }
+    }
+    return NULL;
+}
+
+// Whether one of a function's I/O BARs holds a UART at the port.
+static bool io_bar_holds(EFI_PCI_IO_PROTOCOL *io, uint16_t port) {
+    uint8_t header_type = 0;
+    io->Pci.Read(io, EfiPciIoWidthUint8, PCI_HEADER_TYPE, 1, &header_type);
+    if ((header_type & PCI_HEADER_TYPE_MASK) != 0) {
+        return false;
+    }
+    uint32_t bars[PCI_BARS];
+    if (io->Pci.Read(io, EfiPciIoWidthUint32, PCI_BAR0, PCI_BARS, bars)
+     != EFI_SUCCESS) {
+        return false;
+    }
+    for (size_t i = 0; i < PCI_BARS; i++) {
+        uint32_t base = bars[i] & PCI_BAR_IO_MASK;
+        if ((bars[i] & PCI_BAR_IO) != 0 && base != 0
+         && port >= base && port < base + UART_REGISTERS) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void enable_io(EFI_PCI_IO_PROTOCOL *io) {
+    io->Attributes(io, EfiPciIoAttributeOperationEnable,
+                   EFI_PCI_IO_ATTRIBUTE_IO, NULL);
+    // Some firmware leaves the command register as it was.
+    uint16_t command = 0;
+    io->Pci.Read(io, EfiPciIoWidthUint16, PCI_COMMAND, 1, &command);
+    if ((command & PCI_COMMAND_IO) == 0) {
+        command |= PCI_COMMAND_IO;
+        io->Pci.Write(io, EfiPciIoWidthUint16, PCI_COMMAND, 1, &command);
+    }
+}
+
+bool pci_io_enable_io_port(uint16_t port, struct handoff_pci_address *found) {
+    EFI_UINTN count;
+    struct pci_io_device *devices = pci_io_devices(&count);
+    const struct pci_io_device *dev = NULL;
+
+    for (size_t i = 0; i < count && dev == NULL; i++) {
+        if (io_bar_holds(devices[i].io, port)) {
+            dev = &devices[i];
+        }
+    }
+    if (dev != NULL) {
+        *found = dev->address;
+        // The bridges above it first, so that its decoding reaches it.
+        const struct pci_io_device *bridge = dev;
+        for (size_t depth = 0; depth < PCI_BUSES; depth++) {
+            bridge = upstream_bridge(devices, count, bridge);
+            if (bridge == NULL) {
+                break;
+            }
+            enable_io(bridge->io);
+        }
+        enable_io(dev->io);
+    }
+
+    if (devices != NULL) {
+        efi_bs->FreePool(devices);
+    }
+    return dev != NULL;
 }

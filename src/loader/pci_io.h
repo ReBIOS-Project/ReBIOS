@@ -49,6 +49,11 @@ struct pci_io_device *pci_io_devices(EFI_UINTN *count);
 // Finds the PCI function a device path leads to.
 bool pci_io_device_on_path(EFI_DEVICE_PATH_PROTOCOL *path, struct pci_io_device *dev);
 
+// Enables I/O decoding of the PCI function (and of the bridges above it) whose
+// I/O BAR holds a UART at the port, as on a serial card the firmware has no
+// driver for. Returns whether one does, and which in found.
+bool pci_io_enable_io_port(uint16_t port, struct handoff_pci_address *found);
+
 // Whether a port above the function says it leads to a slot, as those above a
 // card's own bridges do.
 bool pci_io_device_in_slot(const struct pci_io_device *dev);
