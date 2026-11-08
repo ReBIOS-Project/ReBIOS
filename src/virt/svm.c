@@ -82,6 +82,11 @@ static bool svm_idle_hlt;
 bool svm_tlbictl;
 static bool invlpgb;
 static uint32_t invlpgb_count_max;
+// Zen 1 can leave the quotient of the hypervisor's last division where the
+// guest's next division by zero reads it, until a division of 0 by 1 replaces
+// it, as Linux 7.3's KVM has it before VMRUN (svm_vcpu_enter_exit(),
+// amd_clear_divider()).
+static bool divider_clear;
 // Nested page faults bring the guest's instruction bytes along (APM 24593 rev.
 // 3.45, 15.8.4).
 bool svm_decode_assists;
@@ -251,6 +256,7 @@ bool svm_supported(void) {
     // 55449 rev. 1.21, erratum 1235).
     struct x86_cpu_signature signature = x86_cpu_signature();
     unsigned int zen = errata_amd_zen();
+    divider_clear = zen == 1;
     uint8_t setting = core_handoff->config.avic;
     svm_avic = (features & SVM_FEATURE_AVIC) != 0 && signature.family != 0x17
             && (setting == HANDOFF_AVIC_ALWAYS
@@ -1039,6 +1045,9 @@ void svm_run(struct vcpu *v) {
         clean_before_entry(v);
         // Before the processor looks at the guest's interrupt requests.
         atomic_store_explicit(&v->in_guest, true, memory_order_seq_cst);
+        if (divider_clear) {
+            asm volatile ("divl %2" :: "a"(0), "d"(0), "r"(1) : "cc");
+        }
         svm_enter(v->vmcb_pa, &v->gprs);
         atomic_store_explicit(&v->in_guest, false, memory_order_release);
         cpu_guest_exited();
