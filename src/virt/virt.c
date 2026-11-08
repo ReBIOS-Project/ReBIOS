@@ -24,6 +24,7 @@
 #include <lib/printf.h>
 #include <lib/time.h>
 #include <memory.h>
+#include <sys/cache.h>
 #include <sys/cpu.h>
 #include <sys/mm.h>
 #include <sys/x86.h>
@@ -125,7 +126,7 @@ void virt_cpu_init(void) {
     }
     write_cr4(cr4);
     write_cr0(CR0_PE | CR0_MP | CR0_ET | CR0_NE | CR0_WP | CR0_PG);
-    wrmsr(MSR_IA32_PAT, GPT_HOST_PAT);
+    cache_cpu_init(GPT_HOST_PAT);
 
     if (virt_vmx) {
         vmx_cpu_init();
