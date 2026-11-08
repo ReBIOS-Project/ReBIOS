@@ -462,20 +462,33 @@ static uint8_t *vbe_window_byte(uint32_t offset) {
     return offset < PLANE_SIZE && at < vbe.vram_size ? vram_at(at) : NULL;
 }
 
+static uint8_t window_byte_read(bool vbe_mode, uint32_t offset) {
+    if (vbe_mode) {
+        uint8_t *p = vbe_window_byte(offset);
+        return p != NULL ? *p : 0xff;
+    }
+    return mem_read(offset);
+}
+
+static void window_byte_write(bool vbe_mode, uint32_t offset, uint8_t byte) {
+    if (!vbe_mode) {
+        mem_write(offset, byte);
+        return;
+    }
+    uint8_t *p = vbe_window_byte(offset);
+    if (p != NULL) {
+        *p = byte;
+    }
+}
+
 static uint64_t window_read(struct vcpu *v, void *ctx, uint64_t offset, size_t size) {
     (void)v;
     (void)ctx;
     uint64_t value = 0;
     spinlock_acquire(&vga.lock);
+    bool vbe_mode = vbe_on();
     for (size_t i = 0; i < size; i++) {
-        uint8_t byte;
-        if (vbe_on()) {
-            uint8_t *p = vbe_window_byte((uint32_t)offset + i);
-            byte = p != NULL ? *p : 0xff;
-        } else {
-            byte = mem_read((uint32_t)offset + i);
-        }
-        value |= (uint64_t)byte << (8 * i);
+        value |= (uint64_t)window_byte_read(vbe_mode, (uint32_t)(offset + i)) << (8 * i);
     }
     spinlock_release(&vga.lock);
     return value;
@@ -485,21 +498,77 @@ static void window_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size
     (void)v;
     (void)ctx;
     spinlock_acquire(&vga.lock);
+    bool vbe_mode = vbe_on();
     for (size_t i = 0; i < size; i++) {
-        uint8_t byte = (uint8_t)(value >> (8 * i));
-        if (vbe_on()) {
-            uint8_t *p = vbe_window_byte((uint32_t)offset + i);
-            if (p != NULL) {
-                *p = byte;
-            }
-        } else {
-            mem_write((uint32_t)offset + i, byte);
+        window_byte_write(vbe_mode, (uint32_t)(offset + i), (uint8_t)(value >> (8 * i)));
+    }
+    spinlock_release(&vga.lock);
+}
+
+static void window_read_string(
+    struct vcpu *v, void *ctx, uint64_t offset, size_t size, int64_t step, uint8_t *data,
+    size_t count
+) {
+    (void)v;
+    (void)ctx;
+    spinlock_acquire(&vga.lock);
+    bool vbe_mode = vbe_on();
+    for (size_t n = 0; n < count; n++) {
+        uint32_t at = (uint32_t)(offset + (uint64_t)step * n);
+        for (size_t i = 0; i < size; i++) {
+            data[n * size + i] = window_byte_read(vbe_mode, at + (uint32_t)i);
         }
     }
     spinlock_release(&vga.lock);
 }
 
-static const struct mmio_ops window_ops = { .read = window_read, .write = window_write };
+static void window_write_string(
+    struct vcpu *v, void *ctx, uint64_t offset, size_t size, int64_t step, const uint8_t *data,
+    bool same, size_t count
+) {
+    (void)v;
+    (void)ctx;
+    spinlock_acquire(&vga.lock);
+    bool vbe_mode = vbe_on();
+    for (size_t n = 0; n < count; n++) {
+        uint32_t at = (uint32_t)(offset + (uint64_t)step * n);
+        const uint8_t *element = same ? data : data + n * size;
+        for (size_t i = 0; i < size; i++) {
+            window_byte_write(vbe_mode, at + (uint32_t)i, element[i]);
+        }
+    }
+    spinlock_release(&vga.lock);
+}
+
+static void window_move_string(
+    struct vcpu *v, void *ctx, uint64_t source, uint64_t destination, size_t size, int64_t step,
+    size_t count
+) {
+    (void)v;
+    (void)ctx;
+    spinlock_acquire(&vga.lock);
+    bool vbe_mode = vbe_on();
+    for (size_t n = 0; n < count; n++) {
+        uint32_t from = (uint32_t)(source + (uint64_t)step * n);
+        uint32_t to = (uint32_t)(destination + (uint64_t)step * n);
+        uint8_t element[8];
+        for (size_t i = 0; i < size; i++) {
+            element[i] = window_byte_read(vbe_mode, from + (uint32_t)i);
+        }
+        for (size_t i = 0; i < size; i++) {
+            window_byte_write(vbe_mode, to + (uint32_t)i, element[i]);
+        }
+    }
+    spinlock_release(&vga.lock);
+}
+
+static const struct mmio_ops window_ops = {
+    .read = window_read,
+    .write = window_write,
+    .read_string = window_read_string,
+    .write_string = window_write_string,
+    .move_string = window_move_string
+};
 
 // The CRT controller's registers answer at 3Bxh or 3Dxh, as the miscellaneous
 // output register selects.
