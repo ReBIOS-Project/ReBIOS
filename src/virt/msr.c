@@ -31,6 +31,7 @@
 #include <sys/x86.h>
 #include <virt/cpuid.h>
 #include <virt/layout.h>
+#include <virt/microcode.h>
 #include <virt/msr_table.h>
 #include <virt/nsvm.h>
 #include <virt/nvmx.h>
@@ -131,10 +132,12 @@
 #define PERF_CAPABILITIES_PEBS_FORMAT(c) (((c) >> 8) & 0xf)
 #define MSR_IA32_PEBS_ENABLE 0x3f1
 
-// AMD's microcode patch loader, which loads the patch at the linear address
-// written (Linux 7.3's MSR_AMD64_PATCH_LOADER): the guest's writes load
-// nothing, as VMX has Intel's do (SDM 325462-093 Vol. 3C, 28.3), so that the
-// processor does not change under the hypervisor.
+// The microcode update interfaces, which load the update at the linear address
+// written: Intel's trigger, whose writes load nothing in VMX non-root
+// operation (SDM 325462-093 Vol. 3C, 28.3), and AMD's patch loader (Linux
+// 7.3's MSR_AMD64_PATCH_LOADER). The hypervisor loads the guest's for it
+// (microcode.c).
+#define MSR_IA32_BIOS_UPDT_TRIG 0x79
 #define MSR_AMD_PATCH_LOADER 0xc0010020
 
 // AMD's hardware configuration (APM 24593 rev. 3.45, 3.2.10 and 15.32.1; PPR
@@ -443,7 +446,9 @@ void msr_init(void) {
     pt_init();
     mpx_init();
     xss_init();
-    if (!virt_vmx) {
+    if (virt_vmx) {
+        virt_intercept_msr(MSR_IA32_BIOS_UPDT_TRIG, false, true);
+    } else {
         virt_intercept_msr(MSR_AMD_PATCH_LOADER, false, true);
         if (svm_erratum_383) {
             virt_intercept_msr(MSR_DC_CFG, false, true);
@@ -998,11 +1003,20 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
             spinlock_release(&hfi_lock);
             return true;
         }
+        case MSR_IA32_BIOS_UPDT_TRIG: {
+            if (!virt_vmx) {
+                return false;
+            }
+            *fault = false;
+            microcode_load(v, value);
+            return true;
+        }
         case MSR_AMD_PATCH_LOADER: {
             if (virt_vmx) {
                 return false;
             }
             *fault = false;
+            microcode_load(v, value);
             return true;
         }
         case MSR_AMD_HWCR: {
