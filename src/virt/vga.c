@@ -182,7 +182,7 @@ static struct {
 } vga;
 
 // The Bochs display interface, on video memory of its own, which the guest
-// finds as reserved memory.
+// finds in the PCI memory of the bus that the display's VGA device is on.
 static struct {
     bool present;
     uint8_t *vram;
