@@ -165,7 +165,14 @@ bool e820_set_efi_map(
         if (desc.NumberOfPages <= UINT64_MAX >> EFI_PAGE_SHIFT) {
             size = desc.NumberOfPages << EFI_PAGE_SHIFT;
         }
-        bool added = e820_set(map, desc.PhysicalStart, size, efi_type_to_e820(desc.Type));
+        // Neither specific-purpose memory nor memory that cannot be cached
+        // write-back is RAM, as Linux 7.3's do_add_efi_memmap() has it.
+        uint32_t type = efi_type_to_e820(desc.Type);
+        if (type == E820_RAM
+         && ((desc.Attribute & EFI_MEMORY_SP) != 0 || (desc.Attribute & EFI_MEMORY_WB) == 0)) {
+            type = E820_RESERVED;
+        }
+        bool added = e820_set(map, desc.PhysicalStart, size, type);
         if (!added) {
             ok = false;
         }
