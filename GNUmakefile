@@ -454,12 +454,13 @@ edk2-ovmf-bins: edk2-ovmf-bins.tar.gz
 	rm -rf edk2-ovmf-bins
 	gunzip < edk2-ovmf-bins.tar.gz | tar -xf -
 
-# Rules for running our executable in QEMU.
+# Rules for running our executable in Nephrite, the fork of QEMU that ReBIOS is
+# tested on, as QEMU itself has bugs that ReBIOS runs into.
 .PHONY: run
 run: all edk2-ovmf-bins
 	mkdir -p boot/EFI/BOOT
 	cp bin/$(OUTPUT).efi boot/EFI/BOOT/BOOTX64.EFI
-	qemu-system-x86_64 \
+	nephrite-system-x86_64 \
 		-drive file=fat:rw:boot \
 		$(QEMUFLAGS) \
 		$(QEMU_UEFI_FW)

@@ -335,7 +335,10 @@ it adds back of the legacy PC:
 
 Building requires `python3`, `git`, used to fetch the dependencies (see
 `get-deps`), and either GCC and GNU binutils or Clang, LLD, and LLVM's tools.
-`curl` is used to download the EDK2 OVMF firmware images for `make run`.
+`curl` is used to download the EDK2 OVMF firmware images for `make run`, which
+runs ReBIOS with KVM in [Nephrite](https://github.com/Nephrite-Project/Nephrite),
+the fork of QEMU that ReBIOS is tested on (on Arch Linux, the `nephrite` package
+in the AUR), as QEMU itself has bugs that ReBIOS runs into.
 
 ```sh
 ./get-deps
