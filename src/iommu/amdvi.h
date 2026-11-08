@@ -44,9 +44,14 @@ void amdvi_report_faults(void);
 // Interrupt remapping, once the I/O APICs are known: tables per device ID, of
 // the requester IDs that interrupt messages carry, in the guest virtual APIC's
 // format for guest_vapic where every unit has it, which posts interrupts to
-// vCPUs where every unit can also interrupt the calling processor on vector.
+// vCPUs where every unit can also interrupt the calling processor on vector,
+// and to x2APIC destinations where the local APICs are in x2APIC mode and
+// every unit can.
 void amdvi_remap_start(bool guest_vapic, uint8_t vector);
 bool amdvi_remap_on(void);
+// Whether every unit can remap to x2APIC destinations, and whether they do.
+bool amdvi_x2apic_capable(void);
+bool amdvi_x2apic_on(void);
 int amdvi_remap_alloc(int32_t requester, size_t count);
 void amdvi_remap_free(int32_t requester, uint16_t index, size_t count);
 void amdvi_remap_set(int32_t requester, uint16_t index, uint32_t apic_id, uint8_t vector);

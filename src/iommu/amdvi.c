@@ -46,6 +46,7 @@
 #define REG_FEATURES 0x0030
 #define REG_GA_LOG 0x00e0
 #define REG_GA_LOG_TAIL_ADDRESS 0x00e8
+#define REG_XT_GA_LOG_INTERRUPT 0x0180
 #define REG_COMMAND_HEAD 0x2000
 #define REG_COMMAND_TAIL 0x2008
 #define REG_EVENT_HEAD 0x2010
@@ -62,11 +63,15 @@
 #define CONTROL_GAM_GUEST_VAPIC ((uint64_t)1 << 25)
 #define CONTROL_GA_LOG_EN ((uint64_t)1 << 28)
 #define CONTROL_GA_INT_EN ((uint64_t)1 << 29)
+#define CONTROL_XT_EN ((uint64_t)1 << 50)
+#define CONTROL_INTCAPXT_EN ((uint64_t)1 << 51)
 // What firmware may have turned on that ReBIOS does not use: interrupt
 // enables, peripheral page requests, guest translation, guest virtual APIC,
 // dual logs, and device table segmentation, along with the enables above.
-#define CONTROL_TAKEN ((uint64_t)0x0000001ffe03f01d)
+#define CONTROL_TAKEN ((uint64_t)0x000c001ffe03f01d)
 
+// x2APIC destinations (AMD IOMMU 48882 rev. 3.11, MMIO Offset 0030h).
+#define FEATURE_XT ((uint64_t)1 << 2)
 // The guest virtual APIC and its modes (AMD IOMMU 48882 rev. 3.11, 3.4.4).
 #define FEATURE_GA ((uint64_t)1 << 7)
 #define FEATURE_GAM_MASK ((uint64_t)7 << 21)
@@ -94,6 +99,12 @@
 // Rounds of clearing the GA log's interrupt status and reading the entries
 // before it, until it reads as clear.
 #define GA_ROUNDS 4
+// The GA log's interrupt to an x2APIC destination, fixed and physical, its low
+// 24 bits at 31:8 and its high 8 at 63:56 (AMD IOMMU 48882 rev. 3.11, MMIO
+// Offset 0x180h).
+#define XT_INTERRUPT_DEST_SHIFT 8
+#define XT_INTERRUPT_VECTOR_SHIFT 32
+#define XT_INTERRUPT_DEST_HIGH_SHIFT 56
 
 #define DEVICE_IDS 65536
 // The device table holds every device ID, in (511 + 1) 4KiB pages.
@@ -123,17 +134,19 @@
 #define DTE_PASS (DTE_INIT_PASS | DTE_EINT_PASS | DTE_NMI_PASS | DTE_LINT0_PASS | DTE_LINT1_PASS)
 
 // A device's interrupt remapping table: 512 entries, as many as a fixed or
-// arbitrated message's data bits 8:0 name, in the basic format or in the guest
-// virtual APIC's (AMD IOMMU 48882 rev. 3.11, Table 19 to Table 22).
+// arbitrated message's data bits 8:0 name, in the basic format or in the
+// 128-bit one, which has a destination's bits 31:24 at 63:56 of its high half
+// (AMD IOMMU 48882 rev. 3.11, Table 19 to Table 22, Figure 17).
 #define REMAP_LOG2 9
 #define REMAP_ENTRIES ((uint32_t)1 << REMAP_LOG2)
 #define IRTE_REMAP_EN ((uint32_t)1 << 0)
 #define IRTE_DEST_SHIFT 8
 #define IRTE_VECTOR_SHIFT 16
+#define IRTE_DEST_HIGH_SHIFT 56
 // With GuestMode, an entry posts to a guest virtual APIC: its backing page's
 // address in place in the high half, with the vector, and its doorbell's
-// destination, 8 bits wide without x2APIC support (AMD IOMMU 48882 rev. 3.11,
-// Table 23, Figure 20).
+// destination, 8 bits wide without XTEn (AMD IOMMU 48882 rev. 3.11, Table 23,
+// Figure 20).
 #define IRTE_GA_LOG_INTR ((uint64_t)1 << 2)
 #define IRTE_IS_RUN ((uint64_t)1 << 6)
 #define IRTE_GUEST_MODE ((uint64_t)1 << 7)
@@ -206,8 +219,10 @@ static uint64_t *device_table;
 // Over the units' command buffers, which any processor may fill.
 static struct spinlock command_lock;
 static bool remap_enabled;
-// The tables' entries are in the guest virtual APIC's format.
+// The tables' entries are 128-bit ones, and their destinations, as the units'
+// own interrupts', x2APIC IDs.
 static bool wide_entries;
+static bool xt;
 static struct spinlock remap_lock;
 
 // The entries that post to each vCPU, by its tag, whose IsRun follows whether
@@ -495,9 +510,14 @@ static bool unit_msi(const struct amdvi_unit *u, uint32_t apic_id, uint8_t vecto
 }
 
 // The GA log, started as Linux 7.3's iommu_ga_log_enable() starts it, with the
-// unit interrupting for its entries.
+// unit interrupting for its entries, by its XT register with IntCapXTEn.
 static bool ga_log_start(struct amdvi_unit *u, uint32_t apic_id, uint8_t vector) {
-    if (!unit_msi(u, apic_id, vector)) {
+    if (xt) {
+        uint64_t interrupt = (uint64_t)(apic_id & 0xffffff) << XT_INTERRUPT_DEST_SHIFT
+                           | (uint64_t)vector << XT_INTERRUPT_VECTOR_SHIFT
+                           | (uint64_t)(apic_id >> 24) << XT_INTERRUPT_DEST_HIGH_SHIFT;
+        reg_write(u, REG_XT_GA_LOG_INTERRUPT, interrupt);
+    } else if (!unit_msi(u, apic_id, vector)) {
         printf(
             "AMD-Vi unit at %#llx cannot interrupt the processor with APIC ID %#x\n",
             (unsigned long long)u->base, apic_id
@@ -540,28 +560,39 @@ void amdvi_remap_start(bool guest_vapic, uint8_t vector) {
             return;
         }
     }
+    // x2APIC mode's destinations need XTEn, and GAEn's 128-bit entries even
+    // where nothing is posted (AMD IOMMU 48882 rev. 3.11, 2.2.5.3).
+    xt = lapic_x2apic() && amdvi_x2apic_capable();
     // The guest virtual APIC's entries where interrupts may be posted to AVIC,
     // its mode the same on every unit (AMD IOMMU 48882 rev. 3.11, 2.2.5.2),
     // before any table is.
-    bool wide = guest_vapic;
-    for (size_t i = 0; i < unit_count && wide; i++) {
+    bool vapic = guest_vapic;
+    for (size_t i = 0; i < unit_count && vapic; i++) {
         uint64_t features = reg_read(&units[i], REG_FEATURES);
-        wide = (features & FEATURE_GA) != 0
-            && (features & FEATURE_GAM_MASK) == FEATURE_GAM_GUEST_VAPIC;
+        vapic = (features & FEATURE_GA) != 0
+             && (features & FEATURE_GAM_MASK) == FEATURE_GAM_GUEST_VAPIC;
     }
-    for (size_t i = 0; i < unit_count && wide; i++) {
-        struct amdvi_unit *u = &units[i];
-        uint64_t control = reg_read(u, REG_CONTROL);
-        reg_write(u, REG_CONTROL, control | CONTROL_GA_EN | CONTROL_GAM_GUEST_VAPIC);
+    wide_entries = xt || vapic;
+    uint64_t enables = 0;
+    if (wide_entries) {
+        enables |= CONTROL_GA_EN;
     }
-    if (wide) {
+    if (vapic) {
+        enables |= CONTROL_GAM_GUEST_VAPIC;
         printf("AMD-Vi: interrupts are remapped in the guest virtual APIC's format\n");
     }
-    wide_entries = wide;
+    if (xt) {
+        enables |= CONTROL_XT_EN | CONTROL_INTCAPXT_EN;
+        printf("AMD-Vi: interrupts are remapped to x2APIC destinations\n");
+    }
+    for (size_t i = 0; i < unit_count; i++) {
+        struct amdvi_unit *u = &units[i];
+        reg_write(u, REG_CONTROL, reg_read(u, REG_CONTROL) | enables);
+    }
     remap_enabled = true;
     // Posting, where every unit can tell the calling processor of what it
     // posts for vCPUs that do not run.
-    bool post = wide;
+    bool post = vapic;
     for (size_t i = 0; i < unit_count && post; i++) {
         post = ga_log_start(&units[i], this_cpu()->apic_id, vector);
     }
@@ -576,6 +607,20 @@ void amdvi_remap_start(bool guest_vapic, uint8_t vector) {
 
 bool amdvi_remap_on(void) {
     return remap_enabled;
+}
+
+bool amdvi_x2apic_capable(void) {
+    for (size_t i = 0; i < unit_count; i++) {
+        uint64_t features = reg_read(&units[i], REG_FEATURES);
+        if ((features & (FEATURE_XT | FEATURE_GA)) != (FEATURE_XT | FEATURE_GA)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool amdvi_x2apic_on(void) {
+    return xt;
 }
 
 // Erratum 1063 (Revision Guide for AMD Family 17h Models 00h-0Fh Processors
@@ -775,14 +820,15 @@ void amdvi_remap_free(int32_t requester, uint16_t index, size_t count) {
     spinlock_release(&remap_lock);
 }
 
-// Fixed delivery, physical destination: in the guest virtual APIC's format the
-// vector in the high half, with the destination's top byte (AMD IOMMU 48882
-// rev. 3.11, Figure 17, Figure 19).
+// Fixed delivery, physical destination: in the 128-bit format the vector in
+// the high half, with the destination's top byte (AMD IOMMU 48882 rev. 3.11,
+// Figure 17, Figure 19).
 void amdvi_remap_set(int32_t requester, uint16_t index, uint32_t apic_id, uint8_t vector) {
-    uint64_t low = IRTE_REMAP_EN | (uint64_t)(apic_id & 0xff) << IRTE_DEST_SHIFT;
+    uint32_t dest = xt ? apic_id : apic_id & 0xff;
+    uint64_t low = IRTE_REMAP_EN | (uint64_t)(dest & 0xffffff) << IRTE_DEST_SHIFT;
     uint64_t high = 0;
     if (wide_entries) {
-        high = vector;
+        high = vector | (uint64_t)(dest >> 24) << IRTE_DEST_HIGH_SHIFT;
     } else {
         low |= (uint64_t)vector << IRTE_VECTOR_SHIFT;
     }
@@ -808,13 +854,16 @@ bool amdvi_posting(void) {
 bool amdvi_remap_post(
     int32_t requester, uint16_t index, uint8_t vector, const struct remap_target *target
 ) {
-    if (!posting || target->apic_id > MAX_DEST_ID || target->tag >= target_count) {
+    // A destination of all ones is a broadcast.
+    bool alone = xt ? target->apic_id != UINT32_MAX : target->apic_id <= MAX_DEST_ID;
+    if (!posting || !alone || target->tag >= target_count) {
         return false;
     }
     uint64_t low = IRTE_REMAP_EN | IRTE_GA_LOG_INTR | IRTE_GUEST_MODE
-                 | (uint64_t)target->apic_id << IRTE_DEST_SHIFT
+                 | (uint64_t)(target->apic_id & 0xffffff) << IRTE_DEST_SHIFT
                  | (uint64_t)target->tag << IRTE_GA_TAG_SHIFT;
-    uint64_t high = vector | ((uint64_t)target->descriptor & IRTE_GA_ROOT_MASK);
+    uint64_t high = vector | ((uint64_t)target->descriptor & IRTE_GA_ROOT_MASK)
+                  | (uint64_t)(target->apic_id >> 24) << IRTE_DEST_HIGH_SHIFT;
     struct post_target *g = &targets[target->tag];
     spinlock_acquire(&remap_lock);
     struct remap_table *t = table_of((uint16_t)requester);

@@ -94,7 +94,7 @@ bool remap_x2apic_capable(void) {
 }
 
 bool remap_x2apic_on(void) {
-    return !amd() && vtd_remap_x2apic_on();
+    return amd() ? amdvi_x2apic_on() : vtd_remap_x2apic_on();
 }
 
 void remap_x2apic(bool on) {
