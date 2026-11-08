@@ -288,19 +288,20 @@ static uint8_t rotate_right(uint8_t value, size_t count) {
     return (uint8_t)((value >> count) | (value << ((8 - count) & 7)));
 }
 
-static uint8_t logic(uint8_t value, uint8_t latch) {
+// The graphics controller's function on data and the latches, for every plane.
+static uint32_t logic(uint32_t data, uint32_t latches) {
     switch ((vga.gc[GC_ROTATE] >> 3) & 3) {
         case 1: {
-            return value & latch;
+            return data & latches;
         }
         case 2: {
-            return value | latch;
+            return data | latches;
         }
         case 3: {
-            return value ^ latch;
+            return data ^ latches;
         }
         default: {
-            return value;
+            return data;
         }
     }
 }
@@ -328,61 +329,95 @@ static bool window_address(uint32_t offset, uint32_t *address) {
     }
 }
 
-static void mem_write(uint32_t offset, uint8_t value) {
-    uint32_t address;
-    if (!window_address(offset, &address)) {
-        return;
+// A byte for each plane, plane p's in bits 8p to 8p + 7: all ones in those of
+// the planes a 4-bit mask selects.
+static uint32_t plane_bytes(uint8_t planes) {
+    return ((planes & 1) != 0 ? (uint32_t)0x000000ff : 0)
+         | ((planes & 2) != 0 ? (uint32_t)0x0000ff00 : 0)
+         | ((planes & 4) != 0 ? (uint32_t)0x00ff0000 : 0)
+         | ((planes & 8) != 0 ? (uint32_t)0xff000000 : 0);
+}
+
+// What the graphics controller makes of a CPU write's byte for each plane,
+// from the latches as they are, as plane_bytes() lays them out.
+static uint32_t write_results(uint8_t value) {
+    uint32_t latches = read_le32(vga.latch);
+    uint8_t mode = vga.gc[GC_MODE] & 3;
+    if (mode == 1) {
+        return latches;
     }
-    uint8_t planes = vga.seq[SEQ_MAP_MASK] & 0x0f;
-    if ((vga.seq[SEQ_MEMORY_MODE] & SEQ_MEMORY_CHAIN4) != 0) {
-        planes &= (uint8_t)((uint32_t)1 << (address & 3));
-        address &= ~(uint32_t)3;
-    } else if ((vga.seq[SEQ_MEMORY_MODE] & SEQ_MEMORY_SEQUENTIAL) == 0) {
-        planes &= (address & 1) != 0 ? 0x0a : 0x05;
-        address &= ~(uint32_t)1;
+    uint8_t rotated = rotate_right(value, vga.gc[GC_ROTATE]);
+    uint32_t set_reset = plane_bytes(vga.gc[GC_SET_RESET]);
+    uint32_t mask = vga.gc[GC_BIT_MASK] * (uint32_t)0x01010101;
+    uint32_t data;
+    if (mode == 0) {
+        uint32_t enable = plane_bytes(vga.gc[GC_ENABLE_SET_RESET]);
+        data = (set_reset & enable) | (rotated * (uint32_t)0x01010101 & ~enable);
+    } else if (mode == 2) {
+        data = plane_bytes(value);
+    } else {
+        data = set_reset;
+        mask &= rotated * (uint32_t)0x01010101;
     }
-    address &= PLANE_SIZE - 1;
+    return (logic(data, latches) & mask) | (latches & ~mask);
+}
+
+// A plane address the guest wrote to, in the planes of a 4-bit mask, for the
+// display to show.
+static void planes_changed(uint32_t address, uint8_t planes) {
     if (planes != 0) {
         uint32_t chunk = address >> CHUNK_SHIFT;
         vga.changed[chunk / 64] |= (uint64_t)1 << (chunk % 64);
         vga.font_changed |= (planes & 4) != 0;
     }
+}
 
-    uint8_t bit_mask = vga.gc[GC_BIT_MASK];
-    uint8_t rotated = rotate_right(value, vga.gc[GC_ROTATE]);
-    for (size_t p = 0; p < 4; p++) {
-        if ((planes & ((uint32_t)1 << p)) == 0) {
-            continue;
+// CPU writes of count elements of size bytes, the first at offset into the
+// window and each next one step bytes on, all within a page, which the memory
+// map decodes all of or none of: element n's byte i is data[n * size + i], or
+// data[i] for every element where same is true. Each byte reaches the planes
+// that the map mask and the addressing mode select, with what the graphics
+// controller makes of it from the latches, which writes leave as they are.
+static void planes_write(
+    uint32_t offset, int64_t step, size_t size, size_t count, const uint8_t *data, bool same
+) {
+    uint32_t first;
+    if (!window_address(offset, &first)) {
+        return;
+    }
+    uint8_t map = vga.seq[SEQ_MAP_MASK] & 0x0f;
+    bool chain4 = (vga.seq[SEQ_MEMORY_MODE] & SEQ_MEMORY_CHAIN4) != 0;
+    bool odd_even = !chain4 && (vga.seq[SEQ_MEMORY_MODE] & SEQ_MEMORY_SEQUENTIAL) == 0;
+    uint32_t results[8];
+    for (size_t n = 0; n < count; n++) {
+        uint32_t at = first + (uint32_t)((uint64_t)step * n);
+        for (size_t i = 0; i < size; i++) {
+            if (n == 0 || !same) {
+                results[i] = write_results(data[same ? i : n * size + i]);
+            }
+            uint32_t address = at + (uint32_t)i;
+            uint8_t planes = map;
+            if (chain4) {
+                planes &= (uint8_t)((uint32_t)1 << (address & 3));
+                address &= ~(uint32_t)3;
+            } else if (odd_even) {
+                planes &= (address & 1) != 0 ? 0x0a : 0x05;
+                address &= ~(uint32_t)1;
+            }
+            address &= PLANE_SIZE - 1;
+            planes_changed(address, planes);
+            for (size_t p = 0; p < 4; p++) {
+                if ((planes & ((uint32_t)1 << p)) != 0) {
+                    vga.planes[p][address] = (uint8_t)(results[i] >> (8 * p));
+                }
+            }
         }
-        uint8_t latch = vga.latch[p];
-        uint8_t set_reset = (vga.gc[GC_SET_RESET] & ((uint32_t)1 << p)) != 0 ? 0xff : 0x00;
-        uint8_t result;
-        switch (vga.gc[GC_MODE] & 3) {
-            case 0: {
-                uint8_t v = (vga.gc[GC_ENABLE_SET_RESET] & ((uint32_t)1 << p)) != 0
-                          ? set_reset
-                          : rotated;
-                result = (uint8_t)((logic(v, latch) & bit_mask) | (latch & ~bit_mask));
-                break;
-            }
-            case 1: {
-                result = latch;
-                break;
-            }
-            case 2: {
-                uint8_t v = (value & ((uint32_t)1 << p)) != 0 ? 0xff : 0x00;
-                result = (uint8_t)((logic(v, latch) & bit_mask) | (latch & ~bit_mask));
-                break;
-            }
-            default: {
-                uint8_t mask = rotated & bit_mask;
-                result = (uint8_t)((logic(set_reset, latch) & mask) | (latch & ~mask));
-                break;
-            }
-        }
-        vga.planes[p][address] = result;
     }
     vga.dirty = true;
+}
+
+static void mem_write(uint32_t offset, uint8_t value) {
+    planes_write(offset, 1, 1, 1, &value, true);
 }
 
 static uint8_t mem_read(uint32_t offset) {
@@ -529,12 +564,15 @@ static void window_write_string(
     (void)v;
     (void)ctx;
     spinlock_acquire(&vga.lock);
-    bool vbe_mode = vbe_on();
-    for (size_t n = 0; n < count; n++) {
-        uint32_t at = (uint32_t)(offset + (uint64_t)step * n);
-        const uint8_t *element = same ? data : data + n * size;
-        for (size_t i = 0; i < size; i++) {
-            window_byte_write(vbe_mode, at + (uint32_t)i, element[i]);
+    if (!vbe_on()) {
+        planes_write((uint32_t)offset, step, size, count, data, same);
+    } else {
+        for (size_t n = 0; n < count; n++) {
+            uint32_t at = (uint32_t)(offset + (uint64_t)step * n);
+            const uint8_t *element = same ? data : data + n * size;
+            for (size_t i = 0; i < size; i++) {
+                window_byte_write(true, at + (uint32_t)i, element[i]);
+            }
         }
     }
     spinlock_release(&vga.lock);
@@ -555,8 +593,12 @@ static void window_move_string(
         for (size_t i = 0; i < size; i++) {
             element[i] = window_byte_read(vbe_mode, from + (uint32_t)i);
         }
+        if (!vbe_mode) {
+            planes_write(to, 1, size, 1, element, false);
+            continue;
+        }
         for (size_t i = 0; i < size; i++) {
-            window_byte_write(vbe_mode, to + (uint32_t)i, element[i]);
+            window_byte_write(true, to + (uint32_t)i, element[i]);
         }
     }
     spinlock_release(&vga.lock);
