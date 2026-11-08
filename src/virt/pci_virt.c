@@ -1462,6 +1462,22 @@ bool pci_virt_trap(
     return true;
 }
 
+uint32_t pci_virt_config_read(struct pci_cfg_addr addr, uint32_t offset, size_t size) {
+    spinlock_acquire(&virt.lock);
+    uint32_t value = function_read(addr, offset, size);
+    spinlock_release(&virt.lock);
+    return value;
+}
+
+void pci_virt_config_write(
+    struct pci_cfg_addr addr, uint32_t offset, size_t size, uint32_t value
+) {
+    spinlock_acquire(&virt.lock);
+    struct vfunction *wrote = function_write(addr, offset, size, value);
+    spinlock_release(&virt.lock);
+    legacy_io_follow(wrote);
+}
+
 void pci_virt_untrap(struct pci_cfg_addr addr, unsigned int bar, uint64_t offset) {
     struct vfunction *vf = vfunction_find(addr);
     if (vf == NULL || bar >= BAR_COUNT) {

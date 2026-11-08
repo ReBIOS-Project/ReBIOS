@@ -56,6 +56,12 @@ bool pci_virt_trap(
 // the BAR is.
 void pci_virt_untrap(struct pci_cfg_addr addr, unsigned int bar, uint64_t offset);
 
+// What the guest reads from the function's configuration space at offset, or
+// writes there, as through its configuration ports, for a device's own copies
+// of its configuration space. After pci_virt_init().
+uint32_t pci_virt_config_read(struct pci_cfg_addr addr, uint32_t offset, size_t size);
+void pci_virt_config_write(struct pci_cfg_addr addr, uint32_t offset, size_t size, uint32_t value);
+
 // Routes the guest's messages again after its local APICs changed in a way
 // that decides where they can be posted (vlapic_post_changed()).
 void pci_virt_repost(void);
