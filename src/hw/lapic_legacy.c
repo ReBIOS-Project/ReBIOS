@@ -161,6 +161,18 @@ static bool madt_nmi_pin(uint32_t apic_id, struct nmi_pin *pin) {
     return found;
 }
 
+// An entry with an interrupt's delivery mode, masked; one with another, such
+// as SMI for thermal events, the firmware's, as it is.
+static uint32_t lvt_quiet(uint32_t value) {
+    uint32_t mode = value & APIC_LVT_DELIVERY_MASK;
+    bool interrupt = mode == APIC_LVT_DELIVERY_FIXED || mode == ICR_DELIVERY_LOWEST
+                  || mode == APIC_LVT_DELIVERY_NMI || mode == APIC_LVT_DELIVERY_EXTINT;
+    if (!interrupt || (value & APIC_LVT_MASKED) != 0) {
+        return value;
+    }
+    return (value & ~(APIC_LVT_DELIVERY_STATUS | APIC_LVT_REMOTE_IRR)) | APIC_LVT_MASKED;
+}
+
 void lapic_legacy_init(void) {
     uint64_t found_base = rdmsr(MSR_IA32_APIC_BASE);
     bool x2apic = (found_base & APIC_BASE_EXTD) != 0 && lapic_xapic_locked();
@@ -181,14 +193,27 @@ void lapic_legacy_init(void) {
     }
 
     uintptr_t base = found_base;
-    if ((base & APIC_BASE_EXTD) != 0 && !x2apic) {
-        // x2APIC mode can only be left for the disabled state.
+    // x2APIC mode can only be left for the disabled state, which keeps none of
+    // the registers but the ID (SDM 325462-093 Vol. 3A, 13.12.5.1): the
+    // entries found go back, those with an interrupt's delivery mode masked,
+    // and the SVR last, as it enables the APIC.
+    bool left_x2apic = (base & APIC_BASE_EXTD) != 0 && !x2apic;
+    if (left_x2apic) {
         base &= ~(APIC_BASE_EN | APIC_BASE_EXTD);
         wrmsr(MSR_IA32_APIC_BASE, base);
     }
     if ((base & APIC_BASE_EN) == 0) {
         base |= APIC_BASE_EN;
         wrmsr(MSR_IA32_APIC_BASE, base);
+    }
+    if (left_x2apic) {
+        lapic_write(APIC_TPR, found.tpr);
+        for (size_t i = 0; i < LAPIC_LVT_COUNT; i++) {
+            if (lvt_exists(i, found_max_entry)) {
+                lapic_write(lvt_regs[i], lvt_quiet(found.lvt[i]));
+            }
+        }
+        lapic_write(APIC_SVR, found.svr);
     }
 
     uint32_t version = lapic_read(APIC_VERSION);
@@ -218,16 +243,9 @@ void lapic_legacy_init(void) {
          || !lvt_exists(i, max_entry)) {
             continue;
         }
-        // Other delivery modes, such as SMI for thermal events, are the
-        // firmware's.
         uint32_t value = lapic_read(lvt_regs[i]);
-        uint32_t mode = value & APIC_LVT_DELIVERY_MASK;
-        bool interrupt = mode == APIC_LVT_DELIVERY_FIXED || mode == ICR_DELIVERY_LOWEST
-                      || mode == APIC_LVT_DELIVERY_NMI || mode == APIC_LVT_DELIVERY_EXTINT;
-        if (interrupt && (value & APIC_LVT_MASKED) == 0) {
-            uint32_t masked = (value & ~(APIC_LVT_DELIVERY_STATUS | APIC_LVT_REMOTE_IRR))
-                            | APIC_LVT_MASKED;
-            lapic_write(lvt_regs[i], masked);
+        if (lvt_quiet(value) != value) {
+            lapic_write(lvt_regs[i], lvt_quiet(value));
         }
     }
 
