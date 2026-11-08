@@ -62,6 +62,14 @@ void pci_virt_untrap(struct pci_cfg_addr addr, unsigned int bar, uint64_t offset
 uint32_t pci_virt_config_read(struct pci_cfg_addr addr, uint32_t offset, size_t size);
 void pci_virt_config_write(struct pci_cfg_addr addr, uint32_t offset, size_t size, uint32_t value);
 
+// What the guest reads from the function's MSI-X table at offset from its
+// start, or writes there, as through the table itself, for a device's other
+// ways to it: false where the function has no such entry. After
+// pci_virt_init().
+bool pci_virt_msix_access(
+    struct pci_cfg_addr addr, uint64_t offset, size_t size, bool write, uint64_t *value
+);
+
 // Routes the guest's messages again after its local APICs changed in a way
 // that decides where they can be posted (vlapic_post_changed()).
 void pci_virt_repost(void);

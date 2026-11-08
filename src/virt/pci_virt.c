@@ -1478,6 +1478,23 @@ void pci_virt_config_write(
     legacy_io_follow(wrote);
 }
 
+bool pci_virt_msix_access(
+    struct pci_cfg_addr addr, uint64_t offset, size_t size, bool write, uint64_t *value
+) {
+    struct vfunction *vf = vfunction_find(addr);
+    if (vf == NULL || vf->msix.count == 0
+     || offset + size > (uint64_t)vf->msix.count * PCI_MSIX_ENTRY_SIZE) {
+        return false;
+    }
+    uint64_t at = vf->msix.table + offset - vf->msix.page;
+    if (write) {
+        msix_write(NULL, vf, at, size, *value);
+    } else {
+        *value = msix_read(NULL, vf, at, size);
+    }
+    return true;
+}
+
 void pci_virt_untrap(struct pci_cfg_addr addr, unsigned int bar, uint64_t offset) {
     struct vfunction *vf = vfunction_find(addr);
     if (vf == NULL || bar >= BAR_COUNT) {
