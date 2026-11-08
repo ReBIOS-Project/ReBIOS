@@ -43,7 +43,6 @@
 #define REG_FSTS 0x34
 #define REG_FECTL 0x38
 #define REG_PMEN 0x64
-#define REG_IQH 0x80
 #define REG_IQT 0x88
 #define REG_IQA 0x90
 #define REG_IRTA 0xb8
@@ -88,7 +87,14 @@
 #define FSTS_PFO ((uint32_t)1 << 0)
 #define FSTS_PPF ((uint32_t)1 << 1)
 #define FSTS_IQE ((uint32_t)1 << 4)
+#define FSTS_ICE ((uint32_t)1 << 5)
 #define FSTS_ITE ((uint32_t)1 << 6)
+// The queue's address, its descriptors' width, and its size, 4 KiB times two
+// to the power QS, and where the next descriptor goes.
+#define IQA_ADDRESS ((uint64_t)0xfffffffffffff000)
+#define IQA_DW ((uint64_t)1 << 11)
+#define IQA_QS ((uint64_t)7)
+#define IQT_OFFSET ((uint64_t)0x7fff0)
 #define FECTL_IM ((uint32_t)1 << 31)
 
 #define FAULT_F ((uint64_t)1 << 63)
@@ -398,6 +404,39 @@ bool vtd_probe(const struct iommu_tables *tables, size_t *leaf_level) {
     return true;
 }
 
+// The queue the firmware left on goes off once quiesced: empty, with an
+// Invalidation Wait the last descriptor completed (VT-d D51397-019 rev. 5.20,
+// 6.5.2), so one goes after the firmware's descriptors.
+static void firmware_queue_quiesce(struct vtd_unit *u) {
+    uint64_t iqa = reg_read64(u, REG_IQA);
+    uintptr_t queue = (uintptr_t)(iqa & IQA_ADDRESS);
+    size_t width = (iqa & IQA_DW) != 0 ? 32 : 16;
+    size_t size = (size_t)PAGE_SIZE << (iqa & IQA_QS);
+    size_t tail = (size_t)(reg_read64(u, REG_IQT) & IQT_OFFSET);
+    uint64_t *desc = (uint64_t *)(queue + tail);
+    atomic_store_explicit(&u->wait_done, 0, memory_order_relaxed);
+    desc[0] = DESC_WAIT | DESC_WAIT_SW | DESC_WAIT_FN | (uint64_t)1 << DESC_WAIT_DATA_SHIFT;
+    desc[1] = (uint64_t)(uintptr_t)&u->wait_done;
+    if (width == 32) {
+        desc[2] = 0;
+        desc[3] = 0;
+    }
+    tables_flush_caches();
+    reg_write64(u, REG_IQT, (tail + width) % size);
+
+    uint64_t deadline = time_ns() + TIMEOUT_NS;
+    while (atomic_load_explicit(&u->wait_done, memory_order_acquire) != 1) {
+        uint32_t status = reg_read32(u, REG_FSTS);
+        if ((status & (FSTS_IQE | FSTS_ICE | FSTS_ITE)) != 0 || time_ns() > deadline) {
+            panic(
+                "VT-d unit at %#llx does not drain the firmware's invalidations, fault status "
+                "%#x\n", (unsigned long long)u->base, status
+            );
+        }
+        cpu_relax();
+    }
+}
+
 // Firmware may have left translation, interrupt remapping, its invalidation
 // queue, or protected memory regions on, all of which would stand in the way.
 static void unit_take_over(struct vtd_unit *u) {
@@ -414,16 +453,7 @@ static void unit_take_over(struct vtd_unit *u) {
         global_command(u, GCMD_IRE, false, "stop remapping interrupts");
     }
     if ((status & GCMD_QIE) != 0) {
-        uint64_t deadline = time_ns() + TIMEOUT_NS;
-        while (reg_read64(u, REG_IQH) != reg_read64(u, REG_IQT)) {
-            if (time_ns() > deadline) {
-                panic(
-                    "VT-d unit at %#llx does not drain the firmware's invalidations\n",
-                    (unsigned long long)u->base
-                );
-            }
-            cpu_relax();
-        }
+        firmware_queue_quiesce(u);
         global_command(u, GCMD_QIE, false, "disable queued invalidation");
     }
     if ((u->cap & (CAP_PLMR | CAP_PHMR)) != 0 && (reg_read32(u, REG_PMEN) & PMEN_EPM) != 0) {
