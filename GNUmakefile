@@ -30,20 +30,46 @@ PREFIX := /usr/local
 
 # Default user QEMU flags. These are appended to the QEMU command calls.
 QEMUFLAGS := -m 2G
-# ReBIOS needs the host's VMX or SVM, which nested KVM passes on.
-QEMU_MACHINE := -M q35 -accel kvm
-QEMU_CPU := -cpu host
-# And an IOMMU, here without the interrupt remapping KVM's in-kernel irqchip
-# cannot take.
+# The processor that ReBIOS gets, emulated with every extension of it that
+# ReBIOS can use: vmx, Intel's, behind VT-d, or svm, AMD's, behind AMD-Vi, each
+# IOMMU with interrupt remapping and its x2APIC mode.
+QEMU_VIRT := vmx
+QEMU_MACHINE := -M q35 -accel tcg
 QEMU_DEVICES := \
-    -device intel-iommu,intremap=off \
     -device qemu-xhci \
     -device usb-kbd \
     -device usb-mouse
 
+override EMPTY :=
+override SPACE := $(EMPTY) $(EMPTY)
+override COMMA := ,
+# Intel's family 6, model 198, with all of TCG's extensions and VMX with all of
+# its controls.
+override QEMU_CPU_vmx := max,vendor=GenuineIntel,family=6,model=198,+vmx,-svm
+override QEMU_IOMMU_vmx := intel-iommu,intremap=on,eim=on
+# AMD's EPYC-Genoa with SVM and all of SVM's extensions, less what TCG cannot
+# run: AVX-512, GFNI, VPCLMULQDQ, AutoIBRS, and LFENCE's serialising control.
+override QEMU_SVM_ADDED := \
+    svm npt nrip-save vmcb-clean flushbyasid decodeassists pause-filter \
+    pfthreshold vgif vnmi lbrv v-vmsave-vmload avic x2avic x2apic extapic \
+    invlpgb tlbictl rogpt pml tsc-scale gmet svm-lock idle-hlt \
+    bus-lock-threshold host-mce-override eraps sbpb ibpb-brtype cet-ss fred \
+    lkgs bpext addrmaskext bus-lock-detect
+override QEMU_SVM_REMOVED := \
+    avx512f avx512dq avx512ifma avx512cd avx512bw avx512vl avx512vbmi \
+    avx512vbmi2 avx512vnni avx512bitalg avx512-vpopcntdq avx512-bf16 gfni \
+    vpclmulqdq auto-ibrs lfence-always-serializing
+override QEMU_CPU_svm := EPYC-Genoa,$(subst $(SPACE),$(COMMA),$(strip \
+    $(addprefix +,$(QEMU_SVM_ADDED)) $(addprefix -,$(QEMU_SVM_REMOVED))))
+override QEMU_IOMMU_svm := amd-iommu,dma-remap=on,intremap=on,xtsup=on
+ifeq ($(QEMU_CPU_$(QEMU_VIRT)),)
+    $(error QEMU_VIRT must be vmx or svm)
+endif
+
 override QEMUFLAGS := \
     $(QEMU_MACHINE) \
-    $(QEMU_CPU) \
+    -cpu $(QEMU_CPU_$(QEMU_VIRT)) \
+    -device $(QEMU_IOMMU_$(QEMU_VIRT)) \
     $(QEMU_DEVICES) \
     $(QEMUFLAGS)
 override QEMU_UEFI_FW := \
