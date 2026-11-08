@@ -23,6 +23,7 @@
 #include <core.h>
 #include <csm/e820.h>
 #include <handoff.h>
+#include <hw/pci_enum.h>
 #include <hw/pci_host.h>
 #include <iommu/iommu_tables.h>
 #include <lib/heap.h>
@@ -457,6 +458,36 @@ void layout_init(void) {
     }
     for (size_t i = 0; i < host->private_count; i++) {
         identity_remove(host->private[i].base, host->private[i].end);
+    }
+
+    // A legacy video BIOS gives the OS its linear framebuffer's address as the
+    // card has it, not as the guest's BARs do (NVIDIA's VBE 3.0 BIOS on a
+    // Quadro RTX 4000 reports its BAR3 at the host's address): the card's
+    // memory below 4 GiB stays at its host addresses too, beside its BARs.
+    if (h->video.vbios_present) {
+        const struct handoff_pci_address *va = &h->video.vga_device;
+        struct pci_function *f = pci_enum_find((struct pci_addr){
+            va->segment, va->bus, (uint8_t)(va->devfn >> 3),
+            (uint8_t)(va->devfn & 7)
+        });
+        for (size_t b = 0; f != NULL && b < f->bar_count && b < 6; b++) {
+            const struct pci_bar *bar = &f->bars[b];
+            if ((bar->kind != PCI_BAR_MEM32 && bar->kind != PCI_BAR_MEM64)
+             || bar->size == 0 || bar->base == 0
+             || bar->base + bar->size > FOUR_GIB) {
+                continue;
+            }
+            printf(
+                "VBIOS card BAR%zu kept at the host's 0x%llx-0x%llx\n", b,
+                (unsigned long long)bar->base,
+                (unsigned long long)(bar->base + bar->size)
+            );
+            identity_add(
+                align_down(bar->base, PAGE_SIZE),
+                align_up(bar->base + bar->size, PAGE_SIZE), EfiMemoryMappedIO,
+                0
+            );
+        }
     }
 
     for (size_t i = 0; i < identity_count; i++) {
