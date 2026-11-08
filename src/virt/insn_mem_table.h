@@ -20,7 +20,6 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <virt/insn.h>
 
 #define INSN_MEM_TABLE_PREFIX_ANY 4
 #define INSN_MEM_TABLE_REG_ANY 8

@@ -20,9 +20,9 @@
 // rev. 4.11, Vols. 3-5. Do not edit.
 
 #include <stddef.h>
-#include <stdint.h>
 #include <virt/insn_mem_table.h>
 #include <lib/util.h>
+#include <virt/insn.h>
 
 #define LEGACY INSN_SPACE_LEGACY
 #define VEX INSN_SPACE_VEX

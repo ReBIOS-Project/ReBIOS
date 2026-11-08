@@ -16,7 +16,6 @@
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
 #include <stdbool.h>
-#include <stdint.h>
 #include <core.h>
 #include <csm/csm_boot.h>
 #include <handoff.h>
@@ -36,7 +35,6 @@
 #include <sys/cpu.h>
 #include <sys/mm.h>
 #include <sys/smp.h>
-#include <sys/x86.h>
 #include <virt/a20.h>
 #include <virt/cpuid.h>
 #include <virt/ferr.h>

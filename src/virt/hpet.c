@@ -20,7 +20,6 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <uacpi/acpi.h>
-#include <uacpi/platform/types.h>
 #include <uacpi/status.h>
 #include <uacpi/tables.h>
 #include <virt/hpet.h>

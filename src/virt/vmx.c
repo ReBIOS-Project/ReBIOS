@@ -21,7 +21,6 @@
 #include <stdint.h>
 #include <stdnoreturn.h>
 #include <virt/vmx.h>
-#include <hw/power.h>
 #include <lib/log.h>
 #include <lib/util.h>
 #include <memory.h>
@@ -40,7 +39,6 @@
 #include <virt/profile.h>
 #include <virt/task.h>
 #include <virt/vcpu.h>
-#include <virt/vioapic.h>
 #include <virt/virt.h>
 #include <virt/vlapic.h>
 

@@ -41,7 +41,6 @@
 #include <virt/nsvm.h>
 #include <virt/profile.h>
 #include <virt/vcpu.h>
-#include <virt/vioapic.h>
 #include <virt/virt.h>
 #include <virt/vlapic.h>
 

@@ -19,7 +19,6 @@
 // amdgpu.ids, and Linux 7.3's include/drm/intel/pciids.h.
 
 #include <stddef.h>
-#include <stdint.h>
 #include <loader/gpu_lists.h>
 #include <lib/util.h>
 

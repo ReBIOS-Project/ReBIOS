@@ -24,7 +24,6 @@
 #include <hw/pci_enum.h>
 #include <lib/printf.h>
 #include <lib/spinlock.h>
-#include <memory.h>
 #include <virt/guest_mem.h>
 #include <virt/hypercall.h>
 #include <virt/pci_plan.h>

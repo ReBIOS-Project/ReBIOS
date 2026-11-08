@@ -20,7 +20,6 @@
 
 #include <stdbool.h>
 #include <stddef.h>
-#include <stdint.h>
 
 // Finds a file in the coreboot file system of the boot flash, if the machine
 // runs coreboot.

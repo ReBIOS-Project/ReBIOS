@@ -18,7 +18,6 @@
 #ifndef HW__IOAPIC_H
 #define HW__IOAPIC_H
 
-#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <lib/spinlock.h>

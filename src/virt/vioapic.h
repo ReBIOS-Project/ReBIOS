@@ -20,7 +20,6 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <virt/vcpu.h>
 
 // Gives the guest I/O APICs of its own where the host's are, which the
 // hypervisor programs the host's from. Needs ioapic_init().

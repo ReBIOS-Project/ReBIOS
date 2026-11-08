@@ -688,7 +688,6 @@ def main():
             '// the guest reaches as the processor has them.',
             '',
             '#include <stddef.h>',
-            '#include <stdint.h>',
             '#include <virt/msr_table.h>',
             '#include <lib/util.h>',
             '']

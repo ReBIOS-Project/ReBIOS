@@ -21,7 +21,6 @@
 #include <stdint.h>
 #include <virt/vlapic.h>
 #include <hw/lapic.h>
-#include <hw/power.h>
 #include <iommu/remap.h>
 #include <lib/heap.h>
 #include <lib/log.h>
@@ -29,7 +28,6 @@
 #include <lib/util.h>
 #include <memory.h>
 #include <sys/cpu.h>
-#include <sys/fixup.h>
 #include <sys/mm.h>
 #include <sys/smp.h>
 #include <sys/x86.h>

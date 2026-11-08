@@ -28,7 +28,6 @@
 #include <lib/printf.h>
 #include <lib/time.h>
 #include <lib/util.h>
-#include <memory.h>
 #include <sys/fixup.h>
 #include <sys/mm.h>
 #include <sys/x86.h>

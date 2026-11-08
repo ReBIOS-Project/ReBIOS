@@ -22,7 +22,6 @@
 #include <virt/vioapic.h>
 #include <hw/ioapic.h>
 #include <lib/heap.h>
-#include <lib/log.h>
 #include <lib/spinlock.h>
 #include <sys/mm.h>
 #include <virt/gpt.h>

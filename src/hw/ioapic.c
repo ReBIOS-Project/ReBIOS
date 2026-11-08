@@ -15,7 +15,6 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <uacpi/acpi.h>

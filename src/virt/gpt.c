@@ -21,7 +21,6 @@
 #include <stdint.h>
 #include <virt/gpt.h>
 #include <iommu/dma.h>
-#include <lib/log.h>
 #include <lib/spinlock.h>
 #include <lib/util.h>
 #include <sys/mm.h>

@@ -21,7 +21,6 @@
 #include <stdint.h>
 #include <uacpi/acpi.h>
 #include <uacpi/event.h>
-#include <uacpi/io.h>
 #include <uacpi/kernel_api.h>
 #include <uacpi/log.h>
 #include <uacpi/namespace.h>
