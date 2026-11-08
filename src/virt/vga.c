@@ -1375,8 +1375,13 @@ static void make_frame(
             row_scan = 0;
             split = true;
         }
-        out.made[y] = all || line_changed(columns + 1, ma, row_scan);
-        if (out.made[y]) {
+        // A double scan's second line is its first again, unless the split
+        // begins there.
+        bool again = double_scan && (y & 1) != 0 && y != line_compare;
+        out.made[y] = again ? out.made[y - 1] : all || line_changed(columns + 1, ma, row_scan);
+        if (out.made[y] && again) {
+            memcpy(out.frame + y * width, out.frame + (y - 1) * width, width * sizeof(uint32_t));
+        } else if (out.made[y]) {
             // The screen below a split can be kept from panning.
             unsigned int shift = split && (vga.ac[AC_MODE] & AC_MODE_PAN_SPLIT) != 0 ? 0 : pan;
             if (graphics) {
