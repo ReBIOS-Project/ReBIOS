@@ -39,8 +39,11 @@ struct lapic_regs {
     uint32_t lvt[LAPIC_LVT_COUNT];
 };
 
+// What the MADT says of a LINT pin.
 struct nmi_pin {
-    unsigned int lint;
+    bool nmi;
+    // From a Local x2APIC NMI structure.
+    bool x2apic;
     bool active_low;
     bool level;
 };
@@ -102,24 +105,38 @@ static uint32_t apic_id_of(void) {
     return lapic_x2apic() ? id : id >> 24;
 }
 
+// The processor's ACPI UID: a Local x2APIC structure with its ID describes it
+// rather than a Local APIC structure with the ID, whose UID is 8 bits wide
+// rather than 32.
 static bool madt_uid(const uint8_t *madt, size_t length, uint32_t apic_id, uint32_t *uid) {
+    bool found = false;
     size_t offset = sizeof(struct acpi_madt);
     const struct acpi_entry_hdr *entry;
     while ((entry = acpi_madt_next(madt, length, &offset)) != NULL) {
         uint32_t id;
         uint32_t entry_uid;
         uint32_t flags;
-        if (acpi_madt_processor(entry, &id, &entry_uid, &flags) && id == apic_id) {
+        if (!acpi_madt_processor(entry, &id, &entry_uid, &flags) || id != apic_id) {
+            continue;
+        }
+        if (entry->type == ACPI_MADT_ENTRY_TYPE_LOCAL_X2APIC) {
             *uid = entry_uid;
             return true;
         }
+        if (!found) {
+            *uid = entry_uid;
+            found = true;
+        }
     }
-    return false;
+    return found;
 }
 
-// The MADT's NMI structures that apply to the processor with the APIC ID, one
-// for its ACPI processor UID taking precedence over one for all processors.
-static bool madt_nmi_pin(uint32_t apic_id, struct nmi_pin *pin) {
+// The MADT's NMI structures for the processor with the APIC ID, by LINT pin: a
+// later structure takes the place of an earlier one, but not of a Local x2APIC
+// NMI structure, which describes the processor as its Local x2APIC structure
+// does, and a Local APIC NMI structure's 8-bit UID names no processor whose
+// UID is above FEh.
+static bool madt_nmi_pins(uint32_t apic_id, struct nmi_pin pins[2]) {
     if (!acpi_tables_ready()) {
         return false;
     }
@@ -130,31 +147,33 @@ static bool madt_nmi_pin(uint32_t apic_id, struct nmi_pin *pin) {
     const uint8_t *madt = table.ptr;
     size_t length = table.hdr->length;
 
-    uint32_t uid = 0;
-    bool have_uid = madt_uid(madt, length, apic_id, &uid);
+    // A UID no structure gives matches the structures for all processors.
+    uint32_t uid = UINT32_MAX;
+    madt_uid(madt, length, apic_id, &uid);
 
     bool found = false;
-    bool specific = false;
     size_t offset = sizeof(struct acpi_madt);
     const struct acpi_entry_hdr *entry;
-    while (!specific && (entry = acpi_madt_next(madt, length, &offset)) != NULL) {
+    while ((entry = acpi_madt_next(madt, length, &offset)) != NULL) {
         uint32_t nmi_uid;
         bool all;
         uint8_t lint;
         uint16_t flags;
-        if (!acpi_madt_lapic_nmi(entry, &nmi_uid, &all, &lint, &flags)) {
+        if (!acpi_madt_lapic_nmi(entry, &nmi_uid, &all, &lint, &flags) || lint > 1) {
             continue;
         }
-        bool mine = have_uid && nmi_uid == uid;
-
-        if (lint > 1 || !(mine || (all && !found))) {
+        bool x2apic = entry->type == ACPI_MADT_ENTRY_TYPE_LOCAL_X2APIC_NMI;
+        bool mine = all || (nmi_uid == uid && (x2apic || uid <= 0xfe));
+        if (!mine || (pins[lint].x2apic && !x2apic)) {
             continue;
         }
-        pin->lint = lint;
-        pin->active_low = (flags & ACPI_MADT_POLARITY_MASK) == ACPI_MADT_POLARITY_ACTIVE_LOW;
-        pin->level = (flags & ACPI_MADT_TRIGGERING_MASK) == ACPI_MADT_TRIGGERING_LEVEL;
+        pins[lint] = (struct nmi_pin){
+            .nmi = true,
+            .x2apic = x2apic,
+            .active_low = (flags & ACPI_MADT_POLARITY_MASK) == ACPI_MADT_POLARITY_ACTIVE_LOW,
+            .level = (flags & ACPI_MADT_TRIGGERING_MASK) == ACPI_MADT_TRIGGERING_LEVEL
+        };
         found = true;
-        specific = mine;
     }
 
     uacpi_table_unref(&table);
@@ -230,12 +249,13 @@ void lapic_legacy_init(void) {
         printf("Local APIC %#x: found disabled\n", apic_id);
     }
 
-    struct nmi_pin nmi = { .lint = 1, .active_low = false, .level = false };
-    bool from_madt = madt_nmi_pin(apic_id, &nmi);
-    // LINT1 cannot be level-triggered (SDM 325462-093 Vol. 3A, 13.5.1).
-    if (nmi.lint == 1) {
-        nmi.level = false;
+    struct nmi_pin pins[2] = { 0 };
+    bool from_madt = madt_nmi_pins(apic_id, pins);
+    if (!pins[0].nmi && !pins[1].nmi) {
+        pins[1].nmi = true;
     }
+    // LINT1 cannot be level-triggered (SDM 325462-093 Vol. 3A, 13.5.1).
+    pins[1].level = false;
 
     lapic_write(APIC_TPR, 0);
     for (size_t i = 0; i < LAPIC_LVT_COUNT; i++) {
@@ -252,18 +272,27 @@ void lapic_legacy_init(void) {
     // Before the LINT entries, as a software disabled APIC keeps them masked.
     lapic_write(APIC_SVR, APIC_SVR_ENABLED | SPURIOUS_VECTOR);
 
-    uint32_t nmi_lvt = APIC_LVT_DELIVERY_NMI | (nmi.active_low ? APIC_LVT_ACTIVE_LOW : 0)
-                     | (nmi.level ? APIC_LVT_LEVEL : 0);
-    uint32_t extint_lvt = APIC_LVT_DELIVERY_EXTINT;
-    lapic_write(nmi.lint == 0 ? APIC_LVT_LINT0 : APIC_LVT_LINT1, nmi_lvt);
-    lapic_write(nmi.lint == 0 ? APIC_LVT_LINT1 : APIC_LVT_LINT0, extint_lvt);
+    // A pin without NMIs takes the 8259's interrupts.
+    for (size_t lint = 0; lint < 2; lint++) {
+        const struct nmi_pin *pin = &pins[lint];
+        uint32_t lvt = APIC_LVT_DELIVERY_EXTINT;
+        if (pin->nmi) {
+            lvt = APIC_LVT_DELIVERY_NMI | (pin->active_low ? APIC_LVT_ACTIVE_LOW : 0)
+                | (pin->level ? APIC_LVT_LEVEL : 0);
+        }
+        lapic_write(lint == 0 ? APIC_LVT_LINT0 : APIC_LVT_LINT1, lvt);
+    }
 
     struct lapic_regs set;
     read_regs(max_entry, &set);
     log_regs(apic_id, "set", &set, max_entry);
-    printf(
-        "Local APIC %#x: NMIs on LINT%u, active %s, %s triggered, %s\n", apic_id, nmi.lint,
-        nmi.active_low ? "low" : "high", nmi.level ? "level" : "edge",
-        from_madt ? "from the MADT" : "by default"
-    );
+    for (size_t lint = 0; lint < 2; lint++) {
+        if (pins[lint].nmi) {
+            printf(
+                "Local APIC %#x: NMIs on LINT%zu, active %s, %s triggered, %s\n", apic_id, lint,
+                pins[lint].active_low ? "low" : "high", pins[lint].level ? "level" : "edge",
+                from_madt ? "from the MADT" : "by default"
+            );
+        }
+    }
 }
