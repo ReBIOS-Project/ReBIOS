@@ -265,8 +265,10 @@ static struct {
     bool vbe_compare_all;
     bool vbe_tracked;
     uint64_t vbe_compare_due;
-    // One line of the display, in the framebuffer's pixel format.
+    // One line of the display, in the framebuffer's pixel format, which may be
+    // the frame's own.
     uint32_t *fb_line;
+    bool fb_rgb;
     // The colours of the frame being made: the DAC's through the PEL mask, and
     // the attribute controller's palette's through them.
     uint32_t palette[256];
@@ -1448,6 +1450,20 @@ static void fb_put(uint8_t *row, uint32_t x, uint32_t pixel, uint8_t bpp) {
     }
 }
 
+// Pixels from x on in a framebuffer row.
+static void fb_row(uint8_t *row, uint32_t x, const uint32_t *pixels, size_t count, uint8_t bpp) {
+    if (bpp == 32) {
+        volatile uint32_t *p = (volatile uint32_t *)row + x;
+        for (size_t i = 0; i < count; i++) {
+            p[i] = pixels[i];
+        }
+        return;
+    }
+    for (size_t i = 0; i < count; i++) {
+        fb_put(row, x + (uint32_t)i, pixels[i], bpp);
+    }
+}
+
 void vga_screen_size(uint32_t *width, uint32_t *height) {
     const struct handoff_framebuffer *fb = &core_handoff->video.framebuffer;
     bool turned = fb->rotation != HANDOFF_ROTATE_0;
@@ -1556,9 +1572,7 @@ static void screen_line(uint32_t y, uint32_t x0, uint32_t x1) {
     const struct handoff_framebuffer *fb = &core_handoff->video.framebuffer;
     if (fb->rotation == HANDOFF_ROTATE_0) {
         uint8_t *row = (uint8_t *)(uintptr_t)fb->base + (uint64_t)(out.y + y) * fb->pitch;
-        for (size_t x = x0; x < x1; x++) {
-            fb_put(row, out.x + x, out.fb_line[x], fb->bpp);
-        }
+        fb_row(row, out.x + x0, out.fb_line + x0, x1 - x0, fb->bpp);
         return;
     }
     if (out.band_count != 0
@@ -1578,6 +1592,26 @@ static void screen_line(uint32_t y, uint32_t x0, uint32_t x1) {
     }
     pixels_copy(out.band + (uint64_t)out.band_count * out.w, out.fb_line, out.w);
     out.band_count++;
+}
+
+// Pixels x0 to x1 of out.fb_line from a line of the display, scaled across.
+static void fb_line_make(const uint32_t *rgb, uint32_t x0, uint32_t x1) {
+    if (out.fb_rgb) {
+        for (size_t x = x0; x < x1; x++) {
+            out.fb_line[x] = rgb[out.xmap[x]];
+        }
+        return;
+    }
+    uint32_t source = UINT32_MAX;
+    uint32_t pixel = 0;
+    for (size_t x = x0; x < x1; x++) {
+        uint32_t value = rgb[out.xmap[x]];
+        if (value != source) {
+            source = value;
+            pixel = fb_pixel(value);
+        }
+        out.fb_line[x] = pixel;
+    }
 }
 
 // Starts showing a frame, all of it again where its size or border changed.
@@ -1642,16 +1676,7 @@ static void draw_lines(void) {
             x1 = out.w;
         }
         bool turned = fb->rotation != HANDOFF_ROTATE_0;
-        uint32_t source = UINT32_MAX;
-        uint32_t pixel = 0;
-        for (size_t x = turned ? 0 : x0; x < (turned ? out.w : x1); x++) {
-            uint32_t rgb = now[out.xmap[x]];
-            if (rgb != source) {
-                source = rgb;
-                pixel = fb_pixel(rgb);
-            }
-            out.fb_line[x] = pixel;
-        }
+        fb_line_make(now, turned ? 0 : x0, turned ? out.w : x1);
         for (size_t y = y0; y < y1 && y < out.h; y++) {
             screen_line(y, x0, x1);
         }
@@ -1924,16 +1949,7 @@ static void vbe_lines(void) {
 
         uint32_t y0 = (uint32_t)(((uint64_t)sy * out.h + height - 1) / height);
         uint32_t y1 = (uint32_t)(((uint64_t)(sy + 1) * out.h + height - 1) / height);
-        uint32_t source = UINT32_MAX;
-        uint32_t pixel = 0;
-        for (size_t x = 0; x < out.w; x++) {
-            uint32_t rgb = out.vbe_line[out.xmap[x]];
-            if (rgb != source) {
-                source = rgb;
-                pixel = fb_pixel(rgb);
-            }
-            out.fb_line[x] = pixel;
-        }
+        fb_line_make(out.vbe_line, 0, out.w);
         for (size_t y = y0; y < y1 && y < out.h; y++) {
             screen_line(y, 0, out.w);
         }
@@ -2191,6 +2207,8 @@ bool vga_init(void) {
         out.band = page_alloc(BAND_LINES * line_pages);
     }
     mm_write_combining(fb->base, (uint64_t)fb->pitch * fb->height);
+    out.fb_rgb = fb->bpp == 32 && fb->red_size == 8 && fb->red_shift == 16 && fb->green_size == 8
+              && fb->green_shift == 8 && fb->blue_size == 8 && fb->blue_shift == 0;
     for (size_t b = 0; b < 256; b++) {
         uint64_t spread = 0;
         for (size_t k = 0; k < 8; k++) {
