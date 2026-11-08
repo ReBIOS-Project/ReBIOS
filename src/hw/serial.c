@@ -32,6 +32,10 @@
 #define UART_LCR_DLAB 0x80
 #define UART_LCR_8N1 0x03
 #define UART_LSR_THRE 0x20
+// The FIFOs on and emptied, received bytes signalled at 14 (TI SNLS378C,
+// 8.6.4), and DTR, RTS, and OUT2, which gates the interrupt on PCs (8.6.7).
+#define UART_FCR_SETUP 0xc7
+#define UART_MCR_SETUP 0x0b
 
 #define UART_CLOCK 115200
 
@@ -62,8 +66,8 @@ bool serial_init(uint16_t port, uint32_t baud) {
     outb(port + UART_DLL, divisor & 0xff);
     outb(port + UART_DLM, (divisor >> 8) & 0xff);
     outb(port + UART_LCR, UART_LCR_8N1);
-    outb(port + UART_FCR, 0x07);
-    outb(port + UART_MCR, 0x03);
+    outb(port + UART_FCR, UART_FCR_SETUP);
+    outb(port + UART_MCR, UART_MCR_SETUP);
     return true;
 }
 
