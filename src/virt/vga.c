@@ -267,6 +267,10 @@ static struct {
     uint64_t vbe_compare_due;
     // One line of the display, in the framebuffer's pixel format.
     uint32_t *fb_line;
+    // The colours of the frame being made: the DAC's through the PEL mask, and
+    // the attribute controller's palette's through them.
+    uint32_t palette[256];
+    uint32_t ac_palette[16];
     // Lines of a turned display, which run down the framebuffer's columns:
     // band_count lines of out.w pixels, from line band_y on, of which pixels
     // band_x0 to band_x1 changed.
@@ -282,6 +286,9 @@ static struct {
     bool redraw_all;
     uint32_t next_line;
 } out;
+
+// Each byte of a plane as its 8 dots' bits, the leftmost's in the lowest byte.
+static uint64_t plane_spread[256];
 
 static uint8_t rotate_right(uint8_t value, size_t count) {
     count &= 7;
@@ -1201,18 +1208,24 @@ static void text_line(
             glyph = 0xff;
             whole = true;
         }
-        uint32_t fg_rgb = dac_rgb(ac_colour(fg));
-        uint32_t bg_rgb = dac_rgb(ac_colour(bg));
-        for (size_t k = 0; k < dots; k++) {
-            bool on;
-            if (k < 8) {
-                on = ((glyph >> (7 - k)) & 1) != 0;
-            } else {
-                // Line graphics characters continue into the ninth column.
-                on = whole
+        uint32_t fg_rgb = out.ac_palette[fg];
+        uint32_t bg_rgb = out.ac_palette[bg];
+        // Line graphics characters continue into the ninth column.
+        bool ninth = whole
                   || ((vga.ac[AC_MODE] & AC_MODE_LINE_GRAPHICS) != 0 && ch >= 0xc0 && ch <= 0xdf
                    && (glyph & 1) != 0);
+        if (repeat == 1 && x + dots <= width) {
+            for (size_t k = 0; k < 8; k++) {
+                line[x + k] = ((glyph >> (7 - k)) & 1) != 0 ? fg_rgb : bg_rgb;
             }
+            if (dots == 9) {
+                line[x + 8] = ninth ? fg_rgb : bg_rgb;
+            }
+            x += dots;
+            continue;
+        }
+        for (size_t k = 0; k < dots; k++) {
+            bool on = k < 8 ? ((glyph >> (7 - k)) & 1) != 0 : ninth;
             put(line, &x, width, on ? fg_rgb : bg_rgb, repeat);
         }
     }
@@ -1227,13 +1240,24 @@ static void graphics_line(
 ) {
     uint8_t mode = vga.gc[GC_MODE];
     uint8_t enable = vga.ac[AC_PLANE_ENABLE] & 0x0f;
+    uint64_t enables = enable * (uint64_t)0x0101010101010101;
     uint32_t x = 0;
     for (size_t c = 0; c < columns; c++) {
         uint32_t a = crtc_address(ma + c, row_scan);
         uint8_t b[4] = { vga.planes[0][a], vga.planes[1][a], vga.planes[2][a], vga.planes[3][a] };
+        // Each character clock is 8 dots, of the 256-colour mode's pixels
+        // twice.
+        bool room = repeat == 1 && x + 8 <= width;
         if ((mode & GC_MODE_256) != 0) {
             for (size_t k = 0; k < 4; k++) {
-                put(line, &x, width, dac_rgb(b[k]), 2 * repeat);
+                uint32_t rgb = out.palette[b[k]];
+                if (room) {
+                    line[x] = rgb;
+                    line[x + 1] = rgb;
+                    x += 2;
+                } else {
+                    put(line, &x, width, rgb, 2 * repeat);
+                }
             }
         } else if ((mode & GC_MODE_INTERLEAVE) != 0) {
             for (size_t k = 0; k < 8; k++) {
@@ -1241,15 +1265,19 @@ static void graphics_line(
                 uint8_t low = k < 4 ? b[0] : b[1];
                 uint8_t high = k < 4 ? b[2] : b[3];
                 uint8_t colour = (uint8_t)(((low >> shift) & 3) | (((high >> shift) & 3) << 2));
-                put(line, &x, width, dac_rgb(ac_colour(colour & enable)), repeat);
+                put(line, &x, width, out.ac_palette[colour & enable], repeat);
             }
         } else {
+            uint64_t colours = plane_spread[b[0]] | plane_spread[b[1]] << 1
+                             | plane_spread[b[2]] << 2 | plane_spread[b[3]] << 3;
+            colours &= enables;
             for (size_t k = 0; k < 8; k++) {
-                unsigned int shift = 7 - k;
-                uint8_t colour = (uint8_t)(((b[0] >> shift) & 1) | (((b[1] >> shift) & 1) << 1)
-                                         | (((b[2] >> shift) & 1) << 2)
-                                         | (((b[3] >> shift) & 1) << 3));
-                put(line, &x, width, dac_rgb(ac_colour(colour & enable)), repeat);
+                uint32_t rgb = out.ac_palette[(colours >> (8 * k)) & 0x0f];
+                if (room) {
+                    line[x++] = rgb;
+                } else {
+                    put(line, &x, width, rgb, repeat);
+                }
             }
         }
     }
@@ -1318,6 +1346,12 @@ static void make_frame(
         memset(out.frame, 0, width * height * sizeof(uint32_t));
         memset(out.made, all, height);
         return;
+    }
+    for (size_t i = 0; i < 256; i++) {
+        out.palette[i] = dac_rgb((uint8_t)i);
+    }
+    for (size_t i = 0; i < 16; i++) {
+        out.ac_palette[i] = dac_rgb(ac_colour((uint8_t)i));
     }
 
     unsigned int max_scan = vga.crtc[CRTC_MAX_SCAN] & 0x1f;
@@ -2145,6 +2179,13 @@ bool vga_init(void) {
         out.band = page_alloc(BAND_LINES * line_pages);
     }
     mm_write_combining(fb->base, (uint64_t)fb->pitch * fb->height);
+    for (size_t b = 0; b < 256; b++) {
+        uint64_t spread = 0;
+        for (size_t k = 0; k < 8; k++) {
+            spread |= (uint64_t)((b >> (7 - k)) & 1) << (8 * k);
+        }
+        plane_spread[b] = spread;
+    }
     vga.pel_mask = 0xff;
     vga.misc = MISC_COLOR;
 
