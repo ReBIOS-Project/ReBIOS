@@ -39,7 +39,9 @@ void amdvi_enable(uintptr_t root);
 // Makes the units see changes to the tables made while they translate.
 void amdvi_flush(void);
 
-void amdvi_report_faults(void);
+// Logs at most limit of the events that the units logged, clears them all, and
+// returns how many it left out.
+size_t amdvi_report_faults(size_t limit);
 
 // Interrupt remapping, once the I/O APICs are known: tables per device ID, of
 // the requester IDs that interrupt messages carry, in the guest virtual APIC's

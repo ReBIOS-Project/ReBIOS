@@ -645,7 +645,8 @@ void vtd_flush(void) {
     }
 }
 
-void vtd_report_faults(void) {
+size_t vtd_report_faults(size_t limit) {
+    size_t unshown = 0;
     for (size_t i = 0; i < unit_count; i++) {
         struct vtd_unit *u = &units[i];
         uint32_t status = reg_read32(u, REG_FSTS);
@@ -660,6 +661,12 @@ void vtd_report_faults(void) {
             if ((high & FAULT_F) == 0) {
                 continue;
             }
+            if (limit == 0) {
+                unshown++;
+                reg_write64(u, record + 8, FAULT_F);
+                continue;
+            }
+            limit--;
             uint64_t low = reg_read64(u, record);
             uint32_t source = high & 0xffff;
             printf(
@@ -674,4 +681,5 @@ void vtd_report_faults(void) {
             reg_write32(u, REG_FSTS, FSTS_PFO);
         }
     }
+    return unshown;
 }

@@ -999,7 +999,8 @@ void amdvi_flush(void) {
     }
 }
 
-void amdvi_report_faults(void) {
+size_t amdvi_report_faults(size_t limit) {
+    size_t unshown = 0;
     for (size_t i = 0; i < unit_count; i++) {
         struct amdvi_unit *u = &units[i];
         uint32_t head = (reg_read(u, REG_EVENT_HEAD) >> 4) & (LOG_ENTRIES - 1);
@@ -1015,11 +1016,16 @@ void amdvi_report_faults(void) {
                 cpu_relax();
             }
             uint32_t source = event[0] & 0xffff;
-            printf(
-                "AMD-Vi unit %zu: event %#x from %02x:%02x.%x: %08x %08x %08x %08x\n", i,
-                event[1] >> CMD_SHIFT, source >> 8, (source >> 3) & 0x1f, source & 7, event[0],
-                event[1], event[2], event[3]
-            );
+            if (limit == 0) {
+                unshown++;
+            } else {
+                limit--;
+                printf(
+                    "AMD-Vi unit %zu: event %#x from %02x:%02x.%x: %08x %08x %08x %08x\n", i,
+                    event[1] >> CMD_SHIFT, source >> 8, (source >> 3) & 0x1f, source & 7, event[0],
+                    event[1], event[2], event[3]
+                );
+            }
             for (size_t j = 0; j < 4; j++) {
                 event[j] = 0;
             }
@@ -1031,4 +1037,5 @@ void amdvi_report_faults(void) {
             reg_write(u, REG_STATUS, STATUS_EVENT_OVERFLOW);
         }
     }
+    return unshown;
 }

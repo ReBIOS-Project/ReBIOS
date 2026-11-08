@@ -26,13 +26,19 @@
 #include <iommu/vtd.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
+#include <lib/time.h>
 #include <lib/util.h>
 #include <sys/mm.h>
 #include <sys/ptable.h>
+#include <sys/x86.h>
 #include <virt/gpt.h>
+#include <virt/hv_timer.h>
 
 // What 4-level tables translate.
 #define DMA_ADDRESS_LIMIT ((uint64_t)1 << 48)
+// While the guest runs, faults are reported each second, and only a few, as a
+// flood of them would hold the boot processor.
+#define FAULT_LINES 4
 #define LEGACY_END ((uint64_t)0x100000)
 
 // VT-d second-stage paging entries.
@@ -55,6 +61,7 @@ static size_t leaf_level_max;
 static uint64_t *root;
 static bool enabled;
 static struct spinlock dma_lock;
+static struct hv_timer fault_timer;
 
 static bool entry_present(uint64_t e) {
     if (kind == IOMMU_TABLES_KIND_AMD) {
@@ -183,6 +190,22 @@ static void reserved_regions_apply(const struct iommu_tables *tables) {
     }
 }
 
+static size_t report_faults(size_t limit) {
+    if (!enabled) {
+        return 0;
+    }
+    return kind == IOMMU_TABLES_KIND_AMD ? amdvi_report_faults(limit) : vtd_report_faults(limit);
+}
+
+static void fault_timer_fired(void *ctx) {
+    (void)ctx;
+    size_t unshown = report_faults(FAULT_LINES);
+    if (unshown != 0) {
+        printf("%zu more IOMMU faults\n", unshown);
+    }
+    hv_timer_set(&fault_timer, rdtsc() + time_tsc_hz());
+}
+
 void dma_enable(void) {
     const struct iommu_tables *tables = iommu_tables_parse();
 
@@ -196,15 +219,11 @@ void dma_enable(void) {
     enabled = true;
     spinlock_release(&dma_lock);
     printf("Device DMA remapped\n");
+    fault_timer.fired = fault_timer_fired;
+    hv_timer_add(&fault_timer);
+    hv_timer_set(&fault_timer, rdtsc() + time_tsc_hz());
 }
 
 void dma_report_faults(void) {
-    if (!enabled) {
-        return;
-    }
-    if (kind == IOMMU_TABLES_KIND_AMD) {
-        amdvi_report_faults();
-    } else {
-        vtd_report_faults();
-    }
+    report_faults(SIZE_MAX);
 }

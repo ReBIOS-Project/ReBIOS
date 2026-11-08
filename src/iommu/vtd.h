@@ -59,6 +59,8 @@ uint64_t vtd_remap_rte(uint16_t index, uint8_t vector, bool level, bool active_l
 // Makes the units see changes to the tables made while they translate.
 void vtd_flush(void);
 
-void vtd_report_faults(void);
+// Logs at most limit of the faults that the units recorded, clears them all,
+// and returns how many it left out.
+size_t vtd_report_faults(size_t limit);
 
 #endif
