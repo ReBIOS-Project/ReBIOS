@@ -79,7 +79,7 @@ struct cpu {
     uint64_t clock_modulation_set;
     // Whether the host is taking interrupts, as SVM has it do.
     _Atomic(bool) taking_interrupts;
-    // IA32_APIC_BASE, once lapic_host_mode() set it for good, else 0.
+    // IA32_APIC_BASE, once lapic_host_init() set it for good, else 0.
     uint64_t apic_base;
     // The task the CPU runs, while it runs one.
     struct task *task;

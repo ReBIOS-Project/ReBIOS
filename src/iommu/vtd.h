@@ -28,9 +28,12 @@
 // level of leaf all of them take (0 4KiB, 1 2MiB, 2 1GiB).
 bool vtd_probe(const struct iommu_tables *tables, size_t *leaf_level);
 
+// Whether every unit can remap interrupts in x2APIC format.
+bool vtd_remap_x2apic_capable(void);
 // Takes the units over from the firmware, and has them remap interrupts if
+// they all can, in x2APIC format where the local APICs are in x2APIC mode and
 // they all can: before any interrupt source is programmed.
-void vtd_start(void);
+void vtd_start(bool x2apic);
 
 // Has every unit translate all DMA through the 4-level second-stage table at
 // pml4.
@@ -47,11 +50,9 @@ void vtd_remap_set(uint16_t index, uint32_t apic_id, uint8_t vector, bool level)
 // the 64-byte posted-interrupt descriptor at descriptor.
 bool vtd_posting(void);
 void vtd_remap_post(uint16_t index, uint8_t vector, uintptr_t descriptor);
-// Whether every unit also remaps in x2APIC format, which posting then follows
-// the descriptors' destinations into, whether they do now, and switching.
-bool vtd_remap_x2apic_capable(void);
+// Whether the units remap in x2APIC format, reading the descriptors'
+// destinations in it.
 bool vtd_remap_x2apic_on(void);
-void vtd_remap_x2apic(bool on);
 void vtd_remap_message(uint16_t index, uint32_t *address, uint32_t *data);
 uint64_t vtd_remap_rte(uint16_t index, uint8_t vector, bool level, bool active_low);
 

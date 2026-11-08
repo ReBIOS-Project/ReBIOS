@@ -26,10 +26,6 @@
 #include <sys/fixup.h>
 #include <sys/x86.h>
 
-// CMCI has an LVT entry where the version register's maximum entry is this or
-// more.
-#define LVT_CMCI_MIN_MAX_ENTRY 6
-
 #define IPI_TIMEOUT_NS ((uint64_t)100000000)
 
 // The divide configuration register's value for dividing by 1.
@@ -42,6 +38,8 @@
 #define MSR_INTERRUPT_PENDING 0xc0010055
 #define INTERRUPT_PENDING_C1E ((uint64_t)3 << 27)
 
+// The mode lapic_host_choose() chose for every local APIC.
+static bool host_x2apic;
 static bool timer_tsc_deadline;
 // The rate of the timer's clock, measured once, as not every processor says.
 static uint64_t timer_hz;
@@ -207,70 +205,28 @@ void lapic_eoi(void) {
     lapic_write(APIC_EOI, 0);
 }
 
-static uint32_t max_entry(void) {
-    return (lapic_read(APIC_VERSION) >> 16) & 0xff;
+void lapic_host_choose(bool x2apic_wanted) {
+    host_x2apic = lapic_xapic_locked() || lapic_x2apic()
+               || (x2apic_wanted && lapic_x2apic_supported());
+    printf("Local APICs: %s mode\n", host_x2apic ? "x2APIC" : "xAPIC");
 }
 
-static bool host_mode(bool x2apic) {
-    if (x2apic && !lapic_x2apic_supported()) {
-        x2apic = false;
-    }
-    if (!x2apic && lapic_xapic_locked()) {
-        x2apic = true;
-    }
+bool lapic_host_x2apic(void) {
+    return host_x2apic;
+}
+
+// lapic_legacy_init() leaves xAPIC mode, unless that is locked off, so the
+// local APIC only ever enters x2APIC mode here, which keeps its registers (SDM
+// 325462-093 Vol. 3A, 13.12.5).
+static void host_mode(void) {
     uint64_t base = rdmsr(MSR_IA32_APIC_BASE);
     if ((base & APIC_BASE_EN) == 0) {
         base = (base | APIC_BASE_EN) & ~APIC_BASE_EXTD;
         wrmsr(MSR_IA32_APIC_BASE, base);
     }
-    bool now = (base & APIC_BASE_EXTD) != 0;
-    if (x2apic == now) {
-        return x2apic;
-    }
-    if (x2apic) {
+    if (host_x2apic && (base & APIC_BASE_EXTD) == 0) {
         wrmsr(MSR_IA32_APIC_BASE, base | APIC_BASE_EXTD);
-        return true;
     }
-
-    // x2APIC mode is only left for the disabled state, which resets the
-    // registers: those the hypervisor set come back, and so do AMD's extended
-    // control register and LVT entries, which the firmware sets too.
-    static const uint32_t kept[] = {
-        APIC_SVR, APIC_TPR, APIC_LVT_TIMER, APIC_LVT_THERMAL, APIC_LVT_PERF,
-        APIC_LVT_LINT0, APIC_LVT_LINT1, APIC_LVT_ERROR, APIC_TIMER_DIVIDE
-    };
-    uint32_t regs[ARRAY_COUNT(kept) + 2 + APIC_EILVT_MAX];
-    size_t count = 0;
-    for (size_t i = 0; i < ARRAY_COUNT(kept); i++) {
-        regs[count++] = kept[i];
-    }
-    if (max_entry() >= LVT_CMCI_MIN_MAX_ENTRY) {
-        regs[count++] = APIC_LVT_CMCI;
-    }
-    if ((lapic_read(APIC_VERSION) & APIC_VERSION_EXT_SPACE) != 0) {
-        regs[count++] = APIC_EXT_CONTROL;
-        size_t entries = (lapic_read(APIC_EXT_FEATURE) >> 16) & 0xff;
-        for (size_t i = 0; i < entries && i < APIC_EILVT_MAX; i++) {
-            regs[count++] = APIC_EILVT + (uint32_t)i * 0x10;
-        }
-    }
-    uint32_t values[ARRAY_COUNT(regs)];
-    for (size_t i = 0; i < count; i++) {
-        values[i] = lapic_read(regs[i]);
-    }
-    wrmsr(MSR_IA32_APIC_BASE, base & ~(APIC_BASE_EN | APIC_BASE_EXTD));
-    wrmsr(MSR_IA32_APIC_BASE, (base & ~APIC_BASE_EXTD) | APIC_BASE_EN);
-    for (size_t i = 0; i < count; i++) {
-        lapic_write(regs[i], values[i]);
-    }
-    return false;
-}
-
-bool lapic_host_mode(bool x2apic) {
-    this_cpu()->apic_base = 0;
-    x2apic = host_mode(x2apic);
-    this_cpu()->apic_base = rdmsr(MSR_IA32_APIC_BASE);
-    return x2apic;
 }
 
 uint64_t lapic_timer_to_tsc(uint64_t ticks) {
@@ -329,7 +285,9 @@ static void c1e_off(void) {
 
 void lapic_host_init(uint8_t spurious_vector, uint8_t timer_vector) {
     c1e_off();
-    lapic_host_mode(false);
+    this_cpu()->apic_base = 0;
+    host_mode();
+    this_cpu()->apic_base = rdmsr(MSR_IA32_APIC_BASE);
     lapic_write(APIC_TPR, 0);
     lapic_write(APIC_SVR, APIC_SVR_ENABLED | spurious_vector);
     lapic_write(APIC_LVT_LINT0, APIC_LVT_MASKED);

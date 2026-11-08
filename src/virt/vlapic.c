@@ -143,8 +143,6 @@ struct vlapic {
     // triggered one must be in the registers before its vector's EOI exit is.
     struct posted *posted;
     _Atomic(int) avic;
-    // Whether VMX virtualises the vCPU's IPIs.
-    bool ipiv;
     // Something that decides where the guest's messages can be posted changed:
     // they are routed again before the vCPU enters the guest.
     bool post_recheck;
@@ -243,16 +241,10 @@ static bool posted_interrupts;
 static bool x2apic_virtualisation;
 // VMX posts IPIs between vCPUs itself (SDM 325462-093 Vol. 3C, 32.1.6), to
 // PIDs a table finds by APIC ID, and sends their notifications to destinations
-// it reads in the mode of the sender's local APIC: a vCPU does so only while
-// its processor's is the mode they are written in, which follows the vCPUs'.
+// it reads in the mode of the sender's local APIC, which is the hypervisor's.
 static bool ipi_virtualization;
 static uint64_t *pid_table;
 static uint32_t pid_table_last;
-static struct spinlock ipiv_lock;
-static _Atomic(bool) ipiv_x2apic;
-static _Atomic(bool) ipiv_recheck;
-// Nothing is posted while the destinations change format.
-static _Atomic(bool) post_paused;
 
 // The x2APIC MSRs whose registers hold what they read as, and those whose
 // writes VMX virtualises with virtual-interrupt delivery (SDM 325462-093 Vol.
@@ -389,8 +381,6 @@ void vlapic_init(void) {
             ipi_virtualization = false;
         } else {
             pid_table = page_alloc(page_count((pid_table_last + 1) * 8));
-            atomic_store_explicit(&ipiv_x2apic, lapic_x2apic(), memory_order_release);
-            atomic_store_explicit(&ipiv_recheck, true, memory_order_release);
         }
     }
     if (!virt_vmx && svm_avic) {
@@ -469,7 +459,7 @@ static void access_virtualisation(const struct vlapic *vl) {
     if (x2apic_virtualisation) {
         uintptr_t bitmap = virt_msr_bitmap();
         if (x2) {
-            bitmap = vl->ipiv ? virt_msr_bitmap_x2apic_icr() : virt_msr_bitmap_x2apic();
+            bitmap = ipi_virtualization ? virt_msr_bitmap_x2apic_icr() : virt_msr_bitmap_x2apic();
         }
         vmx_write(VMCS_MSR_BITMAP, bitmap);
     }
@@ -722,12 +712,6 @@ static uint32_t ipiv_destination(uint32_t id, bool x2apic) {
     return x2apic ? id : (id << 8) & 0xff00;
 }
 
-static void ipiv_recheck_soon(void) {
-    if (ipi_virtualization) {
-        atomic_store_explicit(&ipiv_recheck, true, memory_order_release);
-    }
-}
-
 static void post_recheck_soon(struct vlapic *vl) {
     if (posted_interrupts || avic_supported) {
         vl->post_recheck = true;
@@ -738,68 +722,6 @@ bool vlapic_post_changed(struct vcpu *v) {
     bool changed = v->vlapic->post_recheck;
     v->vlapic->post_recheck = false;
     return changed;
-}
-
-// The destinations change mode once every vCPU but those waiting for a
-// start-up IPI is in the other: none virtualises IPIs then, as a vCPU only
-// changes its mode out of the guest.
-static void ipiv_reformat(void) {
-    spinlock_acquire(&ipiv_lock);
-    bool to = !atomic_load_explicit(&ipiv_x2apic, memory_order_acquire);
-    bool all = true;
-    for (size_t i = 0; i < smp_cpu_count() && all; i++) {
-        struct cpu *cpu = smp_cpu(i);
-        if (cpu->vcpu == NULL
-         || atomic_load_explicit(&cpu->vcpu->sipi, memory_order_acquire) == VCPU_SIPI_WAITING) {
-            continue;
-        }
-        uintptr_t base = atomic_load_explicit(
-            (_Atomic(uint64_t) *)&cpu->apic_base, memory_order_acquire
-        );
-        all = base != 0 && ((base & APIC_BASE_EXTD) != 0) == to;
-    }
-    if (all) {
-        // The IOMMUs read the destinations in the format they remap in, which
-        // follows where it can, nothing being posted meanwhile, as an
-        // interrupt to a descriptor in the other is blocked (D51397-019 rev.
-        // 5.20, 5.2.3, 9.11). A processor still in xAPIC mode takes x2APIC
-        // format's interrupts, which x2APIC mode comes after (SDM 325462-093
-        // Vol. 3A, 13.12.7).
-        bool posting = remap_posting();
-        if (posting) {
-            atomic_store_explicit(&post_paused, true, memory_order_release);
-            pci_virt_repost();
-            remap_x2apic(to);
-        }
-        for (size_t i = 0; i < smp_cpu_count(); i++) {
-            struct vcpu *v = smp_cpu(i)->vcpu;
-            if (v != NULL && v->vlapic != NULL) {
-                atomic_store_explicit(
-                    &v->vlapic->posted->destination, ipiv_destination(v->vlapic->id, to),
-                    memory_order_release
-                );
-            }
-        }
-        atomic_store_explicit(&ipiv_x2apic, to, memory_order_release);
-        if (posting) {
-            atomic_store_explicit(&post_paused, false, memory_order_release);
-            pci_virt_repost();
-        }
-    }
-    spinlock_release(&ipiv_lock);
-}
-
-static void ipiv_entry(struct vcpu *v) {
-    struct vlapic *vl = v->vlapic;
-    if (atomic_exchange_explicit(&ipiv_recheck, false, memory_order_acq_rel)) {
-        ipiv_reformat();
-    }
-    bool on = lapic_x2apic() == atomic_load_explicit(&ipiv_x2apic, memory_order_acquire);
-    if (on != vl->ipiv) {
-        vl->ipiv = on;
-        vmx_write(VMCS_TERTIARY_CONTROLS, on ? PROC3_IPI_VIRT : 0);
-        access_virtualisation(vl);
-    }
 }
 
 static void avic_recheck_soon(void) {
@@ -1059,7 +981,6 @@ static void reset_registers(struct vcpu *v) {
 
 void vlapic_reset(struct vcpu *v) {
     reset_registers(v);
-    ipiv_recheck_soon();
 }
 
 void vlapic_create(struct vcpu *v) {
@@ -1088,13 +1009,10 @@ void vlapic_create(struct vcpu *v) {
             vmx_write(VMCS_POSTED_INTR_NV, VLAPIC_POSTED_VECTOR);
             vmx_write(VMCS_POSTED_INTR_DESC, (uint64_t)(uintptr_t)vl->posted);
             // The notifications that IPI virtualisation and the IOMMUs send.
-            spinlock_acquire(&ipiv_lock);
             atomic_init(
                 &vl->posted->notification, (uint32_t)VLAPIC_POSTED_VECTOR << POSTED_VECTOR_SHIFT
             );
-            bool x2apic = atomic_load_explicit(&ipiv_x2apic, memory_order_acquire);
-            atomic_init(&vl->posted->destination, ipiv_destination(vl->id, x2apic));
-            spinlock_release(&ipiv_lock);
+            atomic_init(&vl->posted->destination, ipiv_destination(vl->id, lapic_host_x2apic()));
         }
         if (ipi_virtualization) {
             atomic_store_explicit(
@@ -1102,7 +1020,7 @@ void vlapic_create(struct vcpu *v) {
                 memory_order_release
             );
             vmx_write(VMCS_PROC_CONTROLS, vmx_read(VMCS_PROC_CONTROLS) | PROC_TERTIARY_CONTROLS);
-            vmx_write(VMCS_TERTIARY_CONTROLS, 0);
+            vmx_write(VMCS_TERTIARY_CONTROLS, PROC3_IPI_VIRT);
             vmx_write(VMCS_PID_POINTER_TABLE, (uint64_t)(uintptr_t)pid_table);
             vmx_write(VMCS_LAST_PID_POINTER_INDEX, pid_table_last);
         }
@@ -1396,10 +1314,6 @@ static void virtual_delivery(struct vlapic *vl) {
 void vlapic_prepare_entry(struct vcpu *v) {
     struct vlapic *vl = v->vlapic;
     merge(vl);
-    // VMCS01's, which the guest's guest's VMCS is not.
-    if (ipi_virtualization && !nvmx_in_l2(v)) {
-        ipiv_entry(v);
-    }
     if (!avic_supported) {
         return;
     }
@@ -1637,17 +1551,14 @@ void vlapic_deliver_msi(uint32_t address, uint32_t data) {
 
 // Only where posting does what vlapic_deliver_msi() does: fixed or lowest
 // priority edge-triggered interrupts, of vectors past the exceptions', to one
-// vCPU whose local APIC takes them; with VMX, while the IOMMUs read the
-// descriptors' destinations in the format IPI virtualisation has them in, and
-// with SVM, while AVIC runs the local APICs from their registers.
+// vCPU whose local APIC takes them; with VMX, where the IOMMUs read the
+// descriptors' destinations in the local APICs' mode, which they hold them in,
+// and with SVM, while AVIC runs the local APICs from their registers.
 bool vlapic_post_target(
     uint32_t address, uint32_t data, size_t count, struct remap_target *target
 ) {
     if (virt_vmx) {
-        bool x2apic_destinations = ipi_virtualization
-                                && atomic_load_explicit(&ipiv_x2apic, memory_order_acquire);
-        if (!posted_interrupts || atomic_load_explicit(&post_paused, memory_order_acquire)
-         || x2apic_destinations != remap_x2apic_on()) {
+        if (!posted_interrupts || remap_x2apic_on() != lapic_host_x2apic()) {
             return false;
         }
     } else if (!atomic_load_explicit(&avic_wanted, memory_order_acquire)) {
@@ -2175,10 +2086,6 @@ static bool apic_base_write(struct vcpu *v, uint64_t value) {
         return true;
     }
     if (extd != was_x2 || !was_en) {
-        lapic_host_mode(extd);
-        // The way there may have taken the timer's count with it.
-        vl->timer_armed = 0;
-        ipiv_recheck_soon();
         if (!was_en) {
             reset_registers(v);
         }
@@ -2189,10 +2096,6 @@ static bool apic_base_write(struct vcpu *v, uint64_t value) {
             regs_set(vl, x2apic_icr_high(), 0);
         }
         id_reg(vl);
-        thermal_lvt(vl);
-        perf_lvt(vl);
-        eilvt_lvts(vl);
-        mirror_logical(vl);
     }
     if (!extd) {
         trap_page(vl->base & APIC_BASE_ADDRESS);

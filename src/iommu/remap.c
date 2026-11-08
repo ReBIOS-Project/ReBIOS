@@ -89,18 +89,8 @@ void remap_poll(void (*woken)(uint32_t tag)) {
     }
 }
 
-bool remap_x2apic_capable(void) {
-    return !amd() && vtd_remap_x2apic_capable();
-}
-
 bool remap_x2apic_on(void) {
     return amd() ? amdvi_x2apic_on() : vtd_remap_x2apic_on();
-}
-
-void remap_x2apic(bool on) {
-    if (!amd()) {
-        vtd_remap_x2apic(on);
-    }
 }
 
 void remap_message(int32_t requester, uint16_t index, uint32_t *address, uint32_t *data) {

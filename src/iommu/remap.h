@@ -59,11 +59,9 @@ void remap_running(uint32_t tag, bool running);
 // Calls woken with the tag of each vCPU the IOMMUs logged an interrupt for
 // while it did not run, and with every tag where a log lost some.
 void remap_poll(void (*woken)(uint32_t tag));
-// Whether the IOMMUs can also remap in x2APIC format, reading the descriptors'
-// destinations in it, whether they do now, and switching them to it or back.
-bool remap_x2apic_capable(void);
+// Whether the IOMMUs remap to x2APIC destinations, VT-d also reading the
+// descriptors' destinations in x2APIC format.
 bool remap_x2apic_on(void);
-void remap_x2apic(bool on);
 // The message, and the I/O APIC entry, that name an entry.
 void remap_message(int32_t requester, uint16_t index, uint32_t *address, uint32_t *data);
 uint64_t remap_rte(int32_t requester, uint16_t index, uint8_t vector, bool level, bool active_low);

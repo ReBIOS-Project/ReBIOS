@@ -18,7 +18,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <uacpi/acpi.h>
 #include <iommu/dma.h>
+#include <hw/lapic.h>
 #include <iommu/amdvi.h>
 #include <iommu/iommu_tables.h>
 #include <iommu/vtd.h>
@@ -110,15 +112,22 @@ void dma_init(void) {
     const struct iommu_tables *tables = iommu_tables_parse();
     kind = tables->kind;
 
+    // The local APICs' mode, chosen before the units remap interrupts in its
+    // format: x2APIC mode where every unit can remap in it, unless the DMAR
+    // asks system software not to turn it on (VT-d D51397-019 rev. 5.20, 8.1).
     bool usable = false;
     if (kind == IOMMU_TABLES_KIND_VTD) {
         usable = vtd_probe(tables, &leaf_level_max);
         if (usable) {
-            vtd_start();
+            uint32_t opt_out = ACPI_DMAR_INTR_REMAP | ACPI_DMAR_X2APIC_OPT_OUT;
+            bool opted_out = (tables->vtd_flags & opt_out) == opt_out;
+            lapic_host_choose(vtd_remap_x2apic_capable() && !opted_out);
+            vtd_start(lapic_host_x2apic());
         }
     } else if (kind == IOMMU_TABLES_KIND_AMD) {
         usable = amdvi_probe(tables, &leaf_level_max);
         if (usable) {
+            lapic_host_choose(amdvi_x2apic_capable());
             amdvi_start();
         }
     }
