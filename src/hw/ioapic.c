@@ -35,13 +35,18 @@
 static struct ioapic *ioapics;
 static size_t count;
 
+// The index register can be 8 bits wide (Intel 319973-003, 13.5.2).
+static void reg_select(struct ioapic *io, uint32_t reg) {
+    *(volatile uint8_t *)(uintptr_t)(io->base + IOAPIC_REGSEL) = (uint8_t)reg;
+}
+
 static uint32_t reg_read(struct ioapic *io, uint32_t reg) {
-    *(volatile uint32_t *)(uintptr_t)(io->base + IOAPIC_REGSEL) = reg;
+    reg_select(io, reg);
     return *(volatile uint32_t *)(uintptr_t)(io->base + IOAPIC_WINDOW);
 }
 
 static void reg_write(struct ioapic *io, uint32_t reg, uint32_t value) {
-    *(volatile uint32_t *)(uintptr_t)(io->base + IOAPIC_REGSEL) = reg;
+    reg_select(io, reg);
     *(volatile uint32_t *)(uintptr_t)(io->base + IOAPIC_WINDOW) = value;
 }
 
