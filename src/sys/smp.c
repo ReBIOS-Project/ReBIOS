@@ -39,8 +39,8 @@
 #include <virt/virt.h>
 #include <virt/vlapic.h>
 
-// How long the processors get to start, emulated ones included.
-#define AP_START_TIMEOUT_NS ((uint64_t)2000000000)
+// How long each processor gets to start.
+#define AP_START_TIMEOUT_NS ((uint64_t)1000000000)
 #define INIT_DELAY_US 10000
 #define SIPI_DELAY_US 200
 
@@ -238,18 +238,23 @@ void smp_start_aps(void) {
     memcpy(code + (ap_boot_params - ap_boot_start), &params, sizeof(struct ap_boot_params));
     atomic_thread_fence(memory_order_seq_cst);
 
-    // All at once: each processor finds its own area.
+    // One at a time, each with INIT and SIPIs of its own (SDM 325462-093 Vol.
+    // 3A, 11.4.4.1): only the processors the MADT gives as enabled, as
+    // firmware marks disabled the local APICs that fault the machine when
+    // written to. Each finds its own area, so one late to start takes no
+    // other's.
     uint32_t vector = (uint32_t)(page >> 12);
-    lapic_send_ipi(0, ICR_SHORTHAND_OTHERS | ICR_DELIVERY_INIT | ICR_ASSERT);
-    time_udelay(INIT_DELAY_US);
-    lapic_send_ipi(0, ICR_SHORTHAND_OTHERS | ICR_DELIVERY_STARTUP | vector);
-    time_udelay(SIPI_DELAY_US);
-    lapic_send_ipi(0, ICR_SHORTHAND_OTHERS | ICR_DELIVERY_STARTUP | vector);
-
-    uint64_t deadline = time_ns() + AP_START_TIMEOUT_NS;
-    while (atomic_load_explicit(&aps_started, memory_order_acquire) < count
-        && time_ns() < deadline) {
-        cpu_relax();
+    for (size_t i = 1; i <= count; i++) {
+        struct cpu *cpu = cpus[i];
+        lapic_send_ipi(cpu->apic_id, ICR_DELIVERY_INIT | ICR_ASSERT);
+        time_udelay(INIT_DELAY_US);
+        lapic_send_ipi(cpu->apic_id, ICR_DELIVERY_STARTUP | vector);
+        time_udelay(SIPI_DELAY_US);
+        lapic_send_ipi(cpu->apic_id, ICR_DELIVERY_STARTUP | vector);
+        uint64_t deadline = time_ns() + AP_START_TIMEOUT_NS;
+        while (!atomic_load_explicit(&cpu->online, memory_order_acquire) && time_ns() < deadline) {
+            cpu_relax();
+        }
     }
     printf(
         "Started %u of %zu other processors\n",
