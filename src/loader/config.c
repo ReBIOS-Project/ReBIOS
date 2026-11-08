@@ -691,36 +691,22 @@ static bool apply_files_on_volume(
     return applied;
 }
 
-// Returns NULL on failure.
-static void *open_protocol(EFI_HANDLE handle, EFI_GUID *guid) {
-    void *protocol = NULL;
-    if (handle == NULL) {
-        return NULL;
-    }
-    EFI_STATUS status = efi_bs->OpenProtocol(
-        handle, guid, &protocol, efi_image_handle, NULL, EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL
-    );
-    return status == EFI_SUCCESS ? protocol : NULL;
-}
-
-static void close_protocol(EFI_HANDLE handle, EFI_GUID *guid) {
-    efi_bs->CloseProtocol(handle, guid, efi_image_handle, NULL);
-}
-
 static bool apply_files(void) {
-    EFI_LOADED_IMAGE_PROTOCOL *image = open_protocol(efi_image_handle, &loaded_image_guid);
-    if (image == NULL) {
+    EFI_LOADED_IMAGE_PROTOCOL *image;
+    EFI_STATUS status = efi_bs->HandleProtocol(
+        efi_image_handle, &loaded_image_guid, (void **)&image
+    );
+    if (status != EFI_SUCCESS || image == NULL || image->DeviceHandle == NULL) {
         return false;
     }
-    EFI_HANDLE device = image->DeviceHandle;
-    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *volume = open_protocol(device, &simple_file_system_guid);
-    bool applied = false;
-    if (volume != NULL) {
-        applied = apply_files_on_volume(volume, image->FilePath);
-        close_protocol(device, &simple_file_system_guid);
+    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *volume;
+    status = efi_bs->HandleProtocol(
+        image->DeviceHandle, &simple_file_system_guid, (void **)&volume
+    );
+    if (status != EFI_SUCCESS || volume == NULL) {
+        return false;
     }
-    close_protocol(efi_image_handle, &loaded_image_guid);
-    return applied;
+    return apply_files_on_volume(volume, image->FilePath);
 }
 
 // Returns the contents of a variable fit to apply in a pool allocation, or

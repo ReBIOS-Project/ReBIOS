@@ -145,17 +145,6 @@ static EFI_GUID disk_info_usb = DISK_INFO_USB_GUID;
 static struct drive drives[MAX_DRIVES];
 static size_t drive_count;
 
-static void *protocol_get(EFI_HANDLE handle, EFI_GUID *guid) {
-    void *interface;
-    EFI_STATUS status = efi_bs->OpenProtocol(
-        handle, guid, &interface, efi_image_handle, NULL, EFI_OPEN_PROTOCOL_GET_PROTOCOL
-    );
-    if (status != EFI_SUCCESS) {
-        return NULL;
-    }
-    return interface;
-}
-
 static bool guid_equal(const EFI_GUID *a, const EFI_GUID *b) {
     return memcmp(a, b, sizeof(EFI_GUID)) == 0;
 }
@@ -301,10 +290,10 @@ static bool pci_location(
      || !EfiIsDevicePathEndType(remaining)) {
         return false;
     }
-    *pci_io = protocol_get(handle, &pci_io_guid);
     EFI_UINTN device;
     EFI_UINTN function;
-    return *pci_io != NULL
+    return efi_bs->HandleProtocol(handle, &pci_io_guid, (void **)pci_io) == EFI_SUCCESS
+        && *pci_io != NULL
         && (*pci_io)->GetLocation(*pci_io, segment, bus, &device, &function) == EFI_SUCCESS;
 }
 
@@ -474,9 +463,13 @@ static void nvme_model(EFI_DEVICE_PATH_PROTOCOL *path, char *out, size_t size) {
     if (efi_bs->LocateDevicePath(&nvme_guid, &remaining, &handle) != EFI_SUCCESS) {
         return;
     }
-    EFI_NVM_EXPRESS_PASS_THRU_PROTOCOL *nvme = protocol_get(handle, &nvme_guid);
+    EFI_NVM_EXPRESS_PASS_THRU_PROTOCOL *nvme;
+    if (efi_bs->HandleProtocol(handle, &nvme_guid, (void **)&nvme) != EFI_SUCCESS
+     || nvme == NULL) {
+        return;
+    }
     uintptr_t buffer = efi_glue_alloc_pages(1, 0);
-    if (nvme == NULL || buffer == 0) {
+    if (buffer == 0) {
         return;
     }
     EFI_NVM_EXPRESS_COMMAND command;
@@ -503,7 +496,10 @@ static void drive_model(
     EFI_HANDLE handle, EFI_DEVICE_PATH_PROTOCOL *path, char *out, size_t size
 ) {
     out[0] = 0;
-    struct disk_info *info = protocol_get(handle, &disk_info_guid);
+    struct disk_info *info;
+    if (efi_bs->HandleProtocol(handle, &disk_info_guid, (void **)&info) != EFI_SUCCESS) {
+        info = NULL;
+    }
     if (info != NULL
      && (guid_equal(&info->interface, &disk_info_ide)
       || guid_equal(&info->interface, &disk_info_ahci))) {
@@ -574,18 +570,24 @@ static bool path_has_usb(EFI_DEVICE_PATH_PROTOCOL *path) {
 }
 
 static EFI_DEVICE_PATH_PROTOCOL *own_path(void) {
-    EFI_LOADED_IMAGE_PROTOCOL *image = protocol_get(efi_image_handle, &loaded_image_guid);
-    if (image == NULL || image->DeviceHandle == NULL) {
+    EFI_LOADED_IMAGE_PROTOCOL *image;
+    EFI_STATUS status = efi_bs->HandleProtocol(
+        efi_image_handle, &loaded_image_guid, (void **)&image
+    );
+    if (status != EFI_SUCCESS || image == NULL || image->DeviceHandle == NULL) {
         return NULL;
     }
-    EFI_DEVICE_PATH_PROTOCOL *path = protocol_get(image->DeviceHandle, &device_path_guid);
-    return path != NULL && path_valid(path) ? path : NULL;
+    EFI_DEVICE_PATH_PROTOCOL *path;
+    status = efi_bs->HandleProtocol(image->DeviceHandle, &device_path_guid, (void **)&path);
+    return status == EFI_SUCCESS && path != NULL && path_valid(path) ? path : NULL;
 }
 
 static void drive_add(EFI_HANDLE handle, EFI_DEVICE_PATH_PROTOCOL *own) {
-    EFI_BLOCK_IO_PROTOCOL *block_io = protocol_get(handle, &block_io_guid);
-    EFI_DEVICE_PATH_PROTOCOL *path = protocol_get(handle, &device_path_guid);
-    if (block_io == NULL || block_io->Media == NULL || block_io->Media->LogicalPartition
+    EFI_BLOCK_IO_PROTOCOL *block_io;
+    EFI_DEVICE_PATH_PROTOCOL *path;
+    if (efi_bs->HandleProtocol(handle, &block_io_guid, (void **)&block_io) != EFI_SUCCESS
+     || block_io == NULL || block_io->Media == NULL || block_io->Media->LogicalPartition
+     || efi_bs->HandleProtocol(handle, &device_path_guid, (void **)&path) != EFI_SUCCESS
      || path == NULL || !path_valid(path)) {
         return;
     }
@@ -742,8 +744,9 @@ void drives_connect(void) {
     size_t count;
     EFI_HANDLE *handles = efi_glue_locate_handles(&pci_io_guid, &count);
     for (size_t i = 0; handles != NULL && i < count; i++) {
-        EFI_PCI_IO_PROTOCOL *pci_io = protocol_get(handles[i], &pci_io_guid);
-        if (pci_io == NULL) {
+        EFI_PCI_IO_PROTOCOL *pci_io;
+        if (efi_bs->HandleProtocol(handles[i], &pci_io_guid, (void **)&pci_io) != EFI_SUCCESS
+         || pci_io == NULL) {
             continue;
         }
         uint32_t class = pci_class(pci_io);
