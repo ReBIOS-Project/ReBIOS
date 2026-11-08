@@ -29,8 +29,6 @@
 #define UART_LCR 3
 #define UART_MCR 4
 #define UART_LSR 5
-#define UART_SCR 7
-
 #define UART_LCR_DLAB 0x80
 #define UART_LCR_8N1 0x03
 #define UART_LSR_THRE 0x20
@@ -38,13 +36,18 @@
 #define UART_CLOCK 115200
 
 bool serial_init(uint16_t port, uint32_t baud) {
-    // An absent port floats, so the scratch register will not hold a value.
-    outb(port + UART_SCR, 0x5a);
-    if (inb(port + UART_SCR) != 0x5a) {
+    // Below 100h are the motherboard's fixed ports, which the probe writes.
+    if (port < 0x100 || port > 0xfff8) {
         return false;
     }
-    outb(port + UART_SCR, 0xa5);
-    if (inb(port + UART_SCR) != 0xa5) {
+    // An absent port floats, where any 8250-compatible UART's divisor latch
+    // reads back what was written.
+    outb(port + UART_LCR, UART_LCR_DLAB);
+    outb(port + UART_DLL, 0xa5);
+    outb(port + UART_DLM, 0x5a);
+    bool answered = inb(port + UART_DLL) == 0xa5 && inb(port + UART_DLM) == 0x5a;
+    outb(port + UART_LCR, 0);
+    if (!answered) {
         return false;
     }
 
@@ -53,6 +56,7 @@ bool serial_init(uint16_t port, uint32_t baud) {
         divisor = 1;
     }
 
+    // The IER shares its port with the DLM while LCR.DLAB is set.
     outb(port + UART_IER, 0);
     outb(port + UART_LCR, UART_LCR_DLAB);
     outb(port + UART_DLL, divisor & 0xff);
