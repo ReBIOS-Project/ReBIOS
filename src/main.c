@@ -46,15 +46,27 @@
 // their share: 1/NESTED_HEAP_SHARE of the RAM, at most NESTED_HEAP_MAX.
 #define NESTED_HEAP_SHARE 32
 #define NESTED_HEAP_MAX ((uint64_t)128 << 20)
+// The rounds the TSC is timed in against the firmware's delay service.
+#define STALL_ROUND_US 10000
+#define STALL_ROUNDS 3
 
 static EFI_GUID loaded_image_guid = EFI_LOADED_IMAGE_PROTOCOL_GUID;
 
 // Timed against the firmware's delay service, whatever the TSC's frequency
-// enumeration says, which not every processor provides.
+// enumeration says, which not every processor provides: the shortest of a few
+// rounds, since anything that stops the processor during one can only lengthen
+// it.
 static uint64_t measure_tsc_hz(void) {
-    uintptr_t start = rdtsc();
-    efi_bs->Stall(20000);
-    return (rdtsc() - start) * 50;
+    uint64_t shortest = UINT64_MAX;
+    for (size_t i = 0; i < STALL_ROUNDS; i++) {
+        uint64_t start = rdtsc();
+        efi_bs->Stall(STALL_ROUND_US);
+        uint64_t ticks = rdtsc() - start;
+        if (ticks < shortest) {
+            shortest = ticks;
+        }
+    }
+    return shortest * (1000000 / STALL_ROUND_US);
 }
 
 // The memory map buffer must exist before the map that goes into it is taken,
