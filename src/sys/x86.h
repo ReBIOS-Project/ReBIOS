@@ -64,6 +64,7 @@
 #define CR4_LAM_SUP ((uint32_t)1 << 28)
 #define CR4_FRED ((uint64_t)1 << 32)
 
+#define XCR0_SSE ((uint64_t)1 << 1)
 #define XCR0_APX ((uint64_t)1 << 19)
 
 #define CR3_LAM_U57 ((uint64_t)1 << 61)
@@ -372,10 +373,10 @@ static inline uint64_t xgetbv(uint32_t index) {
 }
 
 // The state components of mask that XCR0 enables, saved to and restored from a
-// 64-byte aligned XSAVE area in the standard format.
+// 64-byte aligned XSAVE area in the standard format, the x87 pointers whole.
 static inline void xsave(void *area, uint64_t mask) {
     asm volatile (
-        "xsave (%0)"
+        "xsave64 (%0)"
         :
         : "r"(area), "a"((uint32_t)mask), "d"((uint32_t)(mask >> 32))
         : "memory"
@@ -384,11 +385,29 @@ static inline void xsave(void *area, uint64_t mask) {
 
 static inline void xrstor(const void *area, uint64_t mask) {
     asm volatile (
-        "xrstor (%0)"
+        "xrstor64 (%0)"
         :
         : "r"(area), "a"((uint32_t)mask), "d"((uint32_t)(mask >> 32))
         : "memory"
     );
+}
+
+// The x87 and SSE state, saved to and restored from a 16-byte aligned area of
+// 512 bytes, the x87 pointers whole.
+static inline void fxsave(void *area) {
+    asm volatile ("fxsave64 (%0)" :: "r"(area) : "memory");
+}
+
+static inline void fxrstor(const void *area) {
+    asm volatile ("fxrstor64 (%0)" :: "r"(area) : "memory");
+}
+
+static inline void fninit(void) {
+    asm volatile ("fninit" ::: "memory");
+}
+
+static inline void ldmxcsr(uint32_t value) {
+    asm volatile ("ldmxcsr %0" :: "m"(value));
 }
 
 static inline void wbinvd(void) {
