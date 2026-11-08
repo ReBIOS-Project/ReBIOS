@@ -43,6 +43,10 @@
 // The accesses to where nothing decodes that are logged.
 #define ABSENT_REPORTS 16
 
+// The most bytes of a repeated string instruction's operands mmio_string()
+// takes at a time, which a buffer on the stack holds.
+#define STRING_RUN_BYTES 1024
+
 struct region {
     _Atomic(uintptr_t) base;
     _Atomic(size_t) size;
@@ -130,7 +134,11 @@ void mmio_absent_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, 
     (void)value;
 }
 
-const struct mmio_ops mmio_absent_ops = { absent_read, mmio_absent_write, true };
+const struct mmio_ops mmio_absent_ops = {
+    .read = absent_read,
+    .write = mmio_absent_write,
+    .writes_ignored = true
+};
 
 // What the guest reaches where it has neither memory nor a device, as a PC
 // does where nothing decodes: such as the addresses an OS moves a BAR to.
@@ -269,8 +277,129 @@ static void mem_outs(struct vcpu *v, uint16_t port, size_t size, uint32_t value)
     io_dispatch(v, port, size, false, &value);
 }
 
+// A run of a repeated string instruction's operands at rDI, or rSI, within a
+// page and within STRING_RUN_BYTES: the guest-physical address of the first,
+// *count cut to the run. False where the first crosses a page, or where any
+// would fault, which the instruction then meets an iteration at a time.
+static bool string_run(
+    struct vcpu *v, const struct insn *insn, bool destination, size_t size, int64_t step,
+    bool write, size_t *count, uintptr_t *gpa
+) {
+    uint64_t linear;
+    if (!insn_string_run(v, insn, destination, size, step, 1, write, &linear)) {
+        return false;
+    }
+    size_t in_page = linear & (PAGE_SIZE - 1);
+    if (in_page + size > PAGE_SIZE) {
+        return false;
+    }
+    size_t room = step > 0 ? (PAGE_SIZE - in_page) / size : in_page / size + 1;
+    if (room > STRING_RUN_BYTES / size) {
+        room = STRING_RUN_BYTES / size;
+    }
+    if (*count > room) {
+        *count = room;
+    }
+    uint32_t pf_error;
+    return insn_string_run(v, insn, destination, size, step, *count, write, &linear)
+        && guest_mem_linear_to_phys(v, linear, write, false, gpa, &pf_error);
+}
+
+// Where such a run of count operands is: RAM, *r NULL, or a region, *offset
+// the first's offset into it. False where it is neither, or more than one.
+static bool string_place(
+    uintptr_t gpa, size_t size, int64_t step, size_t count, const struct region **r,
+    uint64_t *offset
+) {
+    *r = find(gpa);
+    if (*r == NULL) {
+        return true;
+    }
+    uint64_t base = atomic_load_explicit(&(*r)->base, memory_order_relaxed);
+    uint64_t length = atomic_load_explicit(&(*r)->size, memory_order_relaxed);
+    *offset = gpa - base;
+    uint64_t low = step > 0 ? *offset : *offset - (uint64_t)(count - 1) * size;
+    return low < length && length - low >= (uint64_t)count * size;
+}
+
+// Puts a run's elements, which lie in memory from its lowest address on, in
+// the order the instruction reaches them, or back.
+static void string_order(uint8_t *buf, size_t size, int64_t step, size_t count) {
+    if (step > 0) {
+        return;
+    }
+    for (size_t i = 0, j = count - 1; i < j; i++, j--) {
+        uint8_t t[8];
+        memcpy(t, buf + i * size, size);
+        memcpy(buf + i * size, buf + j * size, size);
+        memcpy(buf + j * size, t, size);
+    }
+}
+
+size_t mmio_string(
+    struct vcpu *v, const struct insn *insn, size_t size, int64_t step, size_t count
+) {
+    // Breakpoints are checked an access at a time.
+    if (vcpu_breakpoints_armed(v)) {
+        return 0;
+    }
+    unsigned int op = insn->opcode;
+    bool moves = op == 0xa4 || op == 0xa5;
+    bool stores = op == 0xaa || op == 0xab;
+    bool outputs = op == 0x6e || op == 0x6f;
+    // The source first, as the processor reaches it first.
+    uintptr_t src = 0;
+    uintptr_t dst = 0;
+    if ((moves || outputs) && !string_run(v, insn, false, size, step, false, &count, &src)) {
+        return 0;
+    }
+    if ((moves || stores) && !string_run(v, insn, true, size, step, true, &count, &dst)) {
+        return 0;
+    }
+    const struct region *from = NULL;
+    const struct region *to = NULL;
+    uint64_t source = 0;
+    uint64_t destination = 0;
+    if ((moves || outputs) && !string_place(src, size, step, count, &from, &source)) {
+        return 0;
+    }
+    if ((moves || stores) && !string_place(dst, size, step, count, &to, &destination)) {
+        return 0;
+    }
+    uintptr_t src_low = step > 0 ? src : src - (count - 1) * size;
+    uintptr_t dst_low = step > 0 ? dst : dst - (count - 1) * size;
+    uint8_t buf[STRING_RUN_BYTES];
+    if (stores && to != NULL && to->ops->write_string != NULL) {
+        uint8_t value[8];
+        write_le64(value, v->gprs.rax);
+        to->ops->write_string(v, to->ctx, destination, size, step, value, true, count);
+    } else if (outputs && from == NULL && guest_mem_phys_read(src_low, buf, count * size)) {
+        string_order(buf, size, step, count);
+        uint16_t port = (uint16_t)v->gprs.rdx;
+        for (size_t n = 0; n < count; n++) {
+            uint32_t value = 0;
+            memcpy(&value, buf + n * size, size);
+            io_dispatch(v, port, size, false, &value);
+        }
+    } else if (moves && from != NULL && from == to && from->ops->move_string != NULL) {
+        from->ops->move_string(v, from->ctx, source, destination, size, step, count);
+    } else if (moves && from == NULL && to != NULL && to->ops->write_string != NULL
+            && guest_mem_phys_read(src_low, buf, count * size)) {
+        string_order(buf, size, step, count);
+        to->ops->write_string(v, to->ctx, destination, size, step, buf, false, count);
+    } else if (moves && from != NULL && to == NULL && from->ops->read_string != NULL) {
+        from->ops->read_string(v, from->ctx, source, size, step, buf, count);
+        string_order(buf, size, step, count);
+        // What is neither RAM nor emulated decodes nothing.
+        guest_mem_phys_write(dst_low, buf, count * size);
+    } else {
+        return 0;
+    }
+    return count;
+}
+
 static const struct emulate_mem guest_mem = {
-    mmio_read_linear, mmio_write_linear, mem_ins, mem_outs
+    mmio_read_linear, mmio_write_linear, mem_ins, mem_outs, mmio_string
 };
 
 // The pages a single-stepped instruction runs against, and of them the bytes

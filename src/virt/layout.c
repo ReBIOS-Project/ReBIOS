@@ -782,7 +782,11 @@ static uint64_t rom_read(struct vcpu *v, void *ctx, uint64_t offset, size_t size
     return value;
 }
 
-static const struct mmio_ops rom_ops = { rom_read, mmio_absent_write, true };
+static const struct mmio_ops rom_ops = {
+    .read = rom_read,
+    .write = mmio_absent_write,
+    .writes_ignored = true
+};
 
 void layout_read_only(uintptr_t gpa, size_t size) {
     if (size == 0 || gpa >= ONE_MIB || size > ONE_MIB - gpa) {

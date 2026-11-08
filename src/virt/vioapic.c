@@ -210,4 +210,4 @@ static void mmio_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, 
     spinlock_release(&vio->lock);
 }
 
-static const struct mmio_ops mmio_ops = { mmio_read, mmio_write, false };
+static const struct mmio_ops mmio_ops = { .read = mmio_read, .write = mmio_write };

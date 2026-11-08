@@ -499,7 +499,7 @@ static void window_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size
     spinlock_release(&vga.lock);
 }
 
-static const struct mmio_ops window_ops = { window_read, window_write, false };
+static const struct mmio_ops window_ops = { .read = window_read, .write = window_write };
 
 // The CRT controller's registers answer at 3Bxh or 3Dxh, as the miscellaneous
 // output register selects.

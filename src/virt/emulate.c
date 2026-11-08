@@ -19,6 +19,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <virt/emulate.h>
+#include <sys/cpu.h>
 #include <sys/x86.h>
 #include <virt/alu.h>
 #include <virt/insn.h>
@@ -26,8 +27,9 @@
 
 // Iterations of a repeated string instruction emulated at a time: the
 // instruction runs again for the rest, letting interrupts in between, as the
-// processor does.
+// processor does. Those done in bulk go on while the CPU's time slice lasts.
 #define STRING_BATCH 1024
+#define STRING_BULK_BATCH ((size_t)1 << 20)
 
 struct ctx {
     struct vcpu *v;
@@ -474,22 +476,53 @@ static int string_op(struct ctx *c) {
     uint64_t mask = address_size == 8 ? UINT64_MAX : ((uint64_t)1 << (address_size * 8)) - 1;
     size_t count = insn->rep ? v->gprs.rcx & mask : 1;
     bool step = vcpu_stepped(v);
+    bool bulk = insn->rep && !step && !compares && c->mem->string != NULL;
+    bool refused = false;
+    size_t one_at_a_time = 0;
 
-    for (size_t n = 0; count != 0; n++) {
+    for (size_t n = 0; count != 0; ) {
         // The rest when the instruction runs again, with RF set as an event
         // between iterations leaves it (SDM 325462-093 Vol. 3B, 20.3.1.1).
-        if (n == (step ? (uint32_t)1 : STRING_BATCH) || v->db_pending != 0) {
+        if (n == (step ? (size_t)1 : STRING_BULK_BATCH) || one_at_a_time == STRING_BATCH
+         || v->db_pending != 0) {
             vcpu_set_rflags(v, vcpu_rflags(v) | RFLAGS_RF);
             if (step || v->db_pending != 0) {
                 vcpu_step_boundary(v);
             }
             return EMULATE_DONE;
         }
+        if (bulk) {
+            size_t limit = STRING_BULK_BATCH - n < count ? STRING_BULK_BATCH - n : count;
+            size_t done = c->mem->string(v, insn, size, delta, limit);
+            if (done != 0) {
+                refused = false;
+                if (uses_si) {
+                    v->gprs.rsi = string_step(v->gprs.rsi, delta * (int64_t)done, address_size);
+                }
+                if (uses_di) {
+                    v->gprs.rdi = string_step(v->gprs.rdi, delta * (int64_t)done, address_size);
+                }
+                v->gprs.rcx = string_step(v->gprs.rcx, -(int64_t)done, address_size);
+                count -= done;
+                n += done;
+                if (count != 0 && cpu_slice_over()) {
+                    vcpu_set_rflags(v, vcpu_rflags(v) | RFLAGS_RF);
+                    return EMULATE_DONE;
+                }
+                continue;
+            }
+            // One iteration that cannot be done in bulk, as where it crosses a
+            // page, goes alone; where the next cannot either, all the rest do.
+            bulk = !refused;
+            refused = true;
+        }
+        n++;
+        one_at_a_time++;
         int result;
         if (!string_once(c, size, &result)) {
             // Where only part of the iterations happened, the instruction runs
             // again for the rest.
-            if (n != 0 && result == EMULATE_UNSUPPORTED) {
+            if (n != 1 && result == EMULATE_UNSUPPORTED) {
                 vcpu_set_rflags(v, vcpu_rflags(v) | RFLAGS_RF);
                 return EMULATE_DONE;
             }

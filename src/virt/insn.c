@@ -797,8 +797,7 @@ static bool lass_violation(struct vcpu *v, const struct insn *insn, uint64_t la)
 // emulator makes them (emulate.c, __linearize()): in 64-bit mode the address's
 // canonical form; elsewhere, compatibility mode included, the segment's
 // usability, type, and limit, an expand-down one's from above it; and LASS.
-// Where they fail, #SS(0) for SS or #GP(0) is raised.
-static bool linearise(
+static bool linear_allowed(
     struct vcpu *v, const struct insn *insn, int reg, uintptr_t ea, size_t size, bool write,
     uint64_t *linear
 ) {
@@ -834,6 +833,17 @@ static bool linearise(
             return true;
         }
     }
+    return false;
+}
+
+// Where they fail, #SS(0) for SS or #GP(0) is raised.
+static bool linearise(
+    struct vcpu *v, const struct insn *insn, int reg, uintptr_t ea, size_t size, bool write,
+    uint64_t *linear
+) {
+    if (linear_allowed(v, insn, reg, ea, size, write, linear)) {
+        return true;
+    }
     vcpu_inject_exception(v, reg == VCPU_SEG_SS ? 12 : 13, true, 0);
     return false;
 }
@@ -848,4 +858,30 @@ bool insn_string_linear(
     }
     int segment = insn->segment >= 0 ? insn->segment : VCPU_SEG_DS;
     return linearise(v, insn, segment, v->gprs.rsi & mask, size, write, linear);
+}
+
+bool insn_string_run(
+    struct vcpu *v, const struct insn *insn, bool destination, size_t size, int64_t step,
+    size_t count, bool write, uint64_t *linear
+) {
+    uint64_t mask = address_mask(insn->address_size);
+    uint64_t first = (destination ? v->gprs.rdi : v->gprs.rsi) & mask;
+    uint64_t span = (uint64_t)(count - 1) * size;
+    uint64_t last;
+    if (step > 0) {
+        if (span > mask - first) {
+            return false;
+        }
+        last = first + span;
+    } else {
+        if (span > first) {
+            return false;
+        }
+        last = first - span;
+    }
+    int segment = destination ? VCPU_SEG_ES : insn->segment >= 0 ? insn->segment : VCPU_SEG_DS;
+    // The checks hold for every operand between two that pass them.
+    uint64_t last_linear;
+    return linear_allowed(v, insn, segment, first, size, write, linear)
+        && linear_allowed(v, insn, segment, last, size, write, &last_linear);
 }

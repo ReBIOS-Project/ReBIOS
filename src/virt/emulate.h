@@ -33,6 +33,14 @@ struct emulate_mem {
     // INS's data, for its destination: false where INS is not to be emulated.
     bool (*ins)(struct vcpu *v, uintptr_t linear, uint16_t port, size_t size, uint32_t *value);
     void (*outs)(struct vcpu *v, uint16_t port, size_t size, uint32_t value);
+    // Optional: as many as it can of count iterations of a repeated string
+    // instruction moving size bytes each, delta its address registers' step,
+    // at once and with the same effects; returns how many it did, the
+    // registers left for the caller to step: 0 where they are to be emulated
+    // one at a time.
+    size_t (*string)(
+        struct vcpu *v, const struct insn *insn, size_t size, int64_t delta, size_t count
+    );
 };
 
 #define EMULATE_DONE 0

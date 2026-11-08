@@ -462,7 +462,7 @@ static void mmio_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, 
     }
 }
 
-static const struct mmio_ops mmio_ops = { mmio_read, mmio_write, false };
+static const struct mmio_ops mmio_ops = { .read = mmio_read, .write = mmio_write };
 
 static uint64_t fbc_read(struct vcpu *v, void *ctx, uint64_t offset, size_t size) {
     (void)v;
@@ -480,7 +480,7 @@ static void fbc_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, u
     mmio_write_host(igfx.gttmmadr + FBC_PAGE + offset, size, value);
 }
 
-static const struct mmio_ops fbc_ops = { fbc_read, fbc_write, false };
+static const struct mmio_ops fbc_ops = { .read = fbc_read, .write = fbc_write };
 
 static void init_fbc(void) {
     mm_map_device(igfx.gttmmadr + FBC_PAGE, PAGE_SIZE);

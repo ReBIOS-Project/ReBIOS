@@ -126,7 +126,7 @@ static void guest_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size,
     }
 }
 
-static const struct mmio_ops guest_ops = { guest_read, guest_write, false };
+static const struct mmio_ops guest_ops = { .read = guest_read, .write = guest_write };
 
 // The guest reads its registers where they are, but its writes pass through
 // the hypervisor, which so knows whether the 8254 and the RTC interrupt or

@@ -270,6 +270,9 @@ void vcpu_debug_trap(struct vcpu *v, uint64_t dr6);
 // data and I/O breakpoints.
 void vcpu_data_access(struct vcpu *v, uintptr_t linear, size_t size, bool write);
 void vcpu_io_access(struct vcpu *v, uint16_t port, size_t size);
+// Whether the guest has any breakpoint enabled, which accesses carried out for
+// it would have to be checked against.
+bool vcpu_breakpoints_armed(struct vcpu *v);
 // The debug trap for the breakpoints those hit, and the single step asked for.
 void vcpu_debug_traps(struct vcpu *v, bool single_step);
 // After an instruction, or a string instruction's iteration, the hypervisor

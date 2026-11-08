@@ -33,6 +33,24 @@ struct mmio_ops {
     // Whether writes go nowhere, so that INS may be emulated into it: the
     // processor may have read the port already.
     bool writes_ignored;
+    // Optional, for repeated string instructions: count accesses of size bytes
+    // each, the first at offset and each next one step bytes on, all within
+    // the region, with the same effects as read() and write() making them a
+    // byte at a time in ascending order. Element n is at data + n * size, or
+    // is all at data where same is true. A move reads each element, then
+    // writes it.
+    void (*read_string)(
+        struct vcpu *v, void *ctx, uint64_t offset, size_t size, int64_t step, uint8_t *data,
+        size_t count
+    );
+    void (*write_string)(
+        struct vcpu *v, void *ctx, uint64_t offset, size_t size, int64_t step, const uint8_t *data,
+        bool same, size_t count
+    );
+    void (*move_string)(
+        struct vcpu *v, void *ctx, uint64_t source, uint64_t destination, size_t size,
+        int64_t step, size_t count
+    );
 };
 
 // What the guest reaches where nothing decodes: reads of all ones, writes
@@ -59,6 +77,15 @@ bool mmio_read_linear(struct vcpu *v, uintptr_t linear, void *buf, size_t size);
 bool mmio_write_linear(struct vcpu *v, uintptr_t linear, const void *buf, size_t size);
 // The same at a guest-physical address, within a page.
 void mmio_phys_access(struct vcpu *v, uintptr_t gpa, void *buf, size_t len, bool write);
+
+struct insn;
+
+// struct emulate_mem's string() for guest memory: runs of repeated MOVS and
+// STOS whose operands are regions that take string accesses, or RAM, and of
+// OUTS from RAM.
+size_t mmio_string(
+    struct vcpu *v, const struct insn *insn, size_t size, int64_t step, size_t count
+);
 
 // An EPT violation or a nested page fault at gpa, for an access other than a
 // fetch: emulates the instruction that made it, where nothing decodes as

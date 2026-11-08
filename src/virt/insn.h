@@ -134,5 +134,12 @@ bool insn_string_linear(
     struct vcpu *v, const struct insn *insn, bool destination, size_t size, bool write,
     uint64_t *linear
 );
+// The linear address of the first of count such operands, rDI or rSI stepping
+// by step after each: false, raising nothing, where any of them would fail
+// those checks or the address register would wrap.
+bool insn_string_run(
+    struct vcpu *v, const struct insn *insn, bool destination, size_t size, int64_t step,
+    size_t count, bool write, uint64_t *linear
+);
 
 #endif

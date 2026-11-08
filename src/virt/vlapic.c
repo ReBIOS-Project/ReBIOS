@@ -2024,7 +2024,7 @@ static void mmio_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, 
     );
 }
 
-static const struct mmio_ops mmio_ops = { mmio_read, mmio_write, false };
+static const struct mmio_ops mmio_ops = { .read = mmio_read, .write = mmio_write };
 
 static bool apic_base_write(struct vcpu *v, uint64_t value) {
     struct vlapic *vl = v->vlapic;

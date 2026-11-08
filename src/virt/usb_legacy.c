@@ -139,7 +139,7 @@ static void range_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size,
     v->mmio_retry = true;
 }
 
-static const struct mmio_ops range_ops = { range_read, range_write, false };
+static const struct mmio_ops range_ops = { .read = range_read, .write = range_write };
 
 // The low half of the register at reg, as the guest wrote it.
 static void low_half_keep(

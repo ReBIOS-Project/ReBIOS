@@ -775,6 +775,11 @@ void vcpu_data_access(struct vcpu *v, uintptr_t linear, size_t size, bool write)
     );
 }
 
+bool vcpu_breakpoints_armed(struct vcpu *v) {
+    uint64_t dr7 = virt_vmx ? vmx_read(VMCS_GUEST_DR7) : v->vmcb->save.dr7;
+    return (dr7 & 0xff) != 0;
+}
+
 void vcpu_io_access(struct vcpu *v, uint16_t port, size_t size) {
     // R/W 10 breaks on I/O where CR4.DE says so.
     if ((vcpu_cr4(v) & CR4_DE) != 0) {

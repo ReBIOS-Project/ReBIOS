@@ -749,7 +749,7 @@ static void msix_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, 
     spinlock_release(&virt.lock);
 }
 
-static const struct mmio_ops msix_ops = { msix_read, msix_write, false };
+static const struct mmio_ops msix_ops = { .read = msix_read, .write = msix_write };
 
 struct shared_target {
     struct vfunction *vf;
@@ -811,7 +811,7 @@ static void shared_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size
     }
 }
 
-static const struct mmio_ops shared_ops = { shared_read, shared_write, false };
+static const struct mmio_ops shared_ops = { .read = shared_read, .write = shared_write };
 
 static struct shared_page *shared_find(uint64_t page) {
     for (size_t i = 0; i < SHARED_PAGES; i++) {
@@ -1273,7 +1273,7 @@ static void ecam_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, 
     legacy_io_follow(wrote);
 }
 
-static const struct mmio_ops ecam_ops = { ecam_read, ecam_write, false };
+static const struct mmio_ops ecam_ops = { .read = ecam_read, .write = ecam_write };
 
 // A bridge's bus numbers as the guest has them, where they are assigned.
 static uint32_t guest_bus_numbers(const struct pci_enum_function *f, uint32_t value) {

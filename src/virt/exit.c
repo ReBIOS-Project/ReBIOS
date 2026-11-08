@@ -252,7 +252,7 @@ static void string_outs(struct vcpu *v, uint16_t port, size_t size, uint32_t val
 }
 
 static const struct emulate_mem string_mem = {
-    mmio_read_linear, mmio_write_linear, string_ins, string_outs
+    mmio_read_linear, mmio_write_linear, string_ins, string_outs, mmio_string
 };
 
 void exit_string_io(struct vcpu *v, uint16_t port) {
