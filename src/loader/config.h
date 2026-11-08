@@ -46,6 +46,7 @@ struct config {
     bool cpuid_limit;
     bool igpu_stolen_remap;
     bool legacy_usb;
+    bool save_log;
     // NUL-terminated: "self", "auto", or a drive's device path or part of its
     // model; empty when unset, which is "self".
     char boot_drive[CONFIG_BOOT_DRIVE_MAX];

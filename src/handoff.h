@@ -159,6 +159,14 @@ struct handoff_block_device {
 #define HANDOFF_AVIC_ALWAYS 1
 #define HANDOFF_AVIC_NEVER 2
 
+// The vendor GUID of ReBIOS's EFI variables.
+#define HANDOFF_VARIABLE_GUID \
+    { 0xd559b78d, 0x5494, 0x4c9e, { 0xb7, 0xf7, 0xe4, 0x92, 0xb0, 0x94, 0x64, 0x48 } }
+// The variables in which the core keeps its log with save_log
+// (virt/log_save.c): the log's start, and its latest text after that.
+#define HANDOFF_LOG_VARIABLE u"ReBIOSLog"
+#define HANDOFF_LOG_END_VARIABLE u"ReBIOSLogEnd"
+
 struct handoff_config {
     uint8_t serial;
     uint8_t verbose;
@@ -181,6 +189,8 @@ struct handoff_config {
     // Whether the hypervisor has the USB controllers until the OS takes them
     // (virt/usb.c), else the OS has them from the start.
     uint8_t legacy_usb;
+    // Whether the core keeps its log in an EFI variable (virt/log_save.c).
+    uint8_t save_log;
     // Which APIC IDs the guest gets, as inclusive ranges.
     uint32_t cpu_filter;
     uint32_t cpu_range_count;

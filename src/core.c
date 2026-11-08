@@ -46,6 +46,7 @@
 #include <virt/isa_ports.h>
 #include <virt/kbc.h>
 #include <virt/layout.h>
+#include <virt/log_save.h>
 #include <virt/msr.h>
 #include <virt/mtrr.h>
 #include <virt/nsvm.h>
@@ -134,6 +135,7 @@ static void bsp_main(void *arg) {
     dma_enable();
     igfx_switch_end();
     usb_start();
+    log_save_start();
     log_hand_over_screen();
     vcpu_run(v);
 }

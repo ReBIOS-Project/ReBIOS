@@ -60,9 +60,7 @@ static EFI_GUID file_info_guid = EFI_FILE_INFO_ID;
 static const char *const file_names[] = { "rebios.ini", "csmwrap.ini" };
 
 static EFI_CHAR16 rebios_variable[] = u"ReBIOSConfig";
-static EFI_GUID rebios_variable_guid = {
-    0xd559b78d, 0x5494, 0x4c9e, { 0xb7, 0xf7, 0xe4, 0x92, 0xb0, 0x94, 0x64, 0x48 }
-};
+static EFI_GUID rebios_variable_guid = HANDOFF_VARIABLE_GUID;
 static EFI_CHAR16 csmwrap_variable[] = u"CSMWrapConfig";
 static EFI_GUID csmwrap_variable_guid = {
     0x2910aadb, 0xf7ca, 0x42b5, { 0x8c, 0xe2, 0xd6, 0x2d, 0x6a, 0x69, 0xb5, 0xee }
@@ -436,6 +434,7 @@ static const struct setting settings[] = {
     { .name = "cpuid_limit", .apply = apply_boolean, .flag = &config.cpuid_limit },
     { .name = "igpu_stolen_remap", .apply = apply_boolean, .flag = &config.igpu_stolen_remap },
     { .name = "legacy_usb", .apply = apply_boolean, .flag = &config.legacy_usb },
+    { .name = "save_log", .apply = apply_boolean, .flag = &config.save_log },
     { .name = "cpu_allowlist", .apply = apply_cpu_list, .filter = HANDOFF_CPU_FILTER_ALLOW },
     { .name = "cpu_blocklist", .apply = apply_cpu_list, .filter = HANDOFF_CPU_FILTER_BLOCK },
     { .name = "iommu_disable", .apply = apply_obsolete },
@@ -689,6 +688,7 @@ void config_to_handoff(struct handoff_config *out) {
     out->cpuid_limit = config.cpuid_limit;
     out->igpu_stolen_remap = config.igpu_stolen_remap;
     out->legacy_usb = config.legacy_usb;
+    out->save_log = config.save_log;
     out->cpu_filter = config.cpu_filter;
     out->cpu_range_count = config.cpu_range_count;
     for (size_t i = 0; i < config.cpu_range_count; i++) {

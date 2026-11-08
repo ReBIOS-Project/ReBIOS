@@ -51,6 +51,7 @@ static void firmware_reset(EFI_RESET_TYPE type) {
 // now.
 void power_reset(bool warm) {
     printf("Resetting the machine\n");
+    log_keep();
     if (acpi_init()) {
         uacpi_reboot();
         time_udelay(RESET_WAIT_US);
@@ -91,6 +92,7 @@ void power_reset(bool warm) {
 // for the reason it does in power_reset().
 void power_off(void) {
     printf("Powering the machine off\n");
+    log_keep();
     if (acpi_init()) {
         uacpi_status status = uacpi_prepare_for_sleep_state(UACPI_SLEEP_STATE_S5);
         if (status == UACPI_STATUS_OK) {

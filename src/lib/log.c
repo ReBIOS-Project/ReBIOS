@@ -28,6 +28,7 @@
 #include <lib/spinlock.h>
 #include <lib/util.h>
 #include <loader/efi_glue.h>
+#include <memory.h>
 #include <sys/x86.h>
 
 static uint16_t log_serial_port;
@@ -37,7 +38,16 @@ static struct flanterm_context *log_screen;
 static _Atomic(bool) log_screen_handed_over;
 static _Atomic(bool) log_panicking;
 
+// The log's latest bytes after its first LOG_SAVED_START, for
+// log_saved_latest().
+#define SAVED_TAIL 32768
+
 static struct spinlock log_lock;
+static char saved_head[LOG_SAVED_START];
+static size_t saved_head_len;
+static char saved_tail[SAVED_TAIL];
+static size_t saved_tail_count;
+static _Atomic(log_keeper) keeper;
 static char early_log[8192];
 static size_t early_log_len;
 static bool early_log_lost;
@@ -92,6 +102,11 @@ static void screen_flush(struct con_buffer *buf) {
 }
 
 static void log_emit(struct con_buffer *buf, char c) {
+    if (saved_head_len < LOG_SAVED_START) {
+        saved_head[saved_head_len++] = c;
+    } else {
+        saved_tail[saved_tail_count++ % SAVED_TAIL] = c;
+    }
     bool screen = screen_shown();
     if (c == '\n') {
         if (screen) {
@@ -212,6 +227,10 @@ void panic(const char *fmt, ...) {
     va_start(args, fmt);
     vprintf_unlocked(fmt, args);
     va_end(args);
+    log_keeper keep = atomic_exchange_explicit(&keeper, NULL, memory_order_acq_rel);
+    if (keep != NULL) {
+        keep(false);
+    }
     x86_halt_forever();
 }
 
@@ -231,4 +250,56 @@ bool log_take_screen(void) {
     }
     spinlock_release(&log_lock);
     return true;
+}
+
+size_t log_saved_start(char *out, size_t size, bool lock) {
+    if (lock) {
+        spinlock_acquire(&log_lock);
+    }
+    size_t len = saved_head_len < size ? saved_head_len : size;
+    memcpy(out, saved_head, len);
+    if (lock) {
+        spinlock_release(&log_lock);
+    }
+    return len;
+}
+
+size_t log_saved_latest(size_t since, char *out, size_t size, size_t *first, bool lock) {
+    if (lock) {
+        spinlock_acquire(&log_lock);
+    }
+    size_t end = saved_head_len + saved_tail_count;
+    size_t start = end - since > size ? end - size : since;
+    // What the tail no longer holds is lost.
+    size_t oldest = saved_tail_count > SAVED_TAIL
+                  ? LOG_SAVED_START + saved_tail_count - SAVED_TAIL
+                  : 0;
+    if (start < oldest) {
+        start = oldest;
+    }
+    for (size_t p = start; p < end; p++) {
+        out[p - start] = p < LOG_SAVED_START
+                       ? saved_head[p]
+                       : saved_tail[(p - LOG_SAVED_START) % SAVED_TAIL];
+    }
+    if (lock) {
+        spinlock_release(&log_lock);
+    }
+    *first = start;
+    return end - start;
+}
+
+size_t log_saved_count(void) {
+    return saved_head_len + saved_tail_count;
+}
+
+void log_set_keeper(log_keeper keep) {
+    atomic_store_explicit(&keeper, keep, memory_order_release);
+}
+
+void log_keep(void) {
+    log_keeper keep = atomic_load_explicit(&keeper, memory_order_acquire);
+    if (keep != NULL) {
+        keep(true);
+    }
 }
