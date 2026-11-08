@@ -85,6 +85,9 @@ _Static_assert(sizeof(struct smbios3_entry) == 0x18, "SMBIOS 3.0 entry point lay
 #define SMBIOS_END_OF_TABLE 127
 #define SMBIOS_TYPE_FIRMWARE 0
 #define SMBIOS_FIRMWARE_RELEASE_DATE 0x08
+#define SMBIOS_TYPE_SYSTEM 1
+#define SMBIOS_SYSTEM_MANUFACTURER 0x04
+#define SMBIOS_SYSTEM_PRODUCT_NAME 0x05
 
 static const EFI_GUID acpi_20_guid = EFI_ACPI_20_TABLE_GUID;
 static const EFI_GUID acpi_10_guid = EFI_ACPI_10_TABLE_GUID;
@@ -580,6 +583,18 @@ static uint64_t smbios_find(void) {
     return 0;
 }
 
+// SMBIOS's System Information structure's string at offset (DSP0134 3.9.0,
+// 7.2), cut short to fit.
+static void dmi_copy(char out[HANDOFF_DMI_MAX], uint8_t offset) {
+    const char *string = fwtables_smbios_string(SMBIOS_TYPE_SYSTEM, offset);
+    size_t len = 0;
+    while (string != NULL && len < HANDOFF_DMI_MAX - 1 && string[len] != 0) {
+        out[len] = string[len];
+        len++;
+    }
+    out[len] = 0;
+}
+
 // The year of the firmware's release date, mm/dd/yy or mm/dd/yyyy (DSP0134
 // 3.9.0, 7.1), read as Linux 7.3's dmi_get_date() reads it: the digits after
 // the last slash, a one or two-digit year 19xx, but 20xx before 1996.
@@ -645,6 +660,8 @@ void fwtables_collect(void) {
 
     loader_handoff->smbios_entry = smbios_find();
     loader_handoff->bios_year = bios_year();
+    dmi_copy(loader_handoff->dmi_sys_vendor, SMBIOS_SYSTEM_MANUFACTURER);
+    dmi_copy(loader_handoff->dmi_product_name, SMBIOS_SYSTEM_PRODUCT_NAME);
     if (loader_handoff->smbios_entry == 0) {
         printf("No usable SMBIOS entry point\n");
     }

@@ -23,6 +23,8 @@
 #include <stdint.h>
 #include <efi.h>
 
+// The longest SMBIOS string kept, with its NUL.
+#define HANDOFF_DMI_MAX 64
 #define HANDOFF_MAX_RESERVED 16
 #define HANDOFF_MAX_PCI_ROMS 16
 #define HANDOFF_MAX_BLOCK_DEVICES 32
@@ -251,6 +253,11 @@ struct handoff {
     uint64_t smbios_entry;
     // The year of the firmware's release, which SMBIOS gives, or 0.
     uint16_t bios_year;
+    // SMBIOS's system manufacturer and product name, cut short to fit, empty
+    // where there are none, which quirks are matched against as Linux 7.3
+    // matches its DMI tables' DMI_SYS_VENDOR and DMI_PRODUCT_NAME.
+    char dmi_sys_vendor[HANDOFF_DMI_MAX];
+    char dmi_product_name[HANDOFF_DMI_MAX];
 
     struct handoff_config config;
     struct handoff_video video;
