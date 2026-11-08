@@ -578,6 +578,44 @@ static void window_write_string(
     spinlock_release(&vga.lock);
 }
 
+// MOVSB through write mode 1 with planar addressing, as screen-to-screen
+// copies use it: each byte read loads the latches from its address in every
+// plane, and each write stores them in the planes the map mask enables, the
+// data the processor moves going nowhere.
+static bool latch_copies(size_t size) {
+    uint8_t addressing = vga.seq[SEQ_MEMORY_MODE] & (SEQ_MEMORY_CHAIN4 | SEQ_MEMORY_SEQUENTIAL);
+    return size == 1 && (vga.gc[GC_MODE] & 3) == 1 && addressing == SEQ_MEMORY_SEQUENTIAL;
+}
+
+static void latches_move(uint32_t source, uint32_t destination, int64_t step, size_t count) {
+    uint32_t from;
+    uint32_t to;
+    bool read = window_address(source, &from);
+    bool written = window_address(destination, &to);
+    uint8_t planes = vga.seq[SEQ_MAP_MASK] & 0x0f;
+    for (size_t n = 0; n < count; n++) {
+        uint32_t delta = (uint32_t)((uint64_t)step * n);
+        if (read) {
+            uint32_t address = (from + delta) & (PLANE_SIZE - 1);
+            for (size_t p = 0; p < 4; p++) {
+                vga.latch[p] = vga.planes[p][address];
+            }
+        }
+        if (written) {
+            uint32_t address = (to + delta) & (PLANE_SIZE - 1);
+            planes_changed(address, planes);
+            for (size_t p = 0; p < 4; p++) {
+                if ((planes & ((uint32_t)1 << p)) != 0) {
+                    vga.planes[p][address] = vga.latch[p];
+                }
+            }
+        }
+    }
+    if (written) {
+        vga.dirty = true;
+    }
+}
+
 static void window_move_string(
     struct vcpu *v, void *ctx, uint64_t source, uint64_t destination, size_t size, int64_t step,
     size_t count
@@ -586,6 +624,11 @@ static void window_move_string(
     (void)ctx;
     spinlock_acquire(&vga.lock);
     bool vbe_mode = vbe_on();
+    if (!vbe_mode && latch_copies(size)) {
+        latches_move((uint32_t)source, (uint32_t)destination, step, count);
+        spinlock_release(&vga.lock);
+        return;
+    }
     for (size_t n = 0; n < count; n++) {
         uint32_t from = (uint32_t)(source + (uint64_t)step * n);
         uint32_t to = (uint32_t)(destination + (uint64_t)step * n);
