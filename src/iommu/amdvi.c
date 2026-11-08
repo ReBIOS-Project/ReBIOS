@@ -80,6 +80,7 @@
 #define STATUS_EVENT_OVERFLOW ((uint64_t)1 << 0)
 #define STATUS_EVENT_LOG_RUN ((uint64_t)1 << 3)
 #define STATUS_COMMAND_BUFFER_RUN ((uint64_t)1 << 4)
+#define STATUS_PPR_LOG_RUN ((uint64_t)1 << 7)
 #define STATUS_GA_LOG_RUN ((uint64_t)1 << 8)
 #define STATUS_GA_OVERFLOW ((uint64_t)1 << 9)
 #define STATUS_GA_INT ((uint64_t)1 << 10)
@@ -431,16 +432,23 @@ static void device_table_build(const struct iommu_tables *tables) {
 
 static void unit_enable(struct amdvi_unit *u) {
     // Stopped first, as the buffers and logs must not change under a running
-    // unit.
-    uint64_t control = reg_read(u, REG_CONTROL) & ~CONTROL_TAKEN;
-    reg_write(u, REG_CONTROL, control);
+    // unit: the command buffer and the logs before the unit, which finishes
+    // what they hold meanwhile, each Run bit clearing once its part has, as it
+    // must before that part's registers change (AMD IOMMU 48882 rev. 3.11,
+    // 2.4).
+    uint64_t control = reg_read(u, REG_CONTROL);
+    reg_write(u, REG_CONTROL, control & ~(CONTROL_TAKEN & ~CONTROL_IOMMU_EN));
+    uint64_t running = STATUS_COMMAND_BUFFER_RUN | STATUS_EVENT_LOG_RUN | STATUS_PPR_LOG_RUN
+                     | STATUS_GA_LOG_RUN;
     uint64_t deadline = time_ns() + TIMEOUT_NS;
-    while ((reg_read(u, REG_STATUS) & (STATUS_COMMAND_BUFFER_RUN | STATUS_EVENT_LOG_RUN)) != 0) {
+    while ((reg_read(u, REG_STATUS) & running) != 0) {
         if (time_ns() > deadline) {
             panic("AMD-Vi unit at %#llx does not stop\n", (unsigned long long)u->base);
         }
         cpu_relax();
     }
+    control &= ~CONTROL_TAKEN;
+    reg_write(u, REG_CONTROL, control);
 
     u->commands = page_alloc(1);
     u->command_tail = 0;
