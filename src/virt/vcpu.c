@@ -1054,8 +1054,8 @@ void vcpu_set_real_mode(struct vcpu *v, uint16_t cs, uint16_t ip) {
         vmx_write(VMCS_GUEST_INTERRUPTIBILITY, 0);
         vmx_write(VMCS_GUEST_ACTIVITY_STATE, ACTIVITY_ACTIVE);
         // INIT drops the processor's translations, which none of the VMCS
-        // writes above do: a stale one from before can fault the guest's
-        // first fetch once it turns paging back on.
+        // writes above do: a stale one from before can fault the guest's first
+        // fetch once it turns paging back on.
         if (vmx_vpid_usable()) {
             vmx_invvpid(2, 0, 0);
         }

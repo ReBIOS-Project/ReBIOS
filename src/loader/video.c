@@ -588,11 +588,11 @@ static bool try_device(
         );
         return false;
     }
-    // Firmware without a driver for the card, as for a Voodoo, leaves its
-    // BARs undecoded, so that its VBIOS would program nothing.
+    // Firmware without a driver for the card, as for a Voodoo, leaves its BARs
+    // undecoded, so that its VBIOS would program nothing.
     pci_io_enable_device(dev);
     uint16_t command = 0;
-    dev->io->Pci.Read(dev->io, EfiPciIoWidthUint16, 0x04, 1, &command);
+    dev->io->Pci.Read(dev->io, EfiPciIoWidthUint16, PCI_COMMAND, 1, &command);
     printf(
         "VGA device " HANDOFF_PCI_ADDRESS_FMT " decodes, command %#x\n",
         HANDOFF_PCI_ADDRESS_ARGS(dev->address), command

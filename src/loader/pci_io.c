@@ -20,6 +20,7 @@
 #include <stdint.h>
 #include <efi.h>
 #include <loader/pci_io.h>
+#include <handoff.h>
 #include <hw/pci_regs.h>
 #include <lib/log.h>
 #include <loader/efi_glue.h>
@@ -166,8 +167,7 @@ bool pci_io_device_in_slot(const struct pci_io_device *dev) {
 
 // The upstream bridge of a function, or NULL.
 static const struct pci_io_device *upstream_bridge(
-    const struct pci_io_device *devices, EFI_UINTN count,
-    const struct pci_io_device *dev
+    const struct pci_io_device *devices, EFI_UINTN count, const struct pci_io_device *dev
 ) {
     for (size_t i = 0; i < count; i++) {
         uint8_t secondary = 0;
@@ -199,8 +199,8 @@ static bool io_bar_holds(EFI_PCI_IO_PROTOCOL *io, uint16_t port) {
     }
     for (size_t i = 0; i < PCI_STD_NUM_BARS; i++) {
         uint32_t base = bars[i] & PCI_BASE_ADDRESS_IO_MASK;
-        if ((bars[i] & PCI_BASE_ADDRESS_SPACE_IO) != 0 && base != 0
-         && port >= base && port < base + UART_REGISTERS) {
+        if ((bars[i] & PCI_BASE_ADDRESS_SPACE_IO) != 0 && base != 0 && port >= base
+         && port < base + UART_REGISTERS) {
             return true;
         }
     }
@@ -211,8 +211,7 @@ static void enable_decoding(EFI_PCI_IO_PROTOCOL *io, bool memory) {
     EFI_UINT64 attributes = EFI_PCI_IO_ATTRIBUTE_IO;
     uint16_t bits = PCI_COMMAND_IO;
     if (memory) {
-        attributes |= EFI_PCI_IO_ATTRIBUTE_MEMORY
-            | EFI_PCI_IO_ATTRIBUTE_BUS_MASTER;
+        attributes |= EFI_PCI_IO_ATTRIBUTE_MEMORY | EFI_PCI_IO_ATTRIBUTE_BUS_MASTER;
         bits |= PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER;
     }
     io->Attributes(io, EfiPciIoAttributeOperationEnable, attributes, NULL);
@@ -227,8 +226,8 @@ static void enable_decoding(EFI_PCI_IO_PROTOCOL *io, bool memory) {
 
 // Enables a function's decoding and that of the bridges above it.
 static void enable_decoding_path(
-    const struct pci_io_device *devices, EFI_UINTN count,
-    const struct pci_io_device *dev, bool memory
+    const struct pci_io_device *devices, EFI_UINTN count, const struct pci_io_device *dev,
+    bool memory
 ) {
     const struct pci_io_device *bridge = dev;
     for (size_t depth = 0; depth < PCI_BUSES; depth++) {

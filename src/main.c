@@ -216,8 +216,7 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     }
     // A serial card's port only answers once its I/O decoding is on.
     struct handoff_pci_address serial_card;
-    bool serial_on_card = config.serial
-        && pci_io_enable_io_port(config.serial_port, &serial_card);
+    bool serial_on_card = config.serial && pci_io_enable_io_port(config.serial_port, &serial_card);
     log_init(
         config.serial ? config.serial_port : 0, config.serial_baud, serial_clock, config.verbose
     );
