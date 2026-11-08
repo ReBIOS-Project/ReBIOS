@@ -252,6 +252,14 @@ uint64_t vcpu_efer(struct vcpu *v);
 uint64_t vcpu_untagged(struct vcpu *v, size_t reg, uintptr_t linear);
 void vcpu_get_seg(struct vcpu *v, size_t reg, struct vcpu_segment *seg);
 void vcpu_set_seg(struct vcpu *v, size_t reg, const struct vcpu_segment *seg);
+// One field of vcpu_get_seg()'s, read alone, as each costs a VMREAD with VMX,
+// which traps under nested virtualisation.
+uint16_t vcpu_seg_selector(struct vcpu *v, size_t reg);
+uint64_t vcpu_seg_base(struct vcpu *v, size_t reg);
+uint32_t vcpu_seg_limit(struct vcpu *v, size_t reg);
+uint32_t vcpu_seg_attrib(struct vcpu *v, size_t reg);
+// The guest's CPL, SS's DPL.
+unsigned int vcpu_cpl(struct vcpu *v);
 void vcpu_save_mode(struct vcpu *v, struct vcpu_mode *mode);
 void vcpu_load_mode(struct vcpu *v, const struct vcpu_mode *mode);
 

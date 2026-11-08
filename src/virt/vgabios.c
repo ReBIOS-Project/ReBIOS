@@ -461,9 +461,7 @@ static bool real_mode_rom(struct vcpu *v) {
     if ((vcpu_cr0(v) & CR0_PE) != 0) {
         return false;
     }
-    struct vcpu_segment cs;
-    vcpu_get_seg(v, VCPU_SEG_CS, &cs);
-    return cs.selector == VGABIOS_SEGMENT;
+    return vcpu_seg_selector(v, VCPU_SEG_CS) == VGABIOS_SEGMENT;
 }
 
 // The call a new one takes the place of: one that nothing ended, as with a
@@ -509,10 +507,8 @@ static uint16_t call_begin(struct vcpu *v, bool vga_ports) {
     if (!c->direct) {
         return port;
     }
-    struct vcpu_segment ss;
-    vcpu_get_seg(v, VCPU_SEG_SS, &ss);
     c->v = v;
-    c->frame = ss.base + (uint16_t)v->gprs.rbp;
+    c->frame = vcpu_seg_base(v, VCPU_SEG_SS) + (uint16_t)v->gprs.rbp;
     frame_load(c);
     call_run(c, v);
     if (c->finished) {

@@ -525,12 +525,6 @@ static uint64_t *field_at(const struct nvmx *n, int slot) {
     return field_in(n->vmcs12, slot);
 }
 
-static unsigned int guest_cpl(struct vcpu *v) {
-    struct vcpu_segment ss;
-    vcpu_get_seg(v, VCPU_SEG_SS, &ss);
-    return (ss.attrib >> 5) & 3;
-}
-
 static bool long_mode_64(struct vcpu *v) {
     struct vcpu_segment cs;
     vcpu_get_seg(v, VCPU_SEG_CS, &cs);
@@ -2516,7 +2510,7 @@ void nvmx_instruction(struct vcpu *v, uint32_t reason) {
         vcpu_inject_exception(v, 6, false, 0);
         return;
     }
-    if (guest_cpl(v) > 0) {
+    if (vcpu_cpl(v) > 0) {
         vcpu_inject_exception(v, 13, true, 0);
         return;
     }
@@ -2860,7 +2854,7 @@ static bool shadow_access(struct vcpu *v, struct nvmx *n, uint32_t reason) {
     if ((field >> 15) != 0 || page == NULL || (page[field >> 3] >> (field & 7) & 1) != 0) {
         return false;
     }
-    if (guest_cpl(v) > 0) {
+    if (vcpu_cpl(v) > 0) {
         vcpu_inject_exception(v, 13, true, 0);
         return true;
     }

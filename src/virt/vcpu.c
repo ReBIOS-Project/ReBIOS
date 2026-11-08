@@ -595,6 +595,26 @@ static struct vmcb_seg *svm_seg(struct vcpu *v, size_t reg) {
     }
 }
 
+uint16_t vcpu_seg_selector(struct vcpu *v, size_t reg) {
+    return virt_vmx ? vmx_seg_selector(reg) : svm_seg(v, reg)->selector;
+}
+
+uint64_t vcpu_seg_base(struct vcpu *v, size_t reg) {
+    return virt_vmx ? vmx_seg_base(reg) : svm_seg(v, reg)->base;
+}
+
+uint32_t vcpu_seg_limit(struct vcpu *v, size_t reg) {
+    return virt_vmx ? vmx_seg_limit(reg) : svm_seg(v, reg)->limit;
+}
+
+uint32_t vcpu_seg_attrib(struct vcpu *v, size_t reg) {
+    return virt_vmx ? vmx_seg_attrib(reg) : svm_seg(v, reg)->attrib;
+}
+
+unsigned int vcpu_cpl(struct vcpu *v) {
+    return (vcpu_seg_attrib(v, VCPU_SEG_SS) >> 5) & 3;
+}
+
 void vcpu_get_seg(struct vcpu *v, size_t reg, struct vcpu_segment *seg) {
     if (virt_vmx) {
         vmx_get_seg(reg, seg);

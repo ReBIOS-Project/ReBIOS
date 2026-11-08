@@ -410,10 +410,7 @@ retry: *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0)
 bool guest_mem_linear_to_phys(
     struct vcpu *v, uintptr_t linear, bool write, bool fetch, uint64_t *gpa, uint32_t *pf_error
 ) {
-    struct vcpu_segment ss;
-    vcpu_get_seg(v, VCPU_SEG_SS, &ss);
-    bool user = ((ss.attrib >> 5) & 3) == 3;
-    return linear_to_phys(v, linear, write, fetch, user, false, gpa, pf_error);
+    return linear_to_phys(v, linear, write, fetch, vcpu_cpl(v) == 3, false, gpa, pf_error);
 }
 
 // What the processor reads and writes for itself, such as descriptor tables

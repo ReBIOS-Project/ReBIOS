@@ -47,12 +47,11 @@ static bool is_legacy_prefix(uint8_t b) {
 }
 
 unsigned int insn_length_intercepted(struct vcpu *v) {
-    struct vcpu_segment cs;
-    vcpu_get_seg(v, VCPU_SEG_CS, &cs);
-    bool long_mode = (vcpu_efer(v) & EFER_LMA) != 0 && (cs.attrib & VCPU_SEG_L) != 0;
+    uint32_t cs = vcpu_seg_attrib(v, VCPU_SEG_CS);
+    bool long_mode = (vcpu_efer(v) & EFER_LMA) != 0 && (cs & VCPU_SEG_L) != 0;
     uintptr_t linear = vcpu_rip(v);
     if (!long_mode) {
-        linear = (cs.base + linear) & 0xffffffff;
+        linear = (vcpu_seg_base(v, VCPU_SEG_CS) + linear) & 0xffffffff;
     }
 
     uint8_t bytes[15];
@@ -307,16 +306,15 @@ static void vex_rex(struct insn *insn, uint8_t rxb, bool w, bool long_mode) {
 }
 
 bool insn_decode(struct vcpu *v, struct insn *insn) {
-    struct vcpu_segment cs;
-    vcpu_get_seg(v, VCPU_SEG_CS, &cs);
-    bool long_mode = (vcpu_efer(v) & EFER_LMA) != 0 && (cs.attrib & VCPU_SEG_L) != 0;
+    uint32_t cs = vcpu_seg_attrib(v, VCPU_SEG_CS);
+    bool long_mode = (vcpu_efer(v) & EFER_LMA) != 0 && (cs & VCPU_SEG_L) != 0;
     // CS's descriptor gives the defaults, in real mode too, where its cached D
     // bit outlives protected mode, as Linux 7.3's KVM decodes (emulate.c,
     // x86_decode_insn()); V86 mode's are 16-bit.
-    bool big = (vcpu_rflags(v) & RFLAGS_VM) == 0 && (cs.attrib & VCPU_SEG_DB) != 0;
+    bool big = (vcpu_rflags(v) & RFLAGS_VM) == 0 && (cs & VCPU_SEG_DB) != 0;
     uintptr_t linear = vcpu_rip(v);
     if (!long_mode) {
-        linear = (cs.base + linear) & 0xffffffff;
+        linear = (vcpu_seg_base(v, VCPU_SEG_CS) + linear) & 0xffffffff;
     }
 
     // Zeroes past what can be read make the decoding stop short, as the
@@ -585,16 +583,13 @@ static uint64_t address_mask(size_t size) {
 // Outside 64-bit mode the linear address space wraps at 4 GiB, and in it only
 // FS and GS have bases.
 static uintptr_t segment_linear(struct vcpu *v, const struct insn *insn, int reg, uintptr_t ea) {
-    struct vcpu_segment segment;
     if (insn->long_mode) {
         if (reg != VCPU_SEG_FS && reg != VCPU_SEG_GS) {
             return vcpu_untagged(v, (size_t)reg, ea);
         }
-        vcpu_get_seg(v, reg, &segment);
-        return vcpu_untagged(v, (size_t)reg, segment.base + ea);
+        return vcpu_untagged(v, (size_t)reg, vcpu_seg_base(v, (size_t)reg) + ea);
     }
-    vcpu_get_seg(v, reg, &segment);
-    return (segment.base + ea) & 0xffffffff;
+    return (vcpu_seg_base(v, (size_t)reg) + ea) & 0xffffffff;
 }
 
 static bool mem_linear(struct vcpu *v, const struct insn *insn, int64_t disp, uint64_t *linear) {
@@ -783,10 +778,8 @@ static bool lass_violation(struct vcpu *v, const struct insn *insn, uint64_t la)
     if ((vcpu_efer(v) & EFER_LMA) == 0 || (vcpu_cr4(v) & CR4_LASS) == 0) {
         return false;
     }
-    struct vcpu_segment ss;
-    vcpu_get_seg(v, VCPU_SEG_SS, &ss);
     bool high = insn->long_mode && (la >> 63) != 0;
-    if (((ss.attrib >> 5) & 3) == 3) {
+    if (vcpu_cpl(v) == 3) {
         return high;
     }
     return !high && (vcpu_cr4(v) & CR4_SMAP) != 0 && (vcpu_rflags(v) & RFLAGS_AC) == 0;
@@ -810,23 +803,22 @@ static bool linear_allowed(
             return true;
         }
     } else {
-        struct vcpu_segment s;
-        vcpu_get_seg(v, reg, &s);
-        bool code = (s.attrib & SEG_CODE) != 0;
+        uint32_t attrib = vcpu_seg_attrib(v, (size_t)reg);
+        bool code = (attrib & SEG_CODE) != 0;
         bool real = (vcpu_cr0(v) & CR0_PE) == 0;
-        uint64_t limit = s.limit;
-        bool allowed = (s.attrib & VCPU_SEG_UNUSABLE) == 0 && (s.attrib & SEG_PRESENT) != 0;
-        if (write && ((code && !real) || (s.attrib & SEG_RW) == 0)) {
+        uint64_t limit = vcpu_seg_limit(v, (size_t)reg);
+        bool allowed = (attrib & VCPU_SEG_UNUSABLE) == 0 && (attrib & SEG_PRESENT) != 0;
+        if (write && ((code && !real) || (attrib & SEG_RW) == 0)) {
             allowed = false;
         }
-        if (!write && code && (s.attrib & SEG_RW) == 0) {
+        if (!write && code && (attrib & SEG_RW) == 0) {
             allowed = false;
         }
-        if (!code && (s.attrib & SEG_EXPAND_DOWN) != 0) {
+        if (!code && (attrib & SEG_EXPAND_DOWN) != 0) {
             allowed &= ea > limit;
-            limit = (s.attrib & VCPU_SEG_DB) != 0 ? 0xffffffff : 0xffff;
+            limit = (attrib & VCPU_SEG_DB) != 0 ? 0xffffffff : 0xffff;
         }
-        uint64_t la = (s.base + ea) & 0xffffffff;
+        uint64_t la = (vcpu_seg_base(v, (size_t)reg) + ea) & 0xffffffff;
         if (allowed && ea <= limit && (limit == 0xffffffff || size <= limit + 1 - ea)
          && !lass_violation(v, insn, la)) {
             *linear = la;

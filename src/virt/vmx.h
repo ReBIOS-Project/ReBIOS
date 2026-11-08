@@ -505,6 +505,11 @@ bool vmx_ept_dirty_flags(void);
 bool vmx_monitor_trap_supported(void);
 void vmx_get_seg(size_t reg, struct vcpu_segment *seg);
 void vmx_set_seg(size_t reg, const struct vcpu_segment *seg);
+// One field of vmx_get_seg()'s, read alone.
+uint16_t vmx_seg_selector(size_t reg);
+uint64_t vmx_seg_base(size_t reg);
+uint32_t vmx_seg_limit(size_t reg);
+uint32_t vmx_seg_attrib(size_t reg);
 uint64_t vmx_cr0_mask(void);
 uint64_t vmx_cr4_mask(void);
 uint64_t vmx_cr0_real(uint64_t guest_cr0);

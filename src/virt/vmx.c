@@ -464,6 +464,22 @@ static const uint32_t seg_ar_fields[] = {
     VMCS_GUEST_FS_AR, VMCS_GUEST_GS_AR, VMCS_GUEST_LDTR_AR, VMCS_GUEST_TR_AR
 };
 
+uint16_t vmx_seg_selector(size_t reg) {
+    return reg < VCPU_SEG_GDTR ? (uint16_t)vmx_read(seg_sel_fields[reg]) : 0;
+}
+
+uint64_t vmx_seg_base(size_t reg) {
+    return vmx_read(seg_base_fields[reg]);
+}
+
+uint32_t vmx_seg_limit(size_t reg) {
+    return (uint32_t)vmx_read(seg_limit_fields[reg]);
+}
+
+uint32_t vmx_seg_attrib(size_t reg) {
+    return reg < VCPU_SEG_GDTR ? ar_to_seg((uint32_t)vmx_read(seg_ar_fields[reg])) : 0;
+}
+
 void vmx_get_seg(size_t reg, struct vcpu_segment *seg) {
     seg->base = vmx_read(seg_base_fields[reg]);
     seg->limit = vmx_read(seg_limit_fields[reg]);
