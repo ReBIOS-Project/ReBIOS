@@ -20,7 +20,10 @@
 
 #include <stdint.h>
 
-// Loads the host's PAT on the processor, with interrupts disabled.
+// The host's memory types, the same on every processor: loads the PAT, and
+// gives each other processor the MTRRs the boot processor has, where the
+// firmware left it others. The boot processor's call comes before the others',
+// with interrupts disabled on each.
 void cache_cpu_init(uint64_t pat);
 
 #endif
