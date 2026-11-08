@@ -1162,6 +1162,13 @@ static uint32_t font_base(uint8_t attribute) {
     return (map & 3) * (uint32_t)0x4000 + (map >> 2) * (uint32_t)0x2000;
 }
 
+// Pixels a word at a time, where memcpy() goes a byte at a time.
+static void pixels_copy(uint32_t *restrict dst, const uint32_t *restrict src, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        dst[i] = src[i];
+    }
+}
+
 static void put(uint32_t *line, uint32_t *x, uint32_t width, uint32_t rgb, size_t count) {
     for (size_t i = 0; i < count && *x < width; i++) {
         line[(*x)++] = rgb;
@@ -1380,7 +1387,7 @@ static void make_frame(
         bool again = double_scan && (y & 1) != 0 && y != line_compare;
         out.made[y] = again ? out.made[y - 1] : all || line_changed(columns + 1, ma, row_scan);
         if (out.made[y] && again) {
-            memcpy(out.frame + y * width, out.frame + (y - 1) * width, width * sizeof(uint32_t));
+            pixels_copy(out.frame + y * width, out.frame + (y - 1) * width, width);
         } else if (out.made[y]) {
             // The screen below a split can be kept from panning.
             unsigned int shift = split && (vga.ac[AC_MODE] & AC_MODE_PAN_SPLIT) != 0 ? 0 : pan;
@@ -1391,7 +1398,7 @@ static void make_frame(
                     out.line, span, columns + 1, ma, row_scan, dots, repeat, cursor_on, blink_on
                 );
             }
-            memcpy(out.frame + y * width, out.line + shift, width * sizeof(uint32_t));
+            pixels_copy(out.frame + y * width, out.line + shift, width);
         }
         if (!double_scan || (y & 1) != 0) {
             if (row_scan >= max_scan) {
@@ -1569,7 +1576,7 @@ static void screen_line(uint32_t y, uint32_t x0, uint32_t x1) {
     if (x1 > out.band_x1) {
         out.band_x1 = x1;
     }
-    memcpy(out.band + (uint64_t)out.band_count * out.w, out.fb_line, out.w * sizeof(uint32_t));
+    pixels_copy(out.band + (uint64_t)out.band_count * out.w, out.fb_line, out.w);
     out.band_count++;
 }
 
@@ -1624,7 +1631,7 @@ static void draw_lines(void) {
                 last--;
             }
         }
-        memcpy(was + first, now + first, (last - first) * sizeof(uint32_t));
+        pixels_copy(was + first, now + first, last - first);
 
         // The destination rows and columns these source pixels cover.
         uint32_t y0 = (uint32_t)(((uint64_t)sy * out.h + height - 1) / height);
