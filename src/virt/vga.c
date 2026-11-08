@@ -1453,8 +1453,17 @@ static void fb_put(uint8_t *row, uint32_t x, uint32_t pixel, uint8_t bpp) {
 // Pixels from x on in a framebuffer row.
 static void fb_row(uint8_t *row, uint32_t x, const uint32_t *pixels, size_t count, uint8_t bpp) {
     if (bpp == 32) {
+        // Two pixels at a time, where they share an aligned quadword.
         volatile uint32_t *p = (volatile uint32_t *)row + x;
-        for (size_t i = 0; i < count; i++) {
+        size_t i = 0;
+        if (((uintptr_t)p & 4) != 0 && count != 0) {
+            p[0] = pixels[0];
+            i = 1;
+        }
+        for (; i + 2 <= count; i += 2) {
+            *(volatile uint64_t *)(p + i) = pixels[i] | (uint64_t)pixels[i + 1] << 32;
+        }
+        if (i < count) {
             p[i] = pixels[i];
         }
         return;
