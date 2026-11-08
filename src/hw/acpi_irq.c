@@ -35,9 +35,18 @@
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/printf.h>
+#include <lib/util.h>
 #include <memory.h>
 
 #define PCI_PINS 4
+// Linux 7.3's penalties for the IRQs it could give a link device (ACPI 6.6,
+// 6.2.14), drivers/acpi/pci_link.c.
+#define LINK_POSSIBLE_MAX 16
+#define PENALTY_PCI_POSSIBLE (16 * 16)
+#define PENALTY_PCI_USING (16 * 16 * 16)
+#define PENALTY_ISA_TYPICAL (16 * 16 * 16 * 16)
+#define PENALTY_ISA_USED (16 * 16 * 16 * 16 * 16)
+#define PENALTY_ISA_ALWAYS (16 * 16 * 16 * 16 * 16 * 16)
 // The function number of every _PRT entry's Address: all functions, ACPI 6.6,
 // 6.2.14.
 #define PRT_ANY_FUNCTION ((uint32_t)0xffff)
@@ -78,9 +87,35 @@ struct link_search {
     bool found;
 };
 
+// The interrupt a link device is at, 0 where the firmware left it disabled,
+// and the interrupts it can be at, of one descriptor's type, triggering, and
+// polarity.
+struct link {
+    uacpi_namespace_node *node;
+    uint32_t active;
+    uint32_t possible[LINK_POSSIBLE_MAX];
+    size_t possible_count;
+    uint32_t type;
+    uint8_t triggering;
+    uint8_t polarity;
+};
+
+// The timer's, the keyboard's, and the cascade's IRQs always taken, the other
+// ISA ones mostly, and 9 to 11 left for PCI.
+static const uint32_t isa_penalty[ISA_IRQS] = {
+    PENALTY_ISA_ALWAYS, PENALTY_ISA_ALWAYS, PENALTY_ISA_ALWAYS, PENALTY_ISA_TYPICAL,
+    PENALTY_ISA_TYPICAL, PENALTY_ISA_TYPICAL, PENALTY_ISA_TYPICAL, PENALTY_ISA_TYPICAL,
+    PENALTY_ISA_TYPICAL, 0, 0, 0, PENALTY_ISA_USED, PENALTY_ISA_USED, PENALTY_ISA_USED,
+    PENALTY_ISA_USED
+};
+
 static struct acpi_irq_pci_route *routes;
 static size_t route_count;
 static bool routes_done;
+
+static struct link *links;
+static size_t link_count;
+static bool links_done;
 
 static uint16_t isa_claimed;
 static bool isa_claimed_done;
@@ -273,9 +308,180 @@ static uacpi_iteration_decision link_resource(void *user, uacpi_resource *resour
     return UACPI_ITERATION_DECISION_BREAK;
 }
 
+static uacpi_iteration_decision link_possible(void *user, uacpi_resource *resource) {
+    struct link *l = user;
+    if (resource->type == UACPI_RESOURCE_TYPE_IRQ) {
+        const uacpi_resource_irq *irq = &resource->irq;
+        for (size_t i = 0; i < irq->num_irqs && l->possible_count < LINK_POSSIBLE_MAX; i++) {
+            l->possible[l->possible_count++] = irq->irqs[i];
+        }
+        l->triggering = resource->irq.triggering;
+        l->polarity = resource->irq.polarity;
+    } else if (resource->type == UACPI_RESOURCE_TYPE_EXTENDED_IRQ) {
+        const uacpi_resource_extended_irq *x = &resource->extended_irq;
+        for (size_t i = 0; i < x->num_irqs && l->possible_count < LINK_POSSIBLE_MAX; i++) {
+            l->possible[l->possible_count++] = x->irqs[i];
+        }
+        l->triggering = x->triggering;
+        l->polarity = x->polarity;
+    } else {
+        return UACPI_ITERATION_DECISION_CONTINUE;
+    }
+    l->type = resource->type;
+    return UACPI_ITERATION_DECISION_BREAK;
+}
+
+static uacpi_iteration_decision link_current(void *user, uacpi_resource *resource) {
+    uint32_t *active = user;
+    if (resource->type == UACPI_RESOURCE_TYPE_IRQ && resource->irq.num_irqs != 0) {
+        *active = resource->irq.irqs[0];
+    } else if (resource->type == UACPI_RESOURCE_TYPE_EXTENDED_IRQ
+            && resource->extended_irq.num_irqs != 0) {
+        *active = resource->extended_irq.irqs[0];
+    } else {
+        return UACPI_ITERATION_DECISION_CONTINUE;
+    }
+    return UACPI_ITERATION_DECISION_BREAK;
+}
+
+static uint32_t link_active(uacpi_namespace_node *node) {
+    uint32_t active = 0;
+    uacpi_for_each_device_resource(node, "_CRS", link_current, &active);
+    return active;
+}
+
+static uacpi_iteration_decision link_found(
+    void *user, uacpi_namespace_node *node, uacpi_u32 depth
+) {
+    (void)depth;
+    size_t *count = user;
+    if (links != NULL) {
+        struct link *l = &links[*count];
+        *l = (struct link){ .node = node, .active = link_active(node) };
+        uacpi_for_each_device_resource(node, "_PRS", link_possible, l);
+        // A current IRQ it cannot take is no IRQ, as Linux 7.3 takes it, where
+        // it has a list of those it can take at all.
+        bool possible = l->possible_count == 0;
+        for (size_t i = 0; i < l->possible_count; i++) {
+            possible |= l->possible[i] == l->active;
+        }
+        if (!possible) {
+            l->active = 0;
+        }
+    }
+    (*count)++;
+    return UACPI_ITERATION_DECISION_CONTINUE;
+}
+
+static void links_find(void) {
+    links_done = true;
+    size_t count = 0;
+    uacpi_find_devices_at(uacpi_namespace_root(), acpi_link_ids, link_found, &count);
+    if (count == 0) {
+        return;
+    }
+    links = kmalloc(count * sizeof(struct link));
+    link_count = 0;
+    uacpi_find_devices_at(uacpi_namespace_root(), acpi_link_ids, link_found, &link_count);
+}
+
+// PCI may share the SCI where it is level-triggered and active low, and the
+// ISA IRQs devices use are taken, as Linux 7.3 has them
+// (acpi_penalize_sci_irq() and pnpacpi_add_irqresource()).
+static uint32_t link_penalty(uint32_t irq) {
+    uint32_t penalty = 0;
+    uint32_t sci;
+    bool active_low;
+    bool level;
+    if (acpi_irq_sci(&sci, &active_low, &level) && sci == irq) {
+        penalty += active_low && level ? PENALTY_PCI_USING : PENALTY_ISA_ALWAYS;
+    }
+    if (irq < ARRAY_COUNT(isa_penalty)) {
+        penalty += isa_penalty[irq];
+        if ((acpi_irq_isa_claimed() & ((uint32_t)1 << irq)) != 0) {
+            penalty += PENALTY_ISA_USED;
+        }
+    }
+    for (size_t i = 0; i < link_count; i++) {
+        const struct link *l = &links[i];
+        if (l->active != 0 && l->active == irq) {
+            penalty += PENALTY_PCI_USING;
+        }
+        for (size_t j = 0; j < l->possible_count; j++) {
+            if (l->possible[j] == irq) {
+                penalty += PENALTY_PCI_POSSIBLE / (uint32_t)l->possible_count;
+            }
+        }
+    }
+    return penalty;
+}
+
+// A link the firmware left disabled gets the interrupt of those it can take
+// that has the least penalty, searched from the last to favour 9 to 11 and
+// those above 15, set with _SRS, the interrupt it is at read back from _CRS,
+// as Linux 7.3's acpi_pci_link_allocate() and acpi_pci_link_set() give it one.
+// One with an interrupt keeps it, as the guest never sees the host's routing.
+static bool link_enable(struct link *l) {
+    if (l->possible_count == 0) {
+        return false;
+    }
+    uint32_t irq = l->possible[l->possible_count - 1];
+    for (size_t i = l->possible_count; i-- > 0; ) {
+        if (link_penalty(irq) > link_penalty(l->possible[i])) {
+            irq = l->possible[i];
+        }
+    }
+    if (link_penalty(irq) >= PENALTY_ISA_ALWAYS) {
+        return false;
+    }
+
+    union {
+        uacpi_resource resource;
+        uint8_t bytes[sizeof(uacpi_resource) + sizeof(uint32_t)];
+    } setting;
+    memset(&setting, 0, sizeof(setting));
+    uacpi_resource *r = &setting.resource;
+    r->type = l->type;
+    r->length = sizeof(setting);
+    uint8_t sharing = l->triggering == UACPI_TRIGGERING_EDGE ? UACPI_EXCLUSIVE : UACPI_SHARED;
+    if (l->type == UACPI_RESOURCE_TYPE_IRQ) {
+        r->irq.triggering = l->triggering;
+        r->irq.polarity = l->polarity;
+        r->irq.sharing = sharing;
+        r->irq.num_irqs = 1;
+        r->irq.irqs[0] = (uint8_t)irq;
+    } else {
+        r->extended_irq.direction = UACPI_CONSUMER;
+        r->extended_irq.triggering = l->triggering;
+        r->extended_irq.polarity = l->polarity;
+        r->extended_irq.sharing = sharing;
+        r->extended_irq.num_irqs = 1;
+        r->extended_irq.irqs[0] = irq;
+    }
+    uacpi_resources resources = { .length = sizeof(setting), .entries = r };
+    uacpi_status status = uacpi_set_resources(l->node, &resources);
+    if (status != UACPI_STATUS_OK) {
+        acpi_log_failure(l->node, "_SRS", status);
+        return false;
+    }
+    l->active = link_active(l->node);
+    const char *path = uacpi_namespace_node_generate_absolute_path(l->node);
+    printf("PCI link %s enabled at IRQ %u\n", path != NULL ? path : "?", l->active);
+    acpi_path_free(path);
+    return l->active != 0;
+}
+
 static bool link_interrupt(
     uacpi_namespace_node *link, uint32_t index, struct acpi_irq_pci_route *route
 ) {
+    if (!links_done) {
+        links_find();
+    }
+    for (size_t i = 0; i < link_count; i++) {
+        if (links[i].node == link && links[i].active == 0 && !link_enable(&links[i])) {
+            return false;
+        }
+    }
     uacpi_resources *resources;
     uacpi_status status = uacpi_get_current_resources(link, &resources);
     if (status != UACPI_STATUS_OK) {
