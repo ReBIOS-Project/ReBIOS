@@ -42,12 +42,9 @@ struct remap_target;
 #define VLAPIC_DEFAULT_BASE ((uint64_t)0xfee00000)
 
 // Each vCPU's local APIC is emulated, on the processor's, which the hypervisor
-// keeps for itself: x2APIC mode where the processor has it and the guest is
-// not kept from it, xAPIC mode always. Needs virt_init().
+// keeps for itself: x2APIC mode where the processor has it, xAPIC mode always.
+// Needs virt_init().
 void vlapic_init(void);
-// Whether the guest is kept from x2APIC mode, which the DMAR table asks system
-// software not to turn on, where the firmware has not.
-bool vlapic_x2apic_withheld(void);
 
 // A vCPU's local APIC: the boot processor's as a legacy BIOS hands it over,
 // set up as the processor's local APIC is when this is called, the others' as

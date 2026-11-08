@@ -33,10 +33,6 @@
 // interrupts.
 #define SPURIOUS_VECTOR 0x0f
 
-// Whether the firmware handed the boot processor's local APIC over in x2APIC
-// mode.
-static bool firmware_x2apic;
-
 struct lapic_regs {
     uint32_t tpr;
     uint32_t svr;
@@ -167,8 +163,7 @@ static bool madt_nmi_pin(uint32_t apic_id, struct nmi_pin *pin) {
 
 void lapic_legacy_init(void) {
     uint64_t found_base = rdmsr(MSR_IA32_APIC_BASE);
-    firmware_x2apic = (found_base & APIC_BASE_EXTD) != 0;
-    bool x2apic = firmware_x2apic && lapic_xapic_locked();
+    bool x2apic = (found_base & APIC_BASE_EXTD) != 0 && lapic_xapic_locked();
     uintptr_t registers = found_base & APIC_BASE_ADDRESS;
     if (!x2apic && registers + LAPIC_MMIO_SIZE > core_handoff->map_top) {
         printf("Local APIC registers at %#llx are out of reach\n", (unsigned long long)registers);
@@ -253,8 +248,4 @@ void lapic_legacy_init(void) {
         nmi.active_low ? "low" : "high", nmi.level ? "level" : "edge",
         from_madt ? "from the MADT" : "by default"
     );
-}
-
-bool lapic_legacy_firmware_x2apic(void) {
-    return firmware_x2apic;
 }

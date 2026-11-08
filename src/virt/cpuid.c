@@ -487,9 +487,6 @@ static struct cpuid_regs masked(uint32_t leaf, uint32_t subleaf) {
     r.ebx &= bits->keep[1];
     r.ecx &= bits->keep[2];
     r.edx &= bits->keep[3];
-    if (leaf == 1 && vlapic_x2apic_withheld()) {
-        r.ecx &= ~CPUID_1_ECX_X2APIC;
-    }
     // SVM's FRED needs its NMI virtualisation (AMD 69191 rev. 1.10).
     if (leaf == 7 && subleaf == 1 && !virt_vmx && !svm_vnmi) {
         r.eax &= ~CPUID_7_1_EAX_FRED;
