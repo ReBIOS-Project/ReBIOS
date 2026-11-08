@@ -54,6 +54,11 @@ bool pci_io_device_on_path(EFI_DEVICE_PATH_PROTOCOL *path, struct pci_io_device 
 // driver for. Returns whether one does, and which in found.
 bool pci_io_enable_io_port(uint16_t port, struct handoff_pci_address *found);
 
+// Enables I/O, memory and bus-master decoding of the function and the bridges
+// above it, as a card the firmware has no driver for needs before its option
+// ROM runs.
+void pci_io_enable_device(const struct pci_io_device *dev);
+
 // Whether a port above the function says it leads to a slot, as those above a
 // card's own bridges do.
 bool pci_io_device_in_slot(const struct pci_io_device *dev);
