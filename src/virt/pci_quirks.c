@@ -65,6 +65,19 @@
 #define ATI_WINDOW_DATA 0x4
 #define ATI_WINDOW_PORTS 8
 
+// The RTL8168's ERI registers in its BAR 2, through which Windows' driver
+// writes the MSI-X table: the data at ERIDR, then the address at ERIAR with
+// ERIAR_MSIX as its type and ERIAR_FLAG to write, which reads back flipped
+// once done (Linux 7.3's drivers/net/ethernet/realtek/r8169_main.c).
+#define RTL8168_DEVICE_ID 0x8168
+#define RTL8168_BAR 2
+#define RTL8168_ERIDR 0x70
+#define RTL8168_ERIAR 0x74
+#define RTL8168_ERIAR_FLAG ((uint32_t)0x80000000)
+#define RTL8168_ERIAR_TYPE ((uint32_t)0x7fff0000)
+#define RTL8168_ERIAR_MSIX ((uint32_t)0x00010000)
+#define RTL8168_ERIAR_OFFSET ((uint32_t)0x00000fff)
+
 // A copy of the configuration space in a memory BAR, the rest of the pages it
 // is on the device's.
 struct mirror {
@@ -113,6 +126,14 @@ struct nvidia_vga {
     struct pci_cfg_addr addr;
     unsigned int state;
     uint32_t offset;
+};
+
+struct rtl8168 {
+    struct pci_cfg_addr addr;
+    uintptr_t host;
+    bool msix;
+    uint32_t address;
+    uint32_t data;
 };
 
 static uint64_t config_read(struct pci_cfg_addr addr, uint32_t offset, size_t size) {
@@ -349,6 +370,59 @@ static void nvidia_vga_add(const struct pci_enum_function *f) {
     io_register(&handler);
 }
 
+static uint64_t rtl8168_read(struct vcpu *v, void *ctx, uint64_t offset, size_t size) {
+    (void)v;
+    const struct rtl8168 *r = ctx;
+    uint64_t value = mmio_read_host(r->host + offset, size);
+    if (r->msix && size == 4 && offset == RTL8168_ERIAR) {
+        value = r->address ^ RTL8168_ERIAR_FLAG;
+    } else if (r->msix && size == 4 && offset == RTL8168_ERIDR) {
+        uint64_t entry;
+        if (pci_virt_msix_access(r->addr, r->address & RTL8168_ERIAR_OFFSET, 4, false, &entry)) {
+            value = entry;
+        }
+    }
+    return value;
+}
+
+static void rtl8168_write(
+    struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value
+) {
+    (void)v;
+    struct rtl8168 *r = ctx;
+    if (size == 4 && offset == RTL8168_ERIDR) {
+        r->data = (uint32_t)value;
+    } else if (size == 4 && offset == RTL8168_ERIAR) {
+        r->msix = ((uint32_t)value & RTL8168_ERIAR_TYPE) == RTL8168_ERIAR_MSIX;
+        r->address = (uint32_t)value;
+        if (r->msix && ((uint32_t)value & RTL8168_ERIAR_FLAG) != 0) {
+            uint64_t entry = r->data;
+            pci_virt_msix_access(r->addr, value & RTL8168_ERIAR_OFFSET, 4, true, &entry);
+            return;
+        }
+    }
+    mmio_write_host(r->host + offset, size, value);
+}
+
+static const struct mmio_ops rtl8168_ops = { .read = rtl8168_read, .write = rtl8168_write };
+
+static void rtl8168_add(const struct pci_enum_function *f) {
+    const struct pci_enum_bar *b = &f->bars[RTL8168_BAR];
+    if (f->msix_cap == 0 || (b->kind != PCI_ENUM_BAR_MEM32 && b->kind != PCI_ENUM_BAR_MEM64)
+     || b->base == 0 || b->size < RTL8168_ERIAR + 4) {
+        return;
+    }
+    struct rtl8168 *r = kmalloc(sizeof(struct rtl8168));
+    *r = (struct rtl8168){ .addr = f->addr, .host = b->base };
+    mm_map_device(r->host, PAGE_SIZE);
+    if (!pci_virt_trap(f->addr, RTL8168_BAR, RTL8168_ERIDR, 8, &rtl8168_ops, r)) {
+        printf(
+            "PCI %02x:%02x.%x: its MSI-X table stays reachable through its ERI registers\n",
+            f->addr.bus, f->addr.device, f->addr.function
+        );
+    }
+}
+
 void pci_quirks_init(void) {
     const struct pci_enum_topology *t = pci_enum_topology();
     const struct handoff_video *video = &core_handoff->video;
@@ -381,6 +455,8 @@ void pci_quirks_init(void) {
             window_add(
                 f, ATI_WINDOW_BAR, ATI_WINDOW_ADDRESS, ATI_WINDOW_DATA, ATI_WINDOW_PORTS, false
             );
+        } else if (f->vendor_id == PCI_VENDOR_ID_REALTEK && f->device_id == RTL8168_DEVICE_ID) {
+            rtl8168_add(f);
         }
     }
 }
