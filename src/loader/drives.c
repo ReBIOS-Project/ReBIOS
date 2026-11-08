@@ -25,6 +25,7 @@
 #include <hw/pci_regs.h>
 #include <lib/log.h>
 #include <lib/printf.h>
+#include <lib/util.h>
 #include <loader/config.h>
 #include <loader/efi_glue.h>
 #include <loader/loader.h>
@@ -521,11 +522,20 @@ static bool legacy_bootable(EFI_BLOCK_IO_PROTOCOL *block_io, bool optical) {
     if (!media->MediaPresent || media->BlockSize < 512 || media->BlockSize > 4096) {
         return false;
     }
-    uintptr_t buffer = efi_glue_alloc_pages(1, 0);
+    // A transfer's buffer starts at a multiple of IoAlign, a power of two
+    // where it is above 1 (UEFI 2.11, 13.9): pages start at a multiple of 4
+    // KiB, and twice the pages of a larger alignment hold one that starts at a
+    // multiple of it.
+    size_t align = EFI_PAGE_SIZE;
+    if (media->IoAlign > EFI_PAGE_SIZE && (media->IoAlign & (media->IoAlign - 1)) == 0) {
+        align = media->IoAlign;
+    }
+    size_t pages = 2 * EFI_SIZE_TO_PAGES(align);
+    uintptr_t buffer = efi_glue_alloc_pages(pages, 0);
     if (buffer == 0) {
         return false;
     }
-    uint8_t *sector = (uint8_t *)(uintptr_t)buffer;
+    uint8_t *sector = (uint8_t *)(uintptr_t)align_up(buffer, align);
     bool bootable = false;
     if (optical) {
         EFI_STATUS status = block_io->ReadBlocks(
@@ -555,7 +565,7 @@ static bool legacy_bootable(EFI_BLOCK_IO_PROTOCOL *block_io, bool optical) {
             bootable = bootable && code;
         }
     }
-    efi_bs->FreePages(buffer, 1);
+    efi_bs->FreePages(buffer, pages);
     return bootable;
 }
 
