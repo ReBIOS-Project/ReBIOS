@@ -850,16 +850,14 @@ void irq_isa_pulse(unsigned int irq) {
     spinlock_acquire(&lock);
     uint64_t vrte = 0;
     bool apic = isa_apic_entry(irq, &vrte);
-    if (!apic) {
-        pic_pulse_irq(irq);
-        atomic_store_explicit(&extint_asserted, pic_output(), memory_order_release);
-    }
+    // The line reaches the 8259 as well as the I/O APIC, as on a PC.
+    pic_pulse_irq(irq);
+    atomic_store_explicit(&extint_asserted, pic_output(), memory_order_release);
     spinlock_release(&lock);
     if (apic) {
         isa_apic_deliver(vrte);
-    } else {
-        kick_after_update();
     }
+    kick_after_update();
 }
 
 void irq_isa_set(unsigned int irq, bool level) {
