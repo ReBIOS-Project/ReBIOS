@@ -1556,9 +1556,10 @@ static bool controls_valid(const struct nvmx *n) {
         && msr_list_valid(get12(n, VMCS_ENTRY_MSR_LOAD_ADDR), get12(n, VMCS_ENTRY_MSR_LOAD_COUNT));
 }
 
-// The checks on the host state (SDM 325462-093 Vol. 3C, 29.2.2, 29.2.3), which
-// the exits of the guest's guest load into VMCS01.
-static bool host_state_valid(const struct nvmx *n) {
+// The checks on the host state, the address-space size among them (SDM
+// 325462-093 Vol. 3C, 29.2.2 to 29.2.4), which the exits of the guest's guest
+// load into VMCS01.
+static bool host_state_valid(struct vcpu *v, const struct nvmx *n) {
     uint64_t exit = get12(n, VMCS_EXIT_CONTROLS);
     bool host64 = (exit & EXIT_HOST_ADDR_SPACE_SIZE) != 0;
     uint64_t cr0 = get12(n, VMCS_HOST_CR0);
@@ -1589,12 +1590,15 @@ static bool host_state_valid(const struct nvmx *n) {
         return false;
     }
     uintptr_t rip = get12(n, VMCS_HOST_RIP);
+    if (host64 != ((vcpu_efer(v) & EFER_LMA) != 0)) {
+        return false;
+    }
     if (host64) {
         if ((cr4 & CR4_PAE) == 0 || !canonical(rip)) {
             return false;
         }
     } else if ((get12(n, VMCS_ENTRY_CONTROLS) & ENTRY_IA32E_MODE_GUEST) != 0
-            || (cr4 & CR4_PCIDE) != 0 || (rip >> 32) != 0) {
+            || (cr4 & (CR4_PCIDE | CR4_FRED)) != 0 || (rip >> 32) != 0) {
         return false;
     }
     static const uint16_t bases[] = {
@@ -2350,7 +2354,7 @@ static void vmlaunch(struct vcpu *v, struct nvmx *n, bool resume) {
         fail(v, ERROR_ENTRY_CONTROLS);
         return;
     }
-    if (!host_state_valid(n)) {
+    if (!host_state_valid(v, n)) {
         fail(v, ERROR_ENTRY_HOST_STATE);
         return;
     }
