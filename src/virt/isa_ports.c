@@ -30,6 +30,7 @@
 #include <handoff.h>
 #include <hw/acpi.h>
 #include <hw/isa.h>
+#include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
 #include <hw/pci_regs.h>
 #include <lib/log.h>
@@ -57,6 +58,13 @@ const char *const isa_ports_ids[] = { "PNP0500", "PNP0501", "PNP0400", "PNP0401"
 #define IDE_SECONDARY_CONTROL 0x376
 #define IDE_SECONDARY_IRQ 15
 #define IDE_CHANNEL_PORTS 8
+
+// An Intel IDE function's timing registers, one per channel, whose IDE Decode
+// Enable bit has the function claim that channel's ports (PIIX4 datasheet
+// 290562-001, 5.1.10; ICH10 datasheet 319973-003, 14.1.22).
+#define IDE_PRIMARY_TIMING 0x40
+#define IDE_SECONDARY_TIMING 0x42
+#define IDE_TIMING_DECODE 0x8000
 
 // ACPI 6.6's resource descriptors that take I/O ports, by their first byte:
 // the small I/O Port and Fixed Location I/O Port ones (6.4.2.5, 6.4.2.6), and
@@ -346,6 +354,24 @@ void isa_ports_changed(const void *node) {
     log_ports(dev->node, &now);
 }
 
+// A legacy BIOS turns the channel's decode on, which the firmware may leave
+// off, and which drivers take for the channel's presence: Windows XP's, and
+// Linux 7.3's (ata_piix.c, piix_pata_prereset()).
+static void decode_ide_channel(const struct pci_enum_function *f, uint32_t timing) {
+    if (f->vendor_id != PCI_VENDOR_ID_INTEL) {
+        return;
+    }
+    uint32_t value = pci_cfg_read(f->addr, timing, 2);
+    if ((value & IDE_TIMING_DECODE) != 0) {
+        return;
+    }
+    pci_cfg_write(f->addr, timing, 2, value | IDE_TIMING_DECODE);
+    printf(
+        "IDE " PCI_CFG_ADDR_FMT ": decoding the %s channel, which the firmware left off\n",
+        PCI_CFG_ADDR_ARGS(f->addr), timing == IDE_PRIMARY_TIMING ? "primary" : "secondary"
+    );
+}
+
 static void give_ide_channels(void) {
     const struct pci_enum_topology *t = pci_enum_topology();
     for (size_t i = 0; t != NULL && i < t->function_count; i++) {
@@ -354,11 +380,13 @@ static void give_ide_channels(void) {
             continue;
         }
         if ((f->prog_if & IDE_PRIMARY_NATIVE) == 0) {
+            decode_ide_channel(f, IDE_PRIMARY_TIMING);
             io_pass(IDE_PRIMARY_BASE, IDE_CHANNEL_PORTS);
             io_pass(IDE_PRIMARY_CONTROL, 1);
             irq_give_isa_line(IDE_PRIMARY_IRQ);
         }
         if ((f->prog_if & IDE_SECONDARY_NATIVE) == 0) {
+            decode_ide_channel(f, IDE_SECONDARY_TIMING);
             io_pass(IDE_SECONDARY_BASE, IDE_CHANNEL_PORTS);
             io_pass(IDE_SECONDARY_CONTROL, 1);
             irq_give_isa_line(IDE_SECONDARY_IRQ);
