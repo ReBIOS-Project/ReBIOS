@@ -380,7 +380,9 @@ static void latch_status(struct channel *c, uint64_t now) {
     if (c->status_latched) {
         return;
     }
-    bool null_count = !c->loaded || (c->running && ticks_since(c->start, now) == 0);
+    // Modes 1 and 5 load the count into the counting element at a trigger.
+    bool untriggered = (c->mode == 1 || c->mode == 5) && !c->triggered;
+    bool null_count = !c->loaded || untriggered || (c->running && ticks_since(c->start, now) == 0);
     c->status = (uint8_t)((out_level(c, now) ? STATUS_OUT : 0)
                         | (null_count ? STATUS_NULL_COUNT : 0) | c->access << ACCESS_SHIFT
                         | c->mode << MODE_SHIFT | (c->bcd ? CONTROL_BCD : 0));
