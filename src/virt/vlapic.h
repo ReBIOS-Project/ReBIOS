@@ -129,6 +129,9 @@ void vlapic_dismiss(struct vcpu *v, uint8_t vector);
 int vlapic_tpr_held(struct vcpu *v);
 // Whether the 8259's interrupts reach the vCPU through LINT0.
 bool vlapic_extint_open(struct vcpu *v);
+// The 8259's output rose at the vCPU's LINT0, which takes it as an NMI or a
+// vector where its entry asks for one.
+void vlapic_lint0_rose(struct vcpu *v);
 
 // Whether the processor delivers the vCPU's interrupts from its local APIC
 // itself, which then only need putting in its registers.

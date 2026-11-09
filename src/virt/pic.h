@@ -38,8 +38,8 @@ uint8_t pic_read(uint16_t port);
 // The level of an IRQ line.
 void pic_set_irq(unsigned int irq, bool level);
 // An edge on an IRQ line, which stays high until acknowledged, as the 8259A
-// needs.
-void pic_pulse_irq(unsigned int irq);
+// needs, and whether the master's INT output rose for it.
+bool pic_pulse_irq(unsigned int irq);
 
 // Whether the master's INT output is asserted, and the interrupt acknowledge
 // that answers it: the vector, IRQ 7's when nothing requests.

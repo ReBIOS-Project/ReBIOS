@@ -132,9 +132,35 @@ static struct spinlock slot_lock;
 static struct spinlock lock;
 static struct cpu *bsp;
 static _Atomic(bool) extint_asserted;
+// The 8259's output rose since the LINT0 entries last saw it.
+static _Atomic(bool) lint0_edge;
 // The processor an unmasked I/O APIC ExtINT entry sends the 8259's interrupts
 // to, if any.
 static _Atomic(struct cpu *) extint_target;
+
+// The 8259's output, which reaches every processor's LINT0: entries that ask
+// for an NMI or a vector take its rising edges, from low or through a pulse's
+// new edge, as Linux 7.3's KVM has the PIT's ticks take them for old Linux's
+// NMI watchdog (arch/x86/kvm/i8254.c, pit_do_work()).
+static void extint_follow(bool rose) {
+    bool now = pic_output();
+    bool was = atomic_exchange_explicit(&extint_asserted, now, memory_order_acq_rel);
+    if (now && (!was || rose)) {
+        atomic_store_explicit(&lint0_edge, true, memory_order_release);
+    }
+}
+
+static void lint0_follow(void) {
+    if (!atomic_exchange_explicit(&lint0_edge, false, memory_order_acq_rel)) {
+        return;
+    }
+    for (size_t i = 0; i < smp_cpu_count(); i++) {
+        struct vcpu *v = smp_cpu(i)->vcpu;
+        if (v != NULL) {
+            vlapic_lint0_rose(v);
+        }
+    }
+}
 
 static void override(const struct acpi_madt_interrupt_source_override *iso) {
     if (iso->bus != 0 || iso->source >= ISA_IRQS || iso->gsi >= route_count
@@ -387,7 +413,7 @@ static void update(void) {
         }
     }
 
-    atomic_store_explicit(&extint_asserted, pic_output(), memory_order_release);
+    extint_follow(false);
     if (atomic_load_explicit(&extint_target, memory_order_relaxed) != was) {
         vlapic_extint_moved();
     }
@@ -395,6 +421,7 @@ static void update(void) {
 
 // After the 8259s changed, on any processor.
 static void kick_after_update(void) {
+    lint0_follow();
     struct cpu *target = atomic_load_explicit(&extint_target, memory_order_relaxed);
     if (target == NULL) {
         target = bsp;
@@ -437,14 +464,15 @@ void irq_host_interrupt(uint8_t vector) {
     if (edge && irq == ISA_IRQ_TIMER && pit_tick_held(pic_in_service(ISA_IRQ_TIMER))) {
         edge = false;
     }
+    bool rose = false;
     if (edge) {
-        pic_pulse_irq((unsigned int)irq);
+        rose = pic_pulse_irq((unsigned int)irq);
     }
     if (level) {
         pic_set_irq((unsigned int)irq, true);
     }
     lapic_eoi();
-    atomic_store_explicit(&extint_asserted, pic_output(), memory_order_release);
+    extint_follow(rose);
     spinlock_release(&lock);
     kick_after_update();
 }
@@ -851,8 +879,7 @@ void irq_isa_pulse(unsigned int irq) {
     uint64_t vrte = 0;
     bool apic = isa_apic_entry(irq, &vrte);
     // The line reaches the 8259 as well as the I/O APIC, as on a PC.
-    pic_pulse_irq(irq);
-    atomic_store_explicit(&extint_asserted, pic_output(), memory_order_release);
+    extint_follow(pic_pulse_irq(irq));
     spinlock_release(&lock);
     if (apic) {
         isa_apic_deliver(vrte);
@@ -865,7 +892,7 @@ void irq_isa_set(unsigned int irq, bool level) {
     uint64_t vrte = 0;
     bool apic = isa_apic_entry(irq, &vrte);
     pic_set_irq(irq, level);
-    atomic_store_explicit(&extint_asserted, pic_output(), memory_order_release);
+    extint_follow(false);
     spinlock_release(&lock);
     if (apic && level) {
         isa_apic_deliver(vrte);
@@ -880,8 +907,9 @@ uint8_t irq_extint_acknowledge(void) {
     if (!ticking && pic_in_service(ISA_IRQ_TIMER)) {
         pit_tick_begun();
     }
-    atomic_store_explicit(&extint_asserted, pic_output(), memory_order_release);
+    extint_follow(false);
     spinlock_release(&lock);
+    lint0_follow();
     return vector;
 }
 

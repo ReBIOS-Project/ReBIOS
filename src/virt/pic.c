@@ -326,14 +326,25 @@ void pic_set_irq(unsigned int irq, bool level) {
     update();
 }
 
-void pic_pulse_irq(unsigned int irq) {
+bool pic_pulse_irq(unsigned int irq) {
     struct chip *c = &chips[irq >> 3];
     uint8_t mask = (uint32_t)1 << (irq & 7);
+    bool before = pic_output();
+    // A line an earlier pulse still holds falls first, as a counter's output
+    // does between its ticks.
+    bool fell = false;
+    if ((c->pulses & mask) != 0) {
+        c->lines &= ~mask;
+        c->pulses &= ~mask;
+        update();
+        fell = !pic_output();
+    }
     c->lines |= mask;
     c->edges |= mask;
     c->pulses |= mask;
     c->acked &= ~mask;
     update();
+    return pic_output() && (!before || fell);
 }
 
 bool pic_output(void) {

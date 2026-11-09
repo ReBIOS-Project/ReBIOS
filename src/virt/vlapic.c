@@ -1255,6 +1255,21 @@ void vlapic_take(struct vcpu *v, uint8_t vector) {
     set_vector(vl, APIC_ISR, vector, true);
 }
 
+void vlapic_lint0_rose(struct vcpu *v) {
+    struct vlapic *vl = v->vlapic;
+    uint32_t lvt = regs_get(vl, APIC_LVT_LINT0);
+    if (!enabled(vl) || (lvt & APIC_LVT_MASKED) != 0) {
+        return;
+    }
+    uint32_t mode = lvt & APIC_LVT_DELIVERY_MASK;
+    if (mode == APIC_LVT_DELIVERY_FIXED) {
+        vlapic_accept(v, (uint8_t)lvt, (lvt & APIC_LVT_LEVEL) != 0);
+    } else if (mode == APIC_LVT_DELIVERY_NMI) {
+        atomic_store_explicit(&v->cpu->nmi_pending, true, memory_order_release);
+        vcpu_kick(v->cpu);
+    }
+}
+
 bool vlapic_extint_open(struct vcpu *v) {
     struct vlapic *vl = v->vlapic;
     // A globally disabled local APIC leaves LINT0 the processor's INTR pin.
