@@ -18,10 +18,10 @@
 #ifndef HW__TSC_H
 #define HW__TSC_H
 
-// Measures the TSC's rate against the HPET, or else the PM timer, where the
-// loader only timed it with the firmware's Stall(), and takes its nominal rate
-// instead where the processor gives one that agrees. Needs pm_timer_init(),
-// and comes before anything times with the TSC.
+// Measures the TSC's rate against the PM timer, where the loader only timed it
+// with the firmware's Stall(), and takes its nominal rate instead where the
+// processor gives one that agrees. Needs pm_timer_init(), and comes before
+// anything times with the TSC.
 void tsc_calibrate(void);
 
 #endif
