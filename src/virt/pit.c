@@ -417,6 +417,9 @@ static void control_write(uint8_t value) {
     c->bcd = (value & CONTROL_BCD) != 0;
     c->read_state = access;
     c->write_state = access;
+    // Reprogramming releases a latched count (Intel 8254 datasheet 231164-005,
+    // Counter Latch Command).
+    c->latch_state = 0;
     c->loaded = false;
     c->running = false;
     c->triggered = false;
