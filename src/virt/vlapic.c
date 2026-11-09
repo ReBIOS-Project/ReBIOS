@@ -53,6 +53,10 @@
 #define XAPIC_BROADCAST ((uint32_t)0xff)
 #define X2APIC_BROADCAST ((uint32_t)0xffffffff)
 #define TIMER_DIVIDE_WRITABLE ((uint32_t)0xb)
+// The bits of x2APIC mode's ICR that raise #GP (SDM 325462-093 Vol. 3A,
+// 13.12.1.3), which its former delivery status bit is left out of, as Linux
+// 7.3's KVM has them (lapic.c, __kvm_x2apic_icr_write()).
+#define X2APIC_ICR_RESERVED ((uint64_t)0xfff00000 | (uint64_t)3 << 16 | (uint64_t)1 << 13)
 // What AMD's extended feature register says the space has, each turned on by
 // the control register's bit at its position (APM 24593 rev. 3.46, 16.3.5,
 // 16.3.6): the interrupt enable registers, specific EOIs, and 8-bit APIC IDs.
@@ -2175,9 +2179,18 @@ bool vlapic_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
         return true;
     }
     if (msr == MSR_X2APIC_ICR) {
-        x2apic_icr_write(v, value);
+        if ((value & X2APIC_ICR_RESERVED) != 0) {
+            *fault = true;
+        } else {
+            x2apic_icr_write(v, value);
+        }
     } else if (msr == MSR_X2APIC_SELF_IPI) {
-        vlapic_accept(v, (uint8_t)value, false);
+        // Only the vector is not reserved (SDM 325462-093 Vol. 3A, 13.12.11).
+        if ((value & ~(uint64_t)ICR_VECTOR_MASK) != 0) {
+            *fault = true;
+        } else {
+            vlapic_accept(v, (uint8_t)value, false);
+        }
     } else {
         uint32_t reg = (msr - MSR_X2APIC_FIRST) << 4;
         uint32_t ignored;
