@@ -540,8 +540,15 @@ uint32_t irq_isa_gsi(unsigned int irq) {
 }
 
 void irq_gsi_changed(uint32_t gsi) {
-    (void)gsi;
     spinlock_acquire(&lock);
+    // An entry made edge-triggered clears its Remote IRR, which software uses
+    // as an EOI where an I/O APIC has no EOI register, as Linux 7.3's KVM has
+    // it (arch/x86/kvm/ioapic.c, ioapic_write_indirect()).
+    uint64_t vrte;
+    if (gsi < route_count && vioapic_rte(gsi, &vrte) && (vrte & IOAPIC_RTE_LEVEL) == 0) {
+        routes[gsi].held = false;
+        routes[gsi].virtual_held = false;
+    }
     update();
     spinlock_release(&lock);
     kick_after_update();
