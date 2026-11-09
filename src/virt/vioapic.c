@@ -36,7 +36,9 @@
 // The bits of an entry the guest writes; the others the I/O APIC reports.
 #define RTE_WRITABLE \
     (~(IOAPIC_RTE_PENDING | IOAPIC_RTE_REMOTE_IRR) & ~((uint64_t)0x7fff << 17))
-#define ID_WRITABLE ((uint32_t)0xff000000)
+// The APIC ID's 4 bits (ICH10 datasheet 319973-003, 13.5.5), as Linux 7.3's
+// KVM has them (arch/x86/kvm/ioapic.c, ioapic_write_indirect()).
+#define ID_WRITABLE ((uint32_t)0x0f000000)
 
 struct vioapic {
     struct ioapic *host;
