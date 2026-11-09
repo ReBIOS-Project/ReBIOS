@@ -1623,8 +1623,11 @@ static bool ipi_target(struct vcpu *from, struct vcpu *to, uint32_t dest, uint32
 
 static void send_ipi(struct vcpu *from, uint32_t dest, uint32_t command) {
     uint32_t mode = command & ICR_DELIVERY_MASK;
-    // The INIT level de-assert of old processors does nothing.
-    if (mode == ICR_DELIVERY_INIT && (command & ICR_ASSERT) == 0) {
+    // The INIT level de-assert of old processors does nothing, and from the
+    // Pentium 4 on every other INIT is one whatever its level bit (SDM
+    // 325462-093 Vol. 3A, 13.6.1), as Linux 7.3's KVM takes them (lapic.c,
+    // __apic_accept_irq()).
+    if (mode == ICR_DELIVERY_INIT && (command & ICR_LEVEL) != 0 && (command & ICR_ASSERT) == 0) {
         return;
     }
     for (size_t i = 0; i < smp_cpu_count(); i++) {
