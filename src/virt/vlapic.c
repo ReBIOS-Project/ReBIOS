@@ -1433,12 +1433,20 @@ static bool matches(const struct vlapic *target, uint32_t dest, bool logical, bo
     return mda >> 4 == logical_id >> 4 && (mda & logical_id & 0xf) != 0;
 }
 
+// A lowest priority interrupt goes to a processor whose local APIC takes
+// interrupts, as Linux 7.3's KVM picks among them (lapic.c,
+// __kvm_irq_delivery_to_apic()).
+static bool lowest_candidate(const struct vlapic *vl) {
+    return enabled(vl) && sw_enabled(vl);
+}
+
 void vlapic_deliver_external(
     uint32_t dest, bool logical, uint8_t vector, bool level, bool lowest
 ) {
     for (size_t i = 0; i < smp_cpu_count(); i++) {
         struct vcpu *to = smp_cpu(i)->vcpu;
-        if (to == NULL || !matches(to->vlapic, dest, logical, false)) {
+        if (to == NULL || !matches(to->vlapic, dest, logical, false)
+         || (lowest && !lowest_candidate(to->vlapic))) {
             continue;
         }
         vlapic_accept(to, vector, level);
@@ -1621,7 +1629,8 @@ static void send_ipi(struct vcpu *from, uint32_t dest, uint32_t command) {
     }
     for (size_t i = 0; i < smp_cpu_count(); i++) {
         struct vcpu *to = smp_cpu(i)->vcpu;
-        if (to == NULL || !ipi_target(from, to, dest, command)) {
+        if (to == NULL || !ipi_target(from, to, dest, command)
+         || (mode == ICR_DELIVERY_LOWEST && !lowest_candidate(to->vlapic))) {
             continue;
         }
         deliver(from, to, command);
