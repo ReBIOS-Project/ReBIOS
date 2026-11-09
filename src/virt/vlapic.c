@@ -625,10 +625,17 @@ static uint32_t timer_current(const struct vlapic *vl) {
         return 0;
     }
     uint64_t now = rdtsc();
-    if (vl->timer_deadline <= now) {
-        return 0;
+    uint64_t deadline = vl->timer_deadline;
+    // A period that ended before its expiry was taken has begun the next, as
+    // Linux 7.3's KVM counts it (lapic.c, apic_get_tmcct()).
+    if (deadline <= now) {
+        uint64_t span = timer_span(vl);
+        if (timer_mode(vl) != APIC_LVT_TIMER_PERIODIC || span == 0) {
+            return 0;
+        }
+        deadline = now + span - (now - deadline) % span;
     }
-    uint64_t left = lapic_timer_from_tsc(vl->timer_deadline - now) / timer_divisor(vl);
+    uint64_t left = lapic_timer_from_tsc(deadline - now) / timer_divisor(vl);
     uint32_t initial = regs_get(vl, APIC_TIMER_INITIAL);
     return left < initial ? (uint32_t)left : initial;
 }
