@@ -229,9 +229,9 @@ bool lapic_host_x2apic(void) {
     return host_x2apic;
 }
 
-// lapic_legacy_init() leaves xAPIC mode, unless that is locked off, so the
-// local APIC only ever enters x2APIC mode here, which keeps its registers (SDM
-// 325462-093 Vol. 3A, 13.12.5).
+// Where the firmware left the local APIC in x2APIC mode, lapic_host_choose()
+// chose it, so the APIC only ever enters x2APIC mode here, which keeps its
+// registers (SDM 325462-093 Vol. 3A, 13.12.5).
 static void host_mode(void) {
     uint64_t base = rdmsr(MSR_IA32_APIC_BASE);
     if ((base & APIC_BASE_EN) == 0) {

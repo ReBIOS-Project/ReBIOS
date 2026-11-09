@@ -194,7 +194,7 @@ static uint32_t lvt_quiet(uint32_t value) {
 
 void lapic_legacy_init(void) {
     uint64_t found_base = rdmsr(MSR_IA32_APIC_BASE);
-    bool x2apic = (found_base & APIC_BASE_EXTD) != 0 && lapic_xapic_locked();
+    bool x2apic = (found_base & APIC_BASE_EXTD) != 0;
     uintptr_t registers = found_base & APIC_BASE_ADDRESS;
     if (!x2apic && registers + LAPIC_MMIO_SIZE > core_handoff->map_top) {
         printf("Local APIC registers at %#llx are out of reach\n", (unsigned long long)registers);
@@ -211,28 +211,8 @@ void lapic_legacy_init(void) {
         read_regs(found_max_entry, &found);
     }
 
-    uintptr_t base = found_base;
-    // x2APIC mode can only be left for the disabled state, which keeps none of
-    // the registers but the ID (SDM 325462-093 Vol. 3A, 13.12.5.1): the
-    // entries found go back, those with an interrupt's delivery mode masked,
-    // and the SVR last, as it enables the APIC.
-    bool left_x2apic = (base & APIC_BASE_EXTD) != 0 && !x2apic;
-    if (left_x2apic) {
-        base &= ~(APIC_BASE_EN | APIC_BASE_EXTD);
-        wrmsr(MSR_IA32_APIC_BASE, base);
-    }
-    if ((base & APIC_BASE_EN) == 0) {
-        base |= APIC_BASE_EN;
-        wrmsr(MSR_IA32_APIC_BASE, base);
-    }
-    if (left_x2apic) {
-        lapic_write(APIC_TPR, found.tpr);
-        for (size_t i = 0; i < LAPIC_LVT_COUNT; i++) {
-            if (lvt_exists(i, found_max_entry)) {
-                lapic_write(lvt_regs[i], lvt_quiet(found.lvt[i]));
-            }
-        }
-        lapic_write(APIC_SVR, found.svr);
+    if (!found_enabled) {
+        wrmsr(MSR_IA32_APIC_BASE, found_base | APIC_BASE_EN);
     }
 
     uint32_t version = lapic_read(APIC_VERSION);
@@ -241,7 +221,7 @@ void lapic_legacy_init(void) {
     printf(
         "Local APIC %#x: IA32_APIC_BASE %#llx -> %#llx, %s, version %#x\n", apic_id,
         (unsigned long long)found_base, (unsigned long long)rdmsr(MSR_IA32_APIC_BASE),
-        x2apic ? "x2APIC mode locked" : "xAPIC mode", version
+        x2apic ? "x2APIC mode" : "xAPIC mode", version
     );
     if (found_enabled) {
         log_regs(apic_id, "found", &found, found_max_entry);

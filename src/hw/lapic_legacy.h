@@ -19,7 +19,8 @@
 #define HW__LAPIC_LEGACY_H
 
 // Puts the calling processor's local APIC in the state a legacy BIOS hands
-// over. Needs acpi_init().
+// over, but for its mode, which stays the firmware's: the guest's own local
+// APICs are virtual. Needs acpi_init().
 void lapic_legacy_init(void);
 
 #endif
