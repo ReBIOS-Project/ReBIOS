@@ -1424,7 +1424,10 @@ static bool matches(const struct vlapic *target, uint32_t dest, bool logical, bo
         if (short_ids(target)) {
             return (dest & 0xf) == 0xf || (dest & 0xf) == (target->id & 0xf);
         }
-        return dest == XAPIC_BROADCAST || dest == (target->id & 0xff);
+        // The whole ID, which only one in x2APIC mode can have past FFh, as
+        // Linux 7.3's KVM matches it (lapic.c,
+        // kvm_apic_match_physical_addr()).
+        return dest == XAPIC_BROADCAST || dest == target->id;
     }
     if (x2apic(target)) {
         if (dest == X2APIC_BROADCAST) {
