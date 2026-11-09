@@ -141,5 +141,11 @@ bool insn_string_run(
     struct vcpu *v, const struct insn *insn, bool destination, size_t size, int64_t step,
     size_t count, bool write, uint64_t *linear
 );
+// The linear address of an explicit operand of size bytes at offset ea of
+// segment reg, as the vCPU's present mode forms and checks it: false, with
+// #GP(0) or #SS(0) raised, where the segment does not allow the access.
+bool insn_segment_linear(
+    struct vcpu *v, int reg, uintptr_t ea, size_t size, bool write, uint64_t *linear
+);
 
 #endif

@@ -37,6 +37,7 @@
 #include <virt/exit.h>
 #include <virt/gpt.h>
 #include <virt/guest_mem.h>
+#include <virt/insn.h>
 #include <virt/irq.h>
 #include <virt/mmio.h>
 #include <virt/vcpu.h>
@@ -558,9 +559,11 @@ static uint64_t exit_instr_info(void) {
          | (info >> 18 & 15) << 24 | (info >> 23 & 15) << 32 | (info >> 28 & 15) << 40;
 }
 
-// The linear address of a VMX instruction's memory operand, or false with the
-// fault raised.
-static bool operand_address(struct vcpu *v, uint64_t info, size_t size, uint64_t *linear) {
+// The linear address of a VMX instruction's memory operand, which it reads or
+// writes, or false with the fault raised.
+static bool operand_address(
+    struct vcpu *v, uint64_t info, size_t size, bool write, uint64_t *linear
+) {
     uintptr_t address = vmx_read(VMCS_EXIT_QUALIFICATION);
     if ((info & INFO_NO_BASE) == 0) {
         address += vcpu_gpr(v, INFO_BASE(info));
@@ -581,34 +584,12 @@ static bool operand_address(struct vcpu *v, uint64_t info, size_t size, uint64_t
             break;
         }
     }
-    size_t reg = (size_t)INFO_SEGMENT(info);
-    struct vcpu_segment seg;
-    vcpu_get_seg(v, reg, &seg);
-    uint8_t fault = reg == VCPU_SEG_SS ? 12 : 13;
-    if (long_mode_64(v)) {
-        if (reg == VCPU_SEG_FS || reg == VCPU_SEG_GS) {
-            address += seg.base;
-        }
-        address = vcpu_untagged(v, reg, address);
-        unsigned int shift = (vcpu_cr4(v) & CR4_LA57) != 0 ? 7 : 16;
-        if ((uint64_t)((int64_t)(address << shift) >> shift) != address) {
-            vcpu_inject_exception(v, fault, true, 0);
-            return false;
-        }
-    } else {
-        if ((seg.attrib & VCPU_SEG_UNUSABLE) != 0 || address + size - 1 > seg.limit) {
-            vcpu_inject_exception(v, fault, true, 0);
-            return false;
-        }
-        address = (address + seg.base) & 0xffffffff;
-    }
-    *linear = address;
-    return true;
+    return insn_segment_linear(v, (int)INFO_SEGMENT(info), address, size, write, linear);
 }
 
 static bool read_operand64(struct vcpu *v, uint64_t info, uint64_t *value) {
     uintptr_t linear;
-    return operand_address(v, info, 8, &linear) && mmio_read_linear(v, linear, value, 8);
+    return operand_address(v, info, 8, false, &linear) && mmio_read_linear(v, linear, value, 8);
 }
 
 // VMsucceed, VMfailInvalid, and VMfailValid (SDM 325462-093 Vol. 3C, 33.2).
@@ -749,7 +730,8 @@ static void vmptrld(struct vcpu *v, struct nvmx *n, uint64_t info) {
 
 static void vmptrst(struct vcpu *v, struct nvmx *n, uint64_t info) {
     uintptr_t linear;
-    if (!operand_address(v, info, 8, &linear) || !mmio_write_linear(v, linear, &n->current, 8)) {
+    if (!operand_address(v, info, 8, true, &linear)
+     || !mmio_write_linear(v, linear, &n->current, 8)) {
         return;
     }
     succeed(v);
@@ -778,7 +760,7 @@ static void vmread_in(struct vcpu *v, uint8_t *vmcs, uint64_t info) {
     } else {
         uintptr_t linear;
         size_t size = wide ? 8 : 4;
-        if (!operand_address(v, info, size, &linear)
+        if (!operand_address(v, info, size, true, &linear)
          || !mmio_write_linear(v, linear, &value, size)) {
             return;
         }
@@ -795,7 +777,7 @@ static bool vmwrite_in(struct vcpu *v, uint8_t *vmcs, uint64_t info, uint32_t *w
     } else {
         uintptr_t linear;
         size_t size = wide ? 8 : 4;
-        if (!operand_address(v, info, size, &linear)
+        if (!operand_address(v, info, size, false, &linear)
          || !mmio_read_linear(v, linear, &value, size)) {
             return false;
         }
@@ -2429,7 +2411,8 @@ static uint64_t operand_register(struct vcpu *v, uint64_t info) {
 // The 128-bit descriptor INVEPT and INVVPID take.
 static bool read_descriptor(struct vcpu *v, uint64_t info, uint64_t desc[2]) {
     uintptr_t linear;
-    if (!operand_address(v, info, 16, &linear) || !mmio_read_linear(v, linear, &desc[0], 8)) {
+    if (!operand_address(v, info, 16, false, &linear)
+     || !mmio_read_linear(v, linear, &desc[0], 8)) {
         return false;
     }
     uintptr_t high = linear + 8;

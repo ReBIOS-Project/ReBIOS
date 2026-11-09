@@ -582,8 +582,8 @@ static uint64_t address_mask(size_t size) {
 
 // Outside 64-bit mode the linear address space wraps at 4 GiB, and in it only
 // FS and GS have bases.
-static uintptr_t segment_linear(struct vcpu *v, const struct insn *insn, int reg, uintptr_t ea) {
-    if (insn->long_mode) {
+static uintptr_t segment_linear(struct vcpu *v, bool long_mode, int reg, uintptr_t ea) {
+    if (long_mode) {
         if (reg != VCPU_SEG_FS && reg != VCPU_SEG_GS) {
             return vcpu_untagged(v, (size_t)reg, ea);
         }
@@ -647,7 +647,7 @@ static bool mem_linear(struct vcpu *v, const struct insn *insn, int64_t disp, ui
     if (insn->segment >= 0) {
         segment = insn->segment;
     }
-    *linear = segment_linear(v, insn, segment, ea);
+    *linear = segment_linear(v, insn->long_mode, segment, ea);
     return true;
 }
 
@@ -774,11 +774,11 @@ static bool canonical(uintptr_t linear, unsigned int bits) {
 // Vol. 3A, 4.3.2): in IA-32e mode, a user-mode one with bit 63 set, a
 // supervisor-mode one with it clear where SMAP is on and RFLAGS.AC off; bit 63
 // of 32-bit addresses, as in compatibility mode, is clear.
-static bool lass_violation(struct vcpu *v, const struct insn *insn, uint64_t la) {
+static bool lass_violation(struct vcpu *v, bool long_mode, uint64_t la) {
     if ((vcpu_efer(v) & EFER_LMA) == 0 || (vcpu_cr4(v) & CR4_LASS) == 0) {
         return false;
     }
-    bool high = insn->long_mode && (la >> 63) != 0;
+    bool high = long_mode && (la >> 63) != 0;
     if (vcpu_cpl(v) == 3) {
         return high;
     }
@@ -791,14 +791,14 @@ static bool lass_violation(struct vcpu *v, const struct insn *insn, uint64_t la)
 // canonical form; elsewhere, compatibility mode included, the segment's
 // usability, type, and limit, an expand-down one's from above it; and LASS.
 static bool linear_allowed(
-    struct vcpu *v, const struct insn *insn, int reg, uintptr_t ea, size_t size, bool write,
+    struct vcpu *v, bool long_mode, int reg, uintptr_t ea, size_t size, bool write,
     uint64_t *linear
 ) {
-    if (insn->long_mode) {
-        uintptr_t la = segment_linear(v, insn, reg, ea);
+    if (long_mode) {
+        uintptr_t la = segment_linear(v, long_mode, reg, ea);
         unsigned int bits = (vcpu_cr4(v) & CR4_LA57) != 0 ? 57 : 48;
         if (canonical(la, bits) && canonical(la + size - 1, bits)
-         && !lass_violation(v, insn, la)) {
+         && !lass_violation(v, long_mode, la)) {
             *linear = la;
             return true;
         }
@@ -820,7 +820,7 @@ static bool linear_allowed(
         }
         uint64_t la = (vcpu_seg_base(v, (size_t)reg) + ea) & 0xffffffff;
         if (allowed && ea <= limit && (limit == 0xffffffff || size <= limit + 1 - ea)
-         && !lass_violation(v, insn, la)) {
+         && !lass_violation(v, long_mode, la)) {
             *linear = la;
             return true;
         }
@@ -830,10 +830,10 @@ static bool linear_allowed(
 
 // Where they fail, #SS(0) for SS or #GP(0) is raised.
 static bool linearise(
-    struct vcpu *v, const struct insn *insn, int reg, uintptr_t ea, size_t size, bool write,
+    struct vcpu *v, bool long_mode, int reg, uintptr_t ea, size_t size, bool write,
     uint64_t *linear
 ) {
-    if (linear_allowed(v, insn, reg, ea, size, write, linear)) {
+    if (linear_allowed(v, long_mode, reg, ea, size, write, linear)) {
         return true;
     }
     vcpu_inject_exception(v, reg == VCPU_SEG_SS ? 12 : 13, true, 0);
@@ -846,10 +846,10 @@ bool insn_string_linear(
 ) {
     uint64_t mask = address_mask(insn->address_size);
     if (destination) {
-        return linearise(v, insn, VCPU_SEG_ES, v->gprs.rdi & mask, size, write, linear);
+        return linearise(v, insn->long_mode, VCPU_SEG_ES, v->gprs.rdi & mask, size, write, linear);
     }
     int segment = insn->segment >= 0 ? insn->segment : VCPU_SEG_DS;
-    return linearise(v, insn, segment, v->gprs.rsi & mask, size, write, linear);
+    return linearise(v, insn->long_mode, segment, v->gprs.rsi & mask, size, write, linear);
 }
 
 bool insn_string_run(
@@ -874,6 +874,14 @@ bool insn_string_run(
     int segment = destination ? VCPU_SEG_ES : insn->segment >= 0 ? insn->segment : VCPU_SEG_DS;
     // The checks hold for every operand between two that pass them.
     uint64_t last_linear;
-    return linear_allowed(v, insn, segment, first, size, write, linear)
-        && linear_allowed(v, insn, segment, last, size, write, &last_linear);
+    return linear_allowed(v, insn->long_mode, segment, first, size, write, linear)
+        && linear_allowed(v, insn->long_mode, segment, last, size, write, &last_linear);
+}
+
+bool insn_segment_linear(
+    struct vcpu *v, int reg, uintptr_t ea, size_t size, bool write, uint64_t *linear
+) {
+    uint32_t cs = vcpu_seg_attrib(v, VCPU_SEG_CS);
+    bool long_mode = (vcpu_efer(v) & EFER_LMA) != 0 && (cs & VCPU_SEG_L) != 0;
+    return linearise(v, long_mode, reg, ea, size, write, linear);
 }
