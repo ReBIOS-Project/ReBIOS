@@ -46,6 +46,7 @@
 
 #define VERSION_EOI_SUPPRESSION ((uint32_t)1 << 24)
 #define SVR_WRITABLE 0x1ff
+#define SVR_FOCUS_DISABLED ((uint32_t)1 << 9)
 #define SVR_SUPPRESS_EOI_BROADCAST ((uint32_t)1 << 12)
 #define DFR_FLAT ((uint32_t)0xf0000000)
 #define ESR_RECEIVE_ILLEGAL_VECTOR ((uint32_t)1 << 6)
@@ -1789,6 +1790,12 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
         }
         case APIC_SVR: {
             uint32_t writable = SVR_WRITABLE;
+            // AMD's focus CPU core checking (APM 24593 rev. 3.46, 16.4.7),
+            // which Intel reserves from the Pentium 4 on (SDM 325462-093 Vol.
+            // 3A, 13.9).
+            if (!virt_vmx) {
+                writable |= SVR_FOCUS_DISABLED;
+            }
             if ((host_version & VERSION_EOI_SUPPRESSION) != 0) {
                 writable |= SVR_SUPPRESS_EOI_BROADCAST;
             }
