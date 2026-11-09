@@ -164,15 +164,14 @@ static void command(struct chip *c, uint8_t value) {
         c->init_step = 2;
         c->icw4 = (value & ICW1_IC4) != 0;
         c->single = (value & ICW1_SNGL) != 0;
-        // Edge-triggered inputs need a new edge.
+        // What ICW1 resets, which the IS bits, a poll, and rotation in the
+        // automatic EOI mode are not among (ICH10 datasheet 319973-003,
+        // 5.8.2.1): edge-triggered inputs need a new edge.
         c->edges = 0;
-        c->isr = 0;
         c->imr = 0;
         c->lowest = 7;
         c->read_isr = false;
-        c->poll = false;
         c->special_mask = false;
-        c->rotate_auto_eoi = false;
         if (!c->icw4) {
             c->auto_eoi = false;
             c->special_nested = false;
