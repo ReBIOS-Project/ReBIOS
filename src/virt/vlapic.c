@@ -334,6 +334,11 @@ void vlapic_init(void) {
         }
         ext_feature = (feature & EXT_CONTROL_BITS) | (uint32_t)eilvt_count << 16;
         legacy_ext_control = lapic_read(APIC_EXT_CONTROL) & ext_feature & EXT_CONTROL_BITS;
+        // 8-bit APIC IDs where an APIC ID reaches Fh, a broadcast in four bits
+        // (BKDG 42301 rev. 3.14, 2.4.8.1.3), whatever the firmware left.
+        if (smp_long_apic_ids()) {
+            legacy_ext_control |= ext_feature & EXT_APIC_ID;
+        }
         for (size_t i = 0; i < 8; i++) {
             legacy_ier[i] = (feature & EXT_IER) != 0 ? lapic_read(ier_reg(i)) : 0xffffffff;
         }
@@ -942,9 +947,9 @@ static void reset_registers(struct vcpu *v) {
     regs_set(vl, APIC_TIMER_INITIAL, 0);
     regs_set(vl, APIC_TIMER_DIVIDE, 0);
     if (ext_space) {
-        // 8-bit APIC IDs stay on: the firmware turns them on (BKDG 42301 rev.
-        // 3.14, APIC410), Linux 7.3 never, and starting the APs of a processor
-        // with more than 16 in xAPIC mode needs them.
+        // 8-bit APIC IDs stay on: a legacy BIOS turns them on, Linux 7.3
+        // never, and starting the APs in xAPIC mode needs them where an APIC
+        // ID reaches Fh.
         regs_set(vl, APIC_EXT_CONTROL, regs_get(vl, APIC_EXT_CONTROL) & EXT_APIC_ID);
         regs_set(vl, APIC_SEOI, 0);
         for (size_t i = 0; i < 8; i++) {
@@ -1030,8 +1035,9 @@ void vlapic_create(struct vcpu *v) {
     reset_registers(v);
     access_virtualisation(vl);
     if (ext_space) {
-        // Its processor's 8-bit APIC IDs, as the firmware left them.
-        regs_set(vl, APIC_EXT_CONTROL, lapic_read(APIC_EXT_CONTROL) & ext_feature & EXT_APIC_ID);
+        // 8-bit APIC IDs alike on every processor, as a legacy BIOS leaves
+        // them.
+        regs_set(vl, APIC_EXT_CONTROL, legacy_ext_control & EXT_APIC_ID);
     }
     if (v->cpu->bsp) {
         // Its LINT entries as lapic_legacy_init() set the processor's, and its

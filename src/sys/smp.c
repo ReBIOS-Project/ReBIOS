@@ -116,6 +116,10 @@ bool smp_guest_cpu(uint32_t apic_id) {
     return c->cpu_filter == HANDOFF_CPU_FILTER_ALLOW ? listed : !listed;
 }
 
+bool smp_long_apic_ids(void) {
+    return long_ids;
+}
+
 static void ap_main(struct cpu *cpu) {
     cpu_tables_load(cpu, virt_vmx);
     // Before the boot processor starts the next processor, whose INIT and

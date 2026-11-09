@@ -39,4 +39,8 @@ struct cpu *smp_cpu_by_apic_id(uint32_t apic_id);
 // says.
 bool smp_guest_cpu(uint32_t apic_id);
 
+// Whether a processor's APIC ID reaches Fh, so that local APIC messages need
+// 8-bit APIC IDs to name every processor alone.
+bool smp_long_apic_ids(void);
+
 #endif
