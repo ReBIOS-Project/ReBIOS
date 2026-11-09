@@ -127,6 +127,11 @@ bool lapic_xapic_locked(void);
 uint32_t lapic_read(uint32_t reg);
 void lapic_write(uint32_t reg, uint32_t value);
 
+// Turns on 8-bit APIC IDs in the calling processor's local APIC, where it is
+// in xAPIC mode and has them, as AMD's do: until then, it matches physical
+// destinations by their low four bits, Fh there being a broadcast.
+void lapic_host_long_ids(void);
+
 // Sends an IPI from the calling processor, to the APIC ID dest unless the
 // command names a shorthand, and waits for the APIC to take it.
 void lapic_send_ipi(uint32_t dest, uint32_t command);

@@ -38,6 +38,10 @@
 #define MSR_INTERRUPT_PENDING 0xc0010055
 #define INTERRUPT_PENDING_C1E ((uint64_t)3 << 27)
 
+// The Extended APIC Feature register's ExtApicIdCap and the Extended APIC
+// Control register's ExtApicIdEn (PPR 57238 rev. 0.49, APICx400 and APICx410).
+#define EXT_APIC_ID ((uint32_t)1 << 2)
+
 // The mode lapic_host_choose() chose for every local APIC.
 static bool host_x2apic;
 static bool timer_tsc_deadline;
@@ -189,6 +193,14 @@ bool lapic_xapic_locked(void) {
     uint64_t status;
     return rdmsr_safe(MSR_IA32_XAPIC_DISABLE_STATUS, &status)
         && (status & LEGACY_XAPIC_DISABLED) != 0;
+}
+
+void lapic_host_long_ids(void) {
+    if (lapic_x2apic() || (lapic_read(APIC_VERSION) & APIC_VERSION_EXT_SPACE) == 0
+     || (lapic_read(APIC_EXT_FEATURE) & EXT_APIC_ID) == 0) {
+        return;
+    }
+    lapic_write(APIC_EXT_CONTROL, lapic_read(APIC_EXT_CONTROL) | EXT_APIC_ID);
 }
 
 void lapic_send_ipi(uint32_t dest, uint32_t command) {

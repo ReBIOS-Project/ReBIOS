@@ -77,6 +77,9 @@ _Static_assert(sizeof(struct ap_boot_entry) == 16, "ap_boot.S has ENTRY_SIZE 16"
 static struct cpu **cpus;
 static size_t cpu_count;
 static _Atomic(uint32_t) aps_started;
+// Whether an APIC ID reaches Fh, which local APICs that match four bits of
+// APIC IDs take for a broadcast.
+static bool long_ids;
 
 size_t smp_cpu_count(void) {
     return cpu_count;
@@ -115,6 +118,11 @@ bool smp_guest_cpu(uint32_t apic_id) {
 
 static void ap_main(struct cpu *cpu) {
     cpu_tables_load(cpu, virt_vmx);
+    // Before the boot processor starts the next processor, whose INIT and
+    // SIPIs this one takes too while it matches four bits of APIC IDs.
+    if (long_ids) {
+        lapic_host_long_ids();
+    }
     atomic_store_explicit(&cpu->online, true, memory_order_release);
     atomic_fetch_add_explicit(&aps_started, 1, memory_order_release);
 
@@ -198,11 +206,16 @@ void smp_init(void) {
     }
     cpus = kmalloc((count + 1) * sizeof(struct cpu *));
     cpus[0] = bsp;
+    long_ids = bsp->apic_id >= 0xf;
     for (size_t i = 0; i < count; i++) {
         cpus[i + 1] = cpu_area_alloc(i + 1, ids[i], false);
+        long_ids = long_ids || ids[i] >= 0xf;
     }
     kfree(ids);
     cpu_count = count + 1;
+    if (long_ids) {
+        lapic_host_long_ids();
+    }
 }
 
 void smp_start_aps(void) {
