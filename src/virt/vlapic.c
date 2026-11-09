@@ -1449,6 +1449,11 @@ void vlapic_deliver_external(
 }
 
 static void deliver(struct vcpu *from, struct vcpu *to, uint32_t command) {
+    // A globally disabled local APIC takes no messages, as Linux 7.3's KVM has
+    // it (lapic.c, __kvm_irq_delivery_to_apic()).
+    if (!enabled(to->vlapic)) {
+        return;
+    }
     uint8_t vector = command & ICR_VECTOR_MASK;
     switch (command & ICR_DELIVERY_MASK) {
         case ICR_DELIVERY_FIXED:
