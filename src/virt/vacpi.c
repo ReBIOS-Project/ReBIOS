@@ -940,6 +940,91 @@ static bool crs_replaced(uacpi_namespace_node *device) {
         || uacpi_device_matches_pnp_id(device, motherboard_ids);
 }
 
+// The legacy devices ReBIOS gives the guest, as an OS looks for them in the
+// namespace, whatever the firmware says of the machine's: the 8259s with the
+// ELCR, the 8254, the RTC, the speaker's port 61h, the 8237s and their page
+// registers, the x87 error port, and the 8042's keyboard and mouse. ACPI 1.0's
+// resources: IO (Decode16, base, base, 1, length) is 47h 01h base base 01h
+// length, IRQNoFlags () is 22h and a mask, DMA () is 2Ah, a mask, and its
+// flags.
+static const uint8_t pic_crs[] = {
+    0x47, 0x01, 0x20, 0x00, 0x20, 0x00, 0x01, 0x02, 0x47, 0x01, 0xa0, 0x00, 0xa0, 0x00, 0x01,
+    0x02, 0x47, 0x01, 0xd0, 0x04, 0xd0, 0x04, 0x01, 0x02, 0x22, 0x04, 0x00, ACPI_TAG_END, 0x00
+};
+static const uint8_t timer_crs[] = {
+    0x47, 0x01, 0x40, 0x00, 0x40, 0x00, 0x01, 0x04, 0x22, 0x01, 0x00, ACPI_TAG_END, 0x00
+};
+static const uint8_t rtc_crs[] = {
+    0x47, 0x01, 0x70, 0x00, 0x70, 0x00, 0x01, 0x08, 0x22, 0x00, 0x01, ACPI_TAG_END, 0x00
+};
+static const uint8_t speaker_crs[] = {
+    0x47, 0x01, 0x61, 0x00, 0x61, 0x00, 0x01, 0x01, ACPI_TAG_END, 0x00
+};
+// Channel 4, the cascade, in compatibility timing, 8- and 16-bit.
+static const uint8_t dma_crs[] = {
+    0x47, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01, 0x20, 0x47, 0x01, 0x81, 0x00, 0x81, 0x00, 0x01,
+    0x0f, 0x47, 0x01, 0xc0, 0x00, 0xc0, 0x00, 0x01, 0x20, 0x2a, 0x10, 0x01, ACPI_TAG_END, 0x00
+};
+static const uint8_t fpu_crs[] = {
+    0x47, 0x01, 0xf0, 0x00, 0xf0, 0x00, 0x01, 0x01, 0x22, 0x00, 0x20, ACPI_TAG_END, 0x00
+};
+static const uint8_t keyboard_crs[] = {
+    0x47, 0x01, 0x60, 0x00, 0x60, 0x00, 0x01, 0x01, 0x47, 0x01, 0x64, 0x00, 0x64, 0x00, 0x01,
+    0x01, 0x22, 0x02, 0x00, ACPI_TAG_END, 0x00
+};
+static const uint8_t mouse_crs[] = { 0x22, 0x00, 0x10, ACPI_TAG_END, 0x00 };
+
+struct legacy_device {
+    const char *name;
+    const char *hid;
+    const uint8_t *crs;
+    size_t size;
+};
+
+static const struct legacy_device legacy_devices[] = {
+    { "RPIC", "PNP0000", pic_crs, sizeof(pic_crs) },
+    { "RTMR", "PNP0100", timer_crs, sizeof(timer_crs) },
+    { "RRTC", "PNP0B00", rtc_crs, sizeof(rtc_crs) },
+    { "RSPK", "PNP0800", speaker_crs, sizeof(speaker_crs) },
+    { "RDMA", "PNP0200", dma_crs, sizeof(dma_crs) },
+    { "RFPU", "PNP0C04", fpu_crs, sizeof(fpu_crs) },
+    { "RBKB", "PNP0303", keyboard_crs, sizeof(keyboard_crs) },
+    { "RBMS", "PNP0F13", mouse_crs, sizeof(mouse_crs) }
+};
+
+// Whether a legacy device that ReBIOS gives the guest claims the I/O port.
+static bool legacy_port(uint64_t port) {
+    for (size_t i = 0; i < ARRAY_COUNT(legacy_devices); i++) {
+        const uint8_t *p = legacy_devices[i].crs;
+        uint32_t left = (uint32_t)legacy_devices[i].size;
+        while (left != 0 && p[0] != ACPI_TAG_END) {
+            size_t n = resource_size(p, left);
+            if (p[0] == ACPI_TAG_IO && port >= le(p + 2, 2) && port < le(p + 2, 2) + p[7]) {
+                return true;
+            }
+            p += n;
+            left -= n;
+        }
+    }
+    return false;
+}
+
+// The ports that a small I/O descriptor of size bytes claims at a fixed base,
+// if it is one.
+static bool fixed_ports(const uint8_t *p, size_t size, uint64_t *base, uint64_t *end) {
+    if (p[0] == ACPI_TAG_IO && size >= 8 && le(p + 2, 2) == le(p + 4, 2)) {
+        *base = le(p + 2, 2);
+        *end = *base + p[7];
+        return true;
+    }
+    if (p[0] == ACPI_TAG_FIXED_IO && size >= 4) {
+        *base = le(p + 1, 2);
+        *end = *base + p[3];
+        return true;
+    }
+    return false;
+}
+
 // A _CRS being made, and the memory and I/O its descriptors describe, so that
 // none from another host bridge repeats them.
 struct crs {
@@ -968,6 +1053,55 @@ static void crs_note(struct crs *c, bool io, uint64_t base, uint64_t end) {
         c->io[c->count] = io;
         c->count++;
     }
+}
+
+// A descriptor of the kind of in, for count of the ports it claimed from base.
+static void crs_put_ports(struct crs *c, const uint8_t *in, uint64_t base, size_t count) {
+    uint8_t d[8];
+    size_t n;
+    if (in[0] == ACPI_TAG_IO) {
+        d[0] = ACPI_TAG_IO;
+        d[1] = in[1];
+        put_le(d + 2, base, 2);
+        put_le(d + 4, base, 2);
+        d[6] = 1;
+        d[7] = (uint8_t)count;
+        n = 8;
+    } else {
+        d[0] = ACPI_TAG_FIXED_IO;
+        put_le(d + 1, base, 2);
+        d[3] = (uint8_t)count;
+        n = 4;
+    }
+    if (c->size + n <= c->capacity) {
+        memcpy(c->out + c->size, d, n);
+        c->size += n;
+    }
+}
+
+// A motherboard device's claim of ports from base to end, but for those of the
+// legacy devices ReBIOS gives the guest, which Windows XP would otherwise find
+// in conflict with it: each run of the others in a descriptor of its own.
+// False, and nothing put, where the claim has none of theirs.
+static bool crs_put_unclaimed(struct crs *c, const uint8_t *in, uint64_t base, uint64_t end) {
+    bool claimed = false;
+    for (size_t port = base; port < end && !claimed; port++) {
+        claimed = legacy_port(port);
+    }
+    if (!claimed) {
+        return false;
+    }
+    size_t run = base;
+    for (size_t port = base; port <= end; port++) {
+        if (port < end && !legacy_port(port)) {
+            continue;
+        }
+        if (port > run) {
+            crs_put_ports(c, in, run, port - run);
+        }
+        run = port + 1;
+    }
+    return true;
 }
 
 // The guest's bus 0 has every bus number up to the last the guest has.
@@ -1015,6 +1149,16 @@ static bool crs_copy(struct crs *c, uacpi_namespace_node *device, int kind) {
         }
         uint64_t base;
         uint64_t end;
+        if (kind == CRS_MOTHERBOARD && fixed_ports(in, n, &base, &end)
+         && crs_put_unclaimed(c, in, base, end)) {
+            printf(
+                "%.4s: ports %#x-%#x left to the guest's legacy devices where they claim them\n",
+                uacpi_namespace_node_name(device).text, (unsigned int)base, (unsigned int)(end - 1)
+            );
+            in += n;
+            left -= n;
+            continue;
+        }
         bool keep = kind != CRS_MERGED;
         bool io = false;
         bool ranged = true;
@@ -1842,40 +1986,7 @@ static bool ps2_parent(struct path *out) {
     return false;
 }
 
-// The legacy devices ReBIOS gives the guest, as an OS looks for them in the
-// namespace, whatever the firmware says of the machine's: the 8259s with the
-// ELCR, the 8254, the RTC, the speaker's port 61h, the 8237s and their page
-// registers, the x87 error port, and the 8042's keyboard and mouse. ACPI 1.0's
-// resources: IO (Decode16, base, base, 1, length) is 47h 01h base base 01h
-// length, IRQNoFlags () is 22h and a mask, DMA () is 2Ah, a mask, and its
-// flags.
 static void emit_legacy_devices(struct aml *a) {
-    static const uint8_t pic_crs[] = {
-        0x47, 0x01, 0x20, 0x00, 0x20, 0x00, 0x01, 0x02, 0x47, 0x01, 0xa0, 0x00, 0xa0, 0x00, 0x01,
-        0x02, 0x47, 0x01, 0xd0, 0x04, 0xd0, 0x04, 0x01, 0x02, 0x22, 0x04, 0x00, ACPI_TAG_END, 0x00
-    };
-    static const uint8_t timer_crs[] = {
-        0x47, 0x01, 0x40, 0x00, 0x40, 0x00, 0x01, 0x04, 0x22, 0x01, 0x00, ACPI_TAG_END, 0x00
-    };
-    static const uint8_t rtc_crs[] = {
-        0x47, 0x01, 0x70, 0x00, 0x70, 0x00, 0x01, 0x08, 0x22, 0x00, 0x01, ACPI_TAG_END, 0x00
-    };
-    static const uint8_t speaker_crs[] = {
-        0x47, 0x01, 0x61, 0x00, 0x61, 0x00, 0x01, 0x01, ACPI_TAG_END, 0x00
-    };
-    // Channel 4, the cascade, in compatibility timing, 8- and 16-bit.
-    static const uint8_t dma_crs[] = {
-        0x47, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01, 0x20, 0x47, 0x01, 0x81, 0x00, 0x81, 0x00, 0x01,
-        0x0f, 0x47, 0x01, 0xc0, 0x00, 0xc0, 0x00, 0x01, 0x20, 0x2a, 0x10, 0x01, ACPI_TAG_END, 0x00
-    };
-    static const uint8_t fpu_crs[] = {
-        0x47, 0x01, 0xf0, 0x00, 0xf0, 0x00, 0x01, 0x01, 0x22, 0x00, 0x20, ACPI_TAG_END, 0x00
-    };
-    static const uint8_t keyboard_crs[] = {
-        0x47, 0x01, 0x60, 0x00, 0x60, 0x00, 0x01, 0x01, 0x47, 0x01, 0x64, 0x00, 0x64, 0x00, 0x01,
-        0x01, 0x22, 0x02, 0x00, ACPI_TAG_END, 0x00
-    };
-    static const uint8_t mouse_crs[] = { 0x22, 0x00, 0x10, ACPI_TAG_END, 0x00 };
     struct path parent;
     aml_begin(a, AML_SCOPE);
     if (ps2_parent(&parent)) {
@@ -1883,14 +1994,10 @@ static void emit_legacy_devices(struct aml *a) {
     } else {
         aml_name(a, "\\_SB");
     }
-    emit_legacy_device(a, "RPIC", "PNP0000", pic_crs, sizeof(pic_crs));
-    emit_legacy_device(a, "RTMR", "PNP0100", timer_crs, sizeof(timer_crs));
-    emit_legacy_device(a, "RRTC", "PNP0B00", rtc_crs, sizeof(rtc_crs));
-    emit_legacy_device(a, "RSPK", "PNP0800", speaker_crs, sizeof(speaker_crs));
-    emit_legacy_device(a, "RDMA", "PNP0200", dma_crs, sizeof(dma_crs));
-    emit_legacy_device(a, "RFPU", "PNP0C04", fpu_crs, sizeof(fpu_crs));
-    emit_legacy_device(a, "RBKB", "PNP0303", keyboard_crs, sizeof(keyboard_crs));
-    emit_legacy_device(a, "RBMS", "PNP0F13", mouse_crs, sizeof(mouse_crs));
+    for (size_t i = 0; i < ARRAY_COUNT(legacy_devices); i++) {
+        const struct legacy_device *d = &legacy_devices[i];
+        emit_legacy_device(a, d->name, d->hid, d->crs, d->size);
+    }
     aml_end(a);
 }
 
