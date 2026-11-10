@@ -33,6 +33,7 @@
 #include <lib/log.h>
 #include <lib/util.h>
 #include <memory.h>
+#include <sys/cpu.h>
 #include <sys/mm.h>
 
 #define DEVICES 32
@@ -66,6 +67,11 @@
 // with a hotplug slot, 2 MiB of each kind of memory apiece (drivers/pci/pci.c,
 // DEFAULT_HOTPLUG_MMIO_SIZE and DEFAULT_HOTPLUG_MMIO_PREF_SIZE).
 #define SLACK_LOW ((uint64_t)64 << 20)
+// Room above 4 GiB after the larger BARs of the guest's bus 0, and of a port
+// whose prefetchable window is there, for what 64-bit operating systems place
+// there themselves: Linux 7.3 tries 64-bit BARs and bridge windows above 4 GiB
+// first (drivers/pci/bus.c, pci_bus_alloc_resource()).
+#define SLACK_HIGH ((uint64_t)16 << 30)
 
 // A BAR, an expansion ROM, a bridge's window, or the emulated VGA's linear
 // framebuffer, in the memory of the root bus or bridge it is behind.
@@ -808,6 +814,7 @@ const struct pci_plan *pci_plan_make(
     // the configuration space window, largest alignment first, from the top
     // down. Root buses that have no port are not the guest's.
     uint64_t high_cursor = high_floor;
+    uint64_t address_limit = (uint64_t)1 << cpu_physical_address_bits();
     plan.tolud = FOUR_GIB;
     size_t ecam_piece = 2 * (size_t)roots;
     size_t pieces = ecam_piece + 1;
@@ -829,13 +836,25 @@ const struct pci_plan *pci_plan_make(
         if (r != plan.primary && port_of(r) == NULL) {
             continue;
         }
-        if (c->size[SIDE_HIGH] != 0) {
-            c->base[SIDE_HIGH] = high_base(
-                obstacles, count, high_cursor, c->size[SIDE_HIGH], c->align[SIDE_HIGH]
+        // Behind a port, the guest reaches this region through the port's
+        // prefetchable window, which is above 4 GiB only where BARs are.
+        if (r == plan.primary || c->size[SIDE_HIGH] != 0) {
+            uint64_t align = c->align[SIDE_HIGH] > ONE_MIB ? c->align[SIDE_HIGH] : ONE_MIB;
+            uintptr_t base = high_base(
+                obstacles, count, high_cursor, c->size[SIDE_HIGH] + SLACK_HIGH, align
             );
-            c->placed[SIDE_HIGH] = true;
-            high_cursor = c->base[SIDE_HIGH] + c->size[SIDE_HIGH];
-            plan.roots[r].high = (struct pci_plan_range){ c->base[SIDE_HIGH], high_cursor };
+            uint64_t end = base + c->size[SIDE_HIGH];
+            if (address_limit > end) {
+                end += address_limit - end < SLACK_HIGH ? address_limit - end : SLACK_HIGH;
+            }
+            if (c->size[SIDE_HIGH] != 0) {
+                c->base[SIDE_HIGH] = base;
+                c->placed[SIDE_HIGH] = true;
+            }
+            if (end > base) {
+                high_cursor = end;
+                plan.roots[r].high = (struct pci_plan_range){ base, end };
+            }
         }
         for (size_t s = 0; s < 2; s++) {
             size_t side = s == 0 ? SIDE_MEMORY : SIDE_PREF;
