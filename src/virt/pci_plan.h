@@ -23,7 +23,8 @@
 #include <stdint.h>
 
 // Memory BARs up to this size go below 4 GiB, as do larger ones that cannot be
-// above it; the rest stays above.
+// above it; the rest goes above with pci_high_windows and stays unassigned
+// without it.
 #define PCI_PLAN_LOW_BAR_MAX ((uint64_t)256 << 20)
 
 struct pci_plan_range {
@@ -110,7 +111,8 @@ struct pci_plan {
 // Lays the guest's PCI memory out around obstacles, the sorted ranges below 4
 // GiB the guest finds at their addresses, as high below 4 GiB as it goes, with
 // lfb_size bytes for the emulated VGA's linear framebuffer, and the larger
-// BARs from high_floor up. Needs pci_enum_scan() and pci_cfg_init().
+// BARs from high_floor up with pci_high_windows. Needs pci_enum_scan() and
+// pci_cfg_init().
 const struct pci_plan *pci_plan_make(
     const struct pci_plan_range *obstacles, size_t count, size_t lfb_size, uint64_t high_floor
 );

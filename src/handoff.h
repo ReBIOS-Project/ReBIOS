@@ -193,6 +193,9 @@ struct handoff_config {
     uint8_t legacy_usb;
     // Whether the core keeps its log in an EFI variable (virt/log_save.c).
     uint8_t save_log;
+    // Whether BARs too large to go below 4 GiB go above it, in root bus
+    // windows there (virt/pci_plan.c), or else stay unassigned.
+    uint8_t pci_high_windows;
     // Which APIC IDs the guest gets, as inclusive ranges.
     uint32_t cpu_filter;
     uint32_t cpu_range_count;

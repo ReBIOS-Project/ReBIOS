@@ -648,6 +648,7 @@ const struct pci_plan *pci_plan_make(
     plan.root_count = roots;
     plan.high_floor = high_floor;
     plan.primary = primary_root(t);
+    bool high_allowed = core_handoff->config.pci_high_windows != 0;
     for (size_t i = 0; i < n; i++) {
         plan.functions[i] = (struct pci_plan_function){
             .mem_base = PCI_MEMORY_GRANULE,
@@ -695,7 +696,7 @@ const struct pci_plan *pci_plan_make(
     for (size_t i = 0; i < n + roots; i++) {
         high_windows[i] = false;
     }
-    for (size_t i = 0; i < n; i++) {
+    for (size_t i = 0; i < n && high_allowed; i++) {
         const struct pci_enum_function *f = &t->functions[i];
         for (size_t b = 0; b < f->bar_count && b < 6; b++) {
             if (!bar_high(t, f, &f->bars[b])) {
@@ -724,7 +725,16 @@ const struct pci_plan *pci_plan_make(
              || bar->size == 0 || bar->base == 0) {
                 continue;
             }
-            size_t side = bar_high(t, f, bar)
+            bool above = bar_high(t, f, bar);
+            if (above && !high_allowed) {
+                printf(
+                    "PCI " PCI_CFG_ADDR_FMT " BAR%zu: unassigned, as its 0x%llx bytes need room "
+                    "above 4 GiB (pci_high_windows)\n", PCI_CFG_ADDR_ARGS(f->addr), b,
+                    (unsigned long long)bar->size
+                );
+                continue;
+            }
+            size_t side = above
                         ? SIDE_HIGH
                         : bar->prefetchable && pref_low ? SIDE_PREF : SIDE_MEMORY;
             size_t size = element_size(bar->size);
