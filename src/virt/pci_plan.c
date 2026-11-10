@@ -61,6 +61,11 @@
 // A PC's I/O APIC, HPET, local APIC, and firmware flash are from here on, and
 // PCI memory below.
 #define PLATFORM_BASE ((uint64_t)0xfec00000)
+// Room in each root bus's region below 4 GiB for what the guest's operating
+// system places there itself, such as the windows Linux 7.3 gives each bridge
+// with a hotplug slot, 2 MiB of each kind of memory apiece (drivers/pci/pci.c,
+// DEFAULT_HOTPLUG_MMIO_SIZE and DEFAULT_HOTPLUG_MMIO_PREF_SIZE).
+#define SLACK_LOW ((uint64_t)64 << 20)
 
 // A BAR, an expansion ROM, a bridge's window, or the emulated VGA's linear
 // framebuffer, in the memory of the root bus or bridge it is behind.
@@ -834,7 +839,7 @@ const struct pci_plan *pci_plan_make(
         }
         for (size_t s = 0; s < 2; s++) {
             size_t side = s == 0 ? SIDE_MEMORY : SIDE_PREF;
-            piece_size[2 * r + s] = align_up(c->size[side], ONE_MIB);
+            piece_size[2 * r + s] = align_up(c->size[side], ONE_MIB) + (s == 0 ? SLACK_LOW : 0);
             piece_align[2 * r + s] = c->align[side] > ONE_MIB ? c->align[side] : ONE_MIB;
         }
     }
