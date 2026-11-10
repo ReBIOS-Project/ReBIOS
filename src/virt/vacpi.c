@@ -774,8 +774,6 @@ static const char *const power_button_ids[] = { "PNP0C0C", NULL };
 #define CRS_MAX 2048
 #define CRS_RANGES 64
 #define WINDOW_SIZE_MAX 46
-// _OSI's string for Windows Vista.
-static const char osi_vista[] = "Windows 2006";
 
 // How the guest's _CRS of a device keeps the firmware's.
 #define CRS_MOTHERBOARD 0
@@ -1212,52 +1210,18 @@ static void emit_crs(struct aml *a, uacpi_namespace_node *device) {
     }
     for (size_t r = 0; r < roots; r++) {
         const struct pci_plan_root *root = &plan->roots[r];
-        const struct pci_plan_range *ranges[2] = { &root->low, &root->pref };
-        for (size_t k = 0; k < 2; k++) {
+        const struct pci_plan_range *ranges[3] = { &root->low, &root->pref, &root->high };
+        for (size_t k = 0; k < 3; k++) {
             if (ranges[k]->end != ranges[k]->base) {
-                c.size += put_window(c.out + c.size, ranges[k]->base, ranges[k]->end, false);
+                c.size += put_window(c.out + c.size, ranges[k]->base, ranges[k]->end, k == 2);
             }
-        }
-    }
-    size_t below = c.size;
-    for (size_t r = 0; r < roots; r++) {
-        const struct pci_plan_range *high = &plan->roots[r].high;
-        if (high->end != high->base) {
-            c.size += put_window(c.out + c.size, high->base, high->end, true);
         }
     }
     c.out[c.size++] = ACPI_TAG_END;
     c.out[c.size++] = 0;
-    if (c.size == below + 2) {
-        aml_op(a, AML_NAME);
-        emit_seg(a, "_CRS");
-        aml_buffer(a, c.out, c.size);
-        kfree(c.out);
-        return;
-    }
-
-    // Windows XP fails to start with a window above 4 GiB in its root bus's
-    // resources: those windows go only to operating systems that answer _OSI
-    // for Windows Vista, as later Windows and Linux 7.3 do
-    // (drivers/acpi/acpica/utosi.c).
-    aml_method(a, "_CRS", 0, 0);
-    aml_begin(a, AML_IF);
-    aml_op(a, AML_COND_REF_OF);
-    aml_name(a, "\\_OSI");
-    aml_local(a, 0);
-    aml_begin(a, AML_IF);
-    aml_name(a, "\\_OSI");
-    aml_string(a, osi_vista, sizeof(osi_vista) - 1);
-    aml_op(a, AML_RETURN);
+    aml_op(a, AML_NAME);
+    emit_seg(a, "_CRS");
     aml_buffer(a, c.out, c.size);
-    aml_end(a);
-    aml_end(a);
-    // The same, ended before the windows above 4 GiB.
-    c.out[below] = ACPI_TAG_END;
-    c.out[below + 1] = 0;
-    aml_op(a, AML_RETURN);
-    aml_buffer(a, c.out, below + 2);
-    aml_end(a);
     kfree(c.out);
 }
 
