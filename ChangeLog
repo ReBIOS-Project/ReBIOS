@@ -1,3 +1,44 @@
+2026-11-10  Mintsuki  <mintsuki@protonmail.com>
+
+    *** Release 0.7.1 ***
+
+    Noteworthy changes compared to the previous release, 0.7.0:
+
+    New features:
+        - Run the Video BIOS of AMD's APUs with Vega graphics by default
+          (Raven Ridge, Picasso, Renoir, Lucienne, Cezanne, and Barcelo), now
+          that ReBIOS leaves the firmware's graphics driver running, without
+          which their Video BIOS hung.
+
+    Bug fixes:
+        - Turn on AMD's 8-bit APIC IDs, for the machine and for the OS, where
+          a processor's APIC ID reaches 15: with 4-bit IDs, 15 is the
+          broadcast ID, so the INIT with which the OS starts processor 15
+          reached every processor, and restarted 8-core Ryzen laptops.
+        - Turn on the decoding of the IDE channels that the firmware left off
+          on Intel's IDE controllers: without it, Windows XP stopped at boot
+          with STOP 0x7B.
+        - Leave the ports of ReBIOS's own legacy devices, such as the RTC's,
+          out of the firmware's motherboard resources, whose overlap Windows
+          XP showed as a conflict (Code 12).
+        - Give the PCI windows above 4 GiB only to OSes that answer _OSI for
+          Windows Vista, as later Windows and Linux do: Windows XP failed to
+          start with one, which machines with BARs over 256 MiB had.
+        - Leave room in the OS's PCI memory for what the OS places there
+          itself, such as Linux's windows for bridges with hotplug slots,
+          which it could not assign: 64 MiB more in each root bus's region
+          below 4 GiB, and 16 GiB above 4 GiB on the OS's bus 0.
+        - Keep the local APICs in the x2APIC mode that the firmware left them
+          in, rather than leaving it through the disabled state, which clears
+          their registers.
+        - Measure the TSC's rate against the PM timer alone, and no longer
+          check the PM timer's rate against the HPET or the firmware's
+          Stall(), which could replace a sound PM timer with ReBIOS's own.
+        - Check the VM entries and VMX instructions of the OS's own
+          hypervisors as Intel's processors do: the host address-space size
+          against the processor's mode, and the segments of memory operands
+          outside 64-bit mode.
+
 2026-11-09  Mintsuki  <mintsuki@protonmail.com>
 
     *** Release 0.7.0 ***
