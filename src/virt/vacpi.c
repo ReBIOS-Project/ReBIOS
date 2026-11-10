@@ -60,6 +60,7 @@
 #include <virt/pci_plan.h>
 #include <virt/rtc.h>
 #include <virt/vcpu.h>
+#include <virt/vga.h>
 
 // The mailbox the guest's AML calls the firmware's methods through: a header,
 // argument slots, and the result's data, then a page whose writes trap.
@@ -2001,6 +2002,34 @@ static void emit_legacy_devices(struct aml *a) {
     aml_end(a);
 }
 
+// A Fixed Memory32 descriptor, read and write, at p; returns its size.
+static size_t put_fixed_memory32(uint8_t *p, uintptr_t base, size_t size) {
+    p[0] = ACPI_TAG_FIXED_MEMORY32;
+    put_le(p + 1, 9, 2);
+    p[3] = MEMORY_RW;
+    put_le(p + 4, base, 4);
+    put_le(p + 8, size, 4);
+    return 12;
+}
+
+// The memory the guest finds at addresses of ReBIOS's own rather than in a
+// BAR, as a resource list, into crs, CLAIMS_MAX bytes; returns its size. An OS
+// keeps clear of such memory only once a motherboard resource claims it.
+#define CLAIMS_MAX (3 * 12 + 2)
+static size_t claims(uint8_t *crs) {
+    size_t size = put_fixed_memory32(crs, vacpi.mailbox, MBX_SIZE + DOORBELL_SIZE);
+    const struct pci_plan *plan = pci_plan();
+    if (plan != NULL && plan->ecam != 0) {
+        size += put_fixed_memory32(crs + size, plan->ecam, ((size_t)plan->bus_end + 1) * ONE_MIB);
+    }
+    if (plan != NULL && plan->lfb != 0) {
+        size += put_fixed_memory32(crs + size, plan->lfb, vga_lfb_size());
+    }
+    crs[size++] = ACPI_TAG_END;
+    crs[size++] = 0x00;
+    return size;
+}
+
 static void emit_mailbox_device(struct aml *a) {
     aml_begin(a, AML_SCOPE);
     aml_name(a, "\\_SB");
@@ -2008,27 +2037,11 @@ static void emit_mailbox_device(struct aml *a) {
     aml_name(a, "RBMB");
     aml_name_int(a, "_HID", eisa_id("PNP0C02"));
     aml_name_int(a, "_UID", 0x5242);
-    // The mailbox, and the guest's configuration space window, which an OS
-    // uses only once a motherboard resource claims it.
-    uint8_t crs[] = {
-        ACPI_TAG_FIXED_MEMORY32, 0x09, 0x00, 0x01, 0, 0, 0, 0, 0, 0, 0, 0,
-        ACPI_TAG_FIXED_MEMORY32, 0x09, 0x00, 0x01, 0, 0, 0, 0, 0, 0, 0, 0,
-        ACPI_TAG_END, 0x00
-    };
-    put_le(crs + 4, vacpi.mailbox, 4);
-    put_le(crs + 8, MBX_SIZE + DOORBELL_SIZE, 4);
-    size_t crs_size = 12;
-    const struct pci_plan *plan = pci_plan();
-    if (plan != NULL && plan->ecam != 0) {
-        put_le(crs + 16, plan->ecam, 4);
-        put_le(crs + 20, ((uint64_t)plan->bus_end + 1) << 20, 4);
-        crs_size += 12;
-    }
-    crs[crs_size] = ACPI_TAG_END;
-    crs[crs_size + 1] = 0x00;
+    uint8_t crs[CLAIMS_MAX];
+    size_t crs_size = claims(crs);
     aml_op(a, AML_NAME);
     aml_name(a, "_CRS");
-    aml_buffer(a, crs, crs_size + 2);
+    aml_buffer(a, crs, crs_size);
 
     aml_op(a, AML_OPERATION_REGION);
     aml_name(a, "MBXR");
