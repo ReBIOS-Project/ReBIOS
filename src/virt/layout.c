@@ -832,6 +832,12 @@ bool layout_e820(struct e820_map *map) {
     if (plan != NULL && plan->ecam != 0) {
         ok &= e820_set(map, plan->ecam, ((uint64_t)plan->bus_end + 1) << 20, E820_RESERVED);
     }
+    // The emulated VGA's framebuffer is in no BAR: an OS that uses neither
+    // ACPI nor the Plug and Play BIOS, such as Windows 98 set up with /p i,
+    // learns only from here that it is taken.
+    if (plan != NULL && plan->lfb != 0) {
+        ok &= e820_set(map, plan->lfb, vga_lfb_size(), E820_RESERVED);
+    }
     ok &= e820_set_low_memory(map);
     return ok;
 }
