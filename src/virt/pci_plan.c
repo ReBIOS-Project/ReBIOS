@@ -747,8 +747,8 @@ const struct pci_plan *pci_plan_make(
         }
     }
     // In the memory of what the VGA's card is on: an installed Windows 7 keeps
-    // to 16 colours with the linear framebuffer in reserved memory, and on a
-    // root bus's when the card is behind a bridge.
+    // to 16 colours with the linear framebuffer in memory taken from RAM, and
+    // on a root bus's when the card is behind a bridge.
     size_t lfb_container = lfb_size != 0 ? vga_container(t, parents) : NO_CONTAINER;
     if (lfb_container != NO_CONTAINER) {
         element_add(
