@@ -52,6 +52,7 @@
 #include <virt/gpt.h>
 #include <virt/guest_mem.h>
 #include <virt/hpet.h>
+#include <virt/hypercall.h>
 #include <virt/io.h>
 #include <virt/irq.h>
 #include <virt/isa_ports.h>
@@ -980,17 +981,21 @@ struct legacy_device {
     const char *hid;
     const uint8_t *crs;
     size_t size;
+    // Its Plug and Play BIOS device type code: base type, sub-type, and
+    // interface, from Microsoft's devids.txt, or for the coprocessor and the
+    // speaker, which it leaves out, as PCI's class codes have them.
+    uint8_t type[3];
 };
 
 static const struct legacy_device legacy_devices[] = {
-    { "RPIC", "PNP0000", pic_crs, sizeof(pic_crs) },
-    { "RTMR", "PNP0100", timer_crs, sizeof(timer_crs) },
-    { "RRTC", "PNP0B00", rtc_crs, sizeof(rtc_crs) },
-    { "RSPK", "PNP0800", speaker_crs, sizeof(speaker_crs) },
-    { "RDMA", "PNP0200", dma_crs, sizeof(dma_crs) },
-    { "RFPU", "PNP0C04", fpu_crs, sizeof(fpu_crs) },
-    { "RBKB", "PNP0303", keyboard_crs, sizeof(keyboard_crs) },
-    { "RBMS", "PNP0F13", mouse_crs, sizeof(mouse_crs) }
+    { "RPIC", "PNP0000", pic_crs, sizeof(pic_crs), { 0x08, 0x00, 0x01 } },
+    { "RTMR", "PNP0100", timer_crs, sizeof(timer_crs), { 0x08, 0x02, 0x01 } },
+    { "RRTC", "PNP0B00", rtc_crs, sizeof(rtc_crs), { 0x08, 0x03, 0x01 } },
+    { "RSPK", "PNP0800", speaker_crs, sizeof(speaker_crs), { 0x04, 0x01, 0x00 } },
+    { "RDMA", "PNP0200", dma_crs, sizeof(dma_crs), { 0x08, 0x01, 0x01 } },
+    { "RFPU", "PNP0C04", fpu_crs, sizeof(fpu_crs), { 0x0b, 0x40, 0x00 } },
+    { "RBKB", "PNP0303", keyboard_crs, sizeof(keyboard_crs), { 0x09, 0x00, 0x00 } },
+    { "RBMS", "PNP0F13", mouse_crs, sizeof(mouse_crs), { 0x09, 0x02, 0x00 } }
 };
 
 // Whether a legacy device that ReBIOS gives the guest claims the I/O port.
@@ -2106,6 +2111,70 @@ static void emit_mailbox_device(struct aml *a) {
     emit_rcal(a);
     aml_end(a);
     aml_end(a);
+}
+
+// A system device node's size, handle, product identifier, type code, and
+// attributes, which its resource blocks follow (Plug and Play BIOS 1.0A, 4.2).
+#define PNP_NODE_HEADER 12
+// A device that can be neither configured nor disabled.
+#define PNP_NODE_STATIC 0x0003
+#define PNP_NODES_MAX 1024
+
+struct pnp_nodes {
+    uint8_t data[PNP_NODES_MAX];
+    size_t size;
+    size_t count;
+    bool full;
+};
+
+// A system device node for a device with the resources crs, a list ended with
+// an End tag, that can be neither configured nor disabled: it then has no
+// possible resources to list, and nor does it list compatible IDs.
+static void pnp_node_add(
+    struct pnp_nodes *nodes, const char *id, const uint8_t *type, const uint8_t *crs,
+    size_t crs_size
+) {
+    static const uint8_t no_lists[] = { ACPI_TAG_END, 0x00, ACPI_TAG_END, 0x00 };
+    size_t size = PNP_NODE_HEADER + crs_size + sizeof(no_lists);
+    // Handle FFh stands for no node.
+    if (nodes->full || size > PNP_NODES_MAX - nodes->size || nodes->count >= UINT8_MAX) {
+        nodes->full = true;
+        return;
+    }
+    uint8_t *p = nodes->data + nodes->size;
+    put_le(p, size, 2);
+    p[2] = (uint8_t)nodes->count;
+    put_le(p + 3, eisa_id(id), 4);
+    memcpy(p + 7, type, 3);
+    put_le(p + 10, PNP_NODE_STATIC, 2);
+    memcpy(p + PNP_NODE_HEADER, crs, crs_size);
+    memcpy(p + PNP_NODE_HEADER + crs_size, no_lists, sizeof(no_lists));
+    nodes->size += size;
+    nodes->count++;
+}
+
+void vacpi_pnp_nodes(uint32_t gpa) {
+    struct hypercall_pnp_nodes call;
+    if (!guest_mem_phys_read(gpa, &call, sizeof(struct hypercall_pnp_nodes))) {
+        return;
+    }
+    struct pnp_nodes nodes = { .size = 0 };
+    for (size_t i = 0; i < ARRAY_COUNT(legacy_devices); i++) {
+        const struct legacy_device *d = &legacy_devices[i];
+        pnp_node_add(&nodes, d->hid, d->type, d->crs, d->size);
+    }
+    // Other System Peripheral.
+    static const uint8_t motherboard[] = { 0x08, 0x80, 0x00 };
+    uint8_t crs[CLAIMS_MAX];
+    size_t crs_size = claims(crs);
+    pnp_node_add(&nodes, "PNP0C02", motherboard, crs, crs_size);
+
+    call.length = 0;
+    if (!nodes.full && nodes.size <= call.size
+     && guest_mem_phys_write(call.buffer, nodes.data, nodes.size)) {
+        call.length = (uint32_t)nodes.size;
+    }
+    guest_mem_phys_write(gpa, &call, sizeof(struct hypercall_pnp_nodes));
 }
 
 static void emit_links(struct aml *a) {

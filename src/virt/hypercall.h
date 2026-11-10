@@ -38,6 +38,9 @@
 // Switches back to the state the last HYPERCALL_CALL32_ENTER saved, at EBX.
 #define HYPERCALL_CALL32_RETURN 0x0005
 #define HYPERCALL_USB_DISK 0x0006
+// Writes the system device nodes the legacy BIOS's Plug and Play BIOS reports
+// (Plug and Play BIOS 1.0A, 4.2), for EBX's struct hypercall_pnp_nodes.
+#define HYPERCALL_PNP_NODES 0x0007
 
 #define HYPERCALL_RESET_COLD 0
 #define HYPERCALL_RESET_WARM 1
@@ -92,6 +95,18 @@ struct hypercall_usb_disk_info {
     uint32_t bdf;
     char path[64];
     char description[64];
+};
+
+// HYPERCALL_PNP_NODES's EBX is the guest-physical address of one of these.
+struct hypercall_pnp_nodes {
+    // In: where the nodes go, a guest-physical address, and how many bytes fit
+    // there.
+    uint32_t buffer;
+    uint32_t size;
+    // Out: the bytes the nodes take, one after the other, or 0 if they do not
+    // fit.
+    uint32_t length;
+    uint32_t reserved;
 };
 
 #endif // !__ASSEMBLER__

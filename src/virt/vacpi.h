@@ -44,4 +44,9 @@ uint8_t *vacpi_dsdt(size_t *length);
 void vacpi_fadt(uint8_t fadt[VACPI_FADT_SIZE], uint32_t facs, uint32_t dsdt);
 void vacpi_facs(uint8_t facs[VACPI_FACS_SIZE]);
 
+// For HYPERCALL_PNP_NODES, whose struct is at gpa, after vacpi_dsdt(): the
+// legacy devices and motherboard resources the guest's ACPI describes, as the
+// system device nodes of the legacy BIOS's Plug and Play BIOS.
+void vacpi_pnp_nodes(uint32_t gpa);
+
 #endif

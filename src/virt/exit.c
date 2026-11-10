@@ -39,6 +39,7 @@
 #include <virt/profile.h>
 #include <virt/svm.h>
 #include <virt/usb_disk.h>
+#include <virt/vacpi.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>
 #include <virt/vlapic.h>
@@ -107,6 +108,10 @@ static bool hypercall(struct vcpu *v) {
         }
         case HYPERCALL_USB_DISK: {
             usb_disk_call(ebx);
+            return true;
+        }
+        case HYPERCALL_PNP_NODES: {
+            vacpi_pnp_nodes(ebx);
             return true;
         }
         default: {
