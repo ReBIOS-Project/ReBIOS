@@ -19,7 +19,8 @@
 # gpu-lists.py <pci.ids> <amdgpu.ids> <Linux tree> <output.c> [report]: generates
 # the lists of GPUs whose legacy Video BIOS is run or not. Integrated graphics
 # and GPUs soldered to the board go by when they came out: those from before
-# 2018 are allowed and later ones blocked. Cards for slots are allowed. The
+# 2018 are allowed and later ones blocked, but for AMD's Vega APUs, which are
+# allowed. Cards for slots are allowed. The
 # inputs are hwdata's pci.ids, libdrm's amdgpu.ids (which tell apart by revision
 # the cards and soldered parts that share a device ID), and Linux's
 # include/drm/intel/pciids.h.
@@ -67,6 +68,10 @@ NVIDIA_FIRST_TURING = 0x1e00
 # AMD's device IDs here are integrated graphics, and from before 2018 only up
 # to Kaveri's. No GPU for a slot has them.
 AMD_INTEGRATED_LATER = (0x1320, 0x1fff)
+# Among them, AMD's APUs with Vega graphics, from Raven Ridge to Barcelo, whose
+# Video BIOS runs where the firmware's graphics output alone is stopped, as
+# loader/video.c does.
+AMD_VEGA_APUS = [0x15d8, 0x15dd, 0x15e7, 0x1636, 0x1638, 0x164c]
 
 # All of AMD's other GPUs up to Fiji and Vega, the first RDNA device ID being
 # 7310h, as older ones are numbered all over.
@@ -202,11 +207,18 @@ def main():
             allowed.append((NVIDIA, i, i, ANY, name))
 
     # AMD's.
-    blocked.append((AMD, AMD_INTEGRATED_LATER[0], AMD_INTEGRATED_LATER[1], ANY,
-                    'Integrated graphics after Kaveri'))
+    start = AMD_INTEGRATED_LATER[0]
+    for device in AMD_VEGA_APUS + [AMD_INTEGRATED_LATER[1] + 1]:
+        if start < device:
+            blocked.append((AMD, start, device - 1, ANY,
+                            'Integrated graphics after Kaveri'))
+        start = device + 1
     for first, last in AMD_BEFORE_RDNA:
         allowed.append((AMD, first, last, ANY, 'Up to Fiji and Vega, but for '
                         'those blocked'))
+    for device in AMD_VEGA_APUS:
+        allowed.append((AMD, device, device, ANY,
+                        pci_ids[AMD].get(device, 'Vega APU')))
     for device, revision, name in amdgpu:
         if AMD_INTEGRATED_LATER[0] <= device <= AMD_INTEGRATED_LATER[1]:
             continue

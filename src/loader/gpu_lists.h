@@ -32,12 +32,14 @@ struct gpu_lists_id {
     int16_t revision;
 };
 
-// Integrated graphics and GPUs soldered to the board from 2018 on, whose Video
-// BIOS does not run on its own, and takes precedence over the allowlist.
+// Integrated graphics and GPUs soldered to the board from 2018 on, but for
+// AMD's Vega APUs, whose Video BIOS does not run on its own, and takes
+// precedence over the allowlist.
 extern const struct gpu_lists_id gpu_lists_vbios_blocklist[];
 extern const size_t gpu_lists_vbios_blocklist_count;
 
-// Those from before 2018, and cards for slots, whose Video BIOS runs.
+// Those from before 2018, AMD's Vega APUs, and cards for slots, whose Video
+// BIOS runs.
 extern const struct gpu_lists_id gpu_lists_vbios_allowlist[];
 extern const size_t gpu_lists_vbios_allowlist_count;
 

@@ -461,7 +461,13 @@ const struct gpu_lists_id gpu_lists_vbios_blocklist[] = {
     // GB205GLM [RTX PRO 3000 Blackwell Generation Laptop GPU].
     { 0x10de, 0x2f38, 0x2f38, ANY },
     { 0x10de, 0x2f58, 0x2f58, ANY }, // GB205M [GeForce RTX 5070 Ti Mobile].
-    { 0x1002, 0x1320, 0x1fff, ANY }, // Integrated graphics after Kaveri.
+    { 0x1002, 0x1320, 0x15d7, ANY }, // Integrated graphics after Kaveri.
+    { 0x1002, 0x15d9, 0x15dc, ANY }, // Integrated graphics after Kaveri.
+    { 0x1002, 0x15de, 0x15e6, ANY }, // Integrated graphics after Kaveri.
+    { 0x1002, 0x15e8, 0x1635, ANY }, // Integrated graphics after Kaveri.
+    { 0x1002, 0x1637, 0x1637, ANY }, // Integrated graphics after Kaveri.
+    { 0x1002, 0x1639, 0x164b, ANY }, // Integrated graphics after Kaveri.
+    { 0x1002, 0x164d, 0x1fff, ANY }, // Integrated graphics after Kaveri.
     { 0x1002, 0x67ef, 0x67ef, 0xe2 }, // AMD Radeon RX 560X.
     { 0x1002, 0x694c, 0x694c, 0xc0 }, // AMD Radeon RX Vega M GH Graphics.
     { 0x1002, 0x694e, 0x694e, 0xc0 }, // AMD Radeon RX Vega M GL Graphics.
@@ -1042,6 +1048,16 @@ const struct gpu_lists_id gpu_lists_vbios_allowlist[] = {
     { 0x1002, 0x7300, 0x730f, ANY },
     // Up to Fiji and Vega, but for those blocked.
     { 0x1002, 0x9000, 0x9fff, ANY },
+    // Picasso/Raven 2 [Radeon Vega Series / Radeon Vega Mobile Series].
+    { 0x1002, 0x15d8, 0x15d8, ANY },
+    // Raven Ridge [Radeon Vega Series / Radeon Vega Mobile Series].
+    { 0x1002, 0x15dd, 0x15dd, ANY },
+    { 0x1002, 0x15e7, 0x15e7, ANY }, // Barcelo.
+    // Renoir [Radeon Vega Series / Radeon Vega Mobile Series].
+    { 0x1002, 0x1636, 0x1636, ANY },
+    // Cezanne [Radeon Vega Series / Radeon Vega Mobile Series].
+    { 0x1002, 0x1638, 0x1638, ANY },
+    { 0x1002, 0x164c, 0x164c, ANY }, // Lucienne.
     { 0x1002, 0x7312, 0x7312, 0x00 }, // AMD Radeon Pro W5700.
     { 0x1002, 0x731e, 0x731e, 0xc6 }, // AMD Radeon RX 5700XTB.
     { 0x1002, 0x731e, 0x731e, 0xc7 }, // AMD Radeon RX 5700B.
