@@ -1,5 +1,34 @@
 2026-11-11  Mintsuki  <mintsuki@protonmail.com>
 
+    *** Release 0.9.0 ***
+
+    Noteworthy changes compared to the previous release, 0.8.0:
+
+    New features:
+        - Draw the emulated VGA's picture with SIMD instructions, each
+          processor using the fastest of SSE2, SSSE3, SSE4.1, AVX, and AVX2
+          that it has, as timed at start, and share the drawing of each frame
+          among the processors, above all those that wait, such as the ones
+          an OS for one processor never starts. Each frame is drawn whole
+          before it reaches the screen, which never shows part of one.
+
+    Bug fixes:
+        - Leave the IRQs that the HPET takes out of the other legacy
+          devices' resources, where Windows XP found the real-time clock's
+          IRQ claimed twice and gave it Code 12.
+        - Put the legacy devices whose ports no PCI root bus window routes,
+          as on the Dell Wyse 5070, under \_SB rather than the PCI bus, where
+          Windows XP found their ports unavailable and gave the real-time
+          clock Code 12.
+        - Set up the host's registers of a PCI function again after its
+          driver resets it, which takes its BARs, Resizable BAR sizes, bridge
+          windows, and MSI and MSI-X setup back to their defaults.
+        - Show at once what emulated instructions write to the linear
+          framebuffer of the emulated VGA's VBE modes, which showed up to a
+          second later.
+
+2026-11-11  Mintsuki  <mintsuki@protonmail.com>
+
     *** Release 0.8.0 ***
 
     Noteworthy changes compared to the previous release, 0.7.1:
