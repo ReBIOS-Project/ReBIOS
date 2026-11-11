@@ -41,14 +41,23 @@
 .section .rodata
 .balign 16
 .globl ap_boot_start
+.type ap_boot_start, %object
 .globl ap_boot_gdt
+.type ap_boot_gdt, %object
 .globl ap_boot_gdtr
+.type ap_boot_gdtr, %object
 .globl ap_boot_pm32
+.type ap_boot_pm32, %object
 .globl ap_boot_pm32_ptr
+.type ap_boot_pm32_ptr, %object
 .globl ap_boot_lm64
+.type ap_boot_lm64, %object
 .globl ap_boot_lm64_ptr
+.type ap_boot_lm64_ptr, %object
 .globl ap_boot_params
+.type ap_boot_params, %object
 .globl ap_boot_end
+.type ap_boot_end, %object
 
 .code16
 ap_boot_start:
@@ -105,6 +114,7 @@ ap_boot_pm32:
     movl %eax, %cr0
     ljmpl *(ap_boot_lm64_ptr - ap_boot_start)(%ebp)
 
+.size ap_boot_pm32, . - ap_boot_pm32
 .code64
 ap_boot_lm64:
     // The upper half is not defined after the switch.
@@ -151,6 +161,7 @@ ap_boot_lm64:
     cli
     hlt
     jmp .Lap_boot_lm64_5
+.size ap_boot_lm64, . - ap_boot_lm64
 
 .balign 8
 ap_boot_gdt:
@@ -158,16 +169,23 @@ ap_boot_gdt:
 .quad 0x00cf9a000000ffff
 .quad 0x00cf92000000ffff
 .quad 0x00af9a000000ffff
+.size ap_boot_gdt, . - ap_boot_gdt
 ap_boot_gdtr:
 .word 4 * 8 - 1
 .long 0
+.size ap_boot_gdtr, . - ap_boot_gdtr
 ap_boot_pm32_ptr:
 .long 0
 .word 0x08
+.size ap_boot_pm32_ptr, . - ap_boot_pm32_ptr
 ap_boot_lm64_ptr:
 .long 0
 .word 0x18
+.size ap_boot_lm64_ptr, . - ap_boot_lm64_ptr
 .balign 8
 ap_boot_params:
 .fill PARAM_SIZE, 1, 0
+.size ap_boot_params, . - ap_boot_params
+.size ap_boot_start, . - ap_boot_start
 ap_boot_end:
+.size ap_boot_end, . - ap_boot_end

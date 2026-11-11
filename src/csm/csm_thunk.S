@@ -23,10 +23,15 @@
 // patched to VMMCALL.
 .section .rodata
 .globl csm_thunk_start
+.type csm_thunk_start, %object
 .globl csm_thunk_hypercall
+.type csm_thunk_hypercall, %object
 .globl csm_thunk_halt
+.type csm_thunk_halt, %object
 .globl csm_thunk_entry
+.type csm_thunk_entry, %object
 .globl csm_thunk_end
+.type csm_thunk_end, %object
 .code16
 csm_thunk_start:
     lcallw *%cs:(csm_thunk_entry - csm_thunk_start)
@@ -34,14 +39,19 @@ csm_thunk_start:
     movl $(HYPERCALL_MAGIC | HYPERCALL_CSM_RETURN), %eax
 csm_thunk_hypercall:
     vmcall
+.size csm_thunk_hypercall, . - csm_thunk_hypercall
     jmp csm_thunk_start
 csm_thunk_halt:
     cli
     hlt
     jmp csm_thunk_halt
+.size csm_thunk_halt, . - csm_thunk_halt
 .balign 4
 csm_thunk_entry:
 .word 0
 .word 0
+.size csm_thunk_entry, . - csm_thunk_entry
+.size csm_thunk_start, . - csm_thunk_start
 csm_thunk_end:
+.size csm_thunk_end, . - csm_thunk_end
 .code64

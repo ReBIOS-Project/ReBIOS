@@ -18,7 +18,11 @@
 .section .rodata.seabios_csm, "a"
 .balign 16
 .globl seabios_csm
+.type seabios_csm, %object
 seabios_csm:
 .incbin "seabios/out/Csm16.bin"
+.size seabios_csm, . - seabios_csm
 .globl seabios_csm_end
+.type seabios_csm_end, %object
 seabios_csm_end:
+.size seabios_csm_end, . - seabios_csm_end

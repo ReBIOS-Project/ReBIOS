@@ -32,6 +32,7 @@
 .arch i8086
 
 .globl vgabios_stub
+.type vgabios_stub, %object
 vgabios_stub:
 .byte 0x55, 0xaa
 // The ROM's size in 512-byte blocks, which the hypervisor fills in.
@@ -78,6 +79,7 @@ init_entry:
     lretw
 
 .globl vgabios_stub_int10
+.type vgabios_stub_int10, %object
 vgabios_stub_int10:
     save
     cmpb $0x10, %ah
@@ -88,6 +90,7 @@ vgabios_stub_int10:
     movw $BDA, %si
     movw %si, %ds
     jmpw *%cs:(calls_here - vgabios_stub)(%bx)
+.size vgabios_stub_int10, . - vgabios_stub_int10
 
 door:
     callw run
@@ -345,12 +348,14 @@ calls_here:
 
 // VBE's window function, which takes AX=4F05h's registers but for AX.
 .globl vgabios_stub_window
+.type vgabios_stub_window, %object
 vgabios_stub_window:
     save
     movw $0x4f05, (%bp)
     callw run
     restore
     lretw
+.size vgabios_stub_window, . - vgabios_stub_window
 
 // A call gets a port of its own, so that one interrupted by another, as a
 // virtual machine by the next, carries on afterwards. 0 means it is over, in
@@ -713,6 +718,9 @@ operations:
 .word op_read_block - vgabios_stub
 .word op_ecx_high - vgabios_stub
 .word op_dac_rom - vgabios_stub
+.size vgabios_stub, . - vgabios_stub
 
 .globl vgabios_stub_end
+.type vgabios_stub_end, %object
 vgabios_stub_end:
+.size vgabios_stub_end, . - vgabios_stub_end
