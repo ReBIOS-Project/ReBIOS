@@ -1942,19 +1942,92 @@ static void emit_rcal(struct aml *a) {
     aml_end(a);
 }
 
-static void emit_legacy_device(
-    struct aml *a,
-    const char *name,
-    const char *id,
-    const uint8_t *crs,
-    size_t crs_size
+// The ISA IRQs of a device's IRQ and Extended Interrupt descriptors.
+static uacpi_iteration_decision isa_irqs(void *user, uacpi_resource *r) {
+    uint32_t *irqs = user;
+    if (r->type == UACPI_RESOURCE_TYPE_IRQ) {
+        for (size_t i = 0; i < r->irq.num_irqs; i++) {
+            *irqs |= (uint32_t)1 << r->irq.irqs[i];
+        }
+    } else if (r->type == UACPI_RESOURCE_TYPE_EXTENDED_IRQ) {
+        for (size_t i = 0; i < r->extended_irq.num_irqs; i++) {
+            int irq = irq_isa_irq(r->extended_irq.irqs[i]);
+            if (irq >= 0) {
+                *irqs |= (uint32_t)1 << irq;
+            }
+        }
+    }
+    return UACPI_ITERATION_DECISION_CONTINUE;
+}
+
+static uacpi_iteration_decision hpet_irqs(
+    void *user,
+    uacpi_namespace_node *node,
+    uacpi_u32 depth
 ) {
+    (void)depth;
+    uacpi_for_each_device_resource(node, "_CRS", isa_irqs, user);
+    return UACPI_ITERATION_DECISION_CONTINUE;
+}
+
+// Puts a legacy device's resources without the ISA IRQs in taken into a, or
+// only sizes them where a is NULL, adding the IRQs it leaves out to left_out
+// where that is not NULL; an IRQ descriptor left with none goes. Returns their
+// size.
+static size_t put_crs_without(
+    struct aml *a,
+    const uint8_t *crs,
+    size_t size,
+    uint32_t taken,
+    uint32_t *left_out
+) {
+    size_t out = 0;
+    uint32_t left = (uint32_t)size;
+    while (left != 0) {
+        size_t n = resource_size(crs, left);
+        if ((crs[0] & ACPI_LARGE_ITEM) != 0
+         || crs[0] >> ACPI_SMALL_ITEM_NAME_IDX != ACPI_RESOURCE_IRQ) {
+            if (a != NULL) {
+                aml_bytes(a, crs, n);
+            }
+            out += n;
+        } else {
+            uint32_t irqs = (uint32_t)le(crs + 1, 2);
+            if (left_out != NULL) {
+                *left_out |= irqs & taken;
+            }
+            if ((irqs & ~taken) != 0) {
+                if (a != NULL) {
+                    aml_byte(a, crs[0]);
+                    aml_word(a, (uint16_t)(irqs & ~taken));
+                    aml_bytes(a, crs + 3, n - 3);
+                }
+                out += n;
+            }
+        }
+        crs += n;
+        left -= (uint32_t)n;
+    }
+    return out;
+}
+
+static void emit_legacy_device(struct aml *a, const struct legacy_device *d, uint32_t taken) {
+    uint32_t left_out = 0;
+    size_t size = put_crs_without(NULL, d->crs, d->size, taken, &left_out);
+    for (size_t irq = 0; irq < 16; irq++) {
+        if ((left_out & ((uint32_t)1 << irq)) != 0) {
+            printf("%s: IRQ %zu left to the HPET, which claims it\n", d->name, irq);
+        }
+    }
     aml_begin(a, AML_DEVICE);
-    aml_name(a, name);
-    aml_name_int(a, "_HID", eisa_id(id));
+    aml_name(a, d->name);
+    aml_name_int(a, "_HID", eisa_id(d->hid));
     aml_op(a, AML_NAME);
     aml_name(a, "_CRS");
-    aml_buffer(a, crs, crs_size);
+    aml_begin(a, AML_BUFFER);
+    aml_int(a, (uint32_t)size);
+    put_crs_without(a, d->crs, d->size, taken, NULL);
+    aml_end(a);
     aml_end(a);
 }
 
@@ -2015,6 +2088,13 @@ static bool ps2_parent(struct path *out) {
 }
 
 static void emit_legacy_devices(struct aml *a) {
+    // Firmware that gives its HPET the IRQs that legacy replacement takes over
+    // leaves them out of the 8254's and the RTC's resources, which Windows XP
+    // otherwise finds in conflict with the HPET's (Code 12).
+    uint32_t taken = 0;
+    if (!hpet_any_hidden()) {
+        uacpi_find_devices_at(uacpi_namespace_root(), hpet_ids, hpet_irqs, &taken);
+    }
     struct path parent;
     aml_begin(a, AML_SCOPE);
     if (ps2_parent(&parent)) {
@@ -2023,8 +2103,7 @@ static void emit_legacy_devices(struct aml *a) {
         aml_name(a, "\\_SB");
     }
     for (size_t i = 0; i < ARRAY_COUNT(legacy_devices); i++) {
-        const struct legacy_device *d = &legacy_devices[i];
-        emit_legacy_device(a, d->name, d->hid, d->crs, d->size);
+        emit_legacy_device(a, &legacy_devices[i], taken);
     }
     aml_end(a);
 }
