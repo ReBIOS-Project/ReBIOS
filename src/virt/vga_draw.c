@@ -66,6 +66,8 @@ static struct {
     size_t fb_bytes;
 } bench;
 
+static struct cpu *copier;
+
 void vga_draw_filter_position(
     size_t i,
     size_t n,
@@ -338,6 +340,9 @@ static void pick(struct cpu *cpu) {
     simd_end();
     cpu->draw_ops = picked;
     cpu->draw_level = level;
+    if (copier == NULL || cpu->draw_copy_ticks < copier->draw_copy_ticks) {
+        copier = cpu;
+    }
     uint64_t bytes = (uint64_t)bench.fb_bytes * BENCH_RUNS;
     uint64_t rate = cpu->draw_copy_ticks != 0
                   ? bytes * time_tsc_hz() / cpu->draw_copy_ticks >> 20
@@ -399,10 +404,18 @@ void vga_draw_init(uint8_t *fb, size_t pitch, size_t rows) {
     pick(this_cpu());
 }
 
+void vga_draw_cpu_init(void) {
+    pick(this_cpu());
+}
+
 const struct vga_draw_ops *vga_draw_ops(void) {
     return this_cpu()->draw_ops;
 }
 
 size_t vga_draw_level(void) {
     return this_cpu()->draw_level;
+}
+
+struct cpu *vga_draw_copier(void) {
+    return copier;
 }

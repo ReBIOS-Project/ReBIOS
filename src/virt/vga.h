@@ -27,6 +27,8 @@
 // display, drawn on the firmware's framebuffer. Needs layout_init(). Returns
 // whether the VGA is the hypervisor's.
 bool vga_init(void);
+// On each other processor as it starts, after vga_init(): what it draws with.
+void vga_cpu_init(void);
 bool vga_emulated(void);
 
 // The registers of the Bochs display interface, for the video BIOS.
@@ -45,10 +47,10 @@ uintptr_t vga_lfb(void);
 void vga_screen_size(uint32_t *width, uint32_t *height);
 
 // Redraws what the guest changed, at most as often as a display refreshes, a
-// slice at a time. Only the boot processor draws.
+// slice at a time, each processor taking part.
 void vga_refresh(void);
-// Whether this processor has a redraw under way, which vga_refresh() carries
-// on with.
+// Whether a redraw has a part left for this processor, which vga_refresh()
+// carries on with.
 bool vga_redrawing(void);
 
 #endif

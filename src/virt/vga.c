@@ -31,6 +31,7 @@
 #include <sys/cpu.h>
 #include <sys/mm.h>
 #include <sys/simd.h>
+#include <sys/smp.h>
 #include <sys/x86.h>
 #include <virt/dispi.h>
 #include <virt/gpt.h>
@@ -130,9 +131,9 @@
 #define MAX_WIDTH 1024
 #define MAX_HEIGHT 768
 #define REFRESH_NS ((uint32_t)20000000)
-// A frame begins no sooner than this many times as long as the last one took,
-// so that large pictures on slow processors leave the guest most of the boot
-// processor's time.
+// A frame begins no sooner than this many times as long as the processors took
+// on the last one together, so that large pictures on slow processors leave
+// the guest most of their time.
 #define REDRAW_SHARE 4
 // A frame compares every line of the Bochs interface's display this often, so
 // that what the dirty flags do not show, devices' writes for instance, shows
@@ -141,6 +142,8 @@
 // The lines of a frame that a processor takes at a time, an even number, as a
 // double scan's second line is its first again.
 #define SHARE_LINES 16
+// A frame with fewer source lines to look at is the boot processor's alone.
+#define SHARED_MIN 64
 
 // The display tracks the guest's writes to the planes in chunks of plane
 // address, 1 << CHUNK_SHIFT bytes each.
@@ -325,9 +328,10 @@ struct vga_scratch {
     uint32_t *band;
 };
 
-// The frame being drawn, SHARE_LINES lines at a time: first its source lines
-// marked where they changed, then the display's rows drawn into the back
-// buffer, then what changed copied to the framebuffer.
+// The frame being drawn, which every processor takes part in, SHARE_LINES
+// lines at a time: first its source lines marked where they changed, then the
+// display's rows drawn into the back buffer, then what changed copied to the
+// framebuffer by one processor.
 #define STEP_IDLE 0
 #define STEP_DRAW 1
 #define STEP_COPY 2
@@ -341,6 +345,7 @@ static struct {
     bool all;
     uint32_t mark_chunks;
     _Atomic(uint32_t) mark_next;
+    _Atomic(uint32_t) mark_done;
     uint32_t draw_chunks;
     _Atomic(uint32_t) draw_next;
     _Atomic(uint32_t) draw_done;
@@ -352,6 +357,10 @@ static struct {
     bool whole;
     size_t copy_rect;
     uint32_t copy_row;
+    // The processor that copies.
+    struct cpu *copier;
+    // The processors taking part.
+    _Atomic(uint32_t) busy;
 } job;
 
 // Each byte of a plane as its 8 dots' bits, the leftmost's in the lowest byte.
@@ -2110,6 +2119,23 @@ static void copy_ready(void) {
     job.copy_row = 0;
 }
 
+// The processor to copy the frame: the one that copies fastest of those whose
+// vCPUs wait, as the processors that an OS for one processor never starts
+// always do, else the one that copies fastest of all.
+static struct cpu *copier_pick(void) {
+    struct cpu *best = NULL;
+    for (size_t i = 0; i < smp_cpu_count(); i++) {
+        struct cpu *cpu = smp_cpu(i);
+        if (cpu->vga_scratch == NULL || !atomic_load_explicit(&cpu->idle, memory_order_relaxed)) {
+            continue;
+        }
+        if (best == NULL || cpu->draw_copy_ticks < best->draw_copy_ticks) {
+            best = cpu;
+        }
+    }
+    return best != NULL ? best : vga_draw_copier();
+}
+
 // Copies what the frame changed to the framebuffer from where the copy got to,
 // a row at a time, until done or the processor's slice is over. Returns
 // whether done.
@@ -2139,7 +2165,7 @@ static bool copy_on(const struct vga_draw_ops *ops) {
     return true;
 }
 
-// Whether the frame has a part left to take.
+// Whether this processor has a part in the frame left to take.
 static bool work_left(void) {
     switch (atomic_load_explicit(&job.step, memory_order_acquire)) {
         case STEP_DRAW: {
@@ -2147,7 +2173,7 @@ static bool work_left(void) {
                 || atomic_load_explicit(&job.draw_next, memory_order_relaxed) < job.draw_chunks;
         }
         case STEP_COPY: {
-            return true;
+            return this_cpu() == job.copier;
         }
         default: {
             return false;
@@ -2155,14 +2181,16 @@ static bool work_left(void) {
     }
 }
 
-// Carries on with the frame being drawn until it is done or the processor's
-// slice is over.
+// Takes part in the frame being drawn until no part is left for this processor
+// or its slice is over. The processor that draws the last display row hands
+// the copy to the one that copies fastest, which ends the frame.
 static void work(void) {
     if (!work_left()) {
         return;
     }
     struct cpu *cpu = this_cpu();
     struct vga_scratch *s = cpu->vga_scratch;
+    atomic_fetch_add_explicit(&job.busy, 1, memory_order_acq_rel);
     uint64_t start = time_ns();
     uint32_t generation = atomic_load_explicit(&job.generation, memory_order_acquire);
     if (s->generation != generation) {
@@ -2177,9 +2205,12 @@ static void work(void) {
         if (!first && cpu_slice_over()) {
             break;
         }
+        vcpu_serve_pause();
         uint32_t step = atomic_load_explicit(&job.step, memory_order_acquire);
         if (step == STEP_COPY) {
-            done = copy_on(ops);
+            if (cpu == job.copier) {
+                done = copy_on(ops);
+            }
             break;
         }
         if (step != STEP_DRAW) {
@@ -2188,6 +2219,13 @@ static void work(void) {
         uint32_t share = atomic_fetch_add_explicit(&job.mark_next, 1, memory_order_acq_rel);
         if (share < job.mark_chunks) {
             mark_share(ops, s, share);
+            atomic_fetch_add_explicit(&job.mark_done, 1, memory_order_acq_rel);
+            continue;
+        }
+        // The display rows wait for every source line, which others may still
+        // be marking.
+        if (atomic_load_explicit(&job.mark_done, memory_order_acquire) < job.mark_chunks) {
+            cpu_relax();
             continue;
         }
         share = atomic_fetch_add_explicit(&job.draw_next, 1, memory_order_acq_rel);
@@ -2198,14 +2236,16 @@ static void work(void) {
         uint32_t drawn = atomic_fetch_add_explicit(&job.draw_done, 1, memory_order_acq_rel) + 1;
         if (drawn == job.draw_chunks) {
             copy_ready();
+            job.copier = copier_pick();
             atomic_store_explicit(&job.step, STEP_COPY, memory_order_release);
+            vcpu_wake(job.copier);
         }
     }
     simd_end();
     atomic_fetch_add_explicit(&out.frame_cost, time_ns() - start, memory_order_relaxed);
     if (done) {
-        // A display's refresh at least, and REDRAW_SHARE times what drawing
-        // it took.
+        // A display's refresh at least, and REDRAW_SHARE times what the
+        // processors took on it.
         uint64_t wait = atomic_load_explicit(&out.frame_cost, memory_order_relaxed) * REDRAW_SHARE;
         out.next_frame = out.frame_start + (wait > REFRESH_NS ? wait : REFRESH_NS);
         atomic_store_explicit(&job.step, STEP_IDLE, memory_order_release);
@@ -2213,25 +2253,41 @@ static void work(void) {
         // Back for the rest once the guest has had its turn.
         vcpu_exit_after_turn(cpu->vcpu);
     }
+    atomic_fetch_sub_explicit(&job.busy, 1, memory_order_acq_rel);
 }
 
-// Starts the frame's steps.
-static void job_start(bool vbe_mode, bool all) {
+// Starts the frame's steps, with the number of source lines to look at, every
+// other processor kicked to take part where there are enough.
+static void job_start(bool vbe_mode, bool all, uint32_t lines) {
     job.vbe = vbe_mode;
     job.all = all;
     job.mark_chunks = (out.height + SHARE_LINES - 1) / SHARE_LINES;
     job.draw_chunks = (out.h + SHARE_LINES - 1) / SHARE_LINES;
     atomic_store_explicit(&job.mark_next, 0, memory_order_relaxed);
+    atomic_store_explicit(&job.mark_done, 0, memory_order_relaxed);
     atomic_store_explicit(&job.draw_next, 0, memory_order_relaxed);
     atomic_store_explicit(&job.draw_done, 0, memory_order_relaxed);
     atomic_fetch_add_explicit(&job.generation, 1, memory_order_acq_rel);
     atomic_store_explicit(&job.step, STEP_DRAW, memory_order_release);
+    if (lines < SHARED_MIN) {
+        return;
+    }
+    for (size_t i = 0; i < smp_cpu_count(); i++) {
+        struct cpu *cpu = smp_cpu(i);
+        if (cpu != this_cpu() && cpu->vga_scratch != NULL) {
+            vcpu_wake(cpu);
+        }
+    }
 }
 
-// Abandons the frame being drawn.
+// Abandons the frame being drawn, once no processor takes part in it any more.
 static void job_abandon(void) {
     atomic_store_explicit(&job.step, STEP_IDLE, memory_order_release);
     atomic_fetch_add_explicit(&job.generation, 1, memory_order_acq_rel);
+    while (atomic_load_explicit(&job.busy, memory_order_acquire) != 0) {
+        vcpu_serve_pause();
+        cpu_relax();
+    }
 }
 
 // Starts showing the Bochs interface's display: every line where its mode or
@@ -2299,7 +2355,7 @@ static bool vbe_frame(uint64_t now) {
             return false;
         }
     }
-    job_start(true, all);
+    job_start(true, all, lines);
     return true;
 }
 
@@ -2352,7 +2408,7 @@ static bool vga_frame(uint64_t now) {
     if (made == 0 && !all) {
         return false;
     }
-    job_start(false, all);
+    job_start(false, all, (uint32_t)made);
     return true;
 }
 
@@ -2389,15 +2445,19 @@ static void frame_next(void) {
 }
 
 void vga_refresh(void) {
-    if (!vga.on || !this_cpu()->bsp) {
+    // Processors this one paused may be in the middle of the frame, which
+    // abandoning it would wait out.
+    if (!vga.on || vcpu_others_paused()) {
         return;
     }
-    frame_next();
+    if (this_cpu()->bsp) {
+        frame_next();
+    }
     work();
 }
 
 bool vga_redrawing(void) {
-    return vga.on && this_cpu()->bsp && work_left();
+    return vga.on && work_left();
 }
 
 bool vga_emulated(void) {
@@ -2632,4 +2692,12 @@ bool vga_init(void) {
         h->config.vga_filter == HANDOFF_VGA_FILTER_BILINEAR ? ", with bilinear filtering" : ""
     );
     return true;
+}
+
+void vga_cpu_init(void) {
+    if (!vga.on) {
+        return;
+    }
+    vga_draw_cpu_init();
+    this_cpu()->vga_scratch = scratch_alloc();
 }

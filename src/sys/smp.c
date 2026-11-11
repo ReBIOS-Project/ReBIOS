@@ -37,11 +37,14 @@
 #include <sys/simd.h>
 #include <sys/x86.h>
 #include <virt/vcpu.h>
+#include <virt/vga.h>
 #include <virt/virt.h>
 #include <virt/vlapic.h>
 
 // How long each processor gets to start.
 #define AP_START_TIMEOUT_NS ((uint64_t)1000000000)
+// How long one may take to get ready once started.
+#define AP_READY_TIMEOUT_NS ((uint64_t)1000000000)
 #define INIT_DELAY_US 10000
 #define SIPI_DELAY_US 200
 
@@ -139,7 +142,9 @@ static void ap_main(struct cpu *cpu) {
     lapic_host_init(VLAPIC_SPURIOUS_VECTOR, VLAPIC_TIMER_VECTOR);
     virt_cpu_init();
     simd_cpu_init(cpu);
+    vga_cpu_init();
     struct vcpu *v = vcpu_create(cpu);
+    atomic_store_explicit(&cpu->ready, true, memory_order_release);
     vcpu_wait_for_sipi(v);
     vcpu_run(v);
 }
@@ -276,6 +281,12 @@ void smp_start_aps(void) {
         lapic_send_ipi(cpu->apic_id, ICR_DELIVERY_STARTUP | vector);
         uint64_t deadline = time_ns() + AP_START_TIMEOUT_NS;
         while (!atomic_load_explicit(&cpu->online, memory_order_acquire) && time_ns() < deadline) {
+            cpu_relax();
+        }
+        // Each times its SIMD kernels alone.
+        deadline = time_ns() + AP_READY_TIMEOUT_NS;
+        while (atomic_load_explicit(&cpu->online, memory_order_acquire)
+            && !atomic_load_explicit(&cpu->ready, memory_order_acquire) && time_ns() < deadline) {
             cpu_relax();
         }
     }

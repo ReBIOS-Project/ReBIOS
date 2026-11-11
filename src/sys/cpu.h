@@ -141,6 +141,12 @@ struct cpu {
     uint64_t draw_copy_ticks;
     // What the processor draws the emulated VGA with (virt/vga.c).
     struct vga_scratch *vga_scratch;
+    // Whether its vCPU waits rather than runs the guest: halted, or not
+    // started.
+    _Atomic(bool) idle;
+    // Whether it got itself ready to run the guest, which the boot processor
+    // waits for before it starts the next, so that what each times runs alone.
+    _Atomic(bool) ready;
 };
 
 _Static_assert(sizeof(struct cpu) <= 0x1000, "The IST stacks overlap struct cpu.");

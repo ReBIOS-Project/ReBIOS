@@ -230,6 +230,11 @@ void vcpu_halt(struct vcpu *v);
 // whether vCPUs can be single-stepped and making them.
 void vcpu_pause_others(void);
 void vcpu_resume_others(void);
+// Whether this processor has the others paused.
+bool vcpu_others_paused(void);
+// Waits out another processor's pause of this one's guest, if any, as work
+// that may take a while does between steps.
+void vcpu_serve_pause(void);
 bool vcpu_can_single_step(void);
 void vcpu_single_step(struct vcpu *v, bool on);
 // The end of a step, mmio.c's or ferr.c's.

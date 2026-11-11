@@ -113,6 +113,15 @@ static void service_pause(struct vcpu *v) {
     }
 }
 
+void vcpu_serve_pause(void) {
+    // One waiting for a start-up IPI stays out of the guest, and no pause
+    // waits for it.
+    struct vcpu *v = this_cpu()->vcpu;
+    if (atomic_load_explicit(&v->sipi, memory_order_acquire) != VCPU_SIPI_WAITING) {
+        service_pause(v);
+    }
+}
+
 void vcpu_pause_others(void) {
     struct cpu *self = this_cpu();
     // Another pause may come first, which this one must not hold up.
@@ -143,6 +152,10 @@ void vcpu_resume_others(void) {
     atomic_store_explicit(&world_owner, NULL, memory_order_relaxed);
     atomic_fetch_add_explicit(&world_epoch, 1, memory_order_seq_cst);
     spinlock_release(&world_lock);
+}
+
+bool vcpu_others_paused(void) {
+    return atomic_load_explicit(&world_owner, memory_order_relaxed) == this_cpu();
 }
 
 void vcpu_step_done(struct vcpu *v) {
@@ -362,6 +375,7 @@ void vcpu_wait(struct vcpu *v, bool (*ends)(struct vcpu *v), bool spin) {
         asm volatile ("stgi" ::: "memory");
     }
     atomic_store_explicit(&cpu->taking_interrupts, true, memory_order_relaxed);
+    atomic_store_explicit(&cpu->idle, true, memory_order_relaxed);
     vlapic_halt(v, true);
     for (;;) {
         // Each look at whether the wait ends starts a slice, so that the work
@@ -400,6 +414,7 @@ void vcpu_wait(struct vcpu *v, bool (*ends)(struct vcpu *v), bool spin) {
         }
     }
     vlapic_halt(v, false);
+    atomic_store_explicit(&cpu->idle, false, memory_order_relaxed);
     atomic_store_explicit(&cpu->taking_interrupts, false, memory_order_relaxed);
     if (!virt_vmx) {
         asm volatile ("clgi" ::: "memory");
@@ -976,6 +991,7 @@ void vcpu_wait_for_sipi(struct vcpu *v) {
         asm volatile ("stgi" ::: "memory");
     }
     atomic_store_explicit(&cpu->taking_interrupts, true, memory_order_relaxed);
+    atomic_store_explicit(&cpu->idle, true, memory_order_relaxed);
     atomic_store_explicit(&v->sipi, VCPU_SIPI_WAITING, memory_order_release);
     int32_t vector;
     for (;;) {
@@ -989,8 +1005,15 @@ void vcpu_wait_for_sipi(struct vcpu *v) {
             hv_timer_run();
         }
         vlapic_timer_program(v);
-        cpu_halt();
+        // The processor draws while it waits, the guest not running it.
+        vga_refresh();
+        if (vga_redrawing()) {
+            cpu_relax();
+        } else {
+            cpu_halt();
+        }
     }
+    atomic_store_explicit(&cpu->idle, false, memory_order_relaxed);
     atomic_store_explicit(&cpu->taking_interrupts, false, memory_order_relaxed);
     if (!virt_vmx) {
         asm volatile ("clgi" ::: "memory");

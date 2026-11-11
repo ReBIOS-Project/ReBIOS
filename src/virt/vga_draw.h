@@ -22,6 +22,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+struct cpu;
+
 // Bilinear filtering's weights, in steps of 1 / VGA_DRAW_FILTER_ONE.
 #define VGA_DRAW_FILTER_SHIFT 8
 #define VGA_DRAW_FILTER_ONE ((uint32_t)1 << VGA_DRAW_FILTER_SHIFT)
@@ -190,10 +192,15 @@ void vga_draw_scale_set(struct vga_draw_scale *scale, size_t width, size_t colum
 // each kernel on it, timing the copies to the framebuffer with rows rows of
 // the framebuffer at fb, pitch bytes apart, which it writes back as they were.
 void vga_draw_init(uint8_t *fb, size_t pitch, size_t rows);
+// The same on each other processor as it starts, which no other processor's
+// timing disturbs.
+void vga_draw_cpu_init(void);
 // This processor's picks, used between simd_begin(vga_draw_level()) and
 // simd_end().
 const struct vga_draw_ops *vga_draw_ops(void);
 size_t vga_draw_level(void);
+// The processor whose copies to the framebuffer were fastest.
+struct cpu *vga_draw_copier(void);
 
 // What the kernels share whatever their level.
 
