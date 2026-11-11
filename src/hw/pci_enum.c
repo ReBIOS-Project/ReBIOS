@@ -966,3 +966,29 @@ void pci_enum_shrink_rebars(size_t max_size) {
         }
     }
 }
+
+bool pci_enum_rebar_restore(const struct pci_enum_function *f) {
+    if (f->rebar_ext_cap == 0) {
+        return false;
+    }
+    uint32_t first_control = pci_cfg_read(f->addr, f->rebar_ext_cap + REBAR_CONTROL(0), 4);
+    unsigned int pairs = (first_control >> REBAR_PAIRS_SHIFT) & REBAR_PAIRS;
+    bool changed = false;
+    for (size_t n = 0; n < pairs && n < REBAR_MAX_PAIRS; n++) {
+        uint32_t control_reg = f->rebar_ext_cap + REBAR_CONTROL(n);
+        uint32_t control = pci_cfg_read(f->addr, control_reg, 4);
+        uint8_t index = control & REBAR_INDEX;
+        if (index >= f->bar_count || f->bars[index].size < rebar_size(0)) {
+            continue;
+        }
+        unsigned int want = (unsigned int)__builtin_ctzll(f->bars[index].size) - REBAR_SIZE_BASE;
+        if (want > REBAR_SIZE_LAST || ((control >> REBAR_SIZE_SHIFT) & REBAR_SIZE) == want) {
+            continue;
+        }
+        control &= ~(REBAR_SIZE << REBAR_SIZE_SHIFT);
+        control |= want << REBAR_SIZE_SHIFT;
+        pci_cfg_write(f->addr, control_reg, 4, control);
+        changed = true;
+    }
+    return changed;
+}

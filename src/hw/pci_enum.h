@@ -115,4 +115,9 @@ struct pci_enum_function *pci_enum_find(struct pci_cfg_addr addr);
 // Shrinks each Resizable BAR above max_size, and records its new size.
 void pci_enum_shrink_rebars(size_t max_size);
 
+// Sizes the function's Resizable BARs as enumeration and
+// pci_enum_shrink_rebars() left them, where a reset of the function put them
+// back to its defaults. Returns whether it changed any.
+bool pci_enum_rebar_restore(const struct pci_enum_function *f);
+
 #endif

@@ -57,6 +57,9 @@
 // The latency timer of a bridge's bus number register is the hardware's.
 #define BUS_NUMBERS_VIRTUAL ((uint32_t)0x00ffffff)
 
+// How many resets of one function the log tells of.
+#define RESETS_LOGGED 4
+
 // PCI Express Base Specification 6.0, 7.8.6: the capability header, then a
 // capability and a control register for each of up to six BARs.
 #define REBAR_SIZE ((uint32_t)0x34)
@@ -155,6 +158,14 @@ struct vfunction {
     // Where its I/O BARs below 1000h are, whose ports the guest is given: 0
     // for the others.
     uint16_t legacy_io[BAR_COUNT];
+    // A bridge's bus numbers and memory window registers as the host has them,
+    // which the guest's writes do not reach.
+    uint32_t host_buses;
+    uint32_t host_windows[4];
+    // Whether its MSI-X entries go back to the function once it decodes memory
+    // again, after a reset took them away.
+    bool msix_rearm;
+    size_t resets_logged;
 };
 
 static struct {
@@ -1061,18 +1072,133 @@ static uint32_t function_read(struct pci_cfg_addr a, uint32_t offset, size_t siz
     return (kept_read(vf, reg) >> (8 * (offset & 3))) & all_ones(size);
 }
 
+// A memory BAR's register, or its lower one, as the host has it.
+static uint32_t bar_host_word(const struct vfunction *vf, size_t k, uint32_t *reg) {
+    const struct vbar *b = &vf->bars[k];
+    if (k == ROM_INDEX) {
+        *reg = is_bridge(vf) ? PCI_ROM_ADDRESS1 : PCI_ROM_ADDRESS;
+        return ((uint32_t)b->host & PCI_ROM_ADDRESS_MASK)
+             | (b->enabled ? PCI_ROM_ADDRESS_ENABLE : 0);
+    }
+    *reg = vf->f->bars[k].reg;
+    return ((uint32_t)b->host & BAR_ADDRESS) | b->type_bits;
+}
+
+static bool bar_lost(const struct vfunction *vf, size_t k) {
+    const struct vbar *b = &vf->bars[k];
+    if (b->size == 0) {
+        return false;
+    }
+    uint32_t reg;
+    uint32_t want = bar_host_word(vf, k, &reg);
+    struct pci_cfg_addr a = vf->f->addr;
+    return pci_cfg_read(a, reg, 4) != want
+        || (b->kind == PCI_ENUM_BAR_MEM64
+         && pci_cfg_read(a, reg + 4, 4) != (uint32_t)(b->host >> 32));
+}
+
+// What a reset of the function clears on the host that the guest's writes do
+// not reach, as the hypervisor keeps the guest's copies: its memory BARs and
+// their sizes, a bridge's bus numbers and memory windows, and the messages MSI
+// and MSI-X send, which MSI's and MSI-X's enables going off show. After a
+// D3hot to D0 transition with No_Soft_Reset clear (PCI Bus Power Management
+// Interface Specification 1.2, 3.2.4 and 5.4.1), a function level reset, or a
+// bus reset, the guest restores its own copies and turns decoding back on, as
+// Linux 7.3's pci_restore_state() does, and the host's go back first.
+static void reset_repair(struct vfunction *vf) {
+    struct pci_cfg_addr a = vf->f->addr;
+    if (pci_cfg_read(a, PCI_VENDOR_ID, 2) == 0xffff) {
+        return;
+    }
+    bool lost = false;
+    for (size_t k = 0; k <= BAR_COUNT && !lost; k++) {
+        lost = bar_lost(vf, k);
+    }
+    if (!lost && is_bridge(vf)) {
+        lost = (pci_cfg_read(a, PCI_PRIMARY_BUS, 4) & BUS_NUMBERS_VIRTUAL) != vf->host_buses;
+        for (size_t i = 0; i < ARRAY_COUNT(vf->host_windows) && !lost; i++) {
+            lost = pci_cfg_read(a, PCI_MEMORY_BASE + 4 * (uint32_t)i, 4) != vf->host_windows[i];
+        }
+    }
+    if (!lost && vf->f->msi_cap != 0 && vf->msi.slot.cpu != NULL
+     && (vf->msi.control & PCI_MSI_FLAGS_ENABLE) != 0) {
+        uint32_t flags = pci_cfg_read(a, vf->f->msi_cap + PCI_MSI_FLAGS, 2);
+        lost = (flags & PCI_MSI_FLAGS_ENABLE) == 0;
+    }
+    if (!lost && vf->msix.count != 0 && vf->msix.enabled) {
+        uint32_t flags = pci_cfg_read(a, vf->f->msix_cap + PCI_MSIX_FLAGS, 2);
+        lost = (flags & PCI_MSIX_FLAGS_ENABLE) == 0;
+    }
+    if (!lost) {
+        return;
+    }
+
+    uint32_t command = pci_cfg_read(a, PCI_COMMAND, 2);
+    uint32_t decode = PCI_COMMAND_IO | PCI_COMMAND_MEMORY;
+    if ((command & decode) != 0) {
+        pci_cfg_write(a, PCI_COMMAND, 2, command & ~decode);
+    }
+    pci_enum_rebar_restore(vf->f);
+    for (size_t k = 0; k <= BAR_COUNT; k++) {
+        const struct vbar *b = &vf->bars[k];
+        if (b->size == 0) {
+            continue;
+        }
+        uint32_t reg;
+        uint32_t low = bar_host_word(vf, k, &reg);
+        // The upper register first, as in rebar_resize().
+        if (b->kind == PCI_ENUM_BAR_MEM64) {
+            pci_cfg_write(a, reg + 4, 4, (uint32_t)(b->host >> 32));
+        }
+        pci_cfg_write(a, reg, 4, low);
+    }
+    if (is_bridge(vf)) {
+        uint32_t buses = pci_cfg_read(a, PCI_PRIMARY_BUS, 4);
+        pci_cfg_write(a, PCI_PRIMARY_BUS, 4, (buses & ~BUS_NUMBERS_VIRTUAL) | vf->host_buses);
+        for (size_t i = 0; i < ARRAY_COUNT(vf->host_windows); i++) {
+            pci_cfg_write(a, PCI_MEMORY_BASE + 4 * (uint32_t)i, 4, vf->host_windows[i]);
+        }
+    }
+    if (vf->f->msi_cap != 0) {
+        irq_slot_free(&vf->msi.slot);
+        msi_update(vf);
+    }
+    for (size_t i = 0; i < vf->msix.count; i++) {
+        vf->msix.entries[i].armed = false;
+        irq_slot_free(&vf->msix.entries[i].slot);
+    }
+    vf->msix_rearm = vf->msix.count != 0;
+    if (vf->resets_logged < RESETS_LOGGED) {
+        vf->resets_logged++;
+        printf(
+            "PCI " PCI_CFG_ADDR_FMT ": reset, its registers on the host set up again\n",
+            PCI_CFG_ADDR_ARGS(a)
+        );
+    }
+}
+
+// The MSI-X entries a reset took from the function, once it decodes memory to
+// reach its table again.
+static void msix_rearm(struct vfunction *vf) {
+    if (!vf->msix_rearm
+     || (pci_cfg_read(vf->f->addr, PCI_COMMAND, 2) & PCI_COMMAND_MEMORY) == 0) {
+        return;
+    }
+    vf->msix_rearm = false;
+    for (size_t i = 0; i < vf->msix.count; i++) {
+        msix_sync(vf, i);
+    }
+}
+
 // The function whose BAR registers the guest wrote to, for legacy_io_follow():
 // NULL for other writes.
-static struct vfunction *function_write(
+static struct vfunction *config_write(
+    struct vfunction *vf,
     struct pci_cfg_addr a,
     uint32_t offset,
     size_t size,
     uint32_t value
 ) {
-    struct vfunction *vf = vfunction_find(a);
-    if (vf != NULL && (vf->hidden || in_rebar(vf, offset))) {
-        return NULL;
-    }
     uint32_t reg = offset & ~(uint32_t)3;
     unsigned int shift = 8 * (offset & 3);
     uint32_t mask = all_ones(size) << shift;
@@ -1094,6 +1220,29 @@ static struct vfunction *function_write(
     }
     kept_write(vf, reg, (kept_read(vf, reg) & ~mask) | ((value << shift) & mask));
     return NULL;
+}
+
+// As config_write(), with what a reset of the function took away on the host
+// set up again around the guest's writes to its command register.
+static struct vfunction *function_write(
+    struct pci_cfg_addr a,
+    uint32_t offset,
+    size_t size,
+    uint32_t value
+) {
+    struct vfunction *vf = vfunction_find(a);
+    if (vf != NULL && (vf->hidden || in_rebar(vf, offset))) {
+        return NULL;
+    }
+    bool command = vf != NULL && (offset & ~(uint32_t)3) == PCI_COMMAND;
+    if (command) {
+        reset_repair(vf);
+    }
+    struct vfunction *wrote = config_write(vf, a, offset, size, value);
+    if (command) {
+        msix_rearm(vf);
+    }
+    return wrote;
 }
 
 // The guest's bus numbers are the PCI plan's: a port of the plan's, or a
@@ -1369,6 +1518,10 @@ static void vfunction_init(
         vf->pref_limit = pf->pref_limit;
         vf->pref_64 = (pci_cfg_read(f->addr, PCI_PREF_MEMORY_BASE, 4) & 0xf)
                    == PCI_PREF_RANGE_TYPE_64;
+        vf->host_buses = pci_cfg_read(f->addr, PCI_PRIMARY_BUS, 4) & BUS_NUMBERS_VIRTUAL;
+        for (size_t i = 0; i < ARRAY_COUNT(vf->host_windows); i++) {
+            vf->host_windows[i] = pci_cfg_read(f->addr, PCI_MEMORY_BASE + 4 * (uint32_t)i, 4);
+        }
     }
 }
 
