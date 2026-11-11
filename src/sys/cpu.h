@@ -81,6 +81,7 @@ struct cpu_tss {
 struct task;
 struct vcpu;
 struct vga_draw_ops;
+struct vga_scratch;
 
 struct cpu {
     // The CPU itself, where another stack's area has the CPU running on it.
@@ -138,6 +139,8 @@ struct cpu {
     const struct vga_draw_ops *draw_ops;
     size_t draw_level;
     uint64_t draw_copy_ticks;
+    // What the processor draws the emulated VGA with (virt/vga.c).
+    struct vga_scratch *vga_scratch;
 };
 
 _Static_assert(sizeof(struct cpu) <= 0x1000, "The IST stacks overlap struct cpu.");
