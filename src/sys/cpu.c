@@ -72,7 +72,7 @@ static const char *exception_names[32] = {
 
 void cpu_exception_handler(struct exception_frame *frame);
 
-_Static_assert(offsetof(struct cpu, kicked) == CPU_KICKED, "CPU_KICKED is out of date");
+_Static_assert(offsetof(struct cpu, kicked) == CPU_KICKED, "CPU_KICKED is out of date.");
 
 // The longest an exit keeps the CPU from the guest for what can wait for its
 // next exits, so that the guest's interrupts come on time.

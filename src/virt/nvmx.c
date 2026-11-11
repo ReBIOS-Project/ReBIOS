@@ -131,7 +131,7 @@ static const uint16_t fields[] = {
 #define FIELD_COUNT ARRAY_COUNT(fields)
 #define MAX_INDEX 64
 
-_Static_assert(VMCS12_FIELDS + FIELD_COUNT * 8 <= 4096, "VMCS12 layout");
+_Static_assert(VMCS12_FIELDS + FIELD_COUNT * 8 <= 4096, "The VMCS12's fields run past its page.");
 
 // By width, type, and index: the slot plus one, or 0 where there is no such
 // field.

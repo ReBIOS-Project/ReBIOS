@@ -40,7 +40,10 @@ struct smbios_entry32 {
     uint8_t bcd_revision;
 } __attribute__((packed));
 
-_Static_assert(sizeof(struct smbios_entry32) == 0x1f, "SMBIOS 2.1 entry point layout");
+_Static_assert(
+    sizeof(struct smbios_entry32) == 0x1f,
+    "The SMBIOS 2.1 entry point's layout is not the one firmware and OSes use."
+);
 
 // SMBIOS 2.1 gave the entry point's length as 1Eh, short of its BCD revision,
 // so 2.1 entry points may say 1Eh or 1Fh (DSP0134 3.9.0, 5.2.1), and Linux

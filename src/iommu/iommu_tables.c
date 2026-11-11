@@ -125,10 +125,10 @@ struct ivmd {
     uint64_t size;
 } __attribute__((packed));
 
-_Static_assert(sizeof(struct ivrs) == 48, "IVRS layout");
-_Static_assert(IVHD_10H_SIZE == 24, "IVHD layout");
-_Static_assert(sizeof(struct ivhd) == 40, "IVHD layout");
-_Static_assert(sizeof(struct ivmd) == 32, "IVMD layout");
+_Static_assert(sizeof(struct ivrs) == 48, "The IVRS's layout is not the one the firmware writes.");
+_Static_assert(IVHD_10H_SIZE == 24, "The IVHD's layout is not the one the firmware writes.");
+_Static_assert(sizeof(struct ivhd) == 40, "The IVHD's layout is not the one the firmware writes.");
+_Static_assert(sizeof(struct ivmd) == 32, "The IVMD's layout is not the one the firmware writes.");
 
 struct builder {
     struct iommu_tables *t;

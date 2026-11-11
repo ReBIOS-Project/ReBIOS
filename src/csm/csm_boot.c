@@ -86,18 +86,18 @@ extern const uint8_t csm_thunk_end[];
 
 _Static_assert(
     E820_TABLE + E820_MAX_ENTRIES * sizeof(struct e820_entry) <= BBS_TABLE,
-    "E820 table overlaps the BBS table"
+    "The E820 table overlaps the BBS table."
 );
 _Static_assert(
     BBS_TABLE + CSM_BBS_MAX_ENTRIES * sizeof(struct csm_bbs_entry) <= BOOT_TABLE,
-    "BBS table overlaps the boot table"
+    "The BBS table overlaps the boot table."
 );
 _Static_assert(
-    BOOT_TABLE + sizeof(struct csm_boot_table) <= MP_TABLE, "boot table overlaps the MP table"
+    BOOT_TABLE + sizeof(struct csm_boot_table) <= MP_TABLE, "The boot table overlaps the MP table."
 );
 _Static_assert(
     PIR_TABLE + LEGACY_TABLE_SIZE <= BOOT_ORDER,
-    "PCI IRQ routing table overlaps the boot order list"
+    "The PCI IRQ routing table overlaps the boot order list."
 );
 
 #define STAGE_INITIALIZE 0

@@ -142,30 +142,99 @@ struct vmcb {
     struct vmcb_save save;
 } __attribute__((packed));
 
-_Static_assert(offsetof(struct vmcb_control, iopm_base_pa) == 0x40, "VMCB layout");
-_Static_assert(offsetof(struct vmcb_control, guest_asid) == 0x58, "VMCB layout");
-_Static_assert(offsetof(struct vmcb_control, exitcode) == 0x70, "VMCB layout");
-_Static_assert(offsetof(struct vmcb_control, eventinj) == 0xa8, "VMCB layout");
-_Static_assert(offsetof(struct vmcb_control, n_cr3) == 0xb0, "VMCB layout");
-_Static_assert(offsetof(struct vmcb_control, vmcb_clean) == 0xc0, "VMCB layout");
-_Static_assert(offsetof(struct vmcb_control, nrip) == 0xc8, "VMCB layout");
-_Static_assert(offsetof(struct vmcb_control, insn_len) == 0xd0, "VMCB layout");
-_Static_assert(offsetof(struct vmcb_control, avic_backing_page) == 0xe0, "VMCB layout");
-_Static_assert(offsetof(struct vmcb_control, avic_physical_table) == 0xf8, "VMCB layout");
-_Static_assert(offsetof(struct vmcb_control, bus_lock_counter) == 0x120, "VMCB layout");
-_Static_assert(offsetof(struct vmcb_control, exitintdata) == 0x170, "VMCB layout");
-_Static_assert(offsetof(struct vmcb_control, pml_index) == 0x1d0, "VMCB layout");
-_Static_assert(sizeof(struct vmcb_control) == 0x400, "VMCB layout");
-_Static_assert(offsetof(struct vmcb_save, tr) == 0x90, "VMCB layout");
-_Static_assert(offsetof(struct vmcb_save, cpl) == 0xcb, "VMCB layout");
-_Static_assert(offsetof(struct vmcb_save, efer) == 0xd0, "VMCB layout");
-_Static_assert(offsetof(struct vmcb_save, cr4) == 0x148, "VMCB layout");
-_Static_assert(offsetof(struct vmcb_save, rip) == 0x178, "VMCB layout");
-_Static_assert(offsetof(struct vmcb_save, rsp) == 0x1d8, "VMCB layout");
-_Static_assert(offsetof(struct vmcb_save, rax) == 0x1f8, "VMCB layout");
-_Static_assert(offsetof(struct vmcb_save, cr2) == 0x240, "VMCB layout");
-_Static_assert(offsetof(struct vmcb_save, g_pat) == 0x268, "VMCB layout");
-_Static_assert(offsetof(struct vmcb_save, fred_rsp) == 0x8c0, "VMCB layout");
+_Static_assert(
+    offsetof(struct vmcb_control, iopm_base_pa) == 0x40,
+    "The VMCB's layout is not the one the processor uses."
+);
+_Static_assert(
+    offsetof(struct vmcb_control, guest_asid) == 0x58,
+    "The VMCB's layout is not the one the processor uses."
+);
+_Static_assert(
+    offsetof(struct vmcb_control, exitcode) == 0x70,
+    "The VMCB's layout is not the one the processor uses."
+);
+_Static_assert(
+    offsetof(struct vmcb_control, eventinj) == 0xa8,
+    "The VMCB's layout is not the one the processor uses."
+);
+_Static_assert(
+    offsetof(struct vmcb_control, n_cr3) == 0xb0,
+    "The VMCB's layout is not the one the processor uses."
+);
+_Static_assert(
+    offsetof(struct vmcb_control, vmcb_clean) == 0xc0,
+    "The VMCB's layout is not the one the processor uses."
+);
+_Static_assert(
+    offsetof(struct vmcb_control, nrip) == 0xc8,
+    "The VMCB's layout is not the one the processor uses."
+);
+_Static_assert(
+    offsetof(struct vmcb_control, insn_len) == 0xd0,
+    "The VMCB's layout is not the one the processor uses."
+);
+_Static_assert(
+    offsetof(struct vmcb_control, avic_backing_page) == 0xe0,
+    "The VMCB's layout is not the one the processor uses."
+);
+_Static_assert(
+    offsetof(struct vmcb_control, avic_physical_table) == 0xf8,
+    "The VMCB's layout is not the one the processor uses."
+);
+_Static_assert(
+    offsetof(struct vmcb_control, bus_lock_counter) == 0x120,
+    "The VMCB's layout is not the one the processor uses."
+);
+_Static_assert(
+    offsetof(struct vmcb_control, exitintdata) == 0x170,
+    "The VMCB's layout is not the one the processor uses."
+);
+_Static_assert(
+    offsetof(struct vmcb_control, pml_index) == 0x1d0,
+    "The VMCB's layout is not the one the processor uses."
+);
+_Static_assert(
+    sizeof(struct vmcb_control) == 0x400, "The VMCB's layout is not the one the processor uses."
+);
+_Static_assert(
+    offsetof(struct vmcb_save, tr) == 0x90, "The VMCB's layout is not the one the processor uses."
+);
+_Static_assert(
+    offsetof(struct vmcb_save, cpl) == 0xcb, "The VMCB's layout is not the one the processor uses."
+);
+_Static_assert(
+    offsetof(struct vmcb_save, efer) == 0xd0,
+    "The VMCB's layout is not the one the processor uses."
+);
+_Static_assert(
+    offsetof(struct vmcb_save, cr4) == 0x148,
+    "The VMCB's layout is not the one the processor uses."
+);
+_Static_assert(
+    offsetof(struct vmcb_save, rip) == 0x178,
+    "The VMCB's layout is not the one the processor uses."
+);
+_Static_assert(
+    offsetof(struct vmcb_save, rsp) == 0x1d8,
+    "The VMCB's layout is not the one the processor uses."
+);
+_Static_assert(
+    offsetof(struct vmcb_save, rax) == 0x1f8,
+    "The VMCB's layout is not the one the processor uses."
+);
+_Static_assert(
+    offsetof(struct vmcb_save, cr2) == 0x240,
+    "The VMCB's layout is not the one the processor uses."
+);
+_Static_assert(
+    offsetof(struct vmcb_save, g_pat) == 0x268,
+    "The VMCB's layout is not the one the processor uses."
+);
+_Static_assert(
+    offsetof(struct vmcb_save, fred_rsp) == 0x8c0,
+    "The VMCB's layout is not the one the processor uses."
+);
 
 // The intercept vectors, 32 bits each from offset 000h, in which an exit code
 // below C0h is the number of its intercept's bit (APM 24593 rev. 3.46, Table

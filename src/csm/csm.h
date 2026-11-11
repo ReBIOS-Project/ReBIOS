@@ -83,29 +83,57 @@ struct csm_compat16_table {
 #define CSM_COMPAT16_TABLE_SPEC_SIZE \
     offsetof(struct csm_compat16_table, hypervisor_interface)
 
-_Static_assert(offsetof(struct csm_compat16_table, table_length) == 5, "CSM16 table layout");
 _Static_assert(
-    offsetof(struct csm_compat16_table, compatibility16_call_segment) == 12, "CSM16 table layout"
+    offsetof(struct csm_compat16_table, table_length) == 5,
+    "The CSM16 table's layout is not the one the CSM16 uses."
 );
 _Static_assert(
-    offsetof(struct csm_compat16_table, pnp_installation_check_segment) == 16, "CSM16 table layout"
+    offsetof(struct csm_compat16_table, compatibility16_call_segment) == 12,
+    "The CSM16 table's layout is not the one the CSM16 uses."
 );
 _Static_assert(
-    offsetof(struct csm_compat16_table, acpi_rsd_ptr_pointer) == 28, "CSM16 table layout"
+    offsetof(struct csm_compat16_table, pnp_installation_check_segment) == 16,
+    "The CSM16 table's layout is not the one the CSM16 uses."
 );
-_Static_assert(offsetof(struct csm_compat16_table, e820_pointer) == 34, "CSM16 table layout");
-_Static_assert(offsetof(struct csm_compat16_table, mp_table_ptr) == 50, "CSM16 table layout");
-_Static_assert(offsetof(struct csm_compat16_table, ibv_pointer) == 74, "CSM16 table layout");
-_Static_assert(offsetof(struct csm_compat16_table, last_pci_bus) == 82, "CSM16 table layout");
-_Static_assert(offsetof(struct csm_compat16_table, uma_address) == 83, "CSM16 table layout");
 _Static_assert(
-    offsetof(struct csm_compat16_table, hi_permanent_memory_size) == 95, "CSM16 table layout"
+    offsetof(struct csm_compat16_table, acpi_rsd_ptr_pointer) == 28,
+    "The CSM16 table's layout is not the one the CSM16 uses."
 );
-_Static_assert(CSM_COMPAT16_TABLE_SPEC_SIZE == 99, "CSM16 table layout");
 _Static_assert(
-    offsetof(struct csm_compat16_table, boot_order_pointer) == 103, "CSM16 table layout"
+    offsetof(struct csm_compat16_table, e820_pointer) == 34,
+    "The CSM16 table's layout is not the one the CSM16 uses."
 );
-_Static_assert(sizeof(struct csm_compat16_table) == 107, "CSM16 table layout");
+_Static_assert(
+    offsetof(struct csm_compat16_table, mp_table_ptr) == 50,
+    "The CSM16 table's layout is not the one the CSM16 uses."
+);
+_Static_assert(
+    offsetof(struct csm_compat16_table, ibv_pointer) == 74,
+    "The CSM16 table's layout is not the one the CSM16 uses."
+);
+_Static_assert(
+    offsetof(struct csm_compat16_table, last_pci_bus) == 82,
+    "The CSM16 table's layout is not the one the CSM16 uses."
+);
+_Static_assert(
+    offsetof(struct csm_compat16_table, uma_address) == 83,
+    "The CSM16 table's layout is not the one the CSM16 uses."
+);
+_Static_assert(
+    offsetof(struct csm_compat16_table, hi_permanent_memory_size) == 95,
+    "The CSM16 table's layout is not the one the CSM16 uses."
+);
+_Static_assert(
+    CSM_COMPAT16_TABLE_SPEC_SIZE == 99, "The CSM16 table's layout is not the one the CSM16 uses."
+);
+_Static_assert(
+    offsetof(struct csm_compat16_table, boot_order_pointer) == 103,
+    "The CSM16 table's layout is not the one the CSM16 uses."
+);
+_Static_assert(
+    sizeof(struct csm_compat16_table) == 107,
+    "The CSM16 table's layout is not the one the CSM16 uses."
+);
 
 // EFI_COMPATIBILITY_FUNCTIONS, which the CSM16 takes in AX.
 #define CSM_COMPAT16_INITIALIZE_YOURSELF 0x0000
@@ -145,11 +173,21 @@ struct csm_init_table {
 } __attribute__((packed));
 
 _Static_assert(
-    offsetof(struct csm_init_table, reverse_thunk_call_segment) == 12, "CSM init table layout"
+    offsetof(struct csm_init_table, reverse_thunk_call_segment) == 12,
+    "The CSM init table's layout is not the one the CSM16 uses."
 );
-_Static_assert(offsetof(struct csm_init_table, thunk_start) == 24, "CSM init table layout");
-_Static_assert(offsetof(struct csm_init_table, low_pmm_memory) == 32, "CSM init table layout");
-_Static_assert(sizeof(struct csm_init_table) == 40, "CSM init table layout");
+_Static_assert(
+    offsetof(struct csm_init_table, thunk_start) == 24,
+    "The CSM init table's layout is not the one the CSM16 uses."
+);
+_Static_assert(
+    offsetof(struct csm_init_table, low_pmm_memory) == 32,
+    "The CSM init table's layout is not the one the CSM16 uses."
+);
+_Static_assert(
+    sizeof(struct csm_init_table) == 40,
+    "The CSM init table's layout is not the one the CSM16 uses."
+);
 
 // DEVICE_PRODUCER_SERIAL.
 struct csm_device_producer_serial {
@@ -190,13 +228,26 @@ struct csm_device_producer_data_header {
     uint32_t flags;
 } __attribute__((packed));
 
-_Static_assert(sizeof(struct csm_device_producer_serial) == 4, "CSM SIO data layout");
-_Static_assert(sizeof(struct csm_device_producer_parallel) == 5, "CSM SIO data layout");
-_Static_assert(sizeof(struct csm_device_producer_floppy) == 5, "CSM SIO data layout");
 _Static_assert(
-    offsetof(struct csm_device_producer_data_header, floppy) == 31, "CSM SIO data layout"
+    sizeof(struct csm_device_producer_serial) == 4,
+    "The CSM SIO data's layout is not the one the CSM16 uses."
 );
-_Static_assert(sizeof(struct csm_device_producer_data_header) == 41, "CSM SIO data layout");
+_Static_assert(
+    sizeof(struct csm_device_producer_parallel) == 5,
+    "The CSM SIO data's layout is not the one the CSM16 uses."
+);
+_Static_assert(
+    sizeof(struct csm_device_producer_floppy) == 5,
+    "The CSM SIO data's layout is not the one the CSM16 uses."
+);
+_Static_assert(
+    offsetof(struct csm_device_producer_data_header, floppy) == 31,
+    "The CSM SIO data's layout is not the one the CSM16 uses."
+);
+_Static_assert(
+    sizeof(struct csm_device_producer_data_header) == 41,
+    "The CSM SIO data's layout is not the one the CSM16 uses."
+);
 
 // ATAPI_IDENTIFY.
 struct csm_atapi_identify {
@@ -216,8 +267,13 @@ struct csm_hdd_info {
     struct csm_atapi_identify identify_drive[2];
 } __attribute__((packed));
 
-_Static_assert(offsetof(struct csm_hdd_info, identify_drive) == 21, "CSM HDD info layout");
-_Static_assert(sizeof(struct csm_hdd_info) == 1045, "CSM HDD info layout");
+_Static_assert(
+    offsetof(struct csm_hdd_info, identify_drive) == 21,
+    "The CSM HDD info's layout is not the one the CSM16 uses."
+);
+_Static_assert(
+    sizeof(struct csm_hdd_info) == 1045, "The CSM HDD info's layout is not the one the CSM16 uses."
+);
 
 // The specification does not give these; they are the values of its reference
 // implementation, EDK2.
@@ -249,19 +305,34 @@ struct csm_boot_table {
     uint32_t mp_table;
 } __attribute__((packed));
 
-_Static_assert(offsetof(struct csm_boot_table, sio_data) == 16, "CSM boot table layout");
 _Static_assert(
-    offsetof(struct csm_boot_table, number_e820_entries) == 61, "CSM boot table layout"
-);
-_Static_assert(offsetof(struct csm_boot_table, hdd_info) == 65, "CSM boot table layout");
-_Static_assert(
-    offsetof(struct csm_boot_table, number_bbs_entries) == 8425, "CSM boot table layout"
+    offsetof(struct csm_boot_table, sio_data) == 16,
+    "The CSM boot table's layout is not the one the CSM16 uses."
 );
 _Static_assert(
-    offsetof(struct csm_boot_table, unconventional_device_table) == 8441, "CSM boot table layout"
+    offsetof(struct csm_boot_table, number_e820_entries) == 61,
+    "The CSM boot table's layout is not the one the CSM16 uses."
 );
-_Static_assert(offsetof(struct csm_boot_table, mp_table) == 8445, "CSM boot table layout");
-_Static_assert(sizeof(struct csm_boot_table) == 8449, "CSM boot table layout");
+_Static_assert(
+    offsetof(struct csm_boot_table, hdd_info) == 65,
+    "The CSM boot table's layout is not the one the CSM16 uses."
+);
+_Static_assert(
+    offsetof(struct csm_boot_table, number_bbs_entries) == 8425,
+    "The CSM boot table's layout is not the one the CSM16 uses."
+);
+_Static_assert(
+    offsetof(struct csm_boot_table, unconventional_device_table) == 8441,
+    "The CSM boot table's layout is not the one the CSM16 uses."
+);
+_Static_assert(
+    offsetof(struct csm_boot_table, mp_table) == 8445,
+    "The CSM boot table's layout is not the one the CSM16 uses."
+);
+_Static_assert(
+    sizeof(struct csm_boot_table) == 8449,
+    "The CSM boot table's layout is not the one the CSM16 uses."
+);
 
 // BBS_TABLE, which is one entry of the table.
 struct csm_bbs_entry {
@@ -292,11 +363,25 @@ struct csm_bbs_entry {
     uint32_t ibv2;
 } __attribute__((packed));
 
-_Static_assert(offsetof(struct csm_bbs_entry, class) == 14, "BBS table layout");
-_Static_assert(offsetof(struct csm_bbs_entry, status_flags) == 22, "BBS table layout");
-_Static_assert(offsetof(struct csm_bbs_entry, assigned_drive_number) == 52, "BBS table layout");
-_Static_assert(offsetof(struct csm_bbs_entry, ibv2) == 65, "BBS table layout");
-_Static_assert(sizeof(struct csm_bbs_entry) == 69, "BBS table layout");
+_Static_assert(
+    offsetof(struct csm_bbs_entry, class) == 14,
+    "The BBS table's layout is not the one the CSM16 uses."
+);
+_Static_assert(
+    offsetof(struct csm_bbs_entry, status_flags) == 22,
+    "The BBS table's layout is not the one the CSM16 uses."
+);
+_Static_assert(
+    offsetof(struct csm_bbs_entry, assigned_drive_number) == 52,
+    "The BBS table's layout is not the one the CSM16 uses."
+);
+_Static_assert(
+    offsetof(struct csm_bbs_entry, ibv2) == 65,
+    "The BBS table's layout is not the one the CSM16 uses."
+);
+_Static_assert(
+    sizeof(struct csm_bbs_entry) == 69, "The BBS table's layout is not the one the CSM16 uses."
+);
 
 // BBS_STATUS_FLAGS.
 #define CSM_BBS_STATUS_OLD_POSITION_MASK ((uint32_t)0x000f)
@@ -343,12 +428,17 @@ struct csm_oprom_table {
 } __attribute__((packed));
 
 _Static_assert(
-    offsetof(struct csm_oprom_table, number_bbs_entries) == 8, "CSM option ROM table layout"
+    offsetof(struct csm_oprom_table, number_bbs_entries) == 8,
+    "The CSM option ROM table's layout is not the one the CSM16 uses."
 );
 _Static_assert(
-    offsetof(struct csm_oprom_table, bbs_table_pointer) == 9, "CSM option ROM table layout"
+    offsetof(struct csm_oprom_table, bbs_table_pointer) == 9,
+    "The CSM option ROM table's layout is not the one the CSM16 uses."
 );
-_Static_assert(sizeof(struct csm_oprom_table) == 15, "CSM option ROM table layout");
+_Static_assert(
+    sizeof(struct csm_oprom_table) == 15,
+    "The CSM option ROM table's layout is not the one the CSM16 uses."
+);
 
 // Guest addresses and sizes.
 struct csm_init_params {

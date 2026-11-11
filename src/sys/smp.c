@@ -65,14 +65,18 @@ struct ap_boot_params {
     uint64_t stack_offset;
     uint64_t entry;
 };
-_Static_assert(sizeof(struct ap_boot_params) == 56, "ap_boot.S has PARAM_SIZE 56");
+_Static_assert(
+    sizeof(struct ap_boot_params) == 56, "The PARAM_SIZE of ap_boot.S, 56, is out of date."
+);
 
 struct ap_boot_entry {
     uint32_t apic_id;
     uint32_t reserved;
     uint64_t cpu;
 };
-_Static_assert(sizeof(struct ap_boot_entry) == 16, "ap_boot.S has ENTRY_SIZE 16");
+_Static_assert(
+    sizeof(struct ap_boot_entry) == 16, "The ENTRY_SIZE of ap_boot.S, 16, is out of date."
+);
 
 static struct cpu **cpus;
 static size_t cpu_count;

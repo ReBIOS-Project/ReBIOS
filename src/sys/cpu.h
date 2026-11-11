@@ -59,7 +59,10 @@ struct cpu_resume {
     uint64_t rsp, rip, rflags;
 };
 
-_Static_assert(offsetof(struct cpu_resume, rflags) == CPU_RESUME_RFLAGS, "cpu.S has CPU_RESUME_*");
+_Static_assert(
+    offsetof(struct cpu_resume, rflags) == CPU_RESUME_RFLAGS,
+    "The CPU_RESUME_* offsets that cpu.S uses are out of date."
+);
 
 // Returns 0, and 1 again once an exception the host recovers from resumes
 // there, as long as the caller has not returned.
@@ -124,7 +127,7 @@ struct cpu {
     uint64_t firmware_fault;
 };
 
-_Static_assert(sizeof(struct cpu) <= 0x1000, "struct cpu overlaps the IST stacks");
+_Static_assert(sizeof(struct cpu) <= 0x1000, "The IST stacks overlap struct cpu.");
 
 static inline struct cpu *this_cpu(void) {
     uintptr_t rsp;

@@ -228,7 +228,10 @@ struct controller_info_block {
     uint32_t product_revision;
 } __attribute__((packed));
 
-_Static_assert(sizeof(struct controller_info_block) == 0x22, "VbeInfoBlock layout");
+_Static_assert(
+    sizeof(struct controller_info_block) == 0x22,
+    "The VbeInfoBlock's layout is not the one the guest reads."
+);
 
 // The ModeInfoBlock's fields up to MaxPixelClock, the rest being 0.
 struct mode_info_block {
@@ -264,7 +267,10 @@ struct mode_info_block {
     uint32_t max_pixel_clock;
 } __attribute__((packed));
 
-_Static_assert(sizeof(struct mode_info_block) == 0x42, "ModeInfoBlock layout");
+_Static_assert(
+    sizeof(struct mode_info_block) == 0x42,
+    "The ModeInfoBlock's layout is not the one the guest reads."
+);
 
 // A far pointer to the ROM's offset.
 static uint32_t far_pointer(uint16_t offset) {

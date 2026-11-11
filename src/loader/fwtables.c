@@ -80,7 +80,10 @@ struct smbios3_entry {
     uint64_t table_address;
 } __attribute__((packed));
 
-_Static_assert(sizeof(struct smbios3_entry) == 0x18, "SMBIOS 3.0 entry point layout");
+_Static_assert(
+    sizeof(struct smbios3_entry) == 0x18,
+    "The SMBIOS 3.0 entry point's layout is not the one the firmware writes."
+);
 
 #define SMBIOS_END_OF_TABLE 127
 #define SMBIOS_TYPE_FIRMWARE 0

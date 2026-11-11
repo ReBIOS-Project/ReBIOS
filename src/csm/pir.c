@@ -59,11 +59,23 @@ struct pir_slot {
     uint8_t reserved;
 } __attribute__((packed));
 
-_Static_assert(offsetof(struct pir_header, exclusive_irqs) == 10, "$PIR header layout");
-_Static_assert(offsetof(struct pir_header, checksum) == 31, "$PIR header layout");
-_Static_assert(sizeof(struct pir_header) == 32, "$PIR header layout");
-_Static_assert(offsetof(struct pir_slot, slot) == 14, "$PIR slot entry layout");
-_Static_assert(sizeof(struct pir_slot) == 16, "$PIR slot entry layout");
+_Static_assert(
+    offsetof(struct pir_header, exclusive_irqs) == 10,
+    "The $PIR header's layout is not the one OSes read."
+);
+_Static_assert(
+    offsetof(struct pir_header, checksum) == 31,
+    "The $PIR header's layout is not the one OSes read."
+);
+_Static_assert(
+    sizeof(struct pir_header) == 32, "The $PIR header's layout is not the one OSes read."
+);
+_Static_assert(
+    offsetof(struct pir_slot, slot) == 14, "The $PIR slot entry's layout is not the one OSes read."
+);
+_Static_assert(
+    sizeof(struct pir_slot) == 16, "The $PIR slot entry's layout is not the one OSes read."
+);
 
 // Fills the slot entry of the device whose routes start at routes[*index], on
 // the guest's bus, and moves *index past them, as the routes of a device

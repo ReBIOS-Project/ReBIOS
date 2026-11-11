@@ -211,7 +211,7 @@ struct remap_table {
 };
 _Static_assert(
     sizeof(struct remap_table) <= REMAP_TABLE_PAGES * PAGE_SIZE,
-    "a remapping table takes its pages"
+    "A remapping table outgrows its pages."
 );
 
 static struct amdvi_unit *units;

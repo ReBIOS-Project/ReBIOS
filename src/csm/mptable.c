@@ -129,15 +129,35 @@ struct mp_interrupt {
     uint8_t destination_pin;
 } __attribute__((packed));
 
-_Static_assert(sizeof(struct mp_floating_pointer) == 16, "MP floating pointer layout");
-_Static_assert(offsetof(struct mp_config_header, oem_id) == 8, "MP table header layout");
-_Static_assert(offsetof(struct mp_config_header, oem_table) == 28, "MP table header layout");
-_Static_assert(offsetof(struct mp_config_header, local_apic) == 36, "MP table header layout");
-_Static_assert(sizeof(struct mp_config_header) == 44, "MP table header layout");
-_Static_assert(sizeof(struct mp_processor) == 20, "MP processor entry layout");
-_Static_assert(sizeof(struct mp_bus) == 8, "MP bus entry layout");
-_Static_assert(sizeof(struct mp_ioapic) == 8, "MP I/O APIC entry layout");
-_Static_assert(sizeof(struct mp_interrupt) == 8, "MP interrupt entry layout");
+_Static_assert(
+    sizeof(struct mp_floating_pointer) == 16,
+    "The MP floating pointer's layout is not the one OSes read."
+);
+_Static_assert(
+    offsetof(struct mp_config_header, oem_id) == 8,
+    "The MP table header's layout is not the one OSes read."
+);
+_Static_assert(
+    offsetof(struct mp_config_header, oem_table) == 28,
+    "The MP table header's layout is not the one OSes read."
+);
+_Static_assert(
+    offsetof(struct mp_config_header, local_apic) == 36,
+    "The MP table header's layout is not the one OSes read."
+);
+_Static_assert(
+    sizeof(struct mp_config_header) == 44, "The MP table header's layout is not the one OSes read."
+);
+_Static_assert(
+    sizeof(struct mp_processor) == 20, "The MP processor entry's layout is not the one OSes read."
+);
+_Static_assert(sizeof(struct mp_bus) == 8, "The MP bus entry's layout is not the one OSes read.");
+_Static_assert(
+    sizeof(struct mp_ioapic) == 8, "The MP I/O APIC entry's layout is not the one OSes read."
+);
+_Static_assert(
+    sizeof(struct mp_interrupt) == 8, "The MP interrupt entry's layout is not the one OSes read."
+);
 
 #define MP_ENTRIES_OFFSET \
     (sizeof(struct mp_floating_pointer) + sizeof(struct mp_config_header))
