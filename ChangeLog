@@ -1,3 +1,36 @@
+2026-11-11  Mintsuki  <mintsuki@protonmail.com>
+
+    *** Release 0.8.0 ***
+
+    Noteworthy changes compared to the previous release, 0.7.1:
+
+    New features:
+        - Smooth the emulated VGA's picture with bilinear filtering where its
+          scale is no whole number, as with stretched modes. A whole-number
+          scale stays pixel-exact, and vga_filter = nearest brings back the
+          sharp look.
+        - Report the system board's devices, and the memory that ReBIOS takes
+          for itself among the PCI addresses, through the Plug and Play
+          BIOS's system device nodes, for OSes that use it rather than ACPI,
+          such as Windows 95.
+        - Add the pci_high_windows setting, off by default, which places BARs
+          too large to go below 4 GiB above it, in root bus windows there, as
+          firmware's "Above 4G Decoding" option does. Without it, such BARs
+          stay unassigned, and the log names them.
+
+    Bug fixes:
+        - Describe PCI windows above 4 GiB only with pci_high_windows, and
+          then to every OS: 0.7.1 gave them to OSes that answer _OSI for
+          Windows Vista, as Windows XP with a later Windows's ACPI driver
+          does, which then stopped with STOP 0x7B.
+        - Claim the emulated VGA's linear framebuffer, which no BAR holds, in
+          the motherboard resources, the Plug and Play BIOS, and the memory
+          map, so that no OS gives its addresses to a device.
+        - Read USB keyboards whose boot keyboard interfaces have no keys,
+          such as the ROG Ally's, through their report descriptors, as those
+          keyboards ignore the switch to the boot format: Ctrl, Shift, Alt,
+          and the Windows key looked held down.
+
 2026-11-10  Mintsuki  <mintsuki@protonmail.com>
 
     *** Release 0.7.1 ***
