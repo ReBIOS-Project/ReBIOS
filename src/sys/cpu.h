@@ -78,8 +78,9 @@ struct cpu_tss {
     uint16_t iomap_base;
 } __attribute__((packed));
 
-struct vcpu;
 struct task;
+struct vcpu;
+struct vga_draw_ops;
 
 struct cpu {
     // The CPU itself, where another stack's area has the CPU running on it.
@@ -131,6 +132,12 @@ struct cpu {
     uint8_t *simd_area;
     uint64_t simd_saved;
     uint64_t simd_xcr0;
+    // The builds of the emulated VGA's drawing kernels that the processor
+    // found fastest, the SIMD level they need, and how long its fastest copy
+    // to the framebuffer took (virt/vga_draw.c).
+    const struct vga_draw_ops *draw_ops;
+    size_t draw_level;
+    uint64_t draw_copy_ticks;
 };
 
 _Static_assert(sizeof(struct cpu) <= 0x1000, "The IST stacks overlap struct cpu.");

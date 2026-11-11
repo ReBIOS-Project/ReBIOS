@@ -411,6 +411,15 @@ bin/$(OUTPUT): GNUmakefile obj/CC obj/CFLAGS obj/LDFLAGS picoefi/src/x86_64/link
 # runtime that LTO does not account for, so never build those with LTO.
 obj/src/memory.c.o obj/freestanding-lgrt/src/freestanding-lgrt.c.o: override CFLAGS += -fno-lto
 
+# The emulated VGA's drawing kernels for each SIMD level, among which each
+# processor picks at start (src/sys/simd.h), are built with that level's
+# instructions.
+obj/src/virt/vga_draw_sse2.c.o: override CFLAGS += -msse2
+obj/src/virt/vga_draw_ssse3.c.o: override CFLAGS += -mssse3
+obj/src/virt/vga_draw_sse4_1.c.o: override CFLAGS += -msse4.1
+obj/src/virt/vga_draw_avx.c.o: override CFLAGS += -mavx
+obj/src/virt/vga_draw_avx2.c.o: override CFLAGS += -mavx2
+
 # Only the printf implementation sees the nanoprintf header.
 obj/src/lib/printf.c.o: override CPPFLAGS += \
     -I nanoprintf
