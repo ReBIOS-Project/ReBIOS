@@ -23,6 +23,7 @@
 #include <core.h>
 #include <csm/e820.h>
 #include <handoff.h>
+#include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
 #include <hw/pci_host.h>
 #include <iommu/iommu_tables.h>
