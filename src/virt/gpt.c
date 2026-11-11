@@ -380,3 +380,18 @@ bool gpt_dirty(uintptr_t gpa, size_t size, uint64_t *bits, uintptr_t first, bool
     spinlock_release(&gpt_lock);
     return any;
 }
+
+void gpt_mark_dirty(uintptr_t gpa, size_t size) {
+    if (!track_dirty || size == 0) {
+        return;
+    }
+    uint64_t dirty = use_ept ? EPT_DIRTY : PTE_D;
+    spinlock_acquire(&gpt_lock);
+    for (uintptr_t at = page_down(gpa); at < gpa + size; at += PAGE_SIZE) {
+        uint64_t *e = page_entry(root, at);
+        if (e != NULL) {
+            atomic_fetch_or_explicit((_Atomic(uint64_t) *)e, dirty, memory_order_relaxed);
+        }
+    }
+    spinlock_release(&gpt_lock);
+}

@@ -83,6 +83,9 @@ bool gpt_dirty_tracked(void);
 // NULL. As TLBs may keep translations that are dirty already, the other vCPUs
 // must stay out of the guest from clearing flags until gpt_flush().
 bool gpt_dirty(uintptr_t gpa, size_t size, uint64_t *bits, uintptr_t first, bool clear);
+// Sets the dirty flags of the pages of [gpa, gpa + size), as the processor
+// would for the guest's own writes: for the hypervisor's writes on its behalf.
+void gpt_mark_dirty(uintptr_t gpa, size_t size);
 
 // Bumped by gpt_flush(), for the vCPUs to catch up with as they enter the
 // guest.

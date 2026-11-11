@@ -54,6 +54,7 @@ static bool guest_phys_access(uintptr_t gpa, void *buf, size_t len, bool write) 
         }
         if (write) {
             memcpy((void *)(uintptr_t)hpa, p, chunk);
+            gpt_mark_dirty(gpa, chunk);
         } else {
             memcpy(p, (void *)(uintptr_t)hpa, chunk);
         }
