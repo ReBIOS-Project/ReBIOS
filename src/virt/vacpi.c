@@ -2031,7 +2031,16 @@ static void emit_legacy_device(struct aml *a, const struct legacy_device *d, uin
     aml_end(a);
 }
 
-static uacpi_iteration_decision window_has_ps2_ports(void *user, uacpi_resource *r) {
+// Whether one of a host bridge's I/O windows holds the ports from first to
+// last.
+struct port_range {
+    uint64_t first;
+    uint64_t last;
+    bool routed;
+};
+
+static uacpi_iteration_decision window_has_ports(void *user, uacpi_resource *r) {
+    struct port_range *range = user;
     uint64_t minimum = UINT64_MAX;
     uint64_t maximum = 0;
     if (r->type == UACPI_RESOURCE_TYPE_ADDRESS16 && r->address16.common.type == UACPI_RANGE_IO) {
@@ -2046,11 +2055,35 @@ static uacpi_iteration_decision window_has_ps2_ports(void *user, uacpi_resource 
         minimum = r->address64.minimum;
         maximum = r->address64.maximum;
     }
-    if (minimum > PS2_PORT_FIRST || maximum < PS2_PORT_LAST) {
+    if (minimum > range->first || maximum < range->last) {
         return UACPI_ITERATION_DECISION_CONTINUE;
     }
-    *(bool *)user = true;
+    range->routed = true;
     return UACPI_ITERATION_DECISION_BREAK;
+}
+
+static bool routes_ports(uacpi_namespace_node *bridge, uint64_t first, uint64_t last) {
+    struct port_range range = { first, last, false };
+    uacpi_for_each_device_resource(bridge, "_CRS", window_has_ports, &range);
+    return range.routed;
+}
+
+// Whether a host bridge routes every port of a legacy device's.
+static bool routes_device(uacpi_namespace_node *bridge, const struct legacy_device *d) {
+    const uint8_t *p = d->crs;
+    uint32_t left = (uint32_t)d->size;
+    while (left != 0 && p[0] != ACPI_TAG_END) {
+        size_t n = resource_size(p, left);
+        if (p[0] == ACPI_TAG_IO) {
+            uint64_t base = le(p + 2, 2);
+            if (!routes_ports(bridge, base, base + p[7] - 1)) {
+                return false;
+            }
+        }
+        p += n;
+        left -= (uint32_t)n;
+    }
+    return true;
 }
 
 static uacpi_namespace_node *isa_bridge_below(const struct pci_host_bridge *bridge) {
@@ -2073,18 +2106,17 @@ static uacpi_namespace_node *isa_bridge_below(const struct pci_host_bridge *brid
 
 // Where firmware has them: a host bridge's window gives its ports to what is
 // below it alone, so Windows 7 starts no device with those ports beside it.
-static bool ps2_parent(struct path *out) {
+// Returns that host bridge, or NULL where none routes them.
+static uacpi_namespace_node *ps2_parent(struct path *out) {
     const struct pci_host *host = pci_host_scan();
     for (size_t i = 0; i < host->bridge_count; i++) {
         const struct pci_host_bridge *bridge = &host->bridges[i];
-        bool routes = false;
-        uacpi_for_each_device_resource(bridge->node, "_CRS", window_has_ps2_ports, &routes);
-        if (routes) {
+        if (routes_ports(bridge->node, PS2_PORT_FIRST, PS2_PORT_LAST)) {
             uacpi_namespace_node *isa = isa_bridge_below(bridge);
-            return guest_path(isa != NULL ? isa : bridge->node, out);
+            return guest_path(isa != NULL ? isa : bridge->node, out) ? bridge->node : NULL;
         }
     }
-    return false;
+    return NULL;
 }
 
 static void emit_legacy_devices(struct aml *a) {
@@ -2095,17 +2127,43 @@ static void emit_legacy_devices(struct aml *a) {
     if (!hpet_any_hidden()) {
         uacpi_find_devices_at(uacpi_namespace_root(), hpet_ids, hpet_irqs, &taken);
     }
+    // A device whose ports the host bridge's windows leave out goes outside
+    // it, as firmware has it, where Windows XP otherwise finds them not
+    // available (Code 12).
     struct path parent;
-    aml_begin(a, AML_SCOPE);
-    if (ps2_parent(&parent)) {
-        emit_path(a, &parent);
-    } else {
-        aml_name(a, "\\_SB");
-    }
+    uacpi_namespace_node *bridge = ps2_parent(&parent);
+    bool inside[ARRAY_COUNT(legacy_devices)];
+    bool outside = false;
     for (size_t i = 0; i < ARRAY_COUNT(legacy_devices); i++) {
-        emit_legacy_device(a, &legacy_devices[i], taken);
+        inside[i] = bridge != NULL && routes_device(bridge, &legacy_devices[i]);
+        if (bridge != NULL && !inside[i]) {
+            printf(
+                "%s: under \\_SB, as the host bridge's windows leave its ports out\n",
+                legacy_devices[i].name
+            );
+        }
+        outside = outside || !inside[i];
     }
-    aml_end(a);
+    if (bridge != NULL) {
+        aml_begin(a, AML_SCOPE);
+        emit_path(a, &parent);
+        for (size_t i = 0; i < ARRAY_COUNT(legacy_devices); i++) {
+            if (inside[i]) {
+                emit_legacy_device(a, &legacy_devices[i], taken);
+            }
+        }
+        aml_end(a);
+    }
+    if (outside) {
+        aml_begin(a, AML_SCOPE);
+        aml_name(a, "\\_SB");
+        for (size_t i = 0; i < ARRAY_COUNT(legacy_devices); i++) {
+            if (!inside[i]) {
+                emit_legacy_device(a, &legacy_devices[i], taken);
+            }
+        }
+        aml_end(a);
+    }
 }
 
 // A Fixed Memory32 descriptor, read and write, at p; returns its size.
