@@ -52,7 +52,10 @@ struct remap_target {
 // has them post a vector to a target, false where it cannot.
 bool remap_posting(void);
 bool remap_post(
-    int32_t requester, uint16_t index, uint8_t vector, const struct remap_target *target
+    int32_t requester,
+    uint16_t index,
+    uint8_t vector,
+    const struct remap_target *target
 );
 // Whether the vCPU a tag names runs, as AMD-Vi's doorbells need it to.
 void remap_running(uint32_t tag, bool running);

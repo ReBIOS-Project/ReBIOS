@@ -875,7 +875,12 @@ static void data_write(uint8_t value) {
 }
 
 static void data_access(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
+    struct vcpu *v,
+    void *ctx,
+    uint16_t offset,
+    size_t size,
+    bool in,
+    uint32_t *value
 ) {
     (void)v;
     (void)ctx;
@@ -898,7 +903,12 @@ static void data_access(
 }
 
 static void command_access(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
+    struct vcpu *v,
+    void *ctx,
+    uint16_t offset,
+    size_t size,
+    bool in,
+    uint32_t *value
 ) {
     (void)v;
     (void)ctx;

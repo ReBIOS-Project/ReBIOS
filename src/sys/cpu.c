@@ -104,7 +104,11 @@ static uint32_t apic_id_now(void) {
 }
 
 __attribute__((format(printf, 4, 5))) static void append(
-    char *buf, size_t size, size_t *len, const char *fmt, ...
+    char *buf,
+    size_t size,
+    size_t *len,
+    const char *fmt,
+    ...
 ) {
     if (*len + 1 >= size) {
         return;

@@ -43,20 +43,31 @@ struct ptable_format {
 // tables on the way, and splitting the large pages on the way into tables of
 // smaller ones that map the same.
 uint64_t *ptable_table_for(
-    const struct ptable_format *format, uint64_t *root, uintptr_t address, size_t level
+    const struct ptable_format *format,
+    uint64_t *root,
+    uintptr_t address,
+    size_t level
 );
 
 // Maps [address, address + size) to [target, target + size), both page
 // aligned, as size is, with the largest pages that fit, up to max_level.
 void ptable_map(
-    const struct ptable_format *format, uint64_t *root, uintptr_t address, uintptr_t target,
-    size_t size, uint64_t attributes, size_t max_level
+    const struct ptable_format *format,
+    uint64_t *root,
+    uintptr_t address,
+    uintptr_t target,
+    size_t size,
+    uint64_t attributes,
+    size_t max_level
 );
 
 // The entry of the leaf under root that maps address, or NULL if none does,
 // with the leaf's level and its value as found.
 uint64_t *ptable_leaf(
-    const struct ptable_format *format, uint64_t *root, uintptr_t address, size_t *level,
+    const struct ptable_format *format,
+    uint64_t *root,
+    uintptr_t address,
+    size_t *level,
     uint64_t *entry
 );
 

@@ -143,7 +143,12 @@ static void controller_write(struct controller *c, uint8_t reg, uint8_t value) {
 }
 
 static void controller_access(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
+    struct vcpu *v,
+    void *ctx,
+    uint16_t offset,
+    size_t size,
+    bool in,
+    uint32_t *value
 ) {
     (void)v;
     (void)size;
@@ -160,7 +165,12 @@ static void controller_access(
 }
 
 static void pages_access(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
+    struct vcpu *v,
+    void *ctx,
+    uint16_t offset,
+    size_t size,
+    bool in,
+    uint32_t *value
 ) {
     (void)v;
     (void)size;

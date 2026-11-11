@@ -148,8 +148,12 @@ static void pack(struct container *c, size_t side) {
 
 // A window in a bridge's parent for what the bridge has on one side.
 static void window_add(
-    struct container *parent, struct container *c, size_t function, uint8_t kind,
-    size_t side_inside, size_t side
+    struct container *parent,
+    struct container *c,
+    size_t function,
+    uint8_t kind,
+    size_t side_inside,
+    size_t side
 ) {
     if (c->size[side_inside] == 0) {
         return;
@@ -207,7 +211,9 @@ static uint32_t depth_of(const struct pci_enum_topology *t, const struct pci_enu
 // bridge decodes 64-bit addresses there, as the 64-bit prefetchable window of
 // a port does.
 static bool path_reaches_high(
-    const struct pci_enum_topology *t, const struct pci_enum_function *f, bool prefetchable
+    const struct pci_enum_topology *t,
+    const struct pci_enum_function *f,
+    bool prefetchable
 ) {
     for (const struct pci_enum_function *b = f->parent; b != NULL; b = b->parent) {
         if (!prefetchable
@@ -225,7 +231,9 @@ static bool path_reaches_high(
 // root bus, high_windows[n + r] whether root bus r needs its port's above 4
 // GiB.
 static bool pref_window_low(
-    const struct pci_enum_topology *t, const struct pci_enum_function *bridge, size_t root,
+    const struct pci_enum_topology *t,
+    const struct pci_enum_function *bridge,
+    size_t root,
     const bool *high_windows
 ) {
     bool port = root != plan.primary;
@@ -269,7 +277,8 @@ static bool routed(const struct pci_enum_function *f, uintptr_t base, size_t siz
 }
 
 static bool bar_high(
-    const struct pci_enum_topology *t, const struct pci_enum_function *f,
+    const struct pci_enum_topology *t,
+    const struct pci_enum_function *f,
     const struct pci_enum_bar *bar
 ) {
     return bar->size > PCI_PLAN_LOW_BAR_MAX && bar->kind == PCI_ENUM_BAR_MEM64
@@ -354,7 +363,9 @@ static bool numbers_free(const bool *used, size_t base, size_t count) {
 // Gives each root bus's guest number, -1 where it has none, and returns the
 // highest in use.
 static uint8_t number_buses(
-    const struct pci_enum_topology *t, const uint8_t *ends, int *guest_roots
+    const struct pci_enum_topology *t,
+    const uint8_t *ends,
+    int *guest_roots
 ) {
     bool used[PCI_BUSES];
     memset(used, 0, PCI_BUSES * sizeof(bool));
@@ -466,7 +477,9 @@ static size_t free_devices(const struct pci_enum_topology *t, bool firmware, uin
 // A port on the guest's bus 0 for every root bus but the primary that has
 // guest bus numbers, its functions on the first device numbers free.
 static void ports_make(
-    const struct pci_enum_topology *t, const uint8_t *ends, const int *guest_roots
+    const struct pci_enum_topology *t,
+    const uint8_t *ends,
+    const int *guest_roots
 ) {
     size_t wanted = 0;
     for (size_t r = 0; r < t->root_bus_count; r++) {
@@ -508,7 +521,10 @@ static void ports_make(
 // What the root bus's functions and bridges decode of I/O space, in a window
 // of whole granules.
 static void io_window(
-    const struct pci_enum_topology *t, size_t root, uint32_t *base, uint32_t *limit
+    const struct pci_enum_topology *t,
+    size_t root,
+    uint32_t *base,
+    uint32_t *limit
 ) {
     uint32_t low = UINT32_MAX;
     uint32_t high = 0;
@@ -602,7 +618,11 @@ static void assign(const struct pci_enum_topology *t, struct container *containe
 
 // The lowest base from at, of size and align, that no obstacle overlaps.
 static uintptr_t high_base(
-    const struct pci_plan_range *obstacles, size_t count, uint64_t at, size_t size, uint64_t align
+    const struct pci_plan_range *obstacles,
+    size_t count,
+    uint64_t at,
+    size_t size,
+    uint64_t align
 ) {
     uintptr_t base = align_up(at, align);
     for (size_t i = 0; i < count; i++) {
@@ -637,7 +657,10 @@ static const struct pci_plan_port *port_of(size_t root) {
 }
 
 const struct pci_plan *pci_plan_make(
-    const struct pci_plan_range *obstacles, size_t count, size_t lfb_size, uint64_t high_floor
+    const struct pci_plan_range *obstacles,
+    size_t count,
+    size_t lfb_size,
+    uint64_t high_floor
 ) {
     const struct pci_enum_topology *t = pci_enum_topology();
     size_t n = t->function_count;

@@ -255,8 +255,13 @@ void aml_field_unit(struct aml *a, const char *name, uint32_t bits) {
 }
 
 void aml_table_header(
-    uint8_t *table, size_t length, const char signature[4], uint8_t revision, const char oem_id[6],
-    const char oem_table_id[8], uint32_t oem_revision
+    uint8_t *table,
+    size_t length,
+    const char signature[4],
+    uint8_t revision,
+    const char oem_id[6],
+    const char oem_table_id[8],
+    uint32_t oem_revision
 ) {
     memcpy(table, signature, 4);
     write_le32(table + 4, (uint32_t)length);

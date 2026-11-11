@@ -94,8 +94,12 @@ static void slice_end(void) {
 
 // Hands words to the ROM, and takes others from it, until the call goes on.
 static void exchange(
-    const uint16_t *head, size_t head_count, const uint8_t *data, size_t data_words,
-    uint16_t *into, size_t into_count
+    const uint16_t *head,
+    size_t head_count,
+    const uint8_t *data,
+    size_t data_words,
+    uint16_t *into,
+    size_t into_count
 ) {
     struct call *c = current;
     c->head = head;
@@ -333,7 +337,11 @@ void vgabios_far_move(uint16_t segment, uint16_t to, uint16_t from, size_t count
 }
 
 void vgabios_far_font(
-    uint16_t to_segment, uint16_t to, uint16_t from_segment, uint16_t from, uint8_t height,
+    uint16_t to_segment,
+    uint16_t to,
+    uint16_t from_segment,
+    uint16_t from,
+    uint8_t height,
     size_t count
 ) {
     if (count == 0) {
@@ -572,7 +580,12 @@ static uint32_t call_access(struct call *c, struct vcpu *v, bool in, uint16_t wo
 }
 
 static void ports_access(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
+    struct vcpu *v,
+    void *ctx,
+    uint16_t offset,
+    size_t size,
+    bool in,
+    uint32_t *value
 ) {
     (void)ctx;
     uint32_t result = 0xffffffff;
@@ -591,7 +604,12 @@ static void ports_access(
 }
 
 static void vga_ports_access(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
+    struct vcpu *v,
+    void *ctx,
+    uint16_t offset,
+    size_t size,
+    bool in,
+    uint32_t *value
 ) {
     (void)ctx;
     uint32_t result = 0xffffffff;

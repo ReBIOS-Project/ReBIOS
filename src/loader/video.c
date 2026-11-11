@@ -222,7 +222,8 @@ static size_t mask_size(uint32_t mask) {
 // Takes the current mode from Mode->Info rather than from QueryMode(), as some
 // firmware reports a wrong PixelsPerScanLine through the latter.
 static void describe_framebuffer(
-    EFI_GRAPHICS_OUTPUT_PROTOCOL *gop, struct handoff_framebuffer *fb
+    EFI_GRAPHICS_OUTPUT_PROTOCOL *gop,
+    struct handoff_framebuffer *fb
 ) {
     EFI_GRAPHICS_OUTPUT_PROTOCOL_MODE *mode = gop->Mode;
     EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *info = mode->Info;
@@ -418,7 +419,9 @@ static bool load_user_vbios(struct user_vbios *vbios) {
 }
 
 static bool gpu_listed(
-    const struct gpu_lists_id *list, size_t count, const struct pci_io_device *dev
+    const struct gpu_lists_id *list,
+    size_t count,
+    const struct pci_io_device *dev
 ) {
     for (size_t i = 0; i < count; i++) {
         const struct gpu_lists_id *id = &list[i];
@@ -550,7 +553,9 @@ static bool take_vga_decoding(const struct pci_io_device *dev) {
 // Uses the user's VBIOS if given, which needs no matching IDs, or else the
 // legacy image of the device's expansion ROM.
 static bool try_device(
-    const struct pci_io_device *dev, const struct user_vbios *user, struct vbios_choice *choice
+    const struct pci_io_device *dev,
+    const struct user_vbios *user,
+    struct vbios_choice *choice
 ) {
     const void *image;
     size_t size;

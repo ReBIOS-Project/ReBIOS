@@ -131,21 +131,36 @@ bool insn_mem_operand(struct vcpu *v, const struct insn *insn, struct insn_mem *
 // ES:rDI, or its source at DS:rSI or the segment an override names. False,
 // with #GP(0) or #SS(0) raised, where the segment does not allow the access.
 bool insn_string_linear(
-    struct vcpu *v, const struct insn *insn, bool destination, size_t size, bool write,
+    struct vcpu *v,
+    const struct insn *insn,
+    bool destination,
+    size_t size,
+    bool write,
     uint64_t *linear
 );
 // The linear address of the first of count such operands, rDI or rSI stepping
 // by step after each: false, raising nothing, where any of them would fail
 // those checks or the address register would wrap.
 bool insn_string_run(
-    struct vcpu *v, const struct insn *insn, bool destination, size_t size, int64_t step,
-    size_t count, bool write, uint64_t *linear
+    struct vcpu *v,
+    const struct insn *insn,
+    bool destination,
+    size_t size,
+    int64_t step,
+    size_t count,
+    bool write,
+    uint64_t *linear
 );
 // The linear address of an explicit operand of size bytes at offset ea of
 // segment reg, as the vCPU's present mode forms and checks it: false, with
 // #GP(0) or #SS(0) raised, where the segment does not allow the access.
 bool insn_segment_linear(
-    struct vcpu *v, int reg, uintptr_t ea, size_t size, bool write, uint64_t *linear
+    struct vcpu *v,
+    int reg,
+    uintptr_t ea,
+    size_t size,
+    bool write,
+    uint64_t *linear
 );
 
 #endif

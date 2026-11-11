@@ -128,7 +128,8 @@ struct below {
 };
 
 static struct below below_port(
-    const struct pci_enum_topology *t, const struct pci_enum_root_bus *rb
+    const struct pci_enum_topology *t,
+    const struct pci_enum_root_bus *rb
 ) {
     struct below b = { DEVCAP_PAYLOAD, 0, 1, 1 };
     bool any = false;
@@ -212,7 +213,10 @@ static uint16_t vendor_id(const struct pci_enum_topology *t, size_t primary) {
 }
 
 static void port_build(
-    struct port *p, const struct pci_plan_port *pp, bool multi, uint16_t vendor
+    struct port *p,
+    const struct pci_plan_port *pp,
+    bool multi,
+    uint16_t vendor
 ) {
     const struct pci_enum_topology *t = pci_enum_topology();
     uint8_t *c = p->config;

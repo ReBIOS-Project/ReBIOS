@@ -59,7 +59,10 @@ void amdvi_remap_free(int32_t requester, uint16_t index, size_t count);
 void amdvi_remap_set(int32_t requester, uint16_t index, uint32_t apic_id, uint8_t vector);
 bool amdvi_posting(void);
 bool amdvi_remap_post(
-    int32_t requester, uint16_t index, uint8_t vector, const struct remap_target *target
+    int32_t requester,
+    uint16_t index,
+    uint8_t vector,
+    const struct remap_target *target
 );
 void amdvi_running(uint32_t tag, bool running);
 void amdvi_poll(void (*woken)(uint32_t tag));

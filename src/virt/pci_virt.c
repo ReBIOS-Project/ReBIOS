@@ -763,7 +763,10 @@ struct shared_target {
 // The BAR of the page an access falls in, if any, found under the lock, which
 // msix_read() and msix_write() take themselves.
 static bool shared_target(
-    const struct shared_page *sp, uint64_t offset, size_t size, struct shared_target *t
+    const struct shared_page *sp,
+    uint64_t offset,
+    size_t size,
+    struct shared_target *t
 ) {
     bool found = false;
     spinlock_acquire(&virt.lock);
@@ -1061,7 +1064,10 @@ static uint32_t function_read(struct pci_cfg_addr a, uint32_t offset, size_t siz
 // The function whose BAR registers the guest wrote to, for legacy_io_follow():
 // NULL for other writes.
 static struct vfunction *function_write(
-    struct pci_cfg_addr a, uint32_t offset, size_t size, uint32_t value
+    struct pci_cfg_addr a,
+    uint32_t offset,
+    size_t size,
+    uint32_t value
 ) {
     struct vfunction *vf = vfunction_find(a);
     if (vf != NULL && (vf->hidden || in_rebar(vf, offset))) {
@@ -1093,7 +1099,11 @@ static struct vfunction *function_write(
 // The guest's bus numbers are the PCI plan's: a port of the plan's, or a
 // function of the host's, or nothing.
 static uint32_t guest_read(
-    uint8_t bus, uint8_t device, uint8_t function, uint32_t offset, size_t size
+    uint8_t bus,
+    uint8_t device,
+    uint8_t function,
+    uint32_t offset,
+    size_t size
 ) {
     int port = bus == 0 ? pci_port_at(device, function) : -1;
     if (port >= 0) {
@@ -1109,7 +1119,12 @@ static uint32_t guest_read(
 
 // As function_write().
 static struct vfunction *guest_write(
-    uint8_t bus, uint8_t device, uint8_t function, uint32_t offset, size_t size, uint32_t value
+    uint8_t bus,
+    uint8_t device,
+    uint8_t function,
+    uint32_t offset,
+    size_t size,
+    uint32_t value
 ) {
     int port = bus == 0 ? pci_port_at(device, function) : -1;
     if (port >= 0) {
@@ -1155,7 +1170,12 @@ static void rst_cnt_access(bool in, uint32_t *value) {
 // for the reset control register, and data accesses with the address disabled,
 // reach nothing, as on a chipset without other devices there.
 static void config_ports(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
+    struct vcpu *v,
+    void *ctx,
+    uint16_t offset,
+    size_t size,
+    bool in,
+    uint32_t *value
 ) {
     (void)v;
     (void)ctx;
@@ -1290,7 +1310,9 @@ static uint32_t guest_bus_numbers(const struct pci_enum_function *f, uint32_t va
 }
 
 static void vfunction_init(
-    struct vfunction *vf, struct pci_enum_function *f, const struct pci_plan_function *pf
+    struct vfunction *vf,
+    struct pci_enum_function *f,
+    const struct pci_plan_function *pf
 ) {
     *vf = (struct vfunction){ .f = f };
     // An AMD IOMMU's function, whose capability holds its registers' address.
@@ -1404,8 +1426,12 @@ void pci_virt_hook(struct pci_cfg_addr addr, const struct pci_virt_hook *hook, v
 }
 
 bool pci_virt_trap(
-    struct pci_cfg_addr addr, unsigned int bar, uint64_t offset, size_t size,
-    const struct mmio_ops *ops, void *ctx
+    struct pci_cfg_addr addr,
+    unsigned int bar,
+    uint64_t offset,
+    size_t size,
+    const struct mmio_ops *ops,
+    void *ctx
 ) {
     struct vfunction *vf = vfunction_find(addr);
     if (vf == NULL || bar >= BAR_COUNT) {
@@ -1470,7 +1496,10 @@ uint32_t pci_virt_config_read(struct pci_cfg_addr addr, uint32_t offset, size_t 
 }
 
 void pci_virt_config_write(
-    struct pci_cfg_addr addr, uint32_t offset, size_t size, uint32_t value
+    struct pci_cfg_addr addr,
+    uint32_t offset,
+    size_t size,
+    uint32_t value
 ) {
     spinlock_acquire(&virt.lock);
     struct vfunction *wrote = function_write(addr, offset, size, value);
@@ -1479,7 +1508,11 @@ void pci_virt_config_write(
 }
 
 bool pci_virt_msix_access(
-    struct pci_cfg_addr addr, uint64_t offset, size_t size, bool write, uint64_t *value
+    struct pci_cfg_addr addr,
+    uint64_t offset,
+    size_t size,
+    bool write,
+    uint64_t *value
 ) {
     struct vfunction *vf = vfunction_find(addr);
     if (vf == NULL || vf->msix.count == 0

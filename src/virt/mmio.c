@@ -162,7 +162,12 @@ static const struct region *find(uintptr_t gpa) {
 
 // In naturally aligned pieces of up to 8 bytes.
 static void region_access(
-    struct vcpu *v, const struct region *r, uintptr_t gpa, uint8_t *buf, size_t len, bool write
+    struct vcpu *v,
+    const struct region *r,
+    uintptr_t gpa,
+    uint8_t *buf,
+    size_t len,
+    bool write
 ) {
     while (len != 0) {
         uint64_t offset = gpa - atomic_load_explicit(&r->base, memory_order_relaxed);
@@ -187,7 +192,12 @@ static void region_access(
 // Translates every page an access touches before any part happens, so that a
 // fault leaves none of it done.
 static bool translate(
-    struct vcpu *v, uintptr_t linear, size_t size, bool write, uint64_t *gpas, unsigned int *lens,
+    struct vcpu *v,
+    uintptr_t linear,
+    size_t size,
+    bool write,
+    uint64_t *gpas,
+    unsigned int *lens,
     unsigned int *pieces
 ) {
     *pieces = 0;
@@ -255,7 +265,11 @@ bool mmio_write_linear(struct vcpu *v, uintptr_t linear, const void *buf, size_t
 }
 
 static bool mem_ins(
-    struct vcpu *v, uintptr_t linear, uint16_t port, size_t size, uint32_t *value
+    struct vcpu *v,
+    uintptr_t linear,
+    uint16_t port,
+    size_t size,
+    uint32_t *value
 ) {
     uint64_t gpas[2];
     unsigned int lens[2];
@@ -282,8 +296,14 @@ static void mem_outs(struct vcpu *v, uint16_t port, size_t size, uint32_t value)
 // *count cut to the run. False where the first crosses a page, or where any
 // would fault, which the instruction then meets an iteration at a time.
 static bool string_run(
-    struct vcpu *v, const struct insn *insn, bool destination, size_t size, int64_t step,
-    bool write, size_t *count, uintptr_t *gpa
+    struct vcpu *v,
+    const struct insn *insn,
+    bool destination,
+    size_t size,
+    int64_t step,
+    bool write,
+    size_t *count,
+    uintptr_t *gpa
 ) {
     uint64_t linear;
     if (!insn_string_run(v, insn, destination, size, step, 1, write, &linear)) {
@@ -308,7 +328,11 @@ static bool string_run(
 // Where such a run of count operands is: RAM, *r NULL, or a region, *offset
 // the first's offset into it. False where it is neither, or more than one.
 static bool string_place(
-    uintptr_t gpa, size_t size, int64_t step, size_t count, const struct region **r,
+    uintptr_t gpa,
+    size_t size,
+    int64_t step,
+    size_t count,
+    const struct region **r,
     uint64_t *offset
 ) {
     *r = find(gpa);
@@ -337,7 +361,11 @@ static void string_order(uint8_t *buf, size_t size, int64_t step, size_t count) 
 }
 
 size_t mmio_string(
-    struct vcpu *v, const struct insn *insn, size_t size, int64_t step, size_t count
+    struct vcpu *v,
+    const struct insn *insn,
+    size_t size,
+    int64_t step,
+    size_t count
 ) {
     // Breakpoints are checked an access at a time.
     if (vcpu_breakpoints_armed(v)) {
@@ -553,7 +581,11 @@ static void step_begin(struct vcpu *v, uintptr_t gpa, const struct insn *insn) {
 // Writes back the runs of bytes in [start, end) that changed, or that a masked
 // store's two runs wrote alike.
 static void write_runs(
-    struct vcpu *v, struct step_page *p, size_t start, size_t end, bool masked
+    struct vcpu *v,
+    struct step_page *p,
+    size_t start,
+    size_t end,
+    bool masked
 ) {
     for (size_t at = start; at < end; ) {
         bool written = masked

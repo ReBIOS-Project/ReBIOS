@@ -245,7 +245,11 @@ void exit_io(struct vcpu *v, uint16_t port, size_t size, bool in, uint32_t *valu
 }
 
 static bool string_ins(
-    struct vcpu *v, uintptr_t linear, uint16_t port, size_t size, uint32_t *value
+    struct vcpu *v,
+    uintptr_t linear,
+    uint16_t port,
+    size_t size,
+    uint32_t *value
 ) {
     (void)linear;
     port_access(v, port, size, true, value);

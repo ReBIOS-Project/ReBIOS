@@ -71,7 +71,11 @@ static bool reg_wait(uintptr_t base, uint64_t offset, uint32_t mask, uint32_t wa
 }
 
 static bool cfg_wait(
-    struct pci_cfg_addr a, uint32_t offset, uint32_t mask, uint32_t want, uint64_t us
+    struct pci_cfg_addr a,
+    uint32_t offset,
+    uint32_t mask,
+    uint32_t want,
+    uint64_t us
 ) {
     for (size_t waited = 0; ; waited += POLL_US) {
         if ((pci_cfg_read(a, offset, 4) & mask) == want) {

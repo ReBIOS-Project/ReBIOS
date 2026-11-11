@@ -414,7 +414,12 @@ static void planes_changed(uint32_t address, uint8_t planes) {
 // that the map mask and the addressing mode select, with what the graphics
 // controller makes of it from the latches, which writes leave as they are.
 static void planes_write(
-    uint32_t offset, int64_t step, size_t size, size_t count, const uint8_t *data, bool same
+    uint32_t offset,
+    int64_t step,
+    size_t size,
+    size_t count,
+    const uint8_t *data,
+    bool same
 ) {
     uint32_t first;
     if (!window_address(offset, &first)) {
@@ -576,7 +581,12 @@ static void window_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size
 }
 
 static void window_read_string(
-    struct vcpu *v, void *ctx, uint64_t offset, size_t size, int64_t step, uint8_t *data,
+    struct vcpu *v,
+    void *ctx,
+    uint64_t offset,
+    size_t size,
+    int64_t step,
+    uint8_t *data,
     size_t count
 ) {
     (void)v;
@@ -593,8 +603,14 @@ static void window_read_string(
 }
 
 static void window_write_string(
-    struct vcpu *v, void *ctx, uint64_t offset, size_t size, int64_t step, const uint8_t *data,
-    bool same, size_t count
+    struct vcpu *v,
+    void *ctx,
+    uint64_t offset,
+    size_t size,
+    int64_t step,
+    const uint8_t *data,
+    bool same,
+    size_t count
 ) {
     (void)v;
     (void)ctx;
@@ -652,7 +668,12 @@ static void latches_move(uint32_t source, uint32_t destination, int64_t step, si
 }
 
 static void window_move_string(
-    struct vcpu *v, void *ctx, uint64_t source, uint64_t destination, size_t size, int64_t step,
+    struct vcpu *v,
+    void *ctx,
+    uint64_t source,
+    uint64_t destination,
+    size_t size,
+    int64_t step,
     size_t count
 ) {
     (void)v;
@@ -891,7 +912,12 @@ static void port_write(uint16_t port, uint8_t value) {
 }
 
 static void ports_access(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
+    struct vcpu *v,
+    void *ctx,
+    uint16_t offset,
+    size_t size,
+    bool in,
+    uint32_t *value
 ) {
     (void)v;
     (void)ctx;
@@ -1107,7 +1133,12 @@ void vga_dispi_write(uint16_t index, uint16_t value) {
 }
 
 static void dispi_ports(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
+    struct vcpu *v,
+    void *ctx,
+    uint16_t offset,
+    size_t size,
+    bool in,
+    uint32_t *value
 ) {
     (void)v;
     (void)ctx;
@@ -1204,8 +1235,15 @@ static void put(uint32_t *line, uint32_t *x, uint32_t width, uint32_t rgb, size_
 }
 
 static void text_line(
-    uint32_t *line, uint32_t width, uint32_t columns, uint32_t ma, unsigned int row_scan,
-    unsigned int dots, unsigned int repeat, bool cursor_on, bool blink_on
+    uint32_t *line,
+    uint32_t width,
+    uint32_t columns,
+    uint32_t ma,
+    unsigned int row_scan,
+    unsigned int dots,
+    unsigned int repeat,
+    bool cursor_on,
+    bool blink_on
 ) {
     uint32_t cursor = (uint32_t)vga.crtc[CRTC_CURSOR_HIGH] << 8 | vga.crtc[CRTC_CURSOR_LOW];
     unsigned int cursor_start = vga.crtc[CRTC_CURSOR_START] & 0x1f;
@@ -1270,7 +1308,11 @@ static void text_line(
 }
 
 static void graphics_line(
-    uint32_t *line, uint32_t width, uint32_t columns, uint32_t ma, unsigned int row_scan,
+    uint32_t *line,
+    uint32_t width,
+    uint32_t columns,
+    uint32_t ma,
+    unsigned int row_scan,
     unsigned int repeat
 ) {
     uint8_t mode = vga.gc[GC_MODE];
@@ -1359,7 +1401,11 @@ static bool line_changed(uint32_t columns, uint32_t ma, unsigned int row_scan) {
 // the scan lines that fetch what the guest wrote since the last time, the
 // others staying as they were made then.
 static void make_frame(
-    uint32_t *width_out, uint32_t *height_out, bool cursor_on, bool blink_on, bool all
+    uint32_t *width_out,
+    uint32_t *height_out,
+    bool cursor_on,
+    bool blink_on,
+    bool all
 ) {
     bool graphics = (vga.gc[GC_MISC] & GC_MISC_GRAPHICS) != 0;
     unsigned int dots = (graphics || (vga.seq[SEQ_CLOCKING] & SEQ_CLOCKING_8DOT) != 0) ? 8 : 9;
@@ -2009,7 +2055,12 @@ static uint64_t blend_pair(uint64_t a, uint64_t b, uint64_t weight) {
 // Pixels from to end of dst, mixed from those of a and b, weight of FILTER_ONE
 // of b: two at a time.
 static void blend_lines(
-    uint32_t *dst, const uint32_t *a, const uint32_t *b, uint32_t weight, size_t from, size_t end
+    uint32_t *dst,
+    const uint32_t *a,
+    const uint32_t *b,
+    uint32_t weight,
+    size_t from,
+    size_t end
 ) {
     size_t x = from;
     for (; x + 2 <= end; x += 2) {

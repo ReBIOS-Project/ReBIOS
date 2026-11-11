@@ -48,13 +48,15 @@ struct handoff_pci_address {
 #define HANDOFF_PCI_ADDRESS_ARGS(a) (a).segment, (a).bus, (a).devfn >> 3, (a).devfn & 7
 
 static inline bool handoff_pci_address_equal(
-    struct handoff_pci_address a, struct handoff_pci_address b
+    struct handoff_pci_address a,
+    struct handoff_pci_address b
 ) {
     return a.segment == b.segment && a.bus == b.bus && a.devfn == b.devfn;
 }
 
 static inline int handoff_pci_address_compare(
-    struct handoff_pci_address a, struct handoff_pci_address b
+    struct handoff_pci_address a,
+    struct handoff_pci_address b
 ) {
     uint32_t ka = (uint32_t)a.segment << 16 | (uint32_t)a.bus << 8 | a.devfn;
     uint32_t kb = (uint32_t)b.segment << 16 | (uint32_t)b.bus << 8 | b.devfn;
@@ -285,7 +287,8 @@ struct handoff {
 
 // The firmware's memory map descriptor at index, or NULL past the last.
 static inline const EFI_MEMORY_DESCRIPTOR *handoff_efi_desc(
-    const struct handoff *h, size_t index
+    const struct handoff *h,
+    size_t index
 ) {
     if ((index + 1) * h->efi_mmap_desc_size > h->efi_mmap_size) {
         return NULL;

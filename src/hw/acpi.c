@@ -171,7 +171,10 @@ void uacpi_kernel_pci_device_close(uacpi_handle handle) {
 }
 
 static uacpi_status pci_read(
-    uacpi_handle device, uacpi_size offset, size_t size, uint32_t *value
+    uacpi_handle device,
+    uacpi_size offset,
+    size_t size,
+    uint32_t *value
 ) {
     if (offset >= PCI_CFG_SPACE_EXP_SIZE || offset % size != 0) {
         return UACPI_STATUS_INVALID_ARGUMENT;
@@ -182,7 +185,10 @@ static uacpi_status pci_read(
 }
 
 static uacpi_status pci_write(
-    uacpi_handle device, uacpi_size offset, size_t size, uint32_t value
+    uacpi_handle device,
+    uacpi_size offset,
+    size_t size,
+    uint32_t value
 ) {
     if (offset >= PCI_CFG_SPACE_EXP_SIZE || offset % size != 0) {
         return UACPI_STATUS_INVALID_ARGUMENT;
@@ -506,7 +512,10 @@ uacpi_status uacpi_kernel_handle_firmware_request(uacpi_firmware_request *reques
 
 // Kept for acpi_sci_interrupt(), whose caller connects the SCI.
 uacpi_status uacpi_kernel_install_interrupt_handler(
-    uacpi_u32 irq, uacpi_interrupt_handler handler, uacpi_handle ctx, uacpi_handle *out_irq_handle
+    uacpi_u32 irq,
+    uacpi_interrupt_handler handler,
+    uacpi_handle ctx,
+    uacpi_handle *out_irq_handle
 ) {
     sci_irq = irq;
     sci_handler = handler;
@@ -516,7 +525,8 @@ uacpi_status uacpi_kernel_install_interrupt_handler(
 }
 
 uacpi_status uacpi_kernel_uninstall_interrupt_handler(
-    uacpi_interrupt_handler handler, uacpi_handle irq_handle
+    uacpi_interrupt_handler handler,
+    uacpi_handle irq_handle
 ) {
     (void)handler;
     (void)irq_handle;
@@ -538,7 +548,10 @@ void uacpi_kernel_free_work_item(uacpi_handle handle) {
 // 7.3's acpi_os_execute() does, since SMIs that AML sets off from other
 // processors corrupt memory on some machines.
 void uacpi_kernel_schedule_work(
-    uacpi_work_type type, uacpi_handle work_item, uacpi_work_handler handler, uacpi_handle ctx
+    uacpi_work_type type,
+    uacpi_handle work_item,
+    uacpi_work_handler handler,
+    uacpi_handle ctx
 ) {
     struct work *w = work_item;
     w->next = NULL;
@@ -731,7 +744,9 @@ bool acpi_init(void) {
 }
 
 static uacpi_iteration_decision device_found(
-    void *user, uacpi_namespace_node *node, uacpi_u32 depth
+    void *user,
+    uacpi_namespace_node *node,
+    uacpi_u32 depth
 ) {
     (void)node;
     (void)depth;
@@ -782,7 +797,9 @@ static uacpi_iteration_decision resource_claims(void *user, uacpi_resource *reso
 }
 
 static uacpi_iteration_decision device_claims(
-    void *user, uacpi_namespace_node *node, uacpi_u32 depth
+    void *user,
+    uacpi_namespace_node *node,
+    uacpi_u32 depth
 ) {
     (void)depth;
     struct port_claim *claim = user;
@@ -840,7 +857,9 @@ static uacpi_iteration_decision memory_claims(void *user, uacpi_resource *resour
 }
 
 static uacpi_iteration_decision board_claims(
-    void *user, uacpi_namespace_node *node, uacpi_u32 depth
+    void *user,
+    uacpi_namespace_node *node,
+    uacpi_u32 depth
 ) {
     (void)depth;
     struct memory_claim *claim = user;
@@ -901,7 +920,10 @@ void acpi_log_failure(uacpi_namespace_node *node, const char *name, uacpi_status
 }
 
 bool acpi_eval_optional(
-    uacpi_namespace_node *node, const char *name, uint64_t *value, bool *found
+    uacpi_namespace_node *node,
+    const char *name,
+    uint64_t *value,
+    bool *found
 ) {
     uacpi_status status = uacpi_eval_simple_integer(node, name, value);
     if (found != NULL) {
@@ -931,7 +953,10 @@ const struct acpi_entry_hdr *acpi_madt_next(const void *madt, size_t length, siz
 }
 
 bool acpi_madt_processor(
-    const struct acpi_entry_hdr *entry, uint32_t *apic_id, uint32_t *uid, uint32_t *flags
+    const struct acpi_entry_hdr *entry,
+    uint32_t *apic_id,
+    uint32_t *uid,
+    uint32_t *flags
 ) {
     if (entry->type == ACPI_MADT_ENTRY_TYPE_LAPIC
      && entry->length >= sizeof(struct acpi_madt_lapic)) {
@@ -955,7 +980,11 @@ bool acpi_madt_processor(
 }
 
 bool acpi_madt_lapic_nmi(
-    const struct acpi_entry_hdr *entry, uint32_t *uid, bool *all, uint8_t *lint, uint16_t *flags
+    const struct acpi_entry_hdr *entry,
+    uint32_t *uid,
+    bool *all,
+    uint8_t *lint,
+    uint16_t *flags
 ) {
     if (entry->type == ACPI_MADT_ENTRY_TYPE_LAPIC_NMI
      && entry->length >= sizeof(struct acpi_madt_lapic_nmi)) {

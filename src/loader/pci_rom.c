@@ -46,7 +46,10 @@ static uint16_t read16(const uint8_t *p) {
 // Looks for the device in the 0-terminated list of device IDs that a PCI data
 // structure of revision 3 or later may point to, which must lie in the image.
 static bool device_listed(
-    const uint8_t *image, size_t image_size, uint64_t pcir, uint16_t device_id
+    const uint8_t *image,
+    size_t image_size,
+    uint64_t pcir,
+    uint16_t device_id
 ) {
     uint16_t list = read16(image + pcir + PCIR_DEVICE_LIST);
     if (list == 0) {
@@ -66,7 +69,11 @@ static bool device_listed(
 }
 
 bool pci_rom_find_legacy_image(
-    const void *rom, size_t rom_size, uint16_t vendor_id, uint16_t device_id, const void **image,
+    const void *rom,
+    size_t rom_size,
+    uint16_t vendor_id,
+    uint16_t device_id,
+    const void **image,
     size_t *size
 ) {
     const uint8_t *found = NULL;

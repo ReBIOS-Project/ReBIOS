@@ -26,7 +26,11 @@
 // returning where it starts in rom, and its size. Returns false if there is
 // none, or the ROM is malformed.
 bool pci_rom_find_legacy_image(
-    const void *rom, size_t rom_size, uint16_t vendor_id, uint16_t device_id, const void **image,
+    const void *rom,
+    size_t rom_size,
+    uint16_t vendor_id,
+    uint16_t device_id,
+    const void **image,
     size_t *size
 );
 

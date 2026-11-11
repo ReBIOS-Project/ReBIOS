@@ -500,7 +500,12 @@ static void standard_write(uint8_t reg, uint8_t value) {
 }
 
 static void rtc_access(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
+    struct vcpu *v,
+    void *ctx,
+    uint16_t offset,
+    size_t size,
+    bool in,
+    uint32_t *value
 ) {
     (void)v;
     (void)ctx;
@@ -595,7 +600,9 @@ static bool real_works(void) {
 static const char *const tad_ids[] = { "ACPI000E", NULL };
 
 static uacpi_iteration_decision tad_found(
-    void *user, uacpi_namespace_node *node, uacpi_u32 depth
+    void *user,
+    uacpi_namespace_node *node,
+    uacpi_u32 depth
 ) {
     (void)depth;
     *(uacpi_namespace_node **)user = node;

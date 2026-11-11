@@ -68,7 +68,10 @@ bool remap_posting(void) {
 }
 
 bool remap_post(
-    int32_t requester, uint16_t index, uint8_t vector, const struct remap_target *target
+    int32_t requester,
+    uint16_t index,
+    uint8_t vector,
+    const struct remap_target *target
 ) {
     if (amd()) {
         return amdvi_remap_post(requester, index, vector, target);
@@ -103,7 +106,11 @@ void remap_message(int32_t requester, uint16_t index, uint32_t *address, uint32_
 }
 
 uint64_t remap_rte(
-    int32_t requester, uint16_t index, uint8_t vector, bool level, bool active_low
+    int32_t requester,
+    uint16_t index,
+    uint8_t vector,
+    bool level,
+    bool active_low
 ) {
     (void)requester;
     return amd()

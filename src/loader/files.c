@@ -106,7 +106,8 @@ EFI_CHAR16 *files_sibling_path(const EFI_DEVICE_PATH_PROTOCOL *image_path, const
 }
 
 bool files_open_image_volume(
-    EFI_FILE_PROTOCOL **root, const EFI_DEVICE_PATH_PROTOCOL **image_path
+    EFI_FILE_PROTOCOL **root,
+    const EFI_DEVICE_PATH_PROTOCOL **image_path
 ) {
     EFI_LOADED_IMAGE_PROTOCOL *image;
     EFI_STATUS status = efi_bs->HandleProtocol(

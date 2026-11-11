@@ -167,7 +167,9 @@ bool pci_io_device_in_slot(const struct pci_io_device *dev) {
 
 // The upstream bridge of a function, or NULL.
 static const struct pci_io_device *upstream_bridge(
-    const struct pci_io_device *devices, EFI_UINTN count, const struct pci_io_device *dev
+    const struct pci_io_device *devices,
+    EFI_UINTN count,
+    const struct pci_io_device *dev
 ) {
     for (size_t i = 0; i < count; i++) {
         uint8_t secondary = 0;
@@ -226,7 +228,9 @@ static void enable_decoding(EFI_PCI_IO_PROTOCOL *io, bool memory) {
 
 // Enables a function's decoding and that of the bridges above it.
 static void enable_decoding_path(
-    const struct pci_io_device *devices, EFI_UINTN count, const struct pci_io_device *dev,
+    const struct pci_io_device *devices,
+    EFI_UINTN count,
+    const struct pci_io_device *dev,
     bool memory
 ) {
     const struct pci_io_device *bridge = dev;

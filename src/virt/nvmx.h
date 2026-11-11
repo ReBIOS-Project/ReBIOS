@@ -75,7 +75,11 @@ bool nvmx_ept_active(struct vcpu *v);
 // way an EPT violation's qualification gives one; false where that is an exit
 // instead, which waits for the next entry.
 bool nvmx_ept_translate(
-    struct vcpu *v, uintptr_t gpa, uint64_t access, uintptr_t linear, uint64_t *out
+    struct vcpu *v,
+    uintptr_t gpa,
+    uint64_t access,
+    uintptr_t linear,
+    uint64_t *out
 );
 // Whether such an exit waits.
 bool nvmx_exit_pending(struct vcpu *v);

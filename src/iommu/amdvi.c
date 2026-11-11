@@ -280,7 +280,11 @@ static void reg_write(const struct amdvi_unit *u, uint32_t reg, uint64_t value) 
 }
 
 static void command_submit(
-    struct amdvi_unit *u, uint32_t w0, uint32_t w1, uint32_t w2, uint32_t w3
+    struct amdvi_unit *u,
+    uint32_t w0,
+    uint32_t w1,
+    uint32_t w2,
+    uint32_t w3
 ) {
     uint32_t next = (u->command_tail + 1) % LOG_ENTRIES;
     uint64_t deadline = time_ns() + TIMEOUT_NS;
@@ -862,7 +866,10 @@ bool amdvi_posting(void) {
 // the destination, GALogIntr, and the GATag (AMD IOMMU 48882 rev. 3.11,
 // 2.2.5.2), so IsRun changes without invalidations.
 bool amdvi_remap_post(
-    int32_t requester, uint16_t index, uint8_t vector, const struct remap_target *target
+    int32_t requester,
+    uint16_t index,
+    uint8_t vector,
+    const struct remap_target *target
 ) {
     // A destination of all ones is a broadcast.
     bool alone = xt ? target->apic_id != UINT32_MAX : target->apic_id <= MAX_DEST_ID;

@@ -29,11 +29,19 @@ void efi_runtime_init(void);
 // wait for a call in progress on another processor, and EFI_ABORTED for a call
 // in which the firmware's code took a page fault, then EFI_UNSUPPORTED.
 EFI_STATUS efi_runtime_query_variable_info(
-    EFI_UINT32 attributes, EFI_UINT64 *storage, EFI_UINT64 *remaining, EFI_UINT64 *max_size,
+    EFI_UINT32 attributes,
+    EFI_UINT64 *storage,
+    EFI_UINT64 *remaining,
+    EFI_UINT64 *max_size,
     bool wait
 );
 EFI_STATUS efi_runtime_set_variable(
-    EFI_CHAR16 *name, EFI_GUID *guid, EFI_UINT32 attributes, EFI_UINTN size, void *data, bool wait
+    EFI_CHAR16 *name,
+    EFI_GUID *guid,
+    EFI_UINT32 attributes,
+    EFI_UINTN size,
+    void *data,
+    bool wait
 );
 
 // The firmware's reset, which returns if it fails.

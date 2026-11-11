@@ -109,7 +109,10 @@ void acpi_log_failure(uacpi_namespace_node *node, const char *name, uacpi_status
 // _BBN, 0 then, found telling which where it is not NULL. False, logged, where
 // it cannot be evaluated.
 bool acpi_eval_optional(
-    uacpi_namespace_node *node, const char *name, uint64_t *value, bool *found
+    uacpi_namespace_node *node,
+    const char *name,
+    uint64_t *value,
+    bool *found
 );
 
 // The MADT's interrupt controller structure at *offset, which moves past it:
@@ -120,13 +123,20 @@ const struct acpi_entry_hdr *acpi_madt_next(const void *madt, size_t length, siz
 // The processor that a Processor Local APIC or x2APIC structure describes: its
 // APIC ID, ACPI Processor UID, and flags. False for other structures.
 bool acpi_madt_processor(
-    const struct acpi_entry_hdr *entry, uint32_t *apic_id, uint32_t *uid, uint32_t *flags
+    const struct acpi_entry_hdr *entry,
+    uint32_t *apic_id,
+    uint32_t *uid,
+    uint32_t *flags
 );
 // What a Local APIC NMI or Local x2APIC NMI structure says: the ACPI Processor
 // UID of the processor it is for, whether it is for all of them instead, its
 // LINTn pin, and its MPS INTI flags. False for other structures.
 bool acpi_madt_lapic_nmi(
-    const struct acpi_entry_hdr *entry, uint32_t *uid, bool *all, uint8_t *lint, uint16_t *flags
+    const struct acpi_entry_hdr *entry,
+    uint32_t *uid,
+    bool *all,
+    uint8_t *lint,
+    uint16_t *flags
 );
 
 #endif

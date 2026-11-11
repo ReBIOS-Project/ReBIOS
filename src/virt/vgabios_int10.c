@@ -205,7 +205,11 @@ static void font_access_end(const struct vgabios_mode *m) {
 // The rest of the cells cleared first, so that the characters go in one
 // operation.
 static void load_rom_font(
-    const struct vgabios_mode *m, uint16_t font, uint8_t height, uint16_t first, size_t count,
+    const struct vgabios_mode *m,
+    uint16_t font,
+    uint8_t height,
+    uint16_t first,
+    size_t count,
     uint8_t block
 ) {
     font_access_begin();
@@ -219,8 +223,13 @@ static void load_rom_font(
 }
 
 static void load_user_font(
-    const struct vgabios_mode *m, uint16_t segment, uint16_t offset, uint8_t height,
-    uint16_t first, size_t count, uint8_t block
+    const struct vgabios_mode *m,
+    uint16_t segment,
+    uint16_t offset,
+    uint8_t height,
+    uint16_t first,
+    size_t count,
+    uint8_t block
 ) {
     font_access_begin();
     uint16_t base = font_block(block);
@@ -417,7 +426,11 @@ static uint16_t glyph_segment(const struct vgabios_mode *m, uint8_t c) {
 }
 
 static void draw_char(
-    const struct vgabios_mode *m, uint8_t row, uint8_t column, uint8_t c, uint8_t colour
+    const struct vgabios_mode *m,
+    uint8_t row,
+    uint8_t column,
+    uint8_t c,
+    uint8_t colour
 ) {
     uint8_t height = vgabios_peekb(BDA, BDA_CHAR_HEIGHT);
     uint16_t segment = glyph_segment(m, c);
@@ -514,8 +527,14 @@ static void write_chars(uint8_t c, uint8_t page, uint8_t attribute, size_t count
 }
 
 static void scroll_text(
-    const struct vgabios_mode *m, uint8_t page, int lines, uint8_t top, uint8_t left,
-    uint8_t bottom, uint8_t right, uint8_t attribute
+    const struct vgabios_mode *m,
+    uint8_t page,
+    int lines,
+    uint8_t top,
+    uint8_t left,
+    uint8_t bottom,
+    uint8_t right,
+    uint8_t attribute
 ) {
     uint16_t width = (uint16_t)(right - left + 1);
     size_t height = (size_t)(bottom - top + 1);
@@ -617,8 +636,13 @@ static void fill_line(const struct vgabios_mode *m, uint16_t at, size_t bytes, u
 }
 
 static void scroll_graphics(
-    const struct vgabios_mode *m, int lines, uint8_t top, uint8_t left, uint8_t bottom,
-    uint8_t right, uint8_t colour
+    const struct vgabios_mode *m,
+    int lines,
+    uint8_t top,
+    uint8_t left,
+    uint8_t bottom,
+    uint8_t right,
+    uint8_t colour
 ) {
     uint8_t height = vgabios_peekb(BDA, BDA_CHAR_HEIGHT);
     uint16_t segment = m->kind == VGABIOS_MODE_CGA || m->kind == VGABIOS_MODE_CGA1
@@ -667,7 +691,12 @@ static void scroll_graphics(
 }
 
 static void scroll(
-    int lines, uint8_t attribute, uint8_t top, uint8_t left, uint8_t bottom, uint8_t right
+    int lines,
+    uint8_t attribute,
+    uint8_t top,
+    uint8_t left,
+    uint8_t bottom,
+    uint8_t right
 ) {
     const struct vgabios_mode *m = current_mode();
     if (m == NULL) {

@@ -187,7 +187,11 @@ static void mirror_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size
 static const struct mmio_ops mirror_ops = { .read = mirror_read, .write = mirror_write };
 
 static void mirror_add(
-    const struct pci_enum_function *f, unsigned int bar, uint64_t start, uint64_t size, bool nvidia
+    const struct pci_enum_function *f,
+    unsigned int bar,
+    uint64_t start,
+    uint64_t size,
+    bool nvidia
 ) {
     const struct pci_enum_bar *b = &f->bars[bar];
     if ((b->kind != PCI_ENUM_BAR_MEM32 && b->kind != PCI_ENUM_BAR_MEM64) || b->base == 0
@@ -245,7 +249,12 @@ static void port_out(uint16_t port, size_t size, uint32_t value) {
 }
 
 static void window_access(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
+    struct vcpu *v,
+    void *ctx,
+    uint16_t offset,
+    size_t size,
+    bool in,
+    uint32_t *value
 ) {
     (void)v;
     struct window *w = ctx;
@@ -282,8 +291,12 @@ static void window_access(
 }
 
 static void window_add(
-    const struct pci_enum_function *f, unsigned int bar, uint16_t address, uint16_t data,
-    uint16_t ports, bool gated
+    const struct pci_enum_function *f,
+    unsigned int bar,
+    uint16_t address,
+    uint16_t data,
+    uint16_t ports,
+    bool gated
 ) {
     const struct pci_enum_bar *b = &f->bars[bar];
     if (b->kind != PCI_ENUM_BAR_IO || b->base == 0 || b->size < ports) {
@@ -316,7 +329,12 @@ static void window_add(
 }
 
 static void nvidia_vga_access(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
+    struct vcpu *v,
+    void *ctx,
+    uint16_t offset,
+    size_t size,
+    bool in,
+    uint32_t *value
 ) {
     (void)v;
     struct nvidia_vga *n = ctx;
@@ -386,7 +404,11 @@ static uint64_t rtl8168_read(struct vcpu *v, void *ctx, uint64_t offset, size_t 
 }
 
 static void rtl8168_write(
-    struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value
+    struct vcpu *v,
+    void *ctx,
+    uint64_t offset,
+    size_t size,
+    uint64_t value
 ) {
     (void)v;
     struct rtl8168 *r = ctx;

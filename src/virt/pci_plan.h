@@ -114,7 +114,10 @@ struct pci_plan {
 // BARs from high_floor up with pci_high_windows. Needs pci_enum_scan() and
 // pci_cfg_init().
 const struct pci_plan *pci_plan_make(
-    const struct pci_plan_range *obstacles, size_t count, size_t lfb_size, uint64_t high_floor
+    const struct pci_plan_range *obstacles,
+    size_t count,
+    size_t lfb_size,
+    uint64_t high_floor
 );
 
 // The plan, or NULL before pci_plan_make().

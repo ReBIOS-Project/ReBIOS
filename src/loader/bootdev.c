@@ -156,7 +156,9 @@ static uint32_t address_key(const struct handoff_pci_address *address) {
 // The boot controller's records go first, the boot device's own type leading
 // them, then the others by controller and type.
 static bool record_before(
-    const struct handoff_block_device *a, const struct handoff_block_device *b, uint8_t boot_type
+    const struct handoff_block_device *a,
+    const struct handoff_block_device *b,
+    uint8_t boot_type
 ) {
     if (a->boot != b->boot) {
         return a->boot;

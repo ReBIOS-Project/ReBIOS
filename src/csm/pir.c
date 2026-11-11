@@ -69,7 +69,10 @@ _Static_assert(sizeof(struct pir_slot) == 16, "$PIR slot entry layout");
 // the guest's bus, and moves *index past them, as the routes of a device
 // follow each other. Returns whether any of its pins is on an ISA IRQ.
 static bool slot_fill(
-    const struct acpi_irq_pci_route *routes, size_t count, size_t *index, uint8_t bus,
+    const struct acpi_irq_pci_route *routes,
+    size_t count,
+    size_t *index,
+    uint8_t bus,
     struct pir_slot *slot
 ) {
     const struct pci_cfg_addr first = routes[*index].addr;

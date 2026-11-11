@@ -187,7 +187,9 @@ static void query_work(uacpi_handle ctx) {
 
 // The EC's GPE is edge-triggered, ACPI 6.6, 12.6.
 static uacpi_interrupt_ret gpe_handler(
-    uacpi_handle ctx, uacpi_namespace_node *gpe_device, uacpi_u16 idx
+    uacpi_handle ctx,
+    uacpi_namespace_node *gpe_device,
+    uacpi_u16 idx
 ) {
     (void)ctx;
     (void)gpe_device;
@@ -221,7 +223,9 @@ static uacpi_iteration_decision port_found(void *user, uacpi_resource *r) {
 }
 
 static uacpi_iteration_decision device_found(
-    void *user, uacpi_namespace_node *node, uacpi_u32 depth
+    void *user,
+    uacpi_namespace_node *node,
+    uacpi_u32 depth
 ) {
     (void)user;
     (void)depth;

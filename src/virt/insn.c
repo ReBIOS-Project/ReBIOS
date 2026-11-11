@@ -791,7 +791,12 @@ static bool lass_violation(struct vcpu *v, bool long_mode, uint64_t la) {
 // canonical form; elsewhere, compatibility mode included, the segment's
 // usability, type, and limit, an expand-down one's from above it; and LASS.
 static bool linear_allowed(
-    struct vcpu *v, bool long_mode, int reg, uintptr_t ea, size_t size, bool write,
+    struct vcpu *v,
+    bool long_mode,
+    int reg,
+    uintptr_t ea,
+    size_t size,
+    bool write,
     uint64_t *linear
 ) {
     if (long_mode) {
@@ -830,7 +835,12 @@ static bool linear_allowed(
 
 // Where they fail, #SS(0) for SS or #GP(0) is raised.
 static bool linearise(
-    struct vcpu *v, bool long_mode, int reg, uintptr_t ea, size_t size, bool write,
+    struct vcpu *v,
+    bool long_mode,
+    int reg,
+    uintptr_t ea,
+    size_t size,
+    bool write,
     uint64_t *linear
 ) {
     if (linear_allowed(v, long_mode, reg, ea, size, write, linear)) {
@@ -841,7 +851,11 @@ static bool linearise(
 }
 
 bool insn_string_linear(
-    struct vcpu *v, const struct insn *insn, bool destination, size_t size, bool write,
+    struct vcpu *v,
+    const struct insn *insn,
+    bool destination,
+    size_t size,
+    bool write,
     uint64_t *linear
 ) {
     uint64_t mask = address_mask(insn->address_size);
@@ -853,8 +867,14 @@ bool insn_string_linear(
 }
 
 bool insn_string_run(
-    struct vcpu *v, const struct insn *insn, bool destination, size_t size, int64_t step,
-    size_t count, bool write, uint64_t *linear
+    struct vcpu *v,
+    const struct insn *insn,
+    bool destination,
+    size_t size,
+    int64_t step,
+    size_t count,
+    bool write,
+    uint64_t *linear
 ) {
     uint64_t mask = address_mask(insn->address_size);
     uint64_t first = (destination ? v->gprs.rdi : v->gprs.rsi) & mask;
@@ -879,7 +899,12 @@ bool insn_string_run(
 }
 
 bool insn_segment_linear(
-    struct vcpu *v, int reg, uintptr_t ea, size_t size, bool write, uint64_t *linear
+    struct vcpu *v,
+    int reg,
+    uintptr_t ea,
+    size_t size,
+    bool write,
+    uint64_t *linear
 ) {
     uint32_t cs = vcpu_seg_attrib(v, VCPU_SEG_CS);
     bool long_mode = (vcpu_efer(v) & EFER_LMA) != 0 && (cs & VCPU_SEG_L) != 0;

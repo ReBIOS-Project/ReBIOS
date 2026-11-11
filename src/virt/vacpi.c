@@ -493,7 +493,11 @@ static void store_element(struct aml *a, size_t i, size_t j, size_t target_local
 
 // A stub that rebuilds a package of the shape the method's result had.
 static void emit_shaped_stub(
-    struct aml *a, const char name[4], size_t args, size_t index, uacpi_object *shape
+    struct aml *a,
+    const char name[4],
+    size_t args,
+    size_t index,
+    uacpi_object *shape
 ) {
     uacpi_object_array top;
     uacpi_object_get_package(shape, &top);
@@ -582,7 +586,10 @@ static bool emit_replaced(struct aml *a, uacpi_namespace_node *node, const char 
 }
 
 static void emit_method(
-    struct aml *a, uacpi_namespace_node *node, const char name[4], bool in_processor
+    struct aml *a,
+    uacpi_namespace_node *node,
+    const char name[4],
+    bool in_processor
 ) {
     if (name_in(name, left_out_methods) || event_method(name)
      || (in_processor && name_in(name, left_out_processor))
@@ -807,7 +814,12 @@ static size_t resource_size(const uint8_t *p, uint32_t left) {
 // and length fields, each of width bytes, if it is one of the type: ACPI 6.6,
 // 6.4.3.5.
 static bool address_fields(
-    const uint8_t *p, size_t size, uint8_t type, size_t *min, size_t *max, size_t *length,
+    const uint8_t *p,
+    size_t size,
+    uint8_t type,
+    size_t *min,
+    size_t *max,
+    size_t *length,
     size_t *width
 ) {
     switch (p[0]) {
@@ -849,7 +861,11 @@ static bool address_fields(
 // The range an address space descriptor of size bytes and of the type
 // describes, if it is one.
 static bool address_range(
-    const uint8_t *p, size_t size, uint8_t type, uint64_t *base, uint64_t *end
+    const uint8_t *p,
+    size_t size,
+    uint8_t type,
+    uint64_t *base,
+    uint64_t *end
 ) {
     size_t min;
     size_t max;
@@ -1321,7 +1337,9 @@ static const char *const legacy_ids[] = {
 
 // The devices the guest does not get, known before anything refers to them.
 static uacpi_iteration_decision hide_found(
-    void *user, uacpi_namespace_node *node, uacpi_u32 depth
+    void *user,
+    uacpi_namespace_node *node,
+    uacpi_u32 depth
 ) {
     (void)user;
     (void)depth;
@@ -1925,7 +1943,11 @@ static void emit_rcal(struct aml *a) {
 }
 
 static void emit_legacy_device(
-    struct aml *a, const char *name, const char *id, const uint8_t *crs, size_t crs_size
+    struct aml *a,
+    const char *name,
+    const char *id,
+    const uint8_t *crs,
+    size_t crs_size
 ) {
     aml_begin(a, AML_DEVICE);
     aml_name(a, name);
@@ -2131,7 +2153,10 @@ struct pnp_nodes {
 // an End tag, that can be neither configured nor disabled: it then has no
 // possible resources to list, and nor does it list compatible IDs.
 static void pnp_node_add(
-    struct pnp_nodes *nodes, const char *id, const uint8_t *type, const uint8_t *crs,
+    struct pnp_nodes *nodes,
+    const char *id,
+    const uint8_t *type,
+    const uint8_t *crs,
     size_t crs_size
 ) {
     static const uint8_t no_lists[] = { ACPI_TAG_END, 0x00, ACPI_TAG_END, 0x00 };
@@ -2301,7 +2326,10 @@ static void emit_sleep_and_events(struct aml *a) {
 }
 
 static void sdt_ids(
-    const char signature[4], char oem_id[6], char oem_table_id[8], uint32_t *oem_revision
+    const char signature[4],
+    char oem_id[6],
+    char oem_table_id[8],
+    uint32_t *oem_revision
 ) {
     memcpy(oem_id, "REBIOS", 6);
     memcpy(oem_table_id, "REBIOS  ", 8);
@@ -2701,7 +2729,11 @@ static uint64_t doorbell_read(struct vcpu *v, void *ctx, uint64_t offset, size_t
 }
 
 static void doorbell_write(
-    struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value
+    struct vcpu *v,
+    void *ctx,
+    uint64_t offset,
+    size_t size,
+    uint64_t value
 ) {
     (void)ctx;
     (void)offset;
@@ -2859,7 +2891,12 @@ static uint32_t bytes_read(uint32_t reg, uint16_t offset, size_t size) {
 // The guest's PM timer where the machine's fails its checks: the TSC, counted
 // at the PM timer's rate, and as wide as the machine's.
 static void pm_tmr_access(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
+    struct vcpu *v,
+    void *ctx,
+    uint16_t offset,
+    size_t size,
+    bool in,
+    uint32_t *value
 ) {
     (void)v;
     (void)ctx;
@@ -2870,7 +2907,12 @@ static void pm_tmr_access(
 }
 
 static void pm1_evt_access(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
+    struct vcpu *v,
+    void *ctx,
+    uint16_t offset,
+    size_t size,
+    bool in,
+    uint32_t *value
 ) {
     (void)v;
     (void)ctx;
@@ -2897,7 +2939,12 @@ static void pm1_evt_access(
 }
 
 static void pm1_cnt_access(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
+    struct vcpu *v,
+    void *ctx,
+    uint16_t offset,
+    size_t size,
+    bool in,
+    uint32_t *value
 ) {
     (void)v;
     (void)ctx;
@@ -2921,7 +2968,12 @@ static void pm1_cnt_access(
 }
 
 static void gpe0_access(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
+    struct vcpu *v,
+    void *ctx,
+    uint16_t offset,
+    size_t size,
+    bool in,
+    uint32_t *value
 ) {
     (void)v;
     (void)ctx;

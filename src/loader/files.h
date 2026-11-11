@@ -25,7 +25,8 @@
 // and the image's file path on it, or false where the firmware does not give
 // them.
 bool files_open_image_volume(
-    EFI_FILE_PROTOCOL **root, const EFI_DEVICE_PATH_PROTOCOL **image_path
+    EFI_FILE_PROTOCOL **root,
+    const EFI_DEVICE_PATH_PROTOCOL **image_path
 );
 // The absolute path of name in the directory of the image's file path, in a
 // pool allocation, or NULL if that directory is unknown.

@@ -628,8 +628,13 @@ static void resume_l1(struct vcpu *v, struct nsvm *n) {
 // APM 24594 rev. 3.39, VMRUN): VMCB12 takes VMCB02's state and the exit's, and
 // the guest goes on with what VMCB01 held.
 static void exit_to_l1(
-    struct vcpu *v, struct nsvm *n, uint64_t code, uint64_t info1, uint64_t info2,
-    uint64_t intinfo, bool hardware
+    struct vcpu *v,
+    struct nsvm *n,
+    uint64_t code,
+    uint64_t info1,
+    uint64_t info2,
+    uint64_t intinfo,
+    bool hardware
 ) {
     struct vmcb *vmcb02 = n->vmcb02;
     struct vmcb *vmcb12 = (struct vmcb *)guest_mem_page(n->vmcb12);
@@ -973,7 +978,12 @@ static bool npt12_mark(const struct nsvm *n, void *at, uint64_t was, uint64_t se
 // which sets its accessed flags and, for a write, its dirty flag, else the
 // nested page fault's error code.
 static uint64_t npt12_walk(
-    struct nsvm *n, uintptr_t gpa, bool write, bool fetch, bool user, struct npt12_walk *w
+    struct nsvm *n,
+    uintptr_t gpa,
+    bool write,
+    bool fetch,
+    bool user,
+    struct npt12_walk *w
 ) {
     bool wide = n->npt_wide;
     // The fetch flag is defined only with SMEP or with PAE paging's NX (APM
@@ -1166,8 +1176,12 @@ static uint8_t npt12_memtype(const struct nsvm *n, const struct npt12_walk *w) {
 // 3.46, 15.16). Where the hypervisor's memory type is not write-back, it wins
 // but over uncacheable.
 static uint64_t npt02_leaf(
-    const struct nsvm *n, const struct npt12_walk *w, uintptr_t hpa, uint32_t prot,
-    uint8_t memtype, size_t level
+    const struct nsvm *n,
+    const struct npt12_walk *w,
+    uintptr_t hpa,
+    uint32_t prot,
+    uint8_t memtype,
+    size_t level
 ) {
     uint8_t type = npt12_memtype(n, w);
     if (memtype != MT_WB && type != MT_UC) {
@@ -1783,7 +1797,13 @@ bool nsvm_npt_active(struct vcpu *v) {
 }
 
 bool nsvm_npt_translate(
-    struct vcpu *v, uintptr_t gpa, bool write, bool fetch, bool walk, bool user, uint64_t *out
+    struct vcpu *v,
+    uintptr_t gpa,
+    bool write,
+    bool fetch,
+    bool walk,
+    bool user,
+    uint64_t *out
 ) {
     struct nsvm *n = v->nsvm;
     if (n->pending) {
@@ -1858,7 +1878,11 @@ bool nsvm_l2_exit(struct vcpu *v) {
 }
 
 bool nsvm_exception(
-    struct vcpu *v, uint8_t vector, bool has_error, uint32_t error, uint64_t info2
+    struct vcpu *v,
+    uint8_t vector,
+    bool has_error,
+    uint32_t error,
+    uint64_t info2
 ) {
     struct nsvm *n = v->nsvm;
     if (n == NULL || !n->in_l2) {

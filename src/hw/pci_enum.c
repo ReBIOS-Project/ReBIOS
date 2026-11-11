@@ -113,7 +113,9 @@ static void line_flush(struct log_line *line) {
 // Items that would take the line past LOG_LINE_MAX go on a new one, which
 // repeats the prefix.
 __attribute__((format(printf, 2, 0))) static void line_vadd(
-    struct log_line *line, const char *fmt, va_list args
+    struct log_line *line,
+    const char *fmt,
+    va_list args
 ) {
     char item[LOG_ITEM_MAX];
     int n = vsnprintf(item, sizeof(item), fmt, args);
@@ -132,7 +134,9 @@ __attribute__((format(printf, 2, 0))) static void line_vadd(
 }
 
 __attribute__((format(printf, 2, 3))) static void line_start(
-    struct log_line *line, const char *fmt, ...
+    struct log_line *line,
+    const char *fmt,
+    ...
 ) {
     line->length = 0;
     line->prefix_length = 0;
@@ -144,7 +148,9 @@ __attribute__((format(printf, 2, 3))) static void line_start(
 }
 
 __attribute__((format(printf, 2, 3))) static void line_add(
-    struct log_line *line, const char *fmt, ...
+    struct log_line *line,
+    const char *fmt,
+    ...
 ) {
     va_list args;
     va_start(args, fmt);
@@ -177,7 +183,10 @@ static void decode_restore(const struct pci_enum_function *f, uint16_t command, 
 }
 
 static void bar_sample_read(
-    struct pci_cfg_addr addr, uint8_t reg, bool last_slot, struct bar_sample *s
+    struct pci_cfg_addr addr,
+    uint8_t reg,
+    bool last_slot,
+    struct bar_sample *s
 ) {
     *s = (struct bar_sample){ .reg = reg };
     s->low = pci_cfg_read(addr, reg, 4);
@@ -277,7 +286,9 @@ static bool bar_sample_result(const struct bar_sample *s, struct pci_enum_bar *b
 }
 
 static void bar_record(
-    const struct pci_enum_function *f, const struct bar_sample *s, struct pci_enum_bar *bar
+    const struct pci_enum_function *f,
+    const struct bar_sample *s,
+    struct pci_enum_bar *bar
 ) {
     if (s->malformed) {
         printf(
@@ -300,7 +311,10 @@ static void bar_record(
 // rom_reg unless it is 0, with the function's decoding off unless it is a host
 // bridge.
 static void size_bars(
-    struct pci_enum_function *f, unsigned int first, unsigned int end, uint8_t rom_reg
+    struct pci_enum_function *f,
+    unsigned int first,
+    unsigned int end,
+    uint8_t rom_reg
 ) {
     struct bar_sample samples[6];
     struct bar_sample rom = { .kind = PCI_ENUM_BAR_NONE };
@@ -470,7 +484,10 @@ static const char *bar_kind_name(const struct pci_enum_bar *bar) {
 }
 
 static void line_add_window(
-    struct log_line *line, const char *name, uintptr_t base, uint64_t limit
+    struct log_line *line,
+    const char *name,
+    uintptr_t base,
+    uint64_t limit
 ) {
     if (limit < base) {
         line_add(line, " %s closed", name);
@@ -791,7 +808,10 @@ static bool rebar_has(uint64_t supported, int encoding) {
 }
 
 static void rebar_resize(
-    struct pci_enum_function *f, uint8_t index, uint32_t control_reg, unsigned int encoding
+    struct pci_enum_function *f,
+    uint8_t index,
+    uint32_t control_reg,
+    unsigned int encoding
 ) {
     struct pci_enum_bar *bar = &f->bars[index];
     bool wide = bar->kind == PCI_ENUM_BAR_MEM64;
@@ -838,7 +858,10 @@ static void rebar_resize(
 }
 
 static void rebar_shrink(
-    struct pci_enum_function *f, uint32_t control_reg, uint32_t capability, uint32_t control,
+    struct pci_enum_function *f,
+    uint32_t control_reg,
+    uint32_t capability,
+    uint32_t control,
     size_t max_size
 ) {
     uint8_t index = control & REBAR_INDEX;

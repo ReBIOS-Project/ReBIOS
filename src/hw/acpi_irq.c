@@ -131,7 +131,9 @@ static bool device_present(uacpi_namespace_node *node) {
 }
 
 static uacpi_iteration_decision host_bridge_found(
-    void *user, uacpi_namespace_node *node, uacpi_u32 depth
+    void *user,
+    uacpi_namespace_node *node,
+    uacpi_u32 depth
 ) {
     (void)depth;
     struct lookup *l = user;
@@ -170,7 +172,9 @@ static uacpi_iteration_decision host_bridge_found(
 // Should the namespace give a bus to more than one host bridge, those not
 // present make way for one that is.
 static uacpi_namespace_node *host_bridge_node(
-    const struct lookup *l, uint16_t segment, uint8_t bus
+    const struct lookup *l,
+    uint16_t segment,
+    uint8_t bus
 ) {
     uacpi_namespace_node *first = NULL;
     for (size_t i = 0; i < l->host_bridge_count; i++) {
@@ -217,7 +221,10 @@ static uacpi_namespace_node *child_at(uacpi_namespace_node *parent, uint64_t adr
 // The bus's device object is its host bridge, or else the child of the object
 // of the bus above that has the address of the bus's bridge.
 static struct bus_info *bus_get(
-    struct lookup *l, uint16_t segment, uint8_t number, const struct pci_enum_function *bridge
+    struct lookup *l,
+    uint16_t segment,
+    uint8_t number,
+    const struct pci_enum_function *bridge
 ) {
     for (size_t i = 0; i < l->bus_count; i++) {
         if (l->buses[i].segment == segment && l->buses[i].number == number) {
@@ -258,7 +265,9 @@ static struct bus_info *bus_get(
 }
 
 static const uacpi_pci_routing_table_entry *prt_find(
-    const uacpi_pci_routing_table *prt, uint8_t device, uint8_t pin
+    const uacpi_pci_routing_table *prt,
+    uint8_t device,
+    uint8_t pin
 ) {
     if (prt == NULL) {
         return NULL;
@@ -280,7 +289,10 @@ static uint8_t bridge_pin(uint8_t device, uint8_t pin) {
 }
 
 static void route_set(
-    struct acpi_irq_pci_route *route, uint32_t gsi, uint8_t triggering, uint8_t polarity
+    struct acpi_irq_pci_route *route,
+    uint32_t gsi,
+    uint8_t triggering,
+    uint8_t polarity
 ) {
     route->gsi = gsi;
     route->level = triggering == UACPI_TRIGGERING_LEVEL;
@@ -351,7 +363,9 @@ static uint32_t link_active(uacpi_namespace_node *node) {
 }
 
 static uacpi_iteration_decision link_found(
-    void *user, uacpi_namespace_node *node, uacpi_u32 depth
+    void *user,
+    uacpi_namespace_node *node,
+    uacpi_u32 depth
 ) {
     (void)depth;
     size_t *count = user;
@@ -472,7 +486,9 @@ static bool link_enable(struct link *l) {
 }
 
 static bool link_interrupt(
-    uacpi_namespace_node *link, uint32_t index, struct acpi_irq_pci_route *route
+    uacpi_namespace_node *link,
+    uint32_t index,
+    struct acpi_irq_pci_route *route
 ) {
     if (!links_done) {
         links_find();
@@ -496,7 +512,8 @@ static bool link_interrupt(
 
 // ACPI 6.6, 6.2.14: without a Source, the Source Index is the GSI.
 static bool entry_resolve(
-    const uacpi_pci_routing_table_entry *entry, struct acpi_irq_pci_route *route
+    const uacpi_pci_routing_table_entry *entry,
+    struct acpi_irq_pci_route *route
 ) {
     if (entry->source == NULL) {
         // As PCI interrupt lines are.
@@ -507,7 +524,9 @@ static bool entry_resolve(
 }
 
 static bool route_find(
-    struct lookup *l, const struct pci_enum_function *f, struct acpi_irq_pci_route *route
+    struct lookup *l,
+    const struct pci_enum_function *f,
+    struct acpi_irq_pci_route *route
 ) {
     const struct pci_enum_function *at = f;
     uint8_t device = f->addr.device;
@@ -609,7 +628,9 @@ static uacpi_iteration_decision claim_resource(void *user, uacpi_resource *resou
 }
 
 static uacpi_iteration_decision claim_device(
-    void *user, uacpi_namespace_node *node, uacpi_u32 depth
+    void *user,
+    uacpi_namespace_node *node,
+    uacpi_u32 depth
 ) {
     (void)depth;
     if (uacpi_device_matches_pnp_id(node, acpi_link_ids)) {

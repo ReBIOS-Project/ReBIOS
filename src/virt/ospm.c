@@ -322,7 +322,8 @@ static struct cpu *processor_cpu(uacpi_namespace_node *processor, uacpi_object_t
 // The register that the processor's _PTC names to control its T-states (ACPI
 // 6.6, 8.4.4.1), if it has one.
 static bool tstate_register(
-    uacpi_namespace_node *processor, uacpi_resource_generic_register *reg
+    uacpi_namespace_node *processor,
+    uacpi_resource_generic_register *reg
 ) {
     uacpi_object *ptc;
     if (uacpi_eval_simple_package(processor, "_PTC", &ptc) != UACPI_STATUS_OK) {
@@ -350,8 +351,10 @@ static bool tstate_register(
 // for Intel's functional fixed hardware, the processor's
 // IA32_CLOCK_MODULATION, which it writes itself.
 static bool tstate_write(
-    const uacpi_resource_generic_register *reg, uacpi_namespace_node *processor,
-    uacpi_object_type type, uint64_t control
+    const uacpi_resource_generic_register *reg,
+    uacpi_namespace_node *processor,
+    uacpi_object_type type,
+    uint64_t control
 ) {
     if (reg->address_space_id == UACPI_ADDRESS_SPACE_SYSTEM_IO && reg->address != 0
      && reg->address <= 0xfffc && reg->bit_width + reg->bit_offset <= 32) {
@@ -386,7 +389,10 @@ static bool tstate_write(
 // 6.6, 8.4.4), if it has them, and how many steps slower than the fastest the
 // slowest is.
 static bool tstate(
-    uacpi_namespace_node *processor, uacpi_object_type type, size_t steps, uint64_t min_percent,
+    uacpi_namespace_node *processor,
+    uacpi_object_type type,
+    size_t steps,
+    uint64_t min_percent,
     size_t *most
 ) {
     uacpi_resource_generic_register reg;
@@ -425,7 +431,10 @@ static bool tstate(
 // full speed, but none slower than min_percent, if it has one, and how many
 // steps slower than full speed the slowest is.
 static bool duty_cycle(
-    uacpi_namespace_node *processor, uacpi_object_type type, size_t steps, uint64_t min_percent,
+    uacpi_namespace_node *processor,
+    uacpi_object_type type,
+    size_t steps,
+    uint64_t min_percent,
     size_t *most
 ) {
     struct acpi_fadt *fadt;
@@ -629,7 +638,9 @@ static uacpi_status zone_notified(uacpi_handle ctx, uacpi_namespace_node *node, 
 }
 
 static uacpi_iteration_decision zone_found(
-    void *ctx, uacpi_namespace_node *node, uacpi_u32 depth
+    void *ctx,
+    uacpi_namespace_node *node,
+    uacpi_u32 depth
 ) {
     (void)ctx;
     (void)depth;

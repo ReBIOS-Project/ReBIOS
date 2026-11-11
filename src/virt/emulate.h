@@ -39,7 +39,11 @@ struct emulate_mem {
     // registers left for the caller to step: 0 where they are to be emulated
     // one at a time.
     size_t (*string)(
-        struct vcpu *v, const struct insn *insn, size_t size, int64_t delta, size_t count
+        struct vcpu *v,
+        const struct insn *insn,
+        size_t size,
+        int64_t delta,
+        size_t count
     );
 };
 

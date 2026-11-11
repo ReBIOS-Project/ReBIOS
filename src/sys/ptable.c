@@ -22,7 +22,10 @@
 #include <sys/x86.h>
 
 uint64_t *ptable_table_for(
-    const struct ptable_format *format, uint64_t *root, uintptr_t address, size_t level
+    const struct ptable_format *format,
+    uint64_t *root,
+    uintptr_t address,
+    size_t level
 ) {
     uint64_t *table = root;
     for (size_t l = 3; l > level; l--) {
@@ -45,8 +48,13 @@ uint64_t *ptable_table_for(
 }
 
 void ptable_map(
-    const struct ptable_format *format, uint64_t *root, uintptr_t address, uintptr_t target,
-    size_t size, uint64_t attributes, size_t max_level
+    const struct ptable_format *format,
+    uint64_t *root,
+    uintptr_t address,
+    uintptr_t target,
+    size_t size,
+    uint64_t attributes,
+    size_t max_level
 ) {
     while (size != 0) {
         size_t level = 0;
@@ -70,7 +78,10 @@ void ptable_map(
 }
 
 uint64_t *ptable_leaf(
-    const struct ptable_format *format, uint64_t *root, uintptr_t address, size_t *level,
+    const struct ptable_format *format,
+    uint64_t *root,
+    uintptr_t address,
+    size_t *level,
     uint64_t *entry
 ) {
     uint64_t *table = root;

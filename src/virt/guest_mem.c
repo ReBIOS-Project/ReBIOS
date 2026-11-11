@@ -89,7 +89,12 @@ uint8_t *guest_mem_page(uintptr_t gpa) {
 // the guest's EPT or nested page tables where the vCPU runs the guest's guest,
 // else past the A20 gate.
 static bool reach(
-    struct vcpu *v, uintptr_t gpa, uint64_t access, bool user, uintptr_t linear, uint64_t *out,
+    struct vcpu *v,
+    uintptr_t gpa,
+    uint64_t access,
+    bool user,
+    uintptr_t linear,
+    uint64_t *out,
     uint32_t *pf_error
 ) {
     if (nvmx_ept_active(v)) {
@@ -115,7 +120,12 @@ static bool reach(
 }
 
 static bool read_entry(
-    struct vcpu *v, uintptr_t gpa, uintptr_t linear, uint64_t *entry, bool wide, uint32_t *pf_error
+    struct vcpu *v,
+    uintptr_t gpa,
+    uintptr_t linear,
+    uint64_t *entry,
+    bool wide,
+    uint32_t *pf_error
 ) {
     bool reached = reach(v, gpa, EPT_QUAL_READ | EPT_QUAL_LINEAR, true, linear, &gpa, pf_error);
     if (!reached) {
@@ -136,7 +146,12 @@ static bool read_entry(
 // it was: false where the entry changed meanwhile, for the walk to start
 // again. Entries the guest cannot write are left as they are.
 static bool mark_entry(
-    struct vcpu *v, uintptr_t gpa, uintptr_t linear, uint64_t was, uint64_t set, bool wide,
+    struct vcpu *v,
+    uintptr_t gpa,
+    uintptr_t linear,
+    uint64_t was,
+    uint64_t set,
+    bool wide,
     uint32_t *pf_error
 ) {
     uintptr_t hpa;
@@ -242,8 +257,14 @@ static uint64_t data_access(bool write, bool fetch) {
 // is a supervisor-mode one the processor makes for itself, as to descriptor
 // tables, which SMAP cannot be lifted for.
 static bool linear_to_phys(
-    struct vcpu *v, uintptr_t linear, bool write, bool fetch, bool user, bool implicit,
-    uint64_t *gpa, uint32_t *pf_error
+    struct vcpu *v,
+    uintptr_t linear,
+    bool write,
+    bool fetch,
+    bool user,
+    bool implicit,
+    uint64_t *gpa,
+    uint32_t *pf_error
 ) {
     uint64_t cr0 = vcpu_cr0(v);
     uint64_t cr4 = vcpu_cr4(v);
@@ -408,7 +429,12 @@ retry: *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0)
 }
 
 bool guest_mem_linear_to_phys(
-    struct vcpu *v, uintptr_t linear, bool write, bool fetch, uint64_t *gpa, uint32_t *pf_error
+    struct vcpu *v,
+    uintptr_t linear,
+    bool write,
+    bool fetch,
+    uint64_t *gpa,
+    uint32_t *pf_error
 ) {
     return linear_to_phys(v, linear, write, fetch, vcpu_cpl(v) == 3, false, gpa, pf_error);
 }
@@ -416,7 +442,12 @@ bool guest_mem_linear_to_phys(
 // What the processor reads and writes for itself, such as descriptor tables
 // and the TSS, it does with supervisor rights at any CPL.
 static bool system_access(
-    struct vcpu *v, uintptr_t linear, void *buf, size_t len, bool write, uint32_t *pf_error,
+    struct vcpu *v,
+    uintptr_t linear,
+    void *buf,
+    size_t len,
+    bool write,
+    uint32_t *pf_error,
     uint64_t *pf_linear
 ) {
     uint8_t *p = buf;
@@ -440,14 +471,22 @@ static bool system_access(
 }
 
 bool guest_mem_system_read(
-    struct vcpu *v, uintptr_t linear, void *buf, size_t len, uint32_t *pf_error,
+    struct vcpu *v,
+    uintptr_t linear,
+    void *buf,
+    size_t len,
+    uint32_t *pf_error,
     uint64_t *pf_linear
 ) {
     return system_access(v, linear, buf, len, false, pf_error, pf_linear);
 }
 
 bool guest_mem_system_write(
-    struct vcpu *v, uintptr_t linear, const void *buf, size_t len, uint32_t *pf_error,
+    struct vcpu *v,
+    uintptr_t linear,
+    const void *buf,
+    size_t len,
+    uint32_t *pf_error,
     uint64_t *pf_linear
 ) {
     return system_access(v, linear, (void *)buf, len, true, pf_error, pf_linear);

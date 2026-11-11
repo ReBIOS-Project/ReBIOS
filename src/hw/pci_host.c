@@ -199,8 +199,11 @@ static void window_add(struct host_bridge *hb, uintptr_t base, uintptr_t end, bo
 }
 
 static void crs_address(
-    struct crs_scan *s, const uacpi_resource_address_common *common, uintptr_t minimum,
-    size_t length, uint64_t translation
+    struct crs_scan *s,
+    const uacpi_resource_address_common *common,
+    uintptr_t minimum,
+    size_t length,
+    uint64_t translation
 ) {
     if (common->type == UACPI_RANGE_BUS) {
         if (s->hb != NULL && !s->bus_found) {
@@ -312,7 +315,9 @@ static void host_bridge_log(const struct host_bridge *hb, const char *path) {
 }
 
 static bool host_bridge_known(
-    const struct scan *r, const struct host_bridge *hb, const char *name
+    const struct scan *r,
+    const struct host_bridge *hb,
+    const char *name
 ) {
     for (size_t i = 0; i < r->bridge_count; i++) {
         if (r->bridges[i].segment == hb->segment && r->bridges[i].bus == hb->bus) {
@@ -373,7 +378,9 @@ static void host_bridge_found(struct scan *r, uacpi_namespace_node *node) {
 }
 
 static uacpi_iteration_decision device_found(
-    void *user, uacpi_namespace_node *node, uacpi_u32 depth
+    void *user,
+    uacpi_namespace_node *node,
+    uacpi_u32 depth
 ) {
     (void)depth;
     struct scan *r = user;

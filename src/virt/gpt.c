@@ -289,7 +289,11 @@ uintptr_t gpt_cpu_gpa(uintptr_t gpa) {
 }
 
 bool gpt_translate_leaf(
-    uintptr_t gpa, uint64_t *hpa, uint32_t *prot, uint8_t *memtype, size_t *level
+    uintptr_t gpa,
+    uint64_t *hpa,
+    uint32_t *prot,
+    uint8_t *memtype,
+    size_t *level
 ) {
     size_t l;
     uint64_t e;

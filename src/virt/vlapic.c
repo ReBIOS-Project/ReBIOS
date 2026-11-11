@@ -1461,7 +1461,11 @@ static bool lowest_candidate(const struct vlapic *vl) {
 }
 
 void vlapic_deliver_external(
-    uint32_t dest, bool logical, uint8_t vector, bool level, bool lowest
+    uint32_t dest,
+    bool logical,
+    uint8_t vector,
+    bool level,
+    bool lowest
 ) {
     for (size_t i = 0; i < smp_cpu_count(); i++) {
         struct vcpu *to = smp_cpu(i)->vcpu;
@@ -1542,7 +1546,11 @@ struct cpu *vlapic_msi_target(uint32_t address) {
 // The guest has no SMM, and a message has no 8259 to acknowledge: SMI and
 // ExtINT messages go nowhere.
 void vlapic_deliver_message(
-    uint32_t dest, bool logical, uint32_t mode, uint8_t vector, bool level
+    uint32_t dest,
+    bool logical,
+    uint32_t mode,
+    uint8_t vector,
+    bool level
 ) {
     if (mode == ICR_DELIVERY_FIXED || mode == ICR_DELIVERY_LOWEST) {
         vlapic_deliver_external(dest, logical, vector, level, mode == ICR_DELIVERY_LOWEST);
@@ -1579,7 +1587,10 @@ void vlapic_deliver_msi(uint32_t address, uint32_t data) {
 // descriptors' destinations in the local APICs' mode, which they hold them in,
 // and with SVM, while AVIC runs the local APICs from their registers.
 bool vlapic_post_target(
-    uint32_t address, uint32_t data, size_t count, struct remap_target *target
+    uint32_t address,
+    uint32_t data,
+    size_t count,
+    struct remap_target *target
 ) {
     if (virt_vmx) {
         if (!posted_interrupts || remap_x2apic_on() != lapic_host_x2apic()) {

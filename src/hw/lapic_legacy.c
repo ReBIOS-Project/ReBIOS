@@ -77,7 +77,10 @@ static void read_regs(uint32_t max, struct lapic_regs *regs) {
 }
 
 static void log_regs(
-    uint32_t apic_id, const char *what, const struct lapic_regs *regs, uint32_t max_entry
+    uint32_t apic_id,
+    const char *what,
+    const struct lapic_regs *regs,
+    uint32_t max_entry
 ) {
     char line[256];
     int len = snprintf(line, sizeof(line), "TPR %#x SVR %#x", regs->tpr, regs->svr);

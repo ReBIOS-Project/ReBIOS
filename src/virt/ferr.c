@@ -68,7 +68,12 @@ static void latch(bool up) {
 // COPROC_ERR: any write lowers IRQ13 and asserts IGNNE#, while FERR# is up;
 // reads find nothing, as of a register that is written only.
 static void coproc_err(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
+    struct vcpu *v,
+    void *ctx,
+    uint16_t offset,
+    size_t size,
+    bool in,
+    uint32_t *value
 ) {
     (void)v;
     (void)ctx;

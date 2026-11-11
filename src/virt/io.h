@@ -29,7 +29,12 @@ struct io_handler {
     size_t count;
     // offset is from base. value is in and out.
     void (*access)(
-        struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
+        struct vcpu *v,
+        void *ctx,
+        uint16_t offset,
+        size_t size,
+        bool in,
+        uint32_t *value
     );
     void *ctx;
     // An 8-bit device's, which takes a wider access as an ISA bus runs it, one

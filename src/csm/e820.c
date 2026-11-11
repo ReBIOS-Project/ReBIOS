@@ -147,7 +147,10 @@ static uint32_t efi_type_to_e820(uint32_t type) {
 }
 
 bool e820_set_efi_map(
-    struct e820_map *map, const void *efi_mmap, size_t mmap_size, size_t desc_size
+    struct e820_map *map,
+    const void *efi_mmap,
+    size_t mmap_size,
+    size_t desc_size
 ) {
     if (desc_size < sizeof(EFI_MEMORY_DESCRIPTOR)) {
         return false;

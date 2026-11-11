@@ -66,7 +66,10 @@ bool e820_set(struct e820_map *map, uintptr_t base, size_t size, uint32_t type);
 // Sets every range of a UEFI memory map, as it stands after
 // ExitBootServices(), to the corresponding E820 type.
 bool e820_set_efi_map(
-    struct e820_map *map, const void *efi_mmap, size_t mmap_size, size_t desc_size
+    struct e820_map *map,
+    const void *efi_mmap,
+    size_t mmap_size,
+    size_t desc_size
 );
 
 // Replaces the first MiB with base memory, a 1 KiB extended BIOS data area,

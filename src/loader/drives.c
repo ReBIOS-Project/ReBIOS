@@ -71,7 +71,10 @@ struct disk_info {
     EFI_STATUS(EFI_API *inquiry)(struct disk_info *self, void *data, uint32_t *size);
     EFI_STATUS(EFI_API *identify)(struct disk_info *self, void *data, uint32_t *size);
     EFI_STATUS(EFI_API *sense_data)(
-        struct disk_info *self, void *data, uint32_t *size, uint8_t *count
+        struct disk_info *self,
+        void *data,
+        uint32_t *size,
+        uint8_t *count
     );
     EFI_STATUS(EFI_API *which_ide)(struct disk_info *self, uint32_t *channel, uint32_t *device);
 };
@@ -276,8 +279,11 @@ static void path_text(EFI_DEVICE_PATH_PROTOCOL *path, char *out, size_t size) {
 
 // The location of the PCI function at the end of the path's first nodes.
 static bool pci_location(
-    EFI_DEVICE_PATH_PROTOCOL *path, size_t length, EFI_PCI_IO_PROTOCOL **pci_io,
-    EFI_UINTN *segment, EFI_UINTN *bus
+    EFI_DEVICE_PATH_PROTOCOL *path,
+    size_t length,
+    EFI_PCI_IO_PROTOCOL **pci_io,
+    EFI_UINTN *segment,
+    EFI_UINTN *bus
 ) {
     uint8_t buffer[512];
     if (length + EFI_END_DEVICE_PATH_LENGTH > sizeof(buffer)) {
@@ -494,7 +500,10 @@ static void nvme_model(EFI_DEVICE_PATH_PROTOCOL *path, char *out, size_t size) {
 }
 
 static void drive_model(
-    EFI_HANDLE handle, EFI_DEVICE_PATH_PROTOCOL *path, char *out, size_t size
+    EFI_HANDLE handle,
+    EFI_DEVICE_PATH_PROTOCOL *path,
+    char *out,
+    size_t size
 ) {
     out[0] = 0;
     struct disk_info *info;

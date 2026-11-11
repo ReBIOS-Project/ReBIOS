@@ -81,7 +81,11 @@ void vlapic_deliver_external(uint32_t dest, bool logical, uint8_t vector, bool l
 // says it, mode as the interrupt command register has it, to the vCPUs an
 // 8-bit destination names: fixed, or lowest priority, NMI, and INIT.
 void vlapic_deliver_message(
-    uint32_t dest, bool logical, uint32_t mode, uint8_t vector, bool level
+    uint32_t dest,
+    bool logical,
+    uint32_t mode,
+    uint8_t vector,
+    bool level
 );
 // A message-signalled interrupt the guest programmed, as the APIC bus takes
 // it.
@@ -90,7 +94,10 @@ void vlapic_deliver_msi(uint32_t address, uint32_t data);
 // vlapic_deliver_msi() does, or false; and whether the vCPU changed what
 // decides that since the last call.
 bool vlapic_post_target(
-    uint32_t address, uint32_t data, size_t count, struct remap_target *target
+    uint32_t address,
+    uint32_t data,
+    size_t count,
+    struct remap_target *target
 );
 bool vlapic_post_changed(struct vcpu *v);
 // The processor of the first vCPU an 8-bit destination names, or NULL.

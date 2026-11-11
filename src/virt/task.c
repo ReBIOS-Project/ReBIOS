@@ -339,7 +339,11 @@ static void push_error(struct switcher *s, uint32_t error, size_t size) {
 }
 
 void task_switch(
-    struct vcpu *v, uint16_t selector, int source, const struct task_event *event, size_t length
+    struct vcpu *v,
+    uint16_t selector,
+    int source,
+    const struct task_event *event,
+    size_t length
 ) {
     struct switcher s = { .v = v, .event = event };
     struct vcpu_segment tr;

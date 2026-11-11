@@ -162,8 +162,13 @@ void aml_field_unit(struct aml *a, const char *name, uint32_t bits);
 // Fills a definition block's header, checksum included, in front of the AML at
 // table: SDT_HEADER_SIZE bytes, then the AML.
 void aml_table_header(
-    uint8_t *table, size_t length, const char signature[4], uint8_t revision, const char oem_id[6],
-    const char oem_table_id[8], uint32_t oem_revision
+    uint8_t *table,
+    size_t length,
+    const char signature[4],
+    uint8_t revision,
+    const char oem_id[6],
+    const char oem_table_id[8],
+    uint32_t oem_revision
 );
 
 #define AML_SDT_HEADER_SIZE 36

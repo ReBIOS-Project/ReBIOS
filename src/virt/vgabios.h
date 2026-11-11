@@ -182,7 +182,11 @@ void vgabios_far_fill16(uint16_t segment, uint16_t offset, uint16_t value, size_
 void vgabios_far_move(uint16_t segment, uint16_t to, uint16_t from, size_t count);
 // A character map's height bytes per character to count cells of 32 bytes.
 void vgabios_far_font(
-    uint16_t to_segment, uint16_t to, uint16_t from_segment, uint16_t from, uint8_t height,
+    uint16_t to_segment,
+    uint16_t to,
+    uint16_t from_segment,
+    uint16_t from,
+    uint8_t height,
     size_t count
 );
 // The caller's ECX.

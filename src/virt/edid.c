@@ -61,7 +61,11 @@ static void display_descriptor(uint8_t *d, uint8_t tag) {
 }
 
 static void preferred_timing(
-    uint8_t *d, uint32_t width, uint32_t height, uint32_t clock, uint32_t v_blank
+    uint8_t *d,
+    uint32_t width,
+    uint32_t height,
+    uint32_t clock,
+    uint32_t v_blank
 ) {
     uint32_t v_front = v_blank - V_SYNC - V_BACK_PORCH;
     if (v_front > DTD_V_FRONT_PORCH_MAX) {

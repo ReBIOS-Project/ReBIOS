@@ -92,7 +92,11 @@ void nsvm_interrupt_window(struct vcpu *v, bool on);
 // An exception that what the hypervisor carries out for the guest's guest
 // raises: whether the guest intercepts it instead, with the EXITINFO2 given.
 bool nsvm_exception(
-    struct vcpu *v, uint8_t vector, bool has_error, uint32_t error, uint64_t info2
+    struct vcpu *v,
+    uint8_t vector,
+    bool has_error,
+    uint32_t error,
+    uint64_t info2
 );
 // Whether the guest intercepts an exception of its guest, which the vCPU runs.
 bool nsvm_intercepts_exception(struct vcpu *v, uint8_t vector);
@@ -117,7 +121,13 @@ bool nsvm_npt_active(struct vcpu *v);
 // not: false where that is a nested page fault of the guest's instead, which
 // waits for the next entry.
 bool nsvm_npt_translate(
-    struct vcpu *v, uintptr_t gpa, bool write, bool fetch, bool walk, bool user, uint64_t *out
+    struct vcpu *v,
+    uintptr_t gpa,
+    bool write,
+    bool fetch,
+    bool walk,
+    bool user,
+    uint64_t *out
 );
 // The hypervisor's nested page tables changed: the translations of every ASID
 // the guest's guests ran in go too.

@@ -194,7 +194,11 @@ static uintptr_t fit_top(uint64_t lo, uint64_t hi, size_t size, uint64_t align) 
 // Takes the highest align-aligned size bytes clear of [avoid_base, avoid_end)
 // and of the first 2 MiB off the list, or returns 0.
 static uintptr_t take_top(
-    struct range_list *list, size_t size, uint64_t align, uintptr_t avoid_base, uintptr_t avoid_end
+    struct range_list *list,
+    size_t size,
+    uint64_t align,
+    uintptr_t avoid_base,
+    uintptr_t avoid_end
 ) {
     for (size_t i = list->count; i-- > 0; ) {
         uint64_t lo = list->r[i].base > TWO_MIB ? list->r[i].base : TWO_MIB;

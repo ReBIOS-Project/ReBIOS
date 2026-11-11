@@ -562,7 +562,11 @@ static uint64_t exit_instr_info(void) {
 // The linear address of a VMX instruction's memory operand, which it reads or
 // writes, or false with the fault raised.
 static bool operand_address(
-    struct vcpu *v, uint64_t info, size_t size, bool write, uint64_t *linear
+    struct vcpu *v,
+    uint64_t info,
+    size_t size,
+    bool write,
+    uint64_t *linear
 ) {
     uintptr_t address = vmx_read(VMCS_EXIT_QUALIFICATION);
     if ((info & INFO_NO_BASE) == 0) {
@@ -1297,8 +1301,12 @@ static uint64_t ept02_pointer(struct nvmx *n) {
 // Vol. 3C, 31.3.5). Where the hypervisor's memory type is not write-back, it
 // wins but over uncacheable.
 static uint64_t ept02_leaf(
-    const struct nvmx *n, const struct ept12_walk *w, uintptr_t hpa, uint32_t prot,
-    uint8_t memtype, size_t level
+    const struct nvmx *n,
+    const struct ept12_walk *w,
+    uintptr_t hpa,
+    uint32_t prot,
+    uint8_t memtype,
+    size_t level
 ) {
     uint64_t e = hpa & PTE_ADDRESS & ~(x86_level_size(level) - 1);
     if ((w->rights & EPT_R) != 0 && (prot & GPT_R) != 0) {
@@ -2036,7 +2044,10 @@ static void save_l2_state(struct nvmx *n) {
 }
 
 static struct vcpu_segment host_segment(
-    const struct nvmx *n, uint32_t selector_field, uint32_t attrib, uintptr_t base
+    const struct nvmx *n,
+    uint32_t selector_field,
+    uint32_t attrib,
+    uintptr_t base
 ) {
     struct vcpu_segment seg = {
         .selector = (uint16_t)get12(n, selector_field),
@@ -2178,8 +2189,13 @@ static uint64_t timer_left(const struct nvmx *n) {
 // the MSR-store area, and the event to inject alone (SDM 325462-093 Vol. 3C,
 // 27.8.3, 29.8).
 static void exit_to_l1(
-    struct vcpu *v, struct nvmx *n, uint32_t reason, uint64_t qual, uint32_t intr_info,
-    uint32_t intr_error, bool processor
+    struct vcpu *v,
+    struct nvmx *n,
+    uint32_t reason,
+    uint64_t qual,
+    uint32_t intr_info,
+    uint32_t intr_error,
+    bool processor
 ) {
     bool nmi = (reason & 0xffff) == EXIT_REASON_EXCEPTION_NMI
             && (intr_info & ((uint32_t)7 << 8)) == INTR_TYPE_NMI;
@@ -3175,7 +3191,11 @@ bool nvmx_ept_active(struct vcpu *v) {
 }
 
 bool nvmx_ept_translate(
-    struct vcpu *v, uintptr_t gpa, uint64_t access, uintptr_t linear, uint64_t *out
+    struct vcpu *v,
+    uintptr_t gpa,
+    uint64_t access,
+    uintptr_t linear,
+    uint64_t *out
 ) {
     struct nvmx *n = v->nvmx;
     if (n->pending) {
@@ -3212,7 +3232,11 @@ bool nvmx_exit_pending(struct vcpu *v) {
 // SDM 325462-093 Vol. 3C, 28.2: a page fault takes bit 14 of the bitmap where
 // its error code matches, else the other way.
 bool nvmx_exception(
-    struct vcpu *v, uint8_t vector, bool has_error, uint32_t error, uint64_t qual
+    struct vcpu *v,
+    uint8_t vector,
+    bool has_error,
+    uint32_t error,
+    uint64_t qual
 ) {
     struct nvmx *n = v->nvmx;
     if (n == NULL || !n->in_l2) {

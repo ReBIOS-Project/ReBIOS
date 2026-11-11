@@ -760,7 +760,10 @@ static uint64_t guest_dr(size_t n) {
 // bits of the address (SDM 325462-093 Vol. 3B, 20.2.4 and 20.2.5), and so does
 // an AMD address mask the bits it sets.
 static uint64_t breakpoints_hit(
-    struct vcpu *v, uintptr_t address, size_t size, unsigned int kinds
+    struct vcpu *v,
+    uintptr_t address,
+    size_t size,
+    unsigned int kinds
 ) {
     uint64_t dr7 = virt_vmx ? vmx_read(VMCS_GUEST_DR7) : v->vmcb->save.dr7;
     if ((dr7 & 0xff) == 0) {
@@ -901,7 +904,11 @@ void vcpu_set_event_data(struct vcpu *v, uint64_t data) {
 }
 
 void vcpu_inject_exception_data(
-    struct vcpu *v, uint8_t vector, bool has_error, uint32_t error, uint64_t data
+    struct vcpu *v,
+    uint8_t vector,
+    bool has_error,
+    uint32_t error,
+    uint64_t data
 ) {
     // Breakpoints not yet reported are lost (SDM 325462-093 Vol. 3B,
     // 20.3.1.2).

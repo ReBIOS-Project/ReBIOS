@@ -294,7 +294,11 @@ void vcpu_inject_page_fault(struct vcpu *v, uintptr_t linear, uint32_t error);
 // which is a debug exception's DR6 bits and a page fault's address, the
 // qualifications of their exits (SDM 325462-093 Vol. 3A, 8.3.2.1).
 void vcpu_inject_exception_data(
-    struct vcpu *v, uint8_t vector, bool has_error, uint32_t error, uint64_t data
+    struct vcpu *v,
+    uint8_t vector,
+    bool has_error,
+    uint32_t error,
+    uint64_t data
 );
 // Whether the guest may have FRED, and the event data for the event the coming
 // entry injects, which FRED event delivery saves (SDM 325462-093 Vol. 3C,

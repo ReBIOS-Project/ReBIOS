@@ -233,7 +233,9 @@ static void log_ports(uacpi_namespace_node *node, const struct device_ports *d) 
 // Those the firmware enabled, and those it left for the OS to turn on, but for
 // the one of ReBIOS's log.
 static uacpi_iteration_decision find_device(
-    void *user, uacpi_namespace_node *node, uacpi_u32 depth
+    void *user,
+    uacpi_namespace_node *node,
+    uacpi_u32 depth
 ) {
     (void)user;
     (void)depth;

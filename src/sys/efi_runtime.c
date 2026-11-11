@@ -157,7 +157,10 @@ static EFI_STATUS reset_system(void *ctx) {
 }
 
 EFI_STATUS efi_runtime_query_variable_info(
-    EFI_UINT32 attributes, EFI_UINT64 *storage, EFI_UINT64 *remaining, EFI_UINT64 *max_size,
+    EFI_UINT32 attributes,
+    EFI_UINT64 *storage,
+    EFI_UINT64 *remaining,
+    EFI_UINT64 *max_size,
     bool wait
 ) {
     const EFI_RUNTIME_SERVICES *rt = services();
@@ -176,7 +179,12 @@ EFI_STATUS efi_runtime_query_variable_info(
 }
 
 EFI_STATUS efi_runtime_set_variable(
-    EFI_CHAR16 *name, EFI_GUID *guid, EFI_UINT32 attributes, EFI_UINTN size, void *data, bool wait
+    EFI_CHAR16 *name,
+    EFI_GUID *guid,
+    EFI_UINT32 attributes,
+    EFI_UINTN size,
+    void *data,
+    bool wait
 ) {
     if (atomic_load_explicit(&broken, memory_order_acquire)) {
         return EFI_UNSUPPORTED;

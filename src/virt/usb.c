@@ -250,7 +250,11 @@ void tendril_glue_pci_write32(void *ctx, uint16_t offset, uint32_t value) {
 }
 
 bool tendril_glue_pci_find_read8(
-    void *ctx, uint16_t vendor, uint16_t device, uint16_t offset, uint8_t *value
+    void *ctx,
+    uint16_t vendor,
+    uint16_t device,
+    uint16_t offset,
+    uint8_t *value
 ) {
     (void)ctx;
     const struct pci_enum_topology *t = pci_enum_topology();

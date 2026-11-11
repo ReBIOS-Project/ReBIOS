@@ -49,8 +49,12 @@ void pci_virt_hook(struct pci_cfg_addr addr, const struct pci_virt_hook *hook, v
 // ranges as it can take. The range of a BAR smaller than a page is all of it.
 // After pci_virt_init().
 bool pci_virt_trap(
-    struct pci_cfg_addr addr, unsigned int bar, uint64_t offset, size_t size,
-    const struct mmio_ops *ops, void *ctx
+    struct pci_cfg_addr addr,
+    unsigned int bar,
+    uint64_t offset,
+    size_t size,
+    const struct mmio_ops *ops,
+    void *ctx
 );
 // Gives the guest the pages of the range at offset back, mapped as the rest of
 // the BAR is.
@@ -67,7 +71,11 @@ void pci_virt_config_write(struct pci_cfg_addr addr, uint32_t offset, size_t siz
 // ways to it: false where the function has no such entry. After
 // pci_virt_init().
 bool pci_virt_msix_access(
-    struct pci_cfg_addr addr, uint64_t offset, size_t size, bool write, uint64_t *value
+    struct pci_cfg_addr addr,
+    uint64_t offset,
+    size_t size,
+    bool write,
+    uint64_t *value
 );
 
 // Routes the guest's messages again after its local APICs changed in a way

@@ -921,7 +921,12 @@ uint8_t irq_extint_acknowledge(void) {
 }
 
 static void pic_access(
-    struct vcpu *v, void *ctx, uint16_t offset, size_t size, bool in, uint32_t *value
+    struct vcpu *v,
+    void *ctx,
+    uint16_t offset,
+    size_t size,
+    bool in,
+    uint32_t *value
 ) {
     (void)v;
     (void)size;

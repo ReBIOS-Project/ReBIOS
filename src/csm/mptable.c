@@ -349,7 +349,11 @@ static void ioapics_emit(struct mp_writer *w) {
 // An I/O interrupt assignment to the I/O APIC input of the GSI, if an I/O APIC
 // has it.
 static bool io_interrupt_emit(
-    struct mp_writer *w, uint8_t interrupt_type, uint16_t flags, uint8_t bus, uint8_t irq,
+    struct mp_writer *w,
+    uint8_t interrupt_type,
+    uint16_t flags,
+    uint8_t bus,
+    uint8_t irq,
     uint32_t gsi
 ) {
     uint32_t pin;
@@ -423,7 +427,11 @@ static void io_interrupts_emit(struct mp_writer *w, const struct mp_input *in) {
 }
 
 static void local_interrupt_emit(
-    struct mp_writer *w, uint8_t interrupt_type, uint16_t flags, uint8_t bus, uint8_t destination,
+    struct mp_writer *w,
+    uint8_t interrupt_type,
+    uint16_t flags,
+    uint8_t bus,
+    uint8_t destination,
     uint8_t lint
 ) {
     struct mp_interrupt entry = {
@@ -484,7 +492,10 @@ static void local_interrupts_emit(struct mp_writer *w, const struct mp_input *in
 }
 
 static uint32_t table_write(
-    struct mp_writer *w, const struct mp_input *in, uint8_t *buf, uint32_t guest
+    struct mp_writer *w,
+    const struct mp_input *in,
+    uint8_t *buf,
+    uint32_t guest
 ) {
     *w = (struct mp_writer){ .buf = buf, .length = MP_ENTRIES_OFFSET };
     processors_emit(w, in);

@@ -40,16 +40,32 @@ struct mmio_ops {
     // is all at data where same is true. A move reads each element, then
     // writes it.
     void (*read_string)(
-        struct vcpu *v, void *ctx, uint64_t offset, size_t size, int64_t step, uint8_t *data,
+        struct vcpu *v,
+        void *ctx,
+        uint64_t offset,
+        size_t size,
+        int64_t step,
+        uint8_t *data,
         size_t count
     );
     void (*write_string)(
-        struct vcpu *v, void *ctx, uint64_t offset, size_t size, int64_t step, const uint8_t *data,
-        bool same, size_t count
+        struct vcpu *v,
+        void *ctx,
+        uint64_t offset,
+        size_t size,
+        int64_t step,
+        const uint8_t *data,
+        bool same,
+        size_t count
     );
     void (*move_string)(
-        struct vcpu *v, void *ctx, uint64_t source, uint64_t destination, size_t size,
-        int64_t step, size_t count
+        struct vcpu *v,
+        void *ctx,
+        uint64_t source,
+        uint64_t destination,
+        size_t size,
+        int64_t step,
+        size_t count
     );
 };
 
@@ -84,7 +100,11 @@ struct insn;
 // STOS whose operands are regions that take string accesses, or RAM, and of
 // OUTS from RAM.
 size_t mmio_string(
-    struct vcpu *v, const struct insn *insn, size_t size, int64_t step, size_t count
+    struct vcpu *v,
+    const struct insn *insn,
+    size_t size,
+    int64_t step,
+    size_t count
 );
 
 // An EPT violation or a nested page fault at gpa, for an access other than a

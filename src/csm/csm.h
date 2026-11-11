@@ -398,8 +398,11 @@ void csm_compat16_table_checksum(struct csm_compat16_table *table);
 // Copies an ACPI RSDP into the CSM16 image, where the CSM16 table's
 // AcpiRsdPtrPointer says it goes.
 bool csm_copy_rsdp(
-    void *image, uintptr_t image_guest_base, size_t image_size,
-    const struct csm_compat16_table *table, const void *rsdp
+    void *image,
+    uintptr_t image_guest_base,
+    size_t image_size,
+    const struct csm_compat16_table *table,
+    const void *rsdp
 );
 
 void csm_fill_init_table(struct csm_init_table *table, const struct csm_init_params *params);
@@ -409,7 +412,9 @@ void csm_fill_boot_table(struct csm_boot_table *table, const struct csm_boot_par
 // addresses, leaving out those outside segment 0. Returns the number of
 // entries used.
 size_t csm_fill_bbs_table(
-    struct csm_bbs_entry *table, size_t max_entries, const struct handoff_block_device *devices,
+    struct csm_bbs_entry *table,
+    size_t max_entries,
+    const struct handoff_block_device *devices,
     size_t device_count
 );
 

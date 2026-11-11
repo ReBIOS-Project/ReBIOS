@@ -50,7 +50,12 @@ uint64_t guest_mem_pte_reserved(bool wide, bool pae, size_t level, bool large, b
 // Translates through the guest's own paging, as the processor would for the
 // access. On failure, *pf_error holds the page fault error code to raise.
 bool guest_mem_linear_to_phys(
-    struct vcpu *v, uintptr_t linear, bool write, bool fetch, uint64_t *gpa, uint32_t *pf_error
+    struct vcpu *v,
+    uintptr_t linear,
+    bool write,
+    bool fetch,
+    uint64_t *gpa,
+    uint32_t *pf_error
 );
 
 // Reads at a linear address, crossing pages as needed.
@@ -60,11 +65,19 @@ bool guest_mem_linear_read(struct vcpu *v, uintptr_t linear, void *buf, size_t l
 // instructions do. On failure, *pf_error holds the page fault's error code, to
 // raise at *pf_linear.
 bool guest_mem_system_read(
-    struct vcpu *v, uintptr_t linear, void *buf, size_t len, uint32_t *pf_error,
+    struct vcpu *v,
+    uintptr_t linear,
+    void *buf,
+    size_t len,
+    uint32_t *pf_error,
     uint64_t *pf_linear
 );
 bool guest_mem_system_write(
-    struct vcpu *v, uintptr_t linear, const void *buf, size_t len, uint32_t *pf_error,
+    struct vcpu *v,
+    uintptr_t linear,
+    const void *buf,
+    size_t len,
+    uint32_t *pf_error,
     uint64_t *pf_linear
 );
 

@@ -47,8 +47,11 @@ void csm_compat16_table_checksum(struct csm_compat16_table *table) {
 }
 
 bool csm_copy_rsdp(
-    void *image, uintptr_t image_guest_base, size_t image_size,
-    const struct csm_compat16_table *table, const void *rsdp
+    void *image,
+    uintptr_t image_guest_base,
+    size_t image_size,
+    const struct csm_compat16_table *table,
+    const void *rsdp
 ) {
     const struct acpi_rsdp *src = rsdp;
 
@@ -98,7 +101,9 @@ void csm_fill_boot_table(struct csm_boot_table *table, const struct csm_boot_par
 }
 
 static void bbs_describe(
-    struct csm_bbs_entry *entry, const struct handoff_block_device *device, uint16_t priority
+    struct csm_bbs_entry *entry,
+    const struct handoff_block_device *device,
+    uint16_t priority
 ) {
     memset(entry, 0, sizeof(struct csm_bbs_entry));
     entry->boot_priority = priority;
@@ -117,7 +122,9 @@ static void bbs_ignore(struct csm_bbs_entry *entry) {
 }
 
 size_t csm_fill_bbs_table(
-    struct csm_bbs_entry *table, size_t max_entries, const struct handoff_block_device *devices,
+    struct csm_bbs_entry *table,
+    size_t max_entries,
+    const struct handoff_block_device *devices,
     size_t device_count
 ) {
     size_t used = CSM_BBS_DEVICE_FIRST;

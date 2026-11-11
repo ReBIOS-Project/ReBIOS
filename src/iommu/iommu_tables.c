@@ -323,7 +323,9 @@ static void scope_skip(const char *owner, size_t offset, const uint8_t *scope, c
 // Why the function at addr cannot be a bridge on a scope's path, or NULL with
 // the buses behind it.
 static const char *bridge_buses(
-    struct pci_cfg_addr addr, uint8_t *secondary, uint8_t *subordinate
+    struct pci_cfg_addr addr,
+    uint8_t *secondary,
+    uint8_t *subordinate
 ) {
     if (pci_cfg_read(addr, PCI_VENDOR_ID, 2) == 0xffff) {
         return "reads all ones";
@@ -347,7 +349,10 @@ static const char *bridge_buses(
 // scope_length() checked, through the bridges on it (VT-d D51397-019 rev.
 // 5.20, 8.3.1).
 static bool scope_resolve(
-    const char *owner, size_t offset, const uint8_t *scope, uint16_t segment,
+    const char *owner,
+    size_t offset,
+    const uint8_t *scope,
+    uint16_t segment,
     struct scope_target *target
 ) {
     uint32_t type = scope[0];
@@ -689,8 +694,12 @@ static size_t ivhd_entry_size(const uint8_t *ivrs, size_t offset, size_t end) {
 }
 
 static void ivhd_entry(
-    struct builder *b, const struct iommu_tables_unit *unit, uint16_t index, const uint8_t *entry,
-    size_t offset, struct range_start *start
+    struct builder *b,
+    const struct iommu_tables_unit *unit,
+    uint16_t index,
+    const uint8_t *entry,
+    size_t offset,
+    struct range_start *start
 ) {
     struct iommu_tables_device_range range = {
         .segment = unit->segment,

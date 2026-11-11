@@ -59,7 +59,11 @@ bool gpt_translate(uintptr_t gpa, uint64_t *hpa, uint32_t *prot, uint8_t *memtyp
 // Also the level of the leaf that maps it: 0 for 4 KiB, 1 for 2 MiB, 2 for 1
 // GiB.
 bool gpt_translate_leaf(
-    uintptr_t gpa, uint64_t *hpa, uint32_t *prot, uint8_t *memtype, size_t *level
+    uintptr_t gpa,
+    uint64_t *hpa,
+    uint32_t *prot,
+    uint8_t *memtype,
+    size_t *level
 );
 
 // A leaf of SVM nested paging's tables mapping hpa at level as gpt_map() makes
