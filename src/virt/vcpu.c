@@ -351,6 +351,10 @@ void vcpu_exit_soon(struct vcpu *v) {
     }
 }
 
+void vcpu_exit_after_turn(struct vcpu *v) {
+    v->exit_after_turn = true;
+}
+
 void vcpu_wait(struct vcpu *v, bool (*ends)(struct vcpu *v), bool spin) {
     struct cpu *cpu = v->cpu;
     // SVM's host takes interrupts and NMIs only with GIF set.

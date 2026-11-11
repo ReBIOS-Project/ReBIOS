@@ -141,6 +141,9 @@ struct vcpu {
     // A port's handler says the same of the access it was given, which is not
     // to happen yet.
     bool io_retry;
+    // Set for work the hypervisor left for a later exit, which comes once the
+    // guest has run as long as the hypervisor last did (vlapic.c).
+    bool exit_after_turn;
 
     // The guest's MTRRs: the default type, the fixed ranges, and the variable
     // ranges' bases and masks.
@@ -205,6 +208,9 @@ void vcpu_kick(struct cpu *cpu);
 // An interrupt of the hypervisor's own pending at the entry, which ends it
 // right after any event it delivers.
 void vcpu_exit_soon(struct vcpu *v);
+// An exit once the guest has had a turn as long as the hypervisor's since its
+// slice started, for work left to carry on with then.
+void vcpu_exit_after_turn(struct vcpu *v);
 
 // Interrupts the processor's halt, as one waiting for a start-up IPI is in.
 void vcpu_wake(struct cpu *cpu);

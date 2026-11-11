@@ -1158,6 +1158,10 @@ void vlapic_timer_program(struct vcpu *v) {
             next = own;
         }
     }
+    if (v->exit_after_turn) {
+        v->exit_after_turn = false;
+        next = earliest;
+    }
     if (next != 0 && next < earliest) {
         next = earliest;
     }
