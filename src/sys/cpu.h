@@ -125,6 +125,12 @@ struct cpu {
     // them resumes, else NULL, and the address the last such fault was at.
     struct cpu_resume *firmware_resume;
     uint64_t firmware_fault;
+    // Where the guest's SIMD registers wait while the hypervisor uses them
+    // (sys/simd.c), which state components XSAVE saved there, none where
+    // FXSAVE did, and the guest's XCR0.
+    uint8_t *simd_area;
+    uint64_t simd_saved;
+    uint64_t simd_xcr0;
 };
 
 _Static_assert(sizeof(struct cpu) <= 0x1000, "The IST stacks overlap struct cpu.");

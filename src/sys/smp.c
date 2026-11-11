@@ -34,6 +34,7 @@
 #include <lib/util.h>
 #include <memory.h>
 #include <sys/cpu.h>
+#include <sys/simd.h>
 #include <sys/x86.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>
@@ -137,6 +138,7 @@ static void ap_main(struct cpu *cpu) {
     lapic_legacy_init();
     lapic_host_init(VLAPIC_SPURIOUS_VECTOR, VLAPIC_TIMER_VECTOR);
     virt_cpu_init();
+    simd_cpu_init(cpu);
     struct vcpu *v = vcpu_create(cpu);
     vcpu_wait_for_sipi(v);
     vcpu_run(v);

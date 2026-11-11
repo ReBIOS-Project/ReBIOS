@@ -34,6 +34,7 @@
 #include <lib/time.h>
 #include <sys/cpu.h>
 #include <sys/mm.h>
+#include <sys/simd.h>
 #include <sys/smp.h>
 #include <virt/a20.h>
 #include <virt/cpuid.h>
@@ -91,6 +92,8 @@ static void bsp_main(void *arg) {
     cpu_tables_load(cpu, virt_vmx);
     io_init();
     virt_cpu_init();
+    simd_init();
+    simd_cpu_init(cpu);
     msr_init();
     cpuid_init();
     mtrr_init();

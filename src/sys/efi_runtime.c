@@ -31,7 +31,6 @@
 #include <sys/mm.h>
 #include <sys/x86.h>
 
-#define FXSAVE_SIZE 512
 // Every SSE exception masked, as the processor's reset leaves MXCSR.
 #define MXCSR_RESET 0x1f80
 // QueryVariableInfo() came with UEFI 2.0, and older firmware's table ends

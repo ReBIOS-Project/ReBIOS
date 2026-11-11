@@ -65,6 +65,8 @@
 #define CR4_FRED ((uint64_t)1 << 32)
 
 #define XCR0_SSE ((uint64_t)1 << 1)
+#define XCR0_AVX ((uint64_t)1 << 2)
+#define XCR0_ZMM_HI256 ((uint64_t)1 << 6)
 #define XCR0_APX ((uint64_t)1 << 19)
 
 #define CR3_LAM_U57 ((uint64_t)1 << 61)
@@ -393,7 +395,9 @@ static inline void xrstor(const void *area, uint64_t mask) {
 }
 
 // The x87 and SSE state, saved to and restored from a 16-byte aligned area of
-// 512 bytes, the x87 pointers whole.
+// FXSAVE_SIZE bytes, the x87 pointers whole.
+#define FXSAVE_SIZE 512
+
 static inline void fxsave(void *area) {
     asm volatile ("fxsave64 (%0)" :: "r"(area) : "memory");
 }
