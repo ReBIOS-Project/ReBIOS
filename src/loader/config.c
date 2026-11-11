@@ -370,6 +370,17 @@ static bool apply_vga_scale(const struct setting *setting, struct span value) {
     return true;
 }
 
+// In the order of the HANDOFF_VGA_FILTER_* values.
+static const char *const vga_filter_names[] = { "nearest", "bilinear" };
+
+static bool apply_vga_filter(const struct setting *setting, struct span value) {
+    if (!apply_choice(value, vga_filter_names, 2, &config.vga_filter)) {
+        return false;
+    }
+    printf("  %s = %s\n", setting->name, vga_filter_names[config.vga_filter]);
+    return true;
+}
+
 // In the order of the HANDOFF_AVIC_* values.
 static const char *const avic_names[] = { "auto", "always", "never" };
 
@@ -429,6 +440,7 @@ static const struct setting settings[] = {
     { .name = "vga_emulation", .apply = apply_vga_emulation },
     { .name = "vga_scaling", .apply = apply_vga_scaling },
     { .name = "vga_scale", .apply = apply_vga_scale },
+    { .name = "vga_filter", .apply = apply_vga_filter },
     { .name = "profile", .apply = apply_boolean, .flag = &config.profile },
     { .name = "avic", .apply = apply_avic },
     { .name = "cpuid_limit", .apply = apply_boolean, .flag = &config.cpuid_limit },
@@ -655,6 +667,7 @@ void config_load(void) {
     config.vga_emulation = HANDOFF_VGA_EMULATION_AUTO;
     config.vga_scaling = HANDOFF_VGA_SCALING_STRETCH;
     config.vga_scale = 1;
+    config.vga_filter = HANDOFF_VGA_FILTER_BILINEAR;
     config.avic = HANDOFF_AVIC_AUTO;
     config.cpu_filter = HANDOFF_CPU_FILTER_NONE;
     config.igpu_stolen_remap = true;
@@ -684,6 +697,7 @@ void config_to_handoff(struct handoff_config *out) {
     out->vga_emulation = config.vga_emulation;
     out->vga_scaling = config.vga_scaling;
     out->vga_scale = config.vga_scale;
+    out->vga_filter = config.vga_filter;
     out->profile = config.profile;
     out->avic = config.avic;
     out->cpuid_limit = config.cpuid_limit;

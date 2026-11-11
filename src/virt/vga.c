@@ -137,6 +137,9 @@
 #define COMPARE_ALL_NS ((uint64_t)1000000000)
 // The lines of a turned display written to the framebuffer together.
 #define BAND_LINES 32
+// Bilinear filtering's weights, in steps of 1 / FILTER_ONE.
+#define FILTER_SHIFT 8
+#define FILTER_ONE ((uint32_t)1 << FILTER_SHIFT)
 
 // The display tracks the guest's writes to the planes in chunks of plane
 // address, 1 << CHUNK_SHIFT bytes each.
@@ -238,6 +241,26 @@ static struct {
     uint32_t w;
     uint32_t h;
     uint32_t *xmap;
+    // Bilinear filtering (vga_filter), across and down where the scale there
+    // is no whole number: then xmap has each column's source pixel at or
+    // before it, and xweight the weight of the one after.
+    bool filter_x;
+    bool filter_y;
+    uint8_t *xweight;
+    // A filtered redraw: the changed pixels of each source line marked so far,
+    // first to end, none where first is not below end; the first line that the
+    // current call marked; the next display line to draw; and two source lines
+    // blended across, the display columns each holds, and which of them was
+    // used last.
+    uint32_t *changed_first;
+    uint32_t *changed_end;
+    uint32_t pass_line;
+    uint32_t next_row;
+    uint32_t *across[2];
+    uint32_t across_line[2];
+    uint32_t across_x0[2];
+    uint32_t across_x1[2];
+    size_t across_last;
     bool valid;
     // When the frame shown began, how long its redraw took so far, and when
     // the next may begin.
@@ -258,6 +281,9 @@ static struct {
     size_t vbe_line_bytes;
     uint32_t vbe_start;
     uint64_t *vbe_hashes;
+    // Filtering, the lines that the display shows otherwise than their hashes
+    // tell, which the next frame draws again.
+    bool *vbe_stale;
     uint32_t *vbe_line;
     uint32_t vbe_palette[256];
     // Whether the frame shown compares every line, whether the last one went
@@ -1480,6 +1506,21 @@ void vga_screen_size(uint32_t *width, uint32_t *height) {
     *height = turned ? fb->width : fb->height;
 }
 
+// Where display pixel i of n falls among count source pixels, centre on
+// centre: the source pixel at or before it, and the weight, of FILTER_ONE, of
+// the one after.
+static void filter_position(size_t i, size_t n, size_t count, uint32_t *index, uint32_t *weight) {
+    // (i + 1/2) * count / n - 1/2, in steps of 1 / FILTER_ONE.
+    uint64_t at = ((uint64_t)i * 2 + 1) * count * FILTER_ONE / ((uint64_t)n * 2);
+    at = at >= FILTER_ONE / 2 ? at - FILTER_ONE / 2 : 0;
+    *index = (uint32_t)(at / FILTER_ONE);
+    *weight = (uint32_t)(at % FILTER_ONE);
+    if (*index + (size_t)1 >= count) {
+        *index = (uint32_t)count - 1;
+        *weight = 0;
+    }
+}
+
 // The framebuffer's rectangle the display fills, as the configuration asks, at
 // an aspect ratio of aspect_w:aspect_h where it is to be kept.
 static void place(uint32_t width, uint32_t height, uint32_t aspect_w, uint32_t aspect_h) {
@@ -1532,8 +1573,18 @@ static void place(uint32_t width, uint32_t height, uint32_t aspect_w, uint32_t a
     out.h = (uint32_t)hgt;
     out.x = (fw - out.w) / 2;
     out.y = (fh - out.h) / 2;
+    // A whole number of display pixels per pixel needs no filtering.
+    bool filter = h->config.vga_filter == HANDOFF_VGA_FILTER_BILINEAR;
+    out.filter_x = filter && width != 0 && out.w % width != 0;
+    out.filter_y = filter && height != 0 && out.h % height != 0;
     for (size_t x = 0; x < out.w; x++) {
-        out.xmap[x] = (uint32_t)((uint64_t)x * width / out.w);
+        if (out.filter_x) {
+            uint32_t weight;
+            filter_position(x, out.w, width, &out.xmap[x], &weight);
+            out.xweight[x] = (uint8_t)weight;
+        } else {
+            out.xmap[x] = (uint32_t)((uint64_t)x * width / out.w);
+        }
     }
 }
 
@@ -1574,14 +1625,15 @@ static void screen_flush(void) {
     out.band_count = 0;
 }
 
-// Shows pixels x0 to x1 of out.fb_line as the display's line y. A turned
-// display takes whole lines, as single pixels down the framebuffer's columns
-// would keep its writes from combining, and writes them in bands.
-static void screen_line(uint32_t y, uint32_t x0, uint32_t x1) {
+// Shows pixels x0 to x1 of line, in the framebuffer's pixel format, as the
+// display's line y. A turned display takes whole lines, as single pixels down
+// the framebuffer's columns would keep its writes from combining, and writes
+// them in bands.
+static void screen_line(uint32_t y, const uint32_t *line, uint32_t x0, uint32_t x1) {
     const struct handoff_framebuffer *fb = &core_handoff->video.framebuffer;
     if (fb->rotation == HANDOFF_ROTATE_0) {
         uint8_t *row = (uint8_t *)(uintptr_t)fb->base + (uint64_t)(out.y + y) * fb->pitch;
-        fb_row(row, out.x + x0, out.fb_line + x0, x1 - x0, fb->bpp);
+        fb_row(row, out.x + x0, line + x0, x1 - x0, fb->bpp);
         return;
     }
     if (out.band_count != 0
@@ -1599,7 +1651,7 @@ static void screen_line(uint32_t y, uint32_t x0, uint32_t x1) {
     if (x1 > out.band_x1) {
         out.band_x1 = x1;
     }
-    pixels_copy(out.band + (uint64_t)out.band_count * out.w, out.fb_line, out.w);
+    pixels_copy(out.band + (uint64_t)out.band_count * out.w, line, out.w);
     out.band_count++;
 }
 
@@ -1640,6 +1692,9 @@ static void draw_start(uint32_t width, uint32_t height, uint32_t border) {
     out.busy_vbe = false;
     out.redraw_all = all;
     out.next_line = 0;
+    out.next_row = 0;
+    out.across_line[0] = UINT32_MAX;
+    out.across_line[1] = UINT32_MAX;
 }
 
 // Copies the frame's lines that changed since the last frame to the
@@ -1687,7 +1742,7 @@ static void draw_lines(void) {
         bool turned = fb->rotation != HANDOFF_ROTATE_0;
         fb_line_make(now, turned ? 0 : x0, turned ? out.w : x1);
         for (size_t y = y0; y < y1 && y < out.h; y++) {
-            screen_line(y, x0, x1);
+            screen_line(y, out.fb_line, x0, x1);
         }
     }
     screen_flush();
@@ -1914,6 +1969,9 @@ static void vbe_start(uint64_t now) {
     out.busy_vbe = true;
     out.redraw_all = all;
     out.next_line = 0;
+    out.next_row = 0;
+    out.across_line[0] = UINT32_MAX;
+    out.across_line[1] = UINT32_MAX;
 }
 
 // Whether the guest changed the Bochs interface's mode since the redraw under
@@ -1927,6 +1985,250 @@ static bool vbe_mode_changed(void) {
     return changed;
 }
 
+// 0RGB pixels a and b mixed, weight of FILTER_ONE of b to the rest of a. Red
+// and blue share a multiplication, each in 16 bits of it.
+static uint32_t blend(uint32_t a, uint32_t b, uint32_t weight) {
+    uint32_t keep = FILTER_ONE - weight;
+    uint32_t rb = ((a & 0xff00ff) * keep + (b & 0xff00ff) * weight) >> FILTER_SHIFT;
+    uint32_t g = ((a & 0xff00) * keep + (b & 0xff00) * weight) >> FILTER_SHIFT;
+    return (rb & 0xff00ff) | (g & 0xff00);
+}
+
+// Two 0RGB pixels in each of a and b mixed as blend() mixes one, sharing its
+// multiplications: red and blue of both, four channels in 16 bits each, and
+// green of both.
+static uint64_t blend_pair(uint64_t a, uint64_t b, uint64_t weight) {
+    const uint64_t rb_mask = 0x00ff00ff00ff00ff;
+    const uint64_t g_mask = 0x0000ff000000ff00;
+    uint64_t keep = FILTER_ONE - weight;
+    uint64_t rb = ((a & rb_mask) * keep + (b & rb_mask) * weight) >> FILTER_SHIFT;
+    uint64_t g = ((a & g_mask) * keep + (b & g_mask) * weight) >> FILTER_SHIFT;
+    return (rb & rb_mask) | (g & g_mask);
+}
+
+// Pixels from to end of dst, mixed from those of a and b, weight of FILTER_ONE
+// of b: two at a time.
+static void blend_lines(
+    uint32_t *dst, const uint32_t *a, const uint32_t *b, uint32_t weight, size_t from, size_t end
+) {
+    size_t x = from;
+    for (; x + 2 <= end; x += 2) {
+        write_le64(dst + x, blend_pair(read_le64(a + x), read_le64(b + x), weight));
+    }
+    if (x < end) {
+        dst[x] = blend(a[x], b[x], weight);
+    }
+}
+
+// The source lines that display line y is made of, and the weight of the
+// second; the same line twice where there is no second.
+static void row_sources(uint32_t y, uint32_t *top, uint32_t *bottom, uint32_t *weight) {
+    if (out.filter_y) {
+        filter_position(y, out.h, out.height, top, weight);
+        *bottom = *weight != 0 ? *top + 1 : *top;
+        return;
+    }
+    *top = (uint32_t)((uint64_t)y * out.height / out.h);
+    *bottom = *top;
+    *weight = 0;
+}
+
+// The first display column whose source pixel is pixel or after it.
+static uint32_t column_of(uint32_t pixel) {
+    uint32_t low = 0;
+    uint32_t high = out.w;
+    while (low < high) {
+        uint32_t middle = low + (high - low) / 2;
+        if (out.xmap[middle] < pixel) {
+            low = middle + 1;
+        } else {
+            high = middle;
+        }
+    }
+    return low;
+}
+
+// The bytes of video memory that a line of the Bochs interface's display
+// shows.
+static size_t vbe_bytes(void) {
+    return (out.width * (out.vbe_bpp == 15 ? 16 : out.vbe_bpp) + 7) / 8;
+}
+
+// Source line sy as 0RGB pixels: the frame's, or the Bochs interface's from
+// video memory, black past its end.
+static const uint32_t *source_line(bool vbe_mode, uint32_t sy) {
+    if (!vbe_mode) {
+        return out.frame + (size_t)sy * out.width;
+    }
+    size_t bytes = vbe_bytes();
+    uint64_t at = out.vbe_start + (uint64_t)sy * out.vbe_line_bytes;
+    if (at + bytes > vbe.vram_size) {
+        memset(out.vbe_line, 0, out.width * sizeof(uint32_t));
+        return out.vbe_line;
+    }
+    const uint8_t *p = vbe.vram + at;
+    // The guest ran since an earlier call marked the line: what the display
+    // drew of it before may differ from what it draws now.
+    if (sy < out.pass_line && line_hash(p, bytes) != out.vbe_hashes[sy]) {
+        out.vbe_stale[sy] = true;
+    }
+    vbe_convert(p, out.width, out.vbe_bpp, out.vbe_line);
+    return out.vbe_line;
+}
+
+// Source line sy scaled across, display columns x0 to x1 of it at least. Of
+// the two lines kept, the one not used last makes room: a caller holding the
+// other still has it.
+static const uint32_t *across(bool vbe_mode, uint32_t sy, uint32_t x0, uint32_t x1) {
+    for (size_t s = 0; s < 2; s++) {
+        if (out.across_line[s] == sy && out.across_x0[s] <= x0 && out.across_x1[s] >= x1) {
+            out.across_last = s;
+            return out.across[s];
+        }
+    }
+    size_t s = out.across_last ^ 1;
+    const uint32_t *line = source_line(vbe_mode, sy);
+    uint32_t *to = out.across[s];
+    if (out.filter_x) {
+        for (size_t x = x0; x < x1; x++) {
+            uint32_t i = out.xmap[x];
+            uint32_t weight = out.xweight[x];
+            // The last pixel takes no weight from one after it.
+            to[x] = weight != 0 ? blend(line[i], line[i + 1], weight) : line[i];
+        }
+    } else {
+        for (size_t x = x0; x < x1; x++) {
+            to[x] = line[out.xmap[x]];
+        }
+    }
+    out.across_line[s] = sy;
+    out.across_x0[s] = x0;
+    out.across_x1[s] = x1;
+    out.across_last = s;
+    return to;
+}
+
+// Marks which pixels of source line sy changed since they were last shown: of
+// the frame, by comparing them, and of the Bochs interface, a whole line where
+// its hash changed or the display shows it otherwise.
+static void mark_line(bool vbe_mode, uint32_t sy) {
+    uint32_t width = out.width;
+    bool all = out.redraw_all;
+    out.changed_first[sy] = 0;
+    out.changed_end[sy] = 0;
+    if (vbe_mode) {
+        size_t bytes = vbe_bytes();
+        uint64_t at = out.vbe_start + (uint64_t)sy * out.vbe_line_bytes;
+        bool stale = out.vbe_stale[sy];
+        out.vbe_stale[sy] = false;
+        if (at + bytes > vbe.vram_size
+         || (!all && !stale && !out.vbe_compare_all && !vbe_written(at, bytes))) {
+            return;
+        }
+        uint64_t hash = line_hash(vbe.vram + at, bytes);
+        if (!all && !stale && hash == out.vbe_hashes[sy]) {
+            return;
+        }
+        out.vbe_hashes[sy] = hash;
+        out.changed_end[sy] = width;
+        return;
+    }
+    if (!all && !out.made[sy]) {
+        return;
+    }
+    const uint32_t *now = out.frame + (size_t)sy * width;
+    uint32_t *was = out.shown + (size_t)sy * width;
+    size_t first = 0;
+    size_t last = width;
+    if (!all) {
+        while (first < width && now[first] == was[first]) {
+            first++;
+        }
+        if (first == width) {
+            return;
+        }
+        while (last > first && now[last - 1] == was[last - 1]) {
+            last--;
+        }
+    }
+    pixels_copy(was + first, now + first, last - first);
+    out.changed_first[sy] = (uint32_t)first;
+    out.changed_end[sy] = (uint32_t)last;
+}
+
+// Draws display line y, made of source lines top and bottom, weight of the
+// latter, where pixels of either changed.
+static void draw_row(bool vbe_mode, uint32_t y, uint32_t top, uint32_t bottom, uint32_t weight) {
+    uint32_t first = out.changed_first[top];
+    uint32_t end = out.changed_end[top];
+    if (bottom != top && out.changed_first[bottom] < out.changed_end[bottom]) {
+        if (first >= end || out.changed_first[bottom] < first) {
+            first = out.changed_first[bottom];
+        }
+        if (out.changed_end[bottom] > end) {
+            end = out.changed_end[bottom];
+        }
+    }
+    if (first >= end) {
+        return;
+    }
+    // A column filtered across takes the pixel after its own too.
+    uint32_t x0 = column_of(out.filter_x && first != 0 ? first - 1 : first);
+    uint32_t x1 = column_of(end);
+    if (x0 >= x1) {
+        return;
+    }
+    // A turned display takes whole lines.
+    bool turned = core_handoff->video.framebuffer.rotation != HANDOFF_ROTATE_0;
+    uint32_t from = turned ? 0 : x0;
+    uint32_t to = turned ? out.w : x1;
+    const uint32_t *a = across(vbe_mode, top, from, to);
+    const uint32_t *line = a;
+    if (bottom != top) {
+        blend_lines(out.fb_line, a, across(vbe_mode, bottom, from, to), weight, from, to);
+        line = out.fb_line;
+    }
+    if (!out.fb_rgb) {
+        for (size_t x = from; x < to; x++) {
+            out.fb_line[x] = fb_pixel(line[x]);
+        }
+        line = out.fb_line;
+    }
+    screen_line(y, line, x0, x1);
+}
+
+// A redraw filtered across or down, of the frame or the Bochs interface: the
+// source lines from out.next_line on are marked one at a time, and each
+// display line is drawn once both of its source lines are, from out.next_row
+// on, until done or the CPU's time slice is over.
+static void draw_filtered(bool vbe_mode) {
+    uint32_t height = out.height;
+    out.pass_line = out.next_line;
+    for (size_t sy = out.next_line; sy <= height && height != 0; sy++) {
+        if (sy != out.next_line && cpu_slice_over()) {
+            out.next_line = (uint32_t)sy;
+            screen_flush();
+            return;
+        }
+        if (sy < height) {
+            mark_line(vbe_mode, (uint32_t)sy);
+        }
+        while (out.next_row < out.h) {
+            uint32_t top;
+            uint32_t bottom;
+            uint32_t weight;
+            row_sources(out.next_row, &top, &bottom, &weight);
+            if (sy < height && bottom > sy) {
+                break;
+            }
+            draw_row(vbe_mode, out.next_row, top, bottom, weight);
+            out.next_row++;
+        }
+    }
+    screen_flush();
+    out.busy = false;
+}
+
 // Shows the Bochs interface's lines that changed, from out.next_line on, until
 // done or the CPU's time slice is over.
 static void vbe_lines(void) {
@@ -1934,7 +2236,7 @@ static void vbe_lines(void) {
     uint32_t height = out.height;
     uint16_t bpp = out.vbe_bpp;
     bool all = out.redraw_all;
-    size_t bytes = (width * (bpp == 15 ? 16 : bpp) + 7) / 8;
+    size_t bytes = vbe_bytes();
     for (size_t sy = out.next_line; sy < height; sy++) {
         if (sy != out.next_line && cpu_slice_over()) {
             out.next_line = sy;
@@ -1960,11 +2262,22 @@ static void vbe_lines(void) {
         uint32_t y1 = (uint32_t)(((uint64_t)(sy + 1) * out.h + height - 1) / height);
         fb_line_make(out.vbe_line, 0, out.w);
         for (size_t y = y0; y < y1 && y < out.h; y++) {
-            screen_line(y, 0, out.w);
+            screen_line(y, out.fb_line, 0, out.w);
         }
     }
     screen_flush();
     out.busy = false;
+}
+
+// Carries on with the redraw under way.
+static void redraw(bool vbe_mode) {
+    if (out.filter_x || out.filter_y) {
+        draw_filtered(vbe_mode);
+    } else if (vbe_mode) {
+        vbe_lines();
+    } else {
+        draw_lines();
+    }
 }
 
 bool vga_redrawing(void) {
@@ -1980,7 +2293,7 @@ static void frame_begin(uint64_t now) {
     if (vbe_on()) {
         vbe_start(now);
         if (out.busy) {
-            vbe_lines();
+            redraw(true);
         }
         return;
     }
@@ -2012,7 +2325,7 @@ static void frame_begin(uint64_t now) {
     uint32_t border = dac_rgb(ac_colour_border());
     spinlock_release(&vga.lock);
     draw_start(width, height, border);
-    draw_lines();
+    redraw(false);
 }
 
 // Adds the time since now to the frame's redraw, and once that is done, has
@@ -2034,11 +2347,7 @@ void vga_refresh(void) {
     if (out.busy) {
         bool vbe_mode = vbe_on();
         if (out.busy_vbe == vbe_mode && !(vbe_mode && vbe_mode_changed())) {
-            if (vbe_mode) {
-                vbe_lines();
-            } else {
-                draw_lines();
-            }
+            redraw(vbe_mode);
             frame_account(now);
             return;
         }
@@ -2215,6 +2524,16 @@ bool vga_init(void) {
     if (fb->rotation != HANDOFF_ROTATE_0) {
         out.band = page_alloc(BAND_LINES * line_pages);
     }
+    bool filter = h->config.vga_filter == HANDOFF_VGA_FILTER_BILINEAR;
+    if (filter) {
+        size_t lines = DISPI_MAX_YRES > MAX_HEIGHT ? DISPI_MAX_YRES : MAX_HEIGHT;
+        out.xweight = page_alloc(page_count(screen_width));
+        out.changed_first = page_alloc(page_count(lines * sizeof(uint32_t)));
+        out.changed_end = page_alloc(page_count(lines * sizeof(uint32_t)));
+        out.across[0] = page_alloc(line_pages);
+        out.across[1] = page_alloc(line_pages);
+        out.vbe_stale = page_alloc(page_count(lines * sizeof(bool)));
+    }
     mm_write_combining(fb->base, (uint64_t)fb->pitch * fb->height);
     out.fb_rgb = fb->bpp == 32 && fb->red_size == 8 && fb->red_shift == 16 && fb->green_size == 8
               && fb->green_shift == 8 && fb->blue_size == 8 && fb->blue_shift == 0;
@@ -2253,8 +2572,9 @@ bool vga_init(void) {
         }
     }
     printf(
-        "Emulating a VGA, %s on the %ux%u framebuffer at %#llx%s\n", scaling_names[scaling],
-        fb->width, fb->height, (unsigned long long)fb->base, orientation
+        "Emulating a VGA, %s on the %ux%u framebuffer at %#llx%s%s\n", scaling_names[scaling],
+        fb->width, fb->height, (unsigned long long)fb->base, orientation,
+        filter ? ", with bilinear filtering" : ""
     );
     return true;
 }

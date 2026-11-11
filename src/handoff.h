@@ -154,6 +154,12 @@ struct handoff_block_device {
 #define HANDOFF_VGA_SCALING_MANUAL 3
 #define HANDOFF_VGA_SCALING_INTEGER 4
 
+// How an emulated VGA's display is scaled along an axis where its scale there
+// is no whole number: to the nearest pixel, or mixed from the nearest two by
+// bilinear filtering.
+#define HANDOFF_VGA_FILTER_NEAREST 0
+#define HANDOFF_VGA_FILTER_BILINEAR 1
+
 // When AMD's AVIC runs the guest's local APICs: on the processors it serves by
 // default (virt/svm.c), on all that have it but those AMD advises against it
 // on, or never.
@@ -179,6 +185,8 @@ struct handoff_config {
     uint8_t vga_emulation;
     uint8_t vga_scaling;
     uint8_t vga_scale;
+    // One of the HANDOFF_VGA_FILTER_* values.
+    uint8_t vga_filter;
     uint8_t profile;
     // One of the HANDOFF_AVIC_* values.
     uint8_t avic;

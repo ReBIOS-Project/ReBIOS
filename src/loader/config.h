@@ -40,6 +40,8 @@ struct config {
     uint8_t vga_emulation;
     uint8_t vga_scaling;
     uint8_t vga_scale;
+    // One of the HANDOFF_VGA_FILTER_* values.
+    uint8_t vga_filter;
     bool profile;
     // One of the HANDOFF_AVIC_* values.
     uint8_t avic;
