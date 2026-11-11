@@ -211,15 +211,15 @@ void pci_cfg_write(struct pci_cfg_addr addr, uint32_t offset, size_t size, uint3
 // The types Linux 7.3's do_add_efi_memmap() makes reserved E820 entries.
 static bool type_reserved(uint32_t type) {
     switch (type) {
-        case EfiLoaderCode:
-        case EfiLoaderData:
-        case EfiBootServicesCode:
-        case EfiBootServicesData:
-        case EfiConventionalMemory:
-        case EfiUnusableMemory:
-        case EfiACPIReclaimMemory:
-        case EfiACPIMemoryNVS:
-        case EfiPersistentMemory: {
+        case EFI_LOADER_CODE:
+        case EFI_LOADER_DATA:
+        case EFI_BOOT_SERVICES_CODE:
+        case EFI_BOOT_SERVICES_DATA:
+        case EFI_CONVENTIONAL_MEMORY:
+        case EFI_UNUSABLE_MEMORY:
+        case EFI_ACPI_RECLAIM_MEMORY:
+        case EFI_ACPI_MEMORY_NVS:
+        case EFI_PERSISTENT_MEMORY: {
             return false;
         }
         default: {
@@ -235,10 +235,10 @@ static bool memmap_reserves(uint64_t base, uint64_t end) {
     bool advanced = true;
     while (at < end && advanced) {
         advanced = false;
-        const EFI_MEMORY_DESCRIPTOR *d;
+        const struct efi_memory_descriptor *d;
         for (size_t i = 0; (d = handoff_efi_desc(core_handoff, i)) != NULL; i++) {
             uint64_t stop;
-            if (handoff_efi_desc_end(d, &stop) && type_reserved(d->Type) && d->PhysicalStart <= at
+            if (handoff_efi_desc_end(d, &stop) && type_reserved(d->type) && d->physical_start <= at
              && at < stop) {
                 at = stop;
                 advanced = true;
@@ -252,11 +252,11 @@ static bool memmap_reserves(uint64_t base, uint64_t end) {
 // Linux 7.3's is_efi_mmio() takes for an ECAM reservation where the system
 // board devices make none.
 static bool memmap_mmio(uint64_t base, uint64_t end) {
-    const EFI_MEMORY_DESCRIPTOR *d;
+    const struct efi_memory_descriptor *d;
     for (size_t i = 0; (d = handoff_efi_desc(core_handoff, i)) != NULL; i++) {
         uint64_t stop;
-        if (handoff_efi_desc_end(d, &stop) && d->Type == EfiMemoryMappedIO
-         && d->PhysicalStart <= base && end <= stop) {
+        if (handoff_efi_desc_end(d, &stop) && d->type == EFI_MEMORY_MAPPED_IO
+         && d->physical_start <= base && end <= stop) {
             return true;
         }
     }

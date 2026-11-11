@@ -21,26 +21,26 @@
 #include <efi.h>
 #include <loader/efi_glue.h>
 
-EFI_HANDLE efi_image_handle;
-EFI_SYSTEM_TABLE *efi_st;
-EFI_BOOT_SERVICES *efi_bs;
-EFI_RUNTIME_SERVICES *efi_rt;
+efi_handle efi_image_handle;
+struct efi_system_table *efi_st;
+struct efi_boot_services *efi_bs;
+struct efi_runtime_services *efi_rt;
 bool efi_glue_boot_services_exited;
 
 uintptr_t efi_glue_alloc_pages(size_t count, uintptr_t max_addr) {
-    return efi_glue_alloc_pages_typed(count, max_addr, EfiLoaderData);
+    return efi_glue_alloc_pages_typed(count, max_addr, EFI_LOADER_DATA);
 }
 
 // Some firmware leaves memory above 4 GiB out of the page tables the loader
 // runs on until it has its own, so that is where an address-free allocation
 // goes last.
-uintptr_t efi_glue_alloc_pages_typed(size_t count, uintptr_t max_addr, EFI_MEMORY_TYPE type) {
-    EFI_PHYSICAL_ADDRESS addr = max_addr == 0 ? UINT32_MAX : max_addr;
-    if (efi_bs->AllocatePages(EfiAllocateMaxAddress, type, count, &addr) == EFI_SUCCESS) {
+uintptr_t efi_glue_alloc_pages_typed(size_t count, uintptr_t max_addr, uint32_t type) {
+    efi_physical_address addr = max_addr == 0 ? UINT32_MAX : max_addr;
+    if (efi_bs->allocate_pages(EFI_ALLOCATE_MAX_ADDRESS, type, count, &addr) == EFI_SUCCESS) {
         return addr;
     }
     if (max_addr != 0
-     || efi_bs->AllocatePages(EfiAllocateAnyPages, type, count, &addr) != EFI_SUCCESS) {
+     || efi_bs->allocate_pages(EFI_ALLOCATE_ANY_PAGES, type, count, &addr) != EFI_SUCCESS) {
         return 0;
     }
     return addr;
@@ -48,19 +48,19 @@ uintptr_t efi_glue_alloc_pages_typed(size_t count, uintptr_t max_addr, EFI_MEMOR
 
 void *efi_glue_alloc_pool(size_t size) {
     void *buf;
-    if (efi_bs->AllocatePool(EfiLoaderData, size, &buf) != EFI_SUCCESS) {
+    if (efi_bs->allocate_pool(EFI_LOADER_DATA, size, &buf) != EFI_SUCCESS) {
         return NULL;
     }
     return buf;
 }
 
-EFI_HANDLE *efi_glue_locate_handles(EFI_GUID *protocol, EFI_UINTN *count) {
-    EFI_HANDLE *handles;
+efi_handle *efi_glue_locate_handles(struct efi_guid *protocol, size_t *count) {
+    efi_handle *handles;
 
     // LocateHandleBuffer() came with EFI 1.10, as did the protocols of
     // interest.
-    if (efi_bs->Hdr.Revision < EFI_1_10_SYSTEM_TABLE_REVISION
-     || efi_bs->LocateHandleBuffer(EfiByProtocol, protocol, NULL, count, &handles)
+    if (efi_bs->hdr.revision < EFI_1_10_SYSTEM_TABLE_REVISION
+     || efi_bs->locate_handle_buffer(EFI_BY_PROTOCOL, protocol, NULL, count, &handles)
          != EFI_SUCCESS) {
         *count = 0;
         return NULL;

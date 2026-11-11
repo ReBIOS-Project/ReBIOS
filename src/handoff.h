@@ -286,7 +286,7 @@ struct handoff {
 };
 
 // The firmware's memory map descriptor at index, or NULL past the last.
-static inline const EFI_MEMORY_DESCRIPTOR *handoff_efi_desc(
+static inline const struct efi_memory_descriptor *handoff_efi_desc(
     const struct handoff *h,
     size_t index
 ) {
@@ -299,11 +299,11 @@ static inline const EFI_MEMORY_DESCRIPTOR *handoff_efi_desc(
 // Where a descriptor ends, or false where its pages run past the end of the
 // address space, which makes it one that Linux 7.3's efi_memmap_entry_valid()
 // drops.
-static inline bool handoff_efi_desc_end(const EFI_MEMORY_DESCRIPTOR *d, uint64_t *end) {
-    if (d->NumberOfPages > (UINT64_MAX - d->PhysicalStart) / EFI_PAGE_SIZE) {
+static inline bool handoff_efi_desc_end(const struct efi_memory_descriptor *d, uint64_t *end) {
+    if (d->number_of_pages > (UINT64_MAX - d->physical_start) / EFI_PAGE_SIZE) {
         return false;
     }
-    *end = d->PhysicalStart + d->NumberOfPages * EFI_PAGE_SIZE;
+    *end = d->physical_start + d->number_of_pages * EFI_PAGE_SIZE;
     return true;
 }
 

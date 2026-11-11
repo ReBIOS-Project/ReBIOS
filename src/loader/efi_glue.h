@@ -23,21 +23,21 @@
 #include <stdint.h>
 #include <efi.h>
 
-extern EFI_HANDLE efi_image_handle;
-extern EFI_SYSTEM_TABLE *efi_st;
-extern EFI_BOOT_SERVICES *efi_bs;
-extern EFI_RUNTIME_SERVICES *efi_rt;
+extern efi_handle efi_image_handle;
+extern struct efi_system_table *efi_st;
+extern struct efi_boot_services *efi_bs;
+extern struct efi_runtime_services *efi_rt;
 extern bool efi_glue_boot_services_exited;
 
 // Returns 0 on failure. max_addr is inclusive; 0 means anywhere.
 uintptr_t efi_glue_alloc_pages(size_t count, uintptr_t max_addr);
-uintptr_t efi_glue_alloc_pages_typed(size_t count, uintptr_t max_addr, EFI_MEMORY_TYPE type);
+uintptr_t efi_glue_alloc_pages_typed(size_t count, uintptr_t max_addr, uint32_t type);
 
 // Loader data, to free with FreePool(), or NULL on failure.
 void *efi_glue_alloc_pool(size_t size);
 
 // Returns the handles with the protocol, in handle order, in pool memory to
 // free with FreePool(), or NULL if there are none.
-EFI_HANDLE *efi_glue_locate_handles(EFI_GUID *protocol, EFI_UINTN *count);
+efi_handle *efi_glue_locate_handles(struct efi_guid *protocol, size_t *count);
 
 #endif

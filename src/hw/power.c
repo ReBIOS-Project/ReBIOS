@@ -68,7 +68,7 @@ void power_reset(bool warm) {
         outb(RST_CNT, (uint8_t)(other | code));
         time_udelay(RESET_WAIT_US);
     }
-    efi_runtime_reset_system(warm ? EfiResetWarm : EfiResetCold);
+    efi_runtime_reset_system(warm ? EFI_RESET_WARM : EFI_RESET_COLD);
     struct {
         uint16_t limit;
         uint64_t base;
@@ -94,6 +94,6 @@ void power_off(void) {
         }
         printf("Cannot enter ACPI S5: %s\n", uacpi_status_to_string(status));
     }
-    efi_runtime_reset_system(EfiResetShutdown);
+    efi_runtime_reset_system(EFI_RESET_SHUTDOWN);
     panic("Cannot power the machine off\n");
 }

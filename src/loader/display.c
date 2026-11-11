@@ -42,9 +42,9 @@ static const uint8_t edid_header[8] = { 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff
 #define VRAM_MIN ((uint64_t)16 << 20)
 #define VRAM_MAX ((uint64_t)256 << 20)
 
-static EFI_GUID gop_guid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
-static EFI_GUID edid_active_guid = EFI_EDID_ACTIVE_PROTOCOL_GUID;
-static EFI_GUID edid_discovered_guid = EFI_EDID_DISCOVERED_PROTOCOL_GUID;
+static struct efi_guid gop_guid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
+static struct efi_guid edid_active_guid = EFI_EDID_ACTIVE_PROTOCOL_GUID;
+static struct efi_guid edid_discovered_guid = EFI_EDID_DISCOVERED_PROTOCOL_GUID;
 
 bool display_vga_emulated(void) {
     const struct handoff *h = loader_handoff;
@@ -130,37 +130,37 @@ static size_t edid_filter(uint8_t *edid, size_t size) {
 // it or else as the firmware found it, if its base block is valid.
 static void collect_edid(struct handoff_video *video) {
     size_t count;
-    EFI_HANDLE *handles = efi_glue_locate_handles(&gop_guid, &count);
+    efi_handle *handles = efi_glue_locate_handles(&gop_guid, &count);
     if (handles == NULL) {
         return;
     }
     for (size_t i = 0; i < count && video->edid_size == 0; i++) {
-        EFI_GRAPHICS_OUTPUT_PROTOCOL *gop;
-        if (efi_bs->HandleProtocol(handles[i], &gop_guid, (void **)&gop) != EFI_SUCCESS
-         || gop->Mode == NULL || gop->Mode->FrameBufferBase != video->framebuffer.base) {
+        struct efi_graphics_output_protocol *gop;
+        if (efi_bs->handle_protocol(handles[i], &gop_guid, (void **)&gop) != EFI_SUCCESS
+         || gop->mode == NULL || gop->mode->frame_buffer_base != video->framebuffer.base) {
             continue;
         }
-        EFI_GUID *guids[] = { &edid_active_guid, &edid_discovered_guid };
+        struct efi_guid *guids[] = { &edid_active_guid, &edid_discovered_guid };
         for (size_t g = 0; g < 2; g++) {
             // Both protocols have the same layout.
-            EFI_EDID_ACTIVE_PROTOCOL *edid;
-            if (efi_bs->HandleProtocol(handles[i], guids[g], (void **)&edid) != EFI_SUCCESS
-             || edid->SizeOfEdid < EDID_BLOCK || edid->Edid == NULL
-             || !edid_base_valid(edid->Edid)) {
+            struct efi_edid_active_protocol *edid;
+            if (efi_bs->handle_protocol(handles[i], guids[g], (void **)&edid) != EFI_SUCCESS
+             || edid->size_of_edid < EDID_BLOCK || edid->edid == NULL
+             || !edid_base_valid(edid->edid)) {
                 continue;
             }
-            size_t size = edid->SizeOfEdid < HANDOFF_MAX_EDID
-                        ? edid->SizeOfEdid
+            size_t size = edid->size_of_edid < HANDOFF_MAX_EDID
+                        ? edid->size_of_edid
                         : HANDOFF_MAX_EDID;
             size &= ~(size_t)(EDID_BLOCK - 1);
-            memcpy(video->edid, edid->Edid, size);
+            memcpy(video->edid, edid->edid, size);
             size = edid_filter(video->edid, size);
             video->edid_size = size;
             printf("Display EDID: %zu bytes, %s\n", size, g == 0 ? "active" : "discovered");
             break;
         }
     }
-    efi_bs->FreePool(handles);
+    efi_bs->free_pool(handles);
 }
 
 void display_collect(void) {

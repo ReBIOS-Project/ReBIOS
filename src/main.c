@@ -52,7 +52,7 @@
 // The memory map buffer's room for descriptors beyond the map it is sized for.
 #define MAP_SLACK_BYTES 4096
 
-static EFI_GUID loaded_image_guid = EFI_LOADED_IMAGE_PROTOCOL_GUID;
+static struct efi_guid loaded_image_guid = EFI_LOADED_IMAGE_PROTOCOL_GUID;
 
 // Timed against the firmware's delay service, whatever the TSC's frequency
 // enumeration says, which not every processor provides: the shortest of a few
@@ -62,7 +62,7 @@ static uint64_t measure_tsc_hz(void) {
     uint64_t shortest = UINT64_MAX;
     for (size_t i = 0; i < STALL_ROUNDS; i++) {
         uint64_t start = rdtsc();
-        efi_bs->Stall(STALL_ROUND_US);
+        efi_bs->stall(STALL_ROUND_US);
         uint64_t ticks = rdtsc() - start;
         if (ticks < shortest) {
             shortest = ticks;
@@ -79,9 +79,9 @@ static uint64_t measure_tsc_hz(void) {
 // it (efi_exit_boot_services()). It is only recorded as reserved once final,
 // so that it is not counted twice.
 static bool exit_boot_services(void) {
-    EFI_UINTN map_key;
+    size_t map_key;
     size_t desc_size;
-    EFI_UINT32 desc_version;
+    uint32_t desc_version;
     uintptr_t buf = 0;
     size_t buf_size = 0;
     bool called = false;
@@ -93,12 +93,13 @@ static bool exit_boot_services(void) {
 
     for (size_t attempt = 0; attempt < 16; attempt++) {
         size_t size = buf_size;
-        EFI_STATUS status = efi_bs->GetMemoryMap(
-            &size, (EFI_MEMORY_DESCRIPTOR *)(uintptr_t)buf, &map_key, &desc_size, &desc_version
+        efi_status status = efi_bs->get_memory_map(
+            &size, (struct efi_memory_descriptor *)(uintptr_t)buf, &map_key, &desc_size,
+            &desc_version
         );
         if (status == EFI_BUFFER_TOO_SMALL && !called) {
             if (buf != 0) {
-                efi_bs->FreePages(buf, EFI_SIZE_TO_PAGES(buf_size));
+                efi_bs->free_pages(buf, EFI_SIZE_TO_PAGES(buf_size));
             }
             buf_size = align_up(size + MAP_SLACK_BYTES, EFI_PAGE_SIZE);
             buf = efi_glue_alloc_pages(EFI_SIZE_TO_PAGES(buf_size), 0);
@@ -107,12 +108,12 @@ static bool exit_boot_services(void) {
             }
             continue;
         }
-        if (status != EFI_SUCCESS || desc_size < sizeof(EFI_MEMORY_DESCRIPTOR)) {
+        if (status != EFI_SUCCESS || desc_size < sizeof(struct efi_memory_descriptor)) {
             return false;
         }
 
         called = true;
-        if (efi_bs->ExitBootServices(efi_image_handle, map_key) == EFI_SUCCESS) {
+        if (efi_bs->exit_boot_services(efi_image_handle, map_key) == EFI_SUCCESS) {
             efi_glue_boot_services_exited = true;
             loader_reserve(buf, EFI_SIZE_TO_PAGES(buf_size));
             loader_handoff->efi_mmap = buf;
@@ -128,73 +129,74 @@ static bool exit_boot_services(void) {
 
 // The memory the OS may use once boot services end (UEFI 2.11, Table 7.6).
 static bool ram_type(uint32_t type) {
-    return type == EfiLoaderCode || type == EfiLoaderData || type == EfiBootServicesCode
-        || type == EfiBootServicesData || type == EfiConventionalMemory;
+    return type == EFI_LOADER_CODE || type == EFI_LOADER_DATA || type == EFI_BOOT_SERVICES_CODE
+        || type == EFI_BOOT_SERVICES_DATA || type == EFI_CONVENTIONAL_MEMORY;
 }
 
 // The top of the memory map, 4 GiB at least, and the RAM in it.
 static uintptr_t memory_map_top(uint64_t *ram) {
     size_t size = 0;
-    EFI_UINTN map_key;
+    size_t map_key;
     size_t desc_size;
-    EFI_UINT32 desc_version;
+    uint32_t desc_version;
     uintptr_t top = FOUR_GIB;
 
     *ram = 0;
-    efi_bs->GetMemoryMap(&size, NULL, &map_key, &desc_size, &desc_version);
+    efi_bs->get_memory_map(&size, NULL, &map_key, &desc_size, &desc_version);
     size += 16 * desc_size;
     size_t pages = EFI_SIZE_TO_PAGES(size);
     uintptr_t buf = efi_glue_alloc_pages(pages, 0);
     if (buf == 0) {
         return top;
     }
-    EFI_STATUS status = efi_bs->GetMemoryMap(
-        &size, (EFI_MEMORY_DESCRIPTOR *)(uintptr_t)buf, &map_key, &desc_size, &desc_version
+    efi_status status = efi_bs->get_memory_map(
+        &size, (struct efi_memory_descriptor *)(uintptr_t)buf, &map_key, &desc_size, &desc_version
     );
-    if (status == EFI_SUCCESS && desc_size >= sizeof(EFI_MEMORY_DESCRIPTOR)) {
+    if (status == EFI_SUCCESS && desc_size >= sizeof(struct efi_memory_descriptor)) {
         for (size_t off = 0; off + desc_size <= size; off += desc_size) {
-            EFI_MEMORY_DESCRIPTOR *desc = (EFI_MEMORY_DESCRIPTOR *)(uintptr_t)(buf + off);
-            uintptr_t end = desc->PhysicalStart + desc->NumberOfPages * EFI_PAGE_SIZE;
+            struct efi_memory_descriptor *desc;
+            desc = (struct efi_memory_descriptor *)(uintptr_t)(buf + off);
+            uintptr_t end = desc->physical_start + desc->number_of_pages * EFI_PAGE_SIZE;
             if (end > top) {
                 top = end;
             }
-            if (ram_type(desc->Type)) {
-                *ram += desc->NumberOfPages * EFI_PAGE_SIZE;
+            if (ram_type(desc->type)) {
+                *ram += desc->number_of_pages * EFI_PAGE_SIZE;
             }
         }
     }
-    efi_bs->FreePages(buf, pages);
+    efi_bs->free_pages(buf, pages);
     return top;
 }
 
 // What an MC146818 can hold, with a century byte, of the firmware's time.
 static void record_time(void) {
-    EFI_TIME now;
-    if (efi_rt->GetTime(&now, NULL) != EFI_SUCCESS) {
+    struct efi_time now;
+    if (efi_rt->get_time(&now, NULL) != EFI_SUCCESS) {
         return;
     }
     uint64_t tsc = rdtsc();
-    if (now.Year < 1900 || now.Year > 2099 || now.Month < 1 || now.Month > 12 || now.Day < 1
-     || now.Day > 31 || now.Hour > 23 || now.Minute > 59 || now.Second > 59) {
+    if (now.year < 1900 || now.year > 2099 || now.month < 1 || now.month > 12 || now.day < 1
+     || now.day > 31 || now.hour > 23 || now.minute > 59 || now.second > 59) {
         return;
     }
-    loader_handoff->time_year = now.Year;
-    loader_handoff->time_month = now.Month;
-    loader_handoff->time_day = now.Day;
-    loader_handoff->time_hour = now.Hour;
-    loader_handoff->time_minute = now.Minute;
-    loader_handoff->time_second = now.Second;
+    loader_handoff->time_year = now.year;
+    loader_handoff->time_month = now.month;
+    loader_handoff->time_day = now.day;
+    loader_handoff->time_hour = now.hour;
+    loader_handoff->time_minute = now.minute;
+    loader_handoff->time_second = now.second;
     loader_handoff->time_tsc = tsc;
     loader_handoff->time_valid = true;
 }
 
-EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
+efi_status efi_main(efi_handle image_handle, struct efi_system_table *system_table) {
     efi_image_handle = image_handle;
     efi_st = system_table;
-    efi_bs = system_table->BootServices;
-    efi_rt = system_table->RuntimeServices;
+    efi_bs = system_table->boot_services;
+    efi_rt = system_table->runtime_services;
 
-    efi_bs->SetWatchdogTimer(0, 0, 0, NULL);
+    efi_bs->set_watchdog_timer(0, 0, 0, NULL);
 
     printf("ReBIOS\n");
     config_load();
@@ -239,14 +241,12 @@ EFI_STATUS efi_main(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
     }
 
     // The core runs from this image, which stays where the firmware put it.
-    EFI_LOADED_IMAGE_PROTOCOL *image;
-    EFI_STATUS status = efi_bs->HandleProtocol(
-        image_handle, &loaded_image_guid, (EFI_VOID **)&image
-    );
+    struct efi_loaded_image_protocol *image;
+    efi_status status = efi_bs->handle_protocol(image_handle, &loaded_image_guid, (void **)&image);
     if (status != EFI_SUCCESS) {
         panic("Cannot find where ReBIOS is loaded\n");
     }
-    loader_reserve((uintptr_t)image->ImageBase, EFI_SIZE_TO_PAGES(image->ImageSize));
+    loader_reserve((uintptr_t)image->image_base, EFI_SIZE_TO_PAGES(image->image_size));
 
     uint64_t ram;
     uintptr_t map_top = memory_map_top(&ram);

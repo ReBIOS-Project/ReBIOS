@@ -28,23 +28,23 @@ void efi_runtime_init(void);
 // UEFI 2.11, 8.1 asks. Without wait, they return EFI_NOT_READY rather than
 // wait for a call in progress on another processor, and EFI_ABORTED for a call
 // in which the firmware's code took a page fault, then EFI_UNSUPPORTED.
-EFI_STATUS efi_runtime_query_variable_info(
-    EFI_UINT32 attributes,
-    EFI_UINT64 *storage,
-    EFI_UINT64 *remaining,
-    EFI_UINT64 *max_size,
+efi_status efi_runtime_query_variable_info(
+    uint32_t attributes,
+    uint64_t *storage,
+    uint64_t *remaining,
+    uint64_t *max_size,
     bool wait
 );
-EFI_STATUS efi_runtime_set_variable(
-    EFI_CHAR16 *name,
-    EFI_GUID *guid,
-    EFI_UINT32 attributes,
-    EFI_UINTN size,
+efi_status efi_runtime_set_variable(
+    uint16_t *name,
+    struct efi_guid *guid,
+    uint32_t attributes,
+    size_t size,
     void *data,
     bool wait
 );
 
 // The firmware's reset, which returns if it fails.
-void efi_runtime_reset_system(EFI_RESET_TYPE type);
+void efi_runtime_reset_system(uint32_t type);
 
 #endif

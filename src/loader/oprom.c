@@ -61,24 +61,24 @@ void oprom_collect(void) {
     if (devices == NULL) {
         return;
     }
-    EFI_STATUS status = efi_bs->AllocatePool(
-        EfiLoaderData, dev_count * sizeof(struct found_rom), (void **)&roms
+    efi_status status = efi_bs->allocate_pool(
+        EFI_LOADER_DATA, dev_count * sizeof(struct found_rom), (void **)&roms
     );
     if (status != EFI_SUCCESS) {
         printf("Cannot allocate memory to list the option ROMs\n");
-        efi_bs->FreePool(devices);
+        efi_bs->free_pool(devices);
         return;
     }
 
     for (size_t i = 0; i < dev_count; i++) {
         const struct pci_io_device *dev = &devices[i];
-        if (dev->io->RomImage == NULL || dev->io->RomSize == 0
+        if (dev->io->rom_image == NULL || dev->io->rom_size == 0
          || dev->base_class == PCI_BASE_CLASS_DISPLAY
          || (video->vga_present && handoff_pci_address_equal(dev->address, video->vga_device))) {
             continue;
         }
         bool legacy = pci_rom_find_legacy_image(
-            dev->io->RomImage, dev->io->RomSize, dev->vendor_id, dev->device_id,
+            dev->io->rom_image, dev->io->rom_size, dev->vendor_id, dev->device_id,
             &roms[count].image, &roms[count].size
         );
         if (legacy) {
@@ -138,6 +138,6 @@ void oprom_collect(void) {
     }
     loader_handoff->pci_rom_count = (uint32_t)count;
 
-    efi_bs->FreePool(roms);
-    efi_bs->FreePool(devices);
+    efi_bs->free_pool(roms);
+    efi_bs->free_pool(devices);
 }

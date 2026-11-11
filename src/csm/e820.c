@@ -119,25 +119,25 @@ bool e820_set(struct e820_map *map, uintptr_t base, size_t size, uint32_t type) 
 
 static uint32_t efi_type_to_e820(uint32_t type) {
     switch (type) {
-        case EfiLoaderCode:
-        case EfiLoaderData:
-        case EfiBootServicesCode:
-        case EfiBootServicesData:
-        case EfiConventionalMemory: {
+        case EFI_LOADER_CODE:
+        case EFI_LOADER_DATA:
+        case EFI_BOOT_SERVICES_CODE:
+        case EFI_BOOT_SERVICES_DATA:
+        case EFI_CONVENTIONAL_MEMORY: {
             return E820_RAM;
         }
-        case EfiACPIReclaimMemory: {
+        case EFI_ACPI_RECLAIM_MEMORY: {
             return E820_ACPI;
         }
-        case EfiACPIMemoryNVS: {
+        case EFI_ACPI_MEMORY_NVS: {
             return E820_NVS;
         }
-        case EfiUnusableMemory: {
+        case EFI_UNUSABLE_MEMORY: {
             // Memory with errors, which ACPI's table of UEFI types calls
             // reserved, though E820 has a type for it.
             return E820_UNUSABLE;
         }
-        case EfiPersistentMemory: {
+        case EFI_PERSISTENT_MEMORY: {
             return E820_PMEM;
         }
         default: {
@@ -152,30 +152,30 @@ bool e820_set_efi_map(
     size_t mmap_size,
     size_t desc_size
 ) {
-    if (desc_size < sizeof(EFI_MEMORY_DESCRIPTOR)) {
+    if (desc_size < sizeof(struct efi_memory_descriptor)) {
         return false;
     }
 
     bool ok = true;
     for (size_t off = 0; mmap_size - off >= desc_size; off += desc_size) {
         // The stride need not keep the descriptors aligned.
-        EFI_MEMORY_DESCRIPTOR desc;
-        memcpy(&desc, (const uint8_t *)efi_mmap + off, sizeof(EFI_MEMORY_DESCRIPTOR));
-        if (desc.NumberOfPages == 0) {
+        struct efi_memory_descriptor desc;
+        memcpy(&desc, (const uint8_t *)efi_mmap + off, sizeof(struct efi_memory_descriptor));
+        if (desc.number_of_pages == 0) {
             continue;
         }
         size_t size = UINT64_MAX;
-        if (desc.NumberOfPages <= UINT64_MAX >> EFI_PAGE_SHIFT) {
-            size = desc.NumberOfPages << EFI_PAGE_SHIFT;
+        if (desc.number_of_pages <= UINT64_MAX >> EFI_PAGE_SHIFT) {
+            size = desc.number_of_pages << EFI_PAGE_SHIFT;
         }
         // Neither specific-purpose memory nor memory that cannot be cached
         // write-back is RAM, as Linux 7.3's do_add_efi_memmap() has it.
-        uint32_t type = efi_type_to_e820(desc.Type);
+        uint32_t type = efi_type_to_e820(desc.type);
         if (type == E820_RAM
-         && ((desc.Attribute & EFI_MEMORY_SP) != 0 || (desc.Attribute & EFI_MEMORY_WB) == 0)) {
+         && ((desc.attribute & EFI_MEMORY_SP) != 0 || (desc.attribute & EFI_MEMORY_WB) == 0)) {
             type = E820_RESERVED;
         }
-        bool added = e820_set(map, desc.PhysicalStart, size, type);
+        bool added = e820_set(map, desc.physical_start, size, type);
         if (!added) {
             ok = false;
         }

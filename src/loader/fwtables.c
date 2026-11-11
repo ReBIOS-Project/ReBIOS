@@ -92,16 +92,16 @@ _Static_assert(
 #define SMBIOS_SYSTEM_MANUFACTURER 0x04
 #define SMBIOS_SYSTEM_PRODUCT_NAME 0x05
 
-static const EFI_GUID acpi_20_guid = EFI_ACPI_20_TABLE_GUID;
-static const EFI_GUID acpi_10_guid = EFI_ACPI_10_TABLE_GUID;
-static const EFI_GUID smbios_guid = EFI_SMBIOS_TABLE_GUID;
-static const EFI_GUID smbios3_guid = EFI_SMBIOS3_TABLE_GUID;
+static const struct efi_guid acpi_20_guid = EFI_ACPI_20_TABLE_GUID;
+static const struct efi_guid acpi_10_guid = EFI_ACPI_10_TABLE_GUID;
+static const struct efi_guid smbios_guid = EFI_SMBIOS_TABLE_GUID;
+static const struct efi_guid smbios3_guid = EFI_SMBIOS3_TABLE_GUID;
 
-static void *config_table_find(const EFI_GUID *guid) {
-    for (size_t i = 0; i < efi_st->NumberOfTableEntries; i++) {
-        EFI_CONFIGURATION_TABLE *entry = &efi_st->ConfigurationTable[i];
-        if (memcmp(&entry->VendorGuid, guid, sizeof(EFI_GUID)) == 0) {
-            return entry->VendorTable;
+static void *config_table_find(const struct efi_guid *guid) {
+    for (size_t i = 0; i < efi_st->number_of_table_entries; i++) {
+        struct efi_configuration_table *entry = &efi_st->configuration_table[i];
+        if (memcmp(&entry->vendor_guid, guid, sizeof(struct efi_guid)) == 0) {
+            return entry->vendor_table;
         }
     }
     return NULL;
@@ -126,7 +126,7 @@ static const char *rsdp_check(const struct acpi_rsdp *rsdp) {
     return NULL;
 }
 
-static uint64_t rsdp_find(const EFI_GUID *guid, const char *version) {
+static uint64_t rsdp_find(const struct efi_guid *guid, const char *version) {
     const struct acpi_rsdp *rsdp = config_table_find(guid);
     if (rsdp == NULL) {
         return 0;
@@ -207,7 +207,7 @@ static uint64_t smbios2_use(const struct smbios_entry32 *eps) {
     }
 
     uintptr_t copy = efi_glue_alloc_pages_typed(
-        EFI_SIZE_TO_PAGES(size + eps->table_length), UINT32_MAX, EfiRuntimeServicesData
+        EFI_SIZE_TO_PAGES(size + eps->table_length), UINT32_MAX, EFI_RUNTIME_SERVICES_DATA
     );
     if (copy == 0) {
         printf("Cannot allocate memory below 4GiB for the SMBIOS tables\n");
@@ -290,7 +290,7 @@ static uint64_t smbios3_synthesise(const struct smbios3_entry *eps3) {
 
     uintptr_t addr = efi_glue_alloc_pages_typed(
         EFI_SIZE_TO_PAGES(sizeof(struct smbios_entry32) + walk.length), UINT32_MAX,
-        EfiRuntimeServicesData
+        EFI_RUNTIME_SERVICES_DATA
     );
     if (addr == 0) {
         printf("Cannot allocate memory below 4GiB for the SMBIOS tables\n");
@@ -629,7 +629,7 @@ static uint16_t bios_year(void) {
 // uACPI takes the XSDT wherever the RSDP gives one, so where only the RSDT is
 // sound, it gets an ACPI 1.0 RSDP, which gives the RSDT alone.
 static uint64_t rsdp_for_rsdt(const struct acpi_rsdp *rsdp) {
-    uintptr_t copy = efi_glue_alloc_pages_typed(1, UINT32_MAX, EfiACPIReclaimMemory);
+    uintptr_t copy = efi_glue_alloc_pages_typed(1, UINT32_MAX, EFI_ACPI_RECLAIM_MEMORY);
     if (copy == 0) {
         return (uintptr_t)rsdp;
     }

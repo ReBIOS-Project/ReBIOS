@@ -231,8 +231,8 @@ void cpu_exception_handler(struct exception_frame *frame) {
     char text[1536];
     size_t len = 0;
     uint32_t apic_id = apic_id_now();
-    uint64_t image = (uintptr_t)EfiLoadSlide;
-    uintptr_t image_end = image + EfiImageSize;
+    uint64_t image = (uintptr_t)efi_load_slide;
+    uintptr_t image_end = image + efi_image_size;
     uintptr_t map_top = core_handoff != NULL ? core_handoff->map_top : 0;
 
     append(

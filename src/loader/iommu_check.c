@@ -73,14 +73,14 @@ static const uint16_t broadwell_igfx[] = {
 #define ARRANDALE_HOST_BRIDGE 0x0044
 static const uint16_t calpella_host_bridges[] = { 0x0040, 0x0062, 0x006a };
 
-static const EFI_GUID acpi_20_guid = EFI_ACPI_20_TABLE_GUID;
-static const EFI_GUID acpi_10_guid = EFI_ACPI_10_TABLE_GUID;
+static const struct efi_guid acpi_20_guid = EFI_ACPI_20_TABLE_GUID;
+static const struct efi_guid acpi_10_guid = EFI_ACPI_10_TABLE_GUID;
 
-static const uint8_t *config_table(const EFI_GUID *guid) {
-    for (size_t i = 0; i < efi_st->NumberOfTableEntries; i++) {
-        const EFI_CONFIGURATION_TABLE *entry = &efi_st->ConfigurationTable[i];
-        if (memcmp(&entry->VendorGuid, guid, sizeof(EFI_GUID)) == 0) {
-            return entry->VendorTable;
+static const uint8_t *config_table(const struct efi_guid *guid) {
+    for (size_t i = 0; i < efi_st->number_of_table_entries; i++) {
+        const struct efi_configuration_table *entry = &efi_st->configuration_table[i];
+        if (memcmp(&entry->vendor_guid, guid, sizeof(struct efi_guid)) == 0) {
+            return entry->vendor_table;
         }
     }
     return NULL;
@@ -247,8 +247,8 @@ static bool igfx_broken(uint16_t *igfx_id) {
                         );
         if (calpella) {
             uint16_t ggc;
-            EFI_STATUS status = host_bridge->io->Pci.Read(
-                host_bridge->io, EfiPciIoWidthUint16, HOST_BRIDGE_GGC, 1, &ggc
+            efi_status status = host_bridge->io->pci.read(
+                host_bridge->io, EFI_PCI_IO_WIDTH_UINT16, HOST_BRIDGE_GGC, 1, &ggc
             );
             if (status == EFI_SUCCESS && (ggc & GGC_MEMORY_VT_ENABLED) == 0) {
                 broken = true;
@@ -256,7 +256,7 @@ static bool igfx_broken(uint16_t *igfx_id) {
         }
     }
     if (devices != NULL) {
-        efi_bs->FreePool(devices);
+        efi_bs->free_pool(devices);
     }
     return broken;
 }
@@ -283,6 +283,6 @@ bool iommu_check(void) {
             "If the machine has one, enable it in the firmware setup.\n"
         );
     }
-    efi_bs->Stall(NOTICE_SECONDS * 1000000);
+    efi_bs->stall(NOTICE_SECONDS * 1000000);
     return false;
 }

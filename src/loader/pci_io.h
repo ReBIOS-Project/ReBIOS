@@ -25,8 +25,8 @@
 
 // A PCI function the firmware enumerated.
 struct pci_io_device {
-    EFI_HANDLE handle;
-    EFI_PCI_IO_PROTOCOL *io;
+    efi_handle handle;
+    struct efi_pci_io_protocol *io;
     struct handoff_pci_address address;
     uint16_t vendor_id;
     uint16_t device_id;
@@ -38,10 +38,10 @@ struct pci_io_device {
 
 // Returns the PCI functions, in handle order, in pool memory to free with
 // FreePool(), or NULL if there are none.
-struct pci_io_device *pci_io_devices(EFI_UINTN *count);
+struct pci_io_device *pci_io_devices(size_t *count);
 
 // Finds the PCI function a device path leads to.
-bool pci_io_device_on_path(EFI_DEVICE_PATH_PROTOCOL *path, struct pci_io_device *dev);
+bool pci_io_device_on_path(struct efi_device_path_protocol *path, struct pci_io_device *dev);
 
 // Enables I/O decoding of the PCI function (and of the bridges above it) whose
 // I/O BAR holds a UART at the port, as on a serial card the firmware has no

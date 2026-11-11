@@ -23,8 +23,8 @@
 #include <lib/util.h>
 #include <loader/efi_glue.h>
 
-static EFI_GUID loaded_image_guid = EFI_LOADED_IMAGE_PROTOCOL_GUID;
-static EFI_GUID simple_file_system_guid = EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID;
+static struct efi_guid loaded_image_guid = EFI_LOADED_IMAGE_PROTOCOL_GUID;
+static struct efi_guid simple_file_system_guid = EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID;
 
 // Device path nodes are byte-packed, so their fields may be unaligned.
 static size_t node_length(const uint8_t *node) {
@@ -37,12 +37,12 @@ static bool is_file_path_node(const uint8_t *node) {
 
 // The room for the path name in a file path node, in characters.
 static size_t node_path_chars(const uint8_t *node) {
-    return (node_length(node) - EFI_SIZE_OF_FILEPATH_DEVICE_PATH) / sizeof(EFI_CHAR16);
+    return (node_length(node) - EFI_SIZE_OF_FILEPATH_DEVICE_PATH) / sizeof(uint16_t);
 }
 
 // The absolute path of name in the directory of the image's file path, in a
 // pool allocation, or NULL if that directory is unknown.
-EFI_CHAR16 *files_sibling_path(const EFI_DEVICE_PATH_PROTOCOL *image_path, const char *name) {
+uint16_t *files_sibling_path(const struct efi_device_path_protocol *image_path, const char *name) {
     if (image_path == NULL) {
         return NULL;
     }
@@ -51,7 +51,7 @@ EFI_CHAR16 *files_sibling_path(const EFI_DEVICE_PATH_PROTOCOL *image_path, const
     bool found = false;
     const uint8_t *node = (const uint8_t *)image_path;
     for (; node[0] != EFI_END_DEVICE_PATH_TYPE; node += node_length(node)) {
-        if (node_length(node) < sizeof(EFI_DEVICE_PATH_PROTOCOL)) {
+        if (node_length(node) < sizeof(struct efi_device_path_protocol)) {
             return NULL;
         }
         if (is_file_path_node(node)) {
@@ -68,7 +68,7 @@ EFI_CHAR16 *files_sibling_path(const EFI_DEVICE_PATH_PROTOCOL *image_path, const
         name_len++;
     }
     // A leading separator, the image's path, the name, and a NUL.
-    EFI_CHAR16 *path = efi_glue_alloc_pool((path_chars + name_len + 2) * sizeof(EFI_CHAR16));
+    uint16_t *path = efi_glue_alloc_pool((path_chars + name_len + 2) * sizeof(uint16_t));
     if (path == NULL) {
         return NULL;
     }
@@ -84,7 +84,7 @@ EFI_CHAR16 *files_sibling_path(const EFI_DEVICE_PATH_PROTOCOL *image_path, const
             continue;
         }
         for (size_t i = 0; i < node_path_chars(node); i++) {
-            EFI_CHAR16 c = read_le16(node + EFI_SIZE_OF_FILEPATH_DEVICE_PATH + i * 2);
+            uint16_t c = read_le16(node + EFI_SIZE_OF_FILEPATH_DEVICE_PATH + i * 2);
             if (c == 0) {
                 break;
             }
@@ -106,24 +106,24 @@ EFI_CHAR16 *files_sibling_path(const EFI_DEVICE_PATH_PROTOCOL *image_path, const
 }
 
 bool files_open_image_volume(
-    EFI_FILE_PROTOCOL **root,
-    const EFI_DEVICE_PATH_PROTOCOL **image_path
+    struct efi_file_protocol **root,
+    const struct efi_device_path_protocol **image_path
 ) {
-    EFI_LOADED_IMAGE_PROTOCOL *image;
-    EFI_STATUS status = efi_bs->HandleProtocol(
+    struct efi_loaded_image_protocol *image;
+    efi_status status = efi_bs->handle_protocol(
         efi_image_handle, &loaded_image_guid, (void **)&image
     );
-    if (status != EFI_SUCCESS || image == NULL || image->DeviceHandle == NULL) {
+    if (status != EFI_SUCCESS || image == NULL || image->device_handle == NULL) {
         return false;
     }
-    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *volume;
-    status = efi_bs->HandleProtocol(
-        image->DeviceHandle, &simple_file_system_guid, (void **)&volume
+    struct efi_simple_file_system_protocol *volume;
+    status = efi_bs->handle_protocol(
+        image->device_handle, &simple_file_system_guid, (void **)&volume
     );
     if (status != EFI_SUCCESS || volume == NULL
-     || volume->OpenVolume(volume, root) != EFI_SUCCESS) {
+     || volume->open_volume(volume, root) != EFI_SUCCESS) {
         return false;
     }
-    *image_path = image->FilePath;
+    *image_path = image->file_path;
     return true;
 }

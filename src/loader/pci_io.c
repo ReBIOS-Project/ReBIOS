@@ -34,16 +34,16 @@
 #define PCI_EXPRESS_TYPE_DOWNSTREAM 0x0060
 #define PCI_EXPRESS_FLAGS_SLOT 0x0100
 
-static EFI_GUID pci_io_guid = EFI_PCI_IO_PROTOCOL_GUID;
+static struct efi_guid pci_io_guid = EFI_PCI_IO_PROTOCOL_GUID;
 
-static bool pci_io_device_get(EFI_HANDLE handle, struct pci_io_device *dev) {
-    EFI_PCI_IO_PROTOCOL *io;
-    EFI_UINTN segment, bus, device, function;
+static bool pci_io_device_get(efi_handle handle, struct pci_io_device *dev) {
+    struct efi_pci_io_protocol *io;
+    size_t segment, bus, device, function;
     uint32_t header[4];
 
-    if (efi_bs->HandleProtocol(handle, &pci_io_guid, (void **)&io) != EFI_SUCCESS || io == NULL
-     || io->GetLocation(io, &segment, &bus, &device, &function) != EFI_SUCCESS
-     || io->Pci.Read(io, EfiPciIoWidthUint32, 0, 4, header) != EFI_SUCCESS) {
+    if (efi_bs->handle_protocol(handle, &pci_io_guid, (void **)&io) != EFI_SUCCESS || io == NULL
+     || io->get_location(io, &segment, &bus, &device, &function) != EFI_SUCCESS
+     || io->pci.read(io, EFI_PCI_IO_WIDTH_UINT32, 0, 4, header) != EFI_SUCCESS) {
         return false;
     }
 
@@ -61,9 +61,9 @@ static bool pci_io_device_get(EFI_HANDLE handle, struct pci_io_device *dev) {
     return true;
 }
 
-struct pci_io_device *pci_io_devices(EFI_UINTN *count) {
+struct pci_io_device *pci_io_devices(size_t *count) {
     size_t handle_count;
-    EFI_HANDLE *handles = efi_glue_locate_handles(&pci_io_guid, &handle_count);
+    efi_handle *handles = efi_glue_locate_handles(&pci_io_guid, &handle_count);
     struct pci_io_device *devices = NULL;
 
     *count = 0;
@@ -71,8 +71,8 @@ struct pci_io_device *pci_io_devices(EFI_UINTN *count) {
         return NULL;
     }
 
-    EFI_STATUS status = efi_bs->AllocatePool(
-        EfiLoaderData, handle_count * sizeof(struct pci_io_device), (void **)&devices
+    efi_status status = efi_bs->allocate_pool(
+        EFI_LOADER_DATA, handle_count * sizeof(struct pci_io_device), (void **)&devices
     );
     if (status != EFI_SUCCESS) {
         printf("Cannot allocate memory to list the PCI devices\n");
@@ -84,31 +84,31 @@ struct pci_io_device *pci_io_devices(EFI_UINTN *count) {
             }
         }
         if (*count == 0) {
-            efi_bs->FreePool(devices);
+            efi_bs->free_pool(devices);
             devices = NULL;
         }
     }
 
-    efi_bs->FreePool(handles);
+    efi_bs->free_pool(handles);
     return devices;
 }
 
-bool pci_io_device_on_path(EFI_DEVICE_PATH_PROTOCOL *path, struct pci_io_device *dev) {
-    EFI_DEVICE_PATH_PROTOCOL *rest = path;
-    EFI_HANDLE handle;
+bool pci_io_device_on_path(struct efi_device_path_protocol *path, struct pci_io_device *dev) {
+    struct efi_device_path_protocol *rest = path;
+    efi_handle handle;
 
-    if (efi_bs->LocateDevicePath(&pci_io_guid, &rest, &handle) != EFI_SUCCESS) {
+    if (efi_bs->locate_device_path(&pci_io_guid, &rest, &handle) != EFI_SUCCESS) {
         return false;
     }
     return pci_io_device_get(handle, dev);
 }
 
-static bool port_to_slot(EFI_PCI_IO_PROTOCOL *io) {
+static bool port_to_slot(struct efi_pci_io_protocol *io) {
     uint16_t status = 0;
     uint8_t next = 0;
-    io->Pci.Read(io, EfiPciIoWidthUint16, PCI_STATUS, 1, &status);
+    io->pci.read(io, EFI_PCI_IO_WIDTH_UINT16, PCI_STATUS, 1, &status);
     if ((status & PCI_STATUS_CAP_LIST) != 0) {
-        io->Pci.Read(io, EfiPciIoWidthUint8, PCI_CAPABILITY_LIST, 1, &next);
+        io->pci.read(io, EFI_PCI_IO_WIDTH_UINT8, PCI_CAPABILITY_LIST, 1, &next);
     }
 
     for (size_t i = 0; i < PCI_FIND_CAP_TTL; i++) {
@@ -116,23 +116,23 @@ static bool port_to_slot(EFI_PCI_IO_PROTOCOL *io) {
             return false;
         }
         uint8_t id = 0;
-        io->Pci.Read(io, EfiPciIoWidthUint8, next, 1, &id);
+        io->pci.read(io, EFI_PCI_IO_WIDTH_UINT8, next, 1, &id);
         if (id == PCI_CAP_ID_EXP) {
             uint16_t flags = 0;
-            io->Pci.Read(io, EfiPciIoWidthUint16, next + PCI_EXP_FLAGS, 1, &flags);
+            io->pci.read(io, EFI_PCI_IO_WIDTH_UINT16, next + PCI_EXP_FLAGS, 1, &flags);
             uint16_t type = flags & PCI_EXPRESS_FLAGS_TYPE;
             bool port = type == PCI_EXPRESS_TYPE_ROOT_PORT || type == PCI_EXPRESS_TYPE_DOWNSTREAM;
             return port && (flags & PCI_EXPRESS_FLAGS_SLOT) != 0;
         }
         uint32_t link = next + (uint32_t)1;
         next = 0;
-        io->Pci.Read(io, EfiPciIoWidthUint8, link, 1, &next);
+        io->pci.read(io, EFI_PCI_IO_WIDTH_UINT8, link, 1, &next);
     }
     return false;
 }
 
 bool pci_io_device_in_slot(const struct pci_io_device *dev) {
-    EFI_UINTN count;
+    size_t count;
     struct pci_io_device *devices = pci_io_devices(&count);
     bool slot = false;
     uint8_t bus = dev->address.bus;
@@ -146,8 +146,8 @@ bool pci_io_device_in_slot(const struct pci_io_device *dev) {
              || devices[i].address.segment != dev->address.segment) {
                 continue;
             }
-            EFI_PCI_IO_PROTOCOL *io = devices[i].io;
-            io->Pci.Read(io, EfiPciIoWidthUint8, PCI_SECONDARY_BUS, 1, &secondary);
+            struct efi_pci_io_protocol *io = devices[i].io;
+            io->pci.read(io, EFI_PCI_IO_WIDTH_UINT8, PCI_SECONDARY_BUS, 1, &secondary);
             if (secondary != 0 && secondary == bus) {
                 bridge = &devices[i];
             }
@@ -160,7 +160,7 @@ bool pci_io_device_in_slot(const struct pci_io_device *dev) {
     }
 
     if (devices != NULL) {
-        efi_bs->FreePool(devices);
+        efi_bs->free_pool(devices);
     }
     return slot;
 }
@@ -168,7 +168,7 @@ bool pci_io_device_in_slot(const struct pci_io_device *dev) {
 // The upstream bridge of a function, or NULL.
 static const struct pci_io_device *upstream_bridge(
     const struct pci_io_device *devices,
-    EFI_UINTN count,
+    size_t count,
     const struct pci_io_device *dev
 ) {
     for (size_t i = 0; i < count; i++) {
@@ -178,8 +178,8 @@ static const struct pci_io_device *upstream_bridge(
          || devices[i].address.segment != dev->address.segment) {
             continue;
         }
-        EFI_PCI_IO_PROTOCOL *io = devices[i].io;
-        io->Pci.Read(io, EfiPciIoWidthUint8, PCI_SECONDARY_BUS, 1, &secondary);
+        struct efi_pci_io_protocol *io = devices[i].io;
+        io->pci.read(io, EFI_PCI_IO_WIDTH_UINT8, PCI_SECONDARY_BUS, 1, &secondary);
         if (secondary != 0 && secondary == dev->address.bus) {
             return &devices[i];
         }
@@ -188,14 +188,14 @@ static const struct pci_io_device *upstream_bridge(
 }
 
 // Whether one of a function's I/O BARs holds a UART at the port.
-static bool io_bar_holds(EFI_PCI_IO_PROTOCOL *io, uint16_t port) {
+static bool io_bar_holds(struct efi_pci_io_protocol *io, uint16_t port) {
     uint8_t header_type = 0;
-    io->Pci.Read(io, EfiPciIoWidthUint8, PCI_HEADER_TYPE, 1, &header_type);
+    io->pci.read(io, EFI_PCI_IO_WIDTH_UINT8, PCI_HEADER_TYPE, 1, &header_type);
     if ((header_type & PCI_HEADER_TYPE_MASK) != 0) {
         return false;
     }
     uint32_t bars[PCI_STD_NUM_BARS];
-    if (io->Pci.Read(io, EfiPciIoWidthUint32, PCI_BASE_ADDRESS_0, PCI_STD_NUM_BARS, bars)
+    if (io->pci.read(io, EFI_PCI_IO_WIDTH_UINT32, PCI_BASE_ADDRESS_0, PCI_STD_NUM_BARS, bars)
      != EFI_SUCCESS) {
         return false;
     }
@@ -209,27 +209,27 @@ static bool io_bar_holds(EFI_PCI_IO_PROTOCOL *io, uint16_t port) {
     return false;
 }
 
-static void enable_decoding(EFI_PCI_IO_PROTOCOL *io, bool memory) {
-    EFI_UINT64 attributes = EFI_PCI_IO_ATTRIBUTE_IO;
+static void enable_decoding(struct efi_pci_io_protocol *io, bool memory) {
+    uint64_t attributes = EFI_PCI_IO_ATTRIBUTE_IO;
     uint16_t bits = PCI_COMMAND_IO;
     if (memory) {
         attributes |= EFI_PCI_IO_ATTRIBUTE_MEMORY | EFI_PCI_IO_ATTRIBUTE_BUS_MASTER;
         bits |= PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER;
     }
-    io->Attributes(io, EfiPciIoAttributeOperationEnable, attributes, NULL);
+    io->attributes(io, EFI_PCI_IO_ATTRIBUTE_OPERATION_ENABLE, attributes, NULL);
     // Some firmware leaves the command register as it was.
     uint16_t command = 0;
-    io->Pci.Read(io, EfiPciIoWidthUint16, PCI_COMMAND, 1, &command);
+    io->pci.read(io, EFI_PCI_IO_WIDTH_UINT16, PCI_COMMAND, 1, &command);
     if ((command & bits) != bits) {
         command |= bits;
-        io->Pci.Write(io, EfiPciIoWidthUint16, PCI_COMMAND, 1, &command);
+        io->pci.write(io, EFI_PCI_IO_WIDTH_UINT16, PCI_COMMAND, 1, &command);
     }
 }
 
 // Enables a function's decoding and that of the bridges above it.
 static void enable_decoding_path(
     const struct pci_io_device *devices,
-    EFI_UINTN count,
+    size_t count,
     const struct pci_io_device *dev,
     bool memory
 ) {
@@ -245,16 +245,16 @@ static void enable_decoding_path(
 }
 
 void pci_io_enable_device(const struct pci_io_device *dev) {
-    EFI_UINTN count;
+    size_t count;
     struct pci_io_device *devices = pci_io_devices(&count);
     enable_decoding_path(devices, count, dev, true);
     if (devices != NULL) {
-        efi_bs->FreePool(devices);
+        efi_bs->free_pool(devices);
     }
 }
 
 bool pci_io_enable_io_port(uint16_t port, struct handoff_pci_address *found) {
-    EFI_UINTN count;
+    size_t count;
     struct pci_io_device *devices = pci_io_devices(&count);
     const struct pci_io_device *dev = NULL;
 
@@ -269,7 +269,7 @@ bool pci_io_enable_io_port(uint16_t port, struct handoff_pci_address *found) {
     }
 
     if (devices != NULL) {
-        efi_bs->FreePool(devices);
+        efi_bs->free_pool(devices);
     }
     return dev != NULL;
 }

@@ -51,10 +51,10 @@
 #define ATTRIBUTES \
     (EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS)
 
-static EFI_CHAR16 start_name[] = HANDOFF_LOG_VARIABLE;
-static EFI_CHAR16 end_name[] = HANDOFF_LOG_END_VARIABLE;
-static EFI_CHAR16 dummy_name[] = u"ReBIOSDummy";
-static EFI_GUID guid = HANDOFF_VARIABLE_GUID;
+static uint16_t start_name[] = HANDOFF_LOG_VARIABLE;
+static uint16_t end_name[] = HANDOFF_LOG_END_VARIABLE;
+static uint16_t dummy_name[] = u"ReBIOSDummy";
+static struct efi_guid guid = HANDOFF_VARIABLE_GUID;
 static const char gap[] = "[...]\n";
 static struct hv_timer timer;
 static char *text;
@@ -70,8 +70,8 @@ static size_t saves;
 // but not without wait, for panics. 0 where the write would leave less than
 // STORE_RESERVE free.
 static size_t room(size_t name_size, size_t want, size_t kept, bool wait) {
-    EFI_UINT64 storage, remaining, max_size;
-    EFI_STATUS status = efi_runtime_query_variable_info(
+    uint64_t storage, remaining, max_size;
+    efi_status status = efi_runtime_query_variable_info(
         ATTRIBUTES, &storage, &remaining, &max_size, wait
     );
     if (status != EFI_SUCCESS || max_size <= name_size) {
@@ -108,10 +108,10 @@ static size_t room(size_t name_size, size_t want, size_t kept, bool wait) {
 }
 
 // Room for the last save is kept from the others.
-static EFI_STATUS save(bool wait, bool last) {
+static efi_status save(bool wait, bool last) {
     size_t count = log_saved_count();
     size_t kept = last ? 0 : END_MAX;
-    EFI_STATUS status;
+    efi_status status;
     if (!start_saved) {
         size_t size = room(sizeof(start_name), LOG_SAVED_START, kept, wait);
         if (size < SAVE_MIN) {
@@ -152,7 +152,7 @@ static EFI_STATUS save(bool wait, bool last) {
 static void timer_fired(void *ctx) {
     (void)ctx;
     if (log_saved_count() != saved_count) {
-        EFI_STATUS status = save(true, false);
+        efi_status status = save(true, false);
         if (status != EFI_SUCCESS) {
             printf(
                 "The log is saved again only at a panic or before a reset or power off: the "

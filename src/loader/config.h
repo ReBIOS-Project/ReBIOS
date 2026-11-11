@@ -21,7 +21,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <efi.h>
 #include <handoff.h>
 
 #define CONFIG_VGABIOS_MAX 256
@@ -33,7 +32,7 @@ struct config {
     uint32_t serial_baud;
     bool verbose;
     // NUL-terminated, empty when unset.
-    EFI_CHAR16 vgabios[CONFIG_VGABIOS_MAX];
+    uint16_t vgabios[CONFIG_VGABIOS_MAX];
     bool vga_specified;
     struct handoff_pci_address vga_device;
     // One of the HANDOFF_VGA_EMULATION_* and HANDOFF_VGA_SCALING_* values.

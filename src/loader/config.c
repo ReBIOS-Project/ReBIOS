@@ -55,14 +55,14 @@ struct setting {
 
 static unsigned int current_line;
 
-static EFI_GUID file_info_guid = EFI_FILE_INFO_ID;
+static struct efi_guid file_info_guid = EFI_FILE_INFO_ID;
 
 static const char *const file_names[] = { "rebios.ini", "csmwrap.ini" };
 
-static EFI_CHAR16 rebios_variable[] = u"ReBIOSConfig";
-static EFI_GUID rebios_variable_guid = HANDOFF_VARIABLE_GUID;
-static EFI_CHAR16 csmwrap_variable[] = u"CSMWrapConfig";
-static EFI_GUID csmwrap_variable_guid = {
+static uint16_t rebios_variable[] = u"ReBIOSConfig";
+static struct efi_guid rebios_variable_guid = HANDOFF_VARIABLE_GUID;
+static uint16_t csmwrap_variable[] = u"CSMWrapConfig";
+static struct efi_guid csmwrap_variable_guid = {
     0x2910aadb, 0xf7ca, 0x42b5, { 0x8c, 0xe2, 0xd6, 0x2d, 0x6a, 0x69, 0xb5, 0xee }
 };
 
@@ -507,7 +507,7 @@ static void apply_text(const char *text, size_t size, const char *source) {
 }
 
 // For the log, cut short to fit.
-static void path_to_ascii(char *out, size_t size, const EFI_CHAR16 *path) {
+static void path_to_ascii(char *out, size_t size, const uint16_t *path) {
     size_t i = 0;
     for (; i + 1 < size && path[i] != 0; i++) {
         out[i] = path[i] >= 0x20 && path[i] < 0x7f ? (char)path[i] : '?';
@@ -516,42 +516,42 @@ static void path_to_ascii(char *out, size_t size, const EFI_CHAR16 *path) {
 }
 
 // Returns the contents of a file fit to apply in a pool allocation, or NULL.
-static char *read_file(EFI_FILE_PROTOCOL *file, const char *source, size_t *size) {
+static char *read_file(struct efi_file_protocol *file, const char *source, size_t *size) {
     union {
-        EFI_FILE_INFO info;
-        uint8_t bytes[EFI_SIZE_OF_EFI_FILE_INFO + 256 * sizeof(EFI_CHAR16)];
+        struct efi_file_info info;
+        uint8_t bytes[EFI_SIZE_OF_EFI_FILE_INFO + 256 * sizeof(uint16_t)];
     } buf;
     size_t buf_size = sizeof(buf);
-    EFI_STATUS status = file->GetInfo(file, &file_info_guid, &buf_size, &buf);
+    efi_status status = file->get_info(file, &file_info_guid, &buf_size, &buf);
     if (status != EFI_SUCCESS) {
         printf("Skipping %s, error %#llx\n", source, (unsigned long long)status);
         return NULL;
     }
-    if ((buf.info.Attribute & EFI_FILE_DIRECTORY) != 0) {
+    if ((buf.info.attribute & EFI_FILE_DIRECTORY) != 0) {
         printf("Skipping %s, a directory\n", source);
         return NULL;
     }
-    if (buf.info.FileSize > CONFIG_MAX_SIZE) {
+    if (buf.info.file_size > CONFIG_MAX_SIZE) {
         printf("Skipping %s, larger than 64 KiB\n", source);
         return NULL;
     }
-    if (buf.info.FileSize == 0) {
+    if (buf.info.file_size == 0) {
         return NULL;
     }
 
-    size_t file_size = (EFI_UINTN)buf.info.FileSize;
+    size_t file_size = (size_t)buf.info.file_size;
     char *text = efi_glue_alloc_pool(file_size);
     if (text == NULL) {
         printf("Skipping %s, out of memory\n", source);
         return NULL;
     }
-    EFI_UINTN done = 0;
+    size_t done = 0;
     while (done < file_size) {
-        EFI_UINTN chunk = file_size - done;
-        status = file->Read(file, &chunk, text + done);
+        size_t chunk = file_size - done;
+        status = file->read(file, &chunk, text + done);
         if (status != EFI_SUCCESS) {
             printf("Skipping %s, error %#llx\n", source, (unsigned long long)status);
-            efi_bs->FreePool(text);
+            efi_bs->free_pool(text);
             return NULL;
         }
         if (chunk == 0) {
@@ -560,19 +560,19 @@ static char *read_file(EFI_FILE_PROTOCOL *file, const char *source, size_t *size
         done += chunk;
     }
     if (done == 0) {
-        efi_bs->FreePool(text);
+        efi_bs->free_pool(text);
         return NULL;
     }
     *size = done;
     return text;
 }
 
-static bool apply_file(EFI_FILE_PROTOCOL *root, EFI_CHAR16 *path) {
+static bool apply_file(struct efi_file_protocol *root, uint16_t *path) {
     char source[256];
     path_to_ascii(source, sizeof(source), path);
 
-    EFI_FILE_PROTOCOL *file;
-    EFI_STATUS status = root->Open(root, &file, path, EFI_FILE_MODE_READ, 0);
+    struct efi_file_protocol *file;
+    efi_status status = root->open(root, &file, path, EFI_FILE_MODE_READ, 0);
     if (status == EFI_NOT_FOUND) {
         return false;
     }
@@ -582,39 +582,44 @@ static bool apply_file(EFI_FILE_PROTOCOL *root, EFI_CHAR16 *path) {
     }
     size_t size;
     char *text = read_file(file, source, &size);
-    file->Close(file);
+    file->close(file);
     if (text == NULL) {
         return false;
     }
     apply_text(text, size, source);
-    efi_bs->FreePool(text);
+    efi_bs->free_pool(text);
     return true;
 }
 
 static bool apply_files(void) {
-    EFI_FILE_PROTOCOL *root;
-    const EFI_DEVICE_PATH_PROTOCOL *image_path;
+    struct efi_file_protocol *root;
+    const struct efi_device_path_protocol *image_path;
     if (!files_open_image_volume(&root, &image_path)) {
         return false;
     }
     bool applied = false;
     for (size_t i = 0; i < ARRAY_COUNT(file_names) && !applied; i++) {
-        EFI_CHAR16 *path = files_sibling_path(image_path, file_names[i]);
+        uint16_t *path = files_sibling_path(image_path, file_names[i]);
         if (path == NULL) {
             break;
         }
         applied = apply_file(root, path);
-        efi_bs->FreePool(path);
+        efi_bs->free_pool(path);
     }
-    root->Close(root);
+    root->close(root);
     return applied;
 }
 
 // Returns the contents of a variable fit to apply in a pool allocation, or
 // NULL.
-static char *read_variable(EFI_CHAR16 *name, EFI_GUID *guid, const char *source, size_t *size) {
+static char *read_variable(
+    uint16_t *name,
+    struct efi_guid *guid,
+    const char *source,
+    size_t *size
+) {
     size_t data_size = 0;
-    EFI_STATUS status = efi_rt->GetVariable(name, guid, NULL, &data_size, NULL);
+    efi_status status = efi_rt->get_variable(name, guid, NULL, &data_size, NULL);
     if (status == EFI_NOT_FOUND) {
         return NULL;
     }
@@ -635,28 +640,28 @@ static char *read_variable(EFI_CHAR16 *name, EFI_GUID *guid, const char *source,
         printf("Skipping %s, out of memory\n", source);
         return NULL;
     }
-    status = efi_rt->GetVariable(name, guid, NULL, &data_size, text);
+    status = efi_rt->get_variable(name, guid, NULL, &data_size, text);
     if (status != EFI_SUCCESS) {
         printf("Skipping %s, error %#llx\n", source, (unsigned long long)status);
-        efi_bs->FreePool(text);
+        efi_bs->free_pool(text);
         return NULL;
     }
     if (data_size == 0) {
-        efi_bs->FreePool(text);
+        efi_bs->free_pool(text);
         return NULL;
     }
     *size = data_size;
     return text;
 }
 
-static bool apply_variable(EFI_CHAR16 *name, EFI_GUID *guid, const char *source) {
+static bool apply_variable(uint16_t *name, struct efi_guid *guid, const char *source) {
     size_t size;
     char *text = read_variable(name, guid, source, &size);
     if (text == NULL) {
         return false;
     }
     apply_text(text, size, source);
-    efi_bs->FreePool(text);
+    efi_bs->free_pool(text);
     return true;
 }
 

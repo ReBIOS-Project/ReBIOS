@@ -70,7 +70,7 @@ clone_repo_commit \
 clone_repo_commit \
     https://github.com/PicoEFI/PicoEFI.git \
     picoefi \
-    dc23de6c36ae9e10e5ff290d7c3dd6c04b141a7a
+    9065da08260729e932531110a5a7fb90c0022aa9
 
 clone_repo_commit \
     https://github.com/charlesnicholson/nanoprintf.git \

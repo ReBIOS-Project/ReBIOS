@@ -53,7 +53,7 @@ static size_t early_log_len;
 static bool early_log_lost;
 
 struct con_buffer {
-    EFI_CHAR16 chars[128];
+    uint16_t chars[128];
     size_t count;
 };
 
@@ -63,12 +63,12 @@ static void con_flush(struct con_buffer *buf) {
     }
     buf->chars[buf->count] = 0;
     if (!efi_glue_boot_services_exited) {
-        efi_st->ConOut->OutputString(efi_st->ConOut, buf->chars);
+        efi_st->con_out->output_string(efi_st->con_out, buf->chars);
     }
     buf->count = 0;
 }
 
-static void con_put(struct con_buffer *buf, EFI_CHAR16 c) {
+static void con_put(struct con_buffer *buf, uint16_t c) {
     if (buf->count == ARRAY_COUNT(buf->chars) - 1) {
         con_flush(buf);
     }
@@ -85,7 +85,7 @@ static void screen_put(struct con_buffer *buf, char c) {
     if (log_screen != NULL) {
         flanterm_write(log_screen, &c, 1);
     } else {
-        con_put(buf, (EFI_CHAR16)(unsigned char)c);
+        con_put(buf, (uint16_t)(unsigned char)c);
     }
 }
 

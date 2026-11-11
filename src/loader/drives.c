@@ -67,16 +67,16 @@
     }
 
 struct disk_info {
-    EFI_GUID interface;
-    EFI_STATUS(EFI_API *inquiry)(struct disk_info *self, void *data, uint32_t *size);
-    EFI_STATUS(EFI_API *identify)(struct disk_info *self, void *data, uint32_t *size);
-    EFI_STATUS(EFI_API *sense_data)(
+    struct efi_guid interface;
+    efi_status(EFI_API *inquiry)(struct disk_info *self, void *data, uint32_t *size);
+    efi_status(EFI_API *identify)(struct disk_info *self, void *data, uint32_t *size);
+    efi_status(EFI_API *sense_data)(
         struct disk_info *self,
         void *data,
         uint32_t *size,
         uint8_t *count
     );
-    EFI_STATUS(EFI_API *which_ide)(struct disk_info *self, uint32_t *channel, uint32_t *device);
+    efi_status(EFI_API *which_ide)(struct disk_info *self, uint32_t *channel, uint32_t *device);
 };
 
 // ATA8-ACS T13/1699-D revision 4a, 7.16.7.13: IDENTIFY DEVICE words 27-46, the
@@ -134,23 +134,23 @@ struct drive {
 #define RANK_EXTERNAL 7
 #define RANK_SELF_LAST 8
 
-static EFI_GUID loaded_image_guid = EFI_LOADED_IMAGE_PROTOCOL_GUID;
-static EFI_GUID device_path_guid = EFI_DEVICE_PATH_PROTOCOL_GUID;
-static EFI_GUID block_io_guid = EFI_BLOCK_IO_PROTOCOL_GUID;
-static EFI_GUID pci_io_guid = EFI_PCI_IO_PROTOCOL_GUID;
-static EFI_GUID nvme_guid = EFI_NVM_EXPRESS_PASS_THRU_PROTOCOL_GUID;
-static EFI_GUID path_to_text_guid = EFI_DEVICE_PATH_TO_TEXT_PROTOCOL_GUID;
-static EFI_GUID disk_info_guid = DISK_INFO_PROTOCOL_GUID;
-static EFI_GUID disk_info_ide = DISK_INFO_IDE_GUID;
-static EFI_GUID disk_info_ahci = DISK_INFO_AHCI_GUID;
-static EFI_GUID disk_info_scsi = DISK_INFO_SCSI_GUID;
-static EFI_GUID disk_info_usb = DISK_INFO_USB_GUID;
+static struct efi_guid loaded_image_guid = EFI_LOADED_IMAGE_PROTOCOL_GUID;
+static struct efi_guid device_path_guid = EFI_DEVICE_PATH_PROTOCOL_GUID;
+static struct efi_guid block_io_guid = EFI_BLOCK_IO_PROTOCOL_GUID;
+static struct efi_guid pci_io_guid = EFI_PCI_IO_PROTOCOL_GUID;
+static struct efi_guid nvme_guid = EFI_NVM_EXPRESS_PASS_THRU_PROTOCOL_GUID;
+static struct efi_guid path_to_text_guid = EFI_DEVICE_PATH_TO_TEXT_PROTOCOL_GUID;
+static struct efi_guid disk_info_guid = DISK_INFO_PROTOCOL_GUID;
+static struct efi_guid disk_info_ide = DISK_INFO_IDE_GUID;
+static struct efi_guid disk_info_ahci = DISK_INFO_AHCI_GUID;
+static struct efi_guid disk_info_scsi = DISK_INFO_SCSI_GUID;
+static struct efi_guid disk_info_usb = DISK_INFO_USB_GUID;
 
 static struct drive drives[MAX_DRIVES];
 static size_t drive_count;
 
-static bool guid_equal(const EFI_GUID *a, const EFI_GUID *b) {
-    return memcmp(a, b, sizeof(EFI_GUID)) == 0;
+static bool guid_equal(const struct efi_guid *a, const struct efi_guid *b) {
+    return memcmp(a, b, sizeof(struct efi_guid)) == 0;
 }
 
 static char lower(char c) {
@@ -167,20 +167,22 @@ static bool word_is(const char *s, const char *word) {
     return s[i] == 0;
 }
 
-static bool root_bridge(EFI_DEVICE_PATH_PROTOCOL *node) {
-    if (node->Type != EFI_ACPI_DEVICE_PATH) {
+static bool root_bridge(struct efi_device_path_protocol *node) {
+    if (node->type != EFI_ACPI_DEVICE_PATH) {
         return false;
     }
-    if (node->SubType == EFI_ACPI_DP
-     && EfiDevicePathNodeLength(node) >= sizeof(EFI_ACPI_HID_DEVICE_PATH)) {
-        uint32_t hid = ((EFI_ACPI_HID_DEVICE_PATH *)node)->HID;
+    if (node->sub_type == EFI_ACPI_DP
+     && efi_device_path_node_length(node) >= sizeof(struct efi_acpi_hid_device_path)) {
+        uint32_t hid = ((struct efi_acpi_hid_device_path *)node)->hid;
         return hid == ACPI_PNP0A03 || hid == ACPI_PNP0A08;
     }
-    if (node->SubType == EFI_ACPI_EXTENDED_DP
-     && EfiDevicePathNodeLength(node) >= offsetof(EFI_ACPI_EXTENDED_HID_DEVICE_PATH, HidStr)) {
-        EFI_ACPI_EXTENDED_HID_DEVICE_PATH *acpi = (EFI_ACPI_EXTENDED_HID_DEVICE_PATH *)node;
-        return acpi->HID == ACPI_PNP0A03 || acpi->HID == ACPI_PNP0A08 || acpi->CID == ACPI_PNP0A03
-            || acpi->CID == ACPI_PNP0A08;
+    if (node->sub_type == EFI_ACPI_EXTENDED_DP
+     && efi_device_path_node_length(node)
+         >= offsetof(struct efi_acpi_extended_hid_device_path, hid_str)) {
+        struct efi_acpi_extended_hid_device_path *acpi;
+        acpi = (struct efi_acpi_extended_hid_device_path *)node;
+        return acpi->hid == ACPI_PNP0A03 || acpi->hid == ACPI_PNP0A08 || acpi->cid == ACPI_PNP0A03
+            || acpi->cid == ACPI_PNP0A08;
     }
     return false;
 }
@@ -222,50 +224,53 @@ static void copy_text(char *out, size_t size, const uint8_t *s, size_t length) {
 }
 
 // A node shorter than its header would make the walks below loop for ever.
-static bool path_valid(EFI_DEVICE_PATH_PROTOCOL *path) {
-    EFI_DEVICE_PATH_PROTOCOL *node = path;
+static bool path_valid(struct efi_device_path_protocol *path) {
+    struct efi_device_path_protocol *node = path;
     for (size_t i = 0; i < MAX_PATH_NODES; i++) {
-        if (EfiDevicePathNodeLength(node) < sizeof(EFI_DEVICE_PATH_PROTOCOL)) {
+        if (efi_device_path_node_length(node) < sizeof(struct efi_device_path_protocol)) {
             return false;
         }
-        if (EfiIsDevicePathEndType(node)) {
+        if (efi_is_device_path_end_type(node)) {
             return true;
         }
-        node = EfiNextDevicePathNode(node);
+        node = efi_next_device_path_node(node);
     }
     return false;
 }
 
 // The bytes of the path's nodes, without its end node.
-static size_t path_length(EFI_DEVICE_PATH_PROTOCOL *path) {
+static size_t path_length(struct efi_device_path_protocol *path) {
     size_t length = 0;
-    for (EFI_DEVICE_PATH_PROTOCOL *node = path; !EfiIsDevicePathEndType(node);
-         node = EfiNextDevicePathNode(node)) {
-        length += EfiDevicePathNodeLength(node);
+    for (struct efi_device_path_protocol *node = path; !efi_is_device_path_end_type(node);
+         node = efi_next_device_path_node(node)) {
+        length += efi_device_path_node_length(node);
     }
     return length;
 }
 
-static bool path_starts_with(EFI_DEVICE_PATH_PROTOCOL *path, EFI_DEVICE_PATH_PROTOCOL *prefix) {
+static bool path_starts_with(
+    struct efi_device_path_protocol *path,
+    struct efi_device_path_protocol *prefix
+) {
     size_t length = path_length(prefix);
     return path_length(path) >= length && memcmp(path, prefix, length) == 0;
 }
 
-static void path_text(EFI_DEVICE_PATH_PROTOCOL *path, char *out, size_t size) {
-    static EFI_DEVICE_PATH_TO_TEXT_PROTOCOL *to_text;
+static void path_text(struct efi_device_path_protocol *path, char *out, size_t size) {
+    static struct efi_device_path_to_text_protocol *to_text;
     if (to_text == NULL
-     && efi_bs->LocateProtocol(&path_to_text_guid, NULL, (void **)&to_text) != EFI_SUCCESS) {
+     && efi_bs->locate_protocol(&path_to_text_guid, NULL, (void **)&to_text) != EFI_SUCCESS) {
         to_text = NULL;
     }
     out[0] = 0;
-    EFI_CHAR16 *text = to_text != NULL
-                     ? to_text->ConvertDevicePathToText(path, false, false)
-                     : NULL;
+    uint16_t *text = to_text != NULL
+                   ? to_text->convert_device_path_to_text(path, false, false)
+                   : NULL;
     if (text == NULL) {
         // Without the firmware's rendering, its nodes' types and subtypes.
-        for (EFI_DEVICE_PATH_PROTOCOL *node = path; !EfiIsDevicePathEndType(node);
-             node = EfiNextDevicePathNode(node)) {
-            append(out, size, "%sPath(%u,%u)", out[0] != 0 ? "/" : "", node->Type, node->SubType);
+        for (struct efi_device_path_protocol *node = path; !efi_is_device_path_end_type(node);
+             node = efi_next_device_path_node(node)) {
+            append(out, size, "%sPath(%u,%u)", out[0] != 0 ? "/" : "", node->type, node->sub_type);
         }
         return;
     }
@@ -274,39 +279,39 @@ static void path_text(EFI_DEVICE_PATH_PROTOCOL *path, char *out, size_t size) {
         out[n++] = text[i] >= 0x20 && text[i] < 0x7f ? (char)text[i] : '?';
     }
     out[n] = 0;
-    efi_bs->FreePool(text);
+    efi_bs->free_pool(text);
 }
 
 // The location of the PCI function at the end of the path's first nodes.
 static bool pci_location(
-    EFI_DEVICE_PATH_PROTOCOL *path,
+    struct efi_device_path_protocol *path,
     size_t length,
-    EFI_PCI_IO_PROTOCOL **pci_io,
-    EFI_UINTN *segment,
-    EFI_UINTN *bus
+    struct efi_pci_io_protocol **pci_io,
+    size_t *segment,
+    size_t *bus
 ) {
     uint8_t buffer[512];
     if (length + EFI_END_DEVICE_PATH_LENGTH > sizeof(buffer)) {
         return false;
     }
     memcpy(buffer, path, length);
-    EfiSetDevicePathEndNode((EFI_DEVICE_PATH_PROTOCOL *)(buffer + length));
-    EFI_DEVICE_PATH_PROTOCOL *remaining = (EFI_DEVICE_PATH_PROTOCOL *)buffer;
-    EFI_HANDLE handle;
-    if (efi_bs->LocateDevicePath(&pci_io_guid, &remaining, &handle) != EFI_SUCCESS
-     || !EfiIsDevicePathEndType(remaining)) {
+    efi_set_device_path_end_node((struct efi_device_path_protocol *)(buffer + length));
+    struct efi_device_path_protocol *remaining = (struct efi_device_path_protocol *)buffer;
+    efi_handle handle;
+    if (efi_bs->locate_device_path(&pci_io_guid, &remaining, &handle) != EFI_SUCCESS
+     || !efi_is_device_path_end_type(remaining)) {
         return false;
     }
-    EFI_UINTN device;
-    EFI_UINTN function;
-    return efi_bs->HandleProtocol(handle, &pci_io_guid, (void **)pci_io) == EFI_SUCCESS
+    size_t device;
+    size_t function;
+    return efi_bs->handle_protocol(handle, &pci_io_guid, (void **)pci_io) == EFI_SUCCESS
         && *pci_io != NULL
-        && (*pci_io)->GetLocation(*pci_io, segment, bus, &device, &function) == EFI_SUCCESS;
+        && (*pci_io)->get_location(*pci_io, segment, bus, &device, &function) == EFI_SUCCESS;
 }
 
-static uint32_t pci_class(EFI_PCI_IO_PROTOCOL *pci_io) {
+static uint32_t pci_class(struct efi_pci_io_protocol *pci_io) {
     uint32_t value = 0;
-    if (pci_io->Pci.Read(pci_io, EfiPciIoWidthUint32, 0x08, 1, &value) != EFI_SUCCESS) {
+    if (pci_io->pci.read(pci_io, EFI_PCI_IO_WIDTH_UINT32, 0x08, 1, &value) != EFI_SUCCESS) {
         return 0;
     }
     return value >> 8;
@@ -315,41 +320,41 @@ static uint32_t pci_class(EFI_PCI_IO_PROTOCOL *pci_io) {
 // The drive's name as SeaBIOS's bootorder file has it (SeaBIOS src/boot.c,
 // build_pci_path() and the bootprio_find_*() functions), or false where
 // SeaBIOS could not boot it.
-static bool seabios_name(EFI_DEVICE_PATH_PROTOCOL *path, char *out, size_t size) {
-    EFI_PCI_DEVICE_PATH *pci[PCI_DEPTH_MAX];
+static bool seabios_name(struct efi_device_path_protocol *path, char *out, size_t size) {
+    struct efi_pci_device_path *pci[PCI_DEPTH_MAX];
     size_t depth = 0;
     size_t first_pci_end = 0;
     size_t offset = 0;
-    EFI_DEVICE_PATH_PROTOCOL *node = path;
-    for (; !EfiIsDevicePathEndType(node); node = EfiNextDevicePathNode(node)) {
-        if (node->Type == EFI_ACPI_DEVICE_PATH && depth == 0) {
+    struct efi_device_path_protocol *node = path;
+    for (; !efi_is_device_path_end_type(node); node = efi_next_device_path_node(node)) {
+        if (node->type == EFI_ACPI_DEVICE_PATH && depth == 0) {
             if (!root_bridge(node)) {
                 return false;
             }
-        } else if (node->Type == EFI_HARDWARE_DEVICE_PATH && node->SubType == EFI_HW_PCI_DP
-                && EfiDevicePathNodeLength(node) >= sizeof(EFI_PCI_DEVICE_PATH)) {
+        } else if (node->type == EFI_HARDWARE_DEVICE_PATH && node->sub_type == EFI_HW_PCI_DP
+                && efi_device_path_node_length(node) >= sizeof(struct efi_pci_device_path)) {
             if (depth == PCI_DEPTH_MAX) {
                 return false;
             }
-            pci[depth++] = (EFI_PCI_DEVICE_PATH *)node;
+            pci[depth++] = (struct efi_pci_device_path *)node;
             if (depth == 1) {
-                first_pci_end = offset + EfiDevicePathNodeLength(node);
+                first_pci_end = offset + efi_device_path_node_length(node);
             }
         } else {
             break;
         }
-        offset += EfiDevicePathNodeLength(node);
+        offset += efi_device_path_node_length(node);
     }
     if (depth == 0) {
         return false;
     }
 
-    EFI_PCI_IO_PROTOCOL *root_io;
-    EFI_UINTN segment;
-    EFI_UINTN root_bus;
-    EFI_PCI_IO_PROTOCOL *controller_io;
-    EFI_UINTN controller_segment;
-    EFI_UINTN controller_bus;
+    struct efi_pci_io_protocol *root_io;
+    size_t segment;
+    size_t root_bus;
+    struct efi_pci_io_protocol *controller_io;
+    size_t controller_segment;
+    size_t controller_bus;
     bool unlocated = !pci_location(path, first_pci_end, &root_io, &segment, &root_bus)
                   || !pci_location(
                          path, offset, &controller_io, &controller_segment, &controller_bus
@@ -358,7 +363,7 @@ static bool seabios_name(EFI_DEVICE_PATH_PROTOCOL *path, char *out, size_t size)
         return false;
     }
 
-    bool usb = node->Type == EFI_MESSAGING_DEVICE_PATH && node->SubType == EFI_MSG_USB_DP;
+    bool usb = node->type == EFI_MESSAGING_DEVICE_PATH && node->sub_type == EFI_MSG_USB_DP;
     out[0] = 0;
     append(out, size, "/pci@i0cf8");
     // The core has the legacy BIOS find another root bus's devices behind the
@@ -368,62 +373,62 @@ static bool seabios_name(EFI_DEVICE_PATH_PROTOCOL *path, char *out, size_t size)
     }
     for (size_t i = 0; i < depth; i++) {
         const char *kind = i + 1 < depth ? "pci-bridge" : usb ? "usb" : "*";
-        append(out, size, "/%s@%x", kind, pci[i]->Device);
-        if (pci[i]->Function != 0) {
-            append(out, size, ",%x", pci[i]->Function);
+        append(out, size, "/%s@%x", kind, pci[i]->device);
+        if (pci[i]->function != 0) {
+            append(out, size, ",%x", pci[i]->function);
         }
     }
 
-    if (EfiIsDevicePathEndType(node)) {
+    if (efi_is_device_path_end_type(node)) {
         return true;
     }
-    if (node->Type != EFI_MESSAGING_DEVICE_PATH) {
+    if (node->type != EFI_MESSAGING_DEVICE_PATH) {
         return false;
     }
-    switch (node->SubType) {
+    switch (node->sub_type) {
         case EFI_MSG_SATA_DP: {
-            EFI_SATA_DEVICE_PATH *sata = (EFI_SATA_DEVICE_PATH *)node;
+            struct efi_sata_device_path *sata = (struct efi_sata_device_path *)node;
             // SeaBIOS drives no port multipliers.
-            if (sata->PortMultiplierPortNumber != 0xffff) {
+            if (sata->port_multiplier_port_number != 0xffff) {
                 return false;
             }
-            append(out, size, "/drive@%x/disk@0", sata->HBAPortNumber);
-            node = EfiNextDevicePathNode(node);
+            append(out, size, "/drive@%x/disk@0", sata->hba_port_number);
+            node = efi_next_device_path_node(node);
             break;
         }
         case EFI_MSG_ATAPI_DP: {
-            EFI_ATAPI_DEVICE_PATH *ata = (EFI_ATAPI_DEVICE_PATH *)node;
-            append(out, size, "/drive@%x/disk@%x", ata->PrimarySecondary, ata->SlaveMaster);
-            node = EfiNextDevicePathNode(node);
+            struct efi_atapi_device_path *ata = (struct efi_atapi_device_path *)node;
+            append(out, size, "/drive@%x/disk@%x", ata->primary_secondary, ata->slave_master);
+            node = efi_next_device_path_node(node);
             break;
         }
         case EFI_MSG_SCSI_DP: {
-            EFI_SCSI_DEVICE_PATH *scsi = (EFI_SCSI_DEVICE_PATH *)node;
-            append(out, size, "/*@0/*@%x,%x", scsi->Pun, scsi->Lun);
-            node = EfiNextDevicePathNode(node);
+            struct efi_scsi_device_path *scsi = (struct efi_scsi_device_path *)node;
+            append(out, size, "/*@0/*@%x,%x", scsi->pun, scsi->lun);
+            node = efi_next_device_path_node(node);
             break;
         }
         // SeaBIOS orders these by their controllers alone.
         case EFI_MSG_NVME_NAMESPACE_DP:
         case EFI_MSG_SD_DP:
         case EFI_MSG_EMMC_DP: {
-            node = EfiNextDevicePathNode(node);
+            node = efi_next_device_path_node(node);
             break;
         }
         // The hypervisor's USB stack gives the same names (virt/usb_disk.c).
         case EFI_MSG_USB_DP: {
-            while (node->Type == EFI_MESSAGING_DEVICE_PATH && node->SubType == EFI_MSG_USB_DP) {
-                uint32_t port = ((EFI_USB_DEVICE_PATH *)node)->ParentPortNumber + 1;
-                node = EfiNextDevicePathNode(node);
-                bool last = node->Type != EFI_MESSAGING_DEVICE_PATH
-                         || node->SubType != EFI_MSG_USB_DP;
+            while (node->type == EFI_MESSAGING_DEVICE_PATH && node->sub_type == EFI_MSG_USB_DP) {
+                uint32_t port = ((struct efi_usb_device_path *)node)->parent_port_number + 1;
+                node = efi_next_device_path_node(node);
+                bool last = node->type != EFI_MESSAGING_DEVICE_PATH
+                         || node->sub_type != EFI_MSG_USB_DP;
                 append(out, size, last ? "/storage@%x" : "/hub@%x", port);
             }
             uint32_t lun = 0;
-            if (node->Type == EFI_MESSAGING_DEVICE_PATH
-             && node->SubType == EFI_MSG_DEVICE_LOGICAL_UNIT_DP) {
-                lun = ((EFI_DEVICE_LOGICAL_UNIT_DEVICE_PATH *)node)->Lun;
-                node = EfiNextDevicePathNode(node);
+            if (node->type == EFI_MESSAGING_DEVICE_PATH
+             && node->sub_type == EFI_MSG_DEVICE_LOGICAL_UNIT_DP) {
+                lun = ((struct efi_device_logical_unit_device_path *)node)->lun;
+                node = efi_next_device_path_node(node);
             }
             append(out, size, "/*@0/*@0,%x", lun);
             break;
@@ -432,7 +437,7 @@ static bool seabios_name(EFI_DEVICE_PATH_PROTOCOL *path, char *out, size_t size)
             return false;
         }
     }
-    return EfiIsDevicePathEndType(node) && text_length(out) + 1 < size;
+    return efi_is_device_path_end_type(node) && text_length(out) + 1 < size;
 }
 
 static void ata_model(struct disk_info *info, char *out, size_t size) {
@@ -464,14 +469,14 @@ static void scsi_model(struct disk_info *info, char *out, size_t size) {
     append(out, size, "%s%s%s", vendor, vendor[0] != 0 && product[0] != 0 ? " " : "", product);
 }
 
-static void nvme_model(EFI_DEVICE_PATH_PROTOCOL *path, char *out, size_t size) {
-    EFI_DEVICE_PATH_PROTOCOL *remaining = path;
-    EFI_HANDLE handle;
-    if (efi_bs->LocateDevicePath(&nvme_guid, &remaining, &handle) != EFI_SUCCESS) {
+static void nvme_model(struct efi_device_path_protocol *path, char *out, size_t size) {
+    struct efi_device_path_protocol *remaining = path;
+    efi_handle handle;
+    if (efi_bs->locate_device_path(&nvme_guid, &remaining, &handle) != EFI_SUCCESS) {
         return;
     }
-    EFI_NVM_EXPRESS_PASS_THRU_PROTOCOL *nvme;
-    if (efi_bs->HandleProtocol(handle, &nvme_guid, (void **)&nvme) != EFI_SUCCESS
+    struct efi_nvm_express_pass_thru_protocol *nvme;
+    if (efi_bs->handle_protocol(handle, &nvme_guid, (void **)&nvme) != EFI_SUCCESS
      || nvme == NULL) {
         return;
     }
@@ -479,35 +484,35 @@ static void nvme_model(EFI_DEVICE_PATH_PROTOCOL *path, char *out, size_t size) {
     if (buffer == 0) {
         return;
     }
-    EFI_NVM_EXPRESS_COMMAND command;
-    EFI_NVM_EXPRESS_COMPLETION completion;
-    EFI_NVM_EXPRESS_PASS_THRU_COMMAND_PACKET packet;
-    memset(&command, 0, sizeof(EFI_NVM_EXPRESS_COMMAND));
-    memset(&completion, 0, sizeof(EFI_NVM_EXPRESS_COMPLETION));
-    memset(&packet, 0, sizeof(EFI_NVM_EXPRESS_PASS_THRU_COMMAND_PACKET));
-    command.Cdw0.OpCode = NVME_ADMIN_IDENTIFY;
-    command.Cdw10 = NVME_CNS_CONTROLLER;
-    command.Flags = EFI_CDW10_VALID;
-    packet.CommandTimeout = NVME_TIMEOUT_100NS;
-    packet.TransferBuffer = (void *)(uintptr_t)buffer;
-    packet.TransferLength = NVME_IDENTIFY_SIZE;
-    packet.NvmeCmd = &command;
-    packet.NvmeCompletion = &completion;
-    if (nvme->PassThru(nvme, 0, &packet, NULL) == EFI_SUCCESS) {
+    struct efi_nvm_express_command command;
+    struct efi_nvm_express_completion completion;
+    struct efi_nvm_express_pass_thru_command_packet packet;
+    memset(&command, 0, sizeof(struct efi_nvm_express_command));
+    memset(&completion, 0, sizeof(struct efi_nvm_express_completion));
+    memset(&packet, 0, sizeof(struct efi_nvm_express_pass_thru_command_packet));
+    command.cdw0.cdw0 = (uint32_t)NVME_ADMIN_IDENTIFY << EFI_NVME_CDW0_OP_CODE_SHIFT;
+    command.cdw10 = NVME_CNS_CONTROLLER;
+    command.flags = EFI_CDW10_VALID;
+    packet.command_timeout = NVME_TIMEOUT_100NS;
+    packet.transfer_buffer = (void *)(uintptr_t)buffer;
+    packet.transfer_length = NVME_IDENTIFY_SIZE;
+    packet.nvme_cmd = &command;
+    packet.nvme_completion = &completion;
+    if (nvme->pass_thru(nvme, 0, &packet, NULL) == EFI_SUCCESS) {
         copy_text(out, size, (uint8_t *)(uintptr_t)buffer + NVME_MODEL_OFFSET, NVME_MODEL_LENGTH);
     }
-    efi_bs->FreePages(buffer, 1);
+    efi_bs->free_pages(buffer, 1);
 }
 
 static void drive_model(
-    EFI_HANDLE handle,
-    EFI_DEVICE_PATH_PROTOCOL *path,
+    efi_handle handle,
+    struct efi_device_path_protocol *path,
     char *out,
     size_t size
 ) {
     out[0] = 0;
     struct disk_info *info;
-    if (efi_bs->HandleProtocol(handle, &disk_info_guid, (void **)&info) != EFI_SUCCESS) {
+    if (efi_bs->handle_protocol(handle, &disk_info_guid, (void **)&info) != EFI_SUCCESS) {
         info = NULL;
     }
     if (info != NULL
@@ -526,9 +531,9 @@ static void drive_model(
 
 // Whether the medium holds what the legacy BIOS boots: a master boot record
 // with code, not GPT's protective one, or an El Torito boot record.
-static bool legacy_bootable(EFI_BLOCK_IO_PROTOCOL *block_io, bool optical) {
-    EFI_BLOCK_IO_MEDIA *media = block_io->Media;
-    if (!media->MediaPresent || media->BlockSize < 512 || media->BlockSize > 4096) {
+static bool legacy_bootable(struct efi_block_io_protocol *block_io, bool optical) {
+    struct efi_block_io_media *media = block_io->media;
+    if (media->media_present == 0 || media->block_size < 512 || media->block_size > 4096) {
         return false;
     }
     // A transfer's buffer starts at a multiple of IoAlign, a power of two
@@ -536,8 +541,8 @@ static bool legacy_bootable(EFI_BLOCK_IO_PROTOCOL *block_io, bool optical) {
     // KiB, and twice the pages of a larger alignment hold one that starts at a
     // multiple of it.
     size_t align = EFI_PAGE_SIZE;
-    if (media->IoAlign > EFI_PAGE_SIZE && (media->IoAlign & (media->IoAlign - 1)) == 0) {
-        align = media->IoAlign;
+    if (media->io_align > EFI_PAGE_SIZE && (media->io_align & (media->io_align - 1)) == 0) {
+        align = media->io_align;
     }
     size_t pages = 2 * EFI_SIZE_TO_PAGES(align);
     uintptr_t buffer = efi_glue_alloc_pages(pages, 0);
@@ -547,16 +552,16 @@ static bool legacy_bootable(EFI_BLOCK_IO_PROTOCOL *block_io, bool optical) {
     uint8_t *sector = (uint8_t *)(uintptr_t)align_up(buffer, align);
     bool bootable = false;
     if (optical) {
-        EFI_STATUS status = block_io->ReadBlocks(
-            block_io, media->MediaId, EL_TORITO_SECTOR, media->BlockSize, sector
+        efi_status status = block_io->read_blocks(
+            block_io, media->media_id, EL_TORITO_SECTOR, media->block_size, sector
         );
         if (status == EFI_SUCCESS) {
             bootable = sector[0] == 0 && memcmp(sector + 1, "CD001", 5) == 0 && sector[6] == 1
                     && memcmp(sector + 7, EL_TORITO_ID, sizeof(EL_TORITO_ID) - 1) == 0;
         }
     } else {
-        EFI_STATUS status = block_io->ReadBlocks(
-            block_io, media->MediaId, 0, media->BlockSize, sector
+        efi_status status = block_io->read_blocks(
+            block_io, media->media_id, 0, media->block_size, sector
         );
         if (status == EFI_SUCCESS) {
             bootable = sector[MBR_SIGNATURE_OFFSET] == 0x55
@@ -574,39 +579,39 @@ static bool legacy_bootable(EFI_BLOCK_IO_PROTOCOL *block_io, bool optical) {
             bootable = bootable && code;
         }
     }
-    efi_bs->FreePages(buffer, pages);
+    efi_bs->free_pages(buffer, pages);
     return bootable;
 }
 
-static bool path_has_usb(EFI_DEVICE_PATH_PROTOCOL *path) {
-    for (EFI_DEVICE_PATH_PROTOCOL *node = path; !EfiIsDevicePathEndType(node);
-         node = EfiNextDevicePathNode(node)) {
-        if (node->Type == EFI_MESSAGING_DEVICE_PATH && node->SubType == EFI_MSG_USB_DP) {
+static bool path_has_usb(struct efi_device_path_protocol *path) {
+    for (struct efi_device_path_protocol *node = path; !efi_is_device_path_end_type(node);
+         node = efi_next_device_path_node(node)) {
+        if (node->type == EFI_MESSAGING_DEVICE_PATH && node->sub_type == EFI_MSG_USB_DP) {
             return true;
         }
     }
     return false;
 }
 
-static EFI_DEVICE_PATH_PROTOCOL *own_path(void) {
-    EFI_LOADED_IMAGE_PROTOCOL *image;
-    EFI_STATUS status = efi_bs->HandleProtocol(
+static struct efi_device_path_protocol *own_path(void) {
+    struct efi_loaded_image_protocol *image;
+    efi_status status = efi_bs->handle_protocol(
         efi_image_handle, &loaded_image_guid, (void **)&image
     );
-    if (status != EFI_SUCCESS || image == NULL || image->DeviceHandle == NULL) {
+    if (status != EFI_SUCCESS || image == NULL || image->device_handle == NULL) {
         return NULL;
     }
-    EFI_DEVICE_PATH_PROTOCOL *path;
-    status = efi_bs->HandleProtocol(image->DeviceHandle, &device_path_guid, (void **)&path);
+    struct efi_device_path_protocol *path;
+    status = efi_bs->handle_protocol(image->device_handle, &device_path_guid, (void **)&path);
     return status == EFI_SUCCESS && path != NULL && path_valid(path) ? path : NULL;
 }
 
-static void drive_add(EFI_HANDLE handle, EFI_DEVICE_PATH_PROTOCOL *own) {
-    EFI_BLOCK_IO_PROTOCOL *block_io;
-    EFI_DEVICE_PATH_PROTOCOL *path;
-    if (efi_bs->HandleProtocol(handle, &block_io_guid, (void **)&block_io) != EFI_SUCCESS
-     || block_io == NULL || block_io->Media == NULL || block_io->Media->LogicalPartition
-     || efi_bs->HandleProtocol(handle, &device_path_guid, (void **)&path) != EFI_SUCCESS
+static void drive_add(efi_handle handle, struct efi_device_path_protocol *own) {
+    struct efi_block_io_protocol *block_io;
+    struct efi_device_path_protocol *path;
+    if (efi_bs->handle_protocol(handle, &block_io_guid, (void **)&block_io) != EFI_SUCCESS
+     || block_io == NULL || block_io->media == NULL || block_io->media->logical_partition != 0
+     || efi_bs->handle_protocol(handle, &device_path_guid, (void **)&path) != EFI_SUCCESS
      || path == NULL || !path_valid(path)) {
         return;
     }
@@ -628,10 +633,10 @@ static void drive_add(EFI_HANDLE handle, EFI_DEVICE_PATH_PROTOCOL *own) {
         return;
     }
     // CD and DVD drives have 2048-byte blocks, as nothing else here does.
-    d.optical = block_io->Media->BlockSize == 2048;
-    d.external = path_has_usb(path) || (!d.optical && block_io->Media->RemovableMedia);
-    d.size = block_io->Media->MediaPresent
-           ? (block_io->Media->LastBlock + 1) * block_io->Media->BlockSize
+    d.optical = block_io->media->block_size == 2048;
+    d.external = path_has_usb(path) || (!d.optical && block_io->media->removable_media != 0);
+    d.size = block_io->media->media_present != 0
+           ? (block_io->media->last_block + 1) * block_io->media->block_size
            : 0;
     d.self = own != NULL && path_starts_with(own, path);
     drive_model(handle, path, d.model, sizeof(d.model));
@@ -739,20 +744,20 @@ static bool drive_before(const struct drive *a, const struct drive *b) {
     return false;
 }
 
-static bool driver_managed(EFI_HANDLE handle, EFI_GUID *protocol) {
-    EFI_OPEN_PROTOCOL_INFORMATION_ENTRY *entries;
+static bool driver_managed(efi_handle handle, struct efi_guid *protocol) {
+    struct efi_open_protocol_information_entry *entries;
     size_t count;
-    if (efi_bs->OpenProtocolInformation(handle, protocol, &entries, &count) != EFI_SUCCESS) {
+    if (efi_bs->open_protocol_information(handle, protocol, &entries, &count) != EFI_SUCCESS) {
         return false;
     }
     bool managed = false;
-    EFI_UINT32 by_driver = EFI_OPEN_PROTOCOL_BY_DRIVER | EFI_OPEN_PROTOCOL_BY_CHILD_CONTROLLER;
+    uint32_t by_driver = EFI_OPEN_PROTOCOL_BY_DRIVER | EFI_OPEN_PROTOCOL_BY_CHILD_CONTROLLER;
     for (size_t i = 0; i < count; i++) {
-        if ((entries[i].Attributes & by_driver) != 0) {
+        if ((entries[i].attributes & by_driver) != 0) {
             managed = true;
         }
     }
-    efi_bs->FreePool(entries);
+    efi_bs->free_pool(entries);
     return managed;
 }
 
@@ -761,34 +766,34 @@ static bool driver_managed(EFI_HANDLE handle, EFI_GUID *protocol) {
 // that drivers manage has upset some firmware, so only the others are.
 void drives_connect(void) {
     size_t count;
-    EFI_HANDLE *handles = efi_glue_locate_handles(&pci_io_guid, &count);
+    efi_handle *handles = efi_glue_locate_handles(&pci_io_guid, &count);
     for (size_t i = 0; handles != NULL && i < count; i++) {
-        EFI_PCI_IO_PROTOCOL *pci_io;
-        if (efi_bs->HandleProtocol(handles[i], &pci_io_guid, (void **)&pci_io) != EFI_SUCCESS
+        struct efi_pci_io_protocol *pci_io;
+        if (efi_bs->handle_protocol(handles[i], &pci_io_guid, (void **)&pci_io) != EFI_SUCCESS
          || pci_io == NULL) {
             continue;
         }
         uint32_t class = pci_class(pci_io);
         if ((class >> 16 == PCI_BASE_CLASS_STORAGE || class >> 8 == PCI_CLASS_SERIAL_USB)
          && !driver_managed(handles[i], &pci_io_guid)) {
-            efi_bs->ConnectController(handles[i], NULL, NULL, true);
+            efi_bs->connect_controller(handles[i], NULL, NULL, true);
         }
     }
     if (handles != NULL) {
-        efi_bs->FreePool(handles);
+        efi_bs->free_pool(handles);
     }
 }
 
 void drives_collect(void) {
     drive_count = 0;
-    EFI_DEVICE_PATH_PROTOCOL *own = own_path();
+    struct efi_device_path_protocol *own = own_path();
     size_t count;
-    EFI_HANDLE *handles = efi_glue_locate_handles(&block_io_guid, &count);
+    efi_handle *handles = efi_glue_locate_handles(&block_io_guid, &count);
     for (size_t i = 0; handles != NULL && i < count; i++) {
         drive_add(handles[i], own);
     }
     if (handles != NULL) {
-        efi_bs->FreePool(handles);
+        efi_bs->free_pool(handles);
     }
 
     rank_drives();
