@@ -116,9 +116,14 @@ struct handoff_video {
     uint16_t vga_device_id;
     struct handoff_pci_address vga_device;
     struct handoff_pci_rom vbios;
-    // The emulated VGA's video memory, if the VGA is to be emulated.
+    // The emulated VGA's video memory, if the VGA is to be emulated, and a
+    // copy of it as large, as last drawn, right after it.
     uint64_t vram_base;
     uint64_t vram_size;
+    // The emulated VGA's back buffer, as large as the framebuffer, which the
+    // display is drawn in before it is copied there.
+    uint64_t back_base;
+    uint64_t back_size;
     // The framebuffer's display's EDID, its first blocks, as the firmware has
     // it.
     uint32_t edid_size;

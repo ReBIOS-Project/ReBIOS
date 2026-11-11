@@ -67,25 +67,37 @@ bool display_vga_emulated(void) {
 
 static void reserve_vram(struct handoff_video *video) {
     const struct handoff_framebuffer *fb = &video->framebuffer;
+    uint64_t back_size = (uint64_t)fb->pitch * fb->height;
+    uintptr_t back = loader_alloc_reserved(EFI_SIZE_TO_PAGES(back_size), 0);
+    if (back == 0) {
+        printf(
+            "Cannot reserve %llu MiB for the emulated VGA's back buffer\n",
+            (unsigned long long)((back_size + (1 << 20) - 1) >> 20)
+        );
+        return;
+    }
+    video->back_base = back;
+    video->back_size = back_size;
+
     uint64_t frame = (uint64_t)fb->width * fb->height * 4;
     size_t size = VRAM_MIN;
     while (size < 2 * frame && size < VRAM_MAX) {
         size <<= 1;
     }
-    uintptr_t base = loader_alloc_reserved(EFI_SIZE_TO_PAGES(size), 0);
+    uintptr_t base = loader_alloc_reserved(EFI_SIZE_TO_PAGES(2 * size), 0);
     if (base == 0) {
         printf(
             "Cannot reserve %llu MiB of video memory for the emulated VGA\n",
-            (unsigned long long)(size >> 20)
+            (unsigned long long)(2 * size >> 20)
         );
         return;
     }
-    memset((void *)(uintptr_t)base, 0, size);
+    memset((void *)(uintptr_t)base, 0, 2 * size);
     video->vram_base = base;
     video->vram_size = size;
     printf(
-        "Video memory for the emulated VGA: %llu MiB at %#llx\n", (unsigned long long)(size >> 20),
-        (unsigned long long)base
+        "Video memory for the emulated VGA: %llu MiB at %#llx, and as much for its copy\n",
+        (unsigned long long)(size >> 20), (unsigned long long)base
     );
 }
 
