@@ -1,3 +1,73 @@
+2026-11-12  Mintsuki  <mintsuki@protonmail.com>
+
+    *** Release 0.10.0 ***
+
+    Noteworthy changes compared to the previous release, 0.9.0:
+
+    New features:
+        - Carry out the code that follows the guest's access to the emulated
+          VGA in the hypervisor, for as long as it keeps to the VGA, its video
+          BIOS, and memory, rather than return to the guest at each access:
+          DOS games and programs that write the VGA a byte at a time run many
+          times faster, DOOM's demo going from about 0.1 to 23 frames per
+          second under nested KVM.
+        - Give the memory BARs that the firmware left unassigned an address
+          in a window of their bus, as an OS on the bare machine would, so
+          that devices such as the I2C controllers of some Intel laptops
+          answer under ReBIOS.
+        - Say on the screen where the log that save_log keeps went at the
+          next start, or why it could not be written, and when the firmware
+          refuses to keep it.
+        - Boot a GPT drive whose hybrid MBR marks a partition active from the
+          legacy BIOS, as tools such as BootIt UEFI set them up (contributed
+          by geosone).
+
+    Bug fixes:
+        - Give the memory of ACPI devices, but for the TPM's, addresses of
+          the guest's own, in a block below the I/O APIC's, rather than their
+          addresses on the host, which made holes in the guest's memory.
+        - Stop keeping the BARs of the card whose Video BIOS runs at their
+          addresses on the host, which made a hole in the guest's memory at
+          2 GiB, where Windows 98 with more than 2 GiB lost its desktop. The
+          card's own copies of its configuration space answer with its BARs
+          in the guest instead.
+        - Find the VGA device by where its framebuffer is, where the
+          firmware's graphics output leads to no device, as on the Acer
+          Aspire 3 A315-23, whose Vega 3 then got Code 12 in Windows 7.
+        - Show VGA Enable set on the bridges above the GPU of the emulated
+          VGA, without which Windows 7 gave such GPUs Code 10 or Code 12.
+        - Leave the emulated VGA's VBE modes of the screen's own size at
+          once, reading its framebuffer back a slice at a time, which took
+          seconds on large screens.
+        - Give a PCI serial card that the firmware left off a moment after
+          its decoding comes on, before ReBIOS probes it: a CH351 answered
+          too late, and ReBIOS logged nothing to it (contributed by
+          geosone).
+        - Find rebios.ini, and write rebios-last.log, beside ReBIOS where
+          GRUB's chainloader starts it, which gives ReBIOS its path in two
+          parts that ReBIOS joined without a separator, so that it ran with
+          its defaults.
+        - Keep the remap address of Intel's LPSS functions, the I2C, UART,
+          and SPI controllers of laptops, at the address of their BAR on the
+          host, as Intel's datasheets require, rather than the address their
+          drivers see under ReBIOS, which stalled I2C touchpads.
+        - Serve ReBIOS's hypercalls to the legacy BIOS alone, so that no
+          other code in the guest can make them.
+        - Single-step the guest on AMD's processors as their hardware does:
+          the CPL comes from the VMCB, steps end at #BR, #NP, and #CP, PUSHF
+          pushes the guest's own trap flag, and a branch traps with BTF.
+        - Fail VMCALL in the guest's VMX root operation, as VMX does.
+
+    Miscellaneous:
+        - Drop the Bochs display interface from the emulated VGA, whose VBE
+          modes its video BIOS gives.
+        - Make hypercalls with VMMCALL on AMD's processors.
+        - Stop the machine, naming the instruction, where emulation would
+          otherwise reach a device of the host's or deliver an event into
+          emulated memory.
+        - Warn that ReBIOS does not support Ventoy, in the README and the
+          issue forms.
+
 2026-11-11  Mintsuki  <mintsuki@protonmail.com>
 
     *** Release 0.9.0 ***
