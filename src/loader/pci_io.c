@@ -325,9 +325,8 @@ bool pci_io_enable_io_port(uint16_t port, struct handoff_pci_address *found) {
     if (dev != NULL) {
         *found = dev->address;
         enable_decoding_path(devices, count, dev, false);
-        // A card that the firmware left off can take a moment to answer: a
-        // CH351 behind an ASM1083 bridge failed serial_init()'s probe right
-        // after its I/O decoding came on, and passed it 1 ms later.
+        // A card that the firmware left off may answer only a moment after its
+        // decoding comes on, as a CH351 behind an ASM1083 bridge does.
         efi_bs->stall(SERIAL_CARD_SETTLE_US);
     }
 
