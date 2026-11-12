@@ -282,6 +282,9 @@ static void enable_decoding(struct efi_pci_io_protocol *io, bool memory) {
     }
 }
 
+// How long a serial card gets after its decoding comes on, in microseconds.
+#define SERIAL_CARD_SETTLE_US 10000
+
 // Enables a function's decoding and that of the bridges above it.
 static void enable_decoding_path(
     const struct pci_io_device *devices,
@@ -322,6 +325,10 @@ bool pci_io_enable_io_port(uint16_t port, struct handoff_pci_address *found) {
     if (dev != NULL) {
         *found = dev->address;
         enable_decoding_path(devices, count, dev, false);
+        // A card that the firmware left off can take a moment to answer: a
+        // CH351 behind an ASM1083 bridge failed serial_init()'s probe right
+        // after its I/O decoding came on, and passed it 1 ms later.
+        efi_bs->stall(SERIAL_CARD_SETTLE_US);
     }
 
     if (devices != NULL) {
