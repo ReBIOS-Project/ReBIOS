@@ -52,6 +52,15 @@ void exit_cpuid(struct vcpu *v) {
     vcpu_skip_instruction(v);
 }
 
+// A hypercall instruction that makes no hypercall does what it does on a PC: a
+// VMMCALL that nothing intercepts raises #UD (APM 24593 rev. 3.46, 15.18), and
+// so does a VMCALL outside VMX operation (SDM 325462-093 Vol. 3C, 33.3).
+static void not_hypercall(struct vcpu *v) {
+    if (!virt_vmx || !nvmx_vmcall(v)) {
+        vcpu_inject_exception(v, 6, false, 0);
+    }
+}
+
 // Returns whether the guest is to go on after the hypercall instruction; the
 // others set where it goes on themselves.
 static bool hypercall(struct vcpu *v) {
@@ -59,7 +68,7 @@ static bool hypercall(struct vcpu *v) {
     uint32_t ebx = (uint32_t)v->gprs.rbx;
 
     if ((eax & ~HYPERCALL_FUNCTION_MASK) != HYPERCALL_MAGIC) {
-        vcpu_inject_exception(v, 6, false, 0);
+        not_hypercall(v);
         return false;
     }
 
@@ -116,7 +125,7 @@ static bool hypercall(struct vcpu *v) {
             break;
         }
     }
-    vcpu_inject_exception(v, 6, false, 0);
+    not_hypercall(v);
     return false;
 }
 

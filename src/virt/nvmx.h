@@ -31,6 +31,10 @@ void nvmx_vcpu_init(struct vcpu *v);
 
 // The guest's VMX instructions, by the exits they cause.
 void nvmx_instruction(struct vcpu *v, uint32_t reason);
+// A VMCALL that is no hypercall, in the guest's own VMX root operation, as the
+// processor carries it out there (SDM 325462-093 Vol. 3C, 33.3): false outside
+// VMX operation, where it raises #UD.
+bool nvmx_vmcall(struct vcpu *v);
 // The guest's VMX capability MSRs.
 bool nvmx_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault);
 bool nvmx_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault);

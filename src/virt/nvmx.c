@@ -55,6 +55,7 @@
 #define VMCS12_FIELDS 16
 
 // VM-instruction error numbers (SDM 325462-093 Vol. 3C, Table 33-1).
+#define ERROR_VMCALL_IN_ROOT 1
 #define ERROR_VMCLEAR_ADDRESS 2
 #define ERROR_VMCLEAR_VMXON 3
 #define ERROR_VMLAUNCH_NOT_CLEAR 4
@@ -618,6 +619,26 @@ static void fail(struct vcpu *v, uint32_t error) {
 
 static void fail_invalid(struct vcpu *v) {
     result(v, RFLAGS_CF);
+}
+
+bool nvmx_vmcall(struct vcpu *v) {
+    struct nvmx *n = v->nvmx;
+    if (n == NULL || !n->vmxon) {
+        return false;
+    }
+    struct vcpu_segment cs;
+    vcpu_get_seg(v, VCPU_SEG_CS, &cs);
+    bool compatibility = (vcpu_efer(v) & EFER_LMA) != 0 && (cs.attrib & VCPU_SEG_L) == 0;
+    if ((vcpu_rflags(v) & RFLAGS_VM) != 0 || compatibility) {
+        vcpu_inject_exception(v, 6, false, 0);
+    } else if (vcpu_cpl(v) > 0) {
+        vcpu_inject_exception(v, 13, true, 0);
+    } else {
+        // Without the dual-monitor treatment of SMIs and SMM, which the guest
+        // is not offered.
+        fail(v, ERROR_VMCALL_IN_ROOT);
+    }
+    return true;
 }
 
 // The physical addresses a VMX instruction takes, 4 KiB-aligned within the
