@@ -1772,16 +1772,10 @@ static void npt_fault(struct vcpu *v, struct nsvm *n) {
     if (npt02_allows(npt02_fill(n, gpa, &w), write, fetch)) {
         return;
     }
-    // An event the hypervisor cannot deliver itself ends the guest's guest as
-    // a shutdown would.
     if (event_cut_short(v)) {
-        if (event_deliver_real_mode(v)) {
-            return;
+        if (!event_deliver_real_mode(v)) {
+            event_undeliverable(v, w.gpa);
         }
-        if ((n->intercepts[3] & SVM_INTERCEPT_SHUTDOWN) == 0) {
-            svm_shutdown(v, "The guest's guest's event cannot be delivered");
-        }
-        exit_to_l1(v, n, SVM_EXIT_SHUTDOWN, 0, 0, 0, false);
         return;
     }
     if (fetch) {

@@ -956,11 +956,7 @@ static void svm_handle_exit(struct vcpu *v) {
             // memory itself where it can.
             if (event_cut_short(v)) {
                 if (!event_deliver_real_mode(v)) {
-                    printf(
-                        "Event delivery reached emulated memory at %#llx\n",
-                        (unsigned long long)c->exitinfo2
-                    );
-                    svm_shutdown(v, "The guest's event cannot be delivered");
+                    event_undeliverable(v, c->exitinfo2);
                 }
                 break;
             }

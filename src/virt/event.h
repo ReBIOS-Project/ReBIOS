@@ -21,6 +21,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdnoreturn.h>
 #include <virt/vcpu.h>
 
 // Notes the event whose delivery the exit cut short, before the exit is
@@ -63,5 +64,7 @@ bool event_deliver_real_mode(struct vcpu *v);
 // length bytes at RIP raises, its frame returning past the instruction: false
 // outside real mode, or where it cannot.
 bool event_raise_real_mode(struct vcpu *v, uint8_t vector, size_t length);
+// Stops the machine for an event cut short at gpa that it cannot deliver.
+noreturn void event_undeliverable(struct vcpu *v, uintptr_t gpa);
 
 #endif

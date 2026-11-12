@@ -1130,8 +1130,7 @@ noreturn void vmx_shutdown(const char *why) {
 // delivers it itself where it can.
 static void emulated_delivery(struct vcpu *v, uintptr_t gpa) {
     if (!event_deliver_real_mode(v)) {
-        printf("Event delivery reached emulated memory at %#llx\n", (unsigned long long)gpa);
-        vmx_shutdown("The guest's event cannot be delivered");
+        event_undeliverable(v, gpa);
     }
 }
 

@@ -2800,11 +2800,9 @@ static void ept_violation(struct vcpu *v, struct nvmx *n, uint64_t qual) {
         vmx_async_access(w.gpa);
         return;
     }
-    // An event the hypervisor cannot deliver itself ends the guest's guest as
-    // a triple fault would.
     if (event_cut_short(v)) {
         if (!event_deliver_real_mode(v)) {
-            exit_to_l1(v, n, EXIT_REASON_TRIPLE_FAULT, 0, 0, 0, true);
+            event_undeliverable(v, w.gpa);
         }
         return;
     }

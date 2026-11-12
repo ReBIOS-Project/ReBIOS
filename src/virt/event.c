@@ -19,6 +19,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdnoreturn.h>
 #include <virt/event.h>
 #include <hw/lapic.h>
 #include <lib/log.h>
@@ -169,6 +170,14 @@ bool event_deliver_real_mode(struct vcpu *v) {
     }
     v->redeliver = 0;
     return true;
+}
+
+noreturn void event_undeliverable(struct vcpu *v, uintptr_t gpa) {
+    panic(
+        "The guest's event %#x reached emulated memory at %#llx in its delivery, which the "
+        "hypervisor carries out in real mode only, at %#llx\n", v->redeliver,
+        (unsigned long long)gpa, (unsigned long long)vcpu_rip(v)
+    );
 }
 
 bool event_raise_real_mode(struct vcpu *v, uint8_t vector, size_t length) {
