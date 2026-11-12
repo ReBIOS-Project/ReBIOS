@@ -67,7 +67,13 @@ void acpi_lock(void);
 void acpi_unlock(void);
 
 // Initialises the namespace where the hypervisor runs the firmware's ACPI, its
-// embedded controller first, then enables the GPEs that have methods. Needs
+// embedded controller first, so that _INI and _REG have run before anything
+// evaluates the namespace's devices, as Linux 7.3's acpi_bus_init() has them
+// run before its device scan. Needs acpi_init() and pci_cfg_init().
+void acpi_namespace_init(void);
+
+// Puts the firmware in APIC mode, enables the GPEs that have methods, and
+// starts the task that runs the deferred work. Needs acpi_namespace_init() and
 // irq_init().
 void acpi_namespace_start(void);
 

@@ -81,6 +81,9 @@ static void bsp_main(void *arg) {
     tsc_calibrate();
     rtc_sample();
     pci_cfg_init();
+    if (acpi_init()) {
+        acpi_namespace_init();
+    }
     pci_enum_scan();
     pci_enum_shrink_rebars(PCI_PLAN_LOW_BAR_MAX);
     pci_assign_unassigned_bars();

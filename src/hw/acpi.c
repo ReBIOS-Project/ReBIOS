@@ -671,15 +671,20 @@ void acpi_sci_interrupt(void *ctx) {
     acpi_unlock();
 }
 
-void acpi_namespace_start(void) {
+void acpi_namespace_init(void) {
     acpi_lock();
     ec_init();
     uacpi_status status = uacpi_namespace_initialize();
     if (status != UACPI_STATUS_OK) {
         printf("Cannot initialise the ACPI namespace: %s\n", uacpi_status_to_string(status));
     }
+    acpi_unlock();
+}
+
+void acpi_namespace_start(void) {
+    acpi_lock();
     // Again, should _INI have undone it.
-    status = uacpi_set_interrupt_model(UACPI_INTERRUPT_MODEL_IOAPIC);
+    uacpi_status status = uacpi_set_interrupt_model(UACPI_INTERRUPT_MODEL_IOAPIC);
     if (status != UACPI_STATUS_OK) {
         printf("Cannot put the firmware in APIC mode: %s\n", uacpi_status_to_string(status));
     }
