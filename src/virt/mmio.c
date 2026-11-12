@@ -470,6 +470,10 @@ struct mmio_step {
     uint16_t done_cs;
     uintptr_t done_rip;
     bool loads_flags;
+    // The byte of a pushed RFLAGS image that holds TF, which SVM's stepping
+    // sets.
+    bool stores_flags;
+    uintptr_t flags_gpa;
     // A masked store runs twice.
     bool masked;
     bool second;
@@ -722,6 +726,13 @@ static void step_begin(struct vcpu *v, uintptr_t gpa, const struct insn *insn) {
     s->second = false;
     s->masked = modrm && (mem.access & INSN_MEM_MASKED) != 0;
     s->loads_flags = stacked && stack.loads_flags;
+    s->stores_flags = !virt_vmx && stacked && stack.stores_flags;
+    if (s->stores_flags) {
+        // TF is bit 8, in the second byte of the image, which is the push's
+        // operand, the last.
+        size_t i = count - 1;
+        s->flags_gpa = lens[i][0] > 1 ? gpas[i][0] + 1 : gpas[i][1];
+    }
     s->mode = mode_name(v, &cs);
     s->cs = cs;
     s->rip = vcpu_rip(v);
@@ -758,6 +769,26 @@ static void write_runs(struct vcpu *v, struct step_page *p) {
     }
 }
 
+// SVM steps with TF set, which a pushed RFLAGS image holds in place of the
+// guest's own.
+static void store_guest_tf(struct vcpu *v, const struct mmio_step *s) {
+    uint8_t tf = v->step_tf ? (uint8_t)(RFLAGS_TF >> 8) : 0;
+    for (size_t i = 0; i < s->count; i++) {
+        const struct step_page *p = &s->pages[i];
+        if (p->gpa == page_down(s->flags_gpa)) {
+            size_t at = s->flags_gpa - p->gpa;
+            p->scratch[at] = (uint8_t)((p->scratch[at] & ~(RFLAGS_TF >> 8)) | tf);
+            return;
+        }
+    }
+    // Where the image crosses into RAM, the processor wrote that byte there.
+    uint8_t byte;
+    if (guest_mem_phys_read(s->flags_gpa, &byte, 1)) {
+        byte = (uint8_t)((byte & ~(RFLAGS_TF >> 8)) | tf);
+        guest_mem_phys_write(s->flags_gpa, &byte, 1);
+    }
+}
+
 void mmio_step_done(struct vcpu *v) {
     struct mmio_step *s = v->step;
     // A step can end in a fault or an event instead, with nothing written.
@@ -776,6 +807,9 @@ void mmio_step_done(struct vcpu *v) {
         vcpu_set_rip(v, s->rip);
         s->second = true;
         return;
+    }
+    if (completed && s->stores_flags) {
+        store_guest_tf(v, s);
     }
     for (size_t i = 0; i < s->count; i++) {
         struct step_page *p = &s->pages[i];

@@ -126,8 +126,10 @@ struct insn_stack {
     uint16_t selector;
     // The bytes of each slot it pushes or pops.
     size_t slot;
-    // Whether it loads RFLAGS, as POPF and IRET do.
+    // Whether it loads RFLAGS, as POPF and IRET do, or stores them, as PUSHF
+    // does.
     bool loads_flags;
+    bool stores_flags;
 };
 
 // The length of the instruction at the guest's CS:RIP, for intercepted

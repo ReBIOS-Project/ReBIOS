@@ -825,6 +825,7 @@ static bool stack_kind(
     stack->end = INSN_END_NEXT;
     stack->slot = size;
     stack->loads_flags = false;
+    stack->stores_flags = false;
     // A segment register's push fills its slot but with 32-bit operands, where
     // processors either zero-extend the selector or leave the slot's upper
     // bytes as they were (SDM 325462-093 Vol. 2B, PUSH).
@@ -846,6 +847,7 @@ static bool stack_kind(
         // POP of a register, of ES, or of DS.
     } else if (op == 0x68 || op == 0x6a || op == 0x9c || (op == 0xff && reg == 6)) {
         *push = true;
+        stack->stores_flags = op == 0x9c;
     } else if (op == 0x9d) {
         stack->loads_flags = true;
     } else if (op == 0x8f && reg == 0) {
