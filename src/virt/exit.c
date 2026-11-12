@@ -22,10 +22,12 @@
 #include <csm/csm_boot.h>
 #include <hw/power.h>
 #include <lib/log.h>
+#include <lib/util.h>
 #include <sys/fixup.h>
 #include <sys/x86.h>
 #include <virt/cpuid.h>
 #include <virt/emulate.h>
+#include <virt/guest_mem.h>
 #include <virt/hypercall.h>
 #include <virt/insn.h>
 #include <virt/io.h>
@@ -61,19 +63,63 @@ static void not_hypercall(struct vcpu *v) {
     }
 }
 
+// VMCALL and VMMCALL.
+#define HYPERCALL_LENGTH 3
+
+// Whether the hypercall instruction at CS:RIP, its first byte and its last, is
+// where within says, as the guest's paging maps it.
+static bool code_in(struct vcpu *v, bool (*within)(uintptr_t gpa)) {
+    static const size_t ends[] = { 0, HYPERCALL_LENGTH - 1 };
+    struct vcpu_segment cs;
+    vcpu_get_seg(v, VCPU_SEG_CS, &cs);
+    bool long_mode = (vcpu_efer(v) & EFER_LMA) != 0 && (cs.attrib & VCPU_SEG_L) != 0;
+    for (size_t i = 0; i < ARRAY_COUNT(ends); i++) {
+        uintptr_t linear = cs.base + vcpu_rip(v) + ends[i];
+        if (!long_mode) {
+            linear &= 0xffffffff;
+        }
+        uint64_t gpa;
+        uint32_t pf_error;
+        if (!guest_mem_linear_to_phys(v, linear, false, true, &gpa, &pf_error) || !within(gpa)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Hypercalls are the legacy BIOS's. Until the boot, it and the option ROMs it
+// runs are all that runs, at CPL 0. From the boot on, they come from its
+// image's read-only part, at CPL 0, or in V86 mode, where memory managers and
+// Windows run it for DOS. The thunk's returns from its CSM16 calls come before
+// the boot, or where the boot fails.
+static bool allowed(struct vcpu *v, uint32_t function) {
+    bool v86 = (vcpu_rflags(v) & RFLAGS_VM) != 0;
+    if (vcpu_cpl(v) != 0 && !v86) {
+        return false;
+    }
+    if (!csm_boot_begun()) {
+        return !v86;
+    }
+    if (function == HYPERCALL_CSM_RETURN) {
+        return !v86 && code_in(v, csm_boot_thunk_code);
+    }
+    return code_in(v, csm_boot_bios_code);
+}
+
 // Returns whether the guest is to go on after the hypercall instruction; the
 // others set where it goes on themselves.
 static bool hypercall(struct vcpu *v) {
     uint32_t eax = (uint32_t)v->gprs.rax;
     uint32_t ebx = (uint32_t)v->gprs.rbx;
+    uint32_t function = eax & HYPERCALL_FUNCTION_MASK;
 
-    if ((eax & ~HYPERCALL_FUNCTION_MASK) != HYPERCALL_MAGIC) {
+    if ((eax & ~HYPERCALL_FUNCTION_MASK) != HYPERCALL_MAGIC || !allowed(v, function)) {
         not_hypercall(v);
         return false;
     }
 
-    profile_hypercall(eax & HYPERCALL_FUNCTION_MASK);
-    switch (eax & HYPERCALL_FUNCTION_MASK) {
+    profile_hypercall(function);
+    switch (function) {
         case HYPERCALL_DEBUG_PUTC: {
             printf("%c", (char)ebx);
             return true;

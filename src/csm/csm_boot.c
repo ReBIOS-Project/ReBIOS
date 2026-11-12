@@ -116,6 +116,8 @@ static struct {
     // Where the ROM being run sits, and where the next one goes.
     uint32_t rom_at;
     uintptr_t rom_end;
+    // Where the legacy BIOS's code begins from the boot on.
+    uintptr_t code_base;
 } csm;
 
 static uint32_t e820_build(void) {
@@ -209,12 +211,26 @@ static void lock_roms(void) {
     }
     uintptr_t start = csm.compat16->uma_address + csm.compat16->uma_size;
     start = page_up(start);
+    csm.code_base = csm.image_base;
     if (start >= roms_end && start < ROM_AREA_END) {
         printf(
             "Legacy BIOS %#llx-%#x is read-only\n", (unsigned long long)start, ROM_AREA_END - 1
         );
         layout_read_only(start, ROM_AREA_END - start);
+        csm.code_base = start;
     }
+}
+
+bool csm_boot_begun(void) {
+    return csm.code_base != 0;
+}
+
+bool csm_boot_bios_code(uintptr_t gpa) {
+    return csm.code_base != 0 && gpa >= csm.code_base && gpa < ROM_AREA_END;
+}
+
+bool csm_boot_thunk_code(uintptr_t gpa) {
+    return gpa >= THUNK_BASE && gpa - THUNK_BASE < (uintptr_t)(csm_thunk_end - csm_thunk_start);
 }
 
 // Sets up the call the thunk makes next: function in AX, its table in ES:BX.

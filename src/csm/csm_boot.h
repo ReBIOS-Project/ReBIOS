@@ -18,6 +18,9 @@
 #ifndef CSM__CSM_BOOT_H
 #define CSM__CSM_BOOT_H
 
+#include <stdbool.h>
+#include <stdint.h>
+
 struct vcpu;
 
 // Lays out the guest's legacy BIOS, SeaBIOS built as a CSM16, and sets the
@@ -27,5 +30,11 @@ void csm_boot_start(struct vcpu *v);
 
 // Takes the guest's return from a CSM16 call, and sets up the next one.
 void csm_boot_returned(struct vcpu *v);
+
+// Whether the boot has begun, and whether gpa then holds the legacy BIOS's
+// code, which its image's read-only part keeps, or the thunk's that calls it.
+bool csm_boot_begun(void);
+bool csm_boot_bios_code(uintptr_t gpa);
+bool csm_boot_thunk_code(uintptr_t gpa);
 
 #endif
