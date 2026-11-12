@@ -19,6 +19,8 @@
 #define LOADER__FILES_H
 
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <efi.h>
 
 // The root directory of the volume that the loader's image was started from,
@@ -31,5 +33,7 @@ bool files_open_image_volume(
 // The absolute path of name in the directory of the image's file path, in a
 // pool allocation, or NULL if that directory is unknown.
 uint16_t *files_sibling_path(const struct efi_device_path_protocol *image_path, const char *name);
+// A file's path as text for the log, cut short to fit in size bytes.
+void files_path_text(char *out, size_t size, const uint16_t *path);
 
 #endif

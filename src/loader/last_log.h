@@ -18,9 +18,12 @@
 #ifndef LOADER__LAST_LOG_H
 #define LOADER__LAST_LOG_H
 
+#include <stdbool.h>
+
 // Writes the log that the core saved in EFI variables with save_log
 // (virt/log_save.c) to rebios-last.log, beside the loader's image, then
-// deletes the variables.
-void last_log_write(void);
+// deletes the variables. Says on the screen where the log went, or why it did
+// not, and with save_log, where there was none.
+void last_log_write(bool save_log);
 
 #endif

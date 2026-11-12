@@ -231,7 +231,7 @@ efi_status efi_main(efi_handle image_handle, struct efi_system_table *system_tab
             config.serial_port, HANDOFF_PCI_ADDRESS_ARGS(serial_card)
         );
     }
-    last_log_write();
+    last_log_write(config.save_log);
 
     if (x86_cpu_vendor() == 0) {
         panic("ReBIOS runs on Intel's and AMD's processors alone\n");

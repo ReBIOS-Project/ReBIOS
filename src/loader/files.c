@@ -127,3 +127,11 @@ bool files_open_image_volume(
     *image_path = image->file_path;
     return true;
 }
+
+void files_path_text(char *out, size_t size, const uint16_t *path) {
+    size_t i = 0;
+    for (; i + 1 < size && path[i] != 0; i++) {
+        out[i] = path[i] >= 0x20 && path[i] < 0x7f ? (char)path[i] : '?';
+    }
+    out[i] = 0;
+}

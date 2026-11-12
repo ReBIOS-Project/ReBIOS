@@ -506,15 +506,6 @@ static void apply_text(const char *text, size_t size, const char *source) {
     }
 }
 
-// For the log, cut short to fit.
-static void path_to_ascii(char *out, size_t size, const uint16_t *path) {
-    size_t i = 0;
-    for (; i + 1 < size && path[i] != 0; i++) {
-        out[i] = path[i] >= 0x20 && path[i] < 0x7f ? (char)path[i] : '?';
-    }
-    out[i] = 0;
-}
-
 // Returns the contents of a file fit to apply in a pool allocation, or NULL.
 static char *read_file(struct efi_file_protocol *file, const char *source, size_t *size) {
     union {
@@ -569,7 +560,7 @@ static char *read_file(struct efi_file_protocol *file, const char *source, size_
 
 static bool apply_file(struct efi_file_protocol *root, uint16_t *path) {
     char source[256];
-    path_to_ascii(source, sizeof(source), path);
+    files_path_text(source, sizeof(source), path);
 
     struct efi_file_protocol *file;
     efi_status status = root->open(root, &file, path, EFI_FILE_MODE_READ, 0);
