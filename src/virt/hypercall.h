@@ -18,9 +18,9 @@
 #ifndef VIRT__HYPERCALL_H
 #define VIRT__HYPERCALL_H
 
-// Hypercalls are VMCALL or VMMCALL with EAX holding HYPERCALL_MAGIC in its top
-// half and the function in its bottom half. Anything else gets the #UD the
-// instruction raises without a hypervisor.
+// Hypercalls are VMCALL on Intel processors and VMMCALL on AMD's, with EAX
+// holding HYPERCALL_MAGIC in its top half and the function in its bottom half.
+// Anything else gets the #UD the instruction raises without a hypervisor.
 #define HYPERCALL_MAGIC 0x52420000
 #define HYPERCALL_FUNCTION_MASK 0x0000ffff
 

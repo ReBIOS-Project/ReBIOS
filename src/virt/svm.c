@@ -343,9 +343,9 @@ void svm_vcpu_init(struct vcpu *v) {
                        | SVM_INTERCEPT_SKINIT;
     c->intercept_misc3 = (invlpgb ? SVM_INTERCEPT_INVLPGB : 0)
                        | (svm_idle_hlt ? SVM_INTERCEPT_IDLE_HLT : 0);
-    // The legacy BIOS's VMCALL hypercalls raise #UD here, INITs #SX, and the
-    // SVM instructions #GP while the guest's own EFER.SVME is clear (nsvm.c).
-    c->intercept_exceptions = (uint32_t)1 << 6 | (uint32_t)1 << VECTOR_GP | (uint32_t)1 << 30;
+    // INITs raise #SX here, and the SVM instructions #GP while the guest's own
+    // EFER.SVME is clear (nsvm.c).
+    c->intercept_exceptions = (uint32_t)1 << VECTOR_GP | (uint32_t)1 << 30;
     if (svm_erratum_383) {
         c->intercept_exceptions |= (uint32_t)1 << VECTOR_MC;
     }
@@ -888,10 +888,6 @@ static void svm_handle_exit(struct vcpu *v) {
         case SVM_EXIT_HLT:
         case SVM_EXIT_IDLE_HLT: {
             vcpu_halt(v);
-            break;
-        }
-        case SVM_EXIT_EXCEPTION_BASE + 6: {
-            exit_invalid_opcode(v);
             break;
         }
         case SVM_EXIT_EXCEPTION_BASE + VECTOR_GP: {

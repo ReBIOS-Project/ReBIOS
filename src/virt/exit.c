@@ -22,12 +22,10 @@
 #include <csm/csm_boot.h>
 #include <hw/power.h>
 #include <lib/log.h>
-#include <memory.h>
 #include <sys/fixup.h>
 #include <sys/x86.h>
 #include <virt/cpuid.h>
 #include <virt/emulate.h>
-#include <virt/guest_mem.h>
 #include <virt/hypercall.h>
 #include <virt/insn.h>
 #include <virt/io.h>
@@ -126,23 +124,6 @@ void exit_hypercall(struct vcpu *v) {
     if (hypercall(v)) {
         vcpu_skip_instruction(v);
     }
-}
-
-void exit_invalid_opcode(struct vcpu *v) {
-    static const uint8_t vmcall[] = { 0x0f, 0x01, 0xc1 };
-    struct vcpu_segment cs;
-    uint8_t insn[sizeof(vmcall)];
-
-    vcpu_get_seg(v, VCPU_SEG_CS, &cs);
-    uintptr_t rip = vcpu_rip(v);
-    if (guest_mem_linear_read(v, cs.base + rip, insn, sizeof(insn), true)
-     && memcmp(insn, vmcall, sizeof(vmcall)) == 0) {
-        if (hypercall(v)) {
-            vcpu_set_rip(v, rip + sizeof(vmcall));
-        }
-        return;
-    }
-    vcpu_inject_exception(v, 6, false, 0);
 }
 
 bool exit_msr_read(struct vcpu *v, uint32_t msr, uint64_t *value) {

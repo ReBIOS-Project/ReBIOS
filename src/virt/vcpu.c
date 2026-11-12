@@ -192,7 +192,7 @@ static void set_guest_debugctl(struct vcpu *v, uint64_t value) {
 // The faults a stepped instruction may raise, which SVM intercepts so that the
 // step ends there.
 #define STEP_EXCEPTIONS \
-    ((uint32_t)1 << 0 | (uint32_t)1 << 1 | (uint32_t)1 << 7 | (uint32_t)1 << 12 \
+    ((uint32_t)1 << 0 | (uint32_t)1 << 1 | (uint32_t)1 << 6 | (uint32_t)1 << 7 | (uint32_t)1 << 12 \
    | (uint32_t)1 << 13 | (uint32_t)1 << 14 | (uint32_t)1 << 16 | (uint32_t)1 << 17 \
    | (uint32_t)1 << 19)
 

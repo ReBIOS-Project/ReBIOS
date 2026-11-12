@@ -40,7 +40,4 @@ void exit_io(struct vcpu *v, uint16_t port, size_t size, bool in, uint32_t *valu
 // The same for INS and OUTS, which it emulates.
 void exit_string_io(struct vcpu *v, uint16_t port);
 
-// A #UD the guest raised, which may be its VMCALL on an AMD processor.
-void exit_invalid_opcode(struct vcpu *v);
-
 #endif

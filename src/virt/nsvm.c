@@ -899,7 +899,7 @@ static void merge_intercepts(struct nsvm *n) {
         to[i] = own[i] | n->intercepts[i];
     }
     to[0] = (own[0] & ~(SVM_INTERCEPT_CR0_READ | SVM_INTERCEPT_CR0_WRITE)) | n->intercepts[0];
-    to[2] = (own[2] & ~((uint32_t)1 << VECTOR_UD | (uint32_t)1 << VECTOR_MF)) | n->intercepts[2];
+    to[2] = (own[2] & ~((uint32_t)1 << VECTOR_MF)) | n->intercepts[2];
     to[3] = (own[3] & ~(SVM_INTERCEPT_VINTR | SVM_INTERCEPT_CR0_SEL_WRITE)) | n->intercepts[3];
     uint32_t svm = SVM_INTERCEPT_VMLOAD | SVM_INTERCEPT_VMSAVE | SVM_INTERCEPT_STGI
                  | SVM_INTERCEPT_CLGI;
@@ -1726,8 +1726,7 @@ static bool l1_wants(struct vcpu *v, struct nsvm *n, uint64_t code) {
         return (n->intercepts[2] & ((uint32_t)1 << VECTOR_MC)) != 0;
     }
     if (code >= SVM_EXIT_EXCEPTION_BASE && code < SVM_EXIT_EXCEPTION_BASE + 32) {
-        uint32_t own = n->vmcb01->control.intercept_exceptions
-                     & ~((uint32_t)1 << VECTOR_UD | (uint32_t)1 << VECTOR_MF);
+        uint32_t own = n->vmcb01->control.intercept_exceptions & ~((uint32_t)1 << VECTOR_MF);
         return ((own >> (code - SVM_EXIT_EXCEPTION_BASE)) & 1) == 0;
     }
     // VMLOAD and VMSAVE that VMCB12 has virtualised where the processor's
