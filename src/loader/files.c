@@ -48,7 +48,7 @@ uint16_t *files_sibling_path(const struct efi_device_path_protocol *image_path, 
     }
 
     size_t path_chars = 0;
-    bool found = false;
+    size_t nodes = 0;
     const uint8_t *node = (const uint8_t *)image_path;
     for (; node[0] != EFI_END_DEVICE_PATH_TYPE; node += node_length(node)) {
         if (node_length(node) < sizeof(struct efi_device_path_protocol)) {
@@ -56,10 +56,10 @@ uint16_t *files_sibling_path(const struct efi_device_path_protocol *image_path, 
         }
         if (is_file_path_node(node)) {
             path_chars += node_path_chars(node);
-            found = true;
+            nodes++;
         }
     }
-    if (!found) {
+    if (nodes == 0) {
         return NULL;
     }
 
@@ -67,14 +67,17 @@ uint16_t *files_sibling_path(const struct efi_device_path_protocol *image_path, 
     while (name[name_len] != 0) {
         name_len++;
     }
-    // A leading separator, the image's path, the name, and a NUL.
-    uint16_t *path = efi_glue_alloc_pool((path_chars + name_len + 2) * sizeof(uint16_t));
+    // A leading separator, the image's path with a separator before each of
+    // its nodes, the name, and a NUL.
+    uint16_t *path = efi_glue_alloc_pool((path_chars + nodes + name_len + 2) * sizeof(uint16_t));
     if (path == NULL) {
         return NULL;
     }
 
     // Open() only knows backslashes, and the nodes may each begin and end with
-    // one, so separators become single backslashes.
+    // one, so separators become single backslashes, while nodes that meet
+    // without one get one between them (UEFI 2.11, 10.3.5.4), as GRUB 2.16's
+    // chainloader gives an image its directory and file names in two nodes.
     size_t len = 1;
     size_t dir_len = 1;
     path[0] = '\\';
@@ -82,6 +85,10 @@ uint16_t *files_sibling_path(const struct efi_device_path_protocol *image_path, 
     for (; node[0] != EFI_END_DEVICE_PATH_TYPE; node += node_length(node)) {
         if (!is_file_path_node(node)) {
             continue;
+        }
+        if (path[len - 1] != '\\') {
+            path[len++] = '\\';
+            dir_len = len;
         }
         for (size_t i = 0; i < node_path_chars(node); i++) {
             uint16_t c = read_le16(node + EFI_SIZE_OF_FILEPATH_DEVICE_PATH + i * 2);
