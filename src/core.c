@@ -23,6 +23,7 @@
 #include <hw/ioapic.h>
 #include <hw/lapic.h>
 #include <hw/lapic_legacy.h>
+#include <hw/pci_assign.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
 #include <hw/pm_timer.h>
@@ -82,6 +83,7 @@ static void bsp_main(void *arg) {
     pci_cfg_init();
     pci_enum_scan();
     pci_enum_shrink_rebars(PCI_PLAN_LOW_BAR_MAX);
+    pci_assign_unassigned_bars();
     usb_handoff();
     igfx_scan();
     dma_init();

@@ -61,6 +61,10 @@ struct pci_host {
     // put it.
     struct pci_host_range *tpms;
     size_t tpm_count;
+    // The rest of the memory that motherboard resources and host bridges
+    // consume.
+    struct pci_host_range *motherboard;
+    size_t motherboard_count;
     // Sorted and page granular: the configuration space windows and the
     // IOMMUs' registers, which the guest must never reach at their addresses.
     struct pci_host_range *private;

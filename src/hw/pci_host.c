@@ -470,6 +470,7 @@ const struct pci_host *pci_host_scan(void) {
     ranges_out(&r.interrupts, &host.interrupts, &host.interrupt_count);
     ranges_out(&r.devices, &host.devices, &host.device_count);
     ranges_out(&r.tpms, &host.tpms, &host.tpm_count);
+    ranges_out(&r.motherboard, &host.motherboard, &host.motherboard_count);
     ranges_out(&r.private, &host.private, &host.private_count);
     host.bridges = kmalloc(
         (r.bridge_count != 0 ? r.bridge_count : 1) * sizeof(struct pci_host_bridge)
