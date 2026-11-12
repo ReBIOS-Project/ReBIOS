@@ -97,6 +97,9 @@ clone_repo_commit \
     seabios \
     25c529526697aa6210c89ade1a38ae1f46394aba
 
+# Temporary companion SeaBIOS changes until its upstream revision includes them.
+git -C seabios apply ../patches/seabios-atapi-removable.patch
+
 touch .deps-obtained
 
 printf "\nDependencies obtained successfully.\n"

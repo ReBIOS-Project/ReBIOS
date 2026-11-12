@@ -214,6 +214,9 @@ printf '\x07\x00\x00\x00%s' "$(cat rebios.ini)" > /sys/firmware/efi/efivars/ReBI
 | `serial_baud` | int | `115200` | Serial baud rate |
 | `verbose` | bool | `false` | Show debug output on screen while ReBIOS starts |
 | `boot_drive` | `self`/`auto`/drive | `self` | The drive SeaBIOS boots first, the others following in the `auto` order. `self`: the drive ReBIOS was started from, if it has a legacy boot sector (on a GPT drive, a hybrid MBR with code that marks an MBR partition active). `auto`: drives with something to boot (a legacy boot sector, or a bootable CD or DVD) before those without, internal drives before CDs and DVDs before external (USB) drives, and the drive ReBIOS was started from last; the [ReBIOS USB stick](#the-rebios-usb-stick)'s setting. Anything else names a drive by its UEFI device path (e.g. `PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x1,0xFFFF,0x0)`), or else by part of its model name (e.g. `Samsung SSD 860`), case aside, as ReBIOS lists them when `verbose` is on |
+| `floppy_a` | string | (empty) | Reserve an ATAPI LS-120 (or ZIP) as BIOS drive `00h`, DOS A:, independently of boot order and SATA port order. It names the drive by part of its model (e.g. `LS-120`, case-insensitive), or by its port as SeaBIOS names it (`AHCI/2` for SATA port 2, `ata1-0`) or by its SeaBIOS boot order path (e.g. `/pci@i0cf8/*@17/drive@2/disk@0`, for a port on one of several SATA controllers). Of several drives a model matches, the first in boot order is taken. A named drive is a floppy drive, a ZIP too, with or without media. Empty uses the normal floppy ordering. |
+| `floppy_b` | string | (empty) | The same for BIOS drive `01h`, DOS B:, e.g. for `DISKCOPY A: B:` between two drives. With two drives of one model, name them by port, or give both settings the model: A: is then the first in boot order, B: the second. Without `floppy_a`, the first other floppy drive becomes A:. |
+| `zip_mode` | `auto`/`floppy`/`hdd` | `auto` | How an ATAPI Iomega ZIP drive is mapped, until the next boot: by its media when ReBIOS starts (a partition table makes it a hard disk; media without one, or no media, a floppy drive, B: next to an LS-120 on A:), always as a floppy drive, or always as a hard disk (as before, then only with media inserted) |
 | `vgabios` | string | *(empty)* | Path to a custom VBIOS file on the partition ReBIOS was started from (e.g. `\EFI\ReBIOS\vgabios.bin`). When empty, the card's built-in OpROM is used, and, failing that, the emulated VGA. If vgabios is set to `cbfs`, vgabios.bin is loaded from coreboot's CBFS. If you set it to `cbfs:filename` you can use a custom CBFS filename |
 | `vga` | PCI address | *(empty)* | PCI address of the VGA card to use (e.g. `00:02.0`). Format: `BB:DD.F` (hex). When empty, the card the firmware displays on is used, or, if it displays on none, the first card with a VBIOS |
 | `vga_emulation` | `auto`/`always`/`never` | `auto` | When to emulate a VGA: when the graphics have no usable Video BIOS (or, without `vgabios`, when the firmware is Apple's, the screen is mounted sideways, or the graphics are in the processor or soldered to the board and came out from 2018 on, but for the Vega graphics of AMD's processors), always (even if they have one), or never (a Video BIOS then runs in those cases too, and graphics without one get none) |
@@ -255,6 +258,74 @@ cpu_blocklist = 4-6
 ; Boot the drive whose model name has "WDC WD5000" in it first.
 boot_drive = WDC WD5000
 ```
+
+### LS-120 as DOS drive A:
+
+For an IDE/ATAPI LS-120 connected directly or through an ATAPI-capable
+IDE-to-SATA bridge, use:
+
+```ini
+floppy_a = LS-120
+boot_drive = LS-120
+```
+
+`floppy_a` reserves A:; `boot_drive` independently selects what to boot first.
+Omit `boot_drive` to retain the usual boot selection. Use the drive's actual
+model substring (for example `LS120` if its model omits the hyphen). The match
+uses the ATA IDENTIFY model or the SCSI INQUIRY product name; these can
+differ from the UEFI model shown with `verbose`. SeaBIOS logs both identities.
+`boot_drive` can select the device only if UEFI exposes it; otherwise use
+SeaBIOS's boot menu. If multiple ready LS-120 drives match, SeaBIOS reports
+the ambiguity and uses its normal
+floppy order. The drive is registered with or without media: as the ATAPI
+Removable Media Device BIOS Specification describes, the BIOS checks the
+media before each access, so media can be inserted or changed at any time.
+Without media, DOS reports the drive as not ready; a media change is
+reported to DOS, which then reads the new disk.
+
+The implementation provides BIOS sector reads and writes for 720-KB,
+1.44-MB and 120-MB media, using the appropriate CHS geometry, and for other
+media whose geometry the drive reports (its Flexible Disk mode page).
+LS-120 and LS-240 models, and models with "Floppy" in their name, are
+recognized; so is any drive `floppy_a` names.
+
+A ZIP drive is a hard disk or a floppy drive as `zip_mode` says. In `auto`
+mode, as the "auto" ZIP emulation of old BIOSes did, partitioned media
+(in any of the four MBR entries) at boot make it a hard disk, and
+superfloppy media (formatted without a partition table, e.g. by DOS FORMAT
+in the floppy drive) or none a floppy drive. The mapping stays until the
+next boot: a floppy-mapped ZIP reads superfloppies inserted or changed
+later, not partitioned media. Floppy-mapped drives also answer the EDD
+functions (INT 13h AH=41h-48h), through which DOS drivers such as
+OpenASPI's ASPIFDD find them and take their letter over. DOS accesses
+these through INT 13h, without an LS-120-specific DOS driver. The bridge must
+forward ATAPI packet commands; an ATA-only bridge is insufficient. ZIP
+100/250 and other direct-access ATAPI disks use the hard-disk boot path and
+retain their partition table; they are not assigned A: or B:.
+
+This is an initial implementation requiring hardware validation, including
+DOS boot and writes on real LS-120 and ZIP drives. Low-level formatting is
+not supported. An OS that takes over the controller
+needs its own driver; the A: mapping describes BIOS/DOS access.
+
+An isolated 86Box PATA test completed a four-disk DOS 7.1 installation via
+LS-120 A:, booted native 120-MB media, and booted ZIP100/250 with BIOS and
+DOS read/write checks. Another booted DOS 7.1 (with EMM386) from the hard
+disk with the LS-120 empty, then read a 1.44-MB disk inserted afterwards and
+a 120-MB disk swapped in for it. With a ZIP 100 beside the LS-120, partitioned
+ZIP media at boot became hard disk D:, a superfloppy at boot or inserted
+into an empty ZIP became B:. AHCI command construction and bounce-buffer handling
+have host tests; the emulated PATA tests do not validate an AHCI controller,
+a physical bridge, or the complete ReBIOS hypervisor path. See the companion
+test documentation for details. Bootable LS-120 superfloppies need BPB BIOS
+drive 00h (for example, `mkfs.fat -D 0`); DOS SYS preserves this field.
+
+The companion SeaBIOS changes currently live in
+`patches/seabios-atapi-removable.patch`, applied by `./get-deps` after checking
+out the pinned SeaBIOS revision. This patch can be replaced with an updated
+dependency revision once the companion changes are available upstream.
+The geometry/model tests are documented in `seabios/tests/README.md` after
+fetching the dependencies.
 
 ## Frequently Asked Questions
 
