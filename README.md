@@ -22,6 +22,48 @@ PC BIOS environment.
 
 Logo art by [conkkerxd](https://github.com/conkkerxd).
 
+> [!CAUTION]
+> **Ventoy is not supported, and we strongly advise against using it at all.**
+> Issues and pull requests about running ReBIOS, or booting legacy OSes under
+> it, through Ventoy will be closed without being addressed. Anyone who
+> reports an issue while withholding that they use Ventoy will be banned from
+> the ReBIOS-Project organisation.
+>
+> Ventoy is a stack of hacks, and does not boot a disk image as it is. Its own
+> GRUB-based boot manager passes the image file off as a disk or a CD, by
+> hooking the BIOS's INT 13h, or on UEFI by adding a Block I/O device of its
+> own and patching the firmware's boot services. Then, for OSes with drivers
+> of their own, it patches their early boot on the fly, slipping its own
+> scripts, programs, and drivers into the initramfs or the Windows PE image,
+> so that the OS finds the file again once it stops using the firmware. Each
+> kind of OS needs a hack of its own, Ventoy carrying hooks for dozens of Linux
+> distributions alone, and whatever those hacks do not foresee breaks, which is
+> Ventoy's to fix, not ReBIOS's.
+>
+> Its record on security is no better:
+>
+> - Its Secure Boot support has each computer enroll Ventoy's key, and then,
+>   in its own words, "Ventoy default policy is fully bypass secure boot which
+>   means all EFI files can be booted without any check"
+>   ([Ventoy's Secure Boot page](https://www.ventoy.net/en/doc_secure.html)).
+> - Its source tree carries prebuilt binaries, which its releases ship as they
+>   are rather than building them from source
+>   ([#2795](https://github.com/ventoy/Ventoy/issues/2795),
+>   [#3224](https://github.com/ventoy/Ventoy/issues/3224)).
+> - Until version 1.1.01, on Linux it loaded a prebuilt kernel module that
+>   patched the running kernel's device mapper
+>   ([#2234](https://github.com/ventoy/Ventoy/issues/2234)).
+> - Its developer's iVentoy, a mostly closed-source PXE server, made the
+>   Windows PE it boots trust a self-signed root certificate, and loaded a
+>   kernel driver signed with it that the developer had found online, until
+>   version 1.0.21
+>   ([ventoy/PXE#106](https://github.com/ventoy/PXE/issues/106)).
+>
+> Give each OS a medium of its own instead: a CD or DVD, in a drive (USB ones
+> work), or a USB stick prepared for that one image, e.g. with Rufus or
+> balenaEtcher. [The ReBIOS USB stick](#the-rebios-usb-stick) boots it from
+> there.
+
 ## Executive Summary
 
 The idea is to drop ReBIOS into a `/EFI/BOOT/` directory on a FAT (12, 16,
