@@ -343,11 +343,20 @@ static void bar_log(const struct vbar *b, const char *what) {
     }
 }
 
+// Whether the function decodes the space, as its command register says: its
+// BARs there answer nothing while it does not (PCI Local Bus Specification
+// 3.0, 6.2.2), and its ROM only while it decodes memory and the ROM is enabled
+// too (PCI Local Bus Specification 3.0, 6.2.5.2).
+static bool decodes(const struct pci_enum_function *f, uint16_t space) {
+    return (pci_cfg_read(f->addr, PCI_COMMAND, 2) & space) != 0;
+}
+
 // A BAR smaller than a page sits wherever the guest has nothing else, as the
 // hypervisor reaches it where its page cannot be the host's.
-static void sub_page_update(struct vbar *b, bool is_rom) {
+static void sub_page_update(const struct vfunction *vf, struct vbar *b, bool is_rom) {
     uint64_t want = 0;
-    if (b->guest != 0 && (!is_rom || b->enabled) && !sizing(b)) {
+    if (b->guest != 0 && (!is_rom || b->enabled) && !sizing(b)
+     && decodes(vf->f, PCI_COMMAND_MEMORY)) {
         uintptr_t page = page_down(b->guest);
         if (page + PAGE_SIZE <= virt.address_limit && layout_mmio_free(page, PAGE_SIZE)) {
             want = b->guest;
@@ -379,13 +388,13 @@ static void sub_page_update(struct vbar *b, bool is_rom) {
 // Follows the guest's address and enables for the BAR. Where the guest puts it
 // somewhere it cannot map, such as at the size mask while it sizes the BAR, it
 // is in no place.
-static void bar_update(struct vbar *b, bool is_rom) {
+static void bar_update(const struct vfunction *vf, struct vbar *b, bool is_rom) {
     if (sub_page(b)) {
-        sub_page_update(b, is_rom);
+        sub_page_update(vf, b, is_rom);
         return;
     }
     uint64_t want = 0;
-    if (b->guest != 0 && (!is_rom || b->enabled)) {
+    if (b->guest != 0 && (!is_rom || b->enabled) && decodes(vf->f, PCI_COMMAND_MEMORY)) {
         if (mappable(b, b->guest)) {
             want = b->guest;
         } else if (!sizing(b)) {
@@ -498,13 +507,13 @@ static void kept_write(struct vfunction *vf, uint32_t reg, uint32_t value) {
             pci_cfg_write(
                 vf->f->addr, reg, 4, ((uint32_t)b->host & PCI_ROM_ADDRESS_MASK) | enable
             );
-            bar_update(b, true);
+            bar_update(vf, b, true);
         } else if (upper) {
             b->guest = (b->guest & (uint64_t)0xffffffff) | ((uint64_t)value << 32 & bar_mask(b));
-            bar_update(b, false);
+            bar_update(vf, b, false);
         } else {
             b->guest = (b->guest & ~(uint64_t)0xffffffff) | (value & BAR_ADDRESS & bar_mask(b));
-            bar_update(b, false);
+            bar_update(vf, b, false);
         }
         return;
     }
@@ -1026,7 +1035,7 @@ static bool in_rebar(const struct vfunction *vf, uint32_t offset) {
 // Where the function's I/O BAR decodes, if below 1000h: 0 where not.
 static uint16_t legacy_io_base(const struct pci_enum_function *f, size_t i) {
     const struct pci_enum_bar *bar = &f->bars[i];
-    if (bar->kind != PCI_ENUM_BAR_IO || bar->size == 0) {
+    if (bar->kind != PCI_ENUM_BAR_IO || bar->size == 0 || !decodes(f, PCI_COMMAND_IO)) {
         return 0;
     }
     uint32_t base = pci_cfg_read(f->addr, bar->reg, 4) & IO_BAR_ADDRESS;
@@ -1053,9 +1062,19 @@ static void legacy_io_update(struct vfunction *vf) {
         }
         if (vf->legacy_io[i] != 0) {
             io_unpass(vf->legacy_io[i], (size_t)f->bars[i].size);
+            printf(
+                "PCI " PCI_CFG_ADDR_FMT " BAR%zu: ports %#x-%#llx are no longer the guest's\n",
+                PCI_CFG_ADDR_ARGS(f->addr), i, vf->legacy_io[i],
+                (unsigned long long)(vf->legacy_io[i] + f->bars[i].size - 1)
+            );
         }
         if (base != 0) {
             io_pass(base, (size_t)f->bars[i].size);
+            printf(
+                "PCI " PCI_CFG_ADDR_FMT " BAR%zu: ports %#x-%#llx are the guest's\n",
+                PCI_CFG_ADDR_ARGS(f->addr), i, base,
+                (unsigned long long)(base + f->bars[i].size - 1)
+            );
         }
         vf->legacy_io[i] = base;
     }
@@ -1212,8 +1231,8 @@ static void msix_rearm(struct vfunction *vf) {
     }
 }
 
-// The function whose BAR registers the guest wrote to, for legacy_io_follow():
-// NULL for other writes.
+// The function whose BAR or command register the guest wrote to, for
+// legacy_io_follow(): NULL for other writes.
 static struct vfunction *config_write(
     struct vfunction *vf,
     struct pci_cfg_addr a,
@@ -1243,7 +1262,8 @@ static struct vfunction *config_write(
             value = (value & ~vga) | (pci_cfg_read(a, offset, size) & vga);
         }
         pci_cfg_write(a, offset, size, value);
-        return reg >= PCI_BASE_ADDRESS_0 && reg < PCI_BASE_ADDRESS_0 + 4 * BAR_COUNT ? vf : NULL;
+        bool bar = reg >= PCI_BASE_ADDRESS_0 && reg < PCI_BASE_ADDRESS_0 + 4 * BAR_COUNT;
+        return bar || reg == PCI_COMMAND ? vf : NULL;
     }
     kept_write(vf, reg, (kept_read(vf, reg) & ~mask) | ((value << shift) & mask));
     return NULL;
@@ -1267,6 +1287,11 @@ static struct vfunction *function_write(
     }
     struct vfunction *wrote = config_write(vf, a, offset, size, value);
     if (command) {
+        for (size_t k = 0; k <= BAR_COUNT; k++) {
+            if (vf->bars[k].size != 0) {
+                bar_update(vf, &vf->bars[k], k == ROM_INDEX);
+            }
+        }
         msix_rearm(vf);
     }
     return wrote;
@@ -1592,7 +1617,7 @@ void pci_virt_init(void) {
         struct vfunction *vf = &virt.functions[i];
         for (size_t k = 0; k <= BAR_COUNT; k++) {
             if (vf->bars[k].size != 0) {
-                bar_update(&vf->bars[k], k == ROM_INDEX);
+                bar_update(vf, &vf->bars[k], k == ROM_INDEX);
                 mapped += vf->bars[k].mapped != 0;
             }
         }
