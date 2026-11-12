@@ -121,6 +121,15 @@ bool insn_decode(struct vcpu *v, struct insn *insn);
 // MOV's offset operand: false where it has neither. VEX, EVEX, and XOP forms
 // are not handled.
 bool insn_mem_linear(struct vcpu *v, const struct insn *insn, uint64_t *linear);
+// The same delta bytes on, the effective address wrapping at the address size
+// first, as the processor reaches the bit string of a bit test with a register
+// offset beyond its operand (SDM 325462-093 Vol. 2A, BT).
+bool insn_mem_linear_moved(
+    struct vcpu *v,
+    const struct insn *insn,
+    int64_t delta,
+    uint64_t *linear
+);
 // Where an instruction's ModRM memory operand is, and which of its bytes the
 // instruction reads and writes, as SDM 325462-093, Intel APX 355828-009, and
 // APM 40332 rev. 4.11 describe the instruction: none where it only uses the

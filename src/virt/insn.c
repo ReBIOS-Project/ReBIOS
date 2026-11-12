@@ -592,7 +592,14 @@ static uintptr_t segment_linear(struct vcpu *v, bool long_mode, int reg, uintptr
     return (vcpu_seg_base(v, (size_t)reg) + ea) & 0xffffffff;
 }
 
-static bool mem_linear(struct vcpu *v, const struct insn *insn, int64_t disp, uint64_t *linear) {
+// The memory operand's effective address, and the segment it is in.
+static bool mem_ea(
+    struct vcpu *v,
+    const struct insn *insn,
+    int64_t disp,
+    int *segment_out,
+    uint64_t *ea_out
+) {
     int segment = VCPU_SEG_DS;
     uintptr_t ea;
     if (insn->opcode >= 0xa0 && insn->opcode <= 0xa3) {
@@ -647,6 +654,17 @@ static bool mem_linear(struct vcpu *v, const struct insn *insn, int64_t disp, ui
     if (insn->segment >= 0) {
         segment = insn->segment;
     }
+    *segment_out = segment;
+    *ea_out = ea;
+    return true;
+}
+
+static bool mem_linear(struct vcpu *v, const struct insn *insn, int64_t disp, uint64_t *linear) {
+    int segment;
+    uint64_t ea;
+    if (!mem_ea(v, insn, disp, &segment, &ea)) {
+        return false;
+    }
     *linear = segment_linear(v, insn->long_mode, segment, ea);
     return true;
 }
@@ -656,6 +674,22 @@ bool insn_mem_linear(struct vcpu *v, const struct insn *insn, uint64_t *linear) 
         return false;
     }
     return mem_linear(v, insn, insn->disp, linear);
+}
+
+bool insn_mem_linear_moved(
+    struct vcpu *v,
+    const struct insn *insn,
+    int64_t delta,
+    uint64_t *linear
+) {
+    int segment;
+    uint64_t ea;
+    if (insn->vex || !mem_ea(v, insn, insn->disp, &segment, &ea)) {
+        return false;
+    }
+    ea = (ea + (uint64_t)delta) & address_mask(insn->address_size);
+    *linear = segment_linear(v, insn->long_mode, segment, ea);
+    return true;
 }
 
 // The first form of the instruction's opcode it matches, if any.

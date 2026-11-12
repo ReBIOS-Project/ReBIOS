@@ -180,13 +180,13 @@ static int alu_modrm(struct ctx *c, unsigned int op, bool to_reg, size_t size, u
 }
 
 // A register bit offset reaches beyond the operand, in either direction.
-static int bit_test_reg(struct ctx *c, unsigned int op, uintptr_t linear) {
+static int bit_test_reg(struct ctx *c, unsigned int op) {
     size_t size = c->insn->operand_size;
     unsigned int shift = size == 2 ? 4 : size == 4 ? 5 : 6;
     int64_t offset = (int64_t)sign_extend(reg_get(c, modrm_reg(c->insn), size), size);
-    linear += (uint64_t)((offset >> shift) * (int64_t)size);
-    if (!c->insn->long_mode) {
-        linear &= 0xffffffff;
+    uint64_t linear;
+    if (!insn_mem_linear_moved(c->v, c->insn, (offset >> shift) * (int64_t)size, &linear)) {
+        return EMULATE_UNSUPPORTED;
     }
     return alu_mem(c, op, size, linear, (uint64_t)offset & (size * 8 - 1));
 }
@@ -336,7 +336,7 @@ static int memory_op(struct ctx *c, uintptr_t linear) {
         case INSN_OPCODE_0F | 0xab:
         case INSN_OPCODE_0F | 0xb3:
         case INSN_OPCODE_0F | 0xbb: {
-            return bit_test_reg(c, ALU_BT + ((op >> 3) & 3), linear);
+            return bit_test_reg(c, ALU_BT + ((op >> 3) & 3));
         }
         case INSN_OPCODE_0F | 0xba: {
             if (group(insn) < 4) {
