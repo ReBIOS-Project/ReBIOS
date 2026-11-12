@@ -469,6 +469,7 @@ struct mmio_step {
     // Where the instruction leaves the guest once done.
     uint16_t done_cs;
     uintptr_t done_rip;
+    bool branch;
     bool loads_flags;
     // The byte of a pushed RFLAGS image that holds TF, which SVM's stepping
     // sets.
@@ -725,6 +726,7 @@ static void step_begin(struct vcpu *v, uintptr_t gpa, const struct insn *insn) {
     s->count = 0;
     s->second = false;
     s->masked = modrm && (mem.access & INSN_MEM_MASKED) != 0;
+    s->branch = stacked && stack.end != INSN_END_NEXT;
     s->loads_flags = stacked && stack.loads_flags;
     s->stores_flags = !virt_vmx && stacked && stack.stores_flags;
     if (s->stores_flags) {
@@ -840,7 +842,7 @@ void mmio_step_done(struct vcpu *v) {
     // The trap after the instruction is the one TF asked for as it began, none
     // where POPF or IRET sets it (SDM 325462-093 Vol. 3B, 20.3.1.4; APM 24593
     // rev. 3.46, 13.1.4).
-    bool tf = vcpu_guest_tf(v);
+    bool tf = vcpu_step_tf(v, s->branch);
     v->stepping = false;
     // POPF and IRET leave the trap flag the guest's.
     v->step_flags_loaded = completed && s->loads_flags;

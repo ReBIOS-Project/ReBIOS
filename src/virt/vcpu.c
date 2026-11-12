@@ -734,6 +734,10 @@ bool vcpu_guest_tf(struct vcpu *v) {
     return (vcpu_rflags(v) & RFLAGS_TF) != 0 && (guest_debugctl(v) & DEBUGCTL_BTF) == 0;
 }
 
+bool vcpu_step_tf(struct vcpu *v, bool branch) {
+    return v->step_tf && (branch || (v->step_debugctl & DEBUGCTL_BTF) == 0);
+}
+
 void vcpu_debug_trap(struct vcpu *v, uint64_t dr6) {
     // A debug exception's exit takes DR6's bits as its qualification, leaving
     // DR6 alone (SDM 325462-093 Vol. 3C, 30.2.1).

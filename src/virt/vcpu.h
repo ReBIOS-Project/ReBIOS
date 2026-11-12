@@ -287,6 +287,10 @@ void vcpu_advance(struct vcpu *v, size_t length);
 // Whether the guest single-steps, and its trap after an instruction, or a
 // string instruction's iteration, that the hypervisor carried out for it.
 bool vcpu_guest_tf(struct vcpu *v);
+// Whether the guest's TF asked for a trap after the instruction that SVM's
+// stepping ran, as TF was as it began: with BTF only after a branch (SDM
+// 325462-093 Vol. 3B, 20.4.3; APM 24593 rev. 3.46, 13.1.6.2).
+bool vcpu_step_tf(struct vcpu *v, bool branch);
 void vcpu_step_trap(struct vcpu *v);
 // A debug trap with the given DR6 bits, as the processor raises one.
 void vcpu_debug_trap(struct vcpu *v, uint64_t dr6);
