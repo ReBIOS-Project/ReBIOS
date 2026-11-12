@@ -43,6 +43,7 @@
 #include <virt/pci_plan.h>
 #include <virt/pci_port.h>
 #include <virt/vcpu.h>
+#include <virt/vga.h>
 #include <virt/vlapic.h>
 
 #define CONFIG_PORTS 8
@@ -162,6 +163,11 @@ struct vfunction {
     // which the guest's writes do not reach.
     uint32_t host_buses;
     uint32_t host_windows[4];
+    // Whether it is a bridge above the device that owns the legacy VGA
+    // resources, and its VGA Enable bit as the guest has it while the VGA is
+    // emulated.
+    bool vga_path;
+    bool vga_enable;
     // Whether its MSI-X entries go back to the function once it decodes memory
     // again, after a reset took them away.
     bool msix_rearm;
@@ -540,6 +546,20 @@ static bool is_kept(struct vfunction *vf, uint32_t reg) {
     bool upper;
     return bar_at(vf, reg, &upper) != NULL || window_reg(vf, reg)
         || (is_bridge(vf) && reg == PCI_PRIMARY_BUS);
+}
+
+// The VGA Enable bit in the value of an access that reaches it on a bridge
+// above the emulated VGA's device, else 0. The guest has its own bit there,
+// set as firmware sets it on the bridges above the VGA it starts: Windows 7
+// does not start a VGA device behind a bridge without it, and Linux 7.3's VGA
+// arbiter gives such a device no legacy resources. The hardware's bit stays as
+// the firmware left it, as the hypervisor answers the legacy ranges itself.
+static uint32_t vga_enable_bit(const struct vfunction *vf, uint32_t offset, size_t size) {
+    if (vf == NULL || !vf->vga_path || !vga_emulated() || offset > PCI_BRIDGE_CONTROL
+     || offset + size <= PCI_BRIDGE_CONTROL) {
+        return 0;
+    }
+    return (uint32_t)PCI_BRIDGE_CTL_VGA << (8 * (PCI_BRIDGE_CONTROL - offset));
 }
 
 static uint32_t msi_data_reg(const struct vfunction *vf) {
@@ -1067,7 +1087,9 @@ static uint32_t function_read(struct pci_cfg_addr a, uint32_t offset, size_t siz
         return (msi_read(vf, reg) >> (8 * (offset & 3))) & all_ones(size);
     }
     if (vf == NULL || offset >= PCI_STD_HEADER_SIZEOF || !is_kept(vf, reg)) {
-        return pci_cfg_read(a, offset, size);
+        uint32_t vga = vga_enable_bit(vf, offset, size);
+        value = pci_cfg_read(a, offset, size) & ~vga;
+        return vga != 0 && vf->vga_enable ? value | vga : value;
     }
     return (kept_read(vf, reg) >> (8 * (offset & 3))) & all_ones(size);
 }
@@ -1215,6 +1237,11 @@ static struct vfunction *config_write(
         return NULL;
     }
     if (vf == NULL || offset >= PCI_STD_HEADER_SIZEOF || !is_kept(vf, reg)) {
+        uint32_t vga = vga_enable_bit(vf, offset, size);
+        if (vga != 0) {
+            vf->vga_enable = (value & vga) != 0;
+            value = (value & ~vga) | (pci_cfg_read(a, offset, size) & vga);
+        }
         pci_cfg_write(a, offset, size, value);
         return reg >= PCI_BASE_ADDRESS_0 && reg < PCI_BASE_ADDRESS_0 + 4 * BAR_COUNT ? vf : NULL;
     }
@@ -1525,6 +1552,17 @@ static void vfunction_init(
     }
 }
 
+static void vga_path_mark(void) {
+    const struct pci_enum_function *f = pci_enum_vga();
+    for (; f != NULL && f->parent != NULL; f = f->parent) {
+        struct vfunction *vf = vfunction_find(f->parent->addr);
+        if (vf != NULL) {
+            vf->vga_path = true;
+            vf->vga_enable = true;
+        }
+    }
+}
+
 void pci_virt_init(void) {
     const struct pci_enum_topology *t = pci_enum_topology();
     const struct pci_plan *plan = pci_plan();
@@ -1548,6 +1586,7 @@ void pci_virt_init(void) {
             legacy_io_update(&virt.functions[i]);
         }
     }
+    vga_path_mark();
     uint32_t mapped = 0;
     for (size_t i = 0; i < virt.count; i++) {
         struct vfunction *vf = &virt.functions[i];
