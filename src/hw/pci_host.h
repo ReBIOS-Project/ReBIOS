@@ -47,12 +47,20 @@ struct pci_host_bridge {
 struct pci_host {
     struct pci_host_bridge *bridges;
     size_t bridge_count;
-    // Sorted and page granular: memory the interrupt controllers, the HPETs,
-    // interrupt messages, and the ACPI devices other than host bridges use,
-    // which software finds at these addresses, but for the configuration space
-    // windows and the IOMMUs.
-    struct pci_host_range *claimed;
-    size_t claimed_count;
+    // Sorted and page granular, as the ranges below: the memory of the
+    // interrupt controllers and of interrupt messages, which the hypervisor
+    // answers at these addresses.
+    struct pci_host_range *interrupts;
+    size_t interrupt_count;
+    // The memory of the HPETs and of the ACPI devices but host bridges,
+    // motherboard resources, and TPMs, which the guest finds at addresses of
+    // its own.
+    struct pci_host_range *devices;
+    size_t device_count;
+    // The TPMs' memory, which software finds where the TCG's PC Client specs
+    // put it.
+    struct pci_host_range *tpms;
+    size_t tpm_count;
     // Sorted and page granular: the configuration space windows and the
     // IOMMUs' registers, which the guest must never reach at their addresses.
     struct pci_host_range *private;

@@ -30,6 +30,7 @@
 #include <lib/util.h>
 #include <memory.h>
 #include <sys/smp.h>
+#include <virt/devmem.h>
 #include <virt/guest_mem.h>
 #include <virt/hpet.h>
 #include <virt/layout.h>
@@ -43,9 +44,24 @@
 // The tables the guest gets as the firmware has them, besides those the
 // hypervisor generates: none points the guest at host memory or at hardware
 // the hypervisor keeps for itself.
-static const char *const kept[] = {
-    "MSDM", "SLIC", "SPCR", "DBGP", "DBG2", "WAET", "WSMT", "VFCT", "BOOT"
-};
+static const char *const kept[] = { "MSDM", "SLIC", "WAET", "WSMT", "VFCT", "BOOT" };
+
+// ACPI 6.6, 5.2.3.2: a Generic Address Structure, with its address space and
+// its address.
+#define GAS_SIZE 12
+#define GAS_ADDRESS 4
+// Linux 7.3's include/acpi/actbl3.h, struct acpi_table_spcr, and
+// include/acpi/actbl1.h, struct acpi_table_dbgp: the port's address after the
+// header and the interface type. Its struct acpi_table_dbg2 and struct
+// acpi_dbg2_device: where the devices are and how many, and in each, its
+// length, its number of addresses, and where they start.
+#define DEBUG_PORT_GAS 40
+#define DBG2_INFO_OFFSET 36
+#define DBG2_INFO_COUNT 40
+#define DBG2_DEVICE_SIZE 22
+#define DBG2_DEVICE_LENGTH 1
+#define DBG2_DEVICE_REGISTERS 3
+#define DBG2_DEVICE_ADDRESSES 18
 
 // A table of the guest's, and where it goes among them, from the firmware's or
 // made, then freed.
@@ -222,7 +238,7 @@ static uint8_t *mcfg_make(const uint8_t *mcfg, size_t *length) {
     return made;
 }
 
-// The guest's HPET where the firmware's table puts it, with the event timer
+// The guest's HPET where the guest finds the firmware's, with the event timer
 // block ID its registers give, under the table's header: none for an HPET
 // hidden from the guest.
 static uint8_t *hpet_make(const uint8_t *hpet, size_t *length) {
@@ -231,19 +247,66 @@ static uint8_t *hpet_make(const uint8_t *hpet, size_t *length) {
         return NULL;
     }
     memcpy(&table, hpet, sizeof(struct acpi_hpet));
-    if (hpet_hidden(table.address.address)) {
+    uint64_t address = table.address.address;
+    uint64_t guest;
+    if (table.address.address_space_id != ACPI_AS_ID_SYS_MEM || hpet_hidden(address)
+     || !devmem_guest(address, address + 1, false, &guest)) {
         return NULL;
     }
     uint32_t id;
-    if (table.address.address_space_id == ACPI_AS_ID_SYS_MEM
-     && hpet_block_id(table.address.address, &id)) {
+    if (hpet_block_id(address, &id)) {
         table.block_id = id;
     }
+    table.address.address = guest;
     table.hdr.length = sizeof(struct acpi_hpet);
     uint8_t *made = kmalloc(sizeof(struct acpi_hpet));
     memcpy(made, &table, sizeof(struct acpi_hpet));
     checksum_set(made, sizeof(struct acpi_hpet), ACPI_SDT_CHECKSUM);
     *length = sizeof(struct acpi_hpet);
+    return made;
+}
+
+// A Generic Address Structure at p with its memory at the guest's address for
+// it, where the guest has one.
+static void gas_translate(uint8_t *p) {
+    uint64_t address = read_le64(p + GAS_ADDRESS);
+    uint64_t guest;
+    if (p[0] == ACPI_AS_ID_SYS_MEM && address != 0
+     && devmem_guest(address, address + 1, false, &guest)) {
+        write_le64(p + GAS_ADDRESS, guest);
+    }
+}
+
+// The guest's SPCR, DBGP, or DBG2: the firmware's, with its debug ports'
+// memory where the guest finds it.
+static uint8_t *debug_ports_make(const uint8_t *table, size_t *length) {
+    uint8_t *made = kmalloc(*length);
+    memcpy(made, table, *length);
+    if (memcmp(table, "DBG2", 4) != 0) {
+        if (*length >= DEBUG_PORT_GAS + GAS_SIZE) {
+            gas_translate(made + DEBUG_PORT_GAS);
+        }
+    } else if (*length >= DBG2_INFO_COUNT + 4) {
+        size_t offset = read_le32(made + DBG2_INFO_OFFSET);
+        size_t count = read_le32(made + DBG2_INFO_COUNT);
+        for (size_t i = 0; i < count && offset <= *length && *length - offset >= DBG2_DEVICE_SIZE;
+             i++) {
+            uint8_t *device = made + offset;
+            size_t device_length = (size_t)device[DBG2_DEVICE_LENGTH]
+                                 | (size_t)device[DBG2_DEVICE_LENGTH + 1] << 8;
+            size_t first = offset + ((size_t)device[DBG2_DEVICE_ADDRESSES]
+                                   | (size_t)device[DBG2_DEVICE_ADDRESSES + 1] << 8);
+            size_t registers = device[DBG2_DEVICE_REGISTERS];
+            for (size_t r = 0; r < registers && first + (r + 1) * GAS_SIZE <= *length; r++) {
+                gas_translate(made + first + r * GAS_SIZE);
+            }
+            if (device_length == 0) {
+                break;
+            }
+            offset += device_length;
+        }
+    }
+    checksum_set(made, *length, ACPI_SDT_CHECKSUM);
     return made;
 }
 
@@ -260,6 +323,11 @@ static bool table_made(const uint8_t *table, uint8_t **made, size_t *length) {
     }
     if (memcmp(table, "HPET", 4) == 0) {
         *made = hpet_make(table, length);
+        return true;
+    }
+    if (memcmp(table, "SPCR", 4) == 0 || memcmp(table, "DBGP", 4) == 0
+     || memcmp(table, "DBG2", 4) == 0) {
+        *made = debug_ports_make(table, length);
         return true;
     }
     return false;

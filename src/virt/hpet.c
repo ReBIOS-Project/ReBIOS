@@ -30,6 +30,7 @@
 #include <memory.h>
 #include <sys/mm.h>
 #include <sys/x86.h>
+#include <virt/devmem.h>
 #include <virt/gpt.h>
 #include <virt/irq.h>
 #include <virt/layout.h>
@@ -93,7 +94,10 @@ static void hide(uintptr_t base) {
         write32(config, read32(config) & ~(TIMER_INT_ENABLE | TIMER_FSB_ENABLE));
     }
     write32(base + CONFIG, read32(base + CONFIG) & ~CONFIG_LEGACY_ROUTE);
-    layout_absent(base, HPET_SIZE);
+    uint64_t guest;
+    if (devmem_guest(base, base + HPET_SIZE, false, &guest)) {
+        layout_absent(guest, HPET_SIZE);
+    }
     hidden[hidden_count++] = base;
     printf(
         "HPET at %#llx hidden from the guest, as its timers can deliver through the FSB\n",
@@ -133,9 +137,13 @@ static const struct mmio_ops guest_ops = { .read = guest_read, .write = guest_wr
 // timers 0 and 1 in their place (IA-PC HPET Specification 1.0a, 2.4.2.1).
 static void trap_writes(uintptr_t base) {
     uintptr_t page = page_down(base);
+    uint64_t guest;
+    if (!devmem_guest(page, page + PAGE_SIZE, false, &guest)) {
+        return;
+    }
     follow_route();
-    mmio_register(page, PAGE_SIZE, &guest_ops, (void *)page);
-    gpt_map(page, page, PAGE_SIZE, GPT_R, MT_UC);
+    mmio_register(guest, PAGE_SIZE, &guest_ops, (void *)page);
+    gpt_map(guest, page, PAGE_SIZE, GPT_R, MT_UC);
     gpt_flush();
 }
 

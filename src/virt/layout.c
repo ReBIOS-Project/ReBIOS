@@ -32,6 +32,7 @@
 #include <memory.h>
 #include <sys/mm.h>
 #include <sys/x86.h>
+#include <virt/devmem.h>
 #include <virt/gpt.h>
 #include <virt/igfx.h>
 #include <virt/mmio.h>
@@ -77,8 +78,11 @@ static struct range_list ram;
 static struct range_list takeable;
 // The guest's address space where it has no RAM for want of host memory.
 static struct range_list kept;
-// Where the guest has neither memory nor devices.
+// Where the guest has neither memory nor devices, or devices the hypervisor
+// answers for.
 static struct range_list holes;
+// Where the guest finds the memory of the firmware's ACPI devices.
+static struct range_list platform;
 static struct {
     uintptr_t base;
     uintptr_t end;
@@ -396,11 +400,19 @@ void layout_init(void) {
         identity_add(vbt_base, vbt_end, EFI_RESERVED_MEMORY_TYPE, efi_attribute_at(vbt_base));
     }
 
-    // The interrupt controllers, the timers, and what the guest's ACPI
-    // describes, but never the configuration space windows or the IOMMUs.
+    // The interrupt controllers stay where the guest's tables say, as the
+    // hypervisor answers there, and the memory of ACPI devices goes where
+    // devmem_plan() puts it, but never the configuration space windows or the
+    // IOMMUs.
     const struct pci_host *host = pci_host_scan();
-    for (size_t i = 0; i < host->claimed_count; i++) {
-        identity_add(host->claimed[i].base, host->claimed[i].end, EFI_MEMORY_MAPPED_IO, 0);
+    for (size_t i = 0; i < host->interrupt_count; i++) {
+        range_list_add(&holes, host->interrupts[i].base, host->interrupts[i].end);
+    }
+    devmem_plan();
+    uintptr_t platform_base;
+    uintptr_t platform_end;
+    for (size_t i = 0; devmem_range(i, &platform_base, &platform_end); i++) {
+        range_list_add(&platform, platform_base, platform_end);
     }
     for (size_t i = 0; i < host->private_count; i++) {
         identity_remove(host->private[i].base, host->private[i].end);
@@ -418,6 +430,9 @@ void layout_init(void) {
     }
     for (size_t i = 0; i < holes.count; i++) {
         range_list_add(&avoid, holes.r[i].base, holes.r[i].end);
+    }
+    for (size_t i = 0; i < platform.count; i++) {
+        range_list_add(&avoid, platform.r[i].base, platform.r[i].end);
     }
     for (size_t i = 0; i < h->reserved_count; i++) {
         range_list_remove(
@@ -461,8 +476,8 @@ void layout_init(void) {
     // From 1 MiB to the PCI hole, around what must keep its address, then
     // above 4 GiB what the host's memory has left.
     range_list_add(&ram, ONE_MIB, plan->tolud);
-    for (size_t i = 0; i < pinned.count; i++) {
-        range_list_remove(&ram, pinned.r[i].base, pinned.r[i].end);
+    for (size_t i = 0; i < avoid.count; i++) {
+        range_list_remove(&ram, avoid.r[i].base, avoid.r[i].end);
     }
     lfb = plan->lfb;
 
@@ -525,6 +540,7 @@ void layout_init(void) {
         const struct identity_range *r = &identity[i];
         gpt_map(r->base, r->base, r->end - r->base, GPT_RWX, identity_memtype(r));
     }
+    devmem_map();
     if (stolen.end != 0) {
         struct identity_range r = {
             stolen_hpa, stolen_hpa + (stolen.end - stolen.base), EFI_RESERVED_MEMORY_TYPE,
@@ -591,7 +607,7 @@ bool layout_mmio_free(uintptr_t base, size_t size) {
             return false;
         }
     }
-    const struct range_list *lists[] = { &ram, &pinned, &kept, &holes };
+    const struct range_list *lists[] = { &ram, &pinned, &kept, &holes, &platform };
     for (size_t l = 0; l < ARRAY_COUNT(lists); l++) {
         for (size_t i = 0; i < lists[l]->count; i++) {
             if (base < lists[l]->r[i].end && end > lists[l]->r[i].base) {
@@ -804,6 +820,11 @@ bool layout_e820(struct e820_map *map) {
     }
     for (size_t i = 0; i < holes.count; i++) {
         ok &= e820_set(map, holes.r[i].base, holes.r[i].end - holes.r[i].base, E820_RESERVED);
+    }
+    for (size_t i = 0; i < platform.count; i++) {
+        ok &= e820_set(
+            map, platform.r[i].base, platform.r[i].end - platform.r[i].base, E820_RESERVED
+        );
     }
     const struct pci_plan *plan = pci_plan();
     if (plan != NULL && plan->ecam != 0) {

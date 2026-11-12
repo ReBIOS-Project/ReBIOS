@@ -49,6 +49,7 @@
 #include <memory.h>
 #include <sys/mm.h>
 #include <sys/x86.h>
+#include <virt/devmem.h>
 #include <virt/gpt.h>
 #include <virt/guest_mem.h>
 #include <virt/hpet.h>
@@ -566,6 +567,8 @@ static bool shape_usable(uacpi_object *obj) {
 }
 
 static bool crs_replaced(uacpi_namespace_node *device);
+static bool resource_name(const char name[4]);
+static bool template_object(uacpi_object **obj, bool to_guest);
 
 // What the guest has in the place of an object of the firmware's, if anything
 // else: nothing for the identity of a host bridge below its own, and bus 0 of
@@ -677,6 +680,10 @@ static void emit_name(struct aml *a, uacpi_namespace_node *node, const char name
     if (uacpi_eval(node, NULL, NULL, &obj) != UACPI_STATUS_OK || obj == NULL) {
         return;
     }
+    if (resource_name(name) && !template_object(&obj, true)) {
+        uacpi_object_unref(obj);
+        return;
+    }
     aml_op(a, AML_NAME);
     emit_seg(a, name);
     emit_data(a, obj, uacpi_namespace_node_parent(node));
@@ -773,7 +780,6 @@ static void emit_scopes(struct aml *a, uacpi_namespace_node *parent);
 
 static const char *const ec_ids[] = { "PNP0C09", NULL };
 static const char *const hpet_ids[] = { "PNP0103", NULL };
-static const char *const motherboard_ids[] = { "PNP0C01", "PNP0C02", NULL };
 static const char *const power_button_ids[] = { "PNP0C0C", NULL };
 
 // A producer's fixed window, readable and writable, uncached or cacheable.
@@ -943,19 +949,100 @@ static uint32_t put_window(uint8_t *out, uintptr_t base, uintptr_t end, bool hig
     return sizeof(d);
 }
 
-static bool overlaps_private(uintptr_t base, uintptr_t end) {
-    const struct pci_host *host = pci_host_scan();
-    for (size_t i = 0; i < host->private_count; i++) {
-        if (base < host->private[i].end && end > host->private[i].base) {
-            return true;
-        }
+// Whether a device's object by that name is a resource template, as its
+// current and its possible resources are.
+static bool resource_name(const char name[4]) {
+    return memcmp(name, "_CRS", 4) == 0 || memcmp(name, "_PRS", 4) == 0;
+}
+
+// Adds delta to the addresses of a memory descriptor of size bytes at p.
+static void memory_move(uint8_t *p, size_t size, uint64_t delta) {
+    size_t min;
+    size_t max;
+    size_t length;
+    size_t width;
+    if (p[0] == ACPI_TAG_MEMORY32) {
+        put_le(p + 4, le(p + 4, 4) + delta, 4);
+        put_le(p + 8, le(p + 8, 4) + delta, 4);
+    } else if (p[0] == ACPI_TAG_FIXED_MEMORY32) {
+        put_le(p + 4, le(p + 4, 4) + delta, 4);
+    } else if (address_fields(p, size, UACPI_RANGE_MEMORY, &min, &max, &length, &width)) {
+        put_le(p + min, le(p + min, width) + delta, width);
+        put_le(p + max, le(p + max, width) + delta, width);
     }
-    return false;
+}
+
+// A resource template with its memory where the guest finds the host's, or the
+// other way, into out, which holds as many bytes as in; returns its size. The
+// memory below 1 MiB, the guest's own, keeps its addresses. Memory that the
+// guest has no place for is left out of what it gets, and memory the firmware
+// has nothing at reaches it as the guest gave it.
+static size_t template_translate(
+    const uint8_t *in,
+    size_t length,
+    uint8_t *out,
+    bool to_guest
+) {
+    size_t size = 0;
+    uint32_t left = (uint32_t)length;
+    while (left != 0) {
+        size_t n = resource_size(in, left);
+        if (n > left) {
+            n = left;
+        }
+        memcpy(out + size, in, n);
+        bool keep = true;
+        uint64_t base;
+        uint64_t end;
+        if (in[0] != ACPI_TAG_MEMORY24 && in[0] != ACPI_TAG_END
+         && resource_memory(in, n, &base, &end) && end > ONE_MIB) {
+            uint64_t moved;
+            bool found = to_guest
+                       ? devmem_guest(base, end, true, &moved)
+                       : devmem_host(base, end, &moved);
+            if (found) {
+                memory_move(out + size, n, moved - base);
+            }
+            keep = found || !to_guest;
+        }
+        if (keep) {
+            size += n;
+        }
+        // ACPI 6.6, 6.4.2.9: an End Tag's checksum of 0 counts as valid.
+        if (in[0] == ACPI_TAG_END && n >= 2) {
+            out[size - 1] = 0;
+            break;
+        }
+        in += n;
+        left -= (uint32_t)n;
+    }
+    return size;
+}
+
+// Puts a resource template's translation, as above, in the place of the
+// template: false where it cannot make one.
+static bool template_object(uacpi_object **obj, bool to_guest) {
+    uacpi_data_view view;
+    if (*obj == NULL || uacpi_object_get_type(*obj) != UACPI_OBJECT_BUFFER
+     || uacpi_object_get_buffer(*obj, &view) != UACPI_STATUS_OK || view.length == 0) {
+        return true;
+    }
+    uint8_t *out = kmalloc(view.length);
+    size_t size = template_translate(view.const_bytes, view.length, out, to_guest);
+    uacpi_data_view translated = { .const_bytes = out, .length = size };
+    uacpi_object *made = uacpi_object_create_buffer(translated);
+    kfree(out);
+    if (made == NULL) {
+        return false;
+    }
+    uacpi_object_unref(*obj);
+    *obj = made;
+    return true;
 }
 
 static bool crs_replaced(uacpi_namespace_node *device) {
     return uacpi_device_matches_pnp_id(device, acpi_host_bridge_ids)
-        || uacpi_device_matches_pnp_id(device, motherboard_ids);
+        || uacpi_device_matches_pnp_id(device, acpi_motherboard_ids);
 }
 
 // The legacy devices ReBIOS gives the guest, as an OS looks for them in the
@@ -1147,10 +1234,10 @@ static void bus_range_widen(uint8_t *p, size_t size) {
 
 // What the guest's _CRS keeps of the device's: everything but a host bridge's
 // memory windows above 1 MiB, which are the guest's PCI plan's, or a
-// motherboard device's claims of the configuration space windows and the
-// IOMMUs, which the guest has not at their addresses. Of a host bridge below
-// the guest's, only its I/O windows and those below 1 MiB that the guest's has
-// not already. False if the device has no _CRS.
+// motherboard device's memory above 1 MiB, which the guest has nothing of
+// there, but for the interrupt controllers'. Of a host bridge below the
+// guest's, only its I/O windows and those below 1 MiB that the guest's has not
+// already. False if the device has no _CRS.
 static bool crs_copy(struct crs *c, uacpi_namespace_node *device, int kind) {
     uacpi_object *obj;
     if (uacpi_eval(device, "_CRS", NULL, &obj) != UACPI_STATUS_OK || obj == NULL) {
@@ -1185,7 +1272,7 @@ static bool crs_copy(struct crs *c, uacpi_namespace_node *device, int kind) {
         bool io = false;
         bool ranged = true;
         if (resource_memory(in, n, &base, &end)) {
-            keep = kind == CRS_MOTHERBOARD ? !overlaps_private(base, end) : end <= ONE_MIB;
+            keep = end <= ONE_MIB || (kind == CRS_MOTHERBOARD && devmem_interrupts(base, end));
         } else if (address_range(in, n, UACPI_RANGE_IO, &base, &end)) {
             keep = true;
             io = true;
@@ -2178,10 +2265,21 @@ static size_t put_fixed_memory32(uint8_t *p, uintptr_t base, size_t size) {
 
 // The memory the guest finds at addresses of ReBIOS's own rather than in a
 // BAR, as a resource list, into crs, CLAIMS_MAX bytes; returns its size. An OS
-// keeps clear of such memory only once a motherboard resource claims it.
-#define CLAIMS_MAX (3 * 12 + 2)
-static size_t claims(uint8_t *crs) {
+// keeps clear of such memory only once a motherboard resource claims it. Of
+// the block of ACPI devices' memory, for ACPI only what no device's _CRS
+// claims, as those devices claim theirs, but all of it for the Plug and Play
+// BIOS, which shows none of them.
+#define CLAIMS_MAX (4 * 12 + 2)
+static size_t claims(uint8_t *crs, bool acpi) {
     size_t size = put_fixed_memory32(crs, vacpi.mailbox, MBX_SIZE + DOORBELL_SIZE);
+    uintptr_t devices_base;
+    uintptr_t devices_end;
+    bool devices = acpi
+                 ? devmem_spare(&devices_base, &devices_end)
+                 : devmem_range(0, &devices_base, &devices_end);
+    if (devices && devices_end > devices_base) {
+        size += put_fixed_memory32(crs + size, devices_base, devices_end - devices_base);
+    }
     const struct pci_plan *plan = pci_plan();
     if (plan != NULL && plan->ecam != 0) {
         size += put_fixed_memory32(crs + size, plan->ecam, ((size_t)plan->bus_end + 1) * ONE_MIB);
@@ -2202,7 +2300,7 @@ static void emit_mailbox_device(struct aml *a) {
     aml_name_int(a, "_HID", eisa_id("PNP0C02"));
     aml_name_int(a, "_UID", 0x5242);
     uint8_t crs[CLAIMS_MAX];
-    size_t crs_size = claims(crs);
+    size_t crs_size = claims(crs, true);
     aml_op(a, AML_NAME);
     aml_name(a, "_CRS");
     aml_buffer(a, crs, crs_size);
@@ -2328,7 +2426,7 @@ void vacpi_pnp_nodes(uint32_t gpa) {
     // Other System Peripheral.
     static const uint8_t motherboard[] = { 0x08, 0x80, 0x00 };
     uint8_t crs[CLAIMS_MAX];
-    size_t crs_size = claims(crs);
+    size_t crs_size = claims(crs, false);
     pnp_node_add(&nodes, "PNP0C02", motherboard, crs, crs_size);
 
     call.length = 0;
@@ -2689,6 +2787,11 @@ static uacpi_status eval_slots(uacpi_namespace_node *node, uint32_t argc, uacpi_
     for (size_t i = 0; i < argc; i++) {
         args[i] = slot_object(i);
     }
+    // The resources the guest sets, at the host's addresses.
+    uacpi_object_name name = uacpi_namespace_node_name(node);
+    if (argc != 0 && memcmp(name.text, "_SRS", 4) == 0) {
+        template_object(&args[0], false);
+    }
     uacpi_object_array array = { .objects = args, .count = argc };
     uacpi_status status = uacpi_eval(node, NULL, argc != 0 ? &array : NULL, ret);
     for (size_t i = 0; i < argc; i++) {
@@ -2822,6 +2925,10 @@ static void mailbox_call(size_t index, uint32_t argc) {
         status = eval_slots(node, argc, &ret);
     }
     if (status == UACPI_STATUS_OK && is_primary_osc(node) && !osc_merge(&ret, argc)) {
+        status = UACPI_STATUS_OUT_OF_MEMORY;
+    }
+    uacpi_object_name name = uacpi_namespace_node_name(node);
+    if (status == UACPI_STATUS_OK && resource_name(name.text) && !template_object(&ret, true)) {
         status = UACPI_STATUS_OUT_OF_MEMORY;
     }
     if (status == UACPI_STATUS_OK && port != NULL) {

@@ -61,7 +61,12 @@ struct host_bridge {
 };
 
 struct scan {
-    struct range_list claimed;
+    struct range_list interrupts;
+    struct range_list devices;
+    struct range_list tpms;
+    // What only motherboard resources and host bridges consume, which the
+    // guest has nothing at.
+    struct range_list motherboard;
     struct range_list private;
     uint32_t crs_failures;
     struct host_bridge *bridges;
@@ -73,6 +78,8 @@ struct crs_scan {
     struct scan *r;
     // NULL for a device other than a host bridge.
     struct host_bridge *hb;
+    // Where the memory it consumes goes.
+    struct range_list *into;
     bool bus_found;
     uint64_t bus;
 };
@@ -94,10 +101,6 @@ static void claim_into(struct range_list *list, uintptr_t base, size_t size) {
         end = UINT64_MAX;
     }
     range_list_add(list, align_down(base, CLAIM_GRANULE), end);
-}
-
-static void claim(struct scan *r, uintptr_t base, size_t size) {
-    claim_into(&r->claimed, base, size);
 }
 
 static void private_mcfg(struct scan *r) {
@@ -147,7 +150,7 @@ static void claim_madt(struct scan *r) {
          && entry_length >= sizeof(struct acpi_madt_ioapic)) {
             struct acpi_madt_ioapic entry;
             memcpy(&entry, madt + off, sizeof(struct acpi_madt_ioapic));
-            claim(r, entry.address, IOAPIC_MMIO_SIZE);
+            claim_into(&r->interrupts, entry.address, IOAPIC_MMIO_SIZE);
         } else if (type == ACPI_MADT_ENTRY_TYPE_LAPIC_ADDRESS_OVERRIDE
                 && entry_length >= sizeof(struct acpi_madt_lapic_address_override)) {
             struct acpi_madt_lapic_address_override entry;
@@ -156,7 +159,7 @@ static void claim_madt(struct scan *r) {
         }
         off += entry_length;
     }
-    claim(r, lapic, LAPIC_MMIO_SIZE);
+    claim_into(&r->interrupts, lapic, LAPIC_MMIO_SIZE);
     uacpi_table_unref(&table);
 }
 
@@ -169,7 +172,7 @@ static void claim_hpets(struct scan *r) {
             struct acpi_hpet hpet;
             memcpy(&hpet, table.ptr, sizeof(struct acpi_hpet));
             if (hpet.address.address_space_id == ACPI_AS_ID_SYS_MEM) {
-                claim(r, hpet.address.address, HPET_MMIO_SIZE);
+                claim_into(&r->devices, hpet.address.address, HPET_MMIO_SIZE);
             }
         }
         uacpi_table_unref(&table);
@@ -216,7 +219,7 @@ static void crs_address(
         return;
     }
     if (s->hb == NULL || common->direction != UACPI_PRODUCER) {
-        claim(s->r, minimum, length);
+        claim_into(s->into, minimum, length);
         return;
     }
     if (translation != 0) {
@@ -262,15 +265,17 @@ static uacpi_iteration_decision crs_resource(void *user, uacpi_resource *res) {
         }
         case UACPI_RESOURCE_TYPE_MEMORY24: {
             // In 256-byte units, ACPI 6.6, 6.4.3.1.
-            claim(s->r, (uint64_t)res->memory24.minimum << 8, (uint64_t)res->memory24.length << 8);
+            claim_into(
+                s->into, (uint64_t)res->memory24.minimum << 8, (uint64_t)res->memory24.length << 8
+            );
             break;
         }
         case UACPI_RESOURCE_TYPE_MEMORY32: {
-            claim(s->r, res->memory32.minimum, res->memory32.length);
+            claim_into(s->into, res->memory32.minimum, res->memory32.length);
             break;
         }
         case UACPI_RESOURCE_TYPE_FIXED_MEMORY32: {
-            claim(s->r, res->fixed_memory32.address, res->fixed_memory32.length);
+            claim_into(s->into, res->fixed_memory32.address, res->fixed_memory32.length);
             break;
         }
         default: {
@@ -333,7 +338,7 @@ static bool host_bridge_known(
 
 static void host_bridge_found(struct scan *r, uacpi_namespace_node *node) {
     struct host_bridge hb = { .node = node };
-    struct crs_scan scan = { .r = r, .hb = &hb };
+    struct crs_scan scan = { .r = r, .hb = &hb, .into = &r->motherboard };
     uacpi_status status = crs_walk(&scan, node);
     if (status != UACPI_STATUS_OK) {
         acpi_log_failure(node, "_CRS", status);
@@ -403,7 +408,12 @@ static uacpi_iteration_decision device_found(
     if (host_bridge) {
         host_bridge_found(r, node);
     } else {
-        struct crs_scan scan = { .r = r, .hb = NULL };
+        struct crs_scan scan = { .r = r, .hb = NULL, .into = &r->devices };
+        if (uacpi_device_matches_pnp_id(node, acpi_motherboard_ids)) {
+            scan.into = &r->motherboard;
+        } else if (uacpi_device_matches_pnp_id(node, acpi_tpm_ids)) {
+            scan.into = &r->tpms;
+        }
         crs_walk(&scan, node);
     }
     return UACPI_ITERATION_DECISION_CONTINUE;
@@ -432,21 +442,34 @@ const struct pci_host *pci_host_scan(void) {
     private_iommus(&r);
     claim_madt(&r);
     claim_hpets(&r);
-    claim(&r, MSI_BASE, MSI_SIZE);
+    claim_into(&r.interrupts, MSI_BASE, MSI_SIZE);
     uacpi_namespace_for_each_child(
         uacpi_namespace_root(), device_found, NULL, UACPI_OBJECT_DEVICE_BIT, UACPI_MAX_DEPTH_ANY,
         &r
     );
-    // Devices may list them among what they use, as motherboard resources do.
-    for (size_t i = 0; i < r.private.count; i++) {
-        range_list_remove(&r.claimed, r.private.r[i].base, r.private.r[i].end);
+    // Devices may list them among what they use, as motherboard resources do,
+    // and a device's memory is the interrupt controllers' or a TPM's where it
+    // overlaps theirs.
+    struct range_list *lists[] = { &r.interrupts, &r.tpms, &r.devices, &r.motherboard };
+    for (size_t l = 0; l < ARRAY_COUNT(lists); l++) {
+        for (size_t i = 0; i < r.private.count; i++) {
+            range_list_remove(lists[l], r.private.r[i].base, r.private.r[i].end);
+        }
+        for (size_t k = 0; k < l; k++) {
+            for (size_t i = 0; i < lists[k]->count; i++) {
+                range_list_remove(lists[l], lists[k]->r[i].base, lists[k]->r[i].end);
+            }
+        }
     }
     printf(
-        "PCI: %zu ranges of memory claimed, %u devices whose _CRS fails\n", r.claimed.count,
+        "PCI: %zu ranges of device memory, %zu of TPMs, %zu of motherboard resources alone, "
+        "%u devices whose _CRS fails\n", r.devices.count, r.tpms.count, r.motherboard.count,
         r.crs_failures
     );
 
-    ranges_out(&r.claimed, &host.claimed, &host.claimed_count);
+    ranges_out(&r.interrupts, &host.interrupts, &host.interrupt_count);
+    ranges_out(&r.devices, &host.devices, &host.device_count);
+    ranges_out(&r.tpms, &host.tpms, &host.tpm_count);
     ranges_out(&r.private, &host.private, &host.private_count);
     host.bridges = kmalloc(
         (r.bridge_count != 0 ? r.bridge_count : 1) * sizeof(struct pci_host_bridge)
@@ -463,7 +486,9 @@ const struct pci_host *pci_host_scan(void) {
     }
     host.bridge_count = r.bridge_count;
     kfree(r.bridges);
-    range_list_free(&r.claimed);
+    for (size_t l = 0; l < ARRAY_COUNT(lists); l++) {
+        range_list_free(lists[l]);
+    }
     range_list_free(&r.private);
     return &host;
 }

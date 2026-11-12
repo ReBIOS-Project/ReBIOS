@@ -912,6 +912,14 @@ void acpi_path_free(const char *path) {
 
 const char *const acpi_host_bridge_ids[] = { "PNP0A03", "PNP0A08", NULL };
 const char *const acpi_link_ids[] = { "PNP0C0F", NULL };
+const char *const acpi_motherboard_ids[] = { "PNP0C01", "PNP0C02", NULL };
+// TPM 2.0's, which TCG PC Client Platform Firmware Profile 1.06 r52, 9.1 has a
+// TPM's _HID or _CID be, and the PNP IDs of TPM 1.2 TIS devices that Linux
+// 7.3's drivers/char/tpm/tpm_tis.c takes.
+const char *const acpi_tpm_ids[] = {
+    "MSFT0101", "PNP0C31", "ATM1200", "IFX0102", "BCM0101", "BCM0102", "NSC1200", "ICO0102",
+    NULL
+};
 
 void acpi_log_failure(uacpi_namespace_node *node, const char *name, uacpi_status status) {
     const char *path = acpi_path(node);
