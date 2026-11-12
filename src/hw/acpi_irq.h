@@ -21,6 +21,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <uacpi/namespace.h>
 #include <hw/pci_cfg.h>
 
 struct acpi_irq_pci_route {
@@ -41,6 +42,24 @@ const struct acpi_irq_pci_route *acpi_irq_pci_routes(size_t *count);
 // The ISA IRQs that the devices the ACPI namespace describes as present and
 // enabled use, by their current resources: bit n for IRQ n.
 uint16_t acpi_irq_isa_claimed(void);
+
+// An interrupt that a device's current resources give it, and how the
+// descriptor says it is sensed.
+struct acpi_irq_device_line {
+    uacpi_namespace_node *node;
+    uint32_t line;
+    // Whether the line is a GSI, as an Extended Interrupt descriptor gives
+    // one, or else an ISA IRQ, as an IRQ descriptor does.
+    bool gsi;
+    bool level;
+    bool active_low;
+};
+
+// The interrupts of the devices that the ACPI namespace describes as present
+// and enabled, by their current resources, but for those with PNP0xxx IDs, the
+// legacy PC's devices and interrupt links, HID over I2C's PNP0C50 aside. Looks
+// them up once; later calls return the same.
+const struct acpi_irq_device_line *acpi_irq_device_lines(size_t *count);
 
 // The SCI's ISA IRQ, or GSI where it is 16 or more (the FADT's SCI_INT), and
 // whether it is active low and level-triggered, as the MADT's override of it

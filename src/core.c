@@ -133,6 +133,7 @@ static void bsp_main(void *arg) {
     ferr_init();
     isa_ports_init();
     hpet_init();
+    irq_give_device_lines();
     vacpi_init();
     ospm_init();
     profile_init();

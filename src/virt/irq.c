@@ -20,6 +20,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <uacpi/acpi.h>
+#include <uacpi/namespace.h>
 #include <uacpi/status.h>
 #include <uacpi/tables.h>
 #include <uacpi/utilities.h>
@@ -835,6 +836,46 @@ void irq_give_gsi(uint32_t gsi) {
     }
     spinlock_acquire(&lock);
     routes[gsi].given = true;
+    update();
+    spinlock_release(&lock);
+    kick_after_update();
+}
+
+void irq_give_device_lines(void) {
+    uint32_t sci = UINT32_MAX;
+    uint32_t sci_irq;
+    bool active_low;
+    bool level;
+    if (acpi_irq_sci(&sci_irq, &active_low, &level)) {
+        sci = sci_irq < ISA_IRQS ? irq_isa_gsi(sci_irq) : sci_irq;
+    }
+    size_t count;
+    const struct acpi_irq_device_line *lines = acpi_irq_device_lines(&count);
+    spinlock_acquire(&lock);
+    for (size_t i = 0; i < count; i++) {
+        const struct acpi_irq_device_line *l = &lines[i];
+        uint32_t gsi = l->line;
+        if (!l->gsi) {
+            gsi = l->line < ISA_IRQS ? irq_isa_gsi(l->line) : UINT32_MAX;
+        }
+        if (gsi >= route_count || gsi == sci || routes[gsi].io == NULL) {
+            continue;
+        }
+        struct route *r = &routes[gsi];
+        if (r->irq >= 0 && (HYPERVISOR_IRQS & (uint32_t)1 << r->irq) != 0) {
+            continue;
+        }
+        r->given = true;
+        // An Extended Interrupt descriptor says how the 8259 path senses a
+        // line in the ISA range, and the guest's ELCR follows, while the MADT
+        // does for an IRQ descriptor's, as Linux 7.3's
+        // acpi_dev_get_irqresource() takes them.
+        if (l->gsi && r->irq >= 0) {
+            r->level = l->level;
+            r->active_low = l->active_low;
+        }
+        printf("GSI %u is %.4s's\n", gsi, uacpi_namespace_node_name(l->node).text);
+    }
     update();
     spinlock_release(&lock);
     kick_after_update();

@@ -136,6 +136,11 @@ void irq_isa_set(unsigned int irq, bool level);
 void irq_give_gsi(uint32_t gsi);
 void irq_give_isa_line(unsigned int irq);
 
+// Lets the lines of the namespace's devices that acpi_irq_device_lines() gives
+// reach the guest, but for the hypervisor's ISA IRQs and the SCI. Before
+// irq_route_pci(), which sets the guest's ELCR from them too.
+void irq_give_device_lines(void);
+
 // The level of a line the hypervisor drives for the guest on a GSI, which
 // reaches the guest's I/O APIC entry or 8259 input for the GSI as a device's
 // level-triggered line would.

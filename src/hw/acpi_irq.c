@@ -120,6 +120,11 @@ static bool links_done;
 static uint16_t isa_claimed;
 static bool isa_claimed_done;
 
+static struct acpi_irq_device_line *device_lines;
+static size_t device_line_count;
+static size_t device_line_capacity;
+static bool device_lines_done;
+
 static bool namespace_loaded(void) {
     return uacpi_get_current_init_level() >= UACPI_INIT_LEVEL_NAMESPACE_LOADED;
 }
@@ -690,6 +695,107 @@ uint16_t acpi_irq_isa_claimed(void) {
         printf("ACPI devices use ISA IRQs %s\n", text);
     }
     return isa_claimed;
+}
+
+// One of the PNP0xxx IDs of the legacy PC's devices and interrupt links, HID
+// over I2C's aside.
+static bool legacy_id(const uacpi_id_string *id) {
+    static const char hid_over_i2c[] = "PNP0C50";
+    if (id->size < 5 || memcmp(id->value, "PNP0", 4) != 0) {
+        return false;
+    }
+    return id->size != sizeof(hid_over_i2c)
+        || memcmp(id->value, hid_over_i2c, sizeof(hid_over_i2c)) != 0;
+}
+
+static bool legacy_device(uacpi_namespace_node *node) {
+    bool legacy = false;
+    uacpi_id_string *hid;
+    if (uacpi_eval_hid(node, &hid) == UACPI_STATUS_OK) {
+        legacy = legacy_id(hid);
+        uacpi_free_id_string(hid);
+    }
+    uacpi_pnp_id_list *cids;
+    if (!legacy && uacpi_eval_cid(node, &cids) == UACPI_STATUS_OK) {
+        for (size_t i = 0; i < cids->num_ids && !legacy; i++) {
+            legacy = legacy_id(&cids->ids[i]);
+        }
+        uacpi_free_pnp_id_list(cids);
+    }
+    return legacy;
+}
+
+static void device_line_add(
+    uacpi_namespace_node *node,
+    uint32_t line,
+    bool gsi,
+    uacpi_u8 triggering,
+    uacpi_u8 polarity
+) {
+    device_lines = heap_grow(
+        device_lines, device_line_count, &device_line_capacity,
+        sizeof(struct acpi_irq_device_line), 8
+    );
+    device_lines[device_line_count++] = (struct acpi_irq_device_line){
+        node, line, gsi, triggering == UACPI_TRIGGERING_LEVEL,
+        polarity == UACPI_POLARITY_ACTIVE_LOW
+    };
+}
+
+// Those an Extended Interrupt descriptor names for another interrupt
+// controller than the APIC are left out.
+static uacpi_iteration_decision line_resource(void *user, uacpi_resource *resource) {
+    uacpi_namespace_node *node = user;
+    if (resource->type == UACPI_RESOURCE_TYPE_IRQ) {
+        const uacpi_resource_irq *irq = &resource->irq;
+        for (size_t i = 0; i < irq->num_irqs; i++) {
+            device_line_add(node, irq->irqs[i], false, irq->triggering, irq->polarity);
+        }
+    } else if (resource->type == UACPI_RESOURCE_TYPE_EXTENDED_IRQ
+            && resource->extended_irq.direction == UACPI_CONSUMER
+            && resource->extended_irq.source.length == 0) {
+        const uacpi_resource_extended_irq *irq = &resource->extended_irq;
+        for (size_t i = 0; i < irq->num_irqs; i++) {
+            device_line_add(node, irq->irqs[i], true, irq->triggering, irq->polarity);
+        }
+    }
+    return UACPI_ITERATION_DECISION_CONTINUE;
+}
+
+static uacpi_iteration_decision line_device(
+    void *user,
+    uacpi_namespace_node *node,
+    uacpi_u32 depth
+) {
+    (void)user;
+    (void)depth;
+    uacpi_u32 sta;
+    uacpi_u32 wanted = ACPI_STA_RESULT_DEVICE_PRESENT | ACPI_STA_RESULT_DEVICE_ENABLED;
+    if (uacpi_eval_sta(node, &sta) != UACPI_STATUS_OK || (sta & wanted) != wanted
+     || legacy_device(node)) {
+        return UACPI_ITERATION_DECISION_CONTINUE;
+    }
+    uacpi_resources *resources;
+    if (uacpi_get_current_resources(node, &resources) != UACPI_STATUS_OK) {
+        return UACPI_ITERATION_DECISION_CONTINUE;
+    }
+    uacpi_for_each_resource(resources, line_resource, node);
+    uacpi_free_resources(resources);
+    return UACPI_ITERATION_DECISION_CONTINUE;
+}
+
+const struct acpi_irq_device_line *acpi_irq_device_lines(size_t *count) {
+    if (!device_lines_done && namespace_loaded()) {
+        device_lines_done = true;
+        acpi_lock();
+        uacpi_namespace_for_each_child(
+            uacpi_namespace_root(), line_device, NULL, UACPI_OBJECT_DEVICE_BIT,
+            UACPI_MAX_DEPTH_ANY, NULL
+        );
+        acpi_unlock();
+    }
+    *count = device_line_count;
+    return device_lines;
 }
 
 bool acpi_irq_sci(uint32_t *irq, bool *active_low, bool *level) {
