@@ -123,6 +123,8 @@ struct vcpu {
     bool stepping;
     struct mmio_step *step;
     bool step_tf;
+    // Whether the stepped instruction loaded RFLAGS, its trap flag included.
+    bool step_flags_loaded;
     uint64_t step_dr6;
     uint32_t step_exceptions;
     uint64_t step_debugctl;
@@ -237,6 +239,9 @@ bool vcpu_others_paused(void);
 void vcpu_serve_pause(void);
 bool vcpu_can_single_step(void);
 void vcpu_single_step(struct vcpu *v, bool on);
+// The guest's next instruction runs before any maskable interrupt it would
+// otherwise take first.
+void vcpu_interrupt_shadow(struct vcpu *v);
 // The end of a step, mmio.c's or ferr.c's.
 void vcpu_step_done(struct vcpu *v);
 

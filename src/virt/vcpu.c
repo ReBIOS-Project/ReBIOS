@@ -221,7 +221,7 @@ void vcpu_single_step(struct vcpu *v, bool on) {
         vmcb->control.intercept_exceptions |= STEP_EXCEPTIONS;
         return;
     }
-    if (!v->step_tf) {
+    if (!v->step_tf && !v->step_flags_loaded) {
         vmcb->save.rflags &= ~(uint64_t)RFLAGS_TF;
     }
     if ((v->step_debugctl & DEBUGCTL_BTF) != 0) {
@@ -229,6 +229,21 @@ void vcpu_single_step(struct vcpu *v, bool on) {
     }
     vmcb->save.dr6 = v->step_dr6;
     vmcb->control.intercept_exceptions = v->step_exceptions;
+}
+
+// An interrupt pending at VM entry would be delivered before the instruction
+// (SDM 325462-093 Vol. 3C, 28.5.2). VM entry takes blocking by STI only with
+// IF set, where no blocking by MOV SS, which blocks as much, is there already
+// (29.3.1.5).
+void vcpu_interrupt_shadow(struct vcpu *v) {
+    if (!virt_vmx) {
+        v->vmcb->control.interrupt_shadow |= 1;
+        return;
+    }
+    uint64_t intr = vmx_read(VMCS_GUEST_INTERRUPTIBILITY);
+    if ((vcpu_rflags(v) & RFLAGS_IF) != 0 && (intr & INTERRUPTIBILITY_MOV_SS) == 0) {
+        vmx_write(VMCS_GUEST_INTERRUPTIBILITY, intr | INTERRUPTIBILITY_STI);
+    }
 }
 
 static void tick_return_check(struct vcpu *v) {

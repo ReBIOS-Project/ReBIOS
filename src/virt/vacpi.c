@@ -2925,7 +2925,8 @@ static void doorbell_write(
 
 static const struct mmio_ops doorbell_ops = {
     .read = doorbell_read,
-    .write = doorbell_write
+    .write = doorbell_write,
+    .reads_virtual = true
 };
 
 static void mailbox_place(void) {

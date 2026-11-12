@@ -27,9 +27,15 @@
 // unmapped, or mapped without the access it emulates.
 struct mmio_ops {
     // Accesses of 1, 2, 4, or 8 bytes, naturally aligned, offset into the
-    // region. Reads have no side effects.
+    // region. Reads may have effects, as the VGA's latches loading.
     uint64_t (*read)(struct vcpu *v, void *ctx, uint64_t offset, size_t size);
     void (*write)(struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value);
+    // Whether its reads, and its writes, stay within the hypervisor, reaching
+    // none of the host's devices: an instruction that the hypervisor does not
+    // carry out runs against the region, single-stepped, only where each
+    // access it makes there does.
+    bool reads_virtual;
+    bool writes_virtual;
     // Whether writes go nowhere, so that INS may be emulated into it: the
     // processor may have read the port already.
     bool writes_ignored;
@@ -109,10 +115,14 @@ size_t mmio_string(
 
 // An EPT violation or a nested page fault at gpa, for an access other than a
 // fetch: emulates the instruction that made it, where nothing decodes as
-// memory that is not there. Returns false where gpa is mapped after all, as
-// another vCPU may just have mapped it: the guest then runs the access again.
+// memory that is not there, or single-steps it where the step reaches no more
+// than its operand, within the hypervisor, else stops the machine. Returns
+// false where gpa is mapped after all, as another vCPU may just have mapped
+// it: the guest then runs the access again.
 bool mmio_fault(struct vcpu *v, uintptr_t gpa);
-// One for a fetch, of code there: runs it a step at a time.
+// One for a fetch, of code there: where nothing decodes, the #UD of the all
+// ones a PC reads there; elsewhere a panic, as the hypervisor runs no code
+// from a device.
 bool mmio_fetch(struct vcpu *v, uintptr_t gpa);
 
 // The end of a single-step mmio_fault() set up for an instruction it does not

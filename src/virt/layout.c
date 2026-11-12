@@ -783,6 +783,8 @@ static uint64_t rom_read(struct vcpu *v, void *ctx, uint64_t offset, size_t size
 static const struct mmio_ops rom_ops = {
     .read = rom_read,
     .write = mmio_absent_write,
+    .reads_virtual = true,
+    .writes_virtual = true,
     .writes_ignored = true
 };
 

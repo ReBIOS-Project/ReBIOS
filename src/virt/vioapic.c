@@ -212,4 +212,9 @@ static void mmio_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, 
     spinlock_release(&vio->lock);
 }
 
-static const struct mmio_ops mmio_ops = { .read = mmio_read, .write = mmio_write };
+// Writes may let the host's own I/O APICs go on with an interrupt.
+static const struct mmio_ops mmio_ops = {
+    .read = mmio_read,
+    .write = mmio_write,
+    .reads_virtual = true
+};

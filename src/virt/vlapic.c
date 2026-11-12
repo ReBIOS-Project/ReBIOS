@@ -2098,7 +2098,13 @@ static void mmio_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, 
     );
 }
 
-static const struct mmio_ops mmio_ops = { .read = mmio_read, .write = mmio_write };
+// Writes may send IPIs, end interrupts on the host's I/O APICs, or reach local
+// vector table entries that the host's local APIC mirrors.
+static const struct mmio_ops mmio_ops = {
+    .read = mmio_read,
+    .write = mmio_write,
+    .reads_virtual = true
+};
 
 static bool apic_base_write(struct vcpu *v, uint64_t value) {
     struct vlapic *vl = v->vlapic;

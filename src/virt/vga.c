@@ -776,6 +776,8 @@ static void window_move_string(
 static const struct mmio_ops window_ops = {
     .read = window_read,
     .write = window_write,
+    .reads_virtual = true,
+    .writes_virtual = true,
     .read_string = window_read_string,
     .write_string = window_write_string,
     .move_string = window_move_string

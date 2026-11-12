@@ -19,6 +19,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdnoreturn.h>
 #include <virt/mmio.h>
 #include <lib/heap.h>
 #include <lib/log.h>
@@ -137,6 +138,8 @@ void mmio_absent_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, 
 const struct mmio_ops mmio_absent_ops = {
     .read = absent_read,
     .write = mmio_absent_write,
+    .reads_virtual = true,
+    .writes_virtual = true,
     .writes_ignored = true
 };
 
@@ -430,11 +433,13 @@ static const struct emulate_mem guest_mem = {
     mmio_read_linear, mmio_write_linear, mem_ins, mem_outs, mmio_string
 };
 
-// The pages a single-stepped instruction runs against, and of them the bytes
-// SDM 325462-093, Intel APX 355828-009, and APM 40332 rev. 4.11 say it reads
-// or writes: those are what their regions read as, and come back as writes;
-// other bytes it changes come back too.
-#define MAX_STEP_PAGES 4
+// The pages a single-stepped instruction runs against: those its operands
+// reach in emulated memory, its ModRM operand's and its stack's, where the
+// bytes that SDM 325462-093, Intel APX 355828-009, and APM 40332 rev. 4.11 say
+// it reads are what their regions read as, and those they say it writes come
+// back as writes.
+#define MAX_STEP_OPERANDS 2
+#define MAX_STEP_PAGES (MAX_STEP_OPERANDS * 2)
 // Masked stores are vector stores.
 #define MAX_MASKED 64
 
@@ -443,9 +448,11 @@ struct step_page {
     const struct region *r;
     uint8_t *scratch;
     uint8_t *before;
-    // The operand's bytes in the page, if any.
+    // The operand's bytes in the page, and what the instruction does with
+    // them, INSN_MEM_*.
     size_t start;
     size_t end;
+    unsigned int access;
     uint8_t first[MAX_MASKED];
     bool mapped;
     uintptr_t hpa;
@@ -456,29 +463,87 @@ struct step_page {
 struct mmio_step {
     size_t count;
     struct step_page pages[MAX_STEP_PAGES];
-    // Whether the operand is known, and what it is.
-    bool known;
-    struct insn_mem mem;
+    const char *mode;
+    struct vcpu_segment cs;
     uintptr_t rip;
-    uintptr_t next_rip;
+    // Where the instruction leaves the guest once done.
+    uint16_t done_cs;
+    uintptr_t done_rip;
+    bool loads_flags;
     // A masked store runs twice.
+    bool masked;
     bool second;
 };
 
-// Maps a scratch page in place of the region's page at gpa. The operand's
-// bytes in it hold what the region reads as, where the instruction reads them;
-// others nothing in particular.
-static struct step_page *step_map(struct vcpu *v, uintptr_t gpa, size_t len) {
+static const char *mode_name(struct vcpu *v, const struct vcpu_segment *cs) {
+    if ((vcpu_cr0(v) & CR0_PE) == 0) {
+        return "real-mode";
+    }
+    if ((vcpu_rflags(v) & RFLAGS_VM) != 0) {
+        return "virtual-8086";
+    }
+    if ((vcpu_efer(v) & EFER_LMA) != 0 && (cs->attrib & VCPU_SEG_L) != 0) {
+        return "64-bit";
+    }
+    return (cs->attrib & VCPU_SEG_DB) != 0 ? "32-bit" : "16-bit";
+}
+
+// What the guest runs that the hypervisor neither carries out nor can step
+// against no more than its operands, within the hypervisor: the machine stops,
+// showing the instruction, for it to be carried out.
+static noreturn void stop(
+    struct vcpu *v,
+    const char *mode,
+    const struct vcpu_segment *cs,
+    uintptr_t rip,
+    uintptr_t gpa,
+    const char *why
+) {
+    static const char digits[] = "0123456789abcdef";
+    bool long_mode = (vcpu_efer(v) & EFER_LMA) != 0 && (cs->attrib & VCPU_SEG_L) != 0;
+    char bytes[INSN_MAX_LENGTH * 3 + 1] = "unreadable";
+    size_t count = 0;
+    for (; count < INSN_MAX_LENGTH; count++) {
+        uintptr_t linear = cs->base + rip + count;
+        uint8_t byte;
+        if (!guest_mem_linear_read(v, long_mode ? linear : linear & 0xffffffff, &byte, 1, true)) {
+            break;
+        }
+        bytes[count * 3] = digits[byte >> 4];
+        bytes[count * 3 + 1] = digits[byte & 0xf];
+        bytes[count * 3 + 2] = ' ';
+    }
+    if (count != 0) {
+        bytes[count * 3 - 1] = '\0';
+    }
+    panic(
+        "The guest's %s instruction at %04x:%llx, bytes %s, reached emulated memory at %#llx, "
+        "but %s\n", mode, cs->selector, (unsigned long long)rip, bytes, (unsigned long long)gpa,
+        why
+    );
+}
+
+static noreturn void unsupported(struct vcpu *v, uintptr_t gpa, const char *why) {
+    struct vcpu_segment cs;
+    vcpu_get_seg(v, VCPU_SEG_CS, &cs);
+    stop(v, mode_name(v, &cs), &cs, vcpu_rip(v), gpa, why);
+}
+
+// The same for the instruction a step ran, which the guest has left.
+static noreturn void step_unsupported(struct vcpu *v, uintptr_t gpa, const char *why) {
+    struct mmio_step *s = v->step;
+    stop(v, s->mode, &s->cs, s->rip, gpa, why);
+}
+
+// Maps a scratch page in place of the region's page at gpa, the operand's len
+// bytes there holding what the region reads as where the instruction reads
+// them, others nothing in particular.
+static void step_map(struct vcpu *v, uintptr_t gpa, size_t len, unsigned int access) {
     struct mmio_step *s = v->step;
     uintptr_t page = page_down(gpa);
     const struct region *r = find(page);
-    if (r == NULL || s->count == MAX_STEP_PAGES) {
-        return NULL;
-    }
-    for (size_t i = 0; i < s->count; i++) {
-        if (s->pages[i].gpa == page) {
-            return NULL;
-        }
+    if (r == NULL) {
+        return;
     }
     struct step_page *p = &s->pages[s->count++];
     if (p->scratch == NULL) {
@@ -489,117 +554,203 @@ static struct step_page *step_map(struct vcpu *v, uintptr_t gpa, size_t len) {
     p->r = r;
     p->start = gpa - page;
     p->end = p->start + len;
-    if (len == 0) {
-        // Not the operand: all of what the region reads as.
-        for (size_t offset = 0; offset < PAGE_SIZE; offset += 8) {
-            uintptr_t base = atomic_load_explicit(&r->base, memory_order_relaxed);
-            uint64_t value = r->ops->read(v, r->ctx, page + offset - base, 8);
-            write_le64(p->scratch + offset, value);
-        }
+    p->access = access;
+    memset(p->scratch, 0xff, PAGE_SIZE);
+    if ((access & INSN_MEM_READ) != 0) {
+        region_access(v, r, gpa, p->scratch + p->start, len, false);
     } else {
-        memset(p->scratch, 0xff, PAGE_SIZE);
-        if ((s->mem.access & INSN_MEM_READ) != 0) {
-            region_access(v, r, gpa, p->scratch + p->start, len, false);
-        } else {
-            memset(p->scratch + p->start, 0, len);
-        }
+        memset(p->scratch + p->start, 0, len);
     }
     memcpy(p->before, p->scratch, PAGE_SIZE);
     p->mapped = gpt_translate(page, &p->hpa, &p->prot, &p->memtype);
     gpt_map(page, (uintptr_t)p->scratch, PAGE_SIZE, GPT_RWX, MT_WB);
     gpt_flush();
-    return p;
+}
+
+// FXRSTOR and the x87 environment and state forms, whose areas hold fields the
+// manuals leave unused, which the processor may or may not reach.
+static bool state_area(const struct insn *insn) {
+    unsigned int reg = (insn->modrm >> 3) & 7;
+    if (insn->space == (INSN_SPACE_LEGACY | 1)) {
+        return insn->opcode_byte == 0xae && reg == 1;
+    }
+    bool x87 = insn->opcode_byte == 0xd9 || insn->opcode_byte == 0xdd;
+    return insn->space == INSN_SPACE_LEGACY && x87 && (reg == 4 || reg == 6);
+}
+
+// The instruction's ModRM operand, where the step can take it.
+static bool step_modrm_operand(
+    struct vcpu *v,
+    uintptr_t gpa,
+    const struct insn *insn,
+    struct insn_mem *mem
+) {
+    if (!insn_mem_operand(v, insn, mem) || mem->size == 0) {
+        return false;
+    }
+    if (state_area(insn)) {
+        unsupported(v, gpa, "the bytes its state area takes are not known");
+    }
+    bool masked = (mem->access & INSN_MEM_MASKED) != 0;
+    if (mem->size > PAGE_SIZE || (masked && mem->size > MAX_MASKED)) {
+        unsupported(v, gpa, "its operand is larger than a step takes");
+    }
+    if (masked && (mem->access & INSN_MEM_READ) != 0) {
+        unsupported(v, gpa, "a masked load would read the elements its mask leaves out");
+    }
+    return true;
+}
+
+// Where a stack instruction leaves the guest once done, from the slots it pops
+// where it pops its destination, which the step's pages now hold.
+static void step_end(struct vcpu *v, uintptr_t gpa, const struct insn_stack *stack) {
+    struct mmio_step *s = v->step;
+    uint64_t offset = 0;
+    uint16_t selector = 0;
+    switch (stack->end) {
+        case INSN_END_TARGET: {
+            s->done_rip = stack->target;
+            break;
+        }
+        case INSN_END_FAR: {
+            s->done_rip = stack->target;
+            s->done_cs = stack->selector;
+            break;
+        }
+        case INSN_END_POP_NEAR:
+        case INSN_END_POP_FAR: {
+            bool read = guest_mem_linear_read(v, stack->mem.linear, &offset, stack->slot, false);
+            if (read && stack->end == INSN_END_POP_FAR) {
+                read = guest_mem_linear_read(
+                    v, stack->mem.linear + stack->slot, &selector, sizeof(uint16_t), false
+                );
+                s->done_cs = selector;
+            }
+            if (!read) {
+                unsupported(v, gpa, "where it returns to cannot be read");
+            }
+            s->done_rip = offset;
+            break;
+        }
+        default: {
+            break;
+        }
+    }
 }
 
 // The guest runs the instruction itself, with every other vCPU out of the
-// guest, as the pages are theirs too; one the decoder does not know, insn
-// NULL, against the whole page.
+// guest, as the pages are theirs too, and no interrupt before it: only where
+// the decoder knows the bytes of its operands, which the step's accesses are
+// then exactly, and where each region they reach takes those accesses within
+// the hypervisor. Anything else stops the machine.
 static void step_begin(struct vcpu *v, uintptr_t gpa, const struct insn *insn) {
+    struct insn_mem ops[MAX_STEP_OPERANDS];
+    size_t count = 0;
+    struct insn_mem mem;
+    bool modrm = step_modrm_operand(v, gpa, insn, &mem);
+    struct insn_stack stack;
+    bool stacked = insn_stack_operand(v, insn, &stack);
+    if (!modrm && !stacked) {
+        // INS faults on its write to emulated memory only from a port that the
+        // guest reaches itself, which the processor has read already.
+        if (insn->opcode == 0x6c || insn->opcode == 0x6d) {
+            unsupported(v, gpa, "its port was read already, and a step would read it again");
+        }
+        if (insn_mem_operand(v, insn, &mem) && mem.size == 0) {
+            // It only takes the operand's address, as CLFLUSH: nothing for the
+            // device.
+            vcpu_advance(v, insn->length);
+            return;
+        }
+        unsupported(v, gpa, "its operands are not known");
+    }
+    // A pop reaches the stack before the operand it writes, a push after the
+    // one it reads, so that the first to fault is the processor's.
+    if (stacked && (stack.mem.access & INSN_MEM_READ) != 0) {
+        ops[count++] = stack.mem;
+    }
+    if (modrm) {
+        ops[count++] = mem;
+    }
+    if (stacked && (stack.mem.access & INSN_MEM_READ) == 0) {
+        ops[count++] = stack.mem;
+    }
+    if (!vcpu_can_single_step()) {
+        unsupported(v, gpa, "the processor cannot single-step it");
+    }
+    uint64_t gpas[MAX_STEP_OPERANDS][2];
+    unsigned int lens[MAX_STEP_OPERANDS][2];
+    unsigned int pieces[MAX_STEP_OPERANDS];
+    // The fault may be another access of the instruction's, as MOVDIR64B's to
+    // its destination, or the processor's own, as to a page table.
+    bool operand = false;
+    for (size_t i = 0; i < count; i++) {
+        bool reads = (ops[i].access & INSN_MEM_READ) != 0;
+        bool writes = (ops[i].access & INSN_MEM_WRITE) != 0;
+        if (!translate(v, ops[i].linear, ops[i].size, writes, gpas[i], lens[i], &pieces[i])) {
+            return;
+        }
+        for (size_t j = 0; j < pieces[i]; j++) {
+            operand |= (gpas[i][j] ^ gpa) < PAGE_SIZE;
+            const struct region *r = find(gpas[i][j]);
+            if (r == NULL) {
+                continue;
+            }
+            if ((reads && !r->ops->reads_virtual) || (writes && !r->ops->writes_virtual)) {
+                unsupported(v, gpa, "its operand reaches a device of the host's");
+            }
+            for (size_t k = 0; k < i; k++) {
+                for (size_t l = 0; l < pieces[k]; l++) {
+                    if ((gpas[k][l] ^ gpas[i][j]) < PAGE_SIZE) {
+                        unsupported(v, gpa, "two of its operands share a page of emulated memory");
+                    }
+                }
+            }
+        }
+    }
+    if (!operand) {
+        unsupported(v, gpa, "the access that faulted is none of its operands'");
+    }
     if (v->step == NULL) {
         v->step = kmalloc(sizeof(struct mmio_step));
         memset(v->step, 0, sizeof(struct mmio_step));
     }
     struct mmio_step *s = v->step;
+    struct vcpu_segment cs;
+    vcpu_get_seg(v, VCPU_SEG_CS, &cs);
     s->count = 0;
     s->second = false;
-    s->known = insn != NULL && insn_mem_operand(v, insn, &s->mem) && s->mem.size <= PAGE_SIZE
-            && ((s->mem.access & INSN_MEM_MASKED) == 0 || s->mem.size <= MAX_MASKED);
-    if (s->known && s->mem.size == 0) {
-        // It only takes the operand's address, as CLFLUSH: nothing for the
-        // device.
-        vcpu_advance(v, insn->length);
-        return;
-    }
-    if (!vcpu_can_single_step()) {
-        printf(
-            "The instruction at %#llx that reached emulated memory at %#llx cannot be emulated, "
-            "skipped\n", (unsigned long long)vcpu_rip(v), (unsigned long long)gpa
-        );
-        if (insn != NULL) {
-            vcpu_advance(v, insn->length);
-        } else {
-            vcpu_inject_exception(v, 6, false, 0);
-        }
-        return;
-    }
-    uint64_t gpas[2];
-    unsigned int lens[2];
-    unsigned int pieces = 0;
-    if (s->known) {
-        bool translated = translate(
-            v, s->mem.linear, s->mem.size, (s->mem.access & INSN_MEM_WRITE) != 0, gpas, lens,
-            &pieces
-        );
-        if (!translated) {
-            return;
-        }
-        // The fault may be another access of the instruction's, as MOVDIR64B's
-        // to its destination.
-        bool operand = false;
-        for (size_t i = 0; i < pieces; i++) {
-            operand |= (gpas[i] ^ gpa) < PAGE_SIZE;
-        }
-        if (!operand) {
-            s->known = false;
-            pieces = 0;
-        }
-    }
-    vcpu_pause_others();
-    for (size_t i = 0; i < pieces; i++) {
-        step_map(v, gpas[i], lens[i]);
-    }
-    if (!s->known) {
-        step_map(v, gpa, 0);
-    }
+    s->masked = modrm && (mem.access & INSN_MEM_MASKED) != 0;
+    s->loads_flags = stacked && stack.loads_flags;
+    s->mode = mode_name(v, &cs);
+    s->cs = cs;
     s->rip = vcpu_rip(v);
-    // Where its length is not known, whether it completed is not either.
-    s->next_rip = insn != NULL ? s->rip + insn->length : UINT64_MAX;
+    s->done_cs = cs.selector;
+    s->done_rip = s->rip + insn->length;
+    vcpu_pause_others();
+    for (size_t i = 0; i < count; i++) {
+        for (size_t j = 0; j < pieces[i]; j++) {
+            step_map(v, gpas[i][j], lens[i][j], ops[i].access);
+        }
+    }
+    if (stacked) {
+        step_end(v, gpa, &stack);
+    }
     v->stepping = true;
+    vcpu_interrupt_shadow(v);
     vcpu_single_step(v, true);
 }
 
-// Writes back the runs of bytes in [start, end) that changed, or that a masked
-// store's two runs wrote alike.
-static void write_runs(
-    struct vcpu *v,
-    struct step_page *p,
-    size_t start,
-    size_t end,
-    bool masked
-) {
-    for (size_t at = start; at < end; ) {
-        bool written = masked
-                     ? p->first[at - p->start] == p->scratch[at]
-                     : p->scratch[at] != p->before[at];
-        if (!written) {
+// Writes back the runs of bytes of an operand that a masked store's two runs
+// wrote alike.
+static void write_runs(struct vcpu *v, struct step_page *p) {
+    for (size_t at = p->start; at < p->end; ) {
+        if (p->first[at - p->start] != p->scratch[at]) {
             at++;
             continue;
         }
-        unsigned int stop = at + 1;
-        while (stop < end
-            && (masked
-              ? p->first[stop - p->start] == p->scratch[stop]
-              : p->scratch[stop] != p->before[stop])) {
+        size_t stop = at + 1;
+        while (stop < p->end && p->first[stop - p->start] == p->scratch[stop]) {
             stop++;
         }
         region_access(v, p->r, p->gpa + at, p->scratch + at, stop - at, true);
@@ -610,10 +761,10 @@ static void write_runs(
 void mmio_step_done(struct vcpu *v) {
     struct mmio_step *s = v->step;
     // A step can end in a fault or an event instead, with nothing written.
-    bool completed = vcpu_rip(v) == s->next_rip;
-    bool writes = s->known && (s->mem.access & INSN_MEM_WRITE) != 0;
-    bool masked = writes && (s->mem.access & INSN_MEM_MASKED) != 0;
-    if (masked && completed && !s->second) {
+    struct vcpu_segment cs;
+    vcpu_get_seg(v, VCPU_SEG_CS, &cs);
+    bool completed = cs.selector == s->done_cs && vcpu_rip(v) == s->done_rip;
+    if (s->masked && completed && !s->second) {
         // A masked store writes only the elements its mask selects, which may
         // hold what they did: it runs again over other values, and writes its
         // elements alike.
@@ -628,19 +779,21 @@ void mmio_step_done(struct vcpu *v) {
     }
     for (size_t i = 0; i < s->count; i++) {
         struct step_page *p = &s->pages[i];
-        if (completed && writes && p->end != p->start) {
-            if (masked) {
-                write_runs(v, p, p->start, p->end, true);
+        // What it changed beside its operands would come back as writes the
+        // manuals do not give it.
+        if (completed
+         && (memcmp(p->scratch, p->before, p->start) != 0
+          || memcmp(p->scratch + p->end, p->before + p->end, PAGE_SIZE - p->end) != 0)) {
+            step_unsupported(v, p->gpa, "it changed bytes beside its operands");
+        }
+        if (completed && (p->access & INSN_MEM_WRITE) != 0) {
+            if (s->masked) {
+                write_runs(v, p);
             } else {
-                // All of them, alike or not.
                 region_access(
                     v, p->r, p->gpa + p->start, p->scratch + p->start, p->end - p->start, true
                 );
             }
-            write_runs(v, p, 0, p->start, false);
-            write_runs(v, p, p->end, PAGE_SIZE, false);
-        } else if (p->end == p->start || !masked) {
-            write_runs(v, p, 0, PAGE_SIZE, false);
         }
         if (p->mapped) {
             gpt_map(p->gpa, p->hpa, PAGE_SIZE, p->prot, p->memtype);
@@ -650,8 +803,15 @@ void mmio_step_done(struct vcpu *v) {
     }
     gpt_flush();
     s->count = 0;
+    // The trap after the instruction is the one TF asked for as it began, none
+    // where POPF or IRET sets it (SDM 325462-093 Vol. 3B, 20.3.1.4; APM 24593
+    // rev. 3.46, 13.1.4).
+    bool tf = vcpu_guest_tf(v);
     v->stepping = false;
+    // POPF and IRET leave the trap flag the guest's.
+    v->step_flags_loaded = completed && s->loads_flags;
     vcpu_single_step(v, false);
+    v->step_flags_loaded = false;
     vcpu_resume_others();
     // The hypervisor's own step took the guest's MTF exit for its guest.
     if (completed) {
@@ -660,32 +820,34 @@ void mmio_step_done(struct vcpu *v) {
     // SVM's stepping took the trap the guest's own TF asked for, and the
     // breakpoints the instruction hit.
     if (completed && !virt_vmx) {
-        vcpu_debug_traps(v, vcpu_guest_tf(v));
+        vcpu_debug_traps(v, tf);
     }
 }
 
-// Ends a step that cannot go on, its writes dropped: past its instruction
-// where that is known, else with #UD.
-static void step_abort(struct vcpu *v) {
-    struct mmio_step *s = v->step;
-    for (size_t i = 0; i < s->count; i++) {
-        struct step_page *p = &s->pages[i];
-        if (p->mapped) {
-            gpt_map(p->gpa, p->hpa, PAGE_SIZE, p->prot, p->memtype);
-        } else {
-            gpt_map(p->gpa, 0, PAGE_SIZE, 0, 0);
+// Code where nothing decodes is all ones to a PC, which begins with FF FF, an
+// undefined opcode. The hypervisor runs no code from a device.
+static void fetch_fault(struct vcpu *v, uintptr_t gpa) {
+    struct vcpu_segment cs;
+    vcpu_get_seg(v, VCPU_SEG_CS, &cs);
+    bool long_mode = (vcpu_efer(v) & EFER_LMA) != 0 && (cs.attrib & VCPU_SEG_L) != 0;
+    bool absent_code = true;
+    for (size_t i = 0; i < 2; i++) {
+        uintptr_t linear = cs.base + vcpu_rip(v) + i;
+        if (!long_mode) {
+            linear &= 0xffffffff;
         }
+        uint64_t at;
+        uint32_t pf_error;
+        if (!guest_mem_linear_to_phys(v, linear, false, true, &at, &pf_error)) {
+            absent_code = false;
+            break;
+        }
+        absent_code &= find(gpt_cpu_gpa(at)) == &absent;
     }
-    gpt_flush();
-    s->count = 0;
-    v->stepping = false;
-    vcpu_single_step(v, false);
-    vcpu_resume_others();
-    if (s->next_rip != UINT64_MAX) {
-        vcpu_set_rip(v, s->next_rip);
-    } else {
-        vcpu_inject_exception(v, 6, false, 0);
+    if (!absent_code) {
+        unsupported(v, gpa, "it is code in emulated memory");
     }
+    vcpu_inject_exception(v, 6, false, 0);
 }
 
 // A data access, or a fetch, to emulated memory.
@@ -709,28 +871,18 @@ static bool fault(struct vcpu *v, uintptr_t gpa, bool fetch) {
         }
     }
     if (v->stepping) {
-        // The stepped instruction reaches another page, and runs again; one
-        // that reaches more than a step can map is left out.
-        if (step_map(v, gpa, 0) == NULL && find(gpa) != NULL) {
-            printf(
-                "The instruction at %#llx reaches more emulated memory than can be stepped, "
-                "skipped\n", (unsigned long long)vcpu_rip(v)
-            );
-            step_abort(v);
-        }
-        return true;
+        unsupported(v, gpa, "it reaches emulated memory beside its operands");
     }
-    // Code there runs against the page, a step at a time.
     if (fetch) {
-        step_begin(v, gpa, NULL);
+        fetch_fault(v, gpa);
         return true;
     }
     struct insn insn;
     if (!insn_decode(v, &insn)) {
-        // The guest's EPT or nested page tables may not let it fetch the
-        // instruction.
+        // The guest's EPT or nested page tables may keep it from being read,
+        // where the guest's hypervisor takes the exit.
         if (!nvmx_exit_pending(v) && !nsvm_exit_pending(v)) {
-            step_begin(v, gpa, NULL);
+            unsupported(v, gpa, "it cannot be read and decoded");
         }
         return true;
     }
