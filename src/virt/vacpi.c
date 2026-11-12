@@ -2770,6 +2770,27 @@ static uacpi_namespace_node *port_resources(uacpi_namespace_node *node) {
     return isa_ports_shown(device) ? device : NULL;
 }
 
+// The bytes of a refused template that the log shows.
+#define REFUSED_TEMPLATE_SHOWN 64
+
+// A port's template that the guest's _SRS cannot have, as its OS made it.
+static void log_refused_template(uacpi_namespace_node *node, uacpi_data_view view) {
+    static const char digits[] = "0123456789abcdef";
+    char bytes[REFUSED_TEMPLATE_SHOWN * 3 + 1] = "";
+    size_t shown = view.length < REFUSED_TEMPLATE_SHOWN ? view.length : REFUSED_TEMPLATE_SHOWN;
+    for (size_t i = 0; i < shown; i++) {
+        bytes[i * 3] = digits[view.const_bytes[i] >> 4];
+        bytes[i * 3 + 1] = digits[view.const_bytes[i] & 0xf];
+        bytes[i * 3 + 2] = i + 1 < shown ? ' ' : '\0';
+    }
+    const char *path = acpi_path(node);
+    printf(
+        "The guest's template for %s, of %zu bytes, takes a port of the log's UART or "
+        "cannot be read whole: %s%s\n", path, view.length, bytes, shown < view.length ? " ..." : ""
+    );
+    acpi_path_free(path);
+}
+
 // Whether an _SRS's template, in the first slot, may reach the firmware.
 static bool srs_settable(uacpi_namespace_node *node, uint32_t argc) {
     uacpi_object_name name = uacpi_namespace_node_name(node);
@@ -2781,6 +2802,9 @@ static bool srs_settable(uacpi_namespace_node *node, uint32_t argc) {
     bool settable = template == NULL || uacpi_object_get_type(template) != UACPI_OBJECT_BUFFER
                  || uacpi_object_get_string_or_buffer(template, &view) != UACPI_STATUS_OK
                  || isa_ports_settable(view.const_bytes, view.length);
+    if (!settable) {
+        log_refused_template(node, view);
+    }
     uacpi_object_unref(template);
     return settable;
 }
