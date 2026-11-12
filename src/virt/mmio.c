@@ -822,6 +822,11 @@ void mmio_step_done(struct vcpu *v) {
           || memcmp(p->scratch + p->end, p->before + p->end, PAGE_SIZE - p->end) != 0)) {
             step_unsupported(v, p->gpa, "it changed bytes beside its operands");
         }
+        // A fault it raised that the processor delivered before the step ended
+        // may have pushed its frame here, which would go with the page.
+        if (!completed && memcmp(p->scratch, p->before, PAGE_SIZE) != 0) {
+            step_unsupported(v, p->gpa, "the delivery of a fault it raised wrote there");
+        }
         if (completed && (p->access & INSN_MEM_WRITE) != 0) {
             if (s->masked) {
                 write_runs(v, p);
