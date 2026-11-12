@@ -717,6 +717,26 @@ void video_find_framebuffer(void) {
     }
 }
 
+// The PCI function of the graphics output in use: the one its device path
+// leads to, else, where firmware gives the output a path that leads to none,
+// the display function one of whose BARs holds its framebuffer, as Linux 7.3
+// finds the boot display's (drivers/video/screen_info_pci.c,
+// screen_info_pci_dev()).
+static bool gop_device(struct pci_io_device *dev) {
+    if (gop_pci_device(gop_handle, dev)) {
+        return true;
+    }
+    uint64_t base = loader_handoff->video.framebuffer.base;
+    if (base == 0 || !pci_io_display_holding(base, dev)) {
+        return false;
+    }
+    printf(
+        "The graphics output's framebuffer is in a BAR of " HANDOFF_PCI_ADDRESS_FMT "\n",
+        HANDOFF_PCI_ADDRESS_ARGS(dev->address)
+    );
+    return true;
+}
+
 void video_init(void) {
     struct user_vbios user;
     struct pci_io_device dev;
@@ -742,7 +762,7 @@ void video_init(void) {
                 HANDOFF_PCI_ADDRESS_ARGS(config.vga_device)
             );
         }
-    } else if (gop_handle != NULL && gop_pci_device(gop_handle, &dev)) {
+    } else if (gop_handle != NULL && gop_device(&dev)) {
         // Another card's VBIOS would put the legacy display where the
         // firmware's is not.
         have_dev = true;

@@ -23,6 +23,7 @@
 #include <handoff.h>
 #include <hw/pci_regs.h>
 #include <lib/log.h>
+#include <lib/util.h>
 #include <loader/efi_glue.h>
 
 // A 16550 UART's registers.
@@ -33,6 +34,17 @@
 #define PCI_EXPRESS_TYPE_ROOT_PORT 0x0040
 #define PCI_EXPRESS_TYPE_DOWNSTREAM 0x0060
 #define PCI_EXPRESS_FLAGS_SLOT 0x0100
+
+// UEFI 2.11, 14.4.18, Tables 14.10 and 14.11: GetBarAttributes() gives a BAR's
+// ranges as QWORD Address Space Descriptors, the length after its header
+// counting the rest, up to an End Tag.
+#define DESCRIPTOR_QWORD 0x8a
+#define DESCRIPTOR_HEADER 3
+#define DESCRIPTOR_QWORD_LENGTH 0x2b
+#define DESCRIPTOR_TYPE 0x03
+#define DESCRIPTOR_TYPE_MEMORY 0
+#define DESCRIPTOR_MINIMUM 0x0e
+#define DESCRIPTOR_SIZE 0x26
 
 static struct efi_guid pci_io_guid = EFI_PCI_IO_PROTOCOL_GUID;
 
@@ -101,6 +113,50 @@ bool pci_io_device_on_path(struct efi_device_path_protocol *path, struct pci_io_
         return false;
     }
     return pci_io_device_get(handle, dev);
+}
+
+// Whether one of the function's memory BARs holds the address, in the ranges
+// that the firmware gives them.
+static bool memory_bar_holds(struct efi_pci_io_protocol *io, uint64_t address) {
+    bool holds = false;
+    for (size_t bar = 0; bar < PCI_STD_NUM_BARS && !holds; bar++) {
+        void *resources = NULL;
+        if (io->get_bar_attributes(io, (uint8_t)bar, NULL, &resources) != EFI_SUCCESS
+         || resources == NULL) {
+            continue;
+        }
+        const uint8_t *d = resources;
+        while (d[0] == DESCRIPTOR_QWORD && !holds) {
+            size_t length = (size_t)d[1] | (size_t)d[2] << 8;
+            if (length < DESCRIPTOR_QWORD_LENGTH) {
+                break;
+            }
+            uint64_t minimum = read_le64(d + DESCRIPTOR_MINIMUM);
+            uint64_t size = read_le64(d + DESCRIPTOR_SIZE);
+            holds = d[DESCRIPTOR_TYPE] == DESCRIPTOR_TYPE_MEMORY && address >= minimum
+                 && address - minimum < size;
+            d += DESCRIPTOR_HEADER + length;
+        }
+        efi_bs->free_pool(resources);
+    }
+    return holds;
+}
+
+bool pci_io_display_holding(uint64_t address, struct pci_io_device *dev) {
+    size_t count;
+    struct pci_io_device *devices = pci_io_devices(&count);
+    bool found = false;
+    for (size_t i = 0; i < count && !found; i++) {
+        found = devices[i].base_class == PCI_BASE_CLASS_DISPLAY
+             && memory_bar_holds(devices[i].io, address);
+        if (found) {
+            *dev = devices[i];
+        }
+    }
+    if (devices != NULL) {
+        efi_bs->free_pool(devices);
+    }
+    return found;
 }
 
 static bool port_to_slot(struct efi_pci_io_protocol *io) {

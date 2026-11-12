@@ -43,6 +43,10 @@ struct pci_io_device *pci_io_devices(size_t *count);
 // Finds the PCI function a device path leads to.
 bool pci_io_device_on_path(struct efi_device_path_protocol *path, struct pci_io_device *dev);
 
+// Finds the first display function, in handle order, one of whose memory BARs
+// holds the address.
+bool pci_io_display_holding(uint64_t address, struct pci_io_device *dev);
+
 // Enables I/O decoding of the PCI function (and of the bridges above it) whose
 // I/O BAR holds a UART at the port, as on a serial card the firmware has no
 // driver for. Returns whether one does, and which in found.
