@@ -1081,3 +1081,16 @@ bool insn_segment_linear(
     bool long_mode = (vcpu_efer(v) & EFER_LMA) != 0 && (cs & VCPU_SEG_L) != 0;
     return linearise(v, long_mode, reg, ea, size, write, linear);
 }
+
+bool insn_segment_allowed(
+    struct vcpu *v,
+    int reg,
+    uintptr_t ea,
+    size_t size,
+    bool write,
+    uint64_t *linear
+) {
+    uint32_t cs = vcpu_seg_attrib(v, VCPU_SEG_CS);
+    bool long_mode = (vcpu_efer(v) & EFER_LMA) != 0 && (cs & VCPU_SEG_L) != 0;
+    return linear_allowed(v, long_mode, reg, ea, size, write, linear);
+}

@@ -101,7 +101,7 @@ static uint64_t imm(const struct insn *insn) {
     return sign_extend(insn->imm, insn->imm_size);
 }
 
-static bool condition(uint64_t rflags, unsigned int cc) {
+bool emulate_condition(uint64_t rflags, unsigned int cc) {
     bool cf = (rflags & RFLAGS_CF) != 0;
     bool pf = (rflags & RFLAGS_PF) != 0;
     bool zf = (rflags & RFLAGS_ZF) != 0;
@@ -365,7 +365,7 @@ static int memory_op(struct ctx *c, uintptr_t linear) {
         }
     }
     if (op >= (INSN_OPCODE_0F | 0x90) && op <= (INSN_OPCODE_0F | 0x9f)) {
-        return store(c, 1, linear, condition(vcpu_rflags(c->v), op & 0xf));
+        return store(c, 1, linear, emulate_condition(vcpu_rflags(c->v), op & 0xf));
     }
     return EMULATE_UNSUPPORTED;
 }

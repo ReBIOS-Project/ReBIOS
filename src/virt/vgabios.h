@@ -194,4 +194,7 @@ uint32_t vgabios_ecx(const struct vgabios_regs *r);
 // Lets the guest run if this call has had its time, as a wait is to.
 void vgabios_relax(void);
 
+// Whether size bytes of ports from port on are all the video BIOS's own.
+bool vgabios_port(uint16_t port, size_t size);
+
 #endif

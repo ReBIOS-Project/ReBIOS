@@ -505,6 +505,8 @@ bool vmx_ept_dirty_flags(void);
 bool vmx_monitor_trap_supported(void);
 void vmx_get_seg(size_t reg, struct vcpu_segment *seg);
 void vmx_set_seg(size_t reg, const struct vcpu_segment *seg);
+// A load in real or virtual-8086 mode: the selector and its sixteenfold base.
+void vmx_set_seg_real(size_t reg, uint16_t selector);
 // One field of vmx_get_seg()'s, read alone.
 uint16_t vmx_seg_selector(size_t reg);
 uint64_t vmx_seg_base(size_t reg);

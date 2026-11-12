@@ -20,8 +20,46 @@
 #include <virt/alu.h>
 
 uint64_t alu_run(unsigned int stub, uint64_t dst, uint64_t src, uint64_t *rflags);
+uint64_t alu_run_wide(
+    unsigned int stub,
+    uint64_t rax,
+    uint64_t src,
+    uint64_t *rdx,
+    uint64_t *rflags
+);
+uint64_t alu_run_double(
+    unsigned int stub,
+    uint64_t dst,
+    uint64_t src,
+    uint64_t count,
+    uint64_t *rflags
+);
 
 uint64_t alu(unsigned int op, size_t size, uint64_t dst, uint64_t src, uint64_t *rflags) {
     size_t index = size == 1 ? 0 : size == 2 ? 1 : size == 4 ? 2 : 3;
     return alu_run(op * 4 + index, dst, src, rflags);
+}
+
+uint64_t alu_double(
+    unsigned int op,
+    size_t size,
+    uint64_t dst,
+    uint64_t src,
+    uint8_t count,
+    uint64_t *rflags
+) {
+    size_t index = size == 2 ? 1 : size == 4 ? 2 : 3;
+    return alu_run_double(op * 4 + index, dst, src, count, rflags);
+}
+
+uint64_t alu_wide(
+    unsigned int op,
+    size_t size,
+    uint64_t rax,
+    uint64_t *rdx,
+    uint64_t src,
+    uint64_t *rflags
+) {
+    size_t index = size == 1 ? 0 : size == 2 ? 1 : size == 4 ? 2 : 3;
+    return alu_run_wide(op * 4 + index, rax, src, rdx, rflags);
 }

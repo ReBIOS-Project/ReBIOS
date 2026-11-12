@@ -41,7 +41,10 @@
 #include <virt/mmio.h>
 #include <virt/nsvm.h>
 #include <virt/profile.h>
+#include <virt/run.h>
 #include <virt/vcpu.h>
+#include <virt/vga.h>
+#include <virt/vgabios.h>
 #include <virt/virt.h>
 #include <virt/vlapic.h>
 
@@ -434,6 +437,9 @@ static void svm_handle_io(struct vcpu *v) {
     v->vmcb->control.interrupt_shadow = 0;
     v->vmcb->save.rflags &= ~(uint64_t)RFLAGS_RF;
     vcpu_step_boundary(v);
+    if (vga_port_emulated(port, size) || vgabios_port(port, size)) {
+        run_begin(v);
+    }
 }
 
 // MOV to CR4, intercepted for the bits of features the guest does not get: the

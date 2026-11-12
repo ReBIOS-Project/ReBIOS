@@ -778,6 +778,7 @@ static const struct mmio_ops window_ops = {
     .write = window_write,
     .reads_virtual = true,
     .writes_virtual = true,
+    .runs = true,
     .read_string = window_read_string,
     .write_string = window_write_string,
     .move_string = window_move_string
@@ -2638,6 +2639,10 @@ bool vga_redrawing(void) {
 
 bool vga_emulated(void) {
     return vga.on;
+}
+
+bool vga_port_emulated(uint16_t port, size_t size) {
+    return vga.on && port >= PORT_BASE && (size_t)port + size <= PORT_BASE + PORT_COUNT;
 }
 
 uintptr_t vga_lfb(void) {

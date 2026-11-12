@@ -70,6 +70,7 @@ struct vcpu_mode {
 
 struct cpu;
 struct mmio_step;
+struct run_state;
 struct nsvm;
 struct nvmx;
 struct vlapic;
@@ -195,6 +196,8 @@ struct vcpu {
     uint64_t profile_tsc;
     // The last exit's VMX basic exit reason or SVM exit code, for panics.
     uint32_t last_exit;
+    // What runs keep (virt/run.c).
+    struct run_state *run;
 };
 
 struct vcpu *vcpu_create(struct cpu *cpu);
@@ -234,6 +237,8 @@ void vcpu_pause_others(void);
 void vcpu_resume_others(void);
 // Whether this processor has the others paused.
 bool vcpu_others_paused(void);
+// Whether another processor waits for this one to pause.
+bool vcpu_pause_pending(void);
 // Waits out another processor's pause of this one's guest, if any, as work
 // that may take a while does between steps.
 void vcpu_serve_pause(void);
@@ -242,6 +247,9 @@ void vcpu_single_step(struct vcpu *v, bool on);
 // The guest's next instruction runs before any maskable interrupt it would
 // otherwise take first.
 void vcpu_interrupt_shadow(struct vcpu *v);
+// The same for a load of SS by MOV or POP that the guest's last instruction
+// made (SDM 325462-093 Vol. 3A, 7.8.3).
+void vcpu_ss_shadow(struct vcpu *v);
 // The end of a step, mmio.c's or ferr.c's.
 void vcpu_step_done(struct vcpu *v);
 
@@ -268,6 +276,9 @@ uint64_t vcpu_efer(struct vcpu *v);
 uint64_t vcpu_untagged(struct vcpu *v, size_t reg, uintptr_t linear);
 void vcpu_get_seg(struct vcpu *v, size_t reg, struct vcpu_segment *seg);
 void vcpu_set_seg(struct vcpu *v, size_t reg, const struct vcpu_segment *seg);
+// A segment register load in real or virtual-8086 mode: the selector, and the
+// base its sixteenfold, the limit and attributes as they are.
+void vcpu_load_real_segment(struct vcpu *v, size_t reg, uint16_t selector);
 // One field of vcpu_get_seg()'s, read alone, as each costs a VMREAD with VMX,
 // which traps under nested virtualisation.
 uint16_t vcpu_seg_selector(struct vcpu *v, size_t reg);

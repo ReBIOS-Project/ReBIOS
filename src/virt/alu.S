@@ -52,6 +52,70 @@ alu_run:
     retq
 .size alu_run, . - alu_run
 
+// alu_run_double(stub, dst, src, count, rflags) runs a stub on dst in RAX, src
+// in RDX, and count in CL, as alu_run() does.
+.globl alu_run_double
+.type alu_run_double, %function
+alu_run_double:
+    leaq alu_double_stubs(%rip), %r11
+    movl %edi, %eax
+    shlq $4, %rax
+    addq %rax, %r11
+    movq %rsi, %rax
+    pushfq
+    popq %r9
+    andq $~STATUS, %r9
+    movq (%r8), %r10
+    andq $STATUS, %r10
+    orq %r10, %r9
+    pushq %r9
+    popfq
+    callq *%r11
+    pushfq
+    popq %r9
+    andq $STATUS, %r9
+    movq (%r8), %r10
+    andq $~STATUS, %r10
+    orq %r9, %r10
+    movq %r10, (%r8)
+    retq
+.size alu_run_double, . - alu_run_double
+
+// alu_run_wide(stub, rax, src, rdx, rflags) runs a stub on RAX, *rdx in RDX,
+// and src in RCX, as alu_run() does, leaving RDX in *rdx.
+.globl alu_run_wide
+.type alu_run_wide, %function
+alu_run_wide:
+    pushq %rbx
+    movq %rcx, %rbx
+    leaq alu_wide_stubs(%rip), %r11
+    movl %edi, %eax
+    shlq $4, %rax
+    addq %rax, %r11
+    movq %rsi, %rax
+    movq %rdx, %rcx
+    movq (%rbx), %rdx
+    pushfq
+    popq %r9
+    andq $~STATUS, %r9
+    movq (%r8), %r10
+    andq $STATUS, %r10
+    orq %r10, %r9
+    pushq %r9
+    popfq
+    callq *%r11
+    pushfq
+    popq %r9
+    andq $STATUS, %r9
+    movq (%r8), %r10
+    andq $~STATUS, %r10
+    orq %r9, %r10
+    movq %r10, (%r8)
+    movq %rdx, (%rbx)
+    popq %rbx
+    retq
+.size alu_run_wide, . - alu_run_wide
+
 // Each stub takes 16 bytes, as alu_run() finds them by index.
 .macro stub insn
 .Lstub\@:
@@ -89,6 +153,21 @@ alu_run:
     stub "\op\()q %rdx, %rax"
 .endm
 
+// Nor do two-operand IMUL and the double-precision shifts.
+.macro multiply
+    stub "ud2"
+    stub "imulw %dx, %ax"
+    stub "imull %edx, %eax"
+    stub "imulq %rdx, %rax"
+.endm
+
+.macro double op
+    stub "ud2"
+    stub "\op\()w %cl, %dx, %ax"
+    stub "\op\()l %cl, %edx, %eax"
+    stub "\op\()q %cl, %rdx, %rax"
+.endm
+
 // In alu.h's order, four sizes each.
 .balign 16
 .type alu_stubs, %function
@@ -118,4 +197,28 @@ alu_stubs:
     bittest bts
     bittest btr
     bittest btc
+    multiply
 .size alu_stubs, . - alu_stubs
+
+.macro wide op
+    stub "\op\()b %cl"
+    stub "\op\()w %cx"
+    stub "\op\()l %ecx"
+    stub "\op\()q %rcx"
+.endm
+
+.balign 16
+.type alu_wide_stubs, %function
+alu_wide_stubs:
+    wide mul
+    wide imul
+    wide div
+    wide idiv
+.size alu_wide_stubs, . - alu_wide_stubs
+
+.balign 16
+.type alu_double_stubs, %function
+alu_double_stubs:
+    double shld
+    double shrd
+.size alu_double_stubs, . - alu_double_stubs

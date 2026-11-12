@@ -29,6 +29,7 @@
 #include <sys/cpu.h>
 #include <sys/mm.h>
 #include <sys/x86.h>
+#include <virt/run.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>
 
@@ -281,6 +282,7 @@ static void report(uint64_t elapsed_ns) {
         ports_before[best] = ports[best];
     }
     memcpy(ports_before, ports, 0x10000 * sizeof(uint32_t));
+    run_report(ms);
     for (size_t i = 0; i < PAGES; i++) {
         size_t count = atomic_exchange_explicit(&pages[i].count, 0, memory_order_relaxed);
         if (count * 1000 / (ms != 0 ? ms : 1) >= 100) {

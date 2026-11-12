@@ -30,6 +30,8 @@ bool vga_init(void);
 // On each other processor as it starts, after vga_init(): what it draws with.
 void vga_cpu_init(void);
 bool vga_emulated(void);
+// Whether size bytes of ports from port on are all the emulated VGA's.
+bool vga_port_emulated(uint16_t port, size_t size);
 
 // The largest VBE mode the emulated VGA shows.
 #define VGA_VBE_MAX_WIDTH 16000

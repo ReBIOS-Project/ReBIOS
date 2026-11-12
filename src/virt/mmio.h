@@ -39,6 +39,10 @@ struct mmio_ops {
     // Whether writes go nowhere, so that INS may be emulated into it: the
     // processor may have read the port already.
     bool writes_ignored;
+    // Whether an access to it begins a run (virt/run.c).
+    bool runs;
+    // Whether reads reach the memory it maps, which runs then read too.
+    bool reads_mapped;
     // Optional, for repeated string instructions: count accesses of size bytes
     // each, the first at offset and each next one step bytes on, all within
     // the region, with the same effects as read() and write() making them a
@@ -111,6 +115,25 @@ size_t mmio_string(
     size_t size,
     int64_t step,
     size_t count
+);
+
+// What the page at gpa is to a run (virt/run.c), for reads, or for writes
+// where write is true: memory that the guest has mapped write-back, as RAM and
+// the ROMs below 1 MiB are, and that only RAM is for writes, its host address
+// in *host, which it marks written for writes; a region that begins runs,
+// holding all of the page, in *region; or anything else.
+#define MMIO_PLACE_OTHER 0
+#define MMIO_PLACE_RAM 1
+#define MMIO_PLACE_RUN 2
+int mmio_page(uintptr_t gpa, bool write, uint8_t **host, const void **region);
+// An access within a page of the region mmio_page() gave.
+void mmio_region_access(
+    struct vcpu *v,
+    const void *region,
+    uintptr_t gpa,
+    void *buf,
+    size_t len,
+    bool write
 );
 
 // An EPT violation or a nested page fault at gpa, for an access other than a

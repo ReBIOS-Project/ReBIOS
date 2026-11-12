@@ -627,6 +627,13 @@ static void vga_ports_access(
     }
 }
 
+bool vgabios_port(uint16_t port, size_t size) {
+    uint32_t last = (uint32_t)port + (uint32_t)size;
+    return (port >= VGABIOS_STUB_PORT_ALLOCATE && last <= VGABIOS_STUB_PORT_ALLOCATE + PORT_COUNT)
+        || (port >= VGABIOS_STUB_PORT_VGA
+         && last <= VGABIOS_STUB_PORT_VGA + VGABIOS_STUB_PORT_VGA_COUNT);
+}
+
 void vgabios_init(void) {
     struct io_handler ports = {
         VGABIOS_STUB_PORT_ALLOCATE, PORT_COUNT, ports_access, NULL, false

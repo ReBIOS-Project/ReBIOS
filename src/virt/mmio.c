@@ -33,11 +33,14 @@
 #include <virt/guest_mem.h>
 #include <virt/insn.h>
 #include <virt/io.h>
+#include <virt/layout.h>
 #include <virt/nsvm.h>
 #include <virt/nvmx.h>
 #include <virt/profile.h>
+#include <virt/run.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>
+#include <virt/vlapic.h>
 
 #define MAX_REGIONS 256
 
@@ -140,7 +143,8 @@ const struct mmio_ops mmio_absent_ops = {
     .write = mmio_absent_write,
     .reads_virtual = true,
     .writes_virtual = true,
-    .writes_ignored = true
+    .writes_ignored = true,
+    .reads_mapped = true
 };
 
 // What the guest reaches where it has neither memory nor a device, as a PC
@@ -432,6 +436,52 @@ size_t mmio_string(
 static const struct emulate_mem guest_mem = {
     mmio_read_linear, mmio_write_linear, mem_ins, mem_outs, mmio_string
 };
+
+int mmio_page(uintptr_t gpa, bool write, uint8_t **host, const void **region) {
+    uintptr_t page = page_down(gpa);
+    const struct region *r = find(page);
+    if (r == &absent) {
+        return MMIO_PLACE_OTHER;
+    }
+    bool mapped_read = r != NULL && !write && r->ops->reads_mapped;
+    if (r != NULL && !mapped_read) {
+        uint64_t base = atomic_load_explicit(&r->base, memory_order_relaxed);
+        uint64_t length = atomic_load_explicit(&r->size, memory_order_relaxed);
+        bool held = page - base < length && length - (page - base) >= PAGE_SIZE;
+        if (!r->ops->runs || !held) {
+            return MMIO_PLACE_OTHER;
+        }
+        *region = r;
+        return MMIO_PLACE_RUN;
+    }
+    // What is mapped write-back is memory, as RAM and the ROMs below 1 MiB,
+    // but the page behind the local APICs' pages, which the processor stands
+    // in for; and only RAM takes writes.
+    uintptr_t hpa;
+    uint32_t prot;
+    uint8_t memtype;
+    if (!gpt_translate(page, &hpa, &prot, &memtype) || memtype != MT_WB
+     || (prot & (write ? GPT_W : GPT_R)) == 0 || vlapic_access_page(page_down(hpa))
+     || (write && !layout_ram(page, PAGE_SIZE))) {
+        return MMIO_PLACE_OTHER;
+    }
+    if (write) {
+        gpt_mark_dirty(page, PAGE_SIZE);
+    }
+    *host = (uint8_t *)(uintptr_t)hpa;
+    return MMIO_PLACE_RAM;
+}
+
+void mmio_region_access(
+    struct vcpu *v,
+    const void *region,
+    uintptr_t gpa,
+    void *buf,
+    size_t len,
+    bool write
+) {
+    region_access(v, region, gpa, buf, len, write);
+}
 
 // The pages a single-stepped instruction runs against: those its operands
 // reach in emulated memory, its ModRM operand's and its stack's, where the
@@ -927,8 +977,11 @@ static bool fault(struct vcpu *v, uintptr_t gpa, bool fetch) {
         }
         return true;
     }
-    if (emulate(v, &insn, &guest_mem) == EMULATE_UNSUPPORTED) {
+    int result = emulate(v, &insn, &guest_mem);
+    if (result == EMULATE_UNSUPPORTED) {
         step_begin(v, gpa, &insn);
+    } else if (result == EMULATE_DONE && r->ops->runs) {
+        run_begin(v);
     }
     return true;
 }

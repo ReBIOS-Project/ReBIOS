@@ -154,6 +154,12 @@ void vcpu_resume_others(void) {
     spinlock_release(&world_lock);
 }
 
+bool vcpu_pause_pending(void) {
+    uint64_t epoch = atomic_load_explicit(&world_epoch, memory_order_acquire);
+    return (epoch & 1) != 0
+        && atomic_load_explicit(&world_owner, memory_order_acquire) != this_cpu();
+}
+
 bool vcpu_others_paused(void) {
     return atomic_load_explicit(&world_owner, memory_order_relaxed) == this_cpu();
 }
@@ -244,6 +250,18 @@ void vcpu_interrupt_shadow(struct vcpu *v) {
     if ((vcpu_rflags(v) & RFLAGS_IF) != 0 && (intr & INTERRUPTIBILITY_MOV_SS) == 0) {
         vmx_write(VMCS_GUEST_INTERRUPTIBILITY, intr | INTERRUPTIBILITY_STI);
     }
+}
+
+void vcpu_ss_shadow(struct vcpu *v) {
+    if (!virt_vmx) {
+        v->vmcb->control.interrupt_shadow |= 1;
+        return;
+    }
+    uint64_t intr = vmx_read(VMCS_GUEST_INTERRUPTIBILITY);
+    vmx_write(
+        VMCS_GUEST_INTERRUPTIBILITY,
+        (intr & ~(uint64_t)INTERRUPTIBILITY_STI) | INTERRUPTIBILITY_MOV_SS
+    );
 }
 
 static void tick_return_check(struct vcpu *v) {
@@ -672,6 +690,16 @@ void vcpu_get_seg(struct vcpu *v, size_t reg, struct vcpu_segment *seg) {
     seg->attrib = s->attrib;
     seg->limit = s->limit;
     seg->base = s->base;
+}
+
+void vcpu_load_real_segment(struct vcpu *v, size_t reg, uint16_t selector) {
+    if (virt_vmx) {
+        vmx_set_seg_real(reg, selector);
+        return;
+    }
+    struct vmcb_seg *s = svm_seg(v, reg);
+    s->selector = selector;
+    s->base = (uint64_t)selector << 4;
 }
 
 void vcpu_set_seg(struct vcpu *v, size_t reg, const struct vcpu_segment *seg) {

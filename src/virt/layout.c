@@ -785,7 +785,8 @@ static const struct mmio_ops rom_ops = {
     .write = mmio_absent_write,
     .reads_virtual = true,
     .writes_virtual = true,
-    .writes_ignored = true
+    .writes_ignored = true,
+    .reads_mapped = true
 };
 
 void layout_read_only(uintptr_t gpa, size_t size) {

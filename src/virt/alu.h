@@ -49,11 +49,45 @@
 #define ALU_BTS 22
 #define ALU_BTR 23
 #define ALU_BTC 24
+// Two-operand IMUL, which has no byte form.
+#define ALU_IMUL 25
+
+// The double-precision shifts of alu_double().
+#define ALU_SHLD 0
+#define ALU_SHRD 1
+
+// The one-operand multiplications and divisions of alu_wide().
+#define ALU_MUL 0
+#define ALU_IMUL1 1
+#define ALU_DIV 2
+#define ALU_IDIV 3
 
 // Runs operation op, of size 1, 2, 4, or 8 bytes but for BT to BTC, on dst and
 // src, src being the count of shifts and the bit offset of bit tests, with the
 // status flags in *rflags, which it updates. Returns the result, which only
 // the low size bytes of hold.
 uint64_t alu(unsigned int op, size_t size, uint64_t dst, uint64_t src, uint64_t *rflags);
+// SHLD or SHRD of size 2, 4, or 8 bytes: dst shifted by count, src's bits
+// shifted in.
+uint64_t alu_double(
+    unsigned int op,
+    size_t size,
+    uint64_t dst,
+    uint64_t src,
+    uint8_t count,
+    uint64_t *rflags
+);
+
+// MUL, IMUL, DIV, or IDIV of size 1, 2, 4, or 8 bytes on rAX and *rdx with
+// src, as the processor runs them: they leave rAX's result, returned, and
+// rDX's in *rdx. Divisions must not fault: the caller checks them first.
+uint64_t alu_wide(
+    unsigned int op,
+    size_t size,
+    uint64_t rax,
+    uint64_t *rdx,
+    uint64_t src,
+    uint64_t *rflags
+);
 
 #endif

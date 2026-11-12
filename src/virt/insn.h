@@ -159,6 +159,17 @@ bool insn_mem_linear_moved(
     int64_t delta,
     uint64_t *linear
 );
+// Whether an access of size bytes at offset ea of segment reg passes the
+// segment's checks, as insn_segment_linear() makes them, raising nothing
+// either way: its linear address where it does.
+bool insn_segment_allowed(
+    struct vcpu *v,
+    int reg,
+    uintptr_t ea,
+    size_t size,
+    bool write,
+    uint64_t *linear
+);
 // Where an instruction's ModRM memory operand is, and which of its bytes the
 // instruction reads and writes, as SDM 325462-093, Intel APX 355828-009, and
 // APM 40332 rev. 4.11 describe the instruction: none where it only uses the

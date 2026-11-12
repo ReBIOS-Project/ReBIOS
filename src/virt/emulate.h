@@ -54,6 +54,9 @@ struct emulate_mem {
 // Not one of the instructions emulated here.
 #define EMULATE_UNSUPPORTED 2
 
+// Whether condition code cc, as Jcc's low opcode bits encode it, holds.
+bool emulate_condition(uint64_t rflags, unsigned int cc);
+
 // Emulates the decoded instruction at the guest's RIP: the common integer
 // forms with a memory operand, and the string instructions.
 int emulate(struct vcpu *v, const struct insn *insn, const struct emulate_mem *mem);

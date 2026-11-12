@@ -37,8 +37,11 @@
 #include <virt/mmio.h>
 #include <virt/nvmx.h>
 #include <virt/profile.h>
+#include <virt/run.h>
 #include <virt/task.h>
 #include <virt/vcpu.h>
+#include <virt/vga.h>
+#include <virt/vgabios.h>
 #include <virt/virt.h>
 #include <virt/vlapic.h>
 
@@ -500,6 +503,11 @@ void vmx_set_seg(size_t reg, const struct vcpu_segment *seg) {
     }
     vmx_write(seg_sel_fields[reg], seg->selector);
     vmx_write(seg_ar_fields[reg], seg_to_ar(seg->attrib));
+}
+
+void vmx_set_seg_real(size_t reg, uint16_t selector) {
+    vmx_write(seg_sel_fields[reg], selector);
+    vmx_write(seg_base_fields[reg], (uint64_t)selector << 4);
 }
 
 uint64_t vmx_cr0_mask(void) {
@@ -1115,6 +1123,9 @@ static void vmx_handle_io(struct vcpu *v, uint64_t qual) {
         }
     }
     vcpu_skip_instruction(v);
+    if (vga_port_emulated(port, size) || vgabios_port(port, size)) {
+        run_begin(v);
+    }
 }
 
 // The guest got where the processor cannot go on from, as a triple fault does:
