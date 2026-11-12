@@ -1647,7 +1647,11 @@ static void direct_update(void) {
         if (want) {
             memcpy(fb, vbe.vram, vbe.direct_size);
         } else {
-            memcpy(vbe.vram, fb, vbe.direct_size);
+            // The framebuffer's write-combining memory, with the streaming
+            // loads that read it at speed.
+            simd_begin(vga_draw_level());
+            vga_draw_ops()->read_fb(vbe.vram, fb, vbe.direct_size);
+            simd_end();
         }
         vbe.direct = want;
         // The rest of video memory is its own either way.

@@ -16,9 +16,10 @@
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
 // The drawing kernels that SSE4.1 does better: comparing with a test of all
-// bits, packing to 16 bits unsigned, and blending by a mask. Built with SSE4.1
-// enabled. SSE4.2 adds string comparisons and CRC32, of no use to any kernel,
-// so its level draws with these.
+// bits, packing to 16 bits unsigned, blending by a mask, and reading
+// write-combining memory with streaming loads. Built with SSE4.1 enabled.
+// SSE4.2 adds string comparisons and CRC32, of no use to any kernel, so its
+// level draws with these.
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -40,6 +41,13 @@ static inline u8x16 load(const void *p) {
 
 static inline void store(void *p, u8x16 v) {
     memcpy(p, &v, sizeof(u8x16));
+}
+
+// GCC's builtin for it is not Clang's.
+static inline u8x16 load_streaming(const void *p) {
+    u8x16 v;
+    asm ("movntdqa %1, %0" : "=x"(v) : "m"(*(const u8x16 *)p));
+    return v;
 }
 
 static inline uint32_t differ_mask(u8x16 a, u8x16 b) {
@@ -144,8 +152,40 @@ static void text_line(
     vga_draw_text_line_with(line, f, s, dots);
 }
 
+// A streaming load fetches a whole line of write-combining memory, which the
+// next loads of that line take from a buffer, where plain loads go to memory
+// each: a line's loads come together, as the processor has few such buffers.
+// The fence orders them after the writes that other processors made (SDM
+// 325462-093 Vol. 2B, MOVNTDQA).
+static void read_fb(void *dst, const void *src, size_t size) {
+    uint8_t *d = dst;
+    const uint8_t *s = src;
+    asm volatile ("mfence" ::: "memory");
+    size_t i = 0;
+    for (; i < size && (uintptr_t)(s + i) % 16 != 0; i++) {
+        d[i] = s[i];
+    }
+    for (; i + 64 <= size; i += 64) {
+        u8x16 v0 = load_streaming(s + i);
+        u8x16 v1 = load_streaming(s + i + 16);
+        u8x16 v2 = load_streaming(s + i + 32);
+        u8x16 v3 = load_streaming(s + i + 48);
+        store(d + i, v0);
+        store(d + i + 16, v1);
+        store(d + i + 32, v2);
+        store(d + i + 48, v3);
+    }
+    for (; i + 16 <= size; i += 16) {
+        store(d + i, load_streaming(s + i));
+    }
+    for (; i < size; i++) {
+        d[i] = s[i];
+    }
+}
+
 const struct vga_draw_ops vga_draw_sse4_1 = {
     .differ = differ,
+    .read_fb = read_fb,
     .to_rgb565 = to_rgb565,
     .to_rgb555 = to_rgb555,
     .text_line = text_line

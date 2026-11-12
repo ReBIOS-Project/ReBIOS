@@ -135,10 +135,11 @@ struct cpu {
     uint64_t simd_xcr0;
     // The builds of the emulated VGA's drawing kernels that the processor
     // found fastest, the SIMD level they need, and how long its fastest copy
-    // to the framebuffer took (virt/vga_draw.c).
+    // to the framebuffer and from it took (virt/vga_draw.c).
     const struct vga_draw_ops *draw_ops;
     size_t draw_level;
     uint64_t draw_copy_ticks;
+    uint64_t draw_read_ticks;
     // What the processor draws the emulated VGA with (virt/vga.c).
     struct vga_scratch *vga_scratch;
     // Whether its vCPU waits rather than runs the guest: halted, or not

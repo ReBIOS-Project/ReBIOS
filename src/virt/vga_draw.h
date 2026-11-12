@@ -111,6 +111,8 @@ struct vga_draw_ops {
     void (*copy)(void *dst, const void *src, size_t size);
     // The same to the framebuffer's write-combining memory.
     void (*copy_fb)(void *dst, const void *src, size_t size);
+    // The same from it.
+    void (*read_fb)(void *dst, const void *src, size_t size);
     void (*fill)(uint32_t *dst, uint32_t value, size_t count);
     // Pixels of the Bochs interface's video memory, of 8 bits through a
     // palette, of 15, 16, or 24 bits, or of 32 bits with whatever their high

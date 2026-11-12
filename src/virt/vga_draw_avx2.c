@@ -16,7 +16,8 @@
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
 // The drawing kernels with AVX2's 32-byte integer arithmetic, whose byte
-// shuffles and packs work on each 16-byte half alone. Built with AVX2 enabled.
+// shuffles and packs work on each 16-byte half alone, and its 32-byte
+// streaming loads. Built with AVX2 enabled.
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -49,6 +50,13 @@ static inline u8x32 load(const void *p) {
 
 static inline void store(void *p, u8x32 v) {
     memcpy(p, &v, sizeof(u8x32));
+}
+
+// GCC's builtin for it is not Clang's.
+static inline u8x32 load_streaming(const void *p) {
+    u8x32 v;
+    asm ("vmovntdqa %1, %0" : "=x"(v) : "m"(*(const u8x32 *)p));
+    return v;
 }
 
 static inline u8x32 join(u8x16 low, u8x16 high) {
@@ -413,8 +421,32 @@ static void text_line(
     vga_draw_text_line_with(line, f, s, dots);
 }
 
+// As vga_draw_sse4_1.c's, two loads to a line.
+static void read_fb(void *dst, const void *src, size_t size) {
+    uint8_t *d = dst;
+    const uint8_t *s = src;
+    asm volatile ("mfence" ::: "memory");
+    size_t i = 0;
+    for (; i < size && (uintptr_t)(s + i) % 32 != 0; i++) {
+        d[i] = s[i];
+    }
+    for (; i + 64 <= size; i += 64) {
+        u8x32 v0 = load_streaming(s + i);
+        u8x32 v1 = load_streaming(s + i + 32);
+        store(d + i, v0);
+        store(d + i + 32, v1);
+    }
+    for (; i + 32 <= size; i += 32) {
+        store(d + i, load_streaming(s + i));
+    }
+    for (; i < size; i++) {
+        d[i] = s[i];
+    }
+}
+
 const struct vga_draw_ops vga_draw_avx2 = {
     .differ = differ,
+    .read_fb = read_fb,
     .convert8 = convert8,
     .convert15 = convert15,
     .convert16 = convert16,

@@ -50,7 +50,8 @@ static const struct vga_draw_ops *const betters[SIMD_LEVELS] = {
 static struct vga_draw_ops levels[SIMD_LEVELS];
 
 // The buffers the kernels run on, the planes of a VGA frame, and the
-// framebuffer's rows that the copies to it write back as they were.
+// framebuffer's rows, which the reads from it take and the copies to it write
+// back as they were.
 static struct {
     uint8_t *a;
     uint8_t *b;
@@ -164,6 +165,10 @@ static void run_copy_fb(const struct vga_draw_ops *ops) {
     ops->copy_fb(bench.fb, bench.rows, bench.fb_bytes);
 }
 
+static void run_read_fb(const struct vga_draw_ops *ops) {
+    ops->read_fb(bench.rows, bench.fb, bench.fb_bytes);
+}
+
 static void run_fill(const struct vga_draw_ops *ops) {
     ops->fill((uint32_t *)bench.dst, 0x123456, BENCH_PIXELS);
 }
@@ -240,6 +245,8 @@ struct kernel {
 static const struct kernel kernels[] = {
     { "differ", offsetof(struct vga_draw_ops, differ), run_differ },
     { "copy", offsetof(struct vga_draw_ops, copy), run_copy },
+    // Before the copies to the framebuffer, which write back what it read.
+    { "read_fb", offsetof(struct vga_draw_ops, read_fb), run_read_fb },
     { "copy_fb", offsetof(struct vga_draw_ops, copy_fb), run_copy_fb },
     { "fill", offsetof(struct vga_draw_ops, fill), run_fill },
     { "convert8", offsetof(struct vga_draw_ops, convert8), run_convert8 },
@@ -323,7 +330,6 @@ static void pick(struct cpu *cpu) {
             top = l;
         }
     }
-    memcpy(bench.rows, bench.fb, bench.fb_bytes);
     simd_begin(top);
     for (size_t i = 0; i < ARRAY_COUNT(kernels); i++) {
         uint64_t ticks;
@@ -336,6 +342,9 @@ static void pick(struct cpu *cpu) {
         if (kernels[i].run == run_copy_fb) {
             cpu->draw_copy_ticks = ticks;
         }
+        if (kernels[i].run == run_read_fb) {
+            cpu->draw_read_ticks = ticks;
+        }
     }
     simd_end();
     cpu->draw_ops = picked;
@@ -347,9 +356,13 @@ static void pick(struct cpu *cpu) {
     uint64_t rate = cpu->draw_copy_ticks != 0
                   ? bytes * time_tsc_hz() / cpu->draw_copy_ticks >> 20
                   : 0;
+    uint64_t read_rate = cpu->draw_read_ticks != 0
+                       ? bytes * time_tsc_hz() / cpu->draw_read_ticks >> 20
+                       : 0;
     printf(
         "Processor %#x draws the emulated VGA with up to %s, copying to the framebuffer at %llu "
-        "MiB/s\n", cpu->apic_id, simd_level_name(level), (unsigned long long)rate
+        "MiB/s and from it at %llu MiB/s\n", cpu->apic_id, simd_level_name(level),
+        (unsigned long long)rate, (unsigned long long)read_rate
     );
 }
 

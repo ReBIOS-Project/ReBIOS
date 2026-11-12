@@ -434,6 +434,8 @@ const struct vga_draw_ops vga_draw_sse2 = {
     .differ = differ,
     .copy = copy,
     .copy_fb = copy_fb,
+    // With plain loads, the streaming ones coming with SSE4.1.
+    .read_fb = copy,
     .fill = fill,
     .convert8 = convert8,
     .convert15 = convert15,
