@@ -139,6 +139,9 @@
 // that what the dirty flags do not show, devices' writes for instance, shows
 // all the same.
 #define COMPARE_ALL_NS ((uint64_t)1000000000)
+// The longest the other processors wait out of the guest for the last pages of
+// video memory to come back from the framebuffer.
+#define LEAVE_PAUSE_NS ((uint64_t)250000)
 // The lines of a frame that a processor takes at a time, an even number, as a
 // double scan's second line is its first again.
 #define SHARE_LINES 16
@@ -211,6 +214,12 @@ static struct {
     size_t direct_size;
     bool direct;
     bool panned;
+    // While the guest's mode leaves the framebuffer's, the framebuffer stays
+    // the start of video memory to the guest as that comes back from it: the
+    // pages still to read back, a bit for each, and the next to look at.
+    bool leaving;
+    uint64_t *leave_pages;
+    size_t leave_next;
     // Whether the processor's dirty flags tell which pages of video memory the
     // guest wrote to, and those pages: since the frame shown began, and
     // through banks the window showed before, a bit for each.
@@ -560,7 +569,20 @@ static void vram_clear(size_t size) {
         done = size < vbe.direct_size ? size : vbe.direct_size;
         memset(vram_at(0), 0, done);
     }
+    // What comes back from the framebuffer meanwhile is cleared too.
+    if (vbe.leaving) {
+        done = 0;
+    }
     memset(vbe.vram + done, 0, size - done);
+}
+
+// Video memory's byte at offset as the guest reaches it now, and while the
+// framebuffer's part comes back, there too.
+static void vram_write(size_t offset, uint8_t byte) {
+    *vram_at(offset) = byte;
+    if (vbe.leaving && offset < vbe.direct_size) {
+        vbe.vram[offset] = byte;
+    }
 }
 
 // Maps size bytes of video memory from offset on at gpa, as the guest reaches
@@ -568,7 +590,10 @@ static void vram_clear(size_t size) {
 static void map_vram(uintptr_t gpa, size_t offset, size_t size) {
     if (vbe.direct && offset < vbe.direct_size) {
         size_t n = vbe.direct_size - offset < size ? vbe.direct_size - offset : size;
-        gpt_map(gpa, core_handoff->video.framebuffer.base + offset, n, GPT_RWX, MT_WC);
+        gpt_map(
+            gpa, core_handoff->video.framebuffer.base + offset, n,
+            GPT_RWX | (vbe.track ? GPT_DIRTY : 0), MT_WC
+        );
         gpa += n;
         offset += n;
         size -= n;
@@ -579,28 +604,27 @@ static void map_vram(uintptr_t gpa, size_t offset, size_t size) {
 }
 
 // While the Bochs interface is on, the window's first 64 KiB show a bank of
-// its video memory, normally mapped there directly, and the rest nothing.
-static uint8_t *vbe_window_byte(uint32_t offset) {
-    uint64_t at = ((uint64_t)vbe.regs[DISPI_BANK] << 16) + offset;
-    return offset < PLANE_SIZE && at < vbe.vram_size ? vram_at(at) : NULL;
+// its video memory, normally mapped there directly, and the rest nothing:
+// where in video memory offset is, false for nothing.
+static bool vbe_window_at(uint32_t offset, size_t *at) {
+    *at = ((size_t)vbe.regs[DISPI_BANK] << 16) + offset;
+    return offset < PLANE_SIZE && *at < vbe.vram_size;
 }
 
 static uint8_t window_byte_read(bool vbe_mode, uint32_t offset) {
     if (vbe_mode) {
-        uint8_t *p = vbe_window_byte(offset);
-        return p != NULL ? *p : 0xff;
+        size_t at;
+        return vbe_window_at(offset, &at) ? *vram_at(at) : 0xff;
     }
     return mem_read(offset);
 }
 
 static void window_byte_write(bool vbe_mode, uint32_t offset, uint8_t byte) {
+    size_t at;
     if (!vbe_mode) {
         mem_write(offset, byte);
-        return;
-    }
-    uint8_t *p = vbe_window_byte(offset);
-    if (p != NULL) {
-        *p = byte;
+    } else if (vbe_window_at(offset, &at)) {
+        vram_write(at, byte);
     }
 }
 
@@ -1628,9 +1652,157 @@ static bool direct_wanted(void) {
         && vbe.line_bytes == fb->pitch && vbe.start == 0;
 }
 
-// Moves the start of video memory into the firmware's framebuffer or back as
-// the mode has it, with the other processors out of the guest, as what they
-// write meanwhile would be lost.
+// The guest's linear framebuffer and window on video memory, its start in the
+// firmware's framebuffer or not, the rest its own either way.
+static void direct_map(void) {
+    if (vbe.lfb != 0) {
+        map_vram(vbe.lfb, 0, vbe.direct_size);
+    }
+    if (vbe.window_bank != NO_BANK) {
+        map_vram(WINDOW_BASE, (uint64_t)vbe.window_bank << 16, PLANE_SIZE);
+    }
+    gpt_flush();
+    out.vbe_valid = false;
+}
+
+// When the guest's mode leaves the framebuffer's, the start of video memory
+// comes back from the framebuffer, with the streaming loads that read its
+// write-combining memory at speed, a slice at a time while the guest goes on
+// writing to it there. The pages it writes to meanwhile, which the dirty flags
+// tell, come back again, until those left take at most LEAVE_PAUSE_NS with the
+// other processors out of the guest, and the guest's mode then has video
+// memory of its own. Without dirty flags, it all comes back at once.
+
+// Adds the pages of the start of video memory that the guest wrote to since
+// the last call, through its linear framebuffer and the window, now and
+// before, to those to read back, their dirty flags cleared: with the other
+// processors out of the guest, back in after gpt_flush().
+static void leave_take_written(void) {
+    size_t pages = vbe.direct_size / PAGE_SIZE;
+    size_t words = vbe.vram_size / PAGE_SIZE / 64;
+    if (vbe.lfb != 0) {
+        gpt_dirty(vbe.lfb, vbe.direct_size, vbe.leave_pages, 0, true);
+    }
+    if (vbe.window_bank != NO_BANK) {
+        gpt_dirty(
+            WINDOW_BASE, PLANE_SIZE, vbe.leave_pages,
+            ((uint64_t)vbe.window_bank << 16) / PAGE_SIZE, true
+        );
+    }
+    for (size_t i = 0; i < words; i++) {
+        vbe.leave_pages[i] |= vbe.written_before[i];
+        vbe.written_before[i] = 0;
+    }
+    atomic_store_explicit(&vbe.written_before_any, false, memory_order_relaxed);
+    // The pages after the framebuffer's are video memory's own.
+    if (pages % 64 != 0) {
+        vbe.leave_pages[pages / 64] &= ((uint64_t)1 << (pages % 64)) - 1;
+    }
+    for (size_t i = (pages + 63) / 64; i < words; i++) {
+        vbe.leave_pages[i] = 0;
+    }
+}
+
+// The first page from page on still to read back, the framebuffer's page count
+// where none is.
+static size_t leave_find(size_t page) {
+    size_t pages = vbe.direct_size / PAGE_SIZE;
+    for (; page < pages; page++) {
+        if ((vbe.leave_pages[page / 64] & ((uint64_t)1 << (page % 64))) != 0) {
+            break;
+        }
+    }
+    return page;
+}
+
+static void leave_read(const struct vga_draw_ops *ops, size_t page) {
+    const uint8_t *fb = (const uint8_t *)(uintptr_t)core_handoff->video.framebuffer.base;
+    ops->read_fb(vbe.vram + page * PAGE_SIZE, fb + page * PAGE_SIZE, PAGE_SIZE);
+    vbe.leave_pages[page / 64] &= ~((uint64_t)1 << (page % 64));
+}
+
+// With the other processors out of the guest: every page to read back, none
+// written to since.
+static void leave_start(void) {
+    leave_take_written();
+    for (size_t page = 0; page < vbe.direct_size / PAGE_SIZE; page++) {
+        vbe.leave_pages[page / 64] |= (uint64_t)1 << (page % 64);
+    }
+    vbe.leave_next = 0;
+    vbe.leaving = true;
+    gpt_flush();
+}
+
+// The pages written to since the last look, and those left, with the other
+// processors out of the guest for at most LEAVE_PAUSE_NS.
+static void leave_finish(const struct vga_draw_ops *ops) {
+    vcpu_pause_others();
+    spinlock_acquire(&vga.lock);
+    size_t pages = vbe.direct_size / PAGE_SIZE;
+    size_t page = pages;
+    // The guest's mode may be the framebuffer's again.
+    if (!direct_wanted()) {
+        leave_take_written();
+        uint64_t until = time_ns() + LEAVE_PAUSE_NS;
+        page = leave_find(0);
+        while (page < pages && time_ns() < until) {
+            leave_read(ops, page);
+            page = leave_find(page + 1);
+        }
+    }
+    vbe.leaving = page < pages;
+    vbe.leave_next = 0;
+    if (!vbe.leaving && !direct_wanted()) {
+        vbe.direct = false;
+        direct_map();
+    } else {
+        gpt_flush();
+    }
+    spinlock_release(&vga.lock);
+    vcpu_resume_others();
+}
+
+// A slice of reading video memory back, and after a pass over it, the end
+// where it is near. The guest's processor comes back after a turn as long.
+static void direct_leave(void) {
+    struct vcpu *v = this_cpu()->vcpu;
+    const struct vga_draw_ops *ops = vga_draw_ops();
+    size_t pages = vbe.direct_size / PAGE_SIZE;
+    bool passed = false;
+    simd_begin(vga_draw_level());
+    for (bool first = true; ; first = false) {
+        if (!first && cpu_slice_over()) {
+            break;
+        }
+        spinlock_acquire(&vga.lock);
+        // The guest's mode may be the framebuffer's again.
+        if (direct_wanted()) {
+            vbe.leaving = false;
+        }
+        size_t page = vbe.leaving ? leave_find(vbe.leave_next) : pages;
+        if (page < pages) {
+            leave_read(ops, page);
+            vbe.leave_next = page + 1;
+        }
+        spinlock_release(&vga.lock);
+        if (page == pages) {
+            passed = vbe.leaving;
+            break;
+        }
+    }
+    // A stepping vCPU keeps the others paused itself.
+    if (passed && !v->stepping) {
+        leave_finish(ops);
+    }
+    simd_end();
+    if (vbe.leaving) {
+        vcpu_exit_after_turn(v);
+    }
+}
+
+// Moves the start of video memory into the firmware's framebuffer as the mode
+// has it, with the other processors out of the guest, as what they write
+// meanwhile would be lost, or starts it coming back.
 static void direct_update(void) {
     spinlock_acquire(&vga.lock);
     bool want = direct_wanted();
@@ -1642,27 +1814,19 @@ static void direct_update(void) {
     vcpu_pause_others();
     spinlock_acquire(&vga.lock);
     want = direct_wanted();
-    if (want != vbe.direct) {
-        uint8_t *fb = (uint8_t *)(uintptr_t)core_handoff->video.framebuffer.base;
-        if (want) {
-            memcpy(fb, vbe.vram, vbe.direct_size);
-        } else {
-            // The framebuffer's write-combining memory, with the streaming
-            // loads that read it at speed.
-            simd_begin(vga_draw_level());
-            vga_draw_ops()->read_fb(vbe.vram, fb, vbe.direct_size);
-            simd_end();
-        }
-        vbe.direct = want;
-        // The rest of video memory is its own either way.
-        if (vbe.lfb != 0) {
-            map_vram(vbe.lfb, 0, vbe.direct_size);
-        }
-        if (vbe.window_bank != NO_BANK) {
-            map_vram(WINDOW_BASE, (uint64_t)vbe.window_bank << 16, PLANE_SIZE);
-        }
-        gpt_flush();
-        out.vbe_valid = false;
+    uint8_t *fb = (uint8_t *)(uintptr_t)core_handoff->video.framebuffer.base;
+    if (want && !vbe.direct) {
+        memcpy(fb, vbe.vram, vbe.direct_size);
+        vbe.direct = true;
+        direct_map();
+    } else if (!want && vbe.direct && vbe.track) {
+        leave_start();
+    } else if (!want && vbe.direct) {
+        simd_begin(vga_draw_level());
+        vga_draw_ops()->read_fb(vbe.vram, fb, vbe.direct_size);
+        simd_end();
+        vbe.direct = false;
+        direct_map();
     }
     spinlock_release(&vga.lock);
     vcpu_resume_others();
@@ -2425,6 +2589,10 @@ static bool job_stale(void) {
 // Abandons the frame under way where it no longer shows what the display is,
 // and starts the next one once it is due.
 static void frame_next(void) {
+    if (vbe.leaving) {
+        direct_leave();
+        return;
+    }
     uint64_t now = time_ns();
     uint32_t step = atomic_load_explicit(&job.step, memory_order_acquire);
     if (step != STEP_IDLE && job_stale()) {
@@ -2486,6 +2654,7 @@ static void vbe_init(void) {
         size_t bitmap_pages = page_count(vbe.vram_size / PAGE_SIZE / 8);
         vbe.written = page_alloc(bitmap_pages);
         vbe.written_before = page_alloc(bitmap_pages);
+        vbe.leave_pages = page_alloc(bitmap_pages);
     }
     out.shadow = vbe.vram + vbe.vram_size;
     struct io_handler ports = { DISPI_PORT, DISPI_PORT_COUNT, dispi_ports, NULL, false };
