@@ -793,6 +793,136 @@ bool insn_mem_operand(struct vcpu *v, const struct insn *insn, struct insn_mem *
     return true;
 }
 
+// The stack's slots an instruction of the one-byte or 0F map pushes or pops,
+// the bytes of each, and where it goes once done.
+static bool stack_kind(
+    struct vcpu *v,
+    const struct insn *insn,
+    size_t *bytes,
+    bool *push,
+    bool *from_bp,
+    struct insn_stack *stack
+) {
+    bool map0 = insn->space == INSN_SPACE_LEGACY;
+    uint8_t op = insn->opcode_byte;
+    unsigned int reg = (insn->modrm >> 3) & 7;
+    bool real = (vcpu_cr0(v) & CR0_PE) == 0;
+    // Stack operations in 64-bit mode are 64-bit but with 66h (SDM 325462-093
+    // Vol. 1, 6.2.5). Its near branches stay 64-bit there on Intel's
+    // processors (7.3.8.3) but not on AMD's (APM 40332 rev. 4.11, Vol. 3,
+    // 2.5.6), so those are left out.
+    size_t size = insn->operand_size;
+    if (insn->long_mode) {
+        size = size == 2 ? 2 : 8;
+    }
+    bool near_branch = !insn->long_mode || insn->operand_size != 2;
+    uint64_t ip_mask = insn->long_mode ? UINT64_MAX : size == 2 ? 0xffff : 0xffffffff;
+    uint64_t next = vcpu_rip(v) + insn->length;
+    int64_t rel = insn->imm_size == 2 ? (int16_t)insn->imm : (int32_t)insn->imm;
+    *bytes = size;
+    *push = false;
+    *from_bp = false;
+    stack->end = INSN_END_NEXT;
+    stack->slot = size;
+    stack->loads_flags = false;
+    // A segment register's push fills its slot but with 32-bit operands, where
+    // processors either zero-extend the selector or leave the slot's upper
+    // bytes as they were (SDM 325462-093 Vol. 2B, PUSH).
+    bool sreg_push = size != 4;
+    if (!map0) {
+        // POP FS and POP GS, and PUSH FS and PUSH GS.
+        *push = op == 0xa0 || op == 0xa8;
+        return insn->space == (INSN_SPACE_LEGACY | 1)
+            && (op == 0xa1 || op == 0xa9 || (*push && sreg_push));
+    }
+    if (op >= 0x50 && op <= 0x57) {
+        *push = true;
+    } else if (!insn->long_mode && (op == 0x06 || op == 0x0e || op == 0x16 || op == 0x1e)) {
+        *push = true;
+        if (!sreg_push) {
+            return false;
+        }
+    } else if ((op >= 0x58 && op <= 0x5f) || (!insn->long_mode && (op == 0x07 || op == 0x1f))) {
+        // POP of a register, of ES, or of DS.
+    } else if (op == 0x68 || op == 0x6a || op == 0x9c || (op == 0xff && reg == 6)) {
+        *push = true;
+    } else if (op == 0x9d) {
+        stack->loads_flags = true;
+    } else if (op == 0x8f && reg == 0) {
+        // Where RSP is the destination's base, its address follows the pop.
+        unsigned int base = insn->has_sib ? insn->sib & 7 : insn->modrm & 7;
+        if (insn->address_size != 2 && base == 4 && insn->modrm >> 6 != 3) {
+            return false;
+        }
+    } else if (!insn->long_mode && (op == 0x60 || op == 0x61)) {
+        *bytes = 8 * size;
+        *push = op == 0x60;
+    } else if (op == 0xc9) {
+        *from_bp = true;
+    } else if (op == 0xc8) {
+        // ENTER of nesting level 0 only pushes the frame pointer.
+        *push = true;
+        if (((insn->imm >> 16) & 0x1f) != 0) {
+            return false;
+        }
+    } else if (op == 0xe8 && near_branch) {
+        *push = true;
+        stack->end = INSN_END_TARGET;
+        stack->target = (next + (uint64_t)rel) & ip_mask;
+    } else if (op == 0xff && reg == 2 && insn->modrm >> 6 == 3 && near_branch) {
+        unsigned int rm = (insn->modrm & 7) | ((insn->rex & INSN_REX_B) != 0 ? 8 : 0)
+                        | ((insn->rex_upper & INSN_REX_B) != 0 ? 16 : 0);
+        *push = true;
+        stack->end = INSN_END_TARGET;
+        stack->target = vcpu_gpr(v, rm) & ip_mask;
+    } else if ((op == 0xc3 || op == 0xc2) && near_branch) {
+        stack->end = INSN_END_POP_NEAR;
+    } else if (real && op == 0x9a) {
+        *bytes = 2 * size;
+        *push = true;
+        stack->end = INSN_END_FAR;
+        stack->target = insn->imm & (size == 2 ? 0xffff : 0xffffffff);
+        stack->selector = (uint16_t)(insn->imm >> (size * 8));
+    } else if (real && (op == 0xcb || op == 0xca)) {
+        *bytes = 2 * size;
+        stack->end = INSN_END_POP_FAR;
+    } else if (real && op == 0xcf) {
+        *bytes = 3 * size;
+        stack->end = INSN_END_POP_FAR;
+        stack->loads_flags = true;
+    } else {
+        return false;
+    }
+    return true;
+}
+
+bool insn_stack_operand(struct vcpu *v, const struct insn *insn, struct insn_stack *stack) {
+    size_t bytes;
+    bool push;
+    bool from_bp;
+    if (!stack_kind(v, insn, &bytes, &push, &from_bp, stack)) {
+        return false;
+    }
+    // In 64-bit mode SS has no base (SDM 325462-093 Vol. 1, 6.2.5); elsewhere
+    // its B flag makes the stack pointer ESP rather than SP.
+    uint64_t mask = UINT64_MAX;
+    uint64_t base = 0;
+    if (!insn->long_mode) {
+        mask = (vcpu_seg_attrib(v, VCPU_SEG_SS) & VCPU_SEG_DB) != 0 ? 0xffffffff : 0xffff;
+        base = vcpu_seg_base(v, VCPU_SEG_SS);
+    }
+    uint64_t sp = (from_bp ? vcpu_gpr(v, 5) : vcpu_rsp(v)) & mask;
+    uint64_t start = push ? (sp - bytes) & mask : sp;
+    // The slots wrap round the stack's end.
+    if (mask != UINT64_MAX && start + bytes - 1 > mask) {
+        return false;
+    }
+    stack->mem.linear = insn->long_mode ? start : (base + start) & 0xffffffff;
+    stack->mem.size = bytes;
+    stack->mem.access = push ? INSN_MEM_WRITE : INSN_MEM_READ;
+    return true;
+}
+
 #define SEG_PRESENT ((uint32_t)1 << 7)
 #define SEG_CODE ((uint32_t)1 << 3)
 #define SEG_EXPAND_DOWN ((uint32_t)1 << 2)

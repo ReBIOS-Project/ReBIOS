@@ -107,6 +107,29 @@ struct insn_mem {
     unsigned int access;
 };
 
+// Where an instruction that reaches the stack leaves the guest once done: at
+// the next instruction, at target in the same code segment, at the offset it
+// pops there, at the offset and then the selector it pops, or at target in
+// selector's segment.
+#define INSN_END_NEXT 0
+#define INSN_END_TARGET 1
+#define INSN_END_POP_NEAR 2
+#define INSN_END_POP_FAR 3
+#define INSN_END_FAR 4
+
+// What an instruction does with the stack beside its ModRM operand.
+struct insn_stack {
+    struct insn_mem mem;
+    // INSN_END_*.
+    int end;
+    uint64_t target;
+    uint16_t selector;
+    // The bytes of each slot it pushes or pops.
+    size_t slot;
+    // Whether it loads RFLAGS, as POPF and IRET do.
+    bool loads_flags;
+};
+
 // The length of the instruction at the guest's CS:RIP, for intercepted
 // instructions that only need skipping, on processors that do not report it.
 // Returns 0 if it cannot be read or is not one of those instructions.
@@ -136,6 +159,10 @@ bool insn_mem_linear_moved(
 // operand's address, as CLFLUSH. Returns false where the instruction has no
 // such operand, or they do not say.
 bool insn_mem_operand(struct vcpu *v, const struct insn *insn, struct insn_mem *mem);
+// The stack accesses of the stack instructions it knows, and how they end:
+// false for others, and where those accesses or that end depend on more than
+// it knows, as for the far transfers outside real mode.
+bool insn_stack_operand(struct vcpu *v, const struct insn *insn, struct insn_stack *stack);
 // A string instruction's linear address for size bytes: its destination at
 // ES:rDI, or its source at DS:rSI or the segment an override names. False,
 // with #GP(0) or #SS(0) raised, where the segment does not allow the access.
