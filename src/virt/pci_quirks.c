@@ -30,6 +30,7 @@
 #include <sys/mm.h>
 #include <sys/x86.h>
 #include <virt/io.h>
+#include <virt/lpss_ids.h>
 #include <virt/mmio.h>
 #include <virt/pci_virt.h>
 #include <virt/vcpu.h>
@@ -77,6 +78,16 @@
 #define RTL8168_ERIAR_TYPE ((uint32_t)0x7fff0000)
 #define RTL8168_ERIAR_MSIX ((uint32_t)0x00010000)
 #define RTL8168_ERIAR_OFFSET ((uint32_t)0x00000fff)
+
+// Intel's LPSS functions keep the address of their BAR 0 in their remap
+// address registers, which must hold it (Intel 600 and 700 Series PCH
+// datasheet 680836-005, Vol. 2, 13.3.13 and 13.3.14), and which their drivers
+// fill in with the address they see (Linux 7.3's drivers/mfd/intel-lpss.c,
+// intel_lpss_set_remap_addr()): the host's goes there, while the guest reads
+// back what it wrote, or the registers' default of 0 before it writes.
+#define LPSS_BAR 0
+#define LPSS_REMAP_ADDR 0x240
+#define LPSS_REMAP_SIZE 8
 
 // A copy of the configuration space in a memory BAR, the rest of the pages it
 // is on the device's.
@@ -134,6 +145,12 @@ struct rtl8168 {
     bool msix;
     uint32_t address;
     uint32_t data;
+};
+
+struct lpss {
+    uintptr_t host;
+    // The remap address as the guest wrote it.
+    uint64_t remap;
 };
 
 static uint64_t config_read(struct pci_cfg_addr addr, uint32_t offset, size_t size) {
@@ -445,6 +462,65 @@ static void rtl8168_add(const struct pci_enum_function *f) {
     }
 }
 
+// The bits of an access of size bytes, at the bottom.
+static uint64_t size_mask(size_t size) {
+    return size == 8 ? UINT64_MAX : ((uint64_t)1 << size * 8) - 1;
+}
+
+static uint64_t lpss_read(struct vcpu *v, void *ctx, uint64_t offset, size_t size) {
+    (void)v;
+    const struct lpss *l = ctx;
+    if (!within(offset, size, LPSS_REMAP_ADDR, LPSS_REMAP_SIZE)) {
+        return mmio_read_host(l->host + offset, size);
+    }
+    return l->remap >> (offset - LPSS_REMAP_ADDR) * 8 & size_mask(size);
+}
+
+static void lpss_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value) {
+    (void)v;
+    struct lpss *l = ctx;
+    if (!within(offset, size, LPSS_REMAP_ADDR, LPSS_REMAP_SIZE)) {
+        mmio_write_host(l->host + offset, size, value);
+        return;
+    }
+    size_t shift = (offset - LPSS_REMAP_ADDR) * 8;
+    uint64_t mask = size_mask(size) << shift;
+    l->remap = (l->remap & ~mask) | (value << shift & mask);
+    mmio_write_host(l->host + LPSS_REMAP_ADDR, 4, (uint32_t)l->host);
+    mmio_write_host(l->host + LPSS_REMAP_ADDR + 4, 4, (uint32_t)(l->host >> 32));
+}
+
+static const struct mmio_ops lpss_ops = { .read = lpss_read, .write = lpss_write };
+
+static bool lpss_function(const struct pci_enum_function *f) {
+    if (f->vendor_id != PCI_VENDOR_ID_INTEL) {
+        return false;
+    }
+    for (size_t i = 0; i < lpss_ids_count; i++) {
+        if (lpss_ids[i] == f->device_id) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void lpss_add(const struct pci_enum_function *f) {
+    const struct pci_enum_bar *b = &f->bars[LPSS_BAR];
+    if ((b->kind != PCI_ENUM_BAR_MEM32 && b->kind != PCI_ENUM_BAR_MEM64) || b->base == 0
+     || b->size < LPSS_REMAP_ADDR + LPSS_REMAP_SIZE) {
+        return;
+    }
+    struct lpss *l = kmalloc(sizeof(struct lpss));
+    *l = (struct lpss){ .host = b->base };
+    mm_map_device(l->host, PAGE_SIZE);
+    if (!pci_virt_trap(f->addr, LPSS_BAR, LPSS_REMAP_ADDR, LPSS_REMAP_SIZE, &lpss_ops, l)) {
+        printf(
+            "PCI %02x:%02x.%x: its remap address holds what the guest writes there\n",
+            f->addr.bus, f->addr.device, f->addr.function
+        );
+    }
+}
+
 void pci_quirks_init(void) {
     const struct pci_enum_topology *t = pci_enum_topology();
     const struct handoff_video *video = &core_handoff->video;
@@ -479,6 +555,8 @@ void pci_quirks_init(void) {
             );
         } else if (f->vendor_id == PCI_VENDOR_ID_REALTEK && f->device_id == RTL8168_DEVICE_ID) {
             rtl8168_add(f);
+        } else if (lpss_function(f)) {
+            lpss_add(f);
         }
     }
 }

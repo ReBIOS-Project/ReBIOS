@@ -18,11 +18,12 @@
 #ifndef VIRT__PCI_QUIRKS_H
 #define VIRT__PCI_QUIRKS_H
 
-// Takes over the other ways some devices give their configuration space and
-// MSI-X table, so that the guest finds there what the configuration ports and
-// the table show it: NVIDIA's and AMD's GPUs' copies of their configuration
-// space, which hold the host's BAR addresses, and the RTL8168's window onto
-// its MSI-X table. Needs pci_virt_init() and vga_init().
+// Takes over the registers through which some devices show or need their
+// host's view of themselves: NVIDIA's and AMD's GPUs' copies of their
+// configuration space, which hold the host's BAR addresses, the RTL8168's
+// window onto its MSI-X table, and the remap address of Intel's LPSS
+// functions, which must hold their BAR's address on the host. Needs
+// pci_virt_init() and vga_init().
 void pci_quirks_init(void);
 
 #endif
