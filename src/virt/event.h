@@ -19,6 +19,7 @@
 #define VIRT__EVENT_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <virt/vcpu.h>
 
@@ -58,5 +59,9 @@ bool event_cut_short(struct vcpu *v);
 // processor does, through what memory is to the hypervisor's emulation, as
 // where it reached emulated memory: false where it cannot.
 bool event_deliver_real_mode(struct vcpu *v);
+// The same for the software interrupt or exception that the instruction of
+// length bytes at RIP raises, its frame returning past the instruction: false
+// outside real mode, or where it cannot.
+bool event_raise_real_mode(struct vcpu *v, uint8_t vector, size_t length);
 
 #endif

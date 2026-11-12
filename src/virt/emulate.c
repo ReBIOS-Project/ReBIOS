@@ -22,6 +22,7 @@
 #include <sys/cpu.h>
 #include <sys/x86.h>
 #include <virt/alu.h>
+#include <virt/event.h>
 #include <virt/insn.h>
 #include <virt/vcpu.h>
 
@@ -551,12 +552,46 @@ static int string_op(struct ctx *c) {
     return EMULATE_DONE;
 }
 
+// INT n, INT3, INT1, and INTO in real mode, whose frame reaches emulated
+// memory: their delivery clears the trap flag that SVM's stepping sets, so
+// that no single-step trap would end it (SDM 325462-093 Vol. 3B, 20.3.1.4),
+// and the hypervisor delivers them itself.
+static int interrupt(struct vcpu *v, const struct insn *insn) {
+    uint8_t vector;
+    switch (insn->opcode) {
+        case 0xcd: {
+            vector = (uint8_t)insn->imm;
+            break;
+        }
+        case 0xcc: {
+            vector = VECTOR_BP;
+            break;
+        }
+        case 0xf1: {
+            vector = 1;
+            break;
+        }
+        default: {
+            // INTO raises nothing where OF is clear.
+            if ((vcpu_rflags(v) & RFLAGS_OF) == 0) {
+                return EMULATE_UNSUPPORTED;
+            }
+            vector = VECTOR_OF;
+            break;
+        }
+    }
+    return event_raise_real_mode(v, vector, insn->length) ? EMULATE_DONE : EMULATE_UNSUPPORTED;
+}
+
 int emulate(struct vcpu *v, const struct insn *insn, const struct emulate_mem *mem) {
     struct ctx c = { v, insn, mem };
     if (insn->vex) {
         return EMULATE_UNSUPPORTED;
     }
     unsigned int op = insn->opcode;
+    if ((op == 0xcc || op == 0xcd || op == 0xce || op == 0xf1) && (vcpu_cr0(v) & CR0_PE) == 0) {
+        return interrupt(v, insn);
+    }
     if ((op >= 0x6c && op <= 0x6f) || (op >= 0xa4 && op <= 0xa7) || (op >= 0xaa && op <= 0xaf)) {
         return string_op(&c);
     }

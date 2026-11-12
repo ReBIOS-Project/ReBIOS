@@ -129,15 +129,9 @@ bool event_cut_short(struct vcpu *v) {
     return (v->redeliver & EVENT_VALID) != 0;
 }
 
-bool event_deliver_real_mode(struct vcpu *v) {
-    unsigned int type = v->redeliver & EVENT_TYPE_MASK;
-    if ((v->redeliver & EVENT_VALID) == 0 || (vcpu_cr0(v) & CR0_PE) != 0
-     || (type != EVENT_TYPE_EXTERNAL && type != EVENT_TYPE_EXCEPTION)) {
-        return false;
-    }
-    // SDM 325462-093 Vol. 3B, 23.1.4: FLAGS, CS, and IP pushed, the handler
-    // from the interrupt table IDTR points to, and no error code.
-    unsigned int vector = v->redeliver & EVENT_VECTOR_MASK;
+// SDM 325462-093 Vol. 3B, 23.1.4: FLAGS, CS, and ip pushed, the handler from
+// the interrupt table IDTR points to, and no error code.
+static bool deliver_real_mode(struct vcpu *v, unsigned int vector, uintptr_t ip) {
     struct vcpu_segment idtr, ss, cs;
     vcpu_get_seg(v, VCPU_SEG_IDTR, &idtr);
     vcpu_get_seg(v, VCPU_SEG_SS, &ss);
@@ -147,7 +141,7 @@ bool event_deliver_real_mode(struct vcpu *v) {
         return false;
     }
     uint64_t rflags = vcpu_rflags(v);
-    uint16_t frame[3] = { (uint16_t)vcpu_rip(v), cs.selector, (uint16_t)rflags };
+    uint16_t frame[3] = { (uint16_t)ip, cs.selector, (uint16_t)rflags };
     uint64_t sp_mask = (ss.attrib & VCPU_SEG_DB) != 0 ? (uint64_t)0xffffffff : (uint64_t)0xffff;
     uintptr_t rsp = vcpu_rsp(v);
     uint64_t sp = (rsp - sizeof(frame)) & sp_mask;
@@ -163,8 +157,22 @@ bool event_deliver_real_mode(struct vcpu *v) {
     vcpu_set_seg(v, VCPU_SEG_CS, &cs);
     vcpu_set_rip(v, handler & 0xffff);
     vcpu_set_rflags(v, rflags & ~(uint64_t)(RFLAGS_IF | RFLAGS_TF | RFLAGS_RF | RFLAGS_AC));
+    return true;
+}
+
+bool event_deliver_real_mode(struct vcpu *v) {
+    unsigned int type = v->redeliver & EVENT_TYPE_MASK;
+    if ((v->redeliver & EVENT_VALID) == 0 || (vcpu_cr0(v) & CR0_PE) != 0
+     || (type != EVENT_TYPE_EXTERNAL && type != EVENT_TYPE_EXCEPTION)
+     || !deliver_real_mode(v, v->redeliver & EVENT_VECTOR_MASK, vcpu_rip(v))) {
+        return false;
+    }
     v->redeliver = 0;
     return true;
+}
+
+bool event_raise_real_mode(struct vcpu *v, uint8_t vector, size_t length) {
+    return (vcpu_cr0(v) & CR0_PE) == 0 && deliver_real_mode(v, vector, vcpu_rip(v) + length);
 }
 
 static void inject(struct vcpu *v, uint32_t info, uint32_t error, uint64_t data) {
