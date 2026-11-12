@@ -646,7 +646,20 @@ uint32_t vcpu_seg_attrib(struct vcpu *v, size_t reg) {
 }
 
 unsigned int vcpu_cpl(struct vcpu *v) {
-    return (vcpu_seg_attrib(v, VCPU_SEG_SS) >> 5) & 3;
+    if (virt_vmx) {
+        return (vmx_seg_attrib(VCPU_SEG_SS) >> 5) & 3;
+    }
+    // SVM's is the VMCB's CPL field, not a segment's DPL, but for real and
+    // virtual-8086 mode, where the processor takes 0 and 3 (APM 24593 rev.
+    // 3.46, 15.5.1).
+    const struct vmcb_save *s = &v->vmcb->save;
+    if ((s->cr0 & CR0_PE) == 0) {
+        return 0;
+    }
+    if ((s->rflags & RFLAGS_VM) != 0) {
+        return 3;
+    }
+    return s->cpl;
 }
 
 void vcpu_get_seg(struct vcpu *v, size_t reg, struct vcpu_segment *seg) {
