@@ -149,16 +149,30 @@ static efi_status save(bool wait, bool last) {
     return EFI_SUCCESS;
 }
 
+// Says on the screen too why the log is saved again only at the end, as the
+// user may otherwise find none at the next start.
+static void refused(efi_status status) {
+    uint64_t storage = 0;
+    uint64_t remaining = 0;
+    uint64_t max_size = 0;
+    efi_status queried = efi_runtime_query_variable_info(
+        ATTRIBUTES, &storage, &remaining, &max_size, true
+    );
+    log_notice(
+        "The log is saved again only at a panic or before a reset or power off: the "
+        "firmware's variable store refuses it, status %#llx, with %llu of %llu bytes free and "
+        "%llu at most for a variable (status %#llx)\n", (unsigned long long)status,
+        (unsigned long long)remaining, (unsigned long long)storage, (unsigned long long)max_size,
+        (unsigned long long)queried
+    );
+}
+
 static void timer_fired(void *ctx) {
     (void)ctx;
     if (log_saved_count() != saved_count) {
         efi_status status = save(true, false);
         if (status != EFI_SUCCESS) {
-            printf(
-                "The log is saved again only at a panic or before a reset or power off: the "
-                "firmware's variable store refuses it, status %#llx\n",
-                (unsigned long long)status
-            );
+            refused(status);
             return;
         }
         if (++saves == SAVE_LIMIT) {
