@@ -142,6 +142,10 @@ unsigned int insn_length_intercepted(struct vcpu *v);
 // instruction.
 bool insn_decode(struct vcpu *v, struct insn *insn);
 
+// The same from the instruction's bytes, INSN_MAX_LENGTH of them and 4 zeroes
+// after, as the vCPU's present mode decodes them.
+bool insn_decode_bytes(struct vcpu *v, const uint8_t *bytes, struct insn *insn);
+
 // The linear address of a decoded instruction's ModRM memory operand, or of
 // MOV's offset operand: false where it has neither. VEX, EVEX, and XOP forms
 // are not handled.

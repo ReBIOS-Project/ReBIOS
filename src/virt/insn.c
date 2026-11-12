@@ -308,10 +308,6 @@ static void vex_rex(struct insn *insn, uint8_t rxb, bool w, bool long_mode) {
 bool insn_decode(struct vcpu *v, struct insn *insn) {
     uint32_t cs = vcpu_seg_attrib(v, VCPU_SEG_CS);
     bool long_mode = (vcpu_efer(v) & EFER_LMA) != 0 && (cs & VCPU_SEG_L) != 0;
-    // CS's descriptor gives the defaults, in real mode too, where its cached D
-    // bit outlives protected mode, as Linux 7.3's KVM decodes (emulate.c,
-    // x86_decode_insn()); V86 mode's are 16-bit.
-    bool big = (vcpu_rflags(v) & RFLAGS_VM) == 0 && (cs & VCPU_SEG_DB) != 0;
     uintptr_t linear = vcpu_rip(v);
     if (!long_mode) {
         linear = (vcpu_seg_base(v, VCPU_SEG_CS) + linear) & 0xffffffff;
@@ -328,7 +324,16 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
             return false;
         }
     }
+    return insn_decode_bytes(v, bytes, insn);
+}
 
+bool insn_decode_bytes(struct vcpu *v, const uint8_t *bytes, struct insn *insn) {
+    uint32_t cs = vcpu_seg_attrib(v, VCPU_SEG_CS);
+    bool long_mode = (vcpu_efer(v) & EFER_LMA) != 0 && (cs & VCPU_SEG_L) != 0;
+    // CS's descriptor gives the defaults, in real mode too, where its cached D
+    // bit outlives protected mode, as Linux 7.3's KVM decodes (emulate.c,
+    // x86_decode_insn()); V86 mode's are 16-bit.
+    bool big = (vcpu_rflags(v) & RFLAGS_VM) == 0 && (cs & VCPU_SEG_DB) != 0;
     unsigned int operand = long_mode || big ? 4 : 2;
     size_t address = long_mode ? 8 : big ? 4 : 2;
     bool operand_prefix = false;
