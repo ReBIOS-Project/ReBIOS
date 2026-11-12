@@ -792,6 +792,18 @@ struct pci_enum_function *pci_enum_find(struct pci_cfg_addr addr) {
     return NULL;
 }
 
+struct pci_enum_function *pci_enum_vga(void) {
+    const struct handoff_video *video = &core_handoff->video;
+    if (!video->vga_present) {
+        return NULL;
+    }
+    const struct handoff_pci_address *va = &video->vga_device;
+    struct pci_cfg_addr a = {
+        va->segment, va->bus, (uint8_t)(va->devfn >> 3), (uint8_t)(va->devfn & 7)
+    };
+    return pci_enum_find(a);
+}
+
 static size_t rebar_size(unsigned int encoding) {
     return (uint64_t)1 << (encoding + REBAR_SIZE_BASE);
 }

@@ -112,6 +112,10 @@ const struct pci_enum_topology *pci_enum_topology(void);
 
 struct pci_enum_function *pci_enum_find(struct pci_cfg_addr addr);
 
+// The function of the PCI device that owns the legacy VGA resources, NULL
+// where there is none.
+struct pci_enum_function *pci_enum_vga(void);
+
 // Shrinks each Resizable BAR above max_size, and records its new size.
 void pci_enum_shrink_rebars(size_t max_size);
 

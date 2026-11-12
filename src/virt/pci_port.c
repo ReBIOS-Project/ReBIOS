@@ -19,8 +19,6 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <virt/pci_port.h>
-#include <core.h>
-#include <handoff.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
 #include <hw/pci_regs.h>
@@ -168,16 +166,8 @@ static struct below below_port(
 // Whether the display's VGA device is behind the port, and the VGA 16-bit
 // decode of the bridge above it there, where it has one.
 static bool vga_below(const struct pci_enum_topology *t, size_t root, bool *decode_16) {
-    const struct handoff_video *video = &core_handoff->video;
     *decode_16 = true;
-    if (!video->vga_present) {
-        return false;
-    }
-    struct pci_cfg_addr a = {
-        video->vga_device.segment, video->vga_device.bus, (uint8_t)(video->vga_device.devfn >> 3),
-        (uint8_t)(video->vga_device.devfn & 7)
-    };
-    const struct pci_enum_function *f = pci_enum_find(a);
+    const struct pci_enum_function *f = pci_enum_vga();
     if (f == NULL || root_of(t, f) != root) {
         return false;
     }

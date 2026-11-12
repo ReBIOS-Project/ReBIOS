@@ -23,7 +23,6 @@
 #include <core.h>
 #include <csm/e820.h>
 #include <handoff.h>
-#include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
 #include <hw/pci_host.h>
 #include <iommu/iommu_tables.h>
@@ -413,11 +412,7 @@ void layout_init(void) {
     // Quadro RTX 4000 reports its BAR3 at the host's address): the card's
     // memory below 4 GiB stays at its host addresses too, beside its BARs.
     if (h->video.vbios_present) {
-        const struct handoff_pci_address *va = &h->video.vga_device;
-        struct pci_cfg_addr card = {
-            va->segment, va->bus, (uint8_t)(va->devfn >> 3), (uint8_t)(va->devfn & 7)
-        };
-        struct pci_enum_function *f = pci_enum_find(card);
+        struct pci_enum_function *f = pci_enum_vga();
         for (size_t b = 0; f != NULL && b < f->bar_count && b < 6; b++) {
             const struct pci_enum_bar *bar = &f->bars[b];
             if ((bar->kind != PCI_ENUM_BAR_MEM32 && bar->kind != PCI_ENUM_BAR_MEM64)
