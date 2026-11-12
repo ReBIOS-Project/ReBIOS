@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Discord
+    url: https://discord.gg/t5nn4GKTcx
+    about: Questions and help, on ReBIOS's Discord server.
+  - name: Matrix
+    url: https://matrix.to/#/#ReBIOS:matrix.org
+    about: Questions and help, on ReBIOS's Matrix room.

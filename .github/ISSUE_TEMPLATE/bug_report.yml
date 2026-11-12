@@ -1,0 +1,77 @@
+name: Bug report
+description: Something ReBIOS does wrong, or an OS or computer it fails on.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > [!CAUTION]
+        > **Ventoy is not supported.** Issues about running ReBIOS, or booting
+        > legacy OSes under it, through Ventoy are closed without being
+        > addressed. **Anyone who reports an issue while withholding that they
+        > use Ventoy is banned from the ReBIOS-Project organisation.** The
+        > [README](https://github.com/ReBIOS-Project/ReBIOS#readme) says why.
+  - type: checkboxes
+    id: ventoy
+    attributes:
+      label: Ventoy
+      options:
+        - label: I do not use Ventoy to start ReBIOS or the OS it boots.
+          required: true
+        - label: >-
+            I understand that withholding that I use Ventoy gets me banned
+            from the ReBIOS-Project organisation.
+          required: true
+  - type: input
+    id: version
+    attributes:
+      label: ReBIOS version
+      description: The release, such as 0.9.0, or the name of the test build.
+    validations:
+      required: true
+  - type: input
+    id: computer
+    attributes:
+      label: Computer
+      description: Its make and model, processor, and graphics.
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      description: The OS ReBIOS boots, and its version.
+    validations:
+      required: true
+  - type: dropdown
+    id: start
+    attributes:
+      label: How ReBIOS starts
+      options:
+        - From /EFI/BOOT/BOOTX64.EFI on the OS's drive
+        - From the ReBIOS USB stick
+        - Another way, described below
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens
+      description: >-
+        What you do, what you expect, and what happens instead. Photos of the
+        screen help.
+    validations:
+      required: true
+  - type: textarea
+    id: ini
+    attributes:
+      label: rebios.ini
+      description: Its contents, if there is one.
+      render: ini
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: >-
+        Boot once with `verbose = true` and `save_log = true` in rebios.ini.
+        At the next start, ReBIOS writes that boot's log to `rebios-last.log`,
+        next to rebios.efi: attach it here.

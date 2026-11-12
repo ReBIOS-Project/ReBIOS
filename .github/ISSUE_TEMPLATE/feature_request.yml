@@ -1,0 +1,30 @@
+name: Feature request
+description: Something ReBIOS does not do yet.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > [!CAUTION]
+        > **Ventoy is not supported.** Requests about running ReBIOS, or
+        > booting legacy OSes under it, through Ventoy are closed without being
+        > addressed. **Anyone who reports an issue while withholding that they
+        > use Ventoy is banned from the ReBIOS-Project organisation.** The
+        > [README](https://github.com/ReBIOS-Project/ReBIOS#readme) says why.
+  - type: checkboxes
+    id: ventoy
+    attributes:
+      label: Ventoy
+      options:
+        - label: My request is not about Ventoy.
+          required: true
+        - label: >-
+            I understand that withholding that I use Ventoy gets me banned
+            from the ReBIOS-Project organisation.
+          required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What ReBIOS should do
+      description: What you would like, and the computer and OS it is for.
+    validations:
+      required: true
