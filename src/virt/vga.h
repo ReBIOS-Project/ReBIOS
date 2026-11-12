@@ -31,9 +31,49 @@ bool vga_init(void);
 void vga_cpu_init(void);
 bool vga_emulated(void);
 
-// The registers of the Bochs display interface, for the video BIOS.
-uint16_t vga_dispi_read(uint16_t index);
-void vga_dispi_write(uint16_t index, uint16_t value);
+// The largest VBE mode the emulated VGA shows.
+#define VGA_VBE_MAX_WIDTH 16000
+#define VGA_VBE_MAX_HEIGHT 12000
+
+// The emulated VGA's VBE mode, as the video BIOS sets it.
+struct vga_vbe {
+    // Whether a VBE mode is on, rather than one of the VGA's own.
+    bool on;
+    // Whether its mode set asked for the linear framebuffer, and to keep video
+    // memory.
+    bool lfb;
+    bool keep;
+    uint16_t width;
+    uint16_t height;
+    uint16_t bpp;
+    // The scan line in pixels, how many of them video memory holds, and the
+    // display start.
+    uint16_t virt_width;
+    uint16_t virt_height;
+    uint16_t x_offset;
+    uint16_t y_offset;
+    // The 64 KiB bank of video memory that the window at A0000h shows.
+    uint16_t bank;
+};
+
+// The video BIOS's way to the VBE modes, each value brought back in range.
+void vga_vbe_get(struct vga_vbe *mode);
+// Sets a mode, its scan line as wide as it and its display start at the top,
+// with the DAC back to 6 bits per primary, clearing video memory unless keep.
+void vga_vbe_set_mode(uint16_t width, uint16_t height, uint16_t bpp, bool lfb, bool keep);
+// Leaves the VBE modes for the VGA's own, with the DAC back to 6 bits.
+void vga_vbe_set_off(void);
+void vga_vbe_set_bank(uint16_t bank);
+void vga_vbe_set_virt_width(uint16_t width);
+void vga_vbe_set_start(uint16_t x, uint16_t y);
+// Back to a mode that vga_vbe_get() gave, video memory as it is.
+void vga_vbe_restore(const struct vga_vbe *mode);
+// The size of the VBE modes' video memory, 0 where there is none.
+size_t vga_vbe_vram_size(void);
+
+// Whether the DAC takes 8 bits per primary rather than 6.
+bool vga_dac8(void);
+void vga_set_dac8(bool dac8);
 
 // The size of the linear framebuffer vga_init() is to give the guest, 0 if it
 // is to give none.

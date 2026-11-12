@@ -16,7 +16,7 @@
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
 // The VBE 3.0 functions (VBE Core Functions Standard 3.0) and VBE/DDC's
-// (VBE/DDC Standard 1.1), on the hypervisor's Bochs display interface.
+// (VBE/DDC Standard 1.1), on the emulated VGA's VBE modes.
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -24,7 +24,6 @@
 #include <lib/util.h>
 #include <memory.h>
 #include <virt/bda.h>
-#include <virt/dispi.h>
 #include <virt/vga.h>
 #include <virt/vgabios.h>
 
@@ -100,17 +99,26 @@ static const uint8_t color_fields[5][8] = {
 };
 
 // Function 04h's buffer holds the states it is asked for in this order: the
-// controller's registers, the BIOS data, the DAC, and the Bochs interface's
-// registers, each taking this many 64-byte blocks.
+// controller's registers, the BIOS data, the DAC, and the VBE mode, each
+// taking this many 64-byte blocks.
 static const uint8_t state_blocks[4] = { 2, 1, 13, 1 };
 
-// The Bochs interface registers function 04h keeps, in the order they are
-// restored, the enable register's write needing the depth and resolution and
-// clearing what follows it.
-static const uint8_t state_dispi[8] = {
-    DISPI_BPP, DISPI_XRES, DISPI_YRES, DISPI_ENABLE, DISPI_VIRT_WIDTH,
-    DISPI_X_OFFSET, DISPI_Y_OFFSET, DISPI_BANK
-};
+// The VBE mode's words in function 04h's buffer: depth, resolution, flags,
+// scan line, display start, and bank.
+#define STATE_BPP 0
+#define STATE_WIDTH 1
+#define STATE_HEIGHT 2
+#define STATE_FLAGS 3
+#define STATE_VIRT_WIDTH 4
+#define STATE_X_OFFSET 5
+#define STATE_Y_OFFSET 6
+#define STATE_BANK 7
+#define STATE_WORDS 8
+
+#define STATE_FLAG_ON 0x0001
+#define STATE_FLAG_LFB 0x0002
+#define STATE_FLAG_KEEP 0x0004
+#define STATE_FLAG_DAC8 0x0008
 
 struct mode {
     uint16_t number;
@@ -120,21 +128,14 @@ struct mode {
 };
 
 static bool present(void) {
-    return vgabios_display.dispi;
+    return vgabios_display.vbe;
 }
 
-// No operating system comes between the video BIOS and this interface, as none
-// knows it: the hypervisor can take these calls itself.
-static void dispi_write(uint16_t index, uint16_t value) {
-    vga_dispi_write(index, value);
-}
-
-static uint16_t dispi_read(uint16_t index) {
-    return vga_dispi_read(index);
-}
-
+// As much video memory as VBE's count of 64 KiB blocks can tell.
 static size_t vram_size(void) {
-    return (uint32_t)dispi_read(DISPI_VIDEO_MEMORY_64K) << 16;
+    size_t size = vga_vbe_vram_size();
+    size_t most = (size_t)0xffff << 16;
+    return size < most ? size : most;
 }
 
 static size_t depth_index(uint8_t bpp) {
@@ -306,7 +307,7 @@ static void controller_info(struct vgabios_regs *r) {
     b.oem_string = far_pointer(VGABIOS_ROM_OEM_STRING);
     // The DAC can take 8 bits per primary.
     b.capabilities = 0x00000001;
-    b.total_memory = dispi_read(DISPI_VIDEO_MEMORY_64K);
+    b.total_memory = (uint16_t)(vram_size() >> 16);
     if (vbe2) {
         b.vendor_name = far_pointer(VGABIOS_ROM_VENDOR_NAME);
         b.product_name = far_pointer(VGABIOS_ROM_PRODUCT_NAME);
@@ -381,7 +382,7 @@ static void mode_info(struct vgabios_regs *r) {
 
 void vgabios_vbe_disable(void) {
     if (present()) {
-        dispi_write(DISPI_ENABLE, 0);
+        vga_vbe_set_off();
     }
 }
 
@@ -399,16 +400,7 @@ static void set_mode(struct vgabios_regs *r) {
         r->ax = STATUS_FAILED;
         return;
     }
-    // The DAC is back to 6 bits per primary.
-    dispi_write(DISPI_ENABLE, 0);
-    dispi_write(DISPI_BPP, m.bpp);
-    dispi_write(DISPI_XRES, m.width);
-    dispi_write(DISPI_YRES, m.height);
-    dispi_write(DISPI_BANK, 0);
-    dispi_write(
-        DISPI_ENABLE,
-        (uint16_t)(DISPI_ENABLED | (lfb ? DISPI_LFB_ENABLED : 0) | (keep ? DISPI_NOCLEARMEM : 0))
-    );
+    vga_vbe_set_mode(m.width, m.height, m.bpp, lfb, keep);
     if (m.bpp == 8) {
         vgabios_int10_load_palette_256();
     }
@@ -420,26 +412,23 @@ static void set_mode(struct vgabios_regs *r) {
 }
 
 static void current_mode(struct vgabios_regs *r) {
-    uint16_t enable = dispi_read(DISPI_ENABLE);
-    if ((enable & DISPI_ENABLED) == 0) {
+    struct vga_vbe vbe;
+    vga_vbe_get(&vbe);
+    if (!vbe.on) {
         bool kept = (vgabios_peekb(BDA, BDA_VIDEO_CONTROL) & BDA_VIDEO_CONTROL_KEPT) != 0;
         r->bx = (uint16_t)(vgabios_peekb(BDA, BDA_MODE) | (kept ? MODE_KEEP : 0));
         r->ax = STATUS_SUCCESS;
         return;
     }
-    uint16_t width = dispi_read(DISPI_XRES);
-    uint16_t height = dispi_read(DISPI_YRES);
-    uint16_t bpp = dispi_read(DISPI_BPP);
     uint16_t number = 0;
     for (size_t k = 0; k < MODE_COUNT && number == 0; k++) {
         struct mode m;
-        if (mode_get(mode_numbers[k], &m) && m.width == width && m.height == height
-         && m.bpp == bpp) {
+        if (mode_get(mode_numbers[k], &m) && m.width == vbe.width && m.height == vbe.height
+         && m.bpp == vbe.bpp) {
             number = m.number;
         }
     }
-    r->bx = (uint16_t)(number | ((enable & DISPI_LFB_ENABLED) != 0 ? MODE_LFB : 0)
-                     | ((enable & DISPI_NOCLEARMEM) != 0 ? MODE_KEEP : 0));
+    r->bx = (uint16_t)(number | (vbe.lfb ? MODE_LFB : 0) | (vbe.keep ? MODE_KEEP : 0));
     r->ax = STATUS_SUCCESS;
 }
 
@@ -560,22 +549,43 @@ static void dac_restore(uint16_t seg, uint16_t at) {
     }
 }
 
-static void dispi_save(uint16_t seg, uint16_t at) {
-    for (size_t i = 0; i < 8; i++) {
-        vgabios_pokew(seg, (uint16_t)(at + i * 2), dispi_read(state_dispi[i]));
+static void mode_save(uint16_t seg, uint16_t at) {
+    struct vga_vbe vbe;
+    vga_vbe_get(&vbe);
+    uint16_t words[STATE_WORDS];
+    words[STATE_BPP] = vbe.bpp;
+    words[STATE_WIDTH] = vbe.width;
+    words[STATE_HEIGHT] = vbe.height;
+    words[STATE_FLAGS] = (uint16_t)((vbe.on ? STATE_FLAG_ON : 0) | (vbe.lfb ? STATE_FLAG_LFB : 0)
+                                  | (vbe.keep ? STATE_FLAG_KEEP : 0)
+                                  | (vga_dac8() ? STATE_FLAG_DAC8 : 0));
+    words[STATE_VIRT_WIDTH] = vbe.virt_width;
+    words[STATE_X_OFFSET] = vbe.x_offset;
+    words[STATE_Y_OFFSET] = vbe.y_offset;
+    words[STATE_BANK] = vbe.bank;
+    for (size_t i = 0; i < STATE_WORDS; i++) {
+        vgabios_pokew(seg, (uint16_t)(at + i * 2), words[i]);
     }
 }
 
-static void dispi_restore(uint16_t seg, uint16_t at) {
-    dispi_write(DISPI_ENABLE, 0);
-    for (size_t i = 0; i < 8; i++) {
-        uint16_t value = vgabios_peekw(seg, (uint16_t)(at + i * 2));
-        if (state_dispi[i] == DISPI_ENABLE) {
-            // Turned on without clearing the video memory, then as it was.
-            dispi_write(DISPI_ENABLE, (uint16_t)(value | DISPI_NOCLEARMEM));
-        }
-        dispi_write(state_dispi[i], value);
+static void mode_restore(uint16_t seg, uint16_t at) {
+    uint16_t words[STATE_WORDS];
+    for (size_t i = 0; i < STATE_WORDS; i++) {
+        words[i] = vgabios_peekw(seg, (uint16_t)(at + i * 2));
     }
+    struct vga_vbe vbe = { 0 };
+    vbe.on = (words[STATE_FLAGS] & STATE_FLAG_ON) != 0;
+    vbe.lfb = (words[STATE_FLAGS] & STATE_FLAG_LFB) != 0;
+    vbe.keep = (words[STATE_FLAGS] & STATE_FLAG_KEEP) != 0;
+    vbe.bpp = words[STATE_BPP];
+    vbe.width = words[STATE_WIDTH];
+    vbe.height = words[STATE_HEIGHT];
+    vbe.virt_width = words[STATE_VIRT_WIDTH];
+    vbe.x_offset = words[STATE_X_OFFSET];
+    vbe.y_offset = words[STATE_Y_OFFSET];
+    vbe.bank = words[STATE_BANK];
+    vga_vbe_restore(&vbe);
+    vga_set_dac8((words[STATE_FLAGS] & STATE_FLAG_DAC8) != 0);
 }
 
 static void vbe_state(struct vgabios_regs *r) {
@@ -625,9 +635,9 @@ static void vbe_state(struct vgabios_regs *r) {
             }
             default: {
                 if (save) {
-                    dispi_save(seg, at);
+                    mode_save(seg, at);
                 } else {
-                    dispi_restore(seg, at);
+                    mode_restore(seg, at);
                 }
                 break;
             }
@@ -649,7 +659,9 @@ void vgabios_vbe_vga_state(struct vgabios_regs *r) {
 }
 
 static bool vbe_mode_on(void) {
-    return (dispi_read(DISPI_ENABLE) & DISPI_ENABLED) != 0;
+    struct vga_vbe vbe;
+    vga_vbe_get(&vbe);
+    return vbe.on;
 }
 
 static void vbe_window(struct vgabios_regs *r) {
@@ -663,12 +675,14 @@ static void vbe_window(struct vgabios_regs *r) {
     }
     switch (r->bh) {
         case 0x00: {
-            dispi_write(DISPI_BANK, r->dx);
+            vga_vbe_set_bank(r->dx);
             r->ax = STATUS_SUCCESS;
             break;
         }
         case 0x01: {
-            r->dx = dispi_read(DISPI_BANK);
+            struct vga_vbe vbe;
+            vga_vbe_get(&vbe);
+            r->dx = vbe.bank;
             r->ax = STATUS_SUCCESS;
             break;
         }
@@ -680,12 +694,14 @@ static void vbe_window(struct vgabios_regs *r) {
 }
 
 static void scan_line_length(struct vgabios_regs *r) {
-    if (!vbe_mode_on()) {
+    struct vga_vbe vbe;
+    vga_vbe_get(&vbe);
+    if (!vbe.on) {
         r->ax = STATUS_INVALID;
         return;
     }
-    size_t bytes = bytes_per_pixel((uint8_t)dispi_read(DISPI_BPP));
-    uint32_t height = dispi_read(DISPI_YRES);
+    size_t bytes = bytes_per_pixel((uint8_t)vbe.bpp);
+    uint32_t height = vbe.height;
     uint32_t width;
     switch (r->bl) {
         case 0x00: {
@@ -702,8 +718,8 @@ static void scan_line_length(struct vgabios_regs *r) {
         }
         case 0x03: {
             uint32_t max = vram_size() / height / bytes;
-            if (max > DISPI_MAX_XRES) {
-                max = DISPI_MAX_XRES;
+            if (max > VGA_VBE_MAX_WIDTH) {
+                max = VGA_VBE_MAX_WIDTH;
             }
             max &= ~(uint32_t)7;
             r->bx = (uint16_t)(max * bytes);
@@ -718,23 +734,25 @@ static void scan_line_length(struct vgabios_regs *r) {
         }
     }
     if (r->bl != 0x01) {
-        // The interface's lines come in multiples of 8 pixels.
+        // The emulated VGA's lines come in multiples of 8 pixels.
         width = (width + 7) & ~(uint32_t)7;
-        if (width > DISPI_MAX_XRES || width * bytes * height > vram_size()) {
+        if (width > VGA_VBE_MAX_WIDTH || width * bytes * height > vram_size()) {
             r->ax = STATUS_UNSUPPORTED;
             return;
         }
-        dispi_write(DISPI_VIRT_WIDTH, (uint16_t)width);
+        vga_vbe_set_virt_width((uint16_t)width);
+        vga_vbe_get(&vbe);
     }
-    uint16_t virt_width = dispi_read(DISPI_VIRT_WIDTH);
-    r->bx = (uint16_t)(virt_width * bytes);
-    r->cx = virt_width;
-    r->dx = dispi_read(DISPI_VIRT_HEIGHT);
+    r->bx = (uint16_t)(vbe.virt_width * bytes);
+    r->cx = vbe.virt_width;
+    r->dx = vbe.virt_height;
     r->ax = STATUS_SUCCESS;
 }
 
 static void display_start(struct vgabios_regs *r) {
-    if (!vbe_mode_on()) {
+    struct vga_vbe vbe;
+    vga_vbe_get(&vbe);
+    if (!vbe.on) {
         r->ax = STATUS_INVALID;
         return;
     }
@@ -744,28 +762,26 @@ static void display_start(struct vgabios_regs *r) {
             if ((r->bl & 0x80) != 0) {
                 wait_retrace();
             }
-            dispi_write(DISPI_X_OFFSET, r->cx);
-            dispi_write(DISPI_Y_OFFSET, r->dx);
+            vga_vbe_set_start(r->cx, r->dx);
             r->ax = STATUS_SUCCESS;
             break;
         }
         case 0x01: {
             r->bh = 0;
-            r->cx = dispi_read(DISPI_X_OFFSET);
-            r->dx = dispi_read(DISPI_Y_OFFSET);
+            r->cx = vbe.x_offset;
+            r->dx = vbe.y_offset;
             r->ax = STATUS_SUCCESS;
             break;
         }
         case 0x02:
         case 0x82: {
-            size_t bytes = bytes_per_pixel((uint8_t)dispi_read(DISPI_BPP));
-            uint32_t line = (uint32_t)dispi_read(DISPI_VIRT_WIDTH) * bytes;
+            size_t bytes = bytes_per_pixel((uint8_t)vbe.bpp);
+            uint32_t line = (uint32_t)vbe.virt_width * bytes;
             if ((r->bl & 0x80) != 0) {
                 wait_retrace();
             }
             uint32_t start = vgabios_ecx(r);
-            dispi_write(DISPI_X_OFFSET, (uint16_t)(start % line / bytes));
-            dispi_write(DISPI_Y_OFFSET, (uint16_t)(start / line));
+            vga_vbe_set_start((uint16_t)(start % line / bytes), (uint16_t)(start / line));
             r->ax = STATUS_SUCCESS;
             break;
         }
@@ -777,26 +793,21 @@ static void display_start(struct vgabios_regs *r) {
 }
 
 static void dac_format(struct vgabios_regs *r) {
-    uint16_t enable = dispi_read(DISPI_ENABLE);
-    if ((enable & DISPI_ENABLED) != 0 && dispi_read(DISPI_BPP) > 8) {
+    struct vga_vbe vbe;
+    vga_vbe_get(&vbe);
+    if (vbe.on && vbe.bpp > 8) {
         r->ax = STATUS_INVALID;
         return;
     }
     switch (r->bl) {
         case 0x00: {
-            uint16_t bank = dispi_read(DISPI_BANK);
-            enable = r->bh >= 8
-                   ? (uint16_t)(enable | DISPI_8BIT_DAC)
-                   : (uint16_t)(enable & ~DISPI_8BIT_DAC);
-            // Writing the enable register selects bank 0 again.
-            dispi_write(DISPI_ENABLE, enable);
-            dispi_write(DISPI_BANK, bank);
-            r->bh = (enable & DISPI_8BIT_DAC) != 0 ? 8 : 6;
+            vga_set_dac8(r->bh >= 8);
+            r->bh = r->bh >= 8 ? 8 : 6;
             r->ax = STATUS_SUCCESS;
             break;
         }
         case 0x01: {
-            r->bh = (enable & DISPI_8BIT_DAC) != 0 ? 8 : 6;
+            r->bh = vga_dac8() ? 8 : 6;
             r->ax = STATUS_SUCCESS;
             break;
         }

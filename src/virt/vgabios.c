@@ -649,7 +649,7 @@ static void rom_string(uint16_t at, const char *text) {
 static void display_fill(void) {
     const struct handoff_video *video = &core_handoff->video;
     struct vgabios_display *d = &vgabios_display;
-    d->dispi = video->vram_size != 0;
+    d->vbe = video->vram_size != 0;
     uint32_t width;
     uint32_t height;
     vga_screen_size(&width, &height);

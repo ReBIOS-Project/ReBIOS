@@ -33,7 +33,6 @@
 #include <sys/simd.h>
 #include <sys/smp.h>
 #include <sys/x86.h>
-#include <virt/dispi.h>
 #include <virt/gpt.h>
 #include <virt/io.h>
 #include <virt/layout.h>
@@ -135,9 +134,9 @@
 // on the last one together, so that large pictures on slow processors leave
 // the guest most of their time.
 #define REDRAW_SHARE 4
-// A frame compares every line of the Bochs interface's display this often, so
-// that what the dirty flags do not show, devices' writes for instance, shows
-// all the same.
+// A frame compares every line of a VBE mode's display this often, so that what
+// the dirty flags do not show, devices' writes for instance, shows all the
+// same.
 #define COMPARE_ALL_NS ((uint64_t)1000000000)
 // The longest the other processors wait out of the guest for the last pages of
 // video memory to come back from the framebuffer.
@@ -186,20 +185,19 @@ static struct {
     // fonts.
     uint64_t changed[CHUNKS / 64];
     bool font_changed;
-    // The DAC takes 8 bits per primary, as the Bochs interface can select.
+    // The DAC takes 8 bits per primary, as VBE's function 08h can select.
     bool dac8;
     bool palette_dirty;
 } vga;
 
-// The Bochs display interface, on video memory of its own, which the guest
-// finds in the PCI memory of the bus that the display's VGA device is on.
+// The VBE modes, on video memory of their own, which the guest finds in the
+// PCI memory of the bus that the display's VGA device is on.
 static struct {
     bool present;
     uint8_t *vram;
     uintptr_t vram_phys;
     size_t vram_size;
-    uint16_t index;
-    uint16_t regs[DISPI_REG_COUNT];
+    struct vga_vbe mode;
     size_t line_bytes;
     uint32_t start;
     // The bank the window at A0000h shows, while the interface is enabled.
@@ -262,9 +260,9 @@ struct rect {
 };
 
 // The display, and how it is drawn: from the frame, which the VGA's planes
-// make, or from the Bochs interface's video memory, scaled into the back
-// buffer, as large as the framebuffer and in its format, of which what changed
-// goes to the framebuffer once the frame is all drawn.
+// make, or from a VBE mode's video memory, scaled into the back buffer, as
+// large as the framebuffer and in its format, of which what changed goes to
+// the framebuffer once the frame is all drawn.
 static struct {
     // The VGA's frame, as made from the planes, and as last drawn.
     uint32_t *frame;
@@ -297,7 +295,7 @@ static struct {
     bool blank;
     bool graphics;
     struct vga_draw_scan scan;
-    // What the Bochs interface last showed: its mode, and the palette.
+    // What the VBE mode last showed: its mode, and the palette.
     bool vbe_valid;
     uint16_t vbe_bpp;
     size_t vbe_line_bytes;
@@ -321,9 +319,9 @@ static struct {
 } out;
 
 // What a processor draws with: a VGA scan line, a display row, a source line
-// of the Bochs interface converted, two source lines scaled across, the
-// display columns each holds, which was used last, and the frame they are of;
-// and a band of SHARE_LINES display rows of a turned display.
+// of a VBE mode converted, two source lines scaled across, the display columns
+// each holds, which was used last, and the frame they are of; and a band of
+// SHARE_LINES display rows of a turned display.
 struct vga_scratch {
     uint32_t *line;
     uint32_t *row;
@@ -552,7 +550,7 @@ static uint8_t mem_read(uint32_t offset) {
 }
 
 static bool vbe_on(void) {
-    return vbe.present && (vbe.regs[DISPI_ENABLE] & DISPI_ENABLED) != 0;
+    return vbe.present && vbe.mode.on;
 }
 
 // Video memory as the guest reaches it now.
@@ -603,11 +601,11 @@ static void map_vram(uintptr_t gpa, size_t offset, size_t size) {
     }
 }
 
-// While the Bochs interface is on, the window's first 64 KiB show a bank of
-// its video memory, normally mapped there directly, and the rest nothing:
-// where in video memory offset is, false for nothing.
+// While a VBE mode is on, the window's first 64 KiB show a bank of its video
+// memory, normally mapped there directly, and the rest nothing: where in video
+// memory offset is, false for nothing.
 static bool vbe_window_at(uint32_t offset, size_t *at) {
-    *at = ((size_t)vbe.regs[DISPI_BANK] << 16) + offset;
+    *at = ((size_t)vbe.mode.bank << 16) + offset;
     return offset < PLANE_SIZE && *at < vbe.vram_size;
 }
 
@@ -1014,18 +1012,18 @@ static void ports_access(
     spinlock_release(&vga.lock);
 }
 
-static unsigned int dispi_bits(void) {
-    return vbe.regs[DISPI_BPP] == 15 ? 16 : vbe.regs[DISPI_BPP];
+static unsigned int mode_bits(void) {
+    return vbe.mode.bpp == 15 ? 16 : vbe.mode.bpp;
 }
 
-// The registers brought back in range, and the scan line and display start
-// that follow from them, as QEMU's vbe_fixup_regs() does.
-static void dispi_fixup(void) {
-    uint16_t *r = vbe.regs;
-    if ((r[DISPI_ENABLE] & DISPI_ENABLED) == 0) {
+// The mode's values brought back in range, and the scan line and display start
+// that follow from them.
+static void mode_fixup(void) {
+    struct vga_vbe *m = &vbe.mode;
+    if (!m->on) {
         return;
     }
-    switch (r[DISPI_BPP]) {
+    switch (m->bpp) {
         case 4:
         case 8:
         case 15:
@@ -1035,61 +1033,61 @@ static void dispi_fixup(void) {
             break;
         }
         default: {
-            r[DISPI_BPP] = 8;
+            m->bpp = 8;
             break;
         }
     }
-    unsigned int bits = dispi_bits();
-    r[DISPI_XRES] &= (uint16_t)~(uint32_t)7;
-    if (r[DISPI_XRES] == 0) {
-        r[DISPI_XRES] = 8;
+    unsigned int bits = mode_bits();
+    m->width &= (uint16_t)~(uint32_t)7;
+    if (m->width == 0) {
+        m->width = 8;
     }
-    if (r[DISPI_XRES] > DISPI_MAX_XRES) {
-        r[DISPI_XRES] = DISPI_MAX_XRES;
+    if (m->width > VGA_VBE_MAX_WIDTH) {
+        m->width = VGA_VBE_MAX_WIDTH;
     }
-    r[DISPI_VIRT_WIDTH] &= (uint16_t)~(uint32_t)7;
-    if (r[DISPI_VIRT_WIDTH] > DISPI_MAX_XRES) {
-        r[DISPI_VIRT_WIDTH] = DISPI_MAX_XRES;
+    m->virt_width &= (uint16_t)~(uint32_t)7;
+    if (m->virt_width > VGA_VBE_MAX_WIDTH) {
+        m->virt_width = VGA_VBE_MAX_WIDTH;
     }
-    if (r[DISPI_VIRT_WIDTH] < r[DISPI_XRES]) {
-        r[DISPI_VIRT_WIDTH] = r[DISPI_XRES];
+    if (m->virt_width < m->width) {
+        m->virt_width = m->width;
     }
-    uint32_t line = r[DISPI_VIRT_WIDTH] * bits / 8;
+    uint32_t line = m->virt_width * bits / 8;
     uint64_t max_y = vbe.vram_size / line;
-    if (r[DISPI_YRES] == 0) {
-        r[DISPI_YRES] = 1;
+    if (m->height == 0) {
+        m->height = 1;
     }
-    if (r[DISPI_YRES] > DISPI_MAX_YRES) {
-        r[DISPI_YRES] = DISPI_MAX_YRES;
+    if (m->height > VGA_VBE_MAX_HEIGHT) {
+        m->height = VGA_VBE_MAX_HEIGHT;
     }
-    if (r[DISPI_YRES] > max_y) {
-        r[DISPI_YRES] = (uint16_t)max_y;
+    if (m->height > max_y) {
+        m->height = (uint16_t)max_y;
     }
-    if (r[DISPI_X_OFFSET] > DISPI_MAX_XRES) {
-        r[DISPI_X_OFFSET] = DISPI_MAX_XRES;
+    if (m->x_offset > VGA_VBE_MAX_WIDTH) {
+        m->x_offset = VGA_VBE_MAX_WIDTH;
     }
-    if (r[DISPI_Y_OFFSET] > DISPI_MAX_YRES) {
-        r[DISPI_Y_OFFSET] = DISPI_MAX_YRES;
+    if (m->y_offset > VGA_VBE_MAX_HEIGHT) {
+        m->y_offset = VGA_VBE_MAX_HEIGHT;
     }
-    size_t start = (uint64_t)r[DISPI_X_OFFSET] * bits / 8 + (uint64_t)r[DISPI_Y_OFFSET] * line;
-    uint64_t shown = (uint64_t)r[DISPI_YRES] * line;
+    size_t start = (uint64_t)m->x_offset * bits / 8 + (uint64_t)m->y_offset * line;
+    uint64_t shown = (uint64_t)m->height * line;
     if (start + shown > vbe.vram_size) {
-        r[DISPI_Y_OFFSET] = 0;
-        start = (uint64_t)r[DISPI_X_OFFSET] * bits / 8;
+        m->y_offset = 0;
+        start = (uint64_t)m->x_offset * bits / 8;
         if (start + shown > vbe.vram_size) {
-            r[DISPI_X_OFFSET] = 0;
+            m->x_offset = 0;
             start = 0;
         }
     }
-    r[DISPI_VIRT_HEIGHT] = max_y > 0xffff ? 0xffff : (uint16_t)max_y;
+    m->virt_height = max_y > 0xffff ? 0xffff : (uint16_t)max_y;
     vbe.line_bytes = line;
     vbe.start = (uint32_t)start;
 }
 
-// The window at A0000h shows the bank the interface selects while it is on,
-// mapped there directly, and is the VGA's while it is off.
+// The window at A0000h shows the bank the mode selects while a VBE mode is on,
+// mapped there directly, and is the VGA's while none is.
 static void window_update(void) {
-    uint32_t bank = vbe_on() ? vbe.regs[DISPI_BANK] : NO_BANK;
+    uint32_t bank = vbe_on() ? vbe.mode.bank : NO_BANK;
     if (bank == vbe.window_bank) {
         return;
     }
@@ -1110,123 +1108,129 @@ static void window_update(void) {
     gpt_flush();
 }
 
-static uint16_t dispi_read(uint16_t index) {
-    if (index < DISPI_REG_COUNT) {
-        if ((vbe.regs[DISPI_ENABLE] & DISPI_GETCAPS) != 0) {
-            switch (index) {
-                case DISPI_XRES: {
-                    return DISPI_MAX_XRES;
-                }
-                case DISPI_YRES: {
-                    return DISPI_MAX_YRES;
-                }
-                case DISPI_BPP: {
-                    return DISPI_MAX_BPP;
-                }
-                default: {
-                    break;
-                }
-            }
-        }
-        return vbe.regs[index];
-    }
-    if (index == DISPI_VIDEO_MEMORY_64K) {
-        uint64_t blocks = vbe.vram_size >> 16;
-        return blocks > 0xffff ? 0xffff : (uint16_t)blocks;
-    }
-    return 0;
-}
-
-static void dispi_write(uint16_t index, uint16_t value) {
-    uint16_t *r = vbe.regs;
-    switch (index) {
-        case DISPI_ID: {
-            if (value >= DISPI_ID0 && value <= DISPI_ID5) {
-                r[DISPI_ID] = value;
-            }
-            break;
-        }
-        case DISPI_XRES:
-        case DISPI_YRES:
-        case DISPI_BPP:
-        case DISPI_VIRT_WIDTH:
-        case DISPI_X_OFFSET:
-        case DISPI_Y_OFFSET: {
-            r[index] = value;
-            dispi_fixup();
-            if (vbe_on() && vbe.start != 0) {
-                vbe.panned = true;
-            }
-            break;
-        }
-        case DISPI_BANK: {
-            r[DISPI_BANK] = (uint16_t)(value & ((vbe.vram_size >> 16) - 1));
-            window_update();
-            break;
-        }
-        case DISPI_ENABLE: {
-            if ((value & DISPI_ENABLED) != 0 && (r[DISPI_ENABLE] & DISPI_ENABLED) == 0) {
-                r[DISPI_VIRT_WIDTH] = 0;
-                r[DISPI_X_OFFSET] = 0;
-                r[DISPI_Y_OFFSET] = 0;
-                r[DISPI_ENABLE] |= DISPI_ENABLED;
-                dispi_fixup();
-                vbe.panned = false;
-                if ((value & DISPI_NOCLEARMEM) == 0) {
-                    vram_clear((uint64_t)r[DISPI_YRES] * vbe.line_bytes);
-                }
-            } else {
-                r[DISPI_BANK] = 0;
-            }
-            vga.dac8 = (value & DISPI_8BIT_DAC) != 0;
-            vga.palette_dirty = true;
-            r[DISPI_ENABLE] = value;
-            window_update();
-            break;
-        }
-        default: {
-            break;
-        }
+// The scan line or the display start changed: a start away from the top pans
+// until the next mode set.
+static void mode_layout(void) {
+    mode_fixup();
+    if (vbe_on() && vbe.start != 0) {
+        vbe.panned = true;
     }
     vga.dirty = true;
 }
 
-uint16_t vga_dispi_read(uint16_t index) {
-    spinlock_acquire(&vga.lock);
-    uint16_t value = dispi_read(index);
-    spinlock_release(&vga.lock);
-    return value;
-}
-
-void vga_dispi_write(uint16_t index, uint16_t value) {
-    spinlock_acquire(&vga.lock);
-    dispi_write(index, value);
-    spinlock_release(&vga.lock);
-}
-
-static void dispi_ports(
-    struct vcpu *v,
-    void *ctx,
-    uint16_t offset,
-    size_t size,
-    bool in,
-    uint32_t *value
-) {
-    (void)v;
-    (void)ctx;
-    uint16_t mask = size == 1 ? 0xff : 0xffff;
-    spinlock_acquire(&vga.lock);
-    if (offset == 0) {
-        if (in) {
-            *value = vbe.index & mask;
-        } else {
-            vbe.index = (uint16_t)(*value & mask);
-        }
-    } else if (in) {
-        *value = dispi_read(vbe.index) & mask;
-    } else {
-        dispi_write(vbe.index, (uint16_t)(*value & mask));
+// Turns the mode on, its scan line as wide as it and its display start at the
+// top, clearing what it shows of video memory unless keep.
+static void mode_on(bool lfb, bool keep) {
+    struct vga_vbe *m = &vbe.mode;
+    m->on = true;
+    m->lfb = lfb;
+    m->keep = keep;
+    m->virt_width = 0;
+    m->x_offset = 0;
+    m->y_offset = 0;
+    mode_fixup();
+    vbe.panned = false;
+    if (!keep) {
+        vram_clear((uint64_t)m->height * vbe.line_bytes);
     }
+}
+
+static void mode_off(void) {
+    vbe.mode.on = false;
+    vbe.mode.lfb = false;
+    vbe.mode.keep = false;
+    vbe.mode.bank = 0;
+}
+
+void vga_vbe_get(struct vga_vbe *mode) {
+    spinlock_acquire(&vga.lock);
+    *mode = vbe.mode;
+    spinlock_release(&vga.lock);
+}
+
+void vga_vbe_set_mode(uint16_t width, uint16_t height, uint16_t bpp, bool lfb, bool keep) {
+    spinlock_acquire(&vga.lock);
+    mode_off();
+    vbe.mode.width = width;
+    vbe.mode.height = height;
+    vbe.mode.bpp = bpp;
+    mode_on(lfb, keep);
+    vga.dac8 = false;
+    vga.palette_dirty = true;
+    window_update();
+    vga.dirty = true;
+    spinlock_release(&vga.lock);
+}
+
+void vga_vbe_set_off(void) {
+    spinlock_acquire(&vga.lock);
+    mode_off();
+    vga.dac8 = false;
+    vga.palette_dirty = true;
+    window_update();
+    vga.dirty = true;
+    spinlock_release(&vga.lock);
+}
+
+void vga_vbe_set_bank(uint16_t bank) {
+    spinlock_acquire(&vga.lock);
+    vbe.mode.bank = (uint16_t)(bank & ((vbe.vram_size >> 16) - 1));
+    window_update();
+    vga.dirty = true;
+    spinlock_release(&vga.lock);
+}
+
+void vga_vbe_set_virt_width(uint16_t width) {
+    spinlock_acquire(&vga.lock);
+    vbe.mode.virt_width = width;
+    mode_layout();
+    spinlock_release(&vga.lock);
+}
+
+void vga_vbe_set_start(uint16_t x, uint16_t y) {
+    spinlock_acquire(&vga.lock);
+    vbe.mode.x_offset = x;
+    vbe.mode.y_offset = y;
+    mode_layout();
+    spinlock_release(&vga.lock);
+}
+
+void vga_vbe_restore(const struct vga_vbe *mode) {
+    spinlock_acquire(&vga.lock);
+    mode_off();
+    if (mode->on) {
+        vbe.mode.width = mode->width;
+        vbe.mode.height = mode->height;
+        vbe.mode.bpp = mode->bpp;
+        mode_on(mode->lfb, true);
+        vbe.mode.keep = mode->keep;
+        vbe.mode.virt_width = mode->virt_width;
+        vbe.mode.x_offset = mode->x_offset;
+        vbe.mode.y_offset = mode->y_offset;
+        mode_layout();
+        vbe.mode.bank = (uint16_t)(mode->bank & ((vbe.vram_size >> 16) - 1));
+    }
+    window_update();
+    vga.dirty = true;
+    spinlock_release(&vga.lock);
+}
+
+size_t vga_vbe_vram_size(void) {
+    return vbe.present ? vbe.vram_size : 0;
+}
+
+bool vga_dac8(void) {
+    spinlock_acquire(&vga.lock);
+    bool dac8 = vga.dac8;
+    spinlock_release(&vga.lock);
+    return dac8;
+}
+
+void vga_set_dac8(bool dac8) {
+    spinlock_acquire(&vga.lock);
+    vga.dac8 = dac8;
+    vga.palette_dirty = true;
+    vga.dirty = true;
     spinlock_release(&vga.lock);
 }
 
@@ -1642,13 +1646,13 @@ static void border_fill(const struct vga_draw_ops *ops, uint32_t rgb) {
     job.whole = true;
 }
 
-// The Bochs interface's display, its lines redrawn where their bytes changed,
-// as nothing traps the guest's writes to its memory: on the pages that the
-// dirty flags show written, where the processor keeps them.
+// A VBE mode's display, its lines redrawn where their bytes changed, as
+// nothing traps the guest's writes to its memory: on the pages that the dirty
+// flags show written, where the processor keeps them.
 static bool direct_wanted(void) {
     const struct handoff_framebuffer *fb = &core_handoff->video.framebuffer;
-    return vbe.direct_size != 0 && vbe_on() && !vbe.panned && vbe.regs[DISPI_BPP] == 32
-        && vbe.regs[DISPI_XRES] == fb->width && vbe.regs[DISPI_YRES] == fb->height
+    return vbe.direct_size != 0 && vbe_on() && !vbe.panned && vbe.mode.bpp == 32
+        && vbe.mode.width == fb->width && vbe.mode.height == fb->height
         && vbe.line_bytes == fb->pitch && vbe.start == 0;
 }
 
@@ -1890,19 +1894,17 @@ static bool vbe_written(uint64_t at, size_t bytes) {
     return false;
 }
 
-// Whether the guest changed the Bochs interface's mode since the redraw under
-// way started.
+// Whether the guest changed the VBE mode since the redraw under way started.
 static bool vbe_mode_changed(void) {
     spinlock_acquire(&vga.lock);
-    bool changed = vbe.regs[DISPI_XRES] != out.width || vbe.regs[DISPI_YRES] != out.height
-                || vbe.regs[DISPI_BPP] != out.vbe_bpp || vbe.line_bytes != out.vbe_line_bytes
+    bool changed = vbe.mode.width != out.width || vbe.mode.height != out.height
+                || vbe.mode.bpp != out.vbe_bpp || vbe.line_bytes != out.vbe_line_bytes
                 || vbe.start != out.vbe_start;
     spinlock_release(&vga.lock);
     return changed;
 }
 
-// The bytes of video memory that a line of the Bochs interface's display
-// shows.
+// The bytes of video memory that a line of a VBE mode's display shows.
 static size_t vbe_bytes(void) {
     return (out.width * (out.vbe_bpp == 15 ? 16 : out.vbe_bpp) + 7) / 8;
 }
@@ -1935,8 +1937,8 @@ static uint32_t column_of(uint32_t pixel) {
     return low;
 }
 
-// The Bochs interface's source pixels from to end of line sy as 0RGB, from
-// video memory as last drawn.
+// The VBE mode's source pixels from to end of line sy as 0RGB, from video
+// memory as last drawn.
 static void vbe_convert(
     const struct vga_draw_ops *ops,
     uint32_t sy,
@@ -2007,10 +2009,10 @@ static const uint32_t *across(
     return s->across[k];
 }
 
-// Marks which pixels of the Bochs interface's line sy changed since the line
-// was last drawn: all of a line that the frame draws again, else those that
-// differ from video memory as last drawn, on pages the guest wrote to where
-// the dirty flags tell, which then join it.
+// Marks which pixels of the VBE mode's line sy changed since the line was last
+// drawn: all of a line that the frame draws again, else those that differ from
+// video memory as last drawn, on pages the guest wrote to where the dirty
+// flags tell, which then join it.
 static void mark_vbe(const struct vga_draw_ops *ops, uint32_t sy) {
     size_t bytes = vbe_bytes();
     uint64_t at = out.vbe_start + (uint64_t)sy * out.vbe_line_bytes;
@@ -2458,17 +2460,17 @@ static void job_abandon(void) {
     }
 }
 
-// Starts showing the Bochs interface's display: every line where its mode or
-// 8-bit palette changed, else the lines whose bytes changed, of those on pages
+// Starts showing a VBE mode's display: every line where its mode or 8-bit
+// palette changed, else the lines whose bytes changed, of those on pages
 // written to where the dirty flags tell. False where no line can have.
 static bool vbe_frame(uint64_t now) {
     if (vbe.direct) {
         return false;
     }
     spinlock_acquire(&vga.lock);
-    uint32_t width = vbe.regs[DISPI_XRES];
-    uint32_t height = vbe.regs[DISPI_YRES];
-    uint16_t bpp = vbe.regs[DISPI_BPP];
+    uint32_t width = vbe.mode.width;
+    uint32_t height = vbe.mode.height;
+    uint16_t bpp = vbe.mode.bpp;
     size_t line_bytes = vbe.line_bytes;
     uint32_t start = vbe.start;
     bool palette = vga.palette_dirty;
@@ -2640,14 +2642,13 @@ uintptr_t vga_lfb(void) {
     return vbe.present ? vbe.lfb : 0;
 }
 
-// The Bochs interface on the video memory the loader reserved, there for the
-// guest where the layout found room.
+// The VBE modes on the video memory the loader reserved, there for the guest
+// where the layout found room.
 static void vbe_init(void) {
     const struct handoff_video *video = &core_handoff->video;
     vbe.vram_phys = video->vram_base;
     vbe.vram = (uint8_t *)(uintptr_t)video->vram_base;
     vbe.vram_size = video->vram_size;
-    vbe.regs[DISPI_ID] = DISPI_ID5;
     vbe.window_bank = NO_BANK;
     vbe.track = gpt_track_dirty();
     if (vbe.track) {
@@ -2657,13 +2658,11 @@ static void vbe_init(void) {
         vbe.leave_pages = page_alloc(bitmap_pages);
     }
     out.shadow = vbe.vram + vbe.vram_size;
-    struct io_handler ports = { DISPI_PORT, DISPI_PORT_COUNT, dispi_ports, NULL, false };
-    io_register(&ports);
     vbe.present = true;
 
-    // Bochs' 32 bpp pixels hold blue, green, and red in their first three
-    // bytes, and its scan lines are a multiple of 32 bytes. A turned picture
-    // is never the framebuffer's own.
+    // The VBE modes' 32 bpp pixels hold blue, green, and red in their first
+    // three bytes, and their scan lines are a multiple of 32 bytes. A turned
+    // picture is never the framebuffer's own.
     const struct handoff_framebuffer *fb = &video->framebuffer;
     uint64_t frame = page_up((uint64_t)fb->pitch * fb->height);
     if (fb->present && fb->rotation == HANDOFF_ROTATE_0 && fb->bpp == 32 && fb->red_size == 8
@@ -2724,17 +2723,18 @@ size_t vga_lfb_size(void) {
 #define REAL_MONOCHROME_COUNT 0x0c
 #define REAL_COLOUR_BASE 0x3c0
 #define REAL_COLOUR_COUNT 0x20
-// QEMU's VGAs decode the Bochs display interface too, through which their
-// Video BIOSes leave and set graphics modes, and its 16-bit data port reaches
-// 1D0h.
-#define REAL_DISPI_COUNT (DISPI_PORT_COUNT + 1)
+// QEMU's VGAs decode the Bochs display interface too, its index and data ports
+// from 1CEh, through which their Video BIOSes leave and set graphics modes,
+// and its 16-bit data port reaches 1D0h.
+#define REAL_BOCHS_BASE 0x1ce
+#define REAL_BOCHS_COUNT 3
 
 struct pci_id {
     uint16_t vendor;
     uint16_t device;
 };
 
-static const struct pci_id real_dispi_vgas[] = {
+static const struct pci_id real_bochs_vgas[] = {
     // QEMU standard VGA
     { 0x1234, 0x1111 },
     // virtio-vga
@@ -2745,9 +2745,9 @@ static const struct pci_id real_dispi_vgas[] = {
     { 0x15ad, 0x0405 }
 };
 
-static bool decodes_dispi(uint16_t vendor, uint16_t device) {
-    for (size_t i = 0; i < ARRAY_COUNT(real_dispi_vgas); i++) {
-        if (real_dispi_vgas[i].vendor == vendor && real_dispi_vgas[i].device == device) {
+static bool decodes_bochs(uint16_t vendor, uint16_t device) {
+    for (size_t i = 0; i < ARRAY_COUNT(real_bochs_vgas); i++) {
+        if (real_bochs_vgas[i].vendor == vendor && real_bochs_vgas[i].device == device) {
             return true;
         }
     }
@@ -2759,8 +2759,8 @@ static void give_real_vga(void) {
     if (video->vga_present) {
         io_pass(REAL_MONOCHROME_BASE, REAL_MONOCHROME_COUNT);
         io_pass(REAL_COLOUR_BASE, REAL_COLOUR_COUNT);
-        if (decodes_dispi(video->vga_vendor_id, video->vga_device_id)) {
-            io_pass(DISPI_PORT, REAL_DISPI_COUNT);
+        if (decodes_bochs(video->vga_vendor_id, video->vga_device_id)) {
+            io_pass(REAL_BOCHS_BASE, REAL_BOCHS_COUNT);
         }
     }
 }
@@ -2773,7 +2773,7 @@ static struct vga_scratch *scratch_alloc(void) {
     struct vga_scratch *s = kmalloc(sizeof(struct vga_scratch));
     s->line = page_alloc(page_count((MAX_WIDTH + 2 * 9 * 2) * sizeof(uint32_t)));
     s->row = page_alloc(line_pages);
-    s->source = page_alloc(page_count(DISPI_MAX_XRES * sizeof(uint32_t)));
+    s->source = page_alloc(page_count(VGA_VBE_MAX_WIDTH * sizeof(uint32_t)));
     s->across[0] = page_alloc(line_pages);
     s->across[1] = page_alloc(line_pages);
     s->across_line[0] = UINT32_MAX;
@@ -2813,7 +2813,7 @@ bool vga_init(void) {
     uint32_t screen_height;
     vga_screen_size(&screen_width, &screen_height);
     vga_draw_scale_alloc(&out.scale, screen_width);
-    size_t lines = DISPI_MAX_YRES > MAX_HEIGHT ? DISPI_MAX_YRES : MAX_HEIGHT;
+    size_t lines = VGA_VBE_MAX_HEIGHT > MAX_HEIGHT ? VGA_VBE_MAX_HEIGHT : MAX_HEIGHT;
     out.changed_first = page_alloc(page_count(lines * sizeof(uint32_t)));
     out.changed_end = page_alloc(page_count(lines * sizeof(uint32_t)));
     job.dirty = page_alloc(page_count((screen_height / SHARE_LINES + 1) * sizeof(struct rect)));

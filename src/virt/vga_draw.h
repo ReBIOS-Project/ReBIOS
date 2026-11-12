@@ -114,9 +114,8 @@ struct vga_draw_ops {
     // The same from it.
     void (*read_fb)(void *dst, const void *src, size_t size);
     void (*fill)(uint32_t *dst, uint32_t value, size_t count);
-    // Pixels of the Bochs interface's video memory, of 8 bits through a
-    // palette, of 15, 16, or 24 bits, or of 32 bits with whatever their high
-    // byte holds.
+    // Pixels of a VBE mode's video memory, of 8 bits through a palette, of 15,
+    // 16, or 24 bits, or of 32 bits with whatever their high byte holds.
     void (*convert8)(uint32_t *dst, const uint8_t *src, size_t count, const uint32_t *palette);
     void (*convert15)(uint32_t *dst, const uint8_t *src, size_t count);
     void (*convert16)(uint32_t *dst, const uint8_t *src, size_t count);

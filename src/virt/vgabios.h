@@ -126,8 +126,8 @@ struct vgabios_regs {
 
 // What the video BIOS knows of the display it drives.
 struct vgabios_display {
-    // Whether the Bochs display interface is there.
-    bool dispi;
+    // Whether the VBE modes are there, on video memory of their own.
+    bool vbe;
     // The largest mode the display shows unscaled, the framebuffer's.
     uint16_t max_width;
     uint16_t max_height;
@@ -156,7 +156,7 @@ void vgabios_int10_load_palette_256(void);
 void vgabios_vbe_int10(struct vgabios_regs *r);
 // INT 10h AH=1Ch, the VGA's own form of VBE's state functions.
 void vgabios_vbe_vga_state(struct vgabios_regs *r);
-// Turns the Bochs display interface off, for a VGA mode.
+// Leaves the VBE modes, for a VGA mode.
 void vgabios_vbe_disable(void);
 
 // What the running call does in the guest. VGA ports only.
