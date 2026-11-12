@@ -107,6 +107,7 @@ struct disk_info {
 #define MBR_PARTITION_SIZE 16
 #define MBR_TYPE_OFFSET 4
 #define MBR_TYPE_GPT_PROTECTIVE 0xee
+#define MBR_STATUS_ACTIVE 0x80
 
 #define ACPI_PNP0A03 0x0a0341d0
 #define ACPI_PNP0A08 0x0a0841d0
@@ -530,7 +531,9 @@ static void drive_model(
 }
 
 // Whether the medium holds what the legacy BIOS boots: a master boot record
-// with code, not GPT's protective one, or an El Torito boot record.
+// with code, or an El Torito boot record. GPT's protective MBR is no such
+// record, but a hybrid one is where it also marks an MBR partition active for
+// a legacy OS, as boot managers such as BootIt UEFI write.
 static bool legacy_bootable(struct efi_block_io_protocol *block_io, bool optical) {
     struct efi_block_io_media *media = block_io->media;
     if (media->media_present == 0 || media->block_size < 512 || media->block_size > 4096) {
@@ -564,19 +567,23 @@ static bool legacy_bootable(struct efi_block_io_protocol *block_io, bool optical
             block_io, media->media_id, 0, media->block_size, sector
         );
         if (status == EFI_SUCCESS) {
-            bootable = sector[MBR_SIGNATURE_OFFSET] == 0x55
-                    && sector[MBR_SIGNATURE_OFFSET + 1] == 0xaa;
+            bool protective = false;
+            bool active = false;
             for (size_t i = 0; i < 4; i++) {
-                if (sector[MBR_PARTITIONS + i * MBR_PARTITION_SIZE + MBR_TYPE_OFFSET]
-                 == MBR_TYPE_GPT_PROTECTIVE) {
-                    bootable = false;
+                const uint8_t *entry = sector + MBR_PARTITIONS + i * MBR_PARTITION_SIZE;
+                uint8_t type = entry[MBR_TYPE_OFFSET];
+                if (type == MBR_TYPE_GPT_PROTECTIVE) {
+                    protective = true;
+                } else if (type != 0 && entry[0] == MBR_STATUS_ACTIVE) {
+                    active = true;
                 }
             }
             bool code = false;
             for (size_t i = 0; i < MBR_PARTITIONS; i++) {
                 code |= sector[i] != 0;
             }
-            bootable = bootable && code;
+            bootable = sector[MBR_SIGNATURE_OFFSET] == 0x55
+                    && sector[MBR_SIGNATURE_OFFSET + 1] == 0xaa && code && (!protective || active);
         }
     }
     efi_bs->free_pages(buffer, pages);
