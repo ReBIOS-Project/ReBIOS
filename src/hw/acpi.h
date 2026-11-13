@@ -52,6 +52,7 @@
 #define ACPI_TAG_ADDRESS32 (ACPI_LARGE_ITEM | ACPI_RESOURCE_ADDRESS32)
 #define ACPI_TAG_ADDRESS64 (ACPI_LARGE_ITEM | ACPI_RESOURCE_ADDRESS64)
 #define ACPI_TAG_ADDRESS64_EXTENDED (ACPI_LARGE_ITEM | ACPI_RESOURCE_ADDRESS64_EXTENDED)
+#define ACPI_TAG_EXTENDED_IRQ (ACPI_LARGE_ITEM | ACPI_RESOURCE_EXTENDED_IRQ)
 
 // Sets up table access, switches the platform to ACPI mode, then loads the
 // namespace, without initialising any device. Returns false if there is no

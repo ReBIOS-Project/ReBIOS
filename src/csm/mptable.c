@@ -35,6 +35,7 @@
 #include <sys/cpu.h>
 #include <sys/smp.h>
 #include <sys/x86.h>
+#include <virt/irq.h>
 #include <virt/pci_plan.h>
 
 // The structures and values of the Intel MultiProcessor Specification 1.4,
@@ -442,7 +443,7 @@ static void io_interrupts_emit(struct mp_writer *w, const struct mp_input *in) {
                        | (route->level ? MP_LEVEL : MP_EDGE);
         // MultiProcessor Specification 1.4, Table D-1.
         uint8_t irq = (uint8_t)(route->addr.device << 2 | (route->pin - 1));
-        io_interrupt_emit(w, MP_INT, flags, (uint8_t)bus, irq, route->gsi);
+        io_interrupt_emit(w, MP_INT, flags, (uint8_t)bus, irq, irq_guest_gsi(route->gsi));
     }
 }
 

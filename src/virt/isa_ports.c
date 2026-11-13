@@ -34,6 +34,7 @@
 #include <hw/pci_enum.h>
 #include <hw/pci_regs.h>
 #include <lib/log.h>
+#include <lib/util.h>
 #include <virt/io.h>
 #include <virt/irq.h>
 #include <virt/vcpu.h>
@@ -41,6 +42,27 @@
 // The standard PC serial and parallel ports' IDs that Linux 7.3's 8250_pnp and
 // parport_pc drivers take.
 const char *const isa_ports_ids[] = { "PNP0500", "PNP0501", "PNP0400", "PNP0401", NULL };
+static const char *const serial_ids[] = { "PNP0500", "PNP0501", NULL };
+
+// The ISA IRQ that an OS reading no firmware tables takes a port at a PC's
+// address to interrupt on, as Linux 7.3 has them: serial ports in
+// arch/x86/include/asm/serial.h, and parallel ports as parport_pc.c's Super
+// I/O probe sets them. Of ports that share an IRQ, rank 0 gets it first.
+static const struct {
+    uint16_t base;
+    bool serial;
+    uint8_t irq;
+    uint8_t rank;
+} pc_ports[] = {
+    { 0x3f8, true, 4, 0 },
+    { 0x2f8, true, 3, 0 },
+    { 0x3e8, true, 4, 1 },
+    { 0x2e8, true, 3, 1 },
+    { 0x3bc, false, 7, 0 },
+    { 0x378, false, 7, 1 },
+    { 0x278, false, 5, 0 }
+};
+#define PC_PORT_RANKS 2
 
 #define UART_PORTS 8
 #define MAX_DEVICES 8
@@ -86,6 +108,7 @@ struct device_ports {
 // turn on, off, or move through its _SRS and _DIS: what the guest has of it.
 struct port_device {
     uacpi_namespace_node *node;
+    bool serial;
     struct device_ports given;
 };
 
@@ -252,7 +275,9 @@ static uacpi_iteration_decision find_device(
     if (!current_ports(node, &d, &enabled) || device_count == MAX_DEVICES) {
         return UACPI_ITERATION_DECISION_CONTINUE;
     }
-    devices[device_count++] = (struct port_device){ .node = node, .given = d };
+    devices[device_count++] = (struct port_device){
+        .node = node, .serial = uacpi_device_matches_pnp_id(node, serial_ids), .given = d
+    };
     for (size_t i = 0; i < d.ranges; i++) {
         io_pass(d.base[i], d.count[i]);
     }
@@ -262,6 +287,41 @@ static uacpi_iteration_decision find_device(
     }
     log_ports(node, &d);
     return UACPI_ITERATION_DECISION_CONTINUE;
+}
+
+static void present_port(const struct port_device *dev, unsigned int irq) {
+    uint32_t gsi = UINT32_MAX;
+    if (dev->given.line_count != 0) {
+        gsi = dev->given.line_is_gsi[0] ? dev->given.lines[0] : irq_isa_gsi(dev->given.lines[0]);
+    }
+    int was = gsi != UINT32_MAX ? irq_isa_irq(gsi) : -1;
+    if (!irq_present_isa(gsi, irq)) {
+        printf(
+            "%.4s keeps the firmware's interrupt, as ISA IRQ %u cannot be its\n",
+            uacpi_namespace_node_name(dev->node).text, irq
+        );
+    } else if (gsi != UINT32_MAX && was != (int)irq) {
+        printf(
+            "The guest has %.4s on ISA IRQ %u, as a PC has the port at %#x\n",
+            uacpi_namespace_node_name(dev->node).text, irq, dev->given.base[0]
+        );
+    }
+}
+
+// Has the guest see each port at a PC's address on the IRQ that OSes reading
+// no firmware tables take it to have, as on an ISA PC, the guest's own view.
+static void present_ports(void) {
+    for (size_t rank = 0; rank < PC_PORT_RANKS; rank++) {
+        for (size_t i = 0; i < device_count; i++) {
+            const struct port_device *dev = &devices[i];
+            for (size_t j = 0; j < ARRAY_COUNT(pc_ports) && dev->given.ranges != 0; j++) {
+                if (pc_ports[j].base == dev->given.base[0] && pc_ports[j].serial == dev->serial
+                 && pc_ports[j].rank == rank) {
+                    present_port(dev, pc_ports[j].irq);
+                }
+            }
+        }
+    }
 }
 
 static uint64_t field(const uint8_t *p, size_t width) {
@@ -407,5 +467,6 @@ void isa_ports_init(void) {
     }
     acpi_lock();
     uacpi_find_devices_at(uacpi_namespace_root(), isa_ports_ids, find_device, NULL);
+    present_ports();
     acpi_unlock();
 }

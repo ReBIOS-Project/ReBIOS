@@ -44,16 +44,33 @@ struct irq_pci_line {
 };
 
 // Has the guest's 8259s see each GSI PCI devices use on an ISA IRQ: one of
-// those neither ISA devices (isa_claimed, bit n for IRQ n), the SCI, nor the
-// hypervisor's own devices use, in turn, so that as few GSIs share one as can
-// be. Before the guest runs.
+// those neither ISA devices (isa_claimed, bit n for the host's IRQ n, and
+// those irq_present_isa() gave), the SCI, nor the hypervisor's own devices
+// use, in turn, so that as few GSIs share one as can be. Before the guest
+// runs.
 void irq_route_pci(const struct irq_pci_line *lines, size_t count, uint16_t isa_claimed);
 
 // The ISA IRQ the guest's 8259s see a GSI's interrupts on, or -1.
 int irq_isa_irq(uint32_t gsi);
-// The GSI of an ISA IRQ, as the MADT overrides it, or UINT32_MAX. Before
-// irq_route_pci() puts PCI's on ISA IRQs.
+// The GSI of one of the host's ISA IRQs, as the MADT overrides it, or
+// UINT32_MAX.
 uint32_t irq_isa_gsi(unsigned int irq);
+// The guest's I/O APIC entry that a GSI's interrupts reach, and the GSI whose
+// interrupts reach an entry of the guest's: the same GSI, but for lines that
+// irq_present_isa() moved.
+uint32_t irq_guest_gsi(uint32_t gsi);
+uint32_t irq_host_gsi(uint32_t guest_gsi);
+// The host's ISA IRQ whose interrupts the guest sees on an ISA IRQ of its own,
+// or that IRQ where none are.
+unsigned int irq_host_isa_irq(unsigned int irq);
+
+// Has the guest see a GSI's interrupts on an ISA IRQ, at its 8259 input and at
+// the I/O APIC entry that the MADT gives the IRQ, as an ISA device's are: the
+// line the guest saw there goes where the GSI's was. Keeps the IRQ from PCI,
+// for a device without a line, gsi UINT32_MAX, too. False where another device
+// was put on the IRQ first, or where either line is the SCI's, the
+// hypervisor's, or one it drives. Before irq_give_device_lines().
+bool irq_present_isa(uint32_t gsi, unsigned int irq);
 
 // After the guest changed an I/O APIC entry.
 void irq_gsi_changed(uint32_t gsi);

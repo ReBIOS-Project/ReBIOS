@@ -88,6 +88,10 @@ struct route {
     uint32_t pin;
     // The 8259 input it feeds, or -1.
     int irq;
+    // The host's ISA IRQ, as the MADT has it, or -1.
+    int host_irq;
+    // The guest's I/O APIC entry it reaches.
+    uint32_t guest_gsi;
     bool level;
     bool active_low;
     int owner;
@@ -123,6 +127,8 @@ struct route {
 
 static struct route *routes;
 static size_t route_count;
+// The ISA IRQs irq_present_isa() gave devices, which PCI's stay off.
+static uint16_t presented;
 // Per processor, the slot each vector belongs to, and where the next search
 // for room starts, so that a vector freed is the last to be used again.
 static _Atomic(struct irq_slot *) (*slot_table)[256];
@@ -176,10 +182,12 @@ static void override(const struct acpi_madt_interrupt_source_override *iso) {
     for (size_t gsi = 0; gsi < route_count; gsi++) {
         if (routes[gsi].irq == iso->source) {
             routes[gsi].irq = -1;
+            routes[gsi].host_irq = -1;
         }
     }
     struct route *r = &routes[iso->gsi];
     r->irq = iso->source;
+    r->host_irq = iso->source;
     // What conforms to ISA is active high and edge-triggered, and a reserved
     // value means active low or level-triggered, as Linux 7.3's
     // irq_active_low() and irq_is_level() take them.
@@ -206,7 +214,9 @@ static void routes_init(void) {
     }
     routes = kmalloc(route_count * sizeof(struct route));
     for (size_t gsi = 0; gsi < route_count; gsi++) {
-        routes[gsi] = (struct route){ .irq = -1, .host_rte = IOAPIC_RTE_MASKED };
+        routes[gsi] = (struct route){
+            .irq = -1, .host_irq = -1, .guest_gsi = (uint32_t)gsi, .host_rte = IOAPIC_RTE_MASKED
+        };
         routes[gsi].slot = (struct irq_slot){ .taken = mirror_taken, .ctx = &routes[gsi] };
         uint32_t pin;
         struct ioapic *io = ioapic_for_gsi(gsi, &pin);
@@ -220,6 +230,7 @@ static void routes_init(void) {
     for (size_t irq = 0; irq < ISA_IRQS && (uint32_t)irq < route_count; irq++) {
         if (irq != ISA_IRQ_CASCADE && routes[irq].io != NULL) {
             routes[irq].irq = irq;
+            routes[irq].host_irq = irq;
         }
     }
 
@@ -294,7 +305,7 @@ static uint64_t desired(uint32_t gsi, struct route *r, int *owner) {
     }
     // The guest's entry, on a vector of the hypervisor's, to the processor of
     // the first vCPU it names: delivery follows the guest's entry.
-    bool mirror = vioapic_rte(gsi, &rte) && (rte & IOAPIC_RTE_MASKED) == 0
+    bool mirror = vioapic_rte(r->guest_gsi, &rte) && (rte & IOAPIC_RTE_MASKED) == 0
                && (rte & IOAPIC_RTE_DELIVERY_MASK) != IOAPIC_RTE_DELIVERY_EXTINT;
     if (mirror && r->slot.cpu == NULL) {
         uint32_t destination = (uint32_t)(rte >> IOAPIC_RTE_DEST_SHIFT);
@@ -351,9 +362,9 @@ static void resample(void) {
 
 // Where a line the hypervisor drives reaches the guest: its I/O APIC entry,
 // while unmasked, else its 8259.
-static void virtual_deliver(uint32_t gsi, struct route *r) {
+static void virtual_deliver(struct route *r) {
     uint64_t vrte;
-    bool apic = vioapic_rte(gsi, &vrte) && (vrte & IOAPIC_RTE_MASKED) == 0
+    bool apic = vioapic_rte(r->guest_gsi, &vrte) && (vrte & IOAPIC_RTE_MASKED) == 0
              && (vrte & IOAPIC_RTE_DELIVERY_MASK) != IOAPIC_RTE_DELIVERY_EXTINT;
     if (r->irq >= 0) {
         pic_set_irq((unsigned int)r->irq, !apic && r->virtual_asserted);
@@ -393,7 +404,7 @@ static void update(void) {
             atomic_store_explicit(&extint_target, target, memory_order_relaxed);
         }
         if (r->virtual_line) {
-            virtual_deliver(gsi, r);
+            virtual_deliver(r);
         }
         if (r->io == NULL) {
             continue;
@@ -491,7 +502,16 @@ static void elcr_init(void) {
 }
 
 void irq_route_pci(const struct irq_pci_line *lines, size_t count, uint16_t isa_claimed) {
-    uint16_t taken = HYPERVISOR_IRQS | LEGACY_BIOS_IRQS | isa_claimed;
+    uint16_t taken = HYPERVISOR_IRQS | LEGACY_BIOS_IRQS | presented;
+    // The host's IRQs that devices claim, where the guest sees them.
+    for (size_t irq = 0; irq < ISA_IRQS; irq++) {
+        if ((isa_claimed & (uint32_t)1 << irq) == 0) {
+            continue;
+        }
+        uint32_t gsi = irq_isa_gsi((unsigned int)irq);
+        int seen = gsi != UINT32_MAX && routes[gsi].irq >= 0 ? routes[gsi].irq : (int)irq;
+        taken |= (uint16_t)((uint32_t)1 << seen);
+    }
     struct acpi_fadt *fadt;
     if (uacpi_table_fadt(&fadt) == UACPI_STATUS_OK && fadt->sci_int < ISA_IRQS) {
         taken |= (uint32_t)1 << fadt->sci_int;
@@ -533,11 +553,97 @@ int irq_isa_irq(uint32_t gsi) {
 
 uint32_t irq_isa_gsi(unsigned int irq) {
     for (size_t gsi = 0; gsi < route_count; gsi++) {
-        if (routes[gsi].irq == (int)irq) {
+        if (routes[gsi].host_irq == (int)irq) {
             return gsi;
         }
     }
     return UINT32_MAX;
+}
+
+// The line whose interrupts reach the guest's I/O APIC entry for a GSI.
+static struct route *route_at(uint32_t guest_gsi) {
+    if (guest_gsi < route_count && routes[guest_gsi].guest_gsi == guest_gsi) {
+        return &routes[guest_gsi];
+    }
+    for (size_t gsi = 0; gsi < route_count; gsi++) {
+        if (routes[gsi].guest_gsi == guest_gsi) {
+            return &routes[gsi];
+        }
+    }
+    return NULL;
+}
+
+uint32_t irq_guest_gsi(uint32_t gsi) {
+    return gsi < route_count ? routes[gsi].guest_gsi : gsi;
+}
+
+uint32_t irq_host_gsi(uint32_t guest_gsi) {
+    struct route *r = route_at(guest_gsi);
+    return r != NULL ? (uint32_t)(r - routes) : guest_gsi;
+}
+
+unsigned int irq_host_isa_irq(unsigned int irq) {
+    for (size_t gsi = 0; gsi < route_count; gsi++) {
+        if (routes[gsi].irq == (int)irq && routes[gsi].host_irq >= 0) {
+            return (unsigned int)routes[gsi].host_irq;
+        }
+    }
+    return irq;
+}
+
+static uint32_t sci_gsi(void) {
+    uint32_t sci;
+    bool active_low;
+    bool level;
+    if (!acpi_irq_sci(&sci, &active_low, &level)) {
+        return UINT32_MAX;
+    }
+    return sci < ISA_IRQS ? irq_isa_gsi(sci) : sci;
+}
+
+// Whether a line has to stay where the guest sees it: the SCI's, one the
+// hypervisor takes or drives, or one of the hypervisor's own ISA IRQs.
+static bool line_fixed(const struct route *r, uint32_t sci) {
+    return (uint32_t)(r - routes) == sci || r->handler != NULL || r->virtual_line
+        || (r->irq >= 0 && (HYPERVISOR_IRQS & (uint32_t)1 << r->irq) != 0);
+}
+
+bool irq_present_isa(uint32_t gsi, unsigned int irq) {
+    if (irq >= ISA_IRQS || (HYPERVISOR_IRQS & (uint32_t)1 << irq) != 0
+     || (presented & (uint32_t)1 << irq) != 0) {
+        return false;
+    }
+    presented |= (uint16_t)((uint32_t)1 << irq);
+    if (gsi == UINT32_MAX) {
+        return true;
+    }
+    uint32_t entry = irq_isa_gsi(irq);
+    if (gsi >= route_count || entry == UINT32_MAX) {
+        return false;
+    }
+    uint32_t sci = sci_gsi();
+    spinlock_acquire(&lock);
+    struct route *p = &routes[gsi];
+    struct route *t = route_at(entry);
+    bool placed = t == p;
+    if (!placed && t != NULL && !line_fixed(p, sci) && !line_fixed(t, sci)) {
+        int irq_was = p->irq;
+        uint32_t entry_was = p->guest_gsi;
+        p->irq = (int)irq;
+        p->guest_gsi = entry;
+        t->irq = irq_was;
+        t->guest_gsi = entry_was;
+        placed = true;
+        update();
+        printf("The guest gets GSI %u at its GSI %u, ISA IRQ %u\n", gsi, entry, irq);
+        printf(
+            "The guest gets GSI %u at its GSI %u, ISA IRQ %d\n", (uint32_t)(t - routes), entry_was,
+            irq_was
+        );
+    }
+    spinlock_release(&lock);
+    kick_after_update();
+    return placed;
 }
 
 void irq_gsi_changed(uint32_t gsi) {
@@ -546,9 +652,10 @@ void irq_gsi_changed(uint32_t gsi) {
     // as an EOI where an I/O APIC has no EOI register, as Linux 7.3's KVM has
     // it (arch/x86/kvm/ioapic.c, ioapic_write_indirect()).
     uint64_t vrte;
-    if (gsi < route_count && vioapic_rte(gsi, &vrte) && (vrte & IOAPIC_RTE_LEVEL) == 0) {
-        routes[gsi].held = false;
-        routes[gsi].virtual_held = false;
+    struct route *r = route_at(gsi);
+    if (r != NULL && vioapic_rte(gsi, &vrte) && (vrte & IOAPIC_RTE_LEVEL) == 0) {
+        r->held = false;
+        r->virtual_held = false;
     }
     update();
     spinlock_release(&lock);
@@ -581,10 +688,9 @@ bool irq_extint_pending(struct vcpu *v) {
 static void mirror_taken(void *ctx, size_t index) {
     (void)index;
     struct route *r = ctx;
-    uint32_t gsi = (uint32_t)(r - routes);
     uint64_t vrte = 0;
     spinlock_acquire(&lock);
-    bool deliver = r->owner == OWNER_MIRROR && vioapic_rte(gsi, &vrte);
+    bool deliver = r->owner == OWNER_MIRROR && vioapic_rte(r->guest_gsi, &vrte);
     bool level = deliver && (vrte & IOAPIC_RTE_LEVEL) != 0;
     if (level) {
         r->held = true;
@@ -609,7 +715,7 @@ void irq_mirror_eoi(uint8_t vector) {
     for (size_t gsi = 0; gsi < route_count; gsi++) {
         struct route *r = &routes[gsi];
         uint64_t vrte;
-        if (!vioapic_rte(gsi, &vrte) || (uint8_t)vrte != vector) {
+        if (!vioapic_rte(r->guest_gsi, &vrte) || (uint8_t)vrte != vector) {
             continue;
         }
         if (r->held) {
@@ -777,10 +883,10 @@ bool irq_slot_interrupt(uint8_t vector) {
 }
 
 bool irq_remote_irr(uint32_t gsi) {
-    if (gsi >= route_count) {
+    struct route *r = route_at(gsi);
+    if (r == NULL) {
         return false;
     }
-    struct route *r = &routes[gsi];
     return atomic_load_explicit((_Atomic(bool) *)&r->held, memory_order_acquire)
         || atomic_load_explicit((_Atomic(bool) *)&r->virtual_held, memory_order_acquire);
 }
@@ -842,13 +948,7 @@ void irq_give_gsi(uint32_t gsi) {
 }
 
 void irq_give_device_lines(void) {
-    uint32_t sci = UINT32_MAX;
-    uint32_t sci_irq;
-    bool active_low;
-    bool level;
-    if (acpi_irq_sci(&sci_irq, &active_low, &level)) {
-        sci = sci_irq < ISA_IRQS ? irq_isa_gsi(sci_irq) : sci_irq;
-    }
+    uint32_t sci = sci_gsi();
     size_t count;
     const struct acpi_irq_device_line *lines = acpi_irq_device_lines(&count);
     spinlock_acquire(&lock);

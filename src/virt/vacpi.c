@@ -743,7 +743,7 @@ static void emit_prt(struct aml *a, uacpi_namespace_node *bridge) {
         aml_int(a, prt->entries[i].address);
         aml_int(a, prt->entries[i].pin);
         aml_int(a, 0);
-        aml_int(a, gsis[i]);
+        aml_int(a, irq_guest_gsi(gsis[i]));
         aml_end(a);
     }
     aml_end(a);
@@ -972,11 +972,52 @@ static void memory_move(uint8_t *p, size_t size, uint64_t delta) {
     }
 }
 
-// A resource template with its memory where the guest finds the host's, or the
-// other way, into out, which holds as many bytes as in; returns its size. The
-// memory below 1 MiB, the guest's own, keeps its addresses. Memory that the
-// guest has no place for is left out of what it gets, and memory the firmware
-// has nothing at reaches it as the guest gave it.
+// An IRQ descriptor's ISA IRQs where the guest sees the host's, or the other
+// way.
+static uint16_t irqs_translate(uint16_t mask, bool to_guest) {
+    uint16_t out = 0;
+    for (size_t irq = 0; irq < 16; irq++) {
+        if ((mask & (uint32_t)1 << irq) == 0) {
+            continue;
+        }
+        unsigned int to = (unsigned int)irq;
+        uint32_t gsi = irq_isa_gsi((unsigned int)irq);
+        if (!to_guest) {
+            to = irq_host_isa_irq((unsigned int)irq);
+        } else if (gsi != UINT32_MAX && irq_isa_irq(gsi) >= 0) {
+            to = (unsigned int)irq_isa_irq(gsi);
+        }
+        out |= (uint16_t)((uint32_t)1 << to);
+    }
+    return out;
+}
+
+// Moves the lines of an interrupt descriptor of size bytes at p where the
+// guest sees the host's, or the other way: an IRQ descriptor's ISA IRQs, and
+// an Extended Interrupt descriptor's GSIs, but for one whose resource source
+// names another interrupt controller.
+static void interrupts_move(uint8_t *p, size_t size, bool to_guest) {
+    if ((p[0] & ACPI_LARGE_ITEM) == 0) {
+        if (p[0] >> ACPI_SMALL_ITEM_NAME_IDX == ACPI_RESOURCE_IRQ && size >= 3) {
+            put_le(p + 1, irqs_translate((uint16_t)le(p + 1, 2), to_guest), 2);
+        }
+        return;
+    }
+    if (p[0] != ACPI_TAG_EXTENDED_IRQ || size < 5 || size != 5 + 4 * (size_t)p[4]) {
+        return;
+    }
+    for (size_t i = 0; i < p[4]; i++) {
+        uint32_t gsi = (uint32_t)le(p + 5 + 4 * i, 4);
+        put_le(p + 5 + 4 * i, to_guest ? irq_guest_gsi(gsi) : irq_host_gsi(gsi), 4);
+    }
+}
+
+// A resource template with its memory where the guest finds the host's, and
+// its interrupts where the guest sees them, or the other way, into out, which
+// holds as many bytes as in; returns its size. The memory below 1 MiB, the
+// guest's own, keeps its addresses. Memory that the guest has no place for is
+// left out of what it gets, and memory the firmware has nothing at reaches it
+// as the guest gave it.
 static size_t template_translate(
     const uint8_t *in,
     size_t length,
@@ -991,6 +1032,7 @@ static size_t template_translate(
             n = left;
         }
         memcpy(out + size, in, n);
+        interrupts_move(out + size, n, to_guest);
         bool keep = true;
         uint64_t base;
         uint64_t end;
