@@ -36,64 +36,6 @@ static uint16_t start_variable[] = HANDOFF_LOG_VARIABLE;
 static uint16_t end_variable[] = HANDOFF_LOG_END_VARIABLE;
 static struct efi_guid guid = HANDOFF_VARIABLE_GUID;
 
-// Writes text to the file beside ReBIOS's image, whose path goes to where.
-// Returns NULL once it is written, else why it is not, with the firmware's
-// status in *status.
-static const char *write_file(
-    const char *text,
-    size_t size,
-    char *where,
-    size_t where_size,
-    efi_status *status
-) {
-    *status = EFI_SUCCESS;
-    struct efi_file_protocol *root;
-    const struct efi_device_path_protocol *image_path;
-    if (!files_open_image_volume(&root, &image_path)) {
-        return "the firmware gives no volume that ReBIOS started from";
-    }
-    const char *why = NULL;
-    uint16_t *path = files_sibling_path(image_path, FILE_NAME);
-    if (path == NULL) {
-        why = "the firmware gives no path for ReBIOS's own file";
-        goto out;
-    }
-    files_path_text(where, where_size, path);
-    // A file left from before goes first, as an opened file keeps its length.
-    struct efi_file_protocol *file;
-    uint64_t mode = EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE;
-    *status = root->open(root, &file, path, mode, 0);
-    if (*status == EFI_SUCCESS) {
-        *status = file->delete(file);
-        if (*status != EFI_SUCCESS) {
-            why = "the one from before cannot be deleted";
-            goto free_path;
-        }
-    } else if (*status != EFI_NOT_FOUND) {
-        why = "the one from before cannot be opened";
-        goto free_path;
-    }
-    *status = root->open(root, &file, path, mode | EFI_FILE_MODE_CREATE, 0);
-    if (*status != EFI_SUCCESS) {
-        why = "it cannot be created";
-        goto free_path;
-    }
-    size_t done = size;
-    *status = file->write(file, &done, (void *)text);
-    efi_status closed = file->close(file);
-    if (*status != EFI_SUCCESS || done != size) {
-        why = "it cannot be written whole";
-    } else if (closed != EFI_SUCCESS) {
-        *status = closed;
-        why = "it cannot be closed";
-    }
-free_path:
-    efi_bs->free_pool(path);
-out:
-    root->close(root);
-    return why;
-}
-
 // Appends the variable's contents to text, at *len, room bytes at most.
 // Returns whether the variable exists.
 static bool append_variable(uint16_t *name, char *text, size_t *len, size_t room) {
@@ -133,7 +75,7 @@ void last_log_write(bool save_log) {
         }
         char where[256] = FILE_NAME;
         efi_status status;
-        const char *why = write_file(text, len, where, sizeof(where), &status);
+        const char *why = files_write_beside(FILE_NAME, text, len, where, sizeof(where), &status);
         if (why != NULL) {
             log_notice(
                 "Cannot write the log that ReBIOS saved last time to %s: %s, status %#llx\n",

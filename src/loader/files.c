@@ -135,6 +135,62 @@ bool files_open_image_volume(
     return true;
 }
 
+const char *files_write_beside(
+    const char *name,
+    const void *data,
+    size_t size,
+    char *where,
+    size_t where_size,
+    efi_status *status
+) {
+    *status = EFI_SUCCESS;
+    struct efi_file_protocol *root;
+    const struct efi_device_path_protocol *image_path;
+    if (!files_open_image_volume(&root, &image_path)) {
+        return "the firmware gives no volume that ReBIOS started from";
+    }
+    const char *why = NULL;
+    uint16_t *path = files_sibling_path(image_path, name);
+    if (path == NULL) {
+        why = "the firmware gives no path for ReBIOS's own file";
+        goto out;
+    }
+    files_path_text(where, where_size, path);
+    // A file left from before goes first, as an opened file keeps its length.
+    struct efi_file_protocol *file;
+    uint64_t mode = EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE;
+    *status = root->open(root, &file, path, mode, 0);
+    if (*status == EFI_SUCCESS) {
+        *status = file->delete(file);
+        if (*status != EFI_SUCCESS) {
+            why = "the one from before cannot be deleted";
+            goto free_path;
+        }
+    } else if (*status != EFI_NOT_FOUND) {
+        why = "the one from before cannot be opened";
+        goto free_path;
+    }
+    *status = root->open(root, &file, path, mode | EFI_FILE_MODE_CREATE, 0);
+    if (*status != EFI_SUCCESS) {
+        why = "it cannot be created";
+        goto free_path;
+    }
+    size_t done = size;
+    *status = file->write(file, &done, (void *)data);
+    efi_status closed = file->close(file);
+    if (*status != EFI_SUCCESS || done != size) {
+        why = "it cannot be written whole";
+    } else if (closed != EFI_SUCCESS) {
+        *status = closed;
+        why = "it cannot be closed";
+    }
+free_path:
+    efi_bs->free_pool(path);
+out:
+    root->close(root);
+    return why;
+}
+
 void files_path_text(char *out, size_t size, const uint16_t *path) {
     size_t i = 0;
     for (; i + 1 < size && path[i] != 0; i++) {

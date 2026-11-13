@@ -33,6 +33,18 @@ bool files_open_image_volume(
 // The absolute path of name in the directory of the image's file path, in a
 // pool allocation, or NULL if that directory is unknown.
 uint16_t *files_sibling_path(const struct efi_device_path_protocol *image_path, const char *name);
+// Writes size bytes of data to the file name beside the loader's image, in
+// place of any there, and the file's path to where, cut short to fit in
+// where_size bytes. Returns NULL once it is written, else why it is not, with
+// the firmware's status in *status.
+const char *files_write_beside(
+    const char *name,
+    const void *data,
+    size_t size,
+    char *where,
+    size_t where_size,
+    efi_status *status
+);
 // A file's path as text for the log, cut short to fit in size bytes.
 void files_path_text(char *out, size_t size, const uint16_t *path);
 
