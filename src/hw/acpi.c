@@ -35,6 +35,7 @@
 #include <hw/acpi.h>
 #include <core.h>
 #include <handoff.h>
+#include <hw/acpi_cpu.h>
 #include <hw/cmos.h>
 #include <hw/ec.h>
 #include <hw/pci_cfg.h>
@@ -679,6 +680,7 @@ void acpi_namespace_init(void) {
         printf("Cannot initialise the ACPI namespace: %s\n", uacpi_status_to_string(status));
     }
     ec_init();
+    acpi_cpu_init();
     acpi_unlock();
 }
 

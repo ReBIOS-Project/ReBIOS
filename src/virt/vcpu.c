@@ -299,6 +299,12 @@ void vcpu_before_entry(struct vcpu *v) {
     service_pause(v);
     ferr_follow(v);
     acpi_slice();
+    // Work the AML task has left goes on after the guest's turn on the boot
+    // processor, which runs GPE methods: a guest idling in MWAIT may well not
+    // exit before then.
+    if (v->cpu->bsp && acpi_working()) {
+        vcpu_exit_after_turn(v);
+    }
     uint64_t modulation = atomic_load_explicit(&v->cpu->clock_modulation, memory_order_acquire);
     if (modulation != v->cpu->clock_modulation_set) {
         v->cpu->clock_modulation_set = modulation;

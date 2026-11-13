@@ -63,6 +63,7 @@
 #include <virt/rtc.h>
 #include <virt/vcpu.h>
 #include <virt/vga.h>
+#include <virt/virt.h>
 
 // The mailbox the guest's AML calls the firmware's methods through: a header,
 // argument slots, and the result's data, then a page whose writes trap.
@@ -161,9 +162,18 @@
 #define FADT_FIX_RTC ((uint32_t)1 << 6)
 #define FADT_TMR_VAL_EXT ((uint32_t)1 << 8)
 
+// What the hypervisor makes of a firmware method's result for the guest.
+#define FILTER_NONE 0
+#define FILTER_CST 1
+#define FILTER_CSD 2
+
 struct method {
     uacpi_namespace_node *node;
     size_t args;
+    int filter;
+    // The C-states the guest got from the last _CST, and of how many.
+    size_t states_given;
+    size_t states_total;
     bool unbuilt_shown;
 };
 
@@ -247,11 +257,15 @@ static const char *const left_out_names[] = {
     "_PRW", "_S0_", "_S1_", "_S2_", "_S3_", "_S4_", "_S5_", "_PRT", "_DEP",
     "_GPE", "_OS_", "_REV", "_GL_", NULL
 };
-// Processor power management stays the hypervisor's.
-static const char *const left_out_processor[] = {
-    "_PSS", "_PCT", "_PPC", "_CST", "_TSS", "_PTC", "_TPC", "_CPC", "_LPI",
-    "_PDC", "_OSC", "_PSD", "_CSD", "_TSD", NULL
+// The guest manages the processors' power as on the machine, but for telling
+// the firmware so, which the hypervisor did (hw/acpi_cpu.c).
+static const char *const left_out_processor[] = { "_PDC", "_OSC", NULL };
+// The processors' C-states, CPPC, and throttling, which the guest reads from
+// the firmware each time, without what it cannot use.
+static const char *const processor_live[] = {
+    "_CST", "_LPI", "_CSD", "_CPC", "_TSS", "_PTC", "_TSD", NULL
 };
+static const char *const processor_device_ids[] = { "ACPI0007", NULL };
 // Methods that return the same thing every time, by the specification, and
 // become names.
 static const char *const constant_methods[] = {
@@ -426,7 +440,10 @@ static uint32_t method_add(uacpi_namespace_node *node, size_t args) {
     vacpi.methods = heap_grow(
         vacpi.methods, vacpi.method_count, &vacpi.method_capacity, sizeof(struct method), 64
     );
-    vacpi.methods[vacpi.method_count] = (struct method){ .node = node, .args = args };
+    vacpi.methods[vacpi.method_count] = (struct method){
+        .node = node, .args = args, .filter = FILTER_NONE, .states_given = SIZE_MAX,
+        .states_total = SIZE_MAX
+    };
     return vacpi.method_count++;
 }
 
@@ -495,10 +512,419 @@ static bool emit_replaced(struct aml *a, uacpi_namespace_node *node, const char 
     return true;
 }
 
+// A stub that returns what the firmware's method, or name, of the index gives,
+// for up to CALL_ARGS arguments.
+static void emit_call_stub(struct aml *a, const char name[4], size_t index, size_t args) {
+    aml_begin(a, AML_METHOD);
+    emit_seg(a, name);
+    aml_byte(a, (uint8_t)args);
+    aml_op(a, AML_RETURN);
+    helper(a, "CALL");
+    aml_int(a, index);
+    aml_int(a, args);
+    for (size_t k = 0; k < CALL_ARGS; k++) {
+        if (k < args) {
+            aml_arg(a, k);
+        } else {
+            aml_int(a, 0);
+        }
+    }
+    aml_end(a);
+}
+
+// A Generic Register Descriptor's address space, register width, and address
+// (ACPI 6.6, 6.4.3.7): false for other objects.
+#define REGISTER_TAG 0x82
+#define REGISTER_SIZE 15
+#define SPACE_SYSTEM_IO 0x01
+#define SPACE_FFH 0x7f
+
+static bool register_of(uacpi_object *obj, uint8_t *space, uint8_t *bits, uint64_t *address) {
+    uacpi_data_view view;
+    if (uacpi_object_get_type(obj) != UACPI_OBJECT_BUFFER
+     || uacpi_object_get_string_or_buffer(obj, &view) != UACPI_STATUS_OK
+     || view.length < REGISTER_SIZE || view.const_bytes[0] != REGISTER_TAG) {
+        return false;
+    }
+    *space = view.const_bytes[3];
+    *bits = view.const_bytes[4];
+    memcpy(address, view.const_bytes + 7, sizeof(uint64_t));
+    return true;
+}
+
+// Whether the guest reaches a register itself: through MWAIT or an MSR, or at
+// ports it gets.
+static bool register_reached(uacpi_object *obj) {
+    uint8_t space;
+    uint8_t bits;
+    uint64_t address;
+    if (!register_of(obj, &space, &bits, &address)) {
+        return false;
+    }
+    if (space == SPACE_FFH) {
+        return true;
+    }
+    size_t bytes = bits > 8 ? bits / 8 : 1;
+    if (space != SPACE_SYSTEM_IO || address > (uint64_t)UINT16_MAX + 1 - bytes) {
+        return false;
+    }
+    for (size_t i = 0; i < bytes; i++) {
+        if (virt_io_intercepted((uint16_t)(address + i))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Whether the local APIC timer and the TSC run on in deep C-states (ARAT, and
+// an invariant TSC), as the hypervisor's timers need, which have no other
+// timer to wake them.
+static bool deep_idle_safe(void) {
+    return cpuid(0, 0).eax >= 6 && (cpuid(6, 0).eax & ((uint32_t)1 << 2)) != 0
+        && cpuid(0x80000000, 0).eax >= 0x80000007
+        && (cpuid(0x80000007, 0).edx & ((uint32_t)1 << 8)) != 0;
+}
+
+// Whether the guest can enter a state of _CST, in the shape Linux 7.3's
+// acpi_processor_evaluate_cst() takes: through MWAIT or a port it gets, and
+// past C1 only where deep_idle_safe() holds.
+static bool cst_state_usable(uacpi_object *state, bool deep) {
+    uacpi_object_array fields;
+    uint64_t type;
+    return uacpi_object_get_package(state, &fields) == UACPI_STATUS_OK && fields.count == 4
+        && uacpi_object_get_integer(fields.objects[1], &type) == UACPI_STATUS_OK
+        && register_reached(fields.objects[0]) && (type <= 1 || deep);
+}
+
+// _CST with the C-states that the guest can enter, their count first. NULL for
+// none.
+static uacpi_object *cst_usable(uacpi_object *cst) {
+    uacpi_object_array top;
+    if (uacpi_object_get_package(cst, &top) != UACPI_STATUS_OK || top.count < 2) {
+        return NULL;
+    }
+    bool deep = deep_idle_safe();
+    uacpi_object **kept = kmalloc(top.count * sizeof(uacpi_object *));
+    size_t count = 0;
+    for (size_t i = 1; i < top.count; i++) {
+        if (cst_state_usable(top.objects[i], deep)) {
+            kept[++count] = top.objects[i];
+        }
+    }
+    uacpi_object *usable = NULL;
+    if (count != 0) {
+        kept[0] = uacpi_object_create_integer(count);
+        uacpi_object_array array = { .objects = kept, .count = count + 1 };
+        usable = kept[0] != NULL ? uacpi_object_create_package(array) : NULL;
+        uacpi_object_unref(kept[0]);
+    }
+    kfree(kept);
+    return usable;
+}
+
+// _LPI, whole, where deep_idle_safe() holds and the guest reaches every
+// state's entry method, as its states refer to each other by their indexes.
+static bool lpi_usable(uacpi_object *lpi) {
+    uacpi_object_array top;
+    if (!deep_idle_safe() || uacpi_object_get_package(lpi, &top) != UACPI_STATUS_OK
+     || top.count < 3) {
+        return false;
+    }
+    for (size_t i = 3; i < top.count; i++) {
+        uacpi_object_array state;
+        if (uacpi_object_get_package(top.objects[i], &state) != UACPI_STATUS_OK
+         || state.count < 7) {
+            return false;
+        }
+        uacpi_object *entry = state.objects[6];
+        if (uacpi_object_get_type(entry) != UACPI_OBJECT_INTEGER && !register_reached(entry)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// _CPC, whole, where the guest reaches each of its registers, but for those at
+// address 0, which stand for none (ACPI 6.6, 8.4.6.1).
+static bool cpc_usable(uacpi_object *cpc) {
+    uacpi_object_array top;
+    if (uacpi_object_get_package(cpc, &top) != UACPI_STATUS_OK) {
+        return false;
+    }
+    for (size_t i = 0; i < top.count; i++) {
+        uint8_t space;
+        uint8_t bits;
+        uint64_t address;
+        if (uacpi_object_get_type(top.objects[i]) == UACPI_OBJECT_INTEGER
+         || (register_of(top.objects[i], &space, &bits, &address) && address == 0)) {
+            continue;
+        }
+        if (!register_reached(top.objects[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Whether the guest reaches the processor's throttling registers, its _PTC's,
+// which the rest of its T-states stand or fall with.
+static bool processor_ptc_usable(uacpi_namespace_node *processor) {
+    uacpi_object *ptc = NULL;
+    if (uacpi_eval(processor, "_PTC", NULL, &ptc) != UACPI_STATUS_OK || ptc == NULL) {
+        return false;
+    }
+    uacpi_object_array registers;
+    bool usable = uacpi_object_get_package(ptc, &registers) == UACPI_STATUS_OK
+               && registers.count == 2 && register_reached(registers.objects[0])
+               && register_reached(registers.objects[1]);
+    uacpi_object_unref(ptc);
+    return usable;
+}
+
 // An empty package, for a result the guest cannot have otherwise.
 static uacpi_object *empty_package(void) {
     uacpi_object_array none = { .objects = NULL, .count = 0 };
     return uacpi_object_create_package(none);
+}
+
+// C1 through HLT alone, as the guest has it without _CST (ACPI 6.6, 8.4.1.1),
+// for where none of the firmware's C-states is usable.
+static uacpi_object *cst_c1_only(void) {
+    static const uint8_t halt[REGISTER_SIZE + 2] = {
+        REGISTER_TAG, REGISTER_SIZE - 3, 0, SPACE_FFH, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x79, 0
+    };
+    uacpi_data_view view = { .const_bytes = halt, .length = sizeof(halt) };
+    uacpi_object *fields[4] = {
+        uacpi_object_create_buffer(view), uacpi_object_create_integer(1),
+        uacpi_object_create_integer(1), uacpi_object_create_integer(1000)
+    };
+    uacpi_object_array state_fields = { .objects = fields, .count = 4 };
+    uacpi_object *top[2] = { uacpi_object_create_integer(1), NULL };
+    bool made = top[0] != NULL;
+    for (size_t i = 0; i < 4; i++) {
+        made = made && fields[i] != NULL;
+    }
+    top[1] = made ? uacpi_object_create_package(state_fields) : NULL;
+    uacpi_object_array all = { .objects = top, .count = 2 };
+    uacpi_object *cst = top[1] != NULL ? uacpi_object_create_package(all) : NULL;
+    for (size_t i = 0; i < 4; i++) {
+        uacpi_object_unref(fields[i]);
+    }
+    uacpi_object_unref(top[0]);
+    uacpi_object_unref(top[1]);
+    return cst;
+}
+
+// The guest's _CST: the firmware's, without the states the guest cannot use,
+// or C1 alone where none is left. The log shows the first processor's at the
+// start, and any processor's whenever they change.
+static uacpi_object *cst_for_guest(struct method *m, uacpi_object *cst) {
+    static bool shown;
+    uacpi_object_array all = { .objects = NULL, .count = 0 };
+    uacpi_object_get_package(cst, &all);
+    size_t total = all.count != 0 ? all.count - 1 : 0;
+    uacpi_object *usable = cst_usable(cst);
+    size_t given = 0;
+    if (usable != NULL) {
+        uacpi_object_array kept;
+        uacpi_object_get_package(usable, &kept);
+        given = kept.count - 1;
+    } else {
+        usable = cst_c1_only();
+    }
+    bool first = m->states_given == SIZE_MAX;
+    bool changed = given != m->states_given || total != m->states_total;
+    m->states_given = given;
+    m->states_total = total;
+    if (!changed || (first && shown)) {
+        return usable;
+    }
+    shown = true;
+    const char *path = acpi_path(uacpi_namespace_node_parent(m->node));
+    const char *why = "";
+    if (given == 0) {
+        why = ", C1 through HLT in their place";
+    } else if (!deep_idle_safe()) {
+        why = ", only C1, as the local APIC timer or the TSC stops in the others";
+    }
+    printf("The guest gets %zu of the %zu C-states in %s's _CST%s\n", given, total, path, why);
+    acpi_path_free(path);
+    return usable;
+}
+
+// The fields of a _CSD dependency, and the one naming its C-state by its index
+// among _CST's states, from 0 (ACPI 6.6, 8.4.1.2).
+#define CSD_FIELDS 6
+#define CSD_INDEX 5
+
+// The guest's _CSD: each dependency's C-state renumbered among the states the
+// guest gets, as dropping some moves those after them, and dependencies of the
+// states it does not get left out. *renumbered_any, where given, tells whether
+// a dependency's C-state took another number.
+static uacpi_object *csd_for_guest(
+    uacpi_namespace_node *processor,
+    uacpi_object *csd,
+    bool *renumbered_any
+) {
+    uacpi_object *cst = NULL;
+    uacpi_object_array states;
+    uacpi_object_array deps;
+    if (uacpi_eval(processor, "_CST", NULL, &cst) != UACPI_STATUS_OK || cst == NULL
+     || uacpi_object_get_package(cst, &states) != UACPI_STATUS_OK || states.count < 2
+     || uacpi_object_get_package(csd, &deps) != UACPI_STATUS_OK) {
+        uacpi_object_unref(cst);
+        return empty_package();
+    }
+    bool deep = deep_idle_safe();
+    size_t total = states.count - 1;
+    size_t *renumbered = kmalloc(total * sizeof(size_t));
+    size_t kept = 0;
+    for (size_t i = 0; i < total; i++) {
+        renumbered[i] = cst_state_usable(states.objects[i + 1], deep) ? kept++ : SIZE_MAX;
+    }
+    uacpi_object **entries = kmalloc((deps.count + 1) * sizeof(uacpi_object *));
+    size_t count = 0;
+    for (size_t d = 0; d < deps.count; d++) {
+        uacpi_object_array fields;
+        uint64_t index;
+        if (uacpi_object_get_package(deps.objects[d], &fields) != UACPI_STATUS_OK
+         || fields.count < CSD_FIELDS
+         || uacpi_object_get_integer(fields.objects[CSD_INDEX], &index) != UACPI_STATUS_OK
+         || index >= total || renumbered[index] == SIZE_MAX) {
+            continue;
+        }
+        uacpi_object **copy = kmalloc(fields.count * sizeof(uacpi_object *));
+        memcpy(copy, fields.objects, fields.count * sizeof(uacpi_object *));
+        copy[CSD_INDEX] = uacpi_object_create_integer(renumbered[index]);
+        uacpi_object_array dep = { .objects = copy, .count = fields.count };
+        entries[count] = copy[CSD_INDEX] != NULL ? uacpi_object_create_package(dep) : NULL;
+        uacpi_object_unref(copy[CSD_INDEX]);
+        kfree(copy);
+        if (entries[count] != NULL) {
+            count++;
+        }
+        if (renumbered_any != NULL && renumbered[index] != index) {
+            *renumbered_any = true;
+        }
+    }
+    uacpi_object_array all = { .objects = entries, .count = count };
+    uacpi_object *usable = uacpi_object_create_package(all);
+    for (size_t e = 0; e < count; e++) {
+        uacpi_object_unref(entries[e]);
+    }
+    kfree(entries);
+    kfree(renumbered);
+    uacpi_object_unref(cst);
+    return usable;
+}
+
+// The processor's _CST when the guest's namespace is made, read once for its
+// _CST and _CSD alike: whether the guest gets them.
+static struct {
+    uacpi_namespace_node *processor;
+    bool given;
+    size_t states_given;
+    size_t states_total;
+} cst_seen;
+
+static bool processor_cst_given(uacpi_namespace_node *processor) {
+    if (cst_seen.processor == processor) {
+        return cst_seen.given;
+    }
+    cst_seen.processor = processor;
+    cst_seen.given = false;
+    uacpi_namespace_node *cst_node;
+    uacpi_object *cst = NULL;
+    if (uacpi_namespace_node_find(processor, "_CST", &cst_node) != UACPI_STATUS_OK
+     || uacpi_eval(cst_node, NULL, NULL, &cst) != UACPI_STATUS_OK || cst == NULL) {
+        return false;
+    }
+    struct method seen = {
+        .node = cst_node, .args = 0, .filter = FILTER_CST, .states_given = SIZE_MAX,
+        .states_total = SIZE_MAX
+    };
+    uacpi_object *usable = cst_for_guest(&seen, cst);
+    cst_seen.given = seen.states_given != 0;
+    cst_seen.states_given = seen.states_given;
+    cst_seen.states_total = seen.states_total;
+    uacpi_object_unref(usable);
+    uacpi_object_unref(cst);
+    return cst_seen.given;
+}
+
+// The first processor's _CSD as the guest gets it, where that differs from the
+// firmware's.
+static void show_csd(uacpi_namespace_node *processor, uacpi_namespace_node *node) {
+    static bool shown;
+    uacpi_object *csd = NULL;
+    if (shown || uacpi_eval(node, NULL, NULL, &csd) != UACPI_STATUS_OK || csd == NULL) {
+        uacpi_object_unref(csd);
+        return;
+    }
+    shown = true;
+    bool renumbered = false;
+    uacpi_object *given = csd_for_guest(processor, csd, &renumbered);
+    uacpi_object_array all = { .objects = NULL, .count = 0 };
+    uacpi_object_array kept = { .objects = NULL, .count = 0 };
+    uacpi_object_get_package(csd, &all);
+    if (given != NULL) {
+        uacpi_object_get_package(given, &kept);
+    }
+    if (kept.count != all.count || renumbered) {
+        const char *path = acpi_path(processor);
+        printf(
+            "The guest gets %zu of the %zu C-state dependencies in %s's _CSD%s\n", kept.count,
+            all.count, path, renumbered ? ", their C-states renumbered" : ""
+        );
+        acpi_path_free(path);
+    }
+    uacpi_object_unref(given);
+    uacpi_object_unref(csd);
+}
+
+static bool object_usable(uacpi_namespace_node *node, bool (*usable)(uacpi_object *obj)) {
+    uacpi_object *obj = NULL;
+    if (uacpi_eval(node, NULL, NULL, &obj) != UACPI_STATUS_OK || obj == NULL) {
+        return false;
+    }
+    bool given = usable(obj);
+    uacpi_object_unref(obj);
+    return given;
+}
+
+// A processor's C-state, CPPC, or throttling object, which the guest's stub
+// reads from the firmware each time, where the guest can use what it holds
+// when the namespace is made.
+static void emit_live(struct aml *a, uacpi_namespace_node *node, const char name[4]) {
+    uacpi_namespace_node *processor = uacpi_namespace_node_parent(node);
+    int filter = FILTER_NONE;
+    bool given;
+    if (memcmp(name, "_CST", 4) == 0) {
+        given = processor_cst_given(processor);
+        filter = FILTER_CST;
+    } else if (memcmp(name, "_CSD", 4) == 0) {
+        given = processor_cst_given(processor);
+        filter = FILTER_CSD;
+        if (given) {
+            show_csd(processor, node);
+        }
+    } else if (memcmp(name, "_LPI", 4) == 0) {
+        given = object_usable(node, lpi_usable);
+    } else if (memcmp(name, "_CPC", 4) == 0) {
+        given = object_usable(node, cpc_usable);
+    } else {
+        given = processor_ptc_usable(processor);
+    }
+    if (!given) {
+        return;
+    }
+    size_t index = method_add(node, 0);
+    vacpi.methods[index].filter = filter;
+    if (filter == FILTER_CST) {
+        vacpi.methods[index].states_given = cst_seen.states_given;
+        vacpi.methods[index].states_total = cst_seen.states_total;
+    }
+    emit_call_stub(a, name, index, 0);
 }
 
 static void emit_method(
@@ -507,6 +933,14 @@ static void emit_method(
     const char name[4],
     bool in_processor
 ) {
+    if (in_processor && name_in(name, processor_live)) {
+        emit_live(a, node, name);
+        return;
+    }
+    if (in_processor && memcmp(name, "_TPC", 4) == 0
+     && !processor_ptc_usable(uacpi_namespace_node_parent(node))) {
+        return;
+    }
     if (name_in(name, left_out_methods) || event_method(name)
      || (in_processor && name_in(name, left_out_processor))
      || (memcmp(name, "_CRS", 4) == 0 && crs_replaced(uacpi_namespace_node_parent(node))) != 0) {
@@ -535,24 +969,13 @@ static void emit_method(
     }
 
     size_t index = method_add(node, args);
+    if (args <= CALL_ARGS) {
+        emit_call_stub(a, name, index, args);
+        return;
+    }
     aml_begin(a, AML_METHOD);
     emit_seg(a, name);
     aml_byte(a, (uint8_t)args);
-    if (args <= CALL_ARGS) {
-        aml_op(a, AML_RETURN);
-        helper(a, "CALL");
-        aml_int(a, index);
-        aml_int(a, args);
-        for (size_t k = 0; k < CALL_ARGS; k++) {
-            if (k < args) {
-                aml_arg(a, k);
-            } else {
-                aml_int(a, 0);
-            }
-        }
-        aml_end(a);
-        return;
-    }
     // Too many arguments for CALL to pass on.
     acquire(a);
     put_args(a, args);
@@ -1445,7 +1868,7 @@ static void emit_object(struct aml *a, uacpi_namespace_node *node, bool in_proce
             target_add(node);
             aml_begin(a, AML_DEVICE);
             emit_seg(a, name.text);
-            emit_children(a, node, false);
+            emit_children(a, node, uacpi_device_matches_pnp_id(node, processor_device_ids));
             if (node == vacpi.primary) {
                 for (size_t i = 0; i < vacpi.merged_count; i++) {
                     emit_merged(a, &vacpi.merged[i]);
@@ -1507,6 +1930,23 @@ static void emit_object(struct aml *a, uacpi_namespace_node *node, bool in_proce
         case UACPI_OBJECT_BUFFER:
         case UACPI_OBJECT_PACKAGE: {
             if (in_processor && name_in(name.text, left_out_processor)) {
+                return;
+            }
+            if (in_processor && name_in(name.text, processor_live)) {
+                emit_live(a, node, name.text);
+                return;
+            }
+            // The firmware changes a processor's _PPC and _TPC as it limits
+            // the P-states and T-states, then notifies the processor, so the
+            // guest reads them anew each time.
+            bool limit = memcmp(name.text, "_PPC", 4) == 0
+                      || (memcmp(name.text, "_TPC", 4) == 0
+                       && processor_ptc_usable(uacpi_namespace_node_parent(node)));
+            if (in_processor && limit) {
+                emit_call_stub(a, name.text, method_add(node, 0), 0);
+                return;
+            }
+            if (in_processor && memcmp(name.text, "_TPC", 4) == 0) {
                 return;
             }
             emit_name(a, node, name.text);
@@ -2997,11 +3437,22 @@ static bool rebuildable(uacpi_object *obj, size_t depth) {
     }
 }
 
-// What the guest gets of a method's result: an empty package in place of one
-// the guest cannot rebuild, which the log shows once.
+// What the guest gets of a method's result: filtered as its method says, and
+// an empty package in place of one the guest cannot rebuild, which the log
+// shows once.
 static uacpi_object *result_for_guest(struct method *m, uacpi_object *ret) {
-    if (uacpi_object_get_type(ret) != UACPI_OBJECT_PACKAGE || rebuildable(ret, 0)) {
-        return ret;
+    uacpi_object *given = ret;
+    if (m->filter == FILTER_CST) {
+        given = cst_for_guest(m, ret);
+    } else if (m->filter == FILTER_CSD) {
+        given = csd_for_guest(uacpi_namespace_node_parent(m->node), ret, NULL);
+    }
+    if (given != ret) {
+        uacpi_object_unref(ret);
+    }
+    if (given == NULL || uacpi_object_get_type(given) != UACPI_OBJECT_PACKAGE
+     || rebuildable(given, 0)) {
+        return given;
     }
     if (!m->unbuilt_shown) {
         m->unbuilt_shown = true;
@@ -3013,7 +3464,7 @@ static uacpi_object *result_for_guest(struct method *m, uacpi_object *ret) {
         );
         acpi_path_free(path);
     }
-    uacpi_object_unref(ret);
+    uacpi_object_unref(given);
     return empty_package();
 }
 
