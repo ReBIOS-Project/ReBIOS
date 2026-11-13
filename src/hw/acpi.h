@@ -67,8 +67,8 @@ bool acpi_tables_ready(void);
 void acpi_lock(void);
 void acpi_unlock(void);
 
-// Initialises the namespace where the hypervisor runs the firmware's ACPI, its
-// embedded controller first, so that _INI and _REG have run before anything
+// Initialises the namespace where the hypervisor runs the firmware's ACPI,
+// then its embedded controller, so that _INI and _REG have run before anything
 // evaluates the namespace's devices, as Linux 7.3's acpi_bus_init() has them
 // run before its device scan. Needs acpi_init() and pci_cfg_init().
 void acpi_namespace_init(void);

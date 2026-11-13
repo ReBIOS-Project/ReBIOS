@@ -673,11 +673,12 @@ void acpi_sci_interrupt(void *ctx) {
 
 void acpi_namespace_init(void) {
     acpi_lock();
-    ec_init();
+    ec_find();
     uacpi_status status = uacpi_namespace_initialize();
     if (status != UACPI_STATUS_OK) {
         printf("Cannot initialise the ACPI namespace: %s\n", uacpi_status_to_string(status));
     }
+    ec_init();
     acpi_unlock();
 }
 
@@ -725,6 +726,7 @@ bool acpi_init(void) {
     if (status != UACPI_STATUS_OK) {
         printf("Cannot initialise uACPI: %s\n", uacpi_status_to_string(status));
     } else {
+        ec_early_init();
         status = uacpi_namespace_load();
         if (status != UACPI_STATUS_OK) {
             printf("Cannot load the ACPI namespace: %s\n", uacpi_status_to_string(status));

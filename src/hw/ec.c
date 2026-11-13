@@ -63,6 +63,8 @@ static struct {
     uacpi_handle query_work;
     // A work item must not be scheduled again before its handler runs.
     bool query_pending;
+    // The handler on the namespace's root, from before it was loaded.
+    bool early;
 } ec;
 
 static bool wait_status(uint8_t mask, uint8_t value) {
@@ -121,6 +123,10 @@ static uacpi_status region_handler(uacpi_region_op op, uacpi_handle op_data) {
         case UACPI_REGION_OP_READ:
         case UACPI_REGION_OP_WRITE: {
             uacpi_region_rw_data *rw = op_data;
+            // No controller found yet.
+            if (ec.command == 0) {
+                return UACPI_STATUS_NO_HANDLER;
+            }
             if (rw->offset + rw->byte_width > 0x100) {
                 return UACPI_STATUS_INVALID_ARGUMENT;
             }
@@ -292,9 +298,34 @@ static bool gpe_find(uacpi_namespace_node **device, uacpi_u16 *idx) {
     return found;
 }
 
-void ec_init(void) {
+void ec_early_init(void) {
+    uacpi_table table;
+    if (uacpi_table_find_by_signature(ACPI_ECDT_SIGNATURE, &table) == UACPI_STATUS_OK) {
+        const struct acpi_ecdt *ecdt = table.ptr;
+        if (ecdt->hdr.length > sizeof(struct acpi_ecdt)
+         && ecdt->ec_control.address_space_id == UACPI_ADDRESS_SPACE_SYSTEM_IO
+         && ecdt->ec_data.address_space_id == UACPI_ADDRESS_SPACE_SYSTEM_IO) {
+            ec.command = (uint16_t)ecdt->ec_control.address;
+            ec.data = (uint16_t)ecdt->ec_data.address;
+        }
+        uacpi_table_unref(&table);
+    }
+    // Before the namespace is loaded, uACPI runs no _REG for the handler.
+    uacpi_status status = uacpi_install_address_space_handler(
+        uacpi_namespace_root(), UACPI_ADDRESS_SPACE_EMBEDDED_CONTROLLER, region_handler, NULL
+    );
+    ec.early = status == UACPI_STATUS_OK;
+}
+
+void ec_find(void) {
     uacpi_find_devices(EC_HID, device_found, NULL);
-    if (ec.node == NULL && !ecdt_find()) {
+    if (ec.node == NULL) {
+        ecdt_find();
+    }
+}
+
+void ec_init(void) {
+    if (ec.node == NULL) {
         return;
     }
 
@@ -308,9 +339,17 @@ void ec_init(void) {
     );
     acpi_path_free(path);
 
-    uacpi_status status = uacpi_install_address_space_handler(
-        ec.node, UACPI_ADDRESS_SPACE_EMBEDDED_CONTROLLER, region_handler, NULL
-    );
+    // Either way, _REG runs now.
+    uacpi_status status;
+    if (ec.early) {
+        status = uacpi_reg_all_opregions(
+            uacpi_namespace_root(), UACPI_ADDRESS_SPACE_EMBEDDED_CONTROLLER
+        );
+    } else {
+        status = uacpi_install_address_space_handler(
+            ec.node, UACPI_ADDRESS_SPACE_EMBEDDED_CONTROLLER, region_handler, NULL
+        );
+    }
     if (status != UACPI_STATUS_OK) {
         printf(
             "Cannot handle the embedded controller's space: %s\n", uacpi_status_to_string(status)
