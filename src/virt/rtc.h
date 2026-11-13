@@ -20,6 +20,8 @@
 
 #include <stdint.h>
 
+struct vcpu;
+
 // Reads the machine's RTC once, unless the FADT says it has none, for
 // rtc_init() to see that its seconds count. Right after acpi_init().
 void rtc_sample(void);
@@ -29,5 +31,11 @@ void rtc_init(void);
 // The RTC's bytes the guest's FADT gives the indexes of (ACPI 6.6, Table 5.9):
 // its century, day-of-month alarm, and month alarm, 0 for none.
 void rtc_fadt_indexes(uint8_t *century_index, uint8_t *day_alarm, uint8_t *month_alarm);
+// The vCPU's own accesses to the machine's data port, which the guest's index
+// selecting one of the machine's registers lends it: as the last thing before
+// each entry into the guest itself, not the guest's guest, with interrupts
+// off, and right after each exit.
+void rtc_before_entry(struct vcpu *v);
+void rtc_after_exit(struct vcpu *v);
 
 #endif

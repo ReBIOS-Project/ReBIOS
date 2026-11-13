@@ -37,6 +37,7 @@
 #include <virt/mmio.h>
 #include <virt/nvmx.h>
 #include <virt/profile.h>
+#include <virt/rtc.h>
 #include <virt/run.h>
 #include <virt/task.h>
 #include <virt/vcpu.h>
@@ -751,8 +752,7 @@ void vmx_vcpu_init(struct vcpu *v) {
         wrmsr(MSR_IA32_PERF_GLOBAL_CTRL, 0);
     }
 
-    vmx_write(VMCS_IO_BITMAP_A, virt_io_bitmap());
-    vmx_write(VMCS_IO_BITMAP_B, virt_io_bitmap() + PAGE_SIZE);
+    vmx_set_io_bitmaps(false);
     vmx_write(VMCS_MSR_BITMAP, virt_msr_bitmap());
     vmx_load_gpt_root(v);
     if (vmx_vpid_usable()) {
@@ -878,6 +878,12 @@ static bool vmx_paging_changed(uint64_t old0, uint64_t old4, uint64_t cr0, uint6
     vmx_write(VMCS_GUEST_EFER, efer);
     vmx_write(VMCS_ENTRY_CONTROLS, entry);
     return true;
+}
+
+void vmx_set_io_bitmaps(bool lent) {
+    uintptr_t bitmaps = lent ? virt_io_bitmap_lent() : virt_io_bitmap();
+    vmx_write(VMCS_IO_BITMAP_A, bitmaps);
+    vmx_write(VMCS_IO_BITMAP_B, bitmaps + PAGE_SIZE);
 }
 
 void vmx_load_gpt_root(struct vcpu *v) {
@@ -1361,6 +1367,7 @@ void vmx_run(struct vcpu *v) {
         vmx_write(VMCS_TSC_OFFSET, nvmx_tsc_offset(v));
         cache_flush(v->vmcs_cache);
         int result = vmx_enter(&v->gprs, v->vmx_launched);
+        rtc_after_exit(v);
         if (result == VMX_ENTER_KICKED) {
             event_cancel(v);
             continue;

@@ -41,6 +41,7 @@
 #include <virt/mmio.h>
 #include <virt/nsvm.h>
 #include <virt/profile.h>
+#include <virt/rtc.h>
 #include <virt/run.h>
 #include <virt/vcpu.h>
 #include <virt/vga.h>
@@ -514,6 +515,10 @@ void svm_set_cr0(struct vcpu *v, uint64_t value) {
         c->intercept_cr &= ~cr0;
         c->intercept_exceptions &= ~mf;
     }
+}
+
+void svm_set_io_bitmaps(struct vcpu *v, bool lent) {
+    v->vmcb->control.iopm_base_pa = lent ? virt_io_bitmap_lent() : virt_io_bitmap();
 }
 
 static void skip(struct vcpu *v, const struct insn *insn) {
@@ -1070,6 +1075,7 @@ void svm_run(struct vcpu *v) {
         }
         svm_enter(v->vmcb_pa, &v->gprs);
         atomic_store_explicit(&v->in_guest, false, memory_order_release);
+        rtc_after_exit(v);
         cpu_guest_exited();
         clean_after_exit(v);
         v->fetched_count = 0;

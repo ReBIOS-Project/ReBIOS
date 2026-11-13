@@ -48,6 +48,7 @@
 #include <virt/pci_virt.h>
 #include <virt/pit.h>
 #include <virt/profile.h>
+#include <virt/rtc.h>
 #include <virt/svm.h>
 #include <virt/usb.h>
 #include <virt/vga.h>
@@ -352,6 +353,15 @@ void vcpu_before_entry(struct vcpu *v) {
         event_entry(v);
     }
     vlapic_before_entry(v);
+    rtc_before_entry(v);
+}
+
+void vcpu_set_io_bitmaps(struct vcpu *v, bool lent) {
+    if (virt_vmx) {
+        vmx_set_io_bitmaps(lent);
+    } else {
+        svm_set_io_bitmaps(v, lent);
+    }
 }
 
 void vcpu_kick(struct cpu *cpu) {

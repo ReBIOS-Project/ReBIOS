@@ -41,6 +41,12 @@ uintptr_t virt_io_bitmap(void);
 uintptr_t virt_msr_bitmap(void);
 void virt_intercept_io(uint16_t port, size_t count, bool intercept);
 bool virt_io_intercepted(uint16_t port);
+// I/O bitmaps alike but for one port, which they let through, for vCPUs that a
+// device lends it to (vcpu_set_io_bitmaps()), as the bitmaps cannot change
+// while a vCPU that has them is in the guest (SDM 325462-093 Vol. 3C,
+// 27.11.4). Before the guest runs.
+void virt_io_lend(uint16_t port);
+uintptr_t virt_io_bitmap_lent(void);
 // Makes the guest's reads, writes, or both of an MSR exit, for a module to
 // handle them, whatever virt_pass_msr() says; the others follow that.
 void virt_intercept_msr(uint32_t msr, bool read, bool write);

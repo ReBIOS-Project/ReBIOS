@@ -30,4 +30,19 @@ void cmos_host_io(uint16_t port, bool in, uint8_t *value);
 uint8_t cmos_read(uint8_t reg);
 void cmos_write(uint8_t reg, uint8_t value);
 
+// The guest's own accesses to the data port, which do not come here: the index
+// selects their register until cmos_reclaim(), or any other access, calls the
+// reclaimer, with the ports held, to end them. They return how many times that
+// happened, as cmos_reclaims() does, which counts the next one before the
+// reclaimer runs.
+typedef void (*cmos_reclaimer)(void);
+// Before cmos_lend().
+void cmos_set_reclaimer(cmos_reclaimer function);
+uint64_t cmos_lend(uint8_t reg);
+// One of those accesses that came here instead, which selects the register
+// again where another access took the index.
+uint64_t cmos_lent_io(uint8_t reg, bool in, uint8_t *value);
+void cmos_reclaim(void);
+uint64_t cmos_reclaims(void);
+
 #endif

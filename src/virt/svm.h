@@ -488,6 +488,9 @@ void svm_vcpu_init(struct vcpu *v);
 // own being in cr0_shadow; and the loading of CR0 so.
 uint64_t svm_guest_cr0(struct vcpu *v);
 void svm_set_cr0(struct vcpu *v, uint64_t value);
+// The vCPU's I/O permissions map: the one every vCPU shares, or the one that
+// lends a port (virt_io_lend()).
+void svm_set_io_bitmaps(struct vcpu *v, bool lent);
 noreturn void svm_run(struct vcpu *v);
 // The guest got where the processor cannot go on from, as a triple fault does.
 noreturn void svm_shutdown(struct vcpu *v, const char *why);

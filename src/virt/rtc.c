@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -36,18 +37,25 @@
 #include <lib/spinlock.h>
 #include <lib/time.h>
 #include <lib/util.h>
+#include <sys/cpu.h>
+#include <sys/smp.h>
 #include <sys/x86.h>
 #include <virt/hv_timer.h>
 #include <virt/io.h>
 #include <virt/irq.h>
 #include <virt/layout.h>
 #include <virt/vcpu.h>
+#include <virt/virt.h>
 
 // The guest's RTC and CMOS RAM, as the ICH10 has them (datasheet 319973-003,
 // 13.6): the machine's RTC keeps the time, unless the firmware says it has
 // none or it does not count, while the RAM, the extended bank, and the NMI
 // mask bit of the index are the guest's own, so that the guest cannot touch
-// the firmware's settings. Without a working RTC, an MC146818 is emulated.
+// the firmware's settings. While the guest's index selects one of the
+// machine's registers, the machine's index selects it too, and the vCPUs that
+// access the data port reach it themselves, without exits, until the index
+// moves to RAM or the AML needs the ports. Without a working RTC, an MC146818
+// is emulated.
 
 #define PORT_FIRST 0x70
 #define PORT_COUNT 8
@@ -482,20 +490,71 @@ static bool clock_register(uint8_t reg) {
     return reg == century || reg == day_alarm_index || reg == month_alarm_index;
 }
 
+// The RAM, or the emulated clock's registers.
 static uint8_t standard_read(uint8_t reg) {
     if (!clock_register(reg)) {
         return ram[reg];
     }
-    return real ? cmos_read(reg) : clock_read(reg);
+    return clock_read(reg);
 }
 
 static void standard_write(uint8_t reg, uint8_t value) {
     if (!clock_register(reg)) {
         ram[reg] = value;
-    } else if (real) {
-        cmos_write(reg, value);
     } else {
         clock_write(reg, value);
+    }
+}
+
+// The vCPU reaches the machine's data port itself from its next entry on,
+// unless cmos_reclaims() moves on from count first.
+static void lend(struct vcpu *v, uint64_t count) {
+    v->rtc_lent = true;
+    v->rtc_reclaims = count;
+}
+
+// The lending ended: every vCPU in the guest with the port leaves it, and the
+// others see the end at their next entries.
+static void reclaimed(void) {
+    struct cpu *self = this_cpu();
+    for (size_t i = 0; i < smp_cpu_count(); i++) {
+        struct cpu *cpu = smp_cpu(i);
+        if (cpu != self && cpu->vcpu != NULL
+         && atomic_load_explicit(&cpu->vcpu->rtc_in_guest, memory_order_seq_cst)) {
+            vcpu_kick(cpu);
+        }
+    }
+    for (size_t i = 0; i < smp_cpu_count(); i++) {
+        struct cpu *cpu = smp_cpu(i);
+        if (cpu == self || cpu->vcpu == NULL) {
+            continue;
+        }
+        while (atomic_load_explicit(&cpu->vcpu->rtc_in_guest, memory_order_acquire)) {
+            cpu_relax();
+        }
+    }
+}
+
+void rtc_before_entry(struct vcpu *v) {
+    bool lent = v->rtc_lent;
+    if (lent) {
+        // A reclaimer that counts after this waits for the vCPU to leave the
+        // guest, and the count of one before shows here.
+        atomic_store_explicit(&v->rtc_in_guest, true, memory_order_seq_cst);
+        if (cmos_reclaims() != v->rtc_reclaims) {
+            v->rtc_lent = lent = false;
+            atomic_store_explicit(&v->rtc_in_guest, false, memory_order_release);
+        }
+    }
+    if (lent != v->rtc_bitmaps) {
+        v->rtc_bitmaps = lent;
+        vcpu_set_io_bitmaps(v, lent);
+    }
+}
+
+void rtc_after_exit(struct vcpu *v) {
+    if (v->rtc_lent) {
+        atomic_store_explicit(&v->rtc_in_guest, false, memory_order_release);
     }
 }
 
@@ -507,7 +566,6 @@ static void rtc_access(
     bool in,
     uint32_t *value
 ) {
-    (void)v;
     (void)ctx;
     (void)size;
     uint8_t byte = 0xff;
@@ -516,16 +574,24 @@ static void rtc_access(
         case OFFSET_INDEX: {
             if (!in) {
                 index = (uint8_t)*value & INDEX_MASK;
+                if (real && clock_register(index)) {
+                    lend(v, cmos_lend(index));
+                } else if (real) {
+                    cmos_reclaim();
+                }
             } else if ((offset & OFFSET_ALIAS) != 0) {
                 byte = index;
             }
             break;
         }
         case OFFSET_TARGET: {
-            if (in) {
+            byte = (uint8_t)*value;
+            if (real && clock_register(index)) {
+                lend(v, cmos_lent_io(index, in, &byte));
+            } else if (in) {
                 byte = standard_read(index);
             } else {
-                standard_write(index, (uint8_t)*value);
+                standard_write(index, byte);
             }
             break;
         }
@@ -715,6 +781,10 @@ void rtc_init(void) {
 
     struct io_handler ports = { PORT_FIRST, PORT_COUNT, rtc_access, NULL, true };
     io_register(&ports);
+    if (real) {
+        cmos_set_reclaimer(reclaimed);
+        virt_io_lend(PORT_FIRST + OFFSET_TARGET);
+    }
 }
 
 void rtc_fadt_indexes(uint8_t *century_index, uint8_t *day_alarm, uint8_t *month_alarm) {

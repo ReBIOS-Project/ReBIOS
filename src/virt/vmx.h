@@ -520,6 +520,9 @@ uint64_t vmx_cr4_real(uint64_t guest_cr4);
 // The EPT the vCPU's current VMCS takes: the hypervisor's, or the shadow of
 // the guest's EPT that runs its guest's guest.
 void vmx_load_gpt_root(struct vcpu *v);
+// The I/O bitmaps of the current VMCS: those every vCPU shares, or those that
+// lend a port (virt_io_lend()).
+void vmx_set_io_bitmaps(bool lent);
 // INVEPT of every EPTP, and INVVPID of the type, or of all VPIDs but 0 where
 // the processor lacks that type.
 void vmx_invept_all(void);

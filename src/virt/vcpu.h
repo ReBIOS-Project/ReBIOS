@@ -103,6 +103,14 @@ struct vcpu {
     uint64_t fetched_rip;
     // The gpt_generation the vCPU's TLB is current with.
     uint64_t gpt_generation;
+    // Whether the guest's RTC lets the vCPU reach the machine's RTC data port
+    // itself, unless cmos_reclaims() moved on from rtc_reclaims, whether its
+    // I/O bitmaps let it, and whether it is in the guest with them
+    // (virt/rtc.c).
+    bool rtc_lent;
+    bool rtc_bitmaps;
+    uint64_t rtc_reclaims;
+    _Atomic(bool) rtc_in_guest;
 
     // An event whose delivery an exit cut short, to deliver again, with its
     // error code, its event data for FRED, and, for VMX's software events,
@@ -210,6 +218,10 @@ void vcpu_before_entry(struct vcpu *v);
 // Makes the CPU's vCPU leave the guest, if it runs it, for vcpu_before_entry()
 // to see what changed.
 void vcpu_kick(struct cpu *cpu);
+// Gives the vCPU the I/O bitmaps every vCPU shares, or those that let it reach
+// the port virt_io_lend() gave, for its entries into the guest itself, not the
+// guest's guest.
+void vcpu_set_io_bitmaps(struct vcpu *v, bool lent);
 // An interrupt of the hypervisor's own pending at the entry, which ends it
 // right after any event it delivers.
 void vcpu_exit_soon(struct vcpu *v);

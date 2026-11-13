@@ -42,6 +42,9 @@ bool virt_vmx;
 unsigned int virt_breakpoint_masks;
 
 static uint8_t *io_bitmap;
+// The same but for the port virt_io_lend() gave, which it lets through.
+static uint8_t *io_bitmap_lent;
+static uint32_t lent_port = UINT32_MAX;
 static uint8_t *msr_bitmap;
 // The accesses to MSRs a module has chosen for, as their bits in msr_bitmap.
 static uint8_t *msr_claimed;
@@ -78,6 +81,7 @@ bool virt_init(void) {
         virt_vmx = true;
         // I/O bitmaps A and B, then the MSR bitmap.
         io_bitmap = page_alloc(VMX_IO_BITMAP_PAGES);
+        io_bitmap_lent = page_alloc(VMX_IO_BITMAP_PAGES);
         msr_bitmap = page_alloc(VMX_MSR_BITMAP_PAGES);
         msr_claimed = page_alloc(VMX_MSR_BITMAP_PAGES);
         // Only the MSRs the guest gets go to the processor (msr.c).
@@ -86,6 +90,7 @@ bool virt_init(void) {
     } else if (!intel && svm_supported()) {
         virt_vmx = false;
         io_bitmap = page_alloc(SVM_IOPM_PAGES);
+        io_bitmap_lent = page_alloc(SVM_IOPM_PAGES);
         msr_bitmap = page_alloc(SVM_MSRPM_PAGES);
         msr_claimed = page_alloc(SVM_MSRPM_PAGES);
         memset(msr_bitmap, 0xff, SVM_MSRPM_PAGES * PAGE_SIZE);
@@ -142,6 +147,10 @@ uintptr_t virt_io_bitmap(void) {
     return (uintptr_t)io_bitmap;
 }
 
+uintptr_t virt_io_bitmap_lent(void) {
+    return (uintptr_t)io_bitmap_lent;
+}
+
 uintptr_t virt_msr_bitmap(void) {
     return (uintptr_t)msr_bitmap;
 }
@@ -154,14 +163,19 @@ uintptr_t virt_msr_bitmap_x2apic_icr(void) {
     return (uintptr_t)msr_bitmap_x2apic_icr;
 }
 
+static void bitmap_set(uint8_t *bitmap, unsigned int bit, bool set) {
+    if (set) {
+        bitmap[bit / 8] |= 1 << (bit % 8);
+    } else {
+        bitmap[bit / 8] &= ~(1 << (bit % 8));
+    }
+}
+
 void virt_intercept_io(uint16_t port, size_t count, bool intercept) {
     for (size_t i = 0; i < count; i++) {
         unsigned int p = port + i;
-        if (intercept) {
-            io_bitmap[p / 8] |= 1 << (p % 8);
-        } else {
-            io_bitmap[p / 8] &= ~(1 << (p % 8));
-        }
+        bitmap_set(io_bitmap, p, intercept);
+        bitmap_set(io_bitmap_lent, p, intercept && p != lent_port);
     }
 }
 
@@ -169,12 +183,9 @@ bool virt_io_intercepted(uint16_t port) {
     return (io_bitmap[port / 8] & (1 << (port % 8))) != 0;
 }
 
-static void bitmap_set(uint8_t *bitmap, unsigned int bit, bool set) {
-    if (set) {
-        bitmap[bit / 8] |= 1 << (bit % 8);
-    } else {
-        bitmap[bit / 8] &= ~(1 << (bit % 8));
-    }
+void virt_io_lend(uint16_t port) {
+    lent_port = port;
+    bitmap_set(io_bitmap_lent, port, false);
 }
 
 // Where an MSR's read and write bits are: VMX's read bitmaps for the low MSRs
