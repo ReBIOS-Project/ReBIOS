@@ -30,17 +30,33 @@
 #define INDEX_NMI_MASK 0x80
 
 static struct spinlock lock;
-// What the firmware's AML last wrote to the standard index.
+// What the firmware's AML last wrote to the standard index, and what the index
+// holds.
 static uint8_t host_index;
+static uint8_t index;
+
+static void select_index(uint8_t value) {
+    outb(PORT_INDEX, value);
+    index = value;
+}
+
+static uint8_t register_index(uint8_t reg) {
+    return (uint8_t)((host_index & INDEX_NMI_MASK) | reg);
+}
 
 void cmos_host_io(uint16_t port, bool in, uint8_t *value) {
     spinlock_acquire(&lock);
-    if (in) {
-        *value = inb(port);
-    } else {
+    if (!in && (port & ~PORT_ALIAS) == PORT_INDEX) {
         outb(port, *value);
-        if ((port & ~PORT_ALIAS) == PORT_INDEX) {
-            host_index = *value;
+        host_index = index = *value;
+    } else {
+        if (index != host_index) {
+            select_index(host_index);
+        }
+        if (in) {
+            *value = inb(port);
+        } else {
+            outb(port, *value);
         }
     }
     spinlock_release(&lock);
@@ -48,17 +64,15 @@ void cmos_host_io(uint16_t port, bool in, uint8_t *value) {
 
 uint8_t cmos_read(uint8_t reg) {
     spinlock_acquire(&lock);
-    outb(PORT_INDEX, (uint8_t)((host_index & INDEX_NMI_MASK) | reg));
+    select_index(register_index(reg));
     uint8_t value = inb(PORT_TARGET);
-    outb(PORT_INDEX, host_index);
     spinlock_release(&lock);
     return value;
 }
 
 void cmos_write(uint8_t reg, uint8_t value) {
     spinlock_acquire(&lock);
-    outb(PORT_INDEX, (uint8_t)((host_index & INDEX_NMI_MASK) | reg));
+    select_index(register_index(reg));
     outb(PORT_TARGET, value);
-    outb(PORT_INDEX, host_index);
     spinlock_release(&lock);
 }

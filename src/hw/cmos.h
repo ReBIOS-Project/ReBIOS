@@ -22,8 +22,9 @@
 #include <stdint.h>
 
 // The machine's RTC and its RAM, behind ports 70h-77h, which the firmware's
-// AML and the guest's RTC share: an access of the hypervisor's own leaves the
-// index registers as the AML last set them.
+// AML and the guest's RTC share: the AML finds the standard index as it last
+// set it, which the hypervisor's own accesses leave on their register until
+// then.
 void cmos_host_io(uint16_t port, bool in, uint8_t *value);
 // A register of the standard bank, or of the RTC's own.
 uint8_t cmos_read(uint8_t reg);
