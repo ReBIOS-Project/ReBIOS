@@ -447,14 +447,22 @@ bool fwtables_fadt_pm_profile(uint8_t *profile) {
     return false;
 }
 
-// A table the RSDP in the firmware's configuration tables leads to.
-static const uint8_t *acpi_table(const char *signature) {
+uintptr_t fwtables_acpi_rsdp(void) {
     const struct acpi_rsdp *rsdp = config_table_find(&acpi_20_guid);
     if (rsdp == NULL || rsdp_check(rsdp) != NULL) {
         rsdp = config_table_find(&acpi_10_guid);
         if (rsdp == NULL || rsdp_check(rsdp) != NULL) {
-            return NULL;
+            return 0;
         }
+    }
+    return (uintptr_t)rsdp;
+}
+
+// A table the RSDP in the firmware's configuration tables leads to.
+static const uint8_t *acpi_table(const char *signature) {
+    const struct acpi_rsdp *rsdp = (const struct acpi_rsdp *)fwtables_acpi_rsdp();
+    if (rsdp == NULL) {
+        return NULL;
     }
     size_t entry_size;
     const uint8_t *root = acpi_root(rsdp, &entry_size);

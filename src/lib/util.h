@@ -96,6 +96,16 @@ static inline uint8_t checksum8(const void *data, size_t size) {
     return sum;
 }
 
+// The 64-bit FNV-1a hash of size bytes at data (RFC 9923, 2 and 5).
+static inline uint64_t fnv1a64(const void *data, size_t size) {
+    const uint8_t *bytes = data;
+    uint64_t hash = 0xcbf29ce484222325;
+    for (size_t i = 0; i < size; i++) {
+        hash = (hash ^ bytes[i]) * 0x100000001b3;
+    }
+    return hash;
+}
+
 // The pages that size bytes take up, the last of them maybe in part.
 static inline size_t page_count(size_t size) {
     return (size + PAGE_SIZE - 1) / PAGE_SIZE;

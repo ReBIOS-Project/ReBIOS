@@ -447,6 +447,7 @@ static const struct setting settings[] = {
     { .name = "igpu_stolen_remap", .apply = apply_boolean, .flag = &config.igpu_stolen_remap },
     { .name = "legacy_usb", .apply = apply_boolean, .flag = &config.legacy_usb },
     { .name = "save_log", .apply = apply_boolean, .flag = &config.save_log },
+    { .name = "save_acpi", .apply = apply_boolean, .flag = &config.save_acpi },
     { .name = "pci_high_windows", .apply = apply_boolean, .flag = &config.pci_high_windows },
     { .name = "hpet", .apply = apply_boolean, .flag = &config.hpet },
     { .name = "cpu_allowlist", .apply = apply_cpu_list, .filter = HANDOFF_CPU_FILTER_ALLOW },

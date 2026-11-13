@@ -23,6 +23,7 @@
 #include <handoff.h>
 #include <lib/log.h>
 #include <lib/util.h>
+#include <loader/acpi_save.h>
 #include <loader/bootdev.h>
 #include <loader/config.h>
 #include <loader/console.h>
@@ -230,6 +231,9 @@ efi_status efi_main(efi_handle image_handle, struct efi_system_table *system_tab
             "Serial port %#x: on PCI " HANDOFF_PCI_ADDRESS_FMT "\n",
             config.serial_port, HANDOFF_PCI_ADDRESS_ARGS(serial_card)
         );
+    }
+    if (config.save_acpi) {
+        acpi_save_start();
     }
     last_log_write(config.save_log);
 

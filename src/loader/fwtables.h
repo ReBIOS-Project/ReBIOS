@@ -29,6 +29,10 @@ void fwtables_collect(void);
 // string or only spaces, NULL where there is no such structure or field.
 const char *fwtables_smbios_string(uint8_t type, uint8_t offset);
 
+// The address of the RSDP in the firmware's configuration tables, ACPI 2.0's
+// where it is sound, else ACPI 1.0's, or 0. Needs no fwtables_collect().
+uintptr_t fwtables_acpi_rsdp(void);
+
 // Gets the FADT's preferred power management profile, if there is one.
 bool fwtables_fadt_pm_profile(uint8_t *profile);
 

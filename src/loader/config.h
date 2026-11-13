@@ -48,6 +48,7 @@ struct config {
     bool igpu_stolen_remap;
     bool legacy_usb;
     bool save_log;
+    bool save_acpi;
     bool pci_high_windows;
     bool hpet;
     // NUL-terminated: "self", "auto", or a drive's device path or part of its

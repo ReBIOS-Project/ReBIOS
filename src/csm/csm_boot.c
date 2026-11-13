@@ -37,6 +37,7 @@
 #include <lib/util.h>
 #include <memory.h>
 #include <sys/mm.h>
+#include <virt/acpi_save.h>
 #include <virt/guest_acpi.h>
 #include <virt/guest_mem.h>
 #include <virt/hypercall.h>
@@ -590,6 +591,9 @@ void csm_boot_start(struct vcpu *v) {
     if (rsdp_failed) {
         printf("Cannot hand the ACPI RSDP to the legacy BIOS\n");
         acpi = false;
+    }
+    if (acpi) {
+        acpi_save_guest(csm.compat16->acpi_rsd_ptr_pointer);
     }
     csm_compat16_table_checksum(csm.compat16);
 

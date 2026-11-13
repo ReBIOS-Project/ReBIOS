@@ -25,7 +25,7 @@
 
 // The longest SMBIOS string kept, with its NUL.
 #define HANDOFF_DMI_MAX 64
-#define HANDOFF_MAX_RESERVED 16
+#define HANDOFF_MAX_RESERVED 24
 #define HANDOFF_MAX_PCI_ROMS 16
 #define HANDOFF_MAX_BLOCK_DEVICES 32
 #define HANDOFF_MAX_CPU_RANGES 64
@@ -182,6 +182,28 @@ struct handoff_block_device {
 #define HANDOFF_LOG_VARIABLE u"ReBIOSLog"
 #define HANDOFF_LOG_END_VARIABLE u"ReBIOSLogEnd"
 
+// The guest's ACPI tables as the core keeps them with save_acpi
+// (virt/acpi_save.c), for the loader to write out at the next start: this
+// header, at the start of a page, then a record and the bytes of each table,
+// padded to 8 bytes. The hash is FNV-1a's 64-bit one over what follows the
+// header, and the magic, the full 16 bytes of the string, comes last.
+#define HANDOFF_ACPI_SAVE_MAGIC "ReBIOS ACPI v1\n"
+#define HANDOFF_ACPI_SAVE_SIZE ((uint64_t)0x400000)
+
+struct handoff_acpi_save {
+    char magic[16];
+    uint64_t size;
+    uint64_t hash;
+    uint32_t count;
+    uint32_t reserved;
+};
+
+struct handoff_acpi_save_table {
+    uint64_t address;
+    uint32_t length;
+    char signature[4];
+};
+
 struct handoff_config {
     uint8_t serial;
     uint8_t verbose;
@@ -236,6 +258,11 @@ struct handoff {
 
     // A page below 1 MiB, where the other processors start, or 0.
     uint64_t ap_boot;
+
+    // Where the core keeps the guest's ACPI tables with save_acpi, or 0, and
+    // acpi_save_size, the bytes there, all below 4 GiB.
+    uint64_t acpi_save;
+    uint64_t acpi_save_size;
 
     // Memory the core manages itself, nested_heap_size of it for the tables of
     // the guest's own VMX or SVM.
