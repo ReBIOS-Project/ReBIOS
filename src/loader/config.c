@@ -313,6 +313,24 @@ static bool apply_boot_drive(const struct setting *setting, struct span value) {
     return true;
 }
 
+static bool apply_floppy(const struct setting *setting, struct span value, char *out) {
+    if (value.len >= HANDOFF_FLOPPY_MODEL_MAX) {
+        return false;
+    }
+    memset(out, 0, HANDOFF_FLOPPY_MODEL_MAX);
+    memcpy(out, value.ptr, value.len);
+    printf("  %s = %.*s\n", setting->name, (int)value.len, value.ptr);
+    return true;
+}
+
+static bool apply_floppy_a(const struct setting *setting, struct span value) {
+    return apply_floppy(setting, value, config.floppy_a);
+}
+
+static bool apply_floppy_b(const struct setting *setting, struct span value) {
+    return apply_floppy(setting, value, config.floppy_b);
+}
+
 static bool apply_vga(const struct setting *setting, struct span value) {
     struct handoff_pci_address address;
     if (!parse_pci_address(value, &address)) {
@@ -344,6 +362,17 @@ static bool apply_vga_emulation(const struct setting *setting, struct span value
         return false;
     }
     printf("  %s = %s\n", setting->name, vga_emulation_names[config.vga_emulation]);
+    return true;
+}
+
+// In the order of the HANDOFF_ZIP_MODE_* values.
+static const char *const zip_mode_names[] = { "auto", "floppy", "hdd" };
+
+static bool apply_zip_mode(const struct setting *setting, struct span value) {
+    if (!apply_choice(value, zip_mode_names, 3, &config.zip_mode)) {
+        return false;
+    }
+    printf("  %s = %s\n", setting->name, zip_mode_names[config.zip_mode]);
     return true;
 }
 
@@ -435,6 +464,9 @@ static const struct setting settings[] = {
     { .name = "serial_baud", .apply = apply_serial_baud },
     { .name = "verbose", .apply = apply_boolean, .flag = &config.verbose },
     { .name = "boot_drive", .apply = apply_boot_drive },
+    { .name = "floppy_a", .apply = apply_floppy_a },
+    { .name = "floppy_b", .apply = apply_floppy_b },
+    { .name = "zip_mode", .apply = apply_zip_mode },
     { .name = "vgabios", .apply = apply_vgabios },
     { .name = "vga", .apply = apply_vga },
     { .name = "vga_emulation", .apply = apply_vga_emulation },
@@ -661,6 +693,7 @@ void config_load(void) {
     config.serial_port = 0;
     config.serial_baud = 115200;
     config.vga_emulation = HANDOFF_VGA_EMULATION_AUTO;
+    config.zip_mode = HANDOFF_ZIP_MODE_AUTO;
     config.vga_scaling = HANDOFF_VGA_SCALING_STRETCH;
     config.vga_scale = 1;
     config.vga_filter = HANDOFF_VGA_FILTER_BILINEAR;
@@ -699,6 +732,9 @@ void config_to_handoff(struct handoff_config *out) {
     out->cpuid_limit = config.cpuid_limit;
     out->igpu_stolen_remap = config.igpu_stolen_remap;
     out->legacy_usb = config.legacy_usb;
+    memcpy(out->floppy_a, config.floppy_a, sizeof(out->floppy_a));
+    memcpy(out->floppy_b, config.floppy_b, sizeof(out->floppy_b));
+    out->zip_mode = config.zip_mode;
     out->save_log = config.save_log;
     out->pci_high_windows = config.pci_high_windows;
     out->cpu_filter = config.cpu_filter;

@@ -30,6 +30,7 @@
 #define HANDOFF_MAX_BLOCK_DEVICES 32
 #define HANDOFF_MAX_CPU_RANGES 64
 #define HANDOFF_MAX_BOOT_ORDER 4096
+#define HANDOFF_FLOPPY_MODEL_MAX 256
 
 struct handoff_range {
     uint64_t base;
@@ -151,6 +152,10 @@ struct handoff_block_device {
 #define HANDOFF_VGA_EMULATION_ALWAYS 1
 #define HANDOFF_VGA_EMULATION_NEVER 2
 
+#define HANDOFF_ZIP_MODE_AUTO 0
+#define HANDOFF_ZIP_MODE_FLOPPY 1
+#define HANDOFF_ZIP_MODE_HDD 2
+
 // How an emulated VGA's display fills the framebuffer: all of it, as much of
 // it as 4:3 allows, at one framebuffer pixel per VGA pixel, at vga_scale
 // pixels per pixel, or at the most whole pixels per pixel that fit; centered
@@ -206,6 +211,13 @@ struct handoff_config {
     // Whether the hypervisor has the USB controllers until the OS takes them
     // (virt/usb.c), else the OS has them from the start.
     uint8_t legacy_usb;
+    // Model substring or port of an ATAPI LS-120 to reserve as BIOS drive 00h, A:.
+    char floppy_a[HANDOFF_FLOPPY_MODEL_MAX];
+    // The same for BIOS drive 01h, B:.
+    char floppy_b[HANDOFF_FLOPPY_MODEL_MAX];
+    // How an ATAPI ZIP drive is mapped: by its media at boot (partitioned: hard disk, else
+    // floppy), or always as a floppy or a hard disk. One of the HANDOFF_ZIP_MODE_* values.
+    uint8_t zip_mode;
     // Whether the core keeps its log in an EFI variable (virt/log_save.c).
     uint8_t save_log;
     // Whether BARs too large to go below 4 GiB go above it, in root bus

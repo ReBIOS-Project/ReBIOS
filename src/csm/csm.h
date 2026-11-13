@@ -77,6 +77,12 @@ struct csm_compat16_table {
     // file, which the CSM16 then follows instead of the BBS table's
     // priorities, or 0.
     uint32_t boot_order_pointer;
+    // NUL-terminated model substring or port to reserve as floppy A:, or 0.
+    uint32_t floppy_a_pointer;
+    // How an ATAPI ZIP drive is mapped: 0 unset (auto), 1 auto, 2 floppy, 3 hard disk.
+    uint32_t zip_mode;
+    // NUL-terminated model substring or port to reserve as floppy B:, or 0.
+    uint32_t floppy_b_pointer;
 } __attribute__((packed));
 
 // The size of the specification's table, without the extensions.
@@ -131,7 +137,19 @@ _Static_assert(
     "The CSM16 table's layout is not the one the CSM16 uses."
 );
 _Static_assert(
-    sizeof(struct csm_compat16_table) == 107,
+    offsetof(struct csm_compat16_table, floppy_a_pointer) == 107,
+    "The CSM16 table's layout is not the one the CSM16 uses."
+);
+_Static_assert(
+    offsetof(struct csm_compat16_table, zip_mode) == 111,
+    "The CSM16 table's layout is not the one the CSM16 uses."
+);
+_Static_assert(
+    offsetof(struct csm_compat16_table, floppy_b_pointer) == 115,
+    "The CSM16 table's layout is not the one the CSM16 uses."
+);
+_Static_assert(
+    sizeof(struct csm_compat16_table) == 119,
     "The CSM16 table's layout is not the one the CSM16 uses."
 );
 

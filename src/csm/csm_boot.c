@@ -72,6 +72,8 @@ extern const uint8_t csm_thunk_end[];
 #define LEGACY_TABLE_SIZE 0x1000
 #define BOOT_ORDER 0xf000
 #define TABLES_END 0x10000
+#define FLOPPY_A (TABLES_END - HANDOFF_FLOPPY_MODEL_MAX)
+#define FLOPPY_B (FLOPPY_A - HANDOFF_FLOPPY_MODEL_MAX)
 #define LOW_PMM_BASE 0x10000
 #define LOW_PMM_SIZE 0x80000
 #define ROM_AREA_BASE 0xc0000
@@ -504,7 +506,7 @@ static size_t boot_order_line(const char *line, size_t length, char *out, size_t
 static void boot_order(void) {
     const char *list = core_handoff->boot_order;
     char *to = layout_low(BOOT_ORDER);
-    size_t room = TABLES_END - BOOT_ORDER - 1;
+    size_t room = FLOPPY_B - BOOT_ORDER - 1;
     size_t used = 0;
     size_t at = 0;
     while (at < HANDOFF_MAX_BOOT_ORDER && list[at] != 0) {
@@ -577,10 +579,23 @@ void csm_boot_start(struct vcpu *v) {
     } else {
         printf("The legacy BIOS predates the hypervisor's interface\n");
     }
-    if (csm.compat16->table_length >= sizeof(struct csm_compat16_table)) {
+    if (csm.compat16->table_length >= offsetof(struct csm_compat16_table, floppy_a_pointer)) {
         boot_order();
     } else {
         printf("The legacy BIOS takes no boot order, ordering by controller\n");
+    }
+    if (csm.compat16->table_length >= offsetof(struct csm_compat16_table, zip_mode)
+     && h->config.floppy_a[0] != 0) {
+        memcpy(layout_low(FLOPPY_A), h->config.floppy_a, HANDOFF_FLOPPY_MODEL_MAX);
+        csm.compat16->floppy_a_pointer = FLOPPY_A;
+    }
+    if (csm.compat16->table_length >= offsetof(struct csm_compat16_table, floppy_b_pointer)) {
+        csm.compat16->zip_mode = h->config.zip_mode + 1;
+    }
+    if (csm.compat16->table_length >= sizeof(struct csm_compat16_table)
+     && h->config.floppy_b[0] != 0) {
+        memcpy(layout_low(FLOPPY_B), h->config.floppy_b, HANDOFF_FLOPPY_MODEL_MAX);
+        csm.compat16->floppy_b_pointer = FLOPPY_B;
     }
     bool rsdp_failed = acpi
                     && !csm_copy_rsdp(
