@@ -105,11 +105,13 @@ static void bsp_main(void *arg) {
 
     layout_init();
     pci_virt_init();
+    // The USB pool takes the guest's memory first, as its 2 MiB alignment
+    // would leave RAM between it and what layout_take() handed out before.
+    usb_init();
     igfx_init();
     a20_init();
     vga_init();
     pci_quirks_init();
-    usb_init();
     // The guest's boot processor gets its local APIC as a legacy BIOS hands it
     // over, the hypervisor the processor's.
     lapic_legacy_init();
