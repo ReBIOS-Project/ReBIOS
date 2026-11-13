@@ -26,11 +26,26 @@
 struct handoff *loader_handoff;
 
 void loader_reserve(uintptr_t base, size_t pages) {
+    size_t size = pages * EFI_PAGE_SIZE;
+    // Pages that touch a range already kept join it, as those allocated one at
+    // a time, page tables among them, mostly come out next to each other.
+    for (size_t i = 0; i < loader_handoff->reserved_count; i++) {
+        struct handoff_range *r = &loader_handoff->reserved[i];
+        if (base == r->base + r->size) {
+            r->size += size;
+            return;
+        }
+        if (base + size == r->base) {
+            r->base = base;
+            r->size += size;
+            return;
+        }
+    }
     if (loader_handoff->reserved_count == HANDOFF_MAX_RESERVED) {
         panic("Too many hypervisor memory ranges\n");
     }
     loader_handoff->reserved[loader_handoff->reserved_count].base = base;
-    loader_handoff->reserved[loader_handoff->reserved_count].size = pages * EFI_PAGE_SIZE;
+    loader_handoff->reserved[loader_handoff->reserved_count].size = size;
     loader_handoff->reserved_count++;
 }
 

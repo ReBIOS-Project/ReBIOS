@@ -25,7 +25,7 @@
 
 // The longest SMBIOS string kept, with its NUL.
 #define HANDOFF_DMI_MAX 64
-#define HANDOFF_MAX_RESERVED 24
+#define HANDOFF_MAX_RESERVED 64
 #define HANDOFF_MAX_PCI_ROMS 16
 #define HANDOFF_MAX_BLOCK_DEVICES 32
 #define HANDOFF_MAX_CPU_RANGES 64
