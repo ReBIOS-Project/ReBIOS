@@ -25,11 +25,6 @@
 // register gives. After pci_enum_scan(), before layout_init().
 void igfx_scan(void);
 
-// The host range the guest needs at its own address, if any: the raw VBT of an
-// OpRegion 2.0, which the OpRegion that the guest shares with the host's AML
-// gives by its physical address.
-bool igfx_one_to_one(uint64_t *base, uint64_t *end);
-
 // The host's data stolen memory that the guest gets at an address of its own,
 // if any, and the host range the guest's own must stay clear of: the stolen
 // memory and the GGTT's below it. layout_init() places it and tells

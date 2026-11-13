@@ -142,6 +142,10 @@ static struct {
     // that follows it included.
     uint32_t asls;
     size_t size;
+    // An OpRegion 2.0's RVDA, a physical address, which the guest gets as its
+    // own for the raw VBT, and the pages of a raw VBT apart from the OpRegion,
+    // which the guest gets apart too.
+    uint64_t rvda;
     uintptr_t raw_vbt_base;
     uintptr_t raw_vbt_end;
     // What the guest's ASLS holds, which never reaches the hardware: the
@@ -185,7 +189,13 @@ static void scan_opregion(struct pci_enum_function *f) {
             if (rvda >= OPREGION_SIZE && rvda <= RAW_VBT_MAX && asls + rvda + rvds > end) {
                 end = asls + rvda + rvds;
             }
+        } else if (rvda >= asls && rvda - asls <= RAW_VBT_MAX) {
+            igfx.rvda = rvda;
+            if (rvda + rvds > end) {
+                end = rvda + rvds;
+            }
         } else {
+            igfx.rvda = rvda;
             igfx.raw_vbt_base = page_down(rvda);
             igfx.raw_vbt_end = page_up(rvda + rvds);
         }
@@ -297,15 +307,6 @@ void igfx_scan(void) {
         igfx.rmrr_dropped = true;
         iommu_tables_forget_reserved(rmrr_unneeded);
     }
-}
-
-bool igfx_one_to_one(uint64_t *base, uint64_t *end) {
-    if (igfx.raw_vbt_end == 0) {
-        return false;
-    }
-    *base = igfx.raw_vbt_base;
-    *end = igfx.raw_vbt_end;
-    return true;
 }
 
 bool igfx_stolen(uint64_t *host, uint64_t *size, uint64_t *clear_base, uint64_t *clear_end) {
@@ -493,6 +494,36 @@ static void init_fbc(void) {
     printf("Intel graphics: FBC kept off, as VT-d translates\n");
 }
 
+// An OpRegion 2.0 gives its raw VBT by physical address, in RVDA, which only
+// the OS's graphics driver reads: the guest's address goes there, as the guest
+// reads the OpRegion that it shares with the host.
+static void give_raw_vbt(void) {
+    uint64_t guest = igfx.guest_asls + (igfx.rvda - igfx.asls);
+    if (igfx.raw_vbt_end != 0) {
+        size_t size = igfx.raw_vbt_end - igfx.raw_vbt_base;
+        if (!layout_host_kept(igfx.raw_vbt_base, igfx.raw_vbt_end)) {
+            printf(
+                "Intel graphics: the raw VBT at %#llx is in memory the guest may have as RAM\n",
+                (unsigned long long)igfx.rvda
+            );
+            return;
+        }
+        uint32_t alias = layout_take((uint32_t)size, PAGE_SIZE, E820_NVS);
+        if (alias == 0) {
+            printf("Intel graphics: no room in the guest's memory for the raw VBT\n");
+            return;
+        }
+        gpt_map(alias, igfx.raw_vbt_base, size, GPT_R | GPT_W, MT_WB);
+        gpt_flush();
+        guest = alias + (igfx.rvda - igfx.raw_vbt_base);
+    }
+    write_le64((uint8_t *)(uintptr_t)igfx.asls + ASLE_RVDA, guest);
+    printf(
+        "Intel graphics: the raw VBT at %#llx is the guest's at %#llx\n",
+        (unsigned long long)igfx.rvda, (unsigned long long)guest
+    );
+}
+
 static void init_opregion(void) {
     uint64_t offset = igfx.asls & (PAGE_SIZE - 1);
     uintptr_t host = igfx.asls - offset;
@@ -516,6 +547,9 @@ static void init_opregion(void) {
     printf(
         "Intel graphics: the OpRegion at %#x is the guest's at %#x\n", igfx.asls, igfx.guest_asls
     );
+    if (igfx.rvda != 0) {
+        give_raw_vbt();
+    }
 }
 
 static void init_stolen(void) {

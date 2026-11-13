@@ -393,13 +393,6 @@ void layout_init(void) {
         }
         identity_add(base, end, EFI_RESERVED_MEMORY_TYPE, efi_attribute_at(base));
     }
-    // What the OpRegion that the guest shares with the host gives by address.
-    uintptr_t vbt_base;
-    uintptr_t vbt_end;
-    if (igfx_one_to_one(&vbt_base, &vbt_end)) {
-        identity_add(vbt_base, vbt_end, EFI_RESERVED_MEMORY_TYPE, efi_attribute_at(vbt_base));
-    }
-
     // The interrupt controllers stay where the guest's tables say, as the
     // hypervisor answers there, and the memory of ACPI devices goes where
     // devmem_plan() puts it, but never the configuration space windows or the
