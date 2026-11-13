@@ -23,6 +23,8 @@
 #include <uacpi/status.h>
 #include <uacpi/tables.h>
 #include <virt/hpet.h>
+#include <core.h>
+#include <handoff.h>
 #include <hw/isa.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
@@ -88,7 +90,7 @@ static bool fsb_capable(uintptr_t base) {
 
 // Its timers interrupt no more, and the PIT and the RTC interrupt as without
 // it; the counter runs on, as firmware may time its own delays with it.
-static void hide(uintptr_t base) {
+static void hide(uintptr_t base, const char *why) {
     for (size_t n = 0; n < timers(base); n++) {
         uintptr_t config = base + TIMER_BASE + n * TIMER_STRIDE;
         write32(config, read32(config) & ~(TIMER_INT_ENABLE | TIMER_FSB_ENABLE));
@@ -99,10 +101,7 @@ static void hide(uintptr_t base) {
         layout_absent(guest, HPET_SIZE);
     }
     hidden[hidden_count++] = base;
-    printf(
-        "HPET at %#llx hidden from the guest, as its timers can deliver through the FSB\n",
-        (unsigned long long)base
-    );
+    printf("HPET at %#llx hidden from the guest, as %s\n", (unsigned long long)base, why);
 }
 
 // Whether the route changed.
@@ -166,6 +165,7 @@ static void give_lines(uintptr_t base) {
 }
 
 void hpet_init(void) {
+    bool allowed = core_handoff->config.hpet != 0;
     struct uacpi_table table;
     for (size_t n = 0;
          uacpi_table_find_nth_by_signature(ACPI_HPET_SIGNATURE, n, &table) == UACPI_STATUS_OK;
@@ -175,8 +175,9 @@ void hpet_init(void) {
             memcpy(&hpet, table.ptr, sizeof(struct acpi_hpet));
             uintptr_t base = hpet.address.address;
             if (hpet.address.address_space_id == ACPI_AS_ID_SYS_MEM
-             && (base & (PAGE_SIZE - 1)) == 0 && hidden_count < MAX_HIDDEN && fsb_capable(base)) {
-                hide(base);
+             && (base & (PAGE_SIZE - 1)) == 0 && hidden_count < MAX_HIDDEN
+             && (!allowed || fsb_capable(base))) {
+                hide(base, allowed ? "its timers can deliver through the FSB" : "hpet is off");
             } else if (hpet.address.address_space_id == ACPI_AS_ID_SYS_MEM && guest_base == 0) {
                 guest_base = base;
                 trap_writes(base);

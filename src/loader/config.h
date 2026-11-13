@@ -49,6 +49,7 @@ struct config {
     bool legacy_usb;
     bool save_log;
     bool pci_high_windows;
+    bool hpet;
     // NUL-terminated: "self", "auto", or a drive's device path or part of its
     // model; empty when unset, which is "self".
     char boot_drive[CONFIG_BOOT_DRIVE_MAX];

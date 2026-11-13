@@ -448,6 +448,7 @@ static const struct setting settings[] = {
     { .name = "legacy_usb", .apply = apply_boolean, .flag = &config.legacy_usb },
     { .name = "save_log", .apply = apply_boolean, .flag = &config.save_log },
     { .name = "pci_high_windows", .apply = apply_boolean, .flag = &config.pci_high_windows },
+    { .name = "hpet", .apply = apply_boolean, .flag = &config.hpet },
     { .name = "cpu_allowlist", .apply = apply_cpu_list, .filter = HANDOFF_CPU_FILTER_ALLOW },
     { .name = "cpu_blocklist", .apply = apply_cpu_list, .filter = HANDOFF_CPU_FILTER_BLOCK },
     { .name = "iommu_disable", .apply = apply_obsolete },
@@ -701,6 +702,7 @@ void config_to_handoff(struct handoff_config *out) {
     out->legacy_usb = config.legacy_usb;
     out->save_log = config.save_log;
     out->pci_high_windows = config.pci_high_windows;
+    out->hpet = config.hpet;
     out->cpu_filter = config.cpu_filter;
     out->cpu_range_count = config.cpu_range_count;
     for (size_t i = 0; i < config.cpu_range_count; i++) {

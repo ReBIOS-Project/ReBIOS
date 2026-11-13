@@ -211,6 +211,8 @@ struct handoff_config {
     // Whether BARs too large to go below 4 GiB go above it, in root bus
     // windows there (virt/pci_plan.c), or else stay unassigned.
     uint8_t pci_high_windows;
+    // Whether the guest may get the HPET (virt/hpet.c), else it never does.
+    uint8_t hpet;
     // Which APIC IDs the guest gets, as inclusive ranges.
     uint32_t cpu_filter;
     uint32_t cpu_range_count;

@@ -21,10 +21,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-// Hides from the guest every HPET with a timer that can deliver through the
-// FSB, whose messages would go wherever the guest pointed them: its ACPI table
-// and device go, and its registers read as absent. Other HPETs are the guest's
-// as they are, the writes to the first's registers passing through the
+// Hides from the guest every HPET, as firmware setups that turn it off do, or,
+// with the hpet setting on, every HPET with a timer that can deliver through
+// the FSB, whose messages would go wherever the guest pointed them: its ACPI
+// table and device go, and its registers read as absent. Other HPETs are the
+// guest's as they are, the writes to the first's registers passing through the
 // hypervisor. After layout_init().
 void hpet_init(void);
 
