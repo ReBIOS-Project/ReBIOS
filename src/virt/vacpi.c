@@ -2738,9 +2738,17 @@ static void write_result(uacpi_object *obj, uint32_t status) {
             case UACPI_OBJECT_STRING:
             case UACPI_OBJECT_BUFFER: {
                 uacpi_object_get_string_or_buffer(obj, &view);
-                header[1] = uacpi_object_get_type(obj) == UACPI_OBJECT_STRING
-                          ? TYPE_STRING
-                          : TYPE_BUFFER;
+                bool string = uacpi_object_get_type(obj) == UACPI_OBJECT_STRING;
+                header[1] = string ? TYPE_STRING : TYPE_BUFFER;
+                // A string's size counts its terminator, which the guest's
+                // RRES would make a space of.
+                size_t length = 0;
+                while (string && length < view.length && view.const_text[length] != '\0') {
+                    length++;
+                }
+                if (string) {
+                    view.length = length;
+                }
                 if (view.length > MBX_RDATA_SIZE) {
                     view.length = MBX_RDATA_SIZE;
                 }
