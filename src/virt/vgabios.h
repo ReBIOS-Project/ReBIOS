@@ -30,12 +30,21 @@
 // Traps the ports the ROM asks through.
 void vgabios_init(void);
 
-// The ROM's image, with what is left of it to write being its checksum, and
-// what the video BIOS knows of the display.
+// The video BIOS's own ROM, which the guest gets at an address, after the
+// image of the card's own VBIOS as it is where there is one: drivers read
+// their card's tables from the video BIOS that a BIOS leaves at C0000h, and
+// some take only their card's image as it came. Whether that image fits, in at
+// most room bytes with the ROM after it, and the size of both with an image of
+// card_size bytes, 0 for none.
 #define VGABIOS_ROM_SIZE 0x3400
-void vgabios_rom_fill(uint8_t *image);
-
-#define VGABIOS_SEGMENT 0xc000
+bool vgabios_card_fits(size_t card_size, size_t room);
+size_t vgabios_rom_size(size_t card_size);
+// The card's image and the ROM after it, checksum and all, in zeroed memory,
+// with what the video BIOS knows of the display. The card's image is NULL for
+// none, or one that vgabios_card_fits() takes.
+void vgabios_rom_fill(uint8_t *image, uintptr_t address, const uint8_t *card, size_t card_size);
+// The real-mode segment of the video BIOS's own ROM, where a BIOS runs it.
+uint16_t vgabios_segment(void);
 
 // What the ROM holds besides the program, for callers that get far pointers.
 #define VGABIOS_ROM_FONT8 0x0800

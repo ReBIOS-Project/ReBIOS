@@ -23,6 +23,7 @@
 #include <handoff.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
+#include <lib/util.h>
 #include <memory.h>
 #include <sys/task.h>
 #include <sys/x86.h>
@@ -42,6 +43,11 @@
 #define VGA_DAC_DATA 0x3c9
 
 #define ALL_ONES 0xffff
+
+// The video BIOS's own ROM begins on the 2 KiB boundary after the card's
+// image, where OSes look for option ROMs, as Linux 7.3's probe_roms() does
+// (arch/x86/kernel/probe_roms.c).
+#define OWN_ROM_ALIGN 2048
 
 extern const uint8_t vgabios_stub[];
 extern const uint8_t vgabios_stub_end[];
@@ -86,6 +92,8 @@ static size_t knocks;
 static bool init_knocked;
 static struct call *current;
 static uint8_t rom_image[VGABIOS_ROM_SIZE];
+// Where a BIOS puts the video BIOS, until the ROM says otherwise.
+static uint16_t rom_segment = 0xc000;
 static struct spinlock lock;
 
 static void slice_end(void) {
@@ -201,7 +209,7 @@ void vgabios_dac_from_rom(uint16_t offset, size_t count) {
 
 // What is in the ROM is known here, and asking for it would only take longer.
 static bool in_rom(uint16_t segment, uint16_t offset, size_t size) {
-    return segment == VGABIOS_SEGMENT && offset + size <= VGABIOS_ROM_SIZE;
+    return segment == rom_segment && offset + size <= VGABIOS_ROM_SIZE;
 }
 
 uint8_t vgabios_peekb(uint16_t segment, uint16_t offset) {
@@ -469,7 +477,7 @@ static bool real_mode_rom(struct vcpu *v) {
     if ((vcpu_cr0(v) & CR0_PE) != 0) {
         return false;
     }
-    return vcpu_seg_selector(v, VCPU_SEG_CS) == VGABIOS_SEGMENT;
+    return vcpu_seg_selector(v, VCPU_SEG_CS) == rom_segment;
 }
 
 // The call a new one takes the place of: one that nothing ended, as with a
@@ -682,11 +690,33 @@ static void display_fill(void) {
     }
 }
 
-void vgabios_rom_fill(uint8_t *image) {
+static size_t own_rom_at(size_t card_size) {
+    return align_up(card_size, OWN_ROM_ALIGN);
+}
+
+bool vgabios_card_fits(size_t card_size, size_t room) {
+    if (vgabios_rom_size(card_size) > room) {
+        printf("No room for the card's VBIOS image before the emulated VGA's video BIOS\n");
+        return false;
+    }
+    return true;
+}
+
+size_t vgabios_rom_size(size_t card_size) {
+    return own_rom_at(card_size) + VGABIOS_ROM_SIZE;
+}
+
+uint16_t vgabios_segment(void) {
+    return rom_segment;
+}
+
+void vgabios_rom_fill(uint8_t *image, uintptr_t address, const uint8_t *card, size_t card_size) {
     size_t stub = (size_t)(vgabios_stub_end - vgabios_stub);
     if (stub > VGABIOS_ROM_FONT8) {
         panic("The video BIOS's program is larger than its room\n");
     }
+    size_t own = card != NULL ? own_rom_at(card_size) : 0;
+    rom_segment = (uint16_t)((address + own) >> 4);
     display_fill();
     memset(rom_image, 0, sizeof(rom_image));
     memcpy(rom_image, vgabios_stub, stub);
@@ -702,10 +732,15 @@ void vgabios_rom_fill(uint8_t *image) {
     for (size_t i = 0; i < vgabios_tables_palette_count; i++) {
         size_t bytes = vgabios_tables_palettes[i].count * 3;
         size_t at = vgabios_palette_offset(i);
-        if (at + bytes > VGABIOS_ROM_SIZE) {
+        // The last byte is the checksum's.
+        if (at + bytes > VGABIOS_ROM_SIZE - 1) {
             panic("The video BIOS's palettes are larger than their room\n");
         }
         memcpy(rom_image + at, vgabios_tables_palettes[i].colours, bytes);
     }
-    memcpy(image, rom_image, VGABIOS_ROM_SIZE);
+    rom_image[VGABIOS_ROM_SIZE - 1] = (uint8_t)-checksum8(rom_image, VGABIOS_ROM_SIZE - 1);
+    memcpy(image + own, rom_image, VGABIOS_ROM_SIZE);
+    if (card != NULL) {
+        memcpy(image, card, card_size);
+    }
 }

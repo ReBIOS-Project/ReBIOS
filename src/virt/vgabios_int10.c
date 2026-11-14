@@ -216,7 +216,7 @@ static void load_rom_font(
     uint16_t base = font_block(block);
     vgabios_far_fill8(0xa000, (uint16_t)(base + first * (uint32_t)32), 0, count * (uint32_t)32);
     vgabios_far_font(
-        0xa000, (uint16_t)(base + first * (uint32_t)32), VGABIOS_SEGMENT,
+        0xa000, (uint16_t)(base + first * (uint32_t)32), vgabios_segment(),
         (uint16_t)(font + first * height), height, count
     );
     font_access_end(m);
@@ -333,8 +333,8 @@ static void set_mode(uint8_t requested) {
     vgabios_pokew(BDA, BDA_EQUIPMENT, (uint16_t)(equipment | (port == 0x3b4 ? 0x30 : 0x20)));
 
     uint16_t font = is_text(m) ? VGABIOS_ROM_FONT8 : rom_font(m->char_height);
-    set_vector(0x43, VGABIOS_SEGMENT, font);
-    set_vector(0x1f, VGABIOS_SEGMENT, VGABIOS_ROM_FONT8 + 128 * 8);
+    set_vector(0x43, vgabios_segment(), font);
+    set_vector(0x1f, vgabios_segment(), VGABIOS_ROM_FONT8 + 128 * 8);
 
     vgabios_in(port + 6);
     vgabios_out(AC_INDEX, AC_PAS);
@@ -1091,7 +1091,7 @@ static void font_functions(struct vgabios_regs *r) {
             if (r->al == 0x21) {
                 set_vector(0x43, r->es, r->bp);
             } else {
-                set_vector(0x43, VGABIOS_SEGMENT, rom_font(height));
+                set_vector(0x43, vgabios_segment(), rom_font(height));
             }
             vgabios_pokew(BDA, BDA_CHAR_HEIGHT, height);
             uint8_t rows = r->bl == 1 ? 14 : r->bl == 2 ? 25 : r->bl == 3 ? 43 : r->dl;
@@ -1101,7 +1101,7 @@ static void font_functions(struct vgabios_regs *r) {
             break;
         }
         case 0x30: {
-            uint16_t segment = VGABIOS_SEGMENT;
+            uint16_t segment = vgabios_segment();
             uint16_t offset = 0;
             switch (r->bh) {
                 case 0x00: {
@@ -1217,7 +1217,7 @@ static void state_information(struct vgabios_regs *r) {
     uint16_t to = r->di;
     uint16_t es = r->es;
     vgabios_pokew(es, to, VGABIOS_ROM_FUNCTIONALITY);
-    vgabios_pokew(es, (uint16_t)(to + 2), VGABIOS_SEGMENT);
+    vgabios_pokew(es, (uint16_t)(to + 2), vgabios_segment());
     vgabios_pokeb(es, (uint16_t)(to + 4), vgabios_peekb(BDA, BDA_MODE));
     vgabios_pokew(es, (uint16_t)(to + 5), vgabios_peekw(BDA, BDA_COLUMNS));
     vgabios_pokew(es, (uint16_t)(to + 7), vgabios_peekw(BDA, BDA_PAGE_SIZE));
@@ -1379,7 +1379,7 @@ void vgabios_int10(struct vgabios_regs *r) {
 }
 
 void vgabios_int10_init_call(void) {
-    set_vector(0x10, VGABIOS_SEGMENT, vgabios_int10_offset());
+    set_vector(0x10, vgabios_segment(), vgabios_int10_offset());
     vgabios_pokeb(BDA, BDA_VIDEO_CONTROL, 0x60);
     vgabios_pokeb(BDA, BDA_SWITCHES, 0xf9);
     vgabios_pokeb(BDA, BDA_VGA_FLAGS, 0x51);

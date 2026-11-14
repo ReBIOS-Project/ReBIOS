@@ -249,19 +249,36 @@ static void update_bbs(struct vcpu *v) {
     csm_call(v, CSM_COMPAT16_UPDATE_BBS, BOOT_TABLE);
 }
 
-// The emulated VGA's video BIOS as an option ROM: padded to the size its
-// header gives, with the checksum that makes its bytes add up to 0. It is the
-// host's VGA device's, where there is one.
-static const struct handoff_pci_rom *emulated_vbios(void) {
+// The emulated VGA's video BIOS as an option ROM, after the image of the
+// card's own VBIOS where it fits: the two in at most room bytes from address,
+// where the BIOS runs the video BIOS from its own segment (vgabios_segment()).
+// It is the host's VGA device's, where there is one.
+static const struct handoff_pci_rom *emulated_vbios(uintptr_t address, size_t room) {
     static struct handoff_pci_rom rom;
     if (rom.size != 0) {
         return &rom;
     }
     const struct handoff *h = core_handoff;
-    size_t size = VGABIOS_ROM_SIZE;
+    const uint8_t *card = NULL;
+    size_t card_size = 0;
+    if (h->video.vbios_present) {
+        card = (const uint8_t *)(uintptr_t)h->video.vbios.image;
+        card_size = h->video.vbios.size;
+        if (!vgabios_card_fits(card_size, room)) {
+            card = NULL;
+            card_size = 0;
+        }
+    }
+    size_t size = vgabios_rom_size(card_size);
     uint8_t *image = page_alloc(page_count(size));
-    vgabios_rom_fill(image);
-    image[size - 1] = (uint8_t)-checksum8(image, size - 1);
+    vgabios_rom_fill(image, address, card, card_size);
+    if (card != NULL) {
+        printf(
+            "The card's VBIOS image is at %#llx as it is, and the emulated VGA's video BIOS, "
+            "which runs instead, at %#llx\n", (unsigned long long)address,
+            (unsigned long long)vgabios_segment() << 4
+        );
+    }
     if (h->video.vga_present) {
         rom.address = h->video.vga_device;
         rom.vendor_id = h->video.vga_vendor_id;
@@ -286,8 +303,10 @@ static void next_rom(struct vcpu *v) {
 
     for (; csm.roms_done < rom_count; csm.roms_done++) {
         const struct handoff_pci_rom *rom;
+        bool emulated = video && csm.roms_done == 0 && vga_emulated();
         if (video && csm.roms_done == 0) {
-            rom = vga_emulated() ? emulated_vbios() : &h->video.vbios;
+            size_t room = rom_max > csm.rom_end ? rom_max - csm.rom_end : 0;
+            rom = emulated ? emulated_vbios(csm.rom_end, room) : &h->video.vbios;
         } else {
             rom = &h->pci_roms[csm.roms_done - (video ? 1 : 0)];
         }
@@ -310,9 +329,10 @@ static void next_rom(struct vcpu *v) {
         }
 
         memcpy(layout_low(csm.rom_end), (const void *)(uintptr_t)rom->image, rom->size);
+        uintptr_t run_at = emulated ? (uintptr_t)vgabios_segment() << 4 : csm.rom_end;
         struct csm_oprom_params params = {
             .compat16 = csm.compat16,
-            .segment = (uint16_t)(csm.rom_end >> 4),
+            .segment = (uint16_t)(run_at >> 4),
             .address = rom->address,
             .bbs_table = BBS_TABLE,
             .bbs_entry_count = csm.bbs_count
@@ -323,9 +343,9 @@ static void next_rom(struct vcpu *v) {
         printf(
             "Running the option ROM of %02x:%02x.%x (%04x:%04x) at %#llx\n", rom->address.bus,
             rom->address.devfn >> 3, rom->address.devfn & 7, rom->vendor_id, rom->device_id,
-            (unsigned long long)csm.rom_end
+            (unsigned long long)run_at
         );
-        csm.rom_at = csm.rom_end;
+        csm.rom_at = (uint32_t)run_at;
         csm.stage = STAGE_DISPATCH_OPROM;
         csm_call(v, CSM_COMPAT16_DISPATCH_OPROM, OPROM_TABLE);
         return;

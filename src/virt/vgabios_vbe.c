@@ -275,7 +275,7 @@ _Static_assert(
 
 // A far pointer to the ROM's offset.
 static uint32_t far_pointer(uint16_t offset) {
-    return (uint32_t)VGABIOS_SEGMENT << 16 | offset;
+    return (uint32_t)vgabios_segment() << 16 | offset;
 }
 
 // The mode numbers the Reserved area of a VbeInfoBlock holds, after the fields

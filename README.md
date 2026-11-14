@@ -171,7 +171,14 @@ Its Video BIOS also offers the VESA BIOS Extensions (VBE 3.0): modes in 8, 15,
 window or a linear framebuffer, and the display's EDID where the firmware has
 it. Operating systems still see the real video card as the only display
 adapter, which its own drivers can drive, while the linear framebuffer is in
-PCI memory that no device uses.
+PCI memory that no device uses. Where ReBIOS has the image of the card's own
+legacy Video BIOS, it leaves that image as it is at C0000h, where drivers that
+read their card's tables from the Video BIOS find them, as on a BIOS PC, and
+the emulated VGA's Video BIOS runs from a ROM of its own after it. Software
+that runs the card's own code from there, such as `vbetool post`, which calls
+its entry point, or a VBE 3.0 driver that calls its protected-mode interface,
+runs it on the card behind the emulated VGA, which it can leave without a
+picture.
 
 ## Configuration
 
