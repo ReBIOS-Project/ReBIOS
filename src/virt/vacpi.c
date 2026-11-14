@@ -164,6 +164,7 @@
 struct method {
     uacpi_namespace_node *node;
     size_t args;
+    bool unbuilt_shown;
 };
 
 struct notification {
@@ -265,14 +266,6 @@ static const char *const left_out_merged[] = {
     "_HID", "_CID", "_UID", "_ADR", "_SEG", "_BBN", "_CRS", "_PRS", "_SRS",
     "_DIS", "_CBA", "_OSC", NULL
 };
-// Methods that return packages whose shape does not change, which their stubs,
-// as ACPI 1.0 cannot make packages of a size known only at run time, build to
-// the shape they had once.
-static const char *const shaped_methods[] = {
-    "_BIF", "_BIX", "_BST", "_PIF", "_BCL", "_DOD", "_HPP", "_ALR", "_FIF",
-    "_FPS", "_FST", "_BMD", NULL
-};
-
 static bool name_in(const char name[4], const char *const *list) {
     for (size_t i = 0; list[i] != NULL; i++) {
         if (memcmp(name, list[i], 4) == 0) {
@@ -433,7 +426,7 @@ static uint32_t method_add(uacpi_namespace_node *node, size_t args) {
     vacpi.methods = heap_grow(
         vacpi.methods, vacpi.method_count, &vacpi.method_capacity, sizeof(struct method), 64
     );
-    vacpi.methods[vacpi.method_count] = (struct method){ node, args };
+    vacpi.methods[vacpi.method_count] = (struct method){ .node = node, .args = args };
     return vacpi.method_count++;
 }
 
@@ -480,92 +473,6 @@ static void release(struct aml *a) {
     helper(a, "MBXM");
 }
 
-// Store (GELT (i, j), Index (target, index)).
-static void store_element(struct aml *a, size_t i, size_t j, size_t target_local, size_t index) {
-    aml_op(a, AML_STORE);
-    helper(a, "GELT");
-    aml_int(a, i);
-    aml_int(a, j);
-    aml_op(a, AML_INDEX);
-    aml_local(a, target_local);
-    aml_int(a, index);
-    aml_byte(a, AML_ZERO);
-}
-
-// A stub that rebuilds a package of the shape the method's result had.
-static void emit_shaped_stub(
-    struct aml *a,
-    const char name[4],
-    size_t args,
-    size_t index,
-    uacpi_object *shape
-) {
-    uacpi_object_array top;
-    uacpi_object_get_package(shape, &top);
-    aml_begin(a, AML_METHOD);
-    emit_seg(a, name);
-    aml_byte(a, (uint8_t)args);
-    acquire(a);
-    put_args(a, args);
-    helper(a, "RCAL");
-    aml_int(a, index);
-    aml_int(a, args);
-    aml_op(a, AML_STORE);
-    aml_begin(a, AML_PACKAGE);
-    aml_byte(a, (uint8_t)top.count);
-    aml_end(a);
-    aml_local(a, 1);
-    for (size_t i = 0; i < top.count; i++) {
-        uacpi_object_array inner;
-        if (uacpi_object_get_package(top.objects[i], &inner) != UACPI_STATUS_OK) {
-            store_element(a, i, ELEMENT_NONE, 1, i);
-            continue;
-        }
-        aml_op(a, AML_STORE);
-        aml_begin(a, AML_PACKAGE);
-        aml_byte(a, (uint8_t)inner.count);
-        aml_end(a);
-        aml_local(a, 2);
-        for (size_t j = 0; j < inner.count; j++) {
-            store_element(a, i, j, 2, j);
-        }
-        aml_op(a, AML_STORE);
-        aml_local(a, 2);
-        aml_op(a, AML_INDEX);
-        aml_local(a, 1);
-        aml_int(a, i);
-        aml_byte(a, AML_ZERO);
-    }
-    release(a);
-    aml_op(a, AML_RETURN);
-    aml_local(a, 1);
-    aml_end(a);
-}
-
-// Whether a package has one nesting level at most, and no more elements than
-// ACPI 1.0 allows.
-static bool shape_usable(uacpi_object *obj) {
-    uacpi_object_array top;
-    if (uacpi_object_get_package(obj, &top) != UACPI_STATUS_OK || top.count > MAX_PACKAGE) {
-        return false;
-    }
-    for (size_t i = 0; i < top.count; i++) {
-        uacpi_object_array inner;
-        if (uacpi_object_get_package(top.objects[i], &inner) != UACPI_STATUS_OK) {
-            continue;
-        }
-        if (inner.count > MAX_PACKAGE) {
-            return false;
-        }
-        for (size_t j = 0; j < inner.count; j++) {
-            if (uacpi_object_get_type(inner.objects[j]) == UACPI_OBJECT_PACKAGE) {
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
 static bool crs_replaced(uacpi_namespace_node *device);
 static bool resource_name(const char name[4]);
 static bool template_object(uacpi_object **obj, bool to_guest);
@@ -586,6 +493,12 @@ static bool emit_replaced(struct aml *a, uacpi_namespace_node *node, const char 
     emit_seg(a, name);
     aml_int(a, 0);
     return true;
+}
+
+// An empty package, for a result the guest cannot have otherwise.
+static uacpi_object *empty_package(void) {
+    uacpi_object_array none = { .objects = NULL, .count = 0 };
+    return uacpi_object_create_package(none);
 }
 
 static void emit_method(
@@ -622,20 +535,6 @@ static void emit_method(
     }
 
     size_t index = method_add(node, args);
-    if (args == 0 && name_in(name, shaped_methods)) {
-        uacpi_object *obj;
-        if (uacpi_eval(node, NULL, NULL, &obj) == UACPI_STATUS_OK && obj != NULL) {
-            bool usable = shape_usable(obj);
-            if (usable) {
-                emit_shaped_stub(a, name, args, index, obj);
-            }
-            uacpi_object_unref(obj);
-            if (usable) {
-                return;
-            }
-        }
-    }
-
     aml_begin(a, AML_METHOD);
     emit_seg(a, name);
     aml_byte(a, (uint8_t)args);
@@ -2015,6 +1914,98 @@ static void emit_rres(struct aml *a) {
     aml_end(a);
 }
 
+// RPKG (Count): an empty package of Count elements, up to ACPI 1.0's 255, made
+// by a branch per count, as ACPI 1.0 has no package of a size known only at
+// run time.
+static void emit_rpkg(struct aml *a) {
+    aml_method(a, "RPKG", 1, 0);
+    for (size_t count = 0; count < MAX_PACKAGE; count++) {
+        aml_begin(a, AML_IF);
+        aml_op(a, AML_LEQUAL);
+        aml_arg(a, 0);
+        aml_int(a, (uint32_t)count);
+        aml_op(a, AML_RETURN);
+        aml_begin(a, AML_PACKAGE);
+        aml_byte(a, (uint8_t)count);
+        aml_end(a);
+        aml_end(a);
+    }
+    aml_op(a, AML_RETURN);
+    aml_begin(a, AML_PACKAGE);
+    aml_byte(a, MAX_PACKAGE);
+    aml_end(a);
+    aml_end(a);
+}
+
+// While (LLess (Local, Local)) {, closed by aml_end().
+static void while_below(struct aml *a, size_t local, size_t limit) {
+    aml_begin(a, AML_WHILE);
+    aml_op(a, AML_LLESS);
+    aml_local(a, local);
+    aml_local(a, limit);
+}
+
+// Store (RPKG (Local), Local).
+static void store_package(struct aml *a, size_t count, size_t local) {
+    aml_op(a, AML_STORE);
+    aml_name(a, "RPKG");
+    aml_local(a, count);
+    aml_local(a, local);
+}
+
+// RBLD (): the package that the firmware's method gave, as RCAL just reported
+// it, rebuilt element by element through GELT, with the packages in it.
+static void emit_rbld(struct aml *a) {
+    aml_method(a, "RBLD", 0, 0);
+    store_names(a, "MRLN", 0);
+    store_package(a, 0, 1);
+    aml_op(a, AML_STORE);
+    aml_int(a, 0);
+    aml_local(a, 2);
+    while_below(a, 2, 0);
+    aml_op(a, AML_STORE);
+    aml_name(a, "GELT");
+    aml_local(a, 2);
+    aml_int(a, ELEMENT_NONE);
+    aml_local(a, 3);
+
+    aml_begin(a, AML_IF);
+    aml_op(a, AML_LEQUAL);
+    aml_name(a, "MRTY");
+    aml_int(a, TYPE_PACKAGE);
+    store_names(a, "MRLN", 4);
+    store_package(a, 4, 3);
+    aml_op(a, AML_STORE);
+    aml_int(a, 0);
+    aml_local(a, 5);
+    while_below(a, 5, 4);
+    aml_op(a, AML_STORE);
+    aml_name(a, "GELT");
+    aml_local(a, 2);
+    aml_local(a, 5);
+    aml_op(a, AML_INDEX);
+    aml_local(a, 3);
+    aml_local(a, 5);
+    aml_byte(a, AML_ZERO);
+    aml_op(a, AML_INCREMENT);
+    aml_local(a, 5);
+    aml_end(a);
+    aml_end(a);
+
+    aml_op(a, AML_STORE);
+    aml_local(a, 3);
+    aml_op(a, AML_INDEX);
+    aml_local(a, 1);
+    aml_local(a, 2);
+    aml_byte(a, AML_ZERO);
+    aml_op(a, AML_INCREMENT);
+    aml_local(a, 2);
+    aml_end(a);
+    aml_op(a, AML_RETURN);
+    aml_local(a, 1);
+    aml_end(a);
+}
+
 static void emit_rcal(struct aml *a) {
     aml_method(a, "RCAL", 2, 0);
     aml_op(a, AML_STORE);
@@ -2025,6 +2016,14 @@ static void emit_rcal(struct aml *a) {
     aml_name(a, "MARC");
     store_int_name(a, FUNCTION_CALL, "MFUN");
     store_int_name(a, 1, "DOOR");
+    // A package comes back element by element.
+    aml_begin(a, AML_IF);
+    aml_op(a, AML_LEQUAL);
+    aml_name(a, "MRTY");
+    aml_int(a, TYPE_PACKAGE);
+    aml_op(a, AML_RETURN);
+    aml_name(a, "RBLD");
+    aml_end(a);
     aml_op(a, AML_RETURN);
     aml_name(a, "RRES");
     aml_end(a);
@@ -2407,6 +2406,8 @@ static void emit_mailbox_device(struct aml *a) {
     emit_serp(a);
     emit_puta(a);
     emit_rres(a);
+    emit_rpkg(a);
+    emit_rbld(a);
     emit_rcal(a);
     aml_end(a);
     aml_end(a);
@@ -2962,6 +2963,60 @@ static bool srs_settable(uacpi_namespace_node *node, uint32_t argc) {
     return settable;
 }
 
+// Whether the guest's stubs can rebuild a result exactly: integers, strings
+// and buffers that fit the mailbox, and packages of them, nested once at most,
+// within ACPI 1.0's 255 elements. Object references, among others, have no
+// ACPI 1.0 way to be made from what the mailbox carries.
+static bool rebuildable(uacpi_object *obj, size_t depth) {
+    uacpi_data_view view;
+    uacpi_object_array package;
+    switch (uacpi_object_get_type(obj)) {
+        case UACPI_OBJECT_INTEGER: {
+            return true;
+        }
+        case UACPI_OBJECT_STRING:
+        case UACPI_OBJECT_BUFFER: {
+            return uacpi_object_get_string_or_buffer(obj, &view) == UACPI_STATUS_OK
+                && view.length <= MBX_RDATA_SIZE;
+        }
+        case UACPI_OBJECT_PACKAGE: {
+            if (depth == 2 || uacpi_object_get_package(obj, &package) != UACPI_STATUS_OK
+             || package.count > MAX_PACKAGE) {
+                return false;
+            }
+            for (size_t i = 0; i < package.count; i++) {
+                if (!rebuildable(package.objects[i], depth + 1)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        default: {
+            return false;
+        }
+    }
+}
+
+// What the guest gets of a method's result: an empty package in place of one
+// the guest cannot rebuild, which the log shows once.
+static uacpi_object *result_for_guest(struct method *m, uacpi_object *ret) {
+    if (uacpi_object_get_type(ret) != UACPI_OBJECT_PACKAGE || rebuildable(ret, 0)) {
+        return ret;
+    }
+    if (!m->unbuilt_shown) {
+        m->unbuilt_shown = true;
+        const char *path = acpi_path(m->node);
+        printf(
+            "%s returns a package that the guest cannot be given as it is, with object "
+            "references, packages nested twice, or too many elements: it gets an empty one\n",
+            path
+        );
+        acpi_path_free(path);
+    }
+    uacpi_object_unref(ret);
+    return empty_package();
+}
+
 static void mailbox_call(size_t index, uint32_t argc) {
     if (index >= vacpi.method_count || argc > MBX_SLOT_COUNT) {
         write_result(NULL, 1);
@@ -2980,6 +3035,12 @@ static void mailbox_call(size_t index, uint32_t argc) {
     uacpi_object_name name = uacpi_namespace_node_name(node);
     if (status == UACPI_STATUS_OK && resource_name(name.text) && !template_object(&ret, true)) {
         status = UACPI_STATUS_OUT_OF_MEMORY;
+    }
+    if (status == UACPI_STATUS_OK && ret != NULL) {
+        ret = result_for_guest(&vacpi.methods[index], ret);
+        if (ret == NULL) {
+            status = UACPI_STATUS_OUT_OF_MEMORY;
+        }
     }
     if (status == UACPI_STATUS_OK && port != NULL) {
         isa_ports_changed(port);
