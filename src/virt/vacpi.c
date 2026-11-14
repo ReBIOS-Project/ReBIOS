@@ -3119,6 +3119,10 @@ void vacpi_fadt(uint8_t fadt[VACPI_FADT_SIZE], uint32_t facs, uint32_t dsdt) {
     struct acpi_fadt *host;
     if (uacpi_table_fadt(&host) == UACPI_STATUS_OK) {
         write_le16(fadt + FADT_SCI_INT, host->sci_int);
+        // Whether the machine can dock, as the namespace the guest gets is the
+        // firmware's: Windows stops at a dock device of a system that does not
+        // claim to support docking (ACPI 6.6, Table 5.10).
+        flags |= host->flags & ACPI_DCK_CAP;
     }
     if (vacpi.pm1) {
         write_le32(fadt + FADT_PM1A_EVT_BLK, vacpi.pm1_evt);
