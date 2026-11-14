@@ -2707,7 +2707,7 @@ static bool emulation_wanted(void) {
             return true;
         }
         default: {
-            return !h->video.vbios_present;
+            return !h->video.vbios_present || !h->video.vbios_trusted;
         }
     }
 }

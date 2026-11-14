@@ -60,7 +60,7 @@ bool display_vga_emulated(void) {
             return true;
         }
         default: {
-            return !h->video.vbios_present;
+            return !h->video.vbios_present || !h->video.vbios_trusted;
         }
     }
 }

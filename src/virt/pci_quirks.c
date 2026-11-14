@@ -528,7 +528,8 @@ void pci_quirks_init(void) {
         const struct pci_enum_function *f = &t->functions[i];
         // The GPU whose VBIOS runs is the one with the VGA ports, which its
         // VBIOS reaches the copies through.
-        bool vga = video->vbios_present && f->addr.segment == video->vga_device.segment
+        bool vga = video->vbios_present && video->vbios_trusted
+                && f->addr.segment == video->vga_device.segment
                 && f->addr.bus == video->vga_device.bus
                 && (uint32_t)(f->addr.device << 3 | f->addr.function) == video->vga_device.devfn;
         uint32_t config_size = f->pcie_cap != 0 ? PCI_CFG_SPACE_EXP_SIZE : PCI_CFG_SPACE_SIZE;

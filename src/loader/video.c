@@ -90,6 +90,7 @@ struct vbios_choice {
     const void *image;
     size_t size;
     const char *source;
+    bool trusted;
 };
 
 static bool setting_starts_with(const uint16_t *setting, const char *prefix) {
@@ -551,26 +552,21 @@ static bool take_vga_decoding(const struct pci_io_device *dev) {
 }
 
 // Uses the user's VBIOS if given, which needs no matching IDs, or else the
-// legacy image of the device's expansion ROM.
+// legacy image of the device's expansion ROM, which runs where it may: one
+// that may not only gives the emulated VGA's video BIOS its card's tables.
 static bool try_device(
     const struct pci_io_device *dev,
     const struct user_vbios *user,
+    bool may_run,
     struct vbios_choice *choice
 ) {
     const void *image;
     size_t size;
+    bool trusted = may_run;
 
     if (user != NULL) {
         image = user->image;
         size = user->size;
-    } else if (config.vga_emulation != HANDOFF_VGA_EMULATION_NEVER && !vbios_trusted(dev)) {
-        printf(
-            "Skipping the VBIOS of " HANDOFF_PCI_ADDRESS_FMT
-            " (%04x:%04x, revision %02x), not of a card in a slot or graphics from before 2018, "
-            "but with vga_emulation = never\n", HANDOFF_PCI_ADDRESS_ARGS(dev->address),
-            dev->vendor_id, dev->device_id, dev->revision
-        );
-        return false;
     } else {
         bool legacy = pci_rom_find_legacy_image(
             dev->io->rom_image, dev->io->rom_size, dev->vendor_id, dev->device_id, &image, &size
@@ -583,30 +579,43 @@ static bool try_device(
             );
             return false;
         }
+        if (trusted && config.vga_emulation != HANDOFF_VGA_EMULATION_NEVER
+         && !vbios_trusted(dev)) {
+            printf(
+                "Not running the VBIOS of " HANDOFF_PCI_ADDRESS_FMT
+                " (%04x:%04x, revision %02x), not of a card in a slot or graphics from before "
+                "2018, but with vga_emulation = never\n", HANDOFF_PCI_ADDRESS_ARGS(dev->address),
+                dev->vendor_id, dev->device_id, dev->revision
+            );
+            trusted = false;
+        }
     }
 
-    if (!take_vga_decoding(dev)) {
+    if (trusted && !take_vga_decoding(dev)) {
         printf(
-            "Skipping the VBIOS of " HANDOFF_PCI_ADDRESS_FMT
+            "Not running the VBIOS of " HANDOFF_PCI_ADDRESS_FMT
             " (%04x:%04x), as its legacy VGA decoding cannot be enabled\n",
             HANDOFF_PCI_ADDRESS_ARGS(dev->address), dev->vendor_id, dev->device_id
         );
-        return false;
+        trusted = false;
     }
-    // Firmware without a driver for the card, as for a Voodoo, leaves its BARs
-    // undecoded, so that its VBIOS would program nothing.
-    pci_io_enable_device(dev);
-    uint16_t command = 0;
-    dev->io->pci.read(dev->io, EFI_PCI_IO_WIDTH_UINT16, PCI_COMMAND, 1, &command);
-    printf(
-        "VGA device " HANDOFF_PCI_ADDRESS_FMT " decodes, command %#x\n",
-        HANDOFF_PCI_ADDRESS_ARGS(dev->address), command
-    );
+    if (trusted) {
+        // Firmware without a driver for the card, as for a Voodoo, leaves its
+        // BARs undecoded, so that its VBIOS would program nothing.
+        pci_io_enable_device(dev);
+        uint16_t command = 0;
+        dev->io->pci.read(dev->io, EFI_PCI_IO_WIDTH_UINT16, PCI_COMMAND, 1, &command);
+        printf(
+            "VGA device " HANDOFF_PCI_ADDRESS_FMT " decodes, command %#x\n",
+            HANDOFF_PCI_ADDRESS_ARGS(dev->address), command
+        );
+    }
 
     choice->dev = *dev;
     choice->image = image;
     choice->size = size;
     choice->source = user != NULL ? user->source : "its expansion ROM";
+    choice->trusted = trusted;
     return true;
 }
 
@@ -644,7 +653,8 @@ static bool apple_firmware(void) {
     return true;
 }
 
-// For when no graphics output shows which card the firmware's console is on.
+// For when no graphics output shows which card the firmware's console is on,
+// and so none that a VGA could be emulated on.
 static bool try_display_devices(struct vbios_choice *choice) {
     size_t count;
     struct pci_io_device *devices = pci_io_devices(&count);
@@ -652,7 +662,7 @@ static bool try_display_devices(struct vbios_choice *choice) {
 
     for (size_t i = 0; i < count && !found; i++) {
         if (devices[i].base_class == PCI_BASE_CLASS_DISPLAY) {
-            found = try_device(&devices[i], NULL, choice);
+            found = try_device(&devices[i], NULL, true, choice) && choice->trusted;
         }
     }
 
@@ -685,6 +695,7 @@ static bool install_vbios(const struct vbios_choice *choice) {
 
     record_vga_device(dev);
     video->vbios_present = true;
+    video->vbios_trusted = choice->trusted;
     video->vbios.address = dev->address;
     video->vbios.vendor_id = dev->vendor_id;
     video->vbios.device_id = dev->device_id;
@@ -750,12 +761,17 @@ void video_init(void) {
     bool apple = automatic && apple_firmware();
     // A VBIOS draws as the panel scans, sideways on one mounted sideways.
     bool sideways = automatic && loader_handoff->video.framebuffer.rotation != HANDOFF_ROTATE_0;
-    bool skip = apple || sideways;
+    bool may_run = !apple && !sideways;
+    if (apple) {
+        printf("No VBIOS runs under Apple's firmware but with vga_emulation = never\n");
+    } else if (sideways) {
+        printf("No VBIOS runs on a panel mounted sideways but with vga_emulation = never\n");
+    }
 
     if (config.vga_specified) {
         have_dev = find_pci_device(config.vga_device, &dev);
         if (have_dev) {
-            found = !skip && try_device(&dev, user_vbios, &choice);
+            found = try_device(&dev, user_vbios, may_run, &choice);
         } else {
             printf(
                 "The configured VGA device " HANDOFF_PCI_ADDRESS_FMT " does not exist\n",
@@ -766,24 +782,20 @@ void video_init(void) {
         // Another card's VBIOS would put the legacy display where the
         // firmware's is not.
         have_dev = true;
-        found = !skip && try_device(&dev, user_vbios, &choice);
+        found = try_device(&dev, user_vbios, may_run, &choice);
     } else if (have_user) {
         printf(
             "Not using %s as the VBIOS: no VGA device is configured, and no graphics output leads "
             "to one\n", user.source
         );
     } else if (gop_handle == NULL) {
-        found = !skip && try_display_devices(&choice);
+        found = may_run && try_display_devices(&choice);
     }
 
     if (!found || !install_vbios(&choice)) {
-        const char *message = "No usable VBIOS\n";
-        if (apple) {
-            message = "No VBIOS under Apple's firmware but with vga_emulation = never\n";
-        } else if (sideways) {
-            message = "No VBIOS on a panel mounted sideways but with vga_emulation = never\n";
+        if (may_run) {
+            printf("No usable VBIOS\n");
         }
-        printf("%s", message);
         // It keeps its legacy VGA resources, for the emulated VGA to stand in
         // for.
         if (have_dev) {
@@ -804,7 +816,7 @@ void video_exit_boot_services(void) {
 
     // The emulated VGA draws on the framebuffer the driver set up, which some
     // drivers turn off when stopped.
-    if (!video->vbios_present || display_vga_emulated()) {
+    if (!video->vbios_present || !video->vbios_trusted || display_vga_emulated()) {
         return;
     }
     if (efi_bs->hdr.revision < EFI_1_10_SYSTEM_TABLE_REVISION) {

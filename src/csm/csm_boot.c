@@ -293,7 +293,7 @@ static const struct handoff_pci_rom *emulated_vbios(uintptr_t address, size_t ro
 // Runs the next option ROM that fits, or moves on to the boot.
 static void next_rom(struct vcpu *v) {
     const struct handoff *h = core_handoff;
-    bool video = vga_emulated() || h->video.vbios_present;
+    bool video = vga_emulated() || (h->video.vbios_present && h->video.vbios_trusted);
     size_t rom_count = h->pci_rom_count + (video ? 1 : 0);
     // SeaBIOS lets option ROMs grow up to where its own data begins.
     uint32_t rom_max = csm.compat16->uma_address;

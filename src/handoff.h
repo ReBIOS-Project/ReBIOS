@@ -110,8 +110,11 @@ struct handoff_video {
     struct handoff_framebuffer framebuffer;
     // The PCI device that owns the legacy VGA resources, if any.
     bool vga_present;
-    // Whether that device's legacy video BIOS is in vbios.
+    // Whether that device's legacy video BIOS is in vbios, and whether it may
+    // run: one that may not only gives the emulated VGA's video BIOS its
+    // card's tables.
     bool vbios_present;
+    bool vbios_trusted;
     uint16_t vga_vendor_id;
     uint16_t vga_device_id;
     struct handoff_pci_address vga_device;
