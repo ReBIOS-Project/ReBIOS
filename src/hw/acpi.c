@@ -450,13 +450,16 @@ uacpi_thread_id uacpi_kernel_get_thread_id(void) {
     return this_cpu();
 }
 
-// Interrupts are always disabled in the core.
 uacpi_interrupt_state uacpi_kernel_disable_interrupts(void) {
-    return read_rflags();
+    uacpi_interrupt_state state = read_rflags();
+    cli();
+    return state;
 }
 
 void uacpi_kernel_restore_interrupts(uacpi_interrupt_state state) {
-    (void)state;
+    if ((state & RFLAGS_IF) != 0) {
+        sti();
+    }
 }
 
 uacpi_handle uacpi_kernel_create_spinlock(void) {
