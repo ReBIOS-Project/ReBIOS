@@ -22,6 +22,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+struct cpu;
+
 #define VACPI_FADT_SIZE 116
 #define VACPI_FACS_SIZE 64
 
@@ -33,6 +35,9 @@ void vacpi_init(void);
 // Whether the guest has an ACPI OS that takes its events: the GPE of its
 // notifications, or the power button.
 bool vacpi_guest_ospm(void);
+// Whether the CPU's guest waits for its call of a method of the firmware's,
+// which the AML thread runs.
+bool vacpi_call_waits(const struct cpu *cpu);
 
 // The guest's DSDT, generated from the firmware's namespace in ACPI 1.0 AML,
 // and the device its methods call the firmware's through, which this places in

@@ -155,6 +155,11 @@ struct vcpu {
     // Set for work the hypervisor left for a later exit, which comes once the
     // guest has run as long as the hypervisor last did (vlapic.c).
     bool exit_after_turn;
+    // By the TSC, until when threads that the guest does not wait on wait
+    // while it runs, and when the processor's timer brings their next turn, 0
+    // for none (vlapic.c).
+    uint64_t threads_after;
+    uint64_t threads_due;
 
     // The guest's MTRRs: the default type, the fixed ranges, and the variable
     // ranges' bases and masks.

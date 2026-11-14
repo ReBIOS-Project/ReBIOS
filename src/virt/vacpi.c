@@ -47,6 +47,7 @@
 #include <lib/time.h>
 #include <lib/util.h>
 #include <memory.h>
+#include <sys/cpu.h>
 #include <sys/mm.h>
 #include <sys/x86.h>
 #include <virt/devmem.h>
@@ -244,6 +245,8 @@ static struct {
     _Atomic(uint32_t) call;
     size_t call_index;
     uint32_t call_argc;
+    // The CPU whose guest made the call, which waits for it.
+    _Atomic(struct cpu *) call_cpu;
 } vacpi;
 
 // Not mirrored: what only the firmware's own OSPM, the hypervisor, runs, the
@@ -3562,6 +3565,11 @@ static uint64_t doorbell_read(struct vcpu *v, void *ctx, uint64_t offset, size_t
     return 0;
 }
 
+bool vacpi_call_waits(const struct cpu *cpu) {
+    return atomic_load_explicit(&vacpi.call, memory_order_acquire) == CALL_RUNNING
+        && atomic_load_explicit(&vacpi.call_cpu, memory_order_relaxed) == cpu;
+}
+
 static void doorbell_write(
     struct vcpu *v,
     void *ctx,
@@ -3589,6 +3597,7 @@ static void doorbell_write(
                 &vacpi.call, &state, CALL_RUNNING, memory_order_acquire, memory_order_relaxed
             );
             if (started) {
+                atomic_store_explicit(&vacpi.call_cpu, v->cpu, memory_order_relaxed);
                 vacpi.call_index = header[MBX_INDEX / 4];
                 vacpi.call_argc = header[MBX_ARGC / 4];
                 uacpi_kernel_schedule_work(

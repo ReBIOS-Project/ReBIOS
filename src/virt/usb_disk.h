@@ -18,6 +18,7 @@
 #ifndef VIRT__USB_DISK_H
 #define VIRT__USB_DISK_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 // Tendril's mass storage driver reports to this. Before the first controller
@@ -28,5 +29,8 @@ void usb_disk_work(void);
 
 // HYPERCALL_USB_DISK, from the legacy BIOS's driver.
 void usb_disk_call(uint32_t gpa);
+// Whether a transfer that the legacy BIOS's driver started, and polls for, is
+// under way.
+bool usb_disk_busy(void);
 
 #endif

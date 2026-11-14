@@ -1167,6 +1167,9 @@ void vlapic_timer_program(struct vcpu *v) {
             next = own;
         }
     }
+    if (v->threads_due != 0 && (next == 0 || v->threads_due < next)) {
+        next = v->threads_due;
+    }
     if (v->exit_after_turn) {
         v->exit_after_turn = false;
         next = earliest;

@@ -228,6 +228,17 @@ static uint32_t disk_poll(struct usb_disk *d) {
     return status;
 }
 
+bool usb_disk_busy(void) {
+    bool busy = false;
+    spinlock_acquire(&lock);
+    for (size_t i = 0; i < MAX_DISKS && !busy; i++) {
+        busy = disks[i].lun != NULL && disks[i].state != DISK_IDLE
+            && disks[i].state != DISK_DONE;
+    }
+    spinlock_release(&lock);
+    return busy;
+}
+
 void usb_disk_call(uint32_t gpa) {
     struct hypercall_usb_disk call;
     if (!guest_mem_phys_read(gpa, &call, sizeof(struct hypercall_usb_disk))) {

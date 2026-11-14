@@ -51,6 +51,8 @@
 #include <virt/rtc.h>
 #include <virt/svm.h>
 #include <virt/usb.h>
+#include <virt/usb_disk.h>
+#include <virt/vacpi.h>
 #include <virt/vga.h>
 #include <virt/virt.h>
 #include <virt/vlapic.h>
@@ -288,6 +290,11 @@ static void watchdog(struct vcpu *v) {
     );
 }
 
+// While the guest runs, threads that it does not wait on wait between their
+// turns 19 times as long as their last turn took: a twentieth of the
+// processor.
+#define THREADS_SHARE 19
+
 // The threads' turn, with interrupts on, so that an interrupt, the end of the
 // slice that vlapic_timer_slice() arms among them, preempts whatever thread
 // runs then, or keeps the next from starting, for the guest (sys/thread.c). A
@@ -295,15 +302,25 @@ static void watchdog(struct vcpu *v) {
 // goes on here.
 static void threads_turn(struct vcpu *v, bool waiting) {
     struct cpu *cpu = v->cpu;
-    if (!acpi_working() && !(cpu->bsp && usb_working())) {
+    bool aml = acpi_working();
+    bool usb = cpu->bsp && usb_working();
+    if (!aml && !usb) {
         return;
     }
-    // An exit that used up the slice leaves the threads none: they go on at an
-    // exit that leaves some, or while the guest waits.
-    if (!waiting && cpu_slice_over()) {
+    // What the guest waits on goes first, in a slice of its own, until an
+    // interrupt preempts it for the guest or it yields, as the guest does
+    // nothing else meanwhile. The rest waits for its share, and an exit that
+    // used up the slice leaves it none: it goes on at an exit that leaves
+    // some, or while the guest waits.
+    bool aml_asked = aml && vacpi_call_waits(cpu);
+    bool usb_asked = usb && usb_disk_busy();
+    if (!waiting && (aml_asked || usb_asked)) {
+        cpu_slice_start();
+    }
+    bool shared = waiting || (!cpu_slice_over() && rdtsc() >= v->threads_after);
+    if (!aml_asked && !usb_asked && !shared) {
         return;
     }
-    vlapic_timer_slice(v);
     bool taking = atomic_load_explicit(&cpu->taking_interrupts, memory_order_relaxed);
     if (!waiting && !virt_vmx) {
         asm volatile ("stgi" ::: "memory");
@@ -311,8 +328,24 @@ static void threads_turn(struct vcpu *v, bool waiting) {
     atomic_store_explicit(&cpu->taking_interrupts, true, memory_order_relaxed);
     cpu->threads_turn = true;
     sti();
-    acpi_slice();
-    if (cpu->bsp && !cpu_slice_over()) {
+    if (usb_asked) {
+        usb_slice(true);
+    }
+    if (aml_asked) {
+        acpi_slice();
+    }
+    uint64_t start = rdtsc();
+    bool rest = shared && !cpu_slice_over();
+    // The end of the slice, for what the guest does not wait on.
+    if (rest) {
+        cli();
+        vlapic_timer_slice(v);
+        sti();
+    }
+    if (rest && aml && !aml_asked) {
+        acpi_slice();
+    }
+    if (rest && usb && !usb_asked && !cpu_slice_over()) {
         usb_slice(waiting);
     }
     cli();
@@ -320,6 +353,10 @@ static void threads_turn(struct vcpu *v, bool waiting) {
     atomic_store_explicit(&cpu->taking_interrupts, taking, memory_order_relaxed);
     if (!waiting && !virt_vmx) {
         asm volatile ("clgi" ::: "memory");
+    }
+    if (!waiting && rest) {
+        uint64_t now = rdtsc();
+        v->threads_after = now + (now - start) * THREADS_SHARE;
     }
 }
 
@@ -336,11 +373,12 @@ void vcpu_before_entry(struct vcpu *v) {
     threads_turn(v, false);
     // A pause that an interrupt in a thread brought.
     service_pause(v);
-    // Work the AML thread has left goes on after the guest's turn on the boot
-    // processor, which runs GPE methods: a guest idling in MWAIT may well not
-    // exit before then.
-    if (v->cpu->bsp && acpi_working()) {
-        vcpu_exit_after_turn(v);
+    // The boot processor's timer brings the next turn of threads with work
+    // left, the boot processor running the USB stack and GPE methods: a guest
+    // idling in MWAIT may well not exit before then.
+    v->threads_due = 0;
+    if (v->cpu->bsp && (acpi_working() || usb_working())) {
+        v->threads_due = v->threads_after;
     }
     uint64_t modulation = atomic_load_explicit(&v->cpu->clock_modulation, memory_order_acquire);
     if (modulation != v->cpu->clock_modulation_set) {
