@@ -356,6 +356,18 @@ static inline void cpu_relax(void) {
     asm volatile ("pause" ::: "memory");
 }
 
+static inline uint64_t read_rflags(void) {
+    uint64_t value;
+    asm volatile (
+        "pushfq\n\t"
+        "popq %0"
+        : "=r"(value)
+        :
+        : "memory"
+    );
+    return value;
+}
+
 static inline void cli(void) {
     asm volatile ("cli" ::: "memory");
 }

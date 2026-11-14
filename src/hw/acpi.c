@@ -450,18 +450,6 @@ uacpi_thread_id uacpi_kernel_get_thread_id(void) {
     return this_cpu();
 }
 
-static uint64_t read_rflags(void) {
-    uint64_t rflags;
-    asm volatile (
-        "pushfq\n\t"
-        "popq %0"
-        : "=r"(rflags)
-        :
-        : "memory"
-    );
-    return rflags;
-}
-
 // Interrupts are always disabled in the core.
 uacpi_interrupt_state uacpi_kernel_disable_interrupts(void) {
     return read_rflags();

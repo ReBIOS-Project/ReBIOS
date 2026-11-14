@@ -22,24 +22,45 @@
 #include <stdbool.h>
 #include <sys/x86.h>
 
+// A holder runs with interrupts off, so that nothing interrupts or preempts it
+// on its own processor, as nothing could take the lock there meanwhile.
 struct spinlock {
     _Atomic(bool) locked;
+    // Whether interrupts were on where the lock was taken, which its release
+    // turns back on.
+    bool interrupts;
 };
 
 static inline void spinlock_acquire(struct spinlock *lock) {
+    bool interrupts = (read_rflags() & RFLAGS_IF) != 0;
+    cli();
     while (atomic_exchange_explicit(&lock->locked, true, memory_order_acquire)) {
         while (atomic_load_explicit(&lock->locked, memory_order_relaxed)) {
             cpu_relax();
         }
     }
+    lock->interrupts = interrupts;
 }
 
 static inline bool spinlock_try(struct spinlock *lock) {
-    return !atomic_exchange_explicit(&lock->locked, true, memory_order_acquire);
+    bool interrupts = (read_rflags() & RFLAGS_IF) != 0;
+    cli();
+    if (atomic_exchange_explicit(&lock->locked, true, memory_order_acquire)) {
+        if (interrupts) {
+            sti();
+        }
+        return false;
+    }
+    lock->interrupts = interrupts;
+    return true;
 }
 
 static inline void spinlock_release(struct spinlock *lock) {
+    bool interrupts = lock->interrupts;
     atomic_store_explicit(&lock->locked, false, memory_order_release);
+    if (interrupts) {
+        sti();
+    }
 }
 
 #endif
