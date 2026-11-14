@@ -1134,6 +1134,15 @@ void vlapic_timer_fired(struct vcpu *v) {
     v->vlapic->timer_armed = 0;
 }
 
+void vlapic_timer_slice(struct vcpu *v) {
+    struct vlapic *vl = v->vlapic;
+    uint64_t end = v->cpu->slice_end_tsc;
+    if (vl->timer_armed == 0 || end < vl->timer_armed) {
+        vl->timer_armed = end;
+        lapic_timer_arm(end);
+    }
+}
+
 // As an SMI's time goes unnoticed, so does an exit's: a deadline that passes
 // during one is due once the guest has had as long as the exit took, and no
 // timer fires sooner, so that one shorter than an exit cannot starve the

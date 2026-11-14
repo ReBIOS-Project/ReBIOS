@@ -112,11 +112,15 @@ struct cpu {
     uint64_t apic_base;
     // The thread the CPU runs, while it runs one.
     struct thread *thread;
+    // Whether the CPU gives the threads their turn, in which an interrupt
+    // between threads ends the slice (sys/thread.c).
+    bool threads_turn;
     // The time slice of the guest's exit the CPU handles: when the exit came,
     // and when what can wait for the next one gives the CPU back.
     uint64_t slice_start;
     uint64_t slice_start_tsc;
     uint64_t slice_end;
+    uint64_t slice_end_tsc;
     // By the TSC, when the CPU last went into the guest, and the shortest it
     // has taken to come back, or 0.
     uint64_t entry_tsc;

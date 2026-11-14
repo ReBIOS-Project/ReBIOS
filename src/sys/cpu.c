@@ -30,6 +30,7 @@
 #include <lib/util.h>
 #include <sys/fixup.h>
 #include <sys/mm.h>
+#include <sys/thread.h>
 #include <sys/x86.h>
 
 struct idt_entry {
@@ -215,6 +216,7 @@ void cpu_exception_handler(struct exception_frame *frame) {
             panic("Host interrupt %llu with no handler\n", (unsigned long long)frame->vector);
         }
         interrupt_handler((uint8_t)frame->vector);
+        thread_preempt(&frame->rflags);
         return;
     }
 
@@ -331,11 +333,21 @@ uintptr_t cpu_stack_top(struct cpu *cpu) {
     return (uintptr_t)cpu + CPU_AREA_SIZE;
 }
 
+// The slice's length by the TSC, which the first exit finds calibrated.
+static uint64_t slice_tsc(void) {
+    static uint64_t ticks;
+    if (ticks == 0) {
+        ticks = mul_div(CPU_SLICE_NS, time_tsc_hz(), 1000000000);
+    }
+    return ticks;
+}
+
 void cpu_slice_start(void) {
     struct cpu *cpu = this_cpu();
     cpu->slice_start = time_ns();
     cpu->slice_start_tsc = rdtsc();
     cpu->slice_end = cpu->slice_start + CPU_SLICE_NS;
+    cpu->slice_end_tsc = cpu->slice_start_tsc + slice_tsc();
 }
 
 void cpu_slice_end(void) {

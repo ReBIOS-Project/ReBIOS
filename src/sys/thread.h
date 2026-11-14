@@ -36,13 +36,18 @@ struct thread {
     // The time a sleep of the thread lasts until.
     _Atomic(uint64_t) wake;
     bool done;
+    // Whether its runner has interrupts on, which the thread then has too.
+    bool interrupts;
+    // While an interrupt has stopped it, the RFLAGS in the interrupt's frame,
+    // which the thread goes on with from the handler, else NULL.
+    uint64_t *preempted;
 };
 
 void thread_init(struct thread *t, void (*fn)(void *arg), void *arg);
 // Has the thread start over, whatever it was doing.
 void thread_restart(struct thread *t);
-// Runs the thread on this CPU until it yields, unless it sleeps: false once
-// its function returned.
+// Runs the thread on this CPU until it yields, an interrupt preempts it, or
+// unless it sleeps: false once its function returned.
 bool thread_run(struct thread *t);
 // The thread this CPU runs, if any.
 struct thread *thread_current(void);
@@ -56,5 +61,10 @@ void thread_wake(struct thread *t);
 // From a thread, yields where this CPU's time slice is over, returning whether
 // it did; elsewhere, returns false.
 bool thread_yield_if_over(void);
+// From a host interrupt's handler, with the RFLAGS in its frame: the thread
+// that the interrupt came in, if any, gives the CPU back to what runs it, the
+// CPU's slice ending, as what the interrupt brought is the guest's to see to
+// first.
+void thread_preempt(uint64_t *rflags);
 
 #endif

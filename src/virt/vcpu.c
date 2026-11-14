@@ -288,6 +288,41 @@ static void watchdog(struct vcpu *v) {
     );
 }
 
+// The threads' turn, with interrupts on, so that an interrupt, the end of the
+// slice that vlapic_timer_slice() arms among them, preempts whatever thread
+// runs then, or keeps the next from starting, for the guest (sys/thread.c). A
+// vCPU's wait has SVM's global interrupt flag on already; before an entry it
+// goes on here.
+static void threads_turn(struct vcpu *v, bool waiting) {
+    struct cpu *cpu = v->cpu;
+    if (!acpi_working() && !(cpu->bsp && usb_working())) {
+        return;
+    }
+    // An exit that used up the slice leaves the threads none: they go on at an
+    // exit that leaves some, or while the guest waits.
+    if (!waiting && cpu_slice_over()) {
+        return;
+    }
+    vlapic_timer_slice(v);
+    bool taking = atomic_load_explicit(&cpu->taking_interrupts, memory_order_relaxed);
+    if (!waiting && !virt_vmx) {
+        asm volatile ("stgi" ::: "memory");
+    }
+    atomic_store_explicit(&cpu->taking_interrupts, true, memory_order_relaxed);
+    cpu->threads_turn = true;
+    sti();
+    acpi_slice();
+    if (cpu->bsp && !cpu_slice_over()) {
+        usb_slice(waiting);
+    }
+    cli();
+    cpu->threads_turn = false;
+    atomic_store_explicit(&cpu->taking_interrupts, taking, memory_order_relaxed);
+    if (!waiting && !virt_vmx) {
+        asm volatile ("clgi" ::: "memory");
+    }
+}
+
 void vcpu_before_entry(struct vcpu *v) {
     // The guest would draw over a panic's message.
     if (log_panicked()) {
@@ -298,7 +333,9 @@ void vcpu_before_entry(struct vcpu *v) {
     profile_entry(v);
     service_pause(v);
     ferr_follow(v);
-    acpi_slice();
+    threads_turn(v, false);
+    // A pause that an interrupt in a thread brought.
+    service_pause(v);
     // Work the AML thread has left goes on after the guest's turn on the boot
     // processor, which runs GPE methods: a guest idling in MWAIT may well not
     // exit before then.
@@ -340,7 +377,6 @@ void vcpu_before_entry(struct vcpu *v) {
     watchdog(v);
     tick_return_check(v);
     if (v->cpu->bsp) {
-        usb_slice(false);
         hv_timer_run();
     }
     vlapic_timer_program(v);
@@ -434,7 +470,6 @@ void vcpu_wait(struct vcpu *v, bool (*ends)(struct vcpu *v), bool spin) {
         service_pause(v);
         tick_return_check(v);
         if (cpu->bsp) {
-            usb_slice(true);
             hv_timer_run();
         }
         vlapic_timer_program(v);
@@ -444,7 +479,12 @@ void vcpu_wait(struct vcpu *v, bool (*ends)(struct vcpu *v), bool spin) {
         if (log_panicked()) {
             x86_halt_forever();
         }
-        acpi_slice();
+        threads_turn(v, true);
+        // What interrupts brought while the threads ran.
+        vlapic_timer_program(v);
+        if (ends(v)) {
+            break;
+        }
         vga_refresh();
         // Work under way goes on while the guest waits, the boot processor
         // keeping the AML and USB threads going.

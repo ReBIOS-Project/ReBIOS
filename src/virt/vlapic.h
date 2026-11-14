@@ -109,6 +109,8 @@ void vlapic_timer_fired(struct vcpu *v);
 // processor's for what comes next of that and, on the boot processor, of the
 // hypervisor's own timers.
 void vlapic_timer_program(struct vcpu *v);
+// Arms the processor's timer for the end of its slice too, while threads run.
+void vlapic_timer_slice(struct vcpu *v);
 // The IA32_TSC_DEADLINE MSR, as the guest's TSC has it.
 uint64_t vlapic_tsc_deadline(struct vcpu *v);
 void vlapic_tsc_deadline_set(struct vcpu *v, uint64_t deadline);
