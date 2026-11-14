@@ -151,15 +151,15 @@ bool thread_yield_if_over(void) {
 void thread_preempt(uint64_t *rflags) {
     struct cpu *cpu = this_cpu();
     struct thread *t = cpu->thread;
-    // Between the threads of a turn, it ends the slice all the same, so that
-    // the guest sees to what it brought first.
+    // In the threads' turn, it ends the slice, between the turn's threads too,
+    // so that the guest sees to what it brought first. A call that the guest
+    // waits on leaves the slice to what its exit does next.
+    if (cpu->threads_turn) {
+        cpu->slice_end = 0;
+    }
     if (t == NULL) {
-        if (cpu->threads_turn) {
-            cpu->slice_end = 0;
-        }
         return;
     }
-    cpu->slice_end = 0;
     t->preempted = rflags;
     thread_swap(&t->rsp, t->runner_rsp);
     t->preempted = NULL;

@@ -33,6 +33,7 @@
 #include <sys/cpu.h>
 #include <sys/fixup.h>
 #include <sys/smp.h>
+#include <sys/thread.h>
 #include <sys/x86.h>
 #include <virt/cpuid.h>
 #include <virt/event.h>
@@ -295,11 +296,51 @@ static void watchdog(struct vcpu *v) {
 // processor.
 #define THREADS_SHARE 19
 
-// The threads' turn, with interrupts on, so that an interrupt, the end of the
-// slice that vlapic_timer_slice() arms among them, preempts whatever thread
+// Interrupts on for threads, so that an interrupt preempts whatever thread
 // runs then, or keeps the next from starting, for the guest (sys/thread.c). A
-// vCPU's wait has SVM's global interrupt flag on already; before an entry it
-// goes on here.
+// vCPU's wait has SVM's global interrupt flag on already; from an exit it goes
+// on here. In the threads' turn, an interrupt ends the slice too. Returns
+// whether the processor was taking interrupts, for window_close().
+static bool window_open(struct vcpu *v, bool waiting, bool turn) {
+    struct cpu *cpu = v->cpu;
+    bool taking = atomic_load_explicit(&cpu->taking_interrupts, memory_order_relaxed);
+    if (!waiting && !virt_vmx) {
+        asm volatile ("stgi" ::: "memory");
+    }
+    atomic_store_explicit(&cpu->taking_interrupts, true, memory_order_relaxed);
+    cpu->threads_turn = turn;
+    sti();
+    return taking;
+}
+
+static void window_close(struct vcpu *v, bool waiting, bool taking) {
+    struct cpu *cpu = v->cpu;
+    cli();
+    cpu->threads_turn = false;
+    atomic_store_explicit(&cpu->taking_interrupts, taking, memory_order_relaxed);
+    if (!waiting && !virt_vmx) {
+        asm volatile ("clgi" ::: "memory");
+    }
+}
+
+// In an interrupt window, the end of the slice for the threads that the guest
+// does not wait on, which the timer's interrupt preempts.
+static void slice_arm(struct vcpu *v) {
+    cli();
+    vlapic_timer_slice(v);
+    sti();
+}
+
+void vcpu_thread_run(struct vcpu *v, struct thread *t) {
+    if (cpu_slice_over()) {
+        return;
+    }
+    bool taking = window_open(v, false, false);
+    thread_run(t);
+    window_close(v, false, taking);
+}
+
+// The threads' turn, in an interrupt window.
 static void threads_turn(struct vcpu *v, bool waiting) {
     struct cpu *cpu = v->cpu;
     bool aml = acpi_working();
@@ -322,13 +363,7 @@ static void threads_turn(struct vcpu *v, bool waiting) {
     if (!aml_asked && !usb_asked && !shared) {
         return;
     }
-    bool taking = atomic_load_explicit(&cpu->taking_interrupts, memory_order_relaxed);
-    if (!waiting && !virt_vmx) {
-        asm volatile ("stgi" ::: "memory");
-    }
-    atomic_store_explicit(&cpu->taking_interrupts, true, memory_order_relaxed);
-    cpu->threads_turn = true;
-    sti();
+    bool taking = window_open(v, waiting, true);
     if (usb_asked) {
         usb_slice(true);
     }
@@ -337,11 +372,8 @@ static void threads_turn(struct vcpu *v, bool waiting) {
     }
     uint64_t start = rdtsc();
     bool rest = shared && !cpu_slice_over();
-    // The end of the slice, for what the guest does not wait on.
     if (rest) {
-        cli();
-        vlapic_timer_slice(v);
-        sti();
+        slice_arm(v);
     }
     if (rest && aml && !aml_asked) {
         acpi_slice();
@@ -352,12 +384,7 @@ static void threads_turn(struct vcpu *v, bool waiting) {
     if (rest && draw && !cpu_slice_over()) {
         vga_slice();
     }
-    cli();
-    cpu->threads_turn = false;
-    atomic_store_explicit(&cpu->taking_interrupts, taking, memory_order_relaxed);
-    if (!waiting && !virt_vmx) {
-        asm volatile ("clgi" ::: "memory");
-    }
+    window_close(v, waiting, taking);
     if (!waiting && rest) {
         uint64_t now = rdtsc();
         v->threads_after = now + (now - start) * THREADS_SHARE;

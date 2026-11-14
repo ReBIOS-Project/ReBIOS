@@ -73,6 +73,7 @@ struct mmio_step;
 struct run_state;
 struct nsvm;
 struct nvmx;
+struct thread;
 struct vlapic;
 struct vmcb;
 struct vmcs_cache;
@@ -361,6 +362,10 @@ void vcpu_set_real_mode(struct vcpu *v, uint16_t cs, uint16_t ip);
 // Makes an application processor's vCPU wait for a start-up IPI, as after an
 // INIT.
 void vcpu_wait_for_sipi(struct vcpu *v);
+// From an exit of v's, runs t, which the guest waits on, with interrupts on,
+// so that any of them preempts it for the guest; it may not run at all, where
+// the slice is over.
+void vcpu_thread_run(struct vcpu *v, struct thread *t);
 // An INIT for the vCPU, and a start-up IPI with its vector.
 void vcpu_init_signal(struct vcpu *v);
 void vcpu_startup(struct vcpu *v, uint8_t vector);
