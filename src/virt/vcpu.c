@@ -304,7 +304,8 @@ static void threads_turn(struct vcpu *v, bool waiting) {
     struct cpu *cpu = v->cpu;
     bool aml = acpi_working();
     bool usb = cpu->bsp && usb_working();
-    if (!aml && !usb) {
+    bool draw = vga_redrawing();
+    if (!aml && !usb && !draw) {
         return;
     }
     // What the guest waits on goes first, in a slice of its own, until an
@@ -348,6 +349,9 @@ static void threads_turn(struct vcpu *v, bool waiting) {
     if (rest && usb && !usb_asked && !cpu_slice_over()) {
         usb_slice(waiting);
     }
+    if (rest && draw && !cpu_slice_over()) {
+        vga_slice();
+    }
     cli();
     cpu->threads_turn = false;
     atomic_store_explicit(&cpu->taking_interrupts, taking, memory_order_relaxed);
@@ -373,11 +377,12 @@ void vcpu_before_entry(struct vcpu *v) {
     threads_turn(v, false);
     // A pause that an interrupt in a thread brought.
     service_pause(v);
-    // The boot processor's timer brings the next turn of threads with work
-    // left, the boot processor running the USB stack and GPE methods: a guest
-    // idling in MWAIT may well not exit before then.
+    // The processor's timer brings the next turn of threads with work left on
+    // it, the boot processor running the USB stack and GPE methods, and each
+    // its part in a redraw: a guest idling in MWAIT may well not exit before
+    // then.
     v->threads_due = 0;
-    if (v->cpu->bsp && (acpi_working() || usb_working())) {
+    if ((v->cpu->bsp && (acpi_working() || usb_working())) || vga_redrawing()) {
         v->threads_due = v->threads_after;
     }
     uint64_t modulation = atomic_load_explicit(&v->cpu->clock_modulation, memory_order_acquire);
@@ -1161,6 +1166,7 @@ void vcpu_wait_for_sipi(struct vcpu *v) {
         vlapic_timer_program(v);
         // The processor draws while it waits, the guest not running it.
         vga_refresh();
+        threads_turn(v, true);
         if (vga_redrawing()) {
             cpu_relax();
         } else {

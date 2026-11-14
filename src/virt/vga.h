@@ -88,11 +88,12 @@ uintptr_t vga_lfb(void);
 // The framebuffer's size as the emulated VGA's picture stands on it.
 void vga_screen_size(uint32_t *width, uint32_t *height);
 
-// Redraws what the guest changed, at most as often as a display refreshes, a
-// slice at a time, each processor taking part.
+// Starts redrawing what the guest changed, at most as often as a display
+// refreshes, from the boot processor.
 void vga_refresh(void);
-// Whether a redraw has a part left for this processor, which vga_refresh()
-// carries on with.
+// Whether this processor has drawing left, which its drawing thread does in
+// vga_slice(), a piece at a time, each processor taking part.
 bool vga_redrawing(void);
+void vga_slice(void);
 
 #endif

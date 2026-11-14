@@ -32,6 +32,7 @@
 #include <sys/mm.h>
 #include <sys/simd.h>
 #include <sys/smp.h>
+#include <sys/thread.h>
 #include <sys/x86.h>
 #include <virt/gpt.h>
 #include <virt/io.h>
@@ -134,6 +135,10 @@
 // on the last one together, so that large pictures on slow processors leave
 // the guest most of their time.
 #define REDRAW_SHARE 4
+// The longest piece of drawing that a processor's drawing thread does at once,
+// with interrupts off as the guest's SIMD registers are set aside for it, but
+// for the last share that it began.
+#define PIECE_NS ((uint64_t)100000)
 // A frame compares every line of a VBE mode's display this often, so that what
 // the dirty flags do not show, devices' writes for instance, shows all the
 // same.
@@ -333,6 +338,8 @@ struct vga_scratch {
     size_t across_last;
     uint32_t generation;
     uint32_t *band;
+    // The processor's drawing thread.
+    struct thread thread;
 };
 
 // The frame being drawn, which every processor takes part in, SHARE_LINES
@@ -1769,16 +1776,19 @@ static void leave_finish(const struct vga_draw_ops *ops) {
     vcpu_resume_others();
 }
 
-// A slice of reading video memory back, and after a pass over it, the end
-// where it is near. The guest's processor comes back after a turn as long.
-static void direct_leave(void) {
+// A piece of reading video memory back, and after a pass over it, the end
+// where it is near, with interrupts off.
+static void direct_leave_piece(void) {
     struct vcpu *v = this_cpu()->vcpu;
     const struct vga_draw_ops *ops = vga_draw_ops();
     size_t pages = vbe.direct_size / PAGE_SIZE;
+    bool interrupts = (read_rflags() & RFLAGS_IF) != 0;
+    cli();
+    uint64_t until = time_ns() + PIECE_NS;
     bool passed = false;
     simd_begin(vga_draw_level());
     for (bool first = true; ; first = false) {
-        if (!first && cpu_slice_over()) {
+        if (!first && time_ns() >= until) {
             break;
         }
         spinlock_acquire(&vga.lock);
@@ -1802,8 +1812,8 @@ static void direct_leave(void) {
         leave_finish(ops);
     }
     simd_end();
-    if (vbe.leaving) {
-        vcpu_exit_after_turn(v);
+    if (interrupts) {
+        sti();
     }
 }
 
@@ -2310,9 +2320,9 @@ static struct cpu *copier_pick(void) {
 }
 
 // Copies what the frame changed to the framebuffer from where the copy got to,
-// a row at a time, until done or the processor's slice is over. Returns
-// whether done.
-static bool copy_on(const struct vga_draw_ops *ops) {
+// a row at a time, until done or time_ns() reaches until. Returns whether
+// done.
+static bool copy_on(const struct vga_draw_ops *ops, uint64_t until) {
     const struct handoff_framebuffer *fb = &core_handoff->video.framebuffer;
     uint8_t *screen = (uint8_t *)(uintptr_t)fb->base;
     size_t size = fb->bpp / 8;
@@ -2326,7 +2336,7 @@ static bool copy_on(const struct vga_draw_ops *ops) {
             job.copy_row = r.y0;
         }
         for (; job.copy_row < r.y1; job.copy_row++) {
-            if (copied && cpu_slice_over()) {
+            if (copied && time_ns() >= until) {
                 return false;
             }
             size_t offset = (size_t)job.copy_row * fb->pitch + r.x0 * size;
@@ -2354,17 +2364,26 @@ static bool work_left(void) {
     }
 }
 
-// Takes part in the frame being drawn until no part is left for this processor
-// or its slice is over. The processor that draws the last display row hands
-// the copy to the one that copies fastest, which ends the frame.
-static void work(void) {
-    if (!work_left()) {
-        return;
-    }
+// A piece of this processor's part in the frame being drawn, with interrupts
+// off, until no part is left for it or PIECE_NS has passed. The processor that
+// draws the last display row hands the copy to the one that copies fastest,
+// which ends the frame.
+static void work_piece(void) {
     struct cpu *cpu = this_cpu();
     struct vga_scratch *s = cpu->vga_scratch;
+    bool interrupts = (read_rflags() & RFLAGS_IF) != 0;
+    cli();
+    // Taking part before looking, so that an abandon waits for the piece.
     atomic_fetch_add_explicit(&job.busy, 1, memory_order_acq_rel);
+    if (!work_left()) {
+        atomic_fetch_sub_explicit(&job.busy, 1, memory_order_acq_rel);
+        if (interrupts) {
+            sti();
+        }
+        return;
+    }
     uint64_t start = time_ns();
+    uint64_t until = start + PIECE_NS;
     uint32_t generation = atomic_load_explicit(&job.generation, memory_order_acquire);
     if (s->generation != generation) {
         s->generation = generation;
@@ -2375,14 +2394,14 @@ static void work(void) {
     simd_begin(vga_draw_level());
     bool done = false;
     for (bool first = true; ; first = false) {
-        if (!first && cpu_slice_over()) {
+        if (!first && time_ns() >= until) {
             break;
         }
         vcpu_serve_pause();
         uint32_t step = atomic_load_explicit(&job.step, memory_order_acquire);
         if (step == STEP_COPY) {
             if (cpu == job.copier) {
-                done = copy_on(ops);
+                done = copy_on(ops, until);
             }
             break;
         }
@@ -2422,11 +2441,11 @@ static void work(void) {
         uint64_t wait = atomic_load_explicit(&out.frame_cost, memory_order_relaxed) * REDRAW_SHARE;
         out.next_frame = out.frame_start + (wait > REFRESH_NS ? wait : REFRESH_NS);
         atomic_store_explicit(&job.step, STEP_IDLE, memory_order_release);
-    } else if (work_left()) {
-        // Back for the rest once the guest has had its turn.
-        vcpu_exit_after_turn(cpu->vcpu);
     }
     atomic_fetch_sub_explicit(&job.busy, 1, memory_order_acq_rel);
+    if (interrupts) {
+        sti();
+    }
 }
 
 // Starts the frame's steps, with the number of source lines to look at, every
@@ -2594,8 +2613,8 @@ static bool job_stale(void) {
 // Abandons the frame under way where it no longer shows what the display is,
 // and starts the next one once it is due.
 static void frame_next(void) {
+    // The boot processor's drawing thread reads video memory back first.
     if (vbe.leaving) {
-        direct_leave();
         return;
     }
     uint64_t now = time_ns();
@@ -2624,17 +2643,40 @@ static void frame_next(void) {
 void vga_refresh(void) {
     // Processors this one paused may be in the middle of the frame, which
     // abandoning it would wait out.
-    if (!vga.on || vcpu_others_paused()) {
+    if (!vga.on || vcpu_others_paused() || !this_cpu()->bsp) {
         return;
     }
-    if (this_cpu()->bsp) {
-        frame_next();
+    frame_next();
+}
+
+// This processor's drawing left: its part in the frame, and for the boot
+// processor, video memory to read back.
+static bool draw_left(void) {
+    return work_left() || (this_cpu()->bsp && vbe.leaving);
+}
+
+static void draw_main(void *arg) {
+    (void)arg;
+    for (;;) {
+        while (draw_left()) {
+            if (this_cpu()->bsp && vbe.leaving) {
+                direct_leave_piece();
+            } else {
+                work_piece();
+            }
+        }
+        thread_yield();
     }
-    work();
 }
 
 bool vga_redrawing(void) {
-    return vga.on && work_left();
+    return vga.on && this_cpu()->vga_scratch != NULL && draw_left();
+}
+
+void vga_slice(void) {
+    if (vga_redrawing()) {
+        thread_run(&this_cpu()->vga_scratch->thread);
+    }
 }
 
 bool vga_emulated(void) {
@@ -2788,6 +2830,7 @@ static struct vga_scratch *scratch_alloc(void) {
     if (core_handoff->video.framebuffer.rotation != HANDOFF_ROTATE_0) {
         s->band = page_alloc(SHARE_LINES * line_pages);
     }
+    thread_init(&s->thread, draw_main, NULL);
     return s;
 }
 
