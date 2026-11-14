@@ -78,7 +78,7 @@ struct cpu_tss {
     uint16_t iomap_base;
 } __attribute__((packed));
 
-struct task;
+struct thread;
 struct vcpu;
 struct vga_draw_ops;
 struct vga_scratch;
@@ -110,8 +110,8 @@ struct cpu {
     _Atomic(bool) taking_interrupts;
     // IA32_APIC_BASE, once lapic_host_init() set it for good, else 0.
     uint64_t apic_base;
-    // The task the CPU runs, while it runs one.
-    struct task *task;
+    // The thread the CPU runs, while it runs one.
+    struct thread *thread;
     // The time slice of the guest's exit the CPU handles: when the exit came,
     // and when what can wait for the next one gives the CPU back.
     uint64_t slice_start;

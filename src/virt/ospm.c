@@ -577,7 +577,7 @@ static void check(struct zone *z) {
     cool_passively(z, now);
 }
 
-// In the AML task.
+// In the AML thread.
 static void poll(uacpi_handle ctx) {
     (void)ctx;
     atomic_store_explicit(&work_queued, false, memory_order_release);
@@ -623,7 +623,7 @@ static void poll_soon(void *ctx) {
     }
 }
 
-// In the AML task.
+// In the AML thread.
 static uacpi_status zone_notified(uacpi_handle ctx, uacpi_namespace_node *node, uacpi_u64 value) {
     (void)node;
     struct zone *z = ctx;

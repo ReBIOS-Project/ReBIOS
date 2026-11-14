@@ -3579,7 +3579,7 @@ static void doorbell_write(
     }
     switch (header[MBX_FUNCTION / 4]) {
         case FUNCTION_CALL: {
-            // The AML task runs the call on any CPU, as the guest's own OSPM
+            // The AML thread runs the call on any CPU, as the guest's own OSPM
             // would, a slice at each write of the guest's, whose MBXM keeps to
             // one call at a time: a write that finds the call not done does
             // not complete, so that the guest takes its interrupts and writes

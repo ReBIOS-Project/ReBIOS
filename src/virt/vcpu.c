@@ -299,7 +299,7 @@ void vcpu_before_entry(struct vcpu *v) {
     service_pause(v);
     ferr_follow(v);
     acpi_slice();
-    // Work the AML task has left goes on after the guest's turn on the boot
+    // Work the AML thread has left goes on after the guest's turn on the boot
     // processor, which runs GPE methods: a guest idling in MWAIT may well not
     // exit before then.
     if (v->cpu->bsp && acpi_working()) {
@@ -447,7 +447,7 @@ void vcpu_wait(struct vcpu *v, bool (*ends)(struct vcpu *v), bool spin) {
         acpi_slice();
         vga_refresh();
         // Work under way goes on while the guest waits, the boot processor
-        // keeping the AML and USB tasks going.
+        // keeping the AML and USB threads going.
         if (spin || vga_redrawing() || (cpu->bsp && (acpi_working() || usb_working()))) {
             asm volatile (
                 "sti\n\t"

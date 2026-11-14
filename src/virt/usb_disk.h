@@ -23,7 +23,7 @@
 // Tendril's mass storage driver reports to this. Before the first controller
 // is added.
 void usb_disk_register(void);
-// What the guest asked for, from the stack's task.
+// What the guest asked for, from the stack's thread.
 void usb_disk_work(void);
 
 // HYPERCALL_USB_DISK, from the legacy BIOS's driver.

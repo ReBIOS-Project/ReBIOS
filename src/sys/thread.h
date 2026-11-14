@@ -15,8 +15,8 @@
 // You should have received a copy of the GNU General Public License along
 // with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#ifndef SYS__TASK_H
-#define SYS__TASK_H
+#ifndef SYS__THREAD_H
+#define SYS__THREAD_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -24,35 +24,37 @@
 
 // Work on a stack of its own, which a CPU runs until the work yields, and any
 // CPU then carries on with.
-struct task {
-    // The task's stack pointer while it waits, and its runner's while it runs.
+struct thread {
+    // The thread's stack pointer while it waits, and its runner's while it
+    // runs.
     uintptr_t rsp;
     uintptr_t runner_rsp;
     // Its stack's area, which begins with the CPU running it.
     struct cpu **area;
     void (*fn)(void *arg);
     void *arg;
-    // The time a sleep of the task lasts until.
+    // The time a sleep of the thread lasts until.
     _Atomic(uint64_t) wake;
     bool done;
 };
 
-void task_init(struct task *t, void (*fn)(void *arg), void *arg);
-// Has the task start over, whatever it was doing.
-void task_restart(struct task *t);
-// Runs the task on this CPU until it yields, unless it sleeps: false once its
-// function returned.
-bool task_run(struct task *t);
-// The task this CPU runs, if any.
-struct task *task_current(void);
-// From the task, gives the CPU back to whatever runs it, until it runs the
-// task again, or, for a sleep, until it does so once time_ns() reaches until.
-void task_yield(void);
-void task_sleep(uint64_t until);
+void thread_init(struct thread *t, void (*fn)(void *arg), void *arg);
+// Has the thread start over, whatever it was doing.
+void thread_restart(struct thread *t);
+// Runs the thread on this CPU until it yields, unless it sleeps: false once
+// its function returned.
+bool thread_run(struct thread *t);
+// The thread this CPU runs, if any.
+struct thread *thread_current(void);
+// From the thread, gives the CPU back to whatever runs it, until it runs the
+// thread again, or, for a sleep, until it does so once time_ns() reaches
+// until.
+void thread_yield(void);
+void thread_sleep(uint64_t until);
 // Ends its sleep, from anywhere.
-void task_wake(struct task *t);
-// From a task, yields where this CPU's time slice is over, returning whether
+void thread_wake(struct thread *t);
+// From a thread, yields where this CPU's time slice is over, returning whether
 // it did; elsewhere, returns false.
-bool task_yield_if_over(void);
+bool thread_yield_if_over(void);
 
 #endif

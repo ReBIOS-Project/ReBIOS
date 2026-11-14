@@ -17,13 +17,13 @@
 
 .text
 
-// task_swap(save_rsp, rsp) leaves the callee-saved registers on this stack,
+// thread_swap(save_rsp, rsp) leaves the callee-saved registers on this stack,
 // and its pointer in *save_rsp, then carries on from rsp, as another
-// task_swap() left it. A call keeps nothing else: the hypervisor has no x87 or
-// vector state.
-.globl task_swap
-.type task_swap, %function
-task_swap:
+// thread_swap() left it. A call keeps nothing else: the hypervisor has no x87
+// or vector state.
+.globl thread_swap
+.type thread_swap, %function
+thread_swap:
     pushq %rbp
     pushq %rbx
     pushq %r12
@@ -39,13 +39,13 @@ task_swap:
     popq %rbx
     popq %rbp
     retq
-.size task_swap, . - task_swap
+.size thread_swap, . - thread_swap
 
-// Where a task starts, with itself in %rbx.
-.globl task_entry
-.type task_entry, %function
-task_entry:
+// Where a thread starts, with itself in %rbx.
+.globl thread_entry
+.type thread_entry, %function
+thread_entry:
     movq %rbx, %rdi
-    callq task_main
+    callq thread_main
     ud2
-.size task_entry, . - task_entry
+.size thread_entry, . - thread_entry

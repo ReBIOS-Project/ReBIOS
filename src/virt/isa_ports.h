@@ -38,7 +38,7 @@ bool isa_ports_shown(const void *node);
 bool isa_ports_settable(const uint8_t *template, size_t length);
 // After the guest's _SRS or _DIS of a device shown: gives the guest the ports
 // and interrupts the device now has, and takes back the ports it left. In the
-// AML task.
+// AML thread.
 void isa_ports_changed(const void *node);
 
 // The PNP IDs of the serial and parallel ports' devices.

@@ -25,7 +25,7 @@
 #include <lib/spinlock.h>
 #include <lib/util.h>
 #include <memory.h>
-#include <sys/task.h>
+#include <sys/thread.h>
 #include <sys/x86.h>
 #include <virt/bda.h>
 #include <virt/edid.h>
@@ -55,8 +55,8 @@ extern const uint8_t vgabios_stub_int10[];
 extern const uint8_t vgabios_stub_window[];
 
 struct call {
-    struct task task;
-    bool task_made;
+    struct thread thread;
+    bool thread_made;
     bool busy;
     bool finished;
     // In true real mode: everything happens here, in the exit, and the words
@@ -97,7 +97,7 @@ static uint16_t rom_segment = 0xc000;
 static struct spinlock lock;
 
 static void slice_end(void) {
-    task_yield_if_over();
+    thread_yield_if_over();
 }
 
 // Hands words to the ROM, and takes others from it, until the call goes on.
@@ -116,7 +116,7 @@ static void exchange(
     c->data_left = data_words;
     c->into = into;
     c->into_left = into_count;
-    task_yield();
+    thread_yield();
 }
 
 static uintptr_t linear(uint16_t segment, uint16_t offset) {
@@ -459,14 +459,14 @@ static void call_main(void *arg) {
         }
         registers_give(c, &before);
         c->finished = true;
-        task_yield();
+        thread_yield();
     }
 }
 
 static void call_run(struct call *c, struct vcpu *v) {
     c->v = v;
     current = c;
-    task_run(&c->task);
+    thread_run(&c->thread);
     current = NULL;
 }
 
@@ -498,15 +498,15 @@ static struct call *call_slot(bool vga_ports) {
         return oldest;
     }
     printf("The video BIOS gives up on a call that did not end\n");
-    task_restart(&oldest->task);
+    thread_restart(&oldest->thread);
     return oldest;
 }
 
 static uint16_t call_begin(struct vcpu *v, bool vga_ports) {
     struct call *c = call_slot(vga_ports);
-    if (!c->task_made) {
-        task_init(&c->task, call_main, c);
-        c->task_made = true;
+    if (!c->thread_made) {
+        thread_init(&c->thread, call_main, c);
+        c->thread_made = true;
     }
     c->busy = true;
     c->finished = false;

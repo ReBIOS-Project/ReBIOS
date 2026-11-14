@@ -46,7 +46,7 @@
 #include <lib/time.h>
 #include <memory.h>
 #include <sys/cpu.h>
-#include <sys/task.h>
+#include <sys/thread.h>
 #include <sys/x86.h>
 
 // Holds the table list until uacpi_initialize() moves it to the heap, at about
@@ -61,7 +61,7 @@
 
 // Events, semaphores created with no units, are only signalled by the SCI
 // handler (the global lock's release) or AML, neither of which runs while the
-// hypervisor waits outside the AML task with interrupts off. uACPI tries the
+// hypervisor waits outside the AML thread with interrupts off. uACPI tries the
 // global lock again after each wait, so waits forever on events poll instead.
 #define FOREVER_POLL_MS 1
 
@@ -96,12 +96,12 @@ static struct spinlock work_lock;
 static struct work *work_head;
 static struct work *work_tail;
 
-// The work uACPI defers runs as a task, so that what the firmware's AML waits
-// for keeps no CPU from the guest for long: once the time slice of the exit
-// that runs the task is over, the task carries on at a later exit, on
-// whichever CPU. Whether it has work, which lasts until the task ran out of
+// The work uACPI defers runs as a thread, so that what the firmware's AML
+// waits for keeps no CPU from the guest for long: once the time slice of the
+// exit that runs the thread is over, the thread carries on at a later exit, on
+// whichever CPU. Whether it has work, which lasts until the thread ran out of
 // it, whether a CPU runs it, and whether only the boot processor may.
-static struct task aml_task;
+static struct thread aml_thread;
 static _Atomic(bool) aml_started;
 static _Atomic(bool) aml_wanted;
 static _Atomic(bool) aml_running;
@@ -371,9 +371,9 @@ void uacpi_kernel_free(void *mem) {
 }
 
 // uACPI looks at the time at each turn of an AML While loop, where the AML
-// task yields too.
+// thread yields too.
 uacpi_u64 uacpi_kernel_get_nanoseconds_since_boot(void) {
-    task_yield_if_over();
+    thread_yield_if_over();
     return time_ns();
 }
 
@@ -383,8 +383,8 @@ void uacpi_kernel_stall(uacpi_u8 usec) {
 
 void uacpi_kernel_sleep(uacpi_u64 msec) {
     uintptr_t end = time_ns() + msec * 1000000;
-    if (task_current() != NULL) {
-        task_sleep(end);
+    if (thread_current() != NULL) {
+        thread_sleep(end);
         return;
     }
     while (time_ns() < end) {
@@ -426,10 +426,11 @@ uacpi_status uacpi_kernel_wait_for_semaphore(uacpi_handle handle, uacpi_u16 time
         if (timed_out(start, timeout)) {
             return UACPI_STATUS_TIMEOUT;
         }
-        if (task_current() != NULL) {
-            task_yield();
+        if (thread_current() != NULL) {
+            thread_yield();
         } else {
-            // What holds it may be the AML task, which this CPU then runs on.
+            // What holds it may be the AML thread, which this CPU then runs
+            // on.
             acpi_slice();
             cpu_relax();
         }
@@ -441,9 +442,9 @@ void uacpi_kernel_signal_semaphore(uacpi_handle handle) {
     atomic_fetch_add_explicit(&semaphore->units, 1, memory_order_release);
 }
 
-// The AML task's mutexes stay its own on whichever CPU it carries on.
+// The AML thread's mutexes stay its own on whichever CPU it carries on.
 uacpi_thread_id uacpi_kernel_get_thread_id(void) {
-    struct task *t = task_current();
+    struct thread *t = thread_current();
     if (t != NULL) {
         return t;
     }
@@ -535,10 +536,10 @@ void uacpi_kernel_free_work_item(uacpi_handle handle) {
 }
 
 // Work runs in the order it came in, GPE methods and Notify() handlers alike:
-// in the AML task, or before it started, when the CPU that queued it releases
-// acpi_lock(). The task runs GPE methods on the boot processor only, as Linux
-// 7.3's acpi_os_execute() does, since SMIs that AML sets off from other
-// processors corrupt memory on some machines.
+// in the AML thread, or before it started, when the CPU that queued it
+// releases acpi_lock(). The thread runs GPE methods on the boot processor
+// only, as Linux 7.3's acpi_os_execute() does, since SMIs that AML sets off
+// from other processors corrupt memory on some machines.
 void uacpi_kernel_schedule_work(
     uacpi_work_type type,
     uacpi_handle work_item,
@@ -577,23 +578,23 @@ static bool work_take(struct work *w) {
     return head != NULL;
 }
 
-// In the AML task, a slice at a time, and GPE methods on the boot processor,
-// which alone carries the task on meanwhile.
+// In the AML thread, a slice at a time, and GPE methods on the boot processor,
+// which alone carries the thread on meanwhile.
 static void work_run(void) {
-    bool in_task = task_current() != NULL;
+    bool in_task = thread_current() != NULL;
     bool outer = atomic_load_explicit(&aml_bsp, memory_order_relaxed);
     struct work w;
     while (work_take(&w)) {
         if (in_task) {
             atomic_store_explicit(&aml_bsp, outer || w.bsp, memory_order_release);
             while (w.bsp && !this_cpu()->bsp) {
-                task_yield();
+                thread_yield();
             }
         }
         w.handler(w.ctx);
         if (in_task) {
             atomic_store_explicit(&aml_bsp, outer, memory_order_release);
-            task_yield_if_over();
+            thread_yield_if_over();
         }
     }
 }
@@ -626,7 +627,7 @@ static void aml_main(void *arg) {
         if (more) {
             atomic_store_explicit(&aml_wanted, true, memory_order_seq_cst);
         } else {
-            task_yield();
+            thread_yield();
         }
     }
 }
@@ -637,7 +638,7 @@ void acpi_slice(void) {
      || atomic_exchange_explicit(&aml_running, true, memory_order_acquire)) {
         return;
     }
-    task_run(&aml_task);
+    thread_run(&aml_thread);
     atomic_store_explicit(&aml_running, false, memory_order_release);
 }
 
@@ -687,7 +688,7 @@ void acpi_namespace_start(void) {
         printf("Cannot enable the ACPI GPEs: %s\n", uacpi_status_to_string(status));
     }
     acpi_unlock();
-    task_init(&aml_task, aml_main, NULL);
+    thread_init(&aml_thread, aml_main, NULL);
     atomic_store_explicit(&aml_started, true, memory_order_release);
 }
 

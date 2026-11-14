@@ -35,7 +35,7 @@
 #include <memory.h>
 #include <sys/mm.h>
 #include <sys/smp.h>
-#include <sys/task.h>
+#include <sys/thread.h>
 #include <sys/x86.h>
 #include <virt/hv_timer.h>
 #include <virt/kbc.h>
@@ -47,8 +47,8 @@
 
 // USB legacy support, as a BIOS's is to a PC: the hypervisor has the machine's
 // controllers until the OS takes them, with their keyboards and mice feeding
-// the 8042 and their disks the legacy BIOS. All of Tendril runs in one task on
-// the boot processor, whose waits leave the guest its time.
+// the 8042 and their disks the legacy BIOS. All of Tendril runs in one thread
+// on the boot processor, whose waits leave the guest its time.
 
 #define MAX_CONTROLLERS 16
 #define MAX_KEYBOARDS 8
@@ -79,12 +79,12 @@
 
 static struct usb_controller controllers[MAX_CONTROLLERS];
 static size_t controller_count;
-static struct task task;
+static struct thread thread;
 static _Atomic(bool) started;
 static struct hv_timer tick;
 static uint64_t tick_wake;
 static _Atomic(bool) all_ready;
-// The task did not get to the end of its work in its last slice.
+// The thread did not get to the end of its work in its last slice.
 static bool mid_work;
 
 static uint8_t *pool;
@@ -183,7 +183,7 @@ void tendril_glue_dma_barrier(void) {
 // guest going on in between.
 uint16_t tendril_glue_read16(void *ctx, uint32_t offset) {
     struct usb_controller *c = ctx;
-    task_yield_if_over();
+    thread_yield_if_over();
     if (c->mmio == NULL) {
         return inw((uint16_t)(c->port + offset));
     }
@@ -192,7 +192,7 @@ uint16_t tendril_glue_read16(void *ctx, uint32_t offset) {
 
 uint32_t tendril_glue_read32(void *ctx, uint32_t offset) {
     struct usb_controller *c = ctx;
-    task_yield_if_over();
+    thread_yield_if_over();
     if (c->mmio == NULL) {
         return inl((uint16_t)(c->port + offset));
     }
@@ -271,11 +271,11 @@ bool tendril_glue_pci_find_read8(
 // The library's waits read the time as they go, which is where they let the
 // guest go on.
 uint64_t tendril_glue_time_ns(void) {
-    task_yield_if_over();
+    thread_yield_if_over();
     return time_ns();
 }
 
-// One task does all of it.
+// One thread does all of it.
 void tendril_glue_lock(void *ctx) {
     (void)ctx;
 }
@@ -454,7 +454,7 @@ static void usb_main(void *arg) {
         leds_follow();
         atomic_store_explicit(&all_ready, ready, memory_order_release);
         uint64_t poll = time_ns() + (hid_devices != 0 || !ready ? POLL_NS : POLL_IDLE_NS);
-        task_sleep(next < poll ? next : poll);
+        thread_sleep(next < poll ? next : poll);
     }
 }
 
@@ -464,7 +464,7 @@ bool usb_ready(void) {
 }
 
 void usb_kick(void) {
-    task_wake(&task);
+    thread_wake(&thread);
     vcpu_kick(smp_cpu(0));
 }
 
@@ -565,7 +565,7 @@ void usb_start(void) {
     if (controller_count == 0) {
         return;
     }
-    task_init(&task, usb_main, NULL);
+    thread_init(&thread, usb_main, NULL);
     atomic_store_explicit(&started, true, memory_order_release);
 }
 
@@ -574,19 +574,19 @@ void usb_slice(bool guest_waiting) {
         return;
     }
     if (guest_waiting && mid_work) {
-        task_wake(&task);
+        thread_wake(&thread);
     }
     uint64_t before = time_ns();
-    if (atomic_load_explicit(&task.wake, memory_order_acquire) <= before) {
-        task_run(&task);
-        mid_work = atomic_load_explicit(&task.wake, memory_order_acquire) <= time_ns();
+    if (atomic_load_explicit(&thread.wake, memory_order_acquire) <= before) {
+        thread_run(&thread);
+        mid_work = atomic_load_explicit(&thread.wake, memory_order_acquire) <= time_ns();
         if (mid_work) {
-            atomic_store_explicit(&task.wake, time_ns() + WORK_GAP_NS, memory_order_release);
+            atomic_store_explicit(&thread.wake, time_ns() + WORK_GAP_NS, memory_order_release);
         }
     }
     // A timer brings the next one, as the guest may not.
     uint64_t now = time_ns();
-    uint64_t wake = atomic_load_explicit(&task.wake, memory_order_acquire);
+    uint64_t wake = atomic_load_explicit(&thread.wake, memory_order_acquire);
     uint64_t armed = atomic_load_explicit(&tick.deadline, memory_order_acquire);
     if (wake > now && wake == tick_wake && armed != 0) {
         return;
@@ -598,5 +598,5 @@ void usb_slice(bool guest_waiting) {
 
 bool usb_working(void) {
     return atomic_load_explicit(&started, memory_order_acquire)
-        && (mid_work || atomic_load_explicit(&task.wake, memory_order_acquire) <= time_ns());
+        && (mid_work || atomic_load_explicit(&thread.wake, memory_order_acquire) <= time_ns());
 }

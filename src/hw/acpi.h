@@ -62,7 +62,7 @@ bool acpi_init(void);
 bool acpi_tables_ready(void);
 
 // Serialises the hypervisor's use of uACPI across processors, outside the work
-// it defers: GPE methods and Notify() handlers, which run in a task once
+// it defers: GPE methods and Notify() handlers, which run in a thread once
 // acpi_namespace_start() is done, and before that when this is released.
 void acpi_lock(void);
 void acpi_unlock(void);
@@ -74,13 +74,13 @@ void acpi_unlock(void);
 void acpi_namespace_init(void);
 
 // Puts the firmware in APIC mode, enables the GPEs that have methods, and
-// starts the task that runs the deferred work. Needs acpi_namespace_init() and
-// irq_init().
+// starts the thread that runs the deferred work. Needs acpi_namespace_init()
+// and irq_init().
 void acpi_namespace_start(void);
 
-// Runs the deferred work's task until this CPU's time slice is over, unless it
-// has none, sleeps, or runs elsewhere, or needs the boot processor and this is
-// another; whether the task has work.
+// Runs the deferred work's thread until this CPU's time slice is over, unless
+// it has none, sleeps, or runs elsewhere, or needs the boot processor and this
+// is another; whether the thread has work.
 void acpi_slice(void);
 bool acpi_working(void);
 
