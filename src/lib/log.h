@@ -45,13 +45,11 @@ bool log_panicked(void);
 #define LOG_SAVED_START 24576
 // How many bytes the log has had.
 size_t log_saved_count(void);
-// Copies the log's first bytes, at most size, and returns how many.
-size_t log_saved_start(char *out, size_t size, bool lock);
-// Copies the log's latest bytes from position since on, at most size, and
-// returns how many, with the position of the first in *first, which is after
-// since where some between are lost. Without lock, for panics, the copy may
-// catch a line half written.
-size_t log_saved_latest(size_t since, char *out, size_t size, size_t *first, bool lock);
+// Copies the log's bytes from position since on, at most size, oldest first,
+// and returns how many, with the position of the first in *first, which is
+// after since where those at since are lost. A copy stops before bytes that
+// are lost. Without lock, for panics, the copy may catch a line half written.
+size_t log_saved_text(size_t since, char *out, size_t size, size_t *first, bool lock);
 // What keeps the log beyond a reset: log_keep() calls it, and panic() does
 // without wait.
 typedef void (*log_keeper)(bool wait);

@@ -18,9 +18,9 @@
 #ifndef VIRT__LOG_SAVE_H
 #define VIRT__LOG_SAVE_H
 
-// With save_log, keeps the log's start and its latest text in an EFI variable
-// while the guest runs, for when the machine has no serial port and the guest
-// has the screen. Before the guest starts.
+// With save_log, keeps the log in EFI variables while the guest runs, for when
+// the machine has no serial port and the guest has the screen. Before the
+// guest starts.
 void log_save_start(void);
 
 #endif

@@ -28,7 +28,6 @@
 #include <lib/spinlock.h>
 #include <lib/util.h>
 #include <loader/efi_glue.h>
-#include <memory.h>
 #include <sys/x86.h>
 
 static uint16_t log_serial_port;
@@ -252,32 +251,26 @@ bool log_take_screen(void) {
     return true;
 }
 
-size_t log_saved_start(char *out, size_t size, bool lock) {
-    if (lock) {
-        spinlock_acquire(&log_lock);
-    }
-    size_t len = saved_head_len < size ? saved_head_len : size;
-    memcpy(out, saved_head, len);
-    if (lock) {
-        spinlock_release(&log_lock);
-    }
-    return len;
-}
-
-size_t log_saved_latest(size_t since, char *out, size_t size, size_t *first, bool lock) {
+size_t log_saved_text(size_t since, char *out, size_t size, size_t *first, bool lock) {
     if (lock) {
         spinlock_acquire(&log_lock);
     }
     size_t end = saved_head_len + saved_tail_count;
-    size_t start = end - since > size ? end - size : since;
-    // What the tail no longer holds is lost.
-    size_t oldest = saved_tail_count > SAVED_TAIL
-                  ? LOG_SAVED_START + saved_tail_count - SAVED_TAIL
-                  : 0;
-    if (start < oldest) {
-        start = oldest;
+    // The head stays whole, while the tail keeps only its latest SAVED_TAIL
+    // bytes, those from kept on.
+    size_t kept = LOG_SAVED_START;
+    if (saved_tail_count > SAVED_TAIL) {
+        kept = LOG_SAVED_START + saved_tail_count - SAVED_TAIL;
     }
-    for (size_t p = start; p < end; p++) {
+    size_t start = since;
+    size_t stop = end;
+    if (start >= LOG_SAVED_START && start < kept) {
+        start = kept;
+    } else if (start < LOG_SAVED_START && kept > LOG_SAVED_START) {
+        stop = LOG_SAVED_START;
+    }
+    size_t len = stop - start < size ? stop - start : size;
+    for (size_t p = start; p < start + len; p++) {
         out[p - start] = p < LOG_SAVED_START
                        ? saved_head[p]
                        : saved_tail[(p - LOG_SAVED_START) % SAVED_TAIL];
@@ -286,7 +279,7 @@ size_t log_saved_latest(size_t since, char *out, size_t size, size_t *first, boo
         spinlock_release(&log_lock);
     }
     *first = start;
-    return end - start;
+    return len;
 }
 
 size_t log_saved_count(void) {

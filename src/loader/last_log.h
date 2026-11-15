@@ -22,8 +22,9 @@
 
 // Writes the log that the core saved in EFI variables with save_log
 // (virt/log_save.c) to rebios-last.log, beside the loader's image, then
-// deletes the variables. Says on the screen where the log went, or why it did
-// not, and with save_log, where there was none.
+// deletes the variables, which stay for a later start only where the file
+// cannot be written and save_log is off. Says on the screen where the log
+// went, or why it did not, and with save_log, where there was none.
 void last_log_write(bool save_log);
 
 #endif

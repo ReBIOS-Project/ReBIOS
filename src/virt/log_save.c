@@ -35,14 +35,20 @@
 // Each save is a write of the firmware's flash, and may hold the boot
 // processor for tens of milliseconds, so there is one at most every 10
 // seconds, and 360 at most a boot, but for the last before a panic, a reset,
-// or the power going off. Firmware may collect the garbage of its variable
-// store only before ExitBootServices(), as EDK2's does (edk2-stable202608,
-// MdeModulePkg/Universal/Variable/RuntimeDxe/Variable.c), so each save takes
-// new room: the log's start goes once to one variable, and only its latest
-// text, END_MAX bytes at most, to the other, as often as it changes.
+// or the power going off. Every write takes new room in the variable store, so
+// each save writes only the text that the log gained since the last, in
+// variables of its own (handoff.h). Firmware gives the room back as it
+// collects the store's garbage, which rewrites the whole store
+// (edk2-stable202608, MdeModulePkg/Universal/Variable/RuntimeDxe/Variable.c,
+// Reclaim()): EDK2's before ExitBootServices() alone, and others also where a
+// write does not fit, as Linux 7.3 has them do
+// (arch/x86/platform/efi/quirks.c, efi_query_variable_store()). Only the last
+// save asks for that, and the others stop where too little room is left.
 #define SAVE_INTERVAL_S 10
 #define SAVE_LIMIT 360
-#define END_MAX 8192
+// Room in the store that the others leave for the last save.
+#define LAST_ROOM 8192
+// The least room worth a variable.
 #define SAVE_MIN 1024
 // Linux 7.3 keeps at least this much of the variable store free, a figure from
 // Samsung, some of whose machines stop starting with less
@@ -51,106 +57,116 @@
 #define ATTRIBUTES \
     (EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS)
 
-static uint16_t start_name[] = HANDOFF_LOG_VARIABLE;
-static uint16_t end_name[] = HANDOFF_LOG_END_VARIABLE;
 static uint16_t dummy_name[] = u"ReBIOSDummy";
 static struct efi_guid guid = HANDOFF_VARIABLE_GUID;
 static const char gap[] = "[...]\n";
 static struct hv_timer timer;
+// A variable's data, LOG_SAVED_START bytes at most.
 static char *text;
-static bool start_saved;
-static size_t start_len;
+// How much of the log the variables hold, and how many there are.
 static size_t saved_count;
+static size_t variables;
 static size_t saves;
 
 // How many bytes, want at most, a variable named name_size bytes may hold with
-// kept bytes of the store left for later, as Linux 7.3's
-// efi_query_variable_store() decides: where too little is left, a write too
-// large to fit, which fails, may have the firmware collect its garbage first,
-// but not without wait, for panics. 0 where the write would leave less than
-// STORE_RESERVE free.
-static size_t room(size_t name_size, size_t want, size_t kept, bool wait) {
+// kept bytes of the store left for later, in *size, as Linux 7.3's
+// efi_query_variable_store() decides: 0 where the write would leave less than
+// STORE_RESERVE free. With collect, where too little is left, a write too
+// large to fit, which fails, first has the firmware collect the store's
+// garbage, where it does that after ExitBootServices().
+static efi_status room(
+    size_t name_size,
+    size_t want,
+    size_t kept,
+    bool wait,
+    bool collect,
+    size_t *size
+) {
     uint64_t storage, remaining, max_size;
     efi_status status = efi_runtime_query_variable_info(
         ATTRIBUTES, &storage, &remaining, &max_size, wait
     );
-    if (status != EFI_SUCCESS || max_size <= name_size) {
-        return 0;
-    }
-    if (wait && remaining < want + kept + STORE_RESERVE) {
+    if (status == EFI_SUCCESS && collect && remaining < want + kept + STORE_RESERVE) {
+        printf(
+            "The log's last save has the firmware collect its variable store's garbage, with "
+            "%llu of %llu bytes free\n",
+            (unsigned long long)remaining, (unsigned long long)storage
+        );
         size_t dummy_size = (size_t)remaining + 1024;
         void *dummy = kmalloc(dummy_size);
         if (dummy != NULL) {
             memset(dummy, 0, dummy_size);
             status = efi_runtime_set_variable(
-                dummy_name, &guid, ATTRIBUTES, dummy_size, dummy, true
+                dummy_name, &guid, ATTRIBUTES, dummy_size, dummy, wait
             );
             if (status == EFI_SUCCESS) {
-                efi_runtime_set_variable(dummy_name, &guid, ATTRIBUTES, 0, NULL, true);
+                efi_runtime_set_variable(dummy_name, &guid, ATTRIBUTES, 0, NULL, wait);
             }
             kfree(dummy);
         }
         status = efi_runtime_query_variable_info(
-            ATTRIBUTES, &storage, &remaining, &max_size, true
+            ATTRIBUTES, &storage, &remaining, &max_size, wait
         );
-        if (status != EFI_SUCCESS || max_size <= name_size) {
-            return 0;
-        }
     }
-    if (remaining <= STORE_RESERVE + kept) {
-        return 0;
+    *size = 0;
+    if (status != EFI_SUCCESS) {
+        return status;
     }
-    uint64_t size = remaining - STORE_RESERVE - kept;
-    if (size > max_size - name_size) {
-        size = max_size - name_size;
+    if (max_size <= name_size || remaining <= STORE_RESERVE + kept) {
+        return EFI_SUCCESS;
     }
-    return size < want ? (size_t)size : want;
-}
-
-// Room for the last save is kept from the others.
-static efi_status save(bool wait, bool last) {
-    size_t count = log_saved_count();
-    size_t kept = last ? 0 : END_MAX;
-    efi_status status;
-    if (!start_saved) {
-        size_t size = room(sizeof(start_name), LOG_SAVED_START, kept, wait);
-        if (size < SAVE_MIN) {
-            return EFI_OUT_OF_RESOURCES;
-        }
-        size_t len = log_saved_start(text, size, wait);
-        status = efi_runtime_set_variable(start_name, &guid, ATTRIBUTES, len, text, wait);
-        if (status != EFI_SUCCESS) {
-            return status;
-        }
-        start_saved = true;
-        start_len = len;
+    uint64_t fits = remaining - STORE_RESERVE - kept;
+    if (fits > max_size - name_size) {
+        fits = max_size - name_size;
     }
-    if (count > start_len) {
-        size_t size = room(sizeof(end_name), END_MAX, kept, wait);
-        if (size < SAVE_MIN) {
-            return EFI_OUT_OF_RESOURCES;
-        }
-        // Marked where text between the two is lost.
-        size_t gap_len = sizeof(gap) - 1;
-        size_t first;
-        size_t len = log_saved_latest(start_len, text + gap_len, size - gap_len, &first, wait);
-        char *data = text + gap_len;
-        if (first > start_len) {
-            data = text;
-            memcpy(text, gap, gap_len);
-            len += gap_len;
-        }
-        status = efi_runtime_set_variable(end_name, &guid, ATTRIBUTES, len, data, wait);
-        if (status != EFI_SUCCESS) {
-            return status;
-        }
-    }
-    saved_count = count;
+    *size = fits < want ? (size_t)fits : want;
     return EFI_SUCCESS;
 }
 
-// Says on the screen too why the log is saved again only at the end, as the
-// user may otherwise find none at the next start.
+// Writes the text that the log gained since the last save in variables of
+// their own, as far as the store has room: the last save takes the room that
+// the others leave, and may have the firmware collect the store's garbage
+// first.
+static efi_status save(bool wait, bool last) {
+    size_t kept = last ? 0 : LAST_ROOM;
+    size_t gap_len = sizeof(gap) - 1;
+    while (saved_count < log_saved_count()) {
+        if (variables == HANDOFF_LOG_PARTS) {
+            return EFI_OUT_OF_RESOURCES;
+        }
+        uint16_t name[HANDOFF_LOG_PART_NAME_LEN];
+        handoff_log_part_name(name, variables);
+        size_t size;
+        efi_status status = room(sizeof(name), LOG_SAVED_START, kept, wait, last && wait, &size);
+        if (status != EFI_SUCCESS) {
+            return status;
+        }
+        size_t pending = log_saved_count() - saved_count;
+        if (size < SAVE_MIN && size < gap_len + pending) {
+            return EFI_OUT_OF_RESOURCES;
+        }
+        size_t first;
+        size_t len = log_saved_text(saved_count, text + gap_len, size - gap_len, &first, wait);
+        // Marked where text is lost.
+        char *data = text + gap_len;
+        size_t data_len = len;
+        if (first != saved_count) {
+            memcpy(text, gap, gap_len);
+            data = text;
+            data_len += gap_len;
+        }
+        status = efi_runtime_set_variable(name, &guid, ATTRIBUTES, data_len, data, wait);
+        if (status != EFI_SUCCESS) {
+            return status;
+        }
+        saved_count = first + len;
+        variables++;
+    }
+    return EFI_SUCCESS;
+}
+
+// Says on the screen too why the log is saved again only at the end, as what
+// the next start writes out may otherwise end early without a word.
 static void refused(efi_status status) {
     uint64_t storage = 0;
     uint64_t remaining = 0;
@@ -158,12 +174,16 @@ static void refused(efi_status status) {
     efi_status queried = efi_runtime_query_variable_info(
         ATTRIBUTES, &storage, &remaining, &max_size, true
     );
+    const char *why = "refuses it";
+    if (status == EFI_OUT_OF_RESOURCES) {
+        why = "has too little room left for it";
+    }
     log_notice(
         "The log is saved again only at a panic or before a reset or power off: the "
-        "firmware's variable store refuses it, status %#llx, with %llu of %llu bytes free and "
-        "%llu at most for a variable (status %#llx)\n",
-        (unsigned long long)status, (unsigned long long)remaining, (unsigned long long)storage,
-        (unsigned long long)max_size, (unsigned long long)queried
+        "firmware's variable store %s, status %#llx, with %llu of %llu bytes free and %llu at "
+        "most for a variable (status %#llx)\n",
+        why, (unsigned long long)status, (unsigned long long)remaining,
+        (unsigned long long)storage, (unsigned long long)max_size, (unsigned long long)queried
     );
 }
 
@@ -198,13 +218,12 @@ void log_save_start(void) {
         return;
     }
     efi_runtime_init();
-    // The log's start is the larger of the two variables.
     text = page_alloc(page_count(LOG_SAVED_START));
     if (text == NULL) {
         printf("Cannot save the log: out of memory\n");
         return;
     }
-    printf("The log is saved in the ReBIOSLog and ReBIOSLogEnd EFI variables as it grows\n");
+    printf("The log is saved as it grows, in EFI variables from ReBIOSLog0000 on\n");
     timer.fired = timer_fired;
     hv_timer_add(&timer);
     hv_timer_set(&timer, rdtsc());
