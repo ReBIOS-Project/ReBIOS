@@ -495,11 +495,11 @@ static bool ier_holds_back(const struct vlapic *vl) {
         return false;
     }
     for (size_t i = 0; i < 8; i++) {
-        uint32_t enabled = regs_get(vl, ier_reg(i));
+        uint32_t ier = regs_get(vl, ier_reg(i));
         if (i == 0) {
-            enabled |= 0xffff;
+            ier |= 0xffff;
         }
-        if (enabled != 0xffffffff) {
+        if (ier != 0xffffffff) {
             return true;
         }
     }
@@ -700,8 +700,8 @@ static void eilvt_lvts(const struct vlapic *vl) {
 }
 
 // As a local APIC in either mode reads it (SDM 325462-093 Vol. 3C, 32.1.6.2).
-static uint32_t ipiv_destination(uint32_t id, bool x2apic) {
-    return x2apic ? id : (id << 8) & 0xff00;
+static uint32_t ipiv_destination(uint32_t id, bool x2apic_mode) {
+    return x2apic_mode ? id : (id << 8) & 0xff00;
 }
 
 static void post_recheck_soon(struct vlapic *vl) {

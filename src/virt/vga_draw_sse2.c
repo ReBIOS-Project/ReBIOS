@@ -237,7 +237,7 @@ static void convert32(uint32_t *dst, const uint8_t *src, size_t count) {
     }
 }
 
-static void scale(
+static void scale_line(
     uint32_t *dst,
     const uint32_t *src,
     const struct vga_draw_scale *scale,
@@ -442,7 +442,7 @@ const struct vga_draw_ops vga_draw_sse2 = {
     .convert16 = convert16,
     .convert24 = convert24,
     .convert32 = convert32,
-    .scale = scale,
+    .scale = scale_line,
     .blend = blend,
     .to_xbgr = to_xbgr,
     .to_rgb565 = to_rgb565,

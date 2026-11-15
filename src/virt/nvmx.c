@@ -2791,13 +2791,13 @@ static void cr8_access(struct vcpu *v, uint64_t qual) {
 static void ept_violation(struct vcpu *v, struct nvmx *n, uint64_t qual) {
     uintptr_t gpa = vmx_read(VMCS_GUEST_PHYS_ADDR);
     struct ept12_walk w;
-    int result = ept12_walk(n, gpa, qual, &w);
-    if (result == EPT12_VIOLATION) {
+    int walk_result = ept12_walk(n, gpa, qual, &w);
+    if (walk_result == EPT12_VIOLATION) {
         ept02_forget(n, gpa);
         exit_to_l1(v, n, EXIT_REASON_EPT_VIOLATION, ept12_qual(qual, &w), 0, 0, true);
         return;
     }
-    if (result == EPT12_PML_FULL) {
+    if (walk_result == EPT12_PML_FULL) {
         exit_to_l1(v, n, EXIT_REASON_PML_FULL, qual & EPT_QUAL_NMI_UNBLOCKED, 0, 0, true);
         return;
     }
@@ -2810,7 +2810,7 @@ static void ept_violation(struct vcpu *v, struct nvmx *n, uint64_t qual) {
             vmx_read(VMCS_GUEST_INTERRUPTIBILITY) | INTERRUPTIBILITY_NMI
         );
     }
-    if (result == EPT12_MISCONFIG) {
+    if (walk_result == EPT12_MISCONFIG) {
         exit_to_l1(v, n, EXIT_REASON_EPT_MISCONFIG, 0, 0, 0, true);
         return;
     }
@@ -3221,8 +3221,8 @@ bool nvmx_ept_translate(
         return false;
     }
     struct ept12_walk w;
-    int result = ept12_walk(n, gpa, access, &w);
-    if (result == EPT12_MAPPED) {
+    int walk_result = ept12_walk(n, gpa, access, &w);
+    if (walk_result == EPT12_MAPPED) {
         *out = w.gpa;
         return true;
     }
@@ -3231,10 +3231,10 @@ bool nvmx_ept_translate(
     n->pending_error = 0;
     n->pending_gpa = gpa;
     n->pending_linear = (access & EPT_QUAL_LINEAR) != 0 ? linear : 0;
-    if (result == EPT12_MISCONFIG) {
+    if (walk_result == EPT12_MISCONFIG) {
         n->pending_reason = EXIT_REASON_EPT_MISCONFIG;
         n->pending_qual = 0;
-    } else if (result == EPT12_PML_FULL) {
+    } else if (walk_result == EPT12_PML_FULL) {
         n->pending_reason = EXIT_REASON_PML_FULL;
         n->pending_qual = 0;
     } else {

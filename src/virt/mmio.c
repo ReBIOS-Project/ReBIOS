@@ -242,7 +242,7 @@ void mmio_phys_access(struct vcpu *v, uintptr_t gpa, void *buf, size_t len, bool
     }
 }
 
-static bool access(struct vcpu *v, uintptr_t linear, void *buf, size_t size, bool write) {
+static bool access_linear(struct vcpu *v, uintptr_t linear, void *buf, size_t size, bool write) {
     uint64_t gpas[2];
     unsigned int lens[2];
     unsigned int pieces;
@@ -264,11 +264,11 @@ static bool access(struct vcpu *v, uintptr_t linear, void *buf, size_t size, boo
 }
 
 bool mmio_read_linear(struct vcpu *v, uintptr_t linear, void *buf, size_t size) {
-    return access(v, linear, buf, size, false);
+    return access_linear(v, linear, buf, size, false);
 }
 
 bool mmio_write_linear(struct vcpu *v, uintptr_t linear, const void *buf, size_t size) {
-    return access(v, linear, (void *)buf, size, true);
+    return access_linear(v, linear, (void *)buf, size, true);
 }
 
 static bool mem_ins(
@@ -812,12 +812,12 @@ static void write_runs(struct vcpu *v, struct step_page *p) {
             at++;
             continue;
         }
-        size_t stop = at + 1;
-        while (stop < p->end && p->first[stop - p->start] == p->scratch[stop]) {
-            stop++;
+        size_t run_end = at + 1;
+        while (run_end < p->end && p->first[run_end - p->start] == p->scratch[run_end]) {
+            run_end++;
         }
-        region_access(v, p->r, p->gpa + at, p->scratch + at, stop - at, true);
-        at = stop;
+        region_access(v, p->r, p->gpa + at, p->scratch + at, run_end - at, true);
+        at = run_end;
     }
 }
 

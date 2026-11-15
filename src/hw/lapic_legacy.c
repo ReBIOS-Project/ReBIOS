@@ -60,7 +60,7 @@ static const char *const lvt_names[LAPIC_LVT_COUNT] = {
 // The version register's maximum LVT entry from which each entry exists.
 static const uint8_t lvt_first_max_entry[LAPIC_LVT_COUNT] = { 0, 5, 4, 0, 0, 0, 6 };
 
-static uint32_t max_entry(void) {
+static uint32_t max_lvt_entry(void) {
     return (lapic_read(APIC_VERSION) >> 16) & 0xff;
 }
 
@@ -210,7 +210,7 @@ void lapic_legacy_init(void) {
     uint32_t found_max_entry = 0;
     struct lapic_regs found = { 0 };
     if (found_enabled) {
-        found_max_entry = max_entry();
+        found_max_entry = max_lvt_entry();
         read_regs(found_max_entry, &found);
     }
 

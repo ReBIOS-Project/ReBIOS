@@ -86,7 +86,7 @@ static inline u8x16 scale_group(
     return mix(a, b, low, high);
 }
 
-static void scale(
+static void scale_line(
     uint32_t *dst,
     const uint32_t *src,
     const struct vga_draw_scale *scale,
@@ -197,7 +197,7 @@ static void graphics_line(
 
 const struct vga_draw_ops vga_draw_ssse3 = {
     .convert24 = convert24,
-    .scale = scale,
+    .scale = scale_line,
     .to_xbgr = to_xbgr,
     .to_bgr24 = to_bgr24,
     .graphics_line = graphics_line

@@ -213,7 +213,7 @@ static void report(uint64_t elapsed_ns) {
     size_t total = 0;
     uint64_t cycles = 0;
     uint64_t idle = 0;
-    unsigned int hlt = virt_vmx ? VMX_HLT : SVM_HLT;
+    unsigned int halt_slot = virt_vmx ? VMX_HLT : SVM_HLT;
     unsigned int mwait_slot = virt_vmx ? VMX_MWAIT : SVM_MWAIT;
     struct {
         unsigned int slot;
@@ -224,7 +224,7 @@ static void report(uint64_t elapsed_ns) {
         uint64_t exits = now.exits[slot] - before.exits[slot];
         uint64_t c = now.cycles[slot] - before.cycles[slot];
         total += exits;
-        if (slot == hlt || slot == mwait_slot) {
+        if (slot == halt_slot || slot == mwait_slot) {
             idle += c;
         } else {
             cycles += c;
