@@ -55,7 +55,7 @@ static inline void store(void *p, u8x32 v) {
 // GCC's builtin for it is not Clang's.
 static inline u8x32 load_streaming(const void *p) {
     u8x32 v;
-    asm ("vmovntdqa %1, %0" : "=x"(v) : "m"(*(const u8x32 *)p));
+    asm volatile ("vmovntdqa %1, %0" : "=x"(v) : "m"(*(const u8x32 *)p));
     return v;
 }
 
@@ -131,7 +131,7 @@ static inline u32x8 gather(const uint32_t *table, u32x8 index) {
     u32x8 result = { 0 };
     u32x8 mask = { 0 };
     mask = ~mask;
-    asm (
+    asm volatile (
         "vpgatherdd %1, (%3, %2, 4), %0"
         : "+x"(result), "+x"(mask)
         : "x"(index), "r"(table), "m"(*(const uint32_t (*)[256])table)
