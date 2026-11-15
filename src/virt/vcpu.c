@@ -291,9 +291,9 @@ static void watchdog(struct vcpu *v) {
     );
 }
 
-// While the guest runs, threads that it does not wait on wait between their
-// turns 19 times as long as their last turn took: a twentieth of the
-// processor.
+// While the guest runs, threads that neither it nor the display waits on wait
+// between their turns 19 times as long as their last turn took: a twentieth of
+// the processor.
 #define THREADS_SHARE 19
 
 // Interrupts on for threads, so that an interrupt preempts whatever thread
@@ -332,11 +332,14 @@ static void slice_arm(struct vcpu *v) {
 }
 
 void vcpu_thread_run(struct vcpu *v, struct thread *t) {
-    if (cpu_slice_over()) {
-        return;
-    }
     bool taking = window_open(v, false, false);
     thread_run(t);
+    window_close(v, false, taking);
+}
+
+void vcpu_acpi_slice(struct vcpu *v) {
+    bool taking = window_open(v, false, false);
+    acpi_slice();
     window_close(v, false, taking);
 }
 
@@ -349,18 +352,20 @@ static void threads_turn(struct vcpu *v, bool waiting) {
     if (!aml && !usb && !draw) {
         return;
     }
-    // What the guest waits on goes first, in a slice of its own, until an
-    // interrupt preempts it for the guest or it yields, as the guest does
-    // nothing else meanwhile. The rest waits for its share, and an exit that
-    // used up the slice leaves it none: it goes on at an exit that leaves
-    // some, or while the guest waits.
+    // What the guest waits on goes first, from a slice of its own, and runs
+    // until it yields or an interrupt preempts it for the guest, as the guest
+    // does nothing else meanwhile. So does a frame being drawn, which the
+    // display waits on, and whose frames come no more often than virt/vga.c
+    // paces them. The rest waits for its share, and an exit that used up the
+    // slice leaves it none: it goes on at an exit that leaves some, or while
+    // the guest waits.
     bool aml_asked = aml && vacpi_call_waits(cpu);
     bool usb_asked = usb && usb_disk_busy();
-    if (!waiting && (aml_asked || usb_asked)) {
+    if (!waiting && (aml_asked || usb_asked || draw)) {
         cpu_slice_start();
     }
     bool shared = waiting || (!cpu_slice_over() && rdtsc() >= v->threads_after);
-    if (!aml_asked && !usb_asked && !shared) {
+    if (!aml_asked && !usb_asked && !draw && !shared) {
         return;
     }
     bool taking = window_open(v, waiting, true);
@@ -369,6 +374,9 @@ static void threads_turn(struct vcpu *v, bool waiting) {
     }
     if (aml_asked) {
         acpi_slice();
+    }
+    if (draw) {
+        vga_slice();
     }
     uint64_t start = rdtsc();
     bool rest = shared && !cpu_slice_over();
@@ -380,9 +388,6 @@ static void threads_turn(struct vcpu *v, bool waiting) {
     }
     if (rest && usb && !usb_asked && !cpu_slice_over()) {
         usb_slice(waiting);
-    }
-    if (rest && draw && !cpu_slice_over()) {
-        vga_slice();
     }
     window_close(v, waiting, taking);
     if (!waiting && rest) {
@@ -405,12 +410,15 @@ void vcpu_before_entry(struct vcpu *v) {
     // A pause that an interrupt in a thread brought.
     service_pause(v);
     // The processor's timer brings the next turn of threads with work left on
-    // it, the boot processor running the USB stack and GPE methods, and each
-    // its part in a redraw: a guest idling in MWAIT may well not exit before
-    // then.
+    // it, the boot processor running the USB stack and GPE methods: a guest
+    // idling in MWAIT may well not exit before then. A frame that the
+    // processor has a part left in goes on once the guest has had its turn.
     v->threads_due = 0;
-    if ((v->cpu->bsp && (acpi_working() || usb_working())) || vga_redrawing()) {
+    if (v->cpu->bsp && (acpi_working() || usb_working())) {
         v->threads_due = v->threads_after;
+    }
+    if (vga_redrawing()) {
+        vcpu_exit_after_turn(v);
     }
     uint64_t modulation = atomic_load_explicit(&v->cpu->clock_modulation, memory_order_acquire);
     if (modulation != v->cpu->clock_modulation_set) {
@@ -1187,7 +1195,10 @@ void vcpu_wait_for_sipi(struct vcpu *v) {
             break;
         }
         if (cpu->bsp) {
+            // With interrupts on, for any of them to preempt the USB thread.
+            sti();
             usb_slice(true);
+            cli();
             hv_timer_run();
         }
         vlapic_timer_program(v);

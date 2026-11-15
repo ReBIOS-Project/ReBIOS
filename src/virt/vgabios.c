@@ -63,8 +63,7 @@ struct call {
     bool running;
     bool finished;
     // In true real mode: everything happens here, in the exit, and the words
-    // to and from the ROM are only for when that takes too long at once, or an
-    // interrupt comes first.
+    // to and from the ROM are only for when an interrupt comes first.
     bool direct;
     // The ROM's initialisation rather than INT 10h.
     bool init;
@@ -98,10 +97,6 @@ static uint8_t rom_image[VGABIOS_ROM_SIZE];
 // Where a BIOS puts the video BIOS, until the ROM says otherwise.
 static uint16_t rom_segment = 0xc000;
 static struct spinlock lock;
-
-static void slice_end(void) {
-    thread_yield_if_over();
-}
 
 // The call whose thread runs, the one that calls this.
 static struct call *call_current(void) {
@@ -192,7 +187,6 @@ void vgabios_out_block(uint16_t port, const uint8_t *bytes, size_t count) {
     if (call_current()->direct) {
         for (size_t i = 0; i < count; i++) {
             direct_port(port, 1, false, bytes[i]);
-            slice_end();
         }
         return;
     }
@@ -208,7 +202,6 @@ void vgabios_dac_from_rom(uint16_t offset, size_t count) {
     if (call_current()->direct) {
         for (size_t i = 0; i < (size_t)256 * 3; i++) {
             direct_port(VGA_DAC_DATA, 1, false, i < count ? rom_image[offset + i] : 0);
-            slice_end();
         }
         return;
     }
@@ -290,7 +283,6 @@ void vgabios_poke_block(uint16_t segment, uint16_t offset, const void *bytes, si
     if (call_current()->direct) {
         for (size_t i = 0; i + 2 <= count; i += 2) {
             direct_write(segment, (uint16_t)(offset + i), (uint16_t)(p[i] | p[i + 1] << 8), 2);
-            slice_end();
         }
         return;
     }
@@ -305,7 +297,6 @@ void vgabios_far_fill8(uint16_t segment, uint16_t offset, uint8_t value, size_t 
     if (call_current()->direct) {
         for (size_t i = 0; i < count; i++) {
             direct_write(segment, (uint16_t)(offset + i), value, 1);
-            slice_end();
         }
         return;
     }
@@ -322,7 +313,6 @@ void vgabios_far_fill16(uint16_t segment, uint16_t offset, uint16_t value, size_
     if (call_current()->direct) {
         for (size_t i = 0; i < count; i++) {
             direct_write(segment, (uint16_t)(offset + i * 2), value, 2);
-            slice_end();
         }
         return;
     }
@@ -341,7 +331,6 @@ void vgabios_far_move(uint16_t segment, uint16_t to, uint16_t from, size_t count
             direct_write(
                 segment, (uint16_t)(to + at), direct_read(segment, (uint16_t)(from + at), 1), 1
             );
-            slice_end();
         }
         return;
     }
@@ -372,7 +361,6 @@ void vgabios_far_font(
                     to_segment, (uint16_t)(to + c * 32 + i), vgabios_peekb(from_segment, source), 1
                 );
             }
-            slice_end();
         }
         return;
     }
@@ -391,12 +379,6 @@ uint32_t vgabios_ecx(const struct vgabios_regs *r) {
     uint16_t high;
     exchange(&head, 1, NULL, 0, &high, 1);
     return (uint32_t)high << 16 | r->cx;
-}
-
-void vgabios_relax(void) {
-    if (call_current()->direct) {
-        slice_end();
-    }
 }
 
 uint16_t vgabios_palette_offset(size_t index) {
@@ -496,7 +478,7 @@ static bool real_mode_rom(struct vcpu *v) {
 
 // The call a new one takes the place of: one that nothing ended, as with a
 // virtual machine taken away during it, once all others are in use, but none
-// whose thread runs, which a slice ends soon.
+// whose thread runs, until it is done or preempted.
 static struct call *call_slot(bool vga_ports) {
     for (;;) {
         struct call *oldest = NULL;

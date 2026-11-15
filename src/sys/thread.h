@@ -58,9 +58,6 @@ void thread_yield(void);
 void thread_sleep(uint64_t until);
 // Ends its sleep, from anywhere.
 void thread_wake(struct thread *t);
-// From a thread, yields where this CPU's time slice is over, returning whether
-// it did; elsewhere, returns false.
-bool thread_yield_if_over(void);
 // From a host interrupt's handler, with the RFLAGS in its frame: the thread
 // that the interrupt came in, if any, gives the CPU back to what runs it, and
 // in the threads' turn the CPU's slice ends, as what the interrupt brought is

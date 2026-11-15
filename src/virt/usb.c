@@ -179,11 +179,8 @@ void tendril_glue_dma_barrier(void) {
     asm volatile ("mfence" ::: "memory");
 }
 
-// Registers can be slow, and the library has nothing under way that minds the
-// guest going on in between.
 uint16_t tendril_glue_read16(void *ctx, uint32_t offset) {
     struct usb_controller *c = ctx;
-    thread_yield_if_over();
     if (c->mmio == NULL) {
         return inw((uint16_t)(c->port + offset));
     }
@@ -192,7 +189,6 @@ uint16_t tendril_glue_read16(void *ctx, uint32_t offset) {
 
 uint32_t tendril_glue_read32(void *ctx, uint32_t offset) {
     struct usb_controller *c = ctx;
-    thread_yield_if_over();
     if (c->mmio == NULL) {
         return inl((uint16_t)(c->port + offset));
     }
@@ -268,10 +264,7 @@ bool tendril_glue_pci_find_read8(
     return false;
 }
 
-// The library's waits read the time as they go, which is where they let the
-// guest go on.
 uint64_t tendril_glue_time_ns(void) {
-    thread_yield_if_over();
     return time_ns();
 }
 

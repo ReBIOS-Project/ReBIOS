@@ -363,9 +363,11 @@ void vcpu_set_real_mode(struct vcpu *v, uint16_t cs, uint16_t ip);
 // INIT.
 void vcpu_wait_for_sipi(struct vcpu *v);
 // From an exit of v's, runs t, which the guest waits on, with interrupts on,
-// so that any of them preempts it for the guest; it may not run at all, where
-// the slice is over.
+// so that any of them preempts it for the guest.
 void vcpu_thread_run(struct vcpu *v, struct thread *t);
+// From an exit of v's, runs the AML thread for a call that the guest waits on,
+// as vcpu_thread_run() runs a thread.
+void vcpu_acpi_slice(struct vcpu *v);
 // An INIT for the vCPU, and a start-up IPI with its vector.
 void vcpu_init_signal(struct vcpu *v);
 void vcpu_startup(struct vcpu *v, uint8_t vector);

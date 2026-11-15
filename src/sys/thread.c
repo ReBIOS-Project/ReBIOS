@@ -140,14 +140,6 @@ void thread_wake(struct thread *t) {
     atomic_store_explicit(&t->wake, 0, memory_order_release);
 }
 
-bool thread_yield_if_over(void) {
-    if (this_cpu()->thread == NULL || !cpu_slice_over()) {
-        return false;
-    }
-    thread_yield();
-    return true;
-}
-
 void thread_preempt(uint64_t *rflags) {
     struct cpu *cpu = this_cpu();
     struct thread *t = cpu->thread;

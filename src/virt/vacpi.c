@@ -3588,10 +3588,10 @@ static void doorbell_write(
     switch (header[MBX_FUNCTION / 4]) {
         case FUNCTION_CALL: {
             // The AML thread runs the call on any CPU, as the guest's own OSPM
-            // would, a slice at each write of the guest's, whose MBXM keeps to
-            // one call at a time: a write that finds the call not done does
-            // not complete, so that the guest takes its interrupts and writes
-            // again.
+            // would, at each write of the guest's until an interrupt preempts
+            // it, MBXM keeping to one call at a time: a write that finds the
+            // call not done does not complete, so that the guest takes its
+            // interrupts and writes again.
             uint32_t state = CALL_NONE;
             bool started = atomic_compare_exchange_strong_explicit(
                 &vacpi.call, &state, CALL_RUNNING, memory_order_acquire, memory_order_relaxed
@@ -3604,7 +3604,7 @@ static void doorbell_write(
                     UACPI_WORK_NOTIFICATION, vacpi.call_work, call_run, NULL
                 );
             }
-            acpi_slice();
+            vcpu_acpi_slice(v);
             state = CALL_DONE;
             bool finished = atomic_compare_exchange_strong_explicit(
                 &vacpi.call, &state, CALL_NONE, memory_order_acquire, memory_order_relaxed

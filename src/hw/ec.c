@@ -34,7 +34,6 @@
 #include <hw/acpi.h>
 #include <lib/log.h>
 #include <lib/time.h>
-#include <sys/thread.h>
 #include <sys/x86.h>
 
 // EC_SC status bits and commands, ACPI 6.6, 12.2.1 and 12.3.
@@ -73,9 +72,7 @@ static bool wait_status(uint8_t mask, uint8_t value) {
         if (time_ns() - start > EC_TIMEOUT_NS) {
             return false;
         }
-        if (!thread_yield_if_over()) {
-            cpu_relax();
-        }
+        cpu_relax();
     }
     return true;
 }

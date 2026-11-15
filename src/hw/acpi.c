@@ -370,10 +370,7 @@ void uacpi_kernel_free(void *mem) {
     kfree(mem);
 }
 
-// uACPI looks at the time at each turn of an AML While loop, where the AML
-// thread yields too.
 uacpi_u64 uacpi_kernel_get_nanoseconds_since_boot(void) {
-    thread_yield_if_over();
     return time_ns();
 }
 
@@ -578,8 +575,8 @@ static bool work_take(struct work *w) {
     return head != NULL;
 }
 
-// In the AML thread, a slice at a time, and GPE methods on the boot processor,
-// which alone carries the thread on meanwhile.
+// In the AML thread, GPE methods on the boot processor, which alone carries
+// the thread on meanwhile.
 static void work_run(void) {
     bool in_task = thread_current() != NULL;
     bool outer = atomic_load_explicit(&aml_bsp, memory_order_relaxed);
@@ -594,7 +591,6 @@ static void work_run(void) {
         w.handler(w.ctx);
         if (in_task) {
             atomic_store_explicit(&aml_bsp, outer, memory_order_release);
-            thread_yield_if_over();
         }
     }
 }

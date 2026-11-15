@@ -209,9 +209,7 @@ static uintptr_t lfb_address(void) {
 }
 
 static void wait_retrace(void) {
-    while ((vgabios_in(INPUT_STATUS1) & STATUS1_RETRACE) == 0) {
-        vgabios_relax();
-    }
+    while ((vgabios_in(INPUT_STATUS1) & STATUS1_RETRACE) == 0) {}
 }
 
 // The VbeInfoBlock's fields up to OemProductRevPtr, the rest being 0 but for
