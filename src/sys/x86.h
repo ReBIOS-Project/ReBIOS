@@ -317,7 +317,7 @@ static inline uintptr_t read_cr2(void) {
 }
 
 static inline void write_cr2(uintptr_t value) {
-    asm volatile ("movq %0, %%cr2" :: "r"(value));
+    asm volatile ("movq %0, %%cr2" :: "r"(value) : "memory");
 }
 
 static inline uintptr_t read_cr3(void) {

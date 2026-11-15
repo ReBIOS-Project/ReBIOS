@@ -78,6 +78,7 @@ void power_reset(bool warm) {
         "int3"
         :
         : "m"(null_idt)
+        : "memory"
     );
     x86_halt_forever();
 }
