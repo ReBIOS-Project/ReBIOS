@@ -435,7 +435,8 @@ static void firmware_queue_quiesce(struct vtd_unit *u) {
         if ((status & (FSTS_IQE | FSTS_ICE | FSTS_ITE)) != 0 || time_ns() > deadline) {
             panic(
                 "VT-d unit at %#llx does not drain the firmware's invalidations, fault status "
-                "%#x\n", (unsigned long long)u->base, status
+                "%#x\n",
+                (unsigned long long)u->base, status
             );
         }
         cpu_relax();

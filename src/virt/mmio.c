@@ -573,8 +573,8 @@ static noreturn void stop(
     }
     panic(
         "The guest's %s instruction at %04x:%llx, bytes %s, reached emulated memory at %#llx, "
-        "but %s\n", mode, cs->selector, (unsigned long long)rip, bytes, (unsigned long long)gpa,
-        why
+        "but %s\n",
+        mode, cs->selector, (unsigned long long)rip, bytes, (unsigned long long)gpa, why
     );
 }
 

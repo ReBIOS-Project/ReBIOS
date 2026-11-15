@@ -271,14 +271,16 @@ void pci_assign_unassigned_bars(void) {
             if (!program(f, bar, at)) {
                 printf(
                     "PCI " PCI_CFG_ADDR_FMT " BAR%zu: left unassigned by the firmware, and "
-                    "keeps no address written to it\n", PCI_CFG_ADDR_ARGS(f->addr), b
+                    "keeps no address written to it\n",
+                    PCI_CFG_ADDR_ARGS(f->addr), b
                 );
                 continue;
             }
             bar->base = at;
             printf(
                 "PCI " PCI_CFG_ADDR_FMT " BAR%zu: left unassigned by the firmware, now at "
-                "0x%llx+0x%llx\n", PCI_CFG_ADDR_ARGS(f->addr), b, (unsigned long long)at,
+                "0x%llx+0x%llx\n",
+                PCI_CFG_ADDR_ARGS(f->addr), b, (unsigned long long)at,
                 (unsigned long long)bar->size
             );
         }

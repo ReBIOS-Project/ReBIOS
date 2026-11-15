@@ -106,8 +106,8 @@ static bool vtd_unit_usable(uintptr_t base) {
     }
     printf(
         "The VT-d unit at %#llx lacks queued invalidation or 3 or 4-level tables, capabilities "
-        "%#llx, extended %#llx\n", (unsigned long long)base, (unsigned long long)cap,
-        (unsigned long long)ecap
+        "%#llx, extended %#llx\n",
+        (unsigned long long)base, (unsigned long long)cap, (unsigned long long)ecap
     );
     return false;
 }
@@ -273,7 +273,8 @@ bool iommu_check(void) {
             "ReBIOS cannot run with this machine's integrated graphics, %04x:%04x, which\n"
             "malfunctions when the IOMMU remaps its memory accesses. If another\n"
             "graphics card is installed, disable the integrated graphics in the\n"
-            "firmware setup.\n", PCI_VENDOR_ID_INTEL, igfx_id
+            "firmware setup.\n",
+            PCI_VENDOR_ID_INTEL, igfx_id
         );
     } else if (found == FOUND_UNUSABLE) {
         log_notice("ReBIOS cannot use the IOMMU the firmware reports.\n");

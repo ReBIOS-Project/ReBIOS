@@ -536,7 +536,8 @@ static bool take_vga_decoding(const struct pci_io_device *dev) {
         if (taken) {
             printf(
                 "Legacy VGA decoding moves from " HANDOFF_PCI_ADDRESS_FMT " to "
-                HANDOFF_PCI_ADDRESS_FMT "\n", HANDOFF_PCI_ADDRESS_ARGS(devices[i].address),
+                HANDOFF_PCI_ADDRESS_FMT "\n",
+                HANDOFF_PCI_ADDRESS_ARGS(devices[i].address),
                 HANDOFF_PCI_ADDRESS_ARGS(dev->address)
             );
         } else {
@@ -574,8 +575,8 @@ static bool try_device(
         if (!legacy) {
             printf(
                 "No legacy VBIOS in the expansion ROM of " HANDOFF_PCI_ADDRESS_FMT
-                " (%04x:%04x)\n", HANDOFF_PCI_ADDRESS_ARGS(dev->address), dev->vendor_id,
-                dev->device_id
+                " (%04x:%04x)\n",
+                HANDOFF_PCI_ADDRESS_ARGS(dev->address), dev->vendor_id, dev->device_id
             );
             return false;
         }
@@ -584,8 +585,9 @@ static bool try_device(
             printf(
                 "Not running the VBIOS of " HANDOFF_PCI_ADDRESS_FMT
                 " (%04x:%04x, revision %02x), not of a card in a slot or graphics from before "
-                "2018, but with vga_emulation = never\n", HANDOFF_PCI_ADDRESS_ARGS(dev->address),
-                dev->vendor_id, dev->device_id, dev->revision
+                "2018, but with vga_emulation = never\n",
+                HANDOFF_PCI_ADDRESS_ARGS(dev->address), dev->vendor_id, dev->device_id,
+                dev->revision
             );
             trusted = false;
         }
@@ -786,7 +788,8 @@ void video_init(void) {
     } else if (have_user) {
         printf(
             "Not using %s as the VBIOS: no VGA device is configured, and no graphics output leads "
-            "to one\n", user.source
+            "to one\n",
+            user.source
         );
     } else if (gop_handle == NULL) {
         found = may_run && try_display_devices(&choice);
@@ -860,7 +863,8 @@ void video_exit_boot_services(void) {
     if (status != EFI_SUCCESS) {
         printf(
             "Cannot stop the firmware's graphics output for " HANDOFF_PCI_ADDRESS_FMT
-            ", status %#llx\n", HANDOFF_PCI_ADDRESS_ARGS(dev.address), (unsigned long long)status
+            ", status %#llx\n",
+            HANDOFF_PCI_ADDRESS_ARGS(dev.address), (unsigned long long)status
         );
         return;
     }

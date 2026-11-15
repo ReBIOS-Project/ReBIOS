@@ -308,7 +308,8 @@ static bool write_kept(uintptr_t page, uint64_t end) {
     } else {
         log_notice(
             "The ACPI tables that ReBIOS gave the OS last time are damaged, and not written to "
-            "%s\n", GUEST_FILE
+            "%s\n",
+            GUEST_FILE
         );
     }
     // Once is enough.
@@ -339,7 +340,8 @@ static void write_guest(void) {
     if (!found) {
         log_notice(
             "No ACPI tables from ReBIOS's last start for %s: save_acpi was off then, or the "
-            "machine was turned off since\n", GUEST_FILE
+            "machine was turned off since\n",
+            GUEST_FILE
         );
     }
 }

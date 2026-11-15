@@ -185,7 +185,8 @@ static const char *smbios3_check(const struct smbios3_entry *eps) {
 static void smbios_log(const char *how, const struct smbios_entry32 *eps) {
     printf(
         "SMBIOS %u.%u, 32-bit entry point %s %#llx, structure table at %#llx (%u bytes, %u "
-        "structure%s)\n", eps->major, eps->minor, how, (unsigned long long)(uintptr_t)eps,
+        "structure%s)\n",
+        eps->major, eps->minor, how, (unsigned long long)(uintptr_t)eps,
         (unsigned long long)eps->table_address, eps->table_length, eps->struct_count,
         eps->struct_count == 1 ? "" : "s"
     );
@@ -284,7 +285,8 @@ static uint64_t smbios3_synthesise(const struct smbios3_entry *eps3) {
     if (walk.truncated) {
         printf(
             "Cutting the SMBIOS structure table to %zu bytes and %zu structure%s to fit a 32-bit "
-            "entry point\n", walk.length, walk.count, walk.count == 1 ? "" : "s"
+            "entry point\n",
+            walk.length, walk.count, walk.count == 1 ? "" : "s"
         );
     }
 

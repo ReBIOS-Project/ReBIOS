@@ -2336,9 +2336,9 @@ void run_report(uint64_t ms) {
     uint64_t mhz = time_tsc_hz() / 1000000;
     printf(
         "Profile:   runs %llu/s, %llu instructions/s, %llu accesses/s, %llu decodes/s, "
-        "%llu ns each run\n", (unsigned long long)(runs * 1000 / ms),
-        (unsigned long long)(insns * 1000 / ms), (unsigned long long)(accesses * 1000 / ms),
-        (unsigned long long)(decodes * 1000 / ms),
+        "%llu ns each run\n",
+        (unsigned long long)(runs * 1000 / ms), (unsigned long long)(insns * 1000 / ms),
+        (unsigned long long)(accesses * 1000 / ms), (unsigned long long)(decodes * 1000 / ms),
         (unsigned long long)(ticks * 1000 / (mhz != 0 ? mhz : 1) / runs)
     );
     for (size_t i = 1; i < STOP_COUNT; i++) {

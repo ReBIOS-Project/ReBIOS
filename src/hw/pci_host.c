@@ -328,7 +328,8 @@ static bool host_bridge_known(
         if (r->bridges[i].segment == hb->segment && r->bridges[i].bus == hb->bus) {
             printf(
                 "PCI host bridge %s: segment %04x, bus %02x has a host bridge already, ignoring "
-                "this one\n", name, hb->segment, hb->bus
+                "this one\n",
+                name, hb->segment, hb->bus
             );
             return true;
         }
@@ -463,8 +464,8 @@ const struct pci_host *pci_host_scan(void) {
     }
     printf(
         "PCI: %zu ranges of device memory, %zu of TPMs, %zu of motherboard resources alone, "
-        "%u devices whose _CRS fails\n", r.devices.count, r.tpms.count, r.motherboard.count,
-        r.crs_failures
+        "%u devices whose _CRS fails\n",
+        r.devices.count, r.tpms.count, r.motherboard.count, r.crs_failures
     );
 
     ranges_out(&r.interrupts, &host.interrupts, &host.interrupt_count);

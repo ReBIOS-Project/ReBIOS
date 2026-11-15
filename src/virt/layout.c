@@ -342,7 +342,8 @@ void layout_init(void) {
         if (!handoff_efi_desc_end(d, &end)) {
             printf(
                 "Firmware memory map: the descriptor at %#llx runs past the end of memory, so "
-                "it is ignored\n", (unsigned long long)d->physical_start
+                "it is ignored\n",
+                (unsigned long long)d->physical_start
             );
         } else if (desc_is_free(d)) {
             uintptr_t base = page_up(d->physical_start);
@@ -367,8 +368,8 @@ void layout_init(void) {
         if (range_list_overlaps(&host_free, base, end)) {
             printf(
                 "Firmware memory map: type %u memory at %#llx-%#llx overlaps free memory, which "
-                "the guest does not get\n", d->type, (unsigned long long)base,
-                (unsigned long long)end
+                "the guest does not get\n",
+                d->type, (unsigned long long)base, (unsigned long long)end
             );
             range_list_remove(&host_free, base, end);
         }

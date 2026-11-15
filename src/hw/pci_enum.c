@@ -301,7 +301,8 @@ static void bar_record(
         printf(
             "PCI " PCI_CFG_ADDR_FMT
             " BAR at %#x: read back 0x%llx with gaps in its address bits, sized 0x%llx from the "
-            "lowest\n", PCI_CFG_ADDR_ARGS(f->addr), s->reg, (unsigned long long)s->readback,
+            "lowest\n",
+            PCI_CFG_ADDR_ARGS(f->addr), s->reg, (unsigned long long)s->readback,
             (unsigned long long)bar->size
         );
     }
@@ -939,7 +940,8 @@ static void rebar_shrink(
             printf(
                 "PCI " PCI_CFG_ADDR_FMT
                 " BAR%u: Resizable BAR of 0x%llx holds the framebuffer at 0x%llx+0x%llx, leaving "
-                "it\n", PCI_CFG_ADDR_ARGS(f->addr), index, (unsigned long long)current_size,
+                "it\n",
+                PCI_CFG_ADDR_ARGS(f->addr), index, (unsigned long long)current_size,
                 (unsigned long long)fb->base, (unsigned long long)fb->size
             );
             return;

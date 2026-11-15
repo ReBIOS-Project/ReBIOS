@@ -569,7 +569,8 @@ void amdvi_remap_start(bool guest_vapic, uint8_t vector) {
         if (iommu_tables_special_for(IOMMU_TABLES_SPECIAL_IOAPIC, id) == NULL) {
             printf(
                 "AMD-Vi: interrupts are not remapped, as the IVRS gives I/O APIC %u no device "
-                "ID\n", id
+                "ID\n",
+                id
             );
             return;
         }

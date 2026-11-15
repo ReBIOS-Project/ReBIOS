@@ -267,19 +267,20 @@ void cpu_exception_handler(struct exception_frame *frame) {
         "RAX %#llx RBX %#llx RCX %#llx RDX %#llx\n"
         "RSI %#llx RDI %#llx RBP %#llx R8 %#llx\n"
         "R9 %#llx R10 %#llx R11 %#llx R12 %#llx\n"
-        "R13 %#llx R14 %#llx R15 %#llx\n", (unsigned long long)frame->cs,
-        (unsigned long long)frame->rflags, (unsigned long long)frame->rsp,
-        (unsigned long long)frame->ss, (unsigned long long)read_cr0(),
-        (unsigned long long)read_cr2(), (unsigned long long)read_cr3(),
-        (unsigned long long)read_cr4(), (unsigned long long)read_dr6(),
-        (unsigned long long)read_dr7(), (unsigned long long)frame->rax,
-        (unsigned long long)frame->rbx, (unsigned long long)frame->rcx,
-        (unsigned long long)frame->rdx, (unsigned long long)frame->rsi,
-        (unsigned long long)frame->rdi, (unsigned long long)frame->rbp,
-        (unsigned long long)frame->r8, (unsigned long long)frame->r9,
-        (unsigned long long)frame->r10, (unsigned long long)frame->r11,
-        (unsigned long long)frame->r12, (unsigned long long)frame->r13,
-        (unsigned long long)frame->r14, (unsigned long long)frame->r15
+        "R13 %#llx R14 %#llx R15 %#llx\n",
+        (unsigned long long)frame->cs, (unsigned long long)frame->rflags,
+        (unsigned long long)frame->rsp, (unsigned long long)frame->ss,
+        (unsigned long long)read_cr0(), (unsigned long long)read_cr2(),
+        (unsigned long long)read_cr3(), (unsigned long long)read_cr4(),
+        (unsigned long long)read_dr6(), (unsigned long long)read_dr7(),
+        (unsigned long long)frame->rax, (unsigned long long)frame->rbx,
+        (unsigned long long)frame->rcx, (unsigned long long)frame->rdx,
+        (unsigned long long)frame->rsi, (unsigned long long)frame->rdi,
+        (unsigned long long)frame->rbp, (unsigned long long)frame->r8,
+        (unsigned long long)frame->r9, (unsigned long long)frame->r10,
+        (unsigned long long)frame->r11, (unsigned long long)frame->r12,
+        (unsigned long long)frame->r13, (unsigned long long)frame->r14,
+        (unsigned long long)frame->r15
     );
     if (frame->rsp % 8 == 0 && frame->rsp >= PAGE_SIZE && frame->rsp + 64 <= map_top) {
         const uint64_t *stack = (const uint64_t *)(uintptr_t)frame->rsp;

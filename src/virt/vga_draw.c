@@ -361,8 +361,9 @@ static void pick(struct cpu *cpu) {
                        : 0;
     printf(
         "Processor %#x draws the emulated VGA with up to %s, copying to the framebuffer at %llu "
-        "MiB/s and from it at %llu MiB/s\n", cpu->apic_id, simd_level_name(level),
-        (unsigned long long)rate, (unsigned long long)read_rate
+        "MiB/s and from it at %llu MiB/s\n",
+        cpu->apic_id, simd_level_name(level), (unsigned long long)rate,
+        (unsigned long long)read_rate
     );
 }
 

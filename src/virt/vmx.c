@@ -801,7 +801,8 @@ void vmx_async_access(uintptr_t gpa) {
     if (atomic_fetch_add_explicit(&reported, 1, memory_order_relaxed) < 8) {
         printf(
             "An access the processor made for the guest outside of any instruction reached %#llx, "
-            "where it has no RAM\n", (unsigned long long)gpa
+            "where it has no RAM\n",
+            (unsigned long long)gpa
         );
     }
 }

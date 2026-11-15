@@ -275,8 +275,8 @@ static const struct handoff_pci_rom *emulated_vbios(uintptr_t address, size_t ro
     if (card != NULL) {
         printf(
             "The card's VBIOS image is at %#llx as it is, and the emulated VGA's video BIOS, "
-            "which runs instead, at %#llx\n", (unsigned long long)address,
-            (unsigned long long)vgabios_segment() << 4
+            "which runs instead, at %#llx\n",
+            (unsigned long long)address, (unsigned long long)vgabios_segment() << 4
         );
     }
     if (h->video.vga_present) {
@@ -315,7 +315,8 @@ static void next_rom(struct vcpu *v) {
         if (bus < 0) {
             printf(
                 "Not running the option ROM of " HANDOFF_PCI_ADDRESS_FMT
-                ", which the guest does not have\n", HANDOFF_PCI_ADDRESS_ARGS(rom->address)
+                ", which the guest does not have\n",
+                HANDOFF_PCI_ADDRESS_ARGS(rom->address)
             );
             continue;
         }

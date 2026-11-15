@@ -295,7 +295,8 @@ static void log_cut(const struct ecam_window *w, uint8_t end_bus) {
     if (w->end_bus != end_bus) {
         printf(
             "PCI segment %u: configuration space cut to buses %02x-%02x, as only those are "
-            "reserved\n", w->segment, w->start_bus, w->end_bus
+            "reserved\n",
+            w->segment, w->start_bus, w->end_bus
         );
     }
 }
@@ -394,7 +395,8 @@ void pci_cfg_init(void) {
             if (!window_reserved(&cut[i], memmap_reserves)) {
                 printf(
                     "PCI configuration space through ports until the ACPI namespace runs, as "
-                    "the memory map does not reserve segment %u's\n", list[i].segment
+                    "the memory map does not reserve segment %u's\n",
+                    list[i].segment
                 );
                 kfree(cut);
                 pending = list;
@@ -425,7 +427,8 @@ void pci_cfg_verify(void) {
         } else if (!memmap_mmio(window_start(w), window_end(w))) {
             printf(
                 "PCI configuration space through ports only, as nothing reserves segment %u's "
-                "at %#llx\n", w->segment, (unsigned long long)window_start(w)
+                "at %#llx\n",
+                w->segment, (unsigned long long)window_start(w)
             );
             kfree(list);
             return;

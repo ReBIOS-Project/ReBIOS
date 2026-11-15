@@ -161,9 +161,9 @@ static void refused(efi_status status) {
     log_notice(
         "The log is saved again only at a panic or before a reset or power off: the "
         "firmware's variable store refuses it, status %#llx, with %llu of %llu bytes free and "
-        "%llu at most for a variable (status %#llx)\n", (unsigned long long)status,
-        (unsigned long long)remaining, (unsigned long long)storage, (unsigned long long)max_size,
-        (unsigned long long)queried
+        "%llu at most for a variable (status %#llx)\n",
+        (unsigned long long)status, (unsigned long long)remaining, (unsigned long long)storage,
+        (unsigned long long)max_size, (unsigned long long)queried
     );
 }
 

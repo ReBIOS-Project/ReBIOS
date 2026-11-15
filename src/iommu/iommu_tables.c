@@ -751,7 +751,8 @@ static void ivhd_entry(
             if (range.last < start->first) {
                 printf(
                     "IVHD range at offset %#zx ends at " RID_FMT " before its start " RID_FMT
-                    ", skipped\n", start->offset, RID_ARGS(range.last), RID_ARGS(start->first)
+                    ", skipped\n",
+                    start->offset, RID_ARGS(range.last), RID_ARGS(start->first)
                 );
                 break;
             }
@@ -959,7 +960,8 @@ static void ivmd_parse(struct builder *b, const uint8_t *ivrs, size_t offset) {
         if (!region.readable && !region.writable && (ivmd.flags & IVMD_UNITY) != 0) {
             printf(
                 "IVMD at offset %#zx, flags %#x, sets Unity without IR or IW, taken as memory "
-                "never to map\n", offset, ivmd.flags
+                "never to map\n",
+                offset, ivmd.flags
             );
         }
     }
@@ -987,7 +989,8 @@ static void ivrs_parse(struct builder *b, const uint8_t *ivrs, size_t length) {
                 if (chosen != offset) {
                     printf(
                         "IVRS IVHD at offset %#zx, type %#x, superseded by the one at offset %#x, "
-                        "type %#x\n", offset, block.type, chosen, ivrs[chosen]
+                        "type %#x\n",
+                        offset, block.type, chosen, ivrs[chosen]
                     );
                 } else if (!ivhd_parse(b, ivrs, offset, block.length)) {
                     return;
@@ -1046,8 +1049,8 @@ static void log_unit(const struct iommu_tables *t, size_t index) {
     }
     printf(
         "IOMMU unit %zu: AMD IVHD type %#x, registers at %#llx, segment %u, requester ID " RID_FMT
-        ", capability at %#x, flags %#x, info %#x, %s %#x, EFR %#llx, EFR2 %#llx\n", index,
-        u->amd_ivhd_type, (unsigned long long)u->base, u->segment, RID_ARGS(u->amd_rid),
+        ", capability at %#x, flags %#x, info %#x, %s %#x, EFR %#llx, EFR2 %#llx\n",
+        index, u->amd_ivhd_type, (unsigned long long)u->base, u->segment, RID_ARGS(u->amd_rid),
         u->amd_cap_offset, u->amd_ivhd_flags, u->amd_iommu_info,
         u->amd_ivhd_type == IVHD_TYPE_10H ? "features" : "attributes", u->amd_features,
         (unsigned long long)u->amd_efr, (unsigned long long)u->amd_efr2
@@ -1111,8 +1114,9 @@ static void log_reserved(const struct iommu_tables *t, size_t index) {
 static void log_tables(const struct iommu_tables *t) {
     printf(
         "IOMMU tables: %s, %zu units, %zu device ranges, %zu special devices, %zu reserved "
-        "regions%s\n", kind_names[t->kind], t->unit_count, t->range_count, t->special_count,
-        t->reserved_count, t->truncated ? ", table cut short" : ""
+        "regions%s\n",
+        kind_names[t->kind], t->unit_count, t->range_count, t->special_count, t->reserved_count,
+        t->truncated ? ", table cut short" : ""
     );
     for (size_t i = 0; i < t->unit_count; i++) {
         log_unit(t, i);

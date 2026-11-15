@@ -159,6 +159,7 @@ void acpi_save_guest(uint32_t rsdp) {
     }
     printf(
         "Kept %u of the guest's ACPI tables, %llu bytes, at %#llx, for the next start to write "
-        "out\n", count, (unsigned long long)used, (unsigned long long)h->acpi_save
+        "out\n",
+        count, (unsigned long long)used, (unsigned long long)h->acpi_save
     );
 }

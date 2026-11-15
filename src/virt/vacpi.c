@@ -3393,7 +3393,8 @@ static void log_refused_template(uacpi_namespace_node *node, uacpi_data_view vie
     const char *path = acpi_path(node);
     printf(
         "The guest's template for %s, of %zu bytes, takes a port of the log's UART or "
-        "cannot be read whole: %s%s\n", path, view.length, bytes, shown < view.length ? " ..." : ""
+        "cannot be read whole: %s%s\n",
+        path, view.length, bytes, shown < view.length ? " ..." : ""
     );
     acpi_path_free(path);
 }

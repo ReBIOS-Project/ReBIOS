@@ -413,7 +413,8 @@ static uint8_t number_buses(
         if (base == PCI_BUSES) {
             printf(
                 "PCI root bus %04x:%02x: no room for its %zu buses among the guest's bus "
-                "numbers\n", rb->segment, rb->bus, count
+                "numbers\n",
+                rb->segment, rb->bus, count
             );
             continue;
         }
@@ -504,7 +505,8 @@ static void ports_make(
         if (k / PORT_FUNCTIONS >= device_count) {
             printf(
                 "PCI root bus %04x:%02x: no device number left on the guest's bus 0 for its "
-                "port\n", rb->segment, rb->bus
+                "port\n",
+                rb->segment, rb->bus
             );
             continue;
         }
@@ -752,8 +754,8 @@ const struct pci_plan *pci_plan_make(
             if (above && !high_allowed) {
                 printf(
                     "PCI " PCI_CFG_ADDR_FMT " BAR%zu: unassigned, as its 0x%llx bytes need room "
-                    "above 4 GiB (pci_high_windows)\n", PCI_CFG_ADDR_ARGS(f->addr), b,
-                    (unsigned long long)bar->size
+                    "above 4 GiB (pci_high_windows)\n",
+                    PCI_CFG_ADDR_ARGS(f->addr), b, (unsigned long long)bar->size
                 );
                 continue;
             }

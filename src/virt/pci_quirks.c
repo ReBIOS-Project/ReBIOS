@@ -228,8 +228,8 @@ static void mirror_add(
     if (!pci_virt_trap(f->addr, bar, start, size, &mirror_ops, m)) {
         printf(
             "PCI %02x:%02x.%x: the copy of its configuration space at BAR%u+%#llx stays the "
-            "host's\n", f->addr.bus, f->addr.device, f->addr.function, bar,
-            (unsigned long long)start
+            "host's\n",
+            f->addr.bus, f->addr.device, f->addr.function, bar, (unsigned long long)start
         );
     }
 }

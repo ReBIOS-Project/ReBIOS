@@ -583,7 +583,8 @@ uint32_t mptable_build(void *buf, size_t size, uint32_t guest) {
         written = table_write(&w, &in, buf, guest);
         printf(
             "MP table at %#x: %u processors, %u buses, %u I/O APICs, %u I/O interrupts, %u local "
-            "interrupts\n", guest, w.counts[MP_PROCESSOR], w.counts[MP_BUS], w.counts[MP_IOAPIC],
+            "interrupts\n",
+            guest, w.counts[MP_PROCESSOR], w.counts[MP_BUS], w.counts[MP_IOAPIC],
             w.counts[MP_IO_INTERRUPT], w.counts[MP_LOCAL_INTERRUPT]
         );
     }

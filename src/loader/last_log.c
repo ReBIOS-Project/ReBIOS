@@ -63,7 +63,8 @@ void last_log_write(bool save_log) {
     if (len == 0 && save_log) {
         log_notice(
             "No log from ReBIOS's last start for %s: save_log was off then, or the firmware's "
-            "variable store refused it\n", FILE_NAME
+            "variable store refused it\n",
+            FILE_NAME
         );
     }
     if (len != 0) {

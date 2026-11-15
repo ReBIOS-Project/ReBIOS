@@ -144,7 +144,8 @@ void cache_cpu_init(uint64_t pat) {
     if (copy && !atomic_exchange_explicit(&reported, true, memory_order_relaxed)) {
         printf(
             "Processor %#x started with MTRRs unlike the boot processor's: it and any other such "
-            "processor now have the boot processor's\n", this_cpu()->apic_id
+            "processor now have the boot processor's\n",
+            this_cpu()->apic_id
         );
     }
 }

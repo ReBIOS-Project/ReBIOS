@@ -114,7 +114,8 @@ static efi_status guarded(efi_status (*call)(void *ctx), void *ctx) {
         if (!log_panicked()) {
             printf(
                 "The firmware's runtime services took a page fault at %#llx, and are not called "
-                "again\n", (unsigned long long)this_cpu()->firmware_fault
+                "again\n",
+                (unsigned long long)this_cpu()->firmware_fault
             );
         }
         return EFI_ABORTED;

@@ -455,7 +455,8 @@ void panel_fix_framebuffer(struct handoff_framebuffer *fb) {
         }
         printf(
             "This machine's firmware gives its portrait panel as landscape: the framebuffer is "
-            "%ux%u, pitch %u\n", fb->width, fb->height, fb->pitch
+            "%ux%u, pitch %u\n",
+            fb->width, fb->height, fb->pitch
         );
         return;
     }

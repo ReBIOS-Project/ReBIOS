@@ -652,6 +652,7 @@ void igfx_switch_end(void) {
     dma_restore(base, igfx.dsm + igfx.dsm_size);
     printf(
         "Intel graphics: %u GGTT entries moved to the guest's stolen memory, %u present elsewhere "
-        "left\n", moved, elsewhere
+        "left\n",
+        moved, elsewhere
     );
 }

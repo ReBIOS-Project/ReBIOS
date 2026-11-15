@@ -175,8 +175,8 @@ bool event_deliver_real_mode(struct vcpu *v) {
 noreturn void event_undeliverable(struct vcpu *v, uintptr_t gpa) {
     panic(
         "The guest's event %#x reached emulated memory at %#llx in its delivery, which the "
-        "hypervisor carries out in real mode only, at %#llx\n", v->redeliver,
-        (unsigned long long)gpa, (unsigned long long)vcpu_rip(v)
+        "hypervisor carries out in real mode only, at %#llx\n",
+        v->redeliver, (unsigned long long)gpa, (unsigned long long)vcpu_rip(v)
     );
 }
 
