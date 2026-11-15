@@ -35,6 +35,7 @@
 #include <virt/gpt.h>
 #include <virt/guest_mem.h>
 #include <virt/mmio.h>
+#include <virt/mwait.h>
 #include <virt/nvmx.h>
 #include <virt/profile.h>
 #include <virt/rtc.h>
@@ -673,13 +674,15 @@ void vmx_vcpu_init(struct vcpu *v) {
         )
     );
 
-    // CR8 is the virtual local APIC's TPR; the guest's TSC is offset (msr.c).
+    // CR8 is the virtual local APIC's TPR; the guest's TSC is offset (msr.c);
+    // MONITOR and MWAIT are carried out in the hypervisor (mwait.c).
     vmx_write(
         VMCS_PROC_CONTROLS,
         adjust_controls(
             proc_cap, 0,
-            PROC_HLT_EXITING | PROC_IO_BITMAPS | PROC_MSR_BITMAPS | PROC_SECONDARY_CONTROLS
-          | PROC_TPR_SHADOW | PROC_TSC_OFFSETTING, "processor-based"
+            PROC_HLT_EXITING | PROC_MWAIT_EXITING | PROC_MONITOR_EXITING | PROC_IO_BITMAPS
+          | PROC_MSR_BITMAPS | PROC_SECONDARY_CONTROLS | PROC_TPR_SHADOW | PROC_TSC_OFFSETTING,
+            "processor-based"
         )
     );
 
@@ -1202,6 +1205,14 @@ static void vmx_handle_exit(struct vcpu *v) {
         }
         case EXIT_REASON_HLT: {
             vcpu_halt(v);
+            break;
+        }
+        case EXIT_REASON_MONITOR: {
+            mwait_monitor(v);
+            break;
+        }
+        case EXIT_REASON_MWAIT: {
+            mwait_wait(v);
             break;
         }
         case EXIT_REASON_INTR_WINDOW:

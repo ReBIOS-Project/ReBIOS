@@ -275,6 +275,8 @@ _Static_assert(
 #define SVM_INTERCEPT_STGI ((uint32_t)1 << 4)
 #define SVM_INTERCEPT_CLGI ((uint32_t)1 << 5)
 #define SVM_INTERCEPT_SKINIT ((uint32_t)1 << 6)
+#define SVM_INTERCEPT_MONITOR ((uint32_t)1 << 10)
+#define SVM_INTERCEPT_MWAIT ((uint32_t)1 << 11)
 #define SVM_INTERCEPT_XSETBV ((uint32_t)1 << 13)
 
 // Intercept vector 5, at offset 014h.
@@ -314,6 +316,8 @@ _Static_assert(
 #define SVM_EXIT_STGI 0x84
 #define SVM_EXIT_CLGI 0x85
 #define SVM_EXIT_SKINIT 0x86
+#define SVM_EXIT_MONITOR 0x8a
+#define SVM_EXIT_MWAIT 0x8b
 #define SVM_EXIT_XSETBV 0x8d
 #define SVM_EXIT_INVLPGB 0xa0
 #define SVM_EXIT_INVLPGB_ILLEGAL 0xa1

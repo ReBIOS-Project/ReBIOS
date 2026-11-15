@@ -124,7 +124,7 @@ void ferr_fault(struct vcpu *v) {
     // The processor waits before the instruction (8.7.2), which the guest's
     // handler of what comes lets run again.
     if (!event_halt_ends(v)) {
-        vcpu_wait(v, event_halt_ends, false);
+        vcpu_wait(v, event_halt_ends, NULL, false);
     }
 }
 

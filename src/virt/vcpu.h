@@ -68,6 +68,9 @@ struct vcpu_mode {
 #define VCPU_SIPI_RUNNING (-2)
 #define VCPU_SIPI_WAITING (-1)
 
+// The most of the guest's monitor line that the hypervisor keeps (mwait.c).
+#define VCPU_MONITOR_LINE_MAX 256
+
 struct cpu;
 struct mmio_step;
 struct run_state;
@@ -161,6 +164,16 @@ struct vcpu {
     // for none (vlapic.c).
     uint64_t threads_after;
     uint64_t threads_due;
+    // The line the guest's MONITOR armed, as the hypervisor reaches it, or
+    // NULL, and what it held then; while the vCPU waits in MWAIT, its hint,
+    // its extensions, whether it is MWAITX, and MWAITX's deadline by the TSC,
+    // or 0 (mwait.c).
+    uint8_t *monitor_line;
+    uint8_t monitor_copy[VCPU_MONITOR_LINE_MAX];
+    uint32_t mwait_hint;
+    uint32_t mwait_extensions;
+    bool mwait_x;
+    uint64_t mwait_deadline;
 
     // The guest's MTRRs: the default type, the fixed ranges, and the variable
     // ranges' bases and masks.
@@ -243,8 +256,14 @@ void vcpu_wake(struct cpu *cpu);
 void vcpu_init_all(void);
 
 // Waits in the hypervisor, taking interrupts, until ends() holds: halted, or
-// spinning where nothing would interrupt the halt in time.
-void vcpu_wait(struct vcpu *v, bool (*ends)(struct vcpu *v), bool spin);
+// in idle() where given, or spinning where nothing would interrupt the halt in
+// time.
+void vcpu_wait(
+    struct vcpu *v,
+    bool (*ends)(struct vcpu *v),
+    void (*idle)(struct vcpu *v),
+    bool spin
+);
 // The guest's HLT, which waits in the hypervisor, as an interrupt that only
 // becomes deliverable while the guest halts must end it.
 void vcpu_halt(struct vcpu *v);

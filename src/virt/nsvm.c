@@ -903,7 +903,10 @@ static void merge_intercepts(struct nsvm *n) {
     to[3] = (own[3] & ~(SVM_INTERCEPT_VINTR | SVM_INTERCEPT_CR0_SEL_WRITE)) | n->intercepts[3];
     uint32_t svm = SVM_INTERCEPT_VMLOAD | SVM_INTERCEPT_VMSAVE | SVM_INTERCEPT_STGI
                  | SVM_INTERCEPT_CLGI;
-    to[4] = (own[4] & ~(SVM_INTERCEPT_VMMCALL | svm)) | n->intercepts[4]
+    // The guest's guest's MONITOR and MWAIT run on the processor unless VMCB12
+    // intercepts them, as with VMX, where VMCS12 alone has them exit.
+    uint32_t idle = SVM_INTERCEPT_MONITOR | SVM_INTERCEPT_MWAIT;
+    to[4] = (own[4] & ~(SVM_INTERCEPT_VMMCALL | svm | idle)) | n->intercepts[4]
           | (n->vls12 ? 0 : SVM_INTERCEPT_VMLOAD | SVM_INTERCEPT_VMSAVE)
           | (n->vgif12 ? 0 : SVM_INTERCEPT_STGI | SVM_INTERCEPT_CLGI);
     if ((n->vintr12 & SVM_VINTR_MASKING) == 0) {

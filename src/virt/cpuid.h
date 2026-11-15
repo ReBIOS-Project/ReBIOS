@@ -29,6 +29,9 @@ void cpuid_init(void);
 // leaves and bits the hypervisor knows the meaning of and lets the guest have,
 // the rest as a processor without them returns them.
 struct cpuid_regs cpuid_guest(struct vcpu *v, uint32_t leaf, uint32_t subleaf);
+// The leaf's bits that the guest's processor has, whatever the guest's CPUID
+// limit: what the guest's instructions depend on.
+struct cpuid_regs cpuid_offered(uint32_t leaf, uint32_t subleaf);
 
 // The CR4 bits the guest may set: those of the features its CPUID shows, and
 // PCE. VMXE is nested virtualisation's to allow.

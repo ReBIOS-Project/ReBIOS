@@ -193,6 +193,11 @@ void cpu_guest_describer(size_t (*describe)(char *buf, size_t size));
 // an NMI arrived since kicked was cleared.
 void cpu_halt(void);
 
+// Whether the local APIC timer and the TSC run on in deep C-states (ARAT, and
+// an invariant TSC), as the hypervisor's timers need, which have no other
+// timer to wake them.
+bool cpu_deep_idle_safe(void);
+
 // MAXPHYADDR.
 unsigned int cpu_physical_address_bits(void);
 // How far an APIC ID shifts right to its package's ID.

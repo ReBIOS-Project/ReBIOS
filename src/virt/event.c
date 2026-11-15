@@ -364,6 +364,10 @@ static bool window_needed(struct vcpu *v) {
 }
 
 bool event_halt_ends(struct vcpu *v) {
+    return event_wait_ends(v, false);
+}
+
+bool event_wait_ends(struct vcpu *v, bool masked) {
     struct cpu *cpu = v->cpu;
     if (v->injecting) {
         return true;
@@ -383,7 +387,7 @@ bool event_halt_ends(struct vcpu *v) {
      && (v->vmcb->control.vintr & (SVM_VINTR_NMI | SVM_VINTR_NMI_MASK)) == SVM_VINTR_NMI) {
         return true;
     }
-    return (vcpu_rflags(v) & RFLAGS_IF) != 0 && interrupt_pending(v);
+    return (masked || (vcpu_rflags(v) & RFLAGS_IF) != 0) && interrupt_pending(v);
 }
 
 // An injected interrupt of the vector that UINV has is no interrupt to a guest

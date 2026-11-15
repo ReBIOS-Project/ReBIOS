@@ -39,6 +39,7 @@
 #include <virt/gpt.h>
 #include <virt/insn.h>
 #include <virt/mmio.h>
+#include <virt/mwait.h>
 #include <virt/nsvm.h>
 #include <virt/profile.h>
 #include <virt/rtc.h>
@@ -342,9 +343,10 @@ void svm_vcpu_init(struct vcpu *v) {
     if (svm_vnmi) {
         c->vintr |= SVM_VINTR_NMI_ENABLE;
     }
+    // MONITOR and MWAIT are carried out in the hypervisor (mwait.c).
     c->intercept_misc2 = SVM_INTERCEPT_VMRUN | SVM_INTERCEPT_VMMCALL | SVM_INTERCEPT_VMLOAD
                        | SVM_INTERCEPT_VMSAVE | SVM_INTERCEPT_STGI | SVM_INTERCEPT_CLGI
-                       | SVM_INTERCEPT_SKINIT;
+                       | SVM_INTERCEPT_SKINIT | SVM_INTERCEPT_MONITOR | SVM_INTERCEPT_MWAIT;
     c->intercept_misc3 = (invlpgb ? SVM_INTERCEPT_INVLPGB : 0)
                        | (svm_idle_hlt ? SVM_INTERCEPT_IDLE_HLT : 0);
     // INITs raise #SX here, and the SVM instructions #GP while the guest's own
@@ -899,6 +901,14 @@ static void svm_handle_exit(struct vcpu *v) {
         case SVM_EXIT_HLT:
         case SVM_EXIT_IDLE_HLT: {
             vcpu_halt(v);
+            break;
+        }
+        case SVM_EXIT_MONITOR: {
+            mwait_monitor(v);
+            break;
+        }
+        case SVM_EXIT_MWAIT: {
+            mwait_wait(v);
             break;
         }
         case SVM_EXIT_EXCEPTION_BASE + VECTOR_GP: {

@@ -2648,7 +2648,7 @@ void nvmx_wait(struct vcpu *v) {
     // Nothing interrupts a halt when the timer expires.
     bool timer = atomic_load_explicit(&n->inactive, memory_order_relaxed) == ACTIVITY_SHUTDOWN
               && (get12(n, VMCS_PIN_CONTROLS) & PIN_PREEMPTION_TIMER) != 0;
-    vcpu_wait(v, inactive_ends, timer);
+    vcpu_wait(v, inactive_ends, NULL, timer);
 }
 
 bool nvmx_sipi(struct vcpu *v, uint8_t vector) {

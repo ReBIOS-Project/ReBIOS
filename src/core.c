@@ -51,6 +51,7 @@
 #include <virt/log_save.h>
 #include <virt/msr.h>
 #include <virt/mtrr.h>
+#include <virt/mwait.h>
 #include <virt/nsvm.h>
 #include <virt/nvmx.h>
 #include <virt/ospm.h>
@@ -101,6 +102,7 @@ static void bsp_main(void *arg) {
     simd_cpu_init(cpu);
     msr_init();
     cpuid_init();
+    mwait_init();
     mtrr_init();
 
     layout_init();

@@ -531,7 +531,12 @@ void vcpu_exit_after_turn(struct vcpu *v) {
     v->exit_after_turn = true;
 }
 
-void vcpu_wait(struct vcpu *v, bool (*ends)(struct vcpu *v), bool spin) {
+void vcpu_wait(
+    struct vcpu *v,
+    bool (*ends)(struct vcpu *v),
+    void (*idle)(struct vcpu *v),
+    bool spin
+) {
     struct cpu *cpu = v->cpu;
     // SVM's host takes interrupts and NMIs only with GIF set.
     if (!virt_vmx) {
@@ -576,6 +581,8 @@ void vcpu_wait(struct vcpu *v, bool (*ends)(struct vcpu *v), bool spin) {
                 : "memory"
             );
             cpu_relax();
+        } else if (idle != NULL) {
+            idle(v);
         } else {
             cpu_halt();
         }
@@ -590,7 +597,7 @@ void vcpu_wait(struct vcpu *v, bool (*ends)(struct vcpu *v), bool spin) {
 
 void vcpu_halt(struct vcpu *v) {
     vcpu_skip_instruction(v);
-    vcpu_wait(v, event_halt_ends, false);
+    vcpu_wait(v, event_halt_ends, NULL, false);
 }
 
 void vcpu_run(struct vcpu *v) {

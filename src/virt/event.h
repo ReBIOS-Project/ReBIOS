@@ -44,8 +44,9 @@ void event_nmi(struct vcpu *v);
 bool event_interruptible(struct vcpu *v);
 
 // Whether something ends a HLT: an NMI, an INIT, or an interrupt the guest
-// takes.
+// takes; for a wait that masked interrupts end too, any interrupt.
 bool event_halt_ends(struct vcpu *v);
+bool event_wait_ends(struct vcpu *v, bool masked);
 
 // Takes back what event_entry() set up, for an entry that did not happen.
 void event_cancel(struct vcpu *v);

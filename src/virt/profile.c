@@ -42,9 +42,12 @@
 #define TOP 8
 #define HYPERCALLS 8
 
-// VMX's and SVM's HLT, whose time is the guest's idling, not the hypervisor's.
+// VMX's and SVM's HLT and MWAIT, whose time is the guest's idling, not the
+// hypervisor's.
 #define VMX_HLT 12
+#define VMX_MWAIT 36
 #define SVM_HLT 0x78
+#define SVM_MWAIT 0x8b
 
 struct counters {
     uint64_t exits[SLOTS];
@@ -78,7 +81,8 @@ static const char *vmx_names[] = {
     [19] = "VMCLEAR", [20] = "VMLAUNCH", [21] = "VMPTRLD", [22] = "VMPTRST",
     [23] = "VMREAD", [24] = "VMRESUME", [25] = "VMWRITE", [26] = "VMXOFF",
     [27] = "VMXON", [28] = "CR access", [30] = "I/O", [31] = "RDMSR",
-    [32] = "WRMSR", [37] = "monitor trap", [43] = "TPR below threshold",
+    [32] = "WRMSR", [36] = "MWAIT", [37] = "monitor trap", [39] = "MONITOR",
+    [43] = "TPR below threshold",
     [44] = "APIC access", [45] = "EOI", [48] = "EPT violation",
     [49] = "EPT misconfiguration", [50] = "INVEPT", [52] = "preemption timer",
     [53] = "INVVPID", [55] = "XSETBV", [56] = "APIC write"
@@ -106,6 +110,12 @@ static const char *svm_name(unsigned int slot) {
         }
         case 0x7c: {
             return "MSR";
+        }
+        case 0x8a: {
+            return "MONITOR";
+        }
+        case 0x8b: {
+            return "MWAIT";
         }
         case 0x81: {
             return "VMMCALL";
@@ -204,6 +214,7 @@ static void report(uint64_t elapsed_ns) {
     uint64_t cycles = 0;
     uint64_t idle = 0;
     unsigned int hlt = virt_vmx ? VMX_HLT : SVM_HLT;
+    unsigned int mwait_slot = virt_vmx ? VMX_MWAIT : SVM_MWAIT;
     struct {
         unsigned int slot;
         uint64_t exits;
@@ -213,7 +224,7 @@ static void report(uint64_t elapsed_ns) {
         uint64_t exits = now.exits[slot] - before.exits[slot];
         uint64_t c = now.cycles[slot] - before.cycles[slot];
         total += exits;
-        if (slot == hlt) {
+        if (slot == hlt || slot == mwait_slot) {
             idle += c;
         } else {
             cycles += c;
@@ -232,8 +243,8 @@ static void report(uint64_t elapsed_ns) {
     uint64_t ms = elapsed_ns / 1000000;
     uint64_t period = hz * ms / 1000 + 1;
     printf(
-        "Profile: %llu exits/s, %llu.%llu%% of a processor in the hypervisor, %llu.%llu%% "
-        "halted\n", (unsigned long long)(total * 1000 / (ms != 0 ? ms : 1)),
+        "Profile: %llu exits/s, %llu.%llu%% of a processor in the hypervisor, %llu.%llu%% idle\n",
+        (unsigned long long)(total * 1000 / (ms != 0 ? ms : 1)),
         (unsigned long long)(cycles * 100 / period),
         (unsigned long long)(cycles * 1000 / period % 10),
         (unsigned long long)(idle * 100 / period), (unsigned long long)(idle * 1000 / period % 10)

@@ -579,18 +579,9 @@ static bool register_reached(uacpi_object *obj) {
     return true;
 }
 
-// Whether the local APIC timer and the TSC run on in deep C-states (ARAT, and
-// an invariant TSC), as the hypervisor's timers need, which have no other
-// timer to wake them.
-static bool deep_idle_safe(void) {
-    return cpuid(0, 0).eax >= 6 && (cpuid(6, 0).eax & ((uint32_t)1 << 2)) != 0
-        && cpuid(0x80000000, 0).eax >= 0x80000007
-        && (cpuid(0x80000007, 0).edx & ((uint32_t)1 << 8)) != 0;
-}
-
 // Whether the guest can enter a state of _CST, in the shape Linux 7.3's
 // acpi_processor_evaluate_cst() takes: through MWAIT or a port it gets, and
-// past C1 only where deep_idle_safe() holds.
+// past C1 only where cpu_deep_idle_safe() holds.
 static bool cst_state_usable(uacpi_object *state, bool deep) {
     uacpi_object_array fields;
     uint64_t type;
@@ -606,7 +597,7 @@ static uacpi_object *cst_usable(uacpi_object *cst) {
     if (uacpi_object_get_package(cst, &top) != UACPI_STATUS_OK || top.count < 2) {
         return NULL;
     }
-    bool deep = deep_idle_safe();
+    bool deep = cpu_deep_idle_safe();
     uacpi_object **kept = kmalloc(top.count * sizeof(uacpi_object *));
     size_t count = 0;
     for (size_t i = 1; i < top.count; i++) {
@@ -625,11 +616,11 @@ static uacpi_object *cst_usable(uacpi_object *cst) {
     return usable;
 }
 
-// _LPI, whole, where deep_idle_safe() holds and the guest reaches every
+// _LPI, whole, where cpu_deep_idle_safe() holds and the guest reaches every
 // state's entry method, as its states refer to each other by their indexes.
 static bool lpi_usable(uacpi_object *lpi) {
     uacpi_object_array top;
-    if (!deep_idle_safe() || uacpi_object_get_package(lpi, &top) != UACPI_STATUS_OK
+    if (!cpu_deep_idle_safe() || uacpi_object_get_package(lpi, &top) != UACPI_STATUS_OK
      || top.count < 3) {
         return false;
     }
@@ -747,7 +738,7 @@ static uacpi_object *cst_for_guest(struct method *m, uacpi_object *cst) {
     const char *why = "";
     if (given == 0) {
         why = ", C1 through HLT in their place";
-    } else if (!deep_idle_safe()) {
+    } else if (!cpu_deep_idle_safe()) {
         why = ", only C1, as the local APIC timer or the TSC stops in the others";
     }
     printf("The guest gets %zu of the %zu C-states in %s's _CST%s\n", given, total, path, why);
@@ -778,7 +769,7 @@ static uacpi_object *csd_for_guest(
         uacpi_object_unref(cst);
         return empty_package();
     }
-    bool deep = deep_idle_safe();
+    bool deep = cpu_deep_idle_safe();
     size_t total = states.count - 1;
     size_t *renumbered = kmalloc(total * sizeof(size_t));
     size_t kept = 0;

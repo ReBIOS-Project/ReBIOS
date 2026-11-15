@@ -648,6 +648,10 @@ static void amd_overrides(struct vcpu *v, uint32_t leaf, uint32_t subleaf, struc
     }
 }
 
+struct cpuid_regs cpuid_offered(uint32_t leaf, uint32_t subleaf) {
+    return masked(leaf, subleaf);
+}
+
 struct cpuid_regs cpuid_guest(struct vcpu *v, uint32_t leaf, uint32_t subleaf) {
     // Leaves past the last read on Intel's processors as the last basic one
     // (SDM 325462-093 Vol. 1, 21.1.3), which the guest's CPUID limit (msr.c)

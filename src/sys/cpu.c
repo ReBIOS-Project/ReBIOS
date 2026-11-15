@@ -123,6 +123,12 @@ __attribute__((format(printf, 4, 5))) static void append(
     }
 }
 
+bool cpu_deep_idle_safe(void) {
+    return cpuid(0, 0).eax >= 6 && (cpuid(6, 0).eax & ((uint32_t)1 << 2)) != 0
+        && cpuid(0x80000000, 0).eax >= 0x80000007
+        && (cpuid(0x80000007, 0).edx & ((uint32_t)1 << 8)) != 0;
+}
+
 unsigned int cpu_physical_address_bits(void) {
     return cpuid(0x80000008, 0).eax & 0xff;
 }
