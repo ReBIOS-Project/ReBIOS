@@ -203,6 +203,6 @@ unsigned int cpu_physical_address_bits(void);
 // How far an APIC ID shifts right to its package's ID.
 unsigned int cpu_package_shift(void);
 
-#endif // !__ASSEMBLER__
+#endif
 
 #endif

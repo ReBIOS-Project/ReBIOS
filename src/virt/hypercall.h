@@ -109,6 +109,6 @@ struct hypercall_pnp_nodes {
     uint32_t reserved;
 };
 
-#endif // !__ASSEMBLER__
+#endif
 
 #endif
