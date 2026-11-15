@@ -235,7 +235,13 @@ static void data(struct chip *c, uint8_t value) {
     switch (c->init_step) {
         case 2: {
             c->base = value & 0xf8;
-            c->init_step = !c->single ? 3 : c->icw4 ? 4 : 0;
+            if (!c->single) {
+                c->init_step = 3;
+            } else if (c->icw4) {
+                c->init_step = 4;
+            } else {
+                c->init_step = 0;
+            }
             break;
         }
         case 3: {

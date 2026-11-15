@@ -255,7 +255,13 @@ static void set(
 
 // Real mode's is 0, and virtual-8086 mode's 3.
 static unsigned int cpl(struct vcpu *v, const struct run_state *rs) {
-    return rs->real ? 0 : rs->v86 ? 3 : vcpu_cpl(v);
+    if (rs->real) {
+        return 0;
+    }
+    if (rs->v86) {
+        return 3;
+    }
+    return vcpu_cpl(v);
 }
 
 static bool canonical(struct vcpu *v, uint64_t address) {
@@ -1231,7 +1237,12 @@ static bool io_permitted(struct vcpu *v, struct run_state *rs, uint16_t port, si
 static int port(struct vcpu *v, struct run_state *rs, const struct insn *insn) {
     unsigned int op = insn->opcode;
     bool in = op == 0xe4 || op == 0xe5 || op == 0xec || op == 0xed;
-    size_t size = (op & 1) == 0 ? 1 : insn->operand_size == 2 ? 2 : 4;
+    size_t size = 4;
+    if ((op & 1) == 0) {
+        size = 1;
+    } else if (insn->operand_size == 2) {
+        size = 2;
+    }
     uint16_t number = op < 0xe8 ? (uint16_t)insn->imm : (uint16_t)rs->gpr[2];
     bool bios = vgabios_port(number, size);
     if (!bios && !vga_port_emulated(number, size)) {
@@ -1822,7 +1833,12 @@ static int carry_out(struct vcpu *v, struct run_state *rs, const struct insn *in
             if (stop != STOP_NONE) {
                 return stop;
             }
-            uint64_t count = op <= 0xc1 ? insn->imm : op <= 0xd1 ? 1 : rs->gpr[1] & 0xff;
+            uint64_t count = rs->gpr[1] & 0xff;
+            if (op <= 0xc1) {
+                count = insn->imm;
+            } else if (op <= 0xd1) {
+                count = 1;
+            }
             return alu_operand(v, rs, insn, ALU_ROL + group, &o, count);
         }
         case 0xc2:
@@ -1880,7 +1896,21 @@ static int carry_out(struct vcpu *v, struct run_state *rs, const struct insn *in
             if (op == 0xce && (insn->long_mode || (rs->rflags & RFLAGS_OF) == 0)) {
                 return op == 0xce && !insn->long_mode ? next(rs, insn) : STOP_UNSUPPORTED;
             }
-            uint8_t vector = op == 0xcc ? 3 : op == 0xce ? 4 : (uint8_t)insn->imm;
+            uint8_t vector;
+            switch (op) {
+                case 0xcc: {
+                    vector = 3;
+                    break;
+                }
+                case 0xce: {
+                    vector = 4;
+                    break;
+                }
+                default: {
+                    vector = (uint8_t)insn->imm;
+                    break;
+                }
+            }
             return interrupt(v, rs, insn, vector);
         }
         case 0xcf: {

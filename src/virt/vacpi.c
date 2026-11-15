@@ -2165,7 +2165,21 @@ static void slot_name(char out[5], size_t slot, char kind) {
     out[0] = 'S';
     out[1] = (char)('0' + slot);
     out[2] = kind;
-    out[3] = kind == 'D' ? 'T' : kind == 'L' ? 'N' : kind == 'I' ? 'N' : 'Y';
+    switch (kind) {
+        case 'D': {
+            out[3] = 'T';
+            break;
+        }
+        case 'L':
+        case 'I': {
+            out[3] = 'N';
+            break;
+        }
+        default: {
+            out[3] = 'Y';
+            break;
+        }
+    }
     out[4] = '\0';
 }
 
@@ -2675,7 +2689,8 @@ static uacpi_namespace_node *ps2_parent(struct path *out) {
         const struct pci_host_bridge *bridge = &host->bridges[i];
         if (routes_ports(bridge->node, PS2_PORT_FIRST, PS2_PORT_LAST)) {
             uacpi_namespace_node *isa = isa_bridge_below(bridge);
-            return guest_path(isa != NULL ? isa : bridge->node, out) ? bridge->node : NULL;
+            uacpi_namespace_node *named = isa != NULL ? isa : bridge->node;
+            return guest_path(named, out) ? bridge->node : NULL;
         }
     }
     return NULL;

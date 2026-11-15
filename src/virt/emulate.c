@@ -183,7 +183,21 @@ static int alu_modrm(struct ctx *c, unsigned int op, bool to_reg, size_t size, u
 // A register bit offset reaches beyond the operand, in either direction.
 static int bit_test_reg(struct ctx *c, unsigned int op) {
     size_t size = c->insn->operand_size;
-    unsigned int shift = size == 2 ? 4 : size == 4 ? 5 : 6;
+    unsigned int shift;
+    switch (size) {
+        case 2: {
+            shift = 4;
+            break;
+        }
+        case 4: {
+            shift = 5;
+            break;
+        }
+        default: {
+            shift = 6;
+            break;
+        }
+    }
     int64_t offset = (int64_t)sign_extend(reg_get(c, modrm_reg(c->insn), size), size);
     uint64_t linear;
     if (!insn_mem_linear_moved(c->v, c->insn, (offset >> shift) * (int64_t)size, &linear)) {
@@ -467,7 +481,12 @@ static int string_op(struct ctx *c) {
     unsigned int op = insn->opcode;
     bool io = op >= 0x6c && op <= 0x6f;
     // Port I/O is at most 32 bits wide.
-    size_t size = (op & 1) == 0 ? 1 : io && insn->operand_size == 8 ? 4 : insn->operand_size;
+    size_t size = insn->operand_size;
+    if ((op & 1) == 0) {
+        size = 1;
+    } else if (io && size == 8) {
+        size = 4;
+    }
     int64_t delta = (vcpu_rflags(v) & RFLAGS_DF) != 0 ? -(int64_t)size : (int64_t)size;
     bool uses_si = op == 0xa4 || op == 0xa5 || op == 0xa6 || op == 0xa7 || op == 0xac || op == 0xad
                 || op == 0x6e || op == 0x6f;

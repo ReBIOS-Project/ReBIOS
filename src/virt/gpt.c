@@ -237,7 +237,12 @@ void gpt_map(uintptr_t gpa, uintptr_t hpa, size_t size, uint32_t prot, uint8_t m
 
     spinlock_acquire(&gpt_lock);
 
-    size_t max_level = (prot & GPT_DIRTY) != 0 ? 0 : have_huge_pages ? 2 : 1;
+    size_t max_level = 1;
+    if ((prot & GPT_DIRTY) != 0) {
+        max_level = 0;
+    } else if (have_huge_pages) {
+        max_level = 2;
+    }
     ptable_map(&table_format, root, gpa, hpa, size, leaf_attributes(prot, memtype), max_level);
 
     if (masked_root != NULL) {

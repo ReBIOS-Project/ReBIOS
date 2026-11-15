@@ -56,7 +56,8 @@ bool serial_init(uint16_t port, uint32_t baud, uint32_t clock) {
         return false;
     }
 
-    uint32_t divisor = baud == 0 ? 1 : (clock != 0 ? clock : UART_CLOCK_ISA) / (16 * baud);
+    uint32_t input = clock != 0 ? clock : UART_CLOCK_ISA;
+    uint32_t divisor = baud == 0 ? 1 : input / (16 * baud);
     if (divisor == 0) {
         divisor = 1;
     } else if (divisor > UINT16_MAX) {

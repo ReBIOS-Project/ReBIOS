@@ -1087,14 +1087,50 @@ static void font_functions(struct vgabios_regs *r) {
         case 0x22:
         case 0x23:
         case 0x24: {
-            uint8_t height = r->al == 0x21 ? r->cl : r->al == 0x22 ? 14 : r->al == 0x23 ? 8 : 16;
+            uint8_t height;
+            switch (r->al) {
+                case 0x21: {
+                    height = r->cl;
+                    break;
+                }
+                case 0x22: {
+                    height = 14;
+                    break;
+                }
+                case 0x23: {
+                    height = 8;
+                    break;
+                }
+                default: {
+                    height = 16;
+                    break;
+                }
+            }
             if (r->al == 0x21) {
                 set_vector(0x43, r->es, r->bp);
             } else {
                 set_vector(0x43, vgabios_segment(), rom_font(height));
             }
             vgabios_pokew(BDA, BDA_CHAR_HEIGHT, height);
-            uint8_t rows = r->bl == 1 ? 14 : r->bl == 2 ? 25 : r->bl == 3 ? 43 : r->dl;
+            uint8_t rows;
+            switch (r->bl) {
+                case 1: {
+                    rows = 14;
+                    break;
+                }
+                case 2: {
+                    rows = 25;
+                    break;
+                }
+                case 3: {
+                    rows = 43;
+                    break;
+                }
+                default: {
+                    rows = r->dl;
+                    break;
+                }
+            }
             if (rows != 0) {
                 vgabios_pokeb(BDA, BDA_ROWS, (uint8_t)(rows - 1));
             }
@@ -1251,7 +1287,24 @@ static void state_information(struct vgabios_regs *r) {
                             ? (uint32_t)0x8000 / m->page_size
                             : (uint32_t)0x10000 / m->page_size);
         }
-        lines = m->height == 200 ? 0 : m->height == 350 ? 1 : m->height == 480 ? 3 : 2;
+        switch (m->height) {
+            case 200: {
+                lines = 0;
+                break;
+            }
+            case 350: {
+                lines = 1;
+                break;
+            }
+            case 480: {
+                lines = 3;
+                break;
+            }
+            default: {
+                lines = 2;
+                break;
+            }
+        }
     }
     vgabios_pokew(es, (uint16_t)(to + 39), colours);
     vgabios_pokeb(es, (uint16_t)(to + 41), pages);

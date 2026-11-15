@@ -687,11 +687,12 @@ static void display_fill(void) {
     // Without one, guests would not know the display's resolution.
     if (d->edid_size == 0 && edid_synthesize(d->edid, width, height)) {
         d->edid_size = EDID_BLOCK_SIZE;
-        const char *reason = video->edid_size == 0
-                           ? "No EDID from the firmware"
-                           : video->framebuffer.rotation != HANDOFF_ROTATE_0
-                               ? "The panel's EDID describes it unturned"
-                               : "The firmware's EDID is unusable";
+        const char *reason = "The firmware's EDID is unusable";
+        if (video->edid_size == 0) {
+            reason = "No EDID from the firmware";
+        } else if (video->framebuffer.rotation != HANDOFF_ROTATE_0) {
+            reason = "The panel's EDID describes it unturned";
+        }
         printf(
             "%s, so the emulated VGA's display reports %ux%u at 60 Hz\n", reason, width, height
         );

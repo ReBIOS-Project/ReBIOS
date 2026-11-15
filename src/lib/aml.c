@@ -109,7 +109,14 @@ void aml_end(struct aml *a) {
     uint32_t at = a->open[--a->depth];
     uint32_t content = a->size - at - PKG_LENGTH_MAX;
     // A package's length counts its own encoding.
-    size_t n = content + 1 < 0x40 ? 1 : content + 2 < 0x1000 ? 2 : content + 3 < 0x100000 ? 3 : 4;
+    size_t n = 4;
+    if (content + 1 < 0x40) {
+        n = 1;
+    } else if (content + 2 < 0x1000) {
+        n = 2;
+    } else if (content + 3 < 0x100000) {
+        n = 3;
+    }
     memmove(a->data + at + n, a->data + at + PKG_LENGTH_MAX, content);
     pkg_encode(a->data + at, content + n, n);
     a->size -= PKG_LENGTH_MAX - n;
@@ -248,7 +255,14 @@ void aml_field_unit(struct aml *a, const char *name, uint32_t bits) {
     } else {
         aml_byte(a, 0);
     }
-    size_t n = bits < 0x40 ? 1 : bits < 0x1000 ? 2 : bits < 0x100000 ? 3 : 4;
+    size_t n = 4;
+    if (bits < 0x40) {
+        n = 1;
+    } else if (bits < 0x1000) {
+        n = 2;
+    } else if (bits < 0x100000) {
+        n = 3;
+    }
     uint8_t out[4];
     pkg_encode(out, bits, n);
     aml_bytes(a, out, n);

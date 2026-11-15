@@ -279,9 +279,13 @@ static unsigned int decode_modrm(const uint8_t *bytes, size_t i, struct insn *in
         return 1;
     }
     size_t size = 1;
-    size_t disp_size;
+    size_t disp_size = 0;
     if (insn->address_size == 2) {
-        disp_size = mod == 1 ? 1 : mod == 2 || rm == 6 ? 2 : 0;
+        if (mod == 1) {
+            disp_size = 1;
+        } else if (mod == 2 || rm == 6) {
+            disp_size = 2;
+        }
     } else {
         if (rm == 4) {
             insn->has_sib = true;
@@ -289,7 +293,11 @@ static unsigned int decode_modrm(const uint8_t *bytes, size_t i, struct insn *in
             size++;
         }
         bool no_base = mod == 0 && (rm == 5 || (rm == 4 && (insn->sib & 7) == 5));
-        disp_size = mod == 1 ? 1 : mod == 2 || no_base ? 4 : 0;
+        if (mod == 1) {
+            disp_size = 1;
+        } else if (mod == 2 || no_base) {
+            disp_size = 4;
+        }
     }
     insn->disp_size = disp_size;
     insn->disp = read_signed(bytes + i + size, disp_size);
@@ -335,7 +343,12 @@ bool insn_decode_bytes(struct vcpu *v, const uint8_t *bytes, struct insn *insn) 
     // x86_decode_insn()); V86 mode's are 16-bit.
     bool big = (vcpu_rflags(v) & RFLAGS_VM) == 0 && (cs & VCPU_SEG_DB) != 0;
     unsigned int operand = long_mode || big ? 4 : 2;
-    size_t address = long_mode ? 8 : big ? 4 : 2;
+    size_t address = 2;
+    if (long_mode) {
+        address = 8;
+    } else if (big) {
+        address = 4;
+    }
     bool operand_prefix = false;
     bool address_prefix = false;
     bool rex_w = false;
@@ -505,7 +518,20 @@ bool insn_decode_bytes(struct vcpu *v, const uint8_t *bytes, struct insn *insn) 
         i += 3;
         insn->opcode_byte = bytes[i++];
         i += decode_modrm(bytes, i, insn);
-        i += xop_map == 8 ? 1 : xop_map == 10 ? 4 : 0;
+        // XOP's maps 8 and 10 carry an immediate byte and dword.
+        switch (xop_map) {
+            case 8: {
+                i += 1;
+                break;
+            }
+            case 10: {
+                i += 4;
+                break;
+            }
+            default: {
+                break;
+            }
+        }
         insn->opcode = INSN_OPCODE_OTHER;
         insn->vex = true;
         insn->length = i;
@@ -821,7 +847,12 @@ static bool stack_kind(
         size = size == 2 ? 2 : 8;
     }
     bool near_branch = !insn->long_mode || insn->operand_size != 2;
-    uint64_t ip_mask = insn->long_mode ? UINT64_MAX : size == 2 ? 0xffff : 0xffffffff;
+    uint64_t ip_mask = 0xffffffff;
+    if (insn->long_mode) {
+        ip_mask = UINT64_MAX;
+    } else if (size == 2) {
+        ip_mask = 0xffff;
+    }
     uint64_t next = vcpu_rip(v) + insn->length;
     int64_t rel = insn->imm_size == 2 ? (int16_t)insn->imm : (int32_t)insn->imm;
     *bytes = size;
@@ -1062,7 +1093,12 @@ bool insn_string_run(
         }
         last = first - span;
     }
-    int segment = destination ? VCPU_SEG_ES : insn->segment >= 0 ? insn->segment : VCPU_SEG_DS;
+    int segment = VCPU_SEG_DS;
+    if (destination) {
+        segment = VCPU_SEG_ES;
+    } else if (insn->segment >= 0) {
+        segment = insn->segment;
+    }
     // The checks hold for every operand between two that pass them.
     uint64_t last_linear;
     return linear_allowed(v, insn->long_mode, segment, first, size, write, linear)

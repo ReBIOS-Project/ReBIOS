@@ -510,7 +510,12 @@ static void aux_packet(bool stream) {
     int32_t dy = clamp_move(aux_dy);
     aux_dx -= dx;
     aux_dy -= dy;
-    int32_t dz = aux_dz > 7 ? 7 : aux_dz < -8 ? -8 : aux_dz;
+    int32_t dz = aux_dz;
+    if (dz > 7) {
+        dz = 7;
+    } else if (dz < -8) {
+        dz = -8;
+    }
     aux_dz -= dz;
     if (stream && aux_scaled) {
         dx = clamp_move(scaled(dx));

@@ -282,11 +282,12 @@ static void take(const struct pci_enum_function *f) {
         }
     }
 
-    const char *from = !r.owned
-                     ? ""
-                     : r.forced
-                         ? " taken from the firmware, which did not let go, and"
-                         : " taken from the firmware and";
+    const char *from = "";
+    if (r.owned && r.forced) {
+        from = " taken from the firmware, which did not let go, and";
+    } else if (r.owned) {
+        from = " taken from the firmware and";
+    }
     printf(
         "USB " PCI_CFG_ADDR_FMT ": %s%s %s\n", PCI_CFG_ADDR_ARGS(a), name, from,
         stopped ? "stopped" : "not stopped"

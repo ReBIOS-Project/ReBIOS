@@ -353,7 +353,21 @@ static bool template_ports(const uint8_t *r, size_t size, uint64_t *base, uint64
         case ACPI_TAG_ADDRESS64_EXTENDED: {
             // Granularity, minimum, maximum, translation, and length follow
             // each other.
-            size_t width = r[0] == ACPI_TAG_ADDRESS16 ? 2 : r[0] == ACPI_TAG_ADDRESS32 ? 4 : 8;
+            size_t width;
+            switch (r[0]) {
+                case ACPI_TAG_ADDRESS16: {
+                    width = 2;
+                    break;
+                }
+                case ACPI_TAG_ADDRESS32: {
+                    width = 4;
+                    break;
+                }
+                default: {
+                    width = 8;
+                    break;
+                }
+            }
             size_t at = r[0] == ACPI_TAG_ADDRESS64_EXTENDED ? 8 : 6;
             if (r[3] != UACPI_RANGE_IO || at + 5 * width > size) {
                 return false;

@@ -1335,7 +1335,12 @@ static void prepare_vmcb02(struct nsvm *n) {
         n->ncr3 = c12->n_cr3;
         n->npt_wide = (s01->efer & EFER_LMA) != 0 || (s01->cr4 & CR4_PAE) != 0;
         n->npt_pae = (s01->efer & EFER_LMA) == 0 && (s01->cr4 & CR4_PAE) != 0;
-        n->npt_levels = (s01->efer & EFER_LMA) == 0 ? 2 : (s01->cr4 & CR4_LA57) != 0 ? 5 : 4;
+        n->npt_levels = 4;
+        if ((s01->efer & EFER_LMA) == 0) {
+            n->npt_levels = 2;
+        } else if ((s01->cr4 & CR4_LA57) != 0) {
+            n->npt_levels = 5;
+        }
         n->npt_nx = (s01->efer & EFER_NXE) != 0;
         n->npt_pse = (s01->cr4 & CR4_PSE) != 0;
         n->npt_smep = (s01->cr4 & CR4_SMEP) != 0;
@@ -1621,7 +1626,16 @@ static bool io_wanted(struct nsvm *n, uint64_t info) {
         return false;
     }
     size_t size = (info >> 4) & 7;
-    size = size == 4 ? 4 : size == 2 ? 2 : 1;
+    switch (size) {
+        case 2:
+        case 4: {
+            break;
+        }
+        default: {
+            size = 1;
+            break;
+        }
+    }
     uintptr_t base = page_down(n->copy.control.iopm_base_pa);
     for (size_t port = info >> 16; port < (info >> 16) + size; port++) {
         const uint8_t *page = guest_mem_page(base + page_down(port / 8));

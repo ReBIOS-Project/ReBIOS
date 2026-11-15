@@ -390,7 +390,12 @@ bool vtd_probe(const struct iommu_tables *tables, size_t *leaf_level) {
             printf("VT-d unit %zu takes neither 3-level nor 4-level second-stage tables\n", i);
             return false;
         }
-        size_t unit_leaf = (sslps & CAP_SSLPS_1G) != 0 ? 2 : (sslps & CAP_SSLPS_2M) != 0 ? 1 : 0;
+        size_t unit_leaf = 0;
+        if ((sslps & CAP_SSLPS_1G) != 0) {
+            unit_leaf = 2;
+        } else if ((sslps & CAP_SSLPS_2M) != 0) {
+            unit_leaf = 1;
+        }
         if (unit_leaf < leaf) {
             leaf = unit_leaf;
         }

@@ -154,7 +154,12 @@ bool edid_synthesize(uint8_t *edid, uint32_t width, uint32_t height) {
     range[5] = 50;
     range[6] = 75;
     range[7] = 15;
-    range[8] = (uint8_t)(h_khz < 31 ? 31 : h_khz > 255 ? 255 : h_khz);
+    if (h_khz < 31) {
+        h_khz = 31;
+    } else if (h_khz > 255) {
+        h_khz = 255;
+    }
+    range[8] = (uint8_t)h_khz;
     range[9] = (uint8_t)(max_clock > 255 ? 255 : max_clock);
     // Range limits only.
     range[10] = 0x01;

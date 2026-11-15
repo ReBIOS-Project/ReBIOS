@@ -336,7 +336,12 @@ static void mode_info(struct vgabios_regs *r) {
     uint32_t pitch = (uint32_t)m.width * bytes;
     uint32_t page = (uint32_t)align_up(pitch * m.height, 0x10000);
     size_t pages = page != 0 ? vram_size() / page : 0;
-    uint8_t images = pages == 0 ? 0 : (uint8_t)(pages > 256 ? 255 : pages - 1);
+    uint8_t images = 0;
+    if (pages > 256) {
+        images = 255;
+    } else if (pages != 0) {
+        images = (uint8_t)(pages - 1);
+    }
     struct mode_info_block b;
     memset(&b, 0, sizeof(struct mode_info_block));
     b.attributes = ATTRIBUTES_EXTENDED | ATTRIBUTES_COLOR | ATTRIBUTES_GRAPHICS;

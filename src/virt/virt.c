@@ -103,9 +103,12 @@ bool virt_init(void) {
         virt_intercept_msr(MSR_VM_CR, true, true);
         virt_intercept_msr(MSR_VM_HSAVE_PA, true, true);
         uint32_t features = cpuid(0x80000001, 0).ecx;
-        virt_breakpoint_masks = (features & ((uint32_t)1 << 30)) != 0
-                              ? 4
-                              : (features & ((uint32_t)1 << 26)) != 0 ? 1 : 0;
+        virt_breakpoint_masks = 0;
+        if ((features & ((uint32_t)1 << 30)) != 0) {
+            virt_breakpoint_masks = 4;
+        } else if ((features & ((uint32_t)1 << 26)) != 0) {
+            virt_breakpoint_masks = 1;
+        }
     } else {
         return false;
     }

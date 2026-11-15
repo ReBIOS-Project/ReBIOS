@@ -757,9 +757,12 @@ const struct pci_plan *pci_plan_make(
                 );
                 continue;
             }
-            size_t side = above
-                        ? SIDE_HIGH
-                        : bar->prefetchable && pref_low ? SIDE_PREF : SIDE_MEMORY;
+            size_t side = SIDE_MEMORY;
+            if (above) {
+                side = SIDE_HIGH;
+            } else if (bar->prefetchable && pref_low) {
+                side = SIDE_PREF;
+            }
             size_t size = element_size(bar->size);
             element_add(c, (struct element){ i, ELEMENT_BAR, b, side, size, size, 0 });
         }

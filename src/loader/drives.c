@@ -373,7 +373,12 @@ static bool seabios_name(struct efi_device_path_protocol *path, char *out, size_
         append(out, size, ",%x:%x", (unsigned int)segment, (unsigned int)root_bus);
     }
     for (size_t i = 0; i < depth; i++) {
-        const char *kind = i + 1 < depth ? "pci-bridge" : usb ? "usb" : "*";
+        const char *kind = "*";
+        if (i + 1 < depth) {
+            kind = "pci-bridge";
+        } else if (usb) {
+            kind = "usb";
+        }
         append(out, size, "/%s@%x", kind, pci[i]->device);
         if (pci[i]->function != 0) {
             append(out, size, ",%x", pci[i]->function);
@@ -818,10 +823,15 @@ void drives_collect(void) {
     memset(order, 0, HANDOFF_MAX_BOOT_ORDER);
     for (size_t i = 0; i < drive_count; i++) {
         const struct drive *d = &drives[i];
+        const char *connection = "internal";
+        if (d->optical) {
+            connection = "optical";
+        } else if (d->external) {
+            connection = "external";
+        }
         printf(
             "Boot drive %zu: %s, %s, %s%s%s, %llu MiB, %s\n", i + 1, d->text,
-            d->model[0] != 0 ? d->model : "no model name",
-            d->optical ? "optical" : d->external ? "external" : "internal",
+            d->model[0] != 0 ? d->model : "no model name", connection,
             d->bootable ? ", legacy bootable" : "", d->self ? ", ReBIOS's" : "",
             (unsigned long long)(d->size >> 20), d->name
         );

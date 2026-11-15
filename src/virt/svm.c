@@ -415,7 +415,16 @@ static void svm_handle_io(struct vcpu *v) {
     uint16_t port = info >> 16;
 
     // SZ8, SZ16, and SZ32 are one-hot.
-    size = size == 4 ? 4 : size == 2 ? 2 : 1;
+    switch (size) {
+        case 2:
+        case 4: {
+            break;
+        }
+        default: {
+            size = 1;
+            break;
+        }
+    }
     if (string) {
         exit_string_io(v, port);
         return;

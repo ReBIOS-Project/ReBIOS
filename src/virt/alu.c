@@ -35,9 +35,27 @@ uint64_t alu_run_double(
     uint64_t *rflags
 );
 
+// An operand size's index among each operation's four stubs, for 1, 2, 4, and
+// 8 bytes.
+static size_t size_index(size_t size) {
+    switch (size) {
+        case 1: {
+            return 0;
+        }
+        case 2: {
+            return 1;
+        }
+        case 4: {
+            return 2;
+        }
+        default: {
+            return 3;
+        }
+    }
+}
+
 uint64_t alu(unsigned int op, size_t size, uint64_t dst, uint64_t src, uint64_t *rflags) {
-    size_t index = size == 1 ? 0 : size == 2 ? 1 : size == 4 ? 2 : 3;
-    return alu_run(op * 4 + index, dst, src, rflags);
+    return alu_run(op * 4 + size_index(size), dst, src, rflags);
 }
 
 uint64_t alu_double(
@@ -48,8 +66,7 @@ uint64_t alu_double(
     uint8_t count,
     uint64_t *rflags
 ) {
-    size_t index = size == 2 ? 1 : size == 4 ? 2 : 3;
-    return alu_run_double(op * 4 + index, dst, src, count, rflags);
+    return alu_run_double(op * 4 + size_index(size), dst, src, count, rflags);
 }
 
 uint64_t alu_wide(
@@ -60,6 +77,5 @@ uint64_t alu_wide(
     uint64_t src,
     uint64_t *rflags
 ) {
-    size_t index = size == 1 ? 0 : size == 2 ? 1 : size == 4 ? 2 : 3;
-    return alu_run_wide(op * 4 + index, rax, src, rdx, rflags);
+    return alu_run_wide(op * 4 + size_index(size), rax, src, rdx, rflags);
 }
