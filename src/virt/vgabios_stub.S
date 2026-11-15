@@ -12,8 +12,8 @@
 // FOR A PARTICULAR PURPOSE. See the GNU General Public License for more
 // details.
 //
-// You should have received a copy of the GNU General Public License along
-// with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
+// You should have received a copy of the GNU General Public License along with
+// ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
 // The start of the emulated VGA's video BIOS: the code guests run, which asks
 // the hypervisor what to do through vgabios.c's ports, and carries it out

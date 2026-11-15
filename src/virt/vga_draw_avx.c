@@ -12,8 +12,8 @@
 // FOR A PARTICULAR PURPOSE. See the GNU General Public License for more
 // details.
 //
-// You should have received a copy of the GNU General Public License along
-// with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
+// You should have received a copy of the GNU General Public License along with
+// ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
 // The drawing kernels that AVX does better with its 32-byte moves and test,
 // though its integer arithmetic stays 16 bytes wide. Built with AVX enabled.

@@ -12,8 +12,8 @@
 // FOR A PARTICULAR PURPOSE. See the GNU General Public License for more
 // details.
 //
-// You should have received a copy of the GNU General Public License along
-// with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
+// You should have received a copy of the GNU General Public License along with
+// ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
 // The drawing kernels that SSSE3's byte shuffle does better: picking pixels
 // out of a window of source pixels, and the bytes of pixels out of others'.

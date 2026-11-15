@@ -12,8 +12,8 @@
 // FOR A PARTICULAR PURPOSE. See the GNU General Public License for more
 // details.
 //
-// You should have received a copy of the GNU General Public License along
-// with ReBIOS. If not, see <https://www.gnu.org/licenses/>.
+// You should have received a copy of the GNU General Public License along with
+// ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
 // The VBE 3.0 functions (VBE Core Functions Standard 3.0) and VBE/DDC's
 // (VBE/DDC Standard 1.1), on the emulated VGA's VBE modes.
