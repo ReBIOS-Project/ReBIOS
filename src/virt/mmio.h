@@ -117,6 +117,34 @@ size_t mmio_string(
     size_t count
 );
 
+// Runs that ReBIOS carries out in guest memory itself, as REP MOVS and REP
+// STOS do, for the video BIOS's calls (virt/vgabios.c): count elements of size
+// bytes, the first at linear address to, and from, and each next step bytes
+// on. How many elements from the first a run may take: as far as a page and
+// the most a run takes allow, 0 where the first crosses a page.
+size_t mmio_run_room(uintptr_t linear, size_t size, int64_t step, size_t count);
+// Moves within a region that takes string moves, and stores, of data's
+// elements, or of its first for every element where same is true, to a region
+// that takes string stores: the whole run at once, or nothing, false, where it
+// is elsewhere or breakpoints are armed, for the caller to make each access.
+bool mmio_move_run(
+    struct vcpu *v,
+    uintptr_t to,
+    uintptr_t from,
+    size_t size,
+    int64_t step,
+    size_t count
+);
+bool mmio_store_run(
+    struct vcpu *v,
+    uintptr_t to,
+    const uint8_t *data,
+    bool same,
+    size_t size,
+    int64_t step,
+    size_t count
+);
+
 // What the page at gpa is to a run (virt/run.c), for reads, or for writes
 // where write is true: memory that the guest has mapped write-back, as RAM and
 // the ROMs below 1 MiB are, and that only RAM is for writes, its host address

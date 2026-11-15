@@ -145,6 +145,89 @@ static void direct_write(uint16_t segment, uint16_t offset, uint16_t value, size
     mmio_write_linear(call_current()->v, linear(segment, offset), &value, size);
 }
 
+// The elements from segment:offset on, each next step bytes on, that a run in
+// guest memory may take: up to where the offset would wrap, and as far as
+// mmio_run_room() allows.
+static size_t run_room(
+    uint16_t segment,
+    uint16_t offset,
+    size_t size,
+    int64_t step,
+    size_t count
+) {
+    size_t before_wrap = (size_t)offset / size + 1;
+    if (step > 0) {
+        before_wrap = ((size_t)0x10000 - offset) / size;
+    }
+    if (count > before_wrap) {
+        count = before_wrap;
+    }
+    return mmio_run_room(linear(segment, offset), size, step, count);
+}
+
+// Stores count elements of size bytes, 1 or 2, from segment:offset on: data's,
+// or its first for every element where same is true. A run at a time where the
+// guest memory there takes it, an access at a time elsewhere.
+static void direct_store(
+    uint16_t segment,
+    uint16_t offset,
+    const uint8_t *data,
+    bool same,
+    size_t size,
+    size_t count
+) {
+    struct vcpu *v = call_current()->v;
+    for (size_t done = 0; done < count; ) {
+        uint16_t at = (uint16_t)(offset + done * size);
+        const uint8_t *first = same ? data : data + done * size;
+        uintptr_t where = linear(segment, at);
+        size_t n = run_room(segment, at, size, (int64_t)size, count - done);
+        if (n != 0 && mmio_store_run(v, where, first, same, size, (int64_t)size, n)) {
+            done += n;
+            continue;
+        }
+        // An element across a page or the segment's end goes alone.
+        if (n == 0) {
+            n = 1;
+        }
+        for (size_t i = 0; i < n; i++) {
+            const uint8_t *element = same ? data : first + i * size;
+            uint16_t value = element[0];
+            if (size == 2) {
+                value |= (uint16_t)(element[1] << 8);
+            }
+            direct_write(segment, (uint16_t)(at + i * size), value, size);
+        }
+        done += n;
+    }
+}
+
+// Moves count bytes in the segment from from on to to on, from the last back
+// where to is above from, as far as each run goes as direct_store()'s do.
+static void direct_move(uint16_t segment, uint16_t to, uint16_t from, size_t count) {
+    struct vcpu *v = call_current()->v;
+    bool backwards = to > from;
+    int64_t step = backwards ? -1 : 1;
+    for (size_t done = 0; done < count; ) {
+        size_t at = backwards ? count - 1 - done : done;
+        uint16_t target = (uint16_t)(to + at);
+        uint16_t source = (uint16_t)(from + at);
+        size_t n = run_room(segment, target, 1, step, count - done);
+        n = run_room(segment, source, 1, step, n);
+        if (mmio_move_run(v, linear(segment, target), linear(segment, source), 1, step, n)) {
+            done += n;
+            continue;
+        }
+        for (size_t i = 0; i < n; i++) {
+            at = backwards ? count - 1 - (done + i) : done + i;
+            direct_write(
+                segment, (uint16_t)(to + at), direct_read(segment, (uint16_t)(from + at), 1), 1
+            );
+        }
+        done += n;
+    }
+}
+
 uint8_t vgabios_in(uint16_t port) {
     if (call_current()->direct) {
         return (uint8_t)direct_port(port, 1, true, 0);
@@ -281,9 +364,7 @@ void vgabios_pokew(uint16_t segment, uint16_t offset, uint16_t value) {
 void vgabios_poke_block(uint16_t segment, uint16_t offset, const void *bytes, size_t count) {
     const uint8_t *p = bytes;
     if (call_current()->direct) {
-        for (size_t i = 0; i + 2 <= count; i += 2) {
-            direct_write(segment, (uint16_t)(offset + i), (uint16_t)(p[i] | p[i + 1] << 8), 2);
-        }
+        direct_store(segment, offset, p, false, 2, count / 2);
         return;
     }
     uint16_t head[4] = { VGABIOS_STUB_OP_WRITE_BLOCK, segment, offset, (uint16_t)(count / 2) };
@@ -295,9 +376,7 @@ void vgabios_far_fill8(uint16_t segment, uint16_t offset, uint8_t value, size_t 
         return;
     }
     if (call_current()->direct) {
-        for (size_t i = 0; i < count; i++) {
-            direct_write(segment, (uint16_t)(offset + i), value, 1);
-        }
+        direct_store(segment, offset, &value, true, 1, count);
         return;
     }
     uint16_t head[4] = {
@@ -311,9 +390,8 @@ void vgabios_far_fill16(uint16_t segment, uint16_t offset, uint16_t value, size_
         return;
     }
     if (call_current()->direct) {
-        for (size_t i = 0; i < count; i++) {
-            direct_write(segment, (uint16_t)(offset + i * 2), value, 2);
-        }
+        uint8_t element[2] = { (uint8_t)value, (uint8_t)(value >> 8) };
+        direct_store(segment, offset, element, true, 2, count);
         return;
     }
     uint16_t head[5] = { VGABIOS_STUB_OP_FILL16, segment, offset, (uint16_t)count, value };
@@ -324,16 +402,11 @@ void vgabios_far_move(uint16_t segment, uint16_t to, uint16_t from, size_t count
     if (count == 0) {
         return;
     }
-    bool backwards = to > from;
     if (call_current()->direct) {
-        for (size_t i = 0; i < count; i++) {
-            size_t at = backwards ? count - 1 - i : i;
-            direct_write(
-                segment, (uint16_t)(to + at), direct_read(segment, (uint16_t)(from + at), 1), 1
-            );
-        }
+        direct_move(segment, to, from, count);
         return;
     }
+    bool backwards = to > from;
     uint16_t head[6] = {
         (uint16_t)(VGABIOS_STUB_OP_COPY | (backwards ? 1 : 0) << 8), segment,
         (uint16_t)(backwards ? to + count - 1 : to), segment,
@@ -355,10 +428,17 @@ void vgabios_far_font(
     }
     if (call_current()->direct) {
         for (size_t c = 0; c < count; c++) {
+            uint16_t source = (uint16_t)(from + c * height);
+            uint16_t target = (uint16_t)(to + c * 32);
+            // A font of the ROM's is known here, and goes a character at once.
+            if (in_rom(from_segment, source, height)) {
+                direct_store(to_segment, target, rom_image + source, false, 1, height);
+                continue;
+            }
             for (size_t i = 0; i < height; i++) {
-                uint16_t source = (uint16_t)(from + c * height + i);
                 direct_write(
-                    to_segment, (uint16_t)(to + c * 32 + i), vgabios_peekb(from_segment, source), 1
+                    to_segment, (uint16_t)(target + i),
+                    vgabios_peekb(from_segment, (uint16_t)(source + i)), 1
                 );
             }
         }

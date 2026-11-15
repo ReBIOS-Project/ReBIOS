@@ -48,7 +48,8 @@
 #define ABSENT_REPORTS 16
 
 // The most bytes of a repeated string instruction's operands mmio_string()
-// takes at a time, which a buffer on the stack holds.
+// takes at a time, which a buffer on the stack holds, and of the runs that
+// ReBIOS carries out itself.
 #define STRING_RUN_BYTES 1024
 
 struct region {
@@ -298,10 +299,22 @@ static void mem_outs(struct vcpu *v, uint16_t port, size_t size, uint32_t value)
     io_dispatch(v, port, size, false, &value);
 }
 
-// A run of a repeated string instruction's operands at rDI, or rSI, within a
-// page and within STRING_RUN_BYTES: the guest-physical address of the first,
-// *count cut to the run. False where the first crosses a page, or where any
-// would fault, which the instruction then meets an iteration at a time.
+size_t mmio_run_room(uintptr_t linear, size_t size, int64_t step, size_t count) {
+    size_t in_page = linear & (PAGE_SIZE - 1);
+    if (in_page + size > PAGE_SIZE) {
+        return 0;
+    }
+    size_t room = step > 0 ? (PAGE_SIZE - in_page) / size : in_page / size + 1;
+    if (room > STRING_RUN_BYTES / size) {
+        room = STRING_RUN_BYTES / size;
+    }
+    return count < room ? count : room;
+}
+
+// A run of a repeated string instruction's operands at rDI, or rSI, as far as
+// mmio_run_room() allows: the guest-physical address of the first, *count cut
+// to the run. False where the first crosses a page, or where any would fault,
+// which the instruction then meets an iteration at a time.
 static bool string_run(
     struct vcpu *v,
     const struct insn *insn,
@@ -316,16 +329,9 @@ static bool string_run(
     if (!insn_string_run(v, insn, destination, size, step, 1, write, &linear)) {
         return false;
     }
-    size_t in_page = linear & (PAGE_SIZE - 1);
-    if (in_page + size > PAGE_SIZE) {
+    *count = mmio_run_room(linear, size, step, *count);
+    if (*count == 0) {
         return false;
-    }
-    size_t room = step > 0 ? (PAGE_SIZE - in_page) / size : in_page / size + 1;
-    if (room > STRING_RUN_BYTES / size) {
-        room = STRING_RUN_BYTES / size;
-    }
-    if (*count > room) {
-        *count = room;
     }
     uint32_t pf_error;
     return insn_string_run(v, insn, destination, size, step, *count, write, &linear)
@@ -431,6 +437,67 @@ size_t mmio_string(
         return 0;
     }
     return count;
+}
+
+// Where a run that mmio_run_room() allows is, as string_place() finds it, from
+// the linear address of its first element; false where any element would
+// fault, or the run is not all in one place.
+static bool run_place(
+    struct vcpu *v,
+    uintptr_t linear,
+    size_t size,
+    int64_t step,
+    size_t count,
+    bool write,
+    const struct region **r,
+    uint64_t *offset
+) {
+    uintptr_t gpa;
+    uint32_t pf_error;
+    return guest_mem_linear_to_phys(v, linear, write, false, &gpa, &pf_error)
+        && string_place(gpa, size, step, count, r, offset);
+}
+
+bool mmio_move_run(
+    struct vcpu *v,
+    uintptr_t to,
+    uintptr_t from,
+    size_t size,
+    int64_t step,
+    size_t count
+) {
+    const struct region *source_region;
+    const struct region *region;
+    uint64_t source;
+    uint64_t destination;
+    if (vcpu_breakpoints_armed(v)
+     || !run_place(v, from, size, step, count, false, &source_region, &source)
+     || !run_place(v, to, size, step, count, true, &region, &destination) || region == NULL
+     || region != source_region || region->ops->move_string == NULL) {
+        return false;
+    }
+    region->ops->move_string(v, region->ctx, source, destination, size, step, count);
+    return true;
+}
+
+bool mmio_store_run(
+    struct vcpu *v,
+    uintptr_t to,
+    const uint8_t *data,
+    bool same,
+    size_t size,
+    int64_t step,
+    size_t count
+) {
+    const struct region *region;
+    uint64_t destination;
+    if (vcpu_breakpoints_armed(v)
+     || !run_place(v, to, size, step, count, true, &region, &destination) || region == NULL
+     || region->ops->write_string == NULL) {
+        return false;
+    }
+    region->ops->write_string(v, region->ctx, destination, size, step, data, same, count);
+    return true;
 }
 
 static const struct emulate_mem guest_mem = {
