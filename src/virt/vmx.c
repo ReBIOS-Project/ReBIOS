@@ -105,10 +105,6 @@ static void vmwrite(uint32_t field, uint64_t value) {
 // Fields by width, type, and index (SDM 325462-093 Vol. 3C, Table 27-22);
 // those ReBIOS uses all have an index below 32.
 #define CACHE_SLOTS 512
-#define FIELD_SLOT(field) \
-    (((field) >> 13 & 3) << 7 | ((field) >> 10 & 3) << 5 | ((field) >> 1 & 31))
-#define SLOT_FIELD(slot) \
-    (((slot) >> 7 & 3) << 13 | ((slot) >> 5 & 3) << 10 | ((slot) & 31) << 1)
 #define FIELD_TYPE_HOST 3
 
 // What the VMCS holds, as far as known, and what is still to be written to it:
@@ -132,12 +128,21 @@ static struct vmcs_cache *cache_for(uint32_t field) {
     return v->vmcs_cache;
 }
 
+// A field's slot in the cache, by its width, type, and index, and back.
+static size_t field_slot(uint32_t field) {
+    return (field >> 13 & 3) << 7 | (field >> 10 & 3) << 5 | (field >> 1 & 31);
+}
+
+static uint32_t slot_field(size_t slot) {
+    return (uint32_t)((slot >> 7 & 3) << 13 | (slot >> 5 & 3) << 10 | (slot & 31) << 1);
+}
+
 uint64_t vmx_read(uint32_t field) {
     struct vmcs_cache *c = cache_for(field);
     if (c == NULL) {
         return vmread(field);
     }
-    size_t slot = FIELD_SLOT(field);
+    size_t slot = field_slot(field);
     uint64_t bit = (uint64_t)1 << (slot % 64);
     if ((c->valid[slot / 64] & bit) == 0) {
         c->values[slot] = vmread(field);
@@ -166,7 +171,7 @@ void vmx_write(uint32_t field, uint64_t value) {
             break;
         }
     }
-    size_t slot = FIELD_SLOT(field);
+    size_t slot = field_slot(field);
     uint64_t bit = (uint64_t)1 << (slot % 64);
     if ((c->valid[slot / 64] & bit) != 0 && c->values[slot] == value) {
         return;
@@ -183,13 +188,13 @@ static void cache_flush(struct vmcs_cache *c) {
         while (dirty != 0) {
             size_t slot = w * 64 + (unsigned int)__builtin_ctzll(dirty);
             dirty &= dirty - 1;
-            vmwrite(SLOT_FIELD(slot), c->values[slot]);
+            vmwrite(slot_field(slot), c->values[slot]);
         }
     }
 }
 
 static void cache_forget(struct vmcs_cache *c, uint32_t field) {
-    size_t slot = FIELD_SLOT(field);
+    size_t slot = field_slot(field);
     c->valid[slot / 64] &= ~((uint64_t)1 << (slot % 64));
 }
 
