@@ -346,7 +346,6 @@ void cpu_slice_start(void) {
     struct cpu *cpu = this_cpu();
     cpu->slice_start = time_ns();
     cpu->slice_start_tsc = rdtsc();
-    cpu->slice_end = cpu->slice_start + CPU_SLICE_NS;
     cpu->slice_end_tsc = cpu->slice_start_tsc + slice_tsc();
 }
 
@@ -368,7 +367,7 @@ bool cpu_exits_slow(void) {
 }
 
 bool cpu_slice_over(void) {
-    return time_ns() >= this_cpu()->slice_end;
+    return rdtsc() >= this_cpu()->slice_end_tsc;
 }
 
 struct cpu *cpu_area_alloc(size_t index, uint32_t apic_id, bool bsp) {

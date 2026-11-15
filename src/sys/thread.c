@@ -155,7 +155,7 @@ void thread_preempt(uint64_t *rflags) {
     // so that the guest sees to what it brought first. A call that the guest
     // waits on leaves the slice to what its exit does next.
     if (cpu->threads_turn) {
-        cpu->slice_end = 0;
+        cpu->slice_end_tsc = 0;
     }
     if (t == NULL) {
         return;
