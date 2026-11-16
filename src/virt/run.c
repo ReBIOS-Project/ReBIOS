@@ -555,8 +555,9 @@ static int segment_check(
     return STOP_NONE;
 }
 
-// The effective address of the ModRM or offset operand, and its segment, as
-// insn.c's mem_ea() forms it, from the run's registers.
+// The effective address of the ModRM or offset operand, as insn.c's mem_ea()
+// forms it, or of XLAT's table entry, and its segment, from the run's
+// registers.
 static bool effective_address(
     const struct run_state *rs,
     const struct insn *insn,
@@ -569,6 +570,10 @@ static bool effective_address(
     unsigned int rm = insn->modrm & 7;
     if (insn->opcode >= 0xa0 && insn->opcode <= 0xa3) {
         ea = insn->imm;
+    } else if (insn->opcode == 0xd7) {
+        // rBX plus AL taken unsigned, at the address size (SDM 325462-093 Vol.
+        // 2D, XLAT/XLATB).
+        ea = (rs->gpr[3] + (rs->gpr[0] & 0xff)) & size_mask(insn->address_size);
     } else if (!insn->has_modrm || mod == 3) {
         return false;
     } else if (insn->address_size == 2) {
@@ -1633,6 +1638,20 @@ static int carry_out(struct vcpu *v, struct run_state *rs, const struct insn *in
             }
             return next(rs, insn);
         }
+        case 0x63: {
+            // MOVSXD with REX.W, a doubleword sign-extended to a quadword. Its
+            // other forms, and ARPL outside 64-bit mode, are left to the
+            // processor.
+            if (!insn->long_mode || operand_size != 8) {
+                return STOP_UNSUPPORTED;
+            }
+            stop = rm_operand(v, rs, insn, 4, NEED_READ, &o);
+            if (stop != STOP_NONE) {
+                return stop;
+            }
+            set(rs, insn, reg, 8, sign_extend(load(v, rs, insn, &o), 4));
+            return next(rs, insn);
+        }
         case 0x68:
         case 0x6a: {
             stop = push(v, rs, &imm, 1, stack_slot(insn));
@@ -1915,6 +1934,14 @@ static int carry_out(struct vcpu *v, struct run_state *rs, const struct insn *in
         }
         case 0xcf: {
             return interrupt_return(v, rs, insn);
+        }
+        case 0xd7: {
+            stop = memory_operand(v, rs, insn, 1, NEED_READ, &o);
+            if (stop != STOP_NONE) {
+                return stop;
+            }
+            set(rs, insn, 0, 1, load(v, rs, insn, &o));
+            return next(rs, insn);
         }
         case 0xe0:
         case 0xe1:
