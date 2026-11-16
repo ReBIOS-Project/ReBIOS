@@ -52,6 +52,9 @@
 #define STALL_ROUNDS 3
 // The memory map buffer's room for descriptors beyond the map it is sized for.
 #define MAP_SLACK_BYTES 4096
+// The tries at ExitBootServices(), whose map key any allocation of memory
+// meanwhile changes, the firmware's own included.
+#define EXIT_ATTEMPTS 128
 
 static struct efi_guid loaded_image_guid = EFI_LOADED_IMAGE_PROTOCOL_GUID;
 
@@ -73,32 +76,30 @@ static uint64_t measure_tsc_hz(void) {
 }
 
 // The memory map buffer must exist before the map that goes into it is taken,
-// so it gets slack for the descriptors its own allocation adds, and for those
-// that appear before the map key can be used: once ExitBootServices() has been
-// called, GetMemoryMap() is the only other service left to call (UEFI 2.11,
-// 7.4), so the buffer is never replaced after that, as Linux 7.3's stub keeps
-// it (efi_exit_boot_services()). It is only recorded as reserved once final,
-// so that it is not counted twice.
+// so it gets slack for the descriptors its own allocation adds. The map is
+// taken again, in a larger buffer where it outgrew the last, for as long as
+// ExitBootServices() refuses its key, the Memory Allocation Services being
+// left to call after a first call to it (UEFI 2.11, 7.4.6). The buffer is only
+// recorded as reserved once final, so that it is not counted twice.
 static bool exit_boot_services(void) {
     size_t map_key;
     size_t desc_size;
     uint32_t desc_version;
     uintptr_t buf = 0;
     size_t buf_size = 0;
-    bool called = false;
 
     // Room for the buffer's own entry.
     if (loader_handoff->reserved_count == HANDOFF_MAX_RESERVED) {
         return false;
     }
 
-    for (size_t attempt = 0; attempt < 16; attempt++) {
+    for (size_t attempt = 0; attempt < EXIT_ATTEMPTS; attempt++) {
         size_t size = buf_size;
         efi_status status = efi_bs->get_memory_map(
             &size, (struct efi_memory_descriptor *)(uintptr_t)buf, &map_key, &desc_size,
             &desc_version
         );
-        if (status == EFI_BUFFER_TOO_SMALL && !called) {
+        if (status == EFI_BUFFER_TOO_SMALL) {
             if (buf != 0) {
                 efi_bs->free_pages(buf, EFI_SIZE_TO_PAGES(buf_size));
             }
@@ -113,7 +114,6 @@ static bool exit_boot_services(void) {
             return false;
         }
 
-        called = true;
         if (efi_bs->exit_boot_services(efi_image_handle, map_key) == EFI_SUCCESS) {
             efi_glue_boot_services_exited = true;
             loader_reserve(buf, EFI_SIZE_TO_PAGES(buf_size));
