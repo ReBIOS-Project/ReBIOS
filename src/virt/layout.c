@@ -49,6 +49,12 @@
 #define HT_END ((uint64_t)0x10000000000)
 #define VGA_BASE ((uint64_t)0xa0000)
 #define VGA_END ((uint64_t)0xc0000)
+// Where the guest's RAM above 4 GiB ends: on an 8 MiB boundary, as AMD's
+// TOP_MEM2 ends it (APM 24593 rev. 3.46, 7.9.4), which is a whole MiB too, as
+// Intel's TOUUD ends it (Alder Lake-N datasheet 759604-003, 2.7.2). OSes can
+// take the top of the E820 map for a large page's boundary, as TempleOS V5.03
+// does for its uncached alias of memory, which it maps in 2 MiB pages.
+#define HIGH_RAM_ALIGN ((uint64_t)0x800000)
 
 #define MAX_RANGES 1024
 #define MAX_TAKEN 8
@@ -307,7 +313,8 @@ static void assign_rest(const struct range_list *guest, const struct range_list 
 
 // Above 4 GiB, from 4 GiB on, as much as there is around what keeps its place.
 // Lays size bytes of RAM out from 4 GiB around what is to be avoided, into ram
-// and fill where given; returns where it ends.
+// and fill where given, up to the last HIGH_RAM_ALIGN boundary they reach;
+// returns where it ends.
 static uint64_t add_high(struct range_list *fill, size_t size, const struct range_list *avoid) {
     uintptr_t at = FOUR_GIB;
     for (size_t i = 0; i <= avoid->count && size != 0; i++) {
@@ -329,7 +336,19 @@ static uint64_t add_high(struct range_list *fill, size_t size, const struct rang
             at = avoid->r[i].end;
         }
     }
-    return at;
+    // What passes the boundary is absent for the guest, not reserved, as what
+    // lies past TOP_MEM2 is: the map ends at the boundary.
+    uintptr_t top = align_down(at, HIGH_RAM_ALIGN);
+    if (fill != NULL && top < at) {
+        range_list_remove(&ram, top, at);
+        range_list_remove(fill, top, at);
+        printf(
+            "Guest RAM above 4 GiB ends at %#llx, on an 8 MiB boundary, where AMD's and Intel's "
+            "memory controllers can end it: %llu KiB of the host's memory is left unused\n",
+            (unsigned long long)top, (unsigned long long)((at - top) >> 10)
+        );
+    }
+    return top;
 }
 
 void layout_init(void) {
