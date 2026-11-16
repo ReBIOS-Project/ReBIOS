@@ -342,7 +342,7 @@ static bool table_kept(const uint8_t *table) {
     return false;
 }
 
-bool guest_acpi_build(uint8_t rsdp[GUEST_ACPI_RSDP_SIZE]) {
+bool guest_acpi_build(uint8_t rsdp[static GUEST_ACPI_RSDP_SIZE]) {
     size_t dsdt_length;
     uint8_t *dsdt = vacpi_dsdt(&dsdt_length);
     if (dsdt == NULL) {

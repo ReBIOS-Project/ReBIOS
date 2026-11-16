@@ -164,10 +164,10 @@ void aml_field_unit(struct aml *a, const char *name, uint32_t bits);
 void aml_table_header(
     uint8_t *table,
     size_t length,
-    const char signature[4],
+    const char signature[static 4],
     uint8_t revision,
-    const char oem_id[6],
-    const char oem_table_id[8],
+    const char oem_id[static 6],
+    const char oem_table_id[static 8],
     uint32_t oem_revision
 );
 

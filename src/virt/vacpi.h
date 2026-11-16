@@ -46,8 +46,8 @@ bool vacpi_call_waits(const struct cpu *cpu);
 uint8_t *vacpi_dsdt(size_t *length);
 
 // A revision 1 FADT and a FACS for the guest's tables.
-void vacpi_fadt(uint8_t fadt[VACPI_FADT_SIZE], uint32_t facs, uint32_t dsdt);
-void vacpi_facs(uint8_t facs[VACPI_FACS_SIZE]);
+void vacpi_fadt(uint8_t fadt[static VACPI_FADT_SIZE], uint32_t facs, uint32_t dsdt);
+void vacpi_facs(uint8_t facs[static VACPI_FACS_SIZE]);
 
 // For HYPERCALL_PNP_NODES, whose struct is at gpa, after vacpi_dsdt(): the
 // legacy devices and motherboard resources the guest's ACPI describes, as the

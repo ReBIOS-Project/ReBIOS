@@ -601,7 +601,7 @@ static uint64_t smbios_find(void) {
 
 // SMBIOS's System Information structure's string at offset (DSP0134 3.9.0,
 // 7.2), cut short to fit.
-static void dmi_copy(char out[HANDOFF_DMI_MAX], uint8_t offset) {
+static void dmi_copy(char out[static HANDOFF_DMI_MAX], uint8_t offset) {
     const char *string = fwtables_smbios_string(SMBIOS_TYPE_SYSTEM, offset);
     size_t len = 0;
     while (string != NULL && len < HANDOFF_DMI_MAX - 1 && string[len] != 0) {

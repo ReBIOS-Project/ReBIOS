@@ -140,7 +140,7 @@ static bool madt_uid(const uint8_t *madt, size_t length, uint32_t apic_id, uint3
 // NMI structure, which describes the processor as its Local x2APIC structure
 // does, and a Local APIC NMI structure's 8-bit UID names no processor whose
 // UID is above FEh.
-static bool madt_nmi_pins(uint32_t apic_id, struct nmi_pin pins[2]) {
+static bool madt_nmi_pins(uint32_t apic_id, struct nmi_pin pins[static 2]) {
     if (!acpi_tables_ready()) {
         return false;
     }

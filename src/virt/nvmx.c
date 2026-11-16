@@ -2452,7 +2452,7 @@ static uint64_t operand_register(struct vcpu *v, uint64_t info) {
 }
 
 // The 128-bit descriptor INVEPT and INVVPID take.
-static bool read_descriptor(struct vcpu *v, uint64_t info, uint64_t desc[2]) {
+static bool read_descriptor(struct vcpu *v, uint64_t info, uint64_t desc[static 2]) {
     uintptr_t linear;
     if (!operand_address(v, info, 16, false, &linear)
      || !mmio_read_linear(v, linear, &desc[0], 8)) {

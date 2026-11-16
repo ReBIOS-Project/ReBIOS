@@ -283,7 +283,7 @@ static const char *const left_out_merged[] = {
     "_HID", "_CID", "_UID", "_ADR", "_SEG", "_BBN", "_CRS", "_PRS", "_SRS",
     "_DIS", "_CBA", "_OSC", NULL
 };
-static bool name_in(const char name[4], const char *const *list) {
+static bool name_in(const char name[static 4], const char *const *list) {
     for (size_t i = 0; list[i] != NULL; i++) {
         if (memcmp(name, list[i], 4) == 0) {
             return true;
@@ -297,7 +297,7 @@ static bool hex_digit(char c) {
 }
 
 // _Lxx, _Exx, _Qxx: the firmware's event handlers.
-static bool event_method(const char name[4]) {
+static bool event_method(const char name[static 4]) {
     return name[0] == '_' && (name[1] == 'L' || name[1] == 'E' || name[1] == 'Q')
         && hex_digit(name[2]) && hex_digit(name[3]);
 }
@@ -372,7 +372,7 @@ static void helper(struct aml *a, const char *name) {
     aml_name(a, path);
 }
 
-static void emit_seg(struct aml *a, const char name[4]) {
+static void emit_seg(struct aml *a, const char name[static 4]) {
     aml_bytes(a, name, 4);
 }
 
@@ -494,13 +494,13 @@ static void release(struct aml *a) {
 }
 
 static bool crs_replaced(uacpi_namespace_node *device);
-static bool resource_name(const char name[4]);
+static bool resource_name(const char name[static 4]);
 static bool template_object(uacpi_object **obj, bool to_guest);
 
 // What the guest has in the place of an object of the firmware's, if anything
 // else: nothing for the identity of a host bridge below its own, and bus 0 of
 // segment 0 for its own. Returns whether it is something else.
-static bool emit_replaced(struct aml *a, uacpi_namespace_node *node, const char name[4]) {
+static bool emit_replaced(struct aml *a, uacpi_namespace_node *node, const char name[static 4]) {
     uacpi_namespace_node *parent = uacpi_namespace_node_parent(node);
     if (merged_of(parent) != NULL && name_in(name, left_out_merged)) {
         return true;
@@ -517,7 +517,7 @@ static bool emit_replaced(struct aml *a, uacpi_namespace_node *node, const char 
 
 // A stub that returns what the firmware's method, or name, of the index gives,
 // for up to CALL_ARGS arguments.
-static void emit_call_stub(struct aml *a, const char name[4], size_t index, size_t args) {
+static void emit_call_stub(struct aml *a, const char name[static 4], size_t index, size_t args) {
     aml_begin(a, AML_METHOD);
     emit_seg(a, name);
     aml_byte(a, (uint8_t)args);
@@ -895,7 +895,7 @@ static bool object_usable(uacpi_namespace_node *node, bool (*usable)(uacpi_objec
 // A processor's C-state, CPPC, or throttling object, which the guest's stub
 // reads from the firmware each time, where the guest can use what it holds
 // when the namespace is made.
-static void emit_live(struct aml *a, uacpi_namespace_node *node, const char name[4]) {
+static void emit_live(struct aml *a, uacpi_namespace_node *node, const char name[static 4]) {
     uacpi_namespace_node *processor = uacpi_namespace_node_parent(node);
     int filter = FILTER_NONE;
     bool given;
@@ -930,7 +930,7 @@ static void emit_live(struct aml *a, uacpi_namespace_node *node, const char name
 static void emit_method(
     struct aml *a,
     uacpi_namespace_node *node,
-    const char name[4],
+    const char name[static 4],
     bool in_processor
 ) {
     if (in_processor && name_in(name, processor_live)) {
@@ -991,7 +991,7 @@ static void emit_method(
     aml_end(a);
 }
 
-static void emit_name(struct aml *a, uacpi_namespace_node *node, const char name[4]) {
+static void emit_name(struct aml *a, uacpi_namespace_node *node, const char name[static 4]) {
     if (name_in(name, left_out_names)
      || (memcmp(name, "_CRS", 4) == 0 && crs_replaced(uacpi_namespace_node_parent(node))) != 0) {
         return;
@@ -1274,7 +1274,7 @@ static uint32_t put_window(uint8_t *out, uintptr_t base, uintptr_t end, bool hig
 
 // Whether a device's object by that name is a resource template, as its
 // current and its possible resources are.
-static bool resource_name(const char name[4]) {
+static bool resource_name(const char name[static 4]) {
     return memcmp(name, "_CRS", 4) == 0 || memcmp(name, "_PRS", 4) == 0;
 }
 
@@ -1704,7 +1704,7 @@ static bool child_named(uacpi_namespace_node *parent, const char *name) {
     return uacpi_namespace_node_find(parent, name, &child) == UACPI_STATUS_OK;
 }
 
-static bool merged_name_free(const char name[4]) {
+static bool merged_name_free(const char name[static 4]) {
     char text[5];
     memcpy(text, name, 4);
     text[4] = '\0';
@@ -2169,7 +2169,7 @@ static void emit_serp(struct aml *a) {
     aml_end(a);
 }
 
-static void slot_name(char out[5], size_t slot, char kind) {
+static void slot_name(char out[static 5], size_t slot, char kind) {
     out[0] = 'S';
     out[1] = (char)('0' + slot);
     out[2] = kind;
@@ -3061,9 +3061,9 @@ static void emit_sleep_and_events(struct aml *a) {
 }
 
 static void sdt_ids(
-    const char signature[4],
-    char oem_id[6],
-    char oem_table_id[8],
+    const char signature[static 4],
+    char oem_id[static 6],
+    char oem_table_id[static 8],
     uint32_t *oem_revision
 ) {
     memcpy(oem_id, "REBIOS", 6);
@@ -3119,13 +3119,13 @@ uint8_t *vacpi_dsdt(size_t *length) {
 
 // The guest has no sleep state to resume from, and no firmware to share the
 // global lock with.
-void vacpi_facs(uint8_t facs[VACPI_FACS_SIZE]) {
+void vacpi_facs(uint8_t facs[static VACPI_FACS_SIZE]) {
     memset(facs, 0, VACPI_FACS_SIZE);
     memcpy(facs, "FACS", 4);
     write_le32(facs + 4, VACPI_FACS_SIZE);
 }
 
-void vacpi_fadt(uint8_t fadt[VACPI_FADT_SIZE], uint32_t facs, uint32_t dsdt) {
+void vacpi_fadt(uint8_t fadt[static VACPI_FADT_SIZE], uint32_t facs, uint32_t dsdt) {
     memset(fadt, 0, VACPI_FADT_SIZE);
     write_le32(fadt + FADT_FIRMWARE_CTRL, facs);
     write_le32(fadt + FADT_DSDT, dsdt);

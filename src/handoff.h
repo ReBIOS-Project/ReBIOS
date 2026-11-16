@@ -192,7 +192,10 @@ struct handoff_block_device {
 // A part's name in UTF-16 characters, its NUL included.
 #define HANDOFF_LOG_PART_NAME_LEN 14
 
-static inline void handoff_log_part_name(uint16_t name[HANDOFF_LOG_PART_NAME_LEN], size_t part) {
+static inline void handoff_log_part_name(
+    uint16_t name[static HANDOFF_LOG_PART_NAME_LEN],
+    size_t part
+) {
     static const uint16_t base[] = HANDOFF_LOG_VARIABLE;
     size_t len = sizeof(base) / sizeof(uint16_t) - 1;
     for (size_t i = 0; i < len; i++) {

@@ -28,6 +28,6 @@
 // tables that make sense to the guest as they are, with the processors the
 // guest does not get marked unusable. Fills rsdp with an RSDP for them. Needs
 // smp_start_aps() and vacpi_init(). Returns false if there is no usable ACPI.
-bool guest_acpi_build(uint8_t rsdp[GUEST_ACPI_RSDP_SIZE]);
+bool guest_acpi_build(uint8_t rsdp[static GUEST_ACPI_RSDP_SIZE]);
 
 #endif
