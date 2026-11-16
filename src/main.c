@@ -22,6 +22,7 @@
 #include <core.h>
 #include <handoff.h>
 #include <lib/log.h>
+#include <lib/printf.h>
 #include <lib/util.h>
 #include <loader/acpi_save.h>
 #include <loader/bootdev.h>
@@ -80,8 +81,9 @@ static uint64_t measure_tsc_hz(void) {
 // taken again, in a larger buffer where it outgrew the last, for as long as
 // ExitBootServices() refuses its key, the Memory Allocation Services being
 // left to call after a first call to it (UEFI 2.11, 7.4.6). The buffer is only
-// recorded as reserved once final, so that it is not counted twice.
-static bool exit_boot_services(void) {
+// recorded as reserved once final, so that it is not counted twice. Where it
+// fails, why goes in why.
+static bool exit_boot_services(char *why, size_t why_size) {
     size_t map_key;
     size_t desc_size;
     uint32_t desc_version;
@@ -90,12 +92,17 @@ static bool exit_boot_services(void) {
 
     // Room for the buffer's own entry.
     if (loader_handoff->reserved_count == HANDOFF_MAX_RESERVED) {
+        snprintf(
+            why, why_size, "the memory map's buffer would be a reserved range past the %d kept",
+            HANDOFF_MAX_RESERVED
+        );
         return false;
     }
 
+    efi_status status = EFI_SUCCESS;
     for (size_t attempt = 0; attempt < EXIT_ATTEMPTS; attempt++) {
         size_t size = buf_size;
-        efi_status status = efi_bs->get_memory_map(
+        status = efi_bs->get_memory_map(
             &size, (struct efi_memory_descriptor *)(uintptr_t)buf, &map_key, &desc_size,
             &desc_version
         );
@@ -106,15 +113,30 @@ static bool exit_boot_services(void) {
             buf_size = align_up(size + MAP_SLACK_BYTES, EFI_PAGE_SIZE);
             buf = efi_glue_alloc_pages(EFI_SIZE_TO_PAGES(buf_size), 0);
             if (buf == 0) {
+                snprintf(
+                    why, why_size, "no %zu bytes are free for the memory map of %zu bytes",
+                    buf_size, size
+                );
                 return false;
             }
             continue;
         }
-        if (status != EFI_SUCCESS || desc_size < sizeof(struct efi_memory_descriptor)) {
+        if (status != EFI_SUCCESS) {
+            snprintf(
+                why, why_size, "GetMemoryMap() fails, status %#llx", (unsigned long long)status
+            );
+            return false;
+        }
+        if (desc_size < sizeof(struct efi_memory_descriptor)) {
+            snprintf(
+                why, why_size, "the memory map's descriptors have %zu bytes, UEFI's %zu",
+                desc_size, sizeof(struct efi_memory_descriptor)
+            );
             return false;
         }
 
-        if (efi_bs->exit_boot_services(efi_image_handle, map_key) == EFI_SUCCESS) {
+        status = efi_bs->exit_boot_services(efi_image_handle, map_key);
+        if (status == EFI_SUCCESS) {
             efi_glue_boot_services_exited = true;
             loader_reserve(buf, EFI_SIZE_TO_PAGES(buf_size));
             loader_handoff->efi_mmap = buf;
@@ -125,6 +147,10 @@ static bool exit_boot_services(void) {
         }
     }
 
+    snprintf(
+        why, why_size, "ExitBootServices() refuses all %d tries, the last with status %#llx",
+        EXIT_ATTEMPTS, (unsigned long long)status
+    );
     return false;
 }
 
@@ -320,8 +346,9 @@ efi_status efi_main(efi_handle image_handle, struct efi_system_table *system_tab
     printf("Map top %#llx\n", (unsigned long long)map_top);
 
     video_exit_boot_services();
-    if (!exit_boot_services()) {
-        panic("Cannot exit boot services\n");
+    char why[160];
+    if (!exit_boot_services(why, sizeof(why))) {
+        panic("Cannot exit boot services: %s\n", why);
     }
 
     // The new tables identity map this code and its stack, like the
