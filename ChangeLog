@@ -1,3 +1,139 @@
+2026-11-16  Mintsuki  <mintsuki@protonmail.com>
+
+    *** Release 0.11.0 ***
+
+    Noteworthy changes compared to the previous release, 0.10.0:
+
+    New features:
+        - Hide the HPET from the OS unless the new hpet setting is on, as
+          firmware setups that turn it off do: the OS keeps time with the
+          other timers, and ReBIOS is spared the OS's writes to the HPET, each
+          of which passes through it, and of which Windows makes many.
+        - Write the firmware's ACPI tables to rebios-acpi.txt at each start
+          with the new save_acpi setting, and the tables ReBIOS gave the OS to
+          rebios-guest-acpi.txt at the start after a restart, both in the text
+          format of ACPICA's acpidump.
+        - Run ReBIOS's own work, the firmware's AML, USB, and the drawing of
+          the emulated VGA, in threads that the guest's interrupts preempt,
+          the drawing on every processor: work that the guest waits on, such
+          as a video BIOS call, and the drawing of a frame, which the screen
+          waits on, run until done but for the guest's interrupts, while the
+          rest takes at most a twentieth of a processor as long as the guest
+          runs.
+        - Carry out the guest's MONITOR and MWAIT in the hypervisor, entering
+          the C-state that the guest asks for, so that ReBIOS's threads have
+          the time of a processor that the guest leaves idle.
+        - Let the OS read and write the RTC's clock registers without VM exits
+          while it has one selected, the index port still ReBIOS's, which more
+          than doubles the time a Windows that keeps its clock with the RTC at
+          2048 Hz has for itself under nested KVM, and leave the RTC's index
+          on the register ReBIOS last used, putting the firmware AML's own
+          back only before the AML's next access.
+        - Move and fill video memory in the emulated VGA's video BIOS, and
+          load its ROM's fonts, a run at a time rather than a byte at a time:
+          under nested KVM, scrolling text runs 7.3 times as fast, scrolling
+          in mode 12h 14 times, setting modes 7.5 times, and teletype output
+          1.9 times.
+        - Carry out REP MOVS and REP STOS on the emulated VGA's memory in its
+          runs a block of up to 1 KiB at a time, under one lock rather than
+          one for each element: under nested KVM, filling the screen runs 6.2
+          times as fast as in 0.10.0 in text mode, 6.7 times in mode X, 5.7
+          times in mode 12h, 3.1 times in mode 13h, and 3.2 times in banked
+          VBE modes, and mode 12h's copies through the latches 15 times.
+        - Carry out XLAT and MOVSXD in the emulated VGA's runs too: TempleOS
+          V5.03, which draws its screen through XLAT, took a VM exit at each
+          of its stores to video memory, and now gets from its CD to the
+          installer's first question in 35 s rather than 88 s under nested
+          KVM.
+
+    Bug fixes:
+        - Give the guest the interrupts of the ACPI namespace's devices that
+          are not the legacy PC's, such as the GPIO controllers that I2C
+          touchpads signal through, which never reached it.
+        - Map a PCI function's BARs into the guest only while the function
+          decodes them, as hardware does, so that a device the firmware left
+          off no longer covers the registers of a device that the guest moved
+          into its range, as Windows 98 does.
+        - Initialise the ACPI namespace, its embedded controller first, before
+          ReBIOS evaluates any device, as an OS does: methods that read the
+          embedded controller, such as a battery's, failed on machines such as
+          the Lenovo IdeaPad D330.
+        - Run the embedded controller's _REG methods after the ACPI
+          namespace's _INI methods, as Linux does, rather than before: the
+          Lenovo IdeaPad D330's _REG reads what its _INI found, and left the
+          rest of its work undone.
+        - Give the guest an OpRegion 2.0's raw VBT at an address in its own
+          memory, pointing RVDA there, rather than keep the raw VBT at its
+          address on the host, which made a hole in the guest's RAM, as on the
+          Lenovo IdeaPad D330.
+        - Take the USB controllers' memory from the very top of the guest's
+          RAM, before the integrated GPU's OpRegion takes its own, so that no
+          strip of RAM is left between them.
+        - Give the guest its serial and parallel ports at a PC's addresses on
+          the ISA IRQs a PC has them on, COM1 on IRQ 4 and COM2 on IRQ 3 among
+          them, whatever the firmware wires them to, moving the device that
+          had the IRQ to the port's, so that OSes that read no firmware
+          tables, such as Windows 98 in its legacy mode, get the ports'
+          interrupts, and no PCI device shares them.
+        - Give the OS the processors' power management as the firmware has it,
+          P-states, C-states, CPPC, and throttling, read from the firmware
+          each time the OS reads it, but for what the OS cannot use under
+          ReBIOS, telling the firmware through the processors' _OSC, else
+          _PDC, and through PSTATE_CNT and CST_CNT where the FADT asks for
+          them, that the OS manages them, as Linux does: OSes that set the
+          clock through them, such as Windows XP and 7, stayed at the clock
+          the firmware left, often well below the processor's top one, and
+          Windows only idled in C1.
+        - Give the OS the packages that the firmware's ACPI methods return,
+          whatever their shape: those of methods outside a fixed list, such as
+          _DSM, came back empty.
+        - Give the OS the strings that the firmware's ACPI methods return
+          without a trailing space: a battery's type no longer reads as
+          unknown, for one.
+        - Tell the OS that the machine supports docking where its firmware's
+          FADT says so, as the OS gets the firmware's dock devices: Windows
+          stops with STOP 0xA5 at a dock device of a machine that does not
+          claim to support docking.
+        - With the VGA emulated, give the OS the card's own Video BIOS image
+          at C0000h as it came, where drivers read their card's tables, and
+          the emulated VGA's video BIOS as a ROM of its own after it, the
+          card's code never running, also for a Video BIOS that ReBIOS does
+          not run: AMD's Windows 7 driver gave the Vega 3 of an Acer Aspire 3
+          Code 43.
+        - Keep the hypervisor's memory ranges that touch as one, so that
+          ReBIOS no longer runs out of room for them and stops with "Too many
+          hypervisor memory ranges", as it did on a tester's machine with the
+          VGA emulated.
+        - Save only the log's new text each time with save_log, in numbered
+          variables from ReBIOSLog0000 on, and no longer have the firmware
+          collect its variable store's garbage while the OS runs: on machines
+          whose firmware does that at runtime, such as the Lenovo IdeaPad
+          D330, it held a processor for seconds, and the OS froze every minute
+          and a half or so.
+        - Take the memory map again in a larger buffer where it outgrew the
+          last after the firmware refused ExitBootServices(), as UEFI 2.11
+          allows, for up to 128 tries rather than 16, and say why where boot
+          services still cannot be exited: ReBIOS stopped with "Cannot exit
+          boot services" on an MSI B550M-Pro VDH.
+        - End the guest's RAM above 4 GiB on an 8 MiB boundary, where AMD's
+          and Intel's memory controllers can end it, for OSes that take the
+          top of the memory map for the boundary of a large page, as TempleOS
+          V5.03 does, which showed a black screen.
+        - Show the legacy BIOS's image read-only at the top of 4 GiB too,
+          where a PC's chipset decodes its BIOS flash, reserved in the memory
+          map and claimed in ACPI and the Plug and Play BIOS: the memory map
+          then ends at 4 GiB or above, as TempleOS V5.03 expects of a PC,
+          which showed a black screen with no RAM above 4 GiB.
+
+    Miscellaneous:
+        - Update Tendril to its latest version, which reports from its next
+          poll what finished during a call into it, and ask it for disk
+          transfers and keyboard lights right before its polls: a USB disk on
+          xHCI reads at 33 MB/s rather than 27 to 30 under nested KVM.
+        - Update freestanding-lgrt to its workaround for GCC 13.1 and 13.2,
+          which drop atomic stores, and to its __extendhfbf2, which GCC 13.1,
+          13.2, and 14.1 call.
+
 2026-11-12  Mintsuki  <mintsuki@protonmail.com>
 
     *** Release 0.10.0 ***
