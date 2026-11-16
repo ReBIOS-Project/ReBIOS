@@ -18,7 +18,7 @@
 // The status flags: CF, PF, AF, ZF, SF, and OF.
 #define STATUS 0x8d5
 
-.text
+.section .text
 
 // alu_run(stub, dst, src, rflags) runs a stub on dst in RAX and src in RDX and
 // CL, with the status flags of *rflags, which it updates. The host's other

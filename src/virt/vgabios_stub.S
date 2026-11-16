@@ -39,7 +39,7 @@ vgabios_stub:
 .byte 0
 // The initialisation entry point, which the BIOS calls far at offset 3.
 .byte 0xe9
-.word init_entry - (. + 2)
+.short init_entry - (. + 2)
 // Software looks for an IBM video BIOS by this signature.
 .org 0x1e
 .ascii "IBM"
@@ -329,22 +329,22 @@ on_screen:
 
 // By AH, what is done here, up to the last the table has.
 calls_here:
-.word door - vgabios_stub
-.word door - vgabios_stub
-.word set_cursor - vgabios_stub
-.word get_cursor - vgabios_stub
-.word door - vgabios_stub
-.word door - vgabios_stub
-.word door - vgabios_stub
-.word door - vgabios_stub
-.word read_char - vgabios_stub
-.word write_char_attribute - vgabios_stub
-.word write_char - vgabios_stub
-.word door - vgabios_stub
-.word write_pixel - vgabios_stub
-.word read_pixel - vgabios_stub
-.word teletype - vgabios_stub
-.word get_mode - vgabios_stub
+.short door - vgabios_stub
+.short door - vgabios_stub
+.short set_cursor - vgabios_stub
+.short get_cursor - vgabios_stub
+.short door - vgabios_stub
+.short door - vgabios_stub
+.short door - vgabios_stub
+.short door - vgabios_stub
+.short read_char - vgabios_stub
+.short write_char_attribute - vgabios_stub
+.short write_char - vgabios_stub
+.short door - vgabios_stub
+.short write_pixel - vgabios_stub
+.short read_pixel - vgabios_stub
+.short teletype - vgabios_stub
+.short get_mode - vgabios_stub
 
 // VBE's window function, which takes AX=4F05h's registers but for AX.
 .globl vgabios_stub_window
@@ -697,27 +697,27 @@ op_ecx_high:
 
 // In the operations' order, VGABIOS_STUB_OP_DONE to VGABIOS_STUB_OP_DAC_ROM.
 operations:
-.word op_done - vgabios_stub
-.word next - vgabios_stub
-.word op_registers - vgabios_stub
-.word op_set_register - vgabios_stub
-.word op_bda_read8 - vgabios_stub
-.word op_bda_read16 - vgabios_stub
-.word op_bda_write8 - vgabios_stub
-.word op_bda_write16 - vgabios_stub
-.word op_read8 - vgabios_stub
-.word op_read16 - vgabios_stub
-.word op_write8 - vgabios_stub
-.word op_write16 - vgabios_stub
-.word op_fill8 - vgabios_stub
-.word op_fill16 - vgabios_stub
-.word op_copy - vgabios_stub
-.word op_font - vgabios_stub
-.word op_out_block - vgabios_stub
-.word op_write_block - vgabios_stub
-.word op_read_block - vgabios_stub
-.word op_ecx_high - vgabios_stub
-.word op_dac_rom - vgabios_stub
+.short op_done - vgabios_stub
+.short next - vgabios_stub
+.short op_registers - vgabios_stub
+.short op_set_register - vgabios_stub
+.short op_bda_read8 - vgabios_stub
+.short op_bda_read16 - vgabios_stub
+.short op_bda_write8 - vgabios_stub
+.short op_bda_write16 - vgabios_stub
+.short op_read8 - vgabios_stub
+.short op_read16 - vgabios_stub
+.short op_write8 - vgabios_stub
+.short op_write16 - vgabios_stub
+.short op_fill8 - vgabios_stub
+.short op_fill16 - vgabios_stub
+.short op_copy - vgabios_stub
+.short op_font - vgabios_stub
+.short op_out_block - vgabios_stub
+.short op_write_block - vgabios_stub
+.short op_read_block - vgabios_stub
+.short op_ecx_high - vgabios_stub
+.short op_dac_rom - vgabios_stub
 .size vgabios_stub, . - vgabios_stub
 
 .globl vgabios_stub_end

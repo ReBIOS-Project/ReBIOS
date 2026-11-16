@@ -31,7 +31,7 @@
 #define GPR_R14 112
 #define GPR_R15 120
 
-.text
+.section .text
 
 // svm_enter(vmcb_pa, gprs) runs the guest until its next #VMEXIT, with the
 // state VMLOAD and VMSAVE cover loaded from and saved to the VMCB, as nothing

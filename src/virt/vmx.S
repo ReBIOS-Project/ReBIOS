@@ -36,7 +36,7 @@
 
 #define VMCS_HOST_RSP 0x6c14
 
-.text
+.section .text
 
 // vmx_enter(gprs, launched) returns 0 after a VM exit, with the guest's
 // registers in *gprs, 1 if the VM entry failed, or 2 if an NMI reached the

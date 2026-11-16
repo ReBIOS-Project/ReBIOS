@@ -15,7 +15,7 @@
 // You should have received a copy of the GNU General Public License along with
 // ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-.text
+.section .text
 
 // thread_swap(save_rsp, rsp) leaves the callee-saved registers on this stack,
 // and its pointer in *save_rsp, then carries on from rsp, as another

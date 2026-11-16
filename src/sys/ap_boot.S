@@ -171,16 +171,16 @@ ap_boot_gdt:
 .quad 0x00af9a000000ffff
 .size ap_boot_gdt, . - ap_boot_gdt
 ap_boot_gdtr:
-.word 4 * 8 - 1
+.short 4 * 8 - 1
 .long 0
 .size ap_boot_gdtr, . - ap_boot_gdtr
 ap_boot_pm32_ptr:
 .long 0
-.word 0x08
+.short 0x08
 .size ap_boot_pm32_ptr, . - ap_boot_pm32_ptr
 ap_boot_lm64_ptr:
 .long 0
-.word 0x18
+.short 0x18
 .size ap_boot_lm64_ptr, . - ap_boot_lm64_ptr
 .balign 8
 ap_boot_params:

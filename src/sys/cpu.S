@@ -17,7 +17,7 @@
 
 #include <sys/cpu.h>
 
-.text
+.section .text
 
 // cpu_switch_stack(stack_top, fn, arg) calls fn(arg) on the stack that ends at
 // stack_top, never to come back.

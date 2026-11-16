@@ -48,8 +48,8 @@ csm_thunk_halt:
 .size csm_thunk_halt, . - csm_thunk_halt
 .balign 4
 csm_thunk_entry:
-.word 0
-.word 0
+.short 0
+.short 0
 .size csm_thunk_entry, . - csm_thunk_entry
 .size csm_thunk_start, . - csm_thunk_start
 csm_thunk_end:
