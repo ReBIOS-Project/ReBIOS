@@ -422,6 +422,11 @@ static void usb_main(void *arg) {
     tendril_hid_register(&hid_callbacks, 0);
     usb_disk_register();
     for (;;) {
+        // What Tendril is asked from outside its callbacks can leave it work,
+        // or arm timers, that only a poll after the call takes up (Tendril's
+        // docs/API.md, Conventions): the asking comes before the polls.
+        usb_disk_work();
+        leds_follow();
         uint64_t next = UINT64_MAX;
         bool ready = true;
         for (size_t i = 0; i < controller_count; i++) {
@@ -443,8 +448,6 @@ static void usb_main(void *arg) {
                 ready = ready && tendril_hc_ready(c->hc);
             }
         }
-        usb_disk_work();
-        leds_follow();
         atomic_store_explicit(&all_ready, ready, memory_order_release);
         uint64_t poll = time_ns() + (hid_devices != 0 || !ready ? POLL_NS : POLL_IDLE_NS);
         thread_sleep(next < poll ? next : poll);
