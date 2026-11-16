@@ -257,8 +257,8 @@ static void cool_actively(struct zone *z, uint64_t now) {
         list_power(z->node, name, want, true);
         const char *path = acpi_path(z->node);
         printf(
-            "Thermal zone %s at %lld C, its active cooling level %zu %s\n", path, celsius(now), x,
-            want ? "on" : "off"
+            "Thermal zone %s at %lld C, its active cooling level %zu %s\n",
+            path, celsius(now), x, want ? "on" : "off"
         );
         acpi_path_free(path);
     }
@@ -333,7 +333,8 @@ static bool tstate_register(
     uacpi_object_array registers;
     uacpi_data_view buffer;
     uacpi_resource *resource;
-    if (uacpi_object_get_package(ptc, &registers) == UACPI_STATUS_OK && registers.count >= 1
+    if (uacpi_object_get_package(ptc, &registers) == UACPI_STATUS_OK
+     && registers.count >= 1
      && uacpi_object_get_buffer(registers.objects[0], &buffer) == UACPI_STATUS_OK
      && uacpi_get_resource_from_buffer(buffer, &resource) == UACPI_STATUS_OK) {
         found = resource->type == UACPI_RESOURCE_TYPE_GENERIC_REGISTER;
@@ -372,7 +373,8 @@ static bool tstate_write(
         return true;
     }
     if (reg->address_space_id != UACPI_ADDRESS_SPACE_FFIXEDHW
-     || x86_cpu_vendor() != X86_CPU_VENDOR_INTEL || (cpuid(1, 0).edx & CPUID_1_EDX_ACPI) == 0) {
+     || x86_cpu_vendor() != X86_CPU_VENDOR_INTEL
+     || (cpuid(1, 0).edx & CPUID_1_EDX_ACPI) == 0) {
         return false;
     }
     struct cpu *cpu = processor_cpu(processor, type);
@@ -539,8 +541,8 @@ static void cool_passively(struct zone *z, uint64_t now) {
     }
     const char *path = acpi_path(z->node);
     printf(
-        "Thermal zone %s at %lld C, its processors' throttling at step %zu\n", path, celsius(now),
-        z->steps
+        "Thermal zone %s at %lld C, its processors' throttling at step %zu\n",
+        path, celsius(now), z->steps
     );
     acpi_path_free(path);
 }
@@ -567,8 +569,8 @@ static void check(struct zone *z) {
     if (trip != NULL) {
         const char *path = acpi_path(z->node);
         printf(
-            "Thermal zone %s at %lld C, past its %s trip point of %lld C\n", path, celsius(now),
-            trip, celsius(at)
+            "Thermal zone %s at %lld C, past its %s trip point of %lld C\n",
+            path, celsius(now), trip, celsius(at)
         );
         acpi_path_free(path);
         power_off();

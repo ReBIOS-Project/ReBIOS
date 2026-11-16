@@ -55,9 +55,9 @@
 
 // What a stopped graphics driver may turn off, and the VBIOS needs.
 #define VGA_DECODE_ATTRIBUTES \
-    (EFI_PCI_IO_ATTRIBUTE_IO | EFI_PCI_IO_ATTRIBUTE_MEMORY | EFI_PCI_IO_ATTRIBUTE_BUS_MASTER \
-   | EFI_PCI_IO_ATTRIBUTE_VGA_MEMORY | EFI_PCI_IO_ATTRIBUTE_VGA_IO \
-   | EFI_PCI_IO_ATTRIBUTE_VGA_IO_16)
+    (EFI_PCI_IO_ATTRIBUTE_IO | EFI_PCI_IO_ATTRIBUTE_MEMORY \
+   | EFI_PCI_IO_ATTRIBUTE_BUS_MASTER | EFI_PCI_IO_ATTRIBUTE_VGA_MEMORY \
+   | EFI_PCI_IO_ATTRIBUTE_VGA_IO | EFI_PCI_IO_ATTRIBUTE_VGA_IO_16)
 
 #define VGA_ATTRIBUTES \
     (EFI_PCI_IO_ATTRIBUTE_VGA_MEMORY | EFI_PCI_IO_ATTRIBUTE_VGA_IO \
@@ -199,7 +199,8 @@ static efi_handle choose_gop(struct efi_graphics_output_protocol **chosen) {
                 continue;
             }
             if (efi_bs->handle_protocol(handles[i], &gop_guid, (void **)&gop) == EFI_SUCCESS
-             && gop != NULL && gop_prepare(gop)) {
+             && gop != NULL
+             && gop_prepare(gop)) {
                 found = handles[i];
                 *chosen = gop;
             }
@@ -256,8 +257,8 @@ static void describe_framebuffer(
     fb->present = true;
 
     printf(
-        "Framebuffer at %#llx, %ux%u, %u bpp, pitch %u\n", (unsigned long long)fb->base, fb->width,
-        fb->height, bpp, fb->pitch
+        "Framebuffer at %#llx, %ux%u, %u bpp, pitch %u\n",
+        (unsigned long long)fb->base, fb->width, fb->height, bpp, fb->pitch
     );
 }
 
@@ -369,7 +370,8 @@ static bool load_file_vbios(struct user_vbios *vbios) {
             printf("Cannot read the VBIOS file %s\n", name);
         } else if (size == 0 || size > VBIOS_FILE_MAX) {
             printf(
-                "The VBIOS file %s is empty or larger than %u KiB\n", name, VBIOS_FILE_MAX / 1024
+                "The VBIOS file %s is empty or larger than %u KiB\n",
+                name, VBIOS_FILE_MAX / 1024
             );
         } else if ((vbios->buffer = read_file(file, (uint32_t)size)) == NULL) {
             printf("Cannot read the VBIOS file %s\n", name);
@@ -426,7 +428,8 @@ static bool gpu_listed(
 ) {
     for (size_t i = 0; i < count; i++) {
         const struct gpu_lists_id *id = &list[i];
-        if (id->vendor == dev->vendor_id && id->first <= dev->device_id
+        if (id->vendor == dev->vendor_id
+         && id->first <= dev->device_id
          && id->last >= dev->device_id
          && (id->revision == GPU_LISTS_ANY_REVISION || id->revision == dev->revision)) {
             return true;

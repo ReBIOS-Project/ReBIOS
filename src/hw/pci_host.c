@@ -225,8 +225,8 @@ static void crs_address(
     if (translation != 0) {
         const char *path = acpi_path(s->hb->node);
         printf(
-            "PCI host bridge %s: window 0x%llx+0x%llx translated by 0x%llx, not used\n", path,
-            (unsigned long long)minimum, (unsigned long long)length,
+            "PCI host bridge %s: window 0x%llx+0x%llx translated by 0x%llx, not used\n",
+            path, (unsigned long long)minimum, (unsigned long long)length,
             (unsigned long long)translation
         );
         acpi_path_free(path);
@@ -303,8 +303,8 @@ static uacpi_status crs_walk(struct crs_scan *s, uacpi_namespace_node *node) {
 
 static void host_bridge_log(const struct host_bridge *hb, const char *path) {
     printf(
-        "PCI host bridge %s: segment %04x, bus %02x, %s windows below 4 GiB\n", path, hb->segment,
-        hb->bus, hb->low_window_count == 0 ? "no" : "with"
+        "PCI host bridge %s: segment %04x, bus %02x, %s windows below 4 GiB\n",
+        path, hb->segment, hb->bus, hb->low_window_count == 0 ? "no" : "with"
     );
     for (size_t i = 0; i < hb->window_count; i++) {
         const struct pci_host_window *w = &hb->windows[i];
@@ -312,8 +312,9 @@ static void host_bridge_log(const struct host_bridge *hb, const char *path) {
         uintptr_t end = w->end > FOUR_GIB ? FOUR_GIB : w->end;
         if (base < end) {
             printf(
-                "PCI host bridge %s: window 0x%llx-0x%llx%s\n", path, (unsigned long long)base,
-                (unsigned long long)(end - 1), w->prefetchable ? ", prefetchable" : ""
+                "PCI host bridge %s: window 0x%llx-0x%llx%s\n",
+                path, (unsigned long long)base, (unsigned long long)(end - 1),
+                w->prefetchable ? ", prefetchable" : ""
             );
         }
     }
@@ -365,8 +366,8 @@ static void host_bridge_found(struct scan *r, uacpi_namespace_node *node) {
     const char *name = acpi_path(node);
     if (scan.bus_found && has_bbn && (uint8_t)bbn != hb.bus) {
         printf(
-            "PCI host bridge %s: _CRS starts at bus %02x, _BBN says %02x\n", name, hb.bus,
-            (uint8_t)bbn
+            "PCI host bridge %s: _CRS starts at bus %02x, _BBN says %02x\n",
+            name, hb.bus, (uint8_t)bbn
         );
     }
     host_bridge_log(&hb, name);

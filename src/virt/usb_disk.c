@@ -157,8 +157,8 @@ static void disk_path(struct tendril_msc_lun *lun, char *out, size_t size) {
         used += (size_t)snprintf(out + used, size - used, "/hub@%x", ports[i]);
     }
     snprintf(
-        out + used, size - used, "/storage@%x/*@0/*@0,%x", tendril_device_port(dev),
-        tendril_msc_lun_number(lun)
+        out + used, size - used, "/storage@%x/*@0/*@0,%x",
+        tendril_device_port(dev), tendril_msc_lun_number(lun)
     );
 }
 
@@ -185,8 +185,8 @@ static uint32_t disk_info(const struct usb_disk *d, uint32_t gpa) {
              : UINT16_MAX;
     disk_path(lun, info.path, sizeof(info.path));
     snprintf(
-        info.description, sizeof(info.description), "USB %s %s", tendril_msc_vendor(lun),
-        tendril_msc_product(lun)
+        info.description, sizeof(info.description), "USB %s %s",
+        tendril_msc_vendor(lun), tendril_msc_product(lun)
     );
     bool written = guest_mem_phys_write(gpa, &info, sizeof(struct hypercall_usb_disk_info));
     return written ? HYPERCALL_USB_DISK_STATUS_OK : HYPERCALL_USB_DISK_STATUS_FAILED;

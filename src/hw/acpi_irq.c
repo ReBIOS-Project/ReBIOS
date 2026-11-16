@@ -167,8 +167,8 @@ static uacpi_iteration_decision host_bridge_found(
 
     const char *path = acpi_path(node);
     printf(
-        "PCI host bridge %s: segment %04x, bus %02x%s\n", path, hb->segment, hb->bus,
-        hb->present ? "" : ", not present"
+        "PCI host bridge %s: segment %04x, bus %02x%s\n",
+        path, hb->segment, hb->bus, hb->present ? "" : ", not present"
     );
     acpi_path_free(path);
     return UACPI_ITERATION_DECISION_CONTINUE;
@@ -554,7 +554,8 @@ static bool route_find(
 static void format_addr(char *buf, size_t size, struct pci_cfg_addr addr) {
     if (addr.segment != 0) {
         snprintf(
-            buf, size, "%04x:%02x:%02x.%x", addr.segment, addr.bus, addr.device, addr.function
+            buf, size, "%04x:%02x:%02x.%x",
+            addr.segment, addr.bus, addr.device, addr.function
         );
     } else {
         snprintf(buf, size, "%02x:%02x.%x", addr.bus, addr.device, addr.function);
@@ -590,8 +591,9 @@ static void routes_find(void) {
         if (route_find(&l, f, &route)) {
             routes[route_count++] = route;
             printf(
-                "PCI %s INT%c# is GSI %u, %s, active %s\n", text, pin, route.gsi,
-                route.level ? "level" : "edge", route.active_low ? "low" : "high"
+                "PCI %s INT%c# is GSI %u, %s, active %s\n",
+                text, pin, route.gsi, route.level ? "level" : "edge",
+                route.active_low ? "low" : "high"
             );
         } else {
             printf("PCI %s INT%c# has no route\n", text, pin);
@@ -684,7 +686,8 @@ uint16_t acpi_irq_isa_claimed(void) {
     for (size_t irq = 0; irq < ISA_IRQS; irq++) {
         if ((isa_claimed & ((uint32_t)1 << irq)) != 0) {
             int n = snprintf(
-                text + length, sizeof(text) - length, "%s%zu", length == 0 ? "" : ", ", irq
+                text + length, sizeof(text) - length, "%s%zu",
+                length == 0 ? "" : ", ", irq
             );
             length += (size_t)n;
         }

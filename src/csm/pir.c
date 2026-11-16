@@ -134,7 +134,8 @@ uint32_t pir_build(void *buf, size_t size) {
     size_t length = sizeof(struct pir_header) + slots * sizeof(struct pir_slot);
     if (length > size || length > UINT16_MAX) {
         printf(
-            "The PCI IRQ routing table takes %zu bytes, more than the %zu it has\n", length, size
+            "The PCI IRQ routing table takes %zu bytes, more than the %zu it has\n",
+            length, size
         );
         return 0;
     }

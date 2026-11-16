@@ -546,7 +546,8 @@ static bool register_of(uacpi_object *obj, uint8_t *space, uint8_t *bits, uint64
     uacpi_data_view view;
     if (uacpi_object_get_type(obj) != UACPI_OBJECT_BUFFER
      || uacpi_object_get_string_or_buffer(obj, &view) != UACPI_STATUS_OK
-     || view.length < REGISTER_SIZE || view.const_bytes[0] != REGISTER_TAG) {
+     || view.length < REGISTER_SIZE
+     || view.const_bytes[0] != REGISTER_TAG) {
         return false;
     }
     *space = view.const_bytes[3];
@@ -585,9 +586,11 @@ static bool register_reached(uacpi_object *obj) {
 static bool cst_state_usable(uacpi_object *state, bool deep) {
     uacpi_object_array fields;
     uint64_t type;
-    return uacpi_object_get_package(state, &fields) == UACPI_STATUS_OK && fields.count == 4
+    return uacpi_object_get_package(state, &fields) == UACPI_STATUS_OK
+        && fields.count == 4
         && uacpi_object_get_integer(fields.objects[1], &type) == UACPI_STATUS_OK
-        && register_reached(fields.objects[0]) && (type <= 1 || deep);
+        && register_reached(fields.objects[0])
+        && (type <= 1 || deep);
 }
 
 // _CST with the C-states that the guest can enter, their count first. NULL for
@@ -669,7 +672,8 @@ static bool processor_ptc_usable(uacpi_namespace_node *processor) {
     }
     uacpi_object_array registers;
     bool usable = uacpi_object_get_package(ptc, &registers) == UACPI_STATUS_OK
-               && registers.count == 2 && register_reached(registers.objects[0])
+               && registers.count == 2
+               && register_reached(registers.objects[0])
                && register_reached(registers.objects[1]);
     uacpi_object_unref(ptc);
     return usable;
@@ -784,7 +788,8 @@ static uacpi_object *csd_for_guest(
         if (uacpi_object_get_package(deps.objects[d], &fields) != UACPI_STATUS_OK
          || fields.count < CSD_FIELDS
          || uacpi_object_get_integer(fields.objects[CSD_INDEX], &index) != UACPI_STATUS_OK
-         || index >= total || renumbered[index] == SIZE_MAX) {
+         || index >= total
+         || renumbered[index] == SIZE_MAX) {
             continue;
         }
         uacpi_object **copy = kmalloc(fields.count * sizeof(uacpi_object *));
@@ -830,7 +835,8 @@ static bool processor_cst_given(uacpi_namespace_node *processor) {
     uacpi_namespace_node *cst_node;
     uacpi_object *cst = NULL;
     if (uacpi_namespace_node_find(processor, "_CST", &cst_node) != UACPI_STATUS_OK
-     || uacpi_eval(cst_node, NULL, NULL, &cst) != UACPI_STATUS_OK || cst == NULL) {
+     || uacpi_eval(cst_node, NULL, NULL, &cst) != UACPI_STATUS_OK
+     || cst == NULL) {
         return false;
     }
     struct method seen = {
@@ -867,8 +873,8 @@ static void show_csd(uacpi_namespace_node *processor, uacpi_namespace_node *node
     if (kept.count != all.count || renumbered) {
         const char *path = acpi_path(processor);
         printf(
-            "The guest gets %zu of the %zu C-state dependencies in %s's _CSD%s\n", kept.count,
-            all.count, path, renumbered ? ", their C-states renumbered" : ""
+            "The guest gets %zu of the %zu C-state dependencies in %s's _CSD%s\n",
+            kept.count, all.count, path, renumbered ? ", their C-states renumbered" : ""
         );
         acpi_path_free(path);
     }
@@ -935,7 +941,8 @@ static void emit_method(
      && !processor_ptc_usable(uacpi_namespace_node_parent(node))) {
         return;
     }
-    if (name_in(name, left_out_methods) || event_method(name)
+    if (name_in(name, left_out_methods)
+     || event_method(name)
      || (in_processor && name_in(name, left_out_processor))
      || (memcmp(name, "_CRS", 4) == 0 && crs_replaced(uacpi_namespace_node_parent(node))) != 0) {
         return;
@@ -1962,7 +1969,8 @@ static void emit_children(struct aml *a, uacpi_namespace_node *parent, bool in_p
 
 static void emit_scopes(struct aml *a, uacpi_namespace_node *parent) {
     uacpi_namespace_node *iter = NULL;
-    uacpi_object_type_bits scopes = UACPI_OBJECT_DEVICE_BIT | UACPI_OBJECT_PROCESSOR_BIT
+    uacpi_object_type_bits scopes = UACPI_OBJECT_DEVICE_BIT
+                                  | UACPI_OBJECT_PROCESSOR_BIT
                                   | UACPI_OBJECT_POWER_RESOURCE_BIT
                                   | UACPI_OBJECT_THERMAL_ZONE_BIT;
     while (uacpi_namespace_node_next_typed(parent, &iter, scopes) == UACPI_STATUS_OK) {
@@ -3102,8 +3110,8 @@ uint8_t *vacpi_dsdt(size_t *length) {
     // Revision 1 keeps the guest's integers to 32 bits, as ACPI 1.0 has them.
     aml_table_header(a.data, a.size, "DSDT", 1, oem_id, oem_table_id, oem_revision);
     printf(
-        "Guest DSDT: %zu bytes, %zu methods, %zu notification targets\n", a.size,
-        vacpi.method_count, vacpi.target_count
+        "Guest DSDT: %zu bytes, %zu methods, %zu notification targets\n",
+        a.size, vacpi.method_count, vacpi.target_count
     );
     *length = a.size;
     return a.data;
@@ -3308,7 +3316,8 @@ static uacpi_status eval_slots(uacpi_namespace_node *node, uint32_t argc, uacpi_
 // count of them.
 static bool osc_dwords(uacpi_object *obj, uint32_t *dwords, size_t count) {
     uacpi_data_view view;
-    if (obj == NULL || uacpi_object_get_type(obj) != UACPI_OBJECT_BUFFER
+    if (obj == NULL
+     || uacpi_object_get_type(obj) != UACPI_OBJECT_BUFFER
      || uacpi_object_get_string_or_buffer(obj, &view) != UACPI_STATUS_OK
      || view.length < count * 4) {
         return false;
@@ -3407,7 +3416,8 @@ static bool srs_settable(uacpi_namespace_node *node, uint32_t argc) {
     }
     uacpi_object *template = slot_object(0);
     uacpi_data_view view;
-    bool settable = template == NULL || uacpi_object_get_type(template) != UACPI_OBJECT_BUFFER
+    bool settable = template == NULL
+                 || uacpi_object_get_type(template) != UACPI_OBJECT_BUFFER
                  || uacpi_object_get_string_or_buffer(template, &view) != UACPI_STATUS_OK
                  || isa_ports_settable(view.const_bytes, view.length);
     if (!settable) {

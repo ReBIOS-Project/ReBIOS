@@ -275,7 +275,8 @@ static void timer_measure(uint8_t timer_vector) {
     timer_tsc_deadline = (cpuid(1, 0).ecx & CPUID_1_ECX_TSC_DEADLINE) != 0
                       && deadline_microcode_ok();
     printf(
-        "Local APIC timer at %llu MHz%s\n", (unsigned long long)(timer_hz / 1000000),
+        "Local APIC timer at %llu MHz%s\n",
+        (unsigned long long)(timer_hz / 1000000),
         timer_tsc_deadline ? ", with a TSC-deadline mode" : ""
     );
 }

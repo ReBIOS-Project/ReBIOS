@@ -181,7 +181,8 @@ static void query_work(uacpi_handle ctx) {
         uacpi_status status = uacpi_execute(ec.node, method, NULL);
         if (status != UACPI_STATUS_OK) {
             printf(
-                "Embedded controller event %#x: %s %s\n", q, method, uacpi_status_to_string(status)
+                "Embedded controller event %#x: %s %s\n",
+                q, method, uacpi_status_to_string(status)
             );
         }
     }
@@ -331,8 +332,8 @@ void ec_init(void) {
                   && glk != 0;
     const char *path = acpi_path(ec.node);
     printf(
-        "Embedded controller %s, data port %#x, command port %#x%s\n", path, ec.data, ec.command,
-        ec.global_lock ? ", global lock" : ""
+        "Embedded controller %s, data port %#x, command port %#x%s\n",
+        path, ec.data, ec.command, ec.global_lock ? ", global lock" : ""
     );
     acpi_path_free(path);
 
@@ -349,7 +350,8 @@ void ec_init(void) {
     }
     if (status != UACPI_STATUS_OK) {
         printf(
-            "Cannot handle the embedded controller's space: %s\n", uacpi_status_to_string(status)
+            "Cannot handle the embedded controller's space: %s\n",
+            uacpi_status_to_string(status)
         );
     }
 
@@ -365,8 +367,8 @@ void ec_init(void) {
     );
     if (status != UACPI_STATUS_OK) {
         printf(
-            "Cannot handle the embedded controller's GPE %#x: %s\n", idx,
-            uacpi_status_to_string(status)
+            "Cannot handle the embedded controller's GPE %#x: %s\n",
+            idx, uacpi_status_to_string(status)
         );
     }
 }

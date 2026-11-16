@@ -247,8 +247,8 @@ static void give_lines(const struct device_ports *d) {
 static void log_ports(uacpi_namespace_node *node, const struct device_ports *d) {
     for (size_t i = 0; i < d->ranges; i++) {
         printf(
-            "The guest gets %.4s's ports %#x-%#x\n", uacpi_namespace_node_name(node).text,
-            d->base[i], d->base[i] + d->count[i] - 1
+            "The guest gets %.4s's ports %#x-%#x\n",
+            uacpi_namespace_node_name(node).text, d->base[i], d->base[i] + d->count[i] - 1
         );
     }
 }

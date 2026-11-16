@@ -157,7 +157,8 @@ void profile_init(void) {
     last_report = time_ns();
     profile_on = true;
     printf(
-        "Profiling the guest's exits, every %llu s\n", (unsigned long long)(PERIOD_NS / 1000000000)
+        "Profiling the guest's exits, every %llu s\n",
+        (unsigned long long)(PERIOD_NS / 1000000000)
     );
 }
 
@@ -247,7 +248,8 @@ static void report(uint64_t elapsed_ns) {
         (unsigned long long)(total * 1000 / (ms != 0 ? ms : 1)),
         (unsigned long long)(cycles * 100 / period),
         (unsigned long long)(cycles * 1000 / period % 10),
-        (unsigned long long)(idle * 100 / period), (unsigned long long)(idle * 1000 / period % 10)
+        (unsigned long long)(idle * 100 / period),
+        (unsigned long long)(idle * 1000 / period % 10)
     );
     for (size_t i = 0; i < TOP && top[i].exits != 0; i++) {
         const char *name = NULL;
@@ -257,8 +259,10 @@ static void report(uint64_t elapsed_ns) {
             name = vmx_names[top[i].slot];
         }
         printf(
-            "Profile:   %-20s %#5x %8llu/s %6llu us each\n", name != NULL ? name : "?",
-            top[i].slot, (unsigned long long)(top[i].exits * 1000 / (ms != 0 ? ms : 1)),
+            "Profile:   %-20s %#5x %8llu/s %6llu us each\n",
+            name != NULL ? name : "?",
+            top[i].slot,
+            (unsigned long long)(top[i].exits * 1000 / (ms != 0 ? ms : 1)),
             (unsigned long long)(top[i].cycles * 1000000 / hz / top[i].exits)
         );
     }
@@ -287,8 +291,8 @@ static void report(uint64_t elapsed_ns) {
             break;
         }
         printf(
-            "Profile:   port %#06x %8llu/s\n", best,
-            (unsigned long long)most * 1000 / (ms != 0 ? ms : 1)
+            "Profile:   port %#06x %8llu/s\n",
+            best, (unsigned long long)most * 1000 / (ms != 0 ? ms : 1)
         );
         ports_before[best] = ports[best];
     }
@@ -299,8 +303,8 @@ static void report(uint64_t elapsed_ns) {
         if (count * 1000 / (ms != 0 ? ms : 1) >= 100) {
             uint64_t page = atomic_load_explicit(&pages[i].page, memory_order_relaxed) - 1;
             printf(
-                "Profile:   page %#llx %8llu/s\n", (unsigned long long)page,
-                (unsigned long long)count * 1000 / (ms != 0 ? ms : 1)
+                "Profile:   page %#llx %8llu/s\n",
+                (unsigned long long)page, (unsigned long long)count * 1000 / (ms != 0 ? ms : 1)
             );
         }
     }

@@ -588,7 +588,9 @@ static bool legacy_bootable(struct efi_block_io_protocol *block_io, bool optical
                 code |= sector[i] != 0;
             }
             bootable = sector[MBR_SIGNATURE_OFFSET] == 0x55
-                    && sector[MBR_SIGNATURE_OFFSET + 1] == 0xaa && code && (!protective || active);
+                    && sector[MBR_SIGNATURE_OFFSET + 1] == 0xaa
+                    && code
+                    && (!protective || active);
         }
     }
     efi_bs->free_pages(buffer, pages);
@@ -622,9 +624,12 @@ static void drive_add(efi_handle handle, struct efi_device_path_protocol *own) {
     struct efi_block_io_protocol *block_io;
     struct efi_device_path_protocol *path;
     if (efi_bs->handle_protocol(handle, &block_io_guid, (void **)&block_io) != EFI_SUCCESS
-     || block_io == NULL || block_io->media == NULL || block_io->media->logical_partition != 0
+     || block_io == NULL
+     || block_io->media == NULL
+     || block_io->media->logical_partition != 0
      || efi_bs->handle_protocol(handle, &device_path_guid, (void **)&path) != EFI_SUCCESS
-     || path == NULL || !path_valid(path)) {
+     || path == NULL
+     || !path_valid(path)) {
         return;
     }
     struct drive d;
@@ -830,9 +835,9 @@ void drives_collect(void) {
             connection = "external";
         }
         printf(
-            "Boot drive %zu: %s, %s, %s%s%s, %llu MiB, %s\n", i + 1, d->text,
-            d->model[0] != 0 ? d->model : "no model name", connection,
-            d->bootable ? ", legacy bootable" : "", d->self ? ", ReBIOS's" : "",
+            "Boot drive %zu: %s, %s, %s%s%s, %llu MiB, %s\n",
+            i + 1, d->text, d->model[0] != 0 ? d->model : "no model name",
+            connection, d->bootable ? ", legacy bootable" : "", d->self ? ", ReBIOS's" : "",
             (unsigned long long)(d->size >> 20), d->name
         );
         size_t used = text_length(order);

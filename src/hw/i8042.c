@@ -180,8 +180,8 @@ void i8042_init(void) {
         outb(I8042_PORT_DATA, on);
     }
     printf(
-        "Keyboard controller, %s keyboard, %s mouse\n", keyboard ? "with a" : "with no",
-        aux_device ? "a" : "no"
+        "Keyboard controller, %s keyboard, %s mouse\n",
+        keyboard ? "with a" : "with no", aux_device ? "a" : "no"
     );
 }
 

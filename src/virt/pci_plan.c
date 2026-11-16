@@ -161,12 +161,10 @@ static void window_add(
     uint64_t align = c->align[side_inside] > PCI_MEMORY_GRANULE
                    ? c->align[side_inside]
                    : PCI_MEMORY_GRANULE;
-    element_add(
-        parent,
-        (struct element){
-            function, kind, 0, side, align_up(c->size[side_inside], PCI_MEMORY_GRANULE), align, 0
-        }
-    );
+    struct element child = {
+        function, kind, 0, side, align_up(c->size[side_inside], PCI_MEMORY_GRANULE), align, 0
+    };
+    element_add(parent, child);
 }
 
 static bool is_bridge(const struct pci_enum_function *f) {
@@ -747,7 +745,8 @@ const struct pci_plan *pci_plan_make(
         for (size_t b = 0; b < f->bar_count && b < 6; b++) {
             const struct pci_enum_bar *bar = &f->bars[b];
             if ((bar->kind != PCI_ENUM_BAR_MEM32 && bar->kind != PCI_ENUM_BAR_MEM64)
-             || bar->size == 0 || bar->base == 0) {
+             || bar->size == 0
+             || bar->base == 0) {
                 continue;
             }
             bool above = bar_high(t, f, bar);
@@ -989,19 +988,19 @@ const struct pci_plan *pci_plan_make(
     for (size_t r = 0; r < roots; r++) {
         const struct pci_plan_root *pr = &plan.roots[r];
         printf(
-            "PCI root bus %04x:%02x: guest memory 0x%llx-0x%llx", pr->segment, pr->bus,
-            (unsigned long long)pr->low.base, (unsigned long long)pr->low.end
+            "PCI root bus %04x:%02x: guest memory 0x%llx-0x%llx",
+            pr->segment, pr->bus, (unsigned long long)pr->low.base, (unsigned long long)pr->low.end
         );
         if (pr->pref.end != pr->pref.base) {
             printf(
-                ", prefetchable 0x%llx-0x%llx", (unsigned long long)pr->pref.base,
-                (unsigned long long)pr->pref.end
+                ", prefetchable 0x%llx-0x%llx",
+                (unsigned long long)pr->pref.base, (unsigned long long)pr->pref.end
             );
         }
         if (pr->high.end != pr->high.base) {
             printf(
-                ", and 0x%llx-0x%llx", (unsigned long long)pr->high.base,
-                (unsigned long long)pr->high.end
+                ", and 0x%llx-0x%llx",
+                (unsigned long long)pr->high.base, (unsigned long long)pr->high.end
             );
         }
         printf("\n");
@@ -1016,8 +1015,8 @@ const struct pci_plan *pci_plan_make(
     }
     if (plan.ecam != 0) {
         printf(
-            "PCI: guest configuration space for buses 00-%02x at 0x%llx\n", plan.bus_end,
-            (unsigned long long)plan.ecam
+            "PCI: guest configuration space for buses 00-%02x at 0x%llx\n",
+            plan.bus_end, (unsigned long long)plan.ecam
         );
     }
     printf("PCI: the guest's PCI hole starts at 0x%llx\n", (unsigned long long)plan.tolud);

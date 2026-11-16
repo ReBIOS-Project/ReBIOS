@@ -72,7 +72,8 @@ void oprom_collect(void) {
 
     for (size_t i = 0; i < dev_count; i++) {
         const struct pci_io_device *dev = &devices[i];
-        if (dev->io->rom_image == NULL || dev->io->rom_size == 0
+        if (dev->io->rom_image == NULL
+         || dev->io->rom_size == 0
          || dev->base_class == PCI_BASE_CLASS_DISPLAY
          || (video->vga_present && handoff_pci_address_equal(dev->address, video->vga_device))) {
             continue;

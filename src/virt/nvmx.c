@@ -268,15 +268,17 @@ static unsigned int ept02_budget;
    | PROC_MONITOR_TRAP_FLAG | PROC_MSR_BITMAPS | PROC_MONITOR_EXITING | PROC_PAUSE_EXITING \
    | PROC_SECONDARY_CONTROLS | PROC_DEFAULT1)
 #define PROC2_EMULATED \
-    (PROC2_VIRT_APIC_ACCESSES | PROC2_EPT | PROC2_DESC_TABLE_EXITING | PROC2_RDTSCP \
-   | PROC2_VIRT_X2APIC | PROC2_VPID | PROC2_WBINVD_EXITING | PROC2_UNRESTRICTED_GUEST \
-   | PROC2_APIC_REG_VIRT | PROC2_VIRT_INTR_DELIVERY | PROC2_PAUSE_LOOP_EXITING \
-   | PROC2_RDRAND_EXITING | PROC2_INVPCID | PROC2_VMFUNC | PROC2_VMCS_SHADOWING \
-   | PROC2_RDSEED_EXITING | PROC2_PML | PROC2_XSAVES | PROC2_MBEC | PROC2_TSC_SCALING \
-   | PROC2_USER_WAIT_PAUSE)
+    (PROC2_VIRT_APIC_ACCESSES | PROC2_EPT | PROC2_DESC_TABLE_EXITING \
+   | PROC2_RDTSCP | PROC2_VIRT_X2APIC | PROC2_VPID \
+   | PROC2_WBINVD_EXITING | PROC2_UNRESTRICTED_GUEST | PROC2_APIC_REG_VIRT \
+   | PROC2_VIRT_INTR_DELIVERY | PROC2_PAUSE_LOOP_EXITING | PROC2_RDRAND_EXITING \
+   | PROC2_INVPCID | PROC2_VMFUNC | PROC2_VMCS_SHADOWING \
+   | PROC2_RDSEED_EXITING | PROC2_PML | PROC2_XSAVES \
+   | PROC2_MBEC | PROC2_TSC_SCALING | PROC2_USER_WAIT_PAUSE)
 #define EXIT_EMULATED \
     (EXIT_SAVE_DEBUG_CONTROLS | EXIT_HOST_ADDR_SPACE_SIZE | EXIT_ACK_INTR_ON_EXIT | EXIT_SAVE_PAT \
-   | EXIT_LOAD_PAT | EXIT_SAVE_EFER | EXIT_LOAD_EFER | EXIT_SAVE_PREEMPTION_TIMER | EXIT_DEFAULT1)
+   | EXIT_LOAD_PAT | EXIT_SAVE_EFER | EXIT_LOAD_EFER | EXIT_SAVE_PREEMPTION_TIMER \
+   | EXIT_DEFAULT1)
 #define ENTRY_EMULATED \
     (ENTRY_LOAD_DEBUG_CONTROLS | ENTRY_IA32E_MODE_GUEST | ENTRY_LOAD_PAT | ENTRY_LOAD_EFER \
    | ENTRY_DEFAULT1)
@@ -314,9 +316,9 @@ static unsigned int ept02_budget;
 // What the guest is offered of IA32_VMX_EPT_VPID_CAP: not supervisor
 // shadow-stack control nor the HLAT prefix size, whose controls it lacks.
 #define CAP_EPT_OFFERED \
-    (EPT_CAP_EXEC_ONLY | EPT_CAP_WALK_4 | EPT_CAP_WALK_5 | EPT_CAP_UC | EPT_CAP_WB | EPT_CAP_2M \
-   | EPT_CAP_1G | EPT_CAP_INVEPT | EPT_CAP_AD | EPT_CAP_ADVANCED_INFO | EPT_CAP_INVEPT_SINGLE \
-   | EPT_CAP_INVEPT_ALL)
+    (EPT_CAP_EXEC_ONLY | EPT_CAP_WALK_4 | EPT_CAP_WALK_5 | EPT_CAP_UC | EPT_CAP_WB \
+   | EPT_CAP_2M | EPT_CAP_1G | EPT_CAP_INVEPT | EPT_CAP_AD | EPT_CAP_ADVANCED_INFO \
+   | EPT_CAP_INVEPT_SINGLE | EPT_CAP_INVEPT_ALL)
 #define CAP_VPID_OFFERED \
     (VPID_CAP_INVVPID | VPID_CAP_INVVPID_ADDRESS | VPID_CAP_INVVPID_SINGLE | VPID_CAP_INVVPID_ALL \
    | VPID_CAP_INVVPID_GLOBALS)
@@ -391,7 +393,8 @@ void nvmx_init(void) {
         cr3_targets = 4;
     }
     timer_rate = (unsigned int)(misc & MISC_TIMER_RATE);
-    cap_misc = timer_rate | MISC_STORE_LMA | MISC_ACTIVITY_HLT | MISC_ACTIVITY_SHUTDOWN
+    cap_misc = timer_rate | MISC_STORE_LMA
+             | MISC_ACTIVITY_HLT | MISC_ACTIVITY_SHUTDOWN
              | MISC_ACTIVITY_WAIT_SIPI | (uint64_t)cr3_targets << MISC_CR3_TARGETS_SHIFT
              | MISC_VMWRITE_ANY | (misc & MISC_ZERO_LENGTH_INJECTION);
     // Its own Intel PT keeps working in VMX operation, paused while its guests
@@ -555,9 +558,10 @@ static uint64_t exit_instr_info(void) {
         return vmx_read(VMCS_EXIT_EXT_INSTR_INFO);
     }
     uint64_t info = vmx_read(VMCS_EXIT_INSTR_INFO);
-    return (info & 3) | (info >> 7 & 3) << 2 | (info >> 10 & 1) << 4 | (info >> 15 & 7) << 7
-         | (info >> 22 & 1) << 10 | (info >> 27 & 1) << 11 | (info >> 3 & 15) << 16
-         | (info >> 18 & 15) << 24 | (info >> 23 & 15) << 32 | (info >> 28 & 15) << 40;
+    return (info & 3) | (info >> 7 & 3) << 2 | (info >> 10 & 1) << 4
+         | (info >> 15 & 7) << 7 | (info >> 22 & 1) << 10 | (info >> 27 & 1) << 11
+         | (info >> 3 & 15) << 16 | (info >> 18 & 15) << 24 | (info >> 23 & 15) << 32
+         | (info >> 28 & 15) << 40;
 }
 
 // The linear address of a VMX instruction's memory operand, which it reads or
@@ -1085,7 +1089,8 @@ static bool eptp_valid(uint64_t eptp) {
         && ((levels == 4 && (cap_ept_vpid & EPT_CAP_WALK_4) != 0)
          || (levels == 5 && (cap_ept_vpid & EPT_CAP_WALK_5) != 0))
         && ((eptp & EPTP_AD) == 0 || (cap_ept_vpid & EPT_CAP_AD) != 0)
-        && (eptp & EPTP_RESERVED) == 0 && (eptp >> phys_width) == 0;
+        && (eptp & EPTP_RESERVED) == 0
+        && (eptp >> phys_width) == 0;
 }
 
 // SDM 325462-093 Vol. 3C, 31.3.3.1.
@@ -1609,7 +1614,8 @@ static bool host_state_valid(struct vcpu *v, const struct nvmx *n) {
             return false;
         }
     } else if ((get12(n, VMCS_ENTRY_CONTROLS) & ENTRY_IA32E_MODE_GUEST) != 0
-            || (cr4 & (CR4_PCIDE | CR4_FRED)) != 0 || (rip >> 32) != 0) {
+            || (cr4 & (CR4_PCIDE | CR4_FRED)) != 0
+            || (rip >> 32) != 0) {
         return false;
     }
     static const uint16_t bases[] = {
@@ -2527,9 +2533,12 @@ void nvmx_instruction(struct vcpu *v, uint32_t reason) {
                        && (cap_ept_vpid & EPT_CAP_INVEPT) != 0;
     bool invvpid_offered = (cap_proc2 >> 32 & PROC2_VPID) != 0
                         && (cap_ept_vpid & VPID_CAP_INVVPID) != 0;
-    if (n == NULL || (vcpu_cr4(v) & CR4_VMXE) == 0 || (reason != EXIT_REASON_VMXON && !n->vmxon)
+    if (n == NULL
+     || (vcpu_cr4(v) & CR4_VMXE) == 0
+     || (reason != EXIT_REASON_VMXON && !n->vmxon)
      || (reason == EXIT_REASON_INVEPT && !invept_offered)
-     || (reason == EXIT_REASON_INVVPID && !invvpid_offered) || reason == EXIT_REASON_VMFUNC
+     || (reason == EXIT_REASON_INVVPID && !invvpid_offered)
+     || reason == EXIT_REASON_VMFUNC
      || reason == EXIT_REASON_GETSEC) {
         vcpu_inject_exception(v, 6, false, 0);
         return;
@@ -2635,12 +2644,14 @@ static bool inactive_ends(struct vcpu *v) {
     bool nmi_blocked = (pin & PIN_VIRTUAL_NMIS) == 0
                     && (get12(n, VMCS_GUEST_INTERRUPTIBILITY) & INTERRUPTIBILITY_NMI) != 0;
     return atomic_load_explicit(&v->cpu->init_pending, memory_order_acquire)
-        || (nmi && !nmi_blocked) || ((pin & PIN_PREEMPTION_TIMER) != 0 && timer_left(n) == 0);
+        || (nmi && !nmi_blocked)
+        || ((pin & PIN_PREEMPTION_TIMER) != 0 && timer_left(n) == 0);
 }
 
 void nvmx_wait(struct vcpu *v) {
     struct nvmx *n = v->nvmx;
-    if (n == NULL || !n->in_l2
+    if (n == NULL
+     || !n->in_l2
      || atomic_load_explicit(&n->inactive, memory_order_relaxed) == ACTIVITY_ACTIVE
      || inactive_ends(v)) {
         return;

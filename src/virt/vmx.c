@@ -96,8 +96,8 @@ static void vmwrite(uint32_t field, uint64_t value) {
         uint64_t error;
         asm volatile ("vmreadq %1, %0" : "=r"(error) : "r"((uint64_t)VMCS_VM_INSTR_ERROR) : "cc");
         panic(
-            "VMWRITE of %#llx to field %#x failed, error %llu\n", (unsigned long long)value, field,
-            (unsigned long long)error
+            "VMWRITE of %#llx to field %#x failed, error %llu\n",
+            (unsigned long long)value, field, (unsigned long long)error
         );
     }
 }
@@ -288,7 +288,8 @@ bool vmx_supported(void) {
     // from version 2 (SDM 325462-093 Vol. 3B, 22.2.2), and entries load the
     // guest's again (SDM 325462-093 Vol. 3C, 30.5.1 and 29.3.2.1), saved by
     // exits where they can (SDM 325462-093 Vol. 3C, 30.3.1).
-    perf_global_switched = cpuid(0, 0).eax >= 0xa && (cpuid(0xa, 0).eax & 0xff) >= 2
+    perf_global_switched = cpuid(0, 0).eax >= 0xa
+                        && (cpuid(0xa, 0).eax & 0xff) >= 2
                         && control_allowed(exit_cap, EXIT_LOAD_PERF_GLOBAL_CTRL)
                         && control_allowed(entry_cap, ENTRY_LOAD_PERF_GLOBAL_CTRL);
     perf_global_saved = perf_global_switched
@@ -672,24 +673,15 @@ void vmx_vcpu_init(struct vcpu *v) {
     vmptrld(v->vmcs_pa);
 
     // Interrupts and NMIs reach the hypervisor, which passes the guest's on.
-    vmx_write(
-        VMCS_PIN_CONTROLS,
-        adjust_controls(
-            pin_cap, 0, PIN_EXT_INTR_EXITING | PIN_NMI_EXITING | PIN_VIRTUAL_NMIS, "pin-based"
-        )
-    );
+    uint32_t pin_require = PIN_EXT_INTR_EXITING | PIN_NMI_EXITING | PIN_VIRTUAL_NMIS;
+    vmx_write(VMCS_PIN_CONTROLS, adjust_controls(pin_cap, 0, pin_require, "pin-based"));
 
     // CR8 is the virtual local APIC's TPR; the guest's TSC is offset (msr.c);
     // MONITOR and MWAIT are carried out in the hypervisor (mwait.c).
-    vmx_write(
-        VMCS_PROC_CONTROLS,
-        adjust_controls(
-            proc_cap, 0,
-            PROC_HLT_EXITING | PROC_MWAIT_EXITING | PROC_MONITOR_EXITING | PROC_IO_BITMAPS
-          | PROC_MSR_BITMAPS | PROC_SECONDARY_CONTROLS | PROC_TPR_SHADOW | PROC_TSC_OFFSETTING,
-            "processor-based"
-        )
-    );
+    uint32_t proc_require = PROC_HLT_EXITING | PROC_MWAIT_EXITING | PROC_MONITOR_EXITING
+                          | PROC_IO_BITMAPS | PROC_MSR_BITMAPS | PROC_SECONDARY_CONTROLS
+                          | PROC_TPR_SHADOW | PROC_TSC_OFFSETTING;
+    vmx_write(VMCS_PROC_CONTROLS, adjust_controls(proc_cap, 0, proc_require, "processor-based"));
 
     // What the guest's instructions need to work as they would without VMX.
     uint32_t proc2_want = PROC2_RDTSCP | PROC2_INVPCID | PROC2_XSAVES | PROC2_USER_WAIT_PAUSE;
@@ -724,14 +716,9 @@ void vmx_vcpu_init(struct vcpu *v) {
         vmx_write(VMCS_XSS_EXIT_BITMAP, 0);
     }
 
-    vmx_write(
-        VMCS_EXIT_CONTROLS,
-        adjust_controls(
-            exit_cap, exit_want,
-            EXIT_HOST_ADDR_SPACE_SIZE | EXIT_ACK_INTR_ON_EXIT | EXIT_SAVE_EFER | EXIT_LOAD_EFER
-          | EXIT_SAVE_PAT | EXIT_LOAD_PAT, "VM-exit"
-        )
-    );
+    uint32_t exit_require = EXIT_HOST_ADDR_SPACE_SIZE | EXIT_ACK_INTR_ON_EXIT | EXIT_SAVE_EFER
+                          | EXIT_LOAD_EFER | EXIT_SAVE_PAT | EXIT_LOAD_PAT;
+    vmx_write(VMCS_EXIT_CONTROLS, adjust_controls(exit_cap, exit_want, exit_require, "VM-exit"));
     vmx_write(
         VMCS_ENTRY_CONTROLS,
         adjust_controls(entry_cap, entry_want, ENTRY_LOAD_EFER | ENTRY_LOAD_PAT, "VM-entry")
@@ -809,13 +796,14 @@ void vmx_async_access(uintptr_t gpa) {
 
 static void vmx_dump_guest(void) {
     printf(
-        "Guest RIP %#llx RSP %#llx RFLAGS %#llx\n", (unsigned long long)vmx_read(VMCS_GUEST_RIP),
-        (unsigned long long)vmx_read(VMCS_GUEST_RSP),
+        "Guest RIP %#llx RSP %#llx RFLAGS %#llx\n",
+        (unsigned long long)vmx_read(VMCS_GUEST_RIP), (unsigned long long)vmx_read(VMCS_GUEST_RSP),
         (unsigned long long)vmx_read(VMCS_GUEST_RFLAGS)
     );
     printf(
         "Guest CR0 %#llx CR3 %#llx CR4 %#llx EFER %#llx entry controls %#llx\n",
-        (unsigned long long)vmx_read(VMCS_GUEST_CR0), (unsigned long long)vmx_read(VMCS_GUEST_CR3),
+        (unsigned long long)vmx_read(VMCS_GUEST_CR0),
+        (unsigned long long)vmx_read(VMCS_GUEST_CR3),
         (unsigned long long)vmx_read(VMCS_GUEST_CR4),
         (unsigned long long)vmx_read(VMCS_GUEST_EFER),
         (unsigned long long)vmx_read(VMCS_ENTRY_CONTROLS)
@@ -823,7 +811,8 @@ static void vmx_dump_guest(void) {
     static const char *names[] = { "ES", "CS", "SS", "DS", "FS", "GS", "LDTR", "TR" };
     for (size_t i = 0; i < 8; i++) {
         printf(
-            "Guest %s sel %#llx base %#llx limit %#llx ar %#llx\n", names[i],
+            "Guest %s sel %#llx base %#llx limit %#llx ar %#llx\n",
+            names[i],
             (unsigned long long)vmx_read(seg_sel_fields[i]),
             (unsigned long long)vmx_read(seg_base_fields[i]),
             (unsigned long long)vmx_read(seg_limit_fields[i]),
@@ -987,7 +976,8 @@ static bool cr_valid(uint64_t old0, uint64_t old4, uint64_t cr0, uint64_t cr4) {
     bool code64 = lma && (vmx_read(VMCS_GUEST_CS_AR) & VMX_AR_L) != 0;
     // Reserved bits, invalid combinations, and the CR4 bits of features the
     // guest does not get.
-    if ((cr0 >> 32) != 0 || ((cr0 & CR0_PG) != 0 && (cr0 & CR0_PE) == 0)
+    if ((cr0 >> 32) != 0
+     || ((cr0 & CR0_PG) != 0 && (cr0 & CR0_PE) == 0)
      || ((cr0 & CR0_NW) != 0 && (cr0 & CR0_CD) == 0)
      || (cr4 & ~cpuid_cr4_allowed() & ~(uint64_t)CR4_VMXE) != 0) {
         return false;
@@ -1177,8 +1167,8 @@ static void vmx_handle_exit(struct vcpu *v) {
             return;
         }
         printf(
-            "VM entry failed, exit reason %#x, qualification %#llx\n", reason,
-            (unsigned long long)qual
+            "VM entry failed, exit reason %#x, qualification %#llx\n",
+            reason, (unsigned long long)qual
         );
         vmx_shutdown("The guest's state cannot be entered");
     }
@@ -1395,8 +1385,8 @@ void vmx_run(struct vcpu *v) {
                 continue;
             }
             printf(
-                "VM%s failed, VM-instruction error %llu\n", v->vmx_launched ? "RESUME" : "LAUNCH",
-                (unsigned long long)error
+                "VM%s failed, VM-instruction error %llu\n",
+                v->vmx_launched ? "RESUME" : "LAUNCH", (unsigned long long)error
             );
             vmx_dump_guest();
             panic("Cannot enter the guest\n");

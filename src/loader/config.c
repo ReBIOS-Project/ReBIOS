@@ -321,7 +321,8 @@ static bool apply_vga(const struct setting *setting, struct span value) {
     config.vga_specified = true;
     config.vga_device = address;
     printf(
-        "  %s = %02x:%02x.%x\n", setting->name, address.bus, address.devfn >> 3, address.devfn & 7
+        "  %s = %02x:%02x.%x\n",
+        setting->name, address.bus, address.devfn >> 3, address.devfn & 7
     );
     return true;
 }
@@ -413,7 +414,8 @@ static bool apply_cpu_list(const struct setting *setting, struct span value) {
     list[0] = 0;
     for (size_t i = 0; i < count; i++) {
         len += (size_t)snprintf(
-            list + len, sizeof(list) - len, "%s%u", i == 0 ? "" : ", ", ranges[i].first
+            list + len, sizeof(list) - len, "%s%u",
+            i == 0 ? "" : ", ", ranges[i].first
         );
         if (ranges[i].last != ranges[i].first) {
             len += (size_t)snprintf(list + len, sizeof(list) - len, "-%u", ranges[i].last);

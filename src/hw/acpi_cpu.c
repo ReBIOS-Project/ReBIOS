@@ -166,7 +166,9 @@ static bool run_osc(uacpi_namespace_node *node, uint32_t capability_bits) {
     uacpi_object *ret = NULL;
     bool made = args[0] != NULL && args[1] != NULL && args[2] != NULL && args[3] != NULL;
     uacpi_data_view view = { .const_bytes = NULL, .length = 0 };
-    bool took = made && uacpi_eval(node, "_OSC", &array, &ret) == UACPI_STATUS_OK && ret != NULL
+    bool took = made
+             && uacpi_eval(node, "_OSC", &array, &ret) == UACPI_STATUS_OK
+             && ret != NULL
              && uacpi_object_get_type(ret) == UACPI_OBJECT_BUFFER
              && uacpi_object_get_string_or_buffer(ret, &view) == UACPI_STATUS_OK
              && view.length == sizeof(caps);

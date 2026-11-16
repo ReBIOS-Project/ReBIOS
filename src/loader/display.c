@@ -149,7 +149,8 @@ static void collect_edid(struct handoff_video *video) {
     for (size_t i = 0; i < count && video->edid_size == 0; i++) {
         struct efi_graphics_output_protocol *gop;
         if (efi_bs->handle_protocol(handles[i], &gop_guid, (void **)&gop) != EFI_SUCCESS
-         || gop->mode == NULL || gop->mode->frame_buffer_base != video->framebuffer.base) {
+         || gop->mode == NULL
+         || gop->mode->frame_buffer_base != video->framebuffer.base) {
             continue;
         }
         struct efi_guid *guids[] = { &edid_active_guid, &edid_discovered_guid };
@@ -157,7 +158,8 @@ static void collect_edid(struct handoff_video *video) {
             // Both protocols have the same layout.
             struct efi_edid_active_protocol *edid;
             if (efi_bs->handle_protocol(handles[i], guids[g], (void **)&edid) != EFI_SUCCESS
-             || edid->size_of_edid < EDID_BLOCK || edid->edid == NULL
+             || edid->size_of_edid < EDID_BLOCK
+             || edid->edid == NULL
              || !edid_base_valid(edid->edid)) {
                 continue;
             }

@@ -134,13 +134,14 @@ static uint64_t rsdp_find(const struct efi_guid *guid, const char *version) {
     const char *problem = rsdp_check(rsdp);
     if (problem != NULL) {
         printf(
-            "Ignoring the ACPI %s RSDP at %#llx: %s\n", version,
-            (unsigned long long)(uintptr_t)rsdp, problem
+            "Ignoring the ACPI %s RSDP at %#llx: %s\n",
+            version, (unsigned long long)(uintptr_t)rsdp, problem
         );
         return 0;
     }
     printf(
-        "ACPI RSDP revision %u at %#llx\n", rsdp->revision, (unsigned long long)(uintptr_t)rsdp
+        "ACPI RSDP revision %u at %#llx\n",
+        rsdp->revision, (unsigned long long)(uintptr_t)rsdp
     );
     return (uintptr_t)rsdp;
 }
@@ -186,9 +187,10 @@ static void smbios_log(const char *how, const struct smbios_entry32 *eps) {
     printf(
         "SMBIOS %u.%u, 32-bit entry point %s %#llx, structure table at %#llx (%u bytes, %u "
         "structure%s)\n",
-        eps->major, eps->minor, how, (unsigned long long)(uintptr_t)eps,
-        (unsigned long long)eps->table_address, eps->table_length, eps->struct_count,
-        eps->struct_count == 1 ? "" : "s"
+        eps->major, eps->minor,
+        how, (unsigned long long)(uintptr_t)eps,
+        (unsigned long long)eps->table_address, eps->table_length,
+        eps->struct_count, eps->struct_count == 1 ? "" : "s"
     );
 }
 
@@ -278,7 +280,8 @@ static uint64_t smbios3_synthesise(const struct smbios3_entry *eps3) {
     smbios_walk((const uint8_t *)(uintptr_t)table, max_size, &walk);
     if (walk.count == 0) {
         printf(
-            "The SMBIOS structure table at %#llx holds no structures\n", (unsigned long long)table
+            "The SMBIOS structure table at %#llx holds no structures\n",
+            (unsigned long long)table
         );
         return 0;
     }
@@ -497,8 +500,8 @@ static uint32_t table_length(const uint8_t *table) {
 static uint16_t gas_port(const uint8_t *gas) {
     uint64_t address = read_le64(gas + GAS_ADDRESS);
     if (gas[GAS_SPACE] != GAS_SPACE_SYSTEM_IO || gas[GAS_BIT_WIDTH] != 8
-     || gas[GAS_BIT_OFFSET] != 0 || gas[GAS_ACCESS_SIZE] > GAS_ACCESS_BYTE || address < 0x100
-     || address > 0xfff8) {
+     || gas[GAS_BIT_OFFSET] != 0 || gas[GAS_ACCESS_SIZE] > GAS_ACCESS_BYTE
+     || address < 0x100 || address > 0xfff8) {
         return 0;
     }
     return (uint16_t)address;

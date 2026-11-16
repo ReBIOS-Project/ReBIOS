@@ -136,8 +136,8 @@ static void add(const struct acpi_madt_ioapic *entry) {
     // (bad_ioapic_register(), mp_register_ioapic()).
     if (io->id_reg == UINT32_MAX && io->version == UINT32_MAX && io->arbitration == UINT32_MAX) {
         printf(
-            "I/O APIC %u at %#llx reads all ones, so it is left out\n", entry->id,
-            (unsigned long long)base
+            "I/O APIC %u at %#llx reads all ones, so it is left out\n",
+            entry->id, (unsigned long long)base
         );
         return;
     }
@@ -173,8 +173,9 @@ static void add(const struct acpi_madt_ioapic *entry) {
         }
     }
     printf(
-        "I/O APIC %u at %#llx, GSIs %u-%u: masked %u entries\n", entry->id,
-        (unsigned long long)base, entry->gsi_base, entry->gsi_base + io->pins - 1, masked
+        "I/O APIC %u at %#llx, GSIs %u-%u: masked %u entries\n",
+        entry->id, (unsigned long long)base, entry->gsi_base, entry->gsi_base + io->pins - 1,
+        masked
     );
 }
 

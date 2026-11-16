@@ -494,7 +494,8 @@ static void line_add_window(
         line_add(line, " %s closed", name);
     } else {
         line_add(
-            line, " %s 0x%llx-0x%llx", name, (unsigned long long)base, (unsigned long long)limit
+            line, " %s 0x%llx-0x%llx",
+            name, (unsigned long long)base, (unsigned long long)limit
         );
     }
 }
@@ -503,28 +504,28 @@ static void log_function(const struct pci_enum_function *f) {
     struct log_line line;
     line_start(&line, "PCI " PCI_CFG_ADDR_FMT, PCI_CFG_ADDR_ARGS(f->addr));
     line_add(
-        &line, " %04x:%04x class %02x%02x%02x type %u", f->vendor_id, f->device_id, f->base_class,
-        f->subclass, f->prog_if, f->header_type
+        &line, " %04x:%04x class %02x%02x%02x type %u",
+        f->vendor_id, f->device_id, f->base_class, f->subclass, f->prog_if, f->header_type
     );
     for (size_t i = 0; i < f->bar_count; i++) {
         const struct pci_enum_bar *bar = &f->bars[i];
         if (bar->size != 0) {
             line_add(
-                &line, " BAR%zu %s 0x%llx+0x%llx", i, bar_kind_name(bar),
-                (unsigned long long)bar->base, (unsigned long long)bar->size
+                &line, " BAR%zu %s 0x%llx+0x%llx",
+                i, bar_kind_name(bar), (unsigned long long)bar->base, (unsigned long long)bar->size
             );
         }
     }
     if (f->rom.size != 0) {
         line_add(
-            &line, " ROM 0x%llx+0x%llx", (unsigned long long)f->rom.base,
-            (unsigned long long)f->rom.size
+            &line, " ROM 0x%llx+0x%llx",
+            (unsigned long long)f->rom.base, (unsigned long long)f->rom.size
         );
     }
     if (is_bridge(f)) {
         line_add(
-            &line, " pri %02x sec %02x sub %02x", f->primary_bus, f->secondary_bus,
-            f->subordinate_bus
+            &line, " pri %02x sec %02x sub %02x",
+            f->primary_bus, f->secondary_bus, f->subordinate_bus
         );
     }
     if (f->header_type == PCI_HEADER_TYPE_BRIDGE) {
@@ -743,14 +744,16 @@ const struct pci_enum_topology *pci_enum_scan(void) {
     link_topology();
 
     printf(
-        "PCI: %zu functions, %zu root buses\n", topology.function_count, topology.root_bus_count
+        "PCI: %zu functions, %zu root buses\n",
+        topology.function_count, topology.root_bus_count
     );
     if (topology.root_bus_count != 0) {
         struct log_line line;
         line_start(&line, "PCI root buses:");
         for (size_t i = 0; i < topology.root_bus_count; i++) {
             line_add(
-                &line, " %04x:%02x", topology.root_buses[i].segment, topology.root_buses[i].bus
+                &line, " %04x:%02x",
+                topology.root_buses[i].segment, topology.root_buses[i].bus
             );
         }
         line_flush(&line);

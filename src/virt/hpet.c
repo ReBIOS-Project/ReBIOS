@@ -175,7 +175,8 @@ void hpet_init(void) {
             memcpy(&hpet, table.ptr, sizeof(struct acpi_hpet));
             uintptr_t base = hpet.address.address;
             if (hpet.address.address_space_id == ACPI_AS_ID_SYS_MEM
-             && (base & (PAGE_SIZE - 1)) == 0 && hidden_count < MAX_HIDDEN
+             && (base & (PAGE_SIZE - 1)) == 0
+             && hidden_count < MAX_HIDDEN
              && (!allowed || fsb_capable(base))) {
                 hide(base, allowed ? "its timers can deliver through the FSB" : "hpet is off");
             } else if (hpet.address.address_space_id == ACPI_AS_ID_SYS_MEM && guest_base == 0) {

@@ -173,8 +173,8 @@ static void override(const struct acpi_madt_interrupt_source_override *iso) {
     if (iso->bus != 0 || iso->source >= ISA_IRQS || iso->gsi >= route_count
      || routes[iso->gsi].io == NULL) {
         printf(
-            "Ignoring the override of bus %u source %u to GSI %u\n", iso->bus, iso->source,
-            iso->gsi
+            "Ignoring the override of bus %u source %u to GSI %u\n",
+            iso->bus, iso->source, iso->gsi
         );
         return;
     }
@@ -198,8 +198,8 @@ static void override(const struct acpi_madt_interrupt_source_override *iso) {
     r->level = triggering != ACPI_MADT_TRIGGERING_CONFORMING
             && triggering != ACPI_MADT_TRIGGERING_EDGE;
     printf(
-        "ISA IRQ %u is GSI %u, active %s, %s-triggered\n", iso->source, iso->gsi,
-        r->active_low ? "low" : "high", r->level ? "level" : "edge"
+        "ISA IRQ %u is GSI %u, active %s, %s-triggered\n",
+        iso->source, iso->gsi, r->active_low ? "low" : "high", r->level ? "level" : "edge"
     );
 }
 
@@ -264,8 +264,8 @@ static void routes_init(void) {
             routes[gsi].active_low = active_low;
             routes[gsi].level = level;
             printf(
-                "The SCI is GSI %u, active %s, %s-triggered\n", gsi, active_low ? "low" : "high",
-                level ? "level" : "edge"
+                "The SCI is GSI %u, active %s, %s-triggered\n",
+                gsi, active_low ? "low" : "high", level ? "level" : "edge"
             );
         }
     }
@@ -637,8 +637,8 @@ bool irq_present_isa(uint32_t gsi, unsigned int irq) {
         update();
         printf("The guest gets GSI %u at its GSI %u, ISA IRQ %u\n", gsi, entry, irq);
         printf(
-            "The guest gets GSI %u at its GSI %u, ISA IRQ %d\n", (uint32_t)(t - routes), entry_was,
-            irq_was
+            "The guest gets GSI %u at its GSI %u, ISA IRQ %d\n",
+            (uint32_t)(t - routes), entry_was, irq_was
         );
     }
     spinlock_release(&lock);

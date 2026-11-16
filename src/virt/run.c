@@ -292,9 +292,9 @@ static struct run_segment *segment(struct vcpu *v, struct run_state *rs, int reg
         s->selector = vcpu_seg_selector(v, (size_t)reg);
         s->loaded_selector = s->selector;
         s->loaded_base = s->base;
-        s->plain = !rs->lma && (attrib & VCPU_SEG_UNUSABLE) == 0 && (attrib & SEG_PRESENT) != 0
-                && (attrib & SEG_CODE) == 0 && (attrib & SEG_RW) != 0
-                && (attrib & SEG_EXPAND_DOWN) == 0;
+        s->plain = !rs->lma && (attrib & VCPU_SEG_UNUSABLE) == 0
+                && (attrib & SEG_PRESENT) != 0 && (attrib & SEG_CODE) == 0
+                && (attrib & SEG_RW) != 0 && (attrib & SEG_EXPAND_DOWN) == 0;
         rs->segs_loaded |= (uint32_t)1 << reg;
     }
     return s;
@@ -1530,9 +1530,9 @@ static int carry_out(struct vcpu *v, struct run_state *rs, const struct insn *in
     uint64_t imm = sign_extend(insn->imm, insn->imm_size);
     struct operand o;
     int stop;
-    if (segment_operand(op) >= 0 || op == 0x8c || op == 0x8e
-     || ((op == 0xc4 || op == 0xc5) && !insn->long_mode) || op == (INSN_OPCODE_0F | 0xb4)
-     || op == (INSN_OPCODE_0F | 0xb5)) {
+    if (segment_operand(op) >= 0 || op == 0x8c
+     || op == 0x8e || ((op == 0xc4 || op == 0xc5) && !insn->long_mode)
+     || op == (INSN_OPCODE_0F | 0xb4) || op == (INSN_OPCODE_0F | 0xb5)) {
         return segment_form(v, rs, insn);
     }
     if (op < 0x40 && (op & 7) < 4) {
@@ -2167,9 +2167,9 @@ static bool may_run(struct vcpu *v) {
     bool alignment = (vcpu_cr0(v) & CR0_AM) != 0 && (rflags & RFLAGS_AC) != 0
                   && vcpu_cpl(v) == 3;
     // TF with DEBUGCTL.BTF steps the branches alone, which runs take too.
-    return !nvmx_in_l2(v) && !nsvm_in_l2(v) && !v->stepping && !vcpu_stepped(v)
-        && (rflags & RFLAGS_TF) == 0 && !vcpu_breakpoints_armed(v) && v->db_pending == 0
-        && !alignment;
+    return !nvmx_in_l2(v) && !nsvm_in_l2(v) && !v->stepping
+        && !vcpu_stepped(v) && (rflags & RFLAGS_TF) == 0 && !vcpu_breakpoints_armed(v)
+        && v->db_pending == 0 && !alignment;
 }
 
 // What the run starts from: the general registers, RIP, RFLAGS, and the mode,
@@ -2345,8 +2345,8 @@ void run_report(uint64_t ms) {
         uint64_t n = atomic_exchange_explicit(&stop_counts[i], 0, memory_order_relaxed);
         if (n != 0) {
             printf(
-                "Profile:     run stop %-12s %8llu/s\n", stop_names[i],
-                (unsigned long long)(n * 1000 / ms)
+                "Profile:     run stop %-12s %8llu/s\n",
+                stop_names[i], (unsigned long long)(n * 1000 / ms)
             );
         }
     }
@@ -2365,8 +2365,8 @@ void run_report(uint64_t ms) {
         }
         atomic_store_explicit(&opcode_counts[best], 0, memory_order_relaxed);
         printf(
-            "Profile:     run stop opcode %s%02zx %8llu/s\n", best >= 0x100 ? "0f " : "",
-            best & 0xff, (unsigned long long)(most * 1000 / ms)
+            "Profile:     run stop opcode %s%02zx %8llu/s\n",
+            best >= 0x100 ? "0f " : "", best & 0xff, (unsigned long long)(most * 1000 / ms)
         );
     }
     for (size_t i = 0; i < OPCODE_SLOTS; i++) {

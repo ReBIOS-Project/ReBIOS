@@ -90,7 +90,8 @@ bool e820_set(struct e820_map *map, uintptr_t base, size_t size, uint32_t type) 
     // space, which has no 64-bit size.
     uint32_t kept = 0;
     for (size_t i = 0; i < span_count; i++) {
-        if (kept != 0 && spans[kept - 1].type == spans[i].type
+        if (kept != 0
+         && spans[kept - 1].type == spans[i].type
          && spans[kept - 1].last + 1 == spans[i].base
          && !(spans[kept - 1].base == 0 && spans[i].last == UINT64_MAX)) {
             spans[kept - 1].last = spans[i].last;
@@ -279,8 +280,8 @@ void e820_log(const struct e820_map *map) {
             name = unknown;
         }
         printf(
-            "E820 0x%016llx-0x%016llx %s\n", (unsigned long long)e->base,
-            (unsigned long long)entry_last(e), name
+            "E820 0x%016llx-0x%016llx %s\n",
+            (unsigned long long)e->base, (unsigned long long)entry_last(e), name
         );
     }
 }

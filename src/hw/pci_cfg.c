@@ -355,19 +355,17 @@ void pci_cfg_init(void) {
     uintptr_t top = core_handoff->map_top;
     for (size_t i = 0; i < count; i++) {
         struct acpi_mcfg_allocation entry;
-        memcpy(
-            &entry,
-            (const uint8_t *)table.ptr + sizeof(struct acpi_mcfg)
-          + i * sizeof(struct acpi_mcfg_allocation), sizeof(struct acpi_mcfg_allocation)
-        );
+        const uint8_t *from = (const uint8_t *)table.ptr + sizeof(struct acpi_mcfg)
+                            + i * sizeof(struct acpi_mcfg_allocation);
+        memcpy(&entry, from, sizeof(struct acpi_mcfg_allocation));
 
         // The base is that of bus 0, whatever the first bus.
         size_t size = ((uint64_t)entry.end_bus + 1) << 20;
         bool usable = entry.address != 0 && entry.start_bus <= entry.end_bus && size <= top
                    && entry.address <= top - size;
         printf(
-            "PCI segment %u buses %02x-%02x: configuration space at %#llx%s\n", entry.segment,
-            entry.start_bus, entry.end_bus, (unsigned long long)entry.address,
+            "PCI segment %u buses %02x-%02x: configuration space at %#llx%s\n",
+            entry.segment, entry.start_bus, entry.end_bus, (unsigned long long)entry.address,
             usable ? "" : ", not usable"
         );
         if (usable) {

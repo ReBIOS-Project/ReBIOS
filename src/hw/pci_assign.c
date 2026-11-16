@@ -256,7 +256,8 @@ void pci_assign_unassigned_bars(void) {
         for (size_t b = 0; b < f->bar_count; b++) {
             struct pci_enum_bar *bar = &f->bars[b];
             if ((bar->kind != PCI_ENUM_BAR_MEM32 && bar->kind != PCI_ENUM_BAR_MEM64)
-             || bar->size == 0 || bar->base != 0) {
+             || bar->size == 0
+             || bar->base != 0) {
                 continue;
             }
             uintptr_t at;

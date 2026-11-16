@@ -242,11 +242,9 @@ static void port_build(
     put(c, CAP_PCIE + 1, 1, CAP_PM);
     put(c, CAP_PCIE + 2, 2, PCIE_FLAGS);
     put(c, CAP_PCIE + PCIE_DEVCAP, 4, b.payload_max | DEVCAP_RBER);
-    put(
-        c, CAP_PCIE + PCIE_DEVCTL, 2,
-        DEVCTL_RELAX_EN | b.payload << DEVCTL_PAYLOAD_SHIFT | DEVCTL_NOSNOOP_EN
-      | DEVCTL_READRQ_512B
-    );
+    uint32_t devctl = DEVCTL_RELAX_EN | b.payload << DEVCTL_PAYLOAD_SHIFT | DEVCTL_NOSNOOP_EN
+                    | DEVCTL_READRQ_512B;
+    put(c, CAP_PCIE + PCIE_DEVCTL, 2, devctl);
     put(c, CAP_PCIE + PCIE_LNKCAP, 4, b.speed | b.width << LNKCAP_MLW_SHIFT | LNKCAP_ASPM_OPTCOMP);
     put(c, CAP_PCIE + PCIE_LNKSTA, 2, b.speed | b.width << LNKCAP_MLW_SHIFT);
     put(c, CAP_PCIE + PCIE_LNKCAP2, 4, (((uint32_t)1 << b.speed) - 1) << 1);

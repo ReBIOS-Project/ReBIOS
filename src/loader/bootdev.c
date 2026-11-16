@@ -96,7 +96,10 @@ static bool controller_resolve(
     size_t device;
     size_t function;
     if (pci_io->get_location(pci_io, &segment, &bus, &device, &function) != EFI_SUCCESS
-     || segment > 0xffff || bus > 0xff || device > 31 || function > 7) {
+     || segment > 0xffff
+     || bus > 0xff
+     || device > 31
+     || function > 7) {
         return false;
     }
 
@@ -119,9 +122,9 @@ static bool controller_resolve(
 
 static void device_log(const char *what, const struct handoff_block_device *dev) {
     printf(
-        "%s " HANDOFF_PCI_ADDRESS_FMT ", %s, class %02x:%02x%s\n", what,
-        HANDOFF_PCI_ADDRESS_ARGS(dev->address), bbs_type_name(dev->bbs_type), dev->base_class,
-        dev->subclass, dev->boot ? ", boot" : ""
+        "%s " HANDOFF_PCI_ADDRESS_FMT ", %s, class %02x:%02x%s\n",
+        what, HANDOFF_PCI_ADDRESS_ARGS(dev->address), bbs_type_name(dev->bbs_type),
+        dev->base_class, dev->subclass, dev->boot ? ", boot" : ""
     );
 }
 

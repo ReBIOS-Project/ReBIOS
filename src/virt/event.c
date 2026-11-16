@@ -163,7 +163,8 @@ static bool deliver_real_mode(struct vcpu *v, unsigned int vector, uintptr_t ip)
 
 bool event_deliver_real_mode(struct vcpu *v) {
     unsigned int type = v->redeliver & EVENT_TYPE_MASK;
-    if ((v->redeliver & EVENT_VALID) == 0 || (vcpu_cr0(v) & CR0_PE) != 0
+    if ((v->redeliver & EVENT_VALID) == 0
+     || (vcpu_cr0(v) & CR0_PE) != 0
      || (type != EVENT_TYPE_EXTERNAL && type != EVENT_TYPE_EXCEPTION)
      || !deliver_real_mode(v, v->redeliver & EVENT_VECTOR_MASK, vcpu_rip(v))) {
         return false;

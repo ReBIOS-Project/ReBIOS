@@ -175,8 +175,8 @@ static int sdt_find_iommu(const uint8_t *sdt, size_t entry_size) {
         int found = table != NULL ? iommu_table_check(table) : FOUND_NONE;
         if (found != FOUND_NONE) {
             printf(
-                "IOMMU described by the %.4s table at %#llx\n", (const char *)table,
-                (unsigned long long)address
+                "IOMMU described by the %.4s table at %#llx\n",
+                (const char *)table, (unsigned long long)address
             );
         }
         if (found == FOUND_UNUSABLE || (found == FOUND_USABLE && result == FOUND_NONE)) {

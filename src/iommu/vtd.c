@@ -238,7 +238,8 @@ static void queue_sync(struct vtd_unit *u) {
         }
         if (time_ns() > deadline) {
             panic(
-                "VT-d unit at %#llx does not complete invalidations\n", (unsigned long long)u->base
+                "VT-d unit at %#llx does not complete invalidations\n",
+                (unsigned long long)u->base
             );
         }
         cpu_relax();
@@ -375,8 +376,8 @@ bool vtd_probe(const struct iommu_tables *tables, size_t *leaf_level) {
         uint32_t sagaw = (u->cap >> CAP_SAGAW_SHIFT) & 0x1f;
         uint32_t sslps = (u->cap >> CAP_SSLPS_SHIFT) & 0xf;
         printf(
-            "VT-d unit %zu at %#llx: version %u.%u, capabilities %#llx, extended %#llx\n", i,
-            (unsigned long long)u->base, (version >> 4) & 0xf, version & 0xf,
+            "VT-d unit %zu at %#llx: version %u.%u, capabilities %#llx, extended %#llx\n",
+            i, (unsigned long long)u->base, (version >> 4) & 0xf, version & 0xf,
             (unsigned long long)u->cap, (unsigned long long)u->ecap
         );
 
@@ -664,9 +665,9 @@ void vtd_remap_message(uint16_t index, uint32_t *address, uint32_t *data) {
 }
 
 uint64_t vtd_remap_rte(uint16_t index, uint8_t vector, bool level, bool active_low) {
-    return vector | (uint64_t)((uint32_t)index & 0x7fff) << 49 | RTE_REMAPPABLE
-         | (uint64_t)((uint32_t)index >> 15 & 1) << 11 | (level ? IOAPIC_RTE_LEVEL : 0)
-         | (active_low ? IOAPIC_RTE_ACTIVE_LOW : 0);
+    return vector | (uint64_t)((uint32_t)index & 0x7fff) << 49
+         | RTE_REMAPPABLE | (uint64_t)((uint32_t)index >> 15 & 1) << 11
+         | (level ? IOAPIC_RTE_LEVEL : 0) | (active_low ? IOAPIC_RTE_ACTIVE_LOW : 0);
 }
 
 void vtd_enable(uintptr_t pml4) {
@@ -706,8 +707,8 @@ size_t vtd_report_faults(size_t limit) {
             uint64_t low = reg_read64(u, record);
             uint32_t source = high & 0xffff;
             printf(
-                "VT-d unit %zu: DMA fault from %02x:%02x.%x at %#llx, reason %#x\n", i,
-                source >> 8, (source >> 3) & 0x1f, source & 7,
+                "VT-d unit %zu: DMA fault from %02x:%02x.%x at %#llx, reason %#x\n",
+                i, source >> 8, (source >> 3) & 0x1f, source & 7,
                 (unsigned long long)(low & ~(uint64_t)0xfff), (unsigned int)((high >> 32) & 0xff)
             );
             reg_write64(u, record + 8, FAULT_F);

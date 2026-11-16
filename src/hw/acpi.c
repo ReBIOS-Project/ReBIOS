@@ -487,8 +487,8 @@ uacpi_status uacpi_kernel_handle_firmware_request(uacpi_firmware_request *reques
         }
         case UACPI_FIRMWARE_REQUEST_TYPE_FATAL: {
             printf(
-                "AML fatal error, type %#x, code %#x, argument %#llx\n", request->fatal.type,
-                request->fatal.code, (unsigned long long)request->fatal.arg
+                "AML fatal error, type %#x, code %#x, argument %#llx\n",
+                request->fatal.type, request->fatal.code, (unsigned long long)request->fatal.arg
             );
             break;
         }

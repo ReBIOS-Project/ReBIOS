@@ -749,7 +749,8 @@ static const struct insn_mem_table_form *mem_form(const struct insn *insn) {
          && (f->w == INSN_MEM_TABLE_W_ANY || f->w == insn->w)
          && (f->l == INSN_MEM_TABLE_L_ANY || f->l == insn->vector_length)
          && (f->nd == INSN_MEM_TABLE_ND_ANY || f->nd == insn->nd)
-         && (f->nf == INSN_MEM_TABLE_NF_ANY || f->nf == insn->nf) && (f->modes & mode) != 0) {
+         && (f->nf == INSN_MEM_TABLE_NF_ANY || f->nf == insn->nf)
+         && (f->modes & mode) != 0) {
             return f;
         }
     }

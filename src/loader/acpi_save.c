@@ -153,8 +153,8 @@ static void write_tables(const char *name, const char *what) {
     );
     if (why != NULL) {
         log_notice(
-            "Cannot write %s to %s: %s, status %#llx\n", what, where, why,
-            (unsigned long long)status
+            "Cannot write %s to %s: %s, status %#llx\n",
+            what, where, why, (unsigned long long)status
         );
     } else {
         log_notice("Wrote %s, %zu of them, to %s\n", what, table_count, where);

@@ -123,7 +123,8 @@ static bool exit_boot_services(char *why, size_t why_size) {
         }
         if (status != EFI_SUCCESS) {
             snprintf(
-                why, why_size, "GetMemoryMap() fails, status %#llx", (unsigned long long)status
+                why, why_size, "GetMemoryMap() fails, status %#llx",
+                (unsigned long long)status
             );
             return false;
         }

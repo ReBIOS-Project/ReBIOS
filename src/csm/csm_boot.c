@@ -191,8 +191,8 @@ static void free_uma_absent(void) {
     end = page_down(end);
     if (start < end) {
         printf(
-            "Upper memory %#llx-%#llx is free, and absent\n", (unsigned long long)start,
-            (unsigned long long)(end - 1)
+            "Upper memory %#llx-%#llx is free, and absent\n",
+            (unsigned long long)start, (unsigned long long)(end - 1)
         );
         layout_absent(start, end - start);
     }
@@ -205,8 +205,8 @@ static void lock_roms(void) {
     uintptr_t roms_end = page_up(csm.rom_end);
     if (roms_end > ROM_AREA_BASE) {
         printf(
-            "Option ROMs %#x-%#llx are read-only\n", ROM_AREA_BASE,
-            (unsigned long long)(roms_end - 1)
+            "Option ROMs %#x-%#llx are read-only\n",
+            ROM_AREA_BASE, (unsigned long long)(roms_end - 1)
         );
         layout_read_only(ROM_AREA_BASE, roms_end - ROM_AREA_BASE);
     }
@@ -215,7 +215,8 @@ static void lock_roms(void) {
     csm.code_base = csm.image_base;
     if (start >= roms_end && start < ROM_AREA_END) {
         printf(
-            "Legacy BIOS %#llx-%#x is read-only\n", (unsigned long long)start, ROM_AREA_END - 1
+            "Legacy BIOS %#llx-%#x is read-only\n",
+            (unsigned long long)start, ROM_AREA_END - 1
         );
         layout_read_only(start, ROM_AREA_END - start);
         csm.code_base = start;
@@ -342,9 +343,9 @@ static void next_rom(struct vcpu *v) {
         params.address.bus = (uint8_t)bus;
         csm_fill_oprom_table(layout_low(OPROM_TABLE), &params);
         printf(
-            "Running the option ROM of %02x:%02x.%x (%04x:%04x) at %#llx\n", rom->address.bus,
-            rom->address.devfn >> 3, rom->address.devfn & 7, rom->vendor_id, rom->device_id,
-            (unsigned long long)run_at
+            "Running the option ROM of %02x:%02x.%x (%04x:%04x) at %#llx\n",
+            rom->address.bus, rom->address.devfn >> 3, rom->address.devfn & 7, rom->vendor_id,
+            rom->device_id, (unsigned long long)run_at
         );
         csm.rom_at = (uint32_t)run_at;
         csm.stage = STAGE_DISPATCH_OPROM;
@@ -488,7 +489,8 @@ static int root_name(const char *line, size_t length, size_t *at, char *name, si
             }
             if (port->root == r) {
                 return snprintf(
-                    name, size, PCI_DOMAIN "/pci-bridge@%x,%x", port->device, port->function
+                    name, size, PCI_DOMAIN "/pci-bridge@%x,%x",
+                    port->device, port->function
                 );
             }
         }
@@ -633,10 +635,8 @@ void csm_boot_start(struct vcpu *v) {
     csm_fill_init_table(layout_low(INIT_TABLE), &init);
 
     // At the guest's PCI addresses, which are all in segment 0.
-    struct handoff_block_device *devices = kmalloc(
-        (h->block_device_count != 0 ? h->block_device_count : 1)
-      * sizeof(struct handoff_block_device)
-    );
+    size_t entries = h->block_device_count != 0 ? h->block_device_count : 1;
+    struct handoff_block_device *devices = kmalloc(entries * sizeof(struct handoff_block_device));
     for (size_t i = 0; i < h->block_device_count; i++) {
         devices[i] = h->block_devices[i];
         struct handoff_pci_address *a = &devices[i].address;

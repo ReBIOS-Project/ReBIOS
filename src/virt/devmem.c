@@ -92,8 +92,8 @@ static bool usable(uintptr_t base, uintptr_t end) {
     if (base < ONE_MIB || end <= base || end - base > RANGE_MAX || !layout_host_kept(base, end)
      || overlaps(host->private, host->private_count, base, end)) {
         printf(
-            "Device memory at 0x%llx-0x%llx is not the guest's\n", (unsigned long long)base,
-            (unsigned long long)(end - 1)
+            "Device memory at 0x%llx-0x%llx is not the guest's\n",
+            (unsigned long long)base, (unsigned long long)(end - 1)
         );
         return false;
     }
@@ -158,8 +158,10 @@ void devmem_plan(void) {
     devmem.spare = at;
     devmem.first_spare = at;
     printf(
-        "Guest device memory: %zu ranges at 0x%llx-0x%llx%s\n", devmem.count,
-        (unsigned long long)devmem.block_base, (unsigned long long)(devmem.block_end - 1),
+        "Guest device memory: %zu ranges at 0x%llx-0x%llx%s\n",
+        devmem.count,
+        (unsigned long long)devmem.block_base,
+        (unsigned long long)(devmem.block_end - 1),
         devmem.tpm_end != 0 ? ", and a TPM's at its own address" : ""
     );
 }
@@ -219,8 +221,8 @@ static bool place_late(uint64_t base, uint64_t end, uint64_t *guest) {
     devmem_map();
     gpt_flush();
     printf(
-        "Device memory at 0x%llx-0x%llx is the guest's at 0x%llx\n", (unsigned long long)first,
-        (unsigned long long)(last - 1), (unsigned long long)devmem.spare
+        "Device memory at 0x%llx-0x%llx is the guest's at 0x%llx\n",
+        (unsigned long long)first, (unsigned long long)(last - 1), (unsigned long long)devmem.spare
     );
     *guest = devmem.spare + (base - first);
     devmem.spare += last - first;

@@ -185,8 +185,8 @@ static void log_machine_check(void) {
                          ? rdmsr(MSR_MC0_ADDR + 4 * (uint32_t)i)
                          : 0;
         printf(
-            "Machine check in bank %zu: status %#llx, address %#llx\n", i,
-            (unsigned long long)status, (unsigned long long)address
+            "Machine check in bank %zu: status %#llx, address %#llx\n",
+            i, (unsigned long long)status, (unsigned long long)address
         );
     }
 }
@@ -394,16 +394,18 @@ void svm_vcpu_init(struct vcpu *v) {
 static void svm_dump_guest(struct vcpu *v) {
     struct vmcb_save *s = &v->vmcb->save;
     printf(
-        "Guest RIP %#llx RSP %#llx RFLAGS %#llx CPL %u\n", (unsigned long long)s->rip,
-        (unsigned long long)s->rsp, (unsigned long long)s->rflags, s->cpl
+        "Guest RIP %#llx RSP %#llx RFLAGS %#llx CPL %u\n",
+        (unsigned long long)s->rip, (unsigned long long)s->rsp, (unsigned long long)s->rflags,
+        s->cpl
     );
     printf(
-        "Guest CR0 %#llx CR3 %#llx CR4 %#llx EFER %#llx\n", (unsigned long long)s->cr0,
-        (unsigned long long)s->cr3, (unsigned long long)s->cr4, (unsigned long long)s->efer
+        "Guest CR0 %#llx CR3 %#llx CR4 %#llx EFER %#llx\n",
+        (unsigned long long)s->cr0, (unsigned long long)s->cr3, (unsigned long long)s->cr4,
+        (unsigned long long)s->efer
     );
     printf(
-        "Guest CS sel %#x base %#llx limit %#x attrib %#x\n", s->cs.selector,
-        (unsigned long long)s->cs.base, s->cs.limit, s->cs.attrib
+        "Guest CS sel %#x base %#llx limit %#x attrib %#x\n",
+        s->cs.selector, (unsigned long long)s->cs.base, s->cs.limit, s->cs.attrib
     );
 }
 
@@ -467,7 +469,8 @@ static void svm_handle_cr4_write(struct vcpu *v) {
         if (!insn_decode(v, &insn) || insn.opcode != (INSN_OPCODE_0F | 0x22)) {
             // One the hypervisor cannot read runs again.
             printf(
-                "Cannot decode the CR4 write at %#llx\n", (unsigned long long)v->vmcb->save.rip
+                "Cannot decode the CR4 write at %#llx\n",
+                (unsigned long long)v->vmcb->save.rip
             );
             return;
         }
@@ -754,8 +757,8 @@ static bool gp_double_faults(uint8_t first) {
 static void svm_gp_erratum(struct vcpu *v) {
     struct vmcb_control *c = &v->vmcb->control;
     if (svm_vmcb_addr_check || c->exitcode != SVM_EXIT_EXCEPTION_BASE + VECTOR_GP
-     || (c->exitintinfo & SVM_EVENT_VALID) != 0 || c->exitinfo1 != 0 || !nsvm_svme(v)
-     || v->vmcb->save.cpl != 0) {
+     || (c->exitintinfo & SVM_EVENT_VALID) != 0 || c->exitinfo1 != 0
+     || !nsvm_svme(v) || v->vmcb->save.cpl != 0) {
         return;
     }
     struct insn insn;

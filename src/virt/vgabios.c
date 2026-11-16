@@ -774,7 +774,8 @@ static void display_fill(void) {
             reason = "The panel's EDID describes it unturned";
         }
         printf(
-            "%s, so the emulated VGA's display reports %ux%u at 60 Hz\n", reason, width, height
+            "%s, so the emulated VGA's display reports %ux%u at 60 Hz\n",
+            reason, width, height
         );
     }
 }

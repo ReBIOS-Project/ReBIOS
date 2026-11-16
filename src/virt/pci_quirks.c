@@ -528,7 +528,8 @@ void pci_quirks_init(void) {
         const struct pci_enum_function *f = &t->functions[i];
         // The GPU whose VBIOS runs is the one with the VGA ports, which its
         // VBIOS reaches the copies through.
-        bool vga = video->vbios_present && video->vbios_trusted
+        bool vga = video->vbios_present
+                && video->vbios_trusted
                 && f->addr.segment == video->vga_device.segment
                 && f->addr.bus == video->vga_device.bus
                 && (uint32_t)(f->addr.device << 3 | f->addr.function) == video->vga_device.devfn;
@@ -548,7 +549,8 @@ void pci_quirks_init(void) {
             // Where the registers are in BAR 5, BAR 2 holds doorbells instead.
             const struct pci_enum_bar *registers = &f->bars[5];
             if (f->bars[ATI_REGISTERS_BAR].kind == PCI_ENUM_BAR_MEM64
-             && registers->kind != PCI_ENUM_BAR_MEM32 && registers->kind != PCI_ENUM_BAR_MEM64) {
+             && registers->kind != PCI_ENUM_BAR_MEM32
+             && registers->kind != PCI_ENUM_BAR_MEM64) {
                 mirror_add(f, ATI_REGISTERS_BAR, ATI_MIRROR, PCI_CFG_SPACE_SIZE, false);
             }
             window_add(

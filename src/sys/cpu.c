@@ -124,7 +124,8 @@ __attribute__((format(printf, 4, 5))) static void append(
 }
 
 bool cpu_deep_idle_safe(void) {
-    return cpuid(0, 0).eax >= 6 && (cpuid(6, 0).eax & ((uint32_t)1 << 2)) != 0
+    return cpuid(0, 0).eax >= 6
+        && (cpuid(6, 0).eax & ((uint32_t)1 << 2)) != 0
         && cpuid(0x80000000, 0).eax >= 0x80000007
         && (cpuid(0x80000007, 0).edx & ((uint32_t)1 << 8)) != 0;
 }
@@ -247,12 +248,14 @@ void cpu_exception_handler(struct exception_frame *frame) {
         text, sizeof(text), &len,
         "Host exception %s (vector %llu), error code %#llx, APIC ID %#x\n",
         frame->vector < 32 ? exception_names[frame->vector] : "?",
-        (unsigned long long)frame->vector, (unsigned long long)frame->error_code, apic_id
+        (unsigned long long)frame->vector,
+        (unsigned long long)frame->error_code,
+        apic_id
     );
     if (frame->rip >= image && frame->rip < image_end) {
         append(
-            text, sizeof(text), &len, "RIP %#llx (ReBIOS + %#llx)", (unsigned long long)frame->rip,
-            (unsigned long long)(frame->rip - image)
+            text, sizeof(text), &len, "RIP %#llx (ReBIOS + %#llx)",
+            (unsigned long long)frame->rip, (unsigned long long)(frame->rip - image)
         );
     } else {
         append(

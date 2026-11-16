@@ -921,7 +921,8 @@ static void command_access(
     (void)size;
     spinlock_acquire(&lock);
     if (in) {
-        uint8_t status = I8042_STATUS_NOT_INHIBITED | (ram[0] & I8042_CCB_SYSTEM)
+        uint8_t status = I8042_STATUS_NOT_INHIBITED
+                       | (ram[0] & I8042_CCB_SYSTEM)
                        | (last_was_command ? I8042_STATUS_COMMAND : 0)
                        | (output_full ? I8042_STATUS_OUTPUT_FULL : 0)
                        | (output_full && output_aux ? I8042_STATUS_AUX_DATA : 0);

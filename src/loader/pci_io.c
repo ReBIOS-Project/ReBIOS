@@ -53,7 +53,8 @@ static bool pci_io_device_get(efi_handle handle, struct pci_io_device *dev) {
     size_t segment, bus, device, function;
     uint32_t header[4];
 
-    if (efi_bs->handle_protocol(handle, &pci_io_guid, (void **)&io) != EFI_SUCCESS || io == NULL
+    if (efi_bs->handle_protocol(handle, &pci_io_guid, (void **)&io) != EFI_SUCCESS
+     || io == NULL
      || io->get_location(io, &segment, &bus, &device, &function) != EFI_SUCCESS
      || io->pci.read(io, EFI_PCI_IO_WIDTH_UINT32, 0, 4, header) != EFI_SUCCESS) {
         return false;

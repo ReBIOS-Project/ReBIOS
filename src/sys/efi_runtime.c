@@ -164,7 +164,8 @@ efi_status efi_runtime_query_variable_info(
     bool wait
 ) {
     const struct efi_runtime_services *rt = services();
-    if (rt == NULL || rt->hdr.revision < EFI_2_00_SYSTEM_TABLE_REVISION
+    if (rt == NULL
+     || rt->hdr.revision < EFI_2_00_SYSTEM_TABLE_REVISION
      || rt->hdr.header_size < QUERY_VARIABLE_INFO_END
      || atomic_load_explicit(&broken, memory_order_acquire)) {
         return EFI_UNSUPPORTED;

@@ -202,9 +202,10 @@ static void set_guest_debugctl(struct vcpu *v, uint64_t value) {
 // The faults a stepped instruction may raise, which SVM intercepts so that the
 // step ends there.
 #define STEP_EXCEPTIONS \
-    ((uint32_t)1 << 0 | (uint32_t)1 << 1 | (uint32_t)1 << 5 | (uint32_t)1 << 6 | (uint32_t)1 << 7 \
-   | (uint32_t)1 << 11 | (uint32_t)1 << 12 | (uint32_t)1 << 13 | (uint32_t)1 << 14 \
-   | (uint32_t)1 << 16 | (uint32_t)1 << 17 | (uint32_t)1 << 19 | (uint32_t)1 << 21)
+    ((uint32_t)1 << 0 | (uint32_t)1 << 1 | (uint32_t)1 << 5 | (uint32_t)1 << 6 \
+   | (uint32_t)1 << 7 | (uint32_t)1 << 11 | (uint32_t)1 << 12 | (uint32_t)1 << 13 \
+   | (uint32_t)1 << 14 | (uint32_t)1 << 16 | (uint32_t)1 << 17 | (uint32_t)1 << 19 \
+   | (uint32_t)1 << 21)
 
 void vcpu_single_step(struct vcpu *v, bool on) {
     if (virt_vmx) {
@@ -286,8 +287,9 @@ static void watchdog(struct vcpu *v) {
     }
     cpu->watchdog_next = now + WATCHDOG_REPORT_NS;
     printf(
-        "Exit %#x kept CPU %u from the guest for %llu.%03llu ms\n", v->last_exit, cpu->index,
-        (unsigned long long)(held / 1000000), (unsigned long long)(held / 1000 % 1000)
+        "Exit %#x kept CPU %u from the guest for %llu.%03llu ms\n",
+        v->last_exit, cpu->index, (unsigned long long)(held / 1000000),
+        (unsigned long long)(held / 1000 % 1000)
     );
 }
 
@@ -425,8 +427,8 @@ void vcpu_before_entry(struct vcpu *v) {
         v->cpu->clock_modulation_set = modulation;
         if (!wrmsr_safe(MSR_IA32_CLOCK_MODULATION, modulation)) {
             printf(
-                "CPU %u refuses IA32_CLOCK_MODULATION %#llx\n", v->cpu->index,
-                (unsigned long long)modulation
+                "CPU %u refuses IA32_CLOCK_MODULATION %#llx\n",
+                v->cpu->index, (unsigned long long)modulation
             );
         }
     }

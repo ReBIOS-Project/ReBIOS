@@ -157,8 +157,10 @@ void tsc_calibrate(void) {
     }
     time_set_tsc_hz(hz);
     printf(
-        "TSC at %llu Hz, %s %s\n", (unsigned long long)hz,
-        nominal_agrees ? "its nominal rate, which agrees with" : "as measured with", source
+        "TSC at %llu Hz, %s %s\n",
+        (unsigned long long)hz,
+        nominal_agrees ? "its nominal rate, which agrees with" : "as measured with",
+        source
     );
     if (!agree(estimate, hz)) {
         printf("The firmware's Stall() put it at %llu Hz\n", (unsigned long long)estimate);

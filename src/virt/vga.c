@@ -1661,8 +1661,8 @@ static void border_fill(const struct vga_draw_ops *ops, uint32_t rgb) {
 // flags show written, where the processor keeps them.
 static bool direct_wanted(void) {
     const struct handoff_framebuffer *fb = &core_handoff->video.framebuffer;
-    return vbe.direct_size != 0 && vbe_on() && !vbe.panned && vbe.mode.bpp == 32
-        && vbe.mode.width == fb->width && vbe.mode.height == fb->height
+    return vbe.direct_size != 0 && vbe_on() && !vbe.panned
+        && vbe.mode.bpp == 32 && vbe.mode.width == fb->width && vbe.mode.height == fb->height
         && vbe.line_bytes == fb->pitch && vbe.start == 0;
 }
 
@@ -2262,7 +2262,8 @@ static struct rect draw_band(
     if (fb->rotation == HANDOFF_ROTATE_90) {
         ops->transpose(
             back + (ptrdiff_t)dirty.y0 * pitch + dirty.x0, pitch,
-            s->band + (size_t)(rows - 1) * columns, -(ptrdiff_t)columns, rows, columns
+            s->band + (size_t)(rows - 1) * columns, -(ptrdiff_t)columns,
+            rows, columns
         );
     } else {
         ops->transpose(
@@ -2714,10 +2715,11 @@ static void vbe_init(void) {
     // picture is never the framebuffer's own.
     const struct handoff_framebuffer *fb = &video->framebuffer;
     uint64_t frame = page_up((uint64_t)fb->pitch * fb->height);
-    if (fb->present && fb->rotation == HANDOFF_ROTATE_0 && fb->bpp == 32 && fb->red_size == 8
-     && fb->red_shift == 16 && fb->green_size == 8 && fb->green_shift == 8 && fb->blue_size == 8
-     && fb->blue_shift == 0 && fb->pitch % 32 == 0 && fb->base % PAGE_SIZE == 0
-     && frame <= fb->size && frame <= vbe.vram_size) {
+    if (fb->present && fb->rotation == HANDOFF_ROTATE_0 && fb->bpp == 32
+     && fb->red_size == 8 && fb->red_shift == 16 && fb->green_size == 8
+     && fb->green_shift == 8 && fb->blue_size == 8 && fb->blue_shift == 0
+     && fb->pitch % 32 == 0 && fb->base % PAGE_SIZE == 0 && frame <= fb->size
+     && frame <= vbe.vram_size) {
         vbe.direct_size = frame;
     }
 
@@ -2910,8 +2912,8 @@ bool vga_init(void) {
         }
     }
     printf(
-        "Emulating a VGA, %s on the %ux%u framebuffer at %#llx%s%s\n", scaling_names[scaling],
-        fb->width, fb->height, (unsigned long long)fb->base, orientation,
+        "Emulating a VGA, %s on the %ux%u framebuffer at %#llx%s%s\n",
+        scaling_names[scaling], fb->width, fb->height, (unsigned long long)fb->base, orientation,
         h->config.vga_filter == HANDOFF_VGA_FILTER_BILINEAR ? ", with bilinear filtering" : ""
     );
     return true;

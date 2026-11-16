@@ -289,8 +289,8 @@ static void take(const struct pci_enum_function *f) {
         from = " taken from the firmware and";
     }
     printf(
-        "USB " PCI_CFG_ADDR_FMT ": %s%s %s\n", PCI_CFG_ADDR_ARGS(a), name, from,
-        stopped ? "stopped" : "not stopped"
+        "USB " PCI_CFG_ADDR_FMT ": %s%s %s\n",
+        PCI_CFG_ADDR_ARGS(a), name, from, stopped ? "stopped" : "not stopped"
     );
     if (stopped && taken_count < MAX_TAKEN) {
         taken[taken_count++] = a;

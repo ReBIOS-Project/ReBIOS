@@ -341,7 +341,8 @@ static void hfi_init(void) {
 }
 
 static bool pt_msr(uint32_t msr) {
-    return msr == MSR_IA32_RTIT_OUTPUT_BASE || msr == MSR_IA32_RTIT_OUTPUT_MASK_PTRS
+    return msr == MSR_IA32_RTIT_OUTPUT_BASE
+        || msr == MSR_IA32_RTIT_OUTPUT_MASK_PTRS
         || (msr >= MSR_IA32_RTIT_TRIGGER0_CFG && msr <= MSR_IA32_RTIT_CR3_MATCH)
         || (msr >= MSR_IA32_RTIT_ADDR0_A && msr <= MSR_IA32_RTIT_ADDR3_B);
 }
@@ -903,8 +904,8 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
 }
 
 bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
-    if ((pt_hidden && pt_msr(msr)) || (mpx_hidden && msr == MSR_IA32_BNDCFGS) || lbr_msr(msr)
-     || (pebs_hidden && msr == MSR_IA32_PEBS_ENABLE)
+    if ((pt_hidden && pt_msr(msr)) || (mpx_hidden && msr == MSR_IA32_BNDCFGS)
+     || lbr_msr(msr) || (pebs_hidden && msr == MSR_IA32_PEBS_ENABLE)
      || (pstates_read_only && msr >= MSR_AMD_PSTATE_DEF0 && msr <= MSR_AMD_PSTATE_DEF7)) {
         *fault = true;
         return true;

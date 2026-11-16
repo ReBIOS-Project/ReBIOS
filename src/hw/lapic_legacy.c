@@ -90,7 +90,8 @@ static void log_regs(
         }
         if (lvt_exists(i, max_entry)) {
             len += snprintf(
-                line + len, sizeof(line) - (size_t)len, " %s %#x", lvt_names[i], regs->lvt[i]
+                line + len, sizeof(line) - (size_t)len, " %s %#x",
+                lvt_names[i], regs->lvt[i]
             );
         }
     }
@@ -222,8 +223,8 @@ void lapic_legacy_init(void) {
     uint32_t max_entry = (version >> 16) & 0xff;
     uint32_t apic_id = apic_id_of();
     printf(
-        "Local APIC %#x: IA32_APIC_BASE %#llx -> %#llx, %s, version %#x\n", apic_id,
-        (unsigned long long)found_base, (unsigned long long)rdmsr(MSR_IA32_APIC_BASE),
+        "Local APIC %#x: IA32_APIC_BASE %#llx -> %#llx, %s, version %#x\n",
+        apic_id, (unsigned long long)found_base, (unsigned long long)rdmsr(MSR_IA32_APIC_BASE),
         x2apic ? "x2APIC mode" : "xAPIC mode", version
     );
     if (found_enabled) {
@@ -272,9 +273,9 @@ void lapic_legacy_init(void) {
     for (size_t lint = 0; lint < 2; lint++) {
         if (pins[lint].nmi) {
             printf(
-                "Local APIC %#x: NMIs on LINT%zu, active %s, %s triggered, %s\n", apic_id, lint,
-                pins[lint].active_low ? "low" : "high", pins[lint].level ? "level" : "edge",
-                from_madt ? "from the MADT" : "by default"
+                "Local APIC %#x: NMIs on LINT%zu, active %s, %s triggered, %s\n",
+                apic_id, lint, pins[lint].active_low ? "low" : "high",
+                pins[lint].level ? "level" : "edge", from_madt ? "from the MADT" : "by default"
             );
         }
     }

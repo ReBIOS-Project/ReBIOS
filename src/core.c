@@ -160,7 +160,8 @@ void core_main(struct handoff *handoff) {
     core_handoff = handoff;
 
     printf(
-        "ReBIOS core running, heap %#llx-%#llx\n", (unsigned long long)handoff->heap_base,
+        "ReBIOS core running, heap %#llx-%#llx\n",
+        (unsigned long long)handoff->heap_base,
         (unsigned long long)(handoff->heap_base + handoff->heap_size)
     );
 

@@ -353,8 +353,8 @@ void layout_init(void) {
                              ? "specific-purpose memory"
                              : "memory that cannot be cached write-back";
             printf(
-                "Firmware memory map: the guest does not get the %s at %#llx-%#llx\n", what,
-                (unsigned long long)d->physical_start, (unsigned long long)end
+                "Firmware memory map: the guest does not get the %s at %#llx-%#llx\n",
+                what, (unsigned long long)d->physical_start, (unsigned long long)end
             );
         }
     }

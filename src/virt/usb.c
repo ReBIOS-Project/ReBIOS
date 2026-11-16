@@ -408,8 +408,8 @@ static void controller_take(struct usb_controller *c) {
     int status = tendril_hc_add(&config, &c->hc);
     if (status != TENDRIL_OK) {
         printf(
-            "USB: controller %02x:%02x.%x stays the guest's: %s\n", c->f->addr.bus,
-            c->f->addr.device, c->f->addr.function, tendril_status_str(status)
+            "USB: controller %02x:%02x.%x stays the guest's: %s\n",
+            c->f->addr.bus, c->f->addr.device, c->f->addr.function, tendril_status_str(status)
         );
         controller_let_go(c);
         return;
@@ -544,8 +544,8 @@ void usb_init(void) {
         struct usb_controller *c = &controllers[i];
         if (!usb_legacy_own(c)) {
             printf(
-                "USB: controller %02x:%02x.%x stays the guest's\n", c->f->addr.bus,
-                c->f->addr.device, c->f->addr.function
+                "USB: controller %02x:%02x.%x stays the guest's\n",
+                c->f->addr.bus, c->f->addr.device, c->f->addr.function
             );
             atomic_store_explicit(&c->state, USB_CONTROLLER_STATE_RELEASED, memory_order_relaxed);
         }

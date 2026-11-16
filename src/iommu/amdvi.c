@@ -308,15 +308,18 @@ static void command_sync(struct amdvi_unit *u) {
     atomic_store_explicit(&u->wait_done, 0, memory_order_relaxed);
     uintptr_t store = (uintptr_t)&u->wait_done;
     command_submit(
-        u, (uint32_t)store | CMD_WAIT_STORE,
-        (uint32_t)(store >> 32) | CMD_COMPLETION_WAIT << CMD_SHIFT, 1, 0
+        u,
+        (uint32_t)store | CMD_WAIT_STORE,
+        (uint32_t)(store >> 32) | CMD_COMPLETION_WAIT << CMD_SHIFT,
+        1, 0
     );
 
     uint64_t deadline = time_ns() + TIMEOUT_NS;
     while (atomic_load_explicit(&u->wait_done, memory_order_acquire) != 1) {
         if (time_ns() > deadline) {
             panic(
-                "AMD-Vi unit at %#llx does not complete commands\n", (unsigned long long)u->base
+                "AMD-Vi unit at %#llx does not complete commands\n",
+                (unsigned long long)u->base
             );
         }
         cpu_relax();
@@ -376,8 +379,8 @@ bool amdvi_probe(const struct iommu_tables *tables, size_t *leaf_level) {
         };
         erratum_746(u->function);
         printf(
-            "AMD-Vi unit %zu at %#llx: features %#llx, control %#llx\n", i,
-            (unsigned long long)u->base, (unsigned long long)reg_read(u, REG_FEATURES),
+            "AMD-Vi unit %zu at %#llx: features %#llx, control %#llx\n",
+            i, (unsigned long long)u->base, (unsigned long long)reg_read(u, REG_FEATURES),
             (unsigned long long)reg_read(u, REG_CONTROL)
         );
     }
@@ -552,7 +555,8 @@ static bool ga_log_start(struct amdvi_unit *u, uint32_t apic_id, uint8_t vector)
     while ((reg_read(u, REG_STATUS) & STATUS_GA_LOG_RUN) == 0) {
         if (time_ns() > deadline) {
             printf(
-                "AMD-Vi unit at %#llx does not start its GA log\n", (unsigned long long)u->base
+                "AMD-Vi unit at %#llx does not start its GA log\n",
+                (unsigned long long)u->base
             );
             return false;
         }
@@ -747,8 +751,8 @@ static struct remap_table *table_for(uint16_t id) {
         }
         if (had != NULL) {
             printf(
-                "AMD-Vi: device ID %04x moves to the interrupt remapping table of %04x\n", ids[i],
-                id
+                "AMD-Vi: device ID %04x moves to the interrupt remapping table of %04x\n",
+                ids[i], id
             );
         }
         table_install(ids[i], t);
@@ -877,8 +881,8 @@ bool amdvi_remap_post(
     if (!posting || !alone || target->tag >= target_count) {
         return false;
     }
-    uint64_t low = IRTE_REMAP_EN | IRTE_GA_LOG_INTR | IRTE_GUEST_MODE
-                 | (uint64_t)(target->apic_id & 0xffffff) << IRTE_DEST_SHIFT
+    uint64_t low = IRTE_REMAP_EN | IRTE_GA_LOG_INTR
+                 | IRTE_GUEST_MODE | (uint64_t)(target->apic_id & 0xffffff) << IRTE_DEST_SHIFT
                  | (uint64_t)target->tag << IRTE_GA_TAG_SHIFT;
     uint64_t high = vector | ((uint64_t)target->descriptor & IRTE_GA_ROOT_MASK)
                   | (uint64_t)(target->apic_id >> 24) << IRTE_DEST_HIGH_SHIFT;
@@ -1039,9 +1043,9 @@ size_t amdvi_report_faults(size_t limit) {
             } else {
                 limit--;
                 printf(
-                    "AMD-Vi unit %zu: event %#x from %02x:%02x.%x: %08x %08x %08x %08x\n", i,
-                    event[1] >> CMD_SHIFT, source >> 8, (source >> 3) & 0x1f, source & 7, event[0],
-                    event[1], event[2], event[3]
+                    "AMD-Vi unit %zu: event %#x from %02x:%02x.%x: %08x %08x %08x %08x\n",
+                    i, event[1] >> CMD_SHIFT, source >> 8, (source >> 3) & 0x1f, source & 7,
+                    event[0], event[1], event[2], event[3]
                 );
             }
             for (size_t j = 0; j < 4; j++) {

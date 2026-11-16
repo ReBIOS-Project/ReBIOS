@@ -472,8 +472,10 @@ bool mmio_move_run(
     uint64_t destination;
     if (vcpu_breakpoints_armed(v)
      || !run_place(v, from, size, step, count, false, &source_region, &source)
-     || !run_place(v, to, size, step, count, true, &region, &destination) || region == NULL
-     || region != source_region || region->ops->move_string == NULL) {
+     || !run_place(v, to, size, step, count, true, &region, &destination)
+     || region == NULL
+     || region != source_region
+     || region->ops->move_string == NULL) {
         return false;
     }
     region->ops->move_string(v, region->ctx, source, destination, size, step, count);
@@ -492,7 +494,8 @@ bool mmio_store_run(
     const struct region *region;
     uint64_t destination;
     if (vcpu_breakpoints_armed(v)
-     || !run_place(v, to, size, step, count, true, &region, &destination) || region == NULL
+     || !run_place(v, to, size, step, count, true, &region, &destination)
+     || region == NULL
      || region->ops->write_string == NULL) {
         return false;
     }

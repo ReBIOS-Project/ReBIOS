@@ -366,7 +366,8 @@ static void set_cursor_type(uint8_t start, uint8_t end) {
     vgabios_pokew(BDA, BDA_CURSOR_TYPE, (uint16_t)(start << 8 | end));
     uint8_t height = vgabios_peekb(BDA, BDA_CHAR_HEIGHT);
     if ((vgabios_peekb(BDA, BDA_VIDEO_CONTROL) & BDA_VIDEO_CONTROL_NO_EMULATION) == 0 && height > 8
-     && (start & 0x20) == 0 && start < 8 && end < 8) {
+     && (start & 0x20) == 0 && start < 8
+     && end < 8) {
         if (start == 6 && end == 7) {
             start = (uint8_t)(height - 3);
             end = (uint8_t)(height - 2);

@@ -34,7 +34,8 @@ struct csm_compat16_table *csm_find_compat16_table(void *image, size_t size) {
         struct csm_compat16_table *table = (struct csm_compat16_table *)(bytes + off);
         if (table->signature == CSM_COMPAT16_SIGNATURE
          && table->table_length >= CSM_COMPAT16_TABLE_SPEC_SIZE
-         && table->table_length <= size - off && checksum8(table, table->table_length) == 0) {
+         && table->table_length <= size - off
+         && checksum8(table, table->table_length) == 0) {
             return table;
         }
     }

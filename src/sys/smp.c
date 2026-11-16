@@ -286,7 +286,8 @@ void smp_start_aps(void) {
         // Each times its SIMD kernels alone.
         deadline = time_ns() + AP_READY_TIMEOUT_NS;
         while (atomic_load_explicit(&cpu->online, memory_order_acquire)
-            && !atomic_load_explicit(&cpu->ready, memory_order_acquire) && time_ns() < deadline) {
+            && !atomic_load_explicit(&cpu->ready, memory_order_acquire)
+            && time_ns() < deadline) {
             cpu_relax();
         }
     }

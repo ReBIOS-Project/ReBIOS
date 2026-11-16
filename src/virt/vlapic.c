@@ -1028,7 +1028,8 @@ void vlapic_create(struct vcpu *v) {
         if (vl->id <= X2AVIC_MAX_ID) {
             atomic_store_explicit(
                 (_Atomic(uint64_t) *)&avic_physical_table[vl->id],
-                (uint64_t)(uintptr_t)vl->regs | AVIC_ENTRY_VALID | vl->id, memory_order_release
+                (uint64_t)(uintptr_t)vl->regs | AVIC_ENTRY_VALID | vl->id,
+                memory_order_release
             );
         }
     }
@@ -1619,7 +1620,8 @@ bool vlapic_post_target(
     bool lowest = mode == ICR_DELIVERY_LOWEST
                || (mode == ICR_DELIVERY_FIXED && (address & MSI_ADDRESS_REDIRECT) != 0);
     if ((address & MSI_ADDRESS_MASK) != MSI_ADDRESS_BASE
-     || (mode != ICR_DELIVERY_FIXED && mode != ICR_DELIVERY_LOWEST) || (data & ICR_LEVEL) != 0
+     || (mode != ICR_DELIVERY_FIXED && mode != ICR_DELIVERY_LOWEST)
+     || (data & ICR_LEVEL) != 0
      || (data & ICR_VECTOR_MASK & ~(uint32_t)(count - 1)) < 16) {
         return false;
     }
@@ -2244,10 +2246,11 @@ bool vlapic_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
         uint32_t reg = (msr - MSR_X2APIC_FIRST) << 4;
         uint32_t ignored;
         bool readable = reg == APIC_EOI || reg_read(v, reg, &ignored);
-        if (!readable || (value >> 32) != 0 || reg == APIC_ID || reg == APIC_VERSION
-         || reg == APIC_PPR || reg == APIC_LDR || reg == APIC_TIMER_CURRENT
-         || reg == APIC_EXT_FEATURE || (reg >= APIC_ISR && reg < APIC_IRR + 0x80)
-         || !reg_write(v, reg, (uint32_t)value)) {
+        if (!readable || (value >> 32) != 0
+         || reg == APIC_ID || reg == APIC_VERSION
+         || reg == APIC_PPR || reg == APIC_LDR
+         || reg == APIC_TIMER_CURRENT || reg == APIC_EXT_FEATURE
+         || (reg >= APIC_ISR && reg < APIC_IRR + 0x80) || !reg_write(v, reg, (uint32_t)value)) {
             *fault = true;
         }
     }

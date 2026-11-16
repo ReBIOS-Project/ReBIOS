@@ -409,11 +409,13 @@ bool nsvm_in_l2(struct vcpu *v) {
 // for it (svm.c).
 struct cpuid_regs nsvm_cpuid(void) {
     struct cpuid_regs svm = cpuid(0x8000000a, 0);
-    uint32_t features = SVM_FEATURE_NP | SVM_FEATURE_NRIPS | SVM_FEATURE_VMCB_CLEAN
-                      | SVM_FEATURE_FLUSH_BY_ASID | SVM_FEATURE_PAUSE_FILTER
-                      | SVM_FEATURE_PAUSE_FILTER_THRESHOLD | SVM_FEATURE_LBRV | SVM_FEATURE_ROGPT
-                      | SVM_FEATURE_TLBICTL | SVM_FEATURE_DECODE_ASSISTS | SVM_FEATURE_VGIF
-                      | SVM_FEATURE_GMET | SVM_FEATURE_TSC_RATIO | SVM_FEATURE_SVML
+    uint32_t features = SVM_FEATURE_NP | SVM_FEATURE_NRIPS
+                      | SVM_FEATURE_VMCB_CLEAN | SVM_FEATURE_FLUSH_BY_ASID
+                      | SVM_FEATURE_PAUSE_FILTER | SVM_FEATURE_PAUSE_FILTER_THRESHOLD
+                      | SVM_FEATURE_LBRV | SVM_FEATURE_ROGPT
+                      | SVM_FEATURE_TLBICTL | SVM_FEATURE_DECODE_ASSISTS
+                      | SVM_FEATURE_VGIF | SVM_FEATURE_GMET
+                      | SVM_FEATURE_TSC_RATIO | SVM_FEATURE_SVML
                       | SVM_FEATURE_IDLE_HLT | SVM_FEATURE_BUS_LOCK_THRESHOLD
                       | (svm_vls ? SVM_FEATURE_VLS : 0) | (svm_vnmi ? SVM_FEATURE_VNMI : 0);
     return (struct cpuid_regs){
@@ -685,7 +687,8 @@ static void exit_to_l1(
     uint64_t back = (n->vnmi12 ? SVM_VINTR_NMI | SVM_VINTR_NMI_MASK : 0)
                   | (n->vgif12 ? SVM_VINTR_GIF : 0);
     c12->vintr = (c12->vintr & ~(SVM_VINTR_TPR_MASK | SVM_VINTR_IRQ | back))
-               | (c02->vintr & (SVM_VINTR_TPR_MASK | back)) | (virq & SVM_VINTR_IRQ);
+               | (c02->vintr & (SVM_VINTR_TPR_MASK | back))
+               | (virq & SVM_VINTR_IRQ);
     c12->interrupt_shadow = (c12->interrupt_shadow & ~SVM_INTERRUPT_SHADOW)
                           | (c02->interrupt_shadow & SVM_INTERRUPT_SHADOW);
     if (bus_lock_threshold) {
@@ -801,8 +804,10 @@ static bool table_fits(uint64_t base, size_t size) {
 static bool vmcb12_valid(struct vcpu *v, const struct vmcb *vmcb12) {
     const struct vmcb_control *c = &vmcb12->control;
     const struct vmcb_save *s = &vmcb12->save;
-    if ((c->intercept_misc2 & SVM_INTERCEPT_VMRUN) == 0 || c->guest_asid == 0
-     || c->guest_asid >= nasid - 1 || !table_fits(c->msrpm_base_pa, MSRPM_SIZE)
+    if ((c->intercept_misc2 & SVM_INTERCEPT_VMRUN) == 0
+     || c->guest_asid == 0
+     || c->guest_asid >= nasid - 1
+     || !table_fits(c->msrpm_base_pa, MSRPM_SIZE)
      || !table_fits(c->iopm_base_pa, IOPM_USED)
      || !injection_valid(c->eventinj, (s->cr4 & CR4_FRED) != 0)) {
         return false;
@@ -816,8 +821,9 @@ static bool vmcb12_valid(struct vcpu *v, const struct vmcb *vmcb12) {
         return false;
     }
     if ((s->efer & EFER_SVME) == 0 || ((s->cr0 & CR0_CD) == 0 && (s->cr0 & CR0_NW) != 0)
-     || (s->cr0 >> 32) != 0 || (s->dr6 >> 32) != 0 || (s->dr7 >> 32) != 0
-     || (s->cr4 & ~cpuid_cr4_allowed()) != 0 || (s->efer & ~cpuid_efer_allowed(v)) != 0) {
+     || (s->cr0 >> 32) != 0 || (s->dr6 >> 32) != 0
+     || (s->dr7 >> 32) != 0 || (s->cr4 & ~cpuid_cr4_allowed()) != 0
+     || (s->efer & ~cpuid_efer_allowed(v)) != 0) {
         return false;
     }
     // NMI virtualisation needs the NMI intercept (APM 24593 rev. 3.46,
@@ -906,7 +912,8 @@ static void merge_intercepts(struct nsvm *n) {
     // The guest's guest's MONITOR and MWAIT run on the processor unless VMCB12
     // intercepts them, as with VMX, where VMCS12 alone has them exit.
     uint32_t idle = SVM_INTERCEPT_MONITOR | SVM_INTERCEPT_MWAIT;
-    to[4] = (own[4] & ~(SVM_INTERCEPT_VMMCALL | svm | idle)) | n->intercepts[4]
+    to[4] = (own[4] & ~(SVM_INTERCEPT_VMMCALL | svm | idle))
+          | n->intercepts[4]
           | (n->vls12 ? 0 : SVM_INTERCEPT_VMLOAD | SVM_INTERCEPT_VMSAVE)
           | (n->vgif12 ? 0 : SVM_INTERCEPT_STGI | SVM_INTERCEPT_CLGI);
     if ((n->vintr12 & SVM_VINTR_MASKING) == 0) {
@@ -1268,7 +1275,8 @@ static void prepare_vmcb02(struct nsvm *n) {
     n->intercepts[5] &= (invlpgb != 0 ? SVM_INTERCEPT_INVLPGB | SVM_INTERCEPT_INVLPGB_ILLEGAL : 0)
                       | (svm_tlbictl ? SVM_INTERCEPT_TLBSYNC : 0)
                       | (idle_hlt ? SVM_INTERCEPT_IDLE_HLT : 0)
-                      | (bus_lock_threshold ? SVM_INTERCEPT_BUS_LOCK : 0) | SVM_INTERCEPT_INVPCID;
+                      | (bus_lock_threshold ? SVM_INTERCEPT_BUS_LOCK : 0)
+                      | SVM_INTERCEPT_INVPCID;
     n->vintr12 = c12->vintr;
     n->window = false;
     n->tsc_offset12 = c12->tsc_offset;

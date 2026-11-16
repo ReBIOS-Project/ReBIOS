@@ -545,7 +545,8 @@ static void init_opregion(void) {
     gpt_flush();
     igfx.guest_asls = alias + (uint32_t)offset;
     printf(
-        "Intel graphics: the OpRegion at %#x is the guest's at %#x\n", igfx.asls, igfx.guest_asls
+        "Intel graphics: the OpRegion at %#x is the guest's at %#x\n",
+        igfx.asls, igfx.guest_asls
     );
     if (igfx.rvda != 0) {
         give_raw_vbt();

@@ -559,7 +559,8 @@ static void mode_save(uint16_t seg, uint16_t at) {
     words[STATE_BPP] = vbe.bpp;
     words[STATE_WIDTH] = vbe.width;
     words[STATE_HEIGHT] = vbe.height;
-    words[STATE_FLAGS] = (uint16_t)((vbe.on ? STATE_FLAG_ON : 0) | (vbe.lfb ? STATE_FLAG_LFB : 0)
+    words[STATE_FLAGS] = (uint16_t)((vbe.on ? STATE_FLAG_ON : 0)
+                                  | (vbe.lfb ? STATE_FLAG_LFB : 0)
                                   | (vbe.keep ? STATE_FLAG_KEEP : 0)
                                   | (vga_dac8() ? STATE_FLAG_DAC8 : 0));
     words[STATE_VIRT_WIDTH] = vbe.virt_width;
