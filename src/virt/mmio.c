@@ -47,11 +47,6 @@
 // The accesses to where nothing decodes that are logged.
 #define ABSENT_REPORTS 16
 
-// The most bytes of a repeated string instruction's operands mmio_string()
-// takes at a time, which a buffer on the stack holds, and of the runs that
-// ReBIOS carries out itself.
-#define STRING_RUN_BYTES 1024
-
 struct region {
     _Atomic(uintptr_t) base;
     _Atomic(size_t) size;
@@ -305,8 +300,8 @@ size_t mmio_run_room(uintptr_t linear, size_t size, int64_t step, size_t count) 
         return 0;
     }
     size_t room = step > 0 ? (PAGE_SIZE - in_page) / size : in_page / size + 1;
-    if (room > STRING_RUN_BYTES / size) {
-        room = STRING_RUN_BYTES / size;
+    if (room > MMIO_RUN_BYTES / size) {
+        room = MMIO_RUN_BYTES / size;
     }
     return count < room ? count : room;
 }
@@ -338,6 +333,24 @@ static bool string_run(
         && guest_mem_linear_to_phys(v, linear, write, false, gpa, &pf_error);
 }
 
+// Whether a run of count elements of size bytes, the first at gpa and each
+// next step bytes on, lies within region r, *offset the first's offset into
+// it.
+static bool region_run(
+    const struct region *r,
+    uintptr_t gpa,
+    size_t size,
+    int64_t step,
+    size_t count,
+    uint64_t *offset
+) {
+    uint64_t base = atomic_load_explicit(&r->base, memory_order_relaxed);
+    uint64_t length = atomic_load_explicit(&r->size, memory_order_relaxed);
+    *offset = gpa - base;
+    uint64_t low = step > 0 ? *offset : *offset - (uint64_t)(count - 1) * size;
+    return low < length && length - low >= (uint64_t)count * size;
+}
+
 // Where such a run of count operands is: RAM, *r NULL, or a region, *offset
 // the first's offset into it. False where it is neither, or more than one.
 static bool string_place(
@@ -349,14 +362,7 @@ static bool string_place(
     uint64_t *offset
 ) {
     *r = find(gpa);
-    if (*r == NULL) {
-        return true;
-    }
-    uint64_t base = atomic_load_explicit(&(*r)->base, memory_order_relaxed);
-    uint64_t length = atomic_load_explicit(&(*r)->size, memory_order_relaxed);
-    *offset = gpa - base;
-    uint64_t low = step > 0 ? *offset : *offset - (uint64_t)(count - 1) * size;
-    return low < length && length - low >= (uint64_t)count * size;
+    return *r == NULL || region_run(*r, gpa, size, step, count, offset);
 }
 
 // Puts a run's elements, which lie in memory from its lowest address on, in
@@ -409,7 +415,7 @@ size_t mmio_string(
     }
     uintptr_t src_low = step > 0 ? src : src - (count - 1) * size;
     uintptr_t dst_low = step > 0 ? dst : dst - (count - 1) * size;
-    uint8_t buf[STRING_RUN_BYTES];
+    uint8_t buf[MMIO_RUN_BYTES];
     if (stores && to != NULL && to->ops->write_string != NULL) {
         uint8_t value[8];
         write_le64(value, v->gprs.rax);
@@ -551,6 +557,63 @@ void mmio_region_access(
     bool write
 ) {
     region_access(v, region, gpa, buf, len, write);
+}
+
+bool mmio_region_store(
+    struct vcpu *v,
+    const void *region,
+    uintptr_t gpa,
+    const uint8_t *data,
+    bool same,
+    size_t size,
+    int64_t step,
+    size_t count
+) {
+    const struct region *r = region;
+    uint64_t offset;
+    if (r->ops->write_string == NULL || !region_run(r, gpa, size, step, count, &offset)) {
+        return false;
+    }
+    r->ops->write_string(v, r->ctx, offset, size, step, data, same, count);
+    return true;
+}
+
+bool mmio_region_load(
+    struct vcpu *v,
+    const void *region,
+    uintptr_t gpa,
+    uint8_t *data,
+    size_t size,
+    int64_t step,
+    size_t count
+) {
+    const struct region *r = region;
+    uint64_t offset;
+    if (r->ops->read_string == NULL || !region_run(r, gpa, size, step, count, &offset)) {
+        return false;
+    }
+    r->ops->read_string(v, r->ctx, offset, size, step, data, count);
+    return true;
+}
+
+bool mmio_region_move(
+    struct vcpu *v,
+    const void *region,
+    uintptr_t to,
+    uintptr_t from,
+    size_t size,
+    int64_t step,
+    size_t count
+) {
+    const struct region *r = region;
+    uint64_t source;
+    uint64_t destination;
+    if (r->ops->move_string == NULL || !region_run(r, from, size, step, count, &source)
+     || !region_run(r, to, size, step, count, &destination)) {
+        return false;
+    }
+    r->ops->move_string(v, r->ctx, source, destination, size, step, count);
+    return true;
 }
 
 // The pages a single-stepped instruction runs against: those its operands

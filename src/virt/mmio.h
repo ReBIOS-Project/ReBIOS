@@ -117,11 +117,16 @@ size_t mmio_string(
     size_t count
 );
 
+// The most bytes of elements that a run takes, which a buffer on the stack
+// holds.
+#define MMIO_RUN_BYTES 1024
+
 // Runs that ReBIOS carries out in guest memory itself, as REP MOVS and REP
-// STOS do, for the video BIOS's calls (virt/vgabios.c): count elements of size
-// bytes, the first at linear address to, and from, and each next step bytes
-// on. How many elements from the first a run may take: as far as a page and
-// the most a run takes allow, 0 where the first crosses a page.
+// STOS do, for the video BIOS's calls (virt/vgabios.c) and for the guest's own
+// instructions (virt/run.c): count elements of size bytes, the first at linear
+// address to, and from, and each next step bytes on. How many elements from
+// the first a run may take: as far as a page and MMIO_RUN_BYTES allow, 0 where
+// the first crosses a page.
 size_t mmio_run_room(uintptr_t linear, size_t size, int64_t step, size_t count);
 // Moves within a region that takes string moves, and stores, of data's
 // elements, or of its first for every element where same is true, to a region
@@ -162,6 +167,40 @@ void mmio_region_access(
     void *buf,
     size_t len,
     bool write
+);
+// Runs within a page of that region, all at once: count elements of size
+// bytes, the first at gpa, or to and from, and each next step bytes on. Stores
+// of data's elements, or of its first for every element where same is true,
+// loads into data, in the order the elements are reached, and moves within the
+// region. False where the region takes no such runs, for the caller to make
+// each access.
+bool mmio_region_store(
+    struct vcpu *v,
+    const void *region,
+    uintptr_t gpa,
+    const uint8_t *data,
+    bool same,
+    size_t size,
+    int64_t step,
+    size_t count
+);
+bool mmio_region_load(
+    struct vcpu *v,
+    const void *region,
+    uintptr_t gpa,
+    uint8_t *data,
+    size_t size,
+    int64_t step,
+    size_t count
+);
+bool mmio_region_move(
+    struct vcpu *v,
+    const void *region,
+    uintptr_t to,
+    uintptr_t from,
+    size_t size,
+    int64_t step,
+    size_t count
 );
 
 // An EPT violation or a nested page fault at gpa, for an access other than a

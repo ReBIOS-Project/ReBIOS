@@ -1276,9 +1276,142 @@ static int port(struct vcpu *v, struct run_state *rs, const struct insn *insn) {
     return next(rs, insn);
 }
 
-// MOVS, CMPS, STOS, LODS, and SCAS, an iteration at a time, RUN_CHECK of them
-// at most before the run looks at events again: meanwhile the instruction is
-// part done, at RIP with RF set, as an event between iterations leaves it.
+// An operand of the block that string_block() takes, at the destination or the
+// source: *count cut to the elements that come before the operand's offset
+// wraps and that mmio_run_room() allows from the first's linear address,
+// *linear, on, and the page that holds them, or NULL where any of them could
+// fault or stop the run.
+static struct run_page *block_operand(
+    struct vcpu *v,
+    struct run_state *rs,
+    const struct insn *insn,
+    bool destination,
+    size_t size,
+    int64_t delta,
+    size_t *count,
+    uintptr_t *linear
+) {
+    int seg = VCPU_SEG_ES;
+    uint64_t reg = rs->gpr[7];
+    if (!destination) {
+        seg = insn->segment >= 0 ? insn->segment : VCPU_SEG_DS;
+        reg = rs->gpr[6];
+    }
+    uint64_t mask = size_mask(insn->address_size);
+    uint64_t ea = reg & mask;
+    if (ea > mask - (size - 1)) {
+        return NULL;
+    }
+    uint64_t after = delta > 0 ? (mask - (size - 1) - ea) / size : ea / size;
+    if (*count - 1 > after) {
+        *count = (size_t)after + 1;
+    }
+    if (segment_check(v, rs, seg, ea, size, destination, linear) != STOP_NONE) {
+        return NULL;
+    }
+    *count = mmio_run_room(*linear, size, delta, *count);
+    if (*count == 0) {
+        return NULL;
+    }
+    // A segment's limits hold the elements between its first and its last.
+    int64_t span = delta * (int64_t)(*count - 1);
+    uint64_t last = ea + (uint64_t)span;
+    uintptr_t last_linear;
+    if (segment_check(v, rs, seg, last, size, destination, &last_linear) != STOP_NONE
+     || last_linear != *linear + (uintptr_t)span) {
+        return NULL;
+    }
+    bool fault = false;
+    return page_get(v, rs, *linear, destination ? NEED_WRITE : NEED_READ, &fault);
+}
+
+// REP MOVS and REP STOS a block of iterations at a time, where the processor
+// could stop at none of them, from the next on, as far as block_operand()
+// allows for each operand: in emulated memory that takes blocks, as the VGA's
+// does, through its string accesses under one of its locks, and in RAM an
+// access at a time, as the guest makes them. How many it took, 0 for none.
+static size_t string_block(
+    struct vcpu *v,
+    struct run_state *rs,
+    const struct insn *insn,
+    size_t size,
+    int64_t delta,
+    size_t count
+) {
+    bool moves = insn->opcode == 0xa4 || insn->opcode == 0xa5;
+    uintptr_t to_linear;
+    struct run_page *to = block_operand(v, rs, insn, true, size, delta, &count, &to_linear);
+    if (to == NULL) {
+        return 0;
+    }
+    uintptr_t from_linear = 0;
+    struct run_page *from = to;
+    if (moves) {
+        from = block_operand(v, rs, insn, false, size, delta, &count, &from_linear);
+        if (from == NULL) {
+            return 0;
+        }
+    }
+    uintptr_t to_offset = to_linear & (PAGE_SIZE - 1);
+    uintptr_t from_offset = from_linear & (PAGE_SIZE - 1);
+    uintptr_t to_gpa = to->gpa + to_offset;
+    uintptr_t from_gpa = from->gpa + from_offset;
+    uint8_t buf[MMIO_RUN_BYTES];
+    bool done = true;
+    if (!moves && to->place == MMIO_PLACE_RUN) {
+        uint8_t value[8];
+        write_le64(value, rs->gpr[0]);
+        done = mmio_region_store(v, to->region, to_gpa, value, true, size, delta, count);
+    } else if (!moves) {
+        for (size_t n = 0; n < count; n++) {
+            ram_store(to->host + to_offset + delta * (int64_t)n, size, rs->gpr[0]);
+        }
+    } else if (from->place == MMIO_PLACE_RUN && to->place == MMIO_PLACE_RUN) {
+        done = from->region == to->region
+            && mmio_region_move(v, to->region, to_gpa, from_gpa, size, delta, count);
+    } else if (from->place == MMIO_PLACE_RUN) {
+        done = mmio_region_load(v, from->region, from_gpa, buf, size, delta, count);
+        for (size_t n = 0; done && n < count; n++) {
+            uint64_t value = 0;
+            for (size_t i = 0; i < size; i++) {
+                value |= (uint64_t)buf[n * size + i] << (i * 8);
+            }
+            ram_store(to->host + to_offset + delta * (int64_t)n, size, value);
+        }
+    } else if (to->place == MMIO_PLACE_RUN) {
+        for (size_t n = 0; n < count; n++) {
+            uint64_t value = ram_load(from->host + from_offset + delta * (int64_t)n, size);
+            for (size_t i = 0; i < size; i++) {
+                buf[n * size + i] = (uint8_t)(value >> (i * 8));
+            }
+        }
+        done = mmio_region_store(v, to->region, to_gpa, buf, false, size, delta, count);
+    } else {
+        for (size_t n = 0; n < count; n++) {
+            uint64_t value = ram_load(from->host + from_offset + delta * (int64_t)n, size);
+            ram_store(to->host + to_offset + delta * (int64_t)n, size, value);
+        }
+    }
+    if (!done) {
+        return 0;
+    }
+    if (to->place == MMIO_PLACE_RUN || from->place == MMIO_PLACE_RUN) {
+        rs->reached = true;
+    }
+    size_t address_size = insn->address_size;
+    rs->gpr[7] = address_step(rs->gpr[7], delta * (int64_t)count, address_size);
+    if (moves) {
+        rs->gpr[6] = address_step(rs->gpr[6], delta * (int64_t)count, address_size);
+    }
+    rs->gpr[1] = address_step(rs->gpr[1], -(int64_t)count, address_size);
+    return count;
+}
+
+// MOVS, CMPS, STOS, LODS, and SCAS: REP MOVS and REP STOS a block at a time
+// where string_block() takes them, the run looking at events again after each,
+// and the rest an iteration at a time, RUN_CHECK of them at most before it
+// does. Meanwhile the instruction is part done, at RIP with RF set, as an
+// event between iterations leaves it.
 static int string(struct vcpu *v, struct run_state *rs, const struct insn *insn) {
     unsigned int op = insn->opcode;
     size_t size = (op & 1) != 0 ? insn->operand_size : 1;
@@ -1291,6 +1424,17 @@ static int string(struct vcpu *v, struct run_state *rs, const struct insn *insn)
     bool compares = op == 0xa6 || op == 0xa7 || op == 0xae || op == 0xaf;
     int source = insn->segment >= 0 ? insn->segment : VCPU_SEG_DS;
     uint64_t count = insn->rep ? rs->gpr[1] & mask : 1;
+    if (insn->rep && writes && count != 0) {
+        size_t taken = string_block(v, rs, insn, size, delta, (size_t)count);
+        if (taken == count) {
+            return next(rs, insn);
+        }
+        if (taken != 0) {
+            rs->partial = true;
+            rs->recheck = true;
+            return STOP_NONE;
+        }
+    }
     for (size_t done = 0; count != 0; done++) {
         if (done == RUN_CHECK) {
             rs->partial = true;
