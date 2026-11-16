@@ -171,9 +171,6 @@
 #define CMD_PAGES_SIZE ((uint32_t)1 << 0)
 #define CMD_PAGES_PDE ((uint32_t)1 << 1)
 
-// PCI Local Bus Specification 3.0, 6.8.1: MSI's Message Control register and
-// the registers after it.
-
 #define TIMEOUT_NS ((uint64_t)1000000000)
 // As long as Linux 7.3's iommu_ga_log_enable() waits for the log to start.
 #define GA_LOG_TIMEOUT_NS ((uint64_t)20000000)
