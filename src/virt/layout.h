@@ -77,6 +77,13 @@ void layout_absent(uintptr_t gpa, size_t size);
 // locks shadowed ROMs: writes go nowhere. Page aligned.
 void layout_read_only(uintptr_t gpa, size_t size);
 
+// Shows size bytes of image, the legacy BIOS as built, read-only at the top of
+// 4 GiB, where a PC's chipset decodes its BIOS flash, unless something else is
+// there. Before layout_e820().
+void layout_bios_flash(const void *image, size_t size);
+// Where layout_bios_flash() put the image, in whole pages: false if nowhere.
+bool layout_bios_flash_range(uintptr_t *base, size_t *size);
+
 // Fills the guest's memory map.
 bool layout_e820(struct e820_map *map);
 

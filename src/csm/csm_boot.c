@@ -559,6 +559,7 @@ void csm_boot_start(struct vcpu *v) {
     }
     csm.image_base = ROM_AREA_END - image_size;
     memcpy(layout_low(csm.image_base), seabios_csm, image_size);
+    layout_bios_flash(seabios_csm, image_size);
     csm.compat16 = csm_find_compat16_table(layout_low(csm.image_base), image_size);
     if (csm.compat16 == NULL) {
         panic("No CSM16 table in the legacy BIOS image\n");

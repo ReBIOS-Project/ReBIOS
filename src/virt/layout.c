@@ -105,6 +105,8 @@ static uint8_t *low;
 // What absent memory reads as.
 static uintptr_t ones_page;
 static size_t moved_pages;
+// Where the legacy BIOS's image shows at the top of 4 GiB.
+static struct range flash;
 
 static uint64_t list_total(const struct range_list *list) {
     size_t total = 0;
@@ -613,6 +615,9 @@ bool layout_mmio_free(uintptr_t base, size_t size) {
     if (stolen.end != 0 && base < stolen.end && end > stolen.base) {
         return false;
     }
+    if (flash.end != 0 && base < flash.end && end > flash.base) {
+        return false;
+    }
     const struct pci_plan *plan = pci_plan();
     if (plan != NULL && plan->ecam != 0) {
         uintptr_t ecam_end = plan->ecam + (((uint64_t)plan->bus_end + 1) << 20);
@@ -804,6 +809,54 @@ void layout_read_only(uintptr_t gpa, size_t size) {
     gpt_flush();
 }
 
+static uint64_t flash_read(struct vcpu *v, void *ctx, uint64_t offset, size_t size) {
+    (void)v;
+    uint64_t value = 0;
+    memcpy(&value, (const uint8_t *)ctx + offset, size);
+    return value;
+}
+
+static const struct mmio_ops flash_ops = {
+    .read = flash_read,
+    .write = mmio_absent_write,
+    .reads_virtual = true,
+    .writes_virtual = true,
+    .writes_ignored = true,
+    .reads_mapped = true
+};
+
+void layout_bios_flash(const void *image, size_t size) {
+    size_t span = page_count(size) * PAGE_SIZE;
+    uintptr_t base = FOUR_GIB - span;
+    if (size == 0 || span > FOUR_GIB - ONE_MIB || !layout_mmio_free(base, span)) {
+        printf("The guest has other memory at the top of 4 GiB: no BIOS image shows there\n");
+        return;
+    }
+    // The image ends at 4 GiB as it ends at 1 MiB, after erased flash.
+    uint8_t *copy = page_alloc(span / PAGE_SIZE);
+    memset(copy, 0xff, span - size);
+    memcpy(copy + span - size, image, size);
+    flash = (struct range){ base, FOUR_GIB };
+    // Reads go to the image, writes exit to be dropped.
+    mmio_register(base, span, &flash_ops, copy);
+    gpt_map(base, (uintptr_t)copy, span, GPT_R | GPT_X, MT_WB);
+    gpt_flush();
+    printf(
+        "The legacy BIOS's image shows at %#llx-%#llx, where a PC's chipset decodes its BIOS "
+        "flash\n",
+        (unsigned long long)base, (unsigned long long)(FOUR_GIB - 1)
+    );
+}
+
+bool layout_bios_flash_range(uintptr_t *base, size_t *size) {
+    if (flash.end == 0) {
+        return false;
+    }
+    *base = flash.base;
+    *size = flash.end - flash.base;
+    return true;
+}
+
 bool layout_e820(struct e820_map *map) {
     bool ok = true;
     e820_init(map);
@@ -848,6 +901,12 @@ bool layout_e820(struct e820_map *map) {
     // learns only from here that it is taken.
     if (plan != NULL && plan->lfb != 0) {
         ok &= e820_set(map, plan->lfb, vga_lfb_size(), E820_RESERVED);
+    }
+    // The BIOS flash, which a PC's firmware lists: the map then ends at 4 GiB
+    // or above, as an OS can take its end for that of the memory it maps, as
+    // TempleOS V5.03 does, in 2 MiB pages.
+    if (flash.end != 0) {
+        ok &= e820_set(map, flash.base, flash.end - flash.base, E820_RESERVED);
     }
     ok &= e820_set_low_memory(map);
     return ok;

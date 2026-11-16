@@ -2751,11 +2751,12 @@ static void emit_legacy_devices(struct aml *a) {
     }
 }
 
-// A Fixed Memory32 descriptor, read and write, at p; returns its size.
-static size_t put_fixed_memory32(uint8_t *p, uintptr_t base, size_t size) {
+// A Fixed Memory32 descriptor at p, read-only unless writable (ACPI 6.6,
+// 6.4.3.4); returns its size.
+static size_t put_fixed_memory32(uint8_t *p, uintptr_t base, size_t size, bool writable) {
     p[0] = ACPI_TAG_FIXED_MEMORY32;
     put_le(p + 1, 9, 2);
-    p[3] = MEMORY_RW;
+    p[3] = writable ? MEMORY_RW : 0;
     put_le(p + 4, base, 4);
     put_le(p + 8, size, 4);
     return 12;
@@ -2767,23 +2768,29 @@ static size_t put_fixed_memory32(uint8_t *p, uintptr_t base, size_t size) {
 // the block of ACPI devices' memory, for ACPI only what no device's _CRS
 // claims, as those devices claim theirs, but all of it for the Plug and Play
 // BIOS, which shows none of them.
-#define CLAIMS_MAX (4 * 12 + 2)
+#define CLAIMS_MAX (5 * 12 + 2)
 static size_t claims(uint8_t *crs, bool acpi) {
-    size_t size = put_fixed_memory32(crs, vacpi.mailbox, MBX_SIZE + DOORBELL_SIZE);
+    size_t size = put_fixed_memory32(crs, vacpi.mailbox, MBX_SIZE + DOORBELL_SIZE, true);
     uintptr_t devices_base;
     uintptr_t devices_end;
     bool devices = acpi
                  ? devmem_spare(&devices_base, &devices_end)
                  : devmem_range(0, &devices_base, &devices_end);
     if (devices && devices_end > devices_base) {
-        size += put_fixed_memory32(crs + size, devices_base, devices_end - devices_base);
+        size += put_fixed_memory32(crs + size, devices_base, devices_end - devices_base, true);
     }
     const struct pci_plan *plan = pci_plan();
     if (plan != NULL && plan->ecam != 0) {
-        size += put_fixed_memory32(crs + size, plan->ecam, ((size_t)plan->bus_end + 1) * ONE_MIB);
+        size_t ecam_size = ((size_t)plan->bus_end + 1) * ONE_MIB;
+        size += put_fixed_memory32(crs + size, plan->ecam, ecam_size, true);
     }
     if (plan != NULL && plan->lfb != 0) {
-        size += put_fixed_memory32(crs + size, plan->lfb, vga_lfb_size());
+        size += put_fixed_memory32(crs + size, plan->lfb, vga_lfb_size(), true);
+    }
+    uintptr_t flash_base;
+    size_t flash_size;
+    if (layout_bios_flash_range(&flash_base, &flash_size)) {
+        size += put_fixed_memory32(crs + size, flash_base, flash_size, false);
     }
     crs[size++] = ACPI_TAG_END;
     crs[size++] = 0x00;
