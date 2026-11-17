@@ -206,8 +206,8 @@ static inline struct cpuid_regs cpuid(uint32_t leaf, uint32_t subleaf) {
     struct cpuid_regs r;
     asm volatile (
         "cpuid"
-        : "=a"(r.eax), "=b"(r.ebx), "=c"(r.ecx), "=d"(r.edx)
-        : "a"(leaf), "c"(subleaf)
+        : [eax] "=a"(r.eax), [ebx] "=b"(r.ebx), [ecx] "=c"(r.ecx), [edx] "=d"(r.edx)
+        : [leaf] "a"(leaf), [subleaf] "c"(subleaf)
     );
     return r;
 }
@@ -251,7 +251,7 @@ static inline struct x86_cpu_signature x86_cpu_signature(void) {
 
 static inline uint64_t rdmsr(uint32_t msr) {
     uint32_t lo, hi;
-    asm volatile ("rdmsr" : "=a"(lo), "=d"(hi) : "c"(msr) : "memory");
+    asm volatile ("rdmsr" : [lo] "=a"(lo), [hi] "=d"(hi) : [msr] "c"(msr) : "memory");
     return ((uint64_t)hi << 32) | lo;
 }
 
@@ -259,96 +259,96 @@ static inline void wrmsr(uint32_t msr, uint64_t value) {
     asm volatile (
         "wrmsr"
         :
-        : "c"(msr), "a"((uint32_t)value), "d"((uint32_t)(value >> 32))
+        : [msr] "c"(msr), [low] "a"((uint32_t)value), [high] "d"((uint32_t)(value >> 32))
         : "memory"
     );
 }
 
 static inline uint64_t rdtsc(void) {
     uint32_t lo, hi;
-    asm volatile ("rdtsc" : "=a"(lo), "=d"(hi));
+    asm volatile ("rdtsc" : [lo] "=a"(lo), [hi] "=d"(hi));
     return ((uint64_t)hi << 32) | lo;
 }
 
 static inline void outb(uint16_t port, uint8_t value) {
-    asm volatile ("outb %0, %1" :: "a"(value), "Nd"(port) : "memory");
+    asm volatile ("outb %[value], %[port]" :: [value] "a"(value), [port] "Nd"(port) : "memory");
 }
 
 static inline void outw(uint16_t port, uint16_t value) {
-    asm volatile ("outw %0, %1" :: "a"(value), "Nd"(port) : "memory");
+    asm volatile ("outw %[value], %[port]" :: [value] "a"(value), [port] "Nd"(port) : "memory");
 }
 
 static inline void outl(uint16_t port, uint32_t value) {
-    asm volatile ("outl %0, %1" :: "a"(value), "Nd"(port) : "memory");
+    asm volatile ("outl %[value], %[port]" :: [value] "a"(value), [port] "Nd"(port) : "memory");
 }
 
 static inline uint8_t inb(uint16_t port) {
     uint8_t value;
-    asm volatile ("inb %1, %0" : "=a"(value) : "Nd"(port) : "memory");
+    asm volatile ("inb %[port], %[value]" : [value] "=a"(value) : [port] "Nd"(port) : "memory");
     return value;
 }
 
 static inline uint16_t inw(uint16_t port) {
     uint16_t value;
-    asm volatile ("inw %1, %0" : "=a"(value) : "Nd"(port) : "memory");
+    asm volatile ("inw %[port], %[value]" : [value] "=a"(value) : [port] "Nd"(port) : "memory");
     return value;
 }
 
 static inline uint32_t inl(uint16_t port) {
     uint32_t value;
-    asm volatile ("inl %1, %0" : "=a"(value) : "Nd"(port) : "memory");
+    asm volatile ("inl %[port], %[value]" : [value] "=a"(value) : [port] "Nd"(port) : "memory");
     return value;
 }
 
 static inline uintptr_t read_cr0(void) {
     uintptr_t value;
-    asm volatile ("movq %%cr0, %0" : "=r"(value));
+    asm volatile ("movq %%cr0, %[value]" : [value] "=r"(value));
     return value;
 }
 
 static inline void write_cr0(uintptr_t value) {
-    asm volatile ("movq %0, %%cr0" :: "r"(value) : "memory");
+    asm volatile ("movq %[value], %%cr0" :: [value] "r"(value) : "memory");
 }
 
 static inline uintptr_t read_cr2(void) {
     uintptr_t value;
-    asm volatile ("movq %%cr2, %0" : "=r"(value));
+    asm volatile ("movq %%cr2, %[value]" : [value] "=r"(value));
     return value;
 }
 
 static inline void write_cr2(uintptr_t value) {
-    asm volatile ("movq %0, %%cr2" :: "r"(value) : "memory");
+    asm volatile ("movq %[value], %%cr2" :: [value] "r"(value) : "memory");
 }
 
 static inline uintptr_t read_cr3(void) {
     uintptr_t value;
-    asm volatile ("movq %%cr3, %0" : "=r"(value));
+    asm volatile ("movq %%cr3, %[value]" : [value] "=r"(value));
     return value;
 }
 
 static inline void write_cr3(uintptr_t value) {
-    asm volatile ("movq %0, %%cr3" :: "r"(value) : "memory");
+    asm volatile ("movq %[value], %%cr3" :: [value] "r"(value) : "memory");
 }
 
 static inline uintptr_t read_cr4(void) {
     uintptr_t value;
-    asm volatile ("movq %%cr4, %0" : "=r"(value));
+    asm volatile ("movq %%cr4, %[value]" : [value] "=r"(value));
     return value;
 }
 
 static inline void write_cr4(uintptr_t value) {
-    asm volatile ("movq %0, %%cr4" :: "r"(value) : "memory");
+    asm volatile ("movq %[value], %%cr4" :: [value] "r"(value) : "memory");
 }
 
 static inline uintptr_t read_dr6(void) {
     uintptr_t value;
-    asm volatile ("movq %%dr6, %0" : "=r"(value));
+    asm volatile ("movq %%dr6, %[value]" : [value] "=r"(value));
     return value;
 }
 
 static inline uintptr_t read_dr7(void) {
     uintptr_t value;
-    asm volatile ("movq %%dr7, %0" : "=r"(value));
+    asm volatile ("movq %%dr7, %[value]" : [value] "=r"(value));
     return value;
 }
 
@@ -360,8 +360,8 @@ static inline uint64_t read_rflags(void) {
     uint64_t value;
     asm volatile (
         "pushfq\n\t"
-        "popq %0"
-        : "=r"(value)
+        "popq %[value]"
+        : [value] "=r"(value)
         :
         : "memory"
     );
@@ -382,7 +382,7 @@ static inline void hlt(void) {
 
 static inline uint64_t xgetbv(uint32_t index) {
     uint32_t lo, hi;
-    asm volatile ("xgetbv" : "=a"(lo), "=d"(hi) : "c"(index));
+    asm volatile ("xgetbv" : [lo] "=a"(lo), [hi] "=d"(hi) : [index] "c"(index));
     return ((uint64_t)hi << 32) | lo;
 }
 
@@ -390,18 +390,18 @@ static inline uint64_t xgetbv(uint32_t index) {
 // 64-byte aligned XSAVE area in the standard format, the x87 pointers whole.
 static inline void xsave(void *area, uint64_t mask) {
     asm volatile (
-        "xsave64 (%0)"
+        "xsave64 (%[area])"
         :
-        : "r"(area), "a"((uint32_t)mask), "d"((uint32_t)(mask >> 32))
+        : [area] "r"(area), [low] "a"((uint32_t)mask), [high] "d"((uint32_t)(mask >> 32))
         : "memory"
     );
 }
 
 static inline void xrstor(const void *area, uint64_t mask) {
     asm volatile (
-        "xrstor64 (%0)"
+        "xrstor64 (%[area])"
         :
-        : "r"(area), "a"((uint32_t)mask), "d"((uint32_t)(mask >> 32))
+        : [area] "r"(area), [low] "a"((uint32_t)mask), [high] "d"((uint32_t)(mask >> 32))
         : "memory"
     );
 }
@@ -411,11 +411,11 @@ static inline void xrstor(const void *area, uint64_t mask) {
 #define FXSAVE_SIZE 512
 
 static inline void fxsave(void *area) {
-    asm volatile ("fxsave64 (%0)" :: "r"(area) : "memory");
+    asm volatile ("fxsave64 (%[area])" :: [area] "r"(area) : "memory");
 }
 
 static inline void fxrstor(const void *area) {
-    asm volatile ("fxrstor64 (%0)" :: "r"(area) : "memory");
+    asm volatile ("fxrstor64 (%[area])" :: [area] "r"(area) : "memory");
 }
 
 static inline void fninit(void) {
@@ -423,7 +423,7 @@ static inline void fninit(void) {
 }
 
 static inline void ldmxcsr(uint32_t value) {
-    asm volatile ("ldmxcsr %0" :: "m"(value));
+    asm volatile ("ldmxcsr %[value]" :: [value] "m"(value));
 }
 
 static inline void wbinvd(void) {
@@ -431,7 +431,7 @@ static inline void wbinvd(void) {
 }
 
 static inline void invlpg(uintptr_t addr) {
-    asm volatile ("invlpg (%0)" :: "r"(addr) : "memory");
+    asm volatile ("invlpg (%[addr])" :: [addr] "r"(addr) : "memory");
 }
 
 // Whether each entry of a PAT value names a memory type that the PAT takes: 0,
@@ -473,10 +473,11 @@ static inline void x86_store16(volatile void *p, uint64_t low, uint64_t high) {
     bool stored;
     do {
         asm volatile (
-            "lock cmpxchg16b %1\n\t"
-            "setzb %0"
-            : "=qm"(stored), "+m"(*q), "+a"(old_low), "+d"(old_high)
-            : "b"(low), "c"(high)
+            "lock cmpxchg16b %[q]\n\t"
+            "setzb %[stored]"
+            : [stored] "=qm"(stored), [q] "+m"(*q), [old_low] "+a"(old_low),
+              [old_high] "+d"(old_high)
+            : [low] "b"(low), [high] "c"(high)
             : "memory", "cc"
         );
     } while (!stored);

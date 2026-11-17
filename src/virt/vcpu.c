@@ -935,8 +935,8 @@ void vcpu_debug_trap(struct vcpu *v, uint64_t dr6) {
     if (virt_vmx) {
         // VMX switches DR7 but not DR6, so the processor's is the guest's.
         uint64_t value;
-        asm volatile ("movq %%dr6, %0" : "=r"(value));
-        asm volatile ("movq %0, %%dr6" :: "r"(value | dr6));
+        asm volatile ("movq %%dr6, %[value]" : [value] "=r"(value));
+        asm volatile ("movq %[value], %%dr6" :: [value] "r"(value | dr6));
         vmx_write(VMCS_GUEST_DR7, vmx_read(VMCS_GUEST_DR7) & ~(uint64_t)DR7_GD);
     } else {
         v->vmcb->save.dr6 |= dr6;
@@ -958,19 +958,19 @@ static uint64_t guest_dr(size_t n) {
     uint64_t value;
     switch (n) {
         case 0: {
-            asm volatile ("movq %%dr0, %0" : "=r"(value));
+            asm volatile ("movq %%dr0, %[value]" : [value] "=r"(value));
             break;
         }
         case 1: {
-            asm volatile ("movq %%dr1, %0" : "=r"(value));
+            asm volatile ("movq %%dr1, %[value]" : [value] "=r"(value));
             break;
         }
         case 2: {
-            asm volatile ("movq %%dr2, %0" : "=r"(value));
+            asm volatile ("movq %%dr2, %[value]" : [value] "=r"(value));
             break;
         }
         default: {
-            asm volatile ("movq %%dr3, %0" : "=r"(value));
+            asm volatile ("movq %%dr3, %[value]" : [value] "=r"(value));
             break;
         }
     }

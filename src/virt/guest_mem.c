@@ -186,7 +186,7 @@ static uint32_t guest_pkru(void) {
     write_cr4(cr4 | CR4_PKE);
     uint32_t pkru;
     uint32_t edx;
-    asm volatile ("rdpkru" : "=a"(pkru), "=d"(edx) : "c"(0));
+    asm volatile ("rdpkru" : [pkru] "=a"(pkru), [edx] "=d"(edx) : [ecx] "c"(0));
     write_cr4(cr4);
     return pkru;
 }

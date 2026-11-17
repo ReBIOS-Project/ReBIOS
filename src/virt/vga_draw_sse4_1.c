@@ -46,7 +46,7 @@ static inline void store(void *p, u8x16 v) {
 // GCC's builtin for it is not Clang's.
 static inline u8x16 load_streaming(const void *p) {
     u8x16 v;
-    asm volatile ("movntdqa %1, %0" : "=x"(v) : "m"(*(const u8x16 *)p));
+    asm volatile ("movntdqa %[p], %[v]" : [v] "=x"(v) : [p] "m"(*(const u8x16 *)p));
     return v;
 }
 

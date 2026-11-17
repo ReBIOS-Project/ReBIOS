@@ -725,11 +725,11 @@ static void exit_invlpgb(struct vcpu *v) {
     bool done = false;
     asm volatile (
         "1: invlpgb\n\t"
-        "movb $1, %0\n\t"
+        "movb $1, %[done]\n\t"
         "2:\n\t"
         FIXUP_ENTRY("1b", "2b")
-        : "+r"(done)
-        : "a"(rax), "c"(ecx), "d"(asid)
+        : [done] "+r"(done)
+        : [rax] "a"(rax), [ecx] "c"(ecx), [asid] "d"(asid)
         : "memory"
     );
     // A processor whose CPUID claims INVLPGB without having it, as Linux 7.3
@@ -1093,7 +1093,12 @@ void svm_run(struct vcpu *v) {
         // Before the processor looks at the guest's interrupt requests.
         atomic_store_explicit(&v->in_guest, true, memory_order_seq_cst);
         if (divider_clear) {
-            asm volatile ("divl %2" :: "a"(0), "d"(0), "r"(1) : "cc");
+            asm volatile (
+                "divl %[divisor]"
+                :
+                : [low] "a"(0), [high] "d"(0), [divisor] "r"(1)
+                : "cc"
+            );
         }
         svm_enter(v->vmcb_pa, &v->gprs);
         atomic_store_explicit(&v->in_guest, false, memory_order_release);

@@ -74,10 +74,10 @@ void power_reset(bool warm) {
         uint64_t base;
     } __attribute__((packed)) null_idt = { 0, 0 };
     asm volatile (
-        "lidtq %0\n\t"
+        "lidtq %[null_idt]\n\t"
         "int3"
         :
-        : "m"(null_idt)
+        : [null_idt] "m"(null_idt)
         : "memory"
     );
     x86_halt_forever();

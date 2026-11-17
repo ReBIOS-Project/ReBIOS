@@ -162,15 +162,25 @@ static void idle(struct vcpu *v) {
             "mwait\n\t"
             "cli"
             :
-            : "a"(hint), "c"(EXT_MONITORLESS)
+            : [hint] "a"(hint), [extensions] "c"(EXT_MONITORLESS)
             : "memory"
         );
         return;
     }
     if (v->mwait_x) {
-        asm volatile ("monitorx" :: "a"(v->monitor_line), "c"(0), "d"(0) : "memory");
+        asm volatile (
+            "monitorx"
+            :
+            : [monitor_line] "a"(v->monitor_line), [extensions] "c"(0), [hints] "d"(0)
+            : "memory"
+        );
     } else {
-        asm volatile ("monitor" :: "a"(v->monitor_line), "c"(0), "d"(0) : "memory");
+        asm volatile (
+            "monitor"
+            :
+            : [monitor_line] "a"(v->monitor_line), [extensions] "c"(0), [hints] "d"(0)
+            : "memory"
+        );
     }
     if (line_changed(v)) {
         return;
@@ -181,7 +191,7 @@ static void idle(struct vcpu *v) {
             "mwait\n\t"
             "cli"
             :
-            : "a"(hint), "c"(0)
+            : [hint] "a"(hint), [extensions] "c"(0)
             : "memory"
         );
         return;
@@ -202,7 +212,7 @@ static void idle(struct vcpu *v) {
         "mwaitx\n\t"
         "cli"
         :
-        : "a"(hint), "c"(extensions), "b"(wait)
+        : [hint] "a"(hint), [extensions] "c"(extensions), [wait] "b"(wait)
         : "memory"
     );
 }

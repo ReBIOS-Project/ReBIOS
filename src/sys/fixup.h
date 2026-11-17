@@ -44,11 +44,11 @@ static inline bool rdmsr_safe(uint32_t msr, uint64_t *value) {
     bool ok = false;
     asm volatile (
         "1: rdmsr\n\t"
-        "movb $1, %2\n\t"
+        "movb $1, %[ok]\n\t"
         "2:\n\t"
         FIXUP_ENTRY("1b", "2b")
-        : "+a"(lo), "+d"(hi), "+r"(ok)
-        : "c"(msr)
+        : [lo] "+a"(lo), [hi] "+d"(hi), [ok] "+r"(ok)
+        : [msr] "c"(msr)
         : "memory"
     );
     *value = ((uint64_t)hi << 32) | lo;
@@ -59,11 +59,11 @@ static inline bool wrmsr_safe(uint32_t msr, uint64_t value) {
     bool ok = false;
     asm volatile (
         "1: wrmsr\n\t"
-        "movb $1, %0\n\t"
+        "movb $1, %[ok]\n\t"
         "2:\n\t"
         FIXUP_ENTRY("1b", "2b")
-        : "+r"(ok)
-        : "c"(msr), "a"((uint32_t)value), "d"((uint32_t)(value >> 32))
+        : [ok] "+r"(ok)
+        : [msr] "c"(msr), [low] "a"((uint32_t)value), [high] "d"((uint32_t)(value >> 32))
         : "memory"
     );
     return ok;
@@ -73,11 +73,11 @@ static inline bool xsetbv_safe(uint32_t index, uint64_t value) {
     bool ok = false;
     asm volatile (
         "1: xsetbv\n\t"
-        "movb $1, %0\n\t"
+        "movb $1, %[ok]\n\t"
         "2:\n\t"
         FIXUP_ENTRY("1b", "2b")
-        : "+r"(ok)
-        : "c"(index), "a"((uint32_t)value), "d"((uint32_t)(value >> 32))
+        : [ok] "+r"(ok)
+        : [index] "c"(index), [low] "a"((uint32_t)value), [high] "d"((uint32_t)(value >> 32))
         : "memory"
     );
     return ok;

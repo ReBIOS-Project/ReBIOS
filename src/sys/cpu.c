@@ -417,14 +417,14 @@ void cpu_tables_load(struct cpu *cpu, bool use_ist) {
     struct table_ptr idtr = { sizeof(idt) - 1, (uint64_t)(uintptr_t)idt };
 
     asm volatile (
-        "lgdtq %0\n\t"
-        "lidtq %1\n\t"
-        "pushq %2\n\t"
+        "lgdtq %[gdtr]\n\t"
+        "lidtq %[idtr]\n\t"
+        "pushq %[code]\n\t"
         "leaq 1f(%%rip), %%rax\n\t"
         "pushq %%rax\n\t"
         "lretq\n\t"
         "1:\n\t"
-        "movl %3, %%eax\n\t"
+        "movl %[data], %%eax\n\t"
         "movl %%eax, %%ds\n\t"
         "movl %%eax, %%es\n\t"
         "movl %%eax, %%ss\n\t"
@@ -432,11 +432,11 @@ void cpu_tables_load(struct cpu *cpu, bool use_ist) {
         "movl %%eax, %%fs\n\t"
         "movl %%eax, %%gs"
         :
-        : "m"(gdtr), "m"(idtr), "i"(CPU_GDT_CODE), "i"(CPU_GDT_DATA)
+        : [gdtr] "m"(gdtr), [idtr] "m"(idtr), [code] "i"(CPU_GDT_CODE), [data] "i"(CPU_GDT_DATA)
         : "rax", "memory"
     );
 
     // Busy TSS descriptors cannot be loaded, and this one may be reloaded.
     cpu->gdt[3] &= ~((uint64_t)0x2 << 40);
-    asm volatile ("ltrw %w0" :: "r"(CPU_GDT_TSS) : "memory");
+    asm volatile ("ltrw %w[tss]" :: [tss] "r"(CPU_GDT_TSS) : "memory");
 }

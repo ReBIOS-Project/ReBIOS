@@ -71,10 +71,10 @@ static uint64_t vmread(uint32_t field) {
     uint64_t value;
     bool ok;
     asm volatile (
-        "vmreadq %2, %0\n\t"
-        "setab %1"
-        : "=r"(value), "=qm"(ok)
-        : "r"((uint64_t)field)
+        "vmreadq %[field], %[value]\n\t"
+        "setab %[ok]"
+        : [value] "=r"(value), [ok] "=qm"(ok)
+        : [field] "r"((uint64_t)field)
         : "cc"
     );
     if (!ok) {
@@ -86,15 +86,20 @@ static uint64_t vmread(uint32_t field) {
 static void vmwrite(uint32_t field, uint64_t value) {
     bool ok;
     asm volatile (
-        "vmwriteq %1, %2\n\t"
-        "setab %0"
-        : "=qm"(ok)
-        : "r"(value), "r"((uint64_t)field)
+        "vmwriteq %[value], %[field]\n\t"
+        "setab %[ok]"
+        : [ok] "=qm"(ok)
+        : [value] "r"(value), [field] "r"((uint64_t)field)
         : "cc"
     );
     if (!ok) {
         uint64_t error;
-        asm volatile ("vmreadq %1, %0" : "=r"(error) : "r"((uint64_t)VMCS_VM_INSTR_ERROR) : "cc");
+        asm volatile (
+            "vmreadq %[field], %[error]"
+            : [error] "=r"(error)
+            : [field] "r"((uint64_t)VMCS_VM_INSTR_ERROR)
+            : "cc"
+        );
         panic(
             "VMWRITE of %#llx to field %#x failed, error %llu\n",
             (unsigned long long)value, field, (unsigned long long)error
@@ -385,7 +390,12 @@ void vmx_invept_all(void) {
         uint64_t eptp;
         uint64_t reserved;
     } desc = { 0, 0 };
-    asm volatile ("invept %0, %1" :: "m"(desc), "r"((uint64_t)2) : "cc", "memory");
+    asm volatile (
+        "invept %[desc], %[type]"
+        :
+        : [desc] "m"(desc), [type] "r"((uint64_t)2)
+        : "cc", "memory"
+    );
 }
 
 void vmx_invvpid(unsigned int type, uint16_t vpid, uintptr_t address) {
@@ -400,7 +410,12 @@ void vmx_invvpid(unsigned int type, uint16_t vpid, uintptr_t address) {
         uint64_t vpid;
         uintptr_t address;
     } desc = { vpid, address };
-    asm volatile ("invvpid %0, %1" :: "m"(desc), "r"((uint64_t)type) : "cc", "memory");
+    asm volatile (
+        "invvpid %[desc], %[type]"
+        :
+        : [desc] "m"(desc), [type] "r"((uint64_t)type)
+        : "cc", "memory"
+    );
 }
 
 void vmx_cpu_init(void) {
@@ -420,10 +435,10 @@ void vmx_cpu_init(void) {
     uintptr_t pa = (uintptr_t)vmxon_region;
     bool ok;
     asm volatile (
-        "vmxon %1\n\t"
-        "setab %0"
-        : "=qm"(ok)
-        : "m"(pa)
+        "vmxon %[pa]\n\t"
+        "setab %[ok]"
+        : [ok] "=qm"(ok)
+        : [pa] "m"(pa)
         : "cc", "memory"
     );
     if (!ok) {
@@ -569,10 +584,10 @@ static void write_host_state(struct cpu *cpu) {
 static void vmclear(uintptr_t pa) {
     bool ok;
     asm volatile (
-        "vmclear %1\n\t"
-        "setab %0"
-        : "=qm"(ok)
-        : "m"(pa)
+        "vmclear %[pa]\n\t"
+        "setab %[ok]"
+        : [ok] "=qm"(ok)
+        : [pa] "m"(pa)
         : "cc", "memory"
     );
     if (!ok) {
@@ -583,10 +598,10 @@ static void vmclear(uintptr_t pa) {
 static void vmptrld(uintptr_t pa) {
     bool ok;
     asm volatile (
-        "vmptrld %1\n\t"
-        "setab %0"
-        : "=qm"(ok)
-        : "m"(pa)
+        "vmptrld %[pa]\n\t"
+        "setab %[ok]"
+        : [ok] "=qm"(ok)
+        : [pa] "m"(pa)
         : "cc", "memory"
     );
     if (!ok) {
@@ -1365,7 +1380,7 @@ static void vmx_handle_exit(struct vcpu *v) {
 }
 
 void vmx_run(struct vcpu *v) {
-    asm volatile ("vmptrld %0" :: "m"(v->vmcs_pa) : "cc", "memory");
+    asm volatile ("vmptrld %[vmcs_pa]" :: [vmcs_pa] "m"(v->vmcs_pa) : "cc", "memory");
 
     for (;;) {
         atomic_store_explicit(&v->cpu->kicked, false, memory_order_seq_cst);

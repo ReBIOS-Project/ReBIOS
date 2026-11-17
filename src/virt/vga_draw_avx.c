@@ -48,7 +48,7 @@ static inline void store(void *p, u8x32 v) {
 
 // A store past the caches, to a 32-byte aligned address.
 static inline void stream(void *p, u8x32 v) {
-    asm volatile ("vmovntdq %1, %0" : "=m"(*(u8x32 *)p) : "x"(v));
+    asm volatile ("vmovntdq %[v], %[p]" : [p] "=m"(*(u8x32 *)p) : [v] "x"(v));
 }
 
 static inline bool match128(const uint8_t *a, const uint8_t *b) {

@@ -157,7 +157,7 @@ _Static_assert(sizeof(struct cpu) <= 0x1000, "The IST stacks overlap struct cpu.
 
 static inline struct cpu *this_cpu(void) {
     uintptr_t rsp;
-    asm volatile ("movq %%rsp, %0" : "=r"(rsp));
+    asm volatile ("movq %%rsp, %[rsp]" : [rsp] "=r"(rsp));
     return ((struct cpu *)(rsp & ~(uintptr_t)(CPU_AREA_SIZE - 1)))->self;
 }
 

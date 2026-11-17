@@ -53,7 +53,7 @@ static bool irq_up;
 // leaves it alone.
 static uint16_t status_word(void) {
     uint16_t status;
-    asm volatile ("fnstsw %0" : "=m"(status));
+    asm volatile ("fnstsw %[status]" : [status] "=m"(status));
     return status;
 }
 
@@ -135,7 +135,7 @@ bool ferr_stepping(struct vcpu *v) {
 void ferr_step_done(struct vcpu *v) {
     uint8_t env[ENV_SIZE];
     // FNSTENV masks every exception, which FLDENV's control word undoes.
-    asm volatile ("fnstenv %0" : "=m"(env));
+    asm volatile ("fnstenv %[env]" : [env] "=m"(env));
     uint16_t control = read_le16(&env[ENV_CONTROL]);
     uint16_t status = read_le16(&env[ENV_STATUS]);
     status |= v->ferr_flags;
@@ -143,7 +143,7 @@ void ferr_step_done(struct vcpu *v) {
         status |= FSW_ES | FSW_B;
     }
     write_le16(&env[ENV_STATUS], status);
-    asm volatile ("fldenv %0" :: "m"(env));
+    asm volatile ("fldenv %[env]" :: [env] "m"(env));
     v->ferr_step = false;
     v->stepping = false;
     vcpu_single_step(v, false);
