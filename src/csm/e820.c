@@ -203,47 +203,6 @@ bool e820_set_low_memory(struct e820_map *map) {
     return ok;
 }
 
-// The last byte of the run of RAM entries from entry i, each starting where
-// the previous one ends.
-static uint64_t ram_run_last(const struct e820_map *map, size_t i) {
-    uintptr_t last = entry_last(&map->entries[i]);
-    while (i + 1 < map->count && last != UINT64_MAX && map->entries[i + 1].type == E820_RAM
-        && map->entries[i + 1].base == last + 1) {
-        i++;
-        last = entry_last(&map->entries[i]);
-    }
-    return last;
-}
-
-static uint64_t saturate(uint64_t value, uint64_t max) {
-    return value < max ? value : max;
-}
-
-void e820_cmos(const struct e820_map *map, struct e820_cmos *cmos) {
-    cmos->base_kib = 640;
-    cmos->extended_kib = 0;
-    cmos->above_16m = 0;
-    cmos->above_4g = 0;
-
-    for (size_t i = 0; i < map->count; i++) {
-        const struct e820_entry *e = &map->entries[i];
-        if (e->type != E820_RAM) {
-            continue;
-        }
-        if (e->base <= ONE_MIB && entry_last(e) >= ONE_MIB) {
-            uintptr_t end = saturate(ram_run_last(map, i), FOUR_GIB - 1) + 1;
-            cmos->extended_kib = saturate((end - ONE_MIB) / 1024, 65535);
-            if (end > 16 * ONE_MIB) {
-                cmos->above_16m = saturate((end - 16 * ONE_MIB) / (64 * 1024), 65535);
-            }
-        }
-        if (e->base == FOUR_GIB) {
-            size_t size = ram_run_last(map, i) - FOUR_GIB + 1;
-            cmos->above_4g = saturate(size / (64 * 1024), 0xffffff);
-        }
-    }
-}
-
 static const char *type_name(uint32_t type) {
     switch (type) {
         case E820_RAM: {

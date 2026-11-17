@@ -44,18 +44,6 @@ struct e820_map {
     struct e820_entry entries[E820_MAX_ENTRIES];
 };
 
-// The memory sizes PC/AT CMOS reports, as stored in its registers.
-struct e820_cmos {
-    // Registers 15h-16h: base memory, in KiB.
-    uint16_t base_kib;
-    // Registers 17h-18h and 30h-31h: memory from 1 MiB, in KiB, at most 65535.
-    uint16_t extended_kib;
-    // Registers 34h-35h: memory from 16 MiB, in 64 KiB units, at most 65535.
-    uint16_t above_16m;
-    // Registers 5Bh-5Dh: memory from 4 GiB, in 64 KiB units, at most 0xffffff.
-    uint32_t above_4g;
-};
-
 void e820_init(struct e820_map *map);
 
 // Makes [base, base + size) of the type, whatever was there. Type 0 makes it a
@@ -75,8 +63,6 @@ bool e820_set_efi_map(
 // Replaces the first MiB with base memory, a 1 KiB extended BIOS data area,
 // and a 64 KiB system BIOS, as in the example address map of ACPI 6.6, 15.5.
 bool e820_set_low_memory(struct e820_map *map);
-
-void e820_cmos(const struct e820_map *map, struct e820_cmos *cmos);
 
 void e820_log(const struct e820_map *map);
 

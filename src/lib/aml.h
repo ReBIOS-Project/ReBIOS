@@ -152,7 +152,6 @@ void aml_arg(struct aml *a, size_t n);
 
 // Name(path, Integer); Method(path, args, flags) {, closed by aml_end().
 void aml_name_int(struct aml *a, const char *path, uint32_t value);
-void aml_name_string(struct aml *a, const char *path, const char *s);
 void aml_method(struct aml *a, const char *path, unsigned int args, uint8_t flags);
 // Return (Integer).
 void aml_return_int(struct aml *a, uint32_t value);

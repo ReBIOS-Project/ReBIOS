@@ -223,16 +223,6 @@ void aml_name_int(struct aml *a, const char *path, uint32_t value) {
     aml_int(a, value);
 }
 
-void aml_name_string(struct aml *a, const char *path, const char *s) {
-    aml_op(a, AML_NAME);
-    aml_name(a, path);
-    size_t length = 0;
-    while (s[length] != '\0') {
-        length++;
-    }
-    aml_string(a, s, length);
-}
-
 void aml_method(struct aml *a, const char *path, unsigned int args, uint8_t flags) {
     aml_begin(a, AML_METHOD);
     aml_name(a, path);
