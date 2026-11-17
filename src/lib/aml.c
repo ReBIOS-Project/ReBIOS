@@ -64,12 +64,12 @@ void aml_byte(struct aml *a, uint8_t value) {
 }
 
 void aml_word(struct aml *a, uint16_t value) {
-    uint8_t b[2] = { (uint8_t)value, (uint8_t)(value >> 8) };
+    uint8_t b[] = { (uint8_t)value, (uint8_t)(value >> 8) };
     aml_bytes(a, b, sizeof(b));
 }
 
 void aml_dword(struct aml *a, uint32_t value) {
-    uint8_t b[4] = {
+    uint8_t b[] = {
         (uint8_t)value, (uint8_t)(value >> 8), (uint8_t)(value >> 16), (uint8_t)(value >> 24)
     };
     aml_bytes(a, b, sizeof(b));
@@ -123,7 +123,7 @@ void aml_end(struct aml *a) {
 }
 
 static void seg(struct aml *a, const char *s, size_t length) {
-    char out[4] = { '_', '_', '_', '_' };
+    char out[] = { '_', '_', '_', '_' };
     for (size_t i = 0; i < length && i < 4; i++) {
         out[i] = s[i];
     }

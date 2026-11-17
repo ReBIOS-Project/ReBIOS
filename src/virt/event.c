@@ -142,7 +142,7 @@ static bool deliver_real_mode(struct vcpu *v, unsigned int vector, uintptr_t ip)
         return false;
     }
     uint64_t rflags = vcpu_rflags(v);
-    uint16_t frame[3] = { (uint16_t)ip, cs.selector, (uint16_t)rflags };
+    uint16_t frame[] = { (uint16_t)ip, cs.selector, (uint16_t)rflags };
     uint64_t sp_mask = (ss.attrib & VCPU_SEG_DB) != 0 ? (uint64_t)0xffffffff : (uint64_t)0xffff;
     uintptr_t rsp = vcpu_rsp(v);
     uint64_t sp = (rsp - sizeof(frame)) & sp_mask;

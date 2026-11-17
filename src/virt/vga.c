@@ -1635,7 +1635,7 @@ static void border_fill(const struct vga_draw_ops *ops, uint32_t rgb) {
     for (size_t y = 0; y < fb->height; y++) {
         uint8_t *row = out.back + y * fb->pitch;
         bool inside = y >= display.y0 && y < display.y1;
-        uint32_t spans[2][2] = {
+        uint32_t spans[][2] = {
             { 0, inside ? display.x0 : fb->width }, { inside ? display.x1 : fb->width, fb->width }
         };
         for (size_t k = 0; k < 2; k++) {

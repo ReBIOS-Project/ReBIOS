@@ -177,7 +177,7 @@ static void query_work(uacpi_handle ctx) {
             return;
         }
         static const char hex[] = "0123456789ABCDEF";
-        char method[5] = { '_', 'Q', hex[q >> 4], hex[q & 0xf], '\0' };
+        char method[] = { '_', 'Q', hex[q >> 4], hex[q & 0xf], '\0' };
         uacpi_status status = uacpi_execute(ec.node, method, NULL);
         if (status != UACPI_STATUS_OK) {
             printf(

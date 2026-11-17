@@ -35,7 +35,7 @@
 #define EDID_CHECKSUM 0x7f
 #define EDID_TAG_CTA 0x02
 
-static const uint8_t edid_header[8] = { 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00 };
+static const uint8_t edid_header[] = { 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00 };
 
 // Room for two of the framebuffer's frames at 32 bits per pixel, a power of
 // two, as the emulated display controller's BAR has its size.

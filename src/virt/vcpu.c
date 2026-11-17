@@ -991,7 +991,7 @@ static uint64_t breakpoints_hit(
     if ((dr7 & 0xff) == 0) {
         return 0;
     }
-    static const unsigned int lengths[4] = { 1, 2, 8, 4 };
+    static const unsigned int lengths[] = { 1, 2, 8, 4 };
     uint64_t hits = 0;
     for (size_t n = 0; n < 4; n++) {
         unsigned int rw = (dr7 >> (16 + 4 * n)) & 3;

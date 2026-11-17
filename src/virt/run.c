@@ -578,7 +578,7 @@ static bool effective_address(
         return false;
     } else if (insn->address_size == 2) {
         const uint64_t *g = rs->gpr;
-        uint64_t sums[8] = {
+        uint64_t sums[] = {
             g[3] + g[6], g[3] + g[7], g[5] + g[6], g[5] + g[7], g[6], g[7], g[5], g[3]
         };
         ea = (uint64_t)insn->disp;
@@ -1086,7 +1086,7 @@ static int far(struct vcpu *v, struct run_state *rs, const struct insn *insn) {
         return STOP_FAULT;
     }
     if (call) {
-        uint64_t back[2] = { segment(v, rs, VCPU_SEG_CS)->selector, rs->rip + insn->length };
+        uint64_t back[] = { segment(v, rs, VCPU_SEG_CS)->selector, rs->rip + insn->length };
         int stop = push(v, rs, back, 2, size);
         if (stop != STOP_NONE) {
             return stop;
@@ -1138,7 +1138,7 @@ static int interrupt(
     if (offset > segment(v, rs, VCPU_SEG_CS)->limit) {
         return STOP_FAULT;
     }
-    uint64_t frame[3] = {
+    uint64_t frame[] = {
         rs->rflags & 0xffff, segment(v, rs, VCPU_SEG_CS)->selector,
         (rs->rip + insn->length) & 0xffff
     };

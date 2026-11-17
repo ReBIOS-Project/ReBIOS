@@ -69,7 +69,7 @@
 
 // 4077A616-290C-47BE-9EBD-D87058713953, the processors' _OSC, in ToUUID's byte
 // order.
-static const uint8_t osc_uuid[16] = {
+static const uint8_t osc_uuid[] = {
     0x16, 0xa6, 0x77, 0x40, 0x0c, 0x29, 0xbe, 0x47, 0x9e, 0xbd, 0xd8, 0x70, 0x58, 0x71, 0x39, 0x53
 };
 
@@ -185,7 +185,7 @@ static bool run_osc(uacpi_namespace_node *node, uint32_t capability_bits) {
 }
 
 static void run_pdc(uacpi_namespace_node *node, uint32_t capability_bits) {
-    uint32_t request[3] = { PDC_REVISION, 1, capability_bits };
+    uint32_t request[] = { PDC_REVISION, 1, capability_bits };
     uacpi_data_view view = { .const_bytes = (const uint8_t *)request, .length = sizeof(request) };
     uacpi_object *arg = uacpi_object_create_buffer(view);
     if (arg == NULL) {

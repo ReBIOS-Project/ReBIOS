@@ -42,7 +42,7 @@
 
 // The CGA mode control register value each of modes 0-7 has, which the BIOS
 // data area records.
-static const uint8_t cga_mode_control[8] = {
+static const uint8_t cga_mode_control[] = {
     0x2c, 0x28, 0x2d, 0x29, 0x2a, 0x2e, 0x1e, 0x29
 };
 

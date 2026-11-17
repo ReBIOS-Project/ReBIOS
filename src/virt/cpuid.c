@@ -559,7 +559,7 @@ void cpuid_init(void) {
         }
     }
 
-    static const uint32_t leaves[3][2] = { { 1, 0 }, { 7, 0 }, { 7, 1 } };
+    static const uint32_t leaves[][2] = { { 1, 0 }, { 7, 0 }, { 7, 1 } };
     uint32_t regs[3][4];
     for (size_t i = 0; i < 3; i++) {
         struct cpuid_regs r = masked(leaves[i][0], leaves[i][1]);

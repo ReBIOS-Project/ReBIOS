@@ -145,7 +145,7 @@ static void read_trip_points(struct zone *z) {
     z->steps_max = PASSIVE_STEPS_MAX;
     z->active_count = 0;
     for (size_t x = 0; x < ACTIVE_LEVELS; x++) {
-        char name[5] = { '_', 'A', 'C', (char)('0' + x), '\0' };
+        char name[] = { '_', 'A', 'C', (char)('0' + x), '\0' };
         uint64_t trip = zone_integer(z, name);
         if (trip == 0) {
             break;
@@ -253,7 +253,7 @@ static void cool_actively(struct zone *z, uint64_t now) {
             continue;
         }
         z->active_on[x] = want;
-        char name[5] = { '_', 'A', 'L', (char)('0' + x), '\0' };
+        char name[] = { '_', 'A', 'L', (char)('0' + x), '\0' };
         list_power(z->node, name, want, true);
         const char *path = acpi_path(z->node);
         printf(

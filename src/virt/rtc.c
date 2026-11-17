@@ -249,7 +249,7 @@ static bool stopped(void) {
 
 static bool alarm_matches(void) {
     struct civil c = civil_from_seconds(seconds);
-    uint8_t now[3] = { encode(c.second), encode(c.minute), encode_hours(c.hour) };
+    uint8_t now[] = { encode(c.second), encode(c.minute), encode_hours(c.hour) };
     for (size_t i = 0; i < 3; i++) {
         if ((alarms[i] & ALARM_ANY) != ALARM_ANY && alarms[i] != now[i]) {
             return false;

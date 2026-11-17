@@ -429,7 +429,7 @@ void task_switch(
         }
     } else {
         uint8_t state[TSS16_LDT - TSS16_IP];
-        uint16_t words[2] = { (uint16_t)rip, (uint16_t)eflags };
+        uint16_t words[] = { (uint16_t)rip, (uint16_t)eflags };
         memcpy(state, words, sizeof(words));
         for (size_t i = 0; i < 8; i++) {
             write_le16(state + TSS16_GPRS - TSS16_IP + i * 2, (uint16_t)regs[i]);

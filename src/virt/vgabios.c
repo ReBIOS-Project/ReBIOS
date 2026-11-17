@@ -80,7 +80,7 @@ struct call {
     size_t into_left;
 };
 
-static const uint8_t functionality[16] = {
+static const uint8_t functionality[] = {
     // What INT 10h AH=1Bh points to: modes 0-7, 0Dh-13h, 200, 350, and 400
     // scan lines, 8 character blocks, 2 at once, and the usual functions.
     0xff, 0xe0, 0x0f, 0x00, 0x00, 0x00, 0x00, 0x07, 0x08, 0x02, 0xff, 0x0e,
@@ -274,7 +274,7 @@ void vgabios_out_block(uint16_t port, const uint8_t *bytes, size_t count) {
         return;
     }
     size_t words = count / 2;
-    uint16_t head[3] = { VGABIOS_STUB_OP_OUT_BLOCK, port, (uint16_t)words };
+    uint16_t head[] = { VGABIOS_STUB_OP_OUT_BLOCK, port, (uint16_t)words };
     exchange(head, 3, bytes, words, NULL, 0);
     if ((count & 1) != 0) {
         vgabios_out(port, bytes[count - 1]);
@@ -288,7 +288,7 @@ void vgabios_dac_from_rom(uint16_t offset, size_t count) {
         }
         return;
     }
-    uint16_t head[3] = { VGABIOS_STUB_OP_DAC_ROM, offset, (uint16_t)count };
+    uint16_t head[] = { VGABIOS_STUB_OP_DAC_ROM, offset, (uint16_t)count };
     exchange(head, 3, NULL, 0, NULL, 0);
 }
 
@@ -309,7 +309,7 @@ uint8_t vgabios_peekb(uint16_t segment, uint16_t offset) {
         uint16_t head = (uint16_t)(VGABIOS_STUB_OP_BDA_READ8 | offset << 8);
         exchange(&head, 1, NULL, 0, &value, 1);
     } else {
-        uint16_t head[3] = { VGABIOS_STUB_OP_READ8, segment, offset };
+        uint16_t head[] = { VGABIOS_STUB_OP_READ8, segment, offset };
         exchange(head, 3, NULL, 0, &value, 1);
     }
     return (uint8_t)value;
@@ -327,7 +327,7 @@ uint16_t vgabios_peekw(uint16_t segment, uint16_t offset) {
         uint16_t head = (uint16_t)(VGABIOS_STUB_OP_BDA_READ16 | offset << 8);
         exchange(&head, 1, NULL, 0, &value, 1);
     } else {
-        uint16_t head[3] = { VGABIOS_STUB_OP_READ16, segment, offset };
+        uint16_t head[] = { VGABIOS_STUB_OP_READ16, segment, offset };
         exchange(head, 3, NULL, 0, &value, 1);
     }
     return value;
@@ -339,10 +339,10 @@ void vgabios_pokeb(uint16_t segment, uint16_t offset, uint8_t value) {
         return;
     }
     if (segment == BDA && offset <= 0xff) {
-        uint16_t head[2] = { (uint16_t)(VGABIOS_STUB_OP_BDA_WRITE8 | offset << 8), value };
+        uint16_t head[] = { (uint16_t)(VGABIOS_STUB_OP_BDA_WRITE8 | offset << 8), value };
         exchange(head, 2, NULL, 0, NULL, 0);
     } else {
-        uint16_t head[3] = { (uint16_t)(VGABIOS_STUB_OP_WRITE8 | value << 8), segment, offset };
+        uint16_t head[] = { (uint16_t)(VGABIOS_STUB_OP_WRITE8 | value << 8), segment, offset };
         exchange(head, 3, NULL, 0, NULL, 0);
     }
 }
@@ -353,10 +353,10 @@ void vgabios_pokew(uint16_t segment, uint16_t offset, uint16_t value) {
         return;
     }
     if (segment == BDA && offset <= 0xff) {
-        uint16_t head[2] = { (uint16_t)(VGABIOS_STUB_OP_BDA_WRITE16 | offset << 8), value };
+        uint16_t head[] = { (uint16_t)(VGABIOS_STUB_OP_BDA_WRITE16 | offset << 8), value };
         exchange(head, 2, NULL, 0, NULL, 0);
     } else {
-        uint16_t head[4] = { VGABIOS_STUB_OP_WRITE16, segment, offset, value };
+        uint16_t head[] = { VGABIOS_STUB_OP_WRITE16, segment, offset, value };
         exchange(head, 4, NULL, 0, NULL, 0);
     }
 }
@@ -367,7 +367,7 @@ void vgabios_poke_block(uint16_t segment, uint16_t offset, const void *bytes, si
         direct_store(segment, offset, p, false, 2, count / 2);
         return;
     }
-    uint16_t head[4] = { VGABIOS_STUB_OP_WRITE_BLOCK, segment, offset, (uint16_t)(count / 2) };
+    uint16_t head[] = { VGABIOS_STUB_OP_WRITE_BLOCK, segment, offset, (uint16_t)(count / 2) };
     exchange(head, 4, p, count / 2, NULL, 0);
 }
 
@@ -379,7 +379,7 @@ void vgabios_far_fill8(uint16_t segment, uint16_t offset, uint8_t value, size_t 
         direct_store(segment, offset, &value, true, 1, count);
         return;
     }
-    uint16_t head[4] = {
+    uint16_t head[] = {
         (uint16_t)(VGABIOS_STUB_OP_FILL8 | value << 8), segment, offset, (uint16_t)count
     };
     exchange(head, 4, NULL, 0, NULL, 0);
@@ -390,11 +390,11 @@ void vgabios_far_fill16(uint16_t segment, uint16_t offset, uint16_t value, size_
         return;
     }
     if (call_current()->direct) {
-        uint8_t element[2] = { (uint8_t)value, (uint8_t)(value >> 8) };
+        uint8_t element[] = { (uint8_t)value, (uint8_t)(value >> 8) };
         direct_store(segment, offset, element, true, 2, count);
         return;
     }
-    uint16_t head[5] = { VGABIOS_STUB_OP_FILL16, segment, offset, (uint16_t)count, value };
+    uint16_t head[] = { VGABIOS_STUB_OP_FILL16, segment, offset, (uint16_t)count, value };
     exchange(head, 5, NULL, 0, NULL, 0);
 }
 
@@ -407,7 +407,7 @@ void vgabios_far_move(uint16_t segment, uint16_t to, uint16_t from, size_t count
         return;
     }
     bool backwards = to > from;
-    uint16_t head[6] = {
+    uint16_t head[] = {
         (uint16_t)(VGABIOS_STUB_OP_COPY | (backwards ? 1 : 0) << 8), segment,
         (uint16_t)(backwards ? to + count - 1 : to), segment,
         (uint16_t)(backwards ? from + count - 1 : from), (uint16_t)count
@@ -444,7 +444,7 @@ void vgabios_far_font(
         }
         return;
     }
-    uint16_t head[6] = {
+    uint16_t head[] = {
         (uint16_t)(VGABIOS_STUB_OP_FONT | height << 8), to_segment, to, from_segment, from,
         (uint16_t)count
     };
@@ -505,7 +505,7 @@ static void registers_give(struct call *c, const struct vgabios_regs *before) {
         if (c->direct) {
             mmio_write_linear(c->v, c->frame + frame_offsets[i], &now[i], 2);
         } else {
-            uint16_t head[2] = {
+            uint16_t head[] = {
                 (uint16_t)(VGABIOS_STUB_OP_SET_REGISTER | frame_offsets[i] << 8), now[i]
             };
             exchange(head, 2, NULL, 0, NULL, 0);

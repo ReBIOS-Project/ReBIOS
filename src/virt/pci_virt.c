@@ -759,7 +759,7 @@ static uint64_t msix_read(struct vcpu *v, void *ctx, uint64_t offset, size_t siz
     spinlock_acquire(&virt.lock);
     const struct vmsix_entry *e = &x->entries[at / PCI_MSIX_ENTRY_SIZE];
     uint32_t upper = atomic_load_explicit(&e->upper, memory_order_relaxed);
-    uint32_t words[4] = { e->address, upper, e->data, e->control };
+    uint32_t words[] = { e->address, upper, e->data, e->control };
     spinlock_release(&virt.lock);
     uint64_t value = 0;
     memcpy(&value, (const uint8_t *)words + at % PCI_MSIX_ENTRY_SIZE, size);
@@ -780,7 +780,7 @@ static void msix_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, 
     size_t i = (unsigned int)(at / PCI_MSIX_ENTRY_SIZE);
     struct vmsix_entry *e = &x->entries[i];
     uint32_t upper = atomic_load_explicit(&e->upper, memory_order_relaxed);
-    uint32_t words[4] = { e->address, upper, e->data, e->control };
+    uint32_t words[] = { e->address, upper, e->data, e->control };
     memcpy((uint8_t *)words + at % PCI_MSIX_ENTRY_SIZE, &value, size);
     e->address = words[0] & ~(uint32_t)3;
     atomic_store_explicit(&e->upper, words[1], memory_order_relaxed);

@@ -133,7 +133,7 @@ unsigned int insn_length_intercepted(struct vcpu *v) {
 #define J IMM_J
 #define S OP_SPECIAL
 
-static const uint8_t one_byte[256] = {
+static const uint8_t one_byte[UINT8_MAX + 1] = {
     M, M, M, M, B, Z, 0, 0, M, M, M, M, B, Z, 0, S,
     M, M, M, M, B, Z, 0, 0, M, M, M, M, B, Z, 0, 0,
     M, M, M, M, B, Z, S, 0, M, M, M, M, B, Z, S, 0,
@@ -153,7 +153,7 @@ static const uint8_t one_byte[256] = {
 };
 
 // The 0F map. 0F 38 and 0F 3A escape to maps of their own.
-static const uint8_t two_byte[256] = {
+static const uint8_t two_byte[UINT8_MAX + 1] = {
     M, M, M, M, 0, 0, 0, 0, 0, 0, 0, 0, 0, M, 0, M | B,
     M, M, M, M, M, M, M, M, M, M, M, M, M, M, M, M,
     M, M, M, M, M, M, M, M, M, M, M, M, M, M, M, M,
@@ -645,7 +645,7 @@ static bool mem_ea(
         uint64_t si = vcpu_gpr(v, 6);
         uint64_t di = vcpu_gpr(v, 7);
         static const uint8_t base_is_bp = (uint32_t)1 << 2 | (uint32_t)1 << 3 | (uint32_t)1 << 6;
-        uint64_t sums[8] = { bx + si, bx + di, bp + si, bp + di, si, di, bp, bx };
+        uint64_t sums[] = { bx + si, bx + di, bp + si, bp + di, si, di, bp, bx };
         ea = (uint64_t)disp;
         if (rm != 6 || mod != 0) {
             ea += sums[rm];

@@ -228,7 +228,7 @@ void virt_intercept_msr(uint32_t msr, bool read, bool write) {
     if (!msr_bits(msr, &bits[0], &bits[1])) {
         return;
     }
-    bool chosen[2] = { read, write };
+    bool chosen[] = { read, write };
     for (size_t i = 0; i < 2; i++) {
         if (!chosen[i]) {
             continue;

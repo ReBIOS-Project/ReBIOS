@@ -163,17 +163,18 @@ o.append('#include <stddef.h>')
 o.append('#include <stdint.h>')
 o.append('#include <virt/vgabios.h>')
 o.append('')
-for name, data in (('font8', font8), ('font14', font14), ('font16', font16)):
-    o.append('const uint8_t vgabios_tables_%s[%d] = {' % (name, len(data)))
+for name, data, height in (('font8', font8, 8), ('font14', font14, 14), ('font16', font16, 16)):
+    assert len(data) == 256 * height
+    o.append('const uint8_t vgabios_tables_%s[256 * %d] = {' % (name, height))
     o.append(hexrows(data))
     o.append('};')
     o.append('')
 for i, p in enumerate(palettes):
-    o.append('static const uint8_t palette%d[%d] = {' % (i, len(p)))
+    o.append('static const uint8_t palette%d[] = {' % i)
     o.append(hexrows(p, 12))
     o.append('};')
     o.append('')
-o.append('const struct vgabios_palette vgabios_tables_palettes[%d] = {' % len(palettes))
+o.append('const struct vgabios_palette vgabios_tables_palettes[] = {')
 for i, p in enumerate(palettes):
     o.append('    { palette%d, %d },' % (i, len(p) // 3))
 o.append('};')
@@ -182,7 +183,7 @@ o.append('const size_t vgabios_tables_palette_count = %d;' % len(palettes))
 o.append('')
 o.append('const size_t vgabios_tables_mode_count = %d;' % len(modes))
 o.append('')
-o.append('const struct vgabios_mode vgabios_tables_modes[%d] = {' % len(modes))
+o.append('const struct vgabios_mode vgabios_tables_modes[] = {')
 for m in modes:
     (mode, kind, columns, rows, char_height, palette, width, height, segment, page_size, misc,
      seq, crtc, ac, gc, lines) = m

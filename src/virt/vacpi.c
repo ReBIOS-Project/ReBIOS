@@ -3192,7 +3192,7 @@ static void sci_update(void) {
 }
 
 static void write_result(uacpi_object *obj, uint32_t status) {
-    uint32_t header[4] = { status, TYPE_NONE, 0, 0 };
+    uint32_t header[] = { status, TYPE_NONE, 0, 0 };
     uacpi_data_view view = { 0 };
     uint64_t value;
     uacpi_object_array package;
@@ -3564,7 +3564,7 @@ static void mailbox_element(uint32_t element) {
 }
 
 static void mailbox_notification(void) {
-    uint32_t header[4] = { 0, TYPE_NONE, 0, 0 };
+    uint32_t header[] = { 0, TYPE_NONE, 0, 0 };
     uint32_t target = 0;
     spinlock_acquire(&vacpi.lock);
     if (vacpi.queue_count != 0) {

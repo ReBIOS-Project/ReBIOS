@@ -54,7 +54,7 @@ struct resolution {
 };
 
 // Each in 8, 15, 16, 24, and 32 bits per pixel, then the display's own.
-static const uint8_t depths[5] = { 8, 15, 16, 24, 32 };
+static const uint8_t depths[] = { 8, 15, 16, 24, 32 };
 static const struct resolution resolutions[] = {
     { 320, 200 }, { 640, 400 }, { 640, 480 }, { 800, 600 }, { 1024, 768 },
     { 1152, 864 }, { 1280, 720 }, { 1280, 768 }, { 1280, 800 }, { 1280, 960 },
@@ -90,7 +90,7 @@ static const uint16_t mode_numbers[MODE_COUNT + 1] = {
 };
 
 // Each depth's red, green, blue, and reserved field sizes and positions.
-static const uint8_t color_fields[5][8] = {
+static const uint8_t color_fields[][8] = {
     { 0, 0, 0, 0, 0, 0, 0, 0 },
     { 5, 10, 5, 5, 5, 0, 1, 15 },
     { 5, 11, 6, 5, 5, 0, 0, 0 },
@@ -101,7 +101,7 @@ static const uint8_t color_fields[5][8] = {
 // Function 04h's buffer holds the states it is asked for in this order: the
 // controller's registers, the BIOS data, the DAC, and the VBE mode, each
 // taking this many 64-byte blocks.
-static const uint8_t state_blocks[4] = { 2, 1, 13, 1 };
+static const uint8_t state_blocks[] = { 2, 1, 13, 1 };
 
 // The VBE mode's words in function 04h's buffer: depth, resolution, flags,
 // scan line, display start, and bank.

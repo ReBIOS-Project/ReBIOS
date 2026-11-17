@@ -571,7 +571,7 @@ void csm_boot_start(struct vcpu *v) {
         // VMMCALL in place of VMCALL.
         thunk[csm_thunk_hypercall - csm_thunk_start + 2] = 0xd9;
     }
-    uint16_t entry[2] = {
+    uint16_t entry[] = {
         csm.compat16->compatibility16_call_offset, csm.compat16->compatibility16_call_segment
     };
     memcpy(thunk + (csm_thunk_entry - csm_thunk_start), entry, sizeof(entry));
