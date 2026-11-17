@@ -24,7 +24,7 @@ import re
 import textwrap
 
 COMMENT_LIMIT = 79
-NOTICE_END = '// with ReBIOS. If not, see <https://www.gnu.org/licenses/>.'
+NOTICE_END = '// ReBIOS. If not, see <https://www.gnu.org/licenses/>.'
 
 
 # The notice every generated file starts with.
@@ -43,8 +43,8 @@ NOTICE = [
     '// FOR A PARTICULAR PURPOSE. See the GNU General Public License for more',
     '// details.',
     '//',
-    '// You should have received a copy of the GNU General Public License along',
-    '// with ReBIOS. If not, see <https://www.gnu.org/licenses/>.',
+    '// You should have received a copy of the GNU General Public License along with',
+    '// ReBIOS. If not, see <https://www.gnu.org/licenses/>.',
 ]
 
 
