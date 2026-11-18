@@ -262,10 +262,18 @@ efi_status efi_main(efi_handle image_handle, struct efi_system_table *system_tab
     }
     // Before anything that ReBIOS keeps for its next start is read or written.
     reed_solomon_init();
+    // The last start's log comes out before anything takes the memory that it
+    // may be in, this start's own kept memory included.
+    if (config.save_log) {
+        last_log_write();
+    }
+    last_log_delete_variables();
     if (config.save_acpi) {
         acpi_save_start();
     }
-    last_log_write(config.save_log);
+    if (config.save_log) {
+        last_log_keep();
+    }
 
     if (x86_cpu_vendor() == 0) {
         panic("ReBIOS runs on Intel's and AMD's processors alone\n");

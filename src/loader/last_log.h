@@ -18,13 +18,17 @@
 #ifndef LOADER__LAST_LOG_H
 #define LOADER__LAST_LOG_H
 
-#include <stdbool.h>
+// Writes the log that ReBIOS kept in memory at its last start with save_log
+// (handoff.h) to rebios-last.log, beside the loader's image, once. Says on the
+// screen where the log went, or why it did not.
+void last_log_write(void);
 
-// Writes the log that the core saved in EFI variables with save_log
-// (virt/log_save.c) to rebios-last.log, beside the loader's image, then
-// deletes the variables, which stay for a later start only where the file
-// cannot be written and save_log is off. Says on the screen where the log
-// went, or why it did not, and with save_log, where there was none.
-void last_log_write(bool save_log);
+// Keeps this start's log in memory, from now on, for the next start to write
+// out.
+void last_log_keep(void);
+
+// Deletes the EFI variables that ReBIOS 0.7.0 to 0.11.0 kept their log in, if
+// any are left, without reading them.
+void last_log_delete_variables(void);
 
 #endif

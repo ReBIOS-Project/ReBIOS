@@ -181,33 +181,6 @@ struct handoff_block_device {
 // The vendor GUID of ReBIOS's EFI variables.
 #define HANDOFF_VARIABLE_GUID \
     { 0xd559b78d, 0x5494, 0x4c9e, { 0xb7, 0xf7, 0xe4, 0x92, 0xb0, 0x94, 0x64, 0x48 } }
-// The core keeps its log with save_log (virt/log_save.c) in parts, each in a
-// variable of its own, named after HANDOFF_LOG_VARIABLE and the part's number,
-// from 0 on, in 4 decimal digits (handoff_log_part_name()). ReBIOS 0.7.0 to
-// 0.10.0 kept the log's start in HANDOFF_LOG_VARIABLE itself, and its latest
-// text in HANDOFF_LOG_END_VARIABLE, which the loader still writes out and
-// deletes.
-#define HANDOFF_LOG_VARIABLE u"ReBIOSLog"
-#define HANDOFF_LOG_END_VARIABLE u"ReBIOSLogEnd"
-#define HANDOFF_LOG_PARTS 10000
-// A part's name in UTF-16 characters, its NUL included.
-#define HANDOFF_LOG_PART_NAME_LEN 14
-
-static inline void handoff_log_part_name(
-    uint16_t name[static HANDOFF_LOG_PART_NAME_LEN],
-    size_t part
-) {
-    static const uint16_t base[] = HANDOFF_LOG_VARIABLE;
-    size_t len = sizeof(base) / sizeof(uint16_t) - 1;
-    for (size_t i = 0; i < len; i++) {
-        name[i] = base[i];
-    }
-    for (size_t i = 4; i-- > 0; ) {
-        name[len + i] = (uint16_t)(u'0' + part % 10);
-        part /= 10;
-    }
-    name[len + 4] = 0;
-}
 
 // What ReBIOS keeps in memory for its next start is in areas of
 // HANDOFF_KEPT_SIZE bytes, each at the start of a page: a header, which starts
@@ -229,11 +202,33 @@ _Static_assert(
     "The parity of a kept area's data runs past its end."
 );
 
+// The log as ReBIOS keeps it with save_log (lib/log.c), for the loader to
+// write out at the next start, in a kept area: this header, then, as the data,
+// the log's first HANDOFF_LOG_HEAD_SIZE bytes, and after them its latest
+// bytes, in a ring of the rest. Each line goes to memory as it ends, with the
+// parity of its blocks, then count, the number of bytes the log has had, in
+// one aligned store, and the header's parity, so that whatever stops ReBIOS,
+// the bytes up to count are in memory. The magic, the full 16 bytes of the
+// string, comes once the start of the log is there.
+#define HANDOFF_LOG_MAGIC "ReBIOS log v01\n"
+#define HANDOFF_LOG_HEAD_SIZE ((uint64_t)0x100000)
+#define HANDOFF_LOG_TAIL_SIZE (HANDOFF_KEPT_DATA_SIZE - HANDOFF_LOG_HEAD_SIZE)
+
+struct handoff_log {
+    char magic[HANDOFF_KEPT_MAGIC_SIZE];
+    // When the start whose log it is began, by the firmware's clock, so that
+    // the latest of several can be told apart: all 0 where the clock gave
+    // nothing.
+    struct efi_time started;
+    uint64_t count;
+    uint8_t parity[REED_SOLOMON_PARITY];
+};
+
 // The guest's ACPI tables as the core keeps them with save_acpi
-// (virt/acpi_save.c), for the loader to write out at the next start: this
-// header, then a record and the bytes of each table, padded to 8 bytes. The
-// hash is FNV-1a's 64-bit one over the data, and the magic, the full 16 bytes
-// of the string, comes last.
+// (virt/acpi_save.c), for the loader to write out at the next start, in a kept
+// area: this header, then, as the data, a record and the bytes of each table,
+// padded to 8 bytes. The hash is FNV-1a's 64-bit one over the data, and the
+// magic, the full 16 bytes of the string, comes last.
 #define HANDOFF_ACPI_SAVE_MAGIC "ReBIOS ACPI v2\n"
 
 struct handoff_acpi_save {
@@ -275,8 +270,6 @@ struct handoff_config {
     // Whether the hypervisor has the USB controllers until the OS takes them
     // (virt/usb.c), else the OS has them from the start.
     uint8_t legacy_usb;
-    // Whether the core keeps its log in an EFI variable (virt/log_save.c).
-    uint8_t save_log;
     // Whether BARs too large to go below 4 GiB go above it, in root bus
     // windows there (virt/pci_plan.c), or else stay unassigned.
     uint8_t pci_high_windows;

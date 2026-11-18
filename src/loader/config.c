@@ -703,7 +703,6 @@ void config_to_handoff(struct handoff_config *out) {
     out->cpuid_limit = config.cpuid_limit;
     out->igpu_stolen_remap = config.igpu_stolen_remap;
     out->legacy_usb = config.legacy_usb;
-    out->save_log = config.save_log;
     out->pci_high_windows = config.pci_high_windows;
     out->hpet = config.hpet;
     out->cpu_filter = config.cpu_filter;
