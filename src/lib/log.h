@@ -32,6 +32,9 @@ void log_init(uint16_t serial_port, uint32_t serial_baud, uint32_t serial_clock,
 // What the log shows goes to this console from now on, rather than the
 // firmware's, as it lasts beyond ExitBootServices().
 void log_set_screen(struct flanterm_context *screen);
+// The screen's framebuffer is at a new address from now on, its memory moved
+// there.
+void log_move_screen(void *framebuffer);
 // The guest draws on the screen from now on: only panics still reach it.
 void log_hand_over_screen(void);
 void vprintf(const char *fmt, va_list args);

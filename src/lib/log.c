@@ -22,6 +22,7 @@
 #include <stdint.h>
 #include <efi.h>
 #include <flanterm.h>
+#include <flanterm_backends/fb.h>
 #include <lib/log.h>
 #include <handoff.h>
 #include <hw/serial.h>
@@ -236,6 +237,14 @@ void log_init(uint16_t serial_port, uint32_t serial_baud, uint32_t serial_clock,
 
 void log_set_screen(struct flanterm_context *screen) {
     log_screen = screen;
+}
+
+void log_move_screen(void *framebuffer) {
+    spinlock_acquire(&log_lock);
+    if (log_screen != NULL) {
+        flanterm_fb_set_framebuffer(log_screen, framebuffer);
+    }
+    spinlock_release(&log_lock);
 }
 
 void log_hand_over_screen(void) {
