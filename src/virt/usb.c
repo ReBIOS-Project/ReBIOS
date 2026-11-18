@@ -86,6 +86,19 @@ static uint64_t tick_wake;
 static _Atomic(bool) all_ready;
 // The thread did not get to the end of its work in its last slice.
 static bool mid_work;
+// What the machine's sleep asks of the thread, between its polls: the
+// controllers it drives suspended before, and resumed after, then polled as
+// ever until their devices are ready again, as at the guest's start, within as
+// long as a disk may take to be ready (Tendril's docs/API.md,
+// tendril_hc_ready()).
+#define SLEEP_NONE 0
+#define SLEEP_SUSPEND 1
+#define SLEEP_SUSPENDED 2
+#define SLEEP_RESUME 3
+#define SLEEP_SETTLING 4
+#define SETTLE_NS ((uint64_t)15000000000)
+static _Atomic(int) sleep_step;
+static uint64_t settle_deadline;
 
 static uint8_t *pool;
 static uintptr_t pool_bus;
@@ -417,11 +430,53 @@ static void controller_take(struct usb_controller *c) {
     atomic_store_explicit(&c->state, USB_CONTROLLER_STATE_OWNED, memory_order_release);
 }
 
+// A controller that does not suspend is stopped, and one that does not resume
+// taken over again, as one that loses its state is (Tendril's docs/API.md,
+// tendril_hc_resume()).
+static void sleep_work(int step) {
+    for (size_t i = 0; i < controller_count; i++) {
+        struct usb_controller *c = &controllers[i];
+        if (c->hc == NULL) {
+            continue;
+        }
+        int status;
+        if (step == SLEEP_SUSPEND) {
+            status = tendril_hc_suspend(c->hc, false);
+        } else {
+            status = tendril_hc_resume(c->hc);
+        }
+        if (status == TENDRIL_OK) {
+            continue;
+        }
+        printf(
+            "USB: controller %02x:%02x.%x does not %s (%s), and is taken over again after "
+            "waking\n",
+            c->f->addr.bus, c->f->addr.device, c->f->addr.function,
+            step == SLEEP_SUSPEND ? "suspend" : "resume", tendril_status_str(status)
+        );
+        tendril_hc_remove(c->hc);
+        c->hc = NULL;
+        atomic_store_explicit(&c->state, USB_CONTROLLER_STATE_WAITING, memory_order_release);
+    }
+    settle_deadline = time_ns() + SETTLE_NS;
+    int done = step == SLEEP_SUSPEND ? SLEEP_SUSPENDED : SLEEP_SETTLING;
+    atomic_store_explicit(&sleep_step, done, memory_order_release);
+}
+
 static void usb_main(void *arg) {
     (void)arg;
     tendril_hid_register(&hid_callbacks, 0);
     usb_disk_register();
     for (;;) {
+        int step = atomic_load_explicit(&sleep_step, memory_order_acquire);
+        if (step == SLEEP_SUSPEND || step == SLEEP_RESUME) {
+            sleep_work(step);
+            continue;
+        }
+        if (step == SLEEP_SUSPENDED) {
+            thread_sleep(time_ns() + POLL_IDLE_NS);
+            continue;
+        }
         // What Tendril is asked from outside its callbacks can leave it work,
         // or arm timers, that only a poll after the call takes up (Tendril's
         // docs/API.md, Conventions): the asking comes before the polls.
@@ -454,6 +509,12 @@ static void usb_main(void *arg) {
             }
         }
         atomic_store_explicit(&all_ready, ready, memory_order_release);
+        if (step == SLEEP_SETTLING && (ready || time_ns() > settle_deadline)) {
+            if (!ready) {
+                printf("USB: devices still not ready after waking, the guest goes on\n");
+            }
+            atomic_store_explicit(&sleep_step, SLEEP_NONE, memory_order_release);
+        }
         uint64_t poll = time_ns() + (hid_devices != 0 || !ready ? POLL_NS : POLL_IDLE_NS);
         thread_sleep(next < poll ? next : poll);
     }
@@ -599,6 +660,26 @@ void usb_slice(bool guest_waiting) {
     tick_wake = wake;
     uint64_t delay = wake > now ? wake - now : 0;
     hv_timer_set(&tick, rdtsc() + delay * time_tsc_hz() / 1000000000);
+}
+
+// Has the thread carry out a step of the machine's sleep, the guest waiting.
+static void sleep_ask(int step, int done) {
+    if (!atomic_load_explicit(&started, memory_order_acquire)) {
+        return;
+    }
+    atomic_store_explicit(&sleep_step, step, memory_order_release);
+    while (atomic_load_explicit(&sleep_step, memory_order_acquire) != done) {
+        thread_wake(&thread);
+        thread_run(&thread);
+    }
+}
+
+void usb_suspend(void) {
+    sleep_ask(SLEEP_SUSPEND, SLEEP_SUSPENDED);
+}
+
+void usb_resume(void) {
+    sleep_ask(SLEEP_RESUME, SLEEP_NONE);
 }
 
 bool usb_working(void) {

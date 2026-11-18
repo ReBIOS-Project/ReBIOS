@@ -43,6 +43,7 @@
 #include <virt/pci_virt.h>
 #include <virt/pit.h>
 #include <virt/rtc.h>
+#include <virt/usb.h>
 #include <virt/vacpi.h>
 #include <virt/vcpu.h>
 #include <virt/vga.h>
@@ -191,6 +192,7 @@ static void enter(struct vcpu *v) {
     }
     uint64_t asked = rdtsc();
     printf("The guest puts the machine to sleep (S3)\n");
+    usb_suspend();
     dma_suspend();
     uintptr_t vector = smp_trampoline_wake(woken, wake_stack, WAKE_STACK_SIZE);
     uacpi_status status = uacpi_set_waking_vector(vector, 0);
@@ -227,6 +229,7 @@ static void enter(struct vcpu *v) {
     pci_virt_resume();
     pit_host_stop();
     hpet_wake();
+    usb_resume();
     if (slept) {
         uacpi_prepare_for_wake_from_sleep_state(UACPI_SLEEP_STATE_S3);
         uacpi_wake_from_sleep_state(UACPI_SLEEP_STATE_S3);

@@ -24,6 +24,7 @@
 #include <hw/pci_enum.h>
 #include <lib/printf.h>
 #include <lib/spinlock.h>
+#include <memory.h>
 #include <virt/guest_mem.h>
 #include <virt/hypercall.h>
 #include <virt/pci_plan.h>
@@ -49,6 +50,12 @@
 
 struct usb_disk {
     struct tendril_msc_lun *lun;
+    // Where the disk is, which one gone with its controller's restart after
+    // the machine slept takes its place again by, to stay the same BIOS drive:
+    // its controller, and its path below it.
+    const struct tendril_hc *hc;
+    char path[sizeof(((struct hypercall_usb_disk_info *)NULL)->path)];
+    bool gone;
     uint8_t *buffer;
     int state;
     int status;
@@ -61,19 +68,40 @@ struct usb_disk {
 static struct usb_disk disks[MAX_DISKS];
 static struct spinlock lock;
 
-static void msc_attach(struct tendril_msc_lun *lun) {
-    spinlock_acquire(&lock);
+static void disk_path(struct tendril_msc_lun *lun, char *out, size_t size);
+
+// The disk's slot: the one it had, else the first that none had.
+static struct usb_disk *slot_for(const struct tendril_hc *hc, const char *path) {
+    struct usb_disk *free = NULL;
     for (size_t i = 0; i < MAX_DISKS; i++) {
         struct usb_disk *d = &disks[i];
-        if (d->lun == NULL) {
-            uintptr_t bus;
-            d->buffer = usb_dma_alloc(BUFFER_SIZE, 0, &bus);
-            if (d->buffer != NULL) {
-                d->lun = lun;
-                d->state = DISK_IDLE;
-                tendril_msc_set_user(lun, d);
-            }
-            break;
+        if (d->gone && d->hc == hc && memcmp(d->path, path, sizeof(d->path)) == 0) {
+            return d;
+        }
+        if (free == NULL && d->lun == NULL && !d->gone) {
+            free = d;
+        }
+    }
+    return free;
+}
+
+static void msc_attach(struct tendril_msc_lun *lun) {
+    const struct tendril_hc *hc = tendril_device_hc(tendril_msc_device(lun));
+    // Zeros past its end, for slot_for() to compare all of it.
+    char path[sizeof(((struct hypercall_usb_disk_info *)NULL)->path)] = { 0 };
+    disk_path(lun, path, sizeof(path));
+    spinlock_acquire(&lock);
+    struct usb_disk *d = slot_for(hc, path);
+    if (d != NULL) {
+        uintptr_t bus;
+        d->buffer = usb_dma_alloc(BUFFER_SIZE, 0, &bus);
+        if (d->buffer != NULL) {
+            d->lun = lun;
+            d->hc = hc;
+            memcpy(d->path, path, sizeof(path));
+            d->gone = false;
+            d->state = DISK_IDLE;
+            tendril_msc_set_user(lun, d);
         }
     }
     spinlock_release(&lock);
@@ -87,6 +115,7 @@ static void msc_detach(struct tendril_msc_lun *lun) {
     spinlock_acquire(&lock);
     usb_dma_free(d->buffer, BUFFER_SIZE);
     d->lun = NULL;
+    d->gone = true;
     spinlock_release(&lock);
 }
 

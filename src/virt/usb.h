@@ -38,6 +38,12 @@ void usb_start(void);
 void usb_slice(bool guest_waiting);
 // Whether the stack has work under way, not waiting for anything.
 bool usb_working(void);
+// The controllers the hypervisor drives for the guest, suspended before the
+// machine sleeps, as a BIOS's legacy USB support has them, and resumed after
+// it woke, or did not sleep, their devices ready again before the guest goes
+// on.
+void usb_suspend(void);
+void usb_resume(void);
 // Whether the devices plugged in so far are all up.
 bool usb_ready(void);
 
