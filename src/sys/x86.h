@@ -430,6 +430,13 @@ static inline void wbinvd(void) {
     asm volatile ("wbinvd" ::: "memory");
 }
 
+// Writes the cache line that holds p back to memory, if it changed, and
+// invalidates it, in order with the stores and other flushes around it (SDM
+// 325462-093 Vol. 2A, CLFLUSH).
+static inline void clflush(const volatile void *p) {
+    asm volatile ("clflush %[line]" :: [line] "m"(*(const volatile uint8_t *)p) : "memory");
+}
+
 static inline void invlpg(uintptr_t addr) {
     asm volatile ("invlpg (%[addr])" :: [addr] "r"(addr) : "memory");
 }

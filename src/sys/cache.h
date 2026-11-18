@@ -18,6 +18,7 @@
 #ifndef SYS__CACHE_H
 #define SYS__CACHE_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 // The host's memory types, the same on every processor: loads the PAT, and
@@ -25,5 +26,10 @@
 // firmware left it others. The boot processor's call comes before the others',
 // with interrupts disabled on each.
 void cache_cpu_init(uint64_t pat);
+
+// Writes the cache lines of size bytes at p back to memory, so that what they
+// hold outlasts a reset, which leaves the caches invalid without writing them
+// back (SDM 325462-093 Vol. 3A, Table 12-1).
+void cache_write_back(const void *p, size_t size);
 
 #endif

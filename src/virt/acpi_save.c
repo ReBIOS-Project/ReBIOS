@@ -15,7 +15,6 @@
 // You should have received a copy of the GNU General Public License along with
 // ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
-#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -27,7 +26,7 @@
 #include <lib/log.h>
 #include <lib/util.h>
 #include <memory.h>
-#include <sys/x86.h>
+#include <sys/cache.h>
 #include <virt/guest_mem.h>
 
 // Far more than any table the guest gets, so that a corrupt length is refused.
@@ -148,12 +147,10 @@ void acpi_save_guest(uint32_t rsdp) {
     head->hash = fnv1a64(records, used);
     head->count = count;
     head->reserved = 0;
-    atomic_signal_fence(memory_order_release);
+    // The copy goes to memory before the magic that marks it whole.
+    cache_write_back(head, sizeof(struct handoff_acpi_save) + used);
     memcpy(head->magic, HANDOFF_ACPI_SAVE_MAGIC, sizeof(head->magic));
-    // A reset leaves the caches invalid, with no word of writing them back
-    // first (SDM 325462-093 Vol. 3A, Table 12-1), so the copy goes to memory
-    // now.
-    wbinvd();
+    cache_write_back(head->magic, sizeof(head->magic));
     if (left_out) {
         printf("Some of the guest's ACPI tables do not fit in the memory kept for them\n");
     }

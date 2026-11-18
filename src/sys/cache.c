@@ -33,6 +33,11 @@
 #define MSR_AMD_SYSCFG 0xc0010010
 
 #define CPUID_1_EDX_MTRR ((uint32_t)1 << 12)
+// CPUID 01H EBX[15:8], the line size that CLFLUSH works on, in 8-byte units
+// (SDM 325462-093 Vol. 2A, CPUID, Table 3-8).
+#define CPUID_1_EBX_CLFLUSH_SHIFT 8
+#define CPUID_1_EBX_CLFLUSH_MASK 0xff
+#define CLFLUSH_UNIT 8
 #define MTRRCAP_VCNT 0xff
 #define MTRRCAP_FIX ((uint64_t)1 << 8)
 #define MTRR_DEF_TYPE_E ((uint64_t)1 << 11)
@@ -59,6 +64,8 @@ static bool fixed_present;
 static size_t variable_count;
 static struct mtrrs boot_mtrrs;
 static _Atomic(bool) reported;
+// CLFLUSH's line size, found at its first use.
+static _Atomic(size_t) flush_line;
 
 static void mtrrs_read(struct mtrrs *m) {
     memset(m, 0, sizeof(struct mtrrs));
@@ -147,5 +154,19 @@ void cache_cpu_init(uint64_t pat) {
             "processor now have the boot processor's\n",
             this_cpu()->apic_id
         );
+    }
+}
+
+void cache_write_back(const void *p, size_t size) {
+    size_t line = atomic_load_explicit(&flush_line, memory_order_relaxed);
+    if (line == 0) {
+        uint32_t units = cpuid(1, 0).ebx >> CPUID_1_EBX_CLFLUSH_SHIFT & CPUID_1_EBX_CLFLUSH_MASK;
+        // The smallest size that x86-64 processors have, where none is given.
+        line = units != 0 ? units * CLFLUSH_UNIT : 64;
+        atomic_store_explicit(&flush_line, line, memory_order_relaxed);
+    }
+    uintptr_t end = (uintptr_t)p + size;
+    for (uintptr_t at = align_down((uintptr_t)p, line); at < end; at += line) {
+        clflush((const void *)at);
     }
 }
