@@ -192,6 +192,7 @@ static void enter(struct vcpu *v) {
     }
     uint64_t asked = rdtsc();
     printf("The guest puts the machine to sleep (S3)\n");
+    vacpi_sleep_arm();
     usb_suspend();
     dma_suspend();
     uintptr_t vector = smp_trampoline_wake(woken, wake_stack, WAKE_STACK_SIZE);
@@ -230,6 +231,7 @@ static void enter(struct vcpu *v) {
     pit_host_stop();
     hpet_wake();
     usb_resume();
+    vacpi_sleep_woken(slept);
     if (slept) {
         uacpi_prepare_for_wake_from_sleep_state(UACPI_SLEEP_STATE_S3);
         uacpi_wake_from_sleep_state(UACPI_SLEEP_STATE_S3);
@@ -242,7 +244,8 @@ static void enter(struct vcpu *v) {
     if (slept) {
         uint64_t hz = time_tsc_hz();
         printf(
-            "The machine is awake: ReBIOS took %llu ms to put it to sleep, %llu ms to have it back\n",
+            "The machine is awake: ReBIOS took %llu ms to put it to sleep, %llu ms to have it "
+            "back\n",
             (unsigned long long)mul_div(sleeping - asked, 1000, hz),
             (unsigned long long)mul_div(rdtsc() - sleeping, 1000, hz)
         );

@@ -21,6 +21,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <hw/pci_cfg.h>
 
 struct cpu;
 
@@ -32,6 +33,14 @@ struct cpu;
 // through PM1 and GPE registers the hypervisor emulates where the host has its
 // own.
 void vacpi_init(void);
+// Before the machine sleeps, the GPEs the guest enabled set up to wake it, as
+// its OS enables those of its devices' _PRW that may; after it woke, or did
+// not sleep, back as they were, the guest's status showing what woke it.
+void vacpi_sleep_arm(void);
+void vacpi_sleep_woken(bool slept);
+// After vacpi_sleep_arm(): whether the guest enabled the GPE that the PCI
+// function's _PRW gives, to wake the machine.
+bool vacpi_sleep_armed_for(struct pci_cfg_addr addr);
 // The guest's virtual PM1 as a wake from a sleeping state leaves it: WAK_STS
 // set (ACPI 6.6, 4.8.3.1.1, Table 4.11), SLP_TYP as the guest wrote it, as the
 // chipsets that keep it in the RTC well have it (Intel 6 Series 324645-006,

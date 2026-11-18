@@ -43,6 +43,7 @@
 #include <virt/usb_controller.h>
 #include <virt/usb_disk.h>
 #include <virt/usb_legacy.h>
+#include <virt/vacpi.h>
 #include <virt/vcpu.h>
 
 // USB legacy support, as a BIOS's is to a PC: the hypervisor has the machine's
@@ -441,7 +442,16 @@ static void sleep_work(int step) {
         }
         int status;
         if (step == SLEEP_SUSPEND) {
-            status = tendril_hc_suspend(c->hc, false);
+            // Its devices wake the machine where the guest enabled the GPE its
+            // _PRW gives, as an OS driving it would have them.
+            bool wake = vacpi_sleep_armed_for(c->f->addr);
+            status = tendril_hc_suspend(c->hc, wake);
+            if (wake && status == TENDRIL_OK) {
+                printf(
+                    "USB: controller %02x:%02x.%x's devices can wake the machine\n",
+                    c->f->addr.bus, c->f->addr.device, c->f->addr.function
+                );
+            }
         } else {
             status = tendril_hc_resume(c->hc);
         }

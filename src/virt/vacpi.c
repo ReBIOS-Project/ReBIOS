@@ -118,9 +118,10 @@
 #define OSC_MASKED 0x00000010
 #define OSC_DWORDS_MAX 16
 
-// The PM1 and GPE bits the guest sees: power button, and GPE 0 for the
-// notifications the firmware's AML sends, ACPI 1.0b, 4.7.3.
+// The PM1 bits the guest sees: the power button, the RTC's alarm, and the wake
+// (ACPI 6.6, 4.8.3.1.1, Table 4.11).
 #define PM1_PWRBTN 0x0100
+#define PM1_RTC 0x0400
 #define PM1_WAK 0x8000
 #define PM1_CNT_SCI_EN 0x0001
 #define PM1_CNT_SLP_TYP_SHIFT 10
@@ -148,10 +149,13 @@
 #define FADT_PM1A_CNT_BLK 64
 #define FADT_PM_TMR_BLK 76
 #define FADT_GPE0_BLK 80
+#define FADT_GPE1_BLK 84
 #define FADT_PM1_EVT_LEN 88
 #define FADT_PM1_CNT_LEN 89
 #define FADT_PM_TM_LEN 91
 #define FADT_GPE0_BLK_LEN 92
+#define FADT_GPE1_BLK_LEN 93
+#define FADT_GPE1_BASE 94
 #define FADT_P_LVL2_LAT 96
 #define FADT_P_LVL3_LAT 98
 #define FADT_DAY_ALRM 106
@@ -198,6 +202,24 @@ struct merged {
     uint32_t adr;
 };
 
+// The guest's GPE blocks are the machine's FADT blocks, numbered and placed as
+// they are: status bytes, then as many enable bytes, from a GPE number.
+#define GPE_BLOCKS 2
+struct gpe_block {
+    uint16_t port;
+    uint8_t bytes;
+    uint16_t base;
+};
+
+// A device that a GPE wakes the machine for, as its _PRW has it, and the PCI
+// function it is, if it is one.
+struct wake_gpe {
+    uint16_t gpe;
+    uacpi_namespace_node *device;
+    bool pci;
+    struct pci_cfg_addr addr;
+};
+
 static struct {
     bool active;
     uintptr_t mailbox;
@@ -206,15 +228,31 @@ static struct {
     uint32_t sci_gsi;
     uint16_t pm1_evt;
     uint16_t pm1_cnt;
-    uint16_t gpe0;
+    struct gpe_block gpe_blocks[GPE_BLOCKS];
+    size_t gpe_block_count;
     bool pm1;
     bool gpe;
     bool power_button;
+    bool rtc_event;
 
     uint16_t pm1_sts;
     uint16_t pm1_en;
     uint16_t slp_typ;
-    uint8_t gpe0_en;
+    // The guest's GPEs, by number: its own, which the notifications the
+    // firmware's AML sends raise, is the first that no _PRW names; the others
+    // stand for the machine's, whose status the guest sees only for what woke
+    // the machine, and whose enables say what may wake it.
+    uint16_t gpe_count;
+    uint16_t own_gpe;
+    uint8_t *gpe_sts;
+    uint8_t *gpe_en;
+    struct wake_gpe *wakes;
+    size_t wake_count;
+    size_t wake_capacity;
+    // The GPEs armed for the machine's sleep, and those of them that ran for
+    // the hypervisor before.
+    uint8_t *gpe_armed;
+    uint8_t *gpe_runtime;
 
     struct method *methods;
     size_t method_count;
@@ -258,13 +296,12 @@ static struct {
 // Not mirrored: what only the firmware's own OSPM, the hypervisor, runs, the
 // operating system provides, or the hypervisor replaces.
 static const char *const left_out_methods[] = {
-    "_INI", "_REG", "_PTS", "_WAK", "_GTS", "_BFS", "_TTS", "_PIC", "_PRW",
-    "_PSW", "_DSW", "_S0W", "_S1W", "_S2W", "_S3W", "_S4W", "_OSI", "_OS_",
-    "_REV", "_PRT", "_DEP", "_GLK", "_GPE", NULL
+    "_INI", "_REG", "_PTS", "_WAK", "_GTS", "_BFS", "_TTS", "_PIC", "_OSI",
+    "_OS_", "_REV", "_PRT", "_DEP", "_GLK", "_GPE", NULL
 };
 static const char *const left_out_names[] = {
-    "_PRW", "_S0_", "_S1_", "_S2_", "_S3_", "_S4_", "_S5_", "_PRT", "_DEP",
-    "_GPE", "_OS_", "_REV", "_GL_", NULL
+    "_S0_", "_S1_", "_S2_", "_S3_", "_S4_", "_S5_", "_PRT", "_DEP", "_GPE",
+    "_OS_", "_REV", "_GL_", NULL
 };
 // The guest manages the processors' power as on the machine, but for telling
 // the firmware so, which the hypervisor did (hw/acpi_cpu.c).
@@ -506,7 +543,66 @@ static bool template_object(uacpi_object **obj, bool to_guest);
 // What the guest has in the place of an object of the firmware's, if anything
 // else: nothing for the identity of a host bridge below its own, and bus 0 of
 // segment 0 for its own. Returns whether it is something else.
+static bool bit_get(const uint8_t *bits, size_t n) {
+    return (bits[n / 8] >> (n % 8) & 1) != 0;
+}
+
+static void bit_set(uint8_t *bits, size_t n, bool on) {
+    uint8_t mask = (uint8_t)((uint32_t)1 << (n % 8));
+    bits[n / 8] = on ? (uint8_t)(bits[n / 8] | mask) : (uint8_t)(bits[n / 8] & ~mask);
+}
+
+// The bytes each of the guest's GPE bitmaps takes.
+static size_t gpe_bytes(void) {
+    return ((size_t)vacpi.gpe_count + 7) / 8;
+}
+
+// Whether one of the guest's GPE blocks has the GPE.
+static bool gpe_in_blocks(uint64_t gpe) {
+    for (size_t i = 0; i < vacpi.gpe_block_count; i++) {
+        const struct gpe_block *b = &vacpi.gpe_blocks[i];
+        if (gpe >= b->base && gpe < b->base + 8 * (uint64_t)b->bytes) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The GPE that a _PRW's package gives as a number of the FADT's blocks, not as
+// one of a GPE block device's (ACPI 6.6, 7.3.13).
+static bool prw_gpe(uacpi_object *prw, uint64_t *gpe) {
+    uacpi_object_array package;
+    return uacpi_object_get_package(prw, &package) == UACPI_STATUS_OK
+        && package.count >= 2
+        && uacpi_object_get_type(package.objects[0]) == UACPI_OBJECT_INTEGER
+        && uacpi_object_get_integer(package.objects[0], gpe) == UACPI_STATUS_OK;
+}
+
+// A device's _PRW, as a name, where the guest has the GPE it gives, by the
+// same number.
+static void emit_prw(struct aml *a, uacpi_namespace_node *node) {
+    uacpi_object *prw;
+    if (uacpi_eval(node, NULL, NULL, &prw) != UACPI_STATUS_OK || prw == NULL) {
+        return;
+    }
+    uint64_t gpe;
+    if (prw_gpe(prw, &gpe) && gpe_in_blocks(gpe) && gpe != vacpi.own_gpe) {
+        aml_op(a, AML_NAME);
+        emit_seg(a, "_PRW");
+        emit_data(a, prw, uacpi_namespace_node_parent(node));
+    } else {
+        const char *path = acpi_path(uacpi_namespace_node_parent(node));
+        printf("Guest DSDT: %s wakes nothing, as its _PRW gives no GPE the guest has\n", path);
+        acpi_path_free(path);
+    }
+    uacpi_object_unref(prw);
+}
+
 static bool emit_replaced(struct aml *a, uacpi_namespace_node *node, const char name[static 4]) {
+    if (memcmp(name, "_PRW", 4) == 0) {
+        emit_prw(a, node);
+        return true;
+    }
     uacpi_namespace_node *parent = uacpi_namespace_node_parent(node);
     if (merged_of(parent) != NULL && name_in(name, left_out_merged)) {
         return true;
@@ -3101,10 +3197,13 @@ static void emit_sleep_and_events(struct aml *a) {
     aml_end(a);
     aml_end(a);
 
-    // GPE 0 stays asserted while notifications wait, and _L00 takes them all.
+    // The guest's own GPE stays asserted while notifications wait, and its
+    // _Lxx takes them all.
+    static const char hex[] = "0123456789ABCDEF";
+    char level[] = { '_', 'L', hex[vacpi.own_gpe >> 4 & 0xf], hex[vacpi.own_gpe & 0xf], 0 };
     aml_begin(a, AML_SCOPE);
     aml_name(a, "\\_GPE");
-    aml_method(a, "_L00", 0, 0);
+    aml_method(a, level, 0, 0);
     aml_op(a, AML_STORE);
     aml_int(a, 1);
     aml_local(a, 2);
@@ -3240,8 +3339,15 @@ void vacpi_fadt(uint8_t fadt[static VACPI_FADT_SIZE], uint32_t facs, uint32_t ds
         }
     }
     if (vacpi.gpe) {
-        write_le32(fadt + FADT_GPE0_BLK, vacpi.gpe0);
-        fadt[FADT_GPE0_BLK_LEN] = 2;
+        const struct gpe_block *gpe0 = &vacpi.gpe_blocks[0];
+        write_le32(fadt + FADT_GPE0_BLK, gpe0->port);
+        fadt[FADT_GPE0_BLK_LEN] = (uint8_t)(2 * gpe0->bytes);
+    }
+    if (vacpi.gpe_block_count > 1) {
+        const struct gpe_block *gpe1 = &vacpi.gpe_blocks[1];
+        write_le32(fadt + FADT_GPE1_BLK, gpe1->port);
+        fadt[FADT_GPE1_BLK_LEN] = (uint8_t)(2 * gpe1->bytes);
+        fadt[FADT_GPE1_BASE] = (uint8_t)gpe1->base;
     }
     if (!vacpi.power_button) {
         flags |= FADT_PWR_BUTTON;
@@ -3258,13 +3364,30 @@ void vacpi_fadt(uint8_t fadt[static VACPI_FADT_SIZE], uint32_t facs, uint32_t ds
     aml_table_header(fadt, VACPI_FADT_SIZE, "FACP", 1, oem_id, oem_table_id, oem_revision);
 }
 
+// Whether the guest's own GPE is enabled, under the lock.
+static bool own_gpe_enabled(void) {
+    return vacpi.gpe && bit_get(vacpi.gpe_en, vacpi.own_gpe);
+}
+
+// A GPE status byte, under the lock: the guest's own GPE while notifications
+// wait.
+static uint8_t gpe_status(size_t byte) {
+    uint8_t status = vacpi.gpe_sts[byte];
+    if (vacpi.queue_count != 0 && vacpi.own_gpe / 8 == byte) {
+        status |= (uint8_t)((uint32_t)1 << (vacpi.own_gpe % 8));
+    }
+    return status;
+}
+
 static void sci_update(void) {
     if (!vacpi.sci) {
         return;
     }
     spinlock_acquire(&vacpi.lock);
-    bool level = (vacpi.pm1_sts & vacpi.pm1_en & PM1_PWRBTN) != 0
-              || (vacpi.queue_count != 0 && (vacpi.gpe0_en & 1) != 0);
+    bool level = (vacpi.pm1_sts & vacpi.pm1_en & (PM1_PWRBTN | PM1_RTC)) != 0;
+    for (size_t byte = 0; vacpi.gpe && byte < gpe_bytes() && !level; byte++) {
+        level = (gpe_status(byte) & vacpi.gpe_en[byte]) != 0;
+    }
     spinlock_release(&vacpi.lock);
     irq_virtual_line(vacpi.sci_gsi, level);
 }
@@ -3763,7 +3886,7 @@ static void power_button_pressed(bool guest) {
 
 bool vacpi_guest_ospm(void) {
     spinlock_acquire(&vacpi.lock);
-    bool ospm = (vacpi.gpe0_en & 1) != 0 || (vacpi.pm1_en & PM1_PWRBTN) != 0;
+    bool ospm = own_gpe_enabled() || (vacpi.pm1_en & PM1_PWRBTN) != 0;
     spinlock_release(&vacpi.lock);
     return ospm;
 }
@@ -3774,7 +3897,7 @@ static uacpi_status notify(uacpi_handle ctx, uacpi_namespace_node *node, uacpi_u
     if (value == NOTIFY_POWER_BUTTON_PRESSED
      && uacpi_device_matches_pnp_id(node, power_button_ids)) {
         spinlock_acquire(&vacpi.lock);
-        bool guest = (vacpi.gpe0_en & 1) != 0;
+        bool guest = own_gpe_enabled();
         spinlock_release(&vacpi.lock);
         power_button_pressed(guest);
     }
@@ -3829,6 +3952,16 @@ static uacpi_interrupt_ret power_button(uacpi_handle ctx) {
     return UACPI_INTERRUPT_HANDLED;
 }
 
+// The RTC's alarm, which the guest enabled.
+static uacpi_interrupt_ret rtc_alarm(uacpi_handle ctx) {
+    (void)ctx;
+    spinlock_acquire(&vacpi.lock);
+    vacpi.pm1_sts |= PM1_RTC;
+    spinlock_release(&vacpi.lock);
+    sci_update();
+    return UACPI_INTERRUPT_HANDLED;
+}
+
 static uint32_t bytes_read(uint32_t reg, uint16_t offset, size_t size) {
     uint32_t mask = size == 4 ? (uint32_t)0xffffffff : ((uint32_t)1 << (8 * size)) - 1;
     return (uint32_t)((uint64_t)reg >> (8 * offset)) & mask;
@@ -3863,6 +3996,8 @@ static void pm1_evt_access(
     (void)v;
     (void)ctx;
     spinlock_acquire(&vacpi.lock);
+    uint16_t was = vacpi.pm1_en;
+    uint16_t cleared = 0;
     uint32_t reg = vacpi.pm1_sts | (uint32_t)vacpi.pm1_en << 16;
     if (in) {
         *value = bytes_read(reg, offset, size);
@@ -3871,6 +4006,7 @@ static void pm1_evt_access(
             unsigned int at = offset + i;
             uint8_t b = (uint8_t)(*value >> (8 * i));
             if (at < 2) {
+                cleared |= (uint16_t)((uint16_t)b << (8 * at));
                 vacpi.pm1_sts &= (uint16_t)~((uint16_t)b << (8 * at));
             } else if (at < 4) {
                 vacpi.pm1_en = (uint16_t)((vacpi.pm1_en & ~(0xff << (8 * (at - 2))))
@@ -3878,10 +4014,25 @@ static void pm1_evt_access(
             }
         }
     }
+    bool rtc = (vacpi.pm1_en & PM1_RTC) != 0;
+    bool rtc_changed = ((was ^ vacpi.pm1_en) & PM1_RTC) != 0;
     spinlock_release(&vacpi.lock);
-    if (!in) {
-        sci_update();
+    if (in) {
+        return;
     }
+    // The machine's RTC is the guest's, whose alarm interrupts, and wakes the
+    // machine, as the guest enables it, and whose status it clears.
+    if ((cleared & PM1_RTC) != 0 && vacpi.rtc_event) {
+        uacpi_clear_fixed_event(UACPI_FIXED_EVENT_RTC);
+    }
+    if (rtc_changed && vacpi.rtc_event) {
+        if (rtc) {
+            uacpi_enable_fixed_event(UACPI_FIXED_EVENT_RTC);
+        } else {
+            uacpi_disable_fixed_event(UACPI_FIXED_EVENT_RTC);
+        }
+    }
+    sci_update();
 }
 
 static void pm1_cnt_access(
@@ -3917,7 +4068,9 @@ static void pm1_cnt_access(
     printf("The guest asked for sleep type %u, which it has no _Sx for\n", vacpi.slp_typ);
 }
 
-static void gpe0_access(
+// A GPE block's bytes: its status bits clear where the guest writes 1s, but
+// for its own GPE's, which stays set while notifications wait.
+static void gpe_access(
     struct vcpu *v,
     void *ctx,
     uint16_t offset,
@@ -3926,19 +4079,29 @@ static void gpe0_access(
     uint32_t *value
 ) {
     (void)v;
-    (void)ctx;
+    const struct gpe_block *b = &vacpi.gpe_blocks[(uintptr_t)ctx];
     spinlock_acquire(&vacpi.lock);
-    // GPE 0 is level-triggered: its status shows notifications waiting.
-    uint32_t reg = (vacpi.queue_count != 0 ? (uint32_t)1 : (uint32_t)0)
-                 | (uint32_t)vacpi.gpe0_en << 8;
-    if (in) {
-        *value = bytes_read(reg, offset, size);
-    } else {
-        for (size_t i = 0; i < size; i++) {
-            if (offset + i == 1) {
-                vacpi.gpe0_en = (uint8_t)(*value >> (8 * i));
+    uint32_t read = 0;
+    for (size_t i = 0; i < size; i++) {
+        unsigned int at = offset + i;
+        bool enable = at >= b->bytes;
+        size_t first = b->base + 8 * (size_t)(enable ? at - b->bytes : at);
+        uint8_t written = (uint8_t)(*value >> (8 * i));
+        for (size_t bit = 0; bit < 8; bit++) {
+            size_t gpe = first + bit;
+            if (in && enable) {
+                read |= (uint32_t)bit_get(vacpi.gpe_en, gpe) << (8 * i + bit);
+            } else if (in) {
+                read |= (uint32_t)(gpe_status(gpe / 8) >> (gpe % 8) & 1) << (8 * i + bit);
+            } else if (enable) {
+                bit_set(vacpi.gpe_en, gpe, (written >> bit & 1) != 0);
+            } else if ((written >> bit & 1) != 0) {
+                bit_set(vacpi.gpe_sts, gpe, false);
             }
         }
+    }
+    if (in) {
+        *value = read;
     }
     spinlock_release(&vacpi.lock);
     if (!in) {
@@ -3966,6 +4129,201 @@ static bool fadt_port(const struct acpi_gas *gas, uint16_t *port) {
     return true;
 }
 
+// The machine's FADT GPE block, which the guest has as it is.
+static void gpe_block_add(const struct acpi_gas *gas, uint8_t length, uint16_t base) {
+    uint16_t port;
+    if (length != 0 && length % 2 == 0 && fadt_port(gas, &port)) {
+        vacpi.gpe_blocks[vacpi.gpe_block_count++] = (struct gpe_block){
+            .port = port, .bytes = (uint8_t)(length / 2), .base = base
+        };
+    }
+}
+
+// The PCI function a device of the namespace is, by its _ADR below a host
+// bridge's node, or below a PCI-to-PCI bridge's on that bridge's secondary bus
+// (ACPI 6.6, 6.1.1).
+static bool node_pci_addr(uacpi_namespace_node *node, struct pci_cfg_addr *addr) {
+    uint64_t adr;
+    uacpi_namespace_node *parent = uacpi_namespace_node_parent(node);
+    if (parent == NULL || uacpi_eval_simple_integer(node, "_ADR", &adr) != UACPI_STATUS_OK) {
+        return false;
+    }
+    const struct pci_host *host = pci_host_scan();
+    for (size_t i = 0; i < host->bridge_count; i++) {
+        if (host->bridges[i].node == parent) {
+            *addr = (struct pci_cfg_addr){
+                host->bridges[i].segment, host->bridges[i].bus, (uint8_t)(adr >> 16),
+                (uint8_t)adr
+            };
+            return true;
+        }
+    }
+    struct pci_cfg_addr bridge;
+    if (!node_pci_addr(parent, &bridge)) {
+        return false;
+    }
+    uint32_t header = pci_cfg_read(bridge, PCI_HEADER_TYPE, 1) & PCI_HEADER_TYPE_MASK;
+    if (header != PCI_HEADER_TYPE_BRIDGE) {
+        return false;
+    }
+    uint8_t bus = (uint8_t)pci_cfg_read(bridge, PCI_SECONDARY_BUS, 1);
+    *addr = (struct pci_cfg_addr){ bridge.segment, bus, (uint8_t)(adr >> 16), (uint8_t)adr };
+    return true;
+}
+
+static uacpi_iteration_decision wake_found(
+    void *user,
+    uacpi_namespace_node *node,
+    uacpi_u32 depth
+) {
+    (void)user;
+    (void)depth;
+    uacpi_object *prw;
+    if (uacpi_eval(node, "_PRW", NULL, &prw) != UACPI_STATUS_OK || prw == NULL) {
+        return UACPI_ITERATION_DECISION_CONTINUE;
+    }
+    uint64_t gpe;
+    if (prw_gpe(prw, &gpe) && gpe_in_blocks(gpe)) {
+        vacpi.wakes = heap_grow(
+            vacpi.wakes, vacpi.wake_count, &vacpi.wake_capacity, sizeof(struct wake_gpe), 16
+        );
+        struct wake_gpe wake = { .gpe = (uint16_t)gpe, .device = node };
+        wake.pci = node_pci_addr(node, &wake.addr);
+        vacpi.wakes[vacpi.wake_count++] = wake;
+    }
+    uacpi_object_unref(prw);
+    return UACPI_ITERATION_DECISION_CONTINUE;
+}
+
+static bool gpe_wakes(size_t gpe) {
+    for (size_t i = 0; i < vacpi.wake_count; i++) {
+        if (vacpi.wakes[i].gpe == gpe) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The GPE bitmaps, the devices that GPEs wake, and the guest's own GPE: the
+// first that no _PRW gives, which an _Lxx can name.
+static void gpes_init(void) {
+    for (size_t i = 0; i < vacpi.gpe_block_count; i++) {
+        const struct gpe_block *b = &vacpi.gpe_blocks[i];
+        uint32_t end = b->base + 8 * (uint32_t)b->bytes;
+        vacpi.gpe_count = end > vacpi.gpe_count ? (uint16_t)end : vacpi.gpe_count;
+    }
+    size_t bytes = gpe_bytes();
+    vacpi.gpe_sts = kmalloc(bytes);
+    vacpi.gpe_en = kmalloc(bytes);
+    vacpi.gpe_armed = kmalloc(bytes);
+    vacpi.gpe_runtime = kmalloc(bytes);
+    uacpi_namespace_for_each_child(
+        uacpi_namespace_root(), wake_found, NULL, UACPI_OBJECT_DEVICE_BIT, UACPI_MAX_DEPTH_ANY,
+        NULL
+    );
+    for (size_t gpe = 0; gpe < vacpi.gpe_count && gpe <= 0xff; gpe++) {
+        if (gpe_in_blocks(gpe) && !gpe_wakes(gpe)) {
+            vacpi.own_gpe = (uint16_t)gpe;
+            return;
+        }
+    }
+    printf("Guest ACPI: every GPE wakes a device, which leaves none for notifications\n");
+    vacpi.gpe = false;
+    vacpi.gpe_block_count = 0;
+}
+
+// Whether uACPI reports the flag of a GPE of the FADT's blocks, or of a fixed
+// event's hardware status.
+static bool gpe_has(uint16_t gpe, uacpi_event_info flag) {
+    uacpi_event_info info = 0;
+    return uacpi_gpe_info(NULL, gpe, &info) == UACPI_STATUS_OK && (info & flag) != 0;
+}
+
+static bool fixed_status(uacpi_fixed_event event) {
+    uacpi_event_info info = 0;
+    return uacpi_fixed_event_info(event, &info) == UACPI_STATUS_OK
+        && (info & UACPI_EVENT_INFO_HW_STATUS) != 0;
+}
+
+void vacpi_sleep_arm(void) {
+    if (!vacpi.gpe) {
+        return;
+    }
+    spinlock_acquire(&vacpi.lock);
+    memcpy(vacpi.gpe_armed, vacpi.gpe_en, gpe_bytes());
+    spinlock_release(&vacpi.lock);
+    bit_set(vacpi.gpe_armed, vacpi.own_gpe, false);
+    memset(vacpi.gpe_runtime, 0, gpe_bytes());
+    for (size_t gpe = 0; gpe < vacpi.gpe_count; gpe++) {
+        if (!bit_get(vacpi.gpe_armed, gpe)) {
+            continue;
+        }
+        // What setting a GPE up for wake takes from those the hypervisor's own
+        // runs, vacpi_sleep_woken() gives back.
+        bool runtime = gpe_has((uint16_t)gpe, UACPI_EVENT_INFO_ENABLED);
+        bool set_up = false;
+        for (size_t i = 0; i < vacpi.wake_count; i++) {
+            if (vacpi.wakes[i].gpe == gpe) {
+                uacpi_status status = uacpi_setup_gpe_for_wake(
+                    NULL, (uint16_t)gpe, vacpi.wakes[i].device
+                );
+                set_up |= status == UACPI_STATUS_OK || status == UACPI_STATUS_ALREADY_EXISTS;
+            }
+        }
+        if (!set_up || uacpi_enable_gpe_for_wake(NULL, (uint16_t)gpe) != UACPI_STATUS_OK) {
+            printf("GPE %#zx cannot wake the machine, which the guest enabled it to\n", gpe);
+            bit_set(vacpi.gpe_armed, gpe, false);
+            continue;
+        }
+        bit_set(vacpi.gpe_runtime, gpe, runtime);
+        printf("GPE %#zx wakes the machine, as the guest enabled it to\n", gpe);
+    }
+}
+
+static bool same_function(struct pci_cfg_addr a, struct pci_cfg_addr b) {
+    return a.segment == b.segment && a.bus == b.bus && a.device == b.device
+        && a.function == b.function;
+}
+
+bool vacpi_sleep_armed_for(struct pci_cfg_addr addr) {
+    for (size_t i = 0; vacpi.gpe && i < vacpi.wake_count; i++) {
+        const struct wake_gpe *w = &vacpi.wakes[i];
+        if (w->pci && same_function(w->addr, addr) && bit_get(vacpi.gpe_armed, w->gpe)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void vacpi_sleep_woken(bool slept) {
+    uint16_t pm1 = 0;
+    if (slept && vacpi.power_button && fixed_status(UACPI_FIXED_EVENT_POWER_BUTTON)) {
+        pm1 |= PM1_PWRBTN;
+    }
+    if (slept && vacpi.rtc_event && fixed_status(UACPI_FIXED_EVENT_RTC)) {
+        pm1 |= PM1_RTC;
+    }
+    spinlock_acquire(&vacpi.lock);
+    vacpi.pm1_sts |= pm1;
+    spinlock_release(&vacpi.lock);
+    for (size_t gpe = 0; vacpi.gpe && gpe < vacpi.gpe_count; gpe++) {
+        if (!bit_get(vacpi.gpe_armed, gpe)) {
+            continue;
+        }
+        if (slept && gpe_has((uint16_t)gpe, UACPI_EVENT_INFO_HW_STATUS)) {
+            spinlock_acquire(&vacpi.lock);
+            bit_set(vacpi.gpe_sts, gpe, true);
+            spinlock_release(&vacpi.lock);
+            printf("GPE %#zx woke the machine\n", gpe);
+        }
+        uacpi_disable_gpe_for_wake(NULL, (uint16_t)gpe);
+        if (bit_get(vacpi.gpe_runtime, gpe) && !gpe_has((uint16_t)gpe, UACPI_EVENT_INFO_ENABLED)) {
+            uacpi_enable_gpe(NULL, (uint16_t)gpe);
+        }
+        bit_set(vacpi.gpe_armed, gpe, false);
+    }
+}
+
 void vacpi_wake(void) {
     spinlock_acquire(&vacpi.lock);
     vacpi.pm1_sts |= PM1_WAK;
@@ -3983,7 +4341,11 @@ void vacpi_init(void) {
     if (uacpi_table_fadt(&fadt) == UACPI_STATUS_OK) {
         vacpi.pm1 = fadt_port(&fadt->x_pm1a_evt_blk, &vacpi.pm1_evt)
                  && fadt_port(&fadt->x_pm1a_cnt_blk, &vacpi.pm1_cnt);
-        vacpi.gpe = fadt_port(&fadt->x_gpe0_blk, &vacpi.gpe0);
+        gpe_block_add(&fadt->x_gpe0_blk, fadt->gpe0_blk_len, 0);
+        vacpi.gpe = vacpi.gpe_block_count != 0;
+        if (vacpi.gpe) {
+            gpe_block_add(&fadt->x_gpe1_blk, fadt->gpe1_blk_len, fadt->gpe1_base);
+        }
         vacpi.power_button = vacpi.pm1 && (fadt->flags & ACPI_PWR_BUTTON) == 0;
         block_fadt_ports(&fadt->x_pm1a_evt_blk, fadt->pm1_evt_len);
         block_fadt_ports(&fadt->x_pm1b_evt_blk, fadt->pm1_evt_len);
@@ -4012,8 +4374,18 @@ void vacpi_init(void) {
         io_register(&evt);
         io_register(&cnt);
     }
+    acpi_lock();
     if (vacpi.gpe) {
-        struct io_handler gpe = { .base = vacpi.gpe0, .count = 2, .access = gpe0_access };
+        gpes_init();
+    }
+    acpi_unlock();
+    for (size_t i = 0; i < vacpi.gpe_block_count; i++) {
+        struct io_handler gpe = {
+            .base = vacpi.gpe_blocks[i].port,
+            .count = 2 * (size_t)vacpi.gpe_blocks[i].bytes,
+            .access = gpe_access,
+            .ctx = (void *)(uintptr_t)i
+        };
         io_register(&gpe);
     }
 
@@ -4026,16 +4398,34 @@ void vacpi_init(void) {
             irq_take_host_line(gsi, acpi_sci_interrupt, NULL);
         }
     }
+    uint16_t gpe0 = vacpi.gpe ? vacpi.gpe_blocks[0].port : 0;
     printf(
         "Guest ACPI: SCI on GSI %d, PM1 at %#x/%#x, GPE0 at %#x, PM timer at %#x%s\n",
-        vacpi.sci ? (int)vacpi.sci_gsi : -1, vacpi.pm1_evt, vacpi.pm1_cnt, vacpi.gpe0,
-        pm_timer_port(), vacpi.power_button ? ", power button" : ""
+        vacpi.sci ? (int)vacpi.sci_gsi : -1, vacpi.pm1_evt, vacpi.pm1_cnt, gpe0, pm_timer_port(),
+        vacpi.power_button ? ", power button" : ""
     );
+    if (vacpi.gpe) {
+        printf(
+            "Guest ACPI: %u GPEs, as the machine numbers them, %zu devices' _PRW giving one, "
+            "notifications on GPE %#x\n",
+            vacpi.gpe_count, vacpi.wake_count, vacpi.own_gpe
+        );
+    }
 
     acpi_lock();
     uacpi_install_notify_handler(uacpi_namespace_root(), notify, NULL);
     if (vacpi.power_button) {
         uacpi_install_fixed_event_handler(UACPI_FIXED_EVENT_POWER_BUTTON, power_button, NULL);
+    }
+    // Off until the guest enables it.
+    if (vacpi.pm1) {
+        uacpi_status rtc = uacpi_install_fixed_event_handler(
+            UACPI_FIXED_EVENT_RTC, rtc_alarm, NULL
+        );
+        if (rtc == UACPI_STATUS_OK) {
+            uacpi_disable_fixed_event(UACPI_FIXED_EVENT_RTC);
+            vacpi.rtc_event = true;
+        }
     }
     acpi_unlock();
 }
