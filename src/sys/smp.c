@@ -233,23 +233,17 @@ void smp_init(void) {
     }
 }
 
-void smp_start_aps(void) {
-    size_t count = cpu_count - 1;
-    if (count == 0) {
-        return;
-    }
+// Puts the start trampoline in its page for the count processors of table,
+// each of which starts entry with its table entry's pointer as the argument,
+// on a stack that ends stack_offset past that pointer; returns the page.
+static uintptr_t trampoline_install(
+    const struct ap_boot_entry *table,
+    size_t count,
+    uint64_t stack_offset,
+    uintptr_t entry
+) {
     uintptr_t page = core_handoff->ap_boot;
-    if (read_cr3() >= FOUR_GIB) {
-        panic("The page tables are beyond the other processors' reach\n");
-    }
-
-    struct ap_boot_entry *table = kmalloc(count * sizeof(struct ap_boot_entry));
-    for (size_t i = 0; i < count; i++) {
-        struct cpu *cpu = cpus[i + 1];
-        table[i] = (struct ap_boot_entry){ cpu->apic_id, 0, (uint64_t)(uintptr_t)cpu };
-    }
-
-    uint8_t *code = (uint8_t *)(uintptr_t)page;
+    uint8_t *code = (uint8_t *)page;
     memcpy(code, ap_boot_start, ap_boot_end - ap_boot_start);
     patch32(code, ap_boot_gdtr + 2, page + (ap_boot_gdt - ap_boot_start));
     patch32(code, ap_boot_pm32_ptr, page + (ap_boot_pm32 - ap_boot_start));
@@ -259,20 +253,22 @@ void smp_start_aps(void) {
         .cr4 = CR4_PAE | (read_cr4() & CR4_LA57),
         .efer = rdmsr(MSR_EFER) & (EFER_LME | EFER_NXE),
         .table = (uint64_t)(uintptr_t)table,
-        .count = count,
-        .stack_offset = CPU_AREA_SIZE,
-        .entry = (uint64_t)(uintptr_t)ap_main
+        .count = (uint32_t)count,
+        .stack_offset = stack_offset,
+        .entry = entry
     };
     memcpy(code + (ap_boot_params - ap_boot_start), &params, sizeof(struct ap_boot_params));
     atomic_thread_fence(memory_order_seq_cst);
+    return page;
+}
 
-    // One at a time, each with INIT and SIPIs of its own (SDM 325462-093 Vol.
-    // 3A, 11.4.4.1): only the processors the MADT gives as enabled, as
-    // firmware marks disabled the local APICs that fault the machine when
-    // written to. Each finds its own area, so one late to start takes no
-    // other's.
+// One at a time, each with INIT and SIPIs of its own (SDM 325462-093 Vol. 3A,
+// 11.4.4.1): only the processors the MADT gives as enabled, as firmware marks
+// disabled the local APICs that fault the machine when written to. Each finds
+// its own area, so one late to start takes no other's.
+static void start_each(uintptr_t page) {
     uint32_t vector = (uint32_t)(page >> 12);
-    for (size_t i = 1; i <= count; i++) {
+    for (size_t i = 1; i < cpu_count; i++) {
         struct cpu *cpu = cpus[i];
         lapic_send_ipi(cpu->apic_id, ICR_DELIVERY_INIT | ICR_ASSERT);
         time_udelay(INIT_DELAY_US);
@@ -291,6 +287,22 @@ void smp_start_aps(void) {
             cpu_relax();
         }
     }
+}
+
+void smp_start_aps(void) {
+    size_t count = cpu_count - 1;
+    if (count == 0) {
+        return;
+    }
+    if (read_cr3() >= FOUR_GIB) {
+        panic("The page tables are beyond the other processors' reach\n");
+    }
+    struct ap_boot_entry *table = kmalloc(count * sizeof(struct ap_boot_entry));
+    for (size_t i = 0; i < count; i++) {
+        struct cpu *cpu = cpus[i + 1];
+        table[i] = (struct ap_boot_entry){ cpu->apic_id, 0, (uint64_t)(uintptr_t)cpu };
+    }
+    start_each(trampoline_install(table, count, CPU_AREA_SIZE, (uintptr_t)ap_main));
     printf(
         "Started %u of %zu other processors\n",
         atomic_load_explicit(&aps_started, memory_order_acquire), count
