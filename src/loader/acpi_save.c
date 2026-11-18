@@ -29,19 +29,12 @@
 #include <loader/efi_glue.h>
 #include <loader/files.h>
 #include <loader/fwtables.h>
+#include <loader/kept.h>
 #include <loader/loader.h>
 #include <memory.h>
 
 #define HOST_FILE "rebios-acpi.txt"
 #define GUEST_FILE "rebios-guest-acpi.txt"
-
-// Where the core keeps the guest's tables: the middle of the largest free
-// memory from 16 MiB up to 4 GiB, away from both the regions that firmware
-// uses at fixed low addresses while it starts, such as OVMF's decompression
-// scratch, and what it hands out from the top down, so that it is still there
-// for the next start to find.
-#define AREA_FLOOR ((uint64_t)0x1000000)
-#define AREA_CEILING ((uint64_t)0x100000000)
 
 // Far more than any table, or machine, has, so that a corrupt length is
 // refused.
@@ -224,41 +217,6 @@ static void write_host(void) {
     write_tables(HOST_FILE, "the firmware's ACPI tables");
 }
 
-// The firmware's memory map, in a pool allocation, or NULL.
-static uint8_t *memory_map(size_t *size, size_t *desc_size) {
-    size_t map_key;
-    uint32_t desc_version;
-    *size = 0;
-    *desc_size = 0;
-    efi_bs->get_memory_map(size, NULL, &map_key, desc_size, &desc_version);
-    // Room for the descriptors that the allocation itself may add.
-    *size += 16 * *desc_size;
-    uint8_t *map = efi_glue_alloc_pool(*size);
-    if (map == NULL) {
-        return NULL;
-    }
-    efi_status status = efi_bs->get_memory_map(
-        size, (struct efi_memory_descriptor *)map, &map_key, desc_size, &desc_version
-    );
-    if (status != EFI_SUCCESS || *desc_size < sizeof(struct efi_memory_descriptor)) {
-        efi_bs->free_pool(map);
-        return NULL;
-    }
-    return map;
-}
-
-// The pages of a descriptor's free memory from AREA_FLOOR up to AREA_CEILING:
-// false where it has none.
-static bool free_part(const struct efi_memory_descriptor *d, uint64_t *base, uint64_t *end) {
-    if (d->type != EFI_CONVENTIONAL_MEMORY) {
-        return false;
-    }
-    uint64_t top = d->physical_start + d->number_of_pages * EFI_PAGE_SIZE;
-    *base = page_up(d->physical_start > AREA_FLOOR ? d->physical_start : AREA_FLOOR);
-    *end = top < AREA_CEILING ? top : AREA_CEILING;
-    return *base < *end;
-}
-
 // The tables of the copy that the core kept, records of count tables over size
 // bytes: false where they do not fit in it.
 static bool add_kept(const uint8_t *records, uint64_t size, uint32_t count) {
@@ -281,8 +239,8 @@ static bool add_kept(const uint8_t *records, uint64_t size, uint32_t count) {
 }
 
 // Writes out the copy that the core kept at page, if there is one there, in
-// free memory up to end: false where there is none.
-static bool write_kept(uintptr_t page, uint64_t end) {
+// free memory up to end, and sets *ctx: false where there is none.
+static bool write_kept(uintptr_t page, uint64_t end, void *ctx) {
     const struct handoff_acpi_save *head = (const struct handoff_acpi_save *)(uintptr_t)page;
     if (memcmp(head->magic, HANDOFF_ACPI_SAVE_MAGIC, sizeof(head->magic)) != 0) {
         return false;
@@ -315,28 +273,13 @@ static bool write_kept(uintptr_t page, uint64_t end) {
     // Once is enough.
     memset((void *)(uintptr_t)page, 0, sizeof(head->magic));
     efi_bs->free_pages(page, pages);
+    *(bool *)ctx = true;
     return true;
 }
 
 static void write_guest(void) {
-    size_t size;
-    size_t desc_size;
-    uint8_t *map = memory_map(&size, &desc_size);
-    if (map == NULL) {
-        return;
-    }
     bool found = false;
-    for (size_t off = 0; off + desc_size <= size && !found; off += desc_size) {
-        uint64_t base;
-        uint64_t end;
-        if (!free_part((const struct efi_memory_descriptor *)(map + off), &base, &end)) {
-            continue;
-        }
-        for (uintptr_t page = base; page + EFI_PAGE_SIZE <= end && !found; page += EFI_PAGE_SIZE) {
-            found = write_kept(page, end);
-        }
-    }
-    efi_bs->free_pool(map);
+    kept_find(write_kept, &found);
     if (!found) {
         log_notice(
             "No ACPI tables from ReBIOS's last start for %s: save_acpi was off then, or the "
@@ -347,39 +290,11 @@ static void write_guest(void) {
 }
 
 static void reserve_area(void) {
-    size_t size;
-    size_t desc_size;
-    uint8_t *map = memory_map(&size, &desc_size);
-    if (map == NULL) {
-        return;
-    }
-    uint64_t largest = 0;
-    uint64_t largest_size = 0;
-    for (size_t off = 0; off + desc_size <= size; off += desc_size) {
-        uint64_t base;
-        uint64_t end;
-        if (free_part((const struct efi_memory_descriptor *)(map + off), &base, &end)
-         && end - base > largest_size) {
-            largest = base;
-            largest_size = end - base;
-        }
-    }
-    efi_bs->free_pool(map);
-    uint64_t area = 0;
-    if (largest_size >= HANDOFF_ACPI_SAVE_SIZE) {
-        area = largest + align_down((largest_size - HANDOFF_ACPI_SAVE_SIZE) / 2, EFI_PAGE_SIZE);
-    }
-    size_t pages = page_count(HANDOFF_ACPI_SAVE_SIZE);
-    efi_physical_address taken = area;
-    efi_status status = EFI_NOT_FOUND;
-    if (area != 0) {
-        status = efi_bs->allocate_pages(EFI_ALLOCATE_ADDRESS, EFI_LOADER_DATA, pages, &taken);
-    }
-    if (status != EFI_SUCCESS) {
+    uint64_t area = kept_reserve(HANDOFF_ACPI_SAVE_SIZE);
+    if (area == 0) {
         log_notice("No memory to keep the ACPI tables that ReBIOS gives the OS in\n");
         return;
     }
-    loader_reserve(area, pages);
     memset((void *)(uintptr_t)area, 0, sizeof(struct handoff_acpi_save));
     loader_handoff->acpi_save = area;
     loader_handoff->acpi_save_size = HANDOFF_ACPI_SAVE_SIZE;
