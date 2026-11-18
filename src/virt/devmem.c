@@ -41,12 +41,16 @@
 #define TPM_BASE ((uintptr_t)0xfed40000)
 #define TPM_SIZE ((size_t)0x5000)
 
-// Host memory at a guest address.
+// Host memory at a guest address, mapped there or trapped.
 struct placed {
     uintptr_t host;
     uintptr_t guest;
     size_t size;
+    bool trapped;
 };
+
+// The most ranges that devmem_add_trapped() takes.
+#define TRAPPED_MAX 4
 
 static struct {
     struct placed *ranges;
@@ -61,14 +65,22 @@ static struct {
     uintptr_t first_spare;
     uintptr_t tpm_base;
     uintptr_t tpm_end;
+    struct pci_host_range trapped[TRAPPED_MAX];
+    size_t trapped_count;
     struct spinlock lock;
 } devmem;
 
-static void place(uintptr_t host, uintptr_t guest, size_t size) {
+static void place(uintptr_t host, uintptr_t guest, size_t size, bool trapped) {
     devmem.ranges = heap_grow(
         devmem.ranges, devmem.count, &devmem.capacity, sizeof(struct placed), 16
     );
-    devmem.ranges[devmem.count++] = (struct placed){ host, guest, size };
+    devmem.ranges[devmem.count++] = (struct placed){ host, guest, size, trapped };
+}
+
+void devmem_add_trapped(uintptr_t base, uintptr_t end) {
+    if (devmem.trapped_count < TRAPPED_MAX) {
+        devmem.trapped[devmem.trapped_count++] = (struct pci_host_range){ base, end };
+    }
 }
 
 static bool overlaps(
@@ -116,6 +128,10 @@ void devmem_plan(void) {
             total += host->tpms[i].end - host->tpms[i].base;
         }
     }
+    // Room for each, and for its alignment.
+    for (size_t i = 0; i < devmem.trapped_count; i++) {
+        total += 2 * (devmem.trapped[i].end - devmem.trapped[i].base);
+    }
     size_t size = align_up(total + SPARE, BLOCK_ALIGN);
     uintptr_t top = BLOCK_TOP;
     for (bool moved = true; moved; ) {
@@ -134,7 +150,15 @@ void devmem_plan(void) {
     for (size_t i = 0; i < host->device_count; i++) {
         const struct pci_host_range *r = &host->devices[i];
         if (usable(r->base, r->end)) {
-            place(r->base, at, r->end - r->base);
+            place(r->base, at, r->end - r->base, false);
+            at += r->end - r->base;
+        }
+    }
+    for (size_t i = 0; i < devmem.trapped_count; i++) {
+        const struct pci_host_range *r = &devmem.trapped[i];
+        if (usable(r->base, r->end)) {
+            at = align_up(at, r->end - r->base);
+            place(r->base, at, r->end - r->base, true);
             at += r->end - r->base;
         }
     }
@@ -145,13 +169,13 @@ void devmem_plan(void) {
         }
         if (tpm_span(host, r)) {
             uintptr_t guest = TPM_BASE + (r->base - host->tpms[0].base);
-            place(r->base, guest, r->end - r->base);
+            place(r->base, guest, r->end - r->base, false);
             devmem.tpm_base = TPM_BASE;
             if (guest + (r->end - r->base) > devmem.tpm_end) {
                 devmem.tpm_end = guest + (r->end - r->base);
             }
         } else {
-            place(r->base, at, r->end - r->base);
+            place(r->base, at, r->end - r->base, false);
             at += r->end - r->base;
         }
     }
@@ -189,7 +213,9 @@ bool devmem_spare(uintptr_t *base, uintptr_t *end) {
 void devmem_map(void) {
     for (; devmem.mapped < devmem.count; devmem.mapped++) {
         const struct placed *p = &devmem.ranges[devmem.mapped];
-        gpt_map(p->guest, p->host, p->size, GPT_RWX, MT_UC);
+        if (!p->trapped) {
+            gpt_map(p->guest, p->host, p->size, GPT_RWX, MT_UC);
+        }
     }
 }
 
@@ -217,7 +243,7 @@ static bool place_late(uint64_t base, uint64_t end, uint64_t *guest) {
         );
         return false;
     }
-    place(first, devmem.spare, last - first);
+    place(first, devmem.spare, last - first, false);
     devmem_map();
     gpt_flush();
     printf(
@@ -245,6 +271,20 @@ bool devmem_guest(uint64_t base, uint64_t end, bool late, uint64_t *guest) {
     }
     if (!found && late && devmem.block_end != 0) {
         found = place_late(base, end, guest);
+    }
+    spinlock_release(&devmem.lock);
+    return found;
+}
+
+bool devmem_trapped_guest(uint64_t base, uint64_t end, uint64_t *guest) {
+    bool found = false;
+    spinlock_acquire(&devmem.lock);
+    for (size_t i = 0; i < devmem.count && !found; i++) {
+        const struct placed *p = &devmem.ranges[i];
+        if (p->trapped && base >= p->host && end <= p->host + p->size) {
+            *guest = p->guest + (base - p->host);
+            found = true;
+        }
     }
     spinlock_release(&devmem.lock);
     return found;

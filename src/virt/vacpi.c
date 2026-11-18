@@ -1604,9 +1604,10 @@ static void bus_range_widen(uint8_t *p, size_t size) {
 // What the guest's _CRS keeps of the device's: everything but a host bridge's
 // memory windows above 1 MiB, which are the guest's PCI plan's, or a
 // motherboard device's memory above 1 MiB, which the guest has nothing of
-// there, but for the interrupt controllers'. Of a host bridge below the
-// guest's, only its I/O windows and those below 1 MiB that the guest's has not
-// already. False if the device has no _CRS.
+// there, but for the interrupt controllers' and, where the guest finds it,
+// what the hypervisor answers in the block of ACPI devices' memory. Of a host
+// bridge below the guest's, only its I/O windows and those below 1 MiB that
+// the guest's has not already. False if the device has no _CRS.
 static bool crs_copy(struct crs *c, uacpi_namespace_node *device, int kind) {
     uacpi_object *obj;
     if (uacpi_eval(device, "_CRS", NULL, &obj) != UACPI_STATUS_OK || obj == NULL) {
@@ -1640,8 +1641,12 @@ static bool crs_copy(struct crs *c, uacpi_namespace_node *device, int kind) {
         bool keep = kind != CRS_MERGED;
         bool io = false;
         bool ranged = true;
+        uint64_t moved = 0;
         if (resource_memory(in, n, &base, &end)) {
             keep = end <= ONE_MIB || (kind == CRS_MOTHERBOARD && devmem_interrupts(base, end));
+            if (!keep && kind == CRS_MOTHERBOARD && devmem_trapped_guest(base, end, &moved)) {
+                keep = true;
+            }
         } else if (address_range(in, n, UACPI_RANGE_IO, &base, &end)) {
             keep = true;
             io = true;
@@ -1653,6 +1658,9 @@ static bool crs_copy(struct crs *c, uacpi_namespace_node *device, int kind) {
         }
         if (keep && c->size + n <= c->capacity) {
             memcpy(c->out + c->size, in, n);
+            if (moved != 0) {
+                memory_move(c->out + c->size, n, moved - base);
+            }
             if (kind == CRS_HOST_BRIDGE && device == vacpi.primary) {
                 bus_range_widen(c->out + c->size, n);
             }

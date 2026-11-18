@@ -24,8 +24,14 @@
 
 // The memory of the firmware's ACPI devices, at addresses of the guest's own:
 // a block below the I/O APICs' area holds the devices' memory, in the host's
-// order, and a TPM's is where the TCG's PC Client specs put it.
+// order, then what the hypervisor answers in its place, and a TPM's is where
+// the TCG's PC Client specs put it.
 
+// Puts the host's [base, end) in the block too, among the devices' memory, but
+// for the hypervisor to answer rather than mapped, aligned to its size, a
+// power of two, as a register that holds its address takes it. Before
+// devmem_plan().
+void devmem_add_trapped(uintptr_t base, uintptr_t end);
 // Lays the devices' memory out in the guest, with room to spare for memory
 // that the firmware's AML gives later. Needs pci_host_scan().
 void devmem_plan(void);
@@ -42,6 +48,9 @@ void devmem_map(void);
 bool devmem_guest(uint64_t base, uint64_t end, bool late, uint64_t *guest);
 // The host's address for the guest's [base, end), false where it has none.
 bool devmem_host(uint64_t base, uint64_t end, uint64_t *host);
+// The guest's address for the host's [base, end), where devmem_add_trapped()
+// put it: false where it did not.
+bool devmem_trapped_guest(uint64_t base, uint64_t end, uint64_t *guest);
 // Whether the guest's [base, end) is all at an interrupt controller's
 // addresses, which the guest keeps.
 bool devmem_interrupts(uint64_t base, uint64_t end);

@@ -59,6 +59,7 @@
 #include <virt/pci_virt.h>
 #include <virt/pit.h>
 #include <virt/profile.h>
+#include <virt/rcba.h>
 #include <virt/rtc.h>
 #include <virt/svm.h>
 #include <virt/usb.h>
@@ -104,6 +105,7 @@ static void bsp_main(void *arg) {
     mwait_init();
     mtrr_init();
 
+    rcba_find();
     layout_init();
     pci_virt_init();
     // The USB pool takes the guest's memory first, as its 2 MiB alignment
@@ -113,6 +115,7 @@ static void bsp_main(void *arg) {
     a20_init();
     vga_init();
     pci_quirks_init();
+    rcba_init();
     // The guest's boot processor gets its local APIC as a legacy BIOS hands it
     // over, the hypervisor the processor's.
     lapic_legacy_init();
