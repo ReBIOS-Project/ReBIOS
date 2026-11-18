@@ -396,7 +396,7 @@ static void controller_let_go(struct usb_controller *c) {
         if (x->hc != NULL
          && (tendril_hc_quirks(x->hc) & TENDRIL_HC_QUIRK_INTEL_PORT_ROUTING) != 0) {
             x->ports_to_ehci = true;
-            usb_release(x);
+            usb_release(x, "its ports go to the EHCI controller that the guest took");
         }
     }
 }
@@ -435,7 +435,12 @@ static void usb_main(void *arg) {
             if (state == USB_CONTROLLER_STATE_RELEASED) {
                 continue;
             }
-            if (atomic_load_explicit(&c->release_wanted, memory_order_acquire)) {
+            const char *why = atomic_load_explicit(&c->release_why, memory_order_acquire);
+            if (why != NULL) {
+                printf(
+                    "USB: the guest takes controller %02x:%02x.%x, as %s\n",
+                    c->f->addr.bus, c->f->addr.device, c->f->addr.function, why
+                );
                 controller_let_go(c);
                 continue;
             }
@@ -464,8 +469,12 @@ void usb_kick(void) {
     vcpu_kick(smp_cpu(0));
 }
 
-void usb_release(struct usb_controller *c) {
-    if (!atomic_exchange_explicit(&c->release_wanted, true, memory_order_acq_rel)) {
+void usb_release(struct usb_controller *c, const char *why) {
+    const char *none = NULL;
+    bool first = atomic_compare_exchange_strong_explicit(
+        &c->release_why, &none, why, memory_order_acq_rel, memory_order_acquire
+    );
+    if (first) {
         usb_kick();
     }
 }

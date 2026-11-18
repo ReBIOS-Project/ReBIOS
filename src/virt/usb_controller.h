@@ -51,7 +51,8 @@ struct usb_controller {
     size_t mmio_size;
     struct tendril_hc *hc;
     _Atomic(int) state;
-    _Atomic(bool) release_wanted;
+    // Why the guest wants it, once it does, for the log.
+    _Atomic(const char *) release_why;
     // The ports it shares with an EHCI controller go back to that one, when
     // the OS takes that one.
     bool ports_to_ehci;

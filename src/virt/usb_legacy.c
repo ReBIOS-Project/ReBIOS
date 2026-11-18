@@ -47,6 +47,10 @@
 // PCI Power Management Interface 1.2, 3.2.4.
 #define PM_CONTROL 4
 
+// Why the guest takes a controller, for the log.
+#define OS_OWNED "it sets the HC OS Owned Semaphore"
+#define REGISTERS "it writes its registers"
+
 static bool owned(const struct usb_controller *c) {
     return atomic_load_explicit(&c->state, memory_order_acquire) != USB_CONTROLLER_STATE_RELEASED;
 }
@@ -129,7 +133,7 @@ static void range_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size,
         if ((mask & USBLEGSUP_OS_OWNED) != 0) {
             c->os_owned = (dword & USBLEGSUP_OS_OWNED) != 0;
             if (c->os_owned) {
-                usb_release(c);
+                usb_release(c, OS_OWNED);
             }
         }
         if (mask != 0) {
@@ -139,11 +143,11 @@ static void range_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size,
     if (c->type == TENDRIL_HC_OHCI) {
         uint32_t dword = access_into_dword(at, size, value, OHCI_COMMAND_STATUS, &mask);
         if ((dword & OHCI_COMMAND_OCR) != 0) {
-            usb_release(c);
+            usb_release(c, "it sets OwnershipChangeRequest");
             return;
         }
     }
-    usb_release(c);
+    usb_release(c, REGISTERS);
     v->mmio_retry = true;
 }
 
@@ -206,13 +210,13 @@ static bool hook_write(void *ctx, uint32_t reg, uint32_t value, uint32_t mask) {
         if ((mask & USBLEGSUP_OS_OWNED) != 0) {
             c->os_owned = (value & USBLEGSUP_OS_OWNED) != 0;
             if (c->os_owned) {
-                usb_release(c);
+                usb_release(c, OS_OWNED);
             }
         }
         return true;
     }
     if (c->type == TENDRIL_HC_UHCI && reg == UHCI_LEGSUP && (mask & UHCI_LEGSUP_BITS) != 0) {
-        usb_release(c);
+        usb_release(c, "it writes its legacy support register");
     }
     return false;
 }
@@ -230,7 +234,7 @@ static void port_access(
     struct usb_controller *c = ctx;
     uint16_t port = (uint16_t)(c->port + offset);
     if (!in && owned(c)) {
-        usb_release(c);
+        usb_release(c, REGISTERS);
         v->io_retry = true;
         return;
     }

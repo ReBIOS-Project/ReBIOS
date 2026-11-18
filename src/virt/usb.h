@@ -41,8 +41,9 @@ bool usb_working(void);
 // Whether the devices plugged in so far are all up.
 bool usb_ready(void);
 
-// The guest wants the controller: the stack lets go as soon as it can.
-void usb_release(struct usb_controller *c);
+// The guest wants the controller, for the reason that why gives the log: the
+// stack lets go as soon as it can.
+void usb_release(struct usb_controller *c, const char *why);
 
 // Pages of the memory devices reach, or NULL, which usb_dma_free() takes back.
 void *usb_dma_alloc(size_t size, size_t align, uintptr_t *bus);
