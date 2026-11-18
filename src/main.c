@@ -23,6 +23,7 @@
 #include <handoff.h>
 #include <lib/log.h>
 #include <lib/printf.h>
+#include <lib/reed_solomon.h>
 #include <lib/util.h>
 #include <loader/acpi_save.h>
 #include <loader/bootdev.h>
@@ -259,6 +260,8 @@ efi_status efi_main(efi_handle image_handle, struct efi_system_table *system_tab
             config.serial_port, HANDOFF_PCI_ADDRESS_ARGS(serial_card)
         );
     }
+    // Before anything that ReBIOS keeps for its next start is read or written.
+    reed_solomon_init();
     if (config.save_acpi) {
         acpi_save_start();
     }

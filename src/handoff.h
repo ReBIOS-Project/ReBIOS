@@ -22,6 +22,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <efi.h>
+#include <lib/reed_solomon.h>
 
 // The longest SMBIOS string kept, with its NUL.
 #define HANDOFF_DMI_MAX 64
@@ -208,20 +209,40 @@ static inline void handoff_log_part_name(
     name[len + 4] = 0;
 }
 
+// What ReBIOS keeps in memory for its next start is in areas of
+// HANDOFF_KEPT_SIZE bytes, each at the start of a page: a header, which starts
+// with a magic of HANDOFF_KEPT_MAGIC_SIZE bytes and ends in the parity of the
+// rest of it, then, at HANDOFF_KEPT_DATA, the data, up to
+// HANDOFF_KEPT_DATA_SIZE bytes, with the parity of each block of it in order
+// from HANDOFF_KEPT_PARITY on (lib/reed_solomon.h), as some machines' memory
+// loses bits over a restart.
+#define HANDOFF_KEPT_MAGIC_SIZE 16
+#define HANDOFF_KEPT_SIZE ((uint64_t)0x400000)
+#define HANDOFF_KEPT_DATA ((uint64_t)0x1000)
+#define HANDOFF_KEPT_DATA_SIZE ((uint64_t)0x380000)
+#define HANDOFF_KEPT_PARITY (HANDOFF_KEPT_DATA + HANDOFF_KEPT_DATA_SIZE)
+#define HANDOFF_KEPT_PARITY_SIZE \
+    (HANDOFF_KEPT_DATA_SIZE / REED_SOLOMON_BLOCK * REED_SOLOMON_PARITY)
+
+_Static_assert(
+    HANDOFF_KEPT_PARITY + HANDOFF_KEPT_PARITY_SIZE <= HANDOFF_KEPT_SIZE,
+    "The parity of a kept area's data runs past its end."
+);
+
 // The guest's ACPI tables as the core keeps them with save_acpi
 // (virt/acpi_save.c), for the loader to write out at the next start: this
-// header, at the start of a page, then a record and the bytes of each table,
-// padded to 8 bytes. The hash is FNV-1a's 64-bit one over what follows the
-// header, and the magic, the full 16 bytes of the string, comes last.
-#define HANDOFF_ACPI_SAVE_MAGIC "ReBIOS ACPI v1\n"
-#define HANDOFF_ACPI_SAVE_SIZE ((uint64_t)0x400000)
+// header, then a record and the bytes of each table, padded to 8 bytes. The
+// hash is FNV-1a's 64-bit one over the data, and the magic, the full 16 bytes
+// of the string, comes last.
+#define HANDOFF_ACPI_SAVE_MAGIC "ReBIOS ACPI v2\n"
 
 struct handoff_acpi_save {
-    char magic[16];
+    char magic[HANDOFF_KEPT_MAGIC_SIZE];
     uint64_t size;
     uint64_t hash;
     uint32_t count;
     uint32_t reserved;
+    uint8_t parity[REED_SOLOMON_PARITY];
 };
 
 struct handoff_acpi_save_table {

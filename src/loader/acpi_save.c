@@ -25,6 +25,7 @@
 #include <hw/acpi.h>
 #include <lib/log.h>
 #include <lib/printf.h>
+#include <lib/reed_solomon.h>
 #include <lib/util.h>
 #include <loader/efi_glue.h>
 #include <loader/files.h>
@@ -241,18 +242,20 @@ static bool add_kept(const uint8_t *records, uint64_t size, uint32_t count) {
 // Writes out the copy that the core kept at page, if there is one there, in
 // free memory up to end, and sets *ctx: false where there is none.
 static bool write_kept(uintptr_t page, uint64_t end, void *ctx) {
-    const struct handoff_acpi_save *head = (const struct handoff_acpi_save *)(uintptr_t)page;
-    if (memcmp(head->magic, HANDOFF_ACPI_SAVE_MAGIC, sizeof(head->magic)) != 0) {
+    struct handoff_acpi_save head;
+    size_t parity_at = offsetof(struct handoff_acpi_save, parity);
+    if (!kept_header(page, HANDOFF_ACPI_SAVE_MAGIC, &head, parity_at)
+     || head.size > HANDOFF_KEPT_DATA_SIZE) {
         return false;
     }
-    uint64_t size = head->size;
-    uint64_t head_size = sizeof(struct handoff_acpi_save);
-    if (size > HANDOFF_ACPI_SAVE_SIZE - head_size || size > end - page - head_size) {
+    size_t blocks = (size_t)(head.size + REED_SOLOMON_BLOCK - 1) / REED_SOLOMON_BLOCK;
+    uint64_t span = HANDOFF_KEPT_PARITY + blocks * REED_SOLOMON_PARITY;
+    if (span > end - page) {
         return false;
     }
     // The pages are the loader's while it reads them, so that writing the file
     // cannot take them.
-    size_t pages = page_count(head_size + size);
+    size_t pages = page_count(span);
     efi_physical_address taken = page;
     efi_status status = efi_bs->allocate_pages(
         EFI_ALLOCATE_ADDRESS, EFI_LOADER_DATA, pages, &taken
@@ -260,9 +263,20 @@ static bool write_kept(uintptr_t page, uint64_t end, void *ctx) {
     if (status != EFI_SUCCESS) {
         return false;
     }
-    const uint8_t *records = (const uint8_t *)(head + 1);
-    if (fnv1a64(records, size) == head->hash && add_kept(records, size, head->count)) {
+    uint8_t *data = (uint8_t *)page + HANDOFF_KEPT_DATA;
+    uint8_t *parity = (uint8_t *)page + HANDOFF_KEPT_PARITY;
+    size_t corrected = 0;
+    size_t failed = 0;
+    reed_solomon_decode_blocks(data, parity, blocks, &corrected, &failed);
+    if (failed == 0 && fnv1a64(data, head.size) == head.hash
+     && add_kept(data, head.size, head.count)) {
         write_tables(GUEST_FILE, "the ACPI tables that ReBIOS gave the OS last time");
+        if (corrected != 0) {
+            log_notice(
+                "Corrected %zu bytes of those tables, which memory changed over the restart\n",
+                corrected
+            );
+        }
     } else {
         log_notice(
             "The ACPI tables that ReBIOS gave the OS last time are damaged, and not written to "
@@ -271,7 +285,7 @@ static bool write_kept(uintptr_t page, uint64_t end, void *ctx) {
         );
     }
     // Once is enough.
-    memset((void *)(uintptr_t)page, 0, sizeof(head->magic));
+    memset((void *)(uintptr_t)page, 0, HANDOFF_KEPT_MAGIC_SIZE);
     efi_bs->free_pages(page, pages);
     *(bool *)ctx = true;
     return true;
@@ -290,14 +304,14 @@ static void write_guest(void) {
 }
 
 static void reserve_area(void) {
-    uint64_t area = kept_reserve(HANDOFF_ACPI_SAVE_SIZE);
+    uint64_t area = kept_reserve(HANDOFF_KEPT_SIZE);
     if (area == 0) {
         log_notice("No memory to keep the ACPI tables that ReBIOS gives the OS in\n");
         return;
     }
     memset((void *)(uintptr_t)area, 0, sizeof(struct handoff_acpi_save));
     loader_handoff->acpi_save = area;
-    loader_handoff->acpi_save_size = HANDOFF_ACPI_SAVE_SIZE;
+    loader_handoff->acpi_save_size = HANDOFF_KEPT_SIZE;
 }
 
 void acpi_save_start(void) {

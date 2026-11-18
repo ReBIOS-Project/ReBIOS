@@ -24,6 +24,7 @@
 #include <handoff.h>
 #include <hw/acpi.h>
 #include <lib/log.h>
+#include <lib/reed_solomon.h>
 #include <lib/util.h>
 #include <memory.h>
 #include <sys/cache.h>
@@ -123,12 +124,12 @@ static void keep_root(uint64_t address, const char *signature, size_t entry_size
 
 void acpi_save_guest(uint32_t rsdp) {
     const struct handoff *h = core_handoff;
-    if (h->acpi_save == 0 || h->acpi_save_size <= sizeof(struct handoff_acpi_save)) {
+    if (h->acpi_save == 0 || h->acpi_save_size < HANDOFF_KEPT_SIZE) {
         return;
     }
     struct handoff_acpi_save *head = (struct handoff_acpi_save *)(uintptr_t)h->acpi_save;
-    records = (uint8_t *)(head + 1);
-    room = h->acpi_save_size - sizeof(struct handoff_acpi_save);
+    records = (uint8_t *)(uintptr_t)(h->acpi_save + HANDOFF_KEPT_DATA);
+    room = HANDOFF_KEPT_DATA_SIZE;
     struct acpi_rsdp r;
     if (!guest_mem_phys_read(rsdp, &r, sizeof(struct acpi_rsdp))) {
         return;
@@ -143,14 +144,21 @@ void acpi_save_guest(uint32_t rsdp) {
     }
     keep_root(r.rsdt_addr, ACPI_RSDT_SIGNATURE, sizeof(uint32_t));
 
+    uint8_t *parity = (uint8_t *)(uintptr_t)(h->acpi_save + HANDOFF_KEPT_PARITY);
+    reed_solomon_encode_blocks(records, parity, 0, used);
+    // The copy goes to memory before the header that marks it whole.
+    cache_write_back(records, used);
+    size_t blocks = (used + REED_SOLOMON_BLOCK - 1) / REED_SOLOMON_BLOCK;
+    cache_write_back(parity, blocks * REED_SOLOMON_PARITY);
     head->size = used;
     head->hash = fnv1a64(records, used);
     head->count = count;
     head->reserved = 0;
-    // The copy goes to memory before the magic that marks it whole.
-    cache_write_back(head, sizeof(struct handoff_acpi_save) + used);
     memcpy(head->magic, HANDOFF_ACPI_SAVE_MAGIC, sizeof(head->magic));
-    cache_write_back(head->magic, sizeof(head->magic));
+    reed_solomon_encode(
+        (const uint8_t *)head, offsetof(struct handoff_acpi_save, parity), head->parity
+    );
+    cache_write_back(head, sizeof(struct handoff_acpi_save));
     if (left_out) {
         printf("Some of the guest's ACPI tables do not fit in the memory kept for them\n");
     }

@@ -20,9 +20,12 @@
 #include <stdint.h>
 #include <efi.h>
 #include <loader/kept.h>
+#include <handoff.h>
+#include <lib/reed_solomon.h>
 #include <lib/util.h>
 #include <loader/efi_glue.h>
 #include <loader/loader.h>
+#include <memory.h>
 
 #define AREA_FLOOR ((uint64_t)0x1000000)
 #define AREA_CEILING ((uint64_t)0x100000000)
@@ -114,4 +117,27 @@ void kept_find(bool (*found)(uintptr_t page, uint64_t end, void *ctx), void *ctx
         }
     }
     efi_bs->free_pool(map);
+}
+
+bool kept_header(
+    uintptr_t page,
+    const char magic[static HANDOFF_KEPT_MAGIC_SIZE],
+    void *header,
+    size_t parity_at
+) {
+    // A magic with more bytes in error than the parity corrects is none, which
+    // spares decoding every page.
+    const uint8_t *at = (const uint8_t *)page;
+    size_t wrong = 0;
+    for (size_t i = 0; i < HANDOFF_KEPT_MAGIC_SIZE; i++) {
+        wrong += at[i] != (uint8_t)magic[i] ? 1 : 0;
+    }
+    if (wrong > REED_SOLOMON_PARITY / 2) {
+        return false;
+    }
+    uint8_t *bytes = header;
+    memcpy(bytes, at, parity_at + REED_SOLOMON_PARITY);
+    size_t corrected = 0;
+    return reed_solomon_decode(bytes, parity_at, bytes + parity_at, &corrected)
+        && memcmp(bytes, magic, HANDOFF_KEPT_MAGIC_SIZE) == 0;
 }

@@ -19,7 +19,9 @@
 #define LOADER__KEPT_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
+#include <handoff.h>
 
 // Reserves size bytes for the hypervisor where the next start finds them as a
 // restart left them, and returns their address, or 0 where there is no room:
@@ -33,5 +35,15 @@ uint64_t kept_reserve(uint64_t size);
 // memory from 16 MiB up to 4 GiB, end being where the free memory that the
 // page is in ends.
 void kept_find(bool (*found)(uintptr_t page, uint64_t end, void *ctx), void *ctx);
+
+// Copies the header of a kept area at page (handoff.h), its parity at
+// parity_at, to header, corrected, where it has magic: false where it does
+// not, or more of it is in error than its parity corrects.
+bool kept_header(
+    uintptr_t page,
+    const char magic[static HANDOFF_KEPT_MAGIC_SIZE],
+    void *header,
+    size_t parity_at
+);
 
 #endif
