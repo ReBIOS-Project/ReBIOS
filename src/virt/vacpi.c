@@ -61,6 +61,7 @@
 #include <virt/layout.h>
 #include <virt/mmio.h>
 #include <virt/pci_plan.h>
+#include <virt/pci_virt.h>
 #include <virt/rtc.h>
 #include <virt/sleep.h>
 #include <virt/vcpu.h>
@@ -3700,6 +3701,21 @@ static uacpi_object *result_for_guest(struct method *m, uacpi_object *ret) {
     return empty_package();
 }
 
+static bool node_pci_addr(uacpi_namespace_node *node, struct pci_cfg_addr *addr);
+
+// Methods that change a device's power, after which the PCI function it is may
+// have lost on the host what the guest cannot see it lose.
+static const char *const power_methods[] = { "_PS0", "_PS1", "_PS2", "_RST", NULL };
+
+static void power_changed(uacpi_namespace_node *method) {
+    uacpi_object_name name = uacpi_namespace_node_name(method);
+    struct pci_cfg_addr addr;
+    if (name_in(name.text, power_methods)
+     && node_pci_addr(uacpi_namespace_node_parent(method), &addr)) {
+        pci_virt_power_changed(addr);
+    }
+}
+
 static void mailbox_call(size_t index, uint32_t argc) {
     if (index >= vacpi.method_count || argc > MBX_SLOT_COUNT) {
         write_result(NULL, 1);
@@ -3727,6 +3743,9 @@ static void mailbox_call(size_t index, uint32_t argc) {
     }
     if (status == UACPI_STATUS_OK && port != NULL) {
         isa_ports_changed(port);
+    }
+    if (status == UACPI_STATUS_OK) {
+        power_changed(node);
     }
     if (status != UACPI_STATUS_OK) {
         const char *path = acpi_path(vacpi.methods[index].node);

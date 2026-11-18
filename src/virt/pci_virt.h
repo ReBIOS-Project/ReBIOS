@@ -46,6 +46,11 @@ void pci_virt_hook(struct pci_cfg_addr addr, const struct pci_virt_hook *hook, v
 // buses and windows, and its MSI and MSI-X messages, after the machine slept,
 // before anything reaches it: bridges come before what is behind them.
 void pci_virt_resume(void);
+// After the firmware's AML changed a function's power, which can leave it on
+// the host without what the guest set up while the guest sees nothing to
+// restore, as an Intel LPSS controller back from D3 through its _PS0 is left
+// without its BAR: what it lost back, decoding as it did.
+void pci_virt_power_changed(struct pci_cfg_addr addr);
 
 // Hands the guest's accesses to the pages holding [offset, offset + size) of a
 // memory BAR of the function to ops, wherever the guest puts the BAR, with

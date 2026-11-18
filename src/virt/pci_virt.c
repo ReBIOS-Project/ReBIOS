@@ -1146,11 +1146,12 @@ static bool bar_lost(const struct vfunction *vf, size_t k) {
 // D3hot to D0 transition with No_Soft_Reset clear (PCI Bus Power Management
 // Interface Specification 1.2, 3.2.4 and 5.4.1), a function level reset, or a
 // bus reset, the guest restores its own copies and turns decoding back on, as
-// Linux 7.3's pci_restore_state() does, and the host's go back first.
-static void reset_repair(struct vfunction *vf) {
+// Linux 7.3's pci_restore_state() does, and the host's go back first. Whether
+// they had to.
+static bool reset_repair(struct vfunction *vf) {
     struct pci_cfg_addr a = vf->f->addr;
     if (pci_cfg_read(a, PCI_VENDOR_ID, 2) == 0xffff) {
-        return;
+        return false;
     }
     bool lost = false;
     for (size_t k = 0; k <= BAR_COUNT && !lost; k++) {
@@ -1172,7 +1173,7 @@ static void reset_repair(struct vfunction *vf) {
         lost = (flags & PCI_MSIX_FLAGS_ENABLE) == 0;
     }
     if (!lost) {
-        return;
+        return false;
     }
 
     uint32_t command = pci_cfg_read(a, PCI_COMMAND, 2);
@@ -1217,6 +1218,7 @@ static void reset_repair(struct vfunction *vf) {
             PCI_CFG_ADDR_ARGS(a)
         );
     }
+    return true;
 }
 
 // The MSI-X entries a reset took from the function, once it decodes memory to
@@ -1711,6 +1713,29 @@ uint32_t pci_virt_config_read(struct pci_cfg_addr addr, uint32_t offset, size_t 
     uint32_t value = function_read(addr, offset, size);
     spinlock_release(&virt.lock);
     return value;
+}
+
+void pci_virt_power_changed(struct pci_cfg_addr addr) {
+    spinlock_acquire(&virt.lock);
+    struct vfunction *vf = vfunction_find(addr);
+    bool repaired = false;
+    if (vf != NULL && !vf->hidden) {
+        uint32_t command = pci_cfg_read(addr, PCI_COMMAND, 2);
+        repaired = reset_repair(vf);
+        if (repaired) {
+            pci_cfg_write(addr, PCI_COMMAND, 2, command);
+            for (size_t k = 0; k <= BAR_COUNT; k++) {
+                if (vf->bars[k].size != 0) {
+                    bar_update(vf, &vf->bars[k], k == ROM_INDEX);
+                }
+            }
+            msix_rearm(vf);
+        }
+    }
+    spinlock_release(&virt.lock);
+    if (repaired) {
+        legacy_io_follow(vf);
+    }
 }
 
 void pci_virt_resume(void) {
