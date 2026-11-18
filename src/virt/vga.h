@@ -81,6 +81,15 @@ void vga_set_dac8(bool dac8);
 // is to give none.
 size_t vga_lfb_size(void);
 
+struct pci_plan_fixed;
+
+// Where an AMD card's video BIOS runs, moves its framebuffer aperture as high
+// on the host as it goes, for the guest to find it there. Needs
+// pci_enum_scan() and acpi_init(), and comes before layout_init().
+void vga_card_place(void);
+// What of the card the guest finds at its host address, if anything.
+bool vga_card_kept(struct pci_plan_fixed *fixed);
+
 // Where the guest finds the emulated VGA's linear framebuffer, or 0 if it has
 // none.
 uintptr_t vga_lfb(void);

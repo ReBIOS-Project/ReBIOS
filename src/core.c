@@ -88,6 +88,7 @@ static void bsp_main(void *arg) {
     pci_enum_scan();
     pci_enum_shrink_rebars(PCI_PLAN_LOW_BAR_MAX);
     pci_assign_unassigned_bars();
+    vga_card_place();
     usb_handoff();
     igfx_scan();
     dma_init();

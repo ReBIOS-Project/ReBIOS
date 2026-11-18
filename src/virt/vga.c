@@ -22,6 +22,9 @@
 #include <virt/vga.h>
 #include <core.h>
 #include <handoff.h>
+#include <hw/pci_assign.h>
+#include <hw/pci_cfg.h>
+#include <hw/pci_enum.h>
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
@@ -40,6 +43,7 @@
 #include <virt/mmio.h>
 #include <virt/nsvm.h>
 #include <virt/nvmx.h>
+#include <virt/pci_plan.h>
 #include <virt/vcpu.h>
 #include <virt/vga_draw.h>
 #include <virt/vgabios.h>
@@ -2754,6 +2758,73 @@ static bool emulation_wanted(void) {
             return !h->video.vbios_present || !h->video.vbios_trusted;
         }
     }
+}
+
+// AMD's cards have their framebuffer aperture at BAR0 from the Radeon on, as
+// Linux 7.3 takes it (radeon's r100.c and amdgpu's gmc_v6_0.c to gmc_v12_0.c),
+// and their video BIOSes give the OS the linear framebuffer's address as the
+// card has it, not as the guest's BAR0 does: a Vega 11's shows nothing
+// otherwise. Where one runs, BAR0 keeps its host address for the guest, moved
+// as high as the host has room first, as the guest's memory below 4 GiB ends
+// under it.
+#define VENDOR_AMD 0x1002
+#define AMD_APERTURE_BAR 0
+
+static struct pci_plan_fixed card_kept;
+
+void vga_card_place(void) {
+    struct handoff *h = core_handoff;
+    if (!h->video.vga_present || !h->video.vbios_present || h->video.vga_vendor_id != VENDOR_AMD
+     || emulation_wanted()) {
+        return;
+    }
+    struct pci_enum_function *f = pci_enum_vga();
+    if (f == NULL || f->vendor_id != VENDOR_AMD) {
+        return;
+    }
+    uintptr_t was = f->bars[AMD_APERTURE_BAR].base;
+    struct handoff_framebuffer *fb = &h->video.framebuffer;
+    bool fb_inside = fb->present && fb->base >= was
+                  && fb->base - was < f->bars[AMD_APERTURE_BAR].size;
+    uintptr_t base;
+    uintptr_t end;
+    if (!pci_assign_top(f, AMD_APERTURE_BAR, &base, &end)) {
+        printf(
+            "PCI " PCI_CFG_ADDR_FMT " BAR0: AMD's framebuffer aperture cannot keep its host "
+            "address for the video BIOS\n",
+            PCI_CFG_ADDR_ARGS(f->addr)
+        );
+        return;
+    }
+    uintptr_t now = f->bars[AMD_APERTURE_BAR].base;
+    if (now != was && fb_inside) {
+        // The log draws on the framebuffer at its new address from here on.
+        fb->base += now - was;
+        size_t fb_size = (size_t)fb->pitch * fb->height;
+        mm_map_device(fb->base, fb->size > fb_size ? fb->size : fb_size);
+        log_move_screen((void *)(uintptr_t)fb->base);
+    }
+    if (now != was) {
+        printf(
+            "PCI " PCI_CFG_ADDR_FMT " BAR0: moved from %#llx to %#llx, as high below 4 GiB as "
+            "the host has room\n",
+            PCI_CFG_ADDR_ARGS(f->addr), (unsigned long long)was, (unsigned long long)now
+        );
+    }
+    printf(
+        "PCI " PCI_CFG_ADDR_FMT " BAR0: AMD's framebuffer aperture, kept at its host address "
+        "for the video BIOS, in %#llx-%#llx\n",
+        PCI_CFG_ADDR_ARGS(f->addr), (unsigned long long)base, (unsigned long long)end
+    );
+    card_kept = (struct pci_plan_fixed){ f, AMD_APERTURE_BAR, base, end };
+}
+
+bool vga_card_kept(struct pci_plan_fixed *fixed) {
+    if (card_kept.function == NULL) {
+        return false;
+    }
+    *fixed = card_kept;
+    return true;
 }
 
 static bool framebuffer_usable(const struct handoff_framebuffer *fb) {

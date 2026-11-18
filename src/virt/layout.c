@@ -449,6 +449,22 @@ void layout_init(void) {
     for (size_t i = 0; i < platform.count; i++) {
         range_list_add(&avoid, platform.r[i].base, platform.r[i].end);
     }
+    // An AMD card's memory that its video BIOS needs at its host addresses
+    // (vga_card_place()), unless what else the guest finds at its host
+    // addresses is there.
+    struct pci_plan_fixed fixed;
+    bool card_kept = vga_card_kept(&fixed);
+    if (card_kept && range_list_overlaps(&avoid, fixed.base, fixed.end)) {
+        printf(
+            "The video BIOS's card memory at %#llx-%#llx overlaps what the guest finds at its "
+            "host addresses, so the guest does not find it there\n",
+            (unsigned long long)fixed.base, (unsigned long long)fixed.end
+        );
+        card_kept = false;
+    }
+    if (card_kept) {
+        range_list_add(&avoid, fixed.base, fixed.end);
+    }
     for (size_t i = 0; i < h->reserved_count; i++) {
         range_list_remove(
             &free_ram, h->reserved[i].base, h->reserved[i].base + h->reserved[i].size
@@ -484,7 +500,7 @@ void layout_init(void) {
     uint64_t high_floor = add_high(NULL, available, &avoid);
     high_floor = align_up(high_floor > pinned_top ? high_floor : pinned_top, ONE_GIB);
     const struct pci_plan *plan = pci_plan_make(
-        obstacles, avoid.count, vga_lfb_size(), high_floor, NULL
+        obstacles, avoid.count, vga_lfb_size(), high_floor, card_kept ? &fixed : NULL
     );
     kfree(obstacles);
 
