@@ -53,6 +53,24 @@ cpu_resume_save:
     retq
 .size cpu_resume_save, . - cpu_resume_save
 
+// cpu_resume_jump(resume) goes on where cpu_resume_save() saved, which returns
+// 1 there: the waking boot processor's way back, on whatever stack it comes.
+.globl cpu_resume_jump
+.type cpu_resume_jump, %function
+cpu_resume_jump:
+    movq CPU_RESUME_RBX(%rdi), %rbx
+    movq CPU_RESUME_RBP(%rdi), %rbp
+    movq CPU_RESUME_R12(%rdi), %r12
+    movq CPU_RESUME_R13(%rdi), %r13
+    movq CPU_RESUME_R14(%rdi), %r14
+    movq CPU_RESUME_R15(%rdi), %r15
+    movq CPU_RESUME_RSP(%rdi), %rsp
+    pushq CPU_RESUME_RFLAGS(%rdi)
+    popfq
+    movl $1, %eax
+    jmpq *CPU_RESUME_RIP(%rdi)
+.size cpu_resume_jump, . - cpu_resume_jump
+
 // cpu_halt() halts until an interrupt, unless the processor has been kicked.
 // The host's NMI handler restarts an NMI that arrives before the HLT, as it
 // would halt with the NMI's work left undone otherwise.

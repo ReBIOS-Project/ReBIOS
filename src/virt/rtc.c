@@ -106,6 +106,7 @@
 #define ALARM_ANY 0xc0
 
 // The PC/AT's CMOS RAM, as BIOSes keep it.
+#define RAM_SHUTDOWN_STATUS 0x0f
 #define RAM_EQUIPMENT 0x14
 #define RAM_BASE_MEMORY 0x15
 #define RAM_EXT_MEMORY 0x17
@@ -117,6 +118,9 @@
 #define EQUIPMENT_FPU 0x02
 #define BASE_MEMORY_KIB 640
 #define EXT_MEMORY_KIB_MAX 0xffff
+// The shutdown status, which a BIOS reads at its reset vector, with which
+// SeaBIOS's handle_resume() goes on to the OS's waking vector.
+#define SHUTDOWN_S3_RESUME 0xfe
 
 // The update starts within this of UIP's rise (13.6.2.1).
 #define UIP_US 244
@@ -755,6 +759,10 @@ static void ram_init(void) {
     const struct handoff *h = core_handoff;
     unsigned int hundreds = h->time_valid ? h->time_year / 100 : 20;
     ram[RAM_CENTURY] = (uint8_t)((hundreds / 10) << 4 | hundreds % 10);
+}
+
+void rtc_wake(void) {
+    ram[RAM_SHUTDOWN_STATUS] = SHUTDOWN_S3_RESUME;
 }
 
 void rtc_init(void) {

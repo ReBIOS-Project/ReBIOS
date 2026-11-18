@@ -30,6 +30,10 @@ struct remap_target;
 // APICs: puts the host in APIC mode for good, masks its 8259s, and routes the
 // ISA IRQs as the MADT has them. Needs vioapic_init().
 void irq_init(void);
+// After the machine slept: its 8259s masked again, and the guest's as a reset
+// and its BIOS leave them, with nothing of its own interrupts in service.
+// After vioapic_wake().
+void irq_wake(void);
 
 // Whether the hypervisor takes the host's interrupts on a vector, and one it
 // took, which it EOIs.

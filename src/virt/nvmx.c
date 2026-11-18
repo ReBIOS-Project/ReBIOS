@@ -425,21 +425,36 @@ void nvmx_init(void) {
     printf("Nested VMX for the guest\n");
 }
 
+static void ept02_drop_all(struct nvmx *n);
+
 void nvmx_vcpu_init(struct vcpu *v) {
     if (!nvmx_enabled) {
         return;
     }
     struct nvmx *n = kmalloc(sizeof(struct nvmx));
-    *n = (struct nvmx){ .current = NO_VMCS, .pi_vector = -1, .sipi = -1 };
-    v->nvmx = n;
+    *n = (struct nvmx){ .current = NO_VMCS };
     if (shadowing) {
         n->shadow = vmx_shadow_vmcs_create();
+    }
+    v->nvmx = n;
+    nvmx_vcpu_power_on(v);
+}
+
+void nvmx_vcpu_power_on(struct vcpu *v) {
+    struct nvmx *n = v->nvmx;
+    if (n == NULL) {
+        return;
+    }
+    ept02_drop_all(n);
+    *n = (struct nvmx){
+        .current = NO_VMCS, .pi_vector = -1, .sipi = -1, .shadow = n->shadow,
+        .msr_bitmap = n->msr_bitmap
+    };
+    if (shadowing) {
         vmx_write(VMCS_VMREAD_BITMAP, (uint64_t)(uintptr_t)vmread_bitmap);
         vmx_write(VMCS_VMWRITE_BITMAP, (uint64_t)(uintptr_t)vmwrite_bitmap);
     }
 }
-
-static void ept02_drop_all(struct nvmx *n);
 
 // Fields that exist only where the guest is offered what they are for (SDM
 // 325462-093 Vol. 3D, Appendix B).

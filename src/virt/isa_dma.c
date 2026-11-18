@@ -185,6 +185,13 @@ static void pages_access(
     spinlock_release(&lock);
 }
 
+void isa_dma_wake(void) {
+    spinlock_acquire(&lock);
+    master_clear(&controllers[0]);
+    master_clear(&controllers[1]);
+    spinlock_release(&lock);
+}
+
 void isa_dma_init(void) {
     master_clear(&controllers[0]);
     master_clear(&controllers[1]);

@@ -75,6 +75,7 @@
 #define MSR_IA32_TSC 0x10
 #define MSR_IA32_APIC_BASE 0x1b
 #define MSR_IA32_FEATURE_CONTROL 0x3a
+#define MSR_IA32_TSC_ADJUST 0x3b
 #define MSR_IA32_XAPIC_DISABLE_STATUS 0xbd
 #define MSR_IA32_ARCH_CAPABILITIES 0x10a
 #define MSR_IA32_MCG_CAP 0x179
@@ -141,6 +142,7 @@
 
 #define CPUID_1_ECX_TSC_DEADLINE ((uint32_t)1 << 24)
 #define CPUID_1_EDX_ACPI ((uint32_t)1 << 22)
+#define CPUID_7_EBX_TSC_ADJUST ((uint32_t)1 << 1)
 #define CPUID_7_EBX_MPX ((uint32_t)1 << 14)
 #define CPUID_7_EBX_PT ((uint32_t)1 << 25)
 #define CPUID_D_1_EAX_XSAVES ((uint32_t)1 << 3)

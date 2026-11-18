@@ -35,6 +35,9 @@ bool virt_init(void);
 
 // Enables virtualisation on the calling CPU.
 void virt_cpu_init(void);
+// Leaves VMX operation on the calling CPU, which sleeping needs; SVM needs
+// nothing.
+void virt_cpu_off(void);
 
 // The intercept bitmaps every vCPU shares, in the vendor's format.
 uintptr_t virt_io_bitmap(void);

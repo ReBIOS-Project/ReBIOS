@@ -282,6 +282,32 @@ void nsvm_vcpu_init(struct vcpu *v) {
     v->nsvm = n;
 }
 
+static void npt02_drop_all(struct nsvm *n);
+
+void nsvm_vcpu_power_on(struct vcpu *v) {
+    struct nsvm *n = v->nsvm;
+    if (n == NULL) {
+        return;
+    }
+    npt02_drop_all(n);
+    size_t asids = page_count((nasid + 63) / 64 * sizeof(uint64_t));
+    memset(n->invlpga_asids, 0, asids * PAGE_SIZE);
+    *n = (struct nsvm){
+        .gif = true,
+        .tsc_ratio = TSC_RATIO_ONE,
+        .tsc_ratio_loaded = TSC_RATIO_ONE,
+        .vm_cr = svm_firmware_vm_cr & (VM_CR_DPD | VM_CR_DIS_A20M | VM_CR_LOCK),
+        .vmcb01 = v->vmcb,
+        .vmcb01_pa = v->vmcb_pa,
+        .vmcb02 = n->vmcb02,
+        .vmcb02_pa = n->vmcb02_pa,
+        .msrpm02 = n->msrpm02,
+        .invlpga_asids = n->invlpga_asids,
+        .seen01 = n->seen01,
+        .seen02 = n->seen02
+    };
+}
+
 static bool valid_page(uint64_t address) {
     return (address & 0xfff) == 0 && (address >> phys_width) == 0;
 }

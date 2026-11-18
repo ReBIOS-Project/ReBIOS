@@ -62,6 +62,7 @@
 #include <virt/mmio.h>
 #include <virt/pci_plan.h>
 #include <virt/rtc.h>
+#include <virt/sleep.h>
 #include <virt/vcpu.h>
 #include <virt/vga.h>
 #include <virt/virt.h>
@@ -124,6 +125,7 @@
 #define PM1_CNT_SCI_EN 0x0001
 #define PM1_CNT_SLP_TYP_SHIFT 10
 #define PM1_CNT_SLP_EN 0x2000
+#define SLP_TYP_S3 3
 #define SLP_TYP_S5 5
 
 // What a control-method power button's Notify() says of a press (ACPI 6.6,
@@ -3055,8 +3057,11 @@ static void emit_sleep_and_events(struct aml *a) {
     static const struct {
         const char *name;
         uint8_t slp_typ;
-    } states[] = { { "\\_S0", 0 }, { "\\_S5", SLP_TYP_S5 } };
-    for (size_t i = 0; i < 2; i++) {
+    } states[] = { { "\\_S0", 0 }, { "\\_S3", SLP_TYP_S3 }, { "\\_S5", SLP_TYP_S5 } };
+    for (size_t i = 0; i < ARRAY_COUNT(states); i++) {
+        if (states[i].slp_typ == SLP_TYP_S3 && !sleep_offered(SLEEP_S3)) {
+            continue;
+        }
         aml_op(a, AML_NAME);
         aml_name(a, states[i].name);
         aml_begin(a, AML_PACKAGE);
@@ -3905,6 +3910,10 @@ static void pm1_cnt_access(
         printf("The guest powers off\n");
         power_off();
     }
+    if (vacpi.slp_typ == SLP_TYP_S3 && sleep_offered(SLEEP_S3)) {
+        sleep_request(SLEEP_S3);
+        return;
+    }
     printf("The guest asked for sleep type %u, which it has no _Sx for\n", vacpi.slp_typ);
 }
 
@@ -3955,6 +3964,12 @@ static bool fadt_port(const struct acpi_gas *gas, uint16_t *port) {
     }
     *port = (uint16_t)gas->address;
     return true;
+}
+
+void vacpi_wake(void) {
+    spinlock_acquire(&vacpi.lock);
+    vacpi.pm1_sts |= PM1_WAK;
+    spinlock_release(&vacpi.lock);
 }
 
 void vacpi_init(void) {

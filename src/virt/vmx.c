@@ -430,7 +430,11 @@ void vmx_cpu_init(void) {
     write_cr0((read_cr0() | cr0_fixed0) & cr0_fixed1);
     write_cr4((read_cr4() | cr4_fixed0 | CR4_VMXE) & cr4_fixed1);
 
-    uint32_t *vmxon_region = page_alloc(1);
+    struct cpu *cpu = this_cpu();
+    if (cpu->virt_area == NULL) {
+        cpu->virt_area = page_alloc(1);
+    }
+    uint32_t *vmxon_region = cpu->virt_area;
     vmxon_region[0] = (uint32_t)vmx_basic & 0x7fffffff;
     uintptr_t pa = (uintptr_t)vmxon_region;
     bool ok;
@@ -678,14 +682,29 @@ void vmx_vmcs_swap(struct vcpu *v, struct vmx_vmcs *other) {
 }
 
 void vmx_vcpu_init(struct vcpu *v) {
-    struct cpu *cpu = v->cpu;
-
     v->vmcs_cache = cache_alloc();
     v->vmcs = page_alloc(1);
     v->vmcs_pa = (uintptr_t)v->vmcs;
+    vmx_vcpu_power_on(v);
+}
+
+void vmx_cpu_off(void) {
+    struct vcpu *v = this_cpu()->vcpu;
+    if (v != NULL) {
+        vmclear(v->vmcs_pa);
+        v->vmx_launched = false;
+    }
+    asm volatile ("vmxoff" ::: "cc", "memory");
+    write_cr4(read_cr4() & ~CR4_VMXE);
+}
+
+void vmx_vcpu_power_on(struct vcpu *v) {
+    struct cpu *cpu = v->cpu;
+
     *(uint32_t *)v->vmcs = (uint32_t)vmx_basic & 0x7fffffff;
     vmclear(v->vmcs_pa);
     vmptrld(v->vmcs_pa);
+    v->vmx_launched = false;
 
     // Interrupts and NMIs reach the hypervisor, which passes the guest's on.
     uint32_t pin_require = PIN_EXT_INTR_EXITING | PIN_NMI_EXITING | PIN_VIRTUAL_NMIS;

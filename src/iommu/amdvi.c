@@ -221,6 +221,8 @@ static bool remap_enabled;
 // own interrupts', x2APIC IDs.
 static bool wide_entries;
 static bool xt;
+// The control bits that remapping turned on in every unit.
+static uint64_t remap_enables;
 static struct spinlock remap_lock;
 
 // The entries that post to each vCPU, by its tag, whose IsRun follows whether
@@ -236,9 +238,10 @@ struct post_target {
 static struct post_target *targets;
 static size_t target_count;
 // Every unit logs the interrupts it posts for vCPUs that do not run, and
-// interrupts the processor that reads the logs on ga_vector.
+// interrupts the processor that reads the logs, ga_apic_id, on ga_vector.
 static bool posting;
 static uint8_t ga_vector;
+static uint32_t ga_apic_id;
 
 #define EVENT_WRITE_TIMEOUT_NS ((uint64_t)1000000)
 #define L2_CONFIG_INDEX 0xf0
@@ -456,9 +459,11 @@ static void unit_enable(struct amdvi_unit *u) {
     control &= ~CONTROL_TAKEN;
     reg_write(u, REG_CONTROL, control);
 
-    u->commands = page_alloc(1);
+    if (u->commands == NULL) {
+        u->commands = page_alloc(1);
+        u->events = page_alloc(1);
+    }
     u->command_tail = 0;
-    u->events = page_alloc(1);
     reg_write(u, REG_EXCLUSION_BASE, 0);
     reg_write(u, REG_DEVICE_TABLE, (uint64_t)(uintptr_t)device_table | DEVICE_TABLE_SIZE);
     reg_write(u, REG_COMMAND_BUFFER, (uint64_t)(uintptr_t)u->commands | LOG_LENGTH_256);
@@ -538,7 +543,9 @@ static bool ga_log_start(struct amdvi_unit *u, uint32_t apic_id, uint8_t vector)
         );
         return false;
     }
-    u->ga_log = page_alloc(1);
+    if (u->ga_log == NULL) {
+        u->ga_log = page_alloc(1);
+    }
     u->ga_head = 0;
     u->ga_unsettled = false;
     atomic_store_explicit(&u->ga_tail, 0, memory_order_relaxed);
@@ -605,6 +612,7 @@ void amdvi_remap_start(bool guest_vapic, uint8_t vector) {
         struct amdvi_unit *u = &units[i];
         reg_write(u, REG_CONTROL, reg_read(u, REG_CONTROL) | enables);
     }
+    remap_enables = enables;
     remap_enabled = true;
     // Posting, where every unit can tell the calling processor of what it
     // posts for vCPUs that do not run.
@@ -616,8 +624,34 @@ void amdvi_remap_start(bool guest_vapic, uint8_t vector) {
         target_count = smp_cpu_count();
         targets = page_alloc(page_count(target_count * sizeof(struct post_target)));
         ga_vector = vector;
+        ga_apic_id = this_cpu()->apic_id;
         posting = true;
         printf("AMD-Vi: interrupts are posted to the vCPUs that AVIC runs\n");
+    }
+}
+
+void amdvi_suspend(void) {
+    for (size_t i = 0; i < unit_count; i++) {
+        struct amdvi_unit *u = &units[i];
+        invalidate_all(u);
+        reg_write(u, REG_CONTROL, reg_read(u, REG_CONTROL) & ~CONTROL_TAKEN);
+    }
+}
+
+// The units as amdvi_start(), amdvi_enable(), and amdvi_remap_start() set
+// them, once sleeping reset them: the same device table, command buffers,
+// event logs, remapping modes, and GA logs (Linux 7.3's amd_iommu_resume()).
+void amdvi_resume(void) {
+    for (size_t i = 0; i < unit_count; i++) {
+        struct amdvi_unit *u = &units[i];
+        unit_enable(u);
+        reg_write(u, REG_CONTROL, reg_read(u, REG_CONTROL) | remap_enables);
+        if (posting && !ga_log_start(u, ga_apic_id, ga_vector)) {
+            panic("AMD-Vi unit at %#llx cannot post after waking\n", (unsigned long long)u->base);
+        }
+    }
+    for (size_t i = 0; i < unit_count; i++) {
+        invalidate_all(&units[i]);
     }
 }
 

@@ -38,6 +38,10 @@ void vtd_start(bool x2apic);
 // Has every unit translate all DMA through the 4-level second-stage table at
 // pml4.
 void vtd_enable(uintptr_t pml4);
+// Stops the units, before the machine sleeps.
+void vtd_suspend(void);
+// The units as they were, after the machine slept.
+void vtd_resume(void);
 
 // Interrupt remapping, if on: count consecutive entries of the table, or -1;
 // an entry pointed at a vector on the processor with an APIC ID; the message

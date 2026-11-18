@@ -28,6 +28,8 @@ extern bool nvmx_enabled;
 
 void nvmx_init(void);
 void nvmx_vcpu_init(struct vcpu *v);
+// The vCPU's nested state as at power-on, what it allocated kept.
+void nvmx_vcpu_power_on(struct vcpu *v);
 
 // The guest's VMX instructions, by the exits they cause.
 void nvmx_instruction(struct vcpu *v, uint32_t reason);

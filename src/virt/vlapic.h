@@ -50,6 +50,8 @@ void vlapic_init(void);
 // set up as the processor's local APIC is when this is called, the others' as
 // after INIT.
 void vlapic_create(struct vcpu *v);
+// The vCPU's local APIC as at power-on, as at its creation.
+void vlapic_power_on(struct vcpu *v);
 // The state INIT leaves the local APIC in.
 void vlapic_reset(struct vcpu *v);
 

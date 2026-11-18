@@ -32,6 +32,11 @@ struct cpu;
 // through PM1 and GPE registers the hypervisor emulates where the host has its
 // own.
 void vacpi_init(void);
+// The guest's virtual PM1 as a wake from a sleeping state leaves it: WAK_STS
+// set (ACPI 6.6, 4.8.3.1.1, Table 4.11), SLP_TYP as the guest wrote it, as the
+// chipsets that keep it in the RTC well have it (Intel 6 Series 324645-006,
+// 13.8.3.3).
+void vacpi_wake(void);
 // Whether the guest has an ACPI OS that takes its events: the GPE of its
 // notifications, or the power button.
 bool vacpi_guest_ospm(void);

@@ -36,6 +36,7 @@
 #include <virt/nsvm.h>
 #include <virt/nvmx.h>
 #include <virt/pci_plan.h>
+#include <virt/sleep.h>
 #include <virt/svm.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>
@@ -64,10 +65,6 @@
 
 #define MSR_IA32_BNDCFGS 0xd90
 #define MSR_IA32_XSS 0xda0
-
-// SDM 325462-093 Vol. 3B, 20.17.3, and Vol. 3A, 13.5.4.1.
-#define CPUID_7_EBX_TSC_ADJUST ((uint32_t)1 << 1)
-#define MSR_IA32_TSC_ADJUST 0x3b
 
 // IA32_MCG_CTL, where IA32_MCG_CAP's MCG_CTL_P says there is one: Intel
 // defines only all 0s and all 1s (SDM 325462-093 Vol. 3B, 18.3.1.3), and a
@@ -657,10 +654,14 @@ void msr_vcpu_init(struct vcpu *v) {
     if (core_handoff->config.cpuid_limit != 0) {
         v->misc_enable |= MISC_ENABLE_LIMIT_CPUID;
     }
-    v->tsc_offset = 0;
+    // The TSC and IA32_TSC_ADJUST as the processor has them since power-on or
+    // waking, without what the hypervisor moved the TSC on by.
+    uint64_t moved = sleep_tsc_moved();
+    v->tsc_offset = 0 - moved;
     v->tsc_adjust = 0;
     if (tsc_adjust) {
         rdmsr_safe(MSR_IA32_TSC_ADJUST, &v->tsc_adjust);
+        v->tsc_adjust -= moved;
     }
     v->mcg_ctl = 0;
     if (mcg_ctl) {

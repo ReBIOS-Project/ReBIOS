@@ -178,7 +178,8 @@ the emulated VGA's Video BIOS runs from a ROM of its own after it. Software
 that runs the card's own code from there, such as `vbetool post`, which calls
 its entry point, or a VBE 3.0 driver that calls its protected-mode interface,
 runs it on the card behind the emulated VGA, which it can leave without a
-picture.
+picture. While ReBIOS emulates the VGA, the OS cannot suspend to RAM (S3), as
+nothing would light the screen again after it.
 
 ## Configuration
 

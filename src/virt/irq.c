@@ -1137,3 +1137,23 @@ void irq_init(void) {
         io_register(&handler);
     }
 }
+
+void irq_wake(void) {
+    if (host_has_8259s()) {
+        outb(PIC_MASTER_DATA, 0xff);
+        outb(PIC_SLAVE_DATA, 0xff);
+    }
+    spinlock_acquire(&lock);
+    for (size_t gsi = 0; gsi < route_count; gsi++) {
+        struct route *r = &routes[gsi];
+        r->asserted = false;
+        r->held = false;
+        r->virtual_held = false;
+        r->virtual_edge_seen = false;
+    }
+    pic_reset();
+    elcr_init();
+    update();
+    spinlock_release(&lock);
+    kick_after_update();
+}

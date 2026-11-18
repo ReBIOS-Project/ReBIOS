@@ -65,8 +65,10 @@ _Static_assert(
 );
 
 // Returns 0, and 1 again once an exception the host recovers from resumes
-// there, as long as the caller has not returned.
+// there, or cpu_resume_jump() goes there, as long as the caller has not
+// returned.
 __attribute__((returns_twice)) int cpu_resume_save(struct cpu_resume *resume);
+noreturn void cpu_resume_jump(const struct cpu_resume *resume);
 
 struct cpu_tss {
     uint32_t reserved0;
@@ -95,6 +97,9 @@ struct cpu {
     uint64_t gdt[5];
     struct cpu_tss tss;
     struct vcpu *vcpu;
+    // The page VMX operation or SVM's host state takes, which the processor
+    // keeps across sleeping.
+    void *virt_area;
     _Atomic(bool) online;
     // Whether a kick's interrupt is on its way, which does for further kicks.
     _Atomic(bool) kick;

@@ -28,5 +28,7 @@
 void a20_init(void);
 // The keyboard controller's A20 line, from its output port.
 void a20_kbc_set(bool open);
+// The system control port as a reset leaves it, after the machine slept.
+void a20_wake(void);
 
 #endif

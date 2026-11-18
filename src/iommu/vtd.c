@@ -676,6 +676,54 @@ void vtd_enable(uintptr_t pml4) {
     }
 }
 
+void vtd_suspend(void) {
+    for (size_t i = 0; i < unit_count; i++) {
+        struct vtd_unit *u = &units[i];
+        invalidate_all(u);
+        global_command(u, GCMD_TE, false, "stop translating");
+        if ((reg_read32(u, REG_GSTS) & GCMD_IRE) != 0) {
+            global_command(u, GCMD_IRE, false, "stop remapping interrupts");
+        }
+        global_command(u, GCMD_QIE, false, "disable queued invalidation");
+    }
+}
+
+// The units as vtd_start() and vtd_enable() set them, once sleeping reset
+// them: the same queues, interrupt remapping table, and root tables (Linux
+// 7.3's iommu_resume()).
+void vtd_resume(void) {
+    for (size_t i = 0; i < unit_count; i++) {
+        struct vtd_unit *u = &units[i];
+        unit_take_over(u);
+        u->queue_tail = 0;
+        reg_write64(u, REG_IQT, 0);
+        reg_write64(u, REG_IQA, (uint64_t)(uintptr_t)u->queue);
+        global_command(u, GCMD_QIE, true, "enable queued invalidation");
+    }
+    if (remap_table != NULL) {
+        tables_flush_caches();
+        uint64_t irta = (uint64_t)(uintptr_t)remap_table | (x2apic_format ? IRTA_EIME : 0)
+                      | REMAP_SIZE;
+        for (size_t i = 0; i < unit_count; i++) {
+            reg_write64(&units[i], REG_IRTA, irta);
+            global_command(&units[i], GCMD_SIRTP, true, "take the interrupt remapping table");
+        }
+        remap_invalidate_all();
+        for (size_t i = 0; i < unit_count; i++) {
+            global_command(&units[i], GCMD_IRE, true, "remap interrupts");
+            global_command(&units[i], GCMD_CFI, false, "block compatibility format interrupts");
+        }
+    }
+    tables_flush_caches();
+    for (size_t i = 0; i < unit_count; i++) {
+        struct vtd_unit *u = &units[i];
+        reg_write64(u, REG_RTADDR, (uint64_t)(uintptr_t)u->root_table);
+        global_command(u, GCMD_SRTP, true, "take the root table");
+        invalidate_all(u);
+        global_command(u, GCMD_TE, true, "start translating");
+    }
+}
+
 void vtd_flush(void) {
     for (size_t i = 0; i < unit_count; i++) {
         invalidate_all(&units[i]);

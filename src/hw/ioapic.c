@@ -63,7 +63,22 @@ void ioapic_rte_write(struct ioapic *io, uint32_t pin, uint64_t rte) {
     spinlock_acquire(&io->lock);
     reg_write(io, IOAPIC_REG_REDIR(pin) + 1, (uint32_t)(rte >> 32));
     reg_write(io, IOAPIC_REG_REDIR(pin), (uint32_t)rte);
+    if (io->rtes != NULL && pin < io->pins) {
+        io->rtes[pin] = rte;
+    }
     spinlock_release(&io->lock);
+}
+
+void ioapic_resume(void) {
+    for (size_t i = 0; i < count; i++) {
+        struct ioapic *io = &ioapics[i];
+        spinlock_acquire(&io->lock);
+        reg_write(io, IOAPIC_REG_ID, io->id_reg);
+        spinlock_release(&io->lock);
+        for (size_t pin = 0; pin < io->pins; pin++) {
+            ioapic_rte_write(io, (uint32_t)pin, io->rtes[pin]);
+        }
+    }
 }
 
 void ioapic_eoi(struct ioapic *io, uint8_t vector) {
@@ -154,6 +169,11 @@ static void add(const struct acpi_madt_ioapic *entry) {
         }
     }
     count++;
+    uint64_t *rtes = kmalloc(io->pins * sizeof(uint64_t));
+    for (size_t pin = 0; pin < io->pins; pin++) {
+        rtes[pin] = ioapic_rte_read(io, (uint32_t)pin);
+    }
+    io->rtes = rtes;
 
     // Other delivery modes, such as SMI, are the firmware's.
     uint32_t masked = 0;

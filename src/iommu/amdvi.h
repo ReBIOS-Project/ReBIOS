@@ -35,6 +35,10 @@ void amdvi_start(void);
 // Has every unit translate all DMA through the 4-level host page table at
 // root, and, with remapping on, block the interrupts no table covers.
 void amdvi_enable(uintptr_t root);
+// Stops the units, before the machine sleeps.
+void amdvi_suspend(void);
+// The units as they were, after the machine slept.
+void amdvi_resume(void);
 
 // Makes the units see changes to the tables made while they translate.
 void amdvi_flush(void);

@@ -90,12 +90,16 @@ static bool fsb_capable(uintptr_t base) {
 
 // Its timers interrupt no more, and the PIT and the RTC interrupt as without
 // it; the counter runs on, as firmware may time its own delays with it.
-static void hide(uintptr_t base, const char *why) {
+static void quiet(uintptr_t base) {
     for (size_t n = 0; n < timers(base); n++) {
         uintptr_t config = base + TIMER_BASE + n * TIMER_STRIDE;
         write32(config, read32(config) & ~(TIMER_INT_ENABLE | TIMER_FSB_ENABLE));
     }
     write32(base + CONFIG, read32(base + CONFIG) & ~CONFIG_LEGACY_ROUTE);
+}
+
+static void hide(uintptr_t base, const char *why) {
+    quiet(base);
     uint64_t guest;
     if (devmem_guest(base, base + HPET_SIZE, false, &guest)) {
         layout_absent(guest, HPET_SIZE);
@@ -186,6 +190,21 @@ void hpet_init(void) {
             }
         }
         uacpi_table_unref(&table);
+    }
+}
+
+void hpet_wake(void) {
+    for (size_t i = 0; i < hidden_count; i++) {
+        quiet(hidden[i]);
+    }
+    if (guest_base == 0) {
+        return;
+    }
+    spinlock_acquire(&lock);
+    bool changed = follow_route();
+    spinlock_release(&lock);
+    if (changed) {
+        irq_hpet_route_changed();
     }
 }
 

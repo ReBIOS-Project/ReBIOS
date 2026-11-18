@@ -487,6 +487,8 @@ void svm_flush_guest_tlb(struct vcpu *v);
 bool svm_huge_pages(void);
 void svm_cpu_init(void);
 void svm_vcpu_init(struct vcpu *v);
+// The vCPU's VMCB set up anew, as at its creation.
+void svm_vcpu_power_on(struct vcpu *v);
 // The guest's CR0 as it has it: the processor's but for NE, which the guest's
 // x87 errors follow (ferr.c), and which the processor keeps set, the guest's
 // own being in cr0_shadow; and the loading of CR0 so.

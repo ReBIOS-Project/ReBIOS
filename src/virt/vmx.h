@@ -475,7 +475,11 @@ struct vmx_vmcs {
 
 bool vmx_supported(void);
 void vmx_cpu_init(void);
+// Leaves VMX operation, the vCPU's VMCS cleared to memory first.
+void vmx_cpu_off(void);
 void vmx_vcpu_init(struct vcpu *v);
+// The vCPU's VMCS set up anew, as at its creation.
+void vmx_vcpu_power_on(struct vcpu *v);
 noreturn void vmx_run(struct vcpu *v);
 // Whether the guest's VMCS gets the secondary processor-based control.
 bool vmx_secondary_allowed(uint32_t control);

@@ -977,12 +977,18 @@ void vlapic_reset(struct vcpu *v) {
 
 void vlapic_create(struct vcpu *v) {
     struct vlapic *vl = kmalloc(sizeof(struct vlapic));
-    *vl = (struct vlapic){
-        .base = VLAPIC_DEFAULT_BASE | APIC_BASE_EN | (v->cpu->bsp ? APIC_BASE_BSP : 0),
-        .id = v->cpu->apic_id
-    };
+    *vl = (struct vlapic){ .id = v->cpu->apic_id };
     vl->regs = page_alloc(1);
+    if (virt_vmx && posted_interrupts) {
+        vl->posted = page_alloc(1);
+    }
     v->vlapic = vl;
+    vlapic_power_on(v);
+}
+
+void vlapic_power_on(struct vcpu *v) {
+    struct vlapic *vl = v->vlapic;
+    vl->base = VLAPIC_DEFAULT_BASE | APIC_BASE_EN | (v->cpu->bsp ? APIC_BASE_BSP : 0);
     if (virt_vmx) {
         vmx_write(VMCS_VIRTUAL_APIC_ADDR, (uint64_t)(uintptr_t)vl->regs);
         vmx_write(VMCS_TPR_THRESHOLD, 0);
@@ -996,7 +1002,7 @@ void vlapic_create(struct vcpu *v) {
             );
         }
         if (posted_interrupts) {
-            vl->posted = page_alloc(1);
+            memset(vl->posted, 0, PAGE_SIZE);
             vmx_write(VMCS_PIN_CONTROLS, vmx_read(VMCS_PIN_CONTROLS) | PIN_POSTED_INTR);
             vmx_write(VMCS_POSTED_INTR_NV, VLAPIC_POSTED_VECTOR);
             vmx_write(VMCS_POSTED_INTR_DESC, (uint64_t)(uintptr_t)vl->posted);
@@ -1018,6 +1024,8 @@ void vlapic_create(struct vcpu *v) {
         }
     }
     if (avic_supported) {
+        // Off, as svm_vcpu_power_on() left the VMCB, until the next entry.
+        atomic_store_explicit(&vl->avic, AVIC_OFF, memory_order_relaxed);
         struct vmcb_control *c = &v->vmcb->control;
         c->avic_apic_bar = vl->base & APIC_BASE_ADDRESS;
         c->avic_backing_page = (uint64_t)(uintptr_t)vl->regs;

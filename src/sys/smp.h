@@ -29,6 +29,12 @@ void smp_init(void);
 // Starts every other processor into the hypervisor, where it waits for the
 // guest to start it. Needs virt_init() and the guest's memory.
 void smp_start_aps(void);
+// Puts the start trampoline in its page for the boot processor alone, which
+// the firmware's waking vector brings to entry, on the stack of size bytes at
+// stack: the page, the waking vector's real-mode address.
+uintptr_t smp_trampoline_wake(void (*entry)(void *), uint8_t *stack, size_t size);
+// Starts the other processors again after the machine slept.
+void smp_restart_aps(void);
 
 // The processors found, the boot processor first, started or not.
 size_t smp_cpu_count(void);

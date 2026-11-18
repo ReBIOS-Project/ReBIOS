@@ -28,6 +28,10 @@
 // guest's as they are, the writes to the first's registers passing through the
 // hypervisor. After layout_init().
 void hpet_init(void);
+// After the machine slept, whose firmware may have set the HPETs up again:
+// the hidden ones quiet, and the guest's legacy replacement route as its
+// registers now have it.
+void hpet_wake(void);
 
 // Whether the HPET with its registers at base is hidden, and whether any is.
 bool hpet_hidden(uintptr_t base);

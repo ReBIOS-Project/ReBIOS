@@ -228,6 +228,9 @@ struct vcpu {
 };
 
 struct vcpu *vcpu_create(struct cpu *cpu);
+// The vCPU as after a power-on reset, its allocations kept, for the guest's
+// wake from a sleeping state; the boot processor's at its reset vector.
+void vcpu_power_on(struct vcpu *v);
 noreturn void vcpu_run(struct vcpu *v);
 
 // Catches up with what changed while the vCPU was out of the guest, and sets
@@ -374,6 +377,9 @@ void vcpu_inject_exception_data(
 bool vcpu_fred(void);
 void vcpu_set_event_data(struct vcpu *v, uint64_t data);
 
+// The processor's state after a reset: real mode at F000:FFF0, CS's base at
+// FFFF0000h.
+void vcpu_set_reset_state(struct vcpu *v);
 // Puts the vCPU in the state the processor has after INIT, in real mode at
 // cs:ip, as for a start-up IPI or the reset vector.
 void vcpu_set_real_mode(struct vcpu *v, uint16_t cs, uint16_t ip);

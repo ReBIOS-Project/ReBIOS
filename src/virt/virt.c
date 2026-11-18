@@ -146,6 +146,12 @@ void virt_cpu_init(void) {
     msr_cpu_init();
 }
 
+void virt_cpu_off(void) {
+    if (virt_vmx) {
+        vmx_cpu_off();
+    }
+}
+
 uintptr_t virt_io_bitmap(void) {
     return (uintptr_t)io_bitmap;
 }

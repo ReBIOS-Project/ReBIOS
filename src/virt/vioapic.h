@@ -24,6 +24,9 @@
 // Gives the guest I/O APICs of its own where the host's are, which the
 // hypervisor programs the host's from. Needs ioapic_init().
 void vioapic_init(void);
+// The guest's I/O APICs as the machine's reset leaves them, with the IDs its
+// BIOS gave them: every entry masked. Before irq_wake().
+void vioapic_wake(void);
 
 // The guest's redirection entry for a GSI. Returns false if no I/O APIC has
 // it.

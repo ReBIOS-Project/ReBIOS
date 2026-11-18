@@ -58,9 +58,15 @@ struct ioapic {
     uint32_t id_reg;
     uint32_t version;
     uint32_t arbitration;
+    // What the hypervisor wrote to each redirection entry, for sleeping to
+    // give back.
+    uint64_t *rtes;
     struct spinlock lock;
 };
 
+// Gives the I/O APICs back their ID and redirection entries after the machine
+// slept, which reset them.
+void ioapic_resume(void);
 // Finds the I/O APICs the MADT lists, and masks every redirection entry, as a
 // legacy BIOS hands them over, the 8259 delivering interrupts. Needs
 // acpi_init().

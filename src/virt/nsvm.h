@@ -29,6 +29,8 @@ extern bool nsvm_enabled;
 
 void nsvm_init(void);
 void nsvm_vcpu_init(struct vcpu *v);
+// The vCPU's nested state as at power-on, what it allocated kept.
+void nsvm_vcpu_power_on(struct vcpu *v);
 
 // The guest's SVM instructions, by the exits they cause.
 void nsvm_instruction(struct vcpu *v, uint64_t code);

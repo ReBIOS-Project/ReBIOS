@@ -36,6 +36,7 @@
 #include <sys/cpu.h>
 #include <sys/simd.h>
 #include <sys/x86.h>
+#include <virt/sleep.h>
 #include <virt/vcpu.h>
 #include <virt/vga.h>
 #include <virt/virt.h>
@@ -88,6 +89,8 @@ static _Atomic(uint32_t) aps_started;
 // Whether an APIC ID reaches Fh, which local APICs that match four bits of
 // APIC IDs take for a broadcast.
 static bool long_ids;
+// The other processors' entries in the start trampoline's table.
+static struct ap_boot_entry *ap_table;
 
 size_t smp_cpu_count(void) {
     return cpu_count;
@@ -297,12 +300,12 @@ void smp_start_aps(void) {
     if (read_cr3() >= FOUR_GIB) {
         panic("The page tables are beyond the other processors' reach\n");
     }
-    struct ap_boot_entry *table = kmalloc(count * sizeof(struct ap_boot_entry));
+    ap_table = kmalloc(count * sizeof(struct ap_boot_entry));
     for (size_t i = 0; i < count; i++) {
         struct cpu *cpu = cpus[i + 1];
-        table[i] = (struct ap_boot_entry){ cpu->apic_id, 0, (uint64_t)(uintptr_t)cpu };
+        ap_table[i] = (struct ap_boot_entry){ cpu->apic_id, 0, (uint64_t)(uintptr_t)cpu };
     }
-    start_each(trampoline_install(table, count, CPU_AREA_SIZE, (uintptr_t)ap_main));
+    start_each(trampoline_install(ap_table, count, CPU_AREA_SIZE, (uintptr_t)ap_main));
     printf(
         "Started %u of %zu other processors\n",
         atomic_load_explicit(&aps_started, memory_order_acquire), count
@@ -312,6 +315,40 @@ void smp_start_aps(void) {
             printf("Processor %#x did not start\n", cpus[i]->apic_id);
         } else if (!smp_guest_cpu(cpus[i]->apic_id)) {
             printf("Processor %#x is not the guest's\n", cpus[i]->apic_id);
+        }
+    }
+}
+
+uintptr_t smp_trampoline_wake(void (*entry)(void *), uint8_t *stack, size_t size) {
+    static struct ap_boot_entry wake;
+    wake = (struct ap_boot_entry){ this_cpu()->apic_id, 0, (uint64_t)(uintptr_t)stack };
+    return trampoline_install(&wake, 1, size, (uintptr_t)entry);
+}
+
+// Where a processor that waking restarts goes: what it had before sleeping,
+// and its vCPU as a processor's after a reset, waiting for a start-up IPI.
+static void ap_wake(struct cpu *cpu) {
+    sleep_cpu_wake(cpu);
+    atomic_store_explicit(&cpu->online, true, memory_order_release);
+    struct vcpu *v = cpu->vcpu;
+    vcpu_power_on(v);
+    atomic_store_explicit(&cpu->ready, true, memory_order_release);
+    vcpu_wait_for_sipi(v);
+    vcpu_run(v);
+}
+
+void smp_restart_aps(void) {
+    if (ap_table == NULL) {
+        return;
+    }
+    for (size_t i = 1; i < cpu_count; i++) {
+        atomic_store_explicit(&cpus[i]->online, false, memory_order_relaxed);
+        atomic_store_explicit(&cpus[i]->ready, false, memory_order_relaxed);
+    }
+    start_each(trampoline_install(ap_table, cpu_count - 1, CPU_AREA_SIZE, (uintptr_t)ap_wake));
+    for (size_t i = 1; i < cpu_count; i++) {
+        if (!atomic_load_explicit(&cpus[i]->online, memory_order_acquire)) {
+            printf("Processor %#x did not start again after waking\n", cpus[i]->apic_id);
         }
     }
 }

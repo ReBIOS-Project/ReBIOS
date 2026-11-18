@@ -50,6 +50,7 @@
 #include <virt/pit.h>
 #include <virt/profile.h>
 #include <virt/rtc.h>
+#include <virt/sleep.h>
 #include <virt/svm.h>
 #include <virt/usb.h>
 #include <virt/usb_disk.h>
@@ -95,6 +96,44 @@ struct vcpu *vcpu_create(struct cpu *cpu) {
     nvmx_vcpu_init(v);
     nsvm_vcpu_init(v);
     return v;
+}
+
+void vcpu_power_on(struct vcpu *v) {
+    atomic_store_explicit(&v->sipi, VCPU_SIPI_RUNNING, memory_order_release);
+    if (virt_vmx) {
+        vmx_vcpu_power_on(v);
+    } else {
+        svm_vcpu_power_on(v);
+    }
+    vlapic_power_on(v);
+    mtrr_vcpu_init(v);
+    msr_vcpu_init(v);
+    nvmx_vcpu_power_on(v);
+    nsvm_vcpu_power_on(v);
+    v->fetched_count = 0;
+    v->redeliver = 0;
+    v->injecting = false;
+    v->nmi_pending = false;
+    v->stepping = false;
+    v->step_tf = false;
+    v->step_flags_loaded = false;
+    v->ferr = false;
+    v->ferr_step = false;
+    v->db_pending = 0;
+    v->mmio_retry = false;
+    v->io_retry = false;
+    v->exit_after_turn = false;
+    v->threads_after = 0;
+    v->threads_due = 0;
+    v->monitor_line = NULL;
+    v->mwait_deadline = 0;
+    v->call32_ready = false;
+    // The I/O bitmaps vmx_vcpu_power_on() and svm_vcpu_power_on() set.
+    v->rtc_lent = false;
+    v->rtc_bitmaps = false;
+    if (v->cpu->bsp) {
+        vcpu_set_reset_state(v);
+    }
 }
 
 static struct spinlock world_lock;
@@ -403,6 +442,7 @@ void vcpu_before_entry(struct vcpu *v) {
     if (log_panicked()) {
         x86_halt_forever();
     }
+    sleep_check(v);
     // Breakpoints only an instruction that completes reports.
     v->db_pending = 0;
     profile_entry(v);
@@ -558,7 +598,7 @@ void vcpu_wait(
             hv_timer_run();
         }
         vlapic_timer_program(v);
-        if (ends(v)) {
+        if (ends(v) || sleep_requested()) {
             break;
         }
         if (log_panicked()) {
@@ -1203,6 +1243,7 @@ void vcpu_wait_for_sipi(struct vcpu *v) {
         if ((vector = atomic_load_explicit(&v->sipi, memory_order_acquire)) >= 0) {
             break;
         }
+        sleep_check(v);
         if (cpu->bsp) {
             // With interrupts on, for any of them to preempt the USB thread.
             sti();
@@ -1253,6 +1294,14 @@ void vcpu_startup(struct vcpu *v, uint8_t vector) {
         return;
     }
     vcpu_set_real_mode(v, (uint16_t)vector << 8, 0);
+}
+
+void vcpu_set_reset_state(struct vcpu *v) {
+    vcpu_set_real_mode(v, 0xf000, 0xfff0);
+    // CS's base at reset, below the top of 4 GiB (SDM 325462-093 Vol. 3A,
+    // 11.1.4).
+    struct vcpu_segment code = { 0xf000, 0x9b, 0xffff, 0xffff0000 };
+    vcpu_set_seg(v, VCPU_SEG_CS, &code);
 }
 
 void vcpu_set_real_mode(struct vcpu *v, uint16_t cs, uint16_t ip) {

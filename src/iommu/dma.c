@@ -224,6 +224,22 @@ void dma_enable(void) {
     hv_timer_set(&fault_timer, rdtsc() + time_tsc_hz());
 }
 
+void dma_suspend(void) {
+    if (kind == IOMMU_TABLES_KIND_AMD) {
+        amdvi_suspend();
+    } else {
+        vtd_suspend();
+    }
+}
+
+void dma_resume(void) {
+    if (kind == IOMMU_TABLES_KIND_AMD) {
+        amdvi_resume();
+    } else {
+        vtd_resume();
+    }
+}
+
 void dma_report_faults(void) {
     report_faults(SIZE_MAX);
 }

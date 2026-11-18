@@ -71,6 +71,19 @@ void vioapic_init(void) {
     gpt_flush();
 }
 
+void vioapic_wake(void) {
+    for (size_t i = 0; i < count; i++) {
+        struct vioapic *vio = &vioapics[i];
+        spinlock_acquire(&vio->lock);
+        vio->select = 0;
+        vio->id_reg = vio->host->id_reg;
+        for (size_t pin = 0; pin < vio->host->pins; pin++) {
+            atomic_store_explicit(&vio->rtes[pin], IOAPIC_RTE_MASKED, memory_order_release);
+        }
+        spinlock_release(&vio->lock);
+    }
+}
+
 bool vioapic_rte(uint32_t gsi, uint64_t *rte) {
     for (size_t i = 0; i < count; i++) {
         struct ioapic *io = vioapics[i].host;

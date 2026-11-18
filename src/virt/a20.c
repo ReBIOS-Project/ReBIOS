@@ -87,6 +87,13 @@ void a20_kbc_set(bool open) {
     spinlock_release(&lock);
 }
 
+void a20_wake(void) {
+    spinlock_acquire(&lock);
+    system_control = 0;
+    update_gate();
+    spinlock_release(&lock);
+}
+
 void a20_init(void) {
     struct io_handler handler = { SYSTEM_CONTROL_A, 1, system_control_a, NULL, true };
     io_register(&handler);

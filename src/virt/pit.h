@@ -24,6 +24,10 @@ struct cpu;
 
 // Gives the guest an 8254 of its own, and the timer bits of port 61h.
 void pit_init(void);
+// After the machine slept: the machine's 8254's counter 0 stopped again, and
+// the guest's 8254 and port 61h as a reset leaves them.
+void pit_host_stop(void);
+void pit_wake(void);
 
 // The guest's 8259 took counter 0's interrupt, and has ended it.
 void pit_tick_begun(void);

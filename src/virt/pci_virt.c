@@ -1713,6 +1713,17 @@ uint32_t pci_virt_config_read(struct pci_cfg_addr addr, uint32_t offset, size_t 
     return value;
 }
 
+void pci_virt_resume(void) {
+    spinlock_acquire(&virt.lock);
+    for (size_t i = 0; i < virt.count; i++) {
+        struct vfunction *vf = &virt.functions[i];
+        if (!vf->hidden) {
+            reset_repair(vf);
+        }
+    }
+    spinlock_release(&virt.lock);
+}
+
 void pci_virt_config_write(
     struct pci_cfg_addr addr,
     uint32_t offset,

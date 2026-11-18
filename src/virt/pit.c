@@ -607,28 +607,64 @@ static bool speaker_works(void) {
     return counting && ended;
 }
 
-void pit_init(void) {
-    boot_tsc = rdtsc();
-    static const char *const pit_ids[] = { "PNP0100", NULL };
-    bool real_pit = acpi_has_device(pit_ids);
-    real_port_61h = acpi_claims_port(PORT_NMI_STATUS);
-    if (real_pit) {
-        // The chipset's stops interrupting, where it runs: its line stays for
-        // the HPET, whose legacy replacement route a guest may use. The count
-        // is for the implementations that only heed the mode once one comes,
-        // as Linux 7.3's clockevent_i8253_disable() has it.
-        outb(PORT_CONTROL, CONTROL_STOP_COUNTER_0);
-        outb(PORT_COUNTER_FIRST, 0);
-        outb(PORT_COUNTER_FIRST, 0);
-        outb(PORT_CONTROL, CONTROL_STOP_COUNTER_0);
+// Whether the machine has an 8254, whose counter 0 the hypervisor stops.
+static bool real_pit;
+
+// The chipset's stops interrupting, where it runs: its line stays for the
+// HPET, whose legacy replacement route a guest may use. The count is for the
+// implementations that only heed the mode once one comes, as Linux 7.3's
+// clockevent_i8253_disable() has it.
+void pit_host_stop(void) {
+    if (!real_pit) {
+        return;
     }
+    outb(PORT_CONTROL, CONTROL_STOP_COUNTER_0);
+    outb(PORT_COUNTER_FIRST, 0);
+    outb(PORT_COUNTER_FIRST, 0);
+    outb(PORT_CONTROL, CONTROL_STOP_COUNTER_0);
+}
+
+// The bits of port 61h the guest writes, as the machine has them.
+static uint8_t nmi_found(void) {
     uint8_t real = real_port_61h ? inb(PORT_NMI_STATUS) : 0xff;
-    nmi_written = real != 0xff ? real & NMI_WRITABLE : 0;
-    real_speaker = real_pit && real_port_61h && speaker_works();
-    printf("The guest's speaker %s\n", real_speaker ? "sounds on the machine's" : "is silent");
+    return real != 0xff ? real & NMI_WRITABLE : 0;
+}
+
+// Counters 0 and 1 always count, channel 2 as port 61h has its gate.
+static void gates_reset(void) {
     channels[0].gate = true;
     channels[1].gate = true;
     channels[CHANNEL_SPEAKER].gate = (nmi_written & NMI_GATE) != 0;
+}
+
+void pit_wake(void) {
+    spinlock_acquire(&lock);
+    hv_timer_set(&tick, 0);
+    for (size_t i = 0; i < CHANNELS; i++) {
+        channels[i] = (struct channel){ 0 };
+    }
+    counter_0_edge = 0;
+    tick_begun = 0;
+    atomic_store_explicit(&tick_cpu, NULL, memory_order_relaxed);
+    atomic_store_explicit(&tick_returning, false, memory_order_relaxed);
+    tick_held_until = 0;
+    host_edge = false;
+    boot_tsc = rdtsc();
+    nmi_written = nmi_found();
+    gates_reset();
+    spinlock_release(&lock);
+}
+
+void pit_init(void) {
+    boot_tsc = rdtsc();
+    static const char *const pit_ids[] = { "PNP0100", NULL };
+    real_pit = acpi_has_device(pit_ids);
+    real_port_61h = acpi_claims_port(PORT_NMI_STATUS);
+    pit_host_stop();
+    nmi_written = nmi_found();
+    real_speaker = real_pit && real_port_61h && speaker_works();
+    printf("The guest's speaker %s\n", real_speaker ? "sounds on the machine's" : "is silent");
+    gates_reset();
 
     tick.fired = tick_fired;
     hv_timer_add(&tick);

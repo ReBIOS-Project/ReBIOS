@@ -20,5 +20,7 @@
 
 // The guest's 8237 DMA controllers, which have no device to serve.
 void isa_dma_init(void);
+// Both as a reset leaves them, after the machine slept: each master cleared.
+void isa_dma_wake(void);
 
 #endif

@@ -35,6 +35,10 @@ void dma_map(uintptr_t gpa, uintptr_t hpa, size_t size, uint32_t prot);
 
 // Turns translation on, once the guest's memory is mapped and before it runs.
 void dma_enable(void);
+// Stops the IOMMUs before the machine sleeps, as Linux 7.3 does, and gives
+// them back their translation and interrupt remapping after it wakes.
+void dma_suspend(void);
+void dma_resume(void);
 
 // Logs, and clears, the faults the IOMMUs recorded.
 void dma_report_faults(void);

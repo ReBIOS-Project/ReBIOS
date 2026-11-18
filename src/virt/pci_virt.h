@@ -42,6 +42,11 @@ struct pci_virt_hook {
 // for NULL. After pci_virt_init().
 void pci_virt_hook(struct pci_cfg_addr addr, const struct pci_virt_hook *hook, void *ctx);
 
+// Gives every function back what the host had of it, its BARs, a bridge's
+// buses and windows, and its MSI and MSI-X messages, after the machine slept,
+// before anything reaches it: bridges come before what is behind them.
+void pci_virt_resume(void);
+
 // Hands the guest's accesses to the pages holding [offset, offset + size) of a
 // memory BAR of the function to ops, wherever the guest puts the BAR, with
 // offsets from the first of those pages. False where another range has any of

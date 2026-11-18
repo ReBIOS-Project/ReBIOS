@@ -299,7 +299,11 @@ void svm_cpu_init(void) {
     // nested page tables (nsvm.c).
     uint64_t nxe = (cpuid(0x80000001, 0).edx & CPUID_80000001_EDX_NX) != 0 ? EFER_NXE : 0;
     wrmsr(MSR_EFER, (rdmsr(MSR_EFER) & ~(uint64_t)EFER_TCE) | EFER_SVME | nxe);
-    wrmsr(MSR_VM_HSAVE_PA, (uint64_t)(uintptr_t)page_alloc(1));
+    struct cpu *cpu = this_cpu();
+    if (cpu->virt_area == NULL) {
+        cpu->virt_area = page_alloc(1);
+    }
+    wrmsr(MSR_VM_HSAVE_PA, (uint64_t)(uintptr_t)cpu->virt_area);
     // INITs become #SX, which the guest's intercept or the host's handler
     // takes, rather than resetting the processor under the hypervisor.
     uint64_t vm_cr = rdmsr(MSR_VM_CR);
@@ -323,7 +327,17 @@ void svm_cpu_init(void) {
 void svm_vcpu_init(struct vcpu *v) {
     v->vmcb = page_alloc(1);
     v->vmcb_pa = (uintptr_t)v->vmcb;
+    svm_vcpu_power_on(v);
+}
 
+void svm_vcpu_power_on(struct vcpu *v) {
+    memset(v->vmcb, 0, PAGE_SIZE);
+    // Nothing of the VMCB is clean on its first VMRUN (APM 24593 rev. 3.45,
+    // 15.15.3).
+    if (v->vmcb_seen != NULL) {
+        page_free(v->vmcb_seen, 1);
+        v->vmcb_seen = NULL;
+    }
     struct vmcb_control *c = &v->vmcb->control;
     // For the CR4 bits of features the guest does not get (cpuid.c).
     c->intercept_cr = SVM_INTERCEPT_CR4_WRITE;
