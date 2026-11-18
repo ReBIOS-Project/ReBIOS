@@ -167,6 +167,96 @@ static void window_add(
     element_add(parent, child);
 }
 
+// Whether b is a bridge between f and its root bus.
+static bool bridge_above(const struct pci_enum_function *b, const struct pci_enum_function *f) {
+    for (const struct pci_enum_function *p = f->parent; p != NULL; p = p->parent) {
+        if (p == b) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// A bridge's window on a side, false where it is closed.
+static bool side_window(
+    const struct pci_enum_function *b,
+    size_t side,
+    uint64_t *base,
+    uint64_t *last
+) {
+    *base = side == SIDE_PREF ? b->pref_base : b->mem_base;
+    *last = side == SIDE_PREF ? b->pref_limit : b->mem_limit;
+    return *last >= *base;
+}
+
+// The side of a bridge above what keeps its host addresses whose window holds
+// it on the host.
+static size_t fixed_side(const struct pci_enum_function *b, const struct pci_plan_fixed *fixed) {
+    const struct pci_enum_bar *bar = &fixed->function->bars[fixed->bar];
+    uint64_t base;
+    uint64_t last;
+    if (side_window(b, SIDE_PREF, &base, &last) && bar->base >= base
+     && bar->base + bar->size - 1 <= last) {
+        return SIDE_PREF;
+    }
+    return SIDE_MEMORY;
+}
+
+// Whether the BAR of f at b keeps its host address with fixed's.
+static bool fixed_member(
+    const struct pci_plan_fixed *fixed,
+    const struct pci_enum_function *f,
+    size_t b
+) {
+    if (fixed == NULL || f != fixed->function) {
+        return false;
+    }
+    const struct pci_enum_bar *bar = &f->bars[b];
+    if (f->parent == NULL) {
+        return b == fixed->bar || bar->prefetchable;
+    }
+    uint64_t base;
+    uint64_t last;
+    bool open = side_window(f->parent, fixed_side(f->parent, fixed), &base, &last);
+    return open && bar->base >= base && bar->base + bar->size - 1 <= last;
+}
+
+// A container's side as the host has it from base, size bytes, for what keeps
+// its host addresses.
+static void host_layout(
+    const struct pci_enum_topology *t,
+    struct container *c,
+    size_t side,
+    uintptr_t base,
+    size_t size
+) {
+    for (size_t i = 0; i < c->count; i++) {
+        struct element *e = &c->elements[i];
+        const struct pci_enum_function *f = &t->functions[e->function];
+        if (e->side != side) {
+            continue;
+        }
+        uintptr_t host = 0;
+        if (e->kind == ELEMENT_BAR) {
+            host = page_down(f->bars[e->bar].base);
+        } else if (e->kind == ELEMENT_PREF_WINDOW) {
+            host = f->pref_base;
+        } else if (e->kind == ELEMENT_LOW_WINDOW) {
+            host = f->mem_base;
+        }
+        if (host < base || host - base + e->size > size) {
+            printf(
+                "PCI " PCI_CFG_ADDR_FMT ": memory outside the window kept at its host addresses "
+                "at 0x%llx\n",
+                PCI_CFG_ADDR_ARGS(f->addr), (unsigned long long)base
+            );
+            continue;
+        }
+        e->offset = host - base;
+    }
+    c->size[side] = size;
+}
+
 static bool is_bridge(const struct pci_enum_function *f) {
     return f->header_type == PCI_HEADER_TYPE_BRIDGE && f->secondary_bus > f->addr.bus;
 }
@@ -660,7 +750,8 @@ const struct pci_plan *pci_plan_make(
     const struct pci_plan_range *obstacles,
     size_t count,
     size_t lfb_size,
-    uint64_t high_floor
+    uint64_t high_floor,
+    const struct pci_plan_fixed *fixed
 ) {
     const struct pci_enum_topology *t = pci_enum_topology();
     size_t n = t->function_count;
@@ -714,6 +805,25 @@ const struct pci_plan *pci_plan_make(
         }
     }
 
+    // What keeps its host addresses, on the guest's bus 0 only: the function
+    // on the root bus it is on or behind.
+    size_t fixed_top = NO_CONTAINER;
+    if (fixed != NULL) {
+        const struct pci_enum_function *top = fixed->function;
+        while (top->parent != NULL) {
+            top = top->parent;
+        }
+        if (root_of(t, top) == plan.primary) {
+            fixed_top = (size_t)(top - t->functions);
+        } else {
+            printf(
+                "PCI " PCI_CFG_ADDR_FMT ": cannot keep its host addresses off the guest's bus 0\n",
+                PCI_CFG_ADDR_ARGS(fixed->function->addr)
+            );
+            fixed = NULL;
+        }
+    }
+
     // The bridges, and the ports, with something above 4 GiB behind them.
     bool *high_windows = kmalloc((n + roots != 0 ? n + roots : 1) * sizeof(bool));
     for (size_t i = 0; i < n + roots; i++) {
@@ -761,6 +871,8 @@ const struct pci_plan *pci_plan_make(
             size_t side = SIDE_MEMORY;
             if (above) {
                 side = SIDE_HIGH;
+            } else if (fixed_member(fixed, f, b)) {
+                side = f->parent != NULL ? fixed_side(f->parent, fixed) : SIDE_PREF;
             } else if (bar->prefetchable && pref_low) {
                 side = SIDE_PREF;
             }
@@ -805,13 +917,28 @@ const struct pci_plan *pci_plan_make(
         pack(c, SIDE_MEMORY);
         pack(c, SIDE_PREF);
         pack(c, SIDE_HIGH);
+        const struct pci_enum_function *b = &t->functions[i];
         struct container *parent = &containers[parents[i]];
-        // A root bus has a region below 4 GiB, a port two windows.
-        bool on_primary = t->functions[i].parent == NULL
-                       && root_of(t, &t->functions[i]) == plan.primary;
-        size_t pref_side = on_primary ? SIDE_MEMORY : SIDE_PREF;
-        window_add(parent, c, i, ELEMENT_LOW_WINDOW, SIDE_MEMORY, SIDE_MEMORY);
-        window_add(parent, c, i, ELEMENT_PREF_WINDOW, SIDE_PREF, pref_side);
+        // A root bus has a region below 4 GiB, a port two windows, and the
+        // guest's bus 0 a second one for what keeps its host addresses.
+        bool on_primary = b->parent == NULL && root_of(t, b) == plan.primary;
+        size_t low_to = SIDE_MEMORY;
+        size_t pref_to = on_primary ? SIDE_MEMORY : SIDE_PREF;
+        if (fixed != NULL && bridge_above(b, fixed->function)) {
+            size_t side = fixed_side(b, fixed);
+            uint64_t base;
+            uint64_t last;
+            side_window(b, side, &base, &last);
+            host_layout(t, c, side, base, last - base + 1);
+            size_t to = i == fixed_top ? SIDE_PREF : fixed_side(b->parent, fixed);
+            if (side == SIDE_MEMORY) {
+                low_to = to;
+            } else {
+                pref_to = to;
+            }
+        }
+        window_add(parent, c, i, ELEMENT_LOW_WINDOW, SIDE_MEMORY, low_to);
+        window_add(parent, c, i, ELEMENT_PREF_WINDOW, SIDE_PREF, pref_to);
         window_add(parent, c, i, ELEMENT_HIGH_WINDOW, SIDE_HIGH, SIDE_HIGH);
     }
 
@@ -894,6 +1021,13 @@ const struct pci_plan *pci_plan_make(
             piece_size[2 * r + s] = align_up(c->size[side], ONE_MIB) + (s == 0 ? SLACK_LOW : 0);
             piece_align[2 * r + s] = c->align[side] > ONE_MIB ? c->align[side] : ONE_MIB;
         }
+        if (fixed != NULL && r == plan.primary) {
+            host_layout(t, c, SIDE_PREF, fixed->base, fixed->end - fixed->base);
+            c->base[SIDE_PREF] = fixed->base;
+            c->placed[SIDE_PREF] = true;
+            plan.roots[r].pref = (struct pci_plan_range){ fixed->base, fixed->end };
+            piece_size[2 * r + 1] = 0;
+        }
     }
     piece_size[ecam_piece] = ecam_present ? ecam_size : 0;
     piece_align[ecam_piece] = ONE_MIB;
@@ -949,6 +1083,9 @@ const struct pci_plan *pci_plan_make(
         if (obstacles[i].base >= TOP_AREA && obstacles[i].base < plan.tolud) {
             plan.tolud = obstacles[i].base;
         }
+    }
+    if (fixed != NULL && fixed->base < plan.tolud) {
+        plan.tolud = fixed->base;
     }
     if (plan.tolud > TOP_AREA && plan.ecam == 0 && placed == 0) {
         plan.tolud = TOP_AREA;

@@ -484,7 +484,7 @@ void layout_init(void) {
     uint64_t high_floor = add_high(NULL, available, &avoid);
     high_floor = align_up(high_floor > pinned_top ? high_floor : pinned_top, ONE_GIB);
     const struct pci_plan *plan = pci_plan_make(
-        obstacles, avoid.count, vga_lfb_size(), high_floor
+        obstacles, avoid.count, vga_lfb_size(), high_floor, NULL
     );
     kfree(obstacles);
 

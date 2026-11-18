@@ -32,6 +32,20 @@ struct pci_plan_range {
     uintptr_t end;
 };
 
+struct pci_enum_function;
+
+// Memory the guest finds at its host address in one piece on its bus 0, from
+// base to end below 4 GiB: function's BAR bar, with its other BARs in the
+// window of the bridge above it that holds it (on a root bus, its other
+// prefetchable BARs), and the windows that hold them of the bridges above,
+// which hold nothing else (pci_assign_top()).
+struct pci_plan_fixed {
+    const struct pci_enum_function *function;
+    size_t bar;
+    uintptr_t base;
+    uintptr_t end;
+};
+
 // Where the guest first finds a function's memory, by guest-physical address:
 // 0 for a BAR or expansion ROM it does not find anywhere.
 struct pci_plan_function {
@@ -111,13 +125,16 @@ struct pci_plan {
 // Lays the guest's PCI memory out around obstacles, the sorted ranges below 4
 // GiB the guest finds at their addresses, as high below 4 GiB as it goes, with
 // lfb_size bytes for the emulated VGA's linear framebuffer, and the larger
-// BARs from high_floor up with pci_high_windows. Needs pci_enum_scan() and
+// BARs from high_floor up with pci_high_windows. What fixed names, if not
+// NULL, keeps its host addresses, one of the obstacles, with the guest's
+// memory below 4 GiB ending under it. Needs pci_enum_scan() and
 // pci_cfg_init().
 const struct pci_plan *pci_plan_make(
     const struct pci_plan_range *obstacles,
     size_t count,
     size_t lfb_size,
-    uint64_t high_floor
+    uint64_t high_floor,
+    const struct pci_plan_fixed *fixed
 );
 
 // The plan, or NULL before pci_plan_make().
