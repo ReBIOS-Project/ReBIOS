@@ -233,6 +233,10 @@ static struct {
     uacpi_namespace_node **dropped;
     size_t dropped_count;
     size_t dropped_capacity;
+    // The processor devices that the guest has as Processor objects, and those
+    // it has as they are.
+    size_t processors_made;
+    size_t processors_kept;
 
     struct notification queue[QUEUE_SIZE];
     uint32_t queue_head;
@@ -1839,8 +1843,45 @@ static void emit_merged(struct aml *a, const struct merged *m) {
     aml_end(a);
 }
 
+// The ID that a processor device has as a Processor object: its _UID, where a
+// local APIC entry of the MADT, the one kind an OS of ACPI 1.0's time knows,
+// gives the same as its processor's (ACPI 6.6, 5.2.12.2): false where none
+// does.
+static bool processor_object_id(uacpi_namespace_node *device, uint8_t *id) {
+    uint64_t uid;
+    struct uacpi_table table;
+    if (uacpi_eval_simple_integer(device, "_UID", &uid) != UACPI_STATUS_OK || uid > UINT8_MAX
+     || uacpi_table_find_by_signature(ACPI_MADT_SIGNATURE, &table) != UACPI_STATUS_OK) {
+        return false;
+    }
+    bool found = false;
+    size_t offset = sizeof(struct acpi_madt);
+    const struct acpi_entry_hdr *hdr;
+    while (!found && (hdr = acpi_madt_next(table.ptr, table.hdr->length, &offset)) != NULL) {
+        found = hdr->type == ACPI_MADT_ENTRY_TYPE_LAPIC
+             && hdr->length >= sizeof(struct acpi_madt_lapic)
+             && ((const struct acpi_madt_lapic *)hdr)->uid == uid;
+    }
+    uacpi_table_unref(&table);
+    *id = (uint8_t)uid;
+    return found;
+}
+
+// Whether the object is the identity of a processor device that the guest has
+// as a Processor object, which has none.
+static bool processor_identity(uacpi_namespace_node *node) {
+    uacpi_object_name name = uacpi_namespace_node_name(node);
+    if (memcmp(name.text, "_HID", 4) != 0 && memcmp(name.text, "_CID", 4) != 0) {
+        return false;
+    }
+    uacpi_namespace_node *device = uacpi_namespace_node_parent(node);
+    uint8_t id;
+    return uacpi_device_matches_pnp_id(device, processor_device_ids)
+        && processor_object_id(device, &id);
+}
+
 static void emit_object(struct aml *a, uacpi_namespace_node *node, bool in_processor) {
-    if (uacpi_namespace_node_is_alias(node)) {
+    if (uacpi_namespace_node_is_alias(node) || (in_processor && processor_identity(node))) {
         return;
     }
     uacpi_object_name name = uacpi_namespace_node_name(node);
@@ -1866,10 +1907,27 @@ static void emit_object(struct aml *a, uacpi_namespace_node *node, bool in_proce
             if (merged_of(node) != NULL || is_dropped(node) || at_port(node)) {
                 return;
             }
+            // The guest's namespace is ACPI 1.0's, whose processors are
+            // Processor objects, all that an OS of its time knows.
+            bool processor = uacpi_device_matches_pnp_id(node, processor_device_ids);
+            uint8_t id;
+            if (processor && processor_object_id(node, &id)) {
+                target_add(node);
+                aml_begin(a, AML_PROCESSOR);
+                emit_seg(a, name.text);
+                aml_byte(a, id);
+                aml_dword(a, 0);
+                aml_byte(a, 0);
+                emit_children(a, node, true);
+                aml_end(a);
+                vacpi.processors_made++;
+                return;
+            }
+            vacpi.processors_kept += processor ? 1 : 0;
             target_add(node);
             aml_begin(a, AML_DEVICE);
             emit_seg(a, name.text);
-            emit_children(a, node, uacpi_device_matches_pnp_id(node, processor_device_ids));
+            emit_children(a, node, processor);
             if (node == vacpi.primary) {
                 for (size_t i = 0; i < vacpi.merged_count; i++) {
                     emit_merged(a, &vacpi.merged[i]);
@@ -3120,6 +3178,13 @@ uint8_t *vacpi_dsdt(size_t *length) {
         "Guest DSDT: %zu bytes, %zu methods, %zu notification targets\n",
         a.size, vacpi.method_count, vacpi.target_count
     );
+    if (vacpi.processors_made != 0 || vacpi.processors_kept != 0) {
+        printf(
+            "Guest DSDT: %zu processor devices as Processor objects, %zu as devices, as no local "
+            "APIC entry of the MADT gives their _UID\n",
+            vacpi.processors_made, vacpi.processors_kept
+        );
+    }
     *length = a.size;
     return a.data;
 }
