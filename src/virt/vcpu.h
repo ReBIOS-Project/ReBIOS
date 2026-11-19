@@ -221,8 +221,11 @@ struct vcpu {
     // For profile.c: the exit being handled, and when it began.
     unsigned int profile_slot;
     uint64_t profile_tsc;
-    // The last exit's VMX basic exit reason or SVM exit code, for panics.
-    uint32_t last_exit;
+    // The last exit's VMX basic exit reason or SVM exit code, for panics,
+    // which another processor's may tell.
+    _Atomic(uint32_t) last_exit;
+    // Whether it stopped for the machine to sleep.
+    _Atomic(bool) parked;
     // What runs keep (virt/run.c).
     struct run_state *run;
 };

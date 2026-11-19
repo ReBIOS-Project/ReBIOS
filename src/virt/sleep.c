@@ -103,10 +103,11 @@ bool sleep_requested(void) {
 // An application processor's last steps before the machine sleeps: it leaves
 // VMX operation, as Xen 4.22's enter_state() has every processor do, and stops
 // with interrupts off, until waking restarts it.
-static noreturn void park(void) {
+static noreturn void park(struct vcpu *v) {
     cli();
     virt_cpu_off();
     wbinvd();
+    atomic_store_explicit(&v->parked, true, memory_order_relaxed);
     atomic_fetch_add_explicit(&parked, 1, memory_order_release);
     x86_halt_forever();
 }
@@ -180,6 +181,24 @@ static void guest_wake(struct vcpu *v) {
     vcpu_power_on(v);
 }
 
+// Each processor that has not stopped for the machine to sleep, with the exit
+// it last took.
+static void name_running(const struct vcpu *boot) {
+    for (size_t i = 0; i < smp_cpu_count(); i++) {
+        struct cpu *cpu = smp_cpu(i);
+        const struct vcpu *v = cpu->vcpu;
+        if (cpu == boot->cpu || !atomic_load_explicit(&cpu->online, memory_order_acquire)
+         || v == NULL || atomic_load_explicit(&v->parked, memory_order_relaxed)) {
+            continue;
+        }
+        printf(
+            "CPU %u, APIC ID %#x, has not stopped: its last exit was %s %#x\n",
+            cpu->index, cpu->apic_id, virt_vmx ? "basic reason" : "code",
+            atomic_load_explicit(&v->last_exit, memory_order_relaxed)
+        );
+    }
+}
+
 static void enter(struct vcpu *v) {
     size_t others = 0;
     for (size_t i = 0; i < smp_cpu_count(); i++) {
@@ -188,6 +207,7 @@ static void enter(struct vcpu *v) {
         others += cpu != v->cpu && online ? 1 : 0;
     }
     if (!others_parked(others)) {
+        name_running(v);
         panic("The other processors do not stop for the guest's S3\n");
     }
     uint64_t asked = rdtsc();
@@ -238,6 +258,12 @@ static void enter(struct vcpu *v) {
     }
     // Before the others start again, which would otherwise stop once more.
     atomic_store_explicit(&parked, 0, memory_order_relaxed);
+    for (size_t i = 0; i < smp_cpu_count(); i++) {
+        struct vcpu *other = smp_cpu(i)->vcpu;
+        if (other != NULL) {
+            atomic_store_explicit(&other->parked, false, memory_order_relaxed);
+        }
+    }
     atomic_store_explicit(&requested, 0, memory_order_release);
     smp_restart_aps();
     guest_wake(v);
@@ -257,7 +283,7 @@ void sleep_check(struct vcpu *v) {
         return;
     }
     if (!v->cpu->bsp) {
-        park();
+        park(v);
     }
     enter(v);
 }

@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License along with
 // ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -61,7 +62,9 @@ static size_t describe_guest(char *buf, size_t size) {
     }
     int len = snprintf(
         buf, size, "Its guest last exited with %s %#x, at RIP %#llx\n",
-        virt_vmx ? "basic reason" : "code", v->last_exit, (unsigned long long)vcpu_rip(v)
+        virt_vmx ? "basic reason" : "code",
+        atomic_load_explicit(&v->last_exit, memory_order_relaxed),
+        (unsigned long long)vcpu_rip(v)
     );
     return len < 0 ? 0 : (size_t)len;
 }

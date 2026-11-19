@@ -327,8 +327,8 @@ static void watchdog(struct vcpu *v) {
     cpu->watchdog_next = now + WATCHDOG_REPORT_NS;
     printf(
         "Exit %#x kept CPU %u from the guest for %llu.%03llu ms\n",
-        v->last_exit, cpu->index, (unsigned long long)(held / 1000000),
-        (unsigned long long)(held / 1000 % 1000)
+        atomic_load_explicit(&v->last_exit, memory_order_relaxed), cpu->index,
+        (unsigned long long)(held / 1000000), (unsigned long long)(held / 1000 % 1000)
     );
 }
 

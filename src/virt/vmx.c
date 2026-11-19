@@ -1186,8 +1186,8 @@ static void emulated_delivery(struct vcpu *v, uintptr_t gpa) {
 
 static void vmx_handle_exit(struct vcpu *v) {
     uint32_t reason = vmx_read(VMCS_EXIT_REASON);
-    v->last_exit = reason & 0xffff;
-    profile_exit(v, v->last_exit);
+    atomic_store_explicit(&v->last_exit, reason & 0xffff, memory_order_relaxed);
+    profile_exit(v, reason & 0xffff);
     uint64_t qual = vmx_read(VMCS_EXIT_QUALIFICATION);
     if (nvmx_l2_exit(v, reason, qual)) {
         return;

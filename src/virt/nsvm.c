@@ -743,8 +743,8 @@ static void exit_to_l1(
     // every other exit clears their count (APM 24593 rev. 3.46, 15.8.4).
     if (svm_decode_assists) {
         bool fault = code == SVM_EXIT_NPF || code == SVM_EXIT_EXCEPTION_BASE + VECTOR_PF;
-        bool fetched = v->last_exit == SVM_EXIT_NPF
-                    || v->last_exit == SVM_EXIT_EXCEPTION_BASE + VECTOR_PF;
+        uint32_t last = atomic_load_explicit(&v->last_exit, memory_order_relaxed);
+        bool fetched = last == SVM_EXIT_NPF || last == SVM_EXIT_EXCEPTION_BASE + VECTOR_PF;
         c12->insn_len = fault && fetched ? c02->insn_len : 0;
         if (fault && fetched) {
             memcpy(c12->insn_bytes, c02->insn_bytes, sizeof(c12->insn_bytes));

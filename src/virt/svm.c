@@ -860,8 +860,8 @@ static void exit_general_protection(struct vcpu *v) {
 
 static void svm_handle_exit(struct vcpu *v) {
     struct vmcb_control *c = &v->vmcb->control;
-    v->last_exit = (uint32_t)c->exitcode;
-    profile_exit(v, v->last_exit);
+    atomic_store_explicit(&v->last_exit, (uint32_t)c->exitcode, memory_order_relaxed);
+    profile_exit(v, (uint32_t)c->exitcode);
     nsvm_sync_gif(v);
     if (v->stepping && c->exitcode >= SVM_EXIT_EXCEPTION_BASE
      && c->exitcode < SVM_EXIT_EXCEPTION_BASE + 32) {
