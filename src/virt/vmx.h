@@ -166,6 +166,9 @@
 #define VMCS_GUEST_PENDING_DBG 0x6822
 #define VMCS_GUEST_SYSENTER_ESP 0x6824
 #define VMCS_GUEST_SYSENTER_EIP 0x6826
+#define VMCS_GUEST_S_CET 0x6828
+#define VMCS_GUEST_SSP 0x682a
+#define VMCS_GUEST_INTR_SSP_TABLE 0x682c
 #define VMCS_HOST_CR0 0x6c00
 #define VMCS_HOST_CR3 0x6c02
 #define VMCS_HOST_CR4 0x6c04
@@ -178,6 +181,9 @@
 #define VMCS_HOST_SYSENTER_EIP 0x6c12
 #define VMCS_HOST_RSP 0x6c14
 #define VMCS_HOST_RIP 0x6c16
+#define VMCS_HOST_S_CET 0x6c18
+#define VMCS_HOST_SSP 0x6c1a
+#define VMCS_HOST_INTR_SSP_TABLE 0x6c1c
 
 // Pin-based controls (SDM 325462-093 Vol. 3C, Table 27-5).
 #define PIN_EXT_INTR_EXITING ((uint32_t)1 << 0)
@@ -253,6 +259,7 @@
 #define EXIT_CLEAR_BNDCFGS ((uint32_t)1 << 23)
 #define EXIT_CONCEAL_VMX_FROM_PT ((uint32_t)1 << 24)
 #define EXIT_CLEAR_RTIT_CTL ((uint32_t)1 << 25)
+#define EXIT_LOAD_CET_STATE ((uint32_t)1 << 28)
 #define EXIT_SAVE_PERF_GLOBAL_CTRL ((uint32_t)1 << 30)
 
 // VM-entry controls (SDM 325462-093 Vol. 3C, Table 27-17).
@@ -265,6 +272,7 @@
 #define ENTRY_LOAD_BNDCFGS ((uint32_t)1 << 16)
 #define ENTRY_CONCEAL_VMX_FROM_PT ((uint32_t)1 << 17)
 #define ENTRY_LOAD_RTIT_CTL ((uint32_t)1 << 18)
+#define ENTRY_LOAD_CET_STATE ((uint32_t)1 << 20)
 
 // Guest segment access rights (SDM 325462-093 Vol. 3C, Table 27-2).
 #define VMX_AR_L ((uint32_t)1 << 13)
@@ -542,6 +550,9 @@ bool vmx_mpx_passthrough(void);
 // where vmx_perf_global_saved().
 bool vmx_perf_global_switched(void);
 bool vmx_perf_global_saved(void);
+// Whether the guest's CET state is in its VMCS, which entries load and exits
+// save, where the guest has CET.
+bool vmx_cet_switched(void);
 // An access the processor made for the guest outside of any instruction that
 // reached gpa, where the guest has no RAM.
 void vmx_async_access(uintptr_t gpa);

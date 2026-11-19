@@ -29,6 +29,7 @@
 #include <lib/util.h>
 #include <memory.h>
 #include <sys/cpu.h>
+#include <sys/fixup.h>
 #include <sys/mm.h>
 #include <sys/smp.h>
 #include <sys/x86.h>
@@ -103,6 +104,13 @@
 
 #define VMCS_CR3_TARGET0 0x6008
 
+// The CET MSRs a VMCS switches, and IA32_S_CET's SUPPRESS and TRACKER (SDM
+// 325462-093 Vol. 4, Table 2-2).
+#define MSR_IA32_S_CET 0x6a2
+#define MSR_IA32_INTERRUPT_SSP_TABLE_ADDR 0x6a8
+#define S_CET_SUPPRESS ((uint64_t)1 << 10)
+#define S_CET_TRACKER ((uint64_t)1 << 11)
+
 // The access-rights bits that are not reserved (SDM 325462-093 Vol. 3C, Table
 // 27-2).
 #define AR_WRITABLE ((uint64_t)0x1f0ff)
@@ -125,8 +133,9 @@ static const uint16_t fields[] = {
     0x600c, 0x600e, 0x6400, 0x6402, 0x6404, 0x6406, 0x6408, 0x640a, 0x6800,
     0x6802, 0x6804, 0x6806, 0x6808, 0x680a, 0x680c, 0x680e, 0x6810, 0x6812,
     0x6814, 0x6816, 0x6818, 0x681a, 0x681c, 0x681e, 0x6820, 0x6822, 0x6824,
-    0x6826, 0x6c00, 0x6c02, 0x6c04, 0x6c06, 0x6c08, 0x6c0a, 0x6c0c, 0x6c0e,
-    0x6c10, 0x6c12, 0x6c14, 0x6c16
+    0x6826, 0x6828, 0x682a, 0x682c, 0x6c00, 0x6c02, 0x6c04, 0x6c06, 0x6c08,
+    0x6c0a, 0x6c0c, 0x6c0e, 0x6c10, 0x6c12, 0x6c14, 0x6c16, 0x6c18, 0x6c1a,
+    0x6c1c
 };
 
 #define FIELD_COUNT ARRAY_COUNT(fields)
@@ -278,10 +287,10 @@ static unsigned int ept02_budget;
 #define EXIT_EMULATED \
     (EXIT_SAVE_DEBUG_CONTROLS | EXIT_HOST_ADDR_SPACE_SIZE | EXIT_ACK_INTR_ON_EXIT | EXIT_SAVE_PAT \
    | EXIT_LOAD_PAT | EXIT_SAVE_EFER | EXIT_LOAD_EFER | EXIT_SAVE_PREEMPTION_TIMER \
-   | EXIT_DEFAULT1)
+   | EXIT_LOAD_CET_STATE | EXIT_DEFAULT1)
 #define ENTRY_EMULATED \
     (ENTRY_LOAD_DEBUG_CONTROLS | ENTRY_IA32E_MODE_GUEST | ENTRY_LOAD_PAT | ENTRY_LOAD_EFER \
-   | ENTRY_DEFAULT1)
+   | ENTRY_LOAD_CET_STATE | ENTRY_DEFAULT1)
 
 // IA32_VMX_BASIC (SDM 325462-093 Vol. 3D, A.1): the VMCS size, write-back
 // memory, the information of INS and OUTS exits, the TRUE capability MSRs, and
@@ -358,6 +367,12 @@ void nvmx_init(void) {
     cap_true_proc = capability(vmx_capability(MSR_IA32_VMX_TRUE_PROCBASED_CTLS), PROC_EMULATED, 0);
     cap_true_exit = capability(vmx_capability(MSR_IA32_VMX_TRUE_EXIT_CTLS), EXIT_EMULATED, 0);
     cap_true_entry = capability(vmx_capability(MSR_IA32_VMX_TRUE_ENTRY_CTLS), ENTRY_EMULATED, 0);
+    // The CET state the guest's VMCSs load is the guest's own in VMCS01
+    // (vmx.c).
+    if (!vmx_cet_switched()) {
+        cap_true_exit &= ~((uint64_t)EXIT_LOAD_CET_STATE << 32);
+        cap_true_entry &= ~((uint64_t)ENTRY_LOAD_CET_STATE << 32);
+    }
     cap_pin = capability(cap_true_pin, PIN_EMULATED, PIN_DEFAULT1);
     cap_proc = capability(cap_true_proc, PROC_EMULATED, PROC_DEFAULT1);
     cap_exit = capability(cap_true_exit, EXIT_EMULATED, EXIT_DEFAULT1);
@@ -510,6 +525,16 @@ static bool field_offered(uint32_t field) {
         case VMCS_EOI_EXIT2:
         case VMCS_EOI_EXIT3: {
             return (proc2 & PROC2_VIRT_INTR_DELIVERY) != 0;
+        }
+        case VMCS_GUEST_S_CET:
+        case VMCS_GUEST_SSP:
+        case VMCS_GUEST_INTR_SSP_TABLE: {
+            return ((uint32_t)(cap_true_entry >> 32) & ENTRY_LOAD_CET_STATE) != 0;
+        }
+        case VMCS_HOST_S_CET:
+        case VMCS_HOST_SSP:
+        case VMCS_HOST_INTR_SSP_TABLE: {
+            return ((uint32_t)(cap_true_exit >> 32) & EXIT_LOAD_CET_STATE) != 0;
         }
         default: {
             return true;
@@ -1055,6 +1080,33 @@ static bool allowed(uint64_t value, uint64_t cap) {
 static bool canonical(uintptr_t address) {
     unsigned int bits = (cpuid(0x80000008, 0).eax >> 8) & 0xff;
     return (uint64_t)((int64_t)(address << (64 - bits)) >> (64 - bits)) == address;
+}
+
+// IA32_S_CET without the bits the processor reserves, which a write in the
+// hypervisor checks, the guest's value being the VMCS's (vmx.c).
+static bool s_cet_valid(uint64_t value) {
+    return wrmsr_safe(MSR_IA32_S_CET, value)
+        && (value & (S_CET_SUPPRESS | S_CET_TRACKER)) != (S_CET_SUPPRESS | S_CET_TRACKER);
+}
+
+// The CET state that entries load and exits save (SDM 325462-093 Vol. 3C,
+// 29.3.2 and 30.3), in the current VMCS.
+struct cet_state {
+    uint64_t s_cet;
+    uint64_t ssp;
+    uint64_t ssp_table;
+};
+
+static struct cet_state cet_read(void) {
+    return (struct cet_state){
+        vmx_read(VMCS_GUEST_S_CET), vmx_read(VMCS_GUEST_SSP), vmx_read(VMCS_GUEST_INTR_SSP_TABLE)
+    };
+}
+
+static void cet_write(const struct cet_state *state) {
+    vmx_write(VMCS_GUEST_S_CET, state->s_cet);
+    vmx_write(VMCS_GUEST_SSP, state->ssp);
+    vmx_write(VMCS_GUEST_INTR_SSP_TABLE, state->ssp_table);
 }
 
 // A list of MSR entries, 16 bytes each, its last byte within the address width
@@ -1652,6 +1704,16 @@ static bool host_state_valid(struct vcpu *v, const struct nvmx *n) {
             return false;
         }
     }
+    if ((exit & EXIT_LOAD_CET_STATE) != 0) {
+        uint64_t s_cet = get12(n, VMCS_HOST_S_CET);
+        uint64_t ssp = get12(n, VMCS_HOST_SSP);
+        // Canonical for a 64-bit host, else within 32 bits.
+        bool widths = host64 ? canonical(s_cet) && canonical(ssp) : ((s_cet | ssp) >> 32) == 0;
+        if (!s_cet_valid(s_cet) || (ssp & 3) != 0 || !widths
+         || !canonical(get12(n, VMCS_HOST_INTR_SSP_TABLE))) {
+            return false;
+        }
+    }
     return (exit & EXIT_LOAD_PAT) == 0 || x86_pat_valid(get12(n, VMCS_HOST_PAT));
 }
 
@@ -1681,6 +1743,20 @@ static bool msr_read(struct vcpu *v, uint32_t msr, uint64_t *value) {
         }
         case MSR_IA32_SYSENTER_EIP: {
             *value = vmx_read(VMCS_GUEST_SYSENTER_EIP);
+            return true;
+        }
+        case MSR_IA32_S_CET: {
+            if (!vmx_cet_switched()) {
+                return exit_msr_read(v, msr, value);
+            }
+            *value = vmx_read(VMCS_GUEST_S_CET);
+            return true;
+        }
+        case MSR_IA32_INTERRUPT_SSP_TABLE_ADDR: {
+            if (!vmx_cet_switched()) {
+                return exit_msr_read(v, msr, value);
+            }
+            *value = vmx_read(VMCS_GUEST_INTR_SSP_TABLE);
             return true;
         }
         default: {
@@ -1721,6 +1797,28 @@ static bool msr_write(struct vcpu *v, uint32_t msr, uint64_t value) {
         }
         case MSR_IA32_SYSENTER_EIP: {
             vmx_write(VMCS_GUEST_SYSENTER_EIP, value);
+            return true;
+        }
+        // A write in the hypervisor checks the value, which the next entry
+        // overwrites.
+        case MSR_IA32_S_CET: {
+            if (!vmx_cet_switched()) {
+                return exit_msr_write(v, msr, value);
+            }
+            if (!wrmsr_safe(msr, value)) {
+                return false;
+            }
+            vmx_write(VMCS_GUEST_S_CET, value);
+            return true;
+        }
+        case MSR_IA32_INTERRUPT_SSP_TABLE_ADDR: {
+            if (!vmx_cet_switched()) {
+                return exit_msr_write(v, msr, value);
+            }
+            if (!wrmsr_safe(msr, value)) {
+                return false;
+            }
+            vmx_write(VMCS_GUEST_INTR_SSP_TABLE, value);
             return true;
         }
         default: {
@@ -1835,6 +1933,7 @@ struct l1_values {
     uint64_t efer;
     uint64_t bndcfgs;
     uint64_t perf_global_ctrl;
+    struct cet_state cet;
 };
 
 // The controls VMCS02 virtualises the local APIC with: the guest's, on its
@@ -2031,6 +2130,15 @@ static void write_vmcs02(struct vcpu *v, struct nvmx *n, const struct l1_values 
     if (vmx_perf_global_switched()) {
         vmx_write(VMCS_GUEST_PERF_GLOBAL_CTRL, l1->perf_global_ctrl);
     }
+    if (vmx_cet_switched()) {
+        struct cet_state cet = l1->cet;
+        if ((entry & ENTRY_LOAD_CET_STATE) != 0) {
+            cet.s_cet = get12(n, VMCS_GUEST_S_CET);
+            cet.ssp = get12(n, VMCS_GUEST_SSP);
+            cet.ssp_table = get12(n, VMCS_GUEST_INTR_SSP_TABLE);
+        }
+        cet_write(&cet);
+    }
     uint64_t efer = get12(n, VMCS_GUEST_EFER);
     if ((entry & ENTRY_LOAD_EFER) == 0) {
         efer = l1->efer & ~(uint64_t)(EFER_LMA | EFER_LME);
@@ -2066,6 +2174,14 @@ static void save_l2_state(struct nvmx *n) {
     }
     if ((exit & EXIT_SAVE_PAT) != 0) {
         set12(n, VMCS_GUEST_PAT, vmx_read(VMCS_GUEST_PAT));
+    }
+    // Whatever the controls, where the processor has the one that loads it
+    // (SDM 325462-093 Vol. 3C, 30.3.1 and 30.3.3).
+    if (vmx_cet_switched()) {
+        struct cet_state cet = cet_read();
+        set12(n, VMCS_GUEST_S_CET, cet.s_cet);
+        set12(n, VMCS_GUEST_SSP, cet.ssp);
+        set12(n, VMCS_GUEST_INTR_SSP_TABLE, cet.ssp_table);
     }
     uint64_t efer = vmx_read(VMCS_GUEST_EFER);
     if ((exit & EXIT_SAVE_EFER) != 0) {
@@ -2164,6 +2280,12 @@ static void load_l1_host_state(struct vcpu *v, struct nvmx *n, bool nmi) {
     vmx_write(VMCS_GUEST_SYSENTER_EIP, get12(n, VMCS_HOST_SYSENTER_EIP));
     if ((exit & EXIT_LOAD_PAT) != 0) {
         vmx_write(VMCS_GUEST_PAT, get12(n, VMCS_HOST_PAT));
+    }
+    if ((exit & EXIT_LOAD_CET_STATE) != 0) {
+        struct cet_state cet = {
+            get12(n, VMCS_HOST_S_CET), get12(n, VMCS_HOST_SSP), get12(n, VMCS_HOST_INTR_SSP_TABLE)
+        };
+        cet_write(&cet);
     }
     // Exits keep NMI blocking but where NMIs cause them (SDM 325462-093 Vol.
     // 3C, 30.5.5).
@@ -2304,6 +2426,7 @@ static void exit_to_l1(
 
     uint64_t bndcfgs = vmx_mpx_passthrough() ? vmx_read(VMCS_GUEST_BNDCFGS) : 0;
     uint64_t perf = vmx_perf_global_switched() ? vmx_read(VMCS_GUEST_PERF_GLOBAL_CTRL) : 0;
+    struct cet_state cet = vmx_cet_switched() ? cet_read() : (struct cet_state){ 0 };
     vmx_vmcs_swap(v, &n->other);
     n->in_l2 = false;
     n->launching = false;
@@ -2312,6 +2435,12 @@ static void exit_to_l1(
     }
     if (vmx_perf_global_switched()) {
         vmx_write(VMCS_GUEST_PERF_GLOBAL_CTRL, perf);
+    }
+    // The guest's guest's CET state stays loaded, but where the entry failed
+    // on the guest state, before loading any (SDM 325462-093 Vol. 3C, 29.8).
+    bool loaded = !failed || (reason & 0xffff) != EXIT_REASON_INVALID_GUEST_STATE;
+    if (vmx_cet_switched() && loaded) {
+        cet_write(&cet);
     }
     load_l1_host_state(v, n, nmi);
     // A failure here would be a VMX abort, which shuts the processor down.
@@ -2410,6 +2539,9 @@ static void vmlaunch(struct vcpu *v, struct nvmx *n, bool resume) {
                           ? vmx_read(VMCS_GUEST_PERF_GLOBAL_CTRL)
                           : 0
     };
+    if (vmx_cet_switched()) {
+        l1.cet = cet_read();
+    }
     if (!n->created) {
         vmx_vmcs_create(v, &n->other);
         n->created = true;

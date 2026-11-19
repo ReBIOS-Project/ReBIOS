@@ -57,6 +57,7 @@ static bool pt_passthrough;
 static bool mpx_passthrough;
 static bool perf_global_switched;
 static bool perf_global_saved;
+static bool cet_controls;
 static uint64_t cr0_fixed0, cr0_fixed1, cr4_fixed0, cr4_fixed1;
 
 #define VMX_ENTER_FAILED 1
@@ -299,6 +300,8 @@ bool vmx_supported(void) {
                         && control_allowed(entry_cap, ENTRY_LOAD_PERF_GLOBAL_CTRL);
     perf_global_saved = perf_global_switched
                      && control_allowed(exit_cap, EXIT_SAVE_PERF_GLOBAL_CTRL);
+    cet_controls = control_allowed(exit_cap, EXIT_LOAD_CET_STATE)
+                && control_allowed(entry_cap, ENTRY_LOAD_CET_STATE);
 
     cpu_nmi_restart((uintptr_t)vmx_enter_restart, (uintptr_t)vmx_enter_restart_end);
     return true;
@@ -377,6 +380,10 @@ bool vmx_perf_global_switched(void) {
 
 bool vmx_perf_global_saved(void) {
     return perf_global_saved;
+}
+
+bool vmx_cet_switched(void) {
+    return cet_controls && (cpuid_cr4_allowed() & CR4_CET) != 0;
 }
 
 bool vmx_vpid_usable(void) {
@@ -738,6 +745,13 @@ void vmx_vcpu_power_on(struct vcpu *v) {
                    | (perf_global_saved ? EXIT_SAVE_PERF_GLOBAL_CTRL : 0);
         entry_want |= ENTRY_LOAD_PERF_GLOBAL_CTRL;
     }
+    // The guest's CET state is the VMCS's, for the controls of its own VMX
+    // that load it (nvmx.c): entries load it and exits save it (SDM 325462-093
+    // Vol. 3C, 29.3.2.1, 29.3.2.3, 30.3.1, and 30.3.3), while the hypervisor
+    // runs with CR4.CET clear, where it does nothing.
+    if (vmx_cet_switched()) {
+        entry_want |= ENTRY_LOAD_CET_STATE;
+    }
     if (vmx_vpid_usable()) {
         proc2_require |= PROC2_VPID;
     }
@@ -773,6 +787,14 @@ void vmx_vcpu_power_on(struct vcpu *v) {
     }
     if (mpx_passthrough) {
         vmx_write(VMCS_GUEST_BNDCFGS, 0);
+    }
+    // The SDM gives the CET state no value after a reset or INIT (325462-093
+    // Vol. 3A, Table 12-1): clear, as Linux 7.3's KVM has it
+    // (vmx_vcpu_reset()).
+    if (vmx_cet_switched()) {
+        vmx_write(VMCS_GUEST_S_CET, 0);
+        vmx_write(VMCS_GUEST_SSP, 0);
+        vmx_write(VMCS_GUEST_INTR_SSP_TABLE, 0);
     }
     // The guest's counters start as the firmware left them, and stop in the
     // hypervisor from now on.
