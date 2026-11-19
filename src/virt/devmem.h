@@ -25,7 +25,7 @@
 // The memory of the firmware's ACPI devices, at addresses of the guest's own:
 // a block below the I/O APICs' area holds the devices' memory, in the host's
 // order, then what the hypervisor answers in its place, and a TPM's is where
-// the TCG's PC Client specs put it.
+// TCG PC Client Platform Firmware Profile 1.06 r52, 9 puts it.
 
 // Puts the host's [base, end) in the block too, among the devices' memory, but
 // for the hypervisor to answer rather than mapped, aligned to its size, a

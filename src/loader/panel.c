@@ -442,7 +442,8 @@ void panel_fix_framebuffer(struct handoff_framebuffer *fb) {
         if (!dmi_matches(q->matches)) {
             continue;
         }
-        // As Linux's, the first quirk that matches decides.
+        // The first quirk that matches decides, as when Linux 7.3's
+        // dmi_check_system() runs efifb_dmi_swap_width_height[].
         if (q->width != 0 && (fb->width != q->width || fb->height != q->height)) {
             return;
         }

@@ -57,8 +57,8 @@ struct pci_host {
     // its own.
     struct pci_host_range *devices;
     size_t device_count;
-    // The TPMs' memory, which software finds where the TCG's PC Client specs
-    // put it.
+    // The TPMs' memory, which software finds where TCG PC Client Platform
+    // Firmware Profile 1.06 r52, 9 puts it.
     struct pci_host_range *tpms;
     size_t tpm_count;
     // The rest of the memory that motherboard resources and host bridges
