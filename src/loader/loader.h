@@ -18,6 +18,7 @@
 #ifndef LOADER__LOADER_H
 #define LOADER__LOADER_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <handoff.h>
@@ -28,6 +29,12 @@ extern struct handoff *loader_handoff;
 // Records pages that the hypervisor keeps for itself, which the guest never
 // sees.
 void loader_reserve(uintptr_t base, size_t pages);
+// Makes room in the list of those pages for more ranges, which it may take
+// pages for: false where the firmware has none. Not once boot services end.
+bool loader_reserve_room(size_t more);
+// Records the list's own pages, with the room that loader_reserve_room() made
+// for them, once nothing more is taken.
+void loader_reserve_list(void);
 
 // Memory for the hypervisor, which the guest never sees. Returns 0 on failure.
 // max_addr is inclusive; 0 means anywhere.

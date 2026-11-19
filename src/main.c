@@ -91,12 +91,9 @@ static bool exit_boot_services(char *why, size_t why_size) {
     uintptr_t buf = 0;
     size_t buf_size = 0;
 
-    // Room for the buffer's own entry.
-    if (loader_handoff->reserved_count == HANDOFF_MAX_RESERVED) {
-        snprintf(
-            why, why_size, "the memory map's buffer would be a reserved range past the %d kept",
-            HANDOFF_MAX_RESERVED
-        );
+    // Room for the buffer's own range, and for the list's.
+    if (!loader_reserve_room(2)) {
+        snprintf(why, why_size, "no memory is free for the list of the hypervisor's ranges");
         return false;
     }
 
@@ -141,6 +138,7 @@ static bool exit_boot_services(char *why, size_t why_size) {
         if (status == EFI_SUCCESS) {
             efi_glue_boot_services_exited = true;
             loader_reserve(buf, EFI_SIZE_TO_PAGES(buf_size));
+            loader_reserve_list();
             loader_handoff->efi_mmap = buf;
             loader_handoff->efi_mmap_size = size;
             loader_handoff->efi_mmap_desc_size = desc_size;

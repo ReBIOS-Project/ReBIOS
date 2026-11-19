@@ -26,7 +26,6 @@
 
 // The longest SMBIOS string kept, with its NUL.
 #define HANDOFF_DMI_MAX 64
-#define HANDOFF_MAX_RESERVED 64
 #define HANDOFF_MAX_PCI_ROMS 16
 #define HANDOFF_MAX_BLOCK_DEVICES 32
 #define HANDOFF_MAX_CPU_RANGES 64
@@ -287,8 +286,9 @@ struct handoff_config {
 // What the loader passes to the core.
 struct handoff {
     // Memory the hypervisor keeps, which the guest must never reach: ReBIOS's
-    // own image, the core's heap, page tables, and what the loader hands over.
-    struct handoff_range reserved[HANDOFF_MAX_RESERVED];
+    // own image, the core's heap, page tables, and what the loader hands over,
+    // this list's pages among them.
+    struct handoff_range *reserved;
     uint32_t reserved_count;
 
     // The page tables the core starts on, identity mapping the bottom of the
