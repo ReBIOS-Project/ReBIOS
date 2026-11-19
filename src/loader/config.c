@@ -425,12 +425,6 @@ static bool apply_cpu_list(const struct setting *setting, struct span value) {
     return true;
 }
 
-static bool apply_obsolete(const struct setting *setting, struct span value) {
-    (void)value;
-    ignore_line("%s is obsolete", setting->name);
-    return true;
-}
-
 static const struct setting settings[] = {
     { .name = "serial", .apply = apply_boolean, .flag = &config.serial },
     { .name = "serial_port", .apply = apply_serial_port },
@@ -453,10 +447,7 @@ static const struct setting settings[] = {
     { .name = "pci_high_windows", .apply = apply_boolean, .flag = &config.pci_high_windows },
     { .name = "hpet", .apply = apply_boolean, .flag = &config.hpet },
     { .name = "cpu_allowlist", .apply = apply_cpu_list, .filter = HANDOFF_CPU_FILTER_ALLOW },
-    { .name = "cpu_blocklist", .apply = apply_cpu_list, .filter = HANDOFF_CPU_FILTER_BLOCK },
-    { .name = "iommu_disable", .apply = apply_obsolete },
-    { .name = "nested", .apply = apply_obsolete },
-    { .name = "system_thread", .apply = apply_obsolete }
+    { .name = "cpu_blocklist", .apply = apply_cpu_list, .filter = HANDOFF_CPU_FILTER_BLOCK }
 };
 
 static void apply_line(struct span line) {

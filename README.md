@@ -239,9 +239,6 @@ printf '\x07\x00\x00\x00%s' "$(cat rebios.ini)" > /sys/firmware/efi/efivars/ReBI
 | `hpet` | bool | `false` | Give the OS the machine's HPET, as firmware setups' "HPET" option does. Off, the OS sees none and keeps time with the other timers, as on machines whose firmware turns it off, which spares ReBIOS the OS's writes to it: each passes through ReBIOS, and Windows makes many. On, an HPET whose timers can send their interrupts as messages stays hidden all the same, as those would go wherever the OS pointed them |
 | `cpu_allowlist` | int/hex list | *(unset)* | Comma-separated list of APIC IDs of logical CPUs that should be given to the OS. Each entry is either a single ID or an inclusive range `N-M` (e.g. `0,2-4,7`). An empty value (`cpu_allowlist =`) is itself a setting and means "hide every AP" (only the BSP stays visible). The BSP is always given to the OS regardless. Mutually exclusive with `cpu_blocklist` |
 | `cpu_blocklist` | int/hex list | *(unset)* | Comma-separated list of APIC IDs of logical CPUs that should be hidden from the OS. Each entry is either a single ID or an inclusive range `N-M` (e.g. `5-7`). An empty value (`cpu_blocklist =`) is a no-op for visibility but still claims the slot, so `cpu_allowlist` cannot also be set. The BSP is always given to the OS regardless. Mutually exclusive with `cpu_allowlist` |
-| `iommu_disable` | | | Obsolete CSMWrap setting, ignored with a warning: ReBIOS requires the IOMMU |
-| `nested` | | | Obsolete setting, ignored with a warning: the OS always gets the processor's virtualisation wherever ReBIOS can give it |
-| `system_thread` | | | Obsolete CSMWrap setting, ignored with a warning: ReBIOS keeps no CPU for itself |
 
 Hidden CPUs are left out of the MADT and the MP table, and cannot be started by
 the OS.
