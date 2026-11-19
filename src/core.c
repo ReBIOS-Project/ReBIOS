@@ -62,6 +62,7 @@
 #include <virt/rcba.h>
 #include <virt/rtc.h>
 #include <virt/svm.h>
+#include <virt/tco.h>
 #include <virt/usb.h>
 #include <virt/vacpi.h>
 #include <virt/vcpu.h>
@@ -117,6 +118,7 @@ static void bsp_main(void *arg) {
     vga_init();
     pci_quirks_init();
     rcba_init();
+    tco_init();
     // The guest's boot processor gets its local APIC as a legacy BIOS hands it
     // over, the hypervisor the processor's.
     lapic_legacy_init();
