@@ -57,6 +57,9 @@
 // moves to RAM or the AML needs the ports. Without a working RTC, an MC146818
 // is emulated.
 
+// The first FADT with the CMOS RTC Not Present flag, ACPI 5.0's.
+#define FADT_REVISION_NO_CMOS_RTC 5
+
 #define PORT_FIRST 0x70
 #define PORT_COUNT 8
 // 74h-77h alias 70h-73h, but the standard index reads back from 74h alone,
@@ -157,6 +160,8 @@ static uint8_t ext_index;
 static uint8_t ram[BANK_SIZE];
 static uint8_t ext_ram[BANK_SIZE];
 
+// Whether the firmware's ACPI lists the machine's RTC.
+static bool listed;
 static uint8_t sampled_seconds;
 static uint64_t sampled_tsc;
 static bool sampled;
@@ -620,10 +625,25 @@ static void rtc_access(
     }
 }
 
-static bool fadt_allows(void) {
+// The CMOS RTC's IDs, as Linux 7.3 takes them (include/linux/acpi.h,
+// ACPI_CMOS_RTC_IDS).
+static const char *const cmos_rtc_ids[] = { "PNP0B00", "PNP0B01", "PNP0B02", NULL };
+
+// Whether the firmware's ACPI says the machine's RTC is at its legacy
+// addresses: an FADT whose CMOS RTC Not Present flag is clear (ACPI 6.6, Table
+// 5.11), as Linux 7.3 takes it (arch/x86/kernel/acpi/boot.c,
+// acpi_parse_fadt()), or, on an FADT from before the flag, which came with
+// revision 5 (Linux 7.3's include/acpi/actbl.h, ACPI_FADT_NO_CMOS_RTC), one of
+// the RTC's devices in the namespace.
+static bool firmware_lists(void) {
     struct acpi_fadt *fadt;
-    return acpi_tables_ready() && uacpi_table_fadt(&fadt) == UACPI_STATUS_OK
-        && (fadt->iapc_boot_arch & ACPI_IA_PC_NO_CMOS_RTC) == 0;
+    if (!acpi_tables_ready() || uacpi_table_fadt(&fadt) != UACPI_STATUS_OK) {
+        return false;
+    }
+    if (fadt->hdr.revision >= FADT_REVISION_NO_CMOS_RTC) {
+        return (fadt->iapc_boot_arch & ACPI_IA_PC_NO_CMOS_RTC) == 0;
+    }
+    return acpi_has_device(cmos_rtc_ids);
 }
 
 // The machine's seconds, once no update holds them.
@@ -636,7 +656,8 @@ static uint8_t real_seconds(void) {
 }
 
 void rtc_sample(void) {
-    if (!fadt_allows()) {
+    listed = firmware_lists();
+    if (!listed) {
         return;
     }
     sampled_seconds = real_seconds();
@@ -644,8 +665,8 @@ void rtc_sample(void) {
     sampled = true;
 }
 
-// The firmware has not said the RTC is absent, and it reads back as one that
-// runs: its RAM and time valid, its divider running, and its seconds counting.
+// The firmware lists the RTC, and it reads back as one that runs: its RAM and
+// time valid, its divider running, and its seconds counting.
 static bool real_works(void) {
     if (!sampled) {
         return false;
@@ -782,10 +803,13 @@ void rtc_init(void) {
         clock_start();
     }
     ram_init();
-    printf(
-        "The guest's RTC %s\n",
-        real ? "keeps the machine's time" : "is emulated, as the machine's does not work"
-    );
+    const char *how = "keeps the machine's time";
+    if (!real && listed) {
+        how = "is emulated, as the machine's does not work";
+    } else if (!real) {
+        how = "is emulated, as the firmware's ACPI lists none";
+    }
+    printf("The guest's RTC %s\n", how);
 
     struct io_handler ports = { PORT_FIRST, PORT_COUNT, rtc_access, NULL, true };
     io_register(&ports);
