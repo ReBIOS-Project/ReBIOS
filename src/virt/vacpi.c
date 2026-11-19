@@ -4432,18 +4432,35 @@ void vacpi_init(void) {
     }
 
     acpi_lock();
-    uacpi_install_notify_handler(uacpi_namespace_root(), notify, NULL);
+    uacpi_status status = uacpi_install_notify_handler(uacpi_namespace_root(), notify, NULL);
+    if (status != UACPI_STATUS_OK) {
+        printf(
+            "The firmware's notifications do not reach the guest: %s\n",
+            uacpi_status_to_string(status)
+        );
+    }
     if (vacpi.power_button) {
-        uacpi_install_fixed_event_handler(UACPI_FIXED_EVENT_POWER_BUTTON, power_button, NULL);
+        status = uacpi_install_fixed_event_handler(
+            UACPI_FIXED_EVENT_POWER_BUTTON, power_button, NULL
+        );
+        if (status != UACPI_STATUS_OK) {
+            printf(
+                "The power button does not reach the guest: %s\n",
+                uacpi_status_to_string(status)
+            );
+        }
     }
     // Off until the guest enables it.
     if (vacpi.pm1) {
-        uacpi_status rtc = uacpi_install_fixed_event_handler(
-            UACPI_FIXED_EVENT_RTC, rtc_alarm, NULL
-        );
-        if (rtc == UACPI_STATUS_OK) {
+        status = uacpi_install_fixed_event_handler(UACPI_FIXED_EVENT_RTC, rtc_alarm, NULL);
+        if (status == UACPI_STATUS_OK) {
             uacpi_disable_fixed_event(UACPI_FIXED_EVENT_RTC);
             vacpi.rtc_event = true;
+        } else {
+            printf(
+                "The RTC's alarm does not reach the guest: %s\n",
+                uacpi_status_to_string(status)
+            );
         }
     }
     acpi_unlock();
