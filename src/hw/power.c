@@ -31,6 +31,10 @@
 #include <sys/x86.h>
 
 #define RESET_WAIT_US 100000
+// How long the keyboard controller gets to take the command, as Linux 7.3's
+// kb_wait() gives it (arch/x86/kernel/reboot.c).
+#define KBC_WAIT_POLLS 0x10000
+#define KBC_POLL_US 2
 
 // What Linux 7.3 writes to the reset control register: a hard reset, and for a
 // cold one, the power cycled.
@@ -50,13 +54,13 @@ void power_reset(bool warm) {
         time_udelay(RESET_WAIT_US);
     }
     if (i8042_present()) {
-        for (size_t i = 0; i < 100000; i++) {
-            if ((inb(0x64) & 2) == 0) {
+        for (size_t i = 0; i < KBC_WAIT_POLLS; i++) {
+            if ((inb(I8042_PORT_COMMAND) & I8042_STATUS_INPUT_FULL) == 0) {
                 break;
             }
-            cpu_relax();
+            time_udelay(KBC_POLL_US);
         }
-        outb(0x64, 0xfe);
+        outb(I8042_PORT_COMMAND, I8042_COMMAND_PULSE_RESET);
         time_udelay(RESET_WAIT_US);
     }
     if (pci_cfg_ports_answer()) {

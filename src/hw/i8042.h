@@ -71,6 +71,10 @@
 #define I8042_COMMAND_A20_ENABLE 0xdf
 #define I8042_COMMAND_READ_TEST 0xe0
 #define I8042_COMMAND_PULSE_FIRST 0xf0
+// Pulses only the output port's bit 0, the reset line: the one pulse that
+// every controller takes (84F9735 of September 1991, Keyboard/Auxiliary Device
+// Controller, commands F0-FF).
+#define I8042_COMMAND_PULSE_RESET 0xfe
 
 #define I8042_PASSWORD_NOT_INSTALLED 0xf1
 #define I8042_SELF_TEST_PASSED 0x55
