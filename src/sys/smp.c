@@ -109,24 +109,6 @@ struct cpu *smp_cpu_by_apic_id(uint32_t apic_id) {
     return NULL;
 }
 
-bool smp_guest_cpu(uint32_t apic_id) {
-    // The boot processor runs the legacy BIOS, whatever the configuration.
-    if (cpu_count != 0 && apic_id == cpus[0]->apic_id) {
-        return true;
-    }
-    const struct handoff_config *c = &core_handoff->config;
-    if (c->cpu_filter == HANDOFF_CPU_FILTER_NONE) {
-        return true;
-    }
-    bool listed = false;
-    for (size_t i = 0; i < c->cpu_range_count; i++) {
-        if (apic_id >= c->cpu_ranges[i].first && apic_id <= c->cpu_ranges[i].last) {
-            listed = true;
-        }
-    }
-    return c->cpu_filter == HANDOFF_CPU_FILTER_ALLOW ? listed : !listed;
-}
-
 bool smp_long_apic_ids(void) {
     return long_ids;
 }
@@ -313,8 +295,6 @@ void smp_start_aps(void) {
     for (size_t i = 1; i <= count; i++) {
         if (!atomic_load_explicit(&cpus[i]->online, memory_order_acquire)) {
             printf("Processor %#x did not start\n", cpus[i]->apic_id);
-        } else if (!smp_guest_cpu(cpus[i]->apic_id)) {
-            printf("Processor %#x is not the guest's\n", cpus[i]->apic_id);
         }
     }
 }

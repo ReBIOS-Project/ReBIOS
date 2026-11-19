@@ -28,7 +28,6 @@
 #define HANDOFF_DMI_MAX 64
 #define HANDOFF_MAX_PCI_ROMS 16
 #define HANDOFF_MAX_BLOCK_DEVICES 32
-#define HANDOFF_MAX_CPU_RANGES 64
 #define HANDOFF_MAX_BOOT_ORDER 4096
 
 struct handoff_range {
@@ -143,10 +142,6 @@ struct handoff_block_device {
     // ReBIOS was loaded from this device.
     bool boot;
 };
-
-#define HANDOFF_CPU_FILTER_NONE 0
-#define HANDOFF_CPU_FILTER_ALLOW 1
-#define HANDOFF_CPU_FILTER_BLOCK 2
 
 // Whether the hypervisor emulates a VGA: when the firmware hands over no
 // usable video BIOS, always, or never.
@@ -274,13 +269,6 @@ struct handoff_config {
     uint8_t pci_high_windows;
     // Whether the guest may get the HPET (virt/hpet.c), else it never does.
     uint8_t hpet;
-    // Which APIC IDs the guest gets, as inclusive ranges.
-    uint32_t cpu_filter;
-    uint32_t cpu_range_count;
-    struct {
-        uint32_t first;
-        uint32_t last;
-    } cpu_ranges[HANDOFF_MAX_CPU_RANGES];
 };
 
 // What the loader passes to the core.

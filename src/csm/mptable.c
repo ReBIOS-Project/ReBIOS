@@ -301,10 +301,10 @@ static void emit(struct mp_writer *w, const void *entry, size_t length) {
     w->length += length;
 }
 
-// Whether the table can list a processor: one the guest gets, with an ID the
-// table's entries can hold.
+// Whether the table can list a processor: one with an ID the table's entries
+// can hold.
 static bool cpu_listable(uint32_t apic_id) {
-    return apic_id <= MP_MAX_APIC_ID && smp_guest_cpu(apic_id);
+    return apic_id <= MP_MAX_APIC_ID;
 }
 
 static bool cpu_listed(uint32_t apic_id) {

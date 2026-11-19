@@ -29,7 +29,6 @@
 #include <lib/log.h>
 #include <lib/util.h>
 #include <memory.h>
-#include <sys/smp.h>
 #include <virt/devmem.h>
 #include <virt/guest_mem.h>
 #include <virt/hpet.h>
@@ -160,27 +159,6 @@ static bool madt_entry_kept(const uint8_t *entry, size_t length) {
     }
 }
 
-// Leaves the local APIC of a processor the guest does not get unusable, where
-// the namespace still has its processor.
-static void processor_hide(uint8_t *entry) {
-    const uint32_t usable = ACPI_PIC_ENABLED | ACPI_PIC_ONLINE_CAPABLE;
-    uint32_t id;
-    uint8_t *flags;
-    if (entry[0] == ACPI_MADT_ENTRY_TYPE_LAPIC) {
-        id = entry[offsetof(struct acpi_madt_lapic, id)];
-        flags = entry + offsetof(struct acpi_madt_lapic, flags);
-    } else if (entry[0] == ACPI_MADT_ENTRY_TYPE_LOCAL_X2APIC) {
-        id = read_le32(entry + offsetof(struct acpi_madt_x2apic, id));
-        flags = entry + offsetof(struct acpi_madt_x2apic, flags);
-    } else {
-        return;
-    }
-    if ((read_le32(flags) & usable) != 0 && !smp_guest_cpu(id)) {
-        write_le32(flags, read_le32(flags) & ~usable);
-        printf("Hiding processor %#x from the guest\n", id);
-    }
-}
-
 // The guest's interrupt controllers, under the firmware's table's header: the
 // 8259 pair the hypervisor always gives, local APICs where a PC's are, and the
 // firmware's entries that madt_entry_kept() keeps, in its order.
@@ -206,7 +184,6 @@ static uint8_t *madt_make(const uint8_t *madt, size_t *length) {
         const uint8_t *entry = (const uint8_t *)hdr;
         if (madt_entry_kept(entry, hdr->length)) {
             memcpy(made + out, entry, hdr->length);
-            processor_hide(made + out);
             out += hdr->length;
         }
     }

@@ -50,7 +50,6 @@ struct setting {
     // Logs what it does. Returns false only if the value is invalid.
     bool (*apply)(const struct setting *setting, struct span value);
     bool *flag;
-    uint32_t filter;
 };
 
 static unsigned int current_line;
@@ -81,10 +80,6 @@ static size_t find_char(struct span s, char c) {
         i++;
     }
     return i;
-}
-
-static bool is_space_or_tab(char c) {
-    return c == ' ' || c == '\t';
 }
 
 static bool is_blank(char c) {
@@ -206,46 +201,6 @@ static bool parse_pci_address(struct span s, struct handoff_pci_address *out) {
     out->bus = (uint8_t)bus;
     out->devfn = (uint8_t)(device << 3 | function);
     return true;
-}
-
-static bool parse_cpu_range(struct span entry, uint32_t *first, uint32_t *last) {
-    size_t dash = find_char(entry, '-');
-    struct span start = trim(span_before(entry, dash), is_space_or_tab);
-    if (!parse_integer(start, first)) {
-        return false;
-    }
-    if (dash == entry.len) {
-        *last = *first;
-        return true;
-    }
-    if (!parse_integer(trim(span_after(entry, dash), is_space_or_tab), last)) {
-        return false;
-    }
-    return *first <= *last;
-}
-
-static bool parse_cpu_list(struct span s, typeof(config.cpu_ranges[0]) *ranges, size_t *count) {
-    *count = 0;
-    if (s.len == 0) {
-        return true;
-    }
-    for (;;) {
-        size_t comma = find_char(s, ',');
-        if (*count == HANDOFF_MAX_CPU_RANGES) {
-            return false;
-        }
-        bool parsed = parse_cpu_range(
-            span_before(s, comma), &ranges[*count].first, &ranges[*count].last
-        );
-        if (!parsed) {
-            return false;
-        }
-        (*count)++;
-        if (comma == s.len) {
-            return true;
-        }
-        s = span_after(s, comma);
-    }
 }
 
 // Lines are logged whole, as the firmware may mirror its console on the log's
@@ -393,38 +348,6 @@ static bool apply_avic(const struct setting *setting, struct span value) {
     return true;
 }
 
-static bool apply_cpu_list(const struct setting *setting, struct span value) {
-    if (config.cpu_filter != HANDOFF_CPU_FILTER_NONE && config.cpu_filter != setting->filter) {
-        ignore_line("cpu_allowlist and cpu_blocklist are mutually exclusive");
-        return true;
-    }
-
-    typeof(config.cpu_ranges) ranges;
-    size_t count;
-    if (!parse_cpu_list(value, ranges, &count)) {
-        return false;
-    }
-    config.cpu_filter = setting->filter;
-    config.cpu_range_count = count;
-    memset(config.cpu_ranges, 0, sizeof(config.cpu_ranges));
-    memcpy(config.cpu_ranges, ranges, count * sizeof(ranges[0]));
-
-    char list[HANDOFF_MAX_CPU_RANGES * sizeof("4294967295-4294967295, ")];
-    size_t len = 0;
-    list[0] = 0;
-    for (size_t i = 0; i < count; i++) {
-        len += (size_t)snprintf(
-            list + len, sizeof(list) - len, "%s%u",
-            i == 0 ? "" : ", ", ranges[i].first
-        );
-        if (ranges[i].last != ranges[i].first) {
-            len += (size_t)snprintf(list + len, sizeof(list) - len, "-%u", ranges[i].last);
-        }
-    }
-    printf("  %s = %s\n", setting->name, count == 0 ? "(none)" : list);
-    return true;
-}
-
 static const struct setting settings[] = {
     { .name = "serial", .apply = apply_boolean, .flag = &config.serial },
     { .name = "serial_port", .apply = apply_serial_port },
@@ -445,9 +368,7 @@ static const struct setting settings[] = {
     { .name = "save_log", .apply = apply_boolean, .flag = &config.save_log },
     { .name = "save_acpi", .apply = apply_boolean, .flag = &config.save_acpi },
     { .name = "pci_high_windows", .apply = apply_boolean, .flag = &config.pci_high_windows },
-    { .name = "hpet", .apply = apply_boolean, .flag = &config.hpet },
-    { .name = "cpu_allowlist", .apply = apply_cpu_list, .filter = HANDOFF_CPU_FILTER_ALLOW },
-    { .name = "cpu_blocklist", .apply = apply_cpu_list, .filter = HANDOFF_CPU_FILTER_BLOCK }
+    { .name = "hpet", .apply = apply_boolean, .flag = &config.hpet }
 };
 
 static void apply_line(struct span line) {
@@ -660,7 +581,6 @@ void config_load(void) {
     config.vga_scale = 1;
     config.vga_filter = HANDOFF_VGA_FILTER_BILINEAR;
     config.avic = HANDOFF_AVIC_AUTO;
-    config.cpu_filter = HANDOFF_CPU_FILTER_NONE;
     config.igpu_stolen_remap = true;
     config.legacy_usb = true;
 
@@ -696,10 +616,4 @@ void config_to_handoff(struct handoff_config *out) {
     out->legacy_usb = config.legacy_usb;
     out->pci_high_windows = config.pci_high_windows;
     out->hpet = config.hpet;
-    out->cpu_filter = config.cpu_filter;
-    out->cpu_range_count = config.cpu_range_count;
-    for (size_t i = 0; i < config.cpu_range_count; i++) {
-        out->cpu_ranges[i].first = config.cpu_ranges[i].first;
-        out->cpu_ranges[i].last = config.cpu_ranges[i].last;
-    }
 }

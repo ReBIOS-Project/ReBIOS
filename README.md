@@ -237,8 +237,6 @@ printf '\x07\x00\x00\x00%s' "$(cat rebios.ini)" > /sys/firmware/efi/efivars/ReBI
 | `legacy_usb` | bool | `true` | Drive the USB controllers until the OS takes them over, as a BIOS's legacy USB support does: USB keyboards and mice work as PS/2 ones, and the BIOS boots from USB disks. With `false` they are the OS's from the start, and the BIOS has no USB |
 | `pci_high_windows` | bool | `false` | Give PCI BARs too large to go below 4 GiB (64-bit ones over 256 MiB that cannot be resized smaller) addresses above 4 GiB, and describe the windows there that hold them, with room after them, to the OS, as firmware setups' "Above 4G Decoding" option does. Off, those BARs stay unassigned, which ReBIOS logs, and the OS sees no window above 4 GiB, as OSes such as Windows XP need: XP fails to start when it sees one. On machines without such BARs, it changes nothing |
 | `hpet` | bool | `false` | Give the OS the machine's HPET, as firmware setups' "HPET" option does. Off, the OS sees none and keeps time with the other timers, as on machines whose firmware turns it off, which spares ReBIOS the OS's writes to it: each passes through ReBIOS, and Windows makes many. On, an HPET whose timers can send their interrupts as messages stays hidden all the same, as those would go wherever the OS pointed them |
-| `cpu_allowlist` | int/hex list | *(unset)* | Comma-separated list of APIC IDs of logical CPUs that should be given to the OS. Each entry is either a single ID or an inclusive range `N-M` (e.g. `0,2-4,7`). An empty value (`cpu_allowlist =`) is itself a setting and means "hide every AP" (only the BSP stays visible). The BSP is always given to the OS regardless. Mutually exclusive with `cpu_blocklist` |
-| `cpu_blocklist` | int/hex list | *(unset)* | Comma-separated list of APIC IDs of logical CPUs that should be hidden from the OS. Each entry is either a single ID or an inclusive range `N-M` (e.g. `5-7`). An empty value (`cpu_blocklist =`) is a no-op for visibility but still claims the slot, so `cpu_allowlist` cannot also be set. The BSP is always given to the OS regardless. Mutually exclusive with `cpu_allowlist` |
 
 Hidden CPUs are left out of the MADT and the MP table, and cannot be started by
 the OS.
@@ -255,9 +253,8 @@ serial_port = 0x3f8
 serial_baud = 115200
 vgabios = \EFI\ReBIOS\vgabios.bin
 
-; Show the emulated VGA as a 4:3 monitor would, and hide APIC IDs 4 through 6 from the OS.
+; Show the emulated VGA as a 4:3 monitor would.
 vga_scaling = aspect
-cpu_blocklist = 4-6
 
 ; Boot the drive whose model name has "WDC WD5000" in it first.
 boot_drive = WDC WD5000
@@ -278,8 +275,8 @@ BIOS, and the like.
 ### I booted a multi-core capable OS with CSMWrap and was missing a logical processor (thread), what about ReBIOS?
 
 ReBIOS does not keep a logical processor for itself as CSMWrap does: every one
-of them is given to the OS (unless `cpu_allowlist` or `cpu_blocklist` say
-otherwise), and systems with only one logical processor work too.
+of them is given to the OS, and systems with only one logical processor work
+too.
 
 ### Can the OS run virtual machines of its own?
 

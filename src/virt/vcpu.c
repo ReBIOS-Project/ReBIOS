@@ -1289,10 +1289,6 @@ void vcpu_init_signal(struct vcpu *v) {
 
 void vcpu_startup(struct vcpu *v, uint8_t vector) {
     atomic_store_explicit(&v->sipi, VCPU_SIPI_RUNNING, memory_order_release);
-    if (!smp_guest_cpu(v->cpu->apic_id)) {
-        vcpu_wait_for_sipi(v);
-        return;
-    }
     vcpu_set_real_mode(v, (uint16_t)vector << 8, 0);
 }
 

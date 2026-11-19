@@ -19,7 +19,6 @@
 #define LOADER__CONFIG_H
 
 #include <stdbool.h>
-#include <stddef.h>
 #include <stdint.h>
 #include <handoff.h>
 
@@ -54,13 +53,6 @@ struct config {
     // NUL-terminated: "self", "auto", or a drive's device path or part of its
     // model; empty when unset, which is "self".
     char boot_drive[CONFIG_BOOT_DRIVE_MAX];
-    // One of the HANDOFF_CPU_FILTER_* values.
-    uint32_t cpu_filter;
-    size_t cpu_range_count;
-    struct {
-        uint32_t first;
-        uint32_t last;
-    } cpu_ranges[HANDOFF_MAX_CPU_RANGES];
 };
 
 // The configuration in effect, filled in by config_load().
