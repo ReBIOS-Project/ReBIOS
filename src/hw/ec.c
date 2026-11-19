@@ -370,5 +370,25 @@ void ec_init(void) {
             "Cannot handle the embedded controller's GPE %#x: %s\n",
             idx, uacpi_status_to_string(status)
         );
+        return;
     }
+    // Events reach the handler once the GPE is enabled, which installing it
+    // does not do, as Linux 7.3's EC driver enables it (ec.c,
+    // acpi_ec_enable_gpe()), querying an event pending already, which the
+    // enable may not signal.
+    status = uacpi_enable_gpe(gpe_device, idx);
+    if (status != UACPI_STATUS_OK) {
+        printf(
+            "Cannot enable the embedded controller's GPE %#x: %s\n",
+            idx, uacpi_status_to_string(status)
+        );
+        return;
+    }
+    uacpi_event_info info;
+    if (uacpi_gpe_info(gpe_device, idx, &info) == UACPI_STATUS_OK
+     && (info & UACPI_EVENT_INFO_HW_STATUS) != 0) {
+        ec.query_pending = true;
+        uacpi_kernel_schedule_work(UACPI_WORK_GPE_EXECUTION, ec.query_work, query_work, NULL);
+    }
+    printf("Embedded controller events on GPE %#x\n", idx);
 }
