@@ -175,10 +175,15 @@
 // As long as Linux 7.3's iommu_ga_log_enable() waits for the log to start.
 #define GA_LOG_TIMEOUT_NS ((uint64_t)20000000)
 
+struct rd890_saved;
+
 struct amdvi_unit {
     uintptr_t base;
     // The function whose MSI capability the unit's own interrupts use.
     struct pci_cfg_addr function;
+    uint16_t cap_offset;
+    // An RD890's setup, which waking may not give back, or NULL.
+    struct rd890_saved *rd890;
     uint32_t *commands;
     uint32_t command_tail;
     uint32_t *events;
@@ -267,6 +272,110 @@ static void erratum_746(struct pci_cfg_addr a) {
         pci_cfg_write(a, L2_CONFIG_INDEX, 4, L2_L2B_CK_GATE_CONTROL);
         printf("Working around AMD erratum 746\n");
     }
+}
+
+// The RD890, whose firmware may not set its IOMMU up again entirely when the
+// machine wakes, so that what it had is saved and put back, as Linux 7.3 does
+// (drivers/iommu/amd/init.c, Copyright (C) 2007-2010 Advanced Micro Devices,
+// Inc.: iommu_init_pci() and iommu_apply_resume_quirks()): the IOMMU's enable
+// in the northbridge's indirect register 75h, the base address in its
+// capability block, which a write of bit 0 locks, and its L1 and L2 indirect
+// registers.
+#define DEVICE_RD890_IOMMU 0x5a23
+#define CAP_BASE_LOW 0x04
+#define CAP_BASE_HIGH 0x08
+#define CAP_BASE_LOCK ((uint32_t)1 << 0)
+#define NB_INDEX 0x60
+#define NB_INDEX_WRITE ((uint32_t)1 << 7)
+#define NB_DATA 0x64
+#define NB_IOC_FEATURE_CONTROL 0x75
+#define IOC_IOMMU_ENABLE ((uint32_t)1 << 0)
+#define L1_CONFIG_INDEX 0xf8
+#define L1_CONFIG_WRITE ((uint32_t)1 << 31)
+#define L1_CONFIG_DATA 0xfc
+#define RD890_L1_COUNT 6
+#define RD890_L1_REGS 0x12
+#define RD890_L2_REGS 0x83
+
+struct rd890_saved {
+    uint32_t base_low;
+    uint32_t base_high;
+    uint32_t l1[RD890_L1_COUNT][RD890_L1_REGS];
+    uint32_t l2[RD890_L2_REGS];
+};
+
+static uint32_t l1_read(struct pci_cfg_addr a, size_t l1, size_t reg) {
+    uint32_t index = (uint32_t)(reg | l1 << 16);
+    pci_cfg_write(a, L1_CONFIG_INDEX, 4, index);
+    return pci_cfg_read(a, L1_CONFIG_DATA, 4);
+}
+
+static void l1_write(struct pci_cfg_addr a, size_t l1, size_t reg, uint32_t value) {
+    uint32_t index = (uint32_t)(reg | l1 << 16);
+    pci_cfg_write(a, L1_CONFIG_INDEX, 4, index | L1_CONFIG_WRITE);
+    pci_cfg_write(a, L1_CONFIG_DATA, 4, value);
+    pci_cfg_write(a, L1_CONFIG_INDEX, 4, index);
+}
+
+static uint32_t l2_read(struct pci_cfg_addr a, size_t reg) {
+    pci_cfg_write(a, L2_CONFIG_INDEX, 4, (uint32_t)reg);
+    return pci_cfg_read(a, L2_CONFIG_DATA, 4);
+}
+
+static void l2_write(struct pci_cfg_addr a, size_t reg, uint32_t value) {
+    pci_cfg_write(a, L2_CONFIG_INDEX, 4, (uint32_t)reg | L2_CONFIG_WRITE);
+    pci_cfg_write(a, L2_CONFIG_DATA, 4, value);
+}
+
+static void rd890_save(struct amdvi_unit *u) {
+    struct pci_cfg_addr a = u->function;
+    struct pci_cfg_addr northbridge = { a.segment, a.bus, 0, 0 };
+    if (pci_cfg_read(a, PCI_VENDOR_ID, 2) != PCI_VENDOR_ID_ATI
+     || pci_cfg_read(a, PCI_DEVICE_ID, 2) != DEVICE_RD890_IOMMU
+     || pci_cfg_read(northbridge, PCI_VENDOR_ID, 2) == 0xffff) {
+        return;
+    }
+    struct rd890_saved *s = kmalloc(sizeof(struct rd890_saved));
+    s->base_low = pci_cfg_read(a, u->cap_offset + CAP_BASE_LOW, 4) & ~CAP_BASE_LOCK;
+    s->base_high = pci_cfg_read(a, u->cap_offset + CAP_BASE_HIGH, 4);
+    for (size_t l1 = 0; l1 < RD890_L1_COUNT; l1++) {
+        for (size_t reg = 0; reg < RD890_L1_REGS; reg++) {
+            s->l1[l1][reg] = l1_read(a, l1, reg);
+        }
+    }
+    for (size_t reg = 0; reg < RD890_L2_REGS; reg++) {
+        s->l2[reg] = l2_read(a, reg);
+    }
+    u->rd890 = s;
+    printf(
+        "AMD-Vi unit at %#llx: an RD890's, set up again at each waking\n",
+        (unsigned long long)u->base
+    );
+}
+
+static void rd890_restore(const struct amdvi_unit *u) {
+    const struct rd890_saved *s = u->rd890;
+    if (s == NULL) {
+        return;
+    }
+    struct pci_cfg_addr a = u->function;
+    struct pci_cfg_addr northbridge = { a.segment, a.bus, 0, 0 };
+    pci_cfg_write(northbridge, NB_INDEX, 4, NB_IOC_FEATURE_CONTROL | NB_INDEX_WRITE);
+    uint32_t control = pci_cfg_read(northbridge, NB_DATA, 4);
+    if ((control & IOC_IOMMU_ENABLE) == 0) {
+        pci_cfg_write(northbridge, NB_DATA, 4, control | IOC_IOMMU_ENABLE);
+    }
+    pci_cfg_write(a, u->cap_offset + CAP_BASE_LOW, 4, s->base_low);
+    pci_cfg_write(a, u->cap_offset + CAP_BASE_HIGH, 4, s->base_high);
+    for (size_t l1 = 0; l1 < RD890_L1_COUNT; l1++) {
+        for (size_t reg = 0; reg < RD890_L1_REGS; reg++) {
+            l1_write(a, l1, reg, s->l1[l1][reg]);
+        }
+    }
+    for (size_t reg = 0; reg < RD890_L2_REGS; reg++) {
+        l2_write(a, reg, s->l2[reg]);
+    }
+    pci_cfg_write(a, u->cap_offset + CAP_BASE_LOW, 4, s->base_low | CAP_BASE_LOCK);
 }
 
 static uint64_t reg_read(const struct amdvi_unit *u, uint32_t reg) {
@@ -377,7 +486,9 @@ bool amdvi_probe(const struct iommu_tables *tables, size_t *leaf_level) {
         u->function = (struct pci_cfg_addr){
             t->segment, (uint8_t)(rid >> 8), (uint8_t)(rid >> 3 & 0x1f), (uint8_t)(rid & 7)
         };
+        u->cap_offset = t->amd_cap_offset;
         erratum_746(u->function);
+        rd890_save(u);
         printf(
             "AMD-Vi unit %zu at %#llx: features %#llx, control %#llx\n",
             i, (unsigned long long)u->base, (unsigned long long)reg_read(u, REG_FEATURES),
@@ -644,6 +755,7 @@ void amdvi_suspend(void) {
 void amdvi_resume(void) {
     for (size_t i = 0; i < unit_count; i++) {
         struct amdvi_unit *u = &units[i];
+        rd890_restore(u);
         unit_enable(u);
         reg_write(u, REG_CONTROL, reg_read(u, REG_CONTROL) | remap_enables);
         if (posting && !ga_log_start(u, ga_apic_id, ga_vector)) {
