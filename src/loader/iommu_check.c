@@ -73,6 +73,20 @@ static const uint16_t broadwell_igfx[] = {
 #define ARRANDALE_HOST_BRIDGE 0x0044
 static const uint16_t calpella_host_bridges[] = { 0x0040, 0x0062, 0x006a };
 
+// The ICH10's HD Audio controller, whose DMA Tylersburg's VTISOCHCTRL, in its
+// System Management Registers' function, sends through the isochronous VT-d
+// unit, unless bit 0 is set, with the TLB entries that bits 4:2 give, in
+// fours. With none, the unit deadlocks under remapping, as Linux 7.3 checks
+// (drivers/iommu/intel/iommu.c, check_tylersburg_isoch()) and then leaves the
+// controller untranslated, which ReBIOS cannot do, as the guest's memory is
+// not where the host's is.
+#define ICH10_AZALIA 0x3a3e
+#define TYLERSBURG_SMR 0x342e
+#define VTISOCHCTRL 0x188
+#define VTISOCHCTRL_NON_ISOCH ((uint32_t)1 << 0)
+#define VTISOCHCTRL_TLB_ENTRIES ((uint32_t)0x1c)
+#define ISOCH_TLB_ENTRIES_ADVISED 16
+
 static const struct efi_guid acpi_20_guid = EFI_ACPI_20_TABLE_GUID;
 static const struct efi_guid acpi_10_guid = EFI_ACPI_10_TABLE_GUID;
 
@@ -261,20 +275,73 @@ static bool igfx_broken(uint16_t *igfx_id) {
     return broken;
 }
 
+// Whether HD Audio's DMA goes through a Tylersburg's isochronous VT-d unit
+// that has no TLB entries.
+static bool azalia_isoch_broken(void) {
+    size_t count;
+    struct pci_io_device *devices = pci_io_devices(&count);
+    bool azalia = false;
+    const struct pci_io_device *smr = NULL;
+    for (size_t i = 0; i < count; i++) {
+        const struct pci_io_device *d = &devices[i];
+        if (d->vendor_id != PCI_VENDOR_ID_INTEL) {
+            continue;
+        }
+        if (d->device_id == ICH10_AZALIA) {
+            azalia = true;
+        } else if (d->device_id == TYLERSBURG_SMR && smr == NULL) {
+            smr = d;
+        }
+    }
+
+    bool broken = false;
+    bool read = false;
+    uint32_t control = 0;
+    if (azalia && smr != NULL) {
+        efi_status status = smr->io->pci.read(
+            smr->io, EFI_PCI_IO_WIDTH_UINT32, VTISOCHCTRL, 1, &control
+        );
+        read = status == EFI_SUCCESS;
+    }
+    if (read && (control & VTISOCHCTRL_NON_ISOCH) == 0) {
+        uint32_t entries = control & VTISOCHCTRL_TLB_ENTRIES;
+        broken = entries == 0;
+        if (!broken && entries != ISOCH_TLB_ENTRIES_ADVISED) {
+            printf(
+                "The VT-d unit for HD Audio's DMA has %u TLB entries, where %u are advised\n",
+                entries, ISOCH_TLB_ENTRIES_ADVISED
+            );
+        }
+    }
+    if (devices != NULL) {
+        efi_bs->free_pool(devices);
+    }
+    return broken;
+}
+
 bool iommu_check(void) {
     int found = acpi_find_iommu();
     uint16_t igfx_id;
-    if (found == FOUND_USABLE && !igfx_broken(&igfx_id)) {
+    bool igfx = found == FOUND_USABLE && igfx_broken(&igfx_id);
+    bool azalia = found == FOUND_USABLE && !igfx && azalia_isoch_broken();
+    if (found == FOUND_USABLE && !igfx && !azalia) {
         return true;
     }
 
-    if (found == FOUND_USABLE) {
+    if (igfx) {
         log_notice(
             "ReBIOS cannot run with this machine's integrated graphics, %04x:%04x, which\n"
             "malfunctions when the IOMMU remaps its memory accesses. If another\n"
             "graphics card is installed, disable the integrated graphics in the\n"
             "firmware setup.\n",
             PCI_VENDOR_ID_INTEL, igfx_id
+        );
+    } else if (azalia) {
+        log_notice(
+            "ReBIOS cannot run with this machine's firmware, which sends the onboard\n"
+            "HD Audio's memory accesses through a VT-d unit it gives no TLB entries,\n"
+            "so that the machine hangs once the IOMMU remaps them. Disabling the\n"
+            "onboard audio in the firmware setup avoids this.\n"
         );
     } else if (found == FOUND_UNUSABLE) {
         log_notice("ReBIOS cannot use the IOMMU the firmware reports.\n");
