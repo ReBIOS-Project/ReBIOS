@@ -38,6 +38,7 @@
 #include <memory.h>
 #include <sys/mm.h>
 #include <virt/acpi_save.h>
+#include <virt/cbtable.h>
 #include <virt/guest_acpi.h>
 #include <virt/guest_mem.h>
 #include <virt/hypercall.h>
@@ -619,6 +620,7 @@ void csm_boot_start(struct vcpu *v) {
     if (acpi) {
         acpi_save_guest(csm.compat16->acpi_rsd_ptr_pointer);
     }
+    cbtable_build(acpi ? csm.compat16->acpi_rsd_ptr_pointer : 0);
     csm_compat16_table_checksum(csm.compat16);
 
     uint32_t high_pmm = layout_take(HIGH_PMM_SIZE, HIGH_PMM_ALIGN, E820_RAM);

@@ -53,14 +53,18 @@ struct pci_host {
     struct pci_host_range *interrupts;
     size_t interrupt_count;
     // The memory of the HPETs and of the ACPI devices but host bridges,
-    // motherboard resources, and TPMs, which the guest finds at addresses of
-    // its own.
+    // motherboard resources, TPMs, and coreboot's table, which the guest finds
+    // at addresses of its own.
     struct pci_host_range *devices;
     size_t device_count;
     // The TPMs' memory, which software finds where TCG PC Client Platform
     // Firmware Profile 1.06 r52, 9 puts it.
     struct pci_host_range *tpms;
     size_t tpm_count;
+    // The memory of coreboot's table, in whose place the guest finds one of
+    // its own.
+    struct pci_host_range *tables;
+    size_t table_count;
     // The rest of the memory that motherboard resources and host bridges
     // consume.
     struct pci_host_range *motherboard;

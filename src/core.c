@@ -38,6 +38,7 @@
 #include <sys/simd.h>
 #include <sys/smp.h>
 #include <virt/a20.h>
+#include <virt/cbtable.h>
 #include <virt/cpuid.h>
 #include <virt/ferr.h>
 #include <virt/hpet.h>
@@ -108,6 +109,7 @@ static void bsp_main(void *arg) {
     mtrr_init();
 
     rcba_find();
+    cbtable_find();
     layout_init();
     pci_virt_init();
     // The USB pool takes the guest's memory first, as its 2 MiB alignment

@@ -24,14 +24,20 @@
 
 // The memory of the firmware's ACPI devices, at addresses of the guest's own:
 // a block below the I/O APICs' area holds the devices' memory, in the host's
-// order, then what the hypervisor answers in its place, and a TPM's is where
-// TCG PC Client Platform Firmware Profile 1.06 r52, 9 puts it.
+// order, then what the hypervisor answers in its place, then firmware data
+// that the guest only reads, and a TPM's is where TCG PC Client Platform
+// Firmware Profile 1.06 r52, 9 puts it.
 
 // Puts the host's [base, end) in the block too, among the devices' memory, but
-// for the hypervisor to answer rather than mapped, aligned to its size, a
-// power of two, as a register that holds its address takes it. Before
+// for the hypervisor to answer rather than mapped, aligned to the power of two
+// at or above its size, as a register that holds its address takes it. Before
 // devmem_plan().
 void devmem_add_trapped(uintptr_t base, uintptr_t end);
+// Puts the host's pages of [base, end) in the block too, among the devices'
+// memory, mapped for the guest to read, its writes going nowhere, even where a
+// device claims them too, as firmware data that the guest sees but does not
+// change. Before devmem_plan().
+void devmem_add_read_only(uintptr_t base, uintptr_t end);
 // Lays the devices' memory out in the guest, with room to spare for memory
 // that the firmware's AML gives later. Needs pci_host_scan().
 void devmem_plan(void);

@@ -917,6 +917,9 @@ const char *const acpi_tpm_ids[] = {
     "MSFT0101", "PNP0C31", "ATM1200", "IFX0102", "BCM0101", "BCM0102", "NSC1200", "ICO0102",
     NULL
 };
+// The IDs that Linux 7.3's drivers/firmware/google/coreboot_table.c finds
+// coreboot's table by.
+const char *const acpi_coreboot_table_ids[] = { "GOOGCB00", "BOOT0000", NULL };
 
 void acpi_log_failure(uacpi_namespace_node *node, const char *name, uacpi_status status) {
     const char *path = acpi_path(node);

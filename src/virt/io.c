@@ -48,12 +48,15 @@ void io_register(const struct io_handler *handler) {
 
 static const struct io_handler *handler_for(uint16_t port);
 
-// Traps the port where a handler has it, where the guest is kept from it, and
-// below 1000h where nothing the guest gets has it.
+// Whether the port is trapped: where a handler has it, where the guest is kept
+// from it, and below 1000h where nothing the guest gets has it.
+static bool trapped(uint16_t port) {
+    return handler_for(port) != NULL || (denied[port / 8] & (1 << (port % 8))) != 0
+        || (port < LEGACY_PORTS && users[port] == 0);
+}
+
 static void settle(uint16_t port) {
-    bool trapped = handler_for(port) != NULL || (denied[port / 8] & (1 << (port % 8))) != 0
-                || (port < LEGACY_PORTS && users[port] == 0);
-    virt_intercept_io(port, 1, trapped);
+    virt_intercept_io(port, 1, trapped(port));
 }
 
 void io_pass(uint16_t base, size_t count) {
@@ -83,6 +86,15 @@ void io_unpass(uint16_t base, size_t count) {
         }
         settle(port);
     }
+}
+
+bool io_passed(uint16_t base, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        if (trapped((uint16_t)(base + i))) {
+            return false;
+        }
+    }
+    return true;
 }
 
 static const struct io_handler *handler_for(uint16_t port) {

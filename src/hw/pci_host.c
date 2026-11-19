@@ -64,6 +64,7 @@ struct scan {
     struct range_list interrupts;
     struct range_list devices;
     struct range_list tpms;
+    struct range_list tables;
     // What only motherboard resources and host bridges consume, which the
     // guest has nothing at.
     struct range_list motherboard;
@@ -415,6 +416,8 @@ static uacpi_iteration_decision device_found(
             scan.into = &r->motherboard;
         } else if (uacpi_device_matches_pnp_id(node, acpi_tpm_ids)) {
             scan.into = &r->tpms;
+        } else if (uacpi_device_matches_pnp_id(node, acpi_coreboot_table_ids)) {
+            scan.into = &r->tables;
         }
         crs_walk(&scan, node);
     }
@@ -450,9 +453,11 @@ const struct pci_host *pci_host_scan(void) {
         &r
     );
     // Devices may list them among what they use, as motherboard resources do,
-    // and a device's memory is the interrupt controllers' or a TPM's where it
-    // overlaps theirs.
-    struct range_list *lists[] = { &r.interrupts, &r.tpms, &r.devices, &r.motherboard };
+    // and a device's memory is the interrupt controllers', a TPM's, or
+    // coreboot's table's where it overlaps theirs.
+    struct range_list *lists[] = {
+        &r.interrupts, &r.tpms, &r.tables, &r.devices, &r.motherboard
+    };
     for (size_t l = 0; l < ARRAY_COUNT(lists); l++) {
         for (size_t i = 0; i < r.private.count; i++) {
             range_list_remove(lists[l], r.private.r[i].base, r.private.r[i].end);
@@ -472,6 +477,7 @@ const struct pci_host *pci_host_scan(void) {
     ranges_out(&r.interrupts, &host.interrupts, &host.interrupt_count);
     ranges_out(&r.devices, &host.devices, &host.device_count);
     ranges_out(&r.tpms, &host.tpms, &host.tpm_count);
+    ranges_out(&r.tables, &host.tables, &host.table_count);
     ranges_out(&r.motherboard, &host.motherboard, &host.motherboard_count);
     ranges_out(&r.private, &host.private, &host.private_count);
     host.bridges = kmalloc(

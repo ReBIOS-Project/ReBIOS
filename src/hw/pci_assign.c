@@ -121,6 +121,7 @@ static void room_find(
     take_ranges(room, host->interrupts, host->interrupt_count);
     take_ranges(room, host->devices, host->device_count);
     take_ranges(room, host->tpms, host->tpm_count);
+    take_ranges(room, host->tables, host->table_count);
     take_ranges(room, host->private, host->private_count);
     take_ranges(room, host->motherboard, host->motherboard_count);
     for (size_t i = 0; ; i++) {

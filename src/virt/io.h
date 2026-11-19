@@ -60,6 +60,9 @@ void io_register(const struct io_handler *handler);
 void io_pass(uint16_t base, size_t count);
 void io_unpass(uint16_t base, size_t count);
 void io_block(uint16_t base, size_t count);
+// Whether the guest reaches each of the machine's ports from base on, count of
+// them, as io_pass() gave them, with no handler and no io_block() between.
+bool io_passed(uint16_t base, size_t count);
 
 // Runs an access the guest made: through the handler of its first port, or a
 // byte at a time where that is an 8-bit device's or nobody's, each byte going

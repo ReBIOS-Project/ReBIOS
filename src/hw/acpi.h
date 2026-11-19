@@ -107,11 +107,12 @@ const char *acpi_path(uacpi_namespace_node *node);
 void acpi_path_free(const char *path);
 
 // The PNP IDs of PCI host bridges, of PCI interrupt link devices, of
-// motherboard resources, and of TPMs.
+// motherboard resources, of TPMs, and of coreboot's table.
 extern const char *const acpi_host_bridge_ids[];
 extern const char *const acpi_link_ids[];
 extern const char *const acpi_motherboard_ids[];
 extern const char *const acpi_tpm_ids[];
+extern const char *const acpi_coreboot_table_ids[];
 
 // Logs that a node's object could not be evaluated.
 void acpi_log_failure(uacpi_namespace_node *node, const char *name, uacpi_status status);
