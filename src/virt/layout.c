@@ -56,7 +56,8 @@
 // does for its uncached alias of memory, which it maps in 2 MiB pages.
 #define HIGH_RAM_ALIGN ((uint64_t)0x800000)
 
-#define MAX_RANGES 1024
+// The identity ranges first taken room for.
+#define IDENTITY_FIRST 64
 #define MAX_TAKEN 8
 // What layout_contiguous() may take of the hypervisor's memory.
 #define MAX_MOVED_PAGES 64
@@ -72,6 +73,7 @@ struct identity_range {
 
 static struct identity_range *identity;
 static size_t identity_count;
+static size_t identity_capacity;
 // The host's memory that the firmware leaves free, in whole pages, but where a
 // descriptor of another type overlaps it: such a range keeps the other type,
 // as Linux 7.3's e820__update_table() resolves overlaps.
@@ -168,9 +170,9 @@ static void identity_add(uintptr_t base, uintptr_t end, uint32_t efi_type, uint6
     if (base >= end) {
         return;
     }
-    if (identity_count == MAX_RANGES) {
-        panic("Too many host ranges for the guest\n");
-    }
+    identity = heap_grow(
+        identity, identity_count, &identity_capacity, sizeof(struct identity_range), IDENTITY_FIRST
+    );
     identity[identity_count++] = (struct identity_range){ base, end, efi_type, attribute };
 }
 
@@ -355,7 +357,6 @@ static uint64_t add_high(struct range_list *fill, size_t size, const struct rang
 
 void layout_init(void) {
     const struct handoff *h = core_handoff;
-    identity = kmalloc(MAX_RANGES * sizeof(struct identity_range));
 
     const struct efi_memory_descriptor *d;
     for (size_t i = 0; (d = handoff_efi_desc(core_handoff, i)) != NULL; i++) {
