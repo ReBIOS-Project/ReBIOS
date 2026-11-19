@@ -25,6 +25,7 @@
 #include <lib/printf.h>
 #include <lib/reed_solomon.h>
 #include <lib/util.h>
+#include <loader/config.h>
 #include <loader/efi_glue.h>
 #include <loader/files.h>
 #include <loader/kept.h>
@@ -55,6 +56,10 @@ struct found {
 
 static struct found found[FOUND_MAX];
 static size_t found_count;
+// Logs whose header a search finds in free memory, but the rest of whose area
+// is not free, and the first of them.
+static size_t partial_count;
+static uintptr_t partial_page;
 
 // Whether a start began after b's, by their clocks.
 static bool later(const struct efi_time *a, const struct efi_time *b) {
@@ -65,18 +70,92 @@ static bool later(const struct efi_time *a, const struct efi_time *b) {
     return date_a != date_b ? date_a > date_b : a->nanosecond > b->nanosecond;
 }
 
-// Notes a log kept at page, whole in free memory up to end.
+// Notes a log kept at page, whole in free memory up to end, or else one that
+// is not.
 static bool note(uintptr_t page, uint64_t end, void *ctx) {
     (void)ctx;
     struct handoff_log header;
     size_t parity_at = offsetof(struct handoff_log, parity);
-    if (end - page >= HANDOFF_KEPT_SIZE && found_count < FOUND_MAX
-     && kept_header(page, HANDOFF_LOG_MAGIC, &header, parity_at)) {
+    if (found_count == FOUND_MAX || !kept_header(page, HANDOFF_LOG_MAGIC, &header, parity_at)) {
+        return false;
+    }
+    if (end - page >= HANDOFF_KEPT_SIZE) {
         found[found_count++] = (struct found){
             .page = page, .started = header.started, .count = header.count
         };
+    } else if (partial_count++ == 0) {
+        partial_page = page;
     }
     return false;
+}
+
+// What memory holds where a kept area would be at base.
+static const char *area_state(uint64_t base) {
+    if (!kept_free(base, HANDOFF_KEPT_SIZE)) {
+        return "the firmware uses part of that memory now";
+    }
+    const uint8_t *at = (const uint8_t *)(uintptr_t)base;
+    bool zeros = true;
+    bool ones = true;
+    for (size_t i = 0; i < HANDOFF_KEPT_SIZE && (zeros || ones); i++) {
+        zeros = zeros && at[i] == 0;
+        ones = ones && at[i] == UINT8_MAX;
+    }
+    if (zeros) {
+        return "it reads as zeros, as where firmware clears memory over a restart";
+    }
+    return ones ? "it reads as all ones" : "it holds other data";
+}
+
+// Says why there is no log to write, on the screen and in the file, so that no
+// file of an earlier start's stands in for it.
+static void none_found(void) {
+    char why[256];
+    int written;
+    if (partial_count != 0) {
+        written = snprintf(
+            why, sizeof(why),
+            "Its log starts at %#llx, but the firmware uses part of the memory after that now.\n",
+            (unsigned long long)partial_page
+        );
+    } else {
+        // Where the last start most likely put it, after the ACPI tables with
+        // save_acpi (loader/acpi_save.c).
+        uint64_t tables = config.save_acpi ? kept_place(HANDOFF_KEPT_SIZE, 0, 0) : 0;
+        uint64_t area = kept_place(HANDOFF_KEPT_SIZE, tables, tables != 0 ? HANDOFF_KEPT_SIZE : 0);
+        if (area != 0) {
+            written = snprintf(
+                why, sizeof(why),
+                "No free memory below 4 GiB holds its log. At %#llx, where this start keeps its "
+                "log, as the last start most likely did, %s.\n",
+                (unsigned long long)area, area_state(area)
+            );
+        } else {
+            written = snprintf(why, sizeof(why), "No free memory below 4 GiB holds its log.\n");
+        }
+    }
+    if (written < 0 || (size_t)written >= sizeof(why)) {
+        return;
+    }
+    static const char first[] = "ReBIOS found no log of its last start to write here: save_log "
+                                "was off then, the machine was turned off since, or its memory "
+                                "did not keep the log.\n";
+    log_notice("No log from ReBIOS's last start for %s\n", FILE_NAME);
+    log_notice("%s", why);
+    char text[sizeof(first) + sizeof(why)];
+    memcpy(text, first, sizeof(first) - 1);
+    memcpy(text + sizeof(first) - 1, why, (size_t)written);
+    char where[256] = FILE_NAME;
+    efi_status status;
+    const char *failed = files_write_beside(
+        FILE_NAME, text, sizeof(first) - 1 + (size_t)written, where, sizeof(where), &status
+    );
+    if (failed != NULL) {
+        log_notice(
+            "Cannot write why to %s: %s, status %#llx\n",
+            where, failed, (unsigned long long)status
+        );
+    }
 }
 
 // Corrects the blocks of the log kept at page that hold its count bytes, and
@@ -208,13 +287,10 @@ static void take(const struct found *f, bool write) {
 
 void last_log_write(void) {
     found_count = 0;
+    partial_count = 0;
     kept_find(note, NULL);
     if (found_count == 0) {
-        log_notice(
-            "No log from ReBIOS's last start for %s: save_log was off then, or the machine was "
-            "turned off since\n",
-            FILE_NAME
-        );
+        none_found();
         return;
     }
     size_t latest = 0;

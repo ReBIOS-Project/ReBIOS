@@ -31,6 +31,15 @@
 // down.
 uint64_t kept_reserve(uint64_t size);
 
+// Where kept_reserve() would put size bytes now, with [taken, taken +
+// taken_size) already taken where taken_size is not 0, or 0 where there is no
+// room. Takes nothing.
+uint64_t kept_place(uint64_t size, uint64_t taken, uint64_t taken_size);
+
+// Whether [base, base + size) is free memory, all in one range of the
+// firmware's memory map.
+bool kept_free(uint64_t base, uint64_t size);
+
 // Calls found(page, end, ctx), until it returns true, for each page of free
 // memory from 16 MiB up to 4 GiB, end being where the free memory that the
 // page is in ends.

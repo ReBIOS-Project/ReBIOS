@@ -65,7 +65,20 @@ static bool free_part(const struct efi_memory_descriptor *d, uint64_t *base, uin
     return *base < *end;
 }
 
-uint64_t kept_reserve(uint64_t size) {
+// Makes [base, end) the largest piece where it is larger than *largest_size.
+static void piece_consider(
+    uint64_t base,
+    uint64_t end,
+    uint64_t *largest,
+    uint64_t *largest_size
+) {
+    if (base < end && end - base > *largest_size) {
+        *largest = base;
+        *largest_size = end - base;
+    }
+}
+
+uint64_t kept_place(uint64_t size, uint64_t taken, uint64_t taken_size) {
     size_t map_size;
     size_t desc_size;
     uint8_t *map = memory_map(&map_size, &desc_size);
@@ -74,20 +87,52 @@ uint64_t kept_reserve(uint64_t size) {
     }
     uint64_t largest = 0;
     uint64_t largest_size = 0;
+    uint64_t taken_end = taken + taken_size;
     for (size_t off = 0; off + desc_size <= map_size; off += desc_size) {
         uint64_t base;
         uint64_t end;
-        if (free_part((const struct efi_memory_descriptor *)(map + off), &base, &end)
-         && end - base > largest_size) {
-            largest = base;
-            largest_size = end - base;
+        if (!free_part((const struct efi_memory_descriptor *)(map + off), &base, &end)) {
+            continue;
+        }
+        if (taken_size == 0 || taken_end <= base || taken >= end) {
+            piece_consider(base, end, &largest, &largest_size);
+        } else {
+            piece_consider(base, taken > base ? taken : base, &largest, &largest_size);
+            piece_consider(taken_end < end ? taken_end : end, end, &largest, &largest_size);
         }
     }
     efi_bs->free_pool(map);
     if (largest_size < size) {
         return 0;
     }
-    uint64_t area = largest + align_down((largest_size - size) / 2, EFI_PAGE_SIZE);
+    return largest + align_down((largest_size - size) / 2, EFI_PAGE_SIZE);
+}
+
+bool kept_free(uint64_t base, uint64_t size) {
+    size_t map_size;
+    size_t desc_size;
+    uint8_t *map = memory_map(&map_size, &desc_size);
+    if (map == NULL) {
+        return false;
+    }
+    bool free = false;
+    for (size_t off = 0; off + desc_size <= map_size && !free; off += desc_size) {
+        const struct efi_memory_descriptor *d = (const struct efi_memory_descriptor *)(map + off);
+        uint64_t part_base;
+        uint64_t part_end;
+        if (free_part(d, &part_base, &part_end)) {
+            free = base >= part_base && base + size <= part_end;
+        }
+    }
+    efi_bs->free_pool(map);
+    return free;
+}
+
+uint64_t kept_reserve(uint64_t size) {
+    uint64_t area = kept_place(size, 0, 0);
+    if (area == 0) {
+        return 0;
+    }
     size_t pages = page_count(size);
     efi_physical_address taken = area;
     if (efi_bs->allocate_pages(EFI_ALLOCATE_ADDRESS, EFI_LOADER_DATA, pages, &taken)
