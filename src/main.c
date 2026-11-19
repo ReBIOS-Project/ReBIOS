@@ -262,14 +262,14 @@ efi_status efi_main(efi_handle image_handle, struct efi_system_table *system_tab
     reed_solomon_init();
     // The last start's log comes out before anything takes the memory that it
     // may be in, this start's own kept memory included.
-    if (config.save_log) {
+    if (config.save_log != HANDOFF_SAVE_LOG_OFF) {
         last_log_write();
     }
     last_log_delete_variables();
     if (config.save_acpi) {
         acpi_save_start();
     }
-    if (config.save_log) {
+    if (config.save_log == HANDOFF_SAVE_LOG_RAM) {
         last_log_keep();
     }
 

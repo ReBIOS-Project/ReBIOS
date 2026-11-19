@@ -294,6 +294,20 @@ static bool apply_choice(struct span value, const char *const *names, size_t cou
 
 // In the order of the HANDOFF_VGA_EMULATION_* values.
 static const char *const vga_emulation_names[] = { "auto", "always", "never" };
+// In the order of the HANDOFF_SAVE_LOG_* values.
+static const char *const save_log_names[] = { "false", "ram", "efi" };
+
+// A boolean too, true meaning ram, as save_log was one before it took efi.
+static bool apply_save_log(const struct setting *setting, struct span value) {
+    bool on;
+    if (parse_boolean(value, &on)) {
+        config.save_log = on ? HANDOFF_SAVE_LOG_RAM : HANDOFF_SAVE_LOG_OFF;
+    } else if (!apply_choice(value, save_log_names, 3, &config.save_log)) {
+        return false;
+    }
+    printf("  %s = %s\n", setting->name, save_log_names[config.save_log]);
+    return true;
+}
 
 static bool apply_vga_emulation(const struct setting *setting, struct span value) {
     if (!apply_choice(value, vga_emulation_names, 3, &config.vga_emulation)) {
@@ -365,7 +379,7 @@ static const struct setting settings[] = {
     { .name = "cpuid_limit", .apply = apply_boolean, .flag = &config.cpuid_limit },
     { .name = "igpu_stolen_remap", .apply = apply_boolean, .flag = &config.igpu_stolen_remap },
     { .name = "legacy_usb", .apply = apply_boolean, .flag = &config.legacy_usb },
-    { .name = "save_log", .apply = apply_boolean, .flag = &config.save_log },
+    { .name = "save_log", .apply = apply_save_log },
     { .name = "save_acpi", .apply = apply_boolean, .flag = &config.save_acpi },
     { .name = "pci_high_windows", .apply = apply_boolean, .flag = &config.pci_high_windows },
     { .name = "hpet", .apply = apply_boolean, .flag = &config.hpet }
@@ -616,4 +630,5 @@ void config_to_handoff(struct handoff_config *out) {
     out->legacy_usb = config.legacy_usb;
     out->pci_high_windows = config.pci_high_windows;
     out->hpet = config.hpet;
+    out->save_log = config.save_log;
 }

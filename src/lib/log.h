@@ -20,6 +20,7 @@
 
 #include <stdarg.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdnoreturn.h>
 
@@ -46,6 +47,22 @@ bool log_panicked(void);
 // The log goes on in area too from now on, after what it has had so far, where
 // the next start finds it (handoff.h): each line reaches memory as it ends.
 void log_keep_in(struct handoff_log *area);
+// The log as a stream of bytes, for keeping beyond a reset in EFI variables:
+// its first LOG_SAVED_START bytes, and its latest ones after those.
+#define LOG_SAVED_START 24576
+// How many bytes the log has had.
+size_t log_saved_count(void);
+// Copies the log's bytes from position since on, at most size, oldest first,
+// and returns how many, with the position of the first in *first, which is
+// after since where those at since are lost. A copy stops before bytes that
+// are lost. Without lock, for panics, the copy may catch a line half written.
+size_t log_saved_text(size_t since, char *out, size_t size, size_t *first, bool lock);
+// What keeps the log beyond a reset: log_keep() calls it, and panic() does
+// without wait.
+typedef void (*log_keeper)(bool wait);
+void log_set_keeper(log_keeper keep_log);
+// Before the machine resets or powers off.
+void log_keep(void);
 // The guest is done for: if the log is on the screen, it is shown there again,
 // over the guest's picture, and log_panicked() stops the other processors.
 // Returns whether it is shown.

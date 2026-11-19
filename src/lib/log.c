@@ -42,6 +42,16 @@ static struct flanterm_context *log_screen;
 static _Atomic(bool) log_screen_handed_over;
 static _Atomic(bool) log_panicking;
 
+// The log's latest bytes after its first LOG_SAVED_START, for
+// log_saved_text().
+#define SAVED_TAIL 32768
+
+static char saved_head[LOG_SAVED_START];
+static size_t saved_head_len;
+static char saved_tail[SAVED_TAIL];
+static size_t saved_tail_count;
+static _Atomic(log_keeper) keeper;
+
 // The log's start, until log_keep_in() puts it in the area it is kept in.
 #define START_TEXT 16384
 
@@ -165,6 +175,11 @@ static void keep(char c) {
 }
 
 static void log_emit(struct con_buffer *buf, char c) {
+    if (saved_head_len < LOG_SAVED_START) {
+        saved_head[saved_head_len++] = c;
+    } else {
+        saved_tail[saved_tail_count++ % SAVED_TAIL] = c;
+    }
     keep(c);
     bool screen = screen_shown();
     if (c == '\n') {
@@ -294,6 +309,10 @@ void panic(const char *fmt, ...) {
     va_start(args, fmt);
     vprintf_unlocked(fmt, args);
     va_end(args);
+    log_keeper keep_log = atomic_exchange_explicit(&keeper, NULL, memory_order_acq_rel);
+    if (keep_log != NULL) {
+        keep_log(false);
+    }
     x86_halt_forever();
 }
 
@@ -333,4 +352,50 @@ void log_keep_in(struct handoff_log *area) {
     memcpy(area->magic, HANDOFF_LOG_MAGIC, sizeof(area->magic));
     kept_seal();
     spinlock_release(&log_lock);
+}
+
+size_t log_saved_text(size_t since, char *out, size_t size, size_t *first, bool lock) {
+    if (lock) {
+        spinlock_acquire(&log_lock);
+    }
+    size_t end = saved_head_len + saved_tail_count;
+    // The head stays whole, while the tail keeps only its latest SAVED_TAIL
+    // bytes, those from kept on.
+    size_t kept_from = LOG_SAVED_START;
+    if (saved_tail_count > SAVED_TAIL) {
+        kept_from = LOG_SAVED_START + saved_tail_count - SAVED_TAIL;
+    }
+    size_t start = since;
+    size_t stop = end;
+    if (start >= LOG_SAVED_START && start < kept_from) {
+        start = kept_from;
+    } else if (start < LOG_SAVED_START && kept_from > LOG_SAVED_START) {
+        stop = LOG_SAVED_START;
+    }
+    size_t len = stop - start < size ? stop - start : size;
+    for (size_t p = start; p < start + len; p++) {
+        out[p - start] = p < LOG_SAVED_START
+                       ? saved_head[p]
+                       : saved_tail[(p - LOG_SAVED_START) % SAVED_TAIL];
+    }
+    if (lock) {
+        spinlock_release(&log_lock);
+    }
+    *first = start;
+    return len;
+}
+
+size_t log_saved_count(void) {
+    return saved_head_len + saved_tail_count;
+}
+
+void log_set_keeper(log_keeper keep_log) {
+    atomic_store_explicit(&keeper, keep_log, memory_order_release);
+}
+
+void log_keep(void) {
+    log_keeper keep_log = atomic_load_explicit(&keeper, memory_order_acquire);
+    if (keep_log != NULL) {
+        keep_log(true);
+    }
 }

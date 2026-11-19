@@ -172,9 +172,42 @@ struct handoff_block_device {
 #define HANDOFF_AVIC_ALWAYS 1
 #define HANDOFF_AVIC_NEVER 2
 
+// Where ReBIOS keeps its log for the next start to write out: nowhere, in
+// memory (lib/log.c), or in EFI variables (virt/log_save.c).
+#define HANDOFF_SAVE_LOG_OFF 0
+#define HANDOFF_SAVE_LOG_RAM 1
+#define HANDOFF_SAVE_LOG_EFI 2
+
 // The vendor GUID of ReBIOS's EFI variables.
 #define HANDOFF_VARIABLE_GUID \
     { 0xd559b78d, 0x5494, 0x4c9e, { 0xb7, 0xf7, 0xe4, 0x92, 0xb0, 0x94, 0x64, 0x48 } }
+// With save_log = efi, the core keeps its log (virt/log_save.c) in parts, each
+// in a variable of its own, named after HANDOFF_LOG_VARIABLE and the part's
+// number, from 0 on, in 4 decimal digits (handoff_log_part_name()). ReBIOS
+// 0.7.0 to 0.10.0 kept the log's start in HANDOFF_LOG_VARIABLE itself, and its
+// latest text in HANDOFF_LOG_END_VARIABLE, which the loader still writes out
+// and deletes.
+#define HANDOFF_LOG_VARIABLE u"ReBIOSLog"
+#define HANDOFF_LOG_END_VARIABLE u"ReBIOSLogEnd"
+#define HANDOFF_LOG_PARTS 10000
+// A part's name in UTF-16 characters, its NUL included.
+#define HANDOFF_LOG_PART_NAME_LEN 14
+
+static inline void handoff_log_part_name(
+    uint16_t name[static HANDOFF_LOG_PART_NAME_LEN],
+    size_t part
+) {
+    static const uint16_t base[] = HANDOFF_LOG_VARIABLE;
+    size_t len = sizeof(base) / sizeof(uint16_t) - 1;
+    for (size_t i = 0; i < len; i++) {
+        name[i] = base[i];
+    }
+    for (size_t i = 4; i-- > 0; ) {
+        name[len + i] = (uint16_t)(u'0' + part % 10);
+        part /= 10;
+    }
+    name[len + 4] = 0;
+}
 
 // What ReBIOS keeps in memory for its next start is in areas of
 // HANDOFF_KEPT_SIZE bytes, each at the start of a page: a header, which starts
@@ -269,6 +302,8 @@ struct handoff_config {
     uint8_t pci_high_windows;
     // Whether the guest may get the HPET (virt/hpet.c), else it never does.
     uint8_t hpet;
+    // One of the HANDOFF_SAVE_LOG_* values.
+    uint8_t save_log;
 };
 
 // What the loader passes to the core.

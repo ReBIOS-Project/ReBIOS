@@ -46,7 +46,8 @@ struct config {
     bool cpuid_limit;
     bool igpu_stolen_remap;
     bool legacy_usb;
-    bool save_log;
+    // One of the HANDOFF_SAVE_LOG_* values.
+    uint8_t save_log;
     bool save_acpi;
     bool pci_high_windows;
     bool hpet;

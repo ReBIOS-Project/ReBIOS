@@ -36,16 +36,14 @@
 // The most logs that one search tells apart: a start without save_log leaves
 // the last one with it where it was.
 #define FOUND_MAX 8
-// ReBIOS 0.7.0 to 0.10.0 kept the log's start in OLD_VARIABLE itself, and its
-// latest text in OLD_END_VARIABLE, and 0.11.0 kept it in parts, from 0 on,
-// named after OLD_VARIABLE and the part's number in 4 decimal digits.
-#define OLD_PARTS 10000
-#define OLD_PART_DIGITS 4
+// More than the core saves in EFI variables (virt/log_save.c), so as to refuse
+// what a firmware gets wrong.
+#define VARIABLES_MAX 0x1000000
 #define ATTRIBUTES \
     (EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS)
 
-static uint16_t old_variable[] = u"ReBIOSLog";
-static uint16_t old_end_variable[] = u"ReBIOSLogEnd";
+static uint16_t old_variable[] = HANDOFF_LOG_VARIABLE;
+static uint16_t old_end_variable[] = HANDOFF_LOG_END_VARIABLE;
 static struct efi_guid guid = HANDOFF_VARIABLE_GUID;
 
 struct found {
@@ -112,7 +110,11 @@ static const char *area_state(uint64_t base) {
 static void none_found(void) {
     char why[256];
     int written;
-    if (partial_count != 0) {
+    if (config.save_log == HANDOFF_SAVE_LOG_EFI) {
+        written = snprintf(
+            why, sizeof(why), "No EFI variables hold it either: the firmware may refuse them.\n"
+        );
+    } else if (partial_count != 0) {
         written = snprintf(
             why, sizeof(why),
             "Its log starts at %#llx, but the firmware uses part of the memory after that now.\n",
@@ -139,7 +141,7 @@ static void none_found(void) {
     }
     static const char first[] = "ReBIOS found no log of its last start to write here: save_log "
                                 "was off then, the machine was turned off since, or its memory "
-                                "did not keep the log.\n";
+                                "or EFI variables did not keep the log.\n";
     log_notice("No log from ReBIOS's last start for %s\n", FILE_NAME);
     log_notice("%s", why);
     char text[sizeof(first) + sizeof(why)];
@@ -176,6 +178,15 @@ static void correct(uintptr_t page, uint64_t count, size_t *corrected, size_t *f
     );
 }
 
+// The file holds text alone, whatever memory or the variables held.
+static void text_only(char *text, size_t size) {
+    for (size_t i = 0; i < size; i++) {
+        if ((text[i] < 0x20 || text[i] > 0x7e) && text[i] != '\n' && text[i] != '\t') {
+            text[i] = '?';
+        }
+    }
+}
+
 // The text of the log kept at page, of count bytes, in a pool allocation of
 // *size bytes: its start, then the latest bytes of its ring, oldest first,
 // with a mark where the bytes between them are lost, then end_len bytes of
@@ -205,12 +216,7 @@ static char *log_text(
     for (size_t i = 0; i < kept; i++) {
         at[i] = text[HANDOFF_LOG_HEAD_SIZE + (first + i) % HANDOFF_LOG_TAIL_SIZE];
     }
-    // The file holds text alone, whatever memory held.
-    for (size_t i = 0; i < *size - end_len; i++) {
-        if ((out[i] < 0x20 || out[i] > 0x7e) && out[i] != '\n' && out[i] != '\t') {
-            out[i] = '?';
-        }
-    }
+    text_only(out, *size - end_len);
     memcpy(out + *size - end_len, end, end_len);
     return out;
 }
@@ -285,12 +291,69 @@ static void take(const struct found *f, bool write) {
     efi_bs->free_pages(f->page, pages);
 }
 
+// Appends the variable's contents to text, at *len, room bytes at most.
+// Returns whether the variable exists.
+static bool append_variable(uint16_t *name, char *text, size_t *len, size_t room) {
+    size_t size = 0;
+    efi_status status = efi_rt->get_variable(name, &guid, NULL, &size, NULL);
+    if (status != EFI_BUFFER_TOO_SMALL || size == 0) {
+        return false;
+    }
+    if (size > room - *len
+     || efi_rt->get_variable(name, &guid, NULL, &size, text + *len) != EFI_SUCCESS) {
+        return true;
+    }
+    *len += size;
+    return true;
+}
+
+// Writes the log that the last start kept in EFI variables with save_log =
+// efi, or ReBIOS 0.7.0 to 0.11.0 did with save_log (handoff.h), out: false
+// where there is none.
+static bool variables_write(void) {
+    char *text = efi_glue_alloc_pool(VARIABLES_MAX);
+    if (text == NULL) {
+        return false;
+    }
+    size_t len = 0;
+    append_variable(old_variable, text, &len, VARIABLES_MAX);
+    append_variable(old_end_variable, text, &len, VARIABLES_MAX);
+    // The parts follow one another up to the first that is missing.
+    uint16_t name[HANDOFF_LOG_PART_NAME_LEN];
+    for (size_t part = 0; part < HANDOFF_LOG_PARTS; part++) {
+        handoff_log_part_name(name, part);
+        if (!append_variable(name, text, &len, VARIABLES_MAX)) {
+            break;
+        }
+    }
+    if (len == 0) {
+        efi_bs->free_pool(text);
+        return false;
+    }
+    text_only(text, len);
+    char where[256] = FILE_NAME;
+    efi_status status;
+    const char *why = files_write_beside(FILE_NAME, text, len, where, sizeof(where), &status);
+    if (why != NULL) {
+        log_notice(
+            "Cannot write the log that ReBIOS saved last time to %s: %s, status %#llx\n",
+            where, why, (unsigned long long)status
+        );
+    } else {
+        log_notice("Wrote the log that ReBIOS saved last time in EFI variables to %s\n", where);
+    }
+    efi_bs->free_pool(text);
+    return true;
+}
+
 void last_log_write(void) {
     found_count = 0;
     partial_count = 0;
     kept_find(note, NULL);
     if (found_count == 0) {
-        none_found();
+        if (!variables_write()) {
+            none_found();
+        }
         return;
     }
     size_t latest = 0;
@@ -338,25 +401,15 @@ void last_log_delete_variables(void) {
     deleted += variable_delete(old_variable) ? 1 : 0;
     deleted += variable_delete(old_end_variable) ? 1 : 0;
     // The parts follow one another up to the first that is missing.
-    size_t base_len = ARRAY_COUNT(old_variable) - 1;
-    uint16_t name[ARRAY_COUNT(old_variable) + OLD_PART_DIGITS];
-    memcpy(name, old_variable, base_len * sizeof(uint16_t));
-    name[base_len + OLD_PART_DIGITS] = 0;
-    for (size_t part = 0; part < OLD_PARTS; part++) {
-        size_t n = part;
-        for (size_t i = OLD_PART_DIGITS; i-- > 0; ) {
-            name[base_len + i] = (uint16_t)(u'0' + n % 10);
-            n /= 10;
-        }
+    uint16_t name[HANDOFF_LOG_PART_NAME_LEN];
+    for (size_t part = 0; part < HANDOFF_LOG_PARTS; part++) {
+        handoff_log_part_name(name, part);
         if (!variable_delete(name)) {
             break;
         }
         deleted++;
     }
     if (deleted != 0) {
-        printf(
-            "Deleted %zu EFI variables that ReBIOS 0.7.0 to 0.11.0 kept their log in\n",
-            deleted
-        );
+        printf("Deleted %zu EFI variables that an earlier start kept its log in\n", deleted);
     }
 }
