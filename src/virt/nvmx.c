@@ -122,8 +122,8 @@ static const uint16_t fields[] = {
     0x080e, 0x0810, 0x0812, 0x0c00, 0x0c02, 0x0c04, 0x0c06, 0x0c08, 0x0c0a,
     0x0c0c, 0x2000, 0x2002, 0x2004, 0x2006, 0x2008, 0x200a, 0x200e, 0x2010,
     0x2012, 0x2014, 0x2016, 0x2018, 0x201a, 0x202c, 0x2032, 0x201c, 0x201e,
-    0x2020, 0x2022, 0x2024, 0x2026, 0x2028, 0x2044, 0x2052, 0x2400, 0x2404,
-    0x2406, 0x2800, 0x2802, 0x2804, 0x2806, 0x2808, 0x280a, 0x280c, 0x280e,
+    0x2020, 0x2022, 0x2024, 0x2026, 0x2028, 0x2034, 0x2044, 0x2052, 0x2400,
+    0x2402, 0x2404, 0x2406, 0x2800, 0x2802, 0x2804, 0x2806, 0x2808, 0x280a, 0x280c, 0x280e,
     0x2810, 0x281a, 0x281c, 0x281e, 0x2820, 0x2822, 0x2824, 0x2826, 0x2828,
     0x2c00, 0x2c02, 0x2c04, 0x2c08, 0x2c0a, 0x2c0c, 0x2c0e, 0x2c10, 0x2c12,
     0x2c14, 0x2c16, 0x4000, 0x4002, 0x4004, 0x4006, 0x4008, 0x400a, 0x400c,
@@ -252,7 +252,7 @@ static uint64_t cap_basic;
 static uint64_t cap_exit2;
 static uint64_t cap_pin, cap_proc, cap_exit, cap_entry;
 static uint64_t cap_true_pin, cap_true_proc, cap_true_exit, cap_true_entry;
-static uint64_t cap_proc2, cap_misc;
+static uint64_t cap_proc2, cap_proc3, cap_misc;
 static uint64_t cap_cr0_fixed0, cap_cr0_fixed1, cap_cr4_fixed0, cap_cr4_fixed1;
 static uint64_t cap_vmcs_enum;
 static uint64_t cap_ept_vpid;
@@ -293,7 +293,7 @@ static unsigned int ept02_budget;
    | PROC_CR3_STORE_EXITING | PROC_CR8_LOAD_EXITING | PROC_CR8_STORE_EXITING | PROC_TPR_SHADOW \
    | PROC_NMI_WINDOW_EXITING | PROC_MOV_DR_EXITING | PROC_UNCOND_IO_EXITING | PROC_IO_BITMAPS \
    | PROC_MONITOR_TRAP_FLAG | PROC_MSR_BITMAPS | PROC_MONITOR_EXITING | PROC_PAUSE_EXITING \
-   | PROC_SECONDARY_CONTROLS | PROC_DEFAULT1)
+   | PROC_SECONDARY_CONTROLS | PROC_TERTIARY_CONTROLS | PROC_DEFAULT1)
 #define PROC2_EMULATED \
     (PROC2_VIRT_APIC_ACCESSES | PROC2_EPT | PROC2_DESC_TABLE_EXITING \
    | PROC2_RDTSCP | PROC2_VIRT_X2APIC | PROC2_VPID \
@@ -302,6 +302,7 @@ static unsigned int ept02_budget;
    | PROC2_INVPCID | PROC2_VMFUNC | PROC2_VMCS_SHADOWING \
    | PROC2_RDSEED_EXITING | PROC2_PML | PROC2_XSAVES \
    | PROC2_MBEC | PROC2_TSC_SCALING | PROC2_USER_WAIT_PAUSE)
+#define PROC3_EMULATED PROC3_MSR_LIST
 #define EXIT_EMULATED \
     (EXIT_SAVE_DEBUG_CONTROLS | EXIT_HOST_ADDR_SPACE_SIZE | EXIT_ACK_INTR_ON_EXIT \
    | EXIT_SAVE_PAT | EXIT_LOAD_PAT | EXIT_SAVE_EFER \
@@ -390,6 +391,12 @@ void nvmx_init(void) {
 
     cap_true_pin = capability(vmx_capability(MSR_IA32_VMX_TRUE_PINBASED_CTLS), PIN_EMULATED, 0);
     cap_true_proc = capability(vmx_capability(MSR_IA32_VMX_TRUE_PROCBASED_CTLS), PROC_EMULATED, 0);
+    // The tertiary controls' capability MSR has allowed 1-settings alone (SDM
+    // 325462-093 Vol. 3D, A.3.4).
+    cap_proc3 = vmx_capability(MSR_IA32_VMX_PROCBASED_CTLS3) & PROC3_EMULATED;
+    if (cap_proc3 == 0) {
+        cap_true_proc &= ~((uint64_t)PROC_TERTIARY_CONTROLS << 32);
+    }
     cap_true_exit = capability(vmx_capability(MSR_IA32_VMX_TRUE_EXIT_CTLS), EXIT_EMULATED, 0);
     cap_true_entry = capability(vmx_capability(MSR_IA32_VMX_TRUE_ENTRY_CTLS), ENTRY_EMULATED, 0);
     // The CET state the guest's VMCSs load is the guest's own in VMCS01
@@ -533,6 +540,12 @@ static bool field_offered(uint32_t field) {
         }
         case VMCS_APIC_ACCESS_ADDR: {
             return (proc2 & PROC2_VIRT_APIC_ACCESSES) != 0;
+        }
+        case VMCS_TERTIARY_CONTROLS: {
+            return (proc & PROC_TERTIARY_CONTROLS) != 0;
+        }
+        case VMCS_MSR_DATA: {
+            return (cap_proc3 & PROC3_MSR_LIST) != 0;
         }
         case VMCS_PML_ADDRESS:
         case VMCS_GUEST_PML_INDEX: {
@@ -1239,6 +1252,15 @@ static uint64_t proc2_12(const struct nvmx *n) {
     return get12(n, VMCS_PROC_CONTROLS2);
 }
 
+// The guest's tertiary controls, all 0 unless it activates them (SDM
+// 325462-093 Vol. 3C, 27.6.2).
+static uint64_t proc3_12(const struct nvmx *n) {
+    if ((get12(n, VMCS_PROC_CONTROLS) & PROC_TERTIARY_CONTROLS) == 0) {
+        return 0;
+    }
+    return get12(n, VMCS_TERTIARY_CONTROLS);
+}
+
 // The guest's secondary VM-exit controls, all 0 unless it activates them (SDM
 // 325462-093 Vol. 3C, 27.7.1).
 static uint64_t exit2_12(const struct nvmx *n) {
@@ -1799,7 +1821,7 @@ static bool controls_valid(const struct nvmx *n) {
      || ((proc & PROC_SECONDARY_CONTROLS) != 0 && !allowed(proc2, cap_proc2))) {
         return false;
     }
-    if ((exit2_12(n) & ~cap_exit2) != 0) {
+    if ((exit2_12(n) & ~cap_exit2) != 0 || (proc3_12(n) & ~cap_proc3) != 0) {
         return false;
     }
     if (get12(n, VMCS_CR3_TARGET_COUNT) > cr3_targets
@@ -2340,6 +2362,11 @@ static void write_vmcs02(struct vcpu *v, struct nvmx *n, const struct l1_values 
     vmx_write(VMCS_PIN_CONTROLS, c.pin);
     vmx_write(VMCS_PROC_CONTROLS, c.proc);
     vmx_write(VMCS_PROC_CONTROLS2, c.proc2);
+    // The guest's MSR-list instructions run as its guest's, against VMCS02's
+    // MSR bitmap.
+    if (cap_proc3 != 0) {
+        vmx_write(VMCS_TERTIARY_CONTROLS, proc3_12(n));
+    }
     // VMCS02 loads and saves the guest's guest's FRED state, which is the
     // guest's own in VMCS01's.
     uint64_t exit_controls = l1->exit_controls;
@@ -2718,6 +2745,10 @@ static void exit_to_l1(
         }
         if (vmx_fred_switched()) {
             set12(n, VMCS_ORIGINAL_EVENT_DATA, vmx_read(VMCS_ORIGINAL_EVENT_DATA));
+        }
+        if ((reason & 0xffff) == EXIT_REASON_WRMSRLIST
+         && (get12(n, VMCS_PROC_CONTROLS) & PROC_MSR_BITMAPS) != 0) {
+            set12(n, VMCS_MSR_DATA, vmx_read(VMCS_MSR_DATA));
         }
     } else if (!failed) {
         for (size_t i = 0; i < ARRAY_COUNT(exit_fields); i++) {
@@ -3254,6 +3285,10 @@ static bool l1_wants(struct vcpu *v, const struct nvmx *n, uint32_t reason, uint
         case EXIT_REASON_UWRMSR: {
             return msr_wanted(n, proc, (uint32_t)qual, reason == EXIT_REASON_UWRMSR);
         }
+        case EXIT_REASON_RDMSRLIST:
+        case EXIT_REASON_WRMSRLIST: {
+            return msr_wanted(n, proc, (uint32_t)qual, reason == EXIT_REASON_WRMSRLIST);
+        }
         case EXIT_REASON_CR_ACCESS: {
             unsigned int cr = qual & 15;
             bool to = ((qual >> 4) & 3) == 0;
@@ -3450,6 +3485,14 @@ bool nvmx_l2_exit(struct vcpu *v, uint32_t reason, uint64_t qual) {
             return true;
         }
         return false;
+    }
+    // Without the guest's MSR bitmaps, which VMCS02's then trap all MSRs for,
+    // its MSR-list exits have a qualification of 0 (SDM 325462-093 Vol. 3C,
+    // 30.2.1).
+    bool list = (reason & 0xffff) == EXIT_REASON_RDMSRLIST
+             || (reason & 0xffff) == EXIT_REASON_WRMSRLIST;
+    if (list && (get12(n, VMCS_PROC_CONTROLS) & PROC_MSR_BITMAPS) == 0) {
+        qual = 0;
     }
     uint32_t info = (uint32_t)vmx_read(VMCS_EXIT_INTR_INFO);
     exit_to_l1(v, n, reason, qual, info, 0, true);
@@ -3677,8 +3720,11 @@ bool nvmx_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
             *value = cap_vmfunc;
             return true;
         }
+        // It exists where the tertiary controls do (SDM 325462-093 Vol. 3D,
+        // A.3.4).
         case MSR_IA32_VMX_PROCBASED_CTLS3: {
-            *fault = true;
+            *fault = (cap_true_proc >> 32 & PROC_TERTIARY_CONTROLS) == 0;
+            *value = cap_proc3;
             return true;
         }
         // It exists where the secondary VM-exit controls do (SDM 325462-093

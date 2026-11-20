@@ -340,6 +340,9 @@ uint64_t vmx_capability(uint32_t msr) {
         case MSR_IA32_VMX_PROCBASED_CTLS2: {
             return proc2_cap;
         }
+        case MSR_IA32_VMX_PROCBASED_CTLS3: {
+            return proc3_cap;
+        }
         case MSR_IA32_VMX_TRUE_EXIT_CTLS: {
             return exit_cap;
         }
