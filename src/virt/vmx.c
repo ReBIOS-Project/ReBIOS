@@ -58,6 +58,7 @@ static bool mpx_passthrough;
 static bool perf_global_switched;
 static bool perf_global_saved;
 static bool cet_controls;
+static uint64_t exit2_cap;
 static uint64_t cr0_fixed0, cr0_fixed1, cr4_fixed0, cr4_fixed1;
 
 #define VMX_ENTER_FAILED 1
@@ -300,6 +301,11 @@ bool vmx_supported(void) {
                         && control_allowed(entry_cap, ENTRY_LOAD_PERF_GLOBAL_CTRL);
     perf_global_saved = perf_global_switched
                      && control_allowed(exit_cap, EXIT_SAVE_PERF_GLOBAL_CTRL);
+    // IA32_VMX_EXIT_CTLS2 exists where the secondary VM-exit controls do (SDM
+    // 325462-093 Vol. 3D, A.4.2).
+    if (control_allowed(exit_cap, EXIT_ACTIVATE_SECONDARY)) {
+        exit2_cap = rdmsr(MSR_IA32_VMX_EXIT_CTLS2);
+    }
     cet_controls = control_allowed(exit_cap, EXIT_LOAD_CET_STATE)
                 && control_allowed(entry_cap, ENTRY_LOAD_CET_STATE);
 
@@ -384,6 +390,15 @@ bool vmx_perf_global_saved(void) {
 
 bool vmx_cet_switched(void) {
     return cet_controls && (cpuid_cr4_allowed() & CR4_CET) != 0;
+}
+
+bool vmx_fred_switched(void) {
+    return control_allowed(entry_cap, ENTRY_LOAD_FRED) && (exit2_cap & EXIT2_SAVE_FRED) != 0
+        && (cpuid_cr4_allowed() & CR4_FRED) != 0;
+}
+
+uint64_t vmx_exit2_capability(void) {
+    return exit2_cap;
 }
 
 bool vmx_vpid_usable(void) {

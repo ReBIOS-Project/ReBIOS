@@ -122,20 +122,22 @@ static const uint16_t fields[] = {
     0x080e, 0x0810, 0x0812, 0x0c00, 0x0c02, 0x0c04, 0x0c06, 0x0c08, 0x0c0a,
     0x0c0c, 0x2000, 0x2002, 0x2004, 0x2006, 0x2008, 0x200a, 0x200e, 0x2010,
     0x2012, 0x2014, 0x2016, 0x2018, 0x201a, 0x202c, 0x2032, 0x201c, 0x201e,
-    0x2020, 0x2022, 0x2024, 0x2026, 0x2028, 0x2400, 0x2406, 0x2800, 0x2802, 0x2804,
-    0x2806, 0x2808, 0x280a, 0x280c, 0x280e, 0x2810, 0x2c00, 0x2c02, 0x2c04, 0x4000, 0x4002,
-    0x4004, 0x4006, 0x4008, 0x400a, 0x400c, 0x400e, 0x4010, 0x4012, 0x4014,
-    0x4016, 0x4018, 0x401a, 0x401c, 0x401e, 0x4020, 0x4022, 0x4400, 0x4402,
-    0x4404, 0x4406, 0x4408, 0x440a, 0x440c, 0x440e, 0x4800, 0x4802, 0x4804,
-    0x4806, 0x4808, 0x480a, 0x480c, 0x480e, 0x4810, 0x4812, 0x4814, 0x4816,
-    0x4818, 0x481a, 0x481c, 0x481e, 0x4820, 0x4822, 0x4824, 0x4826, 0x4828,
-    0x482a, 0x482e, 0x4c00, 0x6000, 0x6002, 0x6004, 0x6006, 0x6008, 0x600a,
-    0x600c, 0x600e, 0x6400, 0x6402, 0x6404, 0x6406, 0x6408, 0x640a, 0x6800,
-    0x6802, 0x6804, 0x6806, 0x6808, 0x680a, 0x680c, 0x680e, 0x6810, 0x6812,
-    0x6814, 0x6816, 0x6818, 0x681a, 0x681c, 0x681e, 0x6820, 0x6822, 0x6824,
-    0x6826, 0x6828, 0x682a, 0x682c, 0x6c00, 0x6c02, 0x6c04, 0x6c06, 0x6c08,
-    0x6c0a, 0x6c0c, 0x6c0e, 0x6c10, 0x6c12, 0x6c14, 0x6c16, 0x6c18, 0x6c1a,
-    0x6c1c
+    0x2020, 0x2022, 0x2024, 0x2026, 0x2028, 0x2044, 0x2052, 0x2400, 0x2404,
+    0x2406, 0x2800, 0x2802, 0x2804, 0x2806, 0x2808, 0x280a, 0x280c, 0x280e,
+    0x2810, 0x281a, 0x281c, 0x281e, 0x2820, 0x2822, 0x2824, 0x2826, 0x2828,
+    0x2c00, 0x2c02, 0x2c04, 0x2c08, 0x2c0a, 0x2c0c, 0x2c0e, 0x2c10, 0x2c12,
+    0x2c14, 0x2c16, 0x4000, 0x4002, 0x4004, 0x4006, 0x4008, 0x400a, 0x400c,
+    0x400e, 0x4010, 0x4012, 0x4014, 0x4016, 0x4018, 0x401a, 0x401c, 0x401e,
+    0x4020, 0x4022, 0x4400, 0x4402, 0x4404, 0x4406, 0x4408, 0x440a, 0x440c,
+    0x440e, 0x4800, 0x4802, 0x4804, 0x4806, 0x4808, 0x480a, 0x480c, 0x480e,
+    0x4810, 0x4812, 0x4814, 0x4816, 0x4818, 0x481a, 0x481c, 0x481e, 0x4820,
+    0x4822, 0x4824, 0x4826, 0x4828, 0x482a, 0x482e, 0x4c00, 0x6000, 0x6002,
+    0x6004, 0x6006, 0x6008, 0x600a, 0x600c, 0x600e, 0x6400, 0x6402, 0x6404,
+    0x6406, 0x6408, 0x640a, 0x6800, 0x6802, 0x6804, 0x6806, 0x6808, 0x680a,
+    0x680c, 0x680e, 0x6810, 0x6812, 0x6814, 0x6816, 0x6818, 0x681a, 0x681c,
+    0x681e, 0x6820, 0x6822, 0x6824, 0x6826, 0x6828, 0x682a, 0x682c, 0x6c00,
+    0x6c02, 0x6c04, 0x6c06, 0x6c08, 0x6c0a, 0x6c0c, 0x6c0e, 0x6c10, 0x6c12,
+    0x6c14, 0x6c16, 0x6c18, 0x6c1a, 0x6c1c
 };
 
 #define FIELD_COUNT ARRAY_COUNT(fields)
@@ -232,6 +234,8 @@ static _Atomic(size_t) vmxon_count;
 // ReBIOS emulates them. Their allowed 0-settings are the processor's, so that
 // the guest's controls are the processor's to take.
 static uint64_t cap_basic;
+// The secondary VM-exit controls the guest may set.
+static uint64_t cap_exit2;
 static uint64_t cap_pin, cap_proc, cap_exit, cap_entry;
 static uint64_t cap_true_pin, cap_true_proc, cap_true_exit, cap_true_entry;
 static uint64_t cap_proc2, cap_misc;
@@ -285,21 +289,25 @@ static unsigned int ept02_budget;
    | PROC2_RDSEED_EXITING | PROC2_PML | PROC2_XSAVES \
    | PROC2_MBEC | PROC2_TSC_SCALING | PROC2_USER_WAIT_PAUSE)
 #define EXIT_EMULATED \
-    (EXIT_SAVE_DEBUG_CONTROLS | EXIT_HOST_ADDR_SPACE_SIZE | EXIT_ACK_INTR_ON_EXIT | EXIT_SAVE_PAT \
-   | EXIT_LOAD_PAT | EXIT_SAVE_EFER | EXIT_LOAD_EFER | EXIT_SAVE_PREEMPTION_TIMER \
-   | EXIT_LOAD_PERF_GLOBAL_CTRL | EXIT_SAVE_PERF_GLOBAL_CTRL | EXIT_LOAD_CET_STATE | EXIT_DEFAULT1)
+    (EXIT_SAVE_DEBUG_CONTROLS | EXIT_HOST_ADDR_SPACE_SIZE | EXIT_ACK_INTR_ON_EXIT \
+   | EXIT_SAVE_PAT | EXIT_LOAD_PAT | EXIT_SAVE_EFER \
+   | EXIT_LOAD_EFER | EXIT_SAVE_PREEMPTION_TIMER | EXIT_LOAD_PERF_GLOBAL_CTRL \
+   | EXIT_SAVE_PERF_GLOBAL_CTRL | EXIT_LOAD_CET_STATE | EXIT_ACTIVATE_SECONDARY \
+   | EXIT_DEFAULT1)
 #define ENTRY_EMULATED \
     (ENTRY_LOAD_DEBUG_CONTROLS | ENTRY_IA32E_MODE_GUEST | ENTRY_LOAD_PAT | ENTRY_LOAD_EFER \
-   | ENTRY_LOAD_PERF_GLOBAL_CTRL | ENTRY_LOAD_CET_STATE | ENTRY_DEFAULT1)
+   | ENTRY_LOAD_PERF_GLOBAL_CTRL | ENTRY_LOAD_CET_STATE | ENTRY_LOAD_FRED | ENTRY_DEFAULT1)
 
 // IA32_VMX_BASIC (SDM 325462-093 Vol. 3D, A.1): the VMCS size, write-back
-// memory, the information of INS and OUTS exits, the TRUE capability MSRs, and
-// whether exceptions can be injected without their error codes.
+// memory, the information of INS and OUTS exits, the TRUE capability MSRs,
+// whether exceptions can be injected without their error codes, and the
+// nested-exception support that comes with FRED.
 #define BASIC_SIZE_SHIFT 32
 #define BASIC_MEMTYPE_WB ((uint64_t)6 << 50)
 #define BASIC_INS_OUTS ((uint64_t)1 << 54)
 #define BASIC_TRUE_CONTROLS ((uint64_t)1 << 55)
 #define BASIC_NO_ERROR_CODE ((uint64_t)1 << 56)
+#define BASIC_NESTED_EXCEPTION ((uint64_t)1 << 58)
 
 // IA32_VMX_MISC (SDM 325462-093 Vol. 3D, A.6): the VMX-preemption timer's
 // rate, exits store EFER.LMA in the IA-32e mode guest control, the HLT
@@ -362,6 +370,9 @@ void nvmx_init(void) {
     uint64_t basic = vmx_capability(MSR_IA32_VMX_BASIC);
     cap_basic = VMCS12_REVISION | (uint64_t)4096 << BASIC_SIZE_SHIFT | BASIC_MEMTYPE_WB
               | BASIC_INS_OUTS | BASIC_TRUE_CONTROLS | (basic & BASIC_NO_ERROR_CODE);
+    if (vmx_fred_switched()) {
+        cap_basic |= basic & BASIC_NESTED_EXCEPTION;
+    }
 
     cap_true_pin = capability(vmx_capability(MSR_IA32_VMX_TRUE_PINBASED_CTLS), PIN_EMULATED, 0);
     cap_true_proc = capability(vmx_capability(MSR_IA32_VMX_TRUE_PROCBASED_CTLS), PROC_EMULATED, 0);
@@ -372,6 +383,16 @@ void nvmx_init(void) {
     if (!vmx_cet_switched()) {
         cap_true_exit &= ~((uint64_t)EXIT_LOAD_CET_STATE << 32);
         cap_true_entry &= ~((uint64_t)ENTRY_LOAD_CET_STATE << 32);
+    }
+    // FRED's state is the guest's own in the processor, which VMCS02 loads and
+    // saves for the guest's guests.
+    if (vmx_fred_switched()) {
+        cap_exit2 = vmx_exit2_capability() & (EXIT2_SAVE_FRED | EXIT2_LOAD_FRED);
+    } else {
+        cap_true_entry &= ~((uint64_t)ENTRY_LOAD_FRED << 32);
+    }
+    if (cap_exit2 == 0) {
+        cap_true_exit &= ~((uint64_t)EXIT_ACTIVATE_SECONDARY << 32);
     }
     // Likewise IA32_PERF_GLOBAL_CTRL.
     if (!vmx_perf_global_switched()) {
@@ -441,7 +462,7 @@ void nvmx_init(void) {
     }
     cap_vmcs_enum = max_index << 1;
 
-    for (size_t msr = MSR_IA32_VMX_BASIC; msr <= MSR_IA32_VMX_PROCBASED_CTLS3; msr++) {
+    for (size_t msr = MSR_IA32_VMX_BASIC; msr <= MSR_IA32_VMX_EXIT_CTLS2; msr++) {
         virt_intercept_msr(msr, true, true);
     }
     printf("Nested VMX for the guest\n");
@@ -543,6 +564,13 @@ static bool field_offered(uint32_t field) {
         case VMCS_HOST_INTR_SSP_TABLE: {
             return ((uint32_t)(cap_true_exit >> 32) & EXIT_LOAD_CET_STATE) != 0;
         }
+        case VMCS_EXIT_CONTROLS2: {
+            return ((uint32_t)(cap_true_exit >> 32) & EXIT_ACTIVATE_SECONDARY) != 0;
+        }
+        case VMCS_INJECTED_EVENT_DATA:
+        case VMCS_ORIGINAL_EVENT_DATA: {
+            return vmx_fred_switched();
+        }
         case VMCS_GUEST_PERF_GLOBAL_CTRL: {
             return ((uint32_t)(cap_true_entry >> 32) & ENTRY_LOAD_PERF_GLOBAL_CTRL) != 0
                 || ((uint32_t)(cap_true_exit >> 32) & EXIT_SAVE_PERF_GLOBAL_CTRL) != 0;
@@ -551,6 +579,15 @@ static bool field_offered(uint32_t field) {
             return ((uint32_t)(cap_true_exit >> 32) & EXIT_LOAD_PERF_GLOBAL_CTRL) != 0;
         }
         default: {
+            uint32_t guest = (field - VMCS_GUEST_FRED) / 2;
+            uint32_t host = (field - VMCS_HOST_FRED) / 2;
+            if (field % 2 == 0 && guest < VMCS_FRED_FIELDS) {
+                return ((uint32_t)(cap_true_entry >> 32) & ENTRY_LOAD_FRED) != 0
+                    || (cap_exit2 & EXIT2_SAVE_FRED) != 0;
+            }
+            if (field % 2 == 0 && host < VMCS_FRED_FIELDS) {
+                return (cap_exit2 & EXIT2_LOAD_FRED) != 0;
+            }
             return true;
         }
     }
@@ -1114,6 +1151,38 @@ static bool perf_global_valid(uint64_t value) {
     return true;
 }
 
+// The FRED MSRs that the VMCS's FRED fields hold, in their order (SDM
+// 325462-093 Vol. 4, Table 2-2).
+static const uint32_t fred_msrs[VMCS_FRED_FIELDS] = {
+    0x1d4, 0x1cd, 0x1ce, 0x1cf, 0x1d0, 0x1d1, 0x1d2, 0x1d3
+};
+
+static int fred_index(uint32_t msr) {
+    for (size_t i = 0; i < VMCS_FRED_FIELDS; i++) {
+        if (fred_msrs[i] == msr) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+// The checks on the FRED state an entry or exit loads (SDM 325462-093 Vol. 3C,
+// 29.2.2 and 29.3.1.1): IA32_FRED_CONFIG without bits 2, 5:4, and 11, RSP1 to
+// RSP3 64-byte aligned, and SSP1 to SSP3 8-byte aligned, all canonical.
+static bool fred_state_valid(const struct nvmx *n, uint32_t base) {
+    static const uint64_t reserved[VMCS_FRED_FIELDS] = {
+        0x834, 0x3f, 0x3f, 0x3f, 0, 0x7, 0x7, 0x7
+    };
+    for (size_t i = 0; i < VMCS_FRED_FIELDS; i++) {
+        uint64_t value = get12(n, base + 2 * (uint32_t)i);
+        // IA32_FRED_STKLVLS has no checks.
+        if (i != 4 && (!canonical(value) || (value & reserved[i]) != 0)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // The CET state that entries load and exits save (SDM 325462-093 Vol. 3C,
 // 29.3.2 and 30.3), in the current VMCS.
 struct cet_state {
@@ -1154,6 +1223,14 @@ static uint64_t proc2_12(const struct nvmx *n) {
         return 0;
     }
     return get12(n, VMCS_PROC_CONTROLS2);
+}
+
+// The guest's secondary VM-exit controls, all 0 unless it activates them (SDM
+// 325462-093 Vol. 3C, 27.7.1).
+static uint64_t exit2_12(const struct nvmx *n) {
+    return (get12(n, VMCS_EXIT_CONTROLS) & EXIT_ACTIVATE_SECONDARY) != 0
+         ? get12(n, VMCS_EXIT_CONTROLS2)
+         : 0;
 }
 
 // TSC scaling counts only with TSC offsetting (SDM 325462-093 Vol. 3C, 28.3,
@@ -1639,6 +1716,9 @@ static bool controls_valid(const struct nvmx *n) {
      || ((proc & PROC_SECONDARY_CONTROLS) != 0 && !allowed(proc2, cap_proc2))) {
         return false;
     }
+    if ((exit2_12(n) & ~cap_exit2) != 0) {
+        return false;
+    }
     if (get12(n, VMCS_CR3_TARGET_COUNT) > cr3_targets
      || ((pin & PIN_VIRTUAL_NMIS) != 0 && (pin & PIN_NMI_EXITING) == 0)
      || ((proc & PROC_NMI_WINDOW_EXITING) != 0 && (pin & PIN_VIRTUAL_NMIS) == 0)
@@ -1694,11 +1774,14 @@ static bool controls_valid(const struct nvmx *n) {
     if ((proc2 & PROC2_VPID) != 0 && get12(n, VMCS_VPID) == 0) {
         return false;
     }
-    // Without the nested-exception support of IA32_VMX_BASIC[58], which the
-    // guest is not offered, an injected event's bit 13 is reserved (SDM
-    // 325462-093 Vol. 3C, 29.2.1.3), also where the processor takes it.
+    // An injected event's nested-exception bit is for hardware exceptions,
+    // with the nested-exception support of IA32_VMX_BASIC[58] (SDM 325462-093
+    // Vol. 3C, 29.2.1.3), which the guest has only where it has FRED, also
+    // where the processor takes it.
     uint64_t injected = get12(n, VMCS_ENTRY_INTR_INFO);
-    if ((injected & INTR_INFO_VALID) != 0 && (injected & INTR_INFO_NESTED_EXCEPTION) != 0) {
+    if ((injected & INTR_INFO_VALID) != 0 && (injected & INTR_INFO_NESTED_EXCEPTION) != 0
+     && ((cap_basic & BASIC_NESTED_EXCEPTION) == 0
+      || (injected & ((uint32_t)7 << 8)) != INTR_TYPE_HW_EXCEPTION)) {
         return false;
     }
     if ((proc & PROC_IO_BITMAPS) != 0) {
@@ -1798,12 +1881,22 @@ static bool host_state_valid(struct vcpu *v, const struct nvmx *n) {
      && !perf_global_valid(get12(n, VMCS_HOST_PERF_GLOBAL_CTRL))) {
         return false;
     }
+    if ((exit2_12(n) & EXIT2_LOAD_FRED) != 0 && !fred_state_valid(n, VMCS_HOST_FRED)) {
+        return false;
+    }
     return (exit & EXIT_LOAD_PAT) == 0 || x86_pat_valid(get12(n, VMCS_HOST_PAT));
 }
 
 // The MSRs a VMCS switches are the current VMCS's, the others as RDMSR and
 // WRMSR have them.
 static bool msr_read(struct vcpu *v, uint32_t msr, uint64_t *value) {
+    // FRED's state is in VMCS02's fields while it is current, and else the
+    // processor's.
+    int fred = vmx_fred_switched() && v->nvmx->in_l2 ? fred_index(msr) : -1;
+    if (fred >= 0) {
+        *value = vmx_read(VMCS_GUEST_FRED + 2 * (uint32_t)fred);
+        return true;
+    }
     switch (msr) {
         case MSR_EFER: {
             *value = vmx_read(VMCS_GUEST_EFER);
@@ -1857,6 +1950,16 @@ static bool msr_read(struct vcpu *v, uint32_t msr, uint64_t *value) {
 }
 
 static bool msr_write(struct vcpu *v, uint32_t msr, uint64_t value) {
+    // A write in the hypervisor checks the value, which VMCS02's entry
+    // overwrites.
+    int fred = vmx_fred_switched() && v->nvmx->in_l2 ? fred_index(msr) : -1;
+    if (fred >= 0) {
+        if (!wrmsr_safe(msr, value)) {
+            return false;
+        }
+        vmx_write(VMCS_GUEST_FRED + 2 * (uint32_t)fred, value);
+        return true;
+    }
     switch (msr) {
         case MSR_EFER: {
             // WRMSR leaves LMA alone.
@@ -2154,11 +2257,18 @@ static void write_vmcs02(struct vcpu *v, struct nvmx *n, const struct l1_values 
     vmx_write(VMCS_PIN_CONTROLS, c.pin);
     vmx_write(VMCS_PROC_CONTROLS, c.proc);
     vmx_write(VMCS_PROC_CONTROLS2, c.proc2);
-    vmx_write(VMCS_EXIT_CONTROLS, l1->exit_controls);
-    vmx_write(
-        VMCS_ENTRY_CONTROLS,
-        (l1->entry_controls & ~(uint64_t)ENTRY_IA32E_MODE_GUEST) | (entry & ENTRY_IA32E_MODE_GUEST)
-    );
+    // VMCS02 loads and saves the guest's guest's FRED state, which is the
+    // guest's own in VMCS01's.
+    uint64_t exit_controls = l1->exit_controls;
+    uint64_t entry_controls = (l1->entry_controls & ~(uint64_t)ENTRY_IA32E_MODE_GUEST)
+                            | (entry & ENTRY_IA32E_MODE_GUEST);
+    if (vmx_fred_switched()) {
+        exit_controls |= EXIT_ACTIVATE_SECONDARY;
+        entry_controls |= ENTRY_LOAD_FRED;
+        vmx_write(VMCS_EXIT_CONTROLS2, EXIT2_SAVE_FRED);
+    }
+    vmx_write(VMCS_EXIT_CONTROLS, exit_controls);
+    vmx_write(VMCS_ENTRY_CONTROLS, entry_controls);
     for (size_t i = 0; i < ARRAY_COUNT(control_fields); i++) {
         vmx_write(control_fields[i], get12(n, control_fields[i]));
     }
@@ -2243,6 +2353,17 @@ static void write_vmcs02(struct vcpu *v, struct nvmx *n, const struct l1_values 
         }
         cet_write(&cet);
     }
+    // The guest's guest's FRED state is what the entry loads, or else the
+    // guest's own, which the processor holds (SDM 325462-093 Vol. 3C,
+    // 29.3.2.1); the event data goes with the event it injects.
+    if (vmx_fred_switched()) {
+        for (size_t i = 0; i < VMCS_FRED_FIELDS; i++) {
+            uint32_t field = VMCS_GUEST_FRED + 2 * (uint32_t)i;
+            bool loaded = (entry & ENTRY_LOAD_FRED) != 0;
+            vmx_write(field, loaded ? get12(n, field) : rdmsr(fred_msrs[i]));
+        }
+        vmx_write(VMCS_INJECTED_EVENT_DATA, get12(n, VMCS_INJECTED_EVENT_DATA));
+    }
     uint64_t efer = get12(n, VMCS_GUEST_EFER);
     if ((entry & ENTRY_LOAD_EFER) == 0) {
         efer = l1->efer & ~(uint64_t)(EFER_LMA | EFER_LME);
@@ -2281,6 +2402,12 @@ static void save_l2_state(struct nvmx *n) {
     }
     if ((exit & EXIT_SAVE_PERF_GLOBAL_CTRL) != 0) {
         set12(n, VMCS_GUEST_PERF_GLOBAL_CTRL, vmx_read(VMCS_GUEST_PERF_GLOBAL_CTRL));
+    }
+    if ((exit2_12(n) & EXIT2_SAVE_FRED) != 0) {
+        for (size_t i = 0; i < VMCS_FRED_FIELDS; i++) {
+            uint32_t field = VMCS_GUEST_FRED + 2 * (uint32_t)i;
+            set12(n, field, vmx_read(field));
+        }
     }
     // Whatever the controls, where the processor has the one that loads it
     // (SDM 325462-093 Vol. 3C, 30.3.1 and 30.3.3).
@@ -2391,6 +2518,13 @@ static void load_l1_host_state(struct vcpu *v, struct nvmx *n, bool nmi) {
     if ((exit & EXIT_LOAD_PERF_GLOBAL_CTRL) != 0) {
         vmx_write(VMCS_GUEST_PERF_GLOBAL_CTRL, get12(n, VMCS_HOST_PERF_GLOBAL_CTRL));
     }
+    // The guest's FRED state is the processor's, which keeps its guest's but
+    // where the exit loads it.
+    if ((exit2_12(n) & EXIT2_LOAD_FRED) != 0) {
+        for (size_t i = 0; i < VMCS_FRED_FIELDS; i++) {
+            wrmsr(fred_msrs[i], get12(n, VMCS_HOST_FRED + 2 * (uint32_t)i));
+        }
+    }
     if ((exit & EXIT_LOAD_CET_STATE) != 0) {
         struct cet_state cet = {
             get12(n, VMCS_HOST_S_CET), get12(n, VMCS_HOST_SSP), get12(n, VMCS_HOST_INTR_SSP_TABLE)
@@ -2499,6 +2633,9 @@ static void exit_to_l1(
         if (apx_info) {
             set12(n, VMCS_EXIT_EXT_INSTR_INFO, vmx_read(VMCS_EXIT_EXT_INSTR_INFO));
         }
+        if (vmx_fred_switched()) {
+            set12(n, VMCS_ORIGINAL_EVENT_DATA, vmx_read(VMCS_ORIGINAL_EVENT_DATA));
+        }
     } else if (!failed) {
         for (size_t i = 0; i < ARRAY_COUNT(exit_fields); i++) {
             set12(n, exit_fields[i], 0);
@@ -2511,15 +2648,23 @@ static void exit_to_l1(
         // An event the entry was to inject, or one an exit cut short, is the
         // guest's to inject again, as Linux 7.3's KVM has it.
         uint32_t injected = (uint32_t)vmx_read(VMCS_ENTRY_INTR_INFO);
+        // With FRED, its event data goes with it (SDM 325462-093 Vol. 3C,
+        // 29.6.1.1).
+        uint64_t data = 0;
         if ((injected & INTR_INFO_VALID) != 0) {
             set12(n, VMCS_IDT_VECTORING_INFO, injected);
             set12(n, VMCS_IDT_VECTORING_ERROR, vmx_read(VMCS_ENTRY_EXCEPTION_ERROR));
             set12(n, VMCS_EXIT_INSTR_LEN, vmx_read(VMCS_ENTRY_INSTR_LEN));
             vmx_write(VMCS_ENTRY_INTR_INFO, 0);
+            data = vmx_fred_switched() ? vmx_read(VMCS_INJECTED_EVENT_DATA) : 0;
         } else if ((v->redeliver & INTR_INFO_VALID) != 0) {
             set12(n, VMCS_IDT_VECTORING_INFO, v->redeliver);
             set12(n, VMCS_IDT_VECTORING_ERROR, v->redeliver_error);
             set12(n, VMCS_EXIT_INSTR_LEN, v->redeliver_length);
+            data = v->redeliver_data;
+        }
+        if (vmx_fred_switched()) {
+            set12(n, VMCS_ORIGINAL_EVENT_DATA, data);
         }
     }
     v->redeliver = 0;
@@ -3440,6 +3585,13 @@ bool nvmx_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
             *fault = true;
             return true;
         }
+        // It exists where the secondary VM-exit controls do (SDM 325462-093
+        // Vol. 3D, A.4.2).
+        case MSR_IA32_VMX_EXIT_CTLS2: {
+            *fault = ((uint32_t)(cap_true_exit >> 32) & EXIT_ACTIVATE_SECONDARY) == 0;
+            *value = cap_exit2;
+            return true;
+        }
         default: {
             return false;
         }
@@ -3450,7 +3602,7 @@ bool nvmx_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
     (void)v;
     (void)value;
     *fault = false;
-    if (!nvmx_enabled || msr < MSR_IA32_VMX_BASIC || msr > MSR_IA32_VMX_PROCBASED_CTLS3) {
+    if (!nvmx_enabled || msr < MSR_IA32_VMX_BASIC || msr > MSR_IA32_VMX_EXIT_CTLS2) {
         return false;
     }
     // The capability MSRs are read-only.

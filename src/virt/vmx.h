@@ -69,6 +69,7 @@
 #define VMCS_TSC_MULTIPLIER 0x2032
 #define VMCS_TERTIARY_CONTROLS 0x2034
 #define VMCS_PID_POINTER_TABLE 0x2042
+#define VMCS_EXIT_CONTROLS2 0x2044
 #define VMCS_INJECTED_EVENT_DATA 0x2052
 #define VMCS_GUEST_PHYS_ADDR 0x2400
 #define VMCS_ORIGINAL_EVENT_DATA 0x2404
@@ -78,6 +79,12 @@
 #define VMCS_GUEST_DEBUGCTL 0x2802
 #define VMCS_GUEST_PAT 0x2804
 #define VMCS_GUEST_EFER 0x2806
+// IA32_FRED_CONFIG, RSP1 to RSP3, STKLVLS, and SSP1 to SSP3, 2 encodings
+// apart, of the guest and of the host (SDM 325462-093 Vol. 3D, Tables B-4 and
+// B-5).
+#define VMCS_GUEST_FRED 0x281a
+#define VMCS_HOST_FRED 0x2c08
+#define VMCS_FRED_FIELDS 8
 #define VMCS_GUEST_PERF_GLOBAL_CTRL 0x2808
 #define VMCS_GUEST_PDPTE0 0x280a
 #define VMCS_GUEST_PDPTE1 0x280c
@@ -261,6 +268,11 @@
 #define EXIT_CLEAR_RTIT_CTL ((uint32_t)1 << 25)
 #define EXIT_LOAD_CET_STATE ((uint32_t)1 << 28)
 #define EXIT_SAVE_PERF_GLOBAL_CTRL ((uint32_t)1 << 30)
+#define EXIT_ACTIVATE_SECONDARY ((uint32_t)1 << 31)
+
+// Secondary VM-exit controls (SDM 325462-093 Vol. 3C, Table 27-15).
+#define EXIT2_SAVE_FRED ((uint64_t)1 << 0)
+#define EXIT2_LOAD_FRED ((uint64_t)1 << 1)
 
 // VM-entry controls (SDM 325462-093 Vol. 3C, Table 27-17).
 #define ENTRY_LOAD_DEBUG_CONTROLS ((uint32_t)1 << 2)
@@ -273,6 +285,7 @@
 #define ENTRY_CONCEAL_VMX_FROM_PT ((uint32_t)1 << 17)
 #define ENTRY_LOAD_RTIT_CTL ((uint32_t)1 << 18)
 #define ENTRY_LOAD_CET_STATE ((uint32_t)1 << 20)
+#define ENTRY_LOAD_FRED ((uint32_t)1 << 23)
 
 // Guest segment access rights (SDM 325462-093 Vol. 3C, Table 27-2).
 #define VMX_AR_L ((uint32_t)1 << 13)
@@ -463,6 +476,7 @@
 #define MSR_IA32_VMX_TRUE_ENTRY_CTLS 0x490
 #define MSR_IA32_VMX_VMFUNC 0x491
 #define MSR_IA32_VMX_PROCBASED_CTLS3 0x492
+#define MSR_IA32_VMX_EXIT_CTLS2 0x493
 
 // IA32_VMX_MISC: Intel PT can run in VMX operation (SDM 325462-093 Vol. 3D,
 // A.6).
@@ -560,6 +574,11 @@ bool vmx_perf_global_saved(void);
 // Whether the guest's CET state is in its VMCS, which entries load and exits
 // save, where the guest has CET.
 bool vmx_cet_switched(void);
+// Whether VMCS02 can load the guest's guests' FRED state at entries and save
+// it at exits, where the guest has FRED.
+bool vmx_fred_switched(void);
+// The secondary VM-exit controls the processor allows.
+uint64_t vmx_exit2_capability(void);
 // An access the processor made for the guest outside of any instruction that
 // reached gpa, where the guest has no RAM.
 void vmx_async_access(uintptr_t gpa);
