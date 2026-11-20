@@ -123,7 +123,7 @@ static const uint16_t fields[] = {
     0x0c0c, 0x2000, 0x2002, 0x2004, 0x2006, 0x2008, 0x200a, 0x200e, 0x2010,
     0x2012, 0x2014, 0x2016, 0x2018, 0x201a, 0x202c, 0x2032, 0x201c, 0x201e,
     0x2020, 0x2022, 0x2024, 0x2026, 0x2028, 0x2400, 0x2406, 0x2800, 0x2802, 0x2804,
-    0x2806, 0x280a, 0x280c, 0x280e, 0x2810, 0x2c00, 0x2c02, 0x4000, 0x4002,
+    0x2806, 0x2808, 0x280a, 0x280c, 0x280e, 0x2810, 0x2c00, 0x2c02, 0x2c04, 0x4000, 0x4002,
     0x4004, 0x4006, 0x4008, 0x400a, 0x400c, 0x400e, 0x4010, 0x4012, 0x4014,
     0x4016, 0x4018, 0x401a, 0x401c, 0x401e, 0x4020, 0x4022, 0x4400, 0x4402,
     0x4404, 0x4406, 0x4408, 0x440a, 0x440c, 0x440e, 0x4800, 0x4802, 0x4804,
@@ -287,10 +287,10 @@ static unsigned int ept02_budget;
 #define EXIT_EMULATED \
     (EXIT_SAVE_DEBUG_CONTROLS | EXIT_HOST_ADDR_SPACE_SIZE | EXIT_ACK_INTR_ON_EXIT | EXIT_SAVE_PAT \
    | EXIT_LOAD_PAT | EXIT_SAVE_EFER | EXIT_LOAD_EFER | EXIT_SAVE_PREEMPTION_TIMER \
-   | EXIT_LOAD_CET_STATE | EXIT_DEFAULT1)
+   | EXIT_LOAD_PERF_GLOBAL_CTRL | EXIT_SAVE_PERF_GLOBAL_CTRL | EXIT_LOAD_CET_STATE | EXIT_DEFAULT1)
 #define ENTRY_EMULATED \
     (ENTRY_LOAD_DEBUG_CONTROLS | ENTRY_IA32E_MODE_GUEST | ENTRY_LOAD_PAT | ENTRY_LOAD_EFER \
-   | ENTRY_LOAD_CET_STATE | ENTRY_DEFAULT1)
+   | ENTRY_LOAD_PERF_GLOBAL_CTRL | ENTRY_LOAD_CET_STATE | ENTRY_DEFAULT1)
 
 // IA32_VMX_BASIC (SDM 325462-093 Vol. 3D, A.1): the VMCS size, write-back
 // memory, the information of INS and OUTS exits, the TRUE capability MSRs, and
@@ -372,6 +372,12 @@ void nvmx_init(void) {
     if (!vmx_cet_switched()) {
         cap_true_exit &= ~((uint64_t)EXIT_LOAD_CET_STATE << 32);
         cap_true_entry &= ~((uint64_t)ENTRY_LOAD_CET_STATE << 32);
+    }
+    // Likewise IA32_PERF_GLOBAL_CTRL.
+    if (!vmx_perf_global_switched()) {
+        uint32_t exit = EXIT_LOAD_PERF_GLOBAL_CTRL | EXIT_SAVE_PERF_GLOBAL_CTRL;
+        cap_true_exit &= ~((uint64_t)exit << 32);
+        cap_true_entry &= ~((uint64_t)ENTRY_LOAD_PERF_GLOBAL_CTRL << 32);
     }
     cap_pin = capability(cap_true_pin, PIN_EMULATED, PIN_DEFAULT1);
     cap_proc = capability(cap_true_proc, PROC_EMULATED, PROC_DEFAULT1);
@@ -536,6 +542,13 @@ static bool field_offered(uint32_t field) {
         case VMCS_HOST_SSP:
         case VMCS_HOST_INTR_SSP_TABLE: {
             return ((uint32_t)(cap_true_exit >> 32) & EXIT_LOAD_CET_STATE) != 0;
+        }
+        case VMCS_GUEST_PERF_GLOBAL_CTRL: {
+            return ((uint32_t)(cap_true_entry >> 32) & ENTRY_LOAD_PERF_GLOBAL_CTRL) != 0
+                || ((uint32_t)(cap_true_exit >> 32) & EXIT_SAVE_PERF_GLOBAL_CTRL) != 0;
+        }
+        case VMCS_HOST_PERF_GLOBAL_CTRL: {
+            return ((uint32_t)(cap_true_exit >> 32) & EXIT_LOAD_PERF_GLOBAL_CTRL) != 0;
         }
         default: {
             return true;
@@ -1088,6 +1101,17 @@ static bool canonical(uintptr_t address) {
 static bool s_cet_valid(uint64_t value) {
     return wrmsr_safe(MSR_IA32_S_CET, value)
         && (value & (S_CET_SUPPRESS | S_CET_TRACKER)) != (S_CET_SUPPRESS | S_CET_TRACKER);
+}
+
+// IA32_PERF_GLOBAL_CTRL without the bits the processor reserves, which a write
+// in the hypervisor checks, the hypervisor's own value, 0, which exits load
+// (vmx.c), coming back at once.
+static bool perf_global_valid(uint64_t value) {
+    if (!wrmsr_safe(MSR_IA32_PERF_GLOBAL_CTRL, value)) {
+        return false;
+    }
+    wrmsr(MSR_IA32_PERF_GLOBAL_CTRL, 0);
+    return true;
 }
 
 // The CET state that entries load and exits save (SDM 325462-093 Vol. 3C,
@@ -1770,6 +1794,10 @@ static bool host_state_valid(struct vcpu *v, const struct nvmx *n) {
             return false;
         }
     }
+    if ((exit & EXIT_LOAD_PERF_GLOBAL_CTRL) != 0
+     && !perf_global_valid(get12(n, VMCS_HOST_PERF_GLOBAL_CTRL))) {
+        return false;
+    }
     return (exit & EXIT_LOAD_PAT) == 0 || x86_pat_valid(get12(n, VMCS_HOST_PAT));
 }
 
@@ -1884,16 +1912,13 @@ static bool msr_write(struct vcpu *v, uint32_t msr, uint64_t value) {
             vmx_write(VMCS_GUEST_INTR_SSP_TABLE, value);
             return true;
         }
-        // The hypervisor's own value, 0, which exits load (vmx.c), comes back
-        // at once.
         case MSR_IA32_PERF_GLOBAL_CTRL: {
             if (!vmx_perf_global_switched()) {
                 return exit_msr_write(v, msr, value);
             }
-            if (!wrmsr_safe(msr, value)) {
+            if (!perf_global_valid(value)) {
                 return false;
             }
-            wrmsr(msr, 0);
             vmx_write(VMCS_GUEST_PERF_GLOBAL_CTRL, value);
             return true;
         }
@@ -2198,13 +2223,16 @@ static void write_vmcs02(struct vcpu *v, struct nvmx *n, const struct l1_values 
     vmx_write(VMCS_GUEST_DR7, debug ? get12(n, VMCS_GUEST_DR7) : l1->dr7);
     vmx_write(VMCS_GUEST_DEBUGCTL, debug ? get12(n, VMCS_GUEST_DEBUGCTL) : l1->debugctl);
     vmx_write(VMCS_GUEST_PAT, (entry & ENTRY_LOAD_PAT) != 0 ? get12(n, VMCS_GUEST_PAT) : l1->pat);
-    // The guest has no controls for IA32_BNDCFGS or IA32_PERF_GLOBAL_CTRL: its
-    // guest runs with its values, and leaves them its own.
+    // The guest has no controls for IA32_BNDCFGS: its guest runs with its
+    // value, and leaves it its own.
     if (vmx_mpx_passthrough()) {
         vmx_write(VMCS_GUEST_BNDCFGS, l1->bndcfgs);
     }
     if (vmx_perf_global_switched()) {
-        vmx_write(VMCS_GUEST_PERF_GLOBAL_CTRL, l1->perf_global_ctrl);
+        uint64_t perf = (entry & ENTRY_LOAD_PERF_GLOBAL_CTRL) != 0
+                      ? get12(n, VMCS_GUEST_PERF_GLOBAL_CTRL)
+                      : l1->perf_global_ctrl;
+        vmx_write(VMCS_GUEST_PERF_GLOBAL_CTRL, perf);
     }
     if (vmx_cet_switched()) {
         struct cet_state cet = l1->cet;
@@ -2250,6 +2278,9 @@ static void save_l2_state(struct nvmx *n) {
     }
     if ((exit & EXIT_SAVE_PAT) != 0) {
         set12(n, VMCS_GUEST_PAT, vmx_read(VMCS_GUEST_PAT));
+    }
+    if ((exit & EXIT_SAVE_PERF_GLOBAL_CTRL) != 0) {
+        set12(n, VMCS_GUEST_PERF_GLOBAL_CTRL, vmx_read(VMCS_GUEST_PERF_GLOBAL_CTRL));
     }
     // Whatever the controls, where the processor has the one that loads it
     // (SDM 325462-093 Vol. 3C, 30.3.1 and 30.3.3).
@@ -2356,6 +2387,9 @@ static void load_l1_host_state(struct vcpu *v, struct nvmx *n, bool nmi) {
     vmx_write(VMCS_GUEST_SYSENTER_EIP, get12(n, VMCS_HOST_SYSENTER_EIP));
     if ((exit & EXIT_LOAD_PAT) != 0) {
         vmx_write(VMCS_GUEST_PAT, get12(n, VMCS_HOST_PAT));
+    }
+    if ((exit & EXIT_LOAD_PERF_GLOBAL_CTRL) != 0) {
+        vmx_write(VMCS_GUEST_PERF_GLOBAL_CTRL, get12(n, VMCS_HOST_PERF_GLOBAL_CTRL));
     }
     if ((exit & EXIT_LOAD_CET_STATE) != 0) {
         struct cet_state cet = {
@@ -2509,12 +2543,13 @@ static void exit_to_l1(
     if (vmx_mpx_passthrough()) {
         vmx_write(VMCS_GUEST_BNDCFGS, bndcfgs);
     }
-    if (vmx_perf_global_switched()) {
+    // The guest's guest's IA32_PERF_GLOBAL_CTRL and CET state stay loaded, but
+    // where the entry failed on the guest state, before loading any (SDM
+    // 325462-093 Vol. 3C, 29.8).
+    bool loaded = !failed || (reason & 0xffff) != EXIT_REASON_INVALID_GUEST_STATE;
+    if (vmx_perf_global_switched() && loaded) {
         vmx_write(VMCS_GUEST_PERF_GLOBAL_CTRL, perf);
     }
-    // The guest's guest's CET state stays loaded, but where the entry failed
-    // on the guest state, before loading any (SDM 325462-093 Vol. 3C, 29.8).
-    bool loaded = !failed || (reason & 0xffff) != EXIT_REASON_INVALID_GUEST_STATE;
     if (vmx_cet_switched() && loaded) {
         cet_write(&cet);
     }
