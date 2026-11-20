@@ -690,11 +690,12 @@ noreturn void svm_shutdown(struct vcpu *v, const char *why) {
 }
 
 // INVLPGB's attributes in rAX: those it compares, and bits 11:5, which fault:
-// nested translations, which the guest is not shown, the IOMMU's, which it
+// nested translations where the guest is not shown them, the IOMMU's, which it
 // cannot enable (EnhancedTlbi), and reserved ones. Of ECX, it defines only the
 // count and, in bit 31, the stride (APM 24594 rev. 3.39, INVLPGB).
 #define INVLPGB_PCID ((uint64_t)1 << 1)
 #define INVLPGB_ASID ((uint64_t)1 << 2)
+#define INVLPGB_NESTED ((uint64_t)1 << 5)
 #define INVLPGB_FAULTING ((uint64_t)0xfe0)
 #define INVLPGB_ECX ((uint32_t)0x8000ffff)
 
@@ -724,7 +725,8 @@ static void exit_invlpgb(struct vcpu *v) {
         vcpu_inject_exception(v, 13, true, 0);
         return;
     }
-    if ((rax & INVLPGB_FAULTING) != 0 || edx >> 28 != 0
+    uint64_t faulting = INVLPGB_FAULTING & ~(nsvm_invlpgb_nested() ? INVLPGB_NESTED : 0);
+    if ((rax & faulting) != 0 || edx >> 28 != 0
      || ((edx >> 16) != 0 && (s->cr4 & CR4_PCIDE) == 0) || (edx & 0xffff) >= nsvm_invlpgb_asids(v)
      || (ecx & 0xffff) > invlpgb_count_max || pse_paging) {
         if (!nsvm_invlpgb_illegal(v)) {
@@ -754,6 +756,9 @@ static void exit_invlpgb(struct vcpu *v) {
     if (!done) {
         vcpu_inject_exception(v, 6, false, 0);
         return;
+    }
+    if ((rax & INVLPGB_NESTED) != 0) {
+        nsvm_invlpgb_nested_flush(v);
     }
     vcpu_advance(v, insn.length);
 }
@@ -979,6 +984,10 @@ static void svm_handle_exit(struct vcpu *v) {
         }
         case SVM_EXIT_INVLPGB: {
             exit_invlpgb(v);
+            break;
+        }
+        case SVM_EXIT_TLBSYNC: {
+            nsvm_tlbsync(v);
             break;
         }
         case SVM_EXIT_INVD: {

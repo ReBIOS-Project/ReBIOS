@@ -43,6 +43,12 @@ bool nsvm_tlbi_enabled(struct vcpu *v);
 uint32_t nsvm_invlpgb_asids(struct vcpu *v);
 bool nsvm_invlpgb_illegal(struct vcpu *v);
 bool nsvm_invlpgb_asid(struct vcpu *v, bool named, uint32_t asid, uint32_t *processor);
+// Whether the guest's INVLPGB may include its guests' nested translations,
+// which then drops them for every vCPU, and its TLBSYNC, which waits for that
+// where an INVLPGB of the vCPU's asked for it.
+bool nsvm_invlpgb_nested(void);
+void nsvm_invlpgb_nested_flush(struct vcpu *v);
+void nsvm_tlbsync(struct vcpu *v);
 // The guest's VM_CR and VM_HSAVE_PA.
 bool nsvm_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault);
 bool nsvm_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault);

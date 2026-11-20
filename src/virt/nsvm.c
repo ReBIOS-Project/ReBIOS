@@ -99,6 +99,8 @@
 #define NPT02_ROOTS 4
 
 #define CPUID_7_0_ECX_BUSLOCKTRAP ((uint32_t)1 << 24)
+#define CPUID_80000008_EBX_INVLPGB ((uint32_t)1 << 3)
+#define CPUID_80000008_EBX_INVLPGB_NESTED ((uint32_t)1 << 21)
 
 #define MSR_IA32_SPEC_CTRL 0x48
 
@@ -219,6 +221,12 @@ struct nsvm {
     // Whether VMCB12 has GAAT paging translate the guest's guest's linear
     // addresses (APM 24593 rev. 3.46, 15.40).
     bool gaat;
+    // Whether the guest's guest may be running on NPT02, and the flush of the
+    // guest's nested translations that NPT02 has seen and, where an INVLPGB of
+    // the guest's asked for one, the flush that its TLBSYNC waits for.
+    _Atomic(bool) l2_live;
+    _Atomic(uint64_t) nested_flush_seen;
+    uint64_t nested_flush_owed;
     // Whether VMCB12 gives the guest's guest PMC registers of its own, and
     // filters the events they may count (APM 24593 rev. 3.46, 15.39).
     bool pmc;
@@ -277,6 +285,11 @@ static bool ssscheck;
 static bool paging_write;
 static bool verify_paging_write;
 static bool gaat;
+// INVLPGB's nested translations, where the processor has them and TlbiCtl, for
+// the TLBSYNC intercept, and the flushes of the guest's that its INVLPGBs
+// asked for.
+static bool invlpgb_nested;
+static _Atomic(uint64_t) nested_flushes;
 static bool pmc_virt;
 static bool pmc_filter;
 static bool tsc_scaling;
@@ -308,6 +321,9 @@ void nsvm_init(void) {
     paging_write = (cpuid(0x8000000a, 0).ecx & CPUID_8000000A_ECX_PW) != 0;
     verify_paging_write = (cpuid(0x8000000a, 0).ecx & CPUID_8000000A_ECX_VPW) != 0;
     gaat = (cpuid(0x8000000a, 0).ecx & CPUID_8000000A_ECX_GAAT) != 0;
+    uint32_t sizes = cpuid(0x80000008, 0).ebx;
+    invlpgb_nested = svm_tlbictl && (sizes & CPUID_80000008_EBX_INVLPGB) != 0
+                  && (sizes & CPUID_80000008_EBX_INVLPGB_NESTED) != 0;
     pmc_virt = (cpuid(0x8000000a, 0).edx & SVM_FEATURE_PMC_VIRT) != 0;
     pmc_filter = pmc_virt && (cpuid(0x8000000a, 0).ecx & CPUID_8000000A_ECX_PMC_FILTER) != 0;
     debugctl_bits = DEBUGCTL_LBR | DEBUGCTL_BTF
@@ -2149,6 +2165,7 @@ bool nsvm_l2_exit(struct vcpu *v) {
     if (n == NULL || !n->in_l2) {
         return false;
     }
+    atomic_store_explicit(&n->l2_live, false, memory_order_seq_cst);
     struct vmcb_control *c = &v->vmcb->control;
     uint64_t code = c->exitcode;
     n->run_pending = false;
@@ -2353,6 +2370,71 @@ static uint64_t cut_short(struct vcpu *v) {
     return v->redeliver | (uint64_t)v->redeliver_error << 32;
 }
 
+// Before the guest's guest runs on NPT02, it drops the tables where the guest
+// flushed its nested translations since, a flush meanwhile seeing it live.
+static void nested_flush_catch_up(struct nsvm *n) {
+    atomic_store_explicit(&n->l2_live, true, memory_order_seq_cst);
+    uint64_t flushes = atomic_load_explicit(&nested_flushes, memory_order_seq_cst);
+    if (atomic_load_explicit(&n->nested_flush_seen, memory_order_relaxed) == flushes) {
+        return;
+    }
+    npt02_drop_all(n);
+    if (n->npt) {
+        n->vmcb02->control.n_cr3 = npt02_root(n);
+    }
+    n->vmcb02->control.tlb_control = SVM_TLB_FLUSH_ALL;
+    atomic_store_explicit(&n->nested_flush_seen, flushes, memory_order_release);
+}
+
+bool nsvm_invlpgb_nested(void) {
+    return invlpgb_nested;
+}
+
+// An INVLPGB of the guest's that includes nested translations drops what its
+// guests' NPT02 tables made of them, on every vCPU: each drops its own before
+// its guest's guest next runs, which the guest's next TLBSYNC waits for (APM
+// 24594 rev. 3.39, INVLPGB and TLBSYNC). Any ASID's flush drops them all.
+void nsvm_invlpgb_nested_flush(struct vcpu *v) {
+    struct nsvm *n = v->nsvm;
+    if (n == NULL || n->in_l2) {
+        return;
+    }
+    n->nested_flush_owed = atomic_fetch_add_explicit(&nested_flushes, 1, memory_order_seq_cst) + 1;
+    n->vmcb01->control.intercept_misc3 |= SVM_INTERCEPT_TLBSYNC;
+    for (size_t i = 0; i < smp_cpu_count(); i++) {
+        struct vcpu *to = smp_cpu(i)->vcpu;
+        if (to != NULL && to != v && to->nsvm != NULL
+         && atomic_load_explicit(&to->nsvm->l2_live, memory_order_seq_cst)) {
+            vcpu_kick(to->cpu);
+        }
+    }
+}
+
+// The guest's TLBSYNC after such an INVLPGB waits until no vCPU runs its
+// guest's guest on tables from before the flush, as each does once the kick
+// makes it exit.
+void nsvm_tlbsync(struct vcpu *v) {
+    struct nsvm *n = v->nsvm;
+    if (n != NULL && !n->in_l2 && n->nested_flush_owed != 0) {
+        for (size_t i = 0; i < smp_cpu_count(); i++) {
+            struct vcpu *to = smp_cpu(i)->vcpu;
+            if (to == NULL || to == v || to->nsvm == NULL) {
+                continue;
+            }
+            struct nsvm *other = to->nsvm;
+            while (atomic_load_explicit(&other->l2_live, memory_order_seq_cst)
+                && atomic_load_explicit(&other->nested_flush_seen, memory_order_acquire)
+                     < n->nested_flush_owed) {
+                cpu_relax();
+            }
+        }
+        n->nested_flush_owed = 0;
+        n->vmcb01->control.intercept_misc3 &= ~SVM_INTERCEPT_TLBSYNC;
+    }
+    asm volatile ("tlbsync" ::: "memory");
+    vcpu_skip_instruction(v);
+}
+
 // The guest's INIT, NMIs, and interrupts are exits of its guest's where VMCB12
 // intercepts them and its global interrupt flag lets them through: INIT and
 // NMIs stay pending for the guest, interrupts in its local APIC (APM 24593
@@ -2425,6 +2507,7 @@ bool nsvm_before_entry(struct vcpu *v) {
     if (window) {
         nsvm_interrupt_window(v, true);
     }
+    nested_flush_catch_up(n);
     return true;
 }
 

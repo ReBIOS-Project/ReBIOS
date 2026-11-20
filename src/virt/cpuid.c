@@ -384,6 +384,9 @@ static const struct last_subleaf amd_last_subleaves[] = {
 #define CPUID_80000001_EDX_RDTSCP ((uint32_t)1 << 27)
 #define CPUID_80000001_EDX_LM ((uint32_t)1 << 29)
 #define CPUID_80000008_EBX_LMSLE_UNSUPPORTED ((uint32_t)1 << 20)
+// INVLPGB's nested translations, which nested SVM drops for the guest
+// (nsvm.c).
+#define CPUID_80000008_EBX_INVLPGB_NESTED ((uint32_t)1 << 21)
 // What AMD's families have of RAPL, PPIN, and memory controller counters (PPR
 // 56713 rev. 3.05, CPUID_Fn80000007_EDX, CPUID_Fn80000008_EBX, and
 // CPUID_Fn80000022_E[B,C]X), and of the node ID MSR (BKDG 31116 rev. 3.62,
@@ -782,6 +785,9 @@ struct cpuid_regs cpuid_guest(struct vcpu *v, uint32_t leaf, uint32_t subleaf) {
         case 0x80000008: {
             if (!virt_vmx && msr_allowed(MSR_AMD_PPIN_CTL)) {
                 r.ebx |= cpuid(leaf, 0).ebx & CPUID_80000008_EBX_PPIN;
+            }
+            if (nsvm_invlpgb_nested()) {
+                r.ebx |= CPUID_80000008_EBX_INVLPGB_NESTED;
             }
             break;
         }

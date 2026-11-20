@@ -358,6 +358,7 @@ _Static_assert(
 #define SVM_EXIT_MWAIT 0x8b
 #define SVM_EXIT_XSETBV 0x8d
 #define SVM_EXIT_INVLPGB 0xa0
+#define SVM_EXIT_TLBSYNC 0xa4
 #define SVM_EXIT_INVLPGB_ILLEGAL 0xa1
 #define SVM_EXIT_IDLE_HLT 0xa6
 #define SVM_EXIT_NPF 0x400
