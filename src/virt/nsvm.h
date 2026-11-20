@@ -117,6 +117,9 @@ void nsvm_set_pat(struct vcpu *v, uint64_t pat);
 // tables, which then translate what the vCPU's accesses take as guest-physical
 // addresses.
 bool nsvm_npt_active(struct vcpu *v);
+// Where GAAT paging translates a linear address of the guest's guest: the
+// guest's GAAT pointer, else false for ordinary paging.
+bool nsvm_gaat_root(struct vcpu *v, uintptr_t linear, uint64_t *gaatp);
 // An address of the guest's guest through the guest's nested page tables, for
 // a data write, an instruction fetch, or neither, of the guest's guest's own
 // page table walks or else at the address it translates to, in user mode or

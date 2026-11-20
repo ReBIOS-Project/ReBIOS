@@ -82,9 +82,13 @@
 #define CPUID_8000000A_ECX_PML ((uint32_t)1 << 4)
 #define PML_LAST 0x1ff
 
-// Paging-Write and Verify Paging-Write, in CPUID Fn8000_000A_ECX, and their
-// bits in the nested page tables' leaves (APM 24593 rev. 3.46, 15.25.6.2 and
-// 15.25.6.3).
+// GAAT, Paging-Write, and Verify Paging-Write, in CPUID Fn8000_000A_ECX, the
+// maximum GAAT prefix width in its EAX, the bits of GAAT's pointer that must
+// be zero, and Paging-Write's and Verify Paging-Write's bits in the nested
+// page tables' leaves (APM 24593 rev. 3.46, 15.40, 15.25.6.2, and 15.25.6.3).
+#define CPUID_8000000A_ECX_GAAT ((uint32_t)1 << 0)
+#define CPUID_8000000A_EAX_GAAT_PREFIX ((uint32_t)0x3f00)
+#define GAAT_POINTER_RESERVED ((uint64_t)0xfff0000000000000)
 #define CPUID_8000000A_ECX_PW ((uint32_t)1 << 1)
 #define CPUID_8000000A_ECX_VPW ((uint32_t)1 << 2)
 #define NPT_VPW ((uint64_t)1 << 57)
@@ -210,6 +214,9 @@ struct nsvm {
     // 3.46, 15.25.6.2 and 15.25.6.3).
     bool pw;
     bool vpw;
+    // Whether VMCB12 has GAAT paging translate the guest's guest's linear
+    // addresses (APM 24593 rev. 3.46, 15.40).
+    bool gaat;
     // Whether VMCB12 has the guest's guest's supervisor shadow-stack accesses
     // reach only supervisor shadow-stack pages of the nested page tables,
     // which the guest's PAE paging and EFER.NXE allow (APM 24593 rev. 3.46,
@@ -255,13 +262,14 @@ static uint64_t debugctl_bits;
 // Whether the processor has read-only guest page tables, page modification
 // logging, GMET, the TSC ratio MSR, the idle HLT intercept, and the bus lock
 // threshold, SSSCheck, which takes the host's EFER.NXE (APM 24593 rev. 3.46,
-// 15.25.15), Paging-Write, and Verify Paging-Write.
+// 15.25.15), Paging-Write, Verify Paging-Write, and GAAT.
 static bool rogpt;
 static bool pml;
 static bool gmet;
 static bool ssscheck;
 static bool paging_write;
 static bool verify_paging_write;
+static bool gaat;
 static bool tsc_scaling;
 static bool idle_hlt;
 static bool bus_lock_threshold;
@@ -290,6 +298,7 @@ void nsvm_init(void) {
     pml = (cpuid(0x8000000a, 0).ecx & CPUID_8000000A_ECX_PML) != 0;
     paging_write = (cpuid(0x8000000a, 0).ecx & CPUID_8000000A_ECX_PW) != 0;
     verify_paging_write = (cpuid(0x8000000a, 0).ecx & CPUID_8000000A_ECX_VPW) != 0;
+    gaat = (cpuid(0x8000000a, 0).ecx & CPUID_8000000A_ECX_GAAT) != 0;
     debugctl_bits = DEBUGCTL_LBR | DEBUGCTL_BTF
                   | ((cpuid(7, 0).ecx & CPUID_7_0_ECX_BUSLOCKTRAP) != 0 ? DEBUGCTL_BLCKDB : 0);
     iopm02 = page_alloc(IOPM_SIZE / PAGE_SIZE);
@@ -501,8 +510,9 @@ struct cpuid_regs nsvm_cpuid(void) {
                       | (ssscheck ? SVM_FEATURE_SSSCHECK : 0) | (svm_vls ? SVM_FEATURE_VLS : 0)
                       | (svm_vnmi ? SVM_FEATURE_VNMI : 0);
     return (struct cpuid_regs){
-        svm.eax & 0xff, nasid - 1,
-        svm.ecx & (CPUID_8000000A_ECX_PML | CPUID_8000000A_ECX_PW | CPUID_8000000A_ECX_VPW),
+        svm.eax & (0xff | (gaat ? CPUID_8000000A_EAX_GAAT_PREFIX : 0)), nasid - 1,
+        svm.ecx & (CPUID_8000000A_ECX_PML | CPUID_8000000A_ECX_PW | CPUID_8000000A_ECX_VPW
+                 | CPUID_8000000A_ECX_GAAT),
         (svm.edx & features) | SVM_FEATURE_VMCB_ADDR_CHECK
     };
 }
@@ -963,6 +973,11 @@ static bool vmcb12_valid(struct vcpu *v, const struct vmcb *vmcb12) {
     bool long_mode = (v->vmcb->save.efer & EFER_LMA) != 0
                   && (v->vmcb->save.cs.attrib & VCPU_SEG_L) != 0;
     if ((c->np_enable & pws) != 0 && (!npt || !long_mode)) {
+        return false;
+    }
+    // So does GAAT, with a valid pointer (15.40.3).
+    bool gaat_on = gaat && (c->np_enable & SVM_NP_GAAT) != 0;
+    if (gaat_on && (!npt || !long_mode || (c->gaat_pointer & GAAT_POINTER_RESERVED) != 0)) {
         return false;
     }
     if ((s->efer & EFER_LME) != 0 && (s->cr0 & CR0_PG) != 0) {
@@ -1465,6 +1480,9 @@ static void prepare_vmcb02(struct nsvm *n) {
     n->sss = false;
     n->pw = paging_write && n->npt && (c12->np_enable & SVM_NP_PW) != 0;
     n->vpw = verify_paging_write && n->npt && (c12->np_enable & SVM_NP_VPW) != 0;
+    n->gaat = gaat && n->npt && (c12->np_enable & SVM_NP_GAAT) != 0;
+    c->gaat_pointer = n->gaat ? c12->gaat_pointer : 0;
+    c->gaat_prefix_width = n->gaat ? c12->gaat_prefix_width : 0;
     // The predictor's entries from the guest are the guest's guest's to have
     // cleared, as Linux 7.3's KVM has it (nested.c,
     // nested_vmcb02_prepare_control()).
@@ -1517,7 +1535,8 @@ static void prepare_vmcb02(struct nsvm *n) {
         if (n->sss) {
             c->np_enable |= SVM_NP_SSS;
         }
-        c->np_enable |= (n->pw ? SVM_NP_PW : 0) | (n->vpw ? SVM_NP_VPW : 0);
+        c->np_enable |= (n->pw ? SVM_NP_PW : 0) | (n->vpw ? SVM_NP_VPW : 0)
+                      | (n->gaat ? SVM_NP_GAAT : 0);
         // Its flushes drop the nested translations too, but for those of its
         // ASID's non-global translations alone, which a change of its nested
         // page tables does not take (APM 24593 rev. 3.46, 15.16.1).
@@ -2022,6 +2041,18 @@ static void npt_fault(struct vcpu *v, struct nsvm *n) {
 
 bool nsvm_npt_active(struct vcpu *v) {
     return v->nsvm != NULL && v->nsvm->in_l2 && v->nsvm->npt;
+}
+
+// With a prefix width, GAAT paging translates the addresses with bit 63 set
+// alone (APM 24593 rev. 3.46, 15.40.1).
+bool nsvm_gaat_root(struct vcpu *v, uintptr_t linear, uint64_t *gaatp) {
+    struct nsvm *n = v->nsvm;
+    if (n == NULL || !n->in_l2 || !n->gaat
+     || (n->copy.control.gaat_prefix_width != 0 && (linear >> 63) == 0)) {
+        return false;
+    }
+    *gaatp = n->copy.control.gaat_pointer;
+    return true;
 }
 
 bool nsvm_npt_translate(

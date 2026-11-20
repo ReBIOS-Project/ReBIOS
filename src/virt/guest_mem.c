@@ -288,18 +288,24 @@ retry: *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0)
     size_t levels;
     bool wide;
     bool pae = false;
-    // HLAT paging, which an entry with bit 11 set restarts as ordinary paging
-    // (SDM 325462-093 Vol. 3A, 5.5.4 and 5.5.5).
+    // HLAT paging, and SVM's GAAT paging, which an entry with bit 11 set
+    // restarts as ordinary paging (SDM 325462-093 Vol. 3A, 5.5.4 and 5.5.5;
+    // APM 24593 rev. 3.46, 15.40.1).
     bool hlat = false;
+    bool alternate = false;
     uintptr_t table;
     if ((efer & EFER_LMA) != 0) {
-        uint64_t hlatp;
+        uint64_t root = 0;
         levels = (cr4 & CR4_LA57) != 0 ? 5 : 4;
         wide = true;
         table = vcpu_cr3(v) & PTE_ADDRESS;
-        if (!restarted && nvmx_hlat_root(v, linear, &hlatp)) {
+        if (!restarted && nvmx_hlat_root(v, linear, &root)) {
             hlat = true;
-            table = hlatp & PTE_ADDRESS;
+        } else if (!restarted && nsvm_gaat_root(v, linear, &root)) {
+            alternate = true;
+        }
+        if (hlat || alternate) {
+            table = root & PTE_ADDRESS;
         }
     } else if ((cr4 & CR4_PAE) != 0) {
         // The PDPT, of 4 entries, is reached through CR3 bits 31:5; with EPT,
@@ -349,8 +355,9 @@ retry: *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0)
         if (!read_entry(v, entry_gpa, linear, &entry, wide, pf_error)) {
             return false;
         }
-        // No translation by HLAT paging says so (SDM 325462-093 Vol. 3A, 5.7).
-        uint32_t no_translation = hlat ? PF_ERROR_HLAT : 0;
+        // No translation by HLAT or GAAT paging says so (SDM 325462-093 Vol.
+        // 3A, 5.7; APM 24593 rev. 3.46, 8.4.2).
+        uint32_t no_translation = hlat || alternate ? PF_ERROR_HLAT : 0;
         if ((entry & PTE_P) == 0) {
             *pf_error |= no_translation;
             return false;
@@ -362,7 +369,7 @@ retry: *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0)
         }
         entries[path] = entry;
         entry_gpas[path++] = entry_gpa;
-        if (hlat && (entry & PTE_HLAT_RESTART) != 0) {
+        if ((hlat || alternate) && (entry & PTE_HLAT_RESTART) != 0) {
             for (size_t i = 0; i < path; i++) {
                 bool unmarked = (entries[i] & PTE_A) == 0
                              && !mark_entry(

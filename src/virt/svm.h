@@ -66,14 +66,18 @@ struct vmcb_control {
     // The bus locks the guest may make before one exits (APM 24593 rev. 3.46,
     // 15.14.5).
     uint16_t bus_lock_counter;
-    uint8_t reserved5[0x170 - 0x122];
+    uint8_t reserved5[0x128 - 0x122];
+    // GAAT's root table and prefix width (APM 24593 rev. 3.46, 15.40.1).
+    uint64_t gaat_pointer;
+    uint32_t gaat_prefix_width;
+    uint8_t reserved6[0x170 - 0x134];
     // FRED's event data (AMD 69191 rev. 1.10).
     uint64_t exitintdata;
     uint64_t eventinjdata;
-    uint8_t reserved6[0x1c8 - 0x180];
+    uint8_t reserved7[0x1c8 - 0x180];
     uint64_t pml_base;
     uint16_t pml_index;
-    uint8_t reserved7[0x400 - 0x1d2];
+    uint8_t reserved8[0x400 - 0x1d2];
 } __attribute__((packed));
 
 struct vmcb_seg {
@@ -187,6 +191,10 @@ _Static_assert(
 );
 _Static_assert(
     offsetof(struct vmcb_control, bus_lock_counter) == 0x120,
+    "The VMCB's layout is not the one the processor uses."
+);
+_Static_assert(
+    offsetof(struct vmcb_control, gaat_pointer) == 0x128,
     "The VMCB's layout is not the one the processor uses."
 );
 _Static_assert(
@@ -415,6 +423,7 @@ _Static_assert(
 #define SVM_NP_VPW ((uint64_t)1 << 10)
 #define SVM_NP_PML ((uint64_t)1 << 11)
 #define SVM_NP_INVLPGB ((uint64_t)1 << 7)
+#define SVM_NP_GAAT ((uint64_t)1 << 8)
 
 // Virtualisation extensions, at offset 0B8h.
 #define SVM_VIRT_EXT_LBR ((uint64_t)1 << 0)
