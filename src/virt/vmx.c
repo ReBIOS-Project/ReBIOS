@@ -1304,6 +1304,9 @@ static void vmx_handle_exit(struct vcpu *v) {
     atomic_store_explicit(&v->last_exit, reason & 0xffff, memory_order_relaxed);
     profile_exit(v, reason & 0xffff);
     uint64_t qual = vmx_read(VMCS_EXIT_QUALIFICATION);
+    if (!nvmx_in_l2(v)) {
+        vlapic_vtimer_exited(v);
+    }
     if (nvmx_l2_exit(v, reason, qual)) {
         return;
     }

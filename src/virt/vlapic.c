@@ -153,6 +153,10 @@ struct vlapic {
     uint64_t timer_armed;
     // Until when a deadline that passed during an exit waits.
     uint64_t timer_held_until;
+    // Whether the processor's guest timer has the deadline while the guest
+    // runs, and whether the vCPU waits in the hypervisor instead.
+    bool vtimer;
+    bool halting;
 };
 
 static uint32_t regs_get(const struct vlapic *vl, uint32_t offset) {
@@ -177,6 +181,12 @@ static void regs_and(struct vlapic *vl, uint32_t offset, uint32_t bits) {
 
 static uint32_t host_version;
 static bool tsc_deadline_mode;
+// APIC-timer virtualisation (SDM 325462-093 Vol. 3C, 28.5.10), for the guest's
+// timer in TSC-deadline mode: its IA32_TSC_DEADLINE reaches the VMCS's
+// guest-deadline shadow and the processor's guest timer, whose events pend the
+// timer's vector as a virtual interrupt, so that neither its writes of the
+// deadline nor the deadline's coming exit.
+static bool vtimer_supported;
 // AMD's extended APIC space, where the processor has one: its feature register
 // as the guest reads it, and its extended LVT entries.
 static bool ext_space;
@@ -354,6 +364,8 @@ void vlapic_init(void) {
         posted_interrupts = apicv && vmx_pin_allowed(PIN_POSTED_INTR);
         x2apic_virtualisation = apicv && vmx_secondary_allowed(PROC2_VIRT_X2APIC);
         ipi_virtualization = posted_interrupts && vmx_tertiary_allowed(PROC3_IPI_VIRT);
+        vtimer_supported = apicv && tsc_deadline_mode
+                        && vmx_tertiary_allowed(PROC3_APIC_TIMER_VIRT);
     }
     if (ipi_virtualization) {
         for (size_t i = 0; i < smp_cpu_count(); i++) {
@@ -406,6 +418,9 @@ void vlapic_init(void) {
     if (ipi_virtualization && x2apic_virtualisation) {
         virt_x2apic_icr_passed(MSR_X2APIC_ICR);
     }
+    if (vtimer_supported) {
+        virt_deadline_msr_passed();
+    }
 }
 
 static bool enabled(const struct vlapic *vl) {
@@ -441,12 +456,8 @@ static void access_virtualisation(const struct vlapic *vl) {
         controls |= PROC2_VIRT_X2APIC;
     }
     vmx_write(VMCS_PROC_CONTROLS2, controls);
-    if (x2apic_virtualisation) {
-        uintptr_t bitmap = virt_msr_bitmap();
-        if (x2) {
-            bitmap = ipi_virtualization ? virt_msr_bitmap_x2apic_icr() : virt_msr_bitmap_x2apic();
-        }
-        vmx_write(VMCS_MSR_BITMAP, bitmap);
+    if (x2apic_virtualisation || vtimer_supported) {
+        vmx_write(VMCS_MSR_BITMAP, virt_msr_bitmap_for(x2, ipi_virtualization, vl->vtimer));
     }
 }
 
@@ -989,6 +1000,8 @@ void vlapic_create(struct vcpu *v) {
 void vlapic_power_on(struct vcpu *v) {
     struct vlapic *vl = v->vlapic;
     vl->base = VLAPIC_DEFAULT_BASE | APIC_BASE_EN | (v->cpu->bsp ? APIC_BASE_BSP : 0);
+    // Off, as vmx_vcpu_power_on() left the VMCS.
+    vl->vtimer = false;
     if (virt_vmx) {
         vmx_write(VMCS_VIRTUAL_APIC_ADDR, (uint64_t)(uintptr_t)vl->regs);
         vmx_write(VMCS_TPR_THRESHOLD, 0);
@@ -1152,6 +1165,53 @@ void vlapic_timer_slice(struct vcpu *v) {
     }
 }
 
+// Whether the processor's guest timer has the guest's deadline while the guest
+// runs: its timer in TSC-deadline mode, unmasked, with a vector that is not
+// illegal, and VMCS01 the one it runs on.
+static bool vtimer_wanted(struct vcpu *v) {
+    struct vlapic *vl = v->vlapic;
+    uint32_t lvt = regs_get(vl, APIC_LVT_TIMER);
+    bool deadline_mode = timer_mode(vl) == APIC_LVT_TIMER_TSC_DEADLINE;
+    return vtimer_supported && !nvmx_in_l2(v) && enabled(vl) && sw_enabled(vl) && deadline_mode
+        && (lvt & APIC_LVT_MASKED) == 0 && (lvt & 0xff) >= 16;
+}
+
+// Gives the guest timer the deadline, a deadline that passed during an exit
+// coming once that exit's time is the guest's (vlapic_timer_program()), else
+// takes it back, before an entry into VMCS01.
+static void vtimer_enter(struct vcpu *v) {
+    struct vlapic *vl = v->vlapic;
+    bool wanted = vtimer_wanted(v);
+    if (wanted != vl->vtimer) {
+        vl->vtimer = wanted;
+        uint64_t proc3 = vmx_read(VMCS_TERTIARY_CONTROLS) & ~PROC3_APIC_TIMER_VIRT;
+        if (wanted) {
+            proc3 |= PROC3_APIC_TIMER_VIRT;
+            vmx_write(VMCS_PROC_CONTROLS, vmx_read(VMCS_PROC_CONTROLS) | PROC_TERTIARY_CONTROLS);
+        }
+        vmx_write(VMCS_TERTIARY_CONTROLS, proc3);
+        access_virtualisation(vl);
+    }
+    if (!wanted) {
+        return;
+    }
+    uint64_t deadline = vl->timer_deadline;
+    if (deadline != 0 && deadline <= rdtsc() && vl->timer_held_until > deadline) {
+        deadline = vl->timer_held_until;
+    }
+    vmx_write(VMCS_VIRTUAL_TIMER_VECTOR, regs_get(vl, APIC_LVT_TIMER) & 0xff);
+    vmx_write(VMCS_GUEST_DEADLINE_SHADOW, vl->timer_guest_deadline);
+    vmx_write(VMCS_GUEST_DEADLINE, deadline);
+}
+
+void vlapic_vtimer_exited(struct vcpu *v) {
+    struct vlapic *vl = v->vlapic;
+    if (vl->vtimer) {
+        vl->timer_deadline = vmx_read(VMCS_GUEST_DEADLINE);
+        vl->timer_guest_deadline = vmx_read(VMCS_GUEST_DEADLINE_SHADOW);
+    }
+}
+
 // As an SMI's time goes unnoticed, so does an exit's: a deadline that passes
 // during one is due once the guest has had as long as the exit took, and no
 // timer fires sooner, so that one shorter than an exit cannot starve the
@@ -1169,7 +1229,9 @@ void vlapic_timer_program(struct vcpu *v) {
             timer_expire(v, now);
         }
     }
-    uint64_t next = vl->timer_deadline;
+    // The processor's guest timer has the deadline while the guest runs, the
+    // processor's timer while the vCPU waits here.
+    uint64_t next = vl->halting || !vtimer_wanted(v) ? vl->timer_deadline : 0;
     if (v->cpu->bsp) {
         uint64_t own = hv_timer_next();
         if (own != 0 && (next == 0 || own < next)) {
@@ -1361,6 +1423,7 @@ void vlapic_prepare_entry(struct vcpu *v) {
 }
 
 void vlapic_halt(struct vcpu *v, bool halting) {
+    v->vlapic->halting = halting;
     if (atomic_load_explicit(&v->vlapic->avic, memory_order_relaxed) != AVIC_OFF) {
         avic_running(v, !halting);
     }
@@ -1378,6 +1441,9 @@ void vlapic_before_entry(struct vcpu *v) {
     struct vlapic *vl = v->vlapic;
     merge(vl);
     if (apicv) {
+        if (vtimer_supported) {
+            vtimer_enter(v);
+        }
         virtual_delivery(vl);
         return;
     }

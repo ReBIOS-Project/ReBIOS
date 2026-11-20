@@ -175,5 +175,8 @@ void vlapic_posted_log(void);
 // step around entries.
 void vlapic_before_entry(struct vcpu *v);
 void vlapic_after_exit(struct vcpu *v);
+// At each exit from VMCS01: takes back from the processor's guest timer the
+// deadline it has, which the guest's writes and the timer's events change.
+void vlapic_vtimer_exited(struct vcpu *v);
 
 #endif

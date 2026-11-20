@@ -24,6 +24,7 @@
 #include <lib/log.h>
 #include <lib/printf.h>
 #include <lib/time.h>
+#include <lib/util.h>
 #include <memory.h>
 #include <sys/cache.h>
 #include <sys/cpu.h>
@@ -54,6 +55,9 @@ static uint8_t *msr_claimed;
 // virtualises too, the ICR's as well.
 static uint8_t *msr_bitmap_x2apic;
 static uint8_t *msr_bitmap_x2apic_icr;
+// The three alike but letting IA32_TSC_DEADLINE through, for vCPUs whose APIC
+// timer the processor virtualises.
+static uint8_t *msr_bitmap_deadline[3];
 
 static size_t describe_guest(char *buf, size_t size) {
     struct vcpu *v = this_cpu()->vcpu;
@@ -232,24 +236,40 @@ static bool msr_bits(uint32_t msr, unsigned int *read, unsigned int *write) {
     return true;
 }
 
+// Follows a change of the other bitmaps in the deadline ones, but for
+// IA32_TSC_DEADLINE, and for the x2APIC registers in those of the x2APIC
+// bitmaps.
+static void deadline_set(unsigned int bit, bool set, bool x2apic_register, uint32_t msr) {
+    if (msr == MSR_IA32_TSC_DEADLINE) {
+        return;
+    }
+    for (size_t i = 0; i < ARRAY_COUNT(msr_bitmap_deadline); i++) {
+        if (msr_bitmap_deadline[i] != NULL && (i == 0 || !x2apic_register)) {
+            bitmap_set(msr_bitmap_deadline[i], bit, set);
+        }
+    }
+}
+
 void virt_intercept_msr(uint32_t msr, bool read, bool write) {
     unsigned int bits[2];
     if (!msr_bits(msr, &bits[0], &bits[1])) {
         return;
     }
     bool chosen[] = { read, write };
+    bool x2apic_register = msr >= 0x800 && msr <= 0x8ff;
     for (size_t i = 0; i < 2; i++) {
         if (!chosen[i]) {
             continue;
         }
         bitmap_set(msr_claimed, bits[i], true);
         bitmap_set(msr_bitmap, bits[i], true);
-        if (msr_bitmap_x2apic != NULL && (msr < 0x800 || msr > 0x8ff)) {
+        if (msr_bitmap_x2apic != NULL && !x2apic_register) {
             bitmap_set(msr_bitmap_x2apic, bits[i], true);
         }
-        if (msr_bitmap_x2apic_icr != NULL && (msr < 0x800 || msr > 0x8ff)) {
+        if (msr_bitmap_x2apic_icr != NULL && !x2apic_register) {
             bitmap_set(msr_bitmap_x2apic_icr, bits[i], true);
         }
+        deadline_set(bits[i], true, x2apic_register, msr);
     }
 }
 
@@ -271,6 +291,7 @@ void virt_pass_msr(uint32_t msr) {
         if (!x2apic_register && msr_bitmap_x2apic_icr != NULL) {
             bitmap_set(msr_bitmap_x2apic_icr, bits[i], false);
         }
+        deadline_set(bits[i], false, x2apic_register, msr);
     }
 }
 
@@ -301,4 +322,31 @@ void virt_x2apic_icr_passed(uint32_t msr) {
         bitmap_set(msr_bitmap_x2apic_icr, read_bit, false);
         bitmap_set(msr_bitmap_x2apic_icr, write_bit, false);
     }
+}
+
+void virt_deadline_msr_passed(void) {
+    const uint8_t *from[] = { msr_bitmap, msr_bitmap_x2apic, msr_bitmap_x2apic_icr };
+    unsigned int read_bit, write_bit;
+    msr_bits(MSR_IA32_TSC_DEADLINE, &read_bit, &write_bit);
+    for (size_t i = 0; i < ARRAY_COUNT(msr_bitmap_deadline); i++) {
+        if (from[i] == NULL) {
+            continue;
+        }
+        msr_bitmap_deadline[i] = page_alloc(VMX_MSR_BITMAP_PAGES);
+        memcpy(msr_bitmap_deadline[i], from[i], VMX_MSR_BITMAP_PAGES * PAGE_SIZE);
+        bitmap_set(msr_bitmap_deadline[i], read_bit, false);
+        bitmap_set(msr_bitmap_deadline[i], write_bit, false);
+    }
+}
+
+uintptr_t virt_msr_bitmap_for(bool x2apic, bool icr, bool deadline) {
+    size_t i = 0;
+    if (x2apic) {
+        i = icr ? 2 : 1;
+    }
+    uint8_t *const plain[] = { msr_bitmap, msr_bitmap_x2apic, msr_bitmap_x2apic_icr };
+    if (deadline && msr_bitmap_deadline[i] != NULL) {
+        return (uintptr_t)msr_bitmap_deadline[i];
+    }
+    return (uintptr_t)plain[i];
 }

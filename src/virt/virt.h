@@ -64,6 +64,12 @@ void virt_x2apic_msr_passed(uint32_t msr, bool read, bool write);
 // done by passing the ICR's MSR as well.
 uintptr_t virt_msr_bitmap_x2apic_icr(void);
 void virt_x2apic_icr_passed(uint32_t msr);
+// Bitmaps alike but letting the guest's accesses to IA32_TSC_DEADLINE through,
+// for vCPUs whose APIC timer the processor virtualises (vlapic.c), made after
+// the x2APIC ones, and the bitmap for a vCPU: whose x2APIC the processor
+// virtualises, its IPIs too, and its APIC timer.
+void virt_deadline_msr_passed(void);
+uintptr_t virt_msr_bitmap_for(bool x2apic, bool icr, bool deadline);
 
 // The reset a triple fault makes on a PC, held a while first if the log is on
 // the screen (log_take_screen()), so that what led there can be read.
