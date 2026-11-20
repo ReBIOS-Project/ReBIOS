@@ -181,17 +181,18 @@ bool lapic_x2apic_supported(void) {
     return (cpuid(1, 0).ecx & ((uint32_t)1 << 21)) != 0;
 }
 
-bool lapic_xapic_locked(void) {
+bool lapic_xapic_disable_status(void) {
     if (cpuid(0, 0).eax < 7 || (cpuid(7, 0).edx & ((uint32_t)1 << 29)) == 0) {
         return false;
     }
     uint64_t caps;
-    if (!rdmsr_safe(MSR_IA32_ARCH_CAPABILITIES, &caps)
-     || (caps & ARCH_CAPABILITIES_XAPIC_DISABLE_STATUS) == 0) {
-        return false;
-    }
+    return rdmsr_safe(MSR_IA32_ARCH_CAPABILITIES, &caps)
+        && (caps & ARCH_CAPABILITIES_XAPIC_DISABLE_STATUS) != 0;
+}
+
+bool lapic_xapic_locked(void) {
     uint64_t status;
-    return rdmsr_safe(MSR_IA32_XAPIC_DISABLE_STATUS, &status)
+    return lapic_xapic_disable_status() && rdmsr_safe(MSR_IA32_XAPIC_DISABLE_STATUS, &status)
         && (status & LEGACY_XAPIC_DISABLED) != 0;
 }
 

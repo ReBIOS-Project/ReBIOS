@@ -119,9 +119,10 @@
 // APIC ID as CPUID reports it.
 bool lapic_x2apic(void);
 uint32_t lapic_cpu_apic_id(void);
-// Whether the processor has x2APIC mode, and has its xAPIC mode turned off for
-// good.
+// Whether the processor has x2APIC mode, IA32_XAPIC_DISABLE_STATUS, and its
+// xAPIC mode turned off for good.
 bool lapic_x2apic_supported(void);
+bool lapic_xapic_disable_status(void);
 bool lapic_xapic_locked(void);
 
 uint32_t lapic_read(uint32_t reg);

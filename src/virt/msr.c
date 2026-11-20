@@ -81,14 +81,15 @@
 #define FEATURE_CONTROL_LMCE_ON ((uint32_t)1 << 20)
 
 // IA32_ARCH_CAPABILITIES' bits the guest sees (SDM 325462-093 Vol. 4, Table
-// 2-2): the defined ones, but for the microcode update interface's 9, 16, and
-// 22, and 21, XAPIC_DISABLE_STATUS, as the guest's xAPIC mode is never off for
-// good. IA32_CORE_CAPABILITIES has only model-specific ones (SDM 325462-093
-// Vol. 4, Tables 2-46 and 2-56): 3, RSM_IN_CPL0_ONLY, and 4 and 5, the UC-lock
-// and split-lock disables' support; 2 enumerates MSR_INTEGRITY_CAPABILITIES,
-// which the guest lacks.
+// 2-2): the defined ones, ITS_NO, which hypervisors set, included, but for the
+// microcode update interface's 9, 16, and 22. XAPIC_DISABLE_STATUS, 21,
+// announces IA32_XAPIC_DISABLE_STATUS, which the vLAPIC gives the guest.
+// IA32_CORE_CAPABILITIES has only model-specific ones (SDM 325462-093 Vol. 4,
+// Tables 2-46 and 2-56): 3, RSM_IN_CPL0_ONLY, and 4 and 5, the UC-lock and
+// split-lock disables' support; 2 enumerates MSR_INTEGRITY_CAPABILITIES, which
+// the guest lacks.
 #define MSR_IA32_CORE_CAPABILITIES 0xcf
-#define ARCH_CAPABILITIES_KNOWN ((uint64_t)0x17f9efdff)
+#define ARCH_CAPABILITIES_KNOWN ((uint64_t)0x400000017fbefdff)
 #define CORE_CAPABILITIES_KNOWN ((uint64_t)0x38)
 
 // MSR_PLATFORM_INFO's bits the model tables of SDM 325462-093 Vol. 4 define:
@@ -853,6 +854,7 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
             *value = v->cpuid_faulting ? FEATURE_ENABLES_CPUID_FAULT : 0;
             return true;
         }
+
         case MSR_IA32_MISC_ENABLE: {
             if (!misc_enable_copied) {
                 return false;
@@ -999,6 +1001,7 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
             }
             return true;
         }
+
         case MSR_IA32_MISC_ENABLE: {
             if (!misc_enable_copied) {
                 return false;

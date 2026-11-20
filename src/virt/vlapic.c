@@ -2188,9 +2188,11 @@ bool vlapic_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
             *value = vl->base;
             return true;
         }
+        // The guest's xAPIC mode is never off for good, wherever the processor
+        // has the MSR (SDM 325462-093 Vol. 4, Table 2-2).
         case MSR_IA32_XAPIC_DISABLE_STATUS: {
             *value = 0;
-            *fault = !lapic_xapic_locked();
+            *fault = !lapic_xapic_disable_status();
             return true;
         }
         default: {
@@ -2221,9 +2223,9 @@ bool vlapic_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
             *fault = !apic_base_write(v, value);
             return true;
         }
+        // Read-only (SDM 325462-093 Vol. 4, Table 2-2).
         case MSR_IA32_XAPIC_DISABLE_STATUS: {
-            // Its lock is the host's to keep.
-            *fault = !lapic_xapic_locked();
+            *fault = true;
             return true;
         }
         default: {
