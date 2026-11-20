@@ -354,9 +354,7 @@ static void l1_intercepts(struct vcpu *v, struct nsvm *n) {
         misc |= gif;
     } else if (!n->gif
             && (atomic_load_explicit(&cpu->init_pending, memory_order_acquire)
-             || (!svm_vnmi
-              && (v->nmi_pending
-               || atomic_load_explicit(&cpu->nmi_pending, memory_order_acquire))))) {
+             || (!svm_vnmi && event_nmi_waiting(v)))) {
         misc |= SVM_INTERCEPT_STGI;
     }
     c->intercept_misc2 = misc;
@@ -2029,8 +2027,7 @@ void nsvm_interrupt_window(struct vcpu *v, bool on) {
 bool nsvm_halt_ends(struct vcpu *v) {
     struct nsvm *n = v->nsvm;
     struct cpu *cpu = v->cpu;
-    if (atomic_load_explicit(&cpu->init_pending, memory_order_acquire) || v->nmi_pending
-     || atomic_load_explicit(&cpu->nmi_pending, memory_order_acquire)) {
+    if (atomic_load_explicit(&cpu->init_pending, memory_order_acquire) || event_nmi_waiting(v)) {
         return true;
     }
     uint64_t vintr = v->vmcb->control.vintr;
@@ -2107,9 +2104,7 @@ bool nsvm_before_entry(struct vcpu *v) {
     bool waiting = n->run_pending || v->injecting || (v->redeliver & SVM_EVENT_VALID) != 0;
     uint32_t misc = n->intercepts[3];
     struct cpu *cpu = v->cpu;
-    if (atomic_exchange_explicit(&cpu->nmi_pending, false, memory_order_acquire)) {
-        v->nmi_pending = true;
-    }
+    event_nmi_collect(v);
     bool window = false;
     if (n->gif && atomic_load_explicit(&cpu->init_pending, memory_order_acquire)) {
         if (waiting) {

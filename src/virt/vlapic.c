@@ -31,6 +31,7 @@
 #include <sys/mm.h>
 #include <sys/smp.h>
 #include <sys/x86.h>
+#include <virt/event.h>
 #include <virt/gpt.h>
 #include <virt/hv_timer.h>
 #include <virt/insn.h>
@@ -1291,8 +1292,22 @@ static void local_interrupt(struct vcpu *v, uint32_t lvt) {
     if ((lvt & APIC_LVT_DELIVERY_MASK) == APIC_LVT_DELIVERY_FIXED) {
         vlapic_accept(v, (uint8_t)lvt, false);
     } else if ((lvt & APIC_LVT_DELIVERY_MASK) == APIC_LVT_DELIVERY_NMI) {
-        atomic_store_explicit(&v->cpu->nmi_pending, true, memory_order_release);
+        event_nmi_sent(v->cpu, (uint8_t)lvt);
     }
+}
+
+uint16_t vlapic_pin_nmi_sources(struct vcpu *v) {
+    static const uint32_t pins[] = { APIC_LVT_LINT0, APIC_LVT_LINT1 };
+    uint16_t sources = 0;
+    for (size_t i = 0; i < ARRAY_COUNT(pins); i++) {
+        if ((lapic_read(pins[i]) & APIC_LVT_DELIVERY_MASK) != APIC_LVT_DELIVERY_NMI) {
+            continue;
+        }
+        uint32_t lvt = regs_get(v->vlapic, pins[i]);
+        bool nmi = (lvt & (APIC_LVT_MASKED | APIC_LVT_DELIVERY_MASK)) == APIC_LVT_DELIVERY_NMI;
+        sources |= event_nmi_source(nmi ? (int)(uint8_t)lvt : -1);
+    }
+    return sources != 0 ? sources : event_nmi_source(-1);
 }
 
 void vlapic_thermal_fired(struct vcpu *v) {
@@ -1370,7 +1385,7 @@ void vlapic_lint0_rose(struct vcpu *v) {
     if (mode == APIC_LVT_DELIVERY_FIXED) {
         vlapic_accept(v, (uint8_t)lvt, (lvt & APIC_LVT_LEVEL) != 0);
     } else if (mode == APIC_LVT_DELIVERY_NMI) {
-        atomic_store_explicit(&v->cpu->nmi_pending, true, memory_order_release);
+        event_nmi_sent(v->cpu, (uint8_t)lvt);
         vcpu_kick(v->cpu);
     }
 }
@@ -1585,7 +1600,7 @@ static void deliver(struct vcpu *from, struct vcpu *to, uint32_t command) {
             break;
         }
         case ICR_DELIVERY_NMI: {
-            atomic_store_explicit(&to->cpu->nmi_pending, true, memory_order_release);
+            event_nmi_sent(to->cpu, vector);
             vcpu_kick(to->cpu);
             break;
         }
@@ -1653,7 +1668,7 @@ void vlapic_deliver_message(
     for (size_t i = 0; i < smp_cpu_count(); i++) {
         struct vcpu *to = smp_cpu(i)->vcpu;
         if (to != NULL && matches(to->vlapic, dest, logical, false)) {
-            deliver(NULL, to, mode);
+            deliver(NULL, to, mode | vector);
         }
     }
 }

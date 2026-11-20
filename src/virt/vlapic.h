@@ -143,6 +143,10 @@ bool vlapic_extint_open(struct vcpu *v);
 // The 8259's output rose at the vCPU's LINT0, which takes it as an NMI or a
 // vector where its entry asks for one.
 void vlapic_lint0_rose(struct vcpu *v);
+// The NMI-source bitmap of an NMI on the machine's NMI pins: the vectors of
+// the guest's entries for those pins that ask for an NMI, bit 0 for the
+// others.
+uint16_t vlapic_pin_nmi_sources(struct vcpu *v);
 
 // Whether the processor delivers the vCPU's interrupts from its local APIC
 // itself, which then only need putting in its registers.

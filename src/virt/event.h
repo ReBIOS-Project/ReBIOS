@@ -37,8 +37,22 @@ void event_hold(struct vcpu *v);
 // processor would deliver to it.
 void event_entry_for(struct vcpu *v, bool nmis, bool interrupts);
 
-// An NMI that made the guest exit.
+// An NMI of the machine's that made the guest exit.
 void event_nmi(struct vcpu *v);
+// An NMI that a local APIC of the guest's sent the processor, with the vector
+// that its message or LVT entry gave it, or none where negative.
+void event_nmi_sent(struct cpu *cpu, int vector);
+// The NMI-source bitmap's bit for an NMI of the vector, or of none where
+// negative.
+uint16_t event_nmi_source(int vector);
+// Whether an NMI waits for the vCPU, its own or one that came to its
+// processor.
+bool event_nmi_waiting(struct vcpu *v);
+// Makes the NMIs that came to the vCPU's processor the vCPU's own.
+void event_nmi_collect(struct vcpu *v);
+// Takes the vCPU's NMI for delivery, returning what the delivery reports of
+// its sources.
+uint64_t event_nmi_take(struct vcpu *v);
 
 // Whether the guest can take an interrupt now.
 bool event_interruptible(struct vcpu *v);

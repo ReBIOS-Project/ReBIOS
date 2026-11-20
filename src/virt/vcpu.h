@@ -126,7 +126,10 @@ struct vcpu {
     size_t redeliver_length;
     // Whether vcpu_inject_exception() set up an event for the coming entry.
     bool injecting;
+    // Whether an NMI waits for the guest, and the NMI-source bitmap of those
+    // it stands for (event.c).
     bool nmi_pending;
+    uint16_t nmi_sources;
     struct vlapic *vlapic;
     struct nvmx *nvmx;
     struct nsvm *nsvm;

@@ -3595,7 +3595,7 @@ static bool inactive_ends(struct vcpu *v) {
         return atomic_load_explicit(&n->sipi, memory_order_acquire) >= 0;
     }
     uint64_t pin = get12(n, VMCS_PIN_CONTROLS);
-    bool nmi = v->nmi_pending || atomic_load_explicit(&v->cpu->nmi_pending, memory_order_acquire);
+    bool nmi = event_nmi_waiting(v);
     bool nmi_blocked = (pin & PIN_VIRTUAL_NMIS) == 0
                     && (get12(n, VMCS_GUEST_INTERRUPTIBILITY) & INTERRUPTIBILITY_NMI) != 0;
     return atomic_load_explicit(&v->cpu->init_pending, memory_order_acquire)
@@ -4083,9 +4083,7 @@ bool nvmx_before_entry(struct vcpu *v) {
     }
     uint64_t pin = get12(n, VMCS_PIN_CONTROLS);
     uint64_t proc = get12(n, VMCS_PROC_CONTROLS);
-    if (atomic_exchange_explicit(&v->cpu->nmi_pending, false, memory_order_acquire)) {
-        v->nmi_pending = true;
-    }
+    event_nmi_collect(v);
     // Without virtual NMIs, the guest's guest's blocking by NMI holds them
     // back, until an NMI window.
     bool nmi_held = false;
@@ -4094,9 +4092,10 @@ bool nvmx_before_entry(struct vcpu *v) {
          && (vmx_read(VMCS_GUEST_INTERRUPTIBILITY) & INTERRUPTIBILITY_NMI) != 0) {
             nmi_held = true;
         } else {
-            v->nmi_pending = false;
+            uint64_t sources = event_nmi_take(v);
             exit_to_l1(
-                v, n, EXIT_REASON_EXCEPTION_NMI, 0, INTR_INFO_VALID | INTR_TYPE_NMI | 2, 0, false
+                v, n, EXIT_REASON_EXCEPTION_NMI, sources, INTR_INFO_VALID | INTR_TYPE_NMI | 2, 0,
+                false
             );
             return false;
         }

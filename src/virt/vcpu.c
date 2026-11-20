@@ -114,6 +114,7 @@ void vcpu_power_on(struct vcpu *v) {
     v->redeliver = 0;
     v->injecting = false;
     v->nmi_pending = false;
+    v->nmi_sources = 0;
     v->stepping = false;
     v->step_tf = false;
     v->step_flags_loaded = false;

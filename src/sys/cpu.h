@@ -103,7 +103,11 @@ struct cpu {
     _Atomic(bool) online;
     // Whether a kick's interrupt is on its way, which does for further kicks.
     _Atomic(bool) kick;
+    // An NMI of the machine's, which is the guest's, that came while the host
+    // ran, and the NMIs that the guest's local APICs sent the processor, as
+    // its NMI-source bitmap has them (virt/event.c).
     _Atomic(bool) nmi_pending;
+    _Atomic(uint16_t) nmi_sources;
     // An INIT that SVM redirected while the host ran.
     _Atomic(bool) init_pending;
     // The IA32_CLOCK_MODULATION that a thermal zone's passive cooling wants,

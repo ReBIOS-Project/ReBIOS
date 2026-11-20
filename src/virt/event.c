@@ -25,6 +25,7 @@
 #include <lib/log.h>
 #include <sys/cpu.h>
 #include <sys/x86.h>
+#include <virt/cpuid.h>
 #include <virt/irq.h>
 #include <virt/mmio.h>
 #include <virt/nsvm.h>
@@ -56,6 +57,8 @@
 // 9.4).
 #define MSR_IA32_UINTR_MISC 0x988
 #define UINTR_MISC_UINV_SHIFT 32
+
+#define CPUID_7_1_EAX_NMI_SRC ((uint32_t)1 << 20)
 
 void event_exit(struct vcpu *v) {
     uint32_t info;
@@ -109,8 +112,53 @@ void event_exit(struct vcpu *v) {
     v->redeliver_data = data;
 }
 
+// Each NMI sets a bit of the processor's NMI-source bitmap: its vector's for
+// vectors 0-15, bit 0 for the others and for NMIs without one (SDM 325462-093
+// Vol. 3A, 7.7.3).
+uint16_t event_nmi_source(int vector) {
+    return vector >= 0 && vector < 16 ? (uint16_t)1 << vector : 1;
+}
+
+// The machine's NMIs come on its NMI pins, which the guest's entries for them
+// give their vectors.
 void event_nmi(struct vcpu *v) {
     v->nmi_pending = true;
+    v->nmi_sources |= vlapic_pin_nmi_sources(v);
+}
+
+void event_nmi_sent(struct cpu *cpu, int vector) {
+    atomic_fetch_or_explicit(&cpu->nmi_sources, event_nmi_source(vector), memory_order_release);
+}
+
+bool event_nmi_waiting(struct vcpu *v) {
+    return v->nmi_pending || atomic_load_explicit(&v->cpu->nmi_pending, memory_order_acquire)
+        || atomic_load_explicit(&v->cpu->nmi_sources, memory_order_acquire) != 0;
+}
+
+void event_nmi_collect(struct vcpu *v) {
+    struct cpu *cpu = v->cpu;
+    if (atomic_exchange_explicit(&cpu->nmi_pending, false, memory_order_acquire)) {
+        event_nmi(v);
+    }
+    uint16_t sent = atomic_exchange_explicit(&cpu->nmi_sources, 0, memory_order_acquire);
+    if (sent != 0) {
+        v->nmi_pending = true;
+        v->nmi_sources |= sent;
+    }
+}
+
+// The processor records the bitmap and clears it as it takes the NMI, by
+// delivery or by a VM exit, which report it where it has NMI-source reporting
+// and report zero where it does not (SDM 325462-093 Vol. 3A, 7.7.3; Vol. 3C,
+// 30.2.1).
+uint64_t event_nmi_take(struct vcpu *v) {
+    uint16_t sources = v->nmi_sources;
+    v->nmi_pending = false;
+    v->nmi_sources = 0;
+    if ((cpuid_offered(7, 1).eax & CPUID_7_1_EAX_NMI_SRC) == 0) {
+        return 0;
+    }
+    return sources;
 }
 
 void event_cancel(struct vcpu *v) {
@@ -215,9 +263,7 @@ static bool nmi_blocked(void) {
 
 // Returns whether it injected one.
 static bool deliver_nmi(struct vcpu *v) {
-    if (atomic_exchange_explicit(&v->cpu->nmi_pending, false, memory_order_acquire)) {
-        v->nmi_pending = true;
-    }
+    event_nmi_collect(v);
     if (!v->nmi_pending) {
         return false;
     }
@@ -225,7 +271,7 @@ static bool deliver_nmi(struct vcpu *v) {
     // stands for this one too, as a processor holds one NMI back at most.
     if (!virt_vmx && svm_vnmi) {
         v->vmcb->control.vintr |= SVM_VINTR_NMI;
-        v->nmi_pending = false;
+        (void)event_nmi_take(v);
         return false;
     }
     // A clear global interrupt flag holds it until STGI, which exits.
@@ -239,8 +285,7 @@ static bool deliver_nmi(struct vcpu *v) {
     if (virt_vmx) {
         set_proc_control(PROC_NMI_WINDOW_EXITING, false);
     }
-    inject(v, EVENT_VALID | EVENT_TYPE_NMI | VECTOR_NMI, 0, 0);
-    v->nmi_pending = false;
+    inject(v, EVENT_VALID | EVENT_TYPE_NMI | VECTOR_NMI, 0, event_nmi_take(v));
     return true;
 }
 
@@ -380,8 +425,7 @@ bool event_wait_ends(struct vcpu *v, bool masked) {
     if (nsvm_in_l2(v)) {
         return nsvm_halt_ends(v);
     }
-    if (v->nmi_pending || atomic_load_explicit(&cpu->nmi_pending, memory_order_acquire)
-     || atomic_load_explicit(&cpu->init_pending, memory_order_acquire)) {
+    if (event_nmi_waiting(v) || atomic_load_explicit(&cpu->init_pending, memory_order_acquire)) {
         return true;
     }
     if (!virt_vmx && svm_vnmi
@@ -436,8 +480,7 @@ void event_hold(struct vcpu *v) {
 
 // The windows for what is pending, once the guest has taken what goes first.
 static void windows_after(struct vcpu *v, bool nmis, bool interrupts) {
-    if (virt_vmx && nmis
-     && (v->nmi_pending || atomic_load_explicit(&v->cpu->nmi_pending, memory_order_acquire))) {
+    if (virt_vmx && nmis && event_nmi_waiting(v)) {
         set_proc_control(PROC_NMI_WINDOW_EXITING, true);
     }
     if (interrupts && window_needed(v)) {
