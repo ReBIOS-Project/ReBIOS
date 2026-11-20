@@ -1851,8 +1851,10 @@ static void npt_fault(struct vcpu *v, struct nsvm *n) {
         exit_to_l1(v, n, SVM_EXIT_PML_FULL, 0, 0, c->exitintinfo, false);
         return;
     }
+    // Whether the access was one to a shadow stack, the processor's error code
+    // tells (APM 24593 rev. 3.46, 15.25.7).
     if (error != 0) {
-        error |= info & (NPF_FINAL | NPF_TABLE);
+        error |= info & (NPF_FINAL | NPF_TABLE | NPF_SS);
         exit_to_l1(v, n, SVM_EXIT_NPF, error, gpa, c->exitintinfo, true);
         return;
     }

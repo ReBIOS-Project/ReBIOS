@@ -346,6 +346,7 @@ _Static_assert(
 #define NPF_US ((uint64_t)1 << 2)
 #define NPF_RSV ((uint64_t)1 << 3)
 #define NPF_ID ((uint64_t)1 << 4)
+#define NPF_SS ((uint64_t)1 << 6)
 #define NPF_FINAL ((uint64_t)1 << 32)
 #define NPF_TABLE ((uint64_t)1 << 33)
 
