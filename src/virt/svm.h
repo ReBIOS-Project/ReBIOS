@@ -350,6 +350,7 @@ _Static_assert(
 #define NPF_FINAL ((uint64_t)1 << 32)
 #define NPF_TABLE ((uint64_t)1 << 33)
 #define NPF_SSS_PAGE ((uint64_t)1 << 37)
+#define NPF_VPW ((uint64_t)1 << 38)
 
 // Virtual interrupt control, at offset 060h.
 #define SVM_VINTR_TPR_MASK ((uint64_t)0xf)
@@ -410,6 +411,8 @@ _Static_assert(
 #define SVM_NP_GMET ((uint64_t)1 << 3)
 #define SVM_NP_SSS ((uint64_t)1 << 4)
 #define SVM_NP_ROGPT ((uint64_t)1 << 6)
+#define SVM_NP_PW ((uint64_t)1 << 9)
+#define SVM_NP_VPW ((uint64_t)1 << 10)
 #define SVM_NP_PML ((uint64_t)1 << 11)
 #define SVM_NP_INVLPGB ((uint64_t)1 << 7)
 
