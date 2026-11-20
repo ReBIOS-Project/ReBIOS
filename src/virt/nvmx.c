@@ -127,26 +127,28 @@
 // The fields the guest's VMCSs have: the controls of what it is offered, and
 // all of the guest state, host state, and exit information.
 static const uint16_t fields[] = {
-    0x0000, 0x0002, 0x0004, 0x0800, 0x0802, 0x0804, 0x0806, 0x0808, 0x080a, 0x080c,
-    0x080e, 0x0810, 0x0812, 0x0814, 0x0c00, 0x0c02, 0x0c04, 0x0c06, 0x0c08, 0x0c0a,
-    0x0c0c, 0x2000, 0x2002, 0x2004, 0x2006, 0x2008, 0x200a, 0x200e, 0x2010,
-    0x2012, 0x2014, 0x2016, 0x2018, 0x201a, 0x202c, 0x2032, 0x201c, 0x201e,
-    0x2020, 0x2022, 0x2024, 0x2026, 0x2028, 0x202a, 0x2034, 0x204a, 0x204c, 0x2044, 0x2052, 0x2400,
-    0x2402, 0x2404, 0x2406, 0x2800, 0x2802, 0x2804, 0x2806, 0x2808, 0x280a, 0x280c, 0x280e,
-    0x2810, 0x2818, 0x281a, 0x281c, 0x281e, 0x2820, 0x2822, 0x2824, 0x2826, 0x2828, 0x282e,
-    0x2c00, 0x2c02, 0x2c04, 0x2c06, 0x2c08, 0x2c0a, 0x2c0c, 0x2c0e, 0x2c10, 0x2c12,
-    0x2c14, 0x2c16, 0x2c1a, 0x4000, 0x4002, 0x4004, 0x4006, 0x4008, 0x400a, 0x400c,
-    0x400e, 0x4010, 0x4012, 0x4014, 0x4016, 0x4018, 0x401a, 0x401c, 0x401e,
-    0x4020, 0x4022, 0x4400, 0x4402, 0x4404, 0x4406, 0x4408, 0x440a, 0x440c,
-    0x440e, 0x4800, 0x4802, 0x4804, 0x4806, 0x4808, 0x480a, 0x480c, 0x480e,
-    0x4810, 0x4812, 0x4814, 0x4816, 0x4818, 0x481a, 0x481c, 0x481e, 0x4820,
-    0x4822, 0x4824, 0x4826, 0x4828, 0x482a, 0x482e, 0x4c00, 0x6000, 0x6002,
-    0x6004, 0x6006, 0x6008, 0x600a, 0x600c, 0x600e, 0x6400, 0x6402, 0x6404,
-    0x6406, 0x6408, 0x640a, 0x6800, 0x6802, 0x6804, 0x6806, 0x6808, 0x680a,
-    0x680c, 0x680e, 0x6810, 0x6812, 0x6814, 0x6816, 0x6818, 0x681a, 0x681c,
-    0x681e, 0x6820, 0x6822, 0x6824, 0x6826, 0x6828, 0x682a, 0x682c, 0x6c00,
-    0x6c02, 0x6c04, 0x6c06, 0x6c08, 0x6c0a, 0x6c0c, 0x6c0e, 0x6c10, 0x6c12,
-    0x6c14, 0x6c16, 0x6c18, 0x6c1a, 0x6c1c
+    0x0000, 0x0002, 0x0004, 0x000a, 0x0800, 0x0802, 0x0804, 0x0806, 0x0808,
+    0x080a, 0x080c, 0x080e, 0x0810, 0x0812, 0x0814, 0x0c00, 0x0c02, 0x0c04,
+    0x0c06, 0x0c08, 0x0c0a, 0x0c0c, 0x2000, 0x2002, 0x2004, 0x2006, 0x2008,
+    0x200a, 0x200e, 0x2010, 0x2012, 0x2014, 0x2016, 0x2018, 0x201a, 0x202c,
+    0x2032, 0x201c, 0x201e, 0x2020, 0x2022, 0x2024, 0x2026, 0x2028, 0x202a,
+    0x2034, 0x204a, 0x204c, 0x204e, 0x2044, 0x2052, 0x2400, 0x2402, 0x2404,
+    0x2406, 0x2800, 0x2802, 0x2804, 0x2806, 0x2808, 0x280a, 0x280c, 0x280e,
+    0x2810, 0x2818, 0x281a, 0x281c, 0x281e, 0x2820, 0x2822, 0x2824, 0x2826,
+    0x2828, 0x282e, 0x2830, 0x2c00, 0x2c02, 0x2c04, 0x2c06, 0x2c08, 0x2c0a,
+    0x2c0c, 0x2c0e, 0x2c10, 0x2c12, 0x2c14, 0x2c16, 0x2c1a, 0x4000, 0x4002,
+    0x4004, 0x4006, 0x4008, 0x400a, 0x400c, 0x400e, 0x4010, 0x4012, 0x4014,
+    0x4016, 0x4018, 0x401a, 0x401c, 0x401e, 0x4020, 0x4022, 0x4400, 0x4402,
+    0x4404, 0x4406, 0x4408, 0x440a, 0x440c, 0x440e, 0x4800, 0x4802, 0x4804,
+    0x4806, 0x4808, 0x480a, 0x480c, 0x480e, 0x4810, 0x4812, 0x4814, 0x4816,
+    0x4818, 0x481a, 0x481c, 0x481e, 0x4820, 0x4822, 0x4824, 0x4826, 0x4828,
+    0x482a, 0x482e, 0x4c00, 0x6000, 0x6002, 0x6004, 0x6006, 0x6008, 0x600a,
+    0x600c, 0x600e, 0x6400, 0x6402, 0x6404, 0x6406, 0x6408, 0x640a, 0x6800,
+    0x6802, 0x6804, 0x6806, 0x6808, 0x680a, 0x680c, 0x680e, 0x6810, 0x6812,
+    0x6814, 0x6816, 0x6818, 0x681a, 0x681c, 0x681e, 0x6820, 0x6822, 0x6824,
+    0x6826, 0x6828, 0x682a, 0x682c, 0x6c00, 0x6c02, 0x6c04, 0x6c06, 0x6c08,
+    0x6c0a, 0x6c0c, 0x6c0e, 0x6c10, 0x6c12, 0x6c14, 0x6c16, 0x6c18, 0x6c1a,
+    0x6c1c
 };
 
 #define FIELD_COUNT ARRAY_COUNT(fields)
@@ -312,7 +314,7 @@ static unsigned int ept02_budget;
    | PROC2_RDSEED_EXITING | PROC2_PML | PROC2_XSAVES \
    | PROC2_MBEC | PROC2_TSC_SCALING | PROC2_USER_WAIT_PAUSE \
    | PROC2_BUS_LOCK_DETECTION | PROC2_EPT_VE)
-#define PROC3_EMULATED (PROC3_MSR_LIST | PROC3_SPEC_CTRL_VIRT)
+#define PROC3_EMULATED (PROC3_MSR_LIST | PROC3_SPEC_CTRL_VIRT | PROC3_APIC_TIMER_VIRT)
 #define EXIT_EMULATED \
     (EXIT_SAVE_DEBUG_CONTROLS | EXIT_HOST_ADDR_SPACE_SIZE | EXIT_ACK_INTR_ON_EXIT \
    | EXIT_SAVE_PAT | EXIT_LOAD_PAT | EXIT_SAVE_EFER \
@@ -583,6 +585,11 @@ static bool field_offered(uint32_t field) {
         case VMCS_SPEC_CTRL_MASK:
         case VMCS_SPEC_CTRL_SHADOW: {
             return (cap_proc3 & PROC3_SPEC_CTRL_VIRT) != 0;
+        }
+        case VMCS_VIRTUAL_TIMER_VECTOR:
+        case VMCS_GUEST_DEADLINE_SHADOW:
+        case VMCS_GUEST_DEADLINE: {
+            return (cap_proc3 & PROC3_APIC_TIMER_VIRT) != 0;
         }
         case VMCS_GUEST_SPEC_CTRL: {
             return ((uint32_t)(cap_true_entry >> 32) & ENTRY_LOAD_SPEC_CTRL) != 0;
@@ -1922,6 +1929,11 @@ static bool controls_valid(const struct nvmx *n) {
     if ((proc2 & PROC2_EPT_VE) != 0 && !valid_address(get12(n, VMCS_VE_INFO_ADDR))) {
         return false;
     }
+    if ((proc3_12(n) & PROC3_APIC_TIMER_VIRT) != 0
+     && ((proc2 & PROC2_VIRT_INTR_DELIVERY) == 0 || (proc & PROC_RDTSC_EXITING) != 0
+      || (get12(n, VMCS_VIRTUAL_TIMER_VECTOR) >> 8) != 0)) {
+        return false;
+    }
     if ((proc2 & PROC2_VIRT_INTR_DELIVERY) != 0 && (pin & PIN_EXT_INTR_EXITING) == 0) {
         return false;
     }
@@ -2299,6 +2311,13 @@ static void merge_msr_bitmap(struct nvmx *n, uint64_t proc, uint64_t proc2) {
     for (size_t i = 0; i < PAGE_SIZE; i++) {
         n->msr_bitmap[i] = bitmap == NULL ? 0xff : bitmap[i] | own_msr[i];
     }
+    // With the guest's APIC-timer virtualisation, its guest's accesses to
+    // IA32_TSC_DEADLINE reach VMCS02, not the MSR (SDM 325462-093 Vol. 3C,
+    // 28.3).
+    if (bitmap != NULL && (proc3_12(n) & PROC3_APIC_TIMER_VIRT) != 0) {
+        guest_msr_bit(n->msr_bitmap, bitmap, MSR_IA32_TSC_DEADLINE, false);
+        guest_msr_bit(n->msr_bitmap, bitmap, MSR_IA32_TSC_DEADLINE, true);
+    }
     // The base bitmap intercepts the x2APIC MSRs, for the guest's local APIC,
     // but for those whose accesses the processor virtualises for the guest
     // (SDM 325462-093 Vol. 3C, 32.5), as Linux 7.3's KVM has them.
@@ -2458,6 +2477,21 @@ static void write_vmcs02(struct vcpu *v, struct nvmx *n, const struct l1_values 
     if ((proc3_12(n) & PROC3_SPEC_CTRL_VIRT) != 0) {
         vmx_write(VMCS_SPEC_CTRL_MASK, get12(n, VMCS_SPEC_CTRL_MASK));
         vmx_write(VMCS_SPEC_CTRL_SHADOW, get12(n, VMCS_SPEC_CTRL_SHADOW));
+    }
+    // And its APIC-timer virtualisation, whose guest deadline is by the TSC
+    // the guest reads, offset from the processor's.
+    if ((cap_proc3 & PROC3_APIC_TIMER_VIRT) != 0) {
+        uint64_t deadline = 0;
+        if ((proc3_12(n) & PROC3_APIC_TIMER_VIRT) != 0) {
+            deadline = get12(n, VMCS_GUEST_DEADLINE);
+            if (deadline != 0) {
+                deadline -= v->tsc_offset;
+                deadline = deadline != 0 ? deadline : 1;
+            }
+            vmx_write(VMCS_VIRTUAL_TIMER_VECTOR, get12(n, VMCS_VIRTUAL_TIMER_VECTOR));
+            vmx_write(VMCS_GUEST_DEADLINE_SHADOW, get12(n, VMCS_GUEST_DEADLINE_SHADOW));
+        }
+        vmx_write(VMCS_GUEST_DEADLINE, deadline);
     }
     // VMCS02 loads and saves the guest's guest's FRED state, which is the
     // guest's own in VMCS01's.
@@ -2864,6 +2898,15 @@ static void exit_to_l1(
     posted_leave(v, n, !failed && active);
     if (!failed) {
         save_l2_state(n);
+        // Every exit saves the guest deadline (SDM 325462-093 Vol. 3C,
+        // 30.3.4).
+        if ((cap_proc3 & PROC3_APIC_TIMER_VIRT) != 0) {
+            uint64_t deadline = vmx_read(VMCS_GUEST_DEADLINE);
+            set12(n, VMCS_GUEST_DEADLINE, deadline != 0 ? deadline + v->tsc_offset : 0);
+        }
+        if ((proc3_12(n) & PROC3_APIC_TIMER_VIRT) != 0) {
+            set12(n, VMCS_GUEST_DEADLINE_SHADOW, vmx_read(VMCS_GUEST_DEADLINE_SHADOW));
+        }
         set12(
             n, VMCS_ENTRY_INTR_INFO, get12(n, VMCS_ENTRY_INTR_INFO) & ~(uint64_t)INTR_INFO_VALID
         );
