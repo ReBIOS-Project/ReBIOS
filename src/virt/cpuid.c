@@ -89,9 +89,9 @@ static const struct leaf_bits intel_leaves[] = {
     // CMPSB/SCASB, FRED, LKGS, WRMSRNS, AMX_FP16, HRESET, AVX_IFMA, LAM; EBX
     // PPIN, CPUIDMAXVAL_LIM_RMV; ECX RDT-M asymmetric, RDT-A asymmetric,
     // MSR_IMM; EDX AVX_VNNI_INT8, AVX_NE_CONVERT, AMX_COMPLEX, AVX_VNNI_INT16,
-    // PREFETCHI, UIRET_UIF, CET_SSS, AVX10, APX_F, MWAIT (APX_F as Intel APX
-    // 355828-009, 3.1.4.3.1 defines it).
-    { 0x7, 1, { 0x04ee1df7, 0x00000009, 0x00000023, 0x00ae4530 } },
+    // PREFETCHI, USER_MSR, UIRET_UIF, CET_SSS, AVX10, APX_F, MWAIT (APX_F as
+    // Intel APX 355828-009, 3.1.4.3.1 defines it).
+    { 0x7, 1, { 0x04ee1df7, 0x00000009, 0x00000023, 0x00aec530 } },
     // EDX PSFD, IPRED_CTRL, RRSBA_CTRL, DDPD_U, BHI_CTRL, MCDT_NO, UC-lock
     // disable, MONITOR_MITG_NO.
     { 0x7, 2, { 0x00000000, 0x00000000, 0x00000000, 0x000000ff } },

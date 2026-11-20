@@ -29,6 +29,7 @@ const struct msr_table_range msr_table_intel_architectural[] = {
     { 0x6, 0x6 }, // IA32_MONITOR_FILTER_SIZE.
     { 0x10, 0x10 }, // IA32_TIME_STAMP_COUNTER.
     { 0x17, 0x17 }, // IA32_PLATFORM_ID.
+    { 0x1c, 0x1c }, // IA32_USER_MSR_CTL.
     { 0x3b, 0x3b }, // IA32_TSC_ADJUST.
     { 0x48, 0x49 }, // IA32_SPEC_CTRL to IA32_PRED_CMD.
     { 0x4e, 0x4f }, // IA32_PPIN_CTL to IA32_PPIN.

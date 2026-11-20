@@ -44,13 +44,14 @@ from c_layout import NOTICE, count_decl, finish
 # MTRRs, ARCH_CAPABILITIES, XAPIC_DISABLE_STATUS, the VMX capabilities, the
 # x2APIC range), and those of what the guest does not get: the microcode
 # update interface beyond the trigger and the signature, SMM, SGX, TME, TDX,
-# DCA, debug interface, PASID, user MSRs, MSR lists, architectural LBRs and
-# PEBS, and the reserved ranges.
+# DCA, debug interface, PASID, MSR lists, architectural LBRs and PEBS, and
+# the reserved ranges.
 INTEL_ARCH = [
     (0x0, 0x1),          # Pentium machine check address and type
     (0x6, 0x6),          # MONITOR filter size
     (0x10, 0x10),        # TSC
     (0x17, 0x17),        # platform ID
+    (0x1c, 0x1c),        # user MSR control
     (0x3b, 0x3b),        # TSC adjust
     (0x48, 0x49),        # speculation control and prediction command
     (0x4e, 0x4f),        # PPIN control and PPIN

@@ -1036,6 +1036,9 @@ static void vmx_handle_task_switch(struct vcpu *v, uint64_t qual) {
 #define CR_ACCESS_CLTS 2
 #define CR_ACCESS_LMSW 3
 
+// The one MSR UWRMSR writes (SDM 325462-093 Vol. 2B, UWRMSR).
+#define MSR_IA32_UARCH_MISC_CTL 0x1b01
+
 // Whether the processor takes CR0 and CR4 values, the old ones then the new,
 // as the guest sees them: the #GP(0) cases of MOV to CR0 and CR4 (SDM
 // 325462-093 Vol. 2B, MOV to/from Control Registers, and Vol. 3A, 2.5) as
@@ -1336,6 +1339,22 @@ static void vmx_handle_exit(struct vcpu *v) {
         case EXIT_REASON_WRMSRNS_IMM: {
             bool write = (reason & 0xffff) == EXIT_REASON_WRMSRNS_IMM;
             exit_msr_register(v, (uint32_t)qual, exit_register(), write);
+            break;
+        }
+        // URDMSR and UWRMSR, which exit for the MSRs the bitmaps trap and for
+        // those from 2000H to 3FFFH once the user-MSR bitmap lets them
+        // through, reported as the immediate forms are (SDM 325462-093 Vol.
+        // 3C, 28.1.3; Intel APX 355828-009, 6.68.2.1 and 6.69.2.1).
+        case EXIT_REASON_URDMSR: {
+            exit_msr_register(v, (uint32_t)qual, exit_register(), false);
+            break;
+        }
+        case EXIT_REASON_UWRMSR: {
+            if ((uint32_t)qual != MSR_IA32_UARCH_MISC_CTL) {
+                vcpu_inject_exception(v, 13, true, 0);
+                break;
+            }
+            exit_msr_register(v, (uint32_t)qual, exit_register(), true);
             break;
         }
         case EXIT_REASON_XSETBV: {
