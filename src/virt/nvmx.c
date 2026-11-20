@@ -322,12 +322,12 @@ static unsigned int ept02_budget;
 
 #define CPUID_7_1_EAX_LAM ((uint32_t)1 << 26)
 
-// What the guest is offered of IA32_VMX_EPT_VPID_CAP: not supervisor
-// shadow-stack control nor the HLAT prefix size, whose controls it lacks.
+// What the guest is offered of IA32_VMX_EPT_VPID_CAP: not the HLAT prefix
+// size, whose control it lacks.
 #define CAP_EPT_OFFERED \
     (EPT_CAP_EXEC_ONLY | EPT_CAP_WALK_4 | EPT_CAP_WALK_5 | EPT_CAP_UC | EPT_CAP_WB \
    | EPT_CAP_2M | EPT_CAP_1G | EPT_CAP_INVEPT | EPT_CAP_AD | EPT_CAP_ADVANCED_INFO \
-   | EPT_CAP_INVEPT_SINGLE | EPT_CAP_INVEPT_ALL)
+   | EPT_CAP_SHADOW_STACK | EPT_CAP_INVEPT_SINGLE | EPT_CAP_INVEPT_ALL)
 #define CAP_VPID_OFFERED \
     (VPID_CAP_INVVPID | VPID_CAP_INVVPID_ADDRESS | VPID_CAP_INVVPID_SINGLE | VPID_CAP_INVVPID_ALL \
    | VPID_CAP_INVVPID_GLOBALS)
@@ -386,10 +386,11 @@ void nvmx_init(void) {
     } else {
         cap_proc2 &= ~((uint64_t)PROC2_VPID << 32);
     }
-    // Only the processor's advanced information tells EPT02's fetches from
-    // user-mode linear addresses from others.
+    // Only the processor's advanced information tells EPT02's fetches and
+    // shadow-stack accesses at user-mode linear addresses from others.
     if ((ept_vpid & EPT_CAP_ADVANCED_INFO) == 0) {
         cap_proc2 &= ~((uint64_t)PROC2_MBEC << 32);
+        cap_ept_vpid &= ~EPT_CAP_SHADOW_STACK;
     }
     // EPTP switching is the hypervisor's to carry out, on EPT02.
     if ((cap_proc2 >> 32 & PROC2_EPT) != 0) {
@@ -1147,7 +1148,9 @@ static bool ept12(const struct nvmx *n) {
 // The page-modification log's entries (SDM 325462-093 Vol. 3C, 31.3.6).
 #define PML_ENTRIES 512
 
-// Whether VM entry takes the EPTP (SDM 325462-093 Vol. 3C, 29.2.1.1).
+// Whether VM entry takes the EPTP (SDM 325462-093 Vol. 3C, 29.2.1.1), whose
+// bit 7 Table 27-9 gives supervisor shadow-stack control where the processor
+// supports it.
 static bool eptp_valid(uint64_t eptp) {
     uint64_t type = eptp & 7;
     size_t levels = EPTP_LEVELS(eptp);
@@ -1156,6 +1159,8 @@ static bool eptp_valid(uint64_t eptp) {
         && ((levels == 4 && (cap_ept_vpid & EPT_CAP_WALK_4) != 0)
          || (levels == 5 && (cap_ept_vpid & EPT_CAP_WALK_5) != 0))
         && ((eptp & EPTP_AD) == 0 || (cap_ept_vpid & EPT_CAP_AD) != 0)
+        && ((eptp & EPTP_SUPERVISOR_SHADOW_STACK) == 0
+         || (cap_ept_vpid & EPT_CAP_SHADOW_STACK) != 0)
         && (eptp & EPTP_RESERVED) == 0
         && (eptp >> phys_width) == 0;
 }
@@ -1188,13 +1193,26 @@ static bool ept12_misconfigured(uint64_t e, size_t level, bool leaf, bool mbec) 
     return (e & PTE_ADDRESS & (x86_level_size(level) - 1)) != 0;
 }
 
+// Whether supervisor shadow-stack control decides the access (SDM 325462-093
+// Vol. 3C, 31.3.3.2): the EPTP enables it, and the access is a shadow-stack
+// access to a supervisor-mode linear address, which the advanced information
+// that the control is offered with tells (Table 30-7).
+static bool supervisor_shadow_stack(uint64_t eptp, uint64_t access) {
+    uint64_t told = EPT_QUAL_SHADOW_STACK | EPT_QUAL_LINEAR | EPT_QUAL_TRANSLATION;
+    return (eptp & EPTP_SUPERVISOR_SHADOW_STACK) != 0
+        && (access & (told | EPT_QUAL_USER)) == told;
+}
+
 // What a walk of the guest's EPT made of an address of its guest.
 struct ept12_walk {
     uintptr_t gpa;
     size_t level;
+    // The entry that maps the page, 0 where the walk did not reach one.
     uint64_t leaf;
     // The rights of every entry used, ANDed.
     uint64_t rights;
+    // The same of the entries that reference tables.
+    uint64_t tables;
     // The access, as an EPT violation's qualification gives it, the way the
     // processor treats it.
     uint64_t access;
@@ -1239,12 +1257,14 @@ static int ept12_walk(struct nvmx *n, uintptr_t gpa, uint64_t access, struct ept
         access |= EPT_QUAL_READ | EPT_QUAL_WRITE;
     }
     w->access = access;
+    w->leaf = 0;
     w->rights = 0;
     if (levels == 4 && (gpa >> 48) != 0) {
         return EPT12_VIOLATION;
     }
     uint64_t *used[5] = { 0 };
     uint64_t rights = EPT_RIGHTS;
+    uint64_t tables = EPT_RIGHTS;
     uintptr_t table = eptp & PTE_ADDRESS;
     size_t l;
     for (l = levels - 1; ; l--) {
@@ -1268,13 +1288,23 @@ static int ept12_walk(struct nvmx *n, uintptr_t gpa, uint64_t access, struct ept
             w->leaf = e;
             break;
         }
+        tables &= e;
         table = e & PTE_ADDRESS;
     }
     w->rights = rights & (mbec ? EPT_RIGHTS : EPT_R | EPT_W | EPT_X);
+    w->tables = tables;
     uint64_t fetch = mbec && (access & EPT_QUAL_USER) != 0 ? EPT_XU : EPT_X;
-    if (((access & EPT_QUAL_READ) != 0 && (rights & EPT_R) == 0)
-     || ((access & EPT_QUAL_WRITE) != 0 && (rights & EPT_W) == 0)
-     || ((access & EPT_QUAL_FETCH) != 0 && (rights & fetch) == 0)) {
+    if (supervisor_shadow_stack(eptp, access)) {
+        // Read access in every entry, write access in those that reference
+        // tables, and the bit in the leaf, whose own write access it does not
+        // need.
+        if ((rights & EPT_R) == 0 || (tables & EPT_W) == 0
+         || (w->leaf & EPT_SUPERVISOR_SHADOW_STACK) == 0) {
+            return EPT12_VIOLATION;
+        }
+    } else if (((access & EPT_QUAL_READ) != 0 && (rights & EPT_R) == 0)
+            || ((access & EPT_QUAL_WRITE) != 0 && (rights & EPT_W) == 0)
+            || ((access & EPT_QUAL_FETCH) != 0 && (rights & fetch) == 0)) {
         return EPT12_VIOLATION;
     }
     if (ad) {
@@ -1308,16 +1338,22 @@ static int ept12_walk(struct nvmx *n, uintptr_t gpa, uint64_t access, struct ept
 }
 
 // The qualification of an EPT violation of the guest's EPT: the access, the
-// rights the guest's EPT gives, and what else the guest is offered of it.
-static uint64_t ept12_qual(uint64_t access, const struct ept12_walk *w) {
-    uint64_t kept = EPT_QUAL_READ | EPT_QUAL_WRITE | EPT_QUAL_FETCH | EPT_QUAL_LINEAR
-                  | EPT_QUAL_TRANSLATION | EPT_QUAL_NMI_UNBLOCKED | EPT_QUAL_ASYNC;
+// rights the guest's EPT gives, its leaf's supervisor shadow-stack bit where
+// the control is on, and what else the guest is offered of it.
+static uint64_t ept12_qual(const struct nvmx *n, uint64_t access, const struct ept12_walk *w) {
+    uint64_t kept = EPT_QUAL_READ | EPT_QUAL_WRITE | EPT_QUAL_FETCH
+                  | EPT_QUAL_LINEAR | EPT_QUAL_TRANSLATION | EPT_QUAL_NMI_UNBLOCKED
+                  | EPT_QUAL_SHADOW_STACK | EPT_QUAL_ASYNC;
     if ((cap_ept_vpid & EPT_CAP_ADVANCED_INFO) != 0) {
         kept |= EPT_QUAL_USER | EPT_QUAL_WRITABLE | EPT_QUAL_XD;
     }
     uint64_t rights = (w->rights & (EPT_R | EPT_W | EPT_X)) << EPT_QUAL_RIGHTS_SHIFT;
     if ((w->rights & EPT_XU) != 0) {
         rights |= (uint64_t)1 << (EPT_QUAL_RIGHTS_SHIFT + 3);
+    }
+    if ((get12(n, VMCS_EPT_POINTER) & EPTP_SUPERVISOR_SHADOW_STACK) != 0
+     && (w->leaf & EPT_SUPERVISOR_SHADOW_STACK) != 0) {
+        rights |= EPT_QUAL_SUPERVISOR_SHADOW_STACK;
     }
     return (access & kept) | rights;
 }
@@ -1385,14 +1421,16 @@ static uint64_t ept02_pointer(struct nvmx *n) {
     }
     n->current02 = r;
     return (uint64_t)(uintptr_t)r->root | (uint64_t)(EPTP_LEVELS(eptp) - 1) << 3 | EPTP_WB
-         | (eptp & EPTP_AD);
+         | (eptp & (EPTP_AD | EPTP_SUPERVISOR_SHADOW_STACK));
 }
 
 // An EPT02 leaf for the guest's mapping and the hypervisor's. With accessed
 // and dirty flags, writes wait for the guest's dirty flag, which the leaf then
 // takes as set until the guest's INVEPT, as a processor may (SDM 325462-093
-// Vol. 3C, 31.3.5). Where the hypervisor's memory type is not write-back, it
-// wins but over uncacheable.
+// Vol. 3C, 31.3.5). Supervisor shadow-stack accesses, which write without the
+// leaf's write access (31.3.3.2), are let through where the hypervisor's EPT
+// has the page writable, and wait for the dirty flag as writes do. Where the
+// hypervisor's memory type is not write-back, it wins but over uncacheable.
 static uint64_t ept02_leaf(
     const struct nvmx *n,
     const struct ept12_walk *w,
@@ -1401,13 +1439,19 @@ static uint64_t ept02_leaf(
     uint8_t memtype,
     size_t level
 ) {
+    uint64_t eptp = get12(n, VMCS_EPT_POINTER);
+    bool dirty = (eptp & EPTP_AD) == 0 || (w->leaf & EPT_DIRTY) != 0;
     uint64_t e = hpa & PTE_ADDRESS & ~(x86_level_size(level) - 1);
     if ((w->rights & EPT_R) != 0 && (prot & GPT_R) != 0) {
         e |= EPT_R;
     }
-    if ((w->rights & EPT_W) != 0 && (prot & GPT_W) != 0 && (e & EPT_R) != 0
-     && ((get12(n, VMCS_EPT_POINTER) & EPTP_AD) == 0 || (w->leaf & EPT_DIRTY) != 0)) {
+    if ((w->rights & EPT_W) != 0 && (prot & GPT_W) != 0 && (e & EPT_R) != 0 && dirty) {
         e |= EPT_W | EPT_DIRTY;
+    }
+    if ((eptp & EPTP_SUPERVISOR_SHADOW_STACK) != 0 && (w->leaf & EPT_SUPERVISOR_SHADOW_STACK) != 0
+     && (w->tables & EPT_W) != 0 && (prot & GPT_W) != 0
+     && (e & EPT_R) != 0 && dirty) {
+        e |= EPT_SUPERVISOR_SHADOW_STACK | EPT_DIRTY;
     }
     if ((w->rights & EPT_X) != 0 && (prot & GPT_X) != 0) {
         e |= EPT_X;
@@ -1438,7 +1482,7 @@ static uint64_t ept02_leaf(
 // guest's EPT found it and the hypervisor's EPT has the guest's memory, but
 // for the page behind the guest's local APICs' pages, which is the guest's
 // guest's only where it is VMCS02's APIC-access page. Returns the rights it
-// got.
+// got, its supervisor shadow-stack bit with them.
 static uint64_t ept02_fill(struct nvmx *n, uintptr_t gpa, const struct ept12_walk *w) {
     uintptr_t hpa;
     uint32_t prot;
@@ -1479,7 +1523,7 @@ static uint64_t ept02_fill(struct nvmx *n, uintptr_t gpa, const struct ept12_wal
         bool is_table = (*slot & EPT_RIGHTS) != 0 && (*slot & EPT_LARGE) == 0;
         if (l <= level && !is_table) {
             *slot = l == level ? leaf : ept02_leaf(n, w, hpa, prot, memtype, l);
-            return *slot & EPT_RIGHTS;
+            return *slot & (EPT_RIGHTS | EPT_SUPERVISOR_SHADOW_STACK);
         }
         if (!is_table) {
             *slot = (uint64_t)(uintptr_t)ept02_table(n) | EPT_RIGHTS;
@@ -1489,7 +1533,7 @@ static uint64_t ept02_fill(struct nvmx *n, uintptr_t gpa, const struct ept12_wal
     leaf = ept02_leaf(n, w, hpa, prot, memtype, 0);
     table[x86_level_index(gpa, 0)] = leaf;
     table[512 + x86_level_index(gpa, 0)] = w->entry[0];
-    return leaf & EPT_RIGHTS;
+    return leaf & (EPT_RIGHTS | EPT_SUPERVISOR_SHADOW_STACK);
 }
 
 // Takes out of a shadow of the guest's EPT what the guest changed since it was
@@ -1545,7 +1589,12 @@ static void ept02_forget(struct nvmx *n, uintptr_t gpa) {
     }
 }
 
+// Whether EPT02's leaf rights allow the access, EPT02's tables allowing all
+// (SDM 325462-093 Vol. 3C, 31.3.3.2).
 static bool ept02_allows(const struct nvmx *n, uint64_t rights, uint64_t access) {
+    if (supervisor_shadow_stack(get12(n, VMCS_EPT_POINTER), access)) {
+        return (rights & EPT_R) != 0 && (rights & EPT_SUPERVISOR_SHADOW_STACK) != 0;
+    }
     uint64_t fetch = (proc2_12(n) & PROC2_MBEC) != 0 && (access & EPT_QUAL_USER) != 0
                    ? EPT_XU
                    : EPT_X;
@@ -2952,7 +3001,7 @@ static void ept_violation(struct vcpu *v, struct nvmx *n, uint64_t qual) {
     int walk_result = ept12_walk(n, gpa, qual, &w);
     if (walk_result == EPT12_VIOLATION) {
         ept02_forget(n, gpa);
-        exit_to_l1(v, n, EXIT_REASON_EPT_VIOLATION, ept12_qual(qual, &w), 0, 0, true);
+        exit_to_l1(v, n, EXIT_REASON_EPT_VIOLATION, ept12_qual(n, qual, &w), 0, 0, true);
         return;
     }
     if (walk_result == EPT12_PML_FULL) {
@@ -3397,7 +3446,7 @@ bool nvmx_ept_translate(
         n->pending_qual = 0;
     } else {
         n->pending_reason = EXIT_REASON_EPT_VIOLATION;
-        n->pending_qual = ept12_qual(w.access, &w);
+        n->pending_qual = ept12_qual(n, w.access, &w);
     }
     return false;
 }

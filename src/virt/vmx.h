@@ -345,8 +345,10 @@
 // EPT violation exit qualification (SDM 325462-093 Vol. 3C, Table 30-7): the
 // access, the rights the EPT entries gave (bits 6:3), whether the guest-linear
 // address is known and was translated rather than a paging-structure entry's,
-// what paging gave the linear address, IRET's NMI unblocking, and whether the
-// processor made the access outside of any instruction.
+// what paging gave the linear address, IRET's NMI unblocking, whether it was a
+// shadow-stack access and what supervisor shadow-stack control found in the
+// entry that maps the page, and whether the processor made the access outside
+// of any instruction.
 #define EPT_QUAL_READ ((uint64_t)1 << 0)
 #define EPT_QUAL_WRITE ((uint64_t)1 << 1)
 #define EPT_QUAL_FETCH ((uint64_t)1 << 2)
@@ -357,6 +359,8 @@
 #define EPT_QUAL_WRITABLE ((uint64_t)1 << 10)
 #define EPT_QUAL_XD ((uint64_t)1 << 11)
 #define EPT_QUAL_NMI_UNBLOCKED ((uint64_t)1 << 12)
+#define EPT_QUAL_SHADOW_STACK ((uint64_t)1 << 13)
+#define EPT_QUAL_SUPERVISOR_SHADOW_STACK ((uint64_t)1 << 14)
 #define EPT_QUAL_ASYNC ((uint64_t)1 << 16)
 
 // IA32_VMX_EPT_VPID_CAP (SDM 325462-093 Vol. 3D, A.10).
@@ -370,6 +374,7 @@
 #define EPT_CAP_INVEPT ((uint64_t)1 << 20)
 #define EPT_CAP_AD ((uint64_t)1 << 21)
 #define EPT_CAP_ADVANCED_INFO ((uint64_t)1 << 22)
+#define EPT_CAP_SHADOW_STACK ((uint64_t)1 << 23)
 #define EPT_CAP_INVEPT_SINGLE ((uint64_t)1 << 25)
 #define EPT_CAP_INVEPT_ALL ((uint64_t)1 << 26)
 #define VPID_CAP_INVVPID ((uint64_t)1 << 32)
@@ -379,8 +384,8 @@
 #define VPID_CAP_INVVPID_GLOBALS ((uint64_t)1 << 43)
 
 // EPT paging-structure entries (SDM 325462-093 Vol. 3C, 31.3.2), whose dirty
-// flags the EPT pointer enables (31.3.5), and the bits reserved in those that
-// reference tables, bit 7 aside.
+// flags (31.3.5) and supervisor shadow-stack bits (31.3.3.2) the EPT pointer
+// enables, and the bits reserved in those that reference tables, bit 7 aside.
 #define EPT_R ((uint64_t)1 << 0)
 #define EPT_W ((uint64_t)1 << 1)
 #define EPT_X ((uint64_t)1 << 2)
@@ -390,12 +395,14 @@
 #define EPT_ACCESSED ((uint64_t)1 << 8)
 #define EPT_DIRTY ((uint64_t)1 << 9)
 #define EPT_XU ((uint64_t)1 << 10)
+#define EPT_SUPERVISOR_SHADOW_STACK ((uint64_t)1 << 60)
 #define EPT_TABLE_RESERVED ((uint64_t)0x78)
 
 // The EPTP (SDM 325462-093 Vol. 3C, Table 27-9).
 #define EPTP_LEVELS(eptp) ((int)((eptp) >> 3 & 7) + 1)
 #define EPTP_AD ((uint64_t)1 << 6)
-#define EPTP_RESERVED ((uint64_t)0xf80)
+#define EPTP_SUPERVISOR_SHADOW_STACK ((uint64_t)1 << 7)
+#define EPTP_RESERVED ((uint64_t)0xf00)
 #define EPTP_UC 0
 #define EPTP_WB 6
 
