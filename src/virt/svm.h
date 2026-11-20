@@ -74,7 +74,11 @@ struct vmcb_control {
     // FRED's event data (AMD 69191 rev. 1.10).
     uint64_t exitintdata;
     uint64_t eventinjdata;
-    uint8_t reserved7[0x1c8 - 0x180];
+    // The events that guest PMC event filtering allows, and the bits it
+    // compares (APM 24593 rev. 3.46, 15.39.1).
+    uint64_t allowed_perf_ctl[6];
+    uint8_t reserved7[0x1c0 - 0x1b0];
+    uint64_t allowed_perf_ctl_mask;
     uint64_t pml_base;
     uint16_t pml_index;
     uint8_t reserved8[0x400 - 0x1d2];
@@ -102,7 +106,11 @@ struct vmcb_save {
     uint8_t cpl;
     uint32_t reserved1;
     uint64_t efer;
-    uint8_t reserved2[0x148 - 0xd8];
+    uint8_t reserved2[0xe0 - 0xd8];
+    // The guest's PerfEvtSel and PerfCtr pairs, IRPerfCount, and global status
+    // and control, with PMC virtualisation (APM 24593 rev. 3.46, 15.39).
+    uint64_t perf_ctl_ctr[12];
+    uint8_t reserved3[0x148 - 0x140];
     uint64_t cr4;
     uint64_t cr3;
     uint64_t cr0;
@@ -110,7 +118,10 @@ struct vmcb_save {
     uint64_t dr6;
     uint64_t rflags;
     uint64_t rip;
-    uint8_t reserved3[0x1d8 - 0x180];
+    uint8_t reserved4[0x1c0 - 0x180];
+    uint64_t instr_retired_ctr;
+    uint64_t perf_ctr_global_sts;
+    uint64_t perf_ctr_global_ctl;
     uint64_t rsp;
     uint64_t s_cet;
     uint64_t ssp;
@@ -125,17 +136,17 @@ struct vmcb_save {
     uint64_t sysenter_esp;
     uint64_t sysenter_eip;
     uint64_t cr2;
-    uint8_t reserved4[0x268 - 0x248];
+    uint8_t reserved5[0x268 - 0x248];
     uint64_t g_pat;
     uint64_t dbgctl;
     uint64_t br_from;
     uint64_t br_to;
     uint64_t last_excp_from;
     uint64_t last_excp_to;
-    uint8_t reserved5[0x2e0 - 0x298];
+    uint8_t reserved6[0x2e0 - 0x298];
     // The guest's IA32_SPEC_CTRL, with SPEC_CTRL virtualisation.
     uint64_t spec_ctrl;
-    uint8_t reserved6[0x8c0 - 0x2e8];
+    uint8_t reserved7[0x8c0 - 0x2e8];
     // The FRED MSRs that the processor switches with the VMCB, all but
     // FRED_RSP0 (AMD 69191 rev. 1.10).
     uint64_t fred_rsp[3];
@@ -202,6 +213,10 @@ _Static_assert(
     "The VMCB's layout is not the one the processor uses."
 );
 _Static_assert(
+    offsetof(struct vmcb_control, allowed_perf_ctl_mask) == 0x1c0,
+    "The VMCB's layout is not the one the processor uses."
+);
+_Static_assert(
     offsetof(struct vmcb_control, pml_index) == 0x1d0,
     "The VMCB's layout is not the one the processor uses."
 );
@@ -216,6 +231,14 @@ _Static_assert(
 );
 _Static_assert(
     offsetof(struct vmcb_save, efer) == 0xd0,
+    "The VMCB's layout is not the one the processor uses."
+);
+_Static_assert(
+    offsetof(struct vmcb_save, perf_ctl_ctr) == 0xe0,
+    "The VMCB's layout is not the one the processor uses."
+);
+_Static_assert(
+    offsetof(struct vmcb_save, instr_retired_ctr) == 0x1c0,
     "The VMCB's layout is not the one the processor uses."
 );
 _Static_assert(
@@ -342,6 +365,9 @@ _Static_assert(
 #define SVM_EXIT_AVIC_NOACCEL 0x402
 #define SVM_EXIT_PML_FULL 0x407
 #define SVM_EXIT_INVALID ((uint64_t)0xffffffffffffffff)
+// A VMRUN that PMC virtualisation's checks refuse (APM 24593 rev. 3.46,
+// 15.39).
+#define SVM_EXIT_INVALID_PMC ((uint64_t)0xfffffffffffffffc)
 
 // The I/O and MSR permission maps' pages (APM 24593 rev. 3.46, 15.10.1 and
 // 15.11).
@@ -396,6 +422,7 @@ _Static_assert(
 #define SVM_FEATURE_VMCB_CLEAN ((uint32_t)1 << 5)
 #define SVM_FEATURE_FLUSH_BY_ASID ((uint32_t)1 << 6)
 #define SVM_FEATURE_DECODE_ASSISTS ((uint32_t)1 << 7)
+#define SVM_FEATURE_PMC_VIRT ((uint32_t)1 << 8)
 #define SVM_FEATURE_PAUSE_FILTER ((uint32_t)1 << 10)
 #define SVM_FEATURE_PAUSE_FILTER_THRESHOLD ((uint32_t)1 << 12)
 #define SVM_FEATURE_AVIC ((uint32_t)1 << 13)
@@ -428,7 +455,9 @@ _Static_assert(
 // Virtualisation extensions, at offset 0B8h.
 #define SVM_VIRT_EXT_LBR ((uint64_t)1 << 0)
 #define SVM_VIRT_EXT_VLS ((uint64_t)1 << 1)
+#define SVM_VIRT_EXT_PMC ((uint64_t)1 << 3)
 #define SVM_VIRT_EXT_FRED ((uint64_t)1 << 4)
+#define SVM_VIRT_EXT_PMC_FILTER ((uint64_t)1 << 5)
 
 // Event injection.
 #define SVM_EVENT_VALID ((uint64_t)1 << 31)

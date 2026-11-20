@@ -91,6 +91,8 @@
 #define GAAT_POINTER_RESERVED ((uint64_t)0xfff0000000000000)
 #define CPUID_8000000A_ECX_PW ((uint32_t)1 << 1)
 #define CPUID_8000000A_ECX_VPW ((uint32_t)1 << 2)
+// Guest PMC event filtering (APM 24593 rev. 3.46, 15.39.1).
+#define CPUID_8000000A_ECX_PMC_FILTER ((uint32_t)1 << 3)
 #define NPT_VPW ((uint64_t)1 << 57)
 #define NPT_PW ((uint64_t)1 << 58)
 
@@ -217,6 +219,10 @@ struct nsvm {
     // Whether VMCB12 has GAAT paging translate the guest's guest's linear
     // addresses (APM 24593 rev. 3.46, 15.40).
     bool gaat;
+    // Whether VMCB12 gives the guest's guest PMC registers of its own, and
+    // filters the events they may count (APM 24593 rev. 3.46, 15.39).
+    bool pmc;
+    bool pmc_filter;
     // Whether VMCB12 has the guest's guest's supervisor shadow-stack accesses
     // reach only supervisor shadow-stack pages of the nested page tables,
     // which the guest's PAE paging and EFER.NXE allow (APM 24593 rev. 3.46,
@@ -262,7 +268,8 @@ static uint64_t debugctl_bits;
 // Whether the processor has read-only guest page tables, page modification
 // logging, GMET, the TSC ratio MSR, the idle HLT intercept, and the bus lock
 // threshold, SSSCheck, which takes the host's EFER.NXE (APM 24593 rev. 3.46,
-// 15.25.15), Paging-Write, Verify Paging-Write, and GAAT.
+// 15.25.15), Paging-Write, Verify Paging-Write, GAAT, PMC virtualisation, and
+// guest PMC event filtering.
 static bool rogpt;
 static bool pml;
 static bool gmet;
@@ -270,6 +277,8 @@ static bool ssscheck;
 static bool paging_write;
 static bool verify_paging_write;
 static bool gaat;
+static bool pmc_virt;
+static bool pmc_filter;
 static bool tsc_scaling;
 static bool idle_hlt;
 static bool bus_lock_threshold;
@@ -299,6 +308,8 @@ void nsvm_init(void) {
     paging_write = (cpuid(0x8000000a, 0).ecx & CPUID_8000000A_ECX_PW) != 0;
     verify_paging_write = (cpuid(0x8000000a, 0).ecx & CPUID_8000000A_ECX_VPW) != 0;
     gaat = (cpuid(0x8000000a, 0).ecx & CPUID_8000000A_ECX_GAAT) != 0;
+    pmc_virt = (cpuid(0x8000000a, 0).edx & SVM_FEATURE_PMC_VIRT) != 0;
+    pmc_filter = pmc_virt && (cpuid(0x8000000a, 0).ecx & CPUID_8000000A_ECX_PMC_FILTER) != 0;
     debugctl_bits = DEBUGCTL_LBR | DEBUGCTL_BTF
                   | ((cpuid(7, 0).ecx & CPUID_7_0_ECX_BUSLOCKTRAP) != 0 ? DEBUGCTL_BLCKDB : 0);
     iopm02 = page_alloc(IOPM_SIZE / PAGE_SIZE);
@@ -499,20 +510,20 @@ bool nsvm_in_l2(struct vcpu *v) {
 struct cpuid_regs nsvm_cpuid(void) {
     struct cpuid_regs svm = cpuid(0x8000000a, 0);
     uint32_t features = SVM_FEATURE_NP | SVM_FEATURE_NRIPS
-                      | SVM_FEATURE_VMCB_CLEAN | SVM_FEATURE_FLUSH_BY_ASID
-                      | SVM_FEATURE_PAUSE_FILTER | SVM_FEATURE_PAUSE_FILTER_THRESHOLD
-                      | SVM_FEATURE_LBRV | SVM_FEATURE_ROGPT
-                      | SVM_FEATURE_TLBICTL | SVM_FEATURE_DECODE_ASSISTS
-                      | SVM_FEATURE_VGIF | SVM_FEATURE_GMET
-                      | SVM_FEATURE_TSC_RATIO | SVM_FEATURE_SVML
-                      | SVM_FEATURE_IDLE_HLT | SVM_FEATURE_BUS_LOCK_THRESHOLD
-                      | SVM_FEATURE_HOST_MCE_OVERRIDE | SVM_FEATURE_V_SPEC_CTRL
-                      | (ssscheck ? SVM_FEATURE_SSSCHECK : 0) | (svm_vls ? SVM_FEATURE_VLS : 0)
-                      | (svm_vnmi ? SVM_FEATURE_VNMI : 0);
+                      | SVM_FEATURE_PMC_VIRT | SVM_FEATURE_VMCB_CLEAN
+                      | SVM_FEATURE_FLUSH_BY_ASID | SVM_FEATURE_PAUSE_FILTER
+                      | SVM_FEATURE_PAUSE_FILTER_THRESHOLD | SVM_FEATURE_LBRV
+                      | SVM_FEATURE_ROGPT | SVM_FEATURE_TLBICTL
+                      | SVM_FEATURE_DECODE_ASSISTS | SVM_FEATURE_VGIF
+                      | SVM_FEATURE_GMET | SVM_FEATURE_TSC_RATIO
+                      | SVM_FEATURE_SVML | SVM_FEATURE_IDLE_HLT
+                      | SVM_FEATURE_BUS_LOCK_THRESHOLD | SVM_FEATURE_HOST_MCE_OVERRIDE
+                      | SVM_FEATURE_V_SPEC_CTRL | (ssscheck ? SVM_FEATURE_SSSCHECK : 0)
+                      | (svm_vls ? SVM_FEATURE_VLS : 0) | (svm_vnmi ? SVM_FEATURE_VNMI : 0);
     return (struct cpuid_regs){
         svm.eax & (0xff | (gaat ? CPUID_8000000A_EAX_GAAT_PREFIX : 0)), nasid - 1,
         svm.ecx & (CPUID_8000000A_ECX_PML | CPUID_8000000A_ECX_PW | CPUID_8000000A_ECX_VPW
-                 | CPUID_8000000A_ECX_GAAT),
+                 | CPUID_8000000A_ECX_GAAT | CPUID_8000000A_ECX_PMC_FILTER),
         (svm.edx & features) | SVM_FEATURE_VMCB_ADDR_CHECK
     };
 }
@@ -661,6 +672,15 @@ static void copy_lbrs(struct vmcb_save *to, const struct vmcb_save *from) {
     to->last_excp_to = from->last_excp_to;
 }
 
+// The PMC registers of a guest with PMC virtualisation, which VMRUN loads and
+// #VMEXIT saves (APM 24593 rev. 3.46, 15.39).
+static void copy_pmcs(struct vmcb_save *to, const struct vmcb_save *from) {
+    memcpy(to->perf_ctl_ctr, from->perf_ctl_ctr, sizeof(to->perf_ctl_ctr));
+    to->instr_retired_ctr = from->instr_retired_ctr;
+    to->perf_ctr_global_sts = from->perf_ctr_global_sts;
+    to->perf_ctr_global_ctl = from->perf_ctr_global_ctl;
+}
+
 static void copy_fred_state(struct vmcb_save *to, const struct vmcb_save *from) {
     for (size_t i = 0; i < 3; i++) {
         to->fred_rsp[i] = from->fred_rsp[i];
@@ -772,6 +792,9 @@ static void exit_to_l1(
     }
     if (svm_v_spec_ctrl) {
         s12->spec_ctrl = s02->spec_ctrl;
+    }
+    if (n->pmc) {
+        copy_pmcs(s12, s02);
     }
     if (n->pml) {
         vmcb12->control.pml_index = n->pml_index;
@@ -1565,7 +1588,16 @@ static void prepare_vmcb02(struct nsvm *n) {
     // 24593 rev. 3.46, 15.20): VMCB12's where the guest has NRIP saving, else
     // its RIP, which the guest moved past the instruction itself.
     c->nrip = svm_nrips ? c12->nrip : s12->rip;
-    c->virt_ext = vmcb01->control.virt_ext;
+    // VMCB12's PMC virtualisation and its event filtering, where the processor
+    // has them.
+    n->pmc = pmc_virt && (c12->virt_ext & SVM_VIRT_EXT_PMC) != 0;
+    n->pmc_filter = n->pmc && pmc_filter && (c12->virt_ext & SVM_VIRT_EXT_PMC_FILTER) != 0;
+    c->virt_ext = vmcb01->control.virt_ext | (n->pmc ? SVM_VIRT_EXT_PMC : 0)
+                | (n->pmc_filter ? SVM_VIRT_EXT_PMC_FILTER : 0);
+    if (n->pmc_filter) {
+        memcpy(c->allowed_perf_ctl, c12->allowed_perf_ctl, sizeof(c->allowed_perf_ctl));
+        c->allowed_perf_ctl_mask = c12->allowed_perf_ctl_mask;
+    }
     c->exitintdata = 0;
     c->eventinjdata = c12->eventinjdata;
 
@@ -1598,6 +1630,9 @@ static void prepare_vmcb02(struct nsvm *n) {
     s->g_pat = n->npt ? s12->g_pat : vmcb01->save.g_pat;
     if (svm_v_spec_ctrl) {
         s->spec_ctrl = s12->spec_ctrl;
+    }
+    if (n->pmc) {
+        copy_pmcs(s, s12);
     }
     n->lbrv = svm_lbr_virtualisation && (c12->virt_ext & SVM_VIRT_EXT_LBR) != 0;
     copy_lbrs(s, n->lbrv ? s12 : &vmcb01->save);
@@ -1831,13 +1866,9 @@ static bool io_wanted(struct nsvm *n, uint64_t info) {
     return false;
 }
 
-// Whether VMCB12's MSR permission map has the access exit, as accesses to MSRs
-// past its ranges always do (APM 24593 rev. 3.46, 15.11).
-static bool msr_wanted(struct vcpu *v, struct nsvm *n, bool write) {
-    if ((n->intercepts[3] & SVM_INTERCEPT_MSR) == 0) {
-        return false;
-    }
-    uint32_t msr = (uint32_t)v->gprs.rcx;
+// The bit of an MSR permission map for an access, false for MSRs past its
+// ranges (APM 24593 rev. 3.46, 15.11).
+static bool msrpm_bit(uint32_t msr, bool write, size_t *bit) {
     size_t offset;
     if (msr <= 0x1fff) {
         offset = 0;
@@ -1846,12 +1877,34 @@ static bool msr_wanted(struct vcpu *v, struct nsvm *n, bool write) {
     } else if (msr >= 0xc0010000 && msr <= 0xc0011fff) {
         offset = 0x1000;
     } else {
+        return false;
+    }
+    *bit = offset * 8 + (msr & 0x1fff) * 2 + (write ? 1 : 0);
+    return true;
+}
+
+// Whether VMCB12's MSR permission map has the access exit, as accesses to MSRs
+// past its ranges always do (APM 24593 rev. 3.46, 15.11).
+static bool msr_wanted(struct vcpu *v, struct nsvm *n, bool write) {
+    if ((n->intercepts[3] & SVM_INTERCEPT_MSR) == 0) {
+        return false;
+    }
+    size_t bit;
+    if (!msrpm_bit((uint32_t)v->gprs.rcx, write, &bit)) {
         return true;
     }
-    size_t bit = offset * 8 + (msr & 0x1fff) * 2 + (write ? 1 : 0);
     uintptr_t base = page_down(n->copy.control.msrpm_base_pa);
     const uint8_t *page = guest_mem_page(base + page_down(bit / 8));
     return page == NULL || ((page[bit / 8 & 0xfff] >> (bit % 8)) & 1) != 0;
+}
+
+// A WRMSR exit that VMCB02's MSR permission map did not make: guest PMC event
+// filtering's, for a write that would enable an event it does not allow, which
+// goes to the guest (APM 24593 rev. 3.46, 15.39.1).
+static bool pmc_filtered(struct vcpu *v, const struct nsvm *n, bool write) {
+    size_t bit;
+    return n->pmc_filter && write && msrpm_bit((uint32_t)v->gprs.rcx, write, &bit)
+        && ((n->msrpm02[bit / 8] >> (bit % 8)) & 1) == 0;
 }
 
 // Whether the guest's guest takes the virtual interrupt VMCB12 gives it now
@@ -1902,14 +1955,16 @@ static bool l1_wants(struct vcpu *v, struct nsvm *n, uint64_t code) {
         case SVM_EXIT_NPF: {
             return false;
         }
-        case SVM_EXIT_INVALID: {
+        case SVM_EXIT_INVALID:
+        case SVM_EXIT_INVALID_PMC: {
             return true;
         }
         case SVM_EXIT_IOIO: {
             return io_wanted(n, c->exitinfo1);
         }
         case SVM_EXIT_MSR: {
-            return msr_wanted(v, n, (c->exitinfo1 & 1) != 0);
+            bool write = (c->exitinfo1 & 1) != 0;
+            return msr_wanted(v, n, write) || pmc_filtered(v, n, write);
         }
         // The guest's own virtual interrupt, but where the hypervisor's window
         // has its place, for the entry to see whether the guest's interrupts
