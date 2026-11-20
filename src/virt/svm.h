@@ -128,7 +128,10 @@ struct vmcb_save {
     uint64_t br_to;
     uint64_t last_excp_from;
     uint64_t last_excp_to;
-    uint8_t reserved5[0x8c0 - 0x298];
+    uint8_t reserved5[0x2e0 - 0x298];
+    // The guest's IA32_SPEC_CTRL, with SPEC_CTRL virtualisation.
+    uint64_t spec_ctrl;
+    uint8_t reserved6[0x8c0 - 0x2e8];
     // The FRED MSRs that the processor switches with the VMCB, all but
     // FRED_RSP0 (AMD 69191 rev. 1.10).
     uint64_t fred_rsp[3];
@@ -229,6 +232,10 @@ _Static_assert(
 );
 _Static_assert(
     offsetof(struct vmcb_save, g_pat) == 0x268,
+    "The VMCB's layout is not the one the processor uses."
+);
+_Static_assert(
+    offsetof(struct vmcb_save, spec_ctrl) == 0x2e0,
     "The VMCB's layout is not the one the processor uses."
 );
 _Static_assert(
@@ -385,6 +392,7 @@ _Static_assert(
 #define SVM_FEATURE_VGIF ((uint32_t)1 << 16)
 #define SVM_FEATURE_GMET ((uint32_t)1 << 17)
 #define SVM_FEATURE_X2AVIC ((uint32_t)1 << 18)
+#define SVM_FEATURE_V_SPEC_CTRL ((uint32_t)1 << 20)
 #define SVM_FEATURE_ROGPT ((uint32_t)1 << 21)
 #define SVM_FEATURE_HOST_MCE_OVERRIDE ((uint32_t)1 << 23)
 #define SVM_FEATURE_TLBICTL ((uint32_t)1 << 24)
@@ -474,6 +482,10 @@ extern bool svm_avic_ext_lvt_reads;
 // address predictor is the guest's to have cleared (svm.c).
 extern bool svm_flush_by_asid;
 extern bool svm_eraps;
+// IA32_SPEC_CTRL has a guest register, which VMRUN loads from the VMCB and
+// #VMEXIT saves there, and which is in effect ORed with the host register
+// while the guest runs (APM 24593 rev. 3.46, 15.37.1).
+extern bool svm_v_spec_ctrl;
 // TlbiCtl: the hypervisor enables its guests' INVLPGB and TLBSYNC, which run
 // without it on processors that lack it, and TLBSYNC can be intercepted (APM
 // 24593 rev. 3.46, Table B-1).

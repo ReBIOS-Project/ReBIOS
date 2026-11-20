@@ -86,6 +86,8 @@
 
 #define CPUID_7_0_ECX_BUSLOCKTRAP ((uint32_t)1 << 24)
 
+#define MSR_IA32_SPEC_CTRL 0x48
+
 // A shadow of one of the guest's nested page tables, for one ASID of its
 // guests: what it and the hypervisor's make of the guest's guest's addresses,
 // filled in as the processor misses them.
@@ -152,6 +154,10 @@ struct nsvm {
     uint64_t tsc_ratio_loaded;
     // Whether VMCB12 has the processor switch the last branch records.
     bool lbrv;
+    // The processor's IA32_SPEC_CTRL host register while the guest's guest
+    // runs with the guest's ORed in, and whether that changed it.
+    uint64_t host_spec_ctrl;
+    bool spec_ctrl_raised;
     // Whether VMCB12 has the processor virtualise the guest's guest's NMIs,
     // global interrupt flag, and VMLOAD and VMSAVE (APM 24593 rev. 3.46,
     // 15.21.10 and 15.33).
@@ -284,12 +290,31 @@ void nsvm_vcpu_init(struct vcpu *v) {
 
 static void npt02_drop_all(struct nsvm *n);
 
+// With SPEC_CTRL virtualisation, the guest's IA32_SPEC_CTRL is the host
+// register to its guest, whose own is the guest register, in VMCB02 (APM 24593
+// rev. 3.46, 15.37.1): the processor's host register has the guest's ORed in
+// while the guest's guest runs.
+static void spec_ctrl_switch(struct nsvm *n, bool to_l2) {
+    if (to_l2) {
+        n->host_spec_ctrl = rdmsr(MSR_IA32_SPEC_CTRL);
+        uint64_t value = n->host_spec_ctrl | n->vmcb01->save.spec_ctrl;
+        n->spec_ctrl_raised = value != n->host_spec_ctrl;
+        if (n->spec_ctrl_raised) {
+            wrmsr(MSR_IA32_SPEC_CTRL, value);
+        }
+    } else if (n->spec_ctrl_raised) {
+        wrmsr(MSR_IA32_SPEC_CTRL, n->host_spec_ctrl);
+        n->spec_ctrl_raised = false;
+    }
+}
+
 void nsvm_vcpu_power_on(struct vcpu *v) {
     struct nsvm *n = v->nsvm;
     if (n == NULL) {
         return;
     }
     npt02_drop_all(n);
+    spec_ctrl_switch(n, false);
     size_t asids = page_count((nasid + 63) / 64 * sizeof(uint64_t));
     memset(n->invlpga_asids, 0, asids * PAGE_SIZE);
     *n = (struct nsvm){
@@ -441,8 +466,8 @@ struct cpuid_regs nsvm_cpuid(void) {
                       | SVM_FEATURE_VGIF | SVM_FEATURE_GMET
                       | SVM_FEATURE_TSC_RATIO | SVM_FEATURE_SVML
                       | SVM_FEATURE_IDLE_HLT | SVM_FEATURE_BUS_LOCK_THRESHOLD
-                      | SVM_FEATURE_HOST_MCE_OVERRIDE | (svm_vls ? SVM_FEATURE_VLS : 0)
-                      | (svm_vnmi ? SVM_FEATURE_VNMI : 0);
+                      | SVM_FEATURE_HOST_MCE_OVERRIDE | SVM_FEATURE_V_SPEC_CTRL
+                      | (svm_vls ? SVM_FEATURE_VLS : 0) | (svm_vnmi ? SVM_FEATURE_VNMI : 0);
     return (struct cpuid_regs){
         svm.eax & 0xff, nasid - 1, svm.ecx & CPUID_8000000A_ECX_PML,
         (svm.edx & features) | SVM_FEATURE_VMCB_ADDR_CHECK
@@ -630,6 +655,9 @@ static void switch_vmcb(struct vcpu *v, struct nsvm *n, bool to_l2) {
         v->vmcb->control.tlb_control = SVM_TLB_FLUSH_ALL;
         from->control.tlb_control = 0;
     }
+    if (svm_v_spec_ctrl) {
+        spec_ctrl_switch(n, to_l2);
+    }
     n->in_l2 = to_l2;
 }
 
@@ -698,6 +726,9 @@ static void exit_to_l1(
     s12->cpl = s02->cpl;
     if (n->npt) {
         s12->g_pat = s02->g_pat;
+    }
+    if (svm_v_spec_ctrl) {
+        s12->spec_ctrl = s02->spec_ctrl;
     }
     if (n->pml) {
         vmcb12->control.pml_index = n->pml_index;
@@ -1447,6 +1478,9 @@ static void prepare_vmcb02(struct nsvm *n) {
     s->rax = s12->rax;
     // Without nested paging of its own, the guest's guest has the guest's PAT.
     s->g_pat = n->npt ? s12->g_pat : vmcb01->save.g_pat;
+    if (svm_v_spec_ctrl) {
+        s->spec_ctrl = s12->spec_ctrl;
+    }
     n->lbrv = svm_lbr_virtualisation && (c12->virt_ext & SVM_VIRT_EXT_LBR) != 0;
     copy_lbrs(s, n->lbrv ? s12 : &vmcb01->save);
     if (n->lbrv) {

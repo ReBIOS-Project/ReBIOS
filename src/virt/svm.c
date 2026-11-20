@@ -100,6 +100,7 @@ bool svm_decode_assists;
 // clears it where the hypervisor changes the guest's paging, and the guest
 // gets the whole predictor (APM 24593 rev. 3.45, 15.37.2).
 bool svm_eraps;
+bool svm_v_spec_ctrl;
 uint64_t svm_firmware_vm_cr;
 
 #define CPUID_80000021_EAX_ERAPS ((uint32_t)1 << 24)
@@ -277,6 +278,7 @@ bool svm_supported(void) {
     svm_avic_ext_lvt_reads = svm_avic && (features & SVM_FEATURE_EXT_LVT_AVIC_ACCESS) != 0;
     svm_eraps = cpuid(0x80000000, 0).eax >= 0x80000021
              && (cpuid(0x80000021, 0).eax & CPUID_80000021_EAX_ERAPS) != 0;
+    svm_v_spec_ctrl = (features & SVM_FEATURE_V_SPEC_CTRL) != 0;
     return true;
 }
 
