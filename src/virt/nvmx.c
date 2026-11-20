@@ -127,11 +127,11 @@
 // The fields the guest's VMCSs have: the controls of what it is offered, and
 // all of the guest state, host state, and exit information.
 static const uint16_t fields[] = {
-    0x0000, 0x0002, 0x0800, 0x0802, 0x0804, 0x0806, 0x0808, 0x080a, 0x080c,
+    0x0000, 0x0002, 0x0004, 0x0800, 0x0802, 0x0804, 0x0806, 0x0808, 0x080a, 0x080c,
     0x080e, 0x0810, 0x0812, 0x0814, 0x0c00, 0x0c02, 0x0c04, 0x0c06, 0x0c08, 0x0c0a,
     0x0c0c, 0x2000, 0x2002, 0x2004, 0x2006, 0x2008, 0x200a, 0x200e, 0x2010,
     0x2012, 0x2014, 0x2016, 0x2018, 0x201a, 0x202c, 0x2032, 0x201c, 0x201e,
-    0x2020, 0x2022, 0x2024, 0x2026, 0x2028, 0x2034, 0x204a, 0x204c, 0x2044, 0x2052, 0x2400,
+    0x2020, 0x2022, 0x2024, 0x2026, 0x2028, 0x202a, 0x2034, 0x204a, 0x204c, 0x2044, 0x2052, 0x2400,
     0x2402, 0x2404, 0x2406, 0x2800, 0x2802, 0x2804, 0x2806, 0x2808, 0x280a, 0x280c, 0x280e,
     0x2810, 0x2818, 0x281a, 0x281c, 0x281e, 0x2820, 0x2822, 0x2824, 0x2826, 0x2828, 0x282e,
     0x2c00, 0x2c02, 0x2c04, 0x2c06, 0x2c08, 0x2c0a, 0x2c0c, 0x2c0e, 0x2c10, 0x2c12,
@@ -311,7 +311,7 @@ static unsigned int ept02_budget;
    | PROC2_INVPCID | PROC2_VMFUNC | PROC2_VMCS_SHADOWING \
    | PROC2_RDSEED_EXITING | PROC2_PML | PROC2_XSAVES \
    | PROC2_MBEC | PROC2_TSC_SCALING | PROC2_USER_WAIT_PAUSE \
-   | PROC2_BUS_LOCK_DETECTION)
+   | PROC2_BUS_LOCK_DETECTION | PROC2_EPT_VE)
 #define PROC3_EMULATED (PROC3_MSR_LIST | PROC3_SPEC_CTRL_VIRT)
 #define EXIT_EMULATED \
     (EXIT_SAVE_DEBUG_CONTROLS | EXIT_HOST_ADDR_SPACE_SIZE | EXIT_ACK_INTR_ON_EXIT \
@@ -609,6 +609,10 @@ static bool field_offered(uint32_t field) {
         }
         case VMCS_TSC_MULTIPLIER: {
             return (proc2 & PROC2_TSC_SCALING) != 0;
+        }
+        case VMCS_EPTP_INDEX:
+        case VMCS_VE_INFO_ADDR: {
+            return (proc2 & PROC2_EPT_VE) != 0;
         }
         case VMCS_EXIT_EXT_INSTR_INFO: {
             return apx_info;
@@ -1423,6 +1427,10 @@ struct ept12_walk {
     uint64_t entry[5];
     // Where the entry that maps the page is.
     const _Atomic(uint64_t) *leaf_at;
+    // Whether the entry that decides an EPT violation, the one not present or
+    // the one that maps the page, suppresses #VE (SDM 325462-093 Vol. 3C,
+    // 28.5.8.1).
+    bool suppress_ve;
 };
 
 #define EPT12_MAPPED 0
@@ -1464,6 +1472,7 @@ static int ept12_walk(struct nvmx *n, uintptr_t gpa, uint64_t access, struct ept
     w->access = access;
     w->leaf = 0;
     w->rights = 0;
+    w->suppress_ve = true;
     if (levels == 4 && (gpa >> 48) != 0) {
         return EPT12_VIOLATION;
     }
@@ -1478,6 +1487,7 @@ static int ept12_walk(struct nvmx *n, uintptr_t gpa, uint64_t access, struct ept
                    ? ~(uint64_t)0
                    : atomic_load_explicit((_Atomic(uint64_t) *)p, memory_order_relaxed);
         if ((e & (EPT_R | EPT_W | EPT_X)) == 0 && !(mbec && (e & EPT_XU) != 0)) {
+            w->suppress_ve = (e & EPT_SUPPRESS_VE) != 0;
             return EPT12_VIOLATION;
         }
         bool leaf = l == 0 || (l <= 2 && (e & EPT_LARGE) != 0);
@@ -1492,6 +1502,7 @@ static int ept12_walk(struct nvmx *n, uintptr_t gpa, uint64_t access, struct ept
             w->level = l;
             w->leaf = e;
             w->leaf_at = (const _Atomic(uint64_t) *)p;
+            w->suppress_ve = (e & EPT_SUPPRESS_VE) != 0;
             break;
         }
         tables &= e;
@@ -1906,6 +1917,9 @@ static bool controls_valid(const struct nvmx *n) {
     }
     if ((proc2 & PROC2_VIRT_APIC_ACCESSES) != 0
      && !valid_address(get12(n, VMCS_APIC_ACCESS_ADDR))) {
+        return false;
+    }
+    if ((proc2 & PROC2_EPT_VE) != 0 && !valid_address(get12(n, VMCS_VE_INFO_ADDR))) {
         return false;
     }
     if ((proc2 & PROC2_VIRT_INTR_DELIVERY) != 0 && (pin & PIN_EXT_INTR_EXITING) == 0) {
@@ -2418,7 +2432,7 @@ static void write_vmcs02(struct vcpu *v, struct nvmx *n, const struct l1_values 
         // EPT02's dirty flags are not the guest's: its walks log for it. The
         // guest's shadow VMCS is in its own format, which the hypervisor
         // reads.
-        .proc2 = (proc2 & ~(uint64_t)(PROC2_PML | PROC2_VMCS_SHADOWING)) | PROC2_EPT
+        .proc2 = (proc2 & ~(uint64_t)(PROC2_PML | PROC2_VMCS_SHADOWING | PROC2_EPT_VE)) | PROC2_EPT
     };
     if (!tsc_scaled(n)) {
         c.proc2 &= ~(uint64_t)PROC2_TSC_SCALING;
@@ -3457,6 +3471,57 @@ static void cr8_access(struct vcpu *v, uint64_t qual) {
     vcpu_skip_instruction(v);
 }
 
+// A convertible EPT violation of the guest's guest, which the processor turns
+// into a #VE where the guest's controls and its information area ask for one
+// (SDM 325462-093 Vol. 3C, 28.5.8): the area filled, and the #VE delivered, or
+// the exception's exit where the guest's exception bitmap takes it. False
+// where the violation stays its VM exit.
+static bool ve_raise(
+    struct vcpu *v,
+    struct nvmx *n,
+    const struct ept12_walk *w,
+    uint64_t qual,
+    uint64_t qual12
+) {
+    bool delivering = (vmx_read(VMCS_IDT_VECTORING_INFO) & INTR_INFO_VALID) != 0;
+    bool busy = (vmx_read(VMCS_EXIT_REASON) & EXIT_REASON_BUSY_SHADOW_STACK) != 0;
+    if ((proc2_12(n) & PROC2_EPT_VE) == 0 || w->suppress_ve
+     || (vmx_read(VMCS_GUEST_CR0) & CR0_PE) == 0 || delivering
+     || busy || (qual & EPT_QUAL_ASYNC) != 0) {
+        return false;
+    }
+    uintptr_t at = get12(n, VMCS_VE_INFO_ADDR);
+    uint8_t *area = guest_mem_page(at);
+    // Where nothing decodes, the dword at offset 4 reads as all ones.
+    if (area == NULL || *(volatile uint32_t *)(area + 4) != 0) {
+        return false;
+    }
+    *(volatile uint32_t *)area = EXIT_REASON_EPT_VIOLATION;
+    *(volatile uint32_t *)(area + 4) = 0xffffffff;
+    *(volatile uint64_t *)(area + 8) = qual12;
+    *(volatile uint64_t *)(area + 16) = vmx_read(VMCS_GUEST_LINEAR_ADDR);
+    *(volatile uint64_t *)(area + 24) = vmx_read(VMCS_GUEST_PHYS_ADDR);
+    *(volatile uint16_t *)(area + 32) = (uint16_t)get12(n, VMCS_EPTP_INDEX);
+    gpt_mark_dirty(at, 34);
+    if ((get12(n, VMCS_EXCEPTION_BITMAP) >> VECTOR_VE & 1) != 0) {
+        uint32_t info = INTR_INFO_VALID | INTR_TYPE_HW_EXCEPTION | VECTOR_VE;
+        if ((qual & EPT_QUAL_NMI_UNBLOCKED) != 0) {
+            info |= INTR_INFO_NMI_UNBLOCKED;
+        }
+        exit_to_l1(v, n, EXIT_REASON_EXCEPTION_NMI, 0, info, 0, false);
+        return true;
+    }
+    // The faulting IRET leaves NMIs blocked.
+    if ((qual & EPT_QUAL_NMI_UNBLOCKED) != 0) {
+        vmx_write(
+            VMCS_GUEST_INTERRUPTIBILITY,
+            vmx_read(VMCS_GUEST_INTERRUPTIBILITY) | INTERRUPTIBILITY_NMI
+        );
+    }
+    vcpu_inject_exception(v, VECTOR_VE, false, 0);
+    return true;
+}
+
 // What the processor found missing in EPT02: the guest's to have exit where
 // its EPT does not allow it, else mapped as the hypervisor's EPT has the
 // guest's memory, or emulated where that is the hypervisor's own device.
@@ -3466,7 +3531,10 @@ static void ept_violation(struct vcpu *v, struct nvmx *n, uint64_t qual) {
     int walk_result = ept12_walk(n, gpa, qual, &w);
     if (walk_result == EPT12_VIOLATION) {
         ept02_forget(n, gpa);
-        exit_to_l1(v, n, EXIT_REASON_EPT_VIOLATION, ept12_qual(n, qual, &w), 0, 0, true);
+        uint64_t qual12 = ept12_qual(n, qual, &w);
+        if (!ve_raise(v, n, &w, qual, qual12)) {
+            exit_to_l1(v, n, EXIT_REASON_EPT_VIOLATION, qual12, 0, 0, true);
+        }
         return;
     }
     if (walk_result == EPT12_PML_FULL) {
@@ -3527,6 +3595,10 @@ static bool eptp_switch(struct vcpu *v, struct nvmx *n) {
         return false;
     }
     set12(n, VMCS_EPT_POINTER, eptp);
+    // SDM 325462-093 Vol. 3C, 28.5.7.3.
+    if ((proc2_12(n) & PROC2_EPT_VE) != 0) {
+        set12(n, VMCS_EPTP_INDEX, index);
+    }
     vmx_load_gpt_root(v);
     vcpu_skip_instruction(v);
     return true;

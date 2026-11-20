@@ -25,6 +25,7 @@
 
 // VMCS field encodings (SDM 325462-093 Vol. 3D, Appendix B).
 #define VMCS_VPID 0x0000
+#define VMCS_EPTP_INDEX 0x0004
 #define VMCS_POSTED_INTR_NV 0x0002
 #define VMCS_LAST_PID_POINTER_INDEX 0x0008
 #define VMCS_GUEST_ES_SEL 0x0800
@@ -66,6 +67,7 @@
 #define VMCS_EPTP_LIST 0x2024
 #define VMCS_VMREAD_BITMAP 0x2026
 #define VMCS_VMWRITE_BITMAP 0x2028
+#define VMCS_VE_INFO_ADDR 0x202a
 #define VMCS_XSS_EXIT_BITMAP 0x202c
 #define VMCS_TSC_MULTIPLIER 0x2032
 #define VMCS_TERTIARY_CONTROLS 0x2034
@@ -377,6 +379,7 @@
 #define EXIT_REASON_RDMSR_IMM 84
 #define EXIT_REASON_WRMSRNS_IMM 85
 
+#define EXIT_REASON_BUSY_SHADOW_STACK ((uint32_t)1 << 25)
 #define EXIT_REASON_ENTRY_FAILURE ((uint32_t)1 << 31)
 
 // EPT violation exit qualification (SDM 325462-093 Vol. 3C, Table 30-7): the
@@ -433,6 +436,7 @@
 #define EPT_DIRTY ((uint64_t)1 << 9)
 #define EPT_XU ((uint64_t)1 << 10)
 #define EPT_SUPERVISOR_SHADOW_STACK ((uint64_t)1 << 60)
+#define EPT_SUPPRESS_VE ((uint64_t)1 << 63)
 #define EPT_TABLE_RESERVED ((uint64_t)0x78)
 
 // The EPTP (SDM 325462-093 Vol. 3C, Table 27-9).
@@ -455,6 +459,7 @@
 // Event injection and exit interruption information fields.
 #define INTR_INFO_VALID ((uint32_t)1 << 31)
 #define INTR_INFO_ERROR_CODE ((uint32_t)1 << 11)
+#define INTR_INFO_NMI_UNBLOCKED ((uint32_t)1 << 12)
 #define INTR_INFO_NESTED_EXCEPTION ((uint32_t)1 << 13)
 #define INTR_TYPE_EXT_INTR ((uint32_t)0 << 8)
 #define INTR_TYPE_NMI ((uint32_t)2 << 8)
