@@ -1114,6 +1114,7 @@ const struct msr_table_range msr_table_amd_architectural[] = {
     { 0xc81, 0xc81 }, // L3 QoS configuration.
     { 0xc8d, 0xc8f }, // QoS monitoring and association.
     { 0xc90, 0xd8f }, // L3 allocation masks.
+    { 0xda0, 0xda0 }, // XSS.
     { 0xc0000081, 0xc0000084 }, // SYSCALL.
     // Read-only MPERF and APERF, instructions retired.
     { 0xc00000e7, 0xc00000e9 },

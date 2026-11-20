@@ -217,11 +217,11 @@ APM = 'amd-apm-40332-rev4.11.txt'
 
 # AMD's architectural MSRs the guest gets: those of APM 24593 rev. 3.46, Table
 # A-1, and those every family's documents give, as reviewed. Left out are those
-# modules of the hypervisor handle (APIC_BASE, the MTRRs, PAT, XSS's writes,
-# EFER, HWCR, SYSCFG, the IORRs, the tops of memory, VM_CR, VM_HSAVE_PA, the SMM
-# and SVM keys and controls, the x2APIC range), and those of what the guest does
-# not get: SMM, SVM's own, SEV and SNP, IBS, the watchdog timer, the LBR stack,
-# the processor name string, the MCA interrupt configuration, and the L3 range
+# modules of the hypervisor handle (APIC_BASE, the MTRRs, PAT, EFER, HWCR,
+# SYSCFG, the IORRs, the tops of memory, VM_CR, VM_HSAVE_PA, the SMM and SVM
+# keys and controls, the x2APIC range), and those of what the guest does not
+# get: SMM, SVM's own, SEV and SNP, IBS, the watchdog timer, the LBR stack, the
+# processor name string, the MCA interrupt configuration, and the L3 range
 # reservation. FRED's are those of AMD 69191 rev. 1.10.
 AMD_ARCH = [
     (0x0, 0x1, 'load-store MCA address and status'),
@@ -244,6 +244,7 @@ AMD_ARCH = [
     (0xc81, 0xc81, 'L3 QoS configuration'),
     (0xc8d, 0xc8f, 'QoS monitoring and association'),
     (0xc90, 0xd8f, 'L3 allocation masks'),
+    (0xda0, 0xda0, 'XSS'),
     (0xc0000081, 0xc0000084, 'SYSCALL'),
     (0xc00000e7, 0xc00000e9, 'read-only MPERF and APERF, instructions retired'),
     (0xc0000100, 0xc0000103, 'FS, GS, and kernel GS bases, TSC_AUX'),
