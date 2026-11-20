@@ -669,6 +669,10 @@ void irq_hpet_route_changed(void) {
     kick_after_update();
 }
 
+bool irq_pic_output(void) {
+    return atomic_load_explicit(&extint_asserted, memory_order_acquire);
+}
+
 bool irq_extint_routed(void) {
     return atomic_load_explicit(&extint_target, memory_order_acquire) != NULL;
 }

@@ -1308,13 +1308,26 @@ static void init_signal(struct vcpu *v) {
 // whose source the entry's vector is, or, on Intel's local APICs, an INIT (SDM
 // 325462-093 Vol. 3A, 13.5.1; AMD's have none, APM 24593 rev. 3.46, 16.4).
 // SMIs go nowhere, as the guest has no SMM, and ExtINT takes the 8259's INTR
-// (irq.c).
-static void pin_signal(struct vcpu *v, uint32_t lvt, bool level) {
+// (irq.c). A level-triggered vector holds the pin's further requests back with
+// the entry's Remote IRR flag until its EOI (lint0_ended()), a level being
+// LINT0's alone (SDM 325462-093 Vol. 3A, 13.5.1; APM 24593 rev. 3.46, 16.4.2).
+static void pin_signal(struct vcpu *v, uint32_t reg, bool level) {
+    struct vlapic *vl = v->vlapic;
+    uint32_t lvt = regs_get(vl, reg);
     if ((lvt & APIC_LVT_MASKED) != 0) {
         return;
     }
     switch (lvt & APIC_LVT_DELIVERY_MASK) {
         case APIC_LVT_DELIVERY_FIXED: {
+            if (level) {
+                uint32_t was = atomic_fetch_or_explicit(
+                    (_Atomic(uint32_t) *)(vl->regs + reg), APIC_LVT_REMOTE_IRR,
+                    memory_order_seq_cst
+                );
+                if ((was & APIC_LVT_REMOTE_IRR) != 0) {
+                    break;
+                }
+            }
             vlapic_accept(v, (uint8_t)lvt, level);
             break;
         }
@@ -1348,7 +1361,7 @@ void vlapic_machine_nmi(struct vcpu *v) {
     }
     for (size_t i = 0; i < ARRAY_COUNT(pins); i++) {
         if ((lapic_read(pins[i]) & APIC_LVT_DELIVERY_MASK) == APIC_LVT_DELIVERY_NMI) {
-            pin_signal(v, regs_get(vl, pins[i]), false);
+            pin_signal(v, pins[i], false);
         }
     }
 }
@@ -1421,8 +1434,21 @@ void vlapic_take(struct vcpu *v, uint8_t vector) {
 void vlapic_lint0_rose(struct vcpu *v) {
     struct vlapic *vl = v->vlapic;
     if (enabled(vl)) {
-        uint32_t lvt = regs_get(vl, APIC_LVT_LINT0);
-        pin_signal(v, lvt, (lvt & APIC_LVT_LEVEL) != 0);
+        pin_signal(v, APIC_LVT_LINT0, (regs_get(vl, APIC_LVT_LINT0) & APIC_LVT_LEVEL) != 0);
+    }
+}
+
+// The EOI of a level-triggered LINT0 vector clears the entry's Remote IRR
+// flag, and the 8259's output, still asserted, requests it again.
+static void lint0_ended(struct vcpu *v, unsigned int vector) {
+    struct vlapic *vl = v->vlapic;
+    uint32_t lvt = regs_get(vl, APIC_LVT_LINT0);
+    if ((lvt & APIC_LVT_REMOTE_IRR) == 0 || (lvt & 0xff) != vector) {
+        return;
+    }
+    regs_and(vl, APIC_LVT_LINT0, ~APIC_LVT_REMOTE_IRR);
+    if (irq_pic_output()) {
+        vlapic_lint0_rose(v);
     }
 }
 
@@ -1533,35 +1559,39 @@ void vlapic_after_exit(struct vcpu *v) {
     }
 }
 
-static void end_interrupt(struct vlapic *vl, unsigned int vector) {
+static void end_interrupt(struct vcpu *v, unsigned int vector) {
+    struct vlapic *vl = v->vlapic;
     set_vector(vl, APIC_ISR, vector, false);
+    if (!vector_set(vl, APIC_TMR, vector)) {
+        return;
+    }
+    lint0_ended(v, vector);
     // Level-triggered ones end at the I/O APICs too, but where the guest ends
     // them there itself.
-    if (vector_set(vl, APIC_TMR, vector)
-     && (regs_get(vl, APIC_SVR) & SVR_SUPPRESS_EOI_BROADCAST) == 0) {
+    if ((regs_get(vl, APIC_SVR) & SVR_SUPPRESS_EOI_BROADCAST) == 0) {
         irq_mirror_eoi((uint8_t)vector);
     }
 }
 
-static void eoi(struct vlapic *vl) {
-    int vector = highest(vl, APIC_ISR);
+static void eoi(struct vcpu *v) {
+    int vector = highest(v->vlapic, APIC_ISR);
     if (vector >= 0) {
-        end_interrupt(vl, (unsigned int)vector);
+        end_interrupt(v, (unsigned int)vector);
     }
 }
 
 // AMD's specific EOI ends a vector in service whether or not it is the highest
 // (APM 24593 rev. 3.46, 16.7.1), and one not in service, which PPR 57238 rev.
 // 0.49 leaves undefined, is left alone.
-static void specific_eoi(struct vlapic *vl, unsigned int vector) {
-    if (vector_set(vl, APIC_ISR, vector)) {
-        end_interrupt(vl, vector);
+static void specific_eoi(struct vcpu *v, unsigned int vector) {
+    if (vector_set(v->vlapic, APIC_ISR, vector)) {
+        end_interrupt(v, vector);
     }
 }
 
 void vlapic_dismiss(struct vcpu *v, uint8_t vector) {
     vlapic_take(v, vector);
-    eoi(v->vlapic);
+    eoi(v);
 }
 
 static bool matches(const struct vlapic *target, uint32_t dest, bool logical, bool x2apic_dest) {
@@ -1835,7 +1865,8 @@ static bool ext_present(uint32_t reg) {
     return reg >= APIC_EILVT && reg < eilvt_reg(eilvt_count);
 }
 
-static void ext_write(struct vlapic *vl, uint32_t reg, uint32_t value) {
+static void ext_write(struct vcpu *v, uint32_t reg, uint32_t value) {
+    struct vlapic *vl = v->vlapic;
     if (reg == APIC_EXT_CONTROL) {
         regs_set(vl, APIC_EXT_CONTROL, value & ext_feature & EXT_CONTROL_BITS);
         avic_recheck_soon();
@@ -1843,7 +1874,7 @@ static void ext_write(struct vlapic *vl, uint32_t reg, uint32_t value) {
     } else if (reg == APIC_SEOI) {
         regs_set(vl, APIC_SEOI, value & 0xff);
         if ((regs_get(vl, APIC_EXT_CONTROL) & EXT_SEOI) != 0) {
-            specific_eoi(vl, value & 0xff);
+            specific_eoi(v, value & 0xff);
         }
     } else if (reg >= APIC_IER && reg < ier_reg(8)) {
         // The control register's bit enables writes to them too.
@@ -1976,7 +2007,7 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
         }
         case APIC_EOI: {
             regs_set(vl, APIC_EOI, 0);
-            eoi(vl);
+            eoi(v);
             return !x2 || value == 0;
         }
         case APIC_SVR: {
@@ -2037,7 +2068,7 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
         }
     }
     if (ext_present(reg)) {
-        ext_write(vl, reg, value);
+        ext_write(v, reg, value);
         return true;
     }
     if (x2) {
@@ -2089,7 +2120,7 @@ static void x2apic_icr_write(struct vcpu *v, uint64_t value) {
 }
 
 void vlapic_eoi_exit(struct vcpu *v, uint8_t vector) {
-    (void)v;
+    lint0_ended(v, vector);
     irq_mirror_eoi(vector);
 }
 
