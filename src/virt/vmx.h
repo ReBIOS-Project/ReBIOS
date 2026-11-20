@@ -256,6 +256,7 @@
 #define PROC2_PT_USE_GPA ((uint32_t)1 << 24)
 #define PROC2_TSC_SCALING ((uint32_t)1 << 25)
 #define PROC2_USER_WAIT_PAUSE ((uint32_t)1 << 26)
+#define PROC2_BUS_LOCK_DETECTION ((uint32_t)1 << 30)
 
 // Tertiary processor-based VM-execution controls (SDM 325462-093 Vol. 3C,
 // Table 27-8).
