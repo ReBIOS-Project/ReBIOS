@@ -127,7 +127,10 @@ ReBIOS requires:
    returns to the firmware. It does the same where the machine's integrated
    graphics malfunctions under VT-d: Intel's Broadwell, and Ironlake in
    Arrandale processors, or in Clarkdale ones whose firmware sets up no shadow
-   GTT for VT-d.
+   GTT for VT-d. Sandy Bridge's integrated graphics runs, but Linux's i915
+   driver turns its per-process GTT off only where it sees VT-d, which ReBIOS
+   keeps from the OS, so under ReBIOS that graphics' accesses fault and Xorg
+   crashes (seen on a ThinkPad X220).
 
 ### Secure Boot
 
