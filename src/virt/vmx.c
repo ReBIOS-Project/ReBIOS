@@ -34,6 +34,7 @@
 #include <virt/ferr.h>
 #include <virt/gpt.h>
 #include <virt/guest_mem.h>
+#include <virt/insn.h>
 #include <virt/mmio.h>
 #include <virt/mwait.h>
 #include <virt/nvmx.h>
@@ -738,6 +739,15 @@ void vmx_vcpu_power_on(struct vcpu *v) {
                           | PROC_IO_BITMAPS | PROC_MSR_BITMAPS | PROC_SECONDARY_CONTROLS
                           | PROC_TPR_SHADOW | PROC_TSC_OFFSETTING;
     vmx_write(VMCS_PROC_CONTROLS, adjust_controls(proc_cap, 0, proc_require, "processor-based"));
+    // RDMSRLIST and WRMSRLIST, which then exit at the MSRs the bitmaps trap
+    // (SDM 325462-093 Vol. 3C, 28.1.3), where the guest's CPUID has them
+    // (cpuid.c); IPI virtualisation joins them (vlapic.c).
+    if (control_allowed(proc_cap, PROC_TERTIARY_CONTROLS)) {
+        vmx_write(VMCS_TERTIARY_CONTROLS, proc3_cap & PROC3_MSR_LIST);
+        if (vmx_tertiary_allowed(PROC3_MSR_LIST)) {
+            vmx_write(VMCS_PROC_CONTROLS, vmx_read(VMCS_PROC_CONTROLS) | PROC_TERTIARY_CONTROLS);
+        }
+    }
 
     // What the guest's instructions need to work as they would without VMX.
     uint32_t proc2_want = PROC2_RDTSCP | PROC2_INVPCID | PROC2_XSAVES | PROC2_USER_WAIT_PAUSE;
@@ -1186,6 +1196,42 @@ static unsigned int exit_register(void) {
     return (vmx_read(VMCS_EXIT_INSTR_INFO) >> 3) & 15;
 }
 
+// An entry of RDMSRLIST or WRMSRLIST whose MSR the bitmaps trap: the exit
+// leaves RCX's bit for it set, has its MSR's address as the qualification, and
+// WRMSRLIST's data in the MSR-data field (SDM 325462-093 Vol. 3C, 28.1.3 and
+// 30.2.5). The entry is carried out here, and the instruction goes on with the
+// rest when the guest runs it again, as after an interrupt between entries
+// (SDM 325462-093 Vol. 2A, RDMSRLIST; Vol. 2D, WRMSRLIST).
+static void vmx_handle_msr_list(struct vcpu *v, uint32_t msr, bool write) {
+    uint64_t rcx = v->gprs.rcx;
+    if (rcx == 0) {
+        vcpu_skip_instruction(v);
+        return;
+    }
+    if (write) {
+        if (!exit_msr_write(v, msr, vmx_read(VMCS_MSR_DATA))) {
+            vcpu_inject_exception(v, VECTOR_GP, true, 0);
+            return;
+        }
+    } else {
+        uint64_t value;
+        uint64_t linear;
+        uintptr_t ea = v->gprs.rdi + 8 * (uint64_t)__builtin_ctzll(rcx);
+        if (!exit_msr_read(v, msr, &value)) {
+            vcpu_inject_exception(v, VECTOR_GP, true, 0);
+            return;
+        }
+        if (!insn_segment_linear(v, VCPU_SEG_DS, ea, sizeof(uint64_t), true, &linear)
+         || !mmio_write_linear(v, linear, &value, sizeof(uint64_t))) {
+            return;
+        }
+    }
+    v->gprs.rcx = rcx & (rcx - 1);
+    if (v->gprs.rcx == 0) {
+        vcpu_skip_instruction(v);
+    }
+}
+
 static void vmx_handle_io(struct vcpu *v, uint64_t qual) {
     size_t size = (qual & 7) + 1;
     bool in = ((qual >> 3) & 1) != 0;
@@ -1339,6 +1385,11 @@ static void vmx_handle_exit(struct vcpu *v) {
         case EXIT_REASON_WRMSRNS_IMM: {
             bool write = (reason & 0xffff) == EXIT_REASON_WRMSRNS_IMM;
             exit_msr_register(v, (uint32_t)qual, exit_register(), write);
+            break;
+        }
+        case EXIT_REASON_RDMSRLIST:
+        case EXIT_REASON_WRMSRLIST: {
+            vmx_handle_msr_list(v, (uint32_t)qual, (reason & 0xffff) == EXIT_REASON_WRMSRLIST);
             break;
         }
         // URDMSR and UWRMSR, which exit for the MSRs the bitmaps trap and for

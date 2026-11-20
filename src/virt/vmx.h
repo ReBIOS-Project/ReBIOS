@@ -72,6 +72,7 @@
 #define VMCS_EXIT_CONTROLS2 0x2044
 #define VMCS_INJECTED_EVENT_DATA 0x2052
 #define VMCS_GUEST_PHYS_ADDR 0x2400
+#define VMCS_MSR_DATA 0x2402
 #define VMCS_ORIGINAL_EVENT_DATA 0x2404
 // Intel APX 355828-009, 3.1.4.4.1.
 #define VMCS_EXIT_EXT_INSTR_INFO 0x2406
@@ -252,6 +253,7 @@
 // Tertiary processor-based VM-execution controls (SDM 325462-093 Vol. 3C,
 // Table 27-8).
 #define PROC3_IPI_VIRT ((uint64_t)1 << 4)
+#define PROC3_MSR_LIST ((uint64_t)1 << 6)
 
 // Primary VM-exit controls (SDM 325462-093 Vol. 3C, Table 27-14).
 #define EXIT_SAVE_DEBUG_CONTROLS ((uint32_t)1 << 2)
@@ -352,6 +354,8 @@
 #define EXIT_REASON_PML_FULL 62
 #define EXIT_REASON_XSAVES 63
 #define EXIT_REASON_XRSTORS 64
+#define EXIT_REASON_RDMSRLIST 78
+#define EXIT_REASON_WRMSRLIST 79
 #define EXIT_REASON_URDMSR 80
 #define EXIT_REASON_UWRMSR 81
 #define EXIT_REASON_RDMSR_IMM 84

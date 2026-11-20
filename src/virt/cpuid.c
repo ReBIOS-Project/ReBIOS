@@ -86,12 +86,12 @@ static const struct leaf_bits intel_leaves[] = {
     { 0x7, 0, { 0xffffffff, 0xffbffffb, 0x9bff5fef, 0xffd9ef3c } },
     // EAX SHA512, SM3, SM4, AVX_VNNI, AVX512_BF16, LASS, CMPCCXADD,
     // ARCH_PERFMON_EXT, fast zero-length MOVSB, fast short STOSB, fast short
-    // CMPSB/SCASB, FRED, LKGS, WRMSRNS, AMX_FP16, HRESET, AVX_IFMA, LAM; EBX
-    // PPIN, CPUIDMAXVAL_LIM_RMV; ECX RDT-M asymmetric, RDT-A asymmetric,
-    // MSR_IMM; EDX AVX_VNNI_INT8, AVX_NE_CONVERT, AMX_COMPLEX, AVX_VNNI_INT16,
-    // PREFETCHI, USER_MSR, UIRET_UIF, CET_SSS, AVX10, APX_F, MWAIT (APX_F as
-    // Intel APX 355828-009, 3.1.4.3.1 defines it).
-    { 0x7, 1, { 0x04ee1df7, 0x00000009, 0x00000023, 0x00aec530 } },
+    // CMPSB/SCASB, FRED, LKGS, WRMSRNS, AMX_FP16, HRESET, AVX_IFMA, LAM,
+    // MSRLIST; EBX PPIN, CPUIDMAXVAL_LIM_RMV; ECX RDT-M asymmetric, RDT-A
+    // asymmetric, MSR_IMM; EDX AVX_VNNI_INT8, AVX_NE_CONVERT, AMX_COMPLEX,
+    // AVX_VNNI_INT16, PREFETCHI, USER_MSR, UIRET_UIF, CET_SSS, AVX10, APX_F,
+    // MWAIT (APX_F as Intel APX 355828-009, 3.1.4.3.1 defines it).
+    { 0x7, 1, { 0x0cee1df7, 0x00000009, 0x00000023, 0x00aec530 } },
     // EDX PSFD, IPRED_CTRL, RRSBA_CTRL, DDPD_U, BHI_CTRL, MCDT_NO, UC-lock
     // disable, MONITOR_MITG_NO.
     { 0x7, 2, { 0x00000000, 0x00000000, 0x00000000, 0x000000ff } },
@@ -372,6 +372,7 @@ static const struct last_subleaf amd_last_subleaves[] = {
 #define CPUID_7_ECX_RDPID ((uint32_t)1 << 22)
 #define CPUID_7_EDX_ARCH_LBR ((uint32_t)1 << 19)
 #define CPUID_7_1_EAX_FRED ((uint32_t)1 << 17)
+#define CPUID_7_1_EAX_MSRLIST ((uint32_t)1 << 27)
 #define CPUID_PT 0x14
 #define CPUID_ARCH_LBR 0x1c
 #define CPUID_PERFMON_EXT 0x23
@@ -524,6 +525,10 @@ static bool mpx(void) {
 
 static bool vmx_runs(uint32_t control) {
     return !virt_vmx || vmx_secondary_allowed(control);
+}
+
+static bool msr_lists(void) {
+    return virt_vmx && vmx_tertiary_allowed(PROC3_MSR_LIST);
 }
 
 void cpuid_init(void) {
@@ -689,6 +694,9 @@ struct cpuid_regs cpuid_guest(struct vcpu *v, uint32_t leaf, uint32_t subleaf) {
             break;
         }
         case 7: {
+            if (subleaf == 1 && !msr_lists()) {
+                r.eax &= ~CPUID_7_1_EAX_MSRLIST;
+            }
             if (subleaf != 0) {
                 break;
             }

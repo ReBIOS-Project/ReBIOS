@@ -1018,7 +1018,7 @@ void vlapic_power_on(struct vcpu *v) {
                 memory_order_release
             );
             vmx_write(VMCS_PROC_CONTROLS, vmx_read(VMCS_PROC_CONTROLS) | PROC_TERTIARY_CONTROLS);
-            vmx_write(VMCS_TERTIARY_CONTROLS, PROC3_IPI_VIRT);
+            vmx_write(VMCS_TERTIARY_CONTROLS, vmx_read(VMCS_TERTIARY_CONTROLS) | PROC3_IPI_VIRT);
             vmx_write(VMCS_PID_POINTER_TABLE, (uint64_t)(uintptr_t)pid_table);
             vmx_write(VMCS_LAST_PID_POINTER_INDEX, pid_table_last);
         }
