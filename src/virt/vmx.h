@@ -26,6 +26,7 @@
 // VMCS field encodings (SDM 325462-093 Vol. 3D, Appendix B).
 #define VMCS_VPID 0x0000
 #define VMCS_EPTP_INDEX 0x0004
+#define VMCS_HLAT_PREFIX_SIZE 0x0006
 #define VMCS_VIRTUAL_TIMER_VECTOR 0x000a
 #define VMCS_POSTED_INTR_NV 0x0002
 #define VMCS_LAST_PID_POINTER_INDEX 0x0008
@@ -72,6 +73,7 @@
 #define VMCS_XSS_EXIT_BITMAP 0x202c
 #define VMCS_TSC_MULTIPLIER 0x2032
 #define VMCS_TERTIARY_CONTROLS 0x2034
+#define VMCS_HLATP 0x2040
 #define VMCS_SPEC_CTRL_MASK 0x204a
 #define VMCS_SPEC_CTRL_SHADOW 0x204c
 #define VMCS_GUEST_DEADLINE_SHADOW 0x204e
@@ -265,6 +267,7 @@
 
 // Tertiary processor-based VM-execution controls (SDM 325462-093 Vol. 3C,
 // Table 27-8).
+#define PROC3_HLAT ((uint64_t)1 << 1)
 #define PROC3_EPT_PAGING_WRITE ((uint64_t)1 << 2)
 #define PROC3_GUEST_PAGING_VERIFY ((uint64_t)1 << 3)
 #define PROC3_IPI_VIRT ((uint64_t)1 << 4)
@@ -424,6 +427,7 @@
 #define EPT_CAP_SHADOW_STACK ((uint64_t)1 << 23)
 #define EPT_CAP_INVEPT_SINGLE ((uint64_t)1 << 25)
 #define EPT_CAP_INVEPT_ALL ((uint64_t)1 << 26)
+#define EPT_CAP_HLAT_PREFIX ((uint64_t)0x3f << 48)
 #define VPID_CAP_INVVPID ((uint64_t)1 << 32)
 #define VPID_CAP_INVVPID_ADDRESS ((uint64_t)1 << 40)
 #define VPID_CAP_INVVPID_SINGLE ((uint64_t)1 << 41)

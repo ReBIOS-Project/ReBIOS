@@ -172,6 +172,7 @@
 #define PF_ERROR_RSVD ((uint32_t)1 << 3)
 #define PF_ERROR_I ((uint32_t)1 << 4)
 #define PF_ERROR_PK ((uint32_t)1 << 5)
+#define PF_ERROR_HLAT ((uint32_t)1 << 7)
 
 // The bits of paging-structure entries, which AMD's nested paging uses too,
 // and whose address bits EPT's and the IOMMUs' tables share.
@@ -184,6 +185,7 @@
 #define PTE_D ((uint64_t)1 << 6)
 #define PTE_PS ((uint64_t)1 << 7)
 #define PTE_PAT_4K ((uint64_t)1 << 7)
+#define PTE_HLAT_RESTART ((uint64_t)1 << 11)
 #define PTE_PAT_LARGE ((uint64_t)1 << 12)
 #define PTE_PKEY_SHIFT 59
 #define PTE_NX ((uint64_t)1 << 63)

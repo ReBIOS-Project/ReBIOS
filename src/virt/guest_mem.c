@@ -274,6 +274,7 @@ static bool linear_to_phys(
     // The fetch flag is defined only with SMEP or with PAE paging's NX.
     bool fetch_flag = fetch
                    && ((cr4 & CR4_SMEP) != 0 || ((cr4 & CR4_PAE) != 0 && (efer & EFER_NXE) != 0));
+    bool restarted = false;
 retry: *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0)
                  | (fetch_flag ? PF_ERROR_I : 0);
 
@@ -287,11 +288,19 @@ retry: *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0)
     size_t levels;
     bool wide;
     bool pae = false;
+    // HLAT paging, which an entry with bit 11 set restarts as ordinary paging
+    // (SDM 325462-093 Vol. 3A, 5.5.4 and 5.5.5).
+    bool hlat = false;
     uintptr_t table;
     if ((efer & EFER_LMA) != 0) {
+        uint64_t hlatp;
         levels = (cr4 & CR4_LA57) != 0 ? 5 : 4;
         wide = true;
         table = vcpu_cr3(v) & PTE_ADDRESS;
+        if (!restarted && nvmx_hlat_root(v, linear, &hlatp)) {
+            hlat = true;
+            table = hlatp & PTE_ADDRESS;
+        }
     } else if ((cr4 & CR4_PAE) != 0) {
         // The PDPT, of 4 entries, is reached through CR3 bits 31:5; with EPT,
         // VMX keeps the PDPTE registers in the VMCS.
@@ -340,16 +349,35 @@ retry: *pf_error = (write ? PF_ERROR_W : 0) | (user ? PF_ERROR_U : 0)
         if (!read_entry(v, entry_gpa, linear, &entry, wide, pf_error)) {
             return false;
         }
+        // No translation by HLAT paging says so (SDM 325462-093 Vol. 3A, 5.7).
+        uint32_t no_translation = hlat ? PF_ERROR_HLAT : 0;
         if ((entry & PTE_P) == 0) {
+            *pf_error |= no_translation;
             return false;
         }
         bool large = level > 0 && (entry & PTE_PS) != 0 && (wide || (cr4 & CR4_PSE) != 0);
         if ((entry & guest_mem_pte_reserved(wide, pae, (unsigned int)level, large, nx)) != 0) {
-            *pf_error |= PF_ERROR_P | PF_ERROR_RSVD;
+            *pf_error |= PF_ERROR_P | PF_ERROR_RSVD | no_translation;
             return false;
         }
         entries[path] = entry;
         entry_gpas[path++] = entry_gpa;
+        if (hlat && (entry & PTE_HLAT_RESTART) != 0) {
+            for (size_t i = 0; i < path; i++) {
+                bool unmarked = (entries[i] & PTE_A) == 0
+                             && !mark_entry(
+                                    v, entry_gpas[i], linear, entries[i], PTE_A, wide, pf_error
+                                );
+                if (unmarked) {
+                    if ((*pf_error & GUEST_MEM_PF_ERROR_EXIT) != 0) {
+                        return false;
+                    }
+                    goto retry;
+                }
+            }
+            restarted = true;
+            goto retry;
+        }
         writable &= (entry & PTE_W) != 0;
         user_ok &= (entry & PTE_U) != 0;
         if (wide && nx && (entry & PTE_NX) != 0) {

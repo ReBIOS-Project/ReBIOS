@@ -87,6 +87,9 @@ bool nvmx_ept_translate(
     uintptr_t linear,
     uint64_t *out
 );
+// Where HLAT paging translates a linear address of the guest's guest: the
+// guest's HLATP, else false for ordinary paging.
+bool nvmx_hlat_root(struct vcpu *v, uintptr_t linear, uint64_t *hlatp);
 // Whether such an exit waits.
 bool nvmx_exit_pending(struct vcpu *v);
 // An exception that what the hypervisor carries out for the guest's guest

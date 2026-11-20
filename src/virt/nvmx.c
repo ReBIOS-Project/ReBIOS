@@ -127,12 +127,12 @@
 // The fields the guest's VMCSs have: the controls of what it is offered, and
 // all of the guest state, host state, and exit information.
 static const uint16_t fields[] = {
-    0x0000, 0x0002, 0x0004, 0x000a, 0x0800, 0x0802, 0x0804, 0x0806, 0x0808,
+    0x0000, 0x0002, 0x0004, 0x0006, 0x000a, 0x0800, 0x0802, 0x0804, 0x0806, 0x0808,
     0x080a, 0x080c, 0x080e, 0x0810, 0x0812, 0x0814, 0x0c00, 0x0c02, 0x0c04,
     0x0c06, 0x0c08, 0x0c0a, 0x0c0c, 0x2000, 0x2002, 0x2004, 0x2006, 0x2008,
     0x200a, 0x200e, 0x2010, 0x2012, 0x2014, 0x2016, 0x2018, 0x201a, 0x202c,
     0x2032, 0x201c, 0x201e, 0x2020, 0x2022, 0x2024, 0x2026, 0x2028, 0x202a,
-    0x2034, 0x204a, 0x204c, 0x204e, 0x2044, 0x2052, 0x2400, 0x2402, 0x2404,
+    0x2034, 0x2040, 0x204a, 0x204c, 0x204e, 0x2044, 0x2052, 0x2400, 0x2402, 0x2404,
     0x2406, 0x2800, 0x2802, 0x2804, 0x2806, 0x2808, 0x280a, 0x280c, 0x280e,
     0x2810, 0x2818, 0x281a, 0x281c, 0x281e, 0x2820, 0x2822, 0x2824, 0x2826,
     0x2828, 0x282e, 0x2830, 0x2c00, 0x2c02, 0x2c04, 0x2c06, 0x2c08, 0x2c0a,
@@ -315,8 +315,11 @@ static unsigned int ept02_budget;
    | PROC2_MBEC | PROC2_TSC_SCALING | PROC2_USER_WAIT_PAUSE \
    | PROC2_BUS_LOCK_DETECTION | PROC2_EPT_VE)
 #define PROC3_EMULATED \
-    (PROC3_EPT_PAGING_WRITE | PROC3_GUEST_PAGING_VERIFY | PROC3_MSR_LIST | PROC3_SPEC_CTRL_VIRT \
-   | PROC3_APIC_TIMER_VIRT)
+    (PROC3_HLAT | PROC3_EPT_PAGING_WRITE | PROC3_GUEST_PAGING_VERIFY | PROC3_MSR_LIST \
+   | PROC3_SPEC_CTRL_VIRT | PROC3_APIC_TIMER_VIRT)
+// HLATP's reserved bits besides those past the physical-address width (SDM
+// 325462-093 Vol. 3C, 29.2.1.1).
+#define HLATP_RESERVED ((uint64_t)0xfe7)
 #define EXIT_EMULATED \
     (EXIT_SAVE_DEBUG_CONTROLS | EXIT_HOST_ADDR_SPACE_SIZE | EXIT_ACK_INTR_ON_EXIT \
    | EXIT_SAVE_PAT | EXIT_LOAD_PAT | EXIT_SAVE_EFER \
@@ -360,8 +363,8 @@ static unsigned int ept02_budget;
 
 #define CPUID_7_1_EAX_LAM ((uint32_t)1 << 26)
 
-// What the guest is offered of IA32_VMX_EPT_VPID_CAP: not the HLAT prefix
-// size, whose control it lacks.
+// What the guest is offered of IA32_VMX_EPT_VPID_CAP, with the HLAT prefix
+// size where it is offered HLAT.
 #define CAP_EPT_OFFERED \
     (EPT_CAP_EXEC_ONLY | EPT_CAP_WALK_4 | EPT_CAP_WALK_5 | EPT_CAP_UC | EPT_CAP_WB \
    | EPT_CAP_2M | EPT_CAP_1G | EPT_CAP_INVEPT | EPT_CAP_AD | EPT_CAP_ADVANCED_INFO \
@@ -465,6 +468,9 @@ void nvmx_init(void) {
     cap_proc2 = capability(vmx_capability(MSR_IA32_VMX_PROCBASED_CTLS2), PROC2_EMULATED, 0);
     uint64_t ept_vpid = vmx_capability(MSR_IA32_VMX_EPT_VPID_CAP);
     cap_ept_vpid = ept_vpid & CAP_EPT_OFFERED;
+    if ((cap_proc3 & PROC3_HLAT) != 0) {
+        cap_ept_vpid |= ept_vpid & EPT_CAP_HLAT_PREFIX;
+    }
     // VMCS02 needs a VPID of its own for the guest's.
     if (vmx_vpid_usable()) {
         cap_ept_vpid |= ept_vpid & CAP_VPID_OFFERED;
@@ -592,6 +598,10 @@ static bool field_offered(uint32_t field) {
         case VMCS_GUEST_DEADLINE_SHADOW:
         case VMCS_GUEST_DEADLINE: {
             return (cap_proc3 & PROC3_APIC_TIMER_VIRT) != 0;
+        }
+        case VMCS_HLATP:
+        case VMCS_HLAT_PREFIX_SIZE: {
+            return (cap_proc3 & PROC3_HLAT) != 0;
         }
         case VMCS_GUEST_SPEC_CTRL: {
             return ((uint32_t)(cap_true_entry >> 32) & ENTRY_LOAD_SPEC_CTRL) != 0;
@@ -1964,9 +1974,16 @@ static bool controls_valid(const struct nvmx *n) {
     if ((proc2 & PROC2_EPT_VE) != 0 && !valid_address(get12(n, VMCS_VE_INFO_ADDR))) {
         return false;
     }
-    if ((proc3_12(n) & (PROC3_EPT_PAGING_WRITE | PROC3_GUEST_PAGING_VERIFY)) != 0
+    uint64_t proc3 = proc3_12(n);
+    if ((proc3 & (PROC3_HLAT | PROC3_EPT_PAGING_WRITE | PROC3_GUEST_PAGING_VERIFY)) != 0
      && (proc2 & PROC2_EPT) == 0) {
         return false;
+    }
+    if ((proc3 & PROC3_HLAT) != 0) {
+        uint64_t hlatp = get12(n, VMCS_HLATP);
+        if ((hlatp & HLATP_RESERVED) != 0 || !valid_address(hlatp & PTE_ADDRESS)) {
+            return false;
+        }
     }
     if ((proc3_12(n) & PROC3_APIC_TIMER_VIRT) != 0
      && ((proc2 & PROC2_VIRT_INTR_DELIVERY) == 0 || (proc & PROC_RDTSC_EXITING) != 0
@@ -2516,6 +2533,12 @@ static void write_vmcs02(struct vcpu *v, struct nvmx *n, const struct l1_values 
     if ((proc3_12(n) & PROC3_SPEC_CTRL_VIRT) != 0) {
         vmx_write(VMCS_SPEC_CTRL_MASK, get12(n, VMCS_SPEC_CTRL_MASK));
         vmx_write(VMCS_SPEC_CTRL_SHADOW, get12(n, VMCS_SPEC_CTRL_SHADOW));
+    }
+    // Its HLAT paging, whose structures are its guest's, as EPT02 reaches
+    // them.
+    if ((proc3_12(n) & PROC3_HLAT) != 0) {
+        vmx_write(VMCS_HLATP, get12(n, VMCS_HLATP));
+        vmx_write(VMCS_HLAT_PREFIX_SIZE, get12(n, VMCS_HLAT_PREFIX_SIZE));
     }
     // And its APIC-timer virtualisation, whose guest deadline is by the TSC
     // the guest reads, offset from the processor's.
@@ -4056,6 +4079,18 @@ bool nvmx_cr_allowed(struct vcpu *v, unsigned int cr, uint64_t value) {
 
 bool nvmx_ept_active(struct vcpu *v) {
     return v->nvmx != NULL && v->nvmx->in_l2 && ept12(v->nvmx);
+}
+
+// A prefix size other than 0 leaves to ordinary paging the addresses whose bit
+// 63 is clear (SDM 325462-093 Vol. 3A, 5.5.1).
+bool nvmx_hlat_root(struct vcpu *v, uintptr_t linear, uint64_t *hlatp) {
+    struct nvmx *n = v->nvmx;
+    if (n == NULL || !n->in_l2 || (proc3_12(n) & PROC3_HLAT) == 0
+     || (get12(n, VMCS_HLAT_PREFIX_SIZE) != 0 && (linear >> 63) == 0)) {
+        return false;
+    }
+    *hlatp = get12(n, VMCS_HLATP);
+    return true;
 }
 
 bool nvmx_ept_translate(
