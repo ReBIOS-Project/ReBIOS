@@ -1670,6 +1670,13 @@ static bool controls_valid(const struct nvmx *n) {
     if ((proc2 & PROC2_VPID) != 0 && get12(n, VMCS_VPID) == 0) {
         return false;
     }
+    // Without the nested-exception support of IA32_VMX_BASIC[58], which the
+    // guest is not offered, an injected event's bit 13 is reserved (SDM
+    // 325462-093 Vol. 3C, 29.2.1.3), also where the processor takes it.
+    uint64_t injected = get12(n, VMCS_ENTRY_INTR_INFO);
+    if ((injected & INTR_INFO_VALID) != 0 && (injected & INTR_INFO_NESTED_EXCEPTION) != 0) {
+        return false;
+    }
     if ((proc & PROC_IO_BITMAPS) != 0) {
         uintptr_t a = get12(n, VMCS_IO_BITMAP_A);
         uintptr_t b = get12(n, VMCS_IO_BITMAP_B);
