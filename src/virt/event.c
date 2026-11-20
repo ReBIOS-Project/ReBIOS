@@ -311,6 +311,7 @@ void event_interrupt(uint8_t vector) {
         case VLAPIC_KICK_VECTOR: {
             atomic_store_explicit(&cpu->kick, false, memory_order_seq_cst);
             lapic_eoi();
+            nvmx_kicked(v);
             if (cpu->bsp) {
                 vlapic_posted_log();
             }

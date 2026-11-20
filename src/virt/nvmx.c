@@ -26,6 +26,7 @@
 #include <hw/lapic.h>
 #include <lib/heap.h>
 #include <lib/log.h>
+#include <lib/spinlock.h>
 #include <lib/util.h>
 #include <memory.h>
 #include <sys/cpu.h>
@@ -127,13 +128,13 @@
 // The fields the guest's VMCSs have: the controls of what it is offered, and
 // all of the guest state, host state, and exit information.
 static const uint16_t fields[] = {
-    0x0000, 0x0002, 0x0004, 0x0006, 0x000a, 0x0800, 0x0802, 0x0804, 0x0806, 0x0808,
-    0x080a, 0x080c, 0x080e, 0x0810, 0x0812, 0x0814, 0x0c00, 0x0c02, 0x0c04,
+    0x0000, 0x0002, 0x0004, 0x0006, 0x0008, 0x000a, 0x0800, 0x0802, 0x0804, 0x0806,
+    0x0808, 0x080a, 0x080c, 0x080e, 0x0810, 0x0812, 0x0814, 0x0c00, 0x0c02, 0x0c04,
     0x0c06, 0x0c08, 0x0c0a, 0x0c0c, 0x2000, 0x2002, 0x2004, 0x2006, 0x2008,
     0x200a, 0x200e, 0x2010, 0x2012, 0x2014, 0x2016, 0x2018, 0x201a, 0x202c,
     0x2032, 0x201c, 0x201e, 0x2020, 0x2022, 0x2024, 0x2026, 0x2028, 0x202a, 0x2030,
-    0x2034, 0x2040, 0x204a, 0x204c, 0x204e, 0x2044, 0x2052, 0x2400, 0x2402, 0x2404,
-    0x2406, 0x2800, 0x2802, 0x2804, 0x2806, 0x2808, 0x280a, 0x280c, 0x280e,
+    0x2034, 0x2040, 0x2042, 0x204a, 0x204c, 0x204e, 0x2044, 0x2052, 0x2400, 0x2402,
+    0x2404, 0x2406, 0x2800, 0x2802, 0x2804, 0x2806, 0x2808, 0x280a, 0x280c, 0x280e,
     0x2810, 0x2816, 0x2818, 0x281a, 0x281c, 0x281e, 0x2820, 0x2822, 0x2824, 0x2826,
     0x2828, 0x282e, 0x2830, 0x2c00, 0x2c02, 0x2c04, 0x2c06, 0x2c08, 0x2c0a,
     0x2c0c, 0x2c0e, 0x2c10, 0x2c12, 0x2c14, 0x2c16, 0x2c1a, 0x4000, 0x4002,
@@ -228,6 +229,11 @@ struct nvmx {
     // process.
     _Atomic(int) pi_vector;
     _Atomic(bool) pi_pending;
+    // While its guest runs with IPI virtualisation: VMCS02's shadow of the
+    // guest's PID-pointer table, and the shadow PID that is VMCS02's
+    // posted-interrupt descriptor, else NULL, both under ipiv_lock.
+    struct ipiv_table *ipiv_table;
+    struct ipiv_slot *ipiv_live;
     // The activity state the guest's guest waits in here, and the vector of
     // the start-up IPI that ends the wait for one, else -1.
     _Atomic(int) inactive;
@@ -254,6 +260,8 @@ struct nvmx {
     uintptr_t pending_gpa;
     uintptr_t pending_linear;
 };
+
+static void ipiv_leave(struct vcpu *v, struct nvmx *n, bool entered);
 
 bool nvmx_enabled;
 // How many vCPUs are in VMX operation.
@@ -319,8 +327,8 @@ static unsigned int ept02_budget;
    | PROC2_MBEC | PROC2_TSC_SCALING | PROC2_USER_WAIT_PAUSE \
    | PROC2_BUS_LOCK_DETECTION | PROC2_EPT_VE | PROC2_SPP)
 #define PROC3_EMULATED \
-    (PROC3_HLAT | PROC3_EPT_PAGING_WRITE | PROC3_GUEST_PAGING_VERIFY | PROC3_MSR_LIST \
-   | PROC3_SPEC_CTRL_VIRT | PROC3_APIC_TIMER_VIRT)
+    (PROC3_HLAT | PROC3_EPT_PAGING_WRITE | PROC3_GUEST_PAGING_VERIFY | PROC3_IPI_VIRT \
+   | PROC3_MSR_LIST | PROC3_SPEC_CTRL_VIRT | PROC3_APIC_TIMER_VIRT)
 // HLATP's reserved bits besides those past the physical-address width (SDM
 // 325462-093 Vol. 3C, 29.2.1.1).
 #define HLATP_RESERVED ((uint64_t)0xfe7)
@@ -563,6 +571,7 @@ void nvmx_vcpu_power_on(struct vcpu *v) {
         return;
     }
     ept02_drop_all(n);
+    ipiv_leave(NULL, n, false);
     *n = (struct nvmx){
         .current = NO_VMCS, .pi_vector = -1, .sipi = -1, .shadow = n->shadow,
         .msr_bitmap = n->msr_bitmap
@@ -612,6 +621,10 @@ static bool field_offered(uint32_t field) {
         case VMCS_HLATP:
         case VMCS_HLAT_PREFIX_SIZE: {
             return (cap_proc3 & PROC3_HLAT) != 0;
+        }
+        case VMCS_PID_POINTER_TABLE:
+        case VMCS_LAST_PID_POINTER_INDEX: {
+            return (cap_proc3 & PROC3_IPI_VIRT) != 0;
         }
         case VMCS_GUEST_SPEC_CTRL: {
             return ((uint32_t)(cap_true_entry >> 32) & ENTRY_LOAD_SPEC_CTRL) != 0;
@@ -2142,6 +2155,15 @@ static bool controls_valid(const struct nvmx *n) {
             return false;
         }
     }
+    // The table's address and that of its last entry (SDM 325462-093 Vol. 3C,
+    // 28.2.1.1).
+    if ((proc3 & PROC3_IPI_VIRT) != 0) {
+        uint64_t table = get12(n, VMCS_PID_POINTER_TABLE);
+        uint64_t last = table + 8 * get12(n, VMCS_LAST_PID_POINTER_INDEX);
+        if ((table & 7) != 0 || (table >> phys_width) != 0 || (last >> phys_width) != 0) {
+            return false;
+        }
+    }
     if ((proc3_12(n) & PROC3_APIC_TIMER_VIRT) != 0
      && ((proc2 & PROC2_VIRT_INTR_DELIVERY) == 0 || (proc & PROC_RDTSC_EXITING) != 0
       || (get12(n, VMCS_VIRTUAL_TIMER_VECTOR) >> 8) != 0)) {
@@ -2549,6 +2571,9 @@ static void merge_msr_bitmap(struct nvmx *n, uint64_t proc, uint64_t proc2) {
         guest_msr_bit(n->msr_bitmap, bitmap, MSR_X2APIC_EOI, true);
         guest_msr_bit(n->msr_bitmap, bitmap, MSR_X2APIC_SELF_IPI, true);
     }
+    if ((proc3_12(n) & PROC3_IPI_VIRT) != 0) {
+        guest_msr_bit(n->msr_bitmap, bitmap, MSR_X2APIC_ICR, true);
+    }
 }
 
 // What VMCS02 takes from VMCS01, read while that is the current one.
@@ -2564,6 +2589,566 @@ struct l1_values {
     uint64_t lbr_ctl;
     struct cet_state cet;
 };
+
+// The posted-interrupt descriptor's requests, then its notification
+// information: ON, SN, and the notification vector in one dword, the
+// destination in the next (SDM 325462-093 Vol. 3C, Table 32-2); and the
+// virtual-APIC page's VIRR.
+#define PID_NOTIFICATION 8
+#define PID_ON ((uint32_t)1 << 0)
+#define PID_SN ((uint32_t)1 << 1)
+#define PID_VECTOR_SHIFT 16
+#define PID_VECTOR_MASK ((uint32_t)0xff << PID_VECTOR_SHIFT)
+#define PID_SIZE 64
+#define VAPIC_IRR 0x200
+
+// Posted-interrupt processing of what a descriptor holds, as the processor
+// does it on a notification (SDM 325462-093 Vol. 3C, 32.6), with VMCS02
+// current.
+static void posted_process(struct nvmx *n, uint32_t *pid) {
+    atomic_fetch_and_explicit(
+        (_Atomic(uint32_t) *)&pid[PID_NOTIFICATION], ~PID_ON, memory_order_seq_cst
+    );
+    int highest = -1;
+    for (size_t i = 0; i < 8; i++) {
+        uint32_t bits = atomic_exchange_explicit(
+            (_Atomic(uint32_t) *)&pid[i], 0, memory_order_seq_cst
+        );
+        if (bits != 0) {
+            uint32_t *irr = (uint32_t *)(n->vapic + VAPIC_IRR + i * 0x10);
+            atomic_fetch_or_explicit((_Atomic(uint32_t) *)irr, bits, memory_order_seq_cst);
+            highest = (int)(i * 32 + 31) - __builtin_clz(bits);
+        }
+    }
+    uint64_t status = vmx_read(VMCS_GUEST_INTR_STATUS);
+    if (highest > (int)(status & 0xff)) {
+        vmx_write(VMCS_GUEST_INTR_STATUS, (status & ~(uint64_t)0xff) | (uint64_t)highest);
+    }
+}
+
+// IPI virtualisation of the guest's guests (SDM 325462-093 Vol. 3C, 32.1.6).
+// The guest's PID-pointer tables hold its physical addresses, and its PIDs
+// notifications with its vectors to its APIC IDs, which the processor cannot
+// take as they are: VMCS02 has a shadow of the guest's table, whose entries
+// name PIDs of the hypervisor's that stand for the guest's, made as the IPIs
+// that the shadow lacks entries for exit. The shadow PID of the guest's own
+// descriptor for the guest's guest a vCPU runs is VMCS02's descriptor while it
+// runs, whose notifications the processor processes itself. The others notify
+// the processor they reach on VLAPIC_KICK_VECTOR, and the hypervisor posts
+// what they hold in the guest's PIDs, notifying as those ask, as the processor
+// would have posted it there; so does a vCPU's exit to the guest, for what its
+// guest's guest posted.
+#define IPIV_ENTRIES 512
+#define IPIV_SLOTS_PER_CPU 64
+// Interrupt command bits that make the processor leave an IPI to an APIC-write
+// VM exit (SDM 325462-093 Vol. 3C, 32.4.3.2, 32.5).
+#define ICR_NOT_VIRTUALISED \
+    ((uint32_t)0xfff00000 | (uint32_t)3 << 16 | (uint32_t)1 << 13 | ICR_PENDING \
+   | ICR_SHORTHAND_MASK | ICR_LEVEL | ICR_LOGICAL | ICR_DELIVERY_MASK)
+
+struct ipiv_table;
+
+struct ipiv_slot {
+    // The guest's PID it stands for, and where that is, else NULL where the
+    // slot is free.
+    uint64_t pid12;
+    uint32_t *pid12_host;
+    uint32_t *pid;
+    // How many shadow tables' entries name it, and the processor whose VMCS02
+    // has it as its descriptor, else NULL.
+    uint32_t refs;
+    struct cpu *live;
+    // The processor it notifies, which software posting needs.
+    struct cpu *notified;
+    // The table that dropped it while in use, which frees it once out of use,
+    // and whether it goes once what it holds is posted.
+    struct ipiv_table *retired;
+    bool dying;
+};
+
+struct ipiv_table {
+    bool used;
+    uint64_t table12;
+    // Where the guest's table is, by page.
+    uint8_t *pages12[2];
+    uint64_t *entries;
+    // The slot each entry names, and the entries made.
+    struct ipiv_slot *slots[IPIV_ENTRIES];
+    uint16_t filled[IPIV_ENTRIES];
+    size_t filled_count;
+    // The vCPUs whose guests' guests run with it, and the slots it waits for
+    // that to end to free.
+    uint32_t users;
+    size_t retired_count;
+};
+
+// The tables, one for each vCPU's guest's guest, and the slots, those in use
+// listed.
+static struct spinlock ipiv_lock;
+static struct ipiv_table *ipiv_tables;
+static struct ipiv_slot *ipiv_slots;
+static size_t ipiv_slot_count;
+static struct ipiv_slot **ipiv_used;
+static _Atomic(size_t) ipiv_used_count;
+static bool ipiv_short_logged;
+static bool ipiv_memory_logged;
+
+static void ipiv_prepare(void) {
+    if (ipiv_tables != NULL) {
+        return;
+    }
+    ipiv_slot_count = smp_cpu_count() * IPIV_SLOTS_PER_CPU;
+    ipiv_tables = kmalloc(smp_cpu_count() * sizeof(struct ipiv_table));
+    ipiv_slots = kmalloc(ipiv_slot_count * sizeof(struct ipiv_slot));
+    ipiv_used = kmalloc(ipiv_slot_count * sizeof(struct ipiv_slot *));
+    uint8_t *pids = page_alloc(ipiv_slot_count * PID_SIZE / PAGE_SIZE);
+    for (size_t i = 0; i < ipiv_slot_count; i++) {
+        ipiv_slots[i].pid = (uint32_t *)(pids + i * PID_SIZE);
+    }
+}
+
+// As the processor's local APIC reads a destination (SDM 325462-093 Vol. 3C,
+// 32.1.6.2).
+static uint32_t host_destination(const struct cpu *cpu) {
+    return lapic_host_x2apic() ? cpu->apic_id : (cpu->apic_id << 8) & 0xff00;
+}
+
+// Where a shadow PID's notifications go, keeping its ON bit.
+static void slot_notify(struct ipiv_slot *slot, struct cpu *cpu, uint8_t vector) {
+    slot->notified = cpu;
+    atomic_store_explicit(
+        (_Atomic(uint32_t) *)&slot->pid[PID_NOTIFICATION + 1], host_destination(cpu),
+        memory_order_seq_cst
+    );
+    _Atomic(uint32_t) *info = (_Atomic(uint32_t) *)&slot->pid[PID_NOTIFICATION];
+    uint32_t old = atomic_load_explicit(info, memory_order_relaxed);
+    for (;;) {
+        uint32_t new = (old & ~PID_VECTOR_MASK) | (uint32_t)vector << PID_VECTOR_SHIFT;
+        bool set = atomic_compare_exchange_strong_explicit(
+            info, &old, new, memory_order_seq_cst, memory_order_relaxed
+        );
+        if (set) {
+            return;
+        }
+    }
+}
+
+// Takes what a shadow PID holds, as processing it would; returns whether it
+// held any.
+static bool slot_take(struct ipiv_slot *slot, uint32_t bits[static 8]) {
+    atomic_fetch_and_explicit(
+        (_Atomic(uint32_t) *)&slot->pid[PID_NOTIFICATION], ~PID_ON, memory_order_seq_cst
+    );
+    bool any = false;
+    for (size_t i = 0; i < 8; i++) {
+        bits[i] = atomic_exchange_explicit(
+            (_Atomic(uint32_t) *)&slot->pid[i], 0, memory_order_seq_cst
+        );
+        any = any || bits[i] != 0;
+    }
+    return any;
+}
+
+// Posts interrupts in one of the guest's PIDs, then reads its notification
+// information and sets ON where both ON and SN were clear, and where it set
+// ON, sends the notification as the vCPU's local APIC (SDM 325462-093 Vol. 3C,
+// 32.1.6.1).
+static void post12(struct vcpu *from, uint32_t *pid, const uint32_t bits[static 8]) {
+    for (size_t i = 0; i < 8; i++) {
+        if (bits[i] != 0) {
+            atomic_fetch_or_explicit((_Atomic(uint32_t) *)&pid[i], bits[i], memory_order_seq_cst);
+        }
+    }
+    _Atomic(uint64_t) *info = (_Atomic(uint64_t) *)&pid[PID_NOTIFICATION];
+    uint64_t old = atomic_load_explicit(info, memory_order_relaxed);
+    for (;;) {
+        if ((old & (PID_ON | PID_SN)) != 0) {
+            return;
+        }
+        bool set = atomic_compare_exchange_strong_explicit(
+            info, &old, old | PID_ON, memory_order_seq_cst, memory_order_relaxed
+        );
+        if (set) {
+            break;
+        }
+    }
+    vlapic_notify(from, (uint32_t)(old >> 32), (uint8_t)(old >> PID_VECTOR_SHIFT));
+}
+
+static struct ipiv_slot *slot_find(uint64_t pid12) {
+    size_t count = atomic_load_explicit(&ipiv_used_count, memory_order_relaxed);
+    for (size_t i = 0; i < count; i++) {
+        if (ipiv_used[i]->pid12 == pid12) {
+            return ipiv_used[i];
+        }
+    }
+    return NULL;
+}
+
+static struct ipiv_slot *slot_alloc(uint64_t pid12, uint32_t *pid12_host) {
+    for (size_t i = 0; i < ipiv_slot_count; i++) {
+        struct ipiv_slot *slot = &ipiv_slots[i];
+        if (slot->pid12_host != NULL) {
+            continue;
+        }
+        slot->pid12 = pid12;
+        slot->pid12_host = pid12_host;
+        slot_notify(slot, this_cpu(), VLAPIC_KICK_VECTOR);
+        size_t count = atomic_load_explicit(&ipiv_used_count, memory_order_relaxed);
+        ipiv_used[count] = slot;
+        atomic_store_explicit(&ipiv_used_count, count + 1, memory_order_release);
+        return slot;
+    }
+    if (!ipiv_short_logged) {
+        ipiv_short_logged = true;
+        printf(
+            "Nested VMX: the shadow PIDs ran out, IPIs to more of the guest's guests exit to be "
+            "virtualised\n"
+        );
+    }
+    return NULL;
+}
+
+static void slot_free(struct ipiv_slot *slot) {
+    size_t count = atomic_load_explicit(&ipiv_used_count, memory_order_relaxed);
+    for (size_t i = 0; i < count; i++) {
+        if (ipiv_used[i] == slot) {
+            ipiv_used[i] = ipiv_used[count - 1];
+            atomic_store_explicit(&ipiv_used_count, count - 1, memory_order_release);
+            break;
+        }
+    }
+    if (slot->retired != NULL) {
+        slot->retired->retired_count--;
+    }
+    uint32_t *pid = slot->pid;
+    memset(pid, 0, PID_SIZE);
+    *slot = (struct ipiv_slot){ .pid = pid };
+}
+
+// A slot that nothing names any more, and that no processor can be posting in:
+// freed, but once what it holds is posted, which its notification is on the
+// way for.
+static void slot_release(struct ipiv_slot *slot) {
+    uint32_t info = atomic_load_explicit(
+        (_Atomic(uint32_t) *)&slot->pid[PID_NOTIFICATION], memory_order_seq_cst
+    );
+    if ((info & PID_ON) != 0) {
+        slot->dying = true;
+    } else {
+        slot_free(slot);
+    }
+}
+
+// An entry of the shadow dropped: its slot goes where nothing names it any
+// more, once no processor runs a guest's guest with the table.
+static void table_drop(struct ipiv_table *t, size_t k) {
+    size_t index = t->filled[k];
+    struct ipiv_slot *slot = t->slots[index];
+    atomic_store_explicit((_Atomic(uint64_t) *)&t->entries[index], 0, memory_order_seq_cst);
+    t->slots[index] = NULL;
+    t->filled[k] = t->filled[--t->filled_count];
+    if (--slot->refs != 0 || slot->live != NULL) {
+        return;
+    }
+    if (t->users == 0) {
+        slot_release(slot);
+    } else if (slot->retired == NULL) {
+        slot->retired = t;
+        t->retired_count++;
+    }
+}
+
+// No processor runs a guest's guest with the table any more.
+static void table_quiet(struct ipiv_table *t) {
+    for (size_t i = atomic_load_explicit(&ipiv_used_count, memory_order_relaxed); i-- > 0; ) {
+        struct ipiv_slot *slot = ipiv_used[i];
+        if (slot->retired != t) {
+            continue;
+        }
+        slot->retired = NULL;
+        t->retired_count--;
+        if (slot->refs == 0 && slot->live == NULL) {
+            slot_release(slot);
+        }
+    }
+}
+
+// The guest's entry of a table, as the processor reads it, where its page is
+// RAM.
+static uint64_t entry12(const struct ipiv_table *t, size_t index) {
+    size_t offset = (t->table12 & 0xfff) + 8 * index;
+    const uint8_t *page = t->pages12[offset / PAGE_SIZE];
+    if (page == NULL) {
+        return 0;
+    }
+    return atomic_load_explicit(
+        (const _Atomic(uint64_t) *)(page + offset % PAGE_SIZE), memory_order_seq_cst
+    );
+}
+
+// The shadow of a guest's table, which another that no processor runs a
+// guest's guest with gives way to.
+static struct ipiv_table *table_for(uint64_t table12) {
+    struct ipiv_table *spare = NULL;
+    for (size_t i = 0; i < smp_cpu_count(); i++) {
+        struct ipiv_table *t = &ipiv_tables[i];
+        if (t->used && t->table12 == table12) {
+            return t;
+        }
+        if (t->users == 0 && (spare == NULL || !t->used)) {
+            spare = t;
+        }
+    }
+    // Each vCPU holds one at most.
+    if (spare == NULL) {
+        panic("No shadow PID-pointer table is free\n");
+    }
+    while (spare->filled_count != 0) {
+        table_drop(spare, spare->filled_count - 1);
+    }
+    if (spare->entries == NULL) {
+        spare->entries = page_alloc(1);
+    }
+    spare->used = true;
+    spare->table12 = table12;
+    uintptr_t page = page_down(table12);
+    spare->pages12[0] = guest_mem_page(page);
+    spare->pages12[1] = guest_mem_page(page + PAGE_SIZE);
+    return spare;
+}
+
+// The shadow gets the guest's entry, where a slot is free for its PID.
+static void table_fill(struct ipiv_table *t, size_t index, uint64_t pid12, uint32_t *pid12_host) {
+    if (t->slots[index] != NULL) {
+        if (t->slots[index]->pid12 == pid12) {
+            return;
+        }
+        for (size_t k = 0; k < t->filled_count; k++) {
+            if (t->filled[k] == index) {
+                table_drop(t, k);
+                break;
+            }
+        }
+    }
+    struct ipiv_slot *slot = slot_find(pid12);
+    if (slot == NULL) {
+        slot = slot_alloc(pid12, pid12_host);
+        if (slot == NULL) {
+            return;
+        }
+    }
+    slot->refs++;
+    slot->dying = false;
+    t->slots[index] = slot;
+    t->filled[t->filled_count++] = (uint16_t)index;
+    atomic_store_explicit(
+        (_Atomic(uint64_t) *)&t->entries[index], (uint64_t)(uintptr_t)slot->pid | 1,
+        memory_order_seq_cst
+    );
+}
+
+// At an entry of the guest's guest: VMCS02 gets the shadow of the guest's
+// table, whose entries the guest changed since dropped, and the shadow of its
+// guest's descriptor as its own, where the guest's has no SN set.
+static void ipiv_enter(struct nvmx *n) {
+    struct cpu *cpu = this_cpu();
+    spinlock_acquire(&ipiv_lock);
+    ipiv_prepare();
+    struct ipiv_table *t = table_for(get12(n, VMCS_PID_POINTER_TABLE));
+    for (size_t k = t->filled_count; k-- > 0; ) {
+        size_t index = t->filled[k];
+        if (entry12(t, index) != (t->slots[index]->pid12 | 1)) {
+            table_drop(t, k);
+        }
+    }
+    t->users++;
+    n->ipiv_table = t;
+    uint32_t info = PID_SN;
+    if (n->pid != NULL) {
+        info = atomic_load_explicit(
+            (_Atomic(uint32_t) *)&n->pid[PID_NOTIFICATION], memory_order_seq_cst
+        );
+    }
+    if ((info & PID_SN) == 0) {
+        struct ipiv_slot *slot = slot_find(get12(n, VMCS_POSTED_INTR_DESC));
+        if (slot != NULL && slot->live == NULL) {
+            slot->live = cpu;
+            slot_notify(slot, cpu, VLAPIC_NESTED_POSTED_VECTOR);
+            n->ipiv_live = slot;
+            vmx_write(VMCS_POSTED_INTR_DESC, (uint64_t)(uintptr_t)slot->pid);
+        }
+    }
+    spinlock_release(&ipiv_lock);
+    uint64_t last = get12(n, VMCS_LAST_PID_POINTER_INDEX);
+    vmx_write(VMCS_PID_POINTER_TABLE, (uint64_t)(uintptr_t)t->entries);
+    vmx_write(VMCS_LAST_PID_POINTER_INDEX, last < IPIV_ENTRIES ? last : IPIV_ENTRIES - 1);
+}
+
+// What the shadow PIDs that no VMCS02 has hold, posted in the guest's, a batch
+// at a time as the lock allows posting none.
+#define IPIV_BATCH 16
+
+static void ipiv_forward(struct vcpu *from) {
+    for (size_t passes = 0; passes <= ipiv_slot_count / IPIV_BATCH; passes++) {
+        uint32_t bits[IPIV_BATCH][8];
+        uint32_t *pids[IPIV_BATCH];
+        size_t count = 0;
+        spinlock_acquire(&ipiv_lock);
+        size_t i = 0;
+        while (i < atomic_load_explicit(&ipiv_used_count, memory_order_relaxed)
+            && count < IPIV_BATCH) {
+            struct ipiv_slot *slot = ipiv_used[i];
+            uint32_t info = atomic_load_explicit(
+                (_Atomic(uint32_t) *)&slot->pid[PID_NOTIFICATION], memory_order_seq_cst
+            );
+            if (slot->live == NULL && (info & PID_ON) != 0 && slot_take(slot, bits[count])) {
+                pids[count++] = slot->pid12_host;
+            }
+            if (slot->dying) {
+                slot_free(slot);
+            } else {
+                i++;
+            }
+        }
+        spinlock_release(&ipiv_lock);
+        for (size_t k = 0; k < count; k++) {
+            post12(from, pids[k], bits[k]);
+        }
+        if (count < IPIV_BATCH) {
+            return;
+        }
+    }
+}
+
+// At an exit to the guest: its guest's guest's descriptor is the guest's
+// again, and what was posted in its shadow is processed, as before the exit,
+// or posted in the guest's, as from the vCPU; where it starts again, without a
+// vCPU, dropped.
+static void ipiv_leave(struct vcpu *v, struct nvmx *n, bool entered) {
+    if (n->ipiv_table == NULL) {
+        return;
+    }
+    uint32_t bits[8];
+    uint32_t *pid12 = NULL;
+    spinlock_acquire(&ipiv_lock);
+    struct ipiv_slot *slot = n->ipiv_live;
+    if (slot != NULL) {
+        n->ipiv_live = NULL;
+        slot->live = NULL;
+        slot_notify(slot, this_cpu(), VLAPIC_KICK_VECTOR);
+        if (entered) {
+            posted_process(n, slot->pid);
+        } else if (slot_take(slot, bits)) {
+            pid12 = slot->pid12_host;
+        }
+        if (slot->refs == 0) {
+            slot_free(slot);
+        }
+    }
+    struct ipiv_table *t = n->ipiv_table;
+    n->ipiv_table = NULL;
+    if (--t->users == 0 && t->retired_count != 0) {
+        table_quiet(t);
+    }
+    spinlock_release(&ipiv_lock);
+    if (v == NULL) {
+        return;
+    }
+    if (pid12 != NULL) {
+        post12(v, pid12, bits);
+    }
+    ipiv_forward(v);
+}
+
+// A notification of the guest's for the descriptor of its guest's guest, whose
+// shadow VMCS02 has: what the guest posted moves there, as processing the
+// guest's would take it.
+static bool ipiv_moved(struct nvmx *n) {
+    if (atomic_load_explicit(&ipiv_used_count, memory_order_relaxed) == 0) {
+        return false;
+    }
+    spinlock_acquire(&ipiv_lock);
+    struct ipiv_slot *slot = n->ipiv_live;
+    if (slot == NULL) {
+        spinlock_release(&ipiv_lock);
+        return false;
+    }
+    uint32_t *pid12 = slot->pid12_host;
+    atomic_fetch_and_explicit(
+        (_Atomic(uint32_t) *)&pid12[PID_NOTIFICATION], ~PID_ON, memory_order_seq_cst
+    );
+    for (size_t i = 0; i < 8; i++) {
+        uint32_t bits = atomic_exchange_explicit(
+            (_Atomic(uint32_t) *)&pid12[i], 0, memory_order_seq_cst
+        );
+        if (bits != 0) {
+            atomic_fetch_or_explicit(
+                (_Atomic(uint32_t) *)&slot->pid[i], bits, memory_order_seq_cst
+            );
+        }
+    }
+    uint32_t info = atomic_fetch_or_explicit(
+        (_Atomic(uint32_t) *)&slot->pid[PID_NOTIFICATION], PID_ON, memory_order_seq_cst
+    );
+    if ((info & PID_ON) == 0 && slot->live != this_cpu()) {
+        lapic_send_ipi(slot->live->apic_id, ICR_DELIVERY_FIXED | VLAPIC_NESTED_POSTED_VECTOR);
+    }
+    spinlock_release(&ipiv_lock);
+    return true;
+}
+
+// An APIC-write exit for 300H of the guest's guest: an IPI the processor would
+// have virtualised with the guest's table, but the shadow lacks the entry for,
+// gets it, and is posted as the processor would have; any other is the guest's
+// (SDM 325462-093 Vol. 3C, 32.1.6.2, 32.4.3.2, 32.5).
+static bool ipiv_exit(struct vcpu *v, struct nvmx *n) {
+    if (n->vapic == NULL || n->ipiv_table == NULL) {
+        return false;
+    }
+    uint32_t low = *(volatile uint32_t *)(n->vapic + 0x300);
+    uint32_t dest = (proc2_12(n) & PROC2_VIRT_APIC_ACCESSES) != 0
+                  ? *(volatile uint32_t *)(n->vapic + 0x310) >> 24
+                  : *(volatile uint32_t *)(n->vapic + 0x304);
+    if ((low & ICR_NOT_VIRTUALISED) != 0 || (low & ICR_VECTOR_MASK) < 16
+     || dest > get12(n, VMCS_LAST_PID_POINTER_INDEX)) {
+        return false;
+    }
+    uint64_t gpa = get12(n, VMCS_PID_POINTER_TABLE) + 8 * (uint64_t)dest;
+    const uint8_t *page = guest_mem_page(page_down(gpa));
+    uint64_t entry = 0;
+    if (page != NULL) {
+        entry = atomic_load_explicit(
+            (const _Atomic(uint64_t) *)(page + (gpa & 0xfff)), memory_order_seq_cst
+        );
+    }
+    uint64_t pid12 = entry & ~(uint64_t)1;
+    uint8_t *pid_page = guest_mem_page(page_down(pid12));
+    if (page == NULL || ((entry & 0x3f) == 1 && (entry >> phys_width) == 0 && pid_page == NULL)) {
+        if (!ipiv_memory_logged) {
+            ipiv_memory_logged = true;
+            printf(
+                "Nested VMX: an IPI's PID-pointer table entry or PID at %#llx is not RAM, its "
+                "APIC-write exit is the guest's\n",
+                (unsigned long long)(page == NULL ? gpa : pid12)
+            );
+        }
+        return false;
+    }
+    if ((entry & 0x3f) != 1 || (entry >> phys_width) != 0) {
+        return false;
+    }
+    uint32_t *pid = (uint32_t *)(pid_page + (pid12 & 0xfff));
+    if (dest < IPIV_ENTRIES) {
+        spinlock_acquire(&ipiv_lock);
+        table_fill(n->ipiv_table, dest, pid12, pid);
+        spinlock_release(&ipiv_lock);
+    }
+    uint32_t bits[8] = { 0 };
+    bits[(low & ICR_VECTOR_MASK) / 32] = (uint32_t)1 << (low % 32);
+    post12(v, pid, bits);
+    return true;
+}
 
 // The controls VMCS02 virtualises the local APIC with: the guest's, on its
 // pages, but for the vector its posted interrupts' notifications reach the
@@ -2707,6 +3292,11 @@ static void write_vmcs02(struct vcpu *v, struct nvmx *n, const struct l1_values 
     if ((proc3_12(n) & PROC3_HLAT) != 0) {
         vmx_write(VMCS_HLATP, get12(n, VMCS_HLATP));
         vmx_write(VMCS_HLAT_PREFIX_SIZE, get12(n, VMCS_HLAT_PREFIX_SIZE));
+    }
+    // Its IPI virtualisation, through VMCS02's shadow of its PID-pointer
+    // table.
+    if ((proc3_12(n) & PROC3_IPI_VIRT) != 0) {
+        ipiv_enter(n);
     }
     // And its APIC-timer virtualisation, whose guest deadline is by the TSC
     // the guest reads, offset from the processor's.
@@ -3066,50 +3656,20 @@ static void load_l1_host_state(struct vcpu *v, struct nvmx *n, bool nmi) {
     vmx_write(VMCS_GUEST_PENDING_DBG, 0);
 }
 
-// The posted-interrupt descriptor's requests, then its notification bits (SDM
-// 325462-093 Vol. 3C, Table 32-2), and the virtual-APIC page's VIRR.
-#define PID_NOTIFICATION 8
-#define PID_ON ((uint32_t)1)
-#define VAPIC_IRR 0x200
-
-// Posted-interrupt processing of a notification the guest sent its guest's
-// processor, as the processor does it (SDM 325462-093 Vol. 3C, 32.6), with
-// VMCS02 current.
-static void posted_process(struct nvmx *n) {
-    atomic_fetch_and_explicit(
-        (_Atomic(uint32_t) *)&n->pid[PID_NOTIFICATION], ~PID_ON, memory_order_seq_cst
-    );
-    int highest = -1;
-    for (size_t i = 0; i < 8; i++) {
-        uint32_t bits = atomic_exchange_explicit(
-            (_Atomic(uint32_t) *)&n->pid[i], 0, memory_order_seq_cst
-        );
-        if (bits != 0) {
-            uint32_t *irr = (uint32_t *)(n->vapic + VAPIC_IRR + i * 0x10);
-            atomic_fetch_or_explicit((_Atomic(uint32_t) *)irr, bits, memory_order_seq_cst);
-            highest = (int)(i * 32 + 31) - __builtin_clz(bits);
-        }
-    }
-    uint64_t status = vmx_read(VMCS_GUEST_INTR_STATUS);
-    if (highest > (int)(status & 0xff)) {
-        vmx_write(VMCS_GUEST_INTR_STATUS, (status & ~(uint64_t)0xff) | (uint64_t)highest);
-    }
-}
-
 // The guest's guest no longer processes posted interrupts. A notification the
 // hypervisor has yet to process came before an exit, or, where the guest's
 // guest could not take it, after an entry that failed or in an inactive state,
 // is the guest's interrupt.
 static void posted_leave(struct vcpu *v, struct nvmx *n, bool entered) {
     int vector = atomic_exchange_explicit(&n->pi_vector, -1, memory_order_seq_cst);
-    if (!atomic_exchange_explicit(&n->pi_pending, false, memory_order_seq_cst)) {
-        return;
+    if (atomic_exchange_explicit(&n->pi_pending, false, memory_order_seq_cst)) {
+        if (entered && n->pid != NULL) {
+            posted_process(n, n->pid);
+        } else if (vector >= 0) {
+            vlapic_accept(v, (uint8_t)vector, false);
+        }
     }
-    if (entered && n->pid != NULL) {
-        posted_process(n);
-    } else if (vector >= 0) {
-        vlapic_accept(v, (uint8_t)vector, false);
-    }
+    ipiv_leave(v, n, entered);
 }
 
 // What is left of the VMX-preemption timer of the guest's guest.
@@ -4000,6 +4560,10 @@ bool nvmx_l2_exit(struct vcpu *v, uint32_t reason, uint64_t qual) {
     if ((reason & 0xffff) == EXIT_REASON_VMFUNC && eptp_switch(v, n)) {
         return true;
     }
+    if ((reason & 0xffff) == EXIT_REASON_APIC_WRITE && qual == 0x300
+     && (proc3_12(n) & PROC3_IPI_VIRT) != 0 && ipiv_exit(v, n)) {
+        return true;
+    }
     if (((reason & 0xffff) == EXIT_REASON_VMREAD || (reason & 0xffff) == EXIT_REASON_VMWRITE)
      && shadow_access(v, n, reason & 0xffff)) {
         return true;
@@ -4145,7 +4709,18 @@ bool nvmx_before_entry(struct vcpu *v) {
         return false;
     }
     if (n->pid != NULL && atomic_exchange_explicit(&n->pi_pending, false, memory_order_seq_cst)) {
-        posted_process(n);
+        posted_process(n, n->pid);
+    }
+    // A notification for VMCS02's shadow descriptor that came while the
+    // hypervisor ran.
+    if (n->ipiv_live != NULL) {
+        uint32_t *pid = n->ipiv_live->pid;
+        uint32_t info = atomic_load_explicit(
+            (_Atomic(uint32_t) *)&pid[PID_NOTIFICATION], memory_order_seq_cst
+        );
+        if ((info & PID_ON) != 0) {
+            posted_process(n, pid);
+        }
     }
     uint64_t windows = PROC_INTR_WINDOW_EXITING | PROC_NMI_WINDOW_EXITING;
     vmx_write(VMCS_PROC_CONTROLS, vmx_read(VMCS_PROC_CONTROLS) & ~windows);
@@ -4399,9 +4974,22 @@ bool nvmx_posted_notification(struct vcpu *v, uint8_t vector) {
     if (n == NULL || atomic_load_explicit(&n->pi_vector, memory_order_seq_cst) != vector) {
         return false;
     }
+    if (ipiv_moved(n)) {
+        return true;
+    }
     atomic_store_explicit(&n->pi_pending, true, memory_order_seq_cst);
-    return atomic_load_explicit(&n->pi_vector, memory_order_seq_cst) == vector
-        || !atomic_exchange_explicit(&n->pi_pending, false, memory_order_seq_cst);
+    bool taken = atomic_load_explicit(&n->pi_vector, memory_order_seq_cst) == vector
+              || !atomic_exchange_explicit(&n->pi_pending, false, memory_order_seq_cst);
+    if (taken && v->cpu != this_cpu()) {
+        lapic_send_ipi(v->cpu->apic_id, ICR_DELIVERY_FIXED | VLAPIC_NESTED_POSTED_VECTOR);
+    }
+    return taken;
+}
+
+void nvmx_kicked(struct vcpu *v) {
+    if (v != NULL && atomic_load_explicit(&ipiv_used_count, memory_order_relaxed) != 0) {
+        ipiv_forward(v);
+    }
 }
 
 bool nvmx_monitor_trap_flag(struct vcpu *v) {

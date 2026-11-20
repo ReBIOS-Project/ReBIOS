@@ -70,9 +70,12 @@ void nvmx_wait(struct vcpu *v);
 // waited for one, for the vCPU to wake for.
 bool nvmx_sipi(struct vcpu *v, uint8_t vector);
 // A fixed, edge-triggered interrupt for the guest, from any processor: whether
-// it is the notification of its guest's posted interrupts instead, for the
-// vCPU's processor to process with VLAPIC_NESTED_POSTED_VECTOR.
+// it is the notification of its guest's posted interrupts instead, which the
+// vCPU's processor then processes.
 bool nvmx_posted_notification(struct vcpu *v, uint8_t vector);
+// The processor of the vCPU, which may run none, was kicked, as the shadow
+// PIDs of the guest's guests' IPI virtualisation notify it.
+void nvmx_kicked(struct vcpu *v);
 
 // Whether the vCPU runs the guest's guest through the guest's EPT, which then
 // translates what the vCPU's accesses take as guest-physical addresses.

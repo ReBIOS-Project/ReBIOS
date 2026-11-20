@@ -1133,9 +1133,6 @@ void vlapic_accept(struct vcpu *v, uint8_t vector, bool level) {
         return;
     }
     if (!level && nvmx_posted_notification(v, vector)) {
-        if (v->cpu != this_cpu()) {
-            lapic_send_ipi(v->cpu->apic_id, ICR_DELIVERY_FIXED | VLAPIC_NESTED_POSTED_VECTOR);
-        }
         return;
     }
     uint32_t bit = (uint32_t)1 << (vector % 32);
@@ -1870,6 +1867,13 @@ static void send_ipi(struct vcpu *from, uint32_t dest, uint32_t command) {
             break;
         }
     }
+}
+
+// In xAPIC mode, the APIC ID is in bits 15:8 of the destination (SDM
+// 325462-093 Vol. 3C, 32.1.6.2).
+void vlapic_notify(struct vcpu *from, uint32_t destination, uint8_t vector) {
+    uint32_t dest = x2apic(from->vlapic) ? destination : destination >> 8 & 0xff;
+    send_ipi(from, dest, ICR_DELIVERY_FIXED | vector);
 }
 
 // Whether AMD's extended space has a register, as the processor's does.

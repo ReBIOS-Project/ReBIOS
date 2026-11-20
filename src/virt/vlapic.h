@@ -102,6 +102,9 @@ bool vlapic_post_target(
     struct remap_target *target
 );
 bool vlapic_post_changed(struct vcpu *v);
+// The notification of a posted-interrupt descriptor, as the vCPU's local APIC
+// sends it: a fixed interrupt to the descriptor's physical destination.
+void vlapic_notify(struct vcpu *from, uint32_t destination, uint8_t vector);
 // The processor of the first vCPU an 8-bit destination names, or NULL.
 struct cpu *vlapic_target(uint32_t dest, bool logical);
 struct cpu *vlapic_msi_target(uint32_t address);
