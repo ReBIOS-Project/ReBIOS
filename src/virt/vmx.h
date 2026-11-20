@@ -37,6 +37,7 @@
 #define VMCS_GUEST_TR_SEL 0x080e
 #define VMCS_GUEST_INTR_STATUS 0x0810
 #define VMCS_GUEST_PML_INDEX 0x0812
+#define VMCS_GUEST_UINV 0x0814
 #define VMCS_HOST_ES_SEL 0x0c00
 #define VMCS_HOST_CS_SEL 0x0c02
 #define VMCS_HOST_SS_SEL 0x0c04
@@ -270,6 +271,7 @@
 #define EXIT_CLEAR_BNDCFGS ((uint32_t)1 << 23)
 #define EXIT_CONCEAL_VMX_FROM_PT ((uint32_t)1 << 24)
 #define EXIT_CLEAR_RTIT_CTL ((uint32_t)1 << 25)
+#define EXIT_CLEAR_UINV ((uint32_t)1 << 27)
 #define EXIT_LOAD_CET_STATE ((uint32_t)1 << 28)
 #define EXIT_LOAD_PKRS ((uint32_t)1 << 29)
 #define EXIT_SAVE_PERF_GLOBAL_CTRL ((uint32_t)1 << 30)
@@ -289,6 +291,7 @@
 #define ENTRY_LOAD_BNDCFGS ((uint32_t)1 << 16)
 #define ENTRY_CONCEAL_VMX_FROM_PT ((uint32_t)1 << 17)
 #define ENTRY_LOAD_RTIT_CTL ((uint32_t)1 << 18)
+#define ENTRY_LOAD_UINV ((uint32_t)1 << 19)
 #define ENTRY_LOAD_CET_STATE ((uint32_t)1 << 20)
 #define ENTRY_LOAD_PKRS ((uint32_t)1 << 22)
 #define ENTRY_LOAD_FRED ((uint32_t)1 << 23)
@@ -591,6 +594,8 @@ bool vmx_cet_switched(void);
 bool vmx_fred_switched(void);
 // Likewise IA32_PKRS, which every exit saves, where the guest has PKS.
 bool vmx_pkrs_switched(void);
+// Likewise UINV, which every exit saves, where the guest has user interrupts.
+bool vmx_uinv_switched(void);
 // The secondary VM-exit controls the processor allows.
 uint64_t vmx_exit2_capability(void);
 // An access the processor made for the guest outside of any instruction that

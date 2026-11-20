@@ -113,6 +113,10 @@
 
 // The protection keys of supervisor pages (SDM 325462-093 Vol. 4, Table 2-2).
 #define MSR_IA32_PKRS 0x6e1
+// UINV, the user-interrupt notification vector, in IA32_UINTR_MISC (SDM
+// 325462-093 Vol. 4, Table 2-2).
+#define MSR_IA32_UINTR_MISC 0x988
+#define UINTR_MISC_UINV ((uint64_t)0xff << 32)
 
 // The access-rights bits that are not reserved (SDM 325462-093 Vol. 3C, Table
 // 27-2).
@@ -122,7 +126,7 @@
 // all of the guest state, host state, and exit information.
 static const uint16_t fields[] = {
     0x0000, 0x0002, 0x0800, 0x0802, 0x0804, 0x0806, 0x0808, 0x080a, 0x080c,
-    0x080e, 0x0810, 0x0812, 0x0c00, 0x0c02, 0x0c04, 0x0c06, 0x0c08, 0x0c0a,
+    0x080e, 0x0810, 0x0812, 0x0814, 0x0c00, 0x0c02, 0x0c04, 0x0c06, 0x0c08, 0x0c0a,
     0x0c0c, 0x2000, 0x2002, 0x2004, 0x2006, 0x2008, 0x200a, 0x200e, 0x2010,
     0x2012, 0x2014, 0x2016, 0x2018, 0x201a, 0x202c, 0x2032, 0x201c, 0x201e,
     0x2020, 0x2022, 0x2024, 0x2026, 0x2028, 0x2034, 0x2044, 0x2052, 0x2400,
@@ -310,12 +314,12 @@ static unsigned int ept02_budget;
     (EXIT_SAVE_DEBUG_CONTROLS | EXIT_HOST_ADDR_SPACE_SIZE | EXIT_ACK_INTR_ON_EXIT \
    | EXIT_SAVE_PAT | EXIT_LOAD_PAT | EXIT_SAVE_EFER \
    | EXIT_LOAD_EFER | EXIT_SAVE_PREEMPTION_TIMER | EXIT_LOAD_PERF_GLOBAL_CTRL \
-   | EXIT_SAVE_PERF_GLOBAL_CTRL | EXIT_LOAD_CET_STATE | EXIT_LOAD_PKRS \
-   | EXIT_ACTIVATE_SECONDARY | EXIT_DEFAULT1)
+   | EXIT_SAVE_PERF_GLOBAL_CTRL | EXIT_CLEAR_UINV | EXIT_LOAD_CET_STATE \
+   | EXIT_LOAD_PKRS | EXIT_ACTIVATE_SECONDARY | EXIT_DEFAULT1)
 #define ENTRY_EMULATED \
     (ENTRY_LOAD_DEBUG_CONTROLS | ENTRY_IA32E_MODE_GUEST | ENTRY_LOAD_PAT | ENTRY_LOAD_EFER \
-   | ENTRY_LOAD_PERF_GLOBAL_CTRL | ENTRY_LOAD_CET_STATE | ENTRY_LOAD_PKRS | ENTRY_LOAD_FRED \
-   | ENTRY_DEFAULT1)
+   | ENTRY_LOAD_PERF_GLOBAL_CTRL | ENTRY_LOAD_UINV | ENTRY_LOAD_CET_STATE | ENTRY_LOAD_PKRS \
+   | ENTRY_LOAD_FRED | ENTRY_DEFAULT1)
 
 // IA32_VMX_BASIC (SDM 325462-093 Vol. 3D, A.1): the VMCS size, write-back
 // memory, the information of INS and OUTS exits, the TRUE capability MSRs,
@@ -414,6 +418,11 @@ void nvmx_init(void) {
     if (!vmx_pkrs_switched()) {
         cap_true_exit &= ~((uint64_t)EXIT_LOAD_PKRS << 32);
         cap_true_entry &= ~((uint64_t)ENTRY_LOAD_PKRS << 32);
+    }
+    // Likewise UINV.
+    if (!vmx_uinv_switched()) {
+        cap_true_exit &= ~((uint64_t)EXIT_CLEAR_UINV << 32);
+        cap_true_entry &= ~((uint64_t)ENTRY_LOAD_UINV << 32);
     }
     // FRED's state is the guest's own in the processor, which VMCS02 loads and
     // saves for the guest's guests.
@@ -600,6 +609,11 @@ static bool field_offered(uint32_t field) {
         case VMCS_HOST_SSP:
         case VMCS_HOST_INTR_SSP_TABLE: {
             return ((uint32_t)(cap_true_exit >> 32) & EXIT_LOAD_CET_STATE) != 0;
+        }
+        // SDM 325462-093 Vol. 3D, Table B-2.
+        case VMCS_GUEST_UINV: {
+            return ((uint32_t)(cap_true_entry >> 32) & ENTRY_LOAD_UINV) != 0
+                || ((uint32_t)(cap_true_exit >> 32) & EXIT_CLEAR_UINV) != 0;
         }
         case VMCS_GUEST_PKRS: {
             return ((uint32_t)(cap_true_entry >> 32) & ENTRY_LOAD_PKRS) != 0;
@@ -2403,6 +2417,13 @@ static void write_vmcs02(struct vcpu *v, struct nvmx *n, const struct l1_values 
         bool loaded = (entry & ENTRY_LOAD_PKRS) != 0;
         vmx_write(VMCS_GUEST_PKRS, loaded ? get12(n, VMCS_GUEST_PKRS) : rdmsr(MSR_IA32_PKRS));
     }
+    // Likewise UINV.
+    if (vmx_uinv_switched()) {
+        entry_controls |= ENTRY_LOAD_UINV;
+        bool loaded = (entry & ENTRY_LOAD_UINV) != 0;
+        uint64_t uinv = (rdmsr(MSR_IA32_UINTR_MISC) & UINTR_MISC_UINV) >> 32;
+        vmx_write(VMCS_GUEST_UINV, loaded ? get12(n, VMCS_GUEST_UINV) : uinv);
+    }
     vmx_write(VMCS_EXIT_CONTROLS, exit_controls);
     vmx_write(VMCS_ENTRY_CONTROLS, entry_controls);
     for (size_t i = 0; i < ARRAY_COUNT(control_fields); i++) {
@@ -2556,6 +2577,9 @@ static void save_l2_state(struct nvmx *n) {
     if (vmx_pkrs_switched()) {
         set12(n, VMCS_GUEST_PKRS, vmx_read(VMCS_GUEST_PKRS));
     }
+    if (vmx_uinv_switched()) {
+        set12(n, VMCS_GUEST_UINV, vmx_read(VMCS_GUEST_UINV));
+    }
     uint64_t efer = vmx_read(VMCS_GUEST_EFER);
     if ((exit & EXIT_SAVE_EFER) != 0) {
         set12(n, VMCS_GUEST_EFER, efer);
@@ -2674,6 +2698,9 @@ static void load_l1_host_state(struct vcpu *v, struct nvmx *n, bool nmi) {
     // where the exit loads it.
     if ((exit & EXIT_LOAD_PKRS) != 0) {
         wrmsr(MSR_IA32_PKRS, get12(n, VMCS_HOST_PKRS));
+    }
+    if ((exit & EXIT_CLEAR_UINV) != 0) {
+        wrmsr(MSR_IA32_UINTR_MISC, rdmsr(MSR_IA32_UINTR_MISC) & ~UINTR_MISC_UINV);
     }
     // Exits keep NMI blocking but where NMIs cause them (SDM 325462-093 Vol.
     // 3C, 30.5.5).
