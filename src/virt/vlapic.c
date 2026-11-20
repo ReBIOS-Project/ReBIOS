@@ -50,7 +50,9 @@
 #define SVR_FOCUS_DISABLED ((uint32_t)1 << 9)
 #define SVR_SUPPRESS_EOI_BROADCAST ((uint32_t)1 << 12)
 #define DFR_FLAT ((uint32_t)0xf0000000)
+#define ESR_SEND_ILLEGAL_VECTOR ((uint32_t)1 << 5)
 #define ESR_RECEIVE_ILLEGAL_VECTOR ((uint32_t)1 << 6)
+#define ESR_ILLEGAL_REGISTER ((uint32_t)1 << 7)
 #define XAPIC_BROADCAST ((uint32_t)0xff)
 #define X2APIC_BROADCAST ((uint32_t)0xffffffff)
 #define TIMER_DIVIDE_WRITABLE ((uint32_t)0xb)
@@ -138,6 +140,9 @@ struct vlapic {
     _Atomic(uint32_t) pending[8];
     _Atomic(uint32_t) pending_level[8];
     _Atomic(uint32_t) esr_pending;
+    // Whether an error raises the error interrupt, as one does once after each
+    // write of the ESR.
+    _Atomic(bool) error_armed;
     // Edge-triggered requests where VMX processes posted interrupts: a level-
     // triggered one must be in the registers before its vector's EOI exit is.
     struct posted *posted;
@@ -951,6 +956,7 @@ static void reset_registers(struct vcpu *v) {
     regs_set(vl, APIC_SVR, 0xff);
     regs_set(vl, APIC_ESR, 0);
     atomic_store_explicit(&vl->esr_pending, 0, memory_order_relaxed);
+    atomic_store_explicit(&vl->error_armed, true, memory_order_relaxed);
     regs_set(vl, APIC_ICR_LOW, 0);
     regs_set(vl, APIC_ICR_HIGH, 0);
     for (size_t i = 0; i < LAPIC_LVT_COUNT; i++) {
@@ -1103,15 +1109,27 @@ bool vlapic_virtual_delivery(struct vcpu *v) {
          : atomic_load_explicit(&v->vlapic->avic, memory_order_acquire) != AVIC_OFF;
 }
 
+// An APIC error, which the ESR shows from its next write: the first since the
+// last write, or the reset, raises the error interrupt, where the error entry
+// lets one through (SDM 325462-093 Vol. 3A, 13.5.3; APM 24593 rev. 3.46,
+// 16.4.6).
+static void apic_error(struct vcpu *v, uint32_t error) {
+    struct vlapic *vl = v->vlapic;
+    atomic_fetch_or_explicit(&vl->esr_pending, error, memory_order_relaxed);
+    uint32_t lvt = regs_get(vl, APIC_LVT_ERROR);
+    if ((lvt & APIC_LVT_MASKED) == 0
+     && atomic_exchange_explicit(&vl->error_armed, false, memory_order_acq_rel)) {
+        vlapic_accept(v, (uint8_t)lvt, false);
+    }
+}
+
 void vlapic_accept(struct vcpu *v, uint8_t vector, bool level) {
     struct vlapic *vl = v->vlapic;
     if (!enabled(vl) || !sw_enabled(vl)) {
         return;
     }
     if (vector < 16) {
-        atomic_fetch_or_explicit(
-            &vl->esr_pending, ESR_RECEIVE_ILLEGAL_VECTOR, memory_order_relaxed
-        );
+        apic_error(v, ESR_RECEIVE_ILLEGAL_VECTOR);
         return;
     }
     if (!level && nvmx_posted_notification(v, vector)) {
@@ -1827,6 +1845,12 @@ static bool ipi_target(struct vcpu *from, struct vcpu *to, uint32_t dest, uint32
 
 static void send_ipi(struct vcpu *from, uint32_t dest, uint32_t command) {
     uint32_t mode = command & ICR_DELIVERY_MASK;
+    // A vector of 0-15 is an error of the sender's too (SDM 325462-093 Vol.
+    // 3A, 13.5.3; APM 24593 rev. 3.46, 16.4.6).
+    bool vectored = mode == ICR_DELIVERY_FIXED || mode == ICR_DELIVERY_LOWEST;
+    if (vectored && (command & ICR_VECTOR_MASK) < 16) {
+        apic_error(from, ESR_SEND_ILLEGAL_VECTOR);
+    }
     // The INIT level de-assert of old processors does nothing, and from the
     // Pentium 4 on every other INIT is one whatever its level bit (SDM
     // 325462-093 Vol. 3A, 13.6.1), as Linux 7.3's KVM takes them (lapic.c,
@@ -2042,6 +2066,7 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
         case APIC_ESR: {
             uint32_t esr = atomic_exchange_explicit(&vl->esr_pending, 0, memory_order_relaxed);
             regs_set(vl, APIC_ESR, esr);
+            atomic_store_explicit(&vl->error_armed, true, memory_order_release);
             return !x2 || value == 0;
         }
         case APIC_TIMER_INITIAL: {
@@ -2140,9 +2165,13 @@ void vlapic_avic_ipi_exit(struct vcpu *v, uint64_t info1, uint64_t info2) {
         }
         return;
     }
-    // Dropped, as Linux 7.3's KVM does: x2AVIC may leave a SELF_IPI write no
-    // ICR to send it by (APM 24593 rev. 3.45, 15.29.10).
-    if (id == AVIC_IPI_BAD_VECTOR) {
+    // A vector of 0-15, which is the sender's error and its targets' (APM
+    // 24593 rev. 3.46, 15.29.9.1 and 16.4.6): from the ICR, but for x2AVIC's
+    // SELF_IPI writes, which leave none to tell them by (15.29.10), as Linux
+    // 7.3's KVM finds, and which the WRMSR's registers tell instead.
+    if (id == AVIC_IPI_BAD_VECTOR && x2apic(vl) && (uint32_t)v->gprs.rcx == MSR_X2APIC_SELF_IPI) {
+        apic_error(v, ESR_SEND_ILLEGAL_VECTOR);
+        vlapic_accept(v, (uint8_t)v->gprs.rax, false);
         return;
     }
     if (id == AVIC_IPI_BAD_BACKING_PAGE) {
@@ -2224,10 +2253,28 @@ static bool xapic_at(const struct vlapic *vl, uintptr_t page) {
     return enabled(vl) && !x2apic(vl) && page == (vl->base & APIC_BASE_ADDRESS);
 }
 
+// The slots of the page that hold no register, whose accesses are errors (SDM
+// 325462-093 Vol. 3A, Table 13-1 and 13.5.3; APM 24593 rev. 3.46, Table 16-2
+// and 16.4.6).
+static bool reserved_slot(uint64_t offset) {
+    if (offset >= APIC_EXT_FEATURE) {
+        return !ext_present((uint32_t)offset);
+    }
+    if (offset == APIC_LVT_CMCI) {
+        return !lvt_present(LVT_CMCI);
+    }
+    return offset <= 0x10 || (offset >= 0x40 && offset <= 0x70)
+        || (offset >= 0x290 && offset <= 0x2e0) || (offset >= 0x3a0 && offset <= 0x3d0)
+        || offset == 0x3f0;
+}
+
 // Registers are 32 bits wide, in the first 32 bits of each 16-byte slot.
 static uint32_t dword_read(struct vcpu *v, uintptr_t page, uint64_t offset) {
     if (!xapic_at(v->vlapic, page)) {
         return 0xffffffff;
+    }
+    if ((offset & 0xc) == 0 && reserved_slot(offset)) {
+        apic_error(v, ESR_ILLEGAL_REGISTER);
     }
     uint32_t value = 0;
     if ((offset & 0xc) != 0 || !reg_read(v, (uint32_t)offset, &value)) {
@@ -2237,9 +2284,13 @@ static uint32_t dword_read(struct vcpu *v, uintptr_t page, uint64_t offset) {
 }
 
 static void dword_write(struct vcpu *v, uintptr_t page, uint64_t offset, uint32_t value) {
-    if (xapic_at(v->vlapic, page) && (offset & 0xc) == 0) {
-        reg_write(v, (uint32_t)offset, value);
+    if (!xapic_at(v->vlapic, page) || (offset & 0xc) != 0) {
+        return;
     }
+    if (reserved_slot(offset)) {
+        apic_error(v, ESR_ILLEGAL_REGISTER);
+    }
+    reg_write(v, (uint32_t)offset, value);
 }
 
 static uint64_t mmio_read(struct vcpu *v, void *ctx, uint64_t offset, size_t size) {
@@ -2398,6 +2449,9 @@ bool vlapic_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
         if ((value & ~(uint64_t)ICR_VECTOR_MASK) != 0) {
             *fault = true;
         } else {
+            if (value < 16) {
+                apic_error(v, ESR_SEND_ILLEGAL_VECTOR);
+            }
             vlapic_accept(v, (uint8_t)value, false);
         }
     } else {
