@@ -314,7 +314,9 @@ static unsigned int ept02_budget;
    | PROC2_RDSEED_EXITING | PROC2_PML | PROC2_XSAVES \
    | PROC2_MBEC | PROC2_TSC_SCALING | PROC2_USER_WAIT_PAUSE \
    | PROC2_BUS_LOCK_DETECTION | PROC2_EPT_VE)
-#define PROC3_EMULATED (PROC3_MSR_LIST | PROC3_SPEC_CTRL_VIRT | PROC3_APIC_TIMER_VIRT)
+#define PROC3_EMULATED \
+    (PROC3_EPT_PAGING_WRITE | PROC3_GUEST_PAGING_VERIFY | PROC3_MSR_LIST | PROC3_SPEC_CTRL_VIRT \
+   | PROC3_APIC_TIMER_VIRT)
 #define EXIT_EMULATED \
     (EXIT_SAVE_DEBUG_CONTROLS | EXIT_HOST_ADDR_SPACE_SIZE | EXIT_ACK_INTR_ON_EXIT \
    | EXIT_SAVE_PAT | EXIT_LOAD_PAT | EXIT_SAVE_EFER \
@@ -1380,9 +1382,9 @@ static bool eptp_valid(uint64_t eptp) {
 }
 
 // SDM 325462-093 Vol. 3C, 31.3.3.1.
-static bool ept12_misconfigured(uint64_t e, size_t level, bool leaf, bool mbec) {
+static bool ept12_misconfigured(uint64_t e, size_t level, bool leaf, bool mbec, bool pw) {
     if ((e & EPT_R) == 0) {
-        if ((e & EPT_W) != 0) {
+        if ((e & EPT_W) != 0 || (pw && leaf && (e & EPT_PAGING_WRITE) != 0)) {
             return true;
         }
         if ((cap_ept_vpid & EPT_CAP_EXEC_ONLY) == 0
@@ -1463,12 +1465,32 @@ static void pml_log(struct nvmx *n, uintptr_t gpa) {
     set12(n, VMCS_GUEST_PML_INDEX, (index - 1) & 0xffff);
 }
 
+// Whether a write is allowed: by the write access in the rights of every entry
+// used, or, for a paging write where the guest's EPT paging-write control is
+// on, by the paging-write access of the entry that maps the page and the write
+// access of those that reference tables (SDM 325462-093 Vol. 3C, 31.3.3.2).
+static bool paging_writable(
+    const struct nvmx *n,
+    uint64_t access,
+    uint64_t rights,
+    uint64_t tables,
+    uint64_t leaf
+) {
+    if ((rights & EPT_W) != 0) {
+        return true;
+    }
+    bool paging = (access & EPT_QUAL_LINEAR) != 0 && (access & EPT_QUAL_TRANSLATION) == 0;
+    return paging && (proc3_12(n) & PROC3_EPT_PAGING_WRITE) != 0 && (tables & EPT_W) != 0
+        && (leaf & EPT_PAGING_WRITE) != 0;
+}
+
 // SDM 325462-093 Vol. 3C, 31.3.2, 31.3.3, and 31.3.5: on an access that the
 // guest's EPT allows, the walk sets its accessed and dirty flags, but where
 // the page-modification log has no room left (SDM 325462-093 Vol. 3C, 31.3.6).
 static int ept12_walk(struct nvmx *n, uintptr_t gpa, uint64_t access, struct ept12_walk *w) {
     uint64_t eptp = get12(n, VMCS_EPT_POINTER);
     bool mbec = (proc2_12(n) & PROC2_MBEC) != 0;
+    bool pw = (proc3_12(n) & PROC3_EPT_PAGING_WRITE) != 0;
     bool ad = (eptp & EPTP_AD) != 0;
     size_t levels = EPTP_LEVELS(eptp);
     // With accessed and dirty flags, accesses to the guest's paging structures
@@ -1498,7 +1520,7 @@ static int ept12_walk(struct nvmx *n, uintptr_t gpa, uint64_t access, struct ept
             return EPT12_VIOLATION;
         }
         bool leaf = l == 0 || (l <= 2 && (e & EPT_LARGE) != 0);
-        if (ept12_misconfigured(e, l, leaf, mbec)) {
+        if (ept12_misconfigured(e, l, leaf, mbec, pw)) {
             return EPT12_MISCONFIG;
         }
         rights &= e;
@@ -1527,7 +1549,8 @@ static int ept12_walk(struct nvmx *n, uintptr_t gpa, uint64_t access, struct ept
             return EPT12_VIOLATION;
         }
     } else if (((access & EPT_QUAL_READ) != 0 && (rights & EPT_R) == 0)
-            || ((access & EPT_QUAL_WRITE) != 0 && (rights & EPT_W) == 0)
+            || ((access & EPT_QUAL_WRITE) != 0
+             && !paging_writable(n, access, rights, tables, w->leaf))
             || ((access & EPT_QUAL_FETCH) != 0 && (rights & fetch) == 0)) {
         return EPT12_VIOLATION;
     }
@@ -1567,7 +1590,7 @@ static int ept12_walk(struct nvmx *n, uintptr_t gpa, uint64_t access, struct ept
 static uint64_t ept12_qual(const struct nvmx *n, uint64_t access, const struct ept12_walk *w) {
     uint64_t kept = EPT_QUAL_READ | EPT_QUAL_WRITE | EPT_QUAL_FETCH
                   | EPT_QUAL_LINEAR | EPT_QUAL_TRANSLATION | EPT_QUAL_NMI_UNBLOCKED
-                  | EPT_QUAL_SHADOW_STACK | EPT_QUAL_ASYNC;
+                  | EPT_QUAL_SHADOW_STACK | EPT_QUAL_GUEST_PAGING_VERIFY | EPT_QUAL_ASYNC;
     if ((cap_ept_vpid & EPT_CAP_ADVANCED_INFO) != 0) {
         kept |= EPT_QUAL_USER | EPT_QUAL_WRITABLE | EPT_QUAL_XD;
     }
@@ -1672,7 +1695,7 @@ static void pml_watch_drop(struct nvmx *n) {
 // Keeps an EPT02 leaf that SLOT now holds, made from the walk W, where it
 // gives write access while the guest logs page modifications.
 static void pml_watch_add(struct nvmx *n, uint64_t *slot, const struct ept12_walk *w) {
-    if ((*slot & EPT_W) == 0 || !pml_watching(n)) {
+    if ((*slot & (EPT_W | EPT_PAGING_WRITE)) == 0 || !pml_watching(n)) {
         return;
     }
     if (n->pml_watched == PML_WATCHED) {
@@ -1740,6 +1763,18 @@ static uint64_t ept02_leaf(
      && (w->tables & EPT_W) != 0 && (prot & GPT_W) != 0
      && (e & EPT_R) != 0 && dirty) {
         e |= EPT_SUPERVISOR_SHADOW_STACK | EPT_DIRTY;
+    }
+    // Paging writes where the guest's EPT allows them, as data writes are, and
+    // its guest-paging verification, which the processor carries out on EPT02
+    // (SDM 325462-093 Vol. 3C, 31.3.3.2).
+    uint64_t proc3 = proc3_12(n);
+    bool paging_write = (proc3 & PROC3_EPT_PAGING_WRITE) != 0 && (w->tables & EPT_W) != 0
+                     && (w->leaf & EPT_PAGING_WRITE) != 0;
+    if (paging_write && (prot & GPT_W) != 0 && (e & EPT_R) != 0 && dirty) {
+        e |= EPT_PAGING_WRITE | EPT_DIRTY;
+    }
+    if ((proc3 & PROC3_GUEST_PAGING_VERIFY) != 0 && (w->leaf & EPT_VERIFY_GUEST_PAGING) != 0) {
+        e |= EPT_VERIFY_GUEST_PAGING;
     }
     if ((w->rights & EPT_X) != 0 && (prot & GPT_X) != 0) {
         e |= EPT_X;
@@ -1812,7 +1847,7 @@ static uint64_t ept02_fill(struct nvmx *n, uintptr_t gpa, const struct ept12_wal
         if (l <= level && !is_table) {
             *slot = l == level ? leaf : ept02_leaf(n, w, hpa, prot, memtype, l);
             pml_watch_add(n, slot, w);
-            return *slot & (EPT_RIGHTS | EPT_SUPERVISOR_SHADOW_STACK);
+            return *slot & (EPT_RIGHTS | EPT_SUPERVISOR_SHADOW_STACK | EPT_PAGING_WRITE);
         }
         if (!is_table) {
             *slot = (uint64_t)(uintptr_t)ept02_table(n) | EPT_RIGHTS;
@@ -1823,7 +1858,7 @@ static uint64_t ept02_fill(struct nvmx *n, uintptr_t gpa, const struct ept12_wal
     table[x86_level_index(gpa, 0)] = leaf;
     table[512 + x86_level_index(gpa, 0)] = w->entry[0];
     pml_watch_add(n, &table[x86_level_index(gpa, 0)], w);
-    return leaf & (EPT_RIGHTS | EPT_SUPERVISOR_SHADOW_STACK);
+    return leaf & (EPT_RIGHTS | EPT_SUPERVISOR_SHADOW_STACK | EPT_PAGING_WRITE);
 }
 
 // Takes out of a shadow of the guest's EPT what the guest changed since it was
@@ -1889,7 +1924,7 @@ static bool ept02_allows(const struct nvmx *n, uint64_t rights, uint64_t access)
                    ? EPT_XU
                    : EPT_X;
     return ((access & EPT_QUAL_READ) == 0 || (rights & EPT_R) != 0)
-        && ((access & EPT_QUAL_WRITE) == 0 || (rights & EPT_W) != 0)
+        && ((access & EPT_QUAL_WRITE) == 0 || paging_writable(n, access, rights, EPT_W, rights))
         && ((access & EPT_QUAL_FETCH) == 0 || (rights & fetch) != 0);
 }
 
@@ -1927,6 +1962,10 @@ static bool controls_valid(const struct nvmx *n) {
         return false;
     }
     if ((proc2 & PROC2_EPT_VE) != 0 && !valid_address(get12(n, VMCS_VE_INFO_ADDR))) {
+        return false;
+    }
+    if ((proc3_12(n) & (PROC3_EPT_PAGING_WRITE | PROC3_GUEST_PAGING_VERIFY)) != 0
+     && (proc2 & PROC2_EPT) == 0) {
         return false;
     }
     if ((proc3_12(n) & PROC3_APIC_TIMER_VIRT) != 0
@@ -3572,6 +3611,11 @@ static void ept_violation(struct vcpu *v, struct nvmx *n, uint64_t qual) {
     uintptr_t gpa = vmx_read(VMCS_GUEST_PHYS_ADDR);
     struct ept12_walk w;
     int walk_result = ept12_walk(n, gpa, qual, &w);
+    // A guest-paging verification that failed on EPT02's copies of the guest's
+    // bits failed on the guest's.
+    if ((qual & EPT_QUAL_GUEST_PAGING_VERIFY) != 0 && walk_result == EPT12_MAPPED) {
+        walk_result = EPT12_VIOLATION;
+    }
     if (walk_result == EPT12_VIOLATION) {
         ept02_forget(n, gpa);
         uint64_t qual12 = ept12_qual(n, qual, &w);

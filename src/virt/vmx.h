@@ -265,6 +265,8 @@
 
 // Tertiary processor-based VM-execution controls (SDM 325462-093 Vol. 3C,
 // Table 27-8).
+#define PROC3_EPT_PAGING_WRITE ((uint64_t)1 << 2)
+#define PROC3_GUEST_PAGING_VERIFY ((uint64_t)1 << 3)
 #define PROC3_IPI_VIRT ((uint64_t)1 << 4)
 #define PROC3_MSR_LIST ((uint64_t)1 << 6)
 #define PROC3_SPEC_CTRL_VIRT ((uint64_t)1 << 7)
@@ -405,6 +407,7 @@
 #define EPT_QUAL_NMI_UNBLOCKED ((uint64_t)1 << 12)
 #define EPT_QUAL_SHADOW_STACK ((uint64_t)1 << 13)
 #define EPT_QUAL_SUPERVISOR_SHADOW_STACK ((uint64_t)1 << 14)
+#define EPT_QUAL_GUEST_PAGING_VERIFY ((uint64_t)1 << 15)
 #define EPT_QUAL_ASYNC ((uint64_t)1 << 16)
 
 // IA32_VMX_EPT_VPID_CAP (SDM 325462-093 Vol. 3D, A.10).
@@ -439,6 +442,8 @@
 #define EPT_ACCESSED ((uint64_t)1 << 8)
 #define EPT_DIRTY ((uint64_t)1 << 9)
 #define EPT_XU ((uint64_t)1 << 10)
+#define EPT_VERIFY_GUEST_PAGING ((uint64_t)1 << 57)
+#define EPT_PAGING_WRITE ((uint64_t)1 << 58)
 #define EPT_SUPERVISOR_SHADOW_STACK ((uint64_t)1 << 60)
 #define EPT_SUPPRESS_VE ((uint64_t)1 << 63)
 #define EPT_TABLE_RESERVED ((uint64_t)0x78)
