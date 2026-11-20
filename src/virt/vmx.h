@@ -106,6 +106,7 @@
 #define VMCS_GUEST_PDPTE3 0x2810
 #define VMCS_GUEST_BNDCFGS 0x2812
 #define VMCS_GUEST_RTIT_CTL 0x2814
+#define VMCS_GUEST_LBR_CTL 0x2816
 #define VMCS_GUEST_PKRS 0x2818
 #define VMCS_HOST_PAT 0x2c00
 #define VMCS_HOST_EFER 0x2c02
@@ -290,6 +291,7 @@
 #define EXIT_CLEAR_BNDCFGS ((uint32_t)1 << 23)
 #define EXIT_CONCEAL_VMX_FROM_PT ((uint32_t)1 << 24)
 #define EXIT_CLEAR_RTIT_CTL ((uint32_t)1 << 25)
+#define EXIT_CLEAR_LBR_CTL ((uint32_t)1 << 26)
 #define EXIT_CLEAR_UINV ((uint32_t)1 << 27)
 #define EXIT_LOAD_CET_STATE ((uint32_t)1 << 28)
 #define EXIT_LOAD_PKRS ((uint32_t)1 << 29)
@@ -314,6 +316,7 @@
 #define ENTRY_LOAD_RTIT_CTL ((uint32_t)1 << 18)
 #define ENTRY_LOAD_UINV ((uint32_t)1 << 19)
 #define ENTRY_LOAD_CET_STATE ((uint32_t)1 << 20)
+#define ENTRY_LOAD_LBR_CTL ((uint32_t)1 << 21)
 #define ENTRY_LOAD_PKRS ((uint32_t)1 << 22)
 #define ENTRY_LOAD_FRED ((uint32_t)1 << 23)
 #define ENTRY_LOAD_SPEC_CTRL ((uint32_t)1 << 24)
@@ -625,6 +628,10 @@ bool vmx_cet_switched(void);
 bool vmx_fred_switched(void);
 // Likewise IA32_PKRS, which every exit saves, where the guest has PKS.
 bool vmx_pkrs_switched(void);
+// Whether the guest has architectural LBRs: exits clear IA32_LBR_CTL, saving
+// the guest's, which entries load, so that the hypervisor's branches stay out
+// of its records.
+bool vmx_lbr_switched(void);
 // Likewise UINV, which every exit saves, where the guest has user interrupts.
 bool vmx_uinv_switched(void);
 // Likewise IA32_SPEC_CTRL, which every exit saves.

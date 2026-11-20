@@ -59,6 +59,7 @@ static bool mpx_passthrough;
 static bool perf_global_switched;
 static bool perf_global_saved;
 static bool cet_controls;
+static bool lbr_switched;
 static uint64_t exit2_cap;
 static uint64_t cr0_fixed0, cr0_fixed1, cr4_fixed0, cr4_fixed1;
 
@@ -309,6 +310,11 @@ bool vmx_supported(void) {
     }
     cet_controls = control_allowed(exit_cap, EXIT_LOAD_CET_STATE)
                 && control_allowed(entry_cap, ENTRY_LOAD_CET_STATE);
+    // Architectural LBRs (SDM 325462-093 Vol. 3B, 20.1; Vol. 3C, 29.3.2.1,
+    // 30.3.1, and 30.5.1).
+    bool arch_lbr = cpuid(0, 0).eax >= 0x1c && (cpuid(7, 0).edx & CPUID_7_EDX_ARCH_LBR) != 0;
+    lbr_switched = arch_lbr && control_allowed(exit_cap, EXIT_CLEAR_LBR_CTL)
+                && control_allowed(entry_cap, ENTRY_LOAD_LBR_CTL);
 
     cpu_nmi_restart((uintptr_t)vmx_enter_restart, (uintptr_t)vmx_enter_restart_end);
     return true;
@@ -404,6 +410,10 @@ bool vmx_fred_switched(void) {
 bool vmx_pkrs_switched(void) {
     return control_allowed(entry_cap, ENTRY_LOAD_PKRS) && control_allowed(exit_cap, EXIT_LOAD_PKRS)
         && (cpuid_cr4_allowed() & CR4_PKS) != 0;
+}
+
+bool vmx_lbr_switched(void) {
+    return lbr_switched;
 }
 
 bool vmx_uinv_switched(void) {
@@ -796,6 +806,10 @@ void vmx_vcpu_power_on(struct vcpu *v) {
     if (vmx_cet_switched()) {
         entry_want |= ENTRY_LOAD_CET_STATE;
     }
+    if (lbr_switched) {
+        exit_want |= EXIT_CLEAR_LBR_CTL;
+        entry_want |= ENTRY_LOAD_LBR_CTL;
+    }
     if (vmx_vpid_usable()) {
         proc2_require |= PROC2_VPID;
     }
@@ -831,6 +845,10 @@ void vmx_vcpu_power_on(struct vcpu *v) {
     }
     if (mpx_passthrough) {
         vmx_write(VMCS_GUEST_BNDCFGS, 0);
+    }
+    // IA32_LBR_CTL's reset value (SDM 325462-093 Vol. 4, Table 2-2).
+    if (lbr_switched) {
+        vmx_write(VMCS_GUEST_LBR_CTL, 0);
     }
     // The SDM gives the CET state no value after a reset or INIT (325462-093
     // Vol. 3A, Table 12-1): clear, as Linux 7.3's KVM has it

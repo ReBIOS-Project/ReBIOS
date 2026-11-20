@@ -145,6 +145,7 @@
 #define CPUID_7_EBX_TSC_ADJUST ((uint32_t)1 << 1)
 #define CPUID_7_EBX_MPX ((uint32_t)1 << 14)
 #define CPUID_7_EBX_PT ((uint32_t)1 << 25)
+#define CPUID_7_EDX_ARCH_LBR ((uint32_t)1 << 19)
 #define CPUID_D_1_EAX_XSAVES ((uint32_t)1 << 3)
 #define CPUID_80000001_EDX_NX ((uint32_t)1 << 20)
 

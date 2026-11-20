@@ -44,8 +44,7 @@ from c_layout import NOTICE, count_decl, finish
 # MTRRs, ARCH_CAPABILITIES, XAPIC_DISABLE_STATUS, the VMX capabilities, the
 # x2APIC range), and those of what the guest does not get: the microcode
 # update interface beyond the trigger and the signature, SMM, SGX, TME, TDX,
-# DCA, debug interface, PASID, architectural LBRs and PEBS, and the reserved
-# ranges.
+# DCA, debug interface, PASID, architectural PEBS, and the reserved ranges.
 INTEL_ARCH = [
     (0x0, 0x1),          # Pentium machine check address and type
     (0x6, 0x6),          # MONITOR filter size
@@ -77,6 +76,8 @@ INTEL_ARCH = [
     (0x1c4, 0x1c5),      # extended feature disable
     (0x1cc, 0x1d4),      # FRED
     (0x1d9, 0x1d9),      # debug control
+    (0x1dd, 0x1de),      # last event record source and destination
+    (0x1e0, 0x1e0),      # last event record information
     (0x277, 0x277),      # PAT
     (0x280, 0x29f),      # machine check bank control 2
     (0x309, 0x30f),      # fixed counters
@@ -106,6 +107,10 @@ INTEL_ARCH = [
     (0xda0, 0xda0),      # XSS
     (0xdb0, 0xdb2),      # HDC
     (0xe00, 0xe01),      # RDT core bandwidth throttling
+    (0x1200, 0x121f),    # LBR information
+    (0x14ce, 0x14cf),    # LBR control and depth
+    (0x1500, 0x151f),    # LBR sources
+    (0x1600, 0x161f),    # LBR destinations
     (0x17d0, 0x17d2),    # hardware feedback interface
     (0x17d4, 0x17d4),    # hardware feedback thread configuration
     (0x17da, 0x17da),    # history reset

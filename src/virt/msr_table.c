@@ -55,6 +55,8 @@ const struct msr_table_range msr_table_intel_architectural[] = {
     { 0x1c4, 0x1c5 }, // IA32_XFD to IA32_XFD_ERR.
     { 0x1cc, 0x1d4 }, // IA32_FRED_RSP0 to IA32_FRED_CONFIG.
     { 0x1d9, 0x1d9 }, // IA32_DEBUGCTL.
+    { 0x1dd, 0x1de }, // IA32_LER_FROM_IP to IA32_LER_TO_IP.
+    { 0x1e0, 0x1e0 }, // IA32_LER_INFO.
     { 0x277, 0x277 }, // IA32_PAT.
     { 0x280, 0x29f }, // IA32_MC0_CTL2 to IA32_MC31_CTL2.
     { 0x309, 0x30f }, // IA32_FIXED_CTR0 to IA32_FIXED_CTR6.
@@ -81,6 +83,10 @@ const struct msr_table_range msr_table_intel_architectural[] = {
     { 0xda0, 0xda0 }, // IA32_XSS.
     { 0xdb0, 0xdb2 }, // IA32_PKG_HDC_CTL to IA32_THREAD_STALL.
     { 0xe00, 0xe01 }, // IA32_QOS_CORE_BW_THRTL_0 to IA32_QOS_CORE_BW_THRTL_1.
+    { 0x1200, 0x121f }, // IA32_LBR_x_INFO to IA32_LBR_x_INFO.
+    { 0x14ce, 0x14cf }, // IA32_LBR_CTL to IA32_LBR_DEPTH.
+    { 0x1500, 0x151f }, // IA32_LBR_x_FROM_IP to IA32_LBR_x_FROM_IP.
+    { 0x1600, 0x161f }, // IA32_LBR_x_TO_IP to IA32_LBR_x_TO_IP.
     { 0x17d0, 0x17d2 }, // IA32_HW_FEEDBACK_PTR to IA32_THREAD_FEEDBACK_CHAR.
     { 0x17d4, 0x17d4 }, // IA32_HW_FEEDBACK_THREAD_CONFIG.
     { 0x17da, 0x17da }, // IA32_HRESET_ENABLE.

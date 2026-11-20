@@ -370,7 +370,6 @@ static const struct last_subleaf amd_last_subleaves[] = {
 #define CPUID_7_ECX_WAITPKG ((uint32_t)1 << 5)
 #define CPUID_7_ECX_MAWAU ((uint32_t)0x1f << 17)
 #define CPUID_7_ECX_RDPID ((uint32_t)1 << 22)
-#define CPUID_7_EDX_ARCH_LBR ((uint32_t)1 << 19)
 #define CPUID_7_1_EAX_FRED ((uint32_t)1 << 17)
 #define CPUID_7_1_EAX_MSRLIST ((uint32_t)1 << 27)
 #define CPUID_PT 0x14
@@ -531,6 +530,10 @@ static bool msr_lists(void) {
     return virt_vmx && vmx_tertiary_allowed(PROC3_MSR_LIST);
 }
 
+static bool arch_lbr(void) {
+    return virt_vmx && vmx_lbr_switched();
+}
+
 void cpuid_init(void) {
     processor_last_basic = cpuid(0, 0).eax;
     processor_last_extended = cpuid(0x80000000, 0).eax;
@@ -551,8 +554,9 @@ void cpuid_init(void) {
         if (!pt()) {
             xss_allowed &= ~((uint64_t)1 << XSAVE_PT);
         }
-        // Architectural LBRs are not the guest's yet.
-        xss_allowed &= ~((uint64_t)1 << XSAVE_LBR);
+        if (!arch_lbr()) {
+            xss_allowed &= ~((uint64_t)1 << XSAVE_LBR);
+        }
     }
     xsave_size = XSAVE_LEGACY_AND_HEADER;
     for (size_t i = 2; i <= XSAVE_LAST_COMPONENT; i++) {
@@ -719,7 +723,9 @@ struct cpuid_regs cpuid_guest(struct vcpu *v, uint32_t leaf, uint32_t subleaf) {
                 r.ebx &= ~CPUID_7_EBX_MPX;
                 r.ecx &= ~CPUID_7_ECX_MAWAU;
             }
-            r.edx &= ~CPUID_7_EDX_ARCH_LBR;
+            if (!arch_lbr()) {
+                r.edx &= ~CPUID_7_EDX_ARCH_LBR;
+            }
             break;
         }
         case 0xd: {
@@ -749,7 +755,9 @@ struct cpuid_regs cpuid_guest(struct vcpu *v, uint32_t leaf, uint32_t subleaf) {
             break;
         }
         case CPUID_ARCH_LBR: {
-            r = (struct cpuid_regs){ 0 };
+            if (!arch_lbr()) {
+                r = (struct cpuid_regs){ 0 };
+            }
             break;
         }
         case CPUID_PERFMON_EXT: {
