@@ -94,13 +94,18 @@
 // MSR_PLATFORM_INFO's bits the model tables of SDM 325462-093 Vol. 4 define:
 // the ratios, what is programmable, PPIN, the 16K DCU mode, LPM, and the
 // ConfigTDP levels, but not BIOS Guard's, PEG2DMIDIS', or SMM's. Bit 31, which
-// those tables reserve, is where processors report CPUID faulting (Linux 7.3's
-// MSR_PLATFORM_INFO_CPUID_FAULT), kept where MSR_FEATURE_ENABLES is the
-// guest's.
+// those tables reserve, reports CPUID faulting, which bit 0 of
+// MISC_FEATURES_ENABLES turns on (Intel Virtualization Technology
+// FlexMigration Application Note 323850-004, 2.3.2), as HWCR's CpuidUserDis
+// does on AMD's processors (APM 24593 rev. 3.46, 3.2.10): CPUID raises #GP(0)
+// at CPL > 0.
 #define MSR_PLATFORM_INFO 0xce
 #define MSR_FEATURE_ENABLES 0x140
 #define PLATFORM_INFO_KNOWN ((uint64_t)0x00ffff077480ff00)
 #define PLATFORM_INFO_CPUID_FAULT ((uint64_t)1 << 31)
+#define FEATURE_ENABLES_CPUID_FAULT ((uint64_t)1 << 0)
+#define HWCR_CPUID_USER_DIS ((uint64_t)1 << 35)
+#define CPUID_80000021_EAX_CPUID_USER_DIS ((uint32_t)1 << 17)
 
 // IA32_PERF_CAPABILITIES' fields the guest sees: those SDM 325462-093 Vol. 3B,
 // 22.8 defines (bit 18, TSX_ADDRESS, only SDM 325462-093 Vol. 4, Table 2-2
@@ -276,6 +281,9 @@ static bool perf_global_kept;
 static bool perf_capabilities;
 static bool pebs_hidden;
 static bool pstates_read_only;
+// Whether the processor has CPUID faulting, which the guest's CPUID exits then
+// carry out.
+static bool cpuid_faulting;
 // The guest's TSC moves only by an offset of the vCPU's (vmx.c, svm.c), as the
 // processor's is the hypervisor's clock: whether the processor has
 // IA32_TSC_ADJUST and the TSC-deadline timer, which the virtual local APIC
@@ -506,6 +514,14 @@ void msr_init(void) {
         virt_intercept_msr(MSR_IA32_CORE_CAPABILITIES, true, false);
         virt_intercept_msr(MSR_IA32_ARCH_CAPABILITIES, true, false);
         virt_intercept_msr(MSR_PLATFORM_INFO, true, false);
+        uint64_t info;
+        cpuid_faulting = rdmsr_safe(MSR_PLATFORM_INFO, &info)
+                      && (info & PLATFORM_INFO_CPUID_FAULT) != 0;
+        if (cpuid_faulting) {
+            virt_intercept_msr(MSR_FEATURE_ENABLES, true, true);
+        }
+    } else if (cpuid(0x80000000, 0).eax >= 0x80000021) {
+        cpuid_faulting = (cpuid(0x80000021, 0).eax & CPUID_80000021_EAX_CPUID_USER_DIS) != 0;
     }
 }
 
@@ -663,6 +679,7 @@ void msr_vcpu_init(struct vcpu *v) {
         rdmsr_safe(MSR_IA32_TSC_ADJUST, &v->tsc_adjust);
         v->tsc_adjust -= moved;
     }
+    v->cpuid_faulting = false;
     v->mcg_ctl = 0;
     if (mcg_ctl) {
         rdmsr_safe(MSR_IA32_MCG_CTL, &v->mcg_ctl);
@@ -825,8 +842,15 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
                 return false;
             }
             *fault = !msr_allowed(msr) || !rdmsr_safe(msr, value);
-            *value &= PLATFORM_INFO_KNOWN
-                    | (msr_allowed(MSR_FEATURE_ENABLES) ? PLATFORM_INFO_CPUID_FAULT : 0);
+            *value &= PLATFORM_INFO_KNOWN | (cpuid_faulting ? PLATFORM_INFO_CPUID_FAULT : 0);
+            return true;
+        }
+        case MSR_FEATURE_ENABLES: {
+            if (!virt_vmx || !cpuid_faulting) {
+                return false;
+            }
+            *fault = false;
+            *value = v->cpuid_faulting ? FEATURE_ENABLES_CPUID_FAULT : 0;
             return true;
         }
         case MSR_IA32_MISC_ENABLE: {
@@ -867,7 +891,8 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
                 return false;
             }
             *fault = !rdmsr_safe(msr, value);
-            *value |= HWCR_SMM_LOCK;
+            *value = (*value & ~HWCR_CPUID_USER_DIS) | HWCR_SMM_LOCK
+                   | (v->cpuid_faulting ? HWCR_CPUID_USER_DIS : 0);
             return true;
         }
         case MSR_IA32_PERF_GLOBAL_CTRL: {
@@ -964,6 +989,16 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
             *fault = true;
             return true;
         }
+        case MSR_FEATURE_ENABLES: {
+            if (!virt_vmx || !cpuid_faulting) {
+                return false;
+            }
+            *fault = (value & ~FEATURE_ENABLES_CPUID_FAULT) != 0;
+            if (!*fault) {
+                v->cpuid_faulting = value != 0;
+            }
+            return true;
+        }
         case MSR_IA32_MISC_ENABLE: {
             if (!misc_enable_copied) {
                 return false;
@@ -1026,9 +1061,13 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
                 return false;
             }
             uint64_t hardware;
-            uint64_t fixed = ~(uint64_t)(HWCR_GUEST | HWCR_SMM_LOCK);
+            uint64_t fixed = ~(uint64_t)(HWCR_GUEST | HWCR_SMM_LOCK)
+                           & ~(cpuid_faulting ? HWCR_CPUID_USER_DIS : 0);
             *fault = !rdmsr_safe(msr, &hardware) || ((value ^ hardware) & fixed) != 0
                   || !wrmsr_safe(msr, (hardware & ~(uint64_t)HWCR_GUEST) | (value & HWCR_GUEST));
+            if (!*fault) {
+                v->cpuid_faulting = (value & HWCR_CPUID_USER_DIS) != 0;
+            }
             return true;
         }
         case MSR_AMD_NB_CFG: {

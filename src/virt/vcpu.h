@@ -185,6 +185,8 @@ struct vcpu {
     uint64_t misc_enable;
     // The guest's IA32_MCG_CTL where the processor gets another (msr.c).
     uint64_t mcg_ctl;
+    // Whether the guest turned CPUID faulting on (msr.c).
+    bool cpuid_faulting;
     // The guest's own AMD memory routing (msr.c): SYSCFG, the IORRs, the tops
     // of memory, and the configuration space window.
     uint64_t amd_syscfg;

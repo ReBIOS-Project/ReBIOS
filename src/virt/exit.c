@@ -46,6 +46,11 @@
 #include <virt/vmx.h>
 
 void exit_cpuid(struct vcpu *v) {
+    // CPUID faulting (msr.c), which the guest has no SMM for.
+    if (v->cpuid_faulting && vcpu_cpl(v) != 0) {
+        vcpu_inject_exception(v, 13, true, 0);
+        return;
+    }
     struct cpuid_regs r = cpuid_guest(v, (uint32_t)v->gprs.rax, (uint32_t)v->gprs.rcx);
     v->gprs.rax = r.eax;
     v->gprs.rbx = r.ebx;
