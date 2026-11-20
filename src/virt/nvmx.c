@@ -440,6 +440,11 @@ void nvmx_init(void) {
     } else {
         cap_true_entry &= ~((uint64_t)ENTRY_LOAD_SPEC_CTRL << 32);
     }
+    // VMCS02 marks the exits that leave its guest's shadow stacks prematurely
+    // busy, where the guest has CET.
+    if ((cpuid_cr4_allowed() & CR4_CET) != 0) {
+        cap_exit2 |= vmx_exit2_capability() & EXIT2_PREMATURELY_BUSY_SS;
+    }
     if (cap_exit2 == 0) {
         cap_true_exit &= ~((uint64_t)EXIT_ACTIVATE_SECONDARY << 32);
     }
@@ -2445,10 +2450,16 @@ static void write_vmcs02(struct vcpu *v, struct nvmx *n, const struct l1_values 
     uint64_t exit_controls = l1->exit_controls;
     uint64_t entry_controls = (l1->entry_controls & ~(uint64_t)ENTRY_IA32E_MODE_GUEST)
                             | (entry & ENTRY_IA32E_MODE_GUEST);
+    // The guest's prematurely busy shadow stack control marks its guest's
+    // exits as the processor's (SDM 325462-093 Vol. 3C, 28.4.3).
+    uint64_t exit2 = exit2_12(n) & EXIT2_PREMATURELY_BUSY_SS;
     if (vmx_fred_switched()) {
-        exit_controls |= EXIT_ACTIVATE_SECONDARY;
         entry_controls |= ENTRY_LOAD_FRED;
-        vmx_write(VMCS_EXIT_CONTROLS2, EXIT2_SAVE_FRED);
+        exit2 |= EXIT2_SAVE_FRED;
+    }
+    if (exit2 != 0) {
+        exit_controls |= EXIT_ACTIVATE_SECONDARY;
+        vmx_write(VMCS_EXIT_CONTROLS2, exit2);
     }
     // Likewise its guest's IA32_PKRS, which the processor checks and every
     // VMCS02 exit saves (SDM 325462-093 Vol. 3C, 29.3.1.1 and 30.3.1).

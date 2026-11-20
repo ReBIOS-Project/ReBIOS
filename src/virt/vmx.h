@@ -287,6 +287,7 @@
 #define EXIT2_SAVE_FRED ((uint64_t)1 << 0)
 #define EXIT2_LOAD_FRED ((uint64_t)1 << 1)
 #define EXIT2_LOAD_SPEC_CTRL ((uint64_t)1 << 2)
+#define EXIT2_PREMATURELY_BUSY_SS ((uint64_t)1 << 3)
 
 // VM-entry controls (SDM 325462-093 Vol. 3C, Table 27-17).
 #define ENTRY_LOAD_DEBUG_CONTROLS ((uint32_t)1 << 2)
