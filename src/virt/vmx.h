@@ -69,6 +69,8 @@
 #define VMCS_XSS_EXIT_BITMAP 0x202c
 #define VMCS_TSC_MULTIPLIER 0x2032
 #define VMCS_TERTIARY_CONTROLS 0x2034
+#define VMCS_SPEC_CTRL_MASK 0x204a
+#define VMCS_SPEC_CTRL_SHADOW 0x204c
 #define VMCS_PID_POINTER_TABLE 0x2042
 #define VMCS_EXIT_CONTROLS2 0x2044
 #define VMCS_INJECTED_EVENT_DATA 0x2052
@@ -85,7 +87,9 @@
 // apart, of the guest and of the host (SDM 325462-093 Vol. 3D, Tables B-4 and
 // B-5).
 #define VMCS_GUEST_FRED 0x281a
+#define VMCS_GUEST_SPEC_CTRL 0x282e
 #define VMCS_HOST_FRED 0x2c08
+#define VMCS_HOST_SPEC_CTRL 0x2c1a
 #define VMCS_FRED_FIELDS 8
 #define VMCS_GUEST_PERF_GLOBAL_CTRL 0x2808
 #define VMCS_GUEST_PDPTE0 0x280a
@@ -257,6 +261,7 @@
 // Table 27-8).
 #define PROC3_IPI_VIRT ((uint64_t)1 << 4)
 #define PROC3_MSR_LIST ((uint64_t)1 << 6)
+#define PROC3_SPEC_CTRL_VIRT ((uint64_t)1 << 7)
 
 // Primary VM-exit controls (SDM 325462-093 Vol. 3C, Table 27-14).
 #define EXIT_SAVE_DEBUG_CONTROLS ((uint32_t)1 << 2)
@@ -280,6 +285,7 @@
 // Secondary VM-exit controls (SDM 325462-093 Vol. 3C, Table 27-15).
 #define EXIT2_SAVE_FRED ((uint64_t)1 << 0)
 #define EXIT2_LOAD_FRED ((uint64_t)1 << 1)
+#define EXIT2_LOAD_SPEC_CTRL ((uint64_t)1 << 2)
 
 // VM-entry controls (SDM 325462-093 Vol. 3C, Table 27-17).
 #define ENTRY_LOAD_DEBUG_CONTROLS ((uint32_t)1 << 2)
@@ -295,6 +301,7 @@
 #define ENTRY_LOAD_CET_STATE ((uint32_t)1 << 20)
 #define ENTRY_LOAD_PKRS ((uint32_t)1 << 22)
 #define ENTRY_LOAD_FRED ((uint32_t)1 << 23)
+#define ENTRY_LOAD_SPEC_CTRL ((uint32_t)1 << 24)
 
 // Guest segment access rights (SDM 325462-093 Vol. 3C, Table 27-2).
 #define VMX_AR_L ((uint32_t)1 << 13)
@@ -596,6 +603,8 @@ bool vmx_fred_switched(void);
 bool vmx_pkrs_switched(void);
 // Likewise UINV, which every exit saves, where the guest has user interrupts.
 bool vmx_uinv_switched(void);
+// Likewise IA32_SPEC_CTRL, which every exit saves.
+bool vmx_spec_ctrl_switched(void);
 // The secondary VM-exit controls the processor allows.
 uint64_t vmx_exit2_capability(void);
 // An access the processor made for the guest outside of any instruction that

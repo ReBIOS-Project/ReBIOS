@@ -412,6 +412,11 @@ bool vmx_uinv_switched(void) {
         && (cpuid_cr4_allowed() & CR4_UINTR) != 0;
 }
 
+bool vmx_spec_ctrl_switched(void) {
+    return control_allowed(entry_cap, ENTRY_LOAD_SPEC_CTRL)
+        && (exit2_cap & EXIT2_LOAD_SPEC_CTRL) != 0;
+}
+
 uint64_t vmx_exit2_capability(void) {
     return exit2_cap;
 }
