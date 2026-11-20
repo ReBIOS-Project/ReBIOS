@@ -3246,6 +3246,10 @@ static bool l1_wants(struct vcpu *v, const struct nvmx *n, uint32_t reason, uint
         case EXIT_REASON_WRMSR: {
             return msr_wanted(n, proc, (uint32_t)v->gprs.rcx, reason == EXIT_REASON_WRMSR);
         }
+        case EXIT_REASON_RDMSR_IMM:
+        case EXIT_REASON_WRMSRNS_IMM: {
+            return msr_wanted(n, proc, (uint32_t)qual, reason == EXIT_REASON_WRMSRNS_IMM);
+        }
         case EXIT_REASON_CR_ACCESS: {
             unsigned int cr = qual & 15;
             bool to = ((qual >> 4) & 3) == 0;

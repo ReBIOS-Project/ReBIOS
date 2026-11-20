@@ -33,6 +33,10 @@ void exit_wrmsr(struct vcpu *v);
 // the instruction; false where it faults.
 bool exit_msr_read(struct vcpu *v, uint32_t msr, uint64_t *value);
 bool exit_msr_write(struct vcpu *v, uint32_t msr, uint64_t value);
+// An MSR access that names its MSR and whose data is general register reg's,
+// as RDMSR's and WRMSR's are EDX:EAX: the immediate forms of RDMSR and
+// WRMSRNS.
+void exit_msr_register(struct vcpu *v, uint32_t msr, unsigned int reg, bool write);
 void exit_xsetbv(struct vcpu *v);
 
 // An I/O port access the bitmaps trap. value is in and out.

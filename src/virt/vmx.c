@@ -1173,6 +1173,16 @@ static void vmx_handle_cr_access(struct vcpu *v, uint64_t qual) {
     }
 }
 
+// The general register an exit's instruction information names, R16 to R31
+// included in the extended field, which processors with APX fill in (Intel APX
+// 355828-009, 3.1.4.4.1).
+static unsigned int exit_register(void) {
+    if ((cpuid_xcr0_allowed() & XCR0_APX) != 0) {
+        return (vmx_read(VMCS_EXIT_EXT_INSTR_INFO) >> 16) & 31;
+    }
+    return (vmx_read(VMCS_EXIT_INSTR_INFO) >> 3) & 15;
+}
+
 static void vmx_handle_io(struct vcpu *v, uint64_t qual) {
     size_t size = (qual & 7) + 1;
     bool in = ((qual >> 3) & 1) != 0;
@@ -1317,6 +1327,15 @@ static void vmx_handle_exit(struct vcpu *v) {
         }
         case EXIT_REASON_WRMSR: {
             exit_wrmsr(v);
+            break;
+        }
+        // The immediate forms of RDMSR and WRMSRNS, which exit where the
+        // implicit ones do, with the MSR's address as the exit qualification
+        // (Intel APX 355828-009, 6.49.2.1).
+        case EXIT_REASON_RDMSR_IMM:
+        case EXIT_REASON_WRMSRNS_IMM: {
+            bool write = (reason & 0xffff) == EXIT_REASON_WRMSRNS_IMM;
+            exit_msr_register(v, (uint32_t)qual, exit_register(), write);
             break;
         }
         case EXIT_REASON_XSETBV: {

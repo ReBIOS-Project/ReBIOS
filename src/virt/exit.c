@@ -263,6 +263,19 @@ void exit_wrmsr(struct vcpu *v) {
     vcpu_skip_instruction(v);
 }
 
+void exit_msr_register(struct vcpu *v, uint32_t msr, unsigned int reg, bool write) {
+    uint64_t value = 0;
+    bool done = write ? exit_msr_write(v, msr, vcpu_gpr(v, reg)) : exit_msr_read(v, msr, &value);
+    if (!done) {
+        vcpu_inject_exception(v, 13, true, 0);
+        return;
+    }
+    if (!write) {
+        vcpu_set_gpr(v, reg, value);
+    }
+    vcpu_skip_instruction(v);
+}
+
 void exit_xsetbv(struct vcpu *v) {
     uint32_t index = (uint32_t)v->gprs.rcx;
     uint64_t value = ((uint64_t)(uint32_t)v->gprs.rdx << 32) | (uint32_t)v->gprs.rax;
