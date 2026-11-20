@@ -70,21 +70,12 @@
 // The vector, message type, and mask (APM 24593 rev. 3.46, 16.4.5).
 #define EILVT_WRITABLE ((uint32_t)0x107ff)
 
-#define MSR_AVIC_DOORBELL 0xc001011b
-// The physical APIC ID table's entries and the logical one's (APM 24593 rev.
-// 3.45, Tables 15-23 and 15-24), and the IDs the physical one holds in xAPIC
-// mode, FFh being broadcast, and in x2APIC mode (APM 24593 rev. 3.45,
+// The logical APIC ID table's entries, and the IDs the physical one holds in
+// xAPIC mode, FFh being broadcast, and in x2APIC mode (APM 24593 rev. 3.45,
 // 15.29.4.3).
-#define AVIC_ENTRY_VALID ((uint64_t)1 << 63)
-#define AVIC_ENTRY_RUNNING ((uint64_t)1 << 62)
-#define AVIC_LOGICAL_VALID ((uint32_t)1 << 31)
 #define AVIC_LOGICAL_ENTRIES 64
 #define AVIC_MAX_ID 0xfe
 #define X2AVIC_MAX_ID 0x1ff
-// Why an IPI AVIC took on exits (APM 24593 rev. 3.45, Table 15-27).
-#define AVIC_IPI_NOT_RUNNING 1
-#define AVIC_IPI_BAD_BACKING_PAGE 3
-#define AVIC_IPI_BAD_VECTOR 4
 
 #define LVT_CMCI 0
 #define LVT_TIMER 1
@@ -786,7 +777,7 @@ static bool avic_logical_rebuild(void) {
             fits = false;
             continue;
         }
-        table[index] = AVIC_LOGICAL_VALID | vl->id;
+        table[index] = SVM_AVIC_LOGICAL_VALID | vl->id;
     }
     for (size_t i = 0; i < AVIC_LOGICAL_ENTRIES; i++) {
         if (avic_logical_table[i] != table[i]) {
@@ -881,8 +872,11 @@ static void avic_update(void) {
 // for the hypervisor to wake them.
 static void avic_running(struct vcpu *v, bool running) {
     _Atomic(uint64_t) *entry = (_Atomic(uint64_t) *)&avic_physical_table[v->vlapic->id];
-    uint64_t value = atomic_load_explicit(entry, memory_order_relaxed) & ~AVIC_ENTRY_RUNNING;
-    atomic_store_explicit(entry, value | (running ? AVIC_ENTRY_RUNNING : 0), memory_order_seq_cst);
+    uint64_t value = atomic_load_explicit(entry, memory_order_relaxed) & ~SVM_AVIC_ENTRY_RUNNING;
+    if (running) {
+        value |= SVM_AVIC_ENTRY_RUNNING;
+    }
+    atomic_store_explicit(entry, value, memory_order_seq_cst);
     remap_running(v->cpu->index, running);
 }
 
@@ -931,7 +925,7 @@ static void avic_notify(struct vcpu *v) {
     if (atomic_load_explicit(&v->vlapic->avic, memory_order_seq_cst) == AVIC_OFF) {
         vcpu_kick(v->cpu);
     } else if (atomic_load_explicit(&v->in_guest, memory_order_seq_cst)) {
-        wrmsr(MSR_AVIC_DOORBELL, v->cpu->apic_id);
+        wrmsr(SVM_AVIC_DOORBELL, v->cpu->apic_id);
     } else if (atomic_load_explicit(&v->cpu->taking_interrupts, memory_order_seq_cst)) {
         vcpu_kick(v->cpu);
     }
@@ -1056,7 +1050,7 @@ void vlapic_power_on(struct vcpu *v) {
         if (vl->id <= X2AVIC_MAX_ID) {
             atomic_store_explicit(
                 (_Atomic(uint64_t) *)&avic_physical_table[vl->id],
-                (uint64_t)(uintptr_t)vl->regs | AVIC_ENTRY_VALID | vl->id,
+                (uint64_t)(uintptr_t)vl->regs | SVM_AVIC_ENTRY_VALID | vl->id,
                 memory_order_release
             );
         }
@@ -2160,7 +2154,7 @@ void vlapic_avic_ipi_exit(struct vcpu *v, uint64_t info1, uint64_t info2) {
     uint32_t dest = x2apic(vl) ? high : high >> 24;
     uint32_t id = (uint32_t)(info2 >> 32);
     // AVIC set the requests of every target.
-    if (id == AVIC_IPI_NOT_RUNNING) {
+    if (id == SVM_AVIC_IPI_NOT_RUNNING) {
         for (size_t i = 0; i < smp_cpu_count(); i++) {
             struct vcpu *to = smp_cpu(i)->vcpu;
             if (to != NULL && to != v && ipi_target(v, to, dest, low)) {
@@ -2173,12 +2167,13 @@ void vlapic_avic_ipi_exit(struct vcpu *v, uint64_t info1, uint64_t info2) {
     // 24593 rev. 3.46, 15.29.9.1 and 16.4.6): from the ICR, but for x2AVIC's
     // SELF_IPI writes, which leave none to tell them by (15.29.10), as Linux
     // 7.3's KVM finds, and which the WRMSR's registers tell instead.
-    if (id == AVIC_IPI_BAD_VECTOR && x2apic(vl) && (uint32_t)v->gprs.rcx == MSR_X2APIC_SELF_IPI) {
+    bool self_ipi = x2apic(vl) && (uint32_t)v->gprs.rcx == MSR_X2APIC_SELF_IPI;
+    if (id == SVM_AVIC_IPI_BAD_VECTOR && self_ipi) {
         apic_error(v, ESR_SEND_ILLEGAL_VECTOR);
         vlapic_accept(v, (uint8_t)v->gprs.rax, false);
         return;
     }
-    if (id == AVIC_IPI_BAD_BACKING_PAGE) {
+    if (id == SVM_AVIC_IPI_BAD_BACKING_PAGE) {
         printf("AVIC found no backing page for IPI %#x to %#x\n", low, dest);
     }
     // Kinds and targets AVIC does not deliver, with none of their requests

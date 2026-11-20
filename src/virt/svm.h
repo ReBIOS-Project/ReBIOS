@@ -403,6 +403,22 @@ _Static_assert(
 #define SVM_VINTR_AVIC ((uint64_t)1 << 31)
 #define SVM_VINTR_VECTOR_MASK ((uint64_t)0xff << 32)
 
+// AVIC's doorbell, the physical APIC ID table's entries and the logical one's,
+// and the last index the physical one's pointer holds (APM 24593 rev. 3.46,
+// Figure 15-22, Tables 15-23 and 15-24, and 15.29.4.2); and why an IPI AVIC
+// took on exits (Table 15-27).
+#define SVM_AVIC_DOORBELL 0xc001011b
+#define SVM_AVIC_ENTRY_VALID ((uint64_t)1 << 63)
+#define SVM_AVIC_ENTRY_RUNNING ((uint64_t)1 << 62)
+#define SVM_AVIC_ENTRY_BACKING ((uint64_t)0xffffffffff000)
+#define SVM_AVIC_ENTRY_HOST_ID ((uint64_t)0xfff)
+#define SVM_AVIC_LOGICAL_VALID ((uint32_t)1 << 31)
+#define SVM_AVIC_PHYSICAL_LAST ((uint64_t)0xfff)
+#define SVM_AVIC_IPI_NOT_RUNNING 1
+#define SVM_AVIC_IPI_BAD_TARGET 2
+#define SVM_AVIC_IPI_BAD_BACKING_PAGE 3
+#define SVM_AVIC_IPI_BAD_VECTOR 4
+
 // The interrupt shadow, at offset 068h.
 #define SVM_INTERRUPT_SHADOW ((uint64_t)1 << 0)
 

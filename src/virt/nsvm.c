@@ -22,8 +22,10 @@
 #include <virt/nsvm.h>
 #include <core.h>
 #include <handoff.h>
+#include <hw/lapic.h>
 #include <lib/heap.h>
 #include <lib/log.h>
+#include <lib/spinlock.h>
 #include <lib/util.h>
 #include <memory.h>
 #include <sys/cpu.h>
@@ -81,6 +83,15 @@
 // its log (APM 24593 rev. 3.46, 15.25.16).
 #define CPUID_8000000A_ECX_PML ((uint32_t)1 << 4)
 #define PML_LAST 0x1ff
+
+// x2AVIC's 4096 IDs, in CPUID Fn8000_000A_ECX, and the last index of the
+// physical APIC ID table in xAVIC mode, in x2AVIC mode, and with 4096 IDs (APM
+// 24593 rev. 3.46, 15.29.4.3); and the shadow table's pages for those.
+#define CPUID_8000000A_ECX_X2AVIC_EXT ((uint32_t)1 << 6)
+#define AVIC_LAST 0xff
+#define X2AVIC_LAST 0x1ff
+#define X2AVIC_EXT_LAST 0xfff
+#define AVIC_TABLE_PAGES ((X2AVIC_EXT_LAST + 1) / (PAGE_SIZE / 8))
 
 // GAAT, Paging-Write, and Verify Paging-Write, in CPUID Fn8000_000A_ECX, the
 // maximum GAAT prefix width in its EAX, the bits of GAAT's pointer that must
@@ -248,6 +259,20 @@ struct nsvm {
     // A bit for each of the guest's guests' ASIDs whose translations the
     // guest's INVLPGA flushed since VMCB02 last had the ASID.
     uint64_t *invlpga_asids;
+    // Whether VMCB12 has AVIC, and x2AVIC, run the guest's guest's local APIC
+    // (APM 24593 rev. 3.46, 15.29); VMCB02's shadow of the guest's physical
+    // APIC ID table then, the guest's backing page for its guest, the entry of
+    // the shadow that names that page, else -1, and whether the guest's guest
+    // runs with it, for the guest's doorbells; all under avic_lock.
+    bool avic12;
+    bool x2avic12;
+    // The page of the guest's guest's that NPT02 maps to avic_apic_page, else
+    // 1, which no page is.
+    uint64_t avic_apic02;
+    struct avic_table *avic_table;
+    uint64_t avic_backing12;
+    int32_t avic_own;
+    _Atomic(bool) avic_running;
     // An exit of the guest's guest that what the hypervisor carried out for it
     // raised, for the next entry.
     bool pending;
@@ -255,6 +280,9 @@ struct nsvm {
     uint64_t pending_info1;
     uint64_t pending_info2;
 };
+
+static void avic_leave(struct nsvm *n);
+static bool avic_doorbell(uint64_t value);
 
 bool nsvm_enabled;
 // MAXPHYADDR, and the processor's number of ASIDs, the first two of which are
@@ -295,6 +323,15 @@ static bool pmc_filter;
 static bool tsc_scaling;
 static bool idle_hlt;
 static bool bus_lock_threshold;
+// The processor's AVIC, x2AVIC, and x2AVIC's 4096 IDs (APM 24594 rev. 3.39,
+// E.4.9).
+static bool avic;
+static bool x2avic;
+static bool x2avic_ext;
+// What NPT02 maps the guest's guest's local APIC page to under xAVIC where the
+// guest's nested page tables map it to no RAM: any page does, as AVIC takes
+// the accesses to the backing page instead (APM 24593 rev. 3.46, 15.29.2).
+static uint8_t *avic_apic_page;
 
 void nsvm_init(void) {
     if (virt_vmx) {
@@ -326,6 +363,12 @@ void nsvm_init(void) {
                   && (sizes & CPUID_80000008_EBX_INVLPGB_NESTED) != 0;
     pmc_virt = (cpuid(0x8000000a, 0).edx & SVM_FEATURE_PMC_VIRT) != 0;
     pmc_filter = pmc_virt && (cpuid(0x8000000a, 0).ecx & CPUID_8000000A_ECX_PMC_FILTER) != 0;
+    avic = (cpuid(0x8000000a, 0).edx & SVM_FEATURE_AVIC) != 0;
+    x2avic = avic && (cpuid(0x8000000a, 0).edx & SVM_FEATURE_X2AVIC) != 0;
+    x2avic_ext = x2avic && (cpuid(0x8000000a, 0).ecx & CPUID_8000000A_ECX_X2AVIC_EXT) != 0;
+    if (avic) {
+        avic_apic_page = page_alloc(1);
+    }
     debugctl_bits = DEBUGCTL_LBR | DEBUGCTL_BTF
                   | ((cpuid(7, 0).ecx & CPUID_7_0_ECX_BUSLOCKTRAP) != 0 ? DEBUGCTL_BLCKDB : 0);
     iopm02 = page_alloc(IOPM_SIZE / PAGE_SIZE);
@@ -382,6 +425,7 @@ void nsvm_vcpu_power_on(struct vcpu *v) {
     }
     npt02_drop_all(n);
     spec_ctrl_switch(n, false);
+    avic_leave(n);
     size_t asids = page_count((nasid + 63) / 64 * sizeof(uint64_t));
     memset(n->invlpga_asids, 0, asids * PAGE_SIZE);
     *n = (struct nsvm){
@@ -396,7 +440,9 @@ void nsvm_vcpu_power_on(struct vcpu *v) {
         .msrpm02 = n->msrpm02,
         .invlpga_asids = n->invlpga_asids,
         .seen01 = n->seen01,
-        .seen02 = n->seen02
+        .seen02 = n->seen02,
+        .avic_apic02 = 1,
+        .avic_own = -1
     };
 }
 
@@ -535,11 +581,14 @@ struct cpuid_regs nsvm_cpuid(void) {
                       | SVM_FEATURE_SVML | SVM_FEATURE_IDLE_HLT
                       | SVM_FEATURE_BUS_LOCK_THRESHOLD | SVM_FEATURE_HOST_MCE_OVERRIDE
                       | SVM_FEATURE_V_SPEC_CTRL | (ssscheck ? SVM_FEATURE_SSSCHECK : 0)
-                      | (svm_vls ? SVM_FEATURE_VLS : 0) | (svm_vnmi ? SVM_FEATURE_VNMI : 0);
+                      | (svm_vls ? SVM_FEATURE_VLS : 0) | (svm_vnmi ? SVM_FEATURE_VNMI : 0)
+                      | SVM_FEATURE_AVIC | SVM_FEATURE_X2AVIC
+                      | SVM_FEATURE_EXT_LVT_AVIC_ACCESS;
     return (struct cpuid_regs){
         svm.eax & (0xff | (gaat ? CPUID_8000000A_EAX_GAAT_PREFIX : 0)), nasid - 1,
-        svm.ecx & (CPUID_8000000A_ECX_PML | CPUID_8000000A_ECX_PW | CPUID_8000000A_ECX_VPW
-                 | CPUID_8000000A_ECX_GAAT | CPUID_8000000A_ECX_PMC_FILTER),
+        svm.ecx & (CPUID_8000000A_ECX_PML | CPUID_8000000A_ECX_PW
+                 | CPUID_8000000A_ECX_VPW | CPUID_8000000A_ECX_GAAT
+                 | CPUID_8000000A_ECX_PMC_FILTER | CPUID_8000000A_ECX_X2AVIC_EXT),
         (svm.edx & features) | SVM_FEATURE_VMCB_ADDR_CHECK
     };
 }
@@ -602,6 +651,11 @@ bool nsvm_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
         *value = n->tsc_ratio;
         return true;
     }
+    // AVIC's doorbell is write-only (APM 24593 rev. 3.46, 15.29.8.2).
+    if (msr == SVM_AVIC_DOORBELL && avic) {
+        *fault = true;
+        return true;
+    }
     return false;
 }
 
@@ -648,6 +702,10 @@ bool nsvm_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
         if (!*fault) {
             n->tsc_ratio = value;
         }
+        return true;
+    }
+    if (msr == SVM_AVIC_DOORBELL && avic) {
+        *fault = !avic_doorbell(value);
         return true;
     }
     return false;
@@ -878,6 +936,7 @@ static void exit_to_l1(
     if (svm_eraps) {
         vmcb01->control.rap_control |= SVM_RAP_CLEAR;
     }
+    avic_leave(n);
     switch_vmcb(v, n, false);
     // The events of the guest's guest are not the guest's.
     v->redeliver = 0;
@@ -933,6 +992,33 @@ static bool injection_valid(uint64_t event, bool fred) {
 // the last one MAXPHYADDR has (APM 24593 rev. 3.46, 15.10.1 and 15.11).
 static bool table_fits(uint64_t base, size_t size) {
     return (page_down(base) + size) >> phys_width == 0;
+}
+
+static bool avic_pages_logged;
+
+// AVIC's checks at VMRUN (APM 24593 rev. 3.46, 15.29.4.3), and the pages the
+// processor reaches for the guest's guest, which it can only where they are
+// RAM: the backing page, and the logical table in xAVIC mode.
+static bool avic_valid(const struct vmcb_control *c, bool x2) {
+    uint64_t last = c->avic_physical_table & SVM_AVIC_PHYSICAL_LAST;
+    uint64_t limit = AVIC_LAST;
+    if (x2) {
+        limit = x2avic_ext ? X2AVIC_EXT_LAST : X2AVIC_LAST;
+    }
+    size_t pages = last / (PAGE_SIZE / 8) + 1;
+    if (last > limit
+     || !table_fits(c->avic_backing_page, PAGE_SIZE)
+     || !table_fits(c->avic_logical_table, PAGE_SIZE)
+     || !table_fits(c->avic_physical_table, pages * PAGE_SIZE)) {
+        return false;
+    }
+    bool ram = guest_mem_page(page_down(c->avic_backing_page)) != NULL
+            && (x2 || guest_mem_page(page_down(c->avic_logical_table)) != NULL);
+    if (!ram && !avic_pages_logged) {
+        avic_pages_logged = true;
+        printf("Nested SVM: the guest's AVIC pages are not RAM, its VMRUN fails\n");
+    }
+    return ram;
 }
 
 // VMRUN's checks of the state it loads (APM 24593 rev. 3.46, 15.5.1, and 15.20
@@ -1019,6 +1105,17 @@ static bool vmcb12_valid(struct vcpu *v, const struct vmcb *vmcb12) {
     if (gaat_on && (!npt || !long_mode || (c->gaat_pointer & GAAT_POINTER_RESERVED) != 0)) {
         return false;
     }
+    // x2AVIC needs AVIC, and AVIC nested paging, its pointers within the
+    // physical address width, and its physical table's last index within its
+    // mode's (15.29.4.1 and 15.29.4.3).
+    bool avic_on = avic && (c->vintr & SVM_VINTR_AVIC) != 0;
+    bool x2avic_on = x2avic && (c->vintr & SVM_VINTR_X2AVIC) != 0;
+    if (x2avic_on && !avic_on) {
+        return false;
+    }
+    if (avic_on && (!npt || !avic_valid(c, x2avic_on))) {
+        return false;
+    }
     if ((s->efer & EFER_LME) != 0 && (s->cr0 & CR0_PG) != 0) {
         if ((s->cr4 & CR4_PAE) == 0 || (s->cr0 & CR0_PE) == 0 || (s->cr3 >> phys_width) != 0
          || ((s->cs.attrib & VCPU_SEG_L) != 0 && (s->cs.attrib & VCPU_SEG_DB) != 0)) {
@@ -1071,12 +1168,20 @@ static void merge_intercepts(struct nsvm *n) {
           | n->intercepts[4]
           | (n->vls12 ? 0 : SVM_INTERCEPT_VMLOAD | SVM_INTERCEPT_VMSAVE)
           | (n->vgif12 ? 0 : SVM_INTERCEPT_STGI | SVM_INTERCEPT_CLGI);
-    if ((n->vintr12 & SVM_VINTR_MASKING) == 0) {
+    // AVIC has CR8 be the guest's guest's TPR whatever VMCB12 masks (APM 24593
+    // rev. 3.46, 15.29.4.1).
+    if ((n->vintr12 & SVM_VINTR_MASKING) == 0 && !n->avic12) {
         to[0] |= SVM_INTERCEPT_CR8_READ | SVM_INTERCEPT_CR8_WRITE;
     }
+    // Under AVIC, the guest's guest halts in the processor, as its doorbells
+    // end the halt there alone, but where VMCB12 intercepts HLT, whose idle
+    // intercept the processor then applies with AVIC's interrupts. Else
     // VMCB12's idle HLT intercept is HLT's in VMCB02, whose virtual interrupts
     // may be the hypervisor's (nsvm_l2_exit()).
-    if ((n->intercepts[5] & SVM_INTERCEPT_IDLE_HLT) != 0) {
+    if (n->avic12) {
+        to[3] = (to[3] & ~SVM_INTERCEPT_HLT) | (n->intercepts[3] & SVM_INTERCEPT_HLT);
+        to[5] = (to[5] & ~SVM_INTERCEPT_IDLE_HLT) | (n->intercepts[5] & SVM_INTERCEPT_IDLE_HLT);
+    } else if ((n->intercepts[5] & SVM_INTERCEPT_IDLE_HLT) != 0) {
         to[3] |= SVM_INTERCEPT_HLT;
     }
     memcpy(&n->vmcb02->control, to, sizeof(to));
@@ -1097,6 +1202,14 @@ static uintptr_t merge_msrpm(struct nsvm *n, uint64_t base12) {
         uint64_t *to = (uint64_t *)(n->msrpm02 + page * PAGE_SIZE);
         for (size_t i = 0; i < PAGE_SIZE / 8; i++) {
             to[i] = mine[i] | (l1 == NULL ? ~(uint64_t)0 : l1[i]);
+        }
+        // Under x2AVIC, the guest's guest's x2APIC MSRs are its own where
+        // VMCB12's map passes them (APM 24593 rev. 3.46, 15.29.10).
+        if (page == 0 && l1 != NULL && n->x2avic12) {
+            memcpy(
+                (uint8_t *)to + MSR_X2APIC_FIRST / 4, (const uint8_t *)l1 + MSR_X2APIC_FIRST / 4,
+                (MSR_X2APIC_LAST + 1 - MSR_X2APIC_FIRST) / 4
+            );
         }
     }
     return (uintptr_t)n->msrpm02;
@@ -1421,8 +1534,18 @@ static uint64_t npt02_fill(struct nsvm *n, uintptr_t gpa, const struct npt12_wal
     uint32_t prot;
     uint8_t memtype;
     size_t level;
-    if (!gpt_translate_leaf(w->gpa, &hpa, &prot, &memtype, &level)
-     || vlapic_access_page(page_down(hpa))) {
+    bool translated = gpt_translate_leaf(w->gpa, &hpa, &prot, &memtype, &level)
+                   && !vlapic_access_page(page_down(hpa));
+    uint64_t apic = n->avic12 && !n->x2avic12 ? page_down(n->copy.control.avic_apic_bar) : 1;
+    if (!translated && page_down(gpa) == apic) {
+        hpa = (uintptr_t)avic_apic_page;
+        prot = GPT_R | GPT_W | GPT_X;
+        memtype = MT_WB;
+        level = 0;
+        translated = true;
+        n->avic_apic02 = apic;
+    }
+    if (!translated) {
         return 0;
     }
     // 32-bit paging's 4 MiB pages take 2 MiB ones.
@@ -1455,6 +1578,377 @@ static uint64_t npt02_fill(struct nsvm *n, uintptr_t gpa, const struct npt12_wal
 static bool npt02_allows(uint64_t leaf, bool write, bool fetch) {
     return (leaf & PTE_P) != 0 && (!write || (leaf & PTE_W) != 0)
         && (!fetch || (leaf & PTE_NX) == 0);
+}
+
+// AVIC of the guest's guests (APM 24593 rev. 3.46, 15.29). The guest's
+// physical APIC ID tables hold its physical addresses, which the processor
+// cannot take: VMCB02 has a shadow of the guest's table, made again from it at
+// each of its guest's entries, whose entries name the same backing pages. The
+// guest's IsRunning bits and physical APIC IDs give way to the vCPUs whose
+// guests' guests run with those pages, as their APIC IDs are the processors'
+// own; an IPI to any other exits, and reaches the guest where its own entry is
+// not running, as with the guest's table. The guest's logical table and its
+// backing pages are the processor's own.
+struct avic_table {
+    bool used;
+    uint64_t table12;
+    // Where the guest's table is, by page, the shadow, and of each of the
+    // guest's entries, the valid bit and backing page the shadow has.
+    uint8_t *pages12[AVIC_TABLE_PAGES];
+    uint64_t *entries;
+    uint64_t *seen12;
+    // The vCPUs whose guests' guests run with it.
+    uint32_t users;
+};
+
+static struct spinlock avic_lock;
+static struct avic_table *avic_tables;
+static bool avic_memory_logged;
+
+static size_t avic_pages(void) {
+    return x2avic_ext ? AVIC_TABLE_PAGES : 1;
+}
+
+// The guest's entry of its table, as the processor reads it, else 0 where its
+// page is not RAM.
+static uint64_t avic_entry12(const struct avic_table *t, size_t index) {
+    const uint8_t *page = t->pages12[index / (PAGE_SIZE / 8)];
+    if (page == NULL) {
+        return 0;
+    }
+    return atomic_load_explicit(
+        (const _Atomic(uint64_t) *)(page + index % (PAGE_SIZE / 8) * 8), memory_order_seq_cst
+    );
+}
+
+// Whether the processor's APIC ID fits the shadow's entries, and its doorbells
+// before x2AVIC (APM 24593 rev. 3.46, Figure 15-22).
+static bool avic_id_fits(const struct cpu *cpu) {
+    return cpu->apic_id <= (x2avic ? SVM_AVIC_ENTRY_HOST_ID : AVIC_LAST);
+}
+
+// The processor whose vCPU's guest's guest runs with a backing page, else
+// NULL.
+static struct cpu *avic_runner(uint64_t backing12) {
+    for (size_t i = 0; i < smp_cpu_count(); i++) {
+        struct cpu *cpu = smp_cpu(i);
+        struct nsvm *n = cpu->vcpu != NULL ? cpu->vcpu->nsvm : NULL;
+        if (n != NULL && atomic_load_explicit(&n->avic_running, memory_order_relaxed)
+         && n->avic_backing12 == backing12 && avic_id_fits(cpu)) {
+            return cpu;
+        }
+    }
+    return NULL;
+}
+
+// The shadow of one of the guest's entries, its valid bit and backing page:
+// none where the page is not RAM, as AVIC cannot reach it.
+static uint64_t avic_shadow_entry(uint64_t entry12) {
+    if ((entry12 & SVM_AVIC_ENTRY_VALID) == 0) {
+        return 0;
+    }
+    uint64_t backing12 = entry12 & SVM_AVIC_ENTRY_BACKING;
+    uint8_t *page = guest_mem_page(backing12);
+    if (page == NULL) {
+        if (!avic_memory_logged) {
+            avic_memory_logged = true;
+            printf(
+                "Nested SVM: a backing page of the guest's AVIC at %#llx is not RAM, IPIs to it "
+                "exit\n",
+                (unsigned long long)backing12
+            );
+        }
+        return 0;
+    }
+    uint64_t shadow = SVM_AVIC_ENTRY_VALID | (uint64_t)(uintptr_t)page;
+    struct cpu *runner = avic_runner(backing12);
+    if (runner != NULL) {
+        shadow |= SVM_AVIC_ENTRY_RUNNING | runner->apic_id;
+    }
+    return shadow;
+}
+
+// The shadow made again, up to an index, where the guest's entries changed.
+static void avic_sync(struct avic_table *t, size_t last) {
+    for (size_t i = 0; i <= last; i++) {
+        uint64_t entry12 = avic_entry12(t, i) & (SVM_AVIC_ENTRY_VALID | SVM_AVIC_ENTRY_BACKING);
+        if (entry12 == t->seen12[i]) {
+            continue;
+        }
+        t->seen12[i] = entry12;
+        atomic_store_explicit(
+            (_Atomic(uint64_t) *)&t->entries[i], avic_shadow_entry(entry12), memory_order_seq_cst
+        );
+    }
+}
+
+// The shadow of a guest's table, which another that no processor runs a
+// guest's guest with gives way to, made again in full.
+static struct avic_table *avic_table_for(uint64_t table12) {
+    if (avic_tables == NULL) {
+        avic_tables = kmalloc(smp_cpu_count() * sizeof(struct avic_table));
+    }
+    struct avic_table *spare = NULL;
+    for (size_t i = 0; i < smp_cpu_count(); i++) {
+        struct avic_table *t = &avic_tables[i];
+        if (t->used && t->table12 == table12) {
+            return t;
+        }
+        if (t->users == 0 && (spare == NULL || !t->used)) {
+            spare = t;
+        }
+    }
+    // Each vCPU holds one at most.
+    if (spare == NULL) {
+        panic("No shadow physical APIC ID table is free\n");
+    }
+    if (spare->entries == NULL) {
+        spare->entries = page_alloc(avic_pages());
+        spare->seen12 = page_alloc(avic_pages());
+    }
+    memset(spare->entries, 0, avic_pages() * PAGE_SIZE);
+    memset(spare->seen12, 0, avic_pages() * PAGE_SIZE);
+    spare->used = true;
+    spare->table12 = table12;
+    for (size_t i = 0; i < avic_pages(); i++) {
+        spare->pages12[i] = guest_mem_page(table12 + i * PAGE_SIZE);
+    }
+    return spare;
+}
+
+// The entry of the shadow that names the guest's guest's own backing page: by
+// its APIC ID, as its backing page holds it, else the first, else -1.
+static int32_t avic_own_index(const struct nsvm *n, const struct avic_table *t, size_t last) {
+    const uint32_t *regs = (const uint32_t *)guest_mem_page(n->avic_backing12);
+    uint32_t id = regs[APIC_ID / 4];
+    id = n->x2avic12 ? id : id >> 24;
+    uint64_t own = SVM_AVIC_ENTRY_VALID | n->avic_backing12;
+    if (id <= last && t->seen12[id] == own) {
+        return (int32_t)id;
+    }
+    for (size_t i = 0; i <= last; i++) {
+        if (t->seen12[i] == own) {
+            return (int32_t)i;
+        }
+    }
+    return -1;
+}
+
+// Whether the shadow entry runs on a processor, and which.
+static void avic_set_running(struct avic_table *t, int32_t index, const struct cpu *cpu) {
+    _Atomic(uint64_t) *entry = (_Atomic(uint64_t) *)&t->entries[index];
+    uint64_t shadow = atomic_load_explicit(entry, memory_order_relaxed)
+                    & ~(SVM_AVIC_ENTRY_RUNNING | SVM_AVIC_ENTRY_HOST_ID);
+    if (cpu != NULL) {
+        shadow |= SVM_AVIC_ENTRY_RUNNING | cpu->apic_id;
+    }
+    atomic_store_explicit(entry, shadow, memory_order_seq_cst);
+}
+
+// At an entry of the guest's guest with AVIC: VMCB02 gets the shadow of the
+// guest's table, the guest's own pages, and its guest's entry running here.
+static void avic_enter(struct nsvm *n) {
+    const struct vmcb_control *c12 = &n->copy.control;
+    struct vmcb_control *c = &n->vmcb02->control;
+    struct cpu *cpu = this_cpu();
+    size_t last = c12->avic_physical_table & SVM_AVIC_PHYSICAL_LAST;
+    n->avic_backing12 = page_down(c12->avic_backing_page);
+    spinlock_acquire(&avic_lock);
+    struct avic_table *t = avic_table_for(page_down(c12->avic_physical_table));
+    avic_sync(t, last);
+    t->users++;
+    n->avic_table = t;
+    n->avic_own = avic_own_index(n, t, last);
+    if (n->avic_own >= 0 && avic_id_fits(cpu)) {
+        avic_set_running(t, n->avic_own, cpu);
+    }
+    atomic_store_explicit(&n->avic_running, true, memory_order_seq_cst);
+    spinlock_release(&avic_lock);
+    c->avic_apic_bar = c12->avic_apic_bar;
+    c->avic_backing_page = (uint64_t)(uintptr_t)guest_mem_page(n->avic_backing12);
+    // x2AVIC has no logical table (15.29.10), whose page need not be RAM then.
+    uint8_t *logical = guest_mem_page(page_down(c12->avic_logical_table));
+    if (logical == NULL) {
+        logical = (uint8_t *)t->entries;
+    }
+    c->avic_logical_table = (uint64_t)(uintptr_t)logical;
+    c->avic_physical_table = (uint64_t)(uintptr_t)t->entries | last;
+}
+
+// At an exit to the guest, or where the vCPU starts again.
+static void avic_leave(struct nsvm *n) {
+    struct avic_table *t = n->avic_table;
+    if (t == NULL) {
+        return;
+    }
+    spinlock_acquire(&avic_lock);
+    atomic_store_explicit(&n->avic_running, false, memory_order_seq_cst);
+    if (n->avic_own >= 0) {
+        uint64_t shadow = atomic_load_explicit(
+            (_Atomic(uint64_t) *)&t->entries[n->avic_own], memory_order_relaxed
+        );
+        if ((shadow & SVM_AVIC_ENTRY_RUNNING) != 0
+         && (shadow & SVM_AVIC_ENTRY_HOST_ID) == this_cpu()->apic_id) {
+            avic_set_running(t, n->avic_own, avic_runner(n->avic_backing12));
+        }
+    }
+    t->users--;
+    n->avic_table = NULL;
+    n->avic_own = -1;
+    spinlock_release(&avic_lock);
+}
+
+// An IPI of the guest's guest that AVIC could not complete on the shadow: its
+// targets, the IPI delivered to those whose entries the guest made since, as
+// AVIC delivers it; and the guest's own exit where its table has a target not
+// running, or not valid for a directed IPI (APM 24593 rev. 3.46, 15.29.6.1).
+struct avic_delivery {
+    struct avic_table *t;
+    size_t last;
+    bool deliver;
+    uint8_t vector;
+    bool directed;
+    bool refused;
+    int64_t not_running;
+};
+
+static void avic_target(struct avic_delivery *d, uint64_t index, uint32_t reported) {
+    uint64_t shadow = 0;
+    if (index <= d->last) {
+        shadow = atomic_load_explicit(
+            (_Atomic(uint64_t) *)&d->t->entries[index], memory_order_seq_cst
+        );
+    }
+    if ((shadow & SVM_AVIC_ENTRY_VALID) == 0) {
+        d->refused = d->refused || d->directed;
+        return;
+    }
+    if (d->deliver) {
+        uint8_t *backing = (uint8_t *)(uintptr_t)(shadow & SVM_AVIC_ENTRY_BACKING);
+        _Atomic(uint32_t) *irr = (_Atomic(uint32_t) *)(backing + APIC_IRR + d->vector / 32 * 0x10);
+        atomic_fetch_or_explicit(irr, (uint32_t)1 << (d->vector % 32), memory_order_seq_cst);
+        if ((shadow & SVM_AVIC_ENTRY_RUNNING) != 0) {
+            wrmsr(SVM_AVIC_DOORBELL, shadow & SVM_AVIC_ENTRY_HOST_ID);
+        }
+    }
+    if ((shadow & SVM_AVIC_ENTRY_RUNNING) == 0 && d->not_running < 0
+     && (avic_entry12(d->t, index) & SVM_AVIC_ENTRY_RUNNING) == 0) {
+        d->not_running = reported;
+    }
+}
+
+// The IPI's targets, as AVIC finds them in the tables (15.29.5.3 and
+// 15.29.6.1): each valid entry of the physical one for a broadcast, but the
+// sender's for one to others; the destination for a directed one; and for a
+// logical one in x2AVIC mode, the x2APIC IDs of its cluster's bits, else the
+// entries of the logical table that its bits name, in flat or cluster mode as
+// the sender's DFR has it.
+static void avic_visit(struct nsvm *n, struct avic_delivery *d, uint32_t low, uint32_t high) {
+    uint32_t dest = n->x2avic12 ? high : high >> 24;
+    uint32_t shorthand = low & ICR_SHORTHAND_MASK;
+    uint32_t all = n->x2avic12 ? ~(uint32_t)0 : 0xff;
+    bool broadcast = shorthand == ICR_SHORTHAND_ALL || shorthand == ICR_SHORTHAND_OTHERS
+                  || (shorthand == ICR_SHORTHAND_NONE && dest == all);
+    d->directed = !broadcast;
+    if (broadcast) {
+        for (size_t i = 0; i <= d->last; i++) {
+            if (shorthand != ICR_SHORTHAND_OTHERS || (int64_t)i != n->avic_own) {
+                avic_target(d, i, (uint32_t)i);
+            }
+        }
+        return;
+    }
+    if (shorthand != ICR_SHORTHAND_NONE) {
+        d->refused = true;
+        return;
+    }
+    if ((low & ICR_LOGICAL) == 0) {
+        avic_target(d, dest, dest);
+        return;
+    }
+    if (n->x2avic12) {
+        for (size_t bit = 0; bit < 16; bit++) {
+            uint32_t id = (dest >> 16) << 4 | (uint32_t)bit;
+            if ((dest >> bit & 1) != 0) {
+                avic_target(d, id, id);
+            }
+        }
+        return;
+    }
+    const uint32_t *regs = (const uint32_t *)guest_mem_page(n->avic_backing12);
+    const uint32_t *table = (const uint32_t *)guest_mem_page(
+        page_down(n->copy.control.avic_logical_table)
+    );
+    if (table == NULL) {
+        d->refused = true;
+        return;
+    }
+    bool flat = regs[APIC_DFR / 4] >> 28 == 0xf;
+    for (size_t bit = 0; bit < (flat ? 8 : 4) && !d->refused; bit++) {
+        uint32_t index = (uint32_t)(flat ? bit : (dest >> 4) * 4 + bit);
+        if ((dest >> bit & 1) == 0) {
+            continue;
+        }
+        uint32_t entry = atomic_load_explicit(
+            (const _Atomic(uint32_t) *)&table[index], memory_order_seq_cst
+        );
+        if ((entry & SVM_AVIC_LOGICAL_VALID) == 0) {
+            d->refused = true;
+        } else {
+            avic_target(d, entry & 0xff, index);
+        }
+    }
+}
+
+static bool avic_ipi(struct vcpu *v, struct nsvm *n, uint64_t info1, uint64_t info2) {
+    uint32_t why = (uint32_t)(info2 >> 32);
+    struct avic_table *t = n->avic_table;
+    if ((why != SVM_AVIC_IPI_NOT_RUNNING && why != SVM_AVIC_IPI_BAD_TARGET) || t == NULL) {
+        return false;
+    }
+    uint32_t low = (uint32_t)info1;
+    uint32_t high = (uint32_t)(info1 >> 32);
+    struct avic_delivery d = {
+        .t = t, .last = n->vmcb02->control.avic_physical_table & SVM_AVIC_PHYSICAL_LAST,
+        .vector = (uint8_t)(low & ICR_VECTOR_MASK), .not_running = -1
+    };
+    spinlock_acquire(&avic_lock);
+    // The guest may have made the entries since its guest's entry. The
+    // processor finds every target before it delivers to any.
+    if (why == SVM_AVIC_IPI_BAD_TARGET) {
+        avic_sync(t, d.last);
+    }
+    avic_visit(n, &d, low, high);
+    if (!d.refused && why == SVM_AVIC_IPI_BAD_TARGET) {
+        d.deliver = true;
+        d.not_running = -1;
+        avic_visit(n, &d, low, high);
+    }
+    spinlock_release(&avic_lock);
+    if (d.refused) {
+        return false;
+    }
+    if (d.not_running >= 0) {
+        uint64_t info = (uint64_t)SVM_AVIC_IPI_NOT_RUNNING << 32 | (uint64_t)d.not_running;
+        exit_to_l1(
+            v, n, SVM_EXIT_AVIC_INCOMPLETE_IPI, info1, info, v->vmcb->control.exitintinfo, true
+        );
+    }
+    return true;
+}
+
+// The guest's doorbell, to a processor whose vCPU's guest's guest runs with
+// AVIC; at others it does nothing, as on those that run no guest (15.29.8.2).
+static bool avic_doorbell(uint64_t value) {
+    if ((value & ~(x2avic ? SVM_AVIC_ENTRY_HOST_ID : AVIC_LAST)) != 0) {
+        return false;
+    }
+    struct cpu *cpu = smp_cpu_by_apic_id((uint32_t)value);
+    struct nsvm *n = cpu != NULL && cpu->vcpu != NULL ? cpu->vcpu->nsvm : NULL;
+    if (n != NULL && atomic_load_explicit(&n->avic_running, memory_order_seq_cst)) {
+        wrmsr(SVM_AVIC_DOORBELL, value);
+    }
+    return true;
 }
 
 // VMCB02 from VMCB12 and the hypervisor's own controls in VMCB01 (APM 24594
@@ -1490,6 +1984,15 @@ static void prepare_vmcb02(struct nsvm *n) {
             && (vmcb01->save.cs.attrib & VCPU_SEG_L) != 0;
     n->vls12_refused = vls && !n->vls12;
     n->fred12 = vcpu_fred() && (c12->virt_ext & SVM_VIRT_EXT_FRED) != 0;
+    n->avic12 = avic && (c12->vintr & SVM_VINTR_AVIC) != 0;
+    n->x2avic12 = n->avic12 && x2avic && (c12->vintr & SVM_VINTR_X2AVIC) != 0;
+    // Without xAVIC, or with the page elsewhere, NPT02's mapping of the local
+    // APIC's page to avic_apic_page goes.
+    uint64_t apic = n->avic12 && !n->x2avic12 ? page_down(c12->avic_apic_bar) : 1;
+    if (n->avic_apic02 != 1 && n->avic_apic02 != apic) {
+        npt02_drop_all(n);
+        n->avic_apic02 = 1;
+    }
     merge_intercepts(n);
 
     // The guest's PAUSE filter, as the hypervisor intercepts no PAUSE itself
@@ -1531,8 +2034,9 @@ static void prepare_vmcb02(struct nsvm *n) {
     // (APM 24593 rev. 3.46, 15.21.10 and 15.33.2).
     uint64_t nmi = SVM_VINTR_NMI | SVM_VINTR_NMI_MASK | SVM_VINTR_NMI_ENABLE;
     uint64_t gif = SVM_VINTR_GIF | SVM_VINTR_GIF_ENABLE;
+    uint64_t avic_bits = n->avic12 ? SVM_VINTR_AVIC | SVM_VINTR_X2AVIC : 0;
     uint64_t from12 = SVM_VINTR_TPR_MASK | VIRQ_BITS | (n->vnmi12 ? nmi : 0)
-                    | (n->vgif12 ? gif : 0);
+                    | (n->vgif12 ? gif : 0) | avic_bits;
     uint64_t from01 = SVM_VINTR_MASKING | (n->vgif12 ? 0 : SVM_VINTR_GIF_ENABLE)
                     | (n->vnmi12 ? 0 : SVM_VINTR_NMI_ENABLE | SVM_VINTR_NMI_MASK);
     c->vintr = (c12->vintr & from12) | (vmcb01->control.vintr & from01);
@@ -1616,6 +2120,9 @@ static void prepare_vmcb02(struct nsvm *n) {
     }
     c->exitintdata = 0;
     c->eventinjdata = c12->eventinjdata;
+    if (n->avic12) {
+        avic_enter(n);
+    }
 
     s->es = s12->es;
     s->cs = s12->cs;
@@ -1975,6 +2482,10 @@ static bool l1_wants(struct vcpu *v, struct nsvm *n, uint64_t code) {
         case SVM_EXIT_INVALID_PMC: {
             return true;
         }
+        case SVM_EXIT_AVIC_INCOMPLETE_IPI:
+        case SVM_EXIT_AVIC_NOACCEL: {
+            return n->avic12;
+        }
         case SVM_EXIT_IOIO: {
             return io_wanted(n, c->exitinfo1);
         }
@@ -2173,6 +2684,10 @@ bool nsvm_l2_exit(struct vcpu *v) {
         npt_fault(v, n);
         return true;
     }
+    if (code == SVM_EXIT_AVIC_INCOMPLETE_IPI && n->avic12
+     && avic_ipi(v, n, c->exitinfo1, c->exitinfo2)) {
+        return true;
+    }
     // Where the guest's guest's own EFER.SVME is clear, the SVM instructions
     // raise #UD before their intercepts, but VMMCALL, whose intercept comes
     // first (APM 24593 rev. 3.46, Table 15-7), and STGI and SKINIT where the
@@ -2298,6 +2813,14 @@ void nsvm_interrupt_window(struct vcpu *v, bool on) {
     // nested_vmcb02_recalc_intercepts()).
     if (!n->gif
      || ((n->vintr12 & SVM_VINTR_MASKING) != 0 && (n->vmcb01->save.rflags & RFLAGS_IF) == 0)) {
+        on = false;
+    }
+    // AVIC ignores V_IRQ (APM 24593 rev. 3.46, 15.29.4.1): the guest's guest
+    // exits again once it has run a while instead, for the window to be looked
+    // at again.
+    if (on && n->avic12) {
+        vcpu_exit_after_turn(v);
+        vlapic_timer_program(v);
         on = false;
     }
     if (!n->window) {
