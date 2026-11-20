@@ -134,7 +134,7 @@ static const uint16_t fields[] = {
     0x2032, 0x201c, 0x201e, 0x2020, 0x2022, 0x2024, 0x2026, 0x2028, 0x202a, 0x2030,
     0x2034, 0x2040, 0x204a, 0x204c, 0x204e, 0x2044, 0x2052, 0x2400, 0x2402, 0x2404,
     0x2406, 0x2800, 0x2802, 0x2804, 0x2806, 0x2808, 0x280a, 0x280c, 0x280e,
-    0x2810, 0x2818, 0x281a, 0x281c, 0x281e, 0x2820, 0x2822, 0x2824, 0x2826,
+    0x2810, 0x2816, 0x2818, 0x281a, 0x281c, 0x281e, 0x2820, 0x2822, 0x2824, 0x2826,
     0x2828, 0x282e, 0x2830, 0x2c00, 0x2c02, 0x2c04, 0x2c06, 0x2c08, 0x2c0a,
     0x2c0c, 0x2c0e, 0x2c10, 0x2c12, 0x2c14, 0x2c16, 0x2c1a, 0x4000, 0x4002,
     0x4004, 0x4006, 0x4008, 0x400a, 0x400c, 0x400e, 0x4010, 0x4012, 0x4014,
@@ -328,12 +328,13 @@ static unsigned int ept02_budget;
     (EXIT_SAVE_DEBUG_CONTROLS | EXIT_HOST_ADDR_SPACE_SIZE | EXIT_ACK_INTR_ON_EXIT \
    | EXIT_SAVE_PAT | EXIT_LOAD_PAT | EXIT_SAVE_EFER \
    | EXIT_LOAD_EFER | EXIT_SAVE_PREEMPTION_TIMER | EXIT_LOAD_PERF_GLOBAL_CTRL \
-   | EXIT_SAVE_PERF_GLOBAL_CTRL | EXIT_CLEAR_UINV | EXIT_LOAD_CET_STATE \
-   | EXIT_LOAD_PKRS | EXIT_ACTIVATE_SECONDARY | EXIT_DEFAULT1)
+   | EXIT_SAVE_PERF_GLOBAL_CTRL | EXIT_CLEAR_LBR_CTL | EXIT_CLEAR_UINV \
+   | EXIT_LOAD_CET_STATE | EXIT_LOAD_PKRS | EXIT_ACTIVATE_SECONDARY \
+   | EXIT_DEFAULT1)
 #define ENTRY_EMULATED \
     (ENTRY_LOAD_DEBUG_CONTROLS | ENTRY_IA32E_MODE_GUEST | ENTRY_LOAD_PAT | ENTRY_LOAD_EFER \
-   | ENTRY_LOAD_PERF_GLOBAL_CTRL | ENTRY_LOAD_UINV | ENTRY_LOAD_CET_STATE | ENTRY_LOAD_PKRS \
-   | ENTRY_LOAD_FRED | ENTRY_LOAD_SPEC_CTRL | ENTRY_DEFAULT1)
+   | ENTRY_LOAD_PERF_GLOBAL_CTRL | ENTRY_LOAD_UINV | ENTRY_LOAD_CET_STATE | ENTRY_LOAD_LBR_CTL \
+   | ENTRY_LOAD_PKRS | ENTRY_LOAD_FRED | ENTRY_LOAD_SPEC_CTRL | ENTRY_DEFAULT1)
 
 // IA32_VMX_BASIC (SDM 325462-093 Vol. 3D, A.1): the VMCS size, write-back
 // memory, the information of INS and OUTS exits, the TRUE capability MSRs,
@@ -432,6 +433,11 @@ void nvmx_init(void) {
     if (!vmx_pkrs_switched()) {
         cap_true_exit &= ~((uint64_t)EXIT_LOAD_PKRS << 32);
         cap_true_entry &= ~((uint64_t)ENTRY_LOAD_PKRS << 32);
+    }
+    // Likewise IA32_LBR_CTL.
+    if (!vmx_lbr_switched()) {
+        cap_true_exit &= ~((uint64_t)EXIT_CLEAR_LBR_CTL << 32);
+        cap_true_entry &= ~((uint64_t)ENTRY_LOAD_LBR_CTL << 32);
     }
     // Likewise UINV.
     if (!vmx_uinv_switched()) {
@@ -668,6 +674,10 @@ static bool field_offered(uint32_t field) {
         case VMCS_GUEST_UINV: {
             return ((uint32_t)(cap_true_entry >> 32) & ENTRY_LOAD_UINV) != 0
                 || ((uint32_t)(cap_true_exit >> 32) & EXIT_CLEAR_UINV) != 0;
+        }
+        case VMCS_GUEST_LBR_CTL: {
+            return ((uint32_t)(cap_true_entry >> 32) & ENTRY_LOAD_LBR_CTL) != 0
+                || ((uint32_t)(cap_true_exit >> 32) & EXIT_CLEAR_LBR_CTL) != 0;
         }
         case VMCS_GUEST_PKRS: {
             return ((uint32_t)(cap_true_entry >> 32) & ENTRY_LOAD_PKRS) != 0;
@@ -2551,6 +2561,7 @@ struct l1_values {
     uint64_t efer;
     uint64_t bndcfgs;
     uint64_t perf_global_ctrl;
+    uint64_t lbr_ctl;
     struct cet_state cet;
 };
 
@@ -2728,6 +2739,12 @@ static void write_vmcs02(struct vcpu *v, struct nvmx *n, const struct l1_values 
         exit_controls |= EXIT_ACTIVATE_SECONDARY;
         vmx_write(VMCS_EXIT_CONTROLS2, exit2);
     }
+    // VMCS02 runs the guest's guest with the IA32_LBR_CTL its entry loads, or
+    // the guest's own, and its exits clear it, as VMCS01's do.
+    if (vmx_lbr_switched()) {
+        bool loaded = (entry & ENTRY_LOAD_LBR_CTL) != 0;
+        vmx_write(VMCS_GUEST_LBR_CTL, loaded ? get12(n, VMCS_GUEST_LBR_CTL) : l1->lbr_ctl);
+    }
     // Likewise its guest's IA32_PKRS, which the processor checks and every
     // VMCS02 exit saves (SDM 325462-093 Vol. 3C, 29.3.1.1 and 30.3.1).
     if (vmx_pkrs_switched()) {
@@ -2901,6 +2918,9 @@ static void save_l2_state(struct nvmx *n) {
     if (vmx_pkrs_switched()) {
         set12(n, VMCS_GUEST_PKRS, vmx_read(VMCS_GUEST_PKRS));
     }
+    if (vmx_lbr_switched()) {
+        set12(n, VMCS_GUEST_LBR_CTL, vmx_read(VMCS_GUEST_LBR_CTL));
+    }
     if (vmx_uinv_switched()) {
         set12(n, VMCS_GUEST_UINV, vmx_read(VMCS_GUEST_UINV));
     }
@@ -3028,6 +3048,10 @@ static void load_l1_host_state(struct vcpu *v, struct nvmx *n, bool nmi) {
     // where the exit loads it.
     if ((exit & EXIT_LOAD_PKRS) != 0) {
         wrmsr(MSR_IA32_PKRS, get12(n, VMCS_HOST_PKRS));
+    }
+    // The guest's IA32_LBR_CTL, which VMCS01 holds while the hypervisor runs.
+    if ((exit & EXIT_CLEAR_LBR_CTL) != 0) {
+        vmx_write(VMCS_GUEST_LBR_CTL, 0);
     }
     if ((exit & EXIT_CLEAR_UINV) != 0) {
         wrmsr(MSR_IA32_UINTR_MISC, rdmsr(MSR_IA32_UINTR_MISC) & ~UINTR_MISC_UINV);
@@ -3198,6 +3222,7 @@ static void exit_to_l1(
 
     uint64_t bndcfgs = vmx_mpx_passthrough() ? vmx_read(VMCS_GUEST_BNDCFGS) : 0;
     uint64_t perf = vmx_perf_global_switched() ? vmx_read(VMCS_GUEST_PERF_GLOBAL_CTRL) : 0;
+    uint64_t lbr_ctl = vmx_lbr_switched() ? vmx_read(VMCS_GUEST_LBR_CTL) : 0;
     struct cet_state cet = vmx_cet_switched() ? cet_read() : (struct cet_state){ 0 };
     vmx_vmcs_swap(v, &n->other);
     n->in_l2 = false;
@@ -3214,6 +3239,9 @@ static void exit_to_l1(
     }
     if (vmx_cet_switched() && loaded) {
         cet_write(&cet);
+    }
+    if (vmx_lbr_switched() && loaded) {
+        vmx_write(VMCS_GUEST_LBR_CTL, lbr_ctl);
     }
     load_l1_host_state(v, n, nmi);
     // A failure here would be a VMX abort, which shuts the processor down.
@@ -3310,7 +3338,8 @@ static void vmlaunch(struct vcpu *v, struct nvmx *n, bool resume) {
         .bndcfgs = vmx_mpx_passthrough() ? vmx_read(VMCS_GUEST_BNDCFGS) : 0,
         .perf_global_ctrl = vmx_perf_global_switched()
                           ? vmx_read(VMCS_GUEST_PERF_GLOBAL_CTRL)
-                          : 0
+                          : 0,
+        .lbr_ctl = vmx_lbr_switched() ? vmx_read(VMCS_GUEST_LBR_CTL) : 0
     };
     if (vmx_cet_switched()) {
         l1.cet = cet_read();
