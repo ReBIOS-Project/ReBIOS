@@ -93,9 +93,11 @@
 #define VMCS_GUEST_PDPTE3 0x2810
 #define VMCS_GUEST_BNDCFGS 0x2812
 #define VMCS_GUEST_RTIT_CTL 0x2814
+#define VMCS_GUEST_PKRS 0x2818
 #define VMCS_HOST_PAT 0x2c00
 #define VMCS_HOST_EFER 0x2c02
 #define VMCS_HOST_PERF_GLOBAL_CTRL 0x2c04
+#define VMCS_HOST_PKRS 0x2c06
 
 #define VMCS_PIN_CONTROLS 0x4000
 #define VMCS_PROC_CONTROLS 0x4002
@@ -269,6 +271,7 @@
 #define EXIT_CONCEAL_VMX_FROM_PT ((uint32_t)1 << 24)
 #define EXIT_CLEAR_RTIT_CTL ((uint32_t)1 << 25)
 #define EXIT_LOAD_CET_STATE ((uint32_t)1 << 28)
+#define EXIT_LOAD_PKRS ((uint32_t)1 << 29)
 #define EXIT_SAVE_PERF_GLOBAL_CTRL ((uint32_t)1 << 30)
 #define EXIT_ACTIVATE_SECONDARY ((uint32_t)1 << 31)
 
@@ -287,6 +290,7 @@
 #define ENTRY_CONCEAL_VMX_FROM_PT ((uint32_t)1 << 17)
 #define ENTRY_LOAD_RTIT_CTL ((uint32_t)1 << 18)
 #define ENTRY_LOAD_CET_STATE ((uint32_t)1 << 20)
+#define ENTRY_LOAD_PKRS ((uint32_t)1 << 22)
 #define ENTRY_LOAD_FRED ((uint32_t)1 << 23)
 
 // Guest segment access rights (SDM 325462-093 Vol. 3C, Table 27-2).
@@ -585,6 +589,8 @@ bool vmx_cet_switched(void);
 // Whether VMCS02 can load the guest's guests' FRED state at entries and save
 // it at exits, where the guest has FRED.
 bool vmx_fred_switched(void);
+// Likewise IA32_PKRS, which every exit saves, where the guest has PKS.
+bool vmx_pkrs_switched(void);
 // The secondary VM-exit controls the processor allows.
 uint64_t vmx_exit2_capability(void);
 // An access the processor made for the guest outside of any instruction that

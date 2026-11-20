@@ -401,6 +401,11 @@ bool vmx_fred_switched(void) {
         && (cpuid_cr4_allowed() & CR4_FRED) != 0;
 }
 
+bool vmx_pkrs_switched(void) {
+    return control_allowed(entry_cap, ENTRY_LOAD_PKRS) && control_allowed(exit_cap, EXIT_LOAD_PKRS)
+        && (cpuid_cr4_allowed() & CR4_PKS) != 0;
+}
+
 uint64_t vmx_exit2_capability(void) {
     return exit2_cap;
 }
