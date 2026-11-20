@@ -158,6 +158,18 @@ struct ept02 {
 
 #define EPT02_ROOTS 4
 
+// An EPT02 leaf that took write access while the guest logs page
+// modifications: where it is, what it holds, and where the guest's EPT entry
+// that it was made from is, and what that held.
+struct pml_watch {
+    uint64_t *slot;
+    uint64_t leaf;
+    const _Atomic(uint64_t) *entry12;
+    uint64_t made_from;
+};
+
+#define PML_WATCHED 128
+
 // VMCS01's VPID is 1. VPIDs tag translations per logical processor, so every
 // vCPU's VMCS02 may share one.
 #define VPID02 2
@@ -213,6 +225,8 @@ struct nvmx {
     struct ept02 *current02;
     size_t ept02_pages;
     unsigned int ept02_next;
+    struct pml_watch pml_watch[PML_WATCHED];
+    size_t pml_watched;
     // The guest's VPID whose translations VPID02 holds.
     uint16_t vpid12;
     // An exit of the guest's guest that what the hypervisor carried out for it
@@ -1319,6 +1333,8 @@ struct ept12_walk {
     uint64_t access;
     // The entries used, by level, as the walk left them.
     uint64_t entry[5];
+    // Where the entry that maps the page is.
+    const _Atomic(uint64_t) *leaf_at;
 };
 
 #define EPT12_MAPPED 0
@@ -1387,6 +1403,7 @@ static int ept12_walk(struct nvmx *n, uintptr_t gpa, uint64_t access, struct ept
             w->gpa = x86_leaf_address(e, l) | (gpa & (x86_level_size(l) - 1));
             w->level = l;
             w->leaf = e;
+            w->leaf_at = (const _Atomic(uint64_t) *)p;
             break;
         }
         tables &= e;
@@ -1467,6 +1484,7 @@ static uint64_t *ept02_table(struct nvmx *n) {
 }
 
 static void ept02_free(struct nvmx *n, uint64_t *table, size_t level) {
+    n->pml_watched = 0;
     for (size_t i = 0; level > 0 && i < 512; i++) {
         uint64_t e = table[i];
         if ((e & EPT_RIGHTS) != 0 && (e & EPT_LARGE) == 0) {
@@ -1525,13 +1543,76 @@ static uint64_t ept02_pointer(struct nvmx *n) {
          | (eptp & (EPTP_AD | EPTP_SUPERVISOR_SHADOW_STACK));
 }
 
+// Whether the guest logs page modifications for its guest, with its EPT's
+// accessed and dirty flags (SDM 325462-093 Vol. 3C, 31.3.6).
+static bool pml_watching(const struct nvmx *n) {
+    return (proc2_12(n) & PROC2_PML) != 0
+        && (get12(n, VMCS_EPT_POINTER) & EPTP_AD) != 0;
+}
+
+// Takes the EPT02 leaves that took write access while the guest logged page
+// modifications out, as long as they hold what they were given, for the next
+// write to find the guest's dirty flag again.
+static void pml_watch_drop(struct nvmx *n) {
+    for (size_t i = 0; i < n->pml_watched; i++) {
+        if (*n->pml_watch[i].slot == n->pml_watch[i].leaf) {
+            *n->pml_watch[i].slot = 0;
+        }
+    }
+    n->pml_watched = 0;
+    vmx_invept_all();
+}
+
+// Keeps an EPT02 leaf that SLOT now holds, made from the walk W, where it
+// gives write access while the guest logs page modifications.
+static void pml_watch_add(struct nvmx *n, uint64_t *slot, const struct ept12_walk *w) {
+    if ((*slot & EPT_W) == 0 || !pml_watching(n)) {
+        return;
+    }
+    if (n->pml_watched == PML_WATCHED) {
+        pml_watch_drop(n);
+    }
+    n->pml_watch[n->pml_watched++] = (struct pml_watch){
+        .slot = slot, .leaf = *slot, .entry12 = w->leaf_at, .made_from = w->entry[w->level]
+    };
+}
+
+// A VM entry while the guest logs page modifications: the EPT02 leaves that
+// took write access from entries of the guest's EPT that read differently now,
+// as where the guest cleared a dirty flag without an INVEPT, go, for its
+// guest's next write to set the flag and log the page again, as KVM's nested
+// EPT has it, rather than as a processor that keeps the translation may (SDM
+// 325462-093 Vol. 3C, 31.3.5).
+static void pml_watch_check(struct nvmx *n) {
+    size_t kept = 0;
+    bool dropped = false;
+    for (size_t i = 0; i < n->pml_watched; i++) {
+        struct pml_watch watch = n->pml_watch[i];
+        if (*watch.slot != watch.leaf) {
+            continue;
+        }
+        if (atomic_load_explicit(watch.entry12, memory_order_relaxed) == watch.made_from) {
+            n->pml_watch[kept++] = watch;
+        } else {
+            *watch.slot = 0;
+            dropped = true;
+        }
+    }
+    n->pml_watched = kept;
+    if (dropped) {
+        vmx_invept_all();
+    }
+}
+
 // An EPT02 leaf for the guest's mapping and the hypervisor's. With accessed
 // and dirty flags, writes wait for the guest's dirty flag, which the leaf then
 // takes as set until the guest's INVEPT, as a processor may (SDM 325462-093
-// Vol. 3C, 31.3.5). Supervisor shadow-stack accesses, which write without the
-// leaf's write access (31.3.3.2), are let through where the hypervisor's EPT
-// has the page writable, and wait for the dirty flag as writes do. Where the
-// hypervisor's memory type is not write-back, it wins but over uncacheable.
+// Vol. 3C, 31.3.5), but for the leaves that a VM entry checks while the guest
+// logs page modifications (pml_watch_check()). Supervisor shadow-stack
+// accesses, which write without the leaf's write access (31.3.3.2), are let
+// through where the hypervisor's EPT has the page writable, and wait for the
+// dirty flag as writes do. Where the hypervisor's memory type is not
+// write-back, it wins but over uncacheable.
 static uint64_t ept02_leaf(
     const struct nvmx *n,
     const struct ept12_walk *w,
@@ -1624,6 +1705,7 @@ static uint64_t ept02_fill(struct nvmx *n, uintptr_t gpa, const struct ept12_wal
         bool is_table = (*slot & EPT_RIGHTS) != 0 && (*slot & EPT_LARGE) == 0;
         if (l <= level && !is_table) {
             *slot = l == level ? leaf : ept02_leaf(n, w, hpa, prot, memtype, l);
+            pml_watch_add(n, slot, w);
             return *slot & (EPT_RIGHTS | EPT_SUPERVISOR_SHADOW_STACK);
         }
         if (!is_table) {
@@ -1634,6 +1716,7 @@ static uint64_t ept02_fill(struct nvmx *n, uintptr_t gpa, const struct ept12_wal
     leaf = ept02_leaf(n, w, hpa, prot, memtype, 0);
     table[x86_level_index(gpa, 0)] = leaf;
     table[512 + x86_level_index(gpa, 0)] = w->entry[0];
+    pml_watch_add(n, &table[x86_level_index(gpa, 0)], w);
     return leaf & (EPT_RIGHTS | EPT_SUPERVISOR_SHADOW_STACK);
 }
 
@@ -2809,6 +2892,11 @@ static void vmlaunch(struct vcpu *v, struct nvmx *n, bool resume) {
         *(volatile uint32_t *)(n->vmcs12 + VMCS12_LAUNCHED) = 1;
     }
     write_vmcs02(v, n, &l1);
+    if (pml_watching(n)) {
+        pml_watch_check(n);
+    } else {
+        n->pml_watched = 0;
+    }
     if ((get12(n, VMCS_PIN_CONTROLS) & PIN_PREEMPTION_TIMER) != 0) {
         n->timer_deadline = (rdtsc() >> timer_rate) + (uint32_t)get12(n, VMCS_PREEMPTION_TIMER);
     }
