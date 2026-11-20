@@ -119,11 +119,8 @@ uint16_t event_nmi_source(int vector) {
     return vector >= 0 && vector < 16 ? (uint16_t)1 << vector : 1;
 }
 
-// The machine's NMIs come on its NMI pins, which the guest's entries for them
-// give their vectors.
 void event_nmi(struct vcpu *v) {
-    v->nmi_pending = true;
-    v->nmi_sources |= vlapic_pin_nmi_sources(v);
+    vlapic_machine_nmi(v);
 }
 
 void event_nmi_sent(struct cpu *cpu, int vector) {

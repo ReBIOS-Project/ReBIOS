@@ -1296,18 +1296,61 @@ static void local_interrupt(struct vcpu *v, uint32_t lvt) {
     }
 }
 
-uint16_t vlapic_pin_nmi_sources(struct vcpu *v) {
-    static const uint32_t pins[] = { APIC_LVT_LINT0, APIC_LVT_LINT1 };
-    uint16_t sources = 0;
-    for (size_t i = 0; i < ARRAY_COUNT(pins); i++) {
-        if ((lapic_read(pins[i]) & APIC_LVT_DELIVERY_MASK) != APIC_LVT_DELIVERY_NMI) {
-            continue;
-        }
-        uint32_t lvt = regs_get(v->vlapic, pins[i]);
-        bool nmi = (lvt & (APIC_LVT_MASKED | APIC_LVT_DELIVERY_MASK)) == APIC_LVT_DELIVERY_NMI;
-        sources |= event_nmi_source(nmi ? (int)(uint8_t)lvt : -1);
+// An INIT for the vCPU, which takes it once running.
+static void init_signal(struct vcpu *v) {
+    if (atomic_load_explicit(&v->sipi, memory_order_acquire) == VCPU_SIPI_RUNNING) {
+        atomic_store_explicit(&v->cpu->init_pending, true, memory_order_release);
+        vcpu_kick(v->cpu);
     }
-    return sources != 0 ? sources : event_nmi_source(-1);
+}
+
+// A signal on a local interrupt pin, as the pin's entry asks: a vector, an NMI
+// whose source the entry's vector is, or, on Intel's local APICs, an INIT (SDM
+// 325462-093 Vol. 3A, 13.5.1; AMD's have none, APM 24593 rev. 3.46, 16.4).
+// SMIs go nowhere, as the guest has no SMM, and ExtINT takes the 8259's INTR
+// (irq.c).
+static void pin_signal(struct vcpu *v, uint32_t lvt, bool level) {
+    if ((lvt & APIC_LVT_MASKED) != 0) {
+        return;
+    }
+    switch (lvt & APIC_LVT_DELIVERY_MASK) {
+        case APIC_LVT_DELIVERY_FIXED: {
+            vlapic_accept(v, (uint8_t)lvt, level);
+            break;
+        }
+        case APIC_LVT_DELIVERY_NMI: {
+            event_nmi_sent(v->cpu, (uint8_t)lvt);
+            vcpu_kick(v->cpu);
+            break;
+        }
+        case APIC_LVT_DELIVERY_INIT: {
+            if (virt_vmx) {
+                init_signal(v);
+            }
+            break;
+        }
+        default: {
+            break;
+        }
+    }
+}
+
+// The machine's NMI pins are the guest's too, its NMIs signals on them, which
+// go as the guest's entries for the pins ask; as NMIs where its local APIC is
+// globally disabled, which leaves LINT1 the processor's NMI pin (SDM
+// 325462-093 Vol. 3A, 7.3.1).
+void vlapic_machine_nmi(struct vcpu *v) {
+    static const uint32_t pins[] = { APIC_LVT_LINT0, APIC_LVT_LINT1 };
+    struct vlapic *vl = v->vlapic;
+    if (!enabled(vl)) {
+        event_nmi_sent(v->cpu, -1);
+        return;
+    }
+    for (size_t i = 0; i < ARRAY_COUNT(pins); i++) {
+        if ((lapic_read(pins[i]) & APIC_LVT_DELIVERY_MASK) == APIC_LVT_DELIVERY_NMI) {
+            pin_signal(v, regs_get(vl, pins[i]), false);
+        }
+    }
 }
 
 void vlapic_thermal_fired(struct vcpu *v) {
@@ -1377,16 +1420,9 @@ void vlapic_take(struct vcpu *v, uint8_t vector) {
 
 void vlapic_lint0_rose(struct vcpu *v) {
     struct vlapic *vl = v->vlapic;
-    uint32_t lvt = regs_get(vl, APIC_LVT_LINT0);
-    if (!enabled(vl) || (lvt & APIC_LVT_MASKED) != 0) {
-        return;
-    }
-    uint32_t mode = lvt & APIC_LVT_DELIVERY_MASK;
-    if (mode == APIC_LVT_DELIVERY_FIXED) {
-        vlapic_accept(v, (uint8_t)lvt, (lvt & APIC_LVT_LEVEL) != 0);
-    } else if (mode == APIC_LVT_DELIVERY_NMI) {
-        event_nmi_sent(v->cpu, (uint8_t)lvt);
-        vcpu_kick(v->cpu);
+    if (enabled(vl)) {
+        uint32_t lvt = regs_get(vl, APIC_LVT_LINT0);
+        pin_signal(v, lvt, (lvt & APIC_LVT_LEVEL) != 0);
     }
 }
 

@@ -71,6 +71,7 @@
 #define APIC_LVT_DELIVERY_FIXED ((uint32_t)0 << 8)
 #define APIC_LVT_DELIVERY_SMI ((uint32_t)2 << 8)
 #define APIC_LVT_DELIVERY_NMI ((uint32_t)4 << 8)
+#define APIC_LVT_DELIVERY_INIT ((uint32_t)5 << 8)
 #define APIC_LVT_DELIVERY_EXTINT ((uint32_t)7 << 8)
 #define APIC_LVT_DELIVERY_STATUS ((uint32_t)1 << 12)
 #define APIC_LVT_ACTIVE_LOW ((uint32_t)1 << 13)
