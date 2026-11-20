@@ -441,7 +441,8 @@ struct cpuid_regs nsvm_cpuid(void) {
                       | SVM_FEATURE_VGIF | SVM_FEATURE_GMET
                       | SVM_FEATURE_TSC_RATIO | SVM_FEATURE_SVML
                       | SVM_FEATURE_IDLE_HLT | SVM_FEATURE_BUS_LOCK_THRESHOLD
-                      | (svm_vls ? SVM_FEATURE_VLS : 0) | (svm_vnmi ? SVM_FEATURE_VNMI : 0);
+                      | SVM_FEATURE_HOST_MCE_OVERRIDE | (svm_vls ? SVM_FEATURE_VLS : 0)
+                      | (svm_vnmi ? SVM_FEATURE_VNMI : 0);
     return (struct cpuid_regs){
         svm.eax & 0xff, nasid - 1, svm.ecx & CPUID_8000000A_ECX_PML,
         (svm.edx & features) | SVM_FEATURE_VMCB_ADDR_CHECK
@@ -1770,9 +1771,12 @@ static bool l1_wants(struct vcpu *v, struct nsvm *n, uint64_t code) {
     }
     // A machine check exits where the guest's guest lacks CR4.MCE whether
     // intercepted or not, where the processor has HOST_MCE_OVERRIDE (APM 24593
-    // rev. 3.46, 15.12.18): it is the guest's only where VMCB12 intercepts it.
+    // rev. 3.46, 15.12.18): it is the guest's where VMCB12 intercepts it, and,
+    // as the guest's SVM has HOST_MCE_OVERRIDE too, where the guest's own
+    // CR4.MCE is set.
     if (code == SVM_EXIT_EXCEPTION_BASE + VECTOR_MC) {
-        return (n->intercepts[2] & ((uint32_t)1 << VECTOR_MC)) != 0;
+        return (n->intercepts[2] & ((uint32_t)1 << VECTOR_MC)) != 0
+            || ((v->vmcb->save.cr4 & CR4_MCE) == 0 && (n->vmcb01->save.cr4 & CR4_MCE) != 0);
     }
     if (code >= SVM_EXIT_EXCEPTION_BASE && code < SVM_EXIT_EXCEPTION_BASE + 32) {
         uint32_t own = n->vmcb01->control.intercept_exceptions & ~((uint32_t)1 << VECTOR_MF);
