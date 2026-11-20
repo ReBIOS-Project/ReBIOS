@@ -349,6 +349,7 @@ _Static_assert(
 #define NPF_SS ((uint64_t)1 << 6)
 #define NPF_FINAL ((uint64_t)1 << 32)
 #define NPF_TABLE ((uint64_t)1 << 33)
+#define NPF_SSS_PAGE ((uint64_t)1 << 37)
 
 // Virtual interrupt control, at offset 060h.
 #define SVM_VINTR_TPR_MASK ((uint64_t)0xf)
@@ -393,6 +394,7 @@ _Static_assert(
 #define SVM_FEATURE_VGIF ((uint32_t)1 << 16)
 #define SVM_FEATURE_GMET ((uint32_t)1 << 17)
 #define SVM_FEATURE_X2AVIC ((uint32_t)1 << 18)
+#define SVM_FEATURE_SSSCHECK ((uint32_t)1 << 19)
 #define SVM_FEATURE_V_SPEC_CTRL ((uint32_t)1 << 20)
 #define SVM_FEATURE_ROGPT ((uint32_t)1 << 21)
 #define SVM_FEATURE_HOST_MCE_OVERRIDE ((uint32_t)1 << 23)
@@ -406,6 +408,7 @@ _Static_assert(
 // Nested paging and what goes with it, at offset 090h.
 #define SVM_NP_ENABLE ((uint64_t)1 << 0)
 #define SVM_NP_GMET ((uint64_t)1 << 3)
+#define SVM_NP_SSS ((uint64_t)1 << 4)
 #define SVM_NP_ROGPT ((uint64_t)1 << 6)
 #define SVM_NP_PML ((uint64_t)1 << 11)
 #define SVM_NP_INVLPGB ((uint64_t)1 << 7)

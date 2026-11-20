@@ -109,6 +109,9 @@ struct npt12_walk {
     bool writable;
     bool executable;
     bool user;
+    // Whether it is a supervisor shadow-stack page that a supervisor
+    // shadow-stack access reached.
+    bool sss;
 };
 
 // SVM as the guest gets it.
@@ -192,6 +195,11 @@ struct nsvm {
     // Whether VMCB12 has the guest's guest's supervisor fetches from user
     // pages of the nested page tables fault (APM 24593 rev. 3.46, 15.25.14).
     bool gmet;
+    // Whether VMCB12 has the guest's guest's supervisor shadow-stack accesses
+    // reach only supervisor shadow-stack pages of the nested page tables,
+    // which the guest's PAE paging and EFER.NXE allow (APM 24593 rev. 3.46,
+    // 15.25.15).
+    bool sss;
     // Whether VMCB12 has the guest's guest's writes that set dirty flags log
     // their pages, and where.
     bool pml;
@@ -231,10 +239,12 @@ static size_t npt02_level_max;
 static uint64_t debugctl_bits;
 // Whether the processor has read-only guest page tables, page modification
 // logging, GMET, the TSC ratio MSR, the idle HLT intercept, and the bus lock
-// threshold.
+// threshold, and SSSCheck, which takes the host's EFER.NXE (APM 24593 rev.
+// 3.46, 15.25.15).
 static bool rogpt;
 static bool pml;
 static bool gmet;
+static bool ssscheck;
 static bool tsc_scaling;
 static bool idle_hlt;
 static bool bus_lock_threshold;
@@ -255,6 +265,8 @@ void nsvm_init(void) {
     npt02_level_max = svm_huge_pages() ? 2 : 1;
     rogpt = (cpuid(0x8000000a, 0).edx & SVM_FEATURE_ROGPT) != 0;
     gmet = (cpuid(0x8000000a, 0).edx & SVM_FEATURE_GMET) != 0;
+    ssscheck = (cpuid(0x8000000a, 0).edx & SVM_FEATURE_SSSCHECK) != 0
+            && (rdmsr(MSR_EFER) & EFER_NXE) != 0;
     tsc_scaling = (cpuid(0x8000000a, 0).edx & SVM_FEATURE_TSC_RATIO) != 0;
     idle_hlt = (cpuid(0x8000000a, 0).edx & SVM_FEATURE_IDLE_HLT) != 0;
     bus_lock_threshold = (cpuid(0x8000000a, 0).edx & SVM_FEATURE_BUS_LOCK_THRESHOLD) != 0;
@@ -467,7 +479,8 @@ struct cpuid_regs nsvm_cpuid(void) {
                       | SVM_FEATURE_TSC_RATIO | SVM_FEATURE_SVML
                       | SVM_FEATURE_IDLE_HLT | SVM_FEATURE_BUS_LOCK_THRESHOLD
                       | SVM_FEATURE_HOST_MCE_OVERRIDE | SVM_FEATURE_V_SPEC_CTRL
-                      | (svm_vls ? SVM_FEATURE_VLS : 0) | (svm_vnmi ? SVM_FEATURE_VNMI : 0);
+                      | (ssscheck ? SVM_FEATURE_SSSCHECK : 0) | (svm_vls ? SVM_FEATURE_VLS : 0)
+                      | (svm_vnmi ? SVM_FEATURE_VNMI : 0);
     return (struct cpuid_regs){
         svm.eax & 0xff, nasid - 1, svm.ecx & CPUID_8000000A_ECX_PML,
         (svm.edx & features) | SVM_FEATURE_VMCB_ADDR_CHECK
@@ -920,6 +933,10 @@ static bool vmcb12_valid(struct vcpu *v, const struct vmcb *vmcb12) {
       || !x86_pat_valid(s->g_pat))) {
         return false;
     }
+    // SSSCheck needs nested paging (15.25.15).
+    if (ssscheck && !npt && (c->np_enable & SVM_NP_SSS) != 0) {
+        return false;
+    }
     if ((s->efer & EFER_LME) != 0 && (s->cr0 & CR0_PG) != 0) {
         if ((s->cr4 & CR4_PAE) == 0 || (s->cr0 & CR0_PE) == 0 || (s->cr3 >> phys_width) != 0
          || ((s->cs.attrib & VCPU_SEG_L) != 0 && (s->cs.attrib & VCPU_SEG_DB) != 0)) {
@@ -1040,15 +1057,19 @@ static bool npt12_mark(const struct nsvm *n, void *at, uint64_t was, uint64_t se
 // The walk of the guest's nested page tables for an access of its guest's (APM
 // 24593 rev. 3.46, 15.25.5, 15.25.7, and 15.25.8), as the guest's own page
 // tables are walked in its paging mode at VMRUN, every access a user one where
-// VMCB12 does not have GMET (15.25.14): 0 where the walk maps the access,
-// which sets its accessed flags and, for a write, its dirty flag, else the
-// nested page fault's error code.
+// VMCB12 does not have GMET (15.25.14), but supervisor shadow-stack ones under
+// SSSCheck (15.25.15): 0 where the walk maps the access, which sets its
+// accessed flags and, for a write, its dirty flag, else the nested page
+// fault's error code. A supervisor shadow-stack page that such an access
+// reaches takes its dirty flag at once, as NPT02 lets the shadow-stack writes
+// that may follow through without a fault.
 static uint64_t npt12_walk(
     struct nsvm *n,
     uintptr_t gpa,
     bool write,
     bool fetch,
     bool user,
+    bool shadow_stack,
     struct npt12_walk *w
 ) {
     bool wide = n->npt_wide;
@@ -1057,6 +1078,7 @@ static uint64_t npt12_walk(
     bool fetch_flag = fetch && (n->npt_smep || (wide && n->npt_nx));
     uint64_t error = (n->gmet && !user ? 0 : NPF_US) | (write ? NPF_RW : 0)
                    | (fetch_flag ? NPF_ID : 0);
+    bool dirties = write || shadow_stack;
 retry:;
     uintptr_t table;
     // The PDPT of PAE paging, which nested paging reads as it walks (APM 24593
@@ -1103,6 +1125,7 @@ retry:;
             return error | NPF_P | NPF_RSV;
         }
         entries[level] = e;
+        bool tables_writable = writable;
         writable = writable && (e & PTE_W) != 0;
         user_page = user_page && (e & PTE_U) != 0;
         executable = executable && (!wide || !n->npt_nx || (e & PTE_NX) == 0);
@@ -1110,21 +1133,33 @@ retry:;
             table = wide ? e & PTE_ADDRESS : e & 0xfffff000;
             continue;
         }
-        // With GMET, U/S keeps the guest's guest's supervisor code off user
-        // pages, and nothing off pages for the supervisor.
-        bool denied = n->gmet ? fetch && !user && user_page : !user_page;
-        if (denied || (write && !writable) || (fetch && !executable)) {
-            return error | NPF_P;
+        // Under SSSCheck, a supervisor shadow-stack page has NX set and U/S
+        // clear in its leaf, and R/W set in every entry above: supervisor
+        // shadow-stack accesses reach those alone, whatever the leaf's R/W,
+        // and the faults of other accesses there say it is one (APM 24593 rev.
+        // 3.46, 15.25.15 and 15.25.6).
+        bool sss_page = n->sss && (e & PTE_NX) != 0 && (e & PTE_U) == 0 && tables_writable;
+        if (shadow_stack) {
+            if (!sss_page) {
+                return error | NPF_P;
+            }
+        } else {
+            // With GMET, U/S keeps the guest's guest's supervisor code off
+            // user pages, and nothing off pages for the supervisor.
+            bool denied = n->gmet ? fetch && !user && user_page : !user_page;
+            if (denied || (write && !writable) || (fetch && !executable)) {
+                return error | NPF_P | (sss_page ? NPF_SSS_PAGE : 0);
+            }
         }
         // A write that sets the dirty flag logs its 4-KByte page, where VMCB12
         // has it, or is not done for want of room (APM 24593 rev. 3.46,
         // 15.25.16).
-        bool logs = n->pml && write && (e & PTE_D) == 0;
+        bool logs = n->pml && dirties && (e & PTE_D) == 0;
         if (logs && n->pml_index > PML_LAST) {
             return NPT12_PML_FULL;
         }
         for (size_t l = n->npt_levels; l-- > level; ) {
-            uint64_t set = PTE_A | (l == level && write ? PTE_D : 0);
+            uint64_t set = PTE_A | (l == level && dirties ? PTE_D : 0);
             if ((entries[l] & set) != set && !npt12_mark(n, used[l], entries[l], set)) {
                 goto retry;
             }
@@ -1144,10 +1179,11 @@ retry:;
             w->gpa = (e & 0xfffff000) | (gpa & page_mask);
         }
         w->level = level;
-        w->leaf = e | PTE_A | (write ? PTE_D : 0);
+        w->leaf = e | PTE_A | (dirties ? PTE_D : 0);
         w->writable = writable;
         w->executable = executable;
         w->user = user_page;
+        w->sss = shadow_stack;
         return 0;
     }
     return error;
@@ -1264,6 +1300,12 @@ static uint64_t npt02_leaf(
     if (n->gmet && !w->user) {
         e &= ~PTE_U;
     }
+    // A supervisor shadow-stack page of the guest's stays one where the
+    // hypervisor's nested page tables have the page writable, as shadow-stack
+    // writes need no write access in the leaf.
+    if (w->sss && (prot & GPT_W) != 0) {
+        e = (e | PTE_NX | PTE_D) & ~PTE_U;
+    }
     return e;
 }
 
@@ -1371,6 +1413,7 @@ static void prepare_vmcb02(struct nsvm *n) {
     }
     n->npt = (c12->np_enable & SVM_NP_ENABLE) != 0;
     n->gmet = gmet && n->npt && (c12->np_enable & SVM_NP_GMET) != 0;
+    n->sss = false;
     // The predictor's entries from the guest are the guest's guest's to have
     // cleared, as Linux 7.3's KVM has it (nested.c,
     // nested_vmcb02_prepare_control()).
@@ -1406,6 +1449,7 @@ static void prepare_vmcb02(struct nsvm *n) {
             n->npt_levels = 5;
         }
         n->npt_nx = (s01->efer & EFER_NXE) != 0;
+        n->sss = ssscheck && (c12->np_enable & SVM_NP_SSS) != 0 && n->npt_wide && n->npt_nx;
         n->npt_pse = (s01->cr4 & CR4_PSE) != 0;
         n->npt_smep = (s01->cr4 & CR4_SMEP) != 0;
         n->npt_pat = s01->g_pat;
@@ -1418,6 +1462,9 @@ static void prepare_vmcb02(struct nsvm *n) {
         }
         if (n->gmet) {
             c->np_enable |= SVM_NP_GMET;
+        }
+        if (n->sss) {
+            c->np_enable |= SVM_NP_SSS;
         }
         // Its flushes drop the nested translations too, but for those of its
         // ASID's non-global translations alone, which a change of its nested
@@ -1827,6 +1874,30 @@ static bool l1_wants(struct vcpu *v, struct nsvm *n, uint64_t code) {
     return ((n->intercepts[code / 32] >> (code % 32)) & 1) != 0;
 }
 
+// Whether a shadow-stack access of the guest's guest that faulted is a
+// supervisor one: one of event delivery, or of an instruction at CPL 0 to 2
+// but WRUSS, whose accesses are user ones (SDM 325462-093 Vol. 2D, WRUSSD/
+// WRUSSQ; Intel APX 355828-009, 6.73 and 6.74). False where the instruction
+// cannot be read, to run it again.
+static bool supervisor_shadow_stack(struct vcpu *v, bool *supervisor) {
+    *supervisor = true;
+    if ((v->vmcb->control.exitintinfo & SVM_EVENT_VALID) != 0) {
+        return true;
+    }
+    if (v->vmcb->save.cpl == 3) {
+        *supervisor = false;
+        return true;
+    }
+    struct insn insn;
+    if (!insn_decode(v, &insn)) {
+        return false;
+    }
+    bool legacy = insn.space == (INSN_SPACE_LEGACY | 2) && insn.opcode_byte == 0xf5;
+    bool apx = insn.space == (INSN_SPACE_EVEX | 4) && insn.opcode_byte == 0x65;
+    *supervisor = !((legacy || apx) && insn.prefix == INSN_PREFIX_66);
+    return true;
+}
+
 // A nested page fault of NPT02: the guest's where its nested page tables do
 // not allow the access, else mapped as the hypervisor's nested page tables
 // have the guest's memory, or emulated where that is the hypervisor's own
@@ -1845,20 +1916,29 @@ static void npt_fault(struct vcpu *v, struct nsvm *n) {
     // mode for supervisor mode (APM 24593 rev. 3.46, 15.25.14; 56323 rev. 1.03
     // and 56683 rev. 1.08, erratum 1218).
     bool user = fetch ? v->vmcb->save.cpl == 3 : (info & NPF_US) != 0;
+    bool shadow_stack = false;
+    if (n->sss && (info & NPF_SS) != 0 && !supervisor_shadow_stack(v, &shadow_stack)) {
+        return;
+    }
     struct npt12_walk w;
-    uint64_t error = npt12_walk(n, gpa, write, fetch, user, &w);
+    uint64_t error = npt12_walk(n, gpa, write, fetch, user, shadow_stack, &w);
     if (error == NPT12_PML_FULL) {
         exit_to_l1(v, n, SVM_EXIT_PML_FULL, 0, 0, c->exitintinfo, false);
         return;
     }
-    // Whether the access was one to a shadow stack, the processor's error code
-    // tells (APM 24593 rev. 3.46, 15.25.7).
+    // Whether the access was one to a shadow stack, and of which privilege,
+    // the processor's error code tells (APM 24593 rev. 3.46, 15.25.7).
     if (error != 0) {
         error |= info & (NPF_FINAL | NPF_TABLE | NPF_SS);
+        if ((info & NPF_SS) != 0) {
+            error = (error & ~NPF_US) | (info & NPF_US);
+        }
         exit_to_l1(v, n, SVM_EXIT_NPF, error, gpa, c->exitintinfo, true);
         return;
     }
-    if (npt02_allows(npt02_fill(n, gpa, &w), write, fetch)) {
+    uint64_t leaf = npt02_fill(n, gpa, &w);
+    uint64_t sss = PTE_P | PTE_U | PTE_NX;
+    if (w.sss ? (leaf & sss) == (PTE_P | PTE_NX) : npt02_allows(leaf, write, fetch)) {
         return;
     }
     if (event_cut_short(v)) {
@@ -1892,7 +1972,9 @@ bool nsvm_npt_translate(
         return false;
     }
     struct npt12_walk w;
-    uint64_t error = npt12_walk(n, gpa, write || (walk && !n->rogpt), fetch && !walk, user, &w);
+    uint64_t error = npt12_walk(
+        n, gpa, write || (walk && !n->rogpt), fetch && !walk, user, false, &w
+    );
     if (error == 0) {
         *out = w.gpa;
         return true;
