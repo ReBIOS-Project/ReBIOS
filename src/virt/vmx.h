@@ -70,6 +70,7 @@
 #define VMCS_VMREAD_BITMAP 0x2026
 #define VMCS_VMWRITE_BITMAP 0x2028
 #define VMCS_VE_INFO_ADDR 0x202a
+#define VMCS_SPPTP 0x2030
 #define VMCS_XSS_EXIT_BITMAP 0x202c
 #define VMCS_TSC_MULTIPLIER 0x2032
 #define VMCS_TERTIARY_CONTROLS 0x2034
@@ -260,6 +261,7 @@
 #define PROC2_CONCEAL_VMX_FROM_PT ((uint32_t)1 << 19)
 #define PROC2_XSAVES ((uint32_t)1 << 20)
 #define PROC2_MBEC ((uint32_t)1 << 22)
+#define PROC2_SPP ((uint32_t)1 << 23)
 #define PROC2_PT_USE_GPA ((uint32_t)1 << 24)
 #define PROC2_TSC_SCALING ((uint32_t)1 << 25)
 #define PROC2_USER_WAIT_PAUSE ((uint32_t)1 << 26)
@@ -381,6 +383,7 @@
 #define EXIT_REASON_PML_FULL 62
 #define EXIT_REASON_XSAVES 63
 #define EXIT_REASON_XRSTORS 64
+#define EXIT_REASON_SPP 66
 #define EXIT_REASON_RDMSRLIST 78
 #define EXIT_REASON_WRMSRLIST 79
 #define EXIT_REASON_URDMSR 80
@@ -449,6 +452,7 @@
 #define EPT_VERIFY_GUEST_PAGING ((uint64_t)1 << 57)
 #define EPT_PAGING_WRITE ((uint64_t)1 << 58)
 #define EPT_SUPERVISOR_SHADOW_STACK ((uint64_t)1 << 60)
+#define EPT_SPP ((uint64_t)1 << 61)
 #define EPT_SUPPRESS_VE ((uint64_t)1 << 63)
 #define EPT_TABLE_RESERVED ((uint64_t)0x78)
 

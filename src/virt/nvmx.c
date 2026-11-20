@@ -131,7 +131,7 @@ static const uint16_t fields[] = {
     0x080a, 0x080c, 0x080e, 0x0810, 0x0812, 0x0814, 0x0c00, 0x0c02, 0x0c04,
     0x0c06, 0x0c08, 0x0c0a, 0x0c0c, 0x2000, 0x2002, 0x2004, 0x2006, 0x2008,
     0x200a, 0x200e, 0x2010, 0x2012, 0x2014, 0x2016, 0x2018, 0x201a, 0x202c,
-    0x2032, 0x201c, 0x201e, 0x2020, 0x2022, 0x2024, 0x2026, 0x2028, 0x202a,
+    0x2032, 0x201c, 0x201e, 0x2020, 0x2022, 0x2024, 0x2026, 0x2028, 0x202a, 0x2030,
     0x2034, 0x2040, 0x204a, 0x204c, 0x204e, 0x2044, 0x2052, 0x2400, 0x2402, 0x2404,
     0x2406, 0x2800, 0x2802, 0x2804, 0x2806, 0x2808, 0x280a, 0x280c, 0x280e,
     0x2810, 0x2818, 0x281a, 0x281c, 0x281e, 0x2820, 0x2822, 0x2824, 0x2826,
@@ -238,6 +238,10 @@ struct nvmx {
     unsigned int ept02_next;
     struct pml_watch pml_watch[PML_WATCHED];
     size_t pml_watched;
+    // The shadow of the guest's SPP table for its guest, with the SPPTP it
+    // shadows.
+    uint64_t *sppt02;
+    uint64_t sppt12;
     // The guest's VPID whose translations VPID02 holds.
     uint16_t vpid12;
     // An exit of the guest's guest that what the hypervisor carried out for it
@@ -313,7 +317,7 @@ static unsigned int ept02_budget;
    | PROC2_INVPCID | PROC2_VMFUNC | PROC2_VMCS_SHADOWING \
    | PROC2_RDSEED_EXITING | PROC2_PML | PROC2_XSAVES \
    | PROC2_MBEC | PROC2_TSC_SCALING | PROC2_USER_WAIT_PAUSE \
-   | PROC2_BUS_LOCK_DETECTION | PROC2_EPT_VE)
+   | PROC2_BUS_LOCK_DETECTION | PROC2_EPT_VE | PROC2_SPP)
 #define PROC3_EMULATED \
     (PROC3_HLAT | PROC3_EPT_PAGING_WRITE | PROC3_GUEST_PAGING_VERIFY | PROC3_MSR_LIST \
    | PROC3_SPEC_CTRL_VIRT | PROC3_APIC_TIMER_VIRT)
@@ -632,6 +636,9 @@ static bool field_offered(uint32_t field) {
         case VMCS_EPTP_INDEX:
         case VMCS_VE_INFO_ADDR: {
             return (proc2 & PROC2_EPT_VE) != 0;
+        }
+        case VMCS_SPPTP: {
+            return (proc2 & PROC2_SPP) != 0;
         }
         case VMCS_EXIT_EXT_INSTR_INFO: {
             return apx_info;
@@ -1450,12 +1457,25 @@ struct ept12_walk {
     // the one that maps the page, suppresses #VE (SDM 325462-093 Vol. 3C,
     // 28.5.8.1).
     bool suppress_ve;
+    // Whether a write that EPT write access refuses goes ahead by the guest's
+    // sub-page write permissions.
+    bool spp_write;
 };
 
 #define EPT12_MAPPED 0
 #define EPT12_VIOLATION 1
 #define EPT12_MISCONFIG 2
 #define EPT12_PML_FULL 3
+#define EPT12_SPP_MISS 4
+#define EPT12_SPP_MISCONFIG 5
+
+// The exit qualification's bit that tells an SPP miss from a misconfiguration
+// (SDM 325462-093 Vol. 3C, 30.2.1), and the reserved bits of an SPPL4E,
+// SPPL3E, or SPPL2E besides those past the physical-address width, and of an
+// SPP vector (31.3.4.2).
+#define QUAL_SPP_MISS ((uint64_t)1 << 11)
+#define SPP_ENTRY_RESERVED ((uint64_t)0xffe)
+#define SPP_VECTOR_RESERVED ((uint64_t)0xaaaaaaaaaaaaaaaa)
 
 // Where nothing decodes, an entry reads as all ones, which is misconfigured.
 static uint64_t *ept12_entry(uintptr_t gpa) {
@@ -1473,6 +1493,109 @@ static void pml_log(struct nvmx *n, uintptr_t gpa) {
         *(volatile uint64_t *)(page + (at & 0xfff)) = page_down(gpa);
     }
     set12(n, VMCS_GUEST_PML_INDEX, (index - 1) & 0xffff);
+}
+
+// An SPP vector of the guest's SPP table for a guest-physical address of its
+// guest, walked as the processor walks it (SDM 325462-093 Vol. 3C, 31.3.4.2):
+// EPT12_MAPPED, EPT12_SPP_MISS, or EPT12_SPP_MISCONFIG. What is not RAM reads
+// as all ones.
+static int spp12_walk(const struct nvmx *n, uintptr_t gpa, uint64_t *vector) {
+    uint64_t table = get12(n, VMCS_SPPTP) & PTE_ADDRESS;
+    for (size_t level = 3; ; level--) {
+        uint64_t at = table + x86_level_index(gpa, level) * 8;
+        const uint8_t *page = guest_mem_page(page_down(at));
+        uint64_t e = ~(uint64_t)0;
+        if (page != NULL) {
+            e = *(const volatile uint64_t *)(page + (at & 0xfff));
+        }
+        if (level == 0) {
+            *vector = e;
+            return (e & SPP_VECTOR_RESERVED) != 0 ? EPT12_SPP_MISCONFIG : EPT12_MAPPED;
+        }
+        if ((e & 1) == 0) {
+            return EPT12_SPP_MISS;
+        }
+        if ((e & SPP_ENTRY_RESERVED) != 0 || (e >> phys_width) != 0) {
+            return EPT12_SPP_MISCONFIG;
+        }
+        table = e & PTE_ADDRESS;
+    }
+}
+
+// The entry of VMCS02's EPT that maps a guest-physical address, or 0.
+static uint64_t ept02_entry(const struct nvmx *n, uintptr_t gpa) {
+    if (n->current02 == NULL) {
+        return 0;
+    }
+    const uint64_t *table = n->current02->root;
+    for (size_t l = EPTP_LEVELS(n->current02->eptp12); l-- > 0; ) {
+        uint64_t e = table[x86_level_index(gpa, l)];
+        if ((e & EPT_RIGHTS) == 0 || l == 0 || (e & EPT_LARGE) != 0) {
+            return e;
+        }
+        table = (const uint64_t *)(uintptr_t)(e & PTE_ADDRESS);
+    }
+    return 0;
+}
+
+// What the guest's sub-page write permissions make of a data write that only
+// EPT write access refuses, to a 4-KByte page whose EPT PTE has bit 61 (SDM
+// 325462-093 Vol. 3C, 31.3.4): where EPT02 has the page with the bit, the
+// processor checked the guest's vector there, which refused it.
+static int spp_write(const struct nvmx *n, uintptr_t gpa) {
+    uint64_t vector;
+    if ((ept02_entry(n, gpa) & (EPT_R | EPT_SPP)) == (EPT_R | EPT_SPP)) {
+        return EPT12_VIOLATION;
+    }
+    int walked = spp12_walk(n, gpa, &vector);
+    if (walked != EPT12_MAPPED) {
+        return walked;
+    }
+    return (vector >> (2 * ((gpa >> 7) & 31)) & 1) != 0 ? EPT12_MAPPED : EPT12_VIOLATION;
+}
+
+// VMCS02's shadow of the guest's SPP table, filled as its misses come: its
+// root, which stays, and its other tables, which go with the guest's INVEPTs.
+static uint64_t *sppt02_root(struct nvmx *n) {
+    if (n->sppt02 == NULL) {
+        n->sppt02 = page_alloc(1);
+        n->ept02_pages++;
+    }
+    return n->sppt02;
+}
+
+static void sppt02_free(struct nvmx *n, uint64_t *table, size_t level) {
+    for (size_t i = 0; i < 512; i++) {
+        if ((table[i] & 1) == 0) {
+            continue;
+        }
+        uint64_t *child = (uint64_t *)(uintptr_t)(table[i] & PTE_ADDRESS);
+        if (level > 1) {
+            sppt02_free(n, child, level - 1);
+        }
+        page_free(child, 1);
+        n->ept02_pages--;
+        table[i] = 0;
+    }
+}
+
+static void sppt02_clear(struct nvmx *n) {
+    if (n->sppt02 != NULL) {
+        sppt02_free(n, n->sppt02, 3);
+    }
+}
+
+static void sppt02_fill(struct nvmx *n, uintptr_t gpa, uint64_t vector) {
+    uint64_t *table = sppt02_root(n);
+    for (size_t level = 3; level > 0; level--) {
+        uint64_t *slot = &table[x86_level_index(gpa, level)];
+        if ((*slot & 1) == 0) {
+            *slot = (uint64_t)(uintptr_t)page_alloc(1) | 1;
+            n->ept02_pages++;
+        }
+        table = (uint64_t *)(uintptr_t)(*slot & PTE_ADDRESS);
+    }
+    table[x86_level_index(gpa, 0)] = vector;
 }
 
 // Whether a write is allowed: by the write access in the rights of every entry
@@ -1512,6 +1635,7 @@ static int ept12_walk(struct nvmx *n, uintptr_t gpa, uint64_t access, struct ept
     w->leaf = 0;
     w->rights = 0;
     w->suppress_ve = true;
+    w->spp_write = false;
     if (levels == 4 && (gpa >> 48) != 0) {
         return EPT12_VIOLATION;
     }
@@ -1559,10 +1683,22 @@ static int ept12_walk(struct nvmx *n, uintptr_t gpa, uint64_t access, struct ept
             return EPT12_VIOLATION;
         }
     } else if (((access & EPT_QUAL_READ) != 0 && (rights & EPT_R) == 0)
-            || ((access & EPT_QUAL_WRITE) != 0
-             && !paging_writable(n, access, rights, tables, w->leaf))
             || ((access & EPT_QUAL_FETCH) != 0 && (rights & fetch) == 0)) {
         return EPT12_VIOLATION;
+    } else if ((access & EPT_QUAL_WRITE) != 0
+            && !paging_writable(n, access, rights, tables, w->leaf)) {
+        // A data write, not one to the guest's guest's paging structures, to a
+        // 4-KByte page that its sub-page write permissions may allow.
+        bool paging = (access & EPT_QUAL_LINEAR) != 0 && (access & EPT_QUAL_TRANSLATION) == 0;
+        if ((proc2_12(n) & PROC2_SPP) == 0 || paging || l != 0
+         || (w->leaf & EPT_SPP) == 0) {
+            return EPT12_VIOLATION;
+        }
+        int spp = spp_write(n, gpa);
+        if (spp != EPT12_MAPPED) {
+            return spp;
+        }
+        w->spp_write = true;
     }
     if (ad) {
         bool pml = (proc2_12(n) & PROC2_PML) != 0;
@@ -1705,7 +1841,7 @@ static void pml_watch_drop(struct nvmx *n) {
 // Keeps an EPT02 leaf that SLOT now holds, made from the walk W, where it
 // gives write access while the guest logs page modifications.
 static void pml_watch_add(struct nvmx *n, uint64_t *slot, const struct ept12_walk *w) {
-    if ((*slot & (EPT_W | EPT_PAGING_WRITE)) == 0 || !pml_watching(n)) {
+    if ((*slot & (EPT_W | EPT_PAGING_WRITE | EPT_SPP)) == 0 || !pml_watching(n)) {
         return;
     }
     if (n->pml_watched == PML_WATCHED) {
@@ -1785,6 +1921,13 @@ static uint64_t ept02_leaf(
     }
     if ((proc3 & PROC3_GUEST_PAGING_VERIFY) != 0 && (w->leaf & EPT_VERIFY_GUEST_PAGING) != 0) {
         e |= EPT_VERIFY_GUEST_PAGING;
+    }
+    // Sub-page write permissions, which VMCS02's shadow of the guest's SPP
+    // table carries, for its 4-KByte pages.
+    bool spp = (proc2_12(n) & PROC2_SPP) != 0 && level == 0 && w->level == 0
+            && (w->leaf & EPT_SPP) != 0;
+    if (spp && (prot & GPT_W) != 0 && (e & EPT_R) != 0 && dirty) {
+        e |= EPT_SPP | EPT_DIRTY;
     }
     if ((w->rights & EPT_X) != 0 && (prot & GPT_X) != 0) {
         e |= EPT_X;
@@ -1972,6 +2115,10 @@ static bool controls_valid(const struct nvmx *n) {
         return false;
     }
     if ((proc2 & PROC2_EPT_VE) != 0 && !valid_address(get12(n, VMCS_VE_INFO_ADDR))) {
+        return false;
+    }
+    if ((proc2 & PROC2_SPP) != 0
+     && ((proc2 & PROC2_EPT) == 0 || !valid_address(get12(n, VMCS_SPPTP)))) {
         return false;
     }
     uint64_t proc3 = proc3_12(n);
@@ -2533,6 +2680,16 @@ static void write_vmcs02(struct vcpu *v, struct nvmx *n, const struct l1_values 
     if ((proc3_12(n) & PROC3_SPEC_CTRL_VIRT) != 0) {
         vmx_write(VMCS_SPEC_CTRL_MASK, get12(n, VMCS_SPEC_CTRL_MASK));
         vmx_write(VMCS_SPEC_CTRL_SHADOW, get12(n, VMCS_SPEC_CTRL_SHADOW));
+    }
+    // Its sub-page write permissions, through VMCS02's shadow of its SPP
+    // table, which a new table starts again.
+    if ((proc2 & PROC2_SPP) != 0) {
+        if (get12(n, VMCS_SPPTP) != n->sppt12) {
+            n->sppt12 = get12(n, VMCS_SPPTP);
+            sppt02_clear(n);
+            vmx_invept_all();
+        }
+        vmx_write(VMCS_SPPTP, (uint64_t)(uintptr_t)sppt02_root(n));
     }
     // Its HLAT paging, whose structures are its guest's, as EPT02 reaches
     // them.
@@ -3262,6 +3419,7 @@ static void invept(struct vcpu *v, struct nvmx *n, uint64_t info) {
             }
         }
     }
+    sppt02_clear(n);
     vmx_invept_all();
     succeed(v);
 }
@@ -3651,6 +3809,11 @@ static void ept_violation(struct vcpu *v, struct nvmx *n, uint64_t qual) {
         exit_to_l1(v, n, EXIT_REASON_PML_FULL, qual & EPT_QUAL_NMI_UNBLOCKED, 0, 0, true);
         return;
     }
+    if (walk_result == EPT12_SPP_MISS || walk_result == EPT12_SPP_MISCONFIG) {
+        uint64_t miss = walk_result == EPT12_SPP_MISS ? QUAL_SPP_MISS : 0;
+        exit_to_l1(v, n, EXIT_REASON_SPP, (qual & EPT_QUAL_NMI_UNBLOCKED) | miss, 0, 0, true);
+        return;
+    }
     // An IRET that started with NMIs blocked unblocked them before the exit:
     // they are blocked again for it to run again (SDM 325462-093 Vol. 3C,
     // 30.2.3).
@@ -3664,7 +3827,10 @@ static void ept_violation(struct vcpu *v, struct nvmx *n, uint64_t qual) {
         exit_to_l1(v, n, EXIT_REASON_EPT_MISCONFIG, 0, 0, 0, true);
         return;
     }
-    if (ept02_allows(n, ept02_fill(n, gpa, &w), w.access)) {
+    // A write that the guest's sub-page write permissions allow comes again,
+    // for the processor to check against VMCS02's shadow of them.
+    uint64_t rights = ept02_fill(n, gpa, &w);
+    if (w.spp_write || ept02_allows(n, rights, w.access)) {
         return;
     }
     if ((qual & EPT_QUAL_ASYNC) != 0) {
@@ -3749,6 +3915,28 @@ static bool shadow_access(struct vcpu *v, struct nvmx *n, uint32_t reason) {
     return true;
 }
 
+// An SPP miss or misconfiguration in VMCS02's shadow of the guest's SPP table:
+// the guest's own where its table has the same (SDM 325462-093 Vol. 3C,
+// 31.3.4.2), else the shadow takes the guest's vector and the write comes
+// again, NMIs blocked again as for an EPT02 miss.
+static void spp_event(struct vcpu *v, struct nvmx *n, uint64_t qual) {
+    uintptr_t gpa = vmx_read(VMCS_GUEST_PHYS_ADDR);
+    uint64_t vector;
+    int walked = spp12_walk(n, gpa, &vector);
+    if (walked != EPT12_MAPPED) {
+        uint64_t miss = walked == EPT12_SPP_MISS ? QUAL_SPP_MISS : 0;
+        exit_to_l1(v, n, EXIT_REASON_SPP, (qual & EPT_QUAL_NMI_UNBLOCKED) | miss, 0, 0, true);
+        return;
+    }
+    sppt02_fill(n, gpa, vector);
+    if ((qual & EPT_QUAL_NMI_UNBLOCKED) != 0) {
+        vmx_write(
+            VMCS_GUEST_INTERRUPTIBILITY,
+            vmx_read(VMCS_GUEST_INTERRUPTIBILITY) | INTERRUPTIBILITY_NMI
+        );
+    }
+}
+
 bool nvmx_l2_exit(struct vcpu *v, uint32_t reason, uint64_t qual) {
     struct nvmx *n = v->nvmx;
     if (n == NULL || !n->in_l2) {
@@ -3774,6 +3962,10 @@ bool nvmx_l2_exit(struct vcpu *v, uint32_t reason, uint64_t qual) {
         ept02_drop_all(n);
         vmx_load_gpt_root(v);
         vmx_invept_all();
+        return true;
+    }
+    if ((reason & 0xffff) == EXIT_REASON_SPP && (proc2_12(n) & PROC2_SPP) != 0) {
+        spp_event(v, n, qual);
         return true;
     }
     if ((reason & 0xffff) == EXIT_REASON_VMFUNC && eptp_switch(v, n)) {
