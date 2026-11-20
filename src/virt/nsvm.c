@@ -76,9 +76,11 @@
 #define IOPM_USED (2 * PAGE_SIZE + 1)
 
 // What the walk of the guest's nested page tables gives where page
-// modification logging has no room for the page an access would dirty, which
-// is no error code's.
+// modification logging has no room for the page an access would dirty, and
+// what marks its faults, whose error code may be 0, as that of a supervisor
+// read of a page that is not present under GMET is: bits no error code has.
 #define NPT12_PML_FULL ((uint64_t)1 << 63)
+#define NPT12_FAULT ((uint64_t)1 << 62)
 // Page modification logging, in CPUID Fn8000_000A_ECX, and the last index of
 // its log (APM 24593 rev. 3.46, 15.25.16).
 #define CPUID_8000000A_ECX_PML ((uint32_t)1 << 4)
@@ -1274,7 +1276,7 @@ static uint64_t npt12_walk(
     // The fetch flag is defined only with SMEP or with PAE paging's NX (APM
     // 24593 rev. 3.46, 8.4.2), as for the guest's page faults (guest_mem.c).
     bool fetch_flag = fetch && (n->npt_smep || (wide && n->npt_nx));
-    uint64_t error = (n->gmet && !user ? 0 : NPF_US) | (write ? NPF_RW : 0)
+    uint64_t error = NPT12_FAULT | (n->gmet && !user ? 0 : NPF_US) | (write ? NPF_RW : 0)
                    | (fetch_flag ? NPF_ID : 0);
     bool dirties = write || shadow_stack;
     bool paging = n->pw && guest_table && write;
@@ -2589,7 +2591,7 @@ static void npt_fault(struct vcpu *v, struct nsvm *n) {
     // Whether the access was one to a shadow stack, and of which privilege,
     // the processor's error code tells (APM 24593 rev. 3.46, 15.25.7).
     if (error != 0) {
-        error |= info & (NPF_FINAL | NPF_TABLE | NPF_SS);
+        error = (error & ~NPT12_FAULT) | (info & (NPF_FINAL | NPF_TABLE | NPF_SS));
         if ((info & NPF_SS) != 0) {
             error = (error & ~NPF_US) | (info & NPF_US);
         }
@@ -2666,7 +2668,7 @@ bool nsvm_npt_translate(
         return false;
     }
     n->pending_code = SVM_EXIT_NPF;
-    n->pending_info1 = error | (walk ? NPF_TABLE : NPF_FINAL);
+    n->pending_info1 = (error & ~NPT12_FAULT) | (walk ? NPF_TABLE : NPF_FINAL);
     n->pending_info2 = gpa;
     return false;
 }
