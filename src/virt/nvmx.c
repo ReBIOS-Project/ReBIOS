@@ -1815,6 +1815,13 @@ static bool msr_read(struct vcpu *v, uint32_t msr, uint64_t *value) {
             *value = vmx_read(VMCS_GUEST_INTR_SSP_TABLE);
             return true;
         }
+        case MSR_IA32_PERF_GLOBAL_CTRL: {
+            if (!vmx_perf_global_switched()) {
+                return exit_msr_read(v, msr, value);
+            }
+            *value = vmx_read(VMCS_GUEST_PERF_GLOBAL_CTRL);
+            return true;
+        }
         default: {
             return exit_msr_read(v, msr, value);
         }
@@ -1875,6 +1882,19 @@ static bool msr_write(struct vcpu *v, uint32_t msr, uint64_t value) {
                 return false;
             }
             vmx_write(VMCS_GUEST_INTR_SSP_TABLE, value);
+            return true;
+        }
+        // The hypervisor's own value, 0, which exits load (vmx.c), comes back
+        // at once.
+        case MSR_IA32_PERF_GLOBAL_CTRL: {
+            if (!vmx_perf_global_switched()) {
+                return exit_msr_write(v, msr, value);
+            }
+            if (!wrmsr_safe(msr, value)) {
+                return false;
+            }
+            wrmsr(msr, 0);
+            vmx_write(VMCS_GUEST_PERF_GLOBAL_CTRL, value);
             return true;
         }
         default: {
