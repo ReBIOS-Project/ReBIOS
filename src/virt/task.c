@@ -23,6 +23,7 @@
 #include <memory.h>
 #include <sys/x86.h>
 #include <virt/guest_mem.h>
+#include <virt/pmu.h>
 #include <virt/vcpu.h>
 #include <virt/vmx.h>
 
@@ -509,5 +510,10 @@ void task_switch(
     // first instruction (SDM 325462-093 Vol. 3B, 20.3.1.5).
     if (new32 && (image[TSS32_TRAP] & 1) != 0 && !s.faulted) {
         vcpu_debug_trap(v, DR6_BT);
+    }
+    // The CALL, JMP, IRET, or INT that made the switch is done, past the
+    // commit point: a branch retired.
+    if (source != TASK_GATE || event->software) {
+        pmu_retired(v, 1, 1);
     }
 }

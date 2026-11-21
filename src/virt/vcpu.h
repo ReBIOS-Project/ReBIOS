@@ -204,6 +204,11 @@ struct vcpu {
     uint8_t amd_cpuid_present;
     // The guest's AMD core performance event selects (msr.c).
     uint64_t amd_perf_evt_sel[6];
+    // The performance counters that count retired instructions, and those that
+    // count retired branch instructions, as the guest has programmed them:
+    // bits 0 to 30 the general ones, bit 31 fixed counter 0 (pmu.c).
+    uint32_t pmu_instructions;
+    uint32_t pmu_branches;
     // The guest's TSC is the processor's plus this, and its IA32_TSC_ADJUST is
     // its own (msr.c).
     uint64_t tsc_offset;
@@ -363,6 +368,9 @@ bool vcpu_breakpoints_armed(struct vcpu *v);
 // Whether the processor records the guest's branches: in LBRs, legacy or
 // architectural, or as branch trace messages.
 bool vcpu_branches_recorded(struct vcpu *v);
+// The guest's IA32_DEBUGCTL: VMX switches it, as SVM does with LBR
+// virtualisation; without, the processor's is the guest's.
+uint64_t vcpu_debugctl(struct vcpu *v);
 // The guest's IA32_S_CET.
 uint64_t vcpu_s_cet(struct vcpu *v);
 // The debug trap for the breakpoints those hit, and the single step asked for.

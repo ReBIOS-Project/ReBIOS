@@ -60,6 +60,7 @@
 #include <virt/pci_quirks.h>
 #include <virt/pci_virt.h>
 #include <virt/pit.h>
+#include <virt/pmu.h>
 #include <virt/profile.h>
 #include <virt/rcba.h>
 #include <virt/rtc.h>
@@ -105,6 +106,7 @@ static void bsp_main(void *arg) {
     simd_init();
     simd_cpu_init(cpu);
     msr_init();
+    pmu_init();
     cpuid_init();
     mwait_init();
     mtrr_init();

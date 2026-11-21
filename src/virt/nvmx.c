@@ -42,6 +42,7 @@
 #include <virt/insn.h>
 #include <virt/irq.h>
 #include <virt/mmio.h>
+#include <virt/pmu.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>
 #include <virt/vlapic.h>
@@ -3860,6 +3861,10 @@ static bool inactive_valid(const struct nvmx *n, uint64_t activity) {
 }
 
 static void vmlaunch(struct vcpu *v, struct nvmx *n, bool resume) {
+    // A branch retired, whether the entry fails or not, as Linux 7.3's KVM
+    // counts it (vmx/nested.c, nested_vmx_run()); a failure is an instruction
+    // retired too.
+    pmu_retired(v, 0, 1);
     // Nor with a shadow VMCS (SDM 325462-093 Vol. 3C, 29.1).
     if (n->vmcs12 == NULL || n->current_shadow) {
         fail_invalid(v);

@@ -48,6 +48,7 @@
 #include <virt/nvmx.h>
 #include <virt/pci_virt.h>
 #include <virt/pit.h>
+#include <virt/pmu.h>
 #include <virt/profile.h>
 #include <virt/rtc.h>
 #include <virt/sleep.h>
@@ -220,9 +221,7 @@ bool vcpu_can_single_step(void) {
     return !virt_vmx || vmx_monitor_trap_supported();
 }
 
-// The guest's IA32_DEBUGCTL: VMX switches it, as SVM does with LBR
-// virtualisation; without, the processor's is the guest's.
-static uint64_t guest_debugctl(struct vcpu *v) {
+uint64_t vcpu_debugctl(struct vcpu *v) {
     if (virt_vmx) {
         return vmx_read(VMCS_GUEST_DEBUGCTL);
     }
@@ -264,7 +263,7 @@ void vcpu_single_step(struct vcpu *v, bool on) {
         v->step_exceptions = vmcb->control.intercept_exceptions;
         // The guest's BTF would let the instruction run on to the next branch
         // (APM 24593 rev. 3.45, 13.1.6.2).
-        v->step_debugctl = guest_debugctl(v);
+        v->step_debugctl = vcpu_debugctl(v);
         if ((v->step_debugctl & DEBUGCTL_BTF) != 0) {
             set_guest_debugctl(v, v->step_debugctl & ~(uint64_t)DEBUGCTL_BTF);
         }
@@ -956,7 +955,7 @@ bool vcpu_guest_tf(struct vcpu *v) {
     // With BTF, TF steps only branches (SDM 325462-093 Vol. 3B, 20.4.3; APM
     // 24593 rev. 3.45, 13.1.6.2), and the hypervisor carries out none for the
     // guest.
-    return (vcpu_rflags(v) & RFLAGS_TF) != 0 && (guest_debugctl(v) & DEBUGCTL_BTF) == 0;
+    return (vcpu_rflags(v) & RFLAGS_TF) != 0 && (vcpu_debugctl(v) & DEBUGCTL_BTF) == 0;
 }
 
 bool vcpu_step_tf(struct vcpu *v, bool branch) {
@@ -983,7 +982,7 @@ void vcpu_debug_trap(struct vcpu *v, uint64_t dr6) {
         v->vmcb->save.dr6 |= dr6;
         v->vmcb->save.dr7 &= ~(uint64_t)DR7_GD;
     }
-    uint64_t debugctl = guest_debugctl(v);
+    uint64_t debugctl = vcpu_debugctl(v);
     if ((debugctl & (DEBUGCTL_LBR | DEBUGCTL_BTF)) != 0) {
         set_guest_debugctl(v, debugctl & ~(uint64_t)(DEBUGCTL_LBR | DEBUGCTL_BTF));
     }
@@ -1067,7 +1066,7 @@ bool vcpu_breakpoints_armed(struct vcpu *v) {
 }
 
 bool vcpu_branches_recorded(struct vcpu *v) {
-    if ((guest_debugctl(v) & (DEBUGCTL_LBR | DEBUGCTL_TR)) != 0) {
+    if ((vcpu_debugctl(v) & (DEBUGCTL_LBR | DEBUGCTL_TR)) != 0) {
         return true;
     }
     return virt_vmx && vmx_lbr_switched() && (vmx_read(VMCS_GUEST_LBR_CTL) & LBR_CTL_LBREN) != 0;
@@ -1142,6 +1141,7 @@ void vcpu_advance(struct vcpu *v, size_t length) {
         v->vmcb->save.rip = next;
         v->vmcb->control.interrupt_shadow = 0;
     }
+    pmu_retired(v, 1, 0);
     vcpu_step_boundary(v);
 }
 

@@ -38,6 +38,7 @@
 #include <virt/mmio.h>
 #include <virt/nsvm.h>
 #include <virt/nvmx.h>
+#include <virt/pmu.h>
 #include <virt/profile.h>
 #include <virt/vcpu.h>
 #include <virt/vga.h>
@@ -162,6 +163,8 @@ struct run_state {
     bool branches_recorded;
     // Whether any of the three is true.
     bool branches_left;
+    // Whether one of the guest's counters counts branch instructions.
+    bool branches_counted;
     // The segments read so far, and those that real-mode and virtual-8086
     // loads changed.
     uint32_t segs_loaded;
@@ -1672,25 +1675,12 @@ static int segment_form(struct vcpu *v, struct run_state *rs, const struct insn 
     return next(rs, insn);
 }
 
-// Whether the processor checks or records the branch that the instruction
-// makes, which a run then leaves to it: near CALL and RET under shadow stacks,
-// indirect near CALL and JMP under indirect branch tracking (SDM 325462-093
-// Vol. 1, 18.2.2 and 18.3.2), and every branch taken while the guest's
-// branches are recorded, the conditional ones, but for INTO, where they are
-// judged.
-static bool branch_left(const struct run_state *rs, const struct insn *insn) {
+// Whether the instruction branches whatever the flags or the counter say:
+// JMP, CALL, RET, and their far forms, INT n, INT3, INTO where it traps, and
+// IRET.
+static bool branch_always(const struct run_state *rs, const struct insn *insn) {
     unsigned int op = insn->opcode;
     unsigned int group = (insn->modrm >> 3) & 7;
-    bool near_call = op == 0xe8 || (op == 0xff && group == 2);
-    bool near_return = op == 0xc2 || op == 0xc3;
-    bool indirect_near = op == 0xff && (group == 2 || group == 4);
-    if ((rs->shadow_stack && (near_call || near_return))
-     || (rs->branch_tracking && indirect_near)) {
-        return true;
-    }
-    if (!rs->branches_recorded) {
-        return false;
-    }
     switch (op) {
         case 0x9a:
         case 0xc2:
@@ -1716,6 +1706,36 @@ static bool branch_left(const struct run_state *rs, const struct insn *insn) {
             return false;
         }
     }
+}
+
+// Whether the instruction is one the processor counts as a branch instruction
+// retired: those of branch_always(), and Jcc, LOOP, LOOPE, LOOPNE, and JCXZ,
+// taken or not (SDM 325462-093 Vol. 3B, Table 22-3; PPR 57238 rev. 0.49,
+// PMCx0C2).
+static bool branch_instruction(const struct run_state *rs, const struct insn *insn) {
+    unsigned int op = insn->opcode;
+    return (op >= 0x70 && op < 0x80)
+        || (op >= (INSN_OPCODE_0F | 0x80) && op <= (INSN_OPCODE_0F | 0x8f))
+        || (op >= 0xe0 && op <= 0xe3)
+        || branch_always(rs, insn);
+}
+
+// Whether the processor checks or records the branch that the instruction
+// makes, which a run then leaves to it: near CALL and RET under shadow stacks,
+// indirect near CALL and JMP under indirect branch tracking (SDM 325462-093
+// Vol. 1, 18.2.2 and 18.3.2), and every branch taken while the guest's
+// branches are recorded, the conditional ones where they are judged.
+static bool branch_left(const struct run_state *rs, const struct insn *insn) {
+    unsigned int op = insn->opcode;
+    unsigned int group = (insn->modrm >> 3) & 7;
+    bool near_call = op == 0xe8 || (op == 0xff && group == 2);
+    bool near_return = op == 0xc2 || op == 0xc3;
+    bool indirect_near = op == 0xff && (group == 2 || group == 4);
+    if ((rs->shadow_stack && (near_call || near_return))
+     || (rs->branch_tracking && indirect_near)) {
+        return true;
+    }
+    return rs->branches_recorded && branch_always(rs, insn);
 }
 
 // Carries out the instruction, or changes nothing and says why not.
@@ -2431,6 +2451,7 @@ static void load_state(struct vcpu *v, struct run_state *rs) {
     }
     rs->branches_recorded = vcpu_branches_recorded(v);
     rs->branches_left = rs->shadow_stack || rs->branch_tracking || rs->branches_recorded;
+    rs->branches_counted = v->pmu_branches != 0;
     rs->page_count = 0;
     rs->victim = 0;
     rs->code_linear = 1;
@@ -2491,7 +2512,11 @@ void run_begin(struct vcpu *v) {
     uint64_t deadline = v->cpu->bsp ? hv_timer_next() : 0;
     unsigned int idle_limit = cpu_exits_slow() ? RUN_IDLE_SLOW_EXITS : RUN_IDLE;
     unsigned int idle = 0;
+    // Instructions and the parts of string instructions carried out, and of
+    // those the instructions retired, and the branch instructions.
     uint64_t count = 0;
+    uint64_t retired = 0;
+    uint64_t branches = 0;
     uint64_t accesses = 0;
     unsigned int last_op = 0;
     bool changed = false;
@@ -2523,7 +2548,15 @@ void run_begin(struct vcpu *v) {
         rs->reached = false;
         rs->partial = false;
         int shadowed = rs->shadow;
+        // INTO's trap depends on OF as the instruction finds it.
+        bool branch = rs->branches_counted && branch_instruction(rs, insn);
         stop = carry_out(v, rs, insn);
+        // An instruction that set TF or changed AC is done, and ends the run.
+        if (stop == STOP_FLAGS) {
+            count++;
+            retired++;
+            branches += branch ? 1 : 0;
+        }
         if (stop == STOP_PARTIAL || stop == STOP_FLAGS) {
             changed = true;
             last_op = insn->opcode;
@@ -2535,6 +2568,11 @@ void run_begin(struct vcpu *v) {
         }
         changed = true;
         count++;
+        // A string instruction's part retires nothing.
+        if (!rs->partial) {
+            retired++;
+            branches += branch ? 1 : 0;
+        }
         // The instruction a shadow covered is done: interrupts may come now.
         if (shadowed != SHADOW_NONE && rs->shadow == shadowed && !rs->partial) {
             rs->shadow = SHADOW_NONE;
@@ -2550,6 +2588,7 @@ void run_begin(struct vcpu *v) {
     if (changed) {
         store_state(v, rs, true);
     }
+    pmu_retired(v, retired, branches);
     if (!profile_on) {
         return;
     }

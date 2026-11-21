@@ -39,6 +39,7 @@
 #include <virt/insn.h>
 #include <virt/irq.h>
 #include <virt/mmio.h>
+#include <virt/pmu.h>
 #include <virt/svm.h>
 #include <virt/vcpu.h>
 #include <virt/virt.h>
@@ -2236,6 +2237,7 @@ static void vmrun(struct vcpu *v, struct nsvm *n) {
     memcpy(&n->copy, vmcb12, sizeof(struct vmcb));
     if (!vmcb12_valid(v, &n->copy)) {
         vmrun_failed(v, n, vmcb12);
+        pmu_retired(v, 1, 0);
         return;
     }
     // A virtual NMI for the guest that it did not take yet is the guest's
@@ -2250,6 +2252,9 @@ static void vmrun(struct vcpu *v, struct nsvm *n) {
     n->ran = true;
     n->run_pending = true;
     set_gif(v, n, true);
+    // An instruction retired, counted in its guest's mode as the processor
+    // counts it, as Linux 7.3's KVM has it (svm/nested.c, nested_svm_vmrun()).
+    pmu_retired(v, 1, 0);
 }
 
 // VMLOAD and VMSAVE (APM 24593 rev. 3.46, 15.5.2), from the guest or a guest

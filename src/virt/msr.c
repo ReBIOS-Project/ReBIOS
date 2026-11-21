@@ -36,6 +36,7 @@
 #include <virt/nsvm.h>
 #include <virt/nvmx.h>
 #include <virt/pci_plan.h>
+#include <virt/pmu.h>
 #include <virt/sleep.h>
 #include <virt/svm.h>
 #include <virt/vcpu.h>
@@ -707,6 +708,7 @@ void msr_vcpu_init(struct vcpu *v) {
             v->amd_cpuid[i] = v->amd_cpuid_hardware[i];
         }
     }
+    pmu_programmed(v);
 }
 
 // The guest's AMD memory routing MSRs, and those of SMM and SVM that it may
@@ -955,6 +957,14 @@ bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault) {
         *fault = !wrmsr_safe(msr, (value & ~PERF_EVT_SEL_HG_ONLY) | PERF_EVT_SEL_GUEST_ONLY);
         if (!*fault) {
             v->amd_perf_evt_sel[counter] = value;
+            pmu_programmed(v);
+        }
+        return true;
+    }
+    if (pmu_programming(msr)) {
+        *fault = !wrmsr_safe(msr, value);
+        if (!*fault) {
+            pmu_programmed(v);
         }
         return true;
     }
