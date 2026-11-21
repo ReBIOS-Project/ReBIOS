@@ -1,3 +1,199 @@
+2026-11-21  Mintsuki  <mintsuki@protonmail.com>
+
+    *** Release 0.12.0 ***
+
+    Noteworthy changes compared to the previous release, 0.11.0:
+
+    New features:
+        - Let the OS suspend to RAM (S3) where the machine's firmware offers
+          it and the OS drives the screen itself: ReBIOS puts the machine to
+          sleep, and the OS wakes through the legacy BIOS as on a PC, its
+          chipset's timers, interrupt controllers, and DMA controllers reset
+          as a PC's are, its RTC and keyboard controller kept, and the USB
+          controllers that ReBIOS drives for it back with their devices, each
+          USB disk the same BIOS drive. Not while ReBIOS emulates the VGA,
+          whose screen nothing would light again after the sleep.
+        - Let the OS choose what wakes the machine, as on a PC: its devices'
+          _PRW, _PSW, and _DSW methods reach it, its GPE blocks are the
+          machine's, numbered as the machine numbers them, and the RTC's alarm
+          event is its own.
+        - Set an AMD RD890 or RD990 IOMMU (1002:5A23) up again as the machine
+          wakes from S3, its enable, base address, and internal registers as
+          the start found them, as Linux does, since the firmware of their
+          boards may not.
+        - Keep the log in memory across a restart with save_log, rather than
+          in EFI variables: 4 MiB that the OS does not get, holding the log's
+          first MiB and its latest 2.5 MiB, each line reaching memory as it
+          ends, so that the next start writes rebios-last.log after any
+          restart, the reset button's and a watchdog's included, with no
+          writes to the firmware's flash; turning the machine off loses it.
+          save_log = efi keeps the log in EFI variables as 0.11.0 did, for
+          machines whose firmware clears memory as they start.
+        - Keep what save_log and save_acpi leave in memory with the parity of
+          a Reed-Solomon code, as Linux's ramoops does, 16 bytes for each 128,
+          so that the next start corrects up to 8 wrong bytes in each 128, as
+          some machines' memory loses bits over a restart; rebios-last.log
+          ends with a line saying what was corrected, where anything was. The
+          guest tables that 0.11.0's save_acpi kept are not read.
+        - Give the OS the Root Complex Register Block of Intel's chipsets that
+          have one, up to the 9 Series, at an address of its own where the
+          firmware's ACPI claims it: GCS, BUC, and the SPI controller's
+          registers reach the chipset, for flashing tools such as flashprog,
+          while the interrupt routing, HPET, and function disable registers
+          are the OS's own copies, and its other writes are dropped.
+        - Give the OS the TCO logic of Intel's chipsets, its watchdog timer
+          among it, as on a PC: Linux's iTCO_wdt could not set a timeout under
+          ReBIOS, as on a ThinkPad X220.
+        - On coreboot machines, give the OS a coreboot table of its own where
+          the firmware's ACPI points to coreboot's: the OS's memory map, the
+          board's records, and coreboot's console log and the other firmware
+          data the OS can read, but neither the host's framebuffer nor
+          anything else that describes the host. Linux took the host's
+          framebuffer for its own, its simplefb then failing on memory that is
+          the OS's RAM, as on a ThinkPad X220 under coreboot.
+        - Give the OS CPUID faulting, IA32_ARCH_CAPABILITIES's
+          XAPIC_DISABLE_STATUS and ITS_NO, the immediate forms of RDMSR and
+          WRMSRNS, URDMSR and UWRMSR, RDMSRLIST, WRMSRLIST, and IA32_BARRIER,
+          architectural LBRs, and NMI-source reporting, where the processor
+          has them; they were hidden. Architectural LBRs need VMX's
+          IA32_LBR_CTL controls, which keep ReBIOS's own branches out of the
+          records.
+        - Run the OS's TSC-deadline timer on the processor's guest timer where
+          the processor has VMX's APIC-timer virtualization, as long as the
+          OS's LVT allows it: the OS's writes of IA32_TSC_DEADLINE no longer
+          exit.
+        - Offer hypervisors in the OS more of VMX, where the processor has it:
+          the controls that load CET state; EPT's supervisor shadow-stack
+          control, which Windows 10's Hyper-V needs on processors with CET,
+          and without which it did not start under ReBIOS; the controls that
+          load and save IA32_PERF_GLOBAL_CTRL; FRED's controls and state, with
+          event data and nested exceptions; the tertiary controls, with the
+          MSR-list instructions' control; the controls that load IA32_PKRS,
+          UINV, IA32_SPEC_CTRL, and IA32_LBR_CTL; IA32_SPEC_CTRL's
+          virtualisation; VMM bus-lock detection; the prematurely busy shadow
+          stack exit; EPT-violation #VE; APIC-timer virtualization; EPT
+          paging-write and guest-paging verification; HLAT paging; sub-page
+          write permissions, through shadows of their SPP tables; and IPI
+          virtualisation, through shadows of their PID-pointer tables and
+          posted-interrupt descriptors, so that an IPI between their guest's
+          running processors takes no exit.
+        - Offer hypervisors in the OS more of SVM, where the processor has it:
+          HOST_MCE_OVERRIDE; SPEC_CTRL virtualisation; SSSCheck; Paging-Write
+          and Verify Paging-Write; GAAT paging; PMC virtualisation and guest
+          PMC event filtering; INVLPGB of their guests' nested translations;
+          and AVIC and x2AVIC, with x2AVIC's 4096 IDs and ExtLvtAvicAccessChg,
+          run by the processor through shadows of their physical APIC ID
+          tables, so that an IPI between their guest's running processors
+          takes no exit. Under SSSCheck and Paging-Write, a page's dirty flag
+          is set at the first access of the kind that reaches it rather than
+          at its first write.
+
+    Bug fixes:
+        - Set a PCI function up again with the host registers that ReBIOS gave
+          it where one of the firmware's power methods that the OS called
+          (_PS0, _PS1, _PS2, _RST) leaves it without them, such as an Intel
+          LPSS controller that _PS0 brings back from D3 without its BAR: the
+          OS, whose own view of the function had not changed, restored
+          nothing, and the device answered nothing after its first power-down,
+          as the I2C touchpad of an ASUS X509FA did.
+        - Show a picture again where the Video BIOS of an AMD card runs, as a
+          Vega 11's does, whose screen 0.10.0 and 0.11.0 left black: the
+          card's framebuffer aperture keeps its address on the host for the
+          OS, after ReBIOS moves it as high below 4 GiB as the host has room
+          for, so that the OS's memory below 4 GiB ends as high as it can.
+        - Enable the embedded controller's GPE, whose handler ReBIOS installed
+          but never enabled: none of the embedded controller's events reached
+          the OS, such as a laptop's brightness keys, or a change of AC power
+          or of the battery.
+        - Give the OS the processors that the firmware declares as ACPI0007
+          devices as ACPI 1.0 Processor objects, where the MADT gives their
+          _UID a local APIC, so that Windows XP, which predates ACPI0007,
+          lists them.
+        - Deliver the machine's NMIs to the OS as its LINT entries for the NMI
+          pins ask, as on a PC: not at all where the OS masked the entry, as
+          Linux does on its APs, and as a vector in fixed mode, where they
+          reached every processor as NMIs; an entry in INIT mode sends an INIT
+          on Intel's processors.
+        - Keep a level-triggered LINT0 entry's Remote IRR flag in fixed mode
+          from the vector's acceptance to its EOI, holding the 8259's further
+          requests back, and after the EOI let the 8259's output, still
+          asserted, request the vector again, as the manuals have it: the flag
+          stayed clear, and the vector came once.
+        - Raise the error interrupt that the OS's LVT Error entry asks for,
+          once after each write of the ESR, and count sending a vector of 0 to
+          15 and, in xAPIC mode, reaching a reserved register as APIC errors
+          too, as the manuals have it: only a received vector of 0 to 15 was
+          one, and none raised the interrupt. Where AVIC runs the local APIC
+          in xAPIC mode, the processor answers reads of reserved registers,
+          which are no errors there.
+        - Give hypervisors in the OS that turn GMET on the nested page fault,
+          whose error code is then 0, where their guest's supervisor code
+          reads a page that their nested page tables leave not present: since
+          0.6.0, ReBIOS took that error code of 0 for a translation and mapped
+          the page to memory its walk had not found, which their guest then
+          read; a Linux that Linux's KVM ran in the OS did not boot under
+          ReBIOS on Nephrite's TCG with SVM.
+        - Give hypervisors in the OS that set IA32_PERF_GLOBAL_CTRL through
+          their VM-entry and VM-exit MSR lists the values that they set, on
+          processors whose VM exits save it: their guests ran with, and
+          stored, the wrong ones.
+        - Fail the VM entry of a hypervisor in the OS that injects an event
+          with the nested-exception bit set where its VMX offers no nested
+          exceptions, as a processor does, rather than let the entry go ahead
+          on processors that have them.
+        - Log a page again at the next write of their guest once a hypervisor
+          in the OS that logs page modifications clears its EPT dirty flag, as
+          KVM does, rather than only after its INVEPT.
+        - Set the SS bit in the nested page faults that hypervisors in the OS
+          take from their guests' shadow-stack accesses, which lacked it.
+        - Run the guests of hypervisors in the OS on processors with SVM's
+          SPEC_CTRL virtualisation with the IA32_SPEC_CTRL of their VMCB,
+          along with the hypervisor's own: they ran with one that neither had
+          set.
+        - Let the OS read IA32_XSS on AMD processors with XSAVES, as the APM
+          lists it among the architectural MSRs: it got #GP, which Linux's KVM
+          logged as an unchecked MSR access as it started.
+        - Give the OS the machine's RTC only where the namespace has an RTC
+          device, and an emulated one elsewhere, where the firmware's FADT
+          predates ACPI 5.0's CMOS RTC Not Present flag.
+        - Drop the fixed limits on the memory ranges that ReBIOS keeps for
+          itself and on those that the OS finds at their addresses on the
+          host: a machine with more than 64 or 1024 of them stopped ReBIOS as
+          it started.
+        - Refuse to start where an X58 or 5520 chipset sends the onboard HD
+          Audio's DMA through a VT-d unit that its firmware gave no TLB
+          entries, which hangs the machine once DMA is remapped, and say so
+          where it has fewer than the 16 advised; turning the onboard audio
+          off in the firmware setup avoids it.
+
+    Miscellaneous:
+        - Drop the cpu_allowlist and cpu_blocklist settings, as the OS gets
+          every processor, and the settings that ReBIOS only ignored:
+          CSMWrap's iommu_disable and system_thread, and its own nested. The
+          log calls them unknown keys.
+        - Stop passing ports 1CEh to 1D0h through to the VGAs of virtual
+          machines: Nephrite's standard VGA, from its release after 0.3.1 on,
+          gives its video BIOS those ports in an I/O BAR, which runs under
+          ReBIOS with nothing of its own, while virtio-vga, QXL, and VMware's
+          SVGA II lose their VBE modes under ReBIOS.
+        - Say in the log when the OS takes a USB controller from ReBIOS and
+          how it asked for it, where uACPI does not take the handlers for the
+          firmware's notifications, the power button, or the RTC's alarm, and
+          which processors did not stop where a panic comes as the machine
+          goes to sleep, with the exit each last took. With save_log, a start
+          that finds no log of the last one to write says why in
+          rebios-last.log.
+        - Note in the README that Sandy Bridge's integrated graphics fault
+          under Linux's i915 driver, which keeps their per-process GTT on
+          where it does not see VT-d.
+        - Update Flanterm to its version that lets a context's framebuffer
+          move, and freestanding-lgrt to its restyled code.
+        - Follow the latest PicoEFI C template's compiler flags: no unwind
+          tables, no strict-aliasing assumptions, declarations hidden as well
+          as definitions, so that code reaches other files' symbols directly,
+          and, with GCC, the outgoing-argument accumulation that older GCCs
+          need for calls to the firmware.
+
 2026-11-16  Mintsuki  <mintsuki@protonmail.com>
 
     *** Release 0.11.0 ***
