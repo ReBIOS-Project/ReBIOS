@@ -100,11 +100,12 @@
 #define STOP_RETRY 9
 #define STOP_PARTIAL 10
 #define STOP_FLAGS 11
-#define STOP_COUNT 12
+#define STOP_BRANCH 12
+#define STOP_COUNT 13
 
 static const char *const stop_names[STOP_COUNT] = {
     "none", "idle", "time", "event", "code", "unsupported", "operand", "fault", "device", "retry",
-    "partial", "flags"
+    "partial", "flags", "branch"
 };
 
 struct run_page {
@@ -154,6 +155,13 @@ struct run_state {
     bool real;
     bool v86;
     uint32_t mode;
+    // Whether shadow stacks and indirect branch tracking are on at the CPL,
+    // and whether the processor records the guest's branches.
+    bool shadow_stack;
+    bool branch_tracking;
+    bool branches_recorded;
+    // Whether any of the three is true.
+    bool branches_left;
     // The segments read so far, and those that real-mode and virtual-8086
     // loads changed.
     uint32_t segs_loaded;
@@ -761,6 +769,9 @@ static int relative(struct vcpu *v, struct run_state *rs, const struct insn *ins
     if (!taken) {
         return next(rs, insn);
     }
+    if (rs->branches_recorded) {
+        return STOP_BRANCH;
+    }
     uint64_t target = rs->rip + insn->length + sign_extend(insn->imm, insn->imm_size);
     return go_to(v, rs, insn, target);
 }
@@ -792,6 +803,9 @@ static int loop(struct vcpu *v, struct run_state *rs, const struct insn *insn) {
         bool zf = (rs->rflags & RFLAGS_ZF) != 0;
         bool condition = insn->opcode == 0xe2 || (insn->opcode == 0xe1) == zf;
         taken = (rcx & mask) != 0 && condition;
+    }
+    if (taken && rs->branches_recorded) {
+        return STOP_BRANCH;
     }
     uint64_t target = rs->rip + insn->length + sign_extend(insn->imm, insn->imm_size);
     if (taken) {
@@ -1658,6 +1672,52 @@ static int segment_form(struct vcpu *v, struct run_state *rs, const struct insn 
     return next(rs, insn);
 }
 
+// Whether the processor checks or records the branch that the instruction
+// makes, which a run then leaves to it: near CALL and RET under shadow stacks,
+// indirect near CALL and JMP under indirect branch tracking (SDM 325462-093
+// Vol. 1, 18.2.2 and 18.3.2), and every branch taken while the guest's
+// branches are recorded, the conditional ones, but for INTO, where they are
+// judged.
+static bool branch_left(const struct run_state *rs, const struct insn *insn) {
+    unsigned int op = insn->opcode;
+    unsigned int group = (insn->modrm >> 3) & 7;
+    bool near_call = op == 0xe8 || (op == 0xff && group == 2);
+    bool near_return = op == 0xc2 || op == 0xc3;
+    bool indirect_near = op == 0xff && (group == 2 || group == 4);
+    if ((rs->shadow_stack && (near_call || near_return))
+     || (rs->branch_tracking && indirect_near)) {
+        return true;
+    }
+    if (!rs->branches_recorded) {
+        return false;
+    }
+    switch (op) {
+        case 0x9a:
+        case 0xc2:
+        case 0xc3:
+        case 0xca:
+        case 0xcb:
+        case 0xcc:
+        case 0xcd:
+        case 0xcf:
+        case 0xe8:
+        case 0xe9:
+        case 0xea:
+        case 0xeb: {
+            return true;
+        }
+        case 0xce: {
+            return (rs->rflags & RFLAGS_OF) != 0;
+        }
+        case 0xff: {
+            return group >= 2 && group <= 5;
+        }
+        default: {
+            return false;
+        }
+    }
+}
+
 // Carries out the instruction, or changes nothing and says why not.
 static int carry_out(struct vcpu *v, struct run_state *rs, const struct insn *insn) {
     unsigned int op = insn->opcode;
@@ -1670,6 +1730,9 @@ static int carry_out(struct vcpu *v, struct run_state *rs, const struct insn *in
     }
     if (string_op) {
         return string(v, rs, insn);
+    }
+    if (rs->branches_left && branch_left(rs, insn)) {
+        return STOP_BRANCH;
     }
     size_t operand_size = insn->operand_size;
     // The byte forms are the even opcodes.
@@ -2359,6 +2422,15 @@ static void load_state(struct vcpu *v, struct run_state *rs) {
     rs->real = (vcpu_cr0(v) & CR0_PE) == 0;
     rs->v86 = (rs->rflags & RFLAGS_VM) != 0;
     rs->mode = cs | (rs->v86 ? (uint32_t)1 << 31 : 0) | (rs->long_mode ? (uint32_t)1 << 30 : 0);
+    rs->shadow_stack = false;
+    rs->branch_tracking = false;
+    if (!rs->real && !rs->v86 && (vcpu_cr4(v) & CR4_CET) != 0) {
+        uint64_t cet = cpl(v, rs) == 3 ? rdmsr(MSR_IA32_U_CET) : vcpu_s_cet(v);
+        rs->shadow_stack = (cet & CET_SH_STK_EN) != 0;
+        rs->branch_tracking = (cet & CET_ENDBR_EN) != 0;
+    }
+    rs->branches_recorded = vcpu_branches_recorded(v);
+    rs->branches_left = rs->shadow_stack || rs->branch_tracking || rs->branches_recorded;
     rs->page_count = 0;
     rs->victim = 0;
     rs->code_linear = 1;
@@ -2487,7 +2559,7 @@ void run_begin(struct vcpu *v) {
     atomic_fetch_add_explicit(&access_count, accesses, memory_order_relaxed);
     atomic_fetch_add_explicit(&stop_counts[stop], 1, memory_order_relaxed);
     if (stop == STOP_UNSUPPORTED || stop == STOP_OPERAND || stop == STOP_DEVICE
-     || stop == STOP_FAULT) {
+     || stop == STOP_FAULT || stop == STOP_BRANCH) {
         atomic_fetch_add_explicit(&opcode_counts[opcode_slot(last_op)], 1, memory_order_relaxed);
     }
 }

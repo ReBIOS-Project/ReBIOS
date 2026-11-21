@@ -1066,6 +1066,22 @@ bool vcpu_breakpoints_armed(struct vcpu *v) {
     return (dr7 & 0xff) != 0;
 }
 
+bool vcpu_branches_recorded(struct vcpu *v) {
+    if ((guest_debugctl(v) & (DEBUGCTL_LBR | DEBUGCTL_TR)) != 0) {
+        return true;
+    }
+    return virt_vmx && vmx_lbr_switched() && (vmx_read(VMCS_GUEST_LBR_CTL) & LBR_CTL_LBREN) != 0;
+}
+
+// VMX switches IA32_S_CET where the guest has CET, and SVM likewise keeps it
+// in the VMCB.
+uint64_t vcpu_s_cet(struct vcpu *v) {
+    if (virt_vmx) {
+        return vmx_cet_switched() ? vmx_read(VMCS_GUEST_S_CET) : rdmsr(MSR_IA32_S_CET);
+    }
+    return v->vmcb->save.s_cet;
+}
+
 void vcpu_io_access(struct vcpu *v, uint16_t port, size_t size) {
     // R/W 10 breaks on I/O where CR4.DE says so.
     if ((vcpu_cr4(v) & CR4_DE) != 0) {

@@ -86,6 +86,7 @@
 #define MSR_IA32_PERF_GLOBAL_CTRL 0x38f
 #define MSR_IA32_RTIT_STATUS 0x571
 #define MSR_IA32_U_CET 0x6a0
+#define MSR_IA32_S_CET 0x6a2
 #define MSR_IA32_TSC_DEADLINE 0x6e0
 #define MSR_EFER 0xc0000080
 #define MSR_AMD_NODE_ID 0xc001100c
@@ -101,6 +102,13 @@
 #define DEBUGCTL_LBR ((uint64_t)1 << 0)
 #define DEBUGCTL_BTF ((uint64_t)1 << 1)
 #define DEBUGCTL_BLCKDB ((uint64_t)1 << 2)
+#define DEBUGCTL_TR ((uint64_t)1 << 6)
+
+// SDM 325462-093 Vol. 4, Table 2-2: IA32_U_CET and IA32_S_CET, and
+// IA32_LBR_CTL.
+#define CET_SH_STK_EN ((uint64_t)1 << 0)
+#define CET_ENDBR_EN ((uint64_t)1 << 2)
+#define LBR_CTL_LBREN ((uint64_t)1 << 0)
 
 // SDM 325462-093 Vol. 4, Tables 2-2 and 2-3.
 #define MISC_ENABLE_LIMIT_CPUID ((uint64_t)1 << 22)

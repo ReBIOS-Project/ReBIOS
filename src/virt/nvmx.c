@@ -105,9 +105,8 @@
 
 #define VMCS_CR3_TARGET0 0x6008
 
-// The CET MSRs a VMCS switches, and IA32_S_CET's SUPPRESS and TRACKER (SDM
-// 325462-093 Vol. 4, Table 2-2).
-#define MSR_IA32_S_CET 0x6a2
+// The CET MSR a VMCS switches besides IA32_S_CET, and IA32_S_CET's SUPPRESS
+// and TRACKER (SDM 325462-093 Vol. 4, Table 2-2).
 #define MSR_IA32_INTERRUPT_SSP_TABLE_ADDR 0x6a8
 #define S_CET_SUPPRESS ((uint64_t)1 << 10)
 #define S_CET_TRACKER ((uint64_t)1 << 11)
