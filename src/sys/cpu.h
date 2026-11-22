@@ -170,9 +170,11 @@ static inline struct cpu *this_cpu(void) {
     return ((struct cpu *)(rsp & ~(uintptr_t)(CPU_AREA_SIZE - 1)))->self;
 }
 
-// Starts this CPU's time slice, at an exit; whether it is over.
+// Starts this CPU's time slice, at an exit; whether it is over, and whether it
+// is or the TSC reached a deadline (none where 0), with one read of the TSC.
 void cpu_slice_start(void);
 bool cpu_slice_over(void);
+bool cpu_slice_over_by(uint64_t deadline);
 // Ends it, on the way into the guest.
 void cpu_slice_end(void);
 // At an exit: starts the slice, and notes how long the trip took.

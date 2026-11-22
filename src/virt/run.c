@@ -2531,7 +2531,7 @@ void run_begin(struct vcpu *v) {
         // Nothing comes between STI and the instruction after it.
         if (rs->shadow == SHADOW_NONE && (count % RUN_CHECK == 0 || rs->recheck)) {
             rs->recheck = false;
-            if (cpu_slice_over() || (deadline != 0 && rdtsc() >= deadline)) {
+            if (cpu_slice_over_by(deadline)) {
                 stop = STOP_TIME;
                 break;
             }

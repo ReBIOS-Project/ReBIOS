@@ -380,6 +380,14 @@ bool cpu_slice_over(void) {
     return rdtsc() >= this_cpu()->slice_end_tsc;
 }
 
+bool cpu_slice_over_by(uint64_t deadline) {
+    uint64_t end = this_cpu()->slice_end_tsc;
+    if (deadline != 0 && deadline < end) {
+        end = deadline;
+    }
+    return rdtsc() >= end;
+}
+
 struct cpu *cpu_area_alloc(size_t index, uint32_t apic_id, bool bsp) {
     struct cpu *cpu = page_alloc_aligned(CPU_AREA_SIZE / PAGE_SIZE, CPU_AREA_SIZE);
     uintptr_t base = (uintptr_t)cpu;
