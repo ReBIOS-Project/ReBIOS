@@ -929,6 +929,15 @@ static void palette_functions(struct vgabios_regs *r) {
         case 0x03: {
             uint8_t mode = ac_read(0x10);
             ac_write(0x10, (uint8_t)((mode & ~0x08) | (r->bl != 0 ? 0x08 : 0x00)));
+            // As the BIOS data area's copy of the CGA's mode select register
+            // keeps it (Ralf Brown's Interrupt List release 61, INT 10h
+            // AX=1003h and Table M0018).
+            uint8_t select = vgabios_peekb(BDA, BDA_MODE_CONTROL)
+                           & (uint8_t)~BDA_MODE_CONTROL_BLINK;
+            vgabios_pokeb(
+                BDA, BDA_MODE_CONTROL,
+                (uint8_t)(select | (r->bl != 0 ? BDA_MODE_CONTROL_BLINK : 0))
+            );
             break;
         }
         case 0x07: {
