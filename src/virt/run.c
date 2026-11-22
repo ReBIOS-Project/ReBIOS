@@ -379,20 +379,23 @@ static struct run_page *page_get(
 }
 
 // Whether size bytes at linear all reach the same place with the access:
-// STOP_NONE, with that place, or why not.
+// STOP_NONE, with that place, and where page is not NULL, the page that holds
+// them, NULL where they are on two, or why not.
 static int reach(
     struct vcpu *v,
     struct run_state *rs,
     uintptr_t linear,
     size_t size,
     unsigned int need,
-    int *place
+    int *place,
+    struct run_page **page
 ) {
     // Outside 64-bit mode the linear address space wraps at 4 GiB.
     if (!rs->long_mode && linear + size > ((uint64_t)1 << 32)) {
         return STOP_DEVICE;
     }
     *place = MMIO_PLACE_OTHER;
+    struct run_page *found = NULL;
     for (uintptr_t at = linear; at < linear + size; at = page_down(at) + PAGE_SIZE) {
         bool fault = false;
         struct run_page *p = page_get(v, rs, at, need, &fault);
@@ -403,6 +406,10 @@ static int reach(
             return STOP_DEVICE;
         }
         *place = p->place;
+        found = found == NULL && at == linear ? p : NULL;
+    }
+    if (page != NULL) {
+        *page = found;
     }
     if (*place == MMIO_PLACE_RUN) {
         rs->reached = true;
@@ -635,6 +642,8 @@ struct operand {
     uintptr_t linear;
     size_t size;
     int place;
+    // The page the operand is on, where it is on one.
+    struct run_page *page;
 };
 
 // The ModRM memory operand, or MOV's offset one, of size bytes at a delta from
@@ -661,11 +670,14 @@ static int memory_operand_at(
         return stop;
     }
     int place;
-    stop = reach(v, rs, linear, size, need, &place);
+    struct run_page *page;
+    stop = reach(v, rs, linear, size, need, &place, &page);
     if (stop != STOP_NONE) {
         return stop;
     }
-    *o = (struct operand){ .memory = true, .linear = linear, .size = size, .place = place };
+    *o = (struct operand){
+        .memory = true, .linear = linear, .size = size, .place = place, .page = page
+    };
     return STOP_NONE;
 }
 
@@ -696,6 +708,17 @@ static int rm_operand(
     return memory_operand(v, rs, insn, size, need, o);
 }
 
+// The page an operand is on, where it still holds the operand's address with
+// the rights need: no other page took its slot since reach() found it.
+static struct run_page *operand_page(const struct operand *o, unsigned int need) {
+    struct run_page *p = o->page;
+    if (p == NULL || p->linear != (o->linear & ~(uintptr_t)(PAGE_SIZE - 1))
+     || (p->rights & need) != need) {
+        return NULL;
+    }
+    return p;
+}
+
 static uint64_t load(
     struct vcpu *v,
     struct run_state *rs,
@@ -705,7 +728,16 @@ static uint64_t load(
     if (!o->memory) {
         return get(rs, insn, o->reg, o->size);
     }
-    return read_linear(v, rs, o->linear, o->size);
+    struct run_page *p = operand_page(o, NEED_READ);
+    if (p == NULL) {
+        return read_linear(v, rs, o->linear, o->size);
+    }
+    size_t offset = o->linear & (PAGE_SIZE - 1);
+    if (p->place == MMIO_PLACE_RUN) {
+        uint64_t value = mmio_region_access(v, p->region, p->gpa + offset, o->size, false, 0);
+        return value & size_mask(o->size);
+    }
+    return ram_load(p->host + offset, o->size);
 }
 
 static void store(
@@ -719,7 +751,17 @@ static void store(
         set(rs, insn, o->reg, o->size, value);
         return;
     }
-    write_linear(v, rs, o->linear, o->size, value);
+    struct run_page *p = operand_page(o, NEED_WRITE);
+    if (p == NULL) {
+        write_linear(v, rs, o->linear, o->size, value);
+        return;
+    }
+    size_t offset = o->linear & (PAGE_SIZE - 1);
+    if (p->place == MMIO_PLACE_RUN) {
+        mmio_region_access(v, p->region, p->gpa + offset, o->size, true, value);
+    } else {
+        ram_store(p->host + offset, o->size, value);
+    }
 }
 
 // Outside 64-bit mode RIP wraps at 4 GiB, as vcpu_advance() has it.
@@ -923,7 +965,7 @@ static int stack_reach(
         return stop;
     }
     int place;
-    stop = reach(v, rs, *linear, bytes, write ? NEED_WRITE : NEED_READ, &place);
+    stop = reach(v, rs, *linear, bytes, write ? NEED_WRITE : NEED_READ, &place, NULL);
     if (stop != STOP_NONE) {
         return stop;
     }
@@ -1140,7 +1182,7 @@ static int interrupt(
     }
     uintptr_t entry = (vcpu_seg_base(v, VCPU_SEG_IDTR) + (uint32_t)vector * 4) & 0xffffffff;
     int place;
-    int stop = reach(v, rs, entry, 4, NEED_READ, &place);
+    int stop = reach(v, rs, entry, 4, NEED_READ, &place, NULL);
     if (stop != STOP_NONE) {
         return stop;
     }
@@ -1521,7 +1563,7 @@ static int io_string(struct vcpu *v, struct run_state *rs, const struct insn *in
         int place;
         int stop = segment_check(v, rs, reg, rs->gpr[index] & mask, size, in, &linear);
         if (stop == STOP_NONE) {
-            stop = reach(v, rs, linear, size, in ? NEED_WRITE : NEED_READ, &place);
+            stop = reach(v, rs, linear, size, in ? NEED_WRITE : NEED_READ, &place, NULL);
         }
         if (stop != STOP_NONE) {
             if (done == 0) {
@@ -1594,13 +1636,13 @@ static int string(struct vcpu *v, struct run_state *rs, const struct insn *insn)
         if (from_source) {
             stop = segment_check(v, rs, source, rs->gpr[6] & mask, size, false, &src);
             if (stop == STOP_NONE) {
-                stop = reach(v, rs, src, size, NEED_READ, &place);
+                stop = reach(v, rs, src, size, NEED_READ, &place, NULL);
             }
         }
         if (stop == STOP_NONE && at_destination) {
             stop = segment_check(v, rs, VCPU_SEG_ES, rs->gpr[7] & mask, size, writes, &dst);
             if (stop == STOP_NONE) {
-                stop = reach(v, rs, dst, size, writes ? NEED_WRITE : NEED_READ, &place);
+                stop = reach(v, rs, dst, size, writes ? NEED_WRITE : NEED_READ, &place, NULL);
             }
         }
         if (stop != STOP_NONE) {
