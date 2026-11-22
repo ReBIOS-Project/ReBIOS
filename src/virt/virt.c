@@ -38,6 +38,9 @@
 #include <virt/vcpu.h>
 #include <virt/vmx.h>
 
+// CPUID 80000001H's ECX: LAHF and SAHF in 64-bit mode.
+#define CPUID_80000001_ECX_LAHF_SAHF ((uint32_t)1 << 0)
+
 #define RESET_HOLD_SECONDS 30
 
 bool virt_vmx;
@@ -83,6 +86,15 @@ void virt_reset(bool shown) {
 
 bool virt_init(void) {
     bool intel = x86_cpu_vendor() == X86_CPU_VENDOR_INTEL;
+
+    // Runs load the guest's status flags with SAHF (alu.S), which 64-bit mode
+    // has where CPUID says so (SDM 325462-093 Vol. 2B, SAHF; APM 40332 rev.
+    // 4.11, Vol. 3, SAHF), as every processor with VMX's unrestricted guest or
+    // SVM's nested paging does.
+    if ((cpuid(0x80000001, 0).ecx & CPUID_80000001_ECX_LAHF_SAHF) == 0) {
+        printf("The processor lacks LAHF and SAHF in 64-bit mode\n");
+        return false;
+    }
 
     if (intel && vmx_supported()) {
         virt_vmx = true;

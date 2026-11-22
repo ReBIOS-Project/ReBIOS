@@ -18,6 +18,22 @@
 // The status flags: CF, PF, AF, ZF, SF, and OF.
 #define STATUS 0x8d5
 
+// The status flags of the RFLAGS image in R10, without POPF and the other
+// flags it loads: OF from an ADD that overflows where it is set, 7Fh + 1, and
+// does not where it is clear, 0 + 1, then SF, ZF, AF, PF, and CF, which bits 7
+// to 0 of RFLAGS hold, through SAHF from AH (SDM 325462-093 Vol. 2B, SAHF),
+// which 64-bit mode has wherever ReBIOS runs. Uses RAX and R9.
+.macro status_in
+    movl %r10d, %r9d
+    shrl $11, %r9d
+    andl $1, %r9d
+    imull $0x7f, %r9d, %r9d
+    addb $1, %r9b
+    movl %r10d, %eax
+    shll $8, %eax
+    sahf
+.endm
+
 .section .text
 
 // alu_run(stub, dst, src, rflags) runs a stub on dst in RAX and src in RDX and
@@ -31,16 +47,10 @@ alu_run:
     movl %edi, %eax
     shlq $4, %rax
     addq %rax, %r11
+    movq (%r8), %r10
+    status_in
     movq %rsi, %rax
     movq %rdx, %rcx
-    pushfq
-    popq %r9
-    andq $~STATUS, %r9
-    movq (%r8), %r10
-    andq $STATUS, %r10
-    orq %r10, %r9
-    pushq %r9
-    popfq
     callq *%r11
     pushfq
     popq %r9
@@ -61,15 +71,9 @@ alu_run_double:
     movl %edi, %eax
     shlq $4, %rax
     addq %rax, %r11
-    movq %rsi, %rax
-    pushfq
-    popq %r9
-    andq $~STATUS, %r9
     movq (%r8), %r10
-    andq $STATUS, %r10
-    orq %r10, %r9
-    pushq %r9
-    popfq
+    status_in
+    movq %rsi, %rax
     callq *%r11
     pushfq
     popq %r9
@@ -92,17 +96,11 @@ alu_run_wide:
     movl %edi, %eax
     shlq $4, %rax
     addq %rax, %r11
+    movq (%r8), %r10
+    status_in
     movq %rsi, %rax
     movq %rdx, %rcx
     movq (%rbx), %rdx
-    pushfq
-    popq %r9
-    andq $~STATUS, %r9
-    movq (%r8), %r10
-    andq $STATUS, %r10
-    orq %r10, %r9
-    pushq %r9
-    popfq
     callq *%r11
     pushfq
     popq %r9
