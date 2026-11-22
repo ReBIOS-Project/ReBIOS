@@ -472,6 +472,48 @@ static void ram_store(uint8_t *p, size_t size, uint64_t value) {
     }
 }
 
+// count elements of size bytes from RAM to buf, one after another, the first
+// at from and each next delta bytes on, each loaded as ram_load() loads it.
+static void ram_load_block(
+    uint8_t *buf,
+    const uint8_t *from,
+    size_t size,
+    int64_t delta,
+    size_t count
+) {
+    switch (size) {
+        case 1: {
+            for (size_t n = 0; n < count; n++) {
+                buf[n] = *(const volatile uint8_t *)(from + delta * (int64_t)n);
+            }
+            break;
+        }
+        case 2: {
+            for (size_t n = 0; n < count; n++) {
+                uint16_t value = *(const volatile uint16_t *)(from + delta * (int64_t)n);
+                memcpy(buf + n * 2, &value, 2);
+            }
+            break;
+        }
+        case 4: {
+            for (size_t n = 0; n < count; n++) {
+                uint32_t value = *(const volatile uint32_t *)(from + delta * (int64_t)n);
+                memcpy(buf + n * 4, &value, 4);
+            }
+            break;
+        }
+        default: {
+            for (size_t n = 0; n < count; n++) {
+                uint64_t value = ram_load(from + delta * (int64_t)n, size);
+                for (size_t i = 0; i < size; i++) {
+                    buf[n * size + i] = (uint8_t)(value >> (i * 8));
+                }
+            }
+            break;
+        }
+    }
+}
+
 // An access of size bytes at linear, whose pages reach() found: what it reads,
 // or 0 where it writes value.
 static uint64_t linear_access(
@@ -1435,12 +1477,7 @@ static size_t string_block(
             ram_store(to->host + to_offset + delta * (int64_t)n, size, value);
         }
     } else if (to->place == MMIO_PLACE_RUN) {
-        for (size_t n = 0; n < count; n++) {
-            uint64_t value = ram_load(from->host + from_offset + delta * (int64_t)n, size);
-            for (size_t i = 0; i < size; i++) {
-                buf[n * size + i] = (uint8_t)(value >> (i * 8));
-            }
-        }
+        ram_load_block(buf, from->host + from_offset, size, delta, count);
         done = mmio_region_store(v, to->region, to_gpa, buf, false, size, delta, count);
     } else {
         for (size_t n = 0; n < count; n++) {
