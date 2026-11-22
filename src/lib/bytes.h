@@ -77,6 +77,16 @@ static inline void bytes_fill(void *dest, uint8_t value, size_t n) {
     );
 }
 
+// quads quadwords at dest set to quad, as bytes_fill() sets them.
+static inline void bytes_fill_quads(void *dest, uint64_t quad, size_t quads) {
+    asm volatile (
+        "rep stosq"
+        : [dest] "+D"(dest), [quads] "+c"(quads)
+        : [quad] "a"(quad)
+        : "memory"
+    );
+}
+
 // Whether n bytes at a and at b are the same, compared a quadword at a time.
 static inline bool bytes_equal(const void *a, const void *b, size_t n) {
     const uint8_t *x = a;

@@ -525,10 +525,9 @@ static void fill_pattern(
     for (size_t j = 0; j < 8; j++) {
         word |= (uint64_t)pattern[(k + j) & 7] << (8 * j);
     }
-    for (; k + 8 <= length; k += 8) {
-        *(uint64_t *)(void *)(to + k) = word;
-    }
-    for (; k < length; k++) {
+    size_t quads = (length - k) / 8;
+    bytes_fill_quads(to + k, word, quads);
+    for (k += quads * 8; k < length; k++) {
         to[k] = pattern[k & 7];
     }
 }
