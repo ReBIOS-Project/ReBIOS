@@ -1421,6 +1421,139 @@ static size_t string_block(
     return count;
 }
 
+// REP INS and REP OUTS a block of iterations at a time, where the processor
+// could stop at none of them, as block_operand() allows for the memory
+// operand, and that in RAM alone: an emulated destination might refuse the
+// block after the port was read. Each element goes through the port's handler
+// as port() takes it. How many it took, 0 for none.
+static size_t port_block(
+    struct vcpu *v,
+    struct run_state *rs,
+    const struct insn *insn,
+    uint16_t number,
+    size_t size,
+    int64_t delta,
+    size_t count
+) {
+    bool in = insn->opcode == 0x6c || insn->opcode == 0x6d;
+    uintptr_t linear;
+    struct run_page *page = block_operand(v, rs, insn, in, size, delta, &count, &linear);
+    if (page == NULL || page->place != MMIO_PLACE_RAM) {
+        return 0;
+    }
+    uint8_t *first = page->host + (linear & (PAGE_SIZE - 1));
+    size_t done = 0;
+    while (done < count) {
+        uint8_t *element = first + delta * (int64_t)done;
+        uint32_t value = in ? 0 : (uint32_t)ram_load(element, size);
+        io_dispatch(v, number, size, in, &value);
+        if (v->io_retry) {
+            break;
+        }
+        if (in) {
+            ram_store(element, size, value);
+        }
+        done++;
+    }
+    size_t index = in ? 7 : 6;
+    size_t address_size = insn->address_size;
+    rs->gpr[index] = address_step(rs->gpr[index], delta * (int64_t)done, address_size);
+    rs->gpr[1] = address_step(rs->gpr[1], -(int64_t)done, address_size);
+    rs->reached = done != 0 || rs->reached;
+    return done;
+}
+
+// INS and OUTS, at the emulated VGA's ports: REP ones a block at a time where
+// port_block() takes them, the run looking at events again after each, and the
+// rest an element at a time as port() does IN and OUT, RUN_CHECK of them at
+// most before it does, each with its memory access checked before its port is
+// reached, so that no element that would fault reaches the port.
+static int io_string(struct vcpu *v, struct run_state *rs, const struct insn *insn) {
+    unsigned int op = insn->opcode;
+    bool in = op == 0x6c || op == 0x6d;
+    // Port I/O is at most 32 bits wide.
+    size_t size = 1;
+    if ((op & 1) != 0) {
+        size = insn->operand_size == 2 ? 2 : 4;
+    }
+    uint16_t number = (uint16_t)rs->gpr[2];
+    if (vgabios_port(number, size) || !vga_port_emulated(number, size)) {
+        return STOP_DEVICE;
+    }
+    if (!io_permitted(v, rs, number, size)) {
+        return STOP_FAULT;
+    }
+    size_t address_size = insn->address_size;
+    uint64_t mask = size_mask(address_size);
+    int64_t delta = (rs->rflags & RFLAGS_DF) != 0 ? -(int64_t)size : (int64_t)size;
+    // INS stores at ES:rDI, OUTS loads from DS:rSI or the segment named.
+    int reg = VCPU_SEG_ES;
+    if (!in) {
+        reg = insn->segment >= 0 ? insn->segment : VCPU_SEG_DS;
+    }
+    size_t index = in ? 7 : 6;
+    uint64_t count = insn->rep ? rs->gpr[1] & mask : 1;
+    if (insn->rep && count != 0) {
+        size_t taken = port_block(v, rs, insn, number, size, delta, (size_t)count);
+        if (v->io_retry) {
+            v->io_retry = false;
+            if (taken == 0) {
+                return STOP_RETRY;
+            }
+            rs->partial = true;
+            return STOP_PARTIAL;
+        }
+        if (taken == count) {
+            return next(rs, insn);
+        }
+        if (taken != 0) {
+            rs->partial = true;
+            rs->recheck = true;
+            return STOP_NONE;
+        }
+    }
+    for (size_t done = 0; count != 0; done++) {
+        if (done == RUN_CHECK) {
+            rs->partial = true;
+            return STOP_NONE;
+        }
+        uintptr_t linear;
+        int place;
+        int stop = segment_check(v, rs, reg, rs->gpr[index] & mask, size, in, &linear);
+        if (stop == STOP_NONE) {
+            stop = reach(v, rs, linear, size, in ? NEED_WRITE : NEED_READ, &place);
+        }
+        if (stop != STOP_NONE) {
+            if (done == 0) {
+                return stop;
+            }
+            rs->partial = true;
+            return STOP_PARTIAL;
+        }
+        uint32_t value = in ? 0 : (uint32_t)read_linear(v, rs, linear, size);
+        io_dispatch(v, number, size, in, &value);
+        if (v->io_retry) {
+            v->io_retry = false;
+            if (done == 0) {
+                return STOP_RETRY;
+            }
+            rs->partial = true;
+            return STOP_PARTIAL;
+        }
+        if (in) {
+            write_linear(v, rs, linear, size, value);
+        }
+        rs->reached = true;
+        rs->gpr[index] = address_step(rs->gpr[index], delta, address_size);
+        if (!insn->rep) {
+            break;
+        }
+        rs->gpr[1] = address_step(rs->gpr[1], -1, address_size);
+        count--;
+    }
+    return next(rs, insn);
+}
+
 // MOVS, CMPS, STOS, LODS, and SCAS: REP MOVS and REP STOS a block at a time
 // where string_block() takes them, the run looking at events again after each,
 // and the rest an iteration at a time, RUN_CHECK of them at most before it
@@ -1738,7 +1871,8 @@ static bool branch_left(const struct run_state *rs, const struct insn *insn) {
 // Carries out the instruction, or changes nothing and says why not.
 static int carry_out(struct vcpu *v, struct run_state *rs, const struct insn *insn) {
     unsigned int op = insn->opcode;
-    bool string_op = (op >= 0xa4 && op <= 0xa7) || (op >= 0xaa && op <= 0xaf);
+    bool string_op = (op >= 0x6c && op <= 0x6f) || (op >= 0xa4 && op <= 0xa7)
+                  || (op >= 0xaa && op <= 0xaf);
     // Mandatory prefixes make other instructions of most opcodes they come
     // before.
     if (insn->vex || insn->lock || (insn->rep && !string_op) || insn->rex_upper != 0
@@ -1746,7 +1880,7 @@ static int carry_out(struct vcpu *v, struct run_state *rs, const struct insn *in
         return STOP_UNSUPPORTED;
     }
     if (string_op) {
-        return string(v, rs, insn);
+        return op <= 0x6f ? io_string(v, rs, insn) : string(v, rs, insn);
     }
     if (rs->branches_left && branch_left(rs, insn)) {
         return STOP_BRANCH;
