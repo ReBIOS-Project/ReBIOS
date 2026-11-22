@@ -284,12 +284,12 @@ static bool canonical(struct vcpu *v, uint64_t address) {
     return upper == 0 || upper == UINT64_MAX >> (bits - 1);
 }
 
-// A segment register as the vCPU has it, read as the run first uses it: in
+// segment() for a register the run has not read yet, as the vCPU has it: in
 // virtual-8086 mode, where the selector gives all (SDM 325462-093 Vol. 3C,
 // 29.3.1.2), the selector alone.
-static struct run_segment *segment(struct vcpu *v, struct run_state *rs, int reg) {
+static struct run_segment *segment_load(struct vcpu *v, struct run_state *rs, int reg) {
     struct run_segment *s = &rs->segs[reg];
-    if ((rs->segs_loaded & ((uint32_t)1 << reg)) == 0 && rs->v86) {
+    if (rs->v86) {
         s->selector = vcpu_seg_selector(v, (size_t)reg);
         s->base = (uint64_t)s->selector << 4;
         s->limit = 0xffff;
@@ -298,7 +298,7 @@ static struct run_segment *segment(struct vcpu *v, struct run_state *rs, int reg
         s->loaded_selector = s->selector;
         s->loaded_base = s->base;
         rs->segs_loaded |= (uint32_t)1 << reg;
-    } else if ((rs->segs_loaded & ((uint32_t)1 << reg)) == 0) {
+    } else {
         uint32_t attrib = vcpu_seg_attrib(v, (size_t)reg);
         s->base = vcpu_seg_base(v, (size_t)reg);
         s->limit = vcpu_seg_limit(v, (size_t)reg);
@@ -312,6 +312,14 @@ static struct run_segment *segment(struct vcpu *v, struct run_state *rs, int reg
         rs->segs_loaded |= (uint32_t)1 << reg;
     }
     return s;
+}
+
+// A segment register as the vCPU has it, read as the run first uses it.
+static inline struct run_segment *segment(struct vcpu *v, struct run_state *rs, int reg) {
+    if ((rs->segs_loaded & ((uint32_t)1 << reg)) != 0) {
+        return &rs->segs[reg];
+    }
+    return segment_load(v, rs, reg);
 }
 
 // A segment register load in real or virtual-8086 mode: the base is the
