@@ -517,6 +517,51 @@ static void ram_load_block(
     }
 }
 
+// The count elements of size bytes in buf to RAM, the first at to and each
+// next delta bytes on, each stored as ram_store() stores it.
+static void ram_store_block(
+    uint8_t *to,
+    const uint8_t *buf,
+    size_t size,
+    int64_t delta,
+    size_t count
+) {
+    switch (size) {
+        case 1: {
+            for (size_t n = 0; n < count; n++) {
+                *(volatile uint8_t *)(to + delta * (int64_t)n) = buf[n];
+            }
+            break;
+        }
+        case 2: {
+            for (size_t n = 0; n < count; n++) {
+                uint16_t value;
+                memcpy(&value, buf + n * 2, 2);
+                *(volatile uint16_t *)(to + delta * (int64_t)n) = value;
+            }
+            break;
+        }
+        case 4: {
+            for (size_t n = 0; n < count; n++) {
+                uint32_t value;
+                memcpy(&value, buf + n * 4, 4);
+                *(volatile uint32_t *)(to + delta * (int64_t)n) = value;
+            }
+            break;
+        }
+        default: {
+            for (size_t n = 0; n < count; n++) {
+                uint64_t value = 0;
+                for (size_t i = 0; i < size; i++) {
+                    value |= (uint64_t)buf[n * size + i] << (i * 8);
+                }
+                ram_store(to + delta * (int64_t)n, size, value);
+            }
+            break;
+        }
+    }
+}
+
 // An access of size bytes at linear, whose pages reach() found: what it reads,
 // or 0 where it writes value.
 static uint64_t linear_access(
@@ -1472,12 +1517,8 @@ static size_t string_block(
             && mmio_region_move(v, to->region, to_gpa, from_gpa, size, delta, count);
     } else if (from->place == MMIO_PLACE_RUN) {
         done = mmio_region_load(v, from->region, from_gpa, buf, size, delta, count);
-        for (size_t n = 0; done && n < count; n++) {
-            uint64_t value = 0;
-            for (size_t i = 0; i < size; i++) {
-                value |= (uint64_t)buf[n * size + i] << (i * 8);
-            }
-            ram_store(to->host + to_offset + delta * (int64_t)n, size, value);
+        if (done) {
+            ram_store_block(to->host + to_offset, buf, size, delta, count);
         }
     } else if (to->place == MMIO_PLACE_RUN) {
         ram_load_block(buf, from->host + from_offset, size, delta, count);

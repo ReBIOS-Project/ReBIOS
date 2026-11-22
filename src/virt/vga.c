@@ -872,6 +872,52 @@ static uint8_t mem_read(uint32_t offset) {
     return (uint8_t)~differ;
 }
 
+// mem_read() for count elements of size bytes in read mode 0, one after
+// another upwards from offset: the bytes of the planes that the addressing
+// mode and the read map select, the latches left as the last byte's read
+// leaves them. False, with nothing read, where they do not all lie in the
+// planes so.
+static bool planes_read_string(
+    uint32_t offset,
+    int64_t step,
+    size_t size,
+    size_t count,
+    uint8_t *data
+) {
+    size_t length = size * count;
+    uint32_t first;
+    uint32_t last;
+    if (count < 2 || (size_t)step != size || (vga.gc[GC_MODE] & GC_MODE_READ1) != 0) {
+        return false;
+    }
+    if (!window_address(offset, &first) || !window_address(offset + (uint32_t)length - 1, &last)
+     || first + length > PLANE_SIZE) {
+        return false;
+    }
+    uint32_t low_bits = 0;
+    if ((vga.seq[SEQ_MEMORY_MODE] & SEQ_MEMORY_CHAIN4) != 0) {
+        low_bits = 3;
+        for (size_t k = 0; k < length; k++) {
+            uint32_t address = first + (uint32_t)k;
+            data[k] = vga.planes[address & 3][address & ~low_bits];
+        }
+    } else if ((vga.seq[SEQ_MEMORY_MODE] & SEQ_MEMORY_SEQUENTIAL) == 0) {
+        low_bits = 1;
+        unsigned int odd = vga.gc[GC_READ_MAP] & 2;
+        for (size_t k = 0; k < length; k++) {
+            uint32_t address = first + (uint32_t)k;
+            data[k] = vga.planes[odd | (address & 1)][address & ~low_bits];
+        }
+    } else {
+        bytes_copy(data, vga.planes[vga.gc[GC_READ_MAP] & 3] + first, length);
+    }
+    uint32_t at = (first + (uint32_t)length - 1) & ~low_bits;
+    for (size_t p = 0; p < 4; p++) {
+        vga.latch[p] = vga.planes[p][at];
+    }
+    return true;
+}
+
 static bool vbe_on(void) {
     return vbe.present && vbe.mode.on;
 }
@@ -993,10 +1039,12 @@ static void window_read_string(
     (void)ctx;
     spinlock_acquire(&vga.lock);
     bool vbe_mode = vbe_on();
-    for (size_t n = 0; n < count; n++) {
-        uint32_t at = (uint32_t)(offset + (uint64_t)step * n);
-        for (size_t i = 0; i < size; i++) {
-            data[n * size + i] = window_byte_read(vbe_mode, at + (uint32_t)i);
+    if (vbe_mode || !planes_read_string((uint32_t)offset, step, size, count, data)) {
+        for (size_t n = 0; n < count; n++) {
+            uint32_t at = (uint32_t)(offset + (uint64_t)step * n);
+            for (size_t i = 0; i < size; i++) {
+                data[n * size + i] = window_byte_read(vbe_mode, at + (uint32_t)i);
+            }
         }
     }
     spinlock_release(&vga.lock);
