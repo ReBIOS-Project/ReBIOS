@@ -685,6 +685,9 @@ static bool uid_given(uacpi_namespace_node *device, uint32_t *uid) {
     return false;
 }
 
+static bool from_vista_on(uacpi_namespace_node *device);
+static void emit_sta_from_vista(struct aml *a, uacpi_namespace_node *sta);
+
 static bool emit_replaced(struct aml *a, uacpi_namespace_node *node, const char name[static 4]) {
     if (memcmp(name, "_PRW", 4) == 0) {
         emit_prw(a, node);
@@ -694,6 +697,10 @@ static bool emit_replaced(struct aml *a, uacpi_namespace_node *node, const char 
     uint32_t uid;
     if (memcmp(name, "_UID", 4) == 0 && uid_given(parent, &uid)) {
         aml_name_int(a, "_UID", uid);
+        return true;
+    }
+    if (memcmp(name, "_STA", 4) == 0 && from_vista_on(parent)) {
+        emit_sta_from_vista(a, node);
         return true;
     }
     if (merged_of(parent) != NULL && name_in(name, left_out_merged)) {
@@ -1906,6 +1913,71 @@ static bool child_named(uacpi_namespace_node *parent, const char *name) {
     return uacpi_namespace_node_find(parent, name, &child) == UACPI_STATUS_OK;
 }
 
+// The string that Windows Vista's _OSI answers true for, as later Windows and
+// Linux 7.3's ACPICA do too (drivers/acpi/acpica/utosi.c).
+#define OSI_VISTA "Windows 2006"
+
+// Whether a device of the firmware's is there only for an OS that answers _OSI
+// as Windows Vista does: one with a _HID that takes an interrupt outside the
+// host bridge. Windows XP's ACPI driver arbitrates such a device's interrupt
+// through the PCI interrupt routing that the host bridge gives it once
+// started, and stops with bug check 0x7E before then. Firmware has devices for
+// some Windows versions only alike, by _OSI. Hiding the device from earlier
+// OSes is an exception to hiding nothing from the guest.
+static bool from_vista_on(uacpi_namespace_node *device) {
+    for (uacpi_namespace_node *n = uacpi_namespace_node_parent(device); n != NULL;
+         n = uacpi_namespace_node_parent(n)) {
+        if (n == vacpi.primary || merged_of(n) != NULL) {
+            return false;
+        }
+    }
+    if (!child_named(device, "_HID")
+     || uacpi_device_matches_pnp_id(device, processor_device_ids)) {
+        return false;
+    }
+    uint32_t irq = UINT32_MAX;
+    uacpi_for_each_device_resource(device, "_CRS", link_irq, &irq);
+    return irq != UINT32_MAX;
+}
+
+// _STA as the firmware's, or present where it has none, for an OS that answers
+// _OSI as Windows Vista does, and not present for others, those without _OSI
+// included.
+static void emit_sta_from_vista(struct aml *a, uacpi_namespace_node *sta) {
+    aml_method(a, "_STA", 0, 0);
+    aml_begin(a, AML_IF);
+    aml_op(a, AML_COND_REF_OF);
+    aml_name(a, "\\_OSI");
+    // No target.
+    aml_byte(a, 0);
+    aml_begin(a, AML_IF);
+    aml_name(a, "\\_OSI");
+    aml_string(a, OSI_VISTA, sizeof(OSI_VISTA) - 1);
+    aml_op(a, AML_RETURN);
+    uacpi_object_type type = UACPI_OBJECT_UNINITIALIZED;
+    if (sta != NULL) {
+        uacpi_namespace_node_type(sta, &type);
+    }
+    uint64_t value = 0x0f;
+    if (type == UACPI_OBJECT_METHOD) {
+        helper(a, "CALL");
+        aml_int(a, method_add(sta, 0));
+        aml_int(a, 0);
+        for (size_t k = 0; k < CALL_ARGS; k++) {
+            aml_int(a, 0);
+        }
+    } else {
+        if (sta != NULL) {
+            uacpi_eval_simple_integer(uacpi_namespace_node_parent(sta), "_STA", &value);
+        }
+        aml_int(a, (uint32_t)value);
+    }
+    aml_end(a);
+    aml_end(a);
+    aml_return_int(a, 0);
+    aml_end(a);
+}
+
 static bool merged_name_free(const char name[static 4]) {
     char text[5];
     memcpy(text, name, 4);
@@ -2146,6 +2218,17 @@ static void emit_object(struct aml *a, uacpi_namespace_node *node, bool in_proce
             }
             bool processor = uacpi_device_matches_pnp_id(node, processor_device_ids);
             vacpi.processors_kept += processor ? 1 : 0;
+            bool vista = from_vista_on(node);
+            if (vista) {
+                const char *path = acpi_path(node);
+                printf(
+                    "Guest DSDT: %s is there only for OSes that answer _OSI (\"" OSI_VISTA "\"), "
+                    "as Windows Vista does: it takes an interrupt outside the host bridge, which "
+                    "stops Windows XP's ACPI driver with 0x7E\n",
+                    path
+                );
+                acpi_path_free(path);
+            }
             target_add(node);
             aml_begin(a, AML_DEVICE);
             emit_seg(a, name.text);
@@ -2153,6 +2236,9 @@ static void emit_object(struct aml *a, uacpi_namespace_node *node, bool in_proce
             uint32_t uid;
             if (!child_named(node, "_UID") && uid_given(node, &uid)) {
                 aml_name_int(a, "_UID", uid);
+            }
+            if (vista && !child_named(node, "_STA")) {
+                emit_sta_from_vista(a, NULL);
             }
             if (node == vacpi.primary) {
                 for (size_t i = 0; i < vacpi.merged_count; i++) {
