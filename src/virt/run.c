@@ -1086,15 +1086,18 @@ static size_t stack_slot(const struct insn *insn) {
     return insn->operand_size;
 }
 
-// bytes at offset sp of SS, all in RAM the run reaches with the access, and
-// their linear address. The stack pointer wrapping is left to the processor.
+// bytes at offset sp of SS, all in RAM the run reaches with the access, their
+// linear address, and where host is not NULL, where the run has them, NULL
+// where they are on two pages. The stack pointer wrapping is left to the
+// processor.
 static int stack_reach(
     struct vcpu *v,
     struct run_state *rs,
     uint64_t sp,
     size_t bytes,
     bool write,
-    uintptr_t *linear
+    uintptr_t *linear,
+    uint8_t **host
 ) {
     uint64_t mask = size_mask(stack_size(v, rs));
     if (sp > mask || bytes - 1 > mask - sp) {
@@ -1105,9 +1108,13 @@ static int stack_reach(
         return stop;
     }
     int place;
-    stop = reach(v, rs, *linear, bytes, write ? NEED_WRITE : NEED_READ, &place, NULL);
+    struct run_page *page;
+    stop = reach(v, rs, *linear, bytes, write ? NEED_WRITE : NEED_READ, &place, &page);
     if (stop != STOP_NONE) {
         return stop;
+    }
+    if (host != NULL) {
+        *host = page != NULL ? page->host + (*linear & (PAGE_SIZE - 1)) : NULL;
     }
     return place == MMIO_PLACE_RAM ? STOP_NONE : STOP_DEVICE;
 }
@@ -1128,12 +1135,18 @@ static int push(
     }
     uint64_t top = sp - bytes;
     uintptr_t linear;
-    int stop = stack_reach(v, rs, top, bytes, true, &linear);
+    uint8_t *host;
+    int stop = stack_reach(v, rs, top, bytes, true, &linear, &host);
     if (stop != STOP_NONE) {
         return stop;
     }
     for (size_t i = 0; i < count; i++) {
-        write_linear(v, rs, linear + (count - 1 - i) * slot, slot, values[i]);
+        size_t at = (count - 1 - i) * slot;
+        if (host != NULL) {
+            ram_store(host + at, slot, values[i]);
+        } else {
+            write_linear(v, rs, linear + at, slot, values[i]);
+        }
     }
     uint64_t mask = size_mask(address_size);
     rs->gpr[4] = address_size == 4 ? top : (rs->gpr[4] & ~mask) | top;
@@ -1155,7 +1168,8 @@ static int pop(
     uint64_t sp = rs->gpr[4] & mask;
     size_t bytes = count * slot;
     uintptr_t linear;
-    int stop = stack_reach(v, rs, sp, bytes, false, &linear);
+    uint8_t *host;
+    int stop = stack_reach(v, rs, sp, bytes, false, &linear, &host);
     if (stop != STOP_NONE) {
         return stop;
     }
@@ -1163,7 +1177,11 @@ static int pop(
         return STOP_UNSUPPORTED;
     }
     for (size_t i = 0; i < count; i++) {
-        values[i] = read_linear(v, rs, linear + i * slot, slot);
+        if (host != NULL) {
+            values[i] = ram_load(host + i * slot, slot);
+        } else {
+            values[i] = read_linear(v, rs, linear + i * slot, slot);
+        }
     }
     *after = sp + bytes + extra;
     return STOP_NONE;
@@ -2434,7 +2452,7 @@ static int carry_out(struct vcpu *v, struct run_state *rs, const struct insn *in
             size_t address_size = stack_size(v, rs);
             uint64_t frame = get(rs, insn, 5, address_size);
             uintptr_t linear;
-            stop = stack_reach(v, rs, frame, slot, false, &linear);
+            stop = stack_reach(v, rs, frame, slot, false, &linear, NULL);
             if (stop != STOP_NONE) {
                 return stop;
             }
