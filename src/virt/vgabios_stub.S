@@ -113,6 +113,9 @@ teletype:
     callw page_cursor
     movw %cx, %dx
     movb VGABIOS_STUB_FRAME_AX(%bp), %al
+    // The control characters, BEL, BS, LF, and CR, are all below 14.
+    cmpb $13, %al
+    ja .Lteletype_0
     cmpb $7, %al
     je to_finish
     cmpb $8, %al
@@ -121,6 +124,7 @@ teletype:
     je .Lteletype_3
     cmpb $13, %al
     je .Lteletype_4
+.Lteletype_0:
     incb %dl
     cmpb BDA_COLUMNS, %dl
     jb .Lteletype_1
