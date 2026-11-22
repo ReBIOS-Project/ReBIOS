@@ -248,7 +248,7 @@ static uint64_t get(
     return rs->gpr[reg] & size_mask(size);
 }
 
-static void set(
+static inline void set(
     struct run_state *rs,
     const struct insn *insn,
     unsigned int reg,
@@ -888,7 +888,7 @@ static struct run_page *operand_page(const struct operand *o, unsigned int need)
     return p;
 }
 
-static uint64_t load(
+static inline uint64_t load(
     struct vcpu *v,
     struct run_state *rs,
     const struct insn *insn,
@@ -909,7 +909,7 @@ static uint64_t load(
     return ram_load(p->host + offset, o->size);
 }
 
-static void store(
+static inline void store(
     struct vcpu *v,
     struct run_state *rs,
     const struct insn *insn,
