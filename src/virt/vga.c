@@ -491,8 +491,14 @@ static void planes_changed_range(uint32_t low, uint32_t high, uint8_t planes) {
     if (planes == 0) {
         return;
     }
-    for (size_t chunk = low >> CHUNK_SHIFT; chunk <= high >> CHUNK_SHIFT; chunk++) {
-        vga.changed[chunk / 64] |= (uint64_t)1 << (chunk % 64);
+    size_t last = high >> CHUNK_SHIFT;
+    // A word of chunks at a time.
+    for (size_t chunk = low >> CHUNK_SHIFT; chunk <= last; ) {
+        size_t bit = chunk % 64;
+        size_t n = last - chunk + 1 < 64 - bit ? last - chunk + 1 : 64 - bit;
+        uint64_t bits = n == 64 ? ~(uint64_t)0 : (((uint64_t)1 << n) - 1) << bit;
+        vga.changed[chunk / 64] |= bits;
+        chunk += n;
     }
     vga.font_changed |= (planes & 4) != 0;
 }
