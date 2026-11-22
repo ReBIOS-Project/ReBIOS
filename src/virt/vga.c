@@ -527,6 +527,73 @@ static void fill_pattern(
     }
 }
 
+// fill_pattern() where the addressing takes every 2^bits'th byte, from first
+// on, each to its address with those low bits clear: eight bytes at a time
+// where they can be, the bytes between them kept.
+static void fill_strided(
+    uint8_t *plane,
+    uint32_t base,
+    size_t first,
+    size_t length,
+    const uint32_t *results,
+    size_t size,
+    size_t p,
+    unsigned int bits
+) {
+    uint32_t period = (uint32_t)1 << bits;
+    uint32_t low_bits = period - 1;
+    size_t k = first;
+    for (; k < length && ((base + (uint32_t)k) & ~low_bits & 7) != 0; k += period) {
+        plane[(base + (uint32_t)k) & ~low_bits] = (uint8_t)(results[k & (size - 1)] >> (8 * p));
+    }
+    // From an aligned address on, every eight bytes take the same bytes.
+    uint64_t mask = 0;
+    uint64_t word = 0;
+    for (size_t j = 0; j < 8; j += period) {
+        mask |= (uint64_t)0xff << (8 * j);
+        word |= (uint64_t)(uint8_t)(results[(k + j) & (size - 1)] >> (8 * p)) << (8 * j);
+    }
+    for (; k + 8 - period < length; k += 8) {
+        uint64_t *at = (uint64_t *)(void *)(plane + ((base + (uint32_t)k) & ~low_bits));
+        *at = (*at & ~mask) | word;
+    }
+    for (; k < length; k += period) {
+        plane[(base + (uint32_t)k) & ~low_bits] = (uint8_t)(results[k & (size - 1)] >> (8 * p));
+    }
+}
+
+// fill_strided() for the bytes of data as they are, byte k to the plane where
+// fill_strided() stores byte k of the pattern.
+static void copy_strided(
+    uint8_t *plane,
+    uint32_t base,
+    size_t first,
+    size_t length,
+    const uint8_t *data,
+    unsigned int bits
+) {
+    uint32_t period = (uint32_t)1 << bits;
+    uint32_t low_bits = period - 1;
+    size_t k = first;
+    for (; k < length && ((base + (uint32_t)k) & ~low_bits & 7) != 0; k += period) {
+        plane[(base + (uint32_t)k) & ~low_bits] = data[k];
+    }
+    // From an aligned address on, the bytes that reach eight of the plane's
+    // are where they lie in eight bytes of data.
+    uint64_t mask = 0;
+    for (size_t j = 0; j < 8; j += period) {
+        mask |= (uint64_t)0xff << (8 * j);
+    }
+    for (; k + 8 <= length; k += 8) {
+        uint64_t *at = (uint64_t *)(void *)(plane + ((base + (uint32_t)k) & ~low_bits));
+        uint64_t bytes = *(const uint64_t *)(const void *)(data + k);
+        *at = (*at & ~mask) | (bytes & mask);
+    }
+    for (; k < length; k += period) {
+        plane[(base + (uint32_t)k) & ~low_bits] = data[k];
+    }
+}
+
 // planes_run() a plane at a time: with results, element byte i's for every
 // element, and otherwise the bytes of data as they are, as the identity write
 // state makes them; bits is how many low address bits choose planes.
@@ -557,19 +624,14 @@ static void planes_run_planes(
             continue;
         }
         if (results == NULL) {
-            for (size_t k = first; k < length; k += period) {
-                plane[(base + (uint32_t)k) & ~low_bits] = data[k];
-            }
+            copy_strided(plane, base, first, length, data, bits);
             continue;
         }
         if (bits == 0) {
             fill_pattern(plane + base, length, results, size, p);
             continue;
         }
-        for (size_t k = first; k < length; k += period) {
-            uint32_t result = results[k & (size - 1)];
-            plane[(base + (uint32_t)k) & ~low_bits] = (uint8_t)(result >> (8 * p));
-        }
+        fill_strided(plane, base, first, length, results, size, p, bits);
     }
     planes_changed_range(base & ~low_bits, (base + (uint32_t)length - 1) & ~low_bits, touched);
 }
