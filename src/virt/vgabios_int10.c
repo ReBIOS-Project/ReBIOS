@@ -42,6 +42,7 @@
 // Interrupt List release 61, Table 00041), the low four as the BIOS data area
 // keeps them.
 #define STATE_MISC_BDA_FLAGS 0x0f
+#define STATE_MISC_CURSOR_EMULATION 0x10
 #define STATE_MISC_BLINK 0x20
 
 #define DCC_VGA_COLOR 0x08
@@ -1324,6 +1325,9 @@ static void state_information(struct vgabios_regs *r) {
     vgabios_pokeb(es, (uint16_t)(to + 43), (uint8_t)(((map >> 3) & 4) | ((map >> 2) & 3)));
     vgabios_pokeb(es, (uint16_t)(to + 44), (uint8_t)(((map >> 2) & 4) | (map & 3)));
     uint8_t misc = vgabios_peekb(BDA, BDA_VGA_FLAGS) & STATE_MISC_BDA_FLAGS;
+    if ((vgabios_peekb(BDA, BDA_VIDEO_CONTROL) & BDA_VIDEO_CONTROL_NO_EMULATION) == 0) {
+        misc |= STATE_MISC_CURSOR_EMULATION;
+    }
     if (vga_blinking()) {
         misc |= STATE_MISC_BLINK;
     }
