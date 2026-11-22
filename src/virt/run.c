@@ -413,7 +413,7 @@ static inline struct run_page *page_get(
 // Whether size bytes at linear all reach the same place with the access:
 // STOP_NONE, with that place, and where page is not NULL, the page that holds
 // them, NULL where they are on two, or why not.
-static int reach(
+static int reach_all(
     struct vcpu *v,
     struct run_state *rs,
     uintptr_t linear,
@@ -444,6 +444,35 @@ static int reach(
         *page = found;
     }
     if (*place == MMIO_PLACE_RUN) {
+        rs->reached = true;
+    }
+    return STOP_NONE;
+}
+
+// reach_all(), an access within one page without a call.
+static inline int reach(
+    struct vcpu *v,
+    struct run_state *rs,
+    uintptr_t linear,
+    size_t size,
+    unsigned int need,
+    int *place,
+    struct run_page **page
+) {
+    if ((linear & (PAGE_SIZE - 1)) + size > PAGE_SIZE
+     || (!rs->long_mode && linear + size > ((uint64_t)1 << 32))) {
+        return reach_all(v, rs, linear, size, need, place, page);
+    }
+    bool fault = false;
+    struct run_page *p = page_get(v, rs, linear, need, &fault);
+    if (p == NULL) {
+        return fault ? STOP_FAULT : STOP_DEVICE;
+    }
+    *place = p->place;
+    if (page != NULL) {
+        *page = p;
+    }
+    if (p->place == MMIO_PLACE_RUN) {
         rs->reached = true;
     }
     return STOP_NONE;
