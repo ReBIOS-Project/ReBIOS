@@ -439,11 +439,22 @@ static uint32_t plane_bytes(uint8_t planes) {
          | ((planes & 8) != 0 ? (uint32_t)0xff000000 : 0);
 }
 
+// Whether the graphics controller writes the processor's byte as it is to
+// every plane: write mode 0, unrotated, replacing, without set/reset, every
+// bit from the processor, as text modes and mode 13h keep it.
+static bool write_identity(void) {
+    return (vga.gc[GC_MODE] & 3) == 0 && (vga.gc[GC_ROTATE] & 0x1f) == 0
+        && (vga.gc[GC_ENABLE_SET_RESET] & 0x0f) == 0 && vga.gc[GC_BIT_MASK] == 0xff;
+}
+
 // What the graphics controller makes of a CPU write's byte for each plane,
 // from the latches as they are, as plane_bytes() lays them out.
 static uint32_t write_results(uint8_t value) {
-    uint32_t latches = read_le32(vga.latch);
+    if (write_identity()) {
+        return value * (uint32_t)0x01010101;
+    }
     uint8_t mode = vga.gc[GC_MODE] & 3;
+    uint32_t latches = read_le32(vga.latch);
     if (mode == 1) {
         return latches;
     }
