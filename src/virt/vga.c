@@ -699,18 +699,34 @@ static void planes_write(
                 results[i] = write_results(data[same ? i : n * size + i]);
             }
             uint32_t address = at + (uint32_t)i;
-            uint8_t planes = map;
+            // Chain-4 addressing takes one plane at each address, odd/even
+            // addressing two, sequential addressing every plane.
             if (chain4) {
-                planes &= (uint8_t)((uint32_t)1 << (address & 3));
-                address &= ~(uint32_t)3;
-            } else if (odd_even) {
-                planes &= (address & 1) != 0 ? 0x0a : 0x05;
-                address &= ~(uint32_t)1;
+                uint32_t p = address & 3;
+                address &= (PLANE_SIZE - 1) & ~(uint32_t)3;
+                if ((map & ((uint32_t)1 << p)) != 0) {
+                    planes_changed(address, (uint8_t)((uint32_t)1 << p));
+                    vga.planes[p][address] = (uint8_t)(results[i] >> (8 * p));
+                }
+                continue;
+            }
+            if (odd_even) {
+                uint32_t p = address & 1;
+                uint8_t planes = map & (uint8_t)((uint32_t)5 << p);
+                address &= (PLANE_SIZE - 1) & ~(uint32_t)1;
+                planes_changed(address, planes);
+                if ((planes & ((uint32_t)1 << p)) != 0) {
+                    vga.planes[p][address] = (uint8_t)(results[i] >> (8 * p));
+                }
+                if ((planes & ((uint32_t)4 << p)) != 0) {
+                    vga.planes[p + 2][address] = (uint8_t)(results[i] >> (8 * (p + 2)));
+                }
+                continue;
             }
             address &= PLANE_SIZE - 1;
-            planes_changed(address, planes);
+            planes_changed(address, map);
             for (size_t p = 0; p < 4; p++) {
-                if ((planes & ((uint32_t)1 << p)) != 0) {
+                if ((map & ((uint32_t)1 << p)) != 0) {
                     vga.planes[p][address] = (uint8_t)(results[i] >> (8 * p));
                 }
             }
