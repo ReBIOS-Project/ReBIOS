@@ -624,7 +624,7 @@ static void write_linear(
 // Vol. 3A, 3.3.7.1, 5.3, and 5.4 that insn.c's linear_allowed() makes, on the
 // run's segments: STOP_NONE, with the linear address, or STOP_FAULT where the
 // processor would fault.
-static int segment_check(
+static int segment_check_all(
     struct vcpu *v,
     struct run_state *rs,
     int reg,
@@ -666,6 +666,27 @@ static int segment_check(
     }
     *linear = (s->base + ea) & 0xffffffff;
     return STOP_NONE;
+}
+
+// segment_check_all(), the common case of a plain data segment that holds the
+// operand without a call.
+static inline int segment_check(
+    struct vcpu *v,
+    struct run_state *rs,
+    int reg,
+    uint64_t ea,
+    size_t size,
+    bool write,
+    uintptr_t *linear
+) {
+    if (!rs->lma) {
+        const struct run_segment *s = segment(v, rs, reg);
+        if (s->plain && ea <= s->limit && size - 1 <= s->limit - ea) {
+            *linear = (s->base + ea) & 0xffffffff;
+            return STOP_NONE;
+        }
+    }
+    return segment_check_all(v, rs, reg, ea, size, write, linear);
 }
 
 // The effective address of the ModRM or offset operand, as insn.c's mem_ea()
