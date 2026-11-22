@@ -43,6 +43,7 @@
 #include <lib/aml.h>
 #include <lib/heap.h>
 #include <lib/log.h>
+#include <lib/printf.h>
 #include <lib/spinlock.h>
 #include <lib/time.h>
 #include <lib/util.h>
@@ -221,6 +222,26 @@ struct wake_gpe {
     struct pci_cfg_addr addr;
 };
 
+// The text of a _UID that is a 32-bit integer, as ACPI 1.0's are.
+#define UID_TEXT 11
+
+// A device of the guest's namespace that has a _HID or a _CID, with its _UID
+// as text, as an OS compares them. Where it shares one of its IDs with another
+// device, the guest gets a _UID that no such device has (ACPI 6.6, 6.1.12),
+// its own where it has one.
+struct uid_device {
+    uacpi_namespace_node *node;
+    uacpi_id_string *hid;
+    uacpi_pnp_id_list *cids;
+    uacpi_id_string *uid;
+    // ReBIOS's own device, where node is NULL.
+    const char *own_path;
+    const char *own_hid;
+    char own_uid[UID_TEXT];
+    bool given;
+    uint32_t given_uid;
+};
+
 static struct {
     bool active;
     uintptr_t mailbox;
@@ -278,6 +299,9 @@ static struct {
     // it has as they are.
     size_t processors_made;
     size_t processors_kept;
+    struct uid_device *uid_devices;
+    size_t uid_device_count;
+    size_t uid_device_capacity;
 
     struct notification queue[QUEUE_SIZE];
     uint32_t queue_head;
@@ -599,12 +623,79 @@ static void emit_prw(struct aml *a, uacpi_namespace_node *node) {
     uacpi_object_unref(prw);
 }
 
+static bool same_text(const char *x, const char *y) {
+    size_t i = 0;
+    while (x[i] != '\0' && x[i] == y[i]) {
+        i++;
+    }
+    return x[i] == y[i];
+}
+
+// A device's IDs: its _HID, then its _CID's.
+static size_t uid_id_count(const struct uid_device *d) {
+    if (d->node == NULL) {
+        return 1;
+    }
+    return (d->hid != NULL ? 1 : 0) + (d->cids != NULL ? d->cids->num_ids : 0);
+}
+
+static const char *uid_id(const struct uid_device *d, size_t index) {
+    if (d->node == NULL) {
+        return d->own_hid;
+    }
+    if (d->hid != NULL) {
+        if (index == 0) {
+            return d->hid->value;
+        }
+        index--;
+    }
+    return d->cids->ids[index].value;
+}
+
+// NULL where the device has no _UID.
+static const char *uid_text(const struct uid_device *d) {
+    if (d->node == NULL) {
+        return d->own_uid;
+    }
+    return d->uid != NULL ? d->uid->value : NULL;
+}
+
+// NULL where the devices share no ID.
+static const char *uid_shared_id(const struct uid_device *x, const struct uid_device *y) {
+    for (size_t i = 0; i < uid_id_count(x); i++) {
+        for (size_t j = 0; j < uid_id_count(y); j++) {
+            if (same_text(uid_id(x, i), uid_id(y, j))) {
+                return uid_id(x, i);
+            }
+        }
+    }
+    return NULL;
+}
+
+// The _UID that the guest gets for a device in place of the firmware's, or
+// where the firmware gives none: false where it gets the firmware's.
+static bool uid_given(uacpi_namespace_node *device, uint32_t *uid) {
+    for (size_t i = 0; i < vacpi.uid_device_count; i++) {
+        const struct uid_device *d = &vacpi.uid_devices[i];
+        if (d->node == device) {
+            *uid = d->given_uid;
+            return d->given;
+        }
+    }
+    return false;
+}
+
 static bool emit_replaced(struct aml *a, uacpi_namespace_node *node, const char name[static 4]) {
     if (memcmp(name, "_PRW", 4) == 0) {
         emit_prw(a, node);
         return true;
     }
     uacpi_namespace_node *parent = uacpi_namespace_node_parent(node);
+    uint32_t uid;
+    if (memcmp(name, "_UID", 4) == 0 && uid_given(parent, &uid)) {
+        aml_name_int(a, "_UID", uid);
+        return true;
+    }
     if (merged_of(parent) != NULL && name_in(name, left_out_merged)) {
         return true;
     }
@@ -1987,6 +2078,35 @@ static bool processor_identity(uacpi_namespace_node *node) {
         && processor_object_id(device, &id);
 }
 
+// What the guest has of a device of the firmware's.
+#define DEVICE_LEFT_OUT 0
+// The devices in its scope, in its parent's.
+#define DEVICE_SCOPE 1
+#define DEVICE_PROCESSOR_OBJECT 2
+#define DEVICE_AS_IS 3
+
+static int device_fate(uacpi_namespace_node *node, uint8_t *id) {
+    // One HPET is all an in-scope machine has.
+    if (uacpi_device_matches_pnp_id(node, acpi_link_ids)
+     || (hpet_any_hidden() && uacpi_device_matches_pnp_id(node, hpet_ids))) {
+        return DEVICE_LEFT_OUT;
+    }
+    // The hypervisor drives the embedded controller.
+    if (uacpi_device_matches_pnp_id(node, ec_ids)) {
+        return DEVICE_SCOPE;
+    }
+    // The other host bridges are below the guest's, if anywhere.
+    if (merged_of(node) != NULL || is_dropped(node) || at_port(node)) {
+        return DEVICE_LEFT_OUT;
+    }
+    // The guest's namespace is ACPI 1.0's, whose processors are Processor
+    // objects, all that an OS of its time knows.
+    if (uacpi_device_matches_pnp_id(node, processor_device_ids) && processor_object_id(node, id)) {
+        return DEVICE_PROCESSOR_OBJECT;
+    }
+    return DEVICE_AS_IS;
+}
+
 static void emit_object(struct aml *a, uacpi_namespace_node *node, bool in_processor) {
     if (uacpi_namespace_node_is_alias(node) || (in_processor && processor_identity(node))) {
         return;
@@ -1999,42 +2119,41 @@ static void emit_object(struct aml *a, uacpi_namespace_node *node, bool in_proce
     uacpi_object *obj;
     switch (type) {
         case UACPI_OBJECT_DEVICE: {
-            // One HPET is all an in-scope machine has.
-            if (uacpi_device_matches_pnp_id(node, acpi_link_ids)
-             || (hpet_any_hidden() && uacpi_device_matches_pnp_id(node, hpet_ids))) {
-                return;
-            }
-            // The hypervisor drives the embedded controller, so the guest gets
-            // only the devices in its scope, in its parent's.
-            if (uacpi_device_matches_pnp_id(node, ec_ids)) {
-                emit_scopes(a, node);
-                return;
-            }
-            // The other host bridges are below the guest's, if anywhere.
-            if (merged_of(node) != NULL || is_dropped(node) || at_port(node)) {
-                return;
-            }
-            // The guest's namespace is ACPI 1.0's, whose processors are
-            // Processor objects, all that an OS of its time knows.
-            bool processor = uacpi_device_matches_pnp_id(node, processor_device_ids);
             uint8_t id;
-            if (processor && processor_object_id(node, &id)) {
-                target_add(node);
-                aml_begin(a, AML_PROCESSOR);
-                emit_seg(a, name.text);
-                aml_byte(a, id);
-                aml_dword(a, 0);
-                aml_byte(a, 0);
-                emit_children(a, node, true);
-                aml_end(a);
-                vacpi.processors_made++;
-                return;
+            switch (device_fate(node, &id)) {
+                case DEVICE_LEFT_OUT: {
+                    return;
+                }
+                case DEVICE_SCOPE: {
+                    emit_scopes(a, node);
+                    return;
+                }
+                case DEVICE_PROCESSOR_OBJECT: {
+                    target_add(node);
+                    aml_begin(a, AML_PROCESSOR);
+                    emit_seg(a, name.text);
+                    aml_byte(a, id);
+                    aml_dword(a, 0);
+                    aml_byte(a, 0);
+                    emit_children(a, node, true);
+                    aml_end(a);
+                    vacpi.processors_made++;
+                    return;
+                }
+                default: {
+                    break;
+                }
             }
+            bool processor = uacpi_device_matches_pnp_id(node, processor_device_ids);
             vacpi.processors_kept += processor ? 1 : 0;
             target_add(node);
             aml_begin(a, AML_DEVICE);
             emit_seg(a, name.text);
             emit_children(a, node, processor);
+            uint32_t uid;
+            if (!child_named(node, "_UID") && uid_given(node, &uid)) {
+                aml_name_int(a, "_UID", uid);
+            }
             if (node == vacpi.primary) {
                 for (size_t i = 0; i < vacpi.merged_count; i++) {
                     emit_merged(a, &vacpi.merged[i]);
@@ -2132,15 +2251,28 @@ static void emit_children(struct aml *a, uacpi_namespace_node *parent, bool in_p
     }
 }
 
+// The objects that the guest has in its namespace's scopes, as below a device
+// whose scope it does not have.
+#define SCOPE_TYPES \
+    (UACPI_OBJECT_DEVICE_BIT | UACPI_OBJECT_PROCESSOR_BIT | UACPI_OBJECT_POWER_RESOURCE_BIT \
+   | UACPI_OBJECT_THERMAL_ZONE_BIT)
+
 static void emit_scopes(struct aml *a, uacpi_namespace_node *parent) {
     uacpi_namespace_node *iter = NULL;
-    uacpi_object_type_bits scopes = UACPI_OBJECT_DEVICE_BIT
-                                  | UACPI_OBJECT_PROCESSOR_BIT
-                                  | UACPI_OBJECT_POWER_RESOURCE_BIT
-                                  | UACPI_OBJECT_THERMAL_ZONE_BIT;
-    while (uacpi_namespace_node_next_typed(parent, &iter, scopes) == UACPI_STATUS_OK) {
+    while (uacpi_namespace_node_next_typed(parent, &iter, SCOPE_TYPES) == UACPI_STATUS_OK) {
         emit_object(a, iter, false);
     }
+}
+
+static bool root_left_out(const char name[static 4]) {
+    return memcmp(name, "_GPE", 4) == 0 || memcmp(name, "_GL_", 4) == 0
+        || memcmp(name, "_OSI", 4) == 0 || memcmp(name, "_OS_", 4) == 0
+        || memcmp(name, "_REV", 4) == 0;
+}
+
+static bool root_scope(const char name[static 4]) {
+    return memcmp(name, "_SB_", 4) == 0 || memcmp(name, "_TZ_", 4) == 0
+        || memcmp(name, "_PR_", 4) == 0 || memcmp(name, "_SI_", 4) == 0;
 }
 
 // The root's children: the predefined scopes as scopes, the rest as objects.
@@ -2149,13 +2281,10 @@ static void emit_root(struct aml *a) {
     uacpi_namespace_node *iter = NULL;
     while (uacpi_namespace_node_next(root, &iter) == UACPI_STATUS_OK) {
         uacpi_object_name name = uacpi_namespace_node_name(iter);
-        if (memcmp(name.text, "_GPE", 4) == 0 || memcmp(name.text, "_GL_", 4) == 0
-         || memcmp(name.text, "_OSI", 4) == 0 || memcmp(name.text, "_OS_", 4) == 0
-         || memcmp(name.text, "_REV", 4) == 0) {
+        if (root_left_out(name.text)) {
             continue;
         }
-        if (memcmp(name.text, "_SB_", 4) == 0 || memcmp(name.text, "_TZ_", 4) == 0
-         || memcmp(name.text, "_PR_", 4) == 0 || memcmp(name.text, "_SI_", 4) == 0) {
+        if (root_scope(name.text)) {
             if (memcmp(name.text, "_SB_", 4) == 0 || memcmp(name.text, "_TZ_", 4) == 0) {
                 target_add(iter);
             }
@@ -2168,6 +2297,222 @@ static void emit_root(struct aml *a) {
         }
         emit_object(a, iter, false);
     }
+}
+
+static void uid_device_add(uacpi_namespace_node *node) {
+    uacpi_id_string *hid = NULL;
+    uacpi_pnp_id_list *cids = NULL;
+    if (uacpi_eval_hid(node, &hid) != UACPI_STATUS_OK) {
+        hid = NULL;
+    }
+    if (uacpi_eval_cid(node, &cids) != UACPI_STATUS_OK) {
+        cids = NULL;
+    } else if (cids->num_ids == 0) {
+        uacpi_free_pnp_id_list(cids);
+        cids = NULL;
+    }
+    if (hid == NULL && cids == NULL) {
+        return;
+    }
+    vacpi.uid_devices = heap_grow(
+        vacpi.uid_devices, vacpi.uid_device_count, &vacpi.uid_device_capacity,
+        sizeof(struct uid_device), 64
+    );
+    struct uid_device *d = &vacpi.uid_devices[vacpi.uid_device_count++];
+    *d = (struct uid_device){ .node = node, .hid = hid, .cids = cids };
+    if (uacpi_eval_uid(node, &d->uid) != UACPI_STATUS_OK) {
+        d->uid = NULL;
+    }
+}
+
+// The PCI interrupt links and legacy devices that ReBIOS gives the guest are
+// the only ones it has of their IDs, the firmware's left out, so its mailbox
+// is the one device of its own that shares an ID with the firmware's.
+static void uid_device_add_own(const char *path, const char *hid, uint32_t uid) {
+    vacpi.uid_devices = heap_grow(
+        vacpi.uid_devices, vacpi.uid_device_count, &vacpi.uid_device_capacity,
+        sizeof(struct uid_device), 64
+    );
+    struct uid_device *d = &vacpi.uid_devices[vacpi.uid_device_count++];
+    *d = (struct uid_device){ .own_path = path, .own_hid = hid };
+    snprintf(d->own_uid, sizeof(d->own_uid), "%u", (unsigned int)uid);
+}
+
+static void uid_collect_children(uacpi_namespace_node *parent);
+
+// The devices with IDs that emit_object() gives the guest, in its order, but
+// for processors, which keep the _UIDs that the MADT gives them.
+static void uid_collect(uacpi_namespace_node *node) {
+    uacpi_object_type type;
+    if (uacpi_namespace_node_is_alias(node)
+     || uacpi_namespace_node_type(node, &type) != UACPI_STATUS_OK) {
+        return;
+    }
+    if (type == UACPI_OBJECT_PROCESSOR || type == UACPI_OBJECT_POWER_RESOURCE
+     || type == UACPI_OBJECT_THERMAL_ZONE) {
+        uid_collect_children(node);
+        return;
+    }
+    if (type != UACPI_OBJECT_DEVICE) {
+        return;
+    }
+    uint8_t id;
+    switch (device_fate(node, &id)) {
+        case DEVICE_LEFT_OUT: {
+            return;
+        }
+        case DEVICE_SCOPE: {
+            uacpi_namespace_node *iter = NULL;
+            while (uacpi_namespace_node_next_typed(node, &iter, SCOPE_TYPES) == UACPI_STATUS_OK) {
+                uid_collect(iter);
+            }
+            return;
+        }
+        case DEVICE_PROCESSOR_OBJECT: {
+            uid_collect_children(node);
+            return;
+        }
+        default: {
+            break;
+        }
+    }
+    if (!uacpi_device_matches_pnp_id(node, processor_device_ids)) {
+        uid_device_add(node);
+    }
+    uid_collect_children(node);
+    if (node == vacpi.primary) {
+        for (size_t i = 0; i < vacpi.merged_count; i++) {
+            uid_collect_children(vacpi.merged[i].node);
+        }
+    }
+}
+
+static void uid_collect_children(uacpi_namespace_node *parent) {
+    uacpi_namespace_node *iter = NULL;
+    while (uacpi_namespace_node_next(parent, &iter) == UACPI_STATUS_OK) {
+        uid_collect(iter);
+    }
+}
+
+static void uid_collect_root(void) {
+    uacpi_namespace_node *root = uacpi_namespace_root();
+    uacpi_namespace_node *iter = NULL;
+    while (uacpi_namespace_node_next(root, &iter) == UACPI_STATUS_OK) {
+        uacpi_object_name name = uacpi_namespace_node_name(iter);
+        if (root_left_out(name.text)) {
+            continue;
+        }
+        if (root_scope(name.text)) {
+            uid_collect_children(iter);
+        } else {
+            uid_collect(iter);
+        }
+    }
+}
+
+// Whether a device that shares an ID with the one at the index has the _UID,
+// as a number and as text, given it or its own, which those after the index
+// are yet to be given.
+static bool uid_used(size_t index, uint32_t number, const char *text) {
+    const struct uid_device *d = &vacpi.uid_devices[index];
+    for (size_t i = 0; i < vacpi.uid_device_count; i++) {
+        const struct uid_device *other = &vacpi.uid_devices[i];
+        if (i == index || uid_shared_id(d, other) == NULL) {
+            continue;
+        }
+        if (other->given && i < index && other->given_uid == number) {
+            return true;
+        }
+        if (!other->given && uid_text(other) != NULL && same_text(uid_text(other), text)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void uid_give(size_t index) {
+    struct uid_device *d = &vacpi.uid_devices[index];
+    char text[UID_TEXT];
+    for (size_t number = 0; ; number++) {
+        snprintf(text, sizeof(text), "%zu", number);
+        if (!uid_used(index, (uint32_t)number, text)) {
+            d->given_uid = (uint32_t)number;
+            break;
+        }
+    }
+    // The device that kept the _UID it had, or else one it shares an ID with.
+    const struct uid_device *other = NULL;
+    for (size_t i = 0; i < index && uid_text(d) != NULL && other == NULL; i++) {
+        const struct uid_device *o = &vacpi.uid_devices[i];
+        if (!o->given && uid_shared_id(d, o) != NULL && uid_text(o) != NULL
+         && same_text(uid_text(o), uid_text(d))) {
+            other = o;
+        }
+    }
+    for (size_t i = 0; i < vacpi.uid_device_count && other == NULL; i++) {
+        if (i != index && uid_shared_id(d, &vacpi.uid_devices[i]) != NULL) {
+            other = &vacpi.uid_devices[i];
+        }
+    }
+    const char *path = d->node != NULL ? acpi_path(d->node) : d->own_path;
+    const char *other_path = other->node != NULL ? acpi_path(other->node) : other->own_path;
+    if (uid_text(d) != NULL) {
+        printf(
+            "Guest DSDT: %s gets _UID %u, as its _UID %s is that of %s, which shares %s with it\n",
+            path, (unsigned int)d->given_uid, uid_text(d), other_path, uid_shared_id(d, other)
+        );
+    } else {
+        printf(
+            "Guest DSDT: %s gets _UID %u, as it has none and shares %s with %s\n",
+            path, (unsigned int)d->given_uid, uid_shared_id(d, other), other_path
+        );
+    }
+    if (d->node != NULL) {
+        acpi_path_free(path);
+    }
+    if (other->node != NULL) {
+        acpi_path_free(other_path);
+    }
+}
+
+// Gives a _UID to each device that shares an ID with another and has none, or
+// has the one that a device before it with that ID kept: the smallest number
+// that no device with any of its IDs has.
+static void uid_plan(void) {
+    struct uid_device *devices = vacpi.uid_devices;
+    size_t count = vacpi.uid_device_count;
+    for (size_t i = 0; i < count; i++) {
+        const char *uid = uid_text(&devices[i]);
+        bool shares = false;
+        bool taken = false;
+        for (size_t j = 0; j < count; j++) {
+            if (j == i || uid_shared_id(&devices[i], &devices[j]) == NULL) {
+                continue;
+            }
+            shares = true;
+            const char *other = uid_text(&devices[j]);
+            if (j < i && !devices[j].given && uid != NULL && other != NULL
+             && same_text(uid, other)) {
+                taken = true;
+            }
+        }
+        devices[i].given = shares && (uid == NULL || taken);
+    }
+    for (size_t i = 0; i < count; i++) {
+        if (devices[i].given) {
+            uid_give(i);
+        }
+    }
+}
+
+static void uid_devices_free(void) {
+    for (size_t i = 0; i < vacpi.uid_device_count; i++) {
+        struct uid_device *d = &vacpi.uid_devices[i];
+        uacpi_free_id_string(d->hid);
+        uacpi_free_pnp_id_list(d->cids);
+        uacpi_free_id_string(d->uid);
+    }
+    vacpi.uid_device_count = 0;
 }
 
 // Store (Field, Local) and friends, by name.
@@ -2962,13 +3307,15 @@ static size_t claims(uint8_t *crs, bool acpi) {
     return size;
 }
 
+#define MAILBOX_UID 0x5242
+
 static void emit_mailbox_device(struct aml *a) {
     aml_begin(a, AML_SCOPE);
     aml_name(a, "\\_SB");
     aml_begin(a, AML_DEVICE);
     aml_name(a, "RBMB");
     aml_name_int(a, "_HID", eisa_id("PNP0C02"));
-    aml_name_int(a, "_UID", 0x5242);
+    aml_name_int(a, "_UID", MAILBOX_UID);
     uint8_t crs[CLAIMS_MAX];
     size_t crs_size = claims(crs, true);
     aml_op(a, AML_NAME);
@@ -3274,11 +3621,15 @@ uint8_t *vacpi_dsdt(size_t *length) {
         NULL
     );
     bridges_merge();
+    uid_device_add_own("\\_SB_.RBMB", "PNP0C02", MAILBOX_UID);
+    uid_collect_root();
+    uid_plan();
     emit_mailbox_device(&a);
     emit_root(&a);
     emit_legacy_devices(&a);
     emit_links(&a);
     emit_sleep_and_events(&a);
+    uid_devices_free();
     acpi_unlock();
 
     char oem_id[6];
