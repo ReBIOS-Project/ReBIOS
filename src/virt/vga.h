@@ -77,6 +77,9 @@ size_t vga_vbe_vram_size(void);
 bool vga_dac8(void);
 void vga_set_dac8(bool dac8);
 
+// Whether attribute bit 7 blinks rather than selects the bright backgrounds.
+bool vga_blinking(void);
+
 // The size of the linear framebuffer vga_init() is to give the guest, 0 if it
 // is to give none.
 size_t vga_lfb_size(void);

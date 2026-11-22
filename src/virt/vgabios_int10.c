@@ -19,6 +19,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <virt/bda.h>
+#include <virt/vga.h>
 #include <virt/vgabios.h>
 
 #define VECTOR(n) ((uint16_t)((n) * 4))
@@ -36,6 +37,12 @@
 
 #define AC_PAS 0x20
 #define SEQ_SCREEN_OFF 0x20
+
+// The miscellaneous flags of AH=1Bh's state information (Ralf Brown's
+// Interrupt List release 61, Table 00041), the low four as the BIOS data area
+// keeps them.
+#define STATE_MISC_BDA_FLAGS 0x0f
+#define STATE_MISC_BLINK 0x20
 
 #define DCC_VGA_COLOR 0x08
 #define DCC_VGA_MONO 0x07
@@ -1316,7 +1323,11 @@ static void state_information(struct vgabios_regs *r) {
     uint8_t map = seq_read(0x03);
     vgabios_pokeb(es, (uint16_t)(to + 43), (uint8_t)(((map >> 3) & 4) | ((map >> 2) & 3)));
     vgabios_pokeb(es, (uint16_t)(to + 44), (uint8_t)(((map >> 2) & 4) | (map & 3)));
-    vgabios_pokeb(es, (uint16_t)(to + 45), (uint8_t)(vgabios_peekb(BDA, BDA_VGA_FLAGS) & 0x0f));
+    uint8_t misc = vgabios_peekb(BDA, BDA_VGA_FLAGS) & STATE_MISC_BDA_FLAGS;
+    if (vga_blinking()) {
+        misc |= STATE_MISC_BLINK;
+    }
+    vgabios_pokeb(es, (uint16_t)(to + 45), misc);
     for (size_t i = 46; i < 64; i++) {
         vgabios_pokeb(es, (uint16_t)(to + i), 0);
     }

@@ -1836,6 +1836,13 @@ void vga_set_dac8(bool dac8) {
     spinlock_release(&vga.lock);
 }
 
+bool vga_blinking(void) {
+    spinlock_acquire(&vga.lock);
+    bool blinking = (vga.ac[AC_MODE] & AC_MODE_BLINK) != 0;
+    spinlock_release(&vga.lock);
+    return blinking;
+}
+
 static uint32_t expand6(uint8_t v) {
     v &= 0x3f;
     return (uint32_t)((v << 2) | (v >> 4));
