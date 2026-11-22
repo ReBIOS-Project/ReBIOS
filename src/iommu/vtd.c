@@ -210,22 +210,27 @@ static void tables_flush_caches(void) {
     }
 }
 
-static void queue_submit(struct vtd_unit *u, uint64_t low, uint64_t high) {
+// Queues a descriptor, which the unit fetches at the next queue_sync(). Its
+// reads of the queue are snooped whatever ECAP.C says (D51397-019 rev. 5.20,
+// Appendix A), so only the tables the descriptors are about need writing back
+// first, which tables_flush_caches() does.
+static void queue_add(struct vtd_unit *u, uint64_t low, uint64_t high) {
     uint64_t *desc = &u->queue[u->queue_tail * 2];
     desc[0] = low;
     desc[1] = high;
     u->queue_tail = (u->queue_tail + 1) % QUEUE_ENTRIES;
-    tables_flush_caches();
-    reg_write64(u, REG_IQT, (uint64_t)u->queue_tail << 4);
 }
 
-// Waits for everything submitted so far to complete.
+// Hands the unit everything queued, with a wait descriptor after it, in one
+// write of the queue's tail, and waits for it all to complete.
 static void queue_sync(struct vtd_unit *u) {
     atomic_store_explicit(&u->wait_done, 0, memory_order_relaxed);
-    queue_submit(
+    queue_add(
         u, DESC_WAIT | DESC_WAIT_SW | DESC_WAIT_FN | (uint64_t)1 << DESC_WAIT_DATA_SHIFT,
         (uint64_t)(uintptr_t)&u->wait_done
     );
+    atomic_thread_fence(memory_order_seq_cst);
+    reg_write64(u, REG_IQT, (uint64_t)u->queue_tail << 4);
 
     uint64_t deadline = time_ns() + TIMEOUT_NS;
     while (atomic_load_explicit(&u->wait_done, memory_order_acquire) != 1) {
@@ -246,7 +251,8 @@ static void queue_sync(struct vtd_unit *u) {
     }
 }
 
-static void invalidate_all(struct vtd_unit *u) {
+// The drains an IOTLB invalidation asks for, where the unit has them.
+static uint64_t iotlb_drain(const struct vtd_unit *u) {
     uint64_t drain = 0;
     if ((u->cap & CAP_DRD) != 0) {
         drain |= DESC_IOTLB_DR;
@@ -254,9 +260,14 @@ static void invalidate_all(struct vtd_unit *u) {
     if ((u->cap & CAP_DWD) != 0) {
         drain |= DESC_IOTLB_DW;
     }
+    return drain;
+}
+
+static void invalidate_all(struct vtd_unit *u) {
     spinlock_acquire(&queue_lock);
-    queue_submit(u, DESC_CONTEXT | DESC_GLOBAL, 0);
-    queue_submit(u, DESC_IOTLB | DESC_GLOBAL | drain, 0);
+    tables_flush_caches();
+    queue_add(u, DESC_CONTEXT | DESC_GLOBAL, 0);
+    queue_add(u, DESC_IOTLB | DESC_GLOBAL | iotlb_drain(u), 0);
     queue_sync(u);
     spinlock_release(&queue_lock);
 }
@@ -267,7 +278,7 @@ static void remap_invalidate_desc(uint64_t desc) {
     tables_flush_caches();
     spinlock_acquire(&queue_lock);
     for (size_t i = 0; i < unit_count; i++) {
-        queue_submit(&units[i], desc, 0);
+        queue_add(&units[i], desc, 0);
         queue_sync(&units[i]);
     }
     spinlock_release(&queue_lock);
