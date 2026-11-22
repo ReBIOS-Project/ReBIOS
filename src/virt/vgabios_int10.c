@@ -657,37 +657,40 @@ static void scroll_graphics(
     if (n == 0 || n >= rows) {
         n = rows;
     }
+    size_t first = top * (size_t)height;
+    size_t kept = (rows - n) * height;
+    size_t cleared = n * height;
+    // Scan lines that span the screen lie one after another, and go at once.
+    bool whole = segment == 0xa000 && x == 0
+              && bytes == (size_t)(pixel_line(m, 0, 1) - pixel_line(m, 0, 0));
+    size_t moved_at_once = whole ? kept : 1;
+    size_t filled_at_once = whole ? cleared : 1;
     // Planes move together through the latches.
     if (m->kind == VGABIOS_MODE_PLANAR) {
         gc_write(0x05, (uint8_t)((m->gc[5] & ~3) | 1));
     }
     if (lines >= 0) {
-        for (size_t r = top; r + n <= bottom; r++) {
-            for (size_t s = 0; s < height; s++) {
-                vgabios_far_move(
-                    segment, pixel_line(m, x, (uint16_t)(r * height + s)),
-                    pixel_line(m, x, (uint16_t)((r + n) * height + s)), bytes
-                );
-            }
+        for (size_t y = 0; y < kept; y += moved_at_once) {
+            vgabios_far_move(
+                segment, pixel_line(m, x, (uint16_t)(first + y)),
+                pixel_line(m, x, (uint16_t)(first + y + cleared)), moved_at_once * bytes
+            );
         }
     } else {
-        for (size_t r = bottom; r >= top + n; r--) {
-            for (size_t s = 0; s < height; s++) {
-                vgabios_far_move(
-                    segment, pixel_line(m, x, (uint16_t)(r * height + s)),
-                    pixel_line(m, x, (uint16_t)((r - n) * height + s)), bytes
-                );
-            }
+        for (size_t y = kept; y > 0; y -= moved_at_once) {
+            size_t from = y - moved_at_once;
+            vgabios_far_move(
+                segment, pixel_line(m, x, (uint16_t)(first + from + cleared)),
+                pixel_line(m, x, (uint16_t)(first + from)), moved_at_once * bytes
+            );
         }
     }
     if (m->kind == VGABIOS_MODE_PLANAR) {
         gc_write(0x05, m->gc[5]);
     }
-    size_t first = lines >= 0 ? bottom - n + 1 : top;
-    for (size_t r = first; r < first + n; r++) {
-        for (size_t s = 0; s < height; s++) {
-            fill_line(m, pixel_line(m, x, (uint16_t)(r * height + s)), bytes, colour);
-        }
+    size_t blank = lines >= 0 ? first + kept : first;
+    for (size_t y = 0; y < cleared; y += filled_at_once) {
+        fill_line(m, pixel_line(m, x, (uint16_t)(blank + y)), filled_at_once * bytes, colour);
     }
 }
 
