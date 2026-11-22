@@ -486,10 +486,7 @@ static uint64_t linear_access(
         size_t chunk = PAGE_SIZE - offset < size - done ? PAGE_SIZE - offset : size - done;
         uint64_t part = value >> (done * 8);
         if (page->place == MMIO_PLACE_RUN) {
-            uint8_t buf[8];
-            write_le64(buf, part);
-            mmio_region_access(v, page->region, page->gpa + offset, buf, chunk, write);
-            part = read_le64(buf);
+            part = mmio_region_access(v, page->region, page->gpa + offset, chunk, write, part);
         } else if (write) {
             ram_store(page->host + offset, chunk, part);
         } else {

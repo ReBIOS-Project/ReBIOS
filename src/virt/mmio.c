@@ -548,15 +548,29 @@ int mmio_page(uintptr_t gpa, bool write, uint8_t **host, const void **region) {
     return MMIO_PLACE_RAM;
 }
 
-void mmio_region_access(
+uint64_t mmio_region_access(
     struct vcpu *v,
     const void *region,
     uintptr_t gpa,
-    void *buf,
     size_t len,
-    bool write
+    bool write,
+    uint64_t value
 ) {
-    region_access(v, region, gpa, buf, len, write);
+    const struct region *r = region;
+    uint64_t offset = gpa - atomic_load_explicit(&r->base, memory_order_relaxed);
+    // One naturally aligned piece, as most accesses are, goes to the region as
+    // it is.
+    if ((len & (len - 1)) == 0 && (offset & (len - 1)) == 0) {
+        if (write) {
+            r->ops->write(v, r->ctx, offset, len, value);
+            return 0;
+        }
+        return r->ops->read(v, r->ctx, offset, len);
+    }
+    uint8_t buf[8];
+    write_le64(buf, value);
+    region_access(v, r, gpa, buf, len, write);
+    return read_le64(buf);
 }
 
 bool mmio_region_store(

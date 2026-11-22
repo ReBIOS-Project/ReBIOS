@@ -159,14 +159,15 @@ bool mmio_store_run(
 #define MMIO_PLACE_RAM 1
 #define MMIO_PLACE_RUN 2
 int mmio_page(uintptr_t gpa, bool write, uint8_t **host, const void **region);
-// An access within a page of the region mmio_page() gave.
-void mmio_region_access(
+// An access of len bytes within a page of the region mmio_page() gave, of
+// value's low bytes, or reading what it returns.
+uint64_t mmio_region_access(
     struct vcpu *v,
     const void *region,
     uintptr_t gpa,
-    void *buf,
     size_t len,
-    bool write
+    bool write,
+    uint64_t value
 );
 // Runs within a page of that region, all at once: count elements of size
 // bytes, the first at gpa, or to and from, and each next step bytes on. Stores
