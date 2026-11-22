@@ -184,8 +184,12 @@ struct amdvi_unit {
     uint16_t cap_offset;
     // An RD890's setup, which waking may not give back, or NULL.
     struct rd890_saved *rd890;
+    // The command buffer, where the next command goes, the head as last read,
+    // and the tail as last written, which the unit processes up to.
     uint32_t *commands;
     uint32_t command_tail;
+    uint32_t command_head;
+    uint32_t command_kicked;
     uint32_t *events;
     _Atomic(uint64_t) wait_done;
     // The GA log, the entry to read next, where the unit keeps a copy of its
@@ -388,6 +392,19 @@ static void reg_write(const struct amdvi_unit *u, uint32_t reg, uint64_t value) 
     *(volatile uint64_t *)(uintptr_t)(u->base + reg) = value;
 }
 
+// Hands the unit the commands queued since the last time, in one write of the
+// tail.
+static void command_kick(struct amdvi_unit *u) {
+    if (u->command_kicked == u->command_tail) {
+        return;
+    }
+    atomic_thread_fence(memory_order_seq_cst);
+    reg_write(u, REG_COMMAND_TAIL, (uint64_t)u->command_tail << 4);
+    u->command_kicked = u->command_tail;
+}
+
+// Queues a command for the next command_kick(), the buffer's head read only
+// where it may be full, after handing the unit what waits.
 static void command_submit(
     struct amdvi_unit *u,
     uint32_t w0,
@@ -396,12 +413,22 @@ static void command_submit(
     uint32_t w3
 ) {
     uint32_t next = (u->command_tail + 1) % LOG_ENTRIES;
-    uint64_t deadline = time_ns() + TIMEOUT_NS;
-    while (((reg_read(u, REG_COMMAND_HEAD) >> 4) & (LOG_ENTRIES - 1)) == next) {
-        if (time_ns() > deadline) {
-            panic("AMD-Vi unit at %#llx does not process commands\n", (unsigned long long)u->base);
+    if (next == u->command_head) {
+        command_kick(u);
+        uint64_t deadline = time_ns() + TIMEOUT_NS;
+        for (;;) {
+            u->command_head = (reg_read(u, REG_COMMAND_HEAD) >> 4) & (LOG_ENTRIES - 1);
+            if (u->command_head != next) {
+                break;
+            }
+            if (time_ns() > deadline) {
+                panic(
+                    "AMD-Vi unit at %#llx does not process commands\n",
+                    (unsigned long long)u->base
+                );
+            }
+            cpu_relax();
         }
-        cpu_relax();
     }
     uint32_t *command = &u->commands[u->command_tail * 4];
     command[0] = w0;
@@ -409,7 +436,6 @@ static void command_submit(
     command[2] = w2;
     command[3] = w3;
     u->command_tail = next;
-    reg_write(u, REG_COMMAND_TAIL, (uint64_t)next << 4);
 }
 
 // Waits for everything submitted so far to complete.
@@ -422,6 +448,7 @@ static void command_sync(struct amdvi_unit *u) {
         (uint32_t)(store >> 32) | CMD_COMPLETION_WAIT << CMD_SHIFT,
         1, 0
     );
+    command_kick(u);
 
     uint64_t deadline = time_ns() + TIMEOUT_NS;
     while (atomic_load_explicit(&u->wait_done, memory_order_acquire) != 1) {
@@ -575,6 +602,8 @@ static void unit_enable(struct amdvi_unit *u) {
         u->events = page_alloc(1);
     }
     u->command_tail = 0;
+    u->command_head = 0;
+    u->command_kicked = 0;
     reg_write(u, REG_EXCLUSION_BASE, 0);
     reg_write(u, REG_DEVICE_TABLE, (uint64_t)(uintptr_t)device_table | DEVICE_TABLE_SIZE);
     reg_write(u, REG_COMMAND_BUFFER, (uint64_t)(uintptr_t)u->commands | LOG_LENGTH_256);
