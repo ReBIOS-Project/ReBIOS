@@ -496,6 +496,83 @@ static void planes_changed_range(uint32_t low, uint32_t high, uint8_t planes) {
     vga.font_changed |= (planes & 4) != 0;
 }
 
+// length bytes at to of plane p's bytes of results, byte k the k % size'th,
+// eight at a time where they can be.
+static void fill_pattern(
+    uint8_t *to,
+    size_t length,
+    const uint32_t *results,
+    size_t size,
+    size_t p
+) {
+    uint8_t pattern[8];
+    for (size_t j = 0; j < 8; j++) {
+        pattern[j] = (uint8_t)(results[j & (size - 1)] >> (8 * p));
+    }
+    size_t k = 0;
+    for (; k < length && ((uintptr_t)(to + k) & 7) != 0; k++) {
+        to[k] = pattern[k & 7];
+    }
+    // From an aligned k on, the eight bytes are the pattern turned by k.
+    uint64_t word = 0;
+    for (size_t j = 0; j < 8; j++) {
+        word |= (uint64_t)pattern[(k + j) & 7] << (8 * j);
+    }
+    for (; k + 8 <= length; k += 8) {
+        *(uint64_t *)(void *)(to + k) = word;
+    }
+    for (; k < length; k++) {
+        to[k] = pattern[k & 7];
+    }
+}
+
+// planes_run() a plane at a time: with results, element byte i's for every
+// element, and otherwise the bytes of data as they are, as the identity write
+// state makes them; bits is how many low address bits choose planes.
+static void planes_run_planes(
+    uint32_t base,
+    size_t length,
+    size_t size,
+    const uint8_t *data,
+    const uint32_t *results,
+    uint8_t map,
+    unsigned int bits
+) {
+    uint32_t period = (uint32_t)1 << bits;
+    uint32_t low_bits = period - 1;
+    uint8_t touched = 0;
+    for (size_t p = 0; p < 4; p++) {
+        if ((map & ((uint32_t)1 << p)) == 0) {
+            continue;
+        }
+        size_t first = (p - base) & low_bits;
+        if (first >= length) {
+            continue;
+        }
+        touched |= (uint8_t)((uint32_t)1 << p);
+        uint8_t *plane = vga.planes[p];
+        if (results == NULL && bits == 0) {
+            memcpy(plane + base, data, length);
+            continue;
+        }
+        if (results == NULL) {
+            for (size_t k = first; k < length; k += period) {
+                plane[(base + (uint32_t)k) & ~low_bits] = data[k];
+            }
+            continue;
+        }
+        if (bits == 0) {
+            fill_pattern(plane + base, length, results, size, p);
+            continue;
+        }
+        for (size_t k = first; k < length; k += period) {
+            uint32_t result = results[k & (size - 1)];
+            plane[(base + (uint32_t)k) & ~low_bits] = (uint8_t)(result >> (8 * p));
+        }
+    }
+    planes_changed_range(base & ~low_bits, (base + (uint32_t)length - 1) & ~low_bits, touched);
+}
+
 // planes_write() for length bytes of window addresses from base on, one after
 // another and none past the planes' end, whose byte k is what the graphics
 // controller makes of data[k], or of data[k % size] where same is true: as
@@ -518,6 +595,19 @@ static void planes_run(
         for (size_t i = 0; i < size; i++) {
             results[i] = write_results(data[i]);
         }
+    }
+    // A plane at a time where it can: the bytes that reach plane p are those
+    // whose addresses' low bits that choose planes, none, one, or two, have
+    // p's value there, each at its address with those bits clear.
+    if (same || write_identity()) {
+        unsigned int bits = 0;
+        if (chain4) {
+            bits = 2;
+        } else if (odd_even) {
+            bits = 1;
+        }
+        planes_run_planes(base, length, size, data, same ? results : NULL, map, bits);
+        return;
     }
     uint8_t touched = 0;
     size_t i = 0;
