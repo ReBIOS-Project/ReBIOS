@@ -77,8 +77,8 @@ bool sleep_offered(uint8_t state) {
         return false;
     }
     // Nothing lights the screen of an emulated VGA again after S3, so the
-    // guest does without S3 there: an exception the maintainer granted to
-    // hiding nothing from the guest for want of something in ReBIOS.
+    // guest does without S3 there: an exception to hiding nothing from the
+    // guest for want of something in ReBIOS.
     return !vga_emulated();
 }
 
