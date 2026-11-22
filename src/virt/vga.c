@@ -927,6 +927,67 @@ static void latches_move(uint32_t source, uint32_t destination, int64_t step, si
     }
 }
 
+// planes_move() for bytes in odd/even addressing, as text modes' scrolls move
+// them: the same bytes, planes, and order, the display told of the destination
+// once where it does not wrap.
+static void move_odd_even_bytes(
+    uint32_t from,
+    uint32_t to,
+    int64_t step,
+    size_t count,
+    uint8_t map,
+    uint8_t read_map
+) {
+    uint8_t write_planes[] = { map & 5, map & 0x0a };
+    // By an address's low bit, the plane its byte comes from, and the two it
+    // may go to, NULL for one the map mask leaves out.
+    const uint8_t *source[] = { vga.planes[read_map & 2], vga.planes[(read_map & 2) | 1] };
+    uint8_t *lower[] = { NULL, NULL };
+    uint8_t *upper[] = { NULL, NULL };
+    for (size_t bit = 0; bit < 2; bit++) {
+        if ((map & ((uint32_t)1 << bit)) != 0) {
+            lower[bit] = vga.planes[bit];
+        }
+        if ((map & ((uint32_t)4 << bit)) != 0) {
+            upper[bit] = vga.planes[bit + 2];
+        }
+    }
+    uint32_t address = 0;
+    uint32_t next_from = from;
+    uint32_t next_to = to;
+    for (size_t n = 0; n < count; n++) {
+        uint32_t at_from = next_from & (PLANE_SIZE - 1);
+        uint32_t at_to = next_to & (PLANE_SIZE - 1);
+        address = at_from & ~(uint32_t)1;
+        uint8_t value = source[at_from & 1][address];
+        uint32_t at = at_to & ~(uint32_t)1;
+        if (lower[at_to & 1] != NULL) {
+            lower[at_to & 1][at] = value;
+        }
+        if (upper[at_to & 1] != NULL) {
+            upper[at_to & 1][at] = value;
+        }
+        next_from += (uint32_t)step;
+        next_to += (uint32_t)step;
+    }
+    for (size_t p = 0; p < 4; p++) {
+        vga.latch[p] = vga.planes[p][address];
+    }
+    uint32_t span = (uint32_t)(count - 1);
+    uint32_t low = step > 0 ? to : to - span;
+    if (step < 0 && to < span) {
+        low = PLANE_SIZE;
+    }
+    if (low + span < PLANE_SIZE) {
+        planes_changed_range(low & ~(uint32_t)1, (low + span) & ~(uint32_t)1, map);
+        return;
+    }
+    for (size_t n = 0; n < count; n++) {
+        uint32_t b = (to + (uint32_t)((uint64_t)step * n)) & (PLANE_SIZE - 1);
+        planes_changed(b & ~(uint32_t)1, write_planes[b & 1]);
+    }
+}
+
 // A move of count elements of size bytes, each step bytes after the last,
 // where step is size or -size, while the graphics controller takes each byte
 // read as it is and writes it as it is to every plane it reaches: each
@@ -955,6 +1016,11 @@ static bool planes_move(
     uint8_t read_map = vga.gc[GC_READ_MAP] & 3;
     bool chain4 = (vga.seq[SEQ_MEMORY_MODE] & SEQ_MEMORY_CHAIN4) != 0;
     bool odd_even = !chain4 && (vga.seq[SEQ_MEMORY_MODE] & SEQ_MEMORY_SEQUENTIAL) == 0;
+    if (odd_even && size == 1) {
+        move_odd_even_bytes(from, to, step, count, map, read_map);
+        vga.dirty = true;
+        return true;
+    }
     // The address bits that select planes rather than addresses in them.
     uint32_t plane_bits = 0;
     if (chain4) {
