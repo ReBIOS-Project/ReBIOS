@@ -341,7 +341,7 @@ static size_t stack_size(struct vcpu *v, struct run_state *rs) {
 // The page holding linear, for accesses needing need: NULL where the processor
 // would fault there, *fault then true, or reach anything but memory or a
 // region that begins runs.
-static struct run_page *page_get(
+static struct run_page *page_get_all(
     struct vcpu *v,
     struct run_state *rs,
     uintptr_t linear,
@@ -387,6 +387,27 @@ static struct run_page *page_get(
     // A walk for a write checked the access's reads too.
     p->rights |= need | (write ? NEED_READ : 0);
     return p;
+}
+
+// page_get_all(), a page the run holds with the rights without a call.
+static inline struct run_page *page_get(
+    struct vcpu *v,
+    struct run_state *rs,
+    uintptr_t linear,
+    unsigned int need,
+    bool *fault
+) {
+    uintptr_t page = linear & ~(uintptr_t)(PAGE_SIZE - 1);
+    for (size_t i = 0; i < rs->page_count; i++) {
+        struct run_page *p = &rs->pages[i];
+        if (p->linear == page) {
+            if ((p->rights & need) == need) {
+                return p;
+            }
+            break;
+        }
+    }
+    return page_get_all(v, rs, linear, need, fault);
 }
 
 // Whether size bytes at linear all reach the same place with the access:
