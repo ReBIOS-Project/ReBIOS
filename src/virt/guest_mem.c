@@ -20,8 +20,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <virt/guest_mem.h>
+#include <lib/bytes.h>
 #include <lib/util.h>
-#include <memory.h>
 #include <sys/mm.h>
 #include <sys/x86.h>
 #include <virt/gpt.h>
@@ -53,10 +53,10 @@ static bool guest_phys_access(uintptr_t gpa, void *buf, size_t len, bool write) 
             chunk = len;
         }
         if (write) {
-            memcpy((void *)(uintptr_t)hpa, p, chunk);
+            bytes_copy((void *)(uintptr_t)hpa, p, chunk);
             gpt_mark_dirty(gpa, chunk);
         } else {
-            memcpy(p, (void *)(uintptr_t)hpa, chunk);
+            bytes_copy(p, (void *)(uintptr_t)hpa, chunk);
         }
         gpa += chunk;
         p += chunk;

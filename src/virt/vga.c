@@ -25,6 +25,7 @@
 #include <hw/pci_assign.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
+#include <lib/bytes.h>
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
@@ -552,7 +553,7 @@ static void planes_run_planes(
         touched |= (uint8_t)((uint32_t)1 << p);
         uint8_t *plane = vga.planes[p];
         if (results == NULL && bits == 0) {
-            memcpy(plane + base, data, length);
+            bytes_copy(plane + base, data, length);
             continue;
         }
         if (results == NULL) {
@@ -663,7 +664,7 @@ static void planes_fill(uint32_t base, size_t length, uint8_t value, uint8_t map
     uint32_t result = write_results(value);
     for (size_t p = 0; p < 4; p++) {
         if ((map & ((uint32_t)1 << p)) != 0) {
-            memset(vga.planes[p] + base, (uint8_t)(result >> (8 * p)), length);
+            bytes_fill(vga.planes[p] + base, (uint8_t)(result >> (8 * p)), length);
         }
     }
     planes_changed_range(base, base + (uint32_t)length - 1, map);
@@ -803,13 +804,13 @@ static void vram_clear(size_t size) {
     uint64_t done = 0;
     if (vbe.direct) {
         done = size < vbe.direct_size ? size : vbe.direct_size;
-        memset(vram_at(0), 0, done);
+        bytes_fill(vram_at(0), 0, done);
     }
     // What comes back from the framebuffer meanwhile is cleared too.
     if (vbe.leaving) {
         done = 0;
     }
-    memset(vbe.vram + done, 0, size - done);
+    bytes_fill(vbe.vram + done, 0, size - done);
 }
 
 // Video memory's byte at offset as the guest reaches it now, and while the
@@ -988,7 +989,7 @@ static bool latches_block(uint32_t from, uint32_t to, int64_t step, size_t count
     }
     for (size_t p = 0; p < 4; p++) {
         if ((planes & ((uint32_t)1 << p)) != 0) {
-            memmove(vga.planes[p] + to_low, vga.planes[p] + from_low, count);
+            bytes_move(vga.planes[p] + to_low, vga.planes[p] + from_low, count);
         }
     }
     planes_changed_range(to_low, to_low + span, planes);

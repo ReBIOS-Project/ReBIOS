@@ -21,6 +21,7 @@
 #include <stdint.h>
 #include <stdnoreturn.h>
 #include <virt/mmio.h>
+#include <lib/bytes.h>
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
@@ -757,13 +758,13 @@ static void step_map(struct vcpu *v, uintptr_t gpa, size_t len, unsigned int acc
     p->start = gpa - page;
     p->end = p->start + len;
     p->access = access;
-    memset(p->scratch, 0xff, PAGE_SIZE);
+    bytes_fill(p->scratch, 0xff, PAGE_SIZE);
     if ((access & INSN_MEM_READ) != 0) {
         region_access(v, r, gpa, p->scratch + p->start, len, false);
     } else {
-        memset(p->scratch + p->start, 0, len);
+        bytes_fill(p->scratch + p->start, 0, len);
     }
-    memcpy(p->before, p->scratch, PAGE_SIZE);
+    bytes_copy(p->before, p->scratch, PAGE_SIZE);
     p->mapped = gpt_translate(page, &p->hpa, &p->prot, &p->memtype);
     gpt_map(page, (uintptr_t)p->scratch, PAGE_SIZE, GPT_RWX, MT_WB);
     gpt_flush();
@@ -1015,13 +1016,13 @@ void mmio_step_done(struct vcpu *v) {
         // What it changed beside its operands would come back as writes the
         // manuals do not give it.
         if (completed
-         && (memcmp(p->scratch, p->before, p->start) != 0
-          || memcmp(p->scratch + p->end, p->before + p->end, PAGE_SIZE - p->end) != 0)) {
+         && (!bytes_equal(p->scratch, p->before, p->start)
+          || !bytes_equal(p->scratch + p->end, p->before + p->end, PAGE_SIZE - p->end))) {
             step_unsupported(v, p->gpa, "it changed bytes beside its operands");
         }
         // A fault it raised that the processor delivered before the step ended
         // may have pushed its frame here, which would go with the page.
-        if (!completed && memcmp(p->scratch, p->before, PAGE_SIZE) != 0) {
+        if (!completed && !bytes_equal(p->scratch, p->before, PAGE_SIZE)) {
             step_unsupported(v, p->gpa, "the delivery of a fault it raised wrote there");
         }
         if (completed && (p->access & INSN_MEM_WRITE) != 0) {
