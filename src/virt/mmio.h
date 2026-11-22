@@ -119,7 +119,7 @@ size_t mmio_string(
 
 // The most bytes of elements that a run takes, which a buffer on the stack
 // holds.
-#define MMIO_RUN_BYTES 1024
+#define MMIO_RUN_BYTES 4096
 
 // Runs that ReBIOS carries out in guest memory itself, as REP MOVS and REP
 // STOS do, for the video BIOS's calls (virt/vgabios.c) and for the guest's own

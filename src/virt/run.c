@@ -188,6 +188,9 @@ struct run_state {
     // Ports and sizes the TSS's bitmap lets through, the port in bits 15:0.
     uint32_t ports[RUN_PORTS];
     size_t port_count;
+    // A block's elements on their way between the VGA and RAM, kept off the
+    // stack of the instruction that moves them.
+    uint8_t block[MMIO_RUN_BYTES];
     struct run_decoded decoded[RUN_DECODED];
 };
 
@@ -1454,7 +1457,7 @@ static size_t string_block(
     uintptr_t from_offset = from_linear & (PAGE_SIZE - 1);
     uintptr_t to_gpa = to->gpa + to_offset;
     uintptr_t from_gpa = from->gpa + from_offset;
-    uint8_t buf[MMIO_RUN_BYTES];
+    uint8_t *buf = rs->block;
     bool done = true;
     if (!moves && to->place == MMIO_PLACE_RUN) {
         uint8_t value[8];
