@@ -555,6 +555,11 @@ static uint32_t ppr(const struct vlapic *vl) {
 // What other processors requested, into the registers.
 static void merge(struct vlapic *vl) {
     for (size_t i = 0; i < 8; i++) {
+        // A locked exchange costs what a load does not, and the words are
+        // mostly clear: a request set after the load is the next merge's.
+        if (atomic_load_explicit(&vl->pending[i], memory_order_relaxed) == 0) {
+            continue;
+        }
         uint32_t bits = atomic_exchange_explicit(&vl->pending[i], 0, memory_order_acquire);
         if (bits == 0) {
             continue;
