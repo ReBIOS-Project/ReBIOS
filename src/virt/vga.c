@@ -67,7 +67,9 @@
 #define SEQ_MEMORY_CHAIN4 0x08
 
 #define CRTC_COUNT 0x19
+#define CRTC_HTOTAL 0x00
 #define CRTC_HDE 0x01
+#define CRTC_VTOTAL 0x06
 #define CRTC_OVERFLOW 0x07
 #define CRTC_MAX_SCAN 0x09
 #define CRTC_CURSOR_START 0x0a
@@ -77,6 +79,7 @@
 #define CRTC_CURSOR_HIGH 0x0e
 #define CRTC_CURSOR_LOW 0x0f
 #define CRTC_PRESET 0x08
+#define CRTC_VRS 0x10
 #define CRTC_VRE 0x11
 #define CRTC_VDE 0x12
 #define CRTC_OFFSET 0x13
@@ -119,14 +122,18 @@
 #define AC_MODE_P54 0x80
 
 #define MISC_COLOR 0x01
-#define MISC_LINES 0xc0
-#define MISC_LINES_480 0xc0
+#define MISC_CLOCK 0x0c
+#define MISC_CLOCK_28 0x04
 
-// The display runs at 60 Hz with 480 lines, else at 70 Hz, and is in vertical
-// retrace for the first part of each frame.
-#define FRAME_NS_70 ((uint32_t)14285714)
-#define FRAME_NS_60 ((uint32_t)16683217)
-#define RETRACE_NS ((uint32_t)600000)
+#define ST01_DISPLAY_OFF 0x01
+#define ST01_RETRACE 0x08
+
+// The dot clocks that the miscellaneous output register selects (IBM PS/2
+// Hardware Interface Technical Reference, Common Interfaces, 84F9735, Figure
+// 2-23), in Hz.
+#define DOT_CLOCK_25 ((uint64_t)25175000)
+#define DOT_CLOCK_28 ((uint64_t)28322000)
+#define NS_PER_S ((uint64_t)1000000000)
 
 // The cursor shows for 16 frames and hides for 16, characters with the blink
 // attribute for 32 each.
@@ -187,7 +194,6 @@ static struct {
     bool dac_reading;
     uint8_t dac_latch[3];
     uint8_t latch[4];
-    uint8_t status_toggle;
     uint8_t *planes[4];
     bool dirty;
     // The chunks of plane address the guest wrote since the display last
@@ -1367,18 +1373,82 @@ static bool port_decoded(uint16_t port) {
     return true;
 }
 
-static uint64_t frame_ns(void) {
-    return (vga.misc & MISC_LINES) == MISC_LINES_480 ? FRAME_NS_60 : FRAME_NS_70;
+// The CRT controller's timings as its registers set them (84F9735, Figures
+// 2-40 to 2-59): the dot clock, the clock's periods per character clock, the
+// character clocks of a scan line and those shown, the scan lines of a frame
+// and those shown, and where the vertical retrace begins and ends.
+struct beam_timing {
+    uint64_t dot_hz;
+    uint32_t dots;
+    uint32_t columns;
+    uint32_t shown_columns;
+    uint32_t lines;
+    uint32_t shown_lines;
+    uint32_t retrace_start;
+    uint32_t retrace_end;
+};
+
+// Where the beam is: the frame, the scan line from the top of the active
+// display, and the character clock from the start of the line.
+struct beam {
+    uint64_t frame;
+    uint32_t line;
+    uint32_t column;
+};
+
+static void beam_timing(struct beam_timing *t) {
+    uint32_t overflow = vga.crtc[CRTC_OVERFLOW];
+    t->dot_hz = (vga.misc & MISC_CLOCK) == MISC_CLOCK_28 ? DOT_CLOCK_28 : DOT_CLOCK_25;
+    t->dots = ((vga.seq[SEQ_CLOCKING] & SEQ_CLOCKING_8DOT) != 0 ? 8 : 9)
+            * ((vga.seq[SEQ_CLOCKING] & SEQ_CLOCKING_HALF) != 0 ? 2 : 1);
+    t->columns = vga.crtc[CRTC_HTOTAL] + (uint32_t)5;
+    t->shown_columns = vga.crtc[CRTC_HDE] + (uint32_t)1;
+    t->lines = (vga.crtc[CRTC_VTOTAL] | (overflow & 0x01) << 8 | (overflow & 0x20) << 4)
+             + (uint32_t)2;
+    t->shown_lines = (vga.crtc[CRTC_VDE] | (overflow & 0x02) << 7 | (overflow & 0x40) << 3)
+                   + (uint32_t)1;
+    t->retrace_start = vga.crtc[CRTC_VRS] | (overflow & 0x04) << 6 | (overflow & 0x80) << 2;
+    // The retrace ends at the first scan line after its start whose low 4 bits
+    // are the end register's.
+    uint32_t width = (vga.crtc[CRTC_VRE] - t->retrace_start) & 0x0f;
+    t->retrace_end = t->retrace_start + (width != 0 ? width : 16);
 }
 
+// The beam at time now, the clock having run since time 0.
+static void beam_at(const struct beam_timing *t, uint64_t now, struct beam *b) {
+    uint64_t clocks = mul_div(now, t->dot_hz, NS_PER_S) / t->dots;
+    uint64_t frame = (uint64_t)t->columns * t->lines;
+    b->frame = clocks / frame;
+    uint64_t in = clocks % frame;
+    b->line = (uint32_t)(in / t->columns);
+    b->column = (uint32_t)(in % t->columns);
+}
+
+// Whether scan line line is in the vertical retrace, which can run on into the
+// next frame's first lines.
+static bool in_retrace(const struct beam_timing *t, uint32_t line) {
+    if (line >= t->retrace_start && line < t->retrace_end) {
+        return true;
+    }
+    return t->retrace_end > t->lines && line < t->retrace_end - t->lines;
+}
+
+// Input status register 1 (84F9735, Figure 2-25): bit 0 whenever the beam is
+// outside the active display, bit 3 during the vertical retrace.
 static uint8_t input_status1(void) {
     vga.ac_data_next = false;
-    if (time_ns() % frame_ns() < RETRACE_NS) {
-        return 0x09;
+    struct beam_timing t;
+    beam_timing(&t);
+    struct beam b;
+    beam_at(&t, time_ns(), &b);
+    uint8_t status = 0;
+    if (b.line >= t.shown_lines || b.column >= t.shown_columns) {
+        status |= ST01_DISPLAY_OFF;
     }
-    // Display enable flips, as with each line's horizontal blanking.
-    vga.status_toggle ^= 1;
-    return vga.status_toggle;
+    if (in_retrace(&t, b.line)) {
+        status |= ST01_RETRACE;
+    }
+    return status;
 }
 
 static uint8_t port_read(uint16_t port) {
@@ -3154,7 +3224,11 @@ static bool vbe_frame(uint64_t now) {
 // Starts showing the VGA's display where anything changed. False where nothing
 // did.
 static bool vga_frame(uint64_t now) {
-    uint64_t frames = now / frame_ns();
+    struct beam_timing timing;
+    beam_timing(&timing);
+    struct beam beam;
+    beam_at(&timing, now, &beam);
+    uint64_t frames = beam.frame;
     bool cursor_on = ((frames >> CURSOR_FRAMES_SHIFT) & 1) == 0;
     bool blink_on = ((frames >> BLINK_FRAMES_SHIFT) & 1) == 0;
     uint32_t blink = (cursor_on ? (uint32_t)1 : (uint32_t)0)
