@@ -780,9 +780,16 @@ static void window_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size
     (void)v;
     (void)ctx;
     spinlock_acquire(&vga.lock);
-    bool vbe_mode = vbe_on();
-    for (size_t i = 0; i < size; i++) {
-        window_byte_write(vbe_mode, (uint32_t)(offset + i), (uint8_t)(value >> (8 * i)));
+    if (!vbe_on()) {
+        // Naturally aligned, the access is all within one of the windows the
+        // memory map select chooses, or all outside it.
+        uint8_t bytes[8];
+        write_le64(bytes, value);
+        planes_write((uint32_t)offset, (int64_t)size, size, 1, bytes, false);
+    } else {
+        for (size_t i = 0; i < size; i++) {
+            window_byte_write(true, (uint32_t)(offset + i), (uint8_t)(value >> (8 * i)));
+        }
     }
     spinlock_release(&vga.lock);
 }
