@@ -48,6 +48,47 @@ void io_register(const struct io_handler *handler) {
 
 static const struct io_handler *handler_for(uint16_t port);
 
+#define MAX_IO_BLOCK_HANDLERS 4
+
+static struct io_block_handler block_handlers[MAX_IO_BLOCK_HANDLERS];
+static size_t block_handler_count;
+
+void io_register_block(const struct io_block_handler *handler) {
+    if (block_handler_count == MAX_IO_BLOCK_HANDLERS) {
+        panic("Too many I/O block handlers\n");
+    }
+    block_handlers[block_handler_count++] = *handler;
+}
+
+void io_dispatch_block(
+    struct vcpu *v,
+    uint16_t port,
+    size_t size,
+    bool in,
+    uint8_t *data,
+    size_t count
+) {
+    for (size_t i = 0; i < block_handler_count; i++) {
+        const struct io_block_handler *h = &block_handlers[i];
+        if (port >= h->base && (size_t)(port - h->base) < h->count) {
+            h->access(v, h->ctx, (uint16_t)(port - h->base), size, in, data, count);
+            return;
+        }
+    }
+    for (size_t n = 0; n < count; n++) {
+        uint32_t value = 0;
+        for (size_t i = 0; i < size; i++) {
+            value |= (uint32_t)data[n * size + i] << (8 * i);
+        }
+        io_dispatch(v, port, size, in, &value);
+        if (in) {
+            for (size_t i = 0; i < size; i++) {
+                data[n * size + i] = (uint8_t)(value >> (8 * i));
+            }
+        }
+    }
+}
+
 // Whether the port is trapped: where a handler has it, where the guest is kept
 // from it, and below 1000h where nothing the guest gets has it.
 static bool trapped(uint16_t port) {

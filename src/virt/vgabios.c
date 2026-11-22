@@ -268,8 +268,11 @@ void vgabios_out_indexed(uint16_t port, uint8_t index, uint8_t value) {
 
 void vgabios_out_block(uint16_t port, const uint8_t *bytes, size_t count) {
     if (call_current()->direct) {
-        for (size_t i = 0; i < count; i++) {
-            direct_port(port, 1, false, bytes[i]);
+        uint8_t chunk[256];
+        for (size_t i = 0; i < count; i += sizeof(chunk)) {
+            size_t n = count - i < sizeof(chunk) ? count - i : sizeof(chunk);
+            memcpy(chunk, bytes + i, n);
+            io_dispatch_block(call_current()->v, port, 1, false, chunk, n);
         }
         return;
     }
@@ -283,8 +286,11 @@ void vgabios_out_block(uint16_t port, const uint8_t *bytes, size_t count) {
 
 void vgabios_dac_from_rom(uint16_t offset, size_t count) {
     if (call_current()->direct) {
-        for (size_t i = 0; i < (size_t)256 * 3; i++) {
-            direct_port(VGA_DAC_DATA, 1, false, i < count ? rom_image[offset + i] : 0);
+        size_t all = (size_t)256 * 3;
+        size_t given = count < all ? count : all;
+        io_dispatch_block(call_current()->v, VGA_DAC_DATA, 1, false, rom_image + offset, given);
+        for (size_t i = given; i < all; i++) {
+            direct_port(VGA_DAC_DATA, 1, false, 0);
         }
         return;
     }

@@ -1485,6 +1485,12 @@ static size_t port_block(
     }
     uint8_t *first = page->host + (linear & (PAGE_SIZE - 1));
     size_t done = 0;
+    // Upwards, the elements lie in order in RAM, which the port's handler then
+    // takes as one string.
+    if (delta > 0) {
+        io_dispatch_block(v, number, size, in, first, count);
+        done = count;
+    }
     while (done < count) {
         uint8_t *element = first + delta * (int64_t)done;
         uint32_t value = in ? 0 : (uint32_t)ram_load(element, size);

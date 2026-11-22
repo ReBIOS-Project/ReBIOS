@@ -423,12 +423,7 @@ size_t mmio_string(
         to->ops->write_string(v, to->ctx, destination, size, step, value, true, count);
     } else if (outputs && from == NULL && guest_mem_phys_read(src_low, buf, count * size)) {
         string_order(buf, size, step, count);
-        uint16_t port = (uint16_t)v->gprs.rdx;
-        for (size_t n = 0; n < count; n++) {
-            uint32_t value = 0;
-            memcpy(&value, buf + n * size, size);
-            io_dispatch(v, port, size, false, &value);
-        }
+        io_dispatch_block(v, (uint16_t)v->gprs.rdx, size, false, buf, count);
     } else if (moves && from != NULL && from == to && from->ops->move_string != NULL) {
         from->ops->move_string(v, from->ctx, source, destination, size, step, count);
     } else if (moves && from == NULL && to != NULL && to->ops->write_string != NULL

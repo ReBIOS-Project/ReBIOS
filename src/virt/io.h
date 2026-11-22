@@ -70,4 +70,36 @@ bool io_passed(uint16_t base, size_t count);
 // else nowhere, reading all ones.
 void io_dispatch(struct vcpu *v, uint16_t port, size_t size, bool in, uint32_t *value);
 
+// A handler that takes a string of accesses to its ports at once, each as its
+// io_handler's access would take it, in order: data holds count elements of
+// size bytes, little-endian, which accesses that read fill.
+struct io_block_handler {
+    uint16_t base;
+    size_t count;
+    void (*access)(
+        struct vcpu *v,
+        void *ctx,
+        uint16_t offset,
+        size_t size,
+        bool in,
+        uint8_t *data,
+        size_t count
+    );
+    void *ctx;
+};
+
+// Adds one, for ports an io_handler has too.
+void io_register_block(const struct io_block_handler *handler);
+
+// count accesses to one port, as io_dispatch() runs each, through a block
+// handler where one has the port's.
+void io_dispatch_block(
+    struct vcpu *v,
+    uint16_t port,
+    size_t size,
+    bool in,
+    uint8_t *data,
+    size_t count
+);
+
 #endif

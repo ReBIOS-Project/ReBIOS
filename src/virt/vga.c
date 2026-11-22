@@ -1470,6 +1470,35 @@ static void ports_access(
     spinlock_release(&vga.lock);
 }
 
+// ports_access() for count accesses at once, under one hold of the lock.
+static void ports_access_block(
+    struct vcpu *v,
+    void *ctx,
+    uint16_t offset,
+    size_t size,
+    bool in,
+    uint8_t *data,
+    size_t count
+) {
+    (void)v;
+    (void)ctx;
+    spinlock_acquire(&vga.lock);
+    uint16_t port = (uint16_t)(PORT_BASE + offset);
+    for (size_t n = 0; n < count; n++) {
+        uint8_t *element = data + n * size;
+        for (size_t i = 0; i < size; i++) {
+            uint16_t p = (uint16_t)(port + i);
+            bool here = p < PORT_BASE + PORT_COUNT && port_decoded(p);
+            if (in) {
+                element[i] = here ? port_read(p) : 0xff;
+            } else if (here) {
+                port_write(p, element[i]);
+            }
+        }
+    }
+    spinlock_release(&vga.lock);
+}
+
 static unsigned int mode_bits(void) {
     return vbe.mode.bpp == 15 ? 16 : vbe.mode.bpp;
 }
@@ -3371,6 +3400,8 @@ bool vga_init(void) {
     vgabios_init();
     struct io_handler ports = { PORT_BASE, PORT_COUNT, ports_access, NULL, false };
     io_register(&ports);
+    struct io_block_handler port_strings = { PORT_BASE, PORT_COUNT, ports_access_block, NULL };
+    io_register_block(&port_strings);
     mmio_register(WINDOW_BASE, WINDOW_SIZE, &window_ops, NULL);
     gpt_map(WINDOW_BASE, 0, WINDOW_SIZE, 0, 0);
     gpt_flush();
