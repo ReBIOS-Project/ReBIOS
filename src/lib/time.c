@@ -37,7 +37,11 @@ uint64_t time_tsc_hz(void) {
 }
 
 uint64_t time_ns(void) {
-    return mul_div(rdtsc() - tsc_start, 1000000000, tsc_hz);
+    return time_ns_at(rdtsc());
+}
+
+uint64_t time_ns_at(uint64_t tsc) {
+    return mul_div(tsc - tsc_start, 1000000000, tsc_hz);
 }
 
 void time_udelay(uint64_t us) {

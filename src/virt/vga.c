@@ -257,14 +257,69 @@ struct display_state {
     uint8_t dac[256][3];
 };
 
+// The guest's register writes that the display shows from the scan line on
+// that the beam reached next: the CRT controller's, the attribute
+// controller's, its index's palette address source bit, the sequencer's
+// clocking mode and character map select, the graphics controller's mode and
+// miscellaneous registers, a DAC entry, and the PEL mask.
+#define WRITE_CRTC 0
+#define WRITE_AC 1
+#define WRITE_AC_INDEX 2
+#define WRITE_SEQ 3
+#define WRITE_GC 4
+#define WRITE_DAC 5
+#define WRITE_PEL_MASK 6
+
+// The writes a frame's log holds.
+#define FRAME_WRITES 8192
+
+struct frame_write {
+    uint16_t line;
+    uint8_t kind;
+    uint8_t index;
+    uint8_t value[3];
+};
+
+// A frame's writes, the frame beginning at the vertical retrace, when the CRT
+// controller latches the start address (IBM PS/2 Hardware Interface Technical
+// Reference, Common Interfaces, 84F9735, Figure 2-53), and the registers as it
+// began. count is FRAME_WRITES + 1 where more came than the log holds.
+struct frame_log {
+    uint64_t frame;
+    size_t count;
+    struct display_state start;
+    struct frame_write *writes;
+};
+
+// The frame the guest writes registers in, and the one before it; and where
+// the last write fell, the frame and the scan line, which writes within a
+// quarter of a scan line of it, in TSC ticks, share. A port access's writes
+// share the time it was read at, once one of them needed it, and so whether
+// the log takes them.
+static struct {
+    struct frame_log logs[2];
+    size_t now;
+    bool placed;
+    uint64_t placed_tsc;
+    uint64_t reuse_tsc;
+    uint64_t frame;
+    uint16_t line;
+    bool access_timed;
+    uint64_t access_tsc;
+    bool access_ready;
+} frames;
+
 // How a VGA scan line of the frame is fetched: from the character clock at ma,
 // in row row_scan, shown shift dots further left, or as the line above it
-// again, as double scanning shows it.
+// again, as double scanning shows it; or blank; and the registers and colours
+// it is made with: out.draw's where set is 0, else out.sets[set - 1]'s.
 struct scan_plan {
     uint32_t ma;
     uint8_t row_scan;
     uint8_t shift;
     bool again;
+    bool blank;
+    uint16_t set;
 };
 
 // A rectangle of the framebuffer, empty where x0 is not below x1.
@@ -303,9 +358,13 @@ static struct {
     uint32_t border;
     // The registers and palette the frame was last made with, what its scan
     // lines are made of and how, which of them are made again, whether the
-    // display is blank, and the scan lines' common shape.
+    // display is blank, and the scan lines' common shape. Where the frame
+    // shows the guest's writes from the scan lines they came at, sets holds
+    // the registers and colours that each change made, and replayed is set.
     struct display_state state;
     struct vga_draw_frame draw;
+    struct vga_draw_frame *sets;
+    bool replayed;
     struct scan_plan plan[MAX_HEIGHT];
     bool made[MAX_HEIGHT];
     bool blank;
@@ -1451,6 +1510,119 @@ static uint8_t input_status1(void) {
     return status;
 }
 
+static void display_state(struct display_state *s) {
+    s->clocking = vga.seq[SEQ_CLOCKING];
+    s->char_map = vga.seq[SEQ_CHAR_MAP];
+    s->gc_misc = vga.gc[GC_MISC];
+    s->gc_mode = vga.gc[GC_MODE] & (GC_MODE_256 | GC_MODE_INTERLEAVE);
+    memcpy(s->crtc, vga.crtc, sizeof(s->crtc));
+    memcpy(s->ac, vga.ac, sizeof(s->ac));
+    s->ac_pas = vga.ac_index & AC_INDEX_PAS;
+    s->pel_mask = vga.pel_mask;
+    s->dac8 = vga.dac8;
+    memcpy(s->dac, vga.dac, sizeof(s->dac));
+}
+
+// Where a write at TSC tsc falls: the frame, and the first scan line that
+// shows it, the one after the beam's, or the next frame's first from the
+// vertical retrace on.
+static void write_place(uint64_t tsc) {
+    struct beam_timing t;
+    beam_timing(&t);
+    struct beam b;
+    beam_at(&t, time_ns_at(tsc), &b);
+    frames.placed = true;
+    frames.placed_tsc = tsc;
+    frames.reuse_tsc = mul_div((uint64_t)t.columns * t.dots, time_tsc_hz(), t.dot_hz) / 4;
+    if (b.line >= t.retrace_start) {
+        frames.frame = b.frame + 1;
+        frames.line = 0;
+    } else {
+        frames.frame = b.frame;
+        frames.line = (uint16_t)(b.line < UINT16_MAX - 1 ? b.line + 1 : UINT16_MAX);
+    }
+}
+
+// Begins frame frame's log, unless it is the one logged: the frame before it
+// keeps its log where it is the last one logged, and otherwise has an empty
+// one and the registers as they are, which no write changed since.
+static void frame_begin(uint64_t frame) {
+    struct frame_log *log = &frames.logs[frames.now];
+    if (frame == log->frame) {
+        return;
+    }
+    if (frame == log->frame + 1) {
+        frames.now ^= 1;
+    } else {
+        struct frame_log *before = &frames.logs[frames.now ^ 1];
+        before->frame = frame - 1;
+        before->count = 0;
+        display_state(&before->start);
+    }
+    log = &frames.logs[frames.now];
+    log->frame = frame;
+    log->count = 0;
+    display_state(&log->start);
+}
+
+// Readies the log for a write, before the write changes the registers; false
+// where a VBE mode is on, which shows none of them, and where the frame's log
+// is full, the frame then being shown as it ends. A write that leaves its
+// register as it was changes nothing the frame shows, and is not logged.
+static bool write_ready(void) {
+    if (frames.access_timed) {
+        return frames.access_ready;
+    }
+    frames.access_timed = true;
+    frames.access_ready = false;
+    if (vbe_on()) {
+        return false;
+    }
+    frames.access_tsc = rdtsc();
+    uint64_t tsc = frames.access_tsc;
+    if (!frames.placed || tsc - frames.placed_tsc > frames.reuse_tsc) {
+        write_place(tsc);
+    }
+    const struct frame_log *log = &frames.logs[frames.now];
+    if (frames.frame == log->frame) {
+        frames.access_ready = log->count <= FRAME_WRITES;
+        return frames.access_ready;
+    }
+    frame_begin(frames.frame);
+    frames.access_ready = true;
+    return true;
+}
+
+static void write_log(uint8_t kind, uint8_t index, const uint8_t *value, size_t size) {
+    struct frame_log *log = &frames.logs[frames.now];
+    if (log->count < FRAME_WRITES) {
+        struct frame_write *w = &log->writes[log->count];
+        w->line = frames.line;
+        w->kind = kind;
+        w->index = index;
+        w->value[0] = value[0];
+        w->value[1] = size > 1 ? value[1] : 0;
+        w->value[2] = size > 2 ? value[2] : 0;
+    }
+    if (log->count <= FRAME_WRITES) {
+        log->count++;
+    }
+}
+
+// The frame before the one the beam is in, the whole frame that the display
+// shows next, with the registers it began with and the guest's writes in it;
+// NULL where the guest wrote more than a log holds.
+static const struct frame_log *frame_last(void) {
+    struct beam_timing t;
+    beam_timing(&t);
+    struct beam b;
+    beam_at(&t, time_ns(), &b);
+    frame_begin(b.line >= t.retrace_start ? b.frame + 1 : b.frame);
+    frames.placed = false;
+    const struct frame_log *log = &frames.logs[frames.now ^ 1];
+    return log->count <= FRAME_WRITES ? log : NULL;
+}
+
 static uint8_t port_read(uint16_t port) {
     switch (port) {
         case 0x3c0: {
@@ -1526,7 +1698,14 @@ static void dac_data_write(uint8_t value) {
     if (++vga.dac_step != 3) {
         return;
     }
+    const uint8_t *was = vga.dac[vga.dac_write_index];
+    bool changed = was[0] != vga.dac_latch[0] || was[1] != vga.dac_latch[1]
+                || was[2] != vga.dac_latch[2];
+    bool logged = changed && write_ready();
     memcpy(vga.dac[vga.dac_write_index], vga.dac_latch, 3);
+    if (logged) {
+        write_log(WRITE_DAC, vga.dac_write_index, vga.dac_latch, 3);
+    }
     vga.dac_step = 0;
     vga.dac_write_index++;
     vga.palette_dirty = true;
@@ -1536,13 +1715,24 @@ static void port_write(uint16_t port, uint8_t value) {
     switch (port) {
         case 0x3c0: {
             if (!vga.ac_data_next) {
-                vga.ac_index = value & 0x3f;
+                uint8_t index = value & 0x3f;
+                // The palette address source bit blanks the display, or shows
+                // it again.
+                bool logged = ((vga.ac_index ^ index) & AC_INDEX_PAS) != 0 && write_ready();
+                vga.ac_index = index;
+                if (logged) {
+                    write_log(WRITE_AC_INDEX, 0, &index, 1);
+                }
             } else {
                 uint8_t index = vga.ac_index & 0x1f;
                 // The palette takes writes only while the display does not
                 // read it.
                 if (index < AC_COUNT && (index >= 0x10 || (vga.ac_index & AC_INDEX_PAS) == 0)) {
+                    bool logged = vga.ac[index] != value && write_ready();
                     vga.ac[index] = value;
+                    if (logged) {
+                        write_log(WRITE_AC, index, &value, 1);
+                    }
                 }
             }
             vga.ac_data_next = !vga.ac_data_next;
@@ -1561,14 +1751,24 @@ static void port_write(uint16_t port, uint8_t value) {
             break;
         }
         case 0x3c5: {
-            if (vga.seq_index < SEQ_COUNT) {
-                vga.seq[vga.seq_index] = value;
+            uint8_t index = vga.seq_index;
+            if (index < SEQ_COUNT) {
+                bool shown = index == SEQ_CLOCKING || index == SEQ_CHAR_MAP;
+                bool logged = shown && vga.seq[index] != value && write_ready();
+                vga.seq[index] = value;
+                if (logged) {
+                    write_log(WRITE_SEQ, index, &value, 1);
+                }
             }
             break;
         }
         case 0x3c6: {
+            bool logged = vga.pel_mask != value && write_ready();
             vga.pel_mask = value;
             vga.palette_dirty = true;
+            if (logged) {
+                write_log(WRITE_PEL_MASK, 0, &value, 1);
+            }
             break;
         }
         case 0x3c7: {
@@ -1592,8 +1792,14 @@ static void port_write(uint16_t port, uint8_t value) {
             break;
         }
         case 0x3cf: {
-            if (vga.gc_index < GC_COUNT) {
-                vga.gc[vga.gc_index] = value;
+            uint8_t index = vga.gc_index;
+            if (index < GC_COUNT) {
+                bool shown = index == GC_MODE || index == GC_MISC;
+                bool logged = shown && vga.gc[index] != value && write_ready();
+                vga.gc[index] = value;
+                if (logged) {
+                    write_log(WRITE_GC, index, &value, 1);
+                }
             }
             break;
         }
@@ -1611,12 +1817,16 @@ static void port_write(uint16_t port, uint8_t value) {
             // Protection leaves registers 0-7 alone, but the line compare bit
             // of the overflow register.
             if ((vga.crtc[CRTC_VRE] & CRTC_VRE_PROTECT) != 0 && index <= CRTC_OVERFLOW) {
-                if (index == CRTC_OVERFLOW) {
-                    vga.crtc[index] = (uint8_t)((vga.crtc[index] & ~0x10) | (value & 0x10));
+                if (index != CRTC_OVERFLOW) {
+                    break;
                 }
-                break;
+                value = (uint8_t)((vga.crtc[index] & ~0x10) | (value & 0x10));
             }
+            bool logged = vga.crtc[index] != value && write_ready();
             vga.crtc[index] = value;
+            if (logged) {
+                write_log(WRITE_CRTC, index, &value, 1);
+            }
             break;
         }
         case 0x3ba:
@@ -1642,6 +1852,7 @@ static void ports_access(
     (void)v;
     (void)ctx;
     spinlock_acquire(&vga.lock);
+    frames.access_timed = false;
     uint16_t port = (uint16_t)(PORT_BASE + offset);
     if (in) {
         uint32_t result = 0;
@@ -1675,6 +1886,7 @@ static void ports_access_block(
     (void)v;
     (void)ctx;
     spinlock_acquire(&vga.lock);
+    frames.access_timed = false;
     uint16_t port = (uint16_t)(PORT_BASE + offset);
     // A palette's bytes for the DAC's data register, as OUTS writes them, go
     // to it without the other ports' dispatch.
@@ -1934,19 +2146,19 @@ static uint32_t expand6(uint8_t v) {
     return (uint32_t)((v << 2) | (v >> 4));
 }
 
-static uint32_t dac_rgb(uint8_t index) {
-    const uint8_t *c = vga.dac[index & vga.pel_mask];
-    if (vga.dac8) {
+static uint32_t dac_rgb(const struct display_state *s, uint8_t index) {
+    const uint8_t *c = s->dac[index & s->pel_mask];
+    if (s->dac8) {
         return (uint32_t)c[0] << 16 | (uint32_t)c[1] << 8 | c[2];
     }
     return expand6(c[0]) << 16 | expand6(c[1]) << 8 | expand6(c[2]);
 }
 
 // A 4-bit colour through the attribute controller's palette, as a DAC index.
-static uint8_t ac_colour(uint8_t colour) {
-    uint8_t p = vga.ac[colour & 0x0f];
-    uint8_t select = vga.ac[AC_COLOR_SELECT];
-    if ((vga.ac[AC_MODE] & AC_MODE_P54) != 0) {
+static uint8_t ac_colour(const struct display_state *s, uint8_t colour) {
+    uint8_t p = s->ac[colour & 0x0f];
+    uint8_t select = s->ac[AC_COLOR_SELECT];
+    if ((s->ac[AC_MODE] & AC_MODE_P54) != 0) {
         p = (uint8_t)((p & 0x0f) | ((select & 0x03) << 4));
     }
     return (uint8_t)((p & 0x3f) | ((select & 0x0c) << 4));
@@ -1954,60 +2166,52 @@ static uint8_t ac_colour(uint8_t colour) {
 
 // The overscan colour register's DAC index, as the colour select register
 // extends it.
-static uint8_t ac_colour_border(void) {
-    return (uint8_t)((vga.ac[0x11] & 0x3f) | ((vga.ac[AC_COLOR_SELECT] & 0x0c) << 4));
+static uint8_t ac_colour_border(const struct display_state *s) {
+    return (uint8_t)((s->ac[0x11] & 0x3f) | ((s->ac[AC_COLOR_SELECT] & 0x0c) << 4));
 }
 
 // How many dots the attribute controller's pel panning shifts the display.
-static unsigned int pel_panning(unsigned int dots) {
-    unsigned int pan = vga.ac[AC_PANNING] & 0x0f;
+static unsigned int pel_panning(const struct display_state *s, unsigned int dots) {
+    unsigned int pan = s->ac[AC_PANNING] & 0x0f;
     if (dots == 9) {
         return pan >= 8 ? 0 : pan + 1;
     }
     return pan & 7;
 }
 
-static void display_state(struct display_state *s) {
-    s->clocking = vga.seq[SEQ_CLOCKING];
-    s->char_map = vga.seq[SEQ_CHAR_MAP];
-    s->gc_misc = vga.gc[GC_MISC];
-    s->gc_mode = vga.gc[GC_MODE] & (GC_MODE_256 | GC_MODE_INTERLEAVE);
-    memcpy(s->crtc, vga.crtc, sizeof(s->crtc));
-    memcpy(s->ac, vga.ac, sizeof(s->ac));
-    s->ac_pas = vga.ac_index & AC_INDEX_PAS;
-    s->pel_mask = vga.pel_mask;
-    s->dac8 = vga.dac8;
-    memcpy(s->dac, vga.dac, sizeof(s->dac));
+// The registers that scan lines are made with, and the attribute controller's
+// palette's colours, but not the DAC's own.
+static void draw_frame_fields(struct vga_draw_frame *f, const struct display_state *s) {
+    f->dword = (s->crtc[CRTC_UNDERLINE] & CRTC_DWORD) != 0;
+    f->byte = (s->crtc[CRTC_MODE] & CRTC_MODE_BYTE) != 0;
+    f->wrap15 = (s->crtc[CRTC_MODE] & CRTC_MODE_WRAP15) != 0;
+    f->cms = (s->crtc[CRTC_MODE] & CRTC_MODE_CMS) == 0;
+    f->srs = (s->crtc[CRTC_MODE] & CRTC_MODE_SRS) == 0;
+    f->cursor = (uint32_t)s->crtc[CRTC_CURSOR_HIGH] << 8 | s->crtc[CRTC_CURSOR_LOW];
+    f->cursor_start = s->crtc[CRTC_CURSOR_START] & 0x1f;
+    f->cursor_end = s->crtc[CRTC_CURSOR_END] & 0x1f;
+    f->cursor_shown = (s->crtc[CRTC_CURSOR_START] & CRTC_CURSOR_OFF) == 0;
+    f->underline = s->crtc[CRTC_UNDERLINE] & 0x1f;
+    f->blink = (s->ac[AC_MODE] & AC_MODE_BLINK) != 0;
+    f->line_graphics = (s->ac[AC_MODE] & AC_MODE_LINE_GRAPHICS) != 0;
+    f->char_map = s->char_map;
+    f->gc_mode = s->gc_mode;
+    f->plane_enable = s->ac[AC_PLANE_ENABLE] & 0x0f;
+    for (size_t i = 0; i < 16; i++) {
+        f->ac_palette[i] = dac_rgb(s, ac_colour(s, (uint8_t)i));
+    }
 }
 
-// The frame's registers and colours, as its scan lines are made with them.
-static void draw_frame_set(void) {
-    struct vga_draw_frame *f = &out.draw;
+// The registers and colours that scan lines are made with.
+static void draw_frame_set(struct vga_draw_frame *f, const struct display_state *s) {
     for (size_t p = 0; p < 4; p++) {
         f->planes[p] = vga.planes[p];
     }
-    f->dword = (vga.crtc[CRTC_UNDERLINE] & CRTC_DWORD) != 0;
-    f->byte = (vga.crtc[CRTC_MODE] & CRTC_MODE_BYTE) != 0;
-    f->wrap15 = (vga.crtc[CRTC_MODE] & CRTC_MODE_WRAP15) != 0;
-    f->cms = (vga.crtc[CRTC_MODE] & CRTC_MODE_CMS) == 0;
-    f->srs = (vga.crtc[CRTC_MODE] & CRTC_MODE_SRS) == 0;
-    f->cursor = (uint32_t)vga.crtc[CRTC_CURSOR_HIGH] << 8 | vga.crtc[CRTC_CURSOR_LOW];
-    f->cursor_start = vga.crtc[CRTC_CURSOR_START] & 0x1f;
-    f->cursor_end = vga.crtc[CRTC_CURSOR_END] & 0x1f;
-    f->cursor_shown = (vga.crtc[CRTC_CURSOR_START] & CRTC_CURSOR_OFF) == 0;
-    f->underline = vga.crtc[CRTC_UNDERLINE] & 0x1f;
-    f->blink = (vga.ac[AC_MODE] & AC_MODE_BLINK) != 0;
-    f->line_graphics = (vga.ac[AC_MODE] & AC_MODE_LINE_GRAPHICS) != 0;
-    f->char_map = vga.seq[SEQ_CHAR_MAP];
-    f->gc_mode = vga.gc[GC_MODE] & (GC_MODE_256 | GC_MODE_INTERLEAVE);
-    f->plane_enable = vga.ac[AC_PLANE_ENABLE] & 0x0f;
     f->spread = plane_spread;
     for (size_t i = 0; i < 256; i++) {
-        f->palette[i] = dac_rgb((uint8_t)i);
+        f->palette[i] = dac_rgb(s, (uint8_t)i);
     }
-    for (size_t i = 0; i < 16; i++) {
-        f->ac_palette[i] = dac_rgb(ac_colour((uint8_t)i));
-    }
+    draw_frame_fields(f, s);
 }
 
 // Whether the guest wrote any of the bytes a scan line fetches since the
@@ -2023,22 +2227,119 @@ static bool line_changed(uint32_t columns, uint32_t ma, unsigned int row_scan) {
     return false;
 }
 
-// Plans the frame as the CRT controller would scan it out: every scan line, or
-// those that fetch what the guest wrote since the last time, the others
-// staying as they were made then. Returns how many it makes.
+static void write_apply(struct display_state *s, const struct frame_write *w) {
+    switch (w->kind) {
+        case WRITE_CRTC: {
+            s->crtc[w->index] = w->value[0];
+            break;
+        }
+        case WRITE_AC: {
+            s->ac[w->index] = w->value[0];
+            break;
+        }
+        case WRITE_AC_INDEX: {
+            s->ac_pas = w->value[0] & AC_INDEX_PAS;
+            break;
+        }
+        case WRITE_SEQ: {
+            if (w->index == SEQ_CLOCKING) {
+                s->clocking = w->value[0];
+            } else {
+                s->char_map = w->value[0];
+            }
+            break;
+        }
+        case WRITE_GC: {
+            if (w->index == GC_MODE) {
+                s->gc_mode = w->value[0] & (GC_MODE_256 | GC_MODE_INTERLEAVE);
+            } else {
+                s->gc_misc = w->value[0];
+            }
+            break;
+        }
+        case WRITE_DAC: {
+            memcpy(s->dac[w->index], w->value, 3);
+            break;
+        }
+        default: {
+            s->pel_mask = w->value[0];
+            break;
+        }
+    }
+}
+
+// Whether the display shows nothing, the screen being off or the attribute
+// controller's palette in the guest's hands.
+static bool display_blank(const struct display_state *s) {
+    return s->ac_pas == 0 || (s->clocking & SEQ_CLOCKING_OFF) != 0;
+}
+
+// The guest's writes up to scan line y, from *next on, applied to the
+// registers that the lines are made with; a new set of registers and colours
+// for the line where any came, *sets counting them. True where any came.
+static bool replay_line(
+    const struct frame_log *log,
+    size_t *next,
+    uint32_t y,
+    struct display_state *s,
+    size_t *sets
+) {
+    size_t first = *next;
+    size_t count = log->count;
+    bool colours = false;
+    while (*next < count && log->writes[*next].line <= y) {
+        const struct frame_write *w = &log->writes[*next];
+        write_apply(s, w);
+        // Through a PEL mask, an entry can show as many colours.
+        bool every = w->kind == WRITE_PEL_MASK || (w->kind == WRITE_DAC && s->pel_mask != 0xff);
+        colours = colours || every;
+        (*next)++;
+    }
+    if (*next == first) {
+        return false;
+    }
+    struct vga_draw_frame *f = &out.sets[*sets];
+    *f = *sets == 0 ? out.draw : out.sets[*sets - 1];
+    if (colours) {
+        for (size_t i = 0; i < 256; i++) {
+            f->palette[i] = dac_rgb(s, (uint8_t)i);
+        }
+    } else {
+        for (size_t k = first; k < *next; k++) {
+            const struct frame_write *w = &log->writes[k];
+            if (w->kind == WRITE_DAC) {
+                f->palette[w->index] = dac_rgb(s, w->index);
+            }
+        }
+    }
+    draw_frame_fields(f, s);
+    (*sets)++;
+    return true;
+}
+
+// Plans the frame as the CRT controller would scan it out from the registers
+// at start: every scan line, or those that fetch what the guest wrote since
+// the last time, the others staying as they were made then. With the guest's
+// writes of the frame, log, each comes into the scan lines from the one it was
+// made before on, as it does when the beam meets it; the start address and the
+// preset row scan stay as the vertical retrace latched them (IBM PS/2 Hardware
+// Interface Technical Reference, Common Interfaces, 84F9735, Figures 2-49 and
+// 2-53), and the shape of the frame as it began. Returns how many it makes.
 static size_t frame_plan(
+    const struct display_state *start,
+    const struct frame_log *log,
     uint32_t *width_out,
     uint32_t *height_out,
     bool cursor_on,
     bool blink_on,
     bool all
 ) {
-    bool graphics = (vga.gc[GC_MISC] & GC_MISC_GRAPHICS) != 0;
-    unsigned int dots = (graphics || (vga.seq[SEQ_CLOCKING] & SEQ_CLOCKING_8DOT) != 0) ? 8 : 9;
-    unsigned int repeat = (vga.seq[SEQ_CLOCKING] & SEQ_CLOCKING_HALF) != 0 ? 2 : 1;
-    uint32_t width = (vga.crtc[CRTC_HDE] + (uint32_t)1) * dots * repeat;
-    uint32_t overflow = vga.crtc[CRTC_OVERFLOW];
-    uint32_t vde = vga.crtc[CRTC_VDE] | ((overflow & 0x02) << 7) | ((overflow & 0x40) << 3);
+    bool graphics = (start->gc_misc & GC_MISC_GRAPHICS) != 0;
+    unsigned int dots = (graphics || (start->clocking & SEQ_CLOCKING_8DOT) != 0) ? 8 : 9;
+    unsigned int repeat = (start->clocking & SEQ_CLOCKING_HALF) != 0 ? 2 : 1;
+    uint32_t width = (start->crtc[CRTC_HDE] + (uint32_t)1) * dots * repeat;
+    uint32_t overflow = start->crtc[CRTC_OVERFLOW];
+    uint32_t vde = start->crtc[CRTC_VDE] | ((overflow & 0x02) << 7) | ((overflow & 0x40) << 3);
     uint32_t height = vde + 1;
     if (width > MAX_WIDTH) {
         width = MAX_WIDTH;
@@ -2050,50 +2351,61 @@ static size_t frame_plan(
     *height_out = height;
 
     out.graphics = graphics;
-    out.blank = (vga.ac_index & AC_INDEX_PAS) == 0
-             || (vga.seq[SEQ_CLOCKING] & SEQ_CLOCKING_OFF) != 0;
+    out.blank = log == NULL && display_blank(start);
     if (out.blank) {
         memset(out.made, all, height);
         return all ? height : 0;
     }
-    draw_frame_set();
+    draw_frame_set(&out.draw, start);
 
-    unsigned int max_scan = vga.crtc[CRTC_MAX_SCAN] & 0x1f;
-    bool double_scan = (vga.crtc[CRTC_MAX_SCAN] & CRTC_DOUBLE_SCAN) != 0;
-    uint32_t line_compare = vga.crtc[CRTC_LINE_COMPARE]
-                          | ((vga.crtc[CRTC_OVERFLOW] & (uint32_t)0x10) << 4)
-                          | ((vga.crtc[CRTC_MAX_SCAN] & (uint32_t)0x40) << 3);
+    // The registers as the scan line is made, which the log's writes change.
+    struct display_state replayed;
+    const struct display_state *s = start;
+    if (log != NULL) {
+        replayed = *start;
+        s = &replayed;
+    }
+    size_t next = 0;
+    size_t sets = 0;
     // The start address, with the CRT controller's byte panning, and the first
     // row's first scan line.
-    uint32_t ma = ((uint32_t)vga.crtc[CRTC_START_HIGH] << 8 | vga.crtc[CRTC_START_LOW])
-                + ((vga.crtc[CRTC_PRESET] >> 5) & (uint32_t)3);
-    uint32_t row_step = vga.crtc[CRTC_OFFSET] * (uint32_t)2;
-    unsigned int row_scan = vga.crtc[CRTC_PRESET] & (uint32_t)0x1f;
-    uint32_t columns = vga.crtc[CRTC_HDE] + (uint32_t)1;
-    unsigned int pan = pel_panning(dots) * repeat;
+    uint32_t ma = ((uint32_t)start->crtc[CRTC_START_HIGH] << 8 | start->crtc[CRTC_START_LOW])
+                + ((start->crtc[CRTC_PRESET] >> 5) & (uint32_t)3);
+    unsigned int row_scan = start->crtc[CRTC_PRESET] & (uint32_t)0x1f;
+    uint32_t columns = start->crtc[CRTC_HDE] + (uint32_t)1;
     out.scan = (struct vga_draw_scan){
         width + 2 * dots * repeat, columns + 1, 0, 0, dots, repeat, cursor_on, blink_on
     };
     bool split = false;
     size_t made = 0;
     for (size_t y = 0; y < height; y++) {
+        bool changed = log != NULL && replay_line(log, &next, (uint32_t)y, &replayed, &sets);
+        unsigned int max_scan = s->crtc[CRTC_MAX_SCAN] & 0x1f;
+        bool double_scan = (s->crtc[CRTC_MAX_SCAN] & CRTC_DOUBLE_SCAN) != 0;
+        uint32_t line_compare = s->crtc[CRTC_LINE_COMPARE]
+                              | ((s->crtc[CRTC_OVERFLOW] & (uint32_t)0x10) << 4)
+                              | ((s->crtc[CRTC_MAX_SCAN] & (uint32_t)0x40) << 3);
         if (y == line_compare) {
             ma = 0;
             row_scan = 0;
             split = true;
         }
         // A double scan's second line is its first again, unless the split
-        // begins there.
-        bool again = double_scan && (y & 1) != 0 && y != line_compare;
+        // begins there or a write came between them.
+        bool again = double_scan && (y & 1) != 0 && y != line_compare && !changed;
         out.made[y] = again ? out.made[y - 1] : all || line_changed(columns + 1, ma, row_scan);
         // The screen below a split can be kept from panning.
-        unsigned int shift = split && (vga.ac[AC_MODE] & AC_MODE_PAN_SPLIT) != 0 ? 0 : pan;
-        out.plan[y] = (struct scan_plan){ ma, (uint8_t)row_scan, (uint8_t)shift, again };
+        unsigned int pan = pel_panning(s, dots) * repeat;
+        unsigned int shift = split && (s->ac[AC_MODE] & AC_MODE_PAN_SPLIT) != 0 ? 0 : pan;
+        out.plan[y] = (struct scan_plan){
+            ma, (uint8_t)row_scan, (uint8_t)shift, again, log != NULL && display_blank(s),
+            (uint16_t)sets
+        };
         made += out.made[y] ? 1 : 0;
         if (!double_scan || (y & 1) != 0) {
             if (row_scan >= max_scan) {
                 row_scan = 0;
-                ma += row_step;
+                ma += s->crtc[CRTC_OFFSET] * (uint32_t)2;
             } else {
                 row_scan++;
             }
@@ -2748,7 +3060,7 @@ static void mark_vga(const struct vga_draw_ops *ops, struct vga_scratch *s, uint
     uint32_t width = out.width;
     uint32_t *now = out.frame + (size_t)y * width;
     const struct scan_plan *plan = &out.plan[y];
-    if (out.blank) {
+    if (out.blank || plan->blank) {
         ops->fill(now, 0, width);
     } else if (plan->again && y % SHARE_LINES != 0) {
         ops->copy(now, now - width, width * sizeof(uint32_t));
@@ -2756,10 +3068,11 @@ static void mark_vga(const struct vga_draw_ops *ops, struct vga_scratch *s, uint
         struct vga_draw_scan scan = out.scan;
         scan.ma = plan->ma;
         scan.row_scan = plan->row_scan;
+        const struct vga_draw_frame *f = plan->set == 0 ? &out.draw : &out.sets[plan->set - 1];
         if (out.graphics) {
-            ops->graphics_line(s->line, &out.draw, &scan);
+            ops->graphics_line(s->line, f, &scan);
         } else {
-            ops->text_line(s->line, &out.draw, &scan);
+            ops->text_line(s->line, f, &scan);
         }
         ops->copy(now, s->line + plan->shift, width * sizeof(uint32_t));
     }
@@ -3222,8 +3535,10 @@ static bool vbe_frame(uint64_t now) {
     vga.palette_dirty = false;
     vga.dirty = false;
     if (bpp == 8 && (palette || !out.vbe_valid)) {
+        struct display_state state;
+        display_state(&state);
         for (size_t i = 0; i < 256; i++) {
-            out.vbe_palette[i] = dac_rgb((uint8_t)i);
+            out.vbe_palette[i] = dac_rgb(&state, (uint8_t)i);
         }
     }
     spinlock_release(&vga.lock);
@@ -3281,12 +3596,11 @@ static bool vga_frame(uint64_t now) {
     beam_timing(&timing);
     struct beam beam;
     beam_at(&timing, now, &beam);
-    uint64_t frames = beam.frame;
-    bool cursor_on = ((frames >> CURSOR_FRAMES_SHIFT) & 1) == 0;
-    bool blink_on = ((frames >> BLINK_FRAMES_SHIFT) & 1) == 0;
+    bool cursor_on = ((beam.frame >> CURSOR_FRAMES_SHIFT) & 1) == 0;
+    bool blink_on = ((beam.frame >> BLINK_FRAMES_SHIFT) & 1) == 0;
     uint32_t blink = (cursor_on ? (uint32_t)1 : (uint32_t)0)
                    | (blink_on ? (uint32_t)2 : (uint32_t)0);
-    if (!vga.dirty && blink == out.blink && out.valid) {
+    if (!vga.dirty && blink == out.blink && out.valid && !out.replayed) {
         return false;
     }
 
@@ -3296,17 +3610,27 @@ static bool vga_frame(uint64_t now) {
     vga.dirty = false;
     struct display_state state;
     display_state(&state);
+    // The last whole frame, from the registers it began with, the writes in it
+    // coming in from the scan lines the beam met them on, where there are any,
+    // which makes its every line again, and the next frame's after it.
+    const struct frame_log *last = frame_last();
+    const struct display_state *start = last != NULL ? &last->start : &state;
+    const struct frame_log *log = last != NULL && last->count != 0 ? last : NULL;
     // A text mode's font and its blinking show on every line, whatever bytes
     // it fetches.
-    bool text = (vga.gc[GC_MISC] & GC_MISC_GRAPHICS) == 0;
-    bool remake = !out.valid || memcmp(&state, &out.state, sizeof(struct display_state)) != 0
+    bool text = (start->gc_misc & GC_MISC_GRAPHICS) == 0;
+    bool remake = log != NULL || out.replayed
+               || !out.valid || memcmp(start, &out.state, sizeof(struct display_state)) != 0
                || (text && (vga.font_changed || blink != out.blink));
-    size_t made = frame_plan(&width, &height, cursor_on, blink_on, remake);
-    out.state = state;
+    size_t made = frame_plan(start, log, &width, &height, cursor_on, blink_on, remake);
+    out.replayed = log != NULL;
+    out.state = *start;
     out.blink = blink;
     memset(vga.changed, 0, sizeof(vga.changed));
     vga.font_changed = false;
-    uint32_t border = dac_rgb(ac_colour_border());
+    // Writes in the frame under way show once it is whole.
+    vga.dirty = frames.logs[frames.now].count != 0;
+    uint32_t border = dac_rgb(start, ac_colour_border(start));
     spinlock_release(&vga.lock);
 
     // All of it again where its size or border changed.
@@ -3620,6 +3944,10 @@ bool vga_init(void) {
     size_t frame_pages = page_count(MAX_WIDTH * MAX_HEIGHT * sizeof(uint32_t));
     out.frame = page_alloc(frame_pages);
     out.shown = page_alloc(frame_pages);
+    out.sets = page_alloc(page_count(MAX_HEIGHT * sizeof(struct vga_draw_frame)));
+    for (size_t i = 0; i < 2; i++) {
+        frames.logs[i].writes = page_alloc(page_count(FRAME_WRITES * sizeof(struct frame_write)));
+    }
     uint32_t screen_width;
     uint32_t screen_height;
     vga_screen_size(&screen_width, &screen_height);

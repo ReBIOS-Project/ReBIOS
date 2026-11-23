@@ -25,8 +25,9 @@ void time_init(uint64_t hz);
 void time_set_tsc_hz(uint64_t hz);
 uint64_t time_tsc_hz(void);
 
-// Nanoseconds since the core started.
+// Nanoseconds since the core started: now, and when the TSC read tsc.
 uint64_t time_ns(void);
+uint64_t time_ns_at(uint64_t tsc);
 void time_udelay(uint64_t us);
 
 #endif
