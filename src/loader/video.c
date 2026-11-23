@@ -262,13 +262,40 @@ static void describe_framebuffer(
     );
 }
 
-static bool load_cbfs_vbios(struct user_vbios *vbios) {
+// Plain cbfs takes vgabios.bin, else the VGA device's option ROM by the names
+// coreboot gives option ROMs in CBFS, with its revision and without (coreboot
+// 7fcd4d58ec7e, src/device/pci_rom.c).
+static bool load_cbfs_default(struct user_vbios *vbios, const struct pci_io_device *dev) {
+    char name[CONFIG_VGABIOS_MAX];
+    snprintf(name, sizeof(name), "%s", CBFS_DEFAULT_NAME);
+    bool found = cbfs_find_file(name, &vbios->image, &vbios->size);
+    if (!found && dev != NULL) {
+        snprintf(
+            name, sizeof(name), "pci%04x,%04x,%02x.rom",
+            dev->vendor_id, dev->device_id, dev->revision
+        );
+        found = cbfs_find_file(name, &vbios->image, &vbios->size);
+    }
+    if (!found && dev != NULL) {
+        snprintf(name, sizeof(name), "pci%04x,%04x.rom", dev->vendor_id, dev->device_id);
+        found = cbfs_find_file(name, &vbios->image, &vbios->size);
+    }
+    if (!found) {
+        const char *more = dev != NULL ? ", or one named for the VGA device's option ROM," : "";
+        printf("Cannot find a usable CBFS file %s%s for the VBIOS\n", CBFS_DEFAULT_NAME, more);
+        return false;
+    }
+    snprintf(vbios->source, sizeof(vbios->source), "the CBFS file %s", name);
+    return true;
+}
+
+static bool load_cbfs_vbios(struct user_vbios *vbios, const struct pci_io_device *dev) {
     const uint16_t *setting = config.vgabios;
     char name[CONFIG_VGABIOS_MAX];
     size_t prefix = sizeof(CBFS_SETTING_PREFIX) - 1;
 
     if (setting[sizeof(CBFS_SETTING) - 1] == 0) {
-        snprintf(name, sizeof(name), "%s", CBFS_DEFAULT_NAME);
+        return load_cbfs_default(vbios, dev);
     } else {
         size_t i = 0;
         for (; prefix + i < CONFIG_VGABIOS_MAX && setting[prefix + i] != 0; i++) {
@@ -390,7 +417,7 @@ static bool load_file_vbios(struct user_vbios *vbios) {
 }
 
 // Failures leave the setting to be treated as empty.
-static bool load_user_vbios(struct user_vbios *vbios) {
+static bool load_user_vbios(struct user_vbios *vbios, const struct pci_io_device *dev) {
     const uint16_t *setting = config.vgabios;
     bool loaded;
 
@@ -401,7 +428,7 @@ static bool load_user_vbios(struct user_vbios *vbios) {
 
     if ((setting_starts_with(setting, CBFS_SETTING) && setting[sizeof(CBFS_SETTING) - 1] == 0)
      || setting_starts_with(setting, CBFS_SETTING_PREFIX)) {
-        loaded = load_cbfs_vbios(vbios);
+        loaded = load_cbfs_vbios(vbios, dev);
     } else {
         loaded = load_file_vbios(vbios);
     }
@@ -760,7 +787,22 @@ void video_init(void) {
     bool found = false;
     bool have_dev = false;
 
-    bool have_user = load_user_vbios(&user);
+    // The VGA device: the one configured, else the one that the graphics
+    // output's framebuffer is on, as another card's VBIOS would put the legacy
+    // display where the firmware's is not.
+    if (config.vga_specified) {
+        have_dev = find_pci_device(config.vga_device, &dev);
+        if (!have_dev) {
+            printf(
+                "The configured VGA device " HANDOFF_PCI_ADDRESS_FMT " does not exist\n",
+                HANDOFF_PCI_ADDRESS_ARGS(config.vga_device)
+            );
+        }
+    } else if (gop_handle != NULL) {
+        have_dev = gop_device(&dev);
+    }
+
+    bool have_user = load_user_vbios(&user, have_dev ? &dev : NULL);
     const struct user_vbios *user_vbios = have_user ? &user : NULL;
     bool automatic = config.vga_emulation == HANDOFF_VGA_EMULATION_AUTO && !have_user;
     bool apple = automatic && apple_firmware();
@@ -773,28 +815,15 @@ void video_init(void) {
         printf("No VBIOS runs on a panel mounted sideways but with vga_emulation = never\n");
     }
 
-    if (config.vga_specified) {
-        have_dev = find_pci_device(config.vga_device, &dev);
-        if (have_dev) {
-            found = try_device(&dev, user_vbios, may_run, &choice);
-        } else {
-            printf(
-                "The configured VGA device " HANDOFF_PCI_ADDRESS_FMT " does not exist\n",
-                HANDOFF_PCI_ADDRESS_ARGS(config.vga_device)
-            );
-        }
-    } else if (gop_handle != NULL && gop_device(&dev)) {
-        // Another card's VBIOS would put the legacy display where the
-        // firmware's is not.
-        have_dev = true;
+    if (have_dev) {
         found = try_device(&dev, user_vbios, may_run, &choice);
-    } else if (have_user) {
+    } else if (!config.vga_specified && have_user) {
         printf(
             "Not using %s as the VBIOS: no VGA device is configured, and no graphics output leads "
             "to one\n",
             user.source
         );
-    } else if (gop_handle == NULL) {
+    } else if (!config.vga_specified && gop_handle == NULL) {
         found = may_run && try_display_devices(&choice);
     }
 
