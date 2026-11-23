@@ -1519,6 +1519,19 @@ static uint8_t port_read(uint16_t port) {
     }
 }
 
+// A byte for the DAC's data register: a third of an entry, which the entry
+// takes once it has all three.
+static void dac_data_write(uint8_t value) {
+    vga.dac_latch[vga.dac_step] = vga.dac8 ? value : value & 0x3f;
+    if (++vga.dac_step != 3) {
+        return;
+    }
+    memcpy(vga.dac[vga.dac_write_index], vga.dac_latch, 3);
+    vga.dac_step = 0;
+    vga.dac_write_index++;
+    vga.palette_dirty = true;
+}
+
 static void port_write(uint16_t port, uint8_t value) {
     switch (port) {
         case 0x3c0: {
@@ -1571,13 +1584,7 @@ static void port_write(uint16_t port, uint8_t value) {
             break;
         }
         case 0x3c9: {
-            vga.dac_latch[vga.dac_step] = vga.dac8 ? value : value & 0x3f;
-            if (++vga.dac_step == 3) {
-                memcpy(vga.dac[vga.dac_write_index], vga.dac_latch, 3);
-                vga.dac_step = 0;
-                vga.dac_write_index++;
-                vga.palette_dirty = true;
-            }
+            dac_data_write(value);
             break;
         }
         case 0x3ce: {
@@ -1669,6 +1676,15 @@ static void ports_access_block(
     (void)ctx;
     spinlock_acquire(&vga.lock);
     uint16_t port = (uint16_t)(PORT_BASE + offset);
+    // A palette's bytes for the DAC's data register, as OUTS writes them, go
+    // to it without the other ports' dispatch.
+    if (!in && size == 1 && port == 0x3c9) {
+        for (size_t n = 0; n < count; n++) {
+            dac_data_write(data[n]);
+        }
+        spinlock_release(&vga.lock);
+        return;
+    }
     for (size_t n = 0; n < count; n++) {
         uint8_t *element = data + n * size;
         for (size_t i = 0; i < size; i++) {
