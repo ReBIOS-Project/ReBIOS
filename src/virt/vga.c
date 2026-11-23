@@ -161,7 +161,7 @@
 // The lines of a frame that a processor takes at a time, an even number, as a
 // double scan's second line is its first again.
 #define SHARE_LINES 16
-// A frame with fewer source lines to look at is the boot processor's alone.
+// A frame with fewer source lines to look at is one processor's alone.
 #define SHARED_MIN 64
 
 // The display tracks the guest's writes to the planes in chunks of plane
@@ -2989,6 +2989,28 @@ static struct cpu *copier_pick(void) {
     return best != NULL ? best : vga_draw_copier();
 }
 
+// The processor other than this one that copies fastest of those whose vCPUs
+// wait, or NULL where no other vCPU does.
+static struct cpu *idle_other(void) {
+    struct cpu *best = NULL;
+    for (size_t i = 0; i < smp_cpu_count(); i++) {
+        struct cpu *cpu = smp_cpu(i);
+        if (cpu == this_cpu() || cpu->vga_scratch == NULL
+         || !atomic_load_explicit(&cpu->idle, memory_order_relaxed)) {
+            continue;
+        }
+        if (best == NULL || cpu->draw_copy_ticks < best->draw_copy_ticks) {
+            best = cpu;
+        }
+    }
+    return best;
+}
+
+// Whether this processor's vCPU waits.
+static bool idle_this(void) {
+    return atomic_load_explicit(&this_cpu()->idle, memory_order_relaxed);
+}
+
 // Copies what the frame changed to the framebuffer from where the copy got to,
 // a row at a time, until done or time_ns() reaches until. Returns whether
 // done.
@@ -3018,12 +3040,16 @@ static bool copy_on(const struct vga_draw_ops *ops, uint64_t until) {
     return true;
 }
 
-// Whether this processor has a part in the frame left to take.
+// Whether this processor has a part in the frame left to take. A processor
+// that runs the guest leaves the frame to those whose vCPUs wait, if any do.
 static bool work_left(void) {
     switch (atomic_load_explicit(&job.step, memory_order_acquire)) {
         case STEP_DRAW: {
-            return atomic_load_explicit(&job.mark_next, memory_order_relaxed) < job.mark_chunks
-                || atomic_load_explicit(&job.draw_next, memory_order_relaxed) < job.draw_chunks;
+            if (atomic_load_explicit(&job.mark_next, memory_order_relaxed) >= job.mark_chunks
+             && atomic_load_explicit(&job.draw_next, memory_order_relaxed) >= job.draw_chunks) {
+                return false;
+            }
+            return idle_this() || idle_other() == NULL;
         }
         case STEP_COPY: {
             return this_cpu() == job.copier;
@@ -3118,8 +3144,10 @@ static void work_piece(void) {
     }
 }
 
-// Starts the frame's steps, with the number of source lines to look at, every
-// other processor kicked to take part where there are enough.
+// Starts the frame's steps, with the number of source lines to look at. Where
+// there are enough, the other processors whose vCPUs wait are kicked to take
+// part, or every other processor where no vCPU waits; else one processor draws
+// the frame, this one unless it runs the guest while another's vCPU waits.
 static void job_start(bool vbe_mode, bool all, uint32_t lines) {
     job.vbe = vbe_mode;
     job.all = all;
@@ -3131,12 +3159,21 @@ static void job_start(bool vbe_mode, bool all, uint32_t lines) {
     atomic_store_explicit(&job.draw_done, 0, memory_order_relaxed);
     atomic_fetch_add_explicit(&job.generation, 1, memory_order_acq_rel);
     atomic_store_explicit(&job.step, STEP_DRAW, memory_order_release);
+    bool idle = idle_this();
+    struct cpu *other = idle_other();
     if (lines < SHARED_MIN) {
+        if (!idle && other != NULL) {
+            vcpu_wake(other);
+        }
         return;
     }
+    bool idle_only = idle || other != NULL;
     for (size_t i = 0; i < smp_cpu_count(); i++) {
         struct cpu *cpu = smp_cpu(i);
-        if (cpu != this_cpu() && cpu->vga_scratch != NULL) {
+        if (cpu == this_cpu() || cpu->vga_scratch == NULL) {
+            continue;
+        }
+        if (!idle_only || atomic_load_explicit(&cpu->idle, memory_order_relaxed)) {
             vcpu_wake(cpu);
         }
     }
