@@ -68,10 +68,11 @@ NVIDIA_FIRST_TURING = 0x1e00
 # AMD's device IDs here are integrated graphics, and from before 2018 only up
 # to Kaveri's. No GPU for a slot has them.
 AMD_INTEGRATED_LATER = (0x1320, 0x1fff)
-# Among them, AMD's APUs with Vega graphics, from Raven Ridge to Barcelo, whose
+# Among them, AMD's APUs with Vega graphics, from Raven Ridge to Lucienne, whose
 # Video BIOS runs where the firmware's graphics output alone is stopped, as
-# loader/video.c does.
-AMD_VEGA_APUS = [0x15d8, 0x15dd, 0x15e7, 0x1636, 0x1638, 0x164c]
+# loader/video.c does. Barcelo's leaves the screen black at graphics modes, as
+# an IdeaPad Slim 3 15ABR8's does at grub4dos's and at Windows 7's.
+AMD_VEGA_APUS = [0x15d8, 0x15dd, 0x1636, 0x1638, 0x164c]
 
 # All of AMD's other GPUs up to Fiji and Vega, the first RDNA device ID being
 # 7310h, as older ones are numbered all over.

@@ -463,8 +463,7 @@ const struct gpu_lists_id gpu_lists_vbios_blocklist[] = {
     { 0x10de, 0x2f58, 0x2f58, ANY }, // GB205M [GeForce RTX 5070 Ti Mobile].
     { 0x1002, 0x1320, 0x15d7, ANY }, // Integrated graphics after Kaveri.
     { 0x1002, 0x15d9, 0x15dc, ANY }, // Integrated graphics after Kaveri.
-    { 0x1002, 0x15de, 0x15e6, ANY }, // Integrated graphics after Kaveri.
-    { 0x1002, 0x15e8, 0x1635, ANY }, // Integrated graphics after Kaveri.
+    { 0x1002, 0x15de, 0x1635, ANY }, // Integrated graphics after Kaveri.
     { 0x1002, 0x1637, 0x1637, ANY }, // Integrated graphics after Kaveri.
     { 0x1002, 0x1639, 0x164b, ANY }, // Integrated graphics after Kaveri.
     { 0x1002, 0x164d, 0x1fff, ANY }, // Integrated graphics after Kaveri.
@@ -1052,7 +1051,6 @@ const struct gpu_lists_id gpu_lists_vbios_allowlist[] = {
     { 0x1002, 0x15d8, 0x15d8, ANY },
     // Raven Ridge [Radeon Vega Series / Radeon Vega Mobile Series].
     { 0x1002, 0x15dd, 0x15dd, ANY },
-    { 0x1002, 0x15e7, 0x15e7, ANY }, // Barcelo.
     // Renoir [Radeon Vega Series / Radeon Vega Mobile Series].
     { 0x1002, 0x1636, 0x1636, ANY },
     // Cezanne [Radeon Vega Series / Radeon Vega Mobile Series].
