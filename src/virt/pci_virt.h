@@ -70,6 +70,15 @@ bool pci_virt_trap(
 // the BAR is.
 void pci_virt_untrap(struct pci_cfg_addr addr, unsigned int bar, uint64_t offset);
 
+// Watches the function's memory BARs but its ROM, and its I/O BARs, wherever
+// the guest puts them, for the guest's first access to any of them, whatever
+// it is: at that access, they become the guest's again, and seen() runs once,
+// before the access goes on natively. Pages of them that another range has,
+// such as an MSI-X table's, are not watched. Until the next call, it watches
+// no more. After pci_virt_init(), outside the hypervisor's locks, as it may
+// take the other vCPUs out of the guest.
+void pci_virt_watch(struct pci_cfg_addr addr, void (*seen)(void));
+
 // What the guest reads from the function's configuration space at offset, or
 // writes there, as through its configuration ports, for a device's own copies
 // of its configuration space. After pci_virt_init().

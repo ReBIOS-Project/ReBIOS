@@ -60,6 +60,8 @@
 
 // How many resets of one function the log tells of.
 #define RESETS_LOGGED 4
+// How many watches of one function, and their ends, the log tells of.
+#define WATCHES_LOGGED 4
 
 // PCI Express Base Specification 6.0, 7.8.6: the capability header, then a
 // capability and a control register for each of up to six BARs. A control
@@ -106,6 +108,18 @@ struct bar_trap {
     int region;
 };
 
+struct vfunction;
+struct vbar;
+
+// Pages of a watched BAR between its traps, whose region stands in for them
+// until the guest's first access: where they begin, from the BAR's first page.
+struct watch_gap {
+    struct vfunction *vf;
+    struct vbar *b;
+    int region;
+    uint64_t offset;
+};
+
 struct vbar {
     uint8_t kind;
     // The read-only type bits of its (lower) register.
@@ -124,6 +138,11 @@ struct vbar {
     // so it has only this, for the whole of it.
     const struct mmio_ops *sub_page_ops;
     void *sub_page_ctx;
+    // Whether a watch has it, its pages before each trap and after the last
+    // reaching the watch's regions rather than the host's: their b is NULL
+    // until the first watch registers them.
+    bool watched;
+    struct watch_gap gaps[BAR_TRAPS + 1];
 };
 
 // A function's MSI as the guest programs it. The function sends a message of
@@ -230,6 +249,14 @@ struct vfunction {
     bool msix_rearm;
     size_t resets_logged;
     size_t resizes_logged;
+    // Whether a watch waits for the guest's first access to its BARs, which
+    // calls watch_seen(), and where it has the ports of its I/O BARs: 0 for
+    // none. Changed under virt.lock, and the ports with the other vCPUs out of
+    // the guest too.
+    _Atomic(bool) watching;
+    void (*watch_seen)(void);
+    uint16_t watch_io[BAR_COUNT];
+    size_t watches_logged;
 };
 
 static struct {
@@ -347,8 +374,12 @@ static uintptr_t trap_end(const struct vbar *b, uint64_t at, size_t i) {
     return page_up(at + b->traps[i].offset + b->traps[i].size);
 }
 
-// Around the pages the guest reaches through the hypervisor, if any.
+// Around the pages the guest reaches through the hypervisor, if any: none
+// while a watch has the BAR.
 static void map(const struct vbar *b) {
+    if (b->watched) {
+        return;
+    }
     uintptr_t base = page_down(b->mapped);
     uintptr_t end = page_up(b->mapped + b->size);
     uint64_t host = page_down(b->host);
@@ -370,6 +401,44 @@ static void traps_move(const struct vbar *b, uint64_t at) {
             b->traps[i].region, at != 0 ? start : 0, at != 0 ? trap_end(b, at, i) - start : 0
         );
     }
+}
+
+// The watch's regions to the pages of the BAR at at that no trap has, while it
+// watches the BAR, or nowhere.
+static void watch_move(struct vbar *b, uint64_t at) {
+    if (b->gaps[0].b == NULL) {
+        return;
+    }
+    for (size_t n = 0; n <= BAR_TRAPS; n++) {
+        struct watch_gap *g = &b->gaps[n];
+        uintptr_t start = 0;
+        uintptr_t end = 0;
+        if (b->watched && at != 0 && n <= b->trap_count) {
+            start = n == 0 ? page_down(at) : trap_end(b, at, n - 1);
+            end = n == b->trap_count ? page_up(at + b->size) : trap_start(b, at, n);
+        }
+        if (end > start) {
+            g->offset = start - page_down(at);
+            mmio_move(g->region, start, end - start);
+        } else {
+            mmio_move(g->region, 0, 0);
+        }
+    }
+}
+
+// The hypervisor's mapping of the BAR's host pages, for the accesses it
+// carries out while a watch has the BAR: false where it cannot be.
+static bool watch_reach(const struct vbar *b) {
+    if (b->host == 0) {
+        return false;
+    }
+    uintptr_t host = page_down(b->host);
+    uintptr_t end = page_up(b->host + b->size);
+    if (end > (uint64_t)1 << 48) {
+        return false;
+    }
+    mm_map_device(host, end - host);
+    return true;
 }
 
 static bool overlaps(const struct vbar *b, uintptr_t base, uintptr_t end) {
@@ -571,6 +640,7 @@ static void bar_update(const struct vfunction *vf, struct vbar *b, bool is_rom) 
         map(b);
     }
     traps_move(b, want);
+    watch_move(b, want);
     gpt_flush();
 }
 
@@ -1276,9 +1346,13 @@ static void rebar_write(struct vfunction *vf, uint32_t offset, size_t size, uint
     struct vbar *b = &vf->bars[index];
     bar_unmap(b);
     traps_move(b, 0);
+    watch_move(b, 0);
     gpt_flush();
     b->size = vf->f->bars[index].size;
     b->guest &= bar_mask(b);
+    if (b->gaps[0].b != NULL) {
+        watch_reach(b);
+    }
     bar_update(vf, b, false);
 }
 
@@ -1787,14 +1861,20 @@ static void iov_init(struct vfunction *vf, const struct pci_plan_function *pf) {
 #define LEGACY_PORTS_END 0x1000
 #define IO_BAR_ADDRESS ((uint32_t)0xfffffffc)
 
-// Where the function's I/O BAR decodes, if below 1000h: 0 where not.
-static uint16_t legacy_io_base(const struct pci_enum_function *f, size_t i) {
+// Where the function's I/O BAR decodes: 0 where it does not.
+static uint16_t io_bar_base(const struct pci_enum_function *f, size_t i) {
     const struct pci_enum_bar *bar = &f->bars[i];
     if (bar->kind != PCI_ENUM_BAR_IO || bar->size == 0 || !decodes(f, PCI_COMMAND_IO)) {
         return 0;
     }
     uint32_t base = pci_cfg_read(f->addr, bar->reg, 4) & IO_BAR_ADDRESS;
-    return base < LEGACY_PORTS_END ? (uint16_t)base : 0;
+    return base <= UINT16_MAX ? (uint16_t)base : 0;
+}
+
+// The same, if below 1000h.
+static uint16_t legacy_io_base(const struct pci_enum_function *f, size_t i) {
+    uint16_t base = io_bar_base(f, i);
+    return base < LEGACY_PORTS_END ? base : 0;
 }
 
 static bool legacy_io_moved(const struct vfunction *vf) {
@@ -1835,16 +1915,166 @@ static void legacy_io_update(struct vfunction *vf) {
     }
 }
 
-// After the guest wrote to the function's BARs, outside virt.lock, as the
-// other vCPUs may wait for it: where their ports moved, with those vCPUs out
-// of the guest.
-static void legacy_io_follow(struct vfunction *vf) {
-    if (vf == NULL || !legacy_io_moved(vf)) {
+static void io_seen(void *ctx);
+
+// Where a watch on the function has the ports of its I/O BAR: where the BAR
+// decodes, while one watches it, else nowhere.
+static uint16_t watch_io_base(const struct vfunction *vf, size_t i) {
+    if (!atomic_load_explicit(&vf->watching, memory_order_relaxed)) {
+        return 0;
+    }
+    return io_bar_base(vf->f, i);
+}
+
+static bool watch_io_moved(const struct vfunction *vf) {
+    for (size_t i = 0; i < vf->f->bar_count && i < BAR_COUNT; i++) {
+        if (watch_io_base(vf, i) != vf->watch_io[i]) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Moves the watch on the function's I/O BARs to where they decode, or ends it,
+// with the other vCPUs out of the guest.
+static void watch_io_update(struct vfunction *vf) {
+    const struct pci_enum_function *f = vf->f;
+    for (size_t i = 0; i < f->bar_count && i < BAR_COUNT; i++) {
+        uint16_t base = watch_io_base(vf, i);
+        if (base == vf->watch_io[i]) {
+            continue;
+        }
+        if (vf->watch_io[i] != 0) {
+            io_unwatch(vf->watch_io[i], (size_t)f->bars[i].size);
+        }
+        if (base != 0 && !io_watch(base, (size_t)f->bars[i].size, io_seen, vf)) {
+            printf(
+                "PCI " PCI_CFG_ADDR_FMT " BAR%zu: ports %#x-%#llx not watched, as too many are\n",
+                PCI_CFG_ADDR_ARGS(f->addr), i, base,
+                (unsigned long long)(base + f->bars[i].size - 1)
+            );
+            base = 0;
+        }
+        vf->watch_io[i] = base;
+    }
+}
+
+// After the guest wrote to the function's BARs or its command register, or a
+// repair after a reset, outside virt.lock, as the other vCPUs may wait for it:
+// where their ports moved, the guest's and a watch's, with those vCPUs out of
+// the guest.
+static void io_follow(struct vfunction *vf) {
+    if (vf == NULL || (!legacy_io_moved(vf) && !watch_io_moved(vf))) {
         return;
     }
     vcpu_pause_others();
     legacy_io_update(vf);
+    watch_io_update(vf);
     vcpu_resume_others();
+}
+
+// The guest's first access to a watched function's BARs, from what. Once,
+// whichever vCPUs make one meanwhile, the BARs are the guest's again before
+// any of those accesses goes on, and the watch's caller hears of it. Its BARs'
+// pages are mapped before the watch's regions leave them, so that an access
+// meanwhile finds one or the other.
+static void watch_end(struct vfunction *vf, const char *what) {
+    spinlock_acquire(&virt.lock);
+    bool was = atomic_exchange_explicit(&vf->watching, false, memory_order_relaxed);
+    bool tell = was && vf->watches_logged < WATCHES_LOGGED;
+    if (tell) {
+        vf->watches_logged++;
+    }
+    for (size_t k = 0; k < BAR_COUNT; k++) {
+        struct vbar *b = &vf->bars[k];
+        if (!b->watched) {
+            continue;
+        }
+        b->watched = false;
+        if (b->mapped != 0) {
+            map(b);
+        }
+        watch_move(b, 0);
+    }
+    gpt_flush();
+    spinlock_release(&virt.lock);
+    // Another vCPU's access to the ports waits here until they are the
+    // guest's.
+    if (watch_io_moved(vf)) {
+        vcpu_pause_others();
+        watch_io_update(vf);
+        vcpu_resume_others();
+    }
+    if (tell) {
+        printf(
+            "PCI " PCI_CFG_ADDR_FMT ": the guest's first access to its BARs, at %s, ends the "
+            "watch on them\n",
+            PCI_CFG_ADDR_ARGS(vf->f->addr), what
+        );
+    }
+    if (was) {
+        vf->watch_seen();
+    }
+}
+
+static void io_seen(void *ctx) {
+    watch_end(ctx, "an I/O BAR");
+}
+
+// The access the instruction makes runs again natively once the watch ended.
+static bool watch_fault(struct vcpu *v, void *ctx, uint64_t offset) {
+    (void)v;
+    struct watch_gap *g = ctx;
+    size_t bar = (size_t)(g->b - g->vf->bars);
+    uint64_t at = page_down(g->b->mapped) + g->offset + offset;
+    char what[48];
+    snprintf(what, sizeof(what), "BAR%zu at %#llx", bar, (unsigned long long)at);
+    watch_end(g->vf, what);
+    return true;
+}
+
+// An access that the hypervisor carries out itself, as one operand of an
+// instruction that has another in emulated memory: once the watch ended, at
+// the host's page, which the hypervisor maps.
+static uintptr_t watch_access(struct watch_gap *g, uint64_t offset) {
+    char what[48];
+    snprintf(what, sizeof(what), "BAR%zu", (size_t)(g->b - g->vf->bars));
+    watch_end(g->vf, what);
+    return page_down(g->b->host) + g->offset + offset;
+}
+
+static uint64_t watch_read(struct vcpu *v, void *ctx, uint64_t offset, size_t size) {
+    (void)v;
+    return mmio_read_host(watch_access(ctx, offset), size);
+}
+
+static void watch_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, uint64_t value) {
+    (void)v;
+    mmio_write_host(watch_access(ctx, offset), size, value);
+}
+
+static const struct mmio_ops watch_ops = {
+    .read = watch_read, .write = watch_write, .fault = watch_fault
+};
+
+// The watch's regions for the BAR, which it keeps from the first watch on, and
+// the hypervisor's mapping of its host pages: false where either cannot be.
+static bool gaps_register(struct vfunction *vf, struct vbar *b) {
+    if (!watch_reach(b)) {
+        return false;
+    }
+    for (size_t n = 0; n <= BAR_TRAPS; n++) {
+        struct watch_gap *g = &b->gaps[n];
+        if (g->b != NULL) {
+            continue;
+        }
+        int region = mmio_register(0, 0, &watch_ops, g);
+        if (region < 0) {
+            return false;
+        }
+        *g = (struct watch_gap){ vf, b, region, 0 };
+    }
+    return true;
 }
 
 static uint32_t function_read(struct pci_cfg_addr a, uint32_t offset, size_t size) {
@@ -2002,7 +2232,7 @@ static void msix_rearm(struct vfunction *vf) {
 }
 
 // The function whose BAR or command register the guest wrote to, for
-// legacy_io_follow(): NULL for other writes.
+// io_follow(): NULL for other writes.
 static struct vfunction *config_write(
     struct vfunction *vf,
     struct pci_cfg_addr a,
@@ -2219,7 +2449,7 @@ static void config_ports(
         }
     }
     spinlock_release(&virt.lock);
-    legacy_io_follow(wrote);
+    io_follow(wrote);
 }
 
 static uint32_t ecam_reg(uint64_t offset) {
@@ -2276,7 +2506,7 @@ static void ecam_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size, 
         wrote = guest_write(bus, device, function, reg, size, (uint32_t)value);
     }
     spinlock_release(&virt.lock);
-    legacy_io_follow(wrote);
+    io_follow(wrote);
 }
 
 static const struct mmio_ops ecam_ops = { .read = ecam_read, .write = ecam_write };
@@ -2500,6 +2730,7 @@ bool pci_virt_trap(
         uintptr_t end = trap_end(b, b->mapped, at);
         gpt_map(start, 0, end - start, 0, 0);
         mmio_move(region, start, end - start);
+        watch_move(b, b->mapped);
         gpt_flush();
     }
     spinlock_release(&virt.lock);
@@ -2532,7 +2763,7 @@ void pci_virt_power_changed(struct pci_cfg_addr addr) {
     }
     spinlock_release(&virt.lock);
     if (repaired) {
-        legacy_io_follow(vf);
+        io_follow(vf);
     }
 }
 
@@ -2556,7 +2787,7 @@ void pci_virt_config_write(
     spinlock_acquire(&virt.lock);
     struct vfunction *wrote = function_write(addr, offset, size, value);
     spinlock_release(&virt.lock);
-    legacy_io_follow(wrote);
+    io_follow(wrote);
 }
 
 bool pci_virt_msix_access(
@@ -2605,11 +2836,64 @@ void pci_virt_untrap(struct pci_cfg_addr addr, unsigned int bar, uint64_t offset
         }
         if (b->mapped != 0) {
             map(b);
+            watch_move(b, b->mapped);
             gpt_flush();
         }
         break;
     }
     spinlock_release(&virt.lock);
+}
+
+// The watch's regions are in place before the BAR's pages leave the guest, so
+// that an access meanwhile finds one or the other.
+void pci_virt_watch(struct pci_cfg_addr addr, void (*seen)(void)) {
+    struct vfunction *vf = vfunction_find(addr);
+    if (vf == NULL || vf->hidden) {
+        return;
+    }
+    spinlock_acquire(&virt.lock);
+    if (atomic_load_explicit(&vf->watching, memory_order_relaxed)) {
+        spinlock_release(&virt.lock);
+        return;
+    }
+    vf->watch_seen = seen;
+    atomic_store_explicit(&vf->watching, true, memory_order_relaxed);
+    for (size_t k = 0; k < BAR_COUNT; k++) {
+        struct vbar *b = &vf->bars[k];
+        if (b->size == 0) {
+            continue;
+        }
+        if (sub_page(b)) {
+            bar_log(b, "not watched, as it is smaller than a page");
+            continue;
+        }
+        if (b->host == 0) {
+            bar_log(b, "not watched, as the host has it nowhere");
+            continue;
+        }
+        if (!gaps_register(vf, b)) {
+            bar_log(b, "not watched, as the hypervisor cannot reach it for the guest");
+            continue;
+        }
+        b->watched = true;
+        if (b->mapped != 0) {
+            watch_move(b, b->mapped);
+            uintptr_t base = page_down(b->mapped);
+            gpt_map(base, 0, page_up(b->mapped + b->size) - base, 0, 0);
+        }
+    }
+    gpt_flush();
+    bool tell = vf->watches_logged < WATCHES_LOGGED;
+    spinlock_release(&virt.lock);
+    vcpu_pause_others();
+    watch_io_update(vf);
+    vcpu_resume_others();
+    if (tell) {
+        printf(
+            "PCI " PCI_CFG_ADDR_FMT ": watched for the guest's first access to its BARs\n",
+            PCI_CFG_ADDR_ARGS(addr)
+        );
+    }
 }
 
 void pci_virt_repost(void) {
