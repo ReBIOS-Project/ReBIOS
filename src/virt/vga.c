@@ -25,6 +25,7 @@
 #include <hw/pci_assign.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_enum.h>
+#include <hw/pci_regs.h>
 #include <lib/bytes.h>
 #include <lib/heap.h>
 #include <lib/log.h>
@@ -45,6 +46,7 @@
 #include <virt/nsvm.h>
 #include <virt/nvmx.h>
 #include <virt/pci_plan.h>
+#include <virt/pci_virt.h>
 #include <virt/vcpu.h>
 #include <virt/vga_draw.h>
 #include <virt/vgabios.h>
@@ -446,6 +448,12 @@ static struct {
     // The processors taking part.
     _Atomic(uint32_t) busy;
 } job;
+
+// Whether a native driver has the GPU, as the guest's first access to its
+// BARs, which a watch waits for, says: nothing is drawn from then on, as the
+// driver may have the framebuffer, and nothing knows what state it leaves the
+// GPU in.
+static _Atomic(bool) gpu_taken;
 
 // Each byte of a plane as its 8 dots' bits, the leftmost's in the lowest byte.
 static uint64_t plane_spread[256];
@@ -3709,7 +3717,8 @@ static bool job_stale(void) {
 }
 
 // Abandons the frame under way where it no longer shows what the display is,
-// and starts the next one once it is due.
+// and starts the next one once it is due, but for none once a native driver
+// has the GPU.
 static void frame_next(void) {
     // The boot processor's drawing thread reads video memory back first.
     if (vbe.leaving) {
@@ -3717,6 +3726,12 @@ static void frame_next(void) {
     }
     uint64_t now = time_ns();
     uint32_t step = atomic_load_explicit(&job.step, memory_order_acquire);
+    if (atomic_load_explicit(&gpu_taken, memory_order_acquire)) {
+        if (step != STEP_IDLE) {
+            job_abandon();
+        }
+        return;
+    }
     if (step != STEP_IDLE && job_stale()) {
         job_abandon();
         step = STEP_IDLE;
@@ -3765,6 +3780,39 @@ static void draw_main(void *arg) {
         }
         thread_yield();
     }
+}
+
+// As Linux 7.3 finds the PCI device of the firmware's framebuffer
+// (screen_info_pci_dev()): the first display controller with a memory BAR that
+// holds all of it.
+static struct pci_enum_function *display_gpu(const struct handoff_framebuffer *fb) {
+    const struct pci_enum_topology *t = pci_enum_topology();
+    if (t == NULL) {
+        return NULL;
+    }
+    uint64_t end = fb->base + (uint64_t)fb->pitch * fb->height;
+    for (size_t i = 0; i < t->function_count; i++) {
+        struct pci_enum_function *f = &t->functions[i];
+        if (f->base_class != PCI_BASE_CLASS_DISPLAY) {
+            continue;
+        }
+        for (size_t k = 0; k < f->bar_count && k < ARRAY_COUNT(f->bars); k++) {
+            const struct pci_enum_bar *bar = &f->bars[k];
+            bool memory = bar->kind == PCI_ENUM_BAR_MEM32 || bar->kind == PCI_ENUM_BAR_MEM64;
+            if (memory && fb->base >= bar->base && end <= bar->base + bar->size) {
+                return f;
+            }
+        }
+    }
+    return NULL;
+}
+
+static void native_driver(void) {
+    atomic_store_explicit(&gpu_taken, true, memory_order_release);
+    // The frame on its way ends before the guest goes on, so that nothing it
+    // writes from here on is drawn.
+    job_abandon();
+    printf("Emulated VGA: a native driver has the GPU, nothing drawn from now on\n");
 }
 
 bool vga_redrawing(void) {
@@ -4043,6 +4091,12 @@ bool vga_init(void) {
     }
     vga.on = true;
     this_cpu()->vga_scratch = scratch_alloc();
+    const struct pci_enum_function *gpu = display_gpu(fb);
+    if (gpu != NULL) {
+        pci_virt_watch(gpu->addr, native_driver);
+    } else {
+        printf("Emulated VGA: no display controller holds the framebuffer, none watched\n");
+    }
 
     unsigned int scaling = h->config.vga_scaling < 5 ? h->config.vga_scaling : 0;
     const char *orientation = "";
