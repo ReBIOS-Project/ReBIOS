@@ -64,6 +64,13 @@ void io_block(uint16_t base, size_t count);
 // them, as io_pass() gave them, with no handler and no io_block() between.
 bool io_passed(uint16_t base, size_t count);
 
+// Traps the ports until the guest's first access to any of them, which calls
+// seen() before it goes on as it would without the watch: seen() ends it with
+// io_unwatch(). False where there are too many watches. As io_pass(), only
+// between vcpu_pause_others() and vcpu_resume_others() while the guest runs.
+bool io_watch(uint16_t base, size_t count, void (*seen)(void *ctx), void *ctx);
+void io_unwatch(uint16_t base, size_t count);
+
 // Runs an access the guest made: through the handler of its first port, or a
 // byte at a time where that is an 8-bit device's or nobody's, each byte going
 // to its port's handler, else to the machine for a port the guest is given,

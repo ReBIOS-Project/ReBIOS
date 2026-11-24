@@ -89,11 +89,48 @@ void io_dispatch_block(
     }
 }
 
+#define MAX_IO_WATCHES 8
+
+struct io_watch {
+    uint16_t base;
+    size_t count;
+    void (*seen)(void *ctx);
+    void *ctx;
+};
+
+// count is 0 where unused.
+static struct io_watch watches[MAX_IO_WATCHES];
+// The ports any watch has, which every access the hypervisor dispatches
+// checks.
+static uint8_t watched[PORTS / 8];
+
+static bool is_watched(uint16_t port) {
+    return (watched[port / 8] & (1 << (port % 8))) != 0;
+}
+
+static const struct io_watch *watch_for(uint16_t port, size_t size) {
+    bool any = false;
+    for (size_t i = 0; i < size; i++) {
+        any |= is_watched((uint16_t)(port + i));
+    }
+    if (!any) {
+        return NULL;
+    }
+    for (size_t i = 0; i < MAX_IO_WATCHES; i++) {
+        const struct io_watch *w = &watches[i];
+        if (w->count != 0 && port < w->base + w->count && port + size > w->base) {
+            return w;
+        }
+    }
+    return NULL;
+}
+
 // Whether the port is trapped: where a handler has it, where the guest is kept
-// from it, and below 1000h where nothing the guest gets has it.
+// from it, where a watch has it, and below 1000h where nothing the guest gets
+// has it.
 static bool trapped(uint16_t port) {
     return handler_for(port) != NULL || (denied[port / 8] & (1 << (port % 8))) != 0
-        || (port < LEGACY_PORTS && users[port] == 0);
+        || is_watched(port) || (port < LEGACY_PORTS && users[port] == 0);
 }
 
 static void settle(uint16_t port) {
@@ -136,6 +173,45 @@ bool io_passed(uint16_t base, size_t count) {
         }
     }
     return true;
+}
+
+bool io_watch(uint16_t base, size_t count, void (*seen)(void *ctx), void *ctx) {
+    for (size_t i = 0; i < MAX_IO_WATCHES; i++) {
+        if (watches[i].count != 0) {
+            continue;
+        }
+        watches[i] = (struct io_watch){ base, count, seen, ctx };
+        for (size_t k = 0; k < count; k++) {
+            uint16_t port = (uint16_t)(base + k);
+            watched[port / 8] |= (uint8_t)(1 << (port % 8));
+            settle(port);
+        }
+        return true;
+    }
+    return false;
+}
+
+void io_unwatch(uint16_t base, size_t count) {
+    for (size_t i = 0; i < MAX_IO_WATCHES; i++) {
+        if (watches[i].count != count || watches[i].base != base) {
+            continue;
+        }
+        watches[i].count = 0;
+        // The other watches keep the ports they share with it, as where the
+        // guest makes two I/O BARs overlap.
+        for (size_t k = 0; k < count; k++) {
+            uint16_t port = (uint16_t)(base + k);
+            watched[port / 8] &= (uint8_t)~(1 << (port % 8));
+            for (size_t j = 0; j < MAX_IO_WATCHES; j++) {
+                const struct io_watch *w = &watches[j];
+                if (w->count != 0 && port >= w->base && (size_t)(port - w->base) < w->count) {
+                    watched[port / 8] |= (uint8_t)(1 << (port % 8));
+                }
+            }
+            settle(port);
+        }
+        return;
+    }
 }
 
 static const struct io_handler *handler_for(uint16_t port) {
@@ -185,6 +261,10 @@ static bool all_given(uint16_t port, size_t size) {
 }
 
 void io_dispatch(struct vcpu *v, uint16_t port, size_t size, bool in, uint32_t *value) {
+    const struct io_watch *w = watch_for(port, size);
+    if (w != NULL) {
+        w->seen(w->ctx);
+    }
     const struct io_handler *h = handler_for(port);
     if (h != NULL && !h->bytes) {
         h->access(v, h->ctx, (uint16_t)(port - h->base), size, in, value);
