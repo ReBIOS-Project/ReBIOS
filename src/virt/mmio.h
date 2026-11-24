@@ -43,6 +43,11 @@ struct mmio_ops {
     bool runs;
     // Whether reads reach the memory it maps, which runs then read too.
     bool reads_mapped;
+    // Optional, for a region that stands in front of memory only until the
+    // guest reaches it: called at a fault on the region, before anything of
+    // the instruction is carried out, true where the region is gone, so that
+    // the instruction runs again natively.
+    bool (*fault)(struct vcpu *v, void *ctx, uint64_t offset);
     // Optional, for repeated string instructions: count accesses of size bytes
     // each, the first at offset and each next one step bytes on, all within
     // the region, with the same effects as read() and write() making them a

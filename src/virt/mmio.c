@@ -1124,6 +1124,10 @@ static bool fault(struct vcpu *v, uintptr_t gpa, bool fetch) {
     if (r == NULL) {
         return false;
     }
+    uint64_t offset = gpa - atomic_load_explicit(&r->base, memory_order_relaxed);
+    if (r->ops->fault != NULL && r->ops->fault(v, r->ctx, offset)) {
+        return true;
+    }
     profile_mmio(gpa);
     if (r == &absent) {
         static _Atomic(unsigned int) reported;
