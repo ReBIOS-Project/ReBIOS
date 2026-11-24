@@ -37,9 +37,10 @@ struct vcpu;
 // Reference, Common Interfaces (84F9735) of September 1991 has its Type 1
 // controller, and the devices behind it as Andries Brouwer's Keyboard
 // scancodes v1.2g has them. Each port's device is the chipset's where it has
-// one, whose bytes and commands pass through, and otherwise emulated. USB
-// input reaches the guest through it either way, in the format the guest asked
-// for.
+// one, whose bytes and commands pass through, the chipset's controller
+// translating its keyboard's bytes as the guest's command byte asks, and
+// otherwise emulated. USB input reaches the guest through it either way, in
+// the format the guest asked for.
 
 // Both data lines idle, and the keyboard not inhibited, as AT controllers had
 // it.
@@ -156,8 +157,11 @@ struct vcpu;
 
 #define MS_TSC(ms) (time_tsc_hz() / 1000 * (ms))
 
+// Bytes, and whether each is as the guest takes it already, as the chipset's
+// controller translated it, or is to be translated as the emulated one does.
 struct queue {
     uint8_t bytes[QUEUE_SIZE];
+    bool as_is[QUEUE_SIZE];
     size_t first;
     size_t count;
 };
@@ -256,23 +260,35 @@ static const uint8_t translation[UINT8_MAX + 1] = {
     0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe, 0xff
 };
 
-static bool queue_put(struct queue *q, uint8_t byte) {
+static bool queue_put_as(struct queue *q, uint8_t byte, bool as_is) {
     if (q->count == QUEUE_SIZE) {
         return false;
     }
-    q->bytes[(q->first + q->count) % QUEUE_SIZE] = byte;
+    size_t at = (q->first + q->count) % QUEUE_SIZE;
+    q->bytes[at] = byte;
+    q->as_is[at] = as_is;
     q->count++;
     return true;
 }
 
-static bool queue_take(struct queue *q, uint8_t *byte) {
+static bool queue_put(struct queue *q, uint8_t byte) {
+    return queue_put_as(q, byte, false);
+}
+
+static bool queue_take_as_is(struct queue *q, uint8_t *byte, bool *as_is) {
     if (q->count == 0) {
         return false;
     }
     *byte = q->bytes[q->first];
+    *as_is = q->as_is[q->first];
     q->first = (q->first + 1) % QUEUE_SIZE;
     q->count--;
     return true;
+}
+
+static bool queue_take(struct queue *q, uint8_t *byte) {
+    bool as_is;
+    return queue_take_as_is(q, byte, &as_is);
 }
 
 // The lines follow the output buffer, so that a byte read by polling leaves no
@@ -299,8 +315,10 @@ static void output_refill(void) {
         if (queue_take(&loopback_queue, &byte)) {
             aux = true;
         } else if (!queue_take(&controller_queue, &byte)) {
-            if ((ram[0] & I8042_CCB_KBD_DISABLED) == 0 && queue_take(&keyboard_queue, &byte)) {
-                if ((ram[0] & I8042_CCB_TRANSLATE) != 0) {
+            bool as_is;
+            if ((ram[0] & I8042_CCB_KBD_DISABLED) == 0
+             && queue_take_as_is(&keyboard_queue, &byte, &as_is)) {
+                if ((ram[0] & I8042_CCB_TRANSLATE) != 0 && !as_is) {
                     if (byte == SCAN_BREAK) {
                         translate_break = true;
                         continue;
@@ -812,7 +830,11 @@ static void command_write(uint8_t value) {
 }
 
 static void ccb_write(uint8_t value) {
+    bool translate = (ram[0] & I8042_CCB_TRANSLATE) != 0;
     ram[0] = value;
+    if (((value & I8042_CCB_TRANSLATE) != 0) != translate) {
+        i8042_translate(!translate);
+    }
     lines_update();
     output_refill();
 }
@@ -1094,7 +1116,7 @@ static void real_receive(void) {
             }
             queue_put(&aux_queue, byte);
         } else {
-            queue_put(&keyboard_queue, byte);
+            queue_put_as(&keyboard_queue, byte, true);
         }
     }
     output_refill();
@@ -1118,7 +1140,7 @@ static void real_poll_fired(void *ctx) {
 
 void kbc_init(void) {
     ram[0] = I8042_CCB_KBD_INTERRUPT | I8042_CCB_SYSTEM | I8042_CCB_TRANSLATE;
-    i8042_init();
+    i8042_init((ram[0] & I8042_CCB_TRANSLATE) != 0);
     real_keyboard = i8042_keyboard();
     real_aux = i8042_aux();
 

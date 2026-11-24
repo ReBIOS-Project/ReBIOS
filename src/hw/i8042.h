@@ -95,9 +95,13 @@ extern const char *const i8042_keyboard_ids[];
 extern const char *const i8042_mouse_ids[];
 
 // The chipset's keyboard controller, as a source of bytes from whatever is
-// plugged into it: untranslated, with its interrupts on. Finds out what there
-// is without resetting it, which firmware on some machines does not take well.
-void i8042_init(void);
+// plugged into it: translated or not, with its interrupts on. Finds out what
+// there is without resetting it, which firmware on some machines does not take
+// well.
+void i8042_init(bool translate);
+// Has the controller translate the keyboard's bytes to scan code set 1, or
+// pass them as they come, as the guest's command byte asks.
+void i8042_translate(bool on);
 bool i8042_present(void);
 bool i8042_keyboard(void);
 bool i8042_aux(void);

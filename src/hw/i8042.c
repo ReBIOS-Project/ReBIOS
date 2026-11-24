@@ -22,6 +22,8 @@
 #include <uacpi/status.h>
 #include <uacpi/tables.h>
 #include <hw/i8042.h>
+#include <core.h>
+#include <handoff.h>
 #include <hw/acpi.h>
 #include <lib/log.h>
 #include <lib/time.h>
@@ -41,9 +43,11 @@
 #define POLL_US 50
 #define SEND_QUEUE_SIZE 64
 
+// A byte for a device, or for the controller's command byte, and the command
+// it follows, if any.
 struct send {
     uint8_t byte;
-    bool aux;
+    uint8_t command;
 };
 
 const char *const i8042_keyboard_ids[] = {
@@ -55,9 +59,15 @@ const char *const i8042_mouse_ids[] = {
     "PNP0F19", "PNP0F1C", "SYN0801", NULL
 };
 
+// The chassis types of Linux 7.3's atkbd_is_portable_device(): portable,
+// laptop, notebook, sub-notebook, convertible, and detachable (SMBIOS DSP0134
+// 3.9.0, Table 17).
+static const uint8_t portable_chassis[] = { 8, 9, 10, 14, 31, 32 };
+
 static bool present;
 static bool keyboard;
 static bool aux_device;
+static uint8_t ccb;
 static struct send sends[SEND_QUEUE_SIZE];
 static size_t send_first;
 static size_t send_count;
@@ -140,7 +150,21 @@ static bool firmware_allows(void) {
         || (fadt->iapc_boot_arch & ACPI_IA_PC_8042) != 0;
 }
 
-void i8042_init(void) {
+// As Linux 7.3's atkbd_skip_getid() has it: a portable machine's controller
+// that translates, whose keyboard may not take well being asked for its ID.
+static bool keyboard_assumed(bool translate) {
+    if (!translate) {
+        return false;
+    }
+    for (size_t i = 0; i < sizeof(portable_chassis); i++) {
+        if (core_handoff->dmi_chassis_type == portable_chassis[i]) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void i8042_init(bool translate) {
     if (!firmware_allows()) {
         printf("No keyboard controller, as the firmware's ACPI has it\n");
         return;
@@ -150,22 +174,29 @@ void i8042_init(void) {
         printf("No keyboard controller\n");
         return;
     }
-    uint8_t ccb;
-    if (!wait_output(&ccb, CONTROLLER_TIMEOUT_US)) {
+    uint8_t firmware_ccb;
+    if (!wait_output(&firmware_ccb, CONTROLLER_TIMEOUT_US)) {
         printf("No keyboard controller\n");
         return;
     }
     present = true;
 
-    // Bytes as the devices send them, and no interrupts while looking.
-    uint8_t off = I8042_CCB_SYSTEM | I8042_CCB_KBD_DISABLED | I8042_CCB_AUX_DISABLED;
+    // The keyboard's bytes translated as the guest asks, as Linux 7.3's i8042
+    // driver keeps them translated, since controllers of notebooks may not
+    // take it otherwise; and no interrupts while looking.
+    uint8_t xlate = translate ? I8042_CCB_TRANSLATE : 0;
+    uint8_t off = I8042_CCB_SYSTEM | I8042_CCB_KBD_DISABLED | I8042_CCB_AUX_DISABLED | xlate;
     if (command(I8042_COMMAND_WRITE_CCB) && wait_input_empty()) {
         outb(I8042_PORT_DATA, off);
     }
-    command(I8042_COMMAND_KBD_ENABLE);
-    keyboard = identify(false);
-    command(I8042_COMMAND_KBD_DISABLE);
-    flush();
+    if (keyboard_assumed(translate)) {
+        keyboard = true;
+    } else {
+        command(I8042_COMMAND_KBD_ENABLE);
+        keyboard = identify(false);
+        command(I8042_COMMAND_KBD_DISABLE);
+        flush();
+    }
 
     command(I8042_COMMAND_AUX_ENABLE);
     uint8_t test;
@@ -174,15 +205,35 @@ void i8042_init(void) {
     aux_device = test_passed && identify(true);
     flush();
 
-    uint8_t on = I8042_CCB_SYSTEM | (keyboard ? I8042_CCB_KBD_INTERRUPT : I8042_CCB_KBD_DISABLED)
-               | (aux_device ? I8042_CCB_AUX_INTERRUPT : I8042_CCB_AUX_DISABLED);
+    ccb = I8042_CCB_SYSTEM | (keyboard ? I8042_CCB_KBD_INTERRUPT : I8042_CCB_KBD_DISABLED)
+        | (aux_device ? I8042_CCB_AUX_INTERRUPT : I8042_CCB_AUX_DISABLED) | xlate;
     if (command(I8042_COMMAND_WRITE_CCB) && wait_input_empty()) {
-        outb(I8042_PORT_DATA, on);
+        outb(I8042_PORT_DATA, ccb);
     }
     printf(
-        "Keyboard controller, %s keyboard, %s mouse\n",
-        keyboard ? "with a" : "with no", aux_device ? "a" : "no"
+        "Keyboard controller, command byte %#x from the firmware, %s keyboard%s, %s mouse\n",
+        firmware_ccb, keyboard ? "with a" : "with no",
+        keyboard_assumed(translate) ? " (not asked for its ID, as on a portable machine)" : "",
+        aux_device ? "a" : "no"
     );
+}
+
+static void send_queue(uint8_t command_byte, uint8_t byte) {
+    if (present && send_count < SEND_QUEUE_SIZE) {
+        size_t at = (send_first + send_count) % SEND_QUEUE_SIZE;
+        sends[at] = (struct send){ byte, command_byte };
+        send_count++;
+    }
+    i8042_send_more();
+}
+
+void i8042_translate(bool on) {
+    uint8_t want = on ? ccb | I8042_CCB_TRANSLATE : ccb & (uint8_t)~I8042_CCB_TRANSLATE;
+    if (!present || want == ccb) {
+        return;
+    }
+    ccb = want;
+    send_queue(I8042_COMMAND_WRITE_CCB, ccb);
 }
 
 bool i8042_present(void) {
@@ -198,12 +249,7 @@ bool i8042_aux(void) {
 }
 
 void i8042_send(bool aux, uint8_t byte) {
-    if (present && send_count < SEND_QUEUE_SIZE) {
-        size_t at = (send_first + send_count) % SEND_QUEUE_SIZE;
-        sends[at] = (struct send){ byte, aux };
-        send_count++;
-    }
-    i8042_send_more();
+    send_queue(aux ? I8042_COMMAND_WRITE_AUX : 0, byte);
 }
 
 bool i8042_send_more(void) {
@@ -217,8 +263,8 @@ bool i8042_send_more(void) {
             return true;
         }
         const struct send *s = &sends[send_first];
-        if (s->aux && !send_prefixed) {
-            outb(I8042_PORT_COMMAND, I8042_COMMAND_WRITE_AUX);
+        if (s->command != 0 && !send_prefixed) {
+            outb(I8042_PORT_COMMAND, s->command);
             send_prefixed = true;
             continue;
         }

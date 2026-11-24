@@ -91,6 +91,9 @@ _Static_assert(
 #define SMBIOS_TYPE_SYSTEM 1
 #define SMBIOS_SYSTEM_MANUFACTURER 0x04
 #define SMBIOS_SYSTEM_PRODUCT_NAME 0x05
+#define SMBIOS_TYPE_ENCLOSURE 3
+#define SMBIOS_ENCLOSURE_TYPE 0x05
+#define SMBIOS_ENCLOSURE_TYPE_MASK 0x7f
 
 static const struct efi_guid acpi_20_guid = EFI_ACPI_20_TABLE_GUID;
 static const struct efi_guid acpi_10_guid = EFI_ACPI_10_TABLE_GUID;
@@ -599,6 +602,17 @@ static uint64_t smbios_find(void) {
     return 0;
 }
 
+// SMBIOS's System Enclosure structure's type (DSP0134 3.9.0, 7.4.1), without
+// its lock bit, or 0.
+static uint8_t chassis_type(void) {
+    const char *strings_end;
+    const uint8_t *structure = smbios_structure(SMBIOS_TYPE_ENCLOSURE, &strings_end);
+    if (structure == NULL || SMBIOS_ENCLOSURE_TYPE >= structure[1]) {
+        return 0;
+    }
+    return structure[SMBIOS_ENCLOSURE_TYPE] & SMBIOS_ENCLOSURE_TYPE_MASK;
+}
+
 // SMBIOS's System Information structure's string at offset (DSP0134 3.9.0,
 // 7.2), cut short to fit.
 static void dmi_copy(char out[static HANDOFF_DMI_MAX], uint8_t offset) {
@@ -676,6 +690,7 @@ void fwtables_collect(void) {
 
     loader_handoff->smbios_entry = smbios_find();
     loader_handoff->bios_year = bios_year();
+    loader_handoff->dmi_chassis_type = chassis_type();
     dmi_copy(loader_handoff->dmi_sys_vendor, SMBIOS_SYSTEM_MANUFACTURER);
     dmi_copy(loader_handoff->dmi_product_name, SMBIOS_SYSTEM_PRODUCT_NAME);
     if (loader_handoff->smbios_entry == 0) {

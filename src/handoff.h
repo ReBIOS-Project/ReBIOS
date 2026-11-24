@@ -368,6 +368,9 @@ struct handoff {
     // matches its DMI tables' DMI_SYS_VENDOR and DMI_PRODUCT_NAME.
     char dmi_sys_vendor[HANDOFF_DMI_MAX];
     char dmi_product_name[HANDOFF_DMI_MAX];
+    // SMBIOS's system enclosure type, without its lock bit, or 0, as Linux 7.3
+    // matches DMI_CHASSIS_TYPE.
+    uint8_t dmi_chassis_type;
 
     struct handoff_config config;
     struct handoff_video video;
