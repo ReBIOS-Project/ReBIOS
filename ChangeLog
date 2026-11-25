@@ -1,3 +1,91 @@
+2026-11-25  Mintsuki  <mintsuki@protonmail.com>
+
+    *** Release 0.13.0 ***
+
+    Noteworthy changes compared to the previous release, 0.12.0:
+
+    New features:
+        - Draw much faster with the emulated VGA: ReBIOS stores, moves, fills,
+          and reads strings in the planes a block at a time where the VGA's
+          registers allow; the runs that carry out the instructions after an
+          access to the VGA carry out more of them themselves, string I/O at
+          its ports included; a string of DAC data reaches the DAC at once;
+          the IOMMUs get their invalidations behind one write of their queue's
+          tail; and processors whose vCPUs wait draw the frames. On the
+          emulated VGA's benchmark under KVM, against 0.12.0: palette loads
+          159 times as fast, mode X drawing 45 times, planar fills 39 times,
+          latch copies 27 times, graphics scrolling 26 times, text fills 17
+          times, mode 13h fills 13 times, text scrolling 7.3 times, mode sets
+          6.4 times, banked VBE drawing 1.7 times, and characters, pixels,
+          teletype output, XLAT lines, and drawing as Windows' VGA driver
+          draws 1.4 to 1.7 times; the processor's own speed, linear
+          framebuffer writes, and exits unchanged.
+        - Follow the beam in the emulated VGA, as IBM's PS/2 Hardware
+          Interface Technical Reference times it: input status register 1
+          shows display enable and the vertical retrace as the CRT
+          controller's registers and the dot clock time them, and register
+          writes show from the scan line after the beam's on, so that copper
+          bars, split screens, and palette changes in the middle of a frame
+          show as on a VGA. Each frame logs up to 8192 writes that change a
+          register; video memory still shows as it is when the frame is drawn.
+          Under nested KVM, where an exit can take longer than the retrace, a
+          program that waits for every retrace sees 0.90 times as many, and
+          copper bars run at every other frame.
+        - Find the VGA device's option ROM for vgabios = cbfs by the names
+          coreboot gives it in CBFS, pciVVVV,DDDD,RR.rom and pciVVVV,DDDD.rom
+          (as a ThinkPad T430's pci8086,0166.rom), where there is no
+          vgabios.bin (#36).
+
+    Bug fixes:
+        - Stop translating the keyboard's scan codes a second time where the
+          machine's own keyboard controller translates them, as some laptops'
+          controllers do whatever they are told, which mixes up the keys: the
+          controller keeps translating as the firmware set it, as Linux's
+          i8042 driver keeps it, the guest's command byte turning translation
+          on and off, and its bytes reach the guest as they come. On portable
+          chassis, by their SMBIOS enclosure type, ReBIOS does not ask the
+          keyboard for its ID while the controller translates, as Linux's
+          atkbd does not (#40).
+        - Give each device of the guest's DSDT that shares a _HID or a _CID
+          with others a _UID that none of them has, as ACPI 6.6, 6.1.12 has
+          it: Windows XP's setup stopped with bug check 0xA5 (0xD, ...,
+          '_UID') where the firmware has a motherboard resources device
+          (PNP0C02) without a _UID beside ReBIOS's own (#36).
+        - Show a device of the firmware's that takes an interrupt outside the
+          PCI host bridge, such as Tiger Lake's GPIO controller or AMD's I2C
+          and UART controllers, only to OSes that answer _OSI ("Windows
+          2006"), as Windows Vista and later and Linux do: Windows XP SP3's
+          setup stopped with bug check 0x7E in its ACPI driver on such
+          machines (#35).
+        - Emulate the VGA by default on AMD's Barcelo APUs (1002:15E7) rather
+          than run their own Video BIOS, which left an IdeaPad Slim 3 15ABR8's
+          screen black at grub4dos's and Windows 7's graphics modes;
+          vga_emulation = never still runs it.
+        - Leave CALL, RET, and indirect branches in the runs after an access
+          to the emulated VGA to the processor: under CET, a CALL left the
+          shadow stack without its return address, so that the RET after it
+          raised #CP, and an indirect branch skipped indirect branch
+          tracking's check; and those branches went into neither the guest's
+          LBRs nor its branch trace.
+        - Count the instructions ReBIOS carries out for the OS in its
+          performance counters of retired instructions and retired branch
+          instructions, as the processor counts them at the CPL the counters
+          ask for, with the overflow's status and interrupt: the instructions
+          of runs, the accesses ReBIOS emulates, the instructions of exits it
+          completes, task switches, and nested entries, which a profiler in
+          the OS missed.
+        - Say in the emulated VGA's video BIOS's state information (INT 10h
+          AH=1Bh) whether attribute bit 7 blinks and whether cursor emulation
+          is on, and keep the blinking state in the BIOS data area (40h:65h)
+          at INT 10h AX=1003h: DOS's ANSI.SYS, which reads the state back and
+          sets it again at every mode set, turned blinking off for good, so
+          that Copper's last screen showed grey blocks that a VGA shows black.
+
+    Miscellaneous:
+        - Refuse a processor without LAHF and SAHF in 64-bit mode, which runs
+          now load the guest's flags with, and which no processor with what
+          else ReBIOS needs lacks.
+
 2026-11-21  Mintsuki  <mintsuki@protonmail.com>
 
     *** Release 0.12.0 ***
