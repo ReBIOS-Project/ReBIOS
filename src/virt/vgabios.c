@@ -114,6 +114,10 @@ static void exchange(
     size_t into_count
 ) {
     struct call *c = call_current();
+    // No interrupt may preempt the call between these and the yield, which
+    // gives the processor back with interrupts as its runner has them: the ROM
+    // would take the words to it before the call takes the words from it.
+    cli();
     c->head = head;
     c->head_left = head_count;
     c->data = data;
