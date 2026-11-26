@@ -575,8 +575,10 @@ static bool group_program(
     if (!took) {
         return false;
     }
+    // A Resizable BAR there has room for its size and no more.
     for (size_t k = 0; k < count; k++) {
         f->bars[order[k]].base = at[k];
+        f->bars[order[k]].room = 0;
     }
     depth = 0;
     for (struct pci_enum_function *p = f->parent; p != NULL; p = p->parent) {

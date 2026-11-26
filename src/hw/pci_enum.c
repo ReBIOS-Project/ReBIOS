@@ -932,6 +932,7 @@ static void rebar_resize(
     bool wide = bar->kind == PCI_ENUM_BAR_MEM64;
     size_t old_size = bar->size;
     size_t new_size = rebar_size(encoding);
+    size_t room = bar->room;
 
     uint32_t low = pci_cfg_read(f->addr, bar->reg, 4);
     uint32_t high = wide ? pci_cfg_read(f->addr, bar->reg + 4, 4) : 0;
@@ -958,6 +959,7 @@ static void rebar_resize(
         );
     }
     size_bars(f, index, index + 1, 0);
+    bar->room = room;
     if (bar->size != new_size) {
         printf(
             "PCI " PCI_CFG_ADDR_FMT " BAR%u: sizes to 0x%llx after resizing to 0x%llx\n",
@@ -1002,6 +1004,9 @@ static void rebar_shrink(
         return;
     }
     size_t current_size = rebar_size(current);
+    if (bar->base != 0) {
+        bar->room = current_size;
+    }
     if (current_size <= max_size) {
         return;
     }
@@ -1107,4 +1112,28 @@ bool pci_enum_rebar_restore(const struct pci_enum_function *f) {
         changed = true;
     }
     return changed;
+}
+
+bool pci_enum_rebar_resize(struct pci_enum_function *f, size_t index, size_t size) {
+    if (f->rebar_ext_cap == 0 || index >= f->bar_count || size < rebar_size(0)
+     || (size & (size - 1)) != 0) {
+        return false;
+    }
+    unsigned int encoding = (unsigned int)__builtin_ctzll(size) - REBAR_SIZE_BASE;
+    uint32_t first_control = pci_cfg_read(f->addr, f->rebar_ext_cap + REBAR_CONTROL(0), 4);
+    unsigned int pairs = (first_control >> REBAR_PAIRS_SHIFT) & REBAR_PAIRS;
+    for (size_t n = 0; n < pairs && n < REBAR_MAX_PAIRS && encoding <= REBAR_SIZE_LAST; n++) {
+        uint32_t control_reg = f->rebar_ext_cap + REBAR_CONTROL(n);
+        uint32_t control = pci_cfg_read(f->addr, control_reg, 4);
+        if ((control & REBAR_INDEX) != index) {
+            continue;
+        }
+        uint32_t capability = pci_cfg_read(f->addr, f->rebar_ext_cap + REBAR_CAPABILITY(n), 4);
+        if (!rebar_has(rebar_supported(capability, control), (int)encoding)) {
+            return false;
+        }
+        rebar_resize(f, (uint8_t)index, control_reg, encoding);
+        return f->bars[index].size == size;
+    }
+    return false;
 }

@@ -38,6 +38,10 @@ struct pci_enum_bar {
     // As the firmware programmed it, and its size; size 0 means unimplemented.
     uintptr_t base;
     size_t size;
+    // A Resizable BAR's largest size that the host has room for at its base:
+    // the firmware's, before ReBIOS shrank it. 0 where that is its size, or it
+    // is no Resizable BAR.
+    size_t room;
 };
 
 struct pci_enum_function {
@@ -139,5 +143,10 @@ void pci_enum_shrink_rebars(size_t max_size);
 // pci_enum_shrink_rebars() left them, where a reset of the function put them
 // back to its defaults. Returns whether it changed any.
 bool pci_enum_rebar_restore(const struct pci_enum_function *f);
+
+// Resizes the function's Resizable BAR index to size on the host, at its base,
+// and records its new size: false where its capability does not offer that
+// size, or the BAR does not take it.
+bool pci_enum_rebar_resize(struct pci_enum_function *f, size_t index, size_t size);
 
 #endif
