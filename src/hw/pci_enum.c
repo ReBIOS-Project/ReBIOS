@@ -877,6 +877,24 @@ uint64_t pci_enum_vf_span(const struct pci_enum_function *f, size_t b) {
     return (uint64_t)bar->size * f->total_vfs;
 }
 
+void pci_enum_vf_read(struct pci_enum_function *vf, const struct pci_enum_function *pf) {
+    struct pci_cfg_addr addr = vf->addr;
+    *vf = (struct pci_enum_function){
+        .addr = addr,
+        .vendor_id = pf->vendor_id,
+        .device_id = (uint16_t)pci_cfg_read(pf->addr, pf->sriov_ext_cap + PCI_SRIOV_VF_DID, 2),
+        .header_type = PCI_HEADER_TYPE_NORMAL,
+        .parent = pf->parent
+    };
+    uint32_t class_revision = pci_cfg_read(addr, PCI_CLASS_REVISION, 4);
+    vf->revision = (uint8_t)class_revision;
+    vf->prog_if = (uint8_t)(class_revision >> 8);
+    vf->subclass = (uint8_t)(class_revision >> 16);
+    vf->base_class = (uint8_t)(class_revision >> 24);
+    walk_capabilities(vf);
+    walk_extended_capabilities(vf);
+}
+
 struct pci_enum_function *pci_enum_vga(void) {
     const struct handoff_video *video = &core_handoff->video;
     if (!video->vga_present) {

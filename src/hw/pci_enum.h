@@ -121,6 +121,13 @@ struct pci_enum_function *pci_enum_find(struct pci_cfg_addr addr);
 // What the function's VF BAR b spans for all of its VFs: 0 where it has none.
 uint64_t pci_enum_vf_span(const struct pci_enum_function *f, size_t b);
 
+// Reads the function at vf->addr, a VF of the physical function pf that
+// answers there, into vf: the Vendor ID of its PF and the Device ID that its
+// PF's SR-IOV capability gives, as a VF's own read as all ones, and its class
+// and capabilities. A VF has no BARs or expansion ROM of its own (Single Root
+// I/O Virtualization and Sharing Specification 1.1, 3.4.1).
+void pci_enum_vf_read(struct pci_enum_function *vf, const struct pci_enum_function *pf);
+
 // The function of the PCI device that owns the legacy VGA resources, NULL
 // where there is none.
 struct pci_enum_function *pci_enum_vga(void);

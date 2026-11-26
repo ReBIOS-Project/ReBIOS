@@ -65,6 +65,15 @@
 // capability and a control register for each of up to six BARs.
 #define REBAR_SIZE ((uint32_t)0x34)
 
+// The SR-IOV capability's registers (Single Root I/O Virtualization and
+// Sharing Specification 1.1, 3.3), the System Page Size of 4 KiB that a
+// physical function keeps on the host, and how often the log tells of one
+// function's VFs coming and going.
+#define SRIOV_SIZE ((uint32_t)0x40)
+#define SRIOV_PAGE_4K ((uint32_t)1)
+#define VFS_ON (PCI_SRIOV_CTRL_VFE | PCI_SRIOV_CTRL_MSE)
+#define VF_CHANGES_LOGGED 8
+
 #define BAR_COUNT 6
 #define ROM_INDEX 6
 
@@ -141,9 +150,40 @@ struct vmsix {
     struct vmsix_entry *entries;
 };
 
+struct vfunction;
+
+// A physical function's SR-IOV capability as the guest has it, as Single Root
+// I/O Virtualization and Sharing Specification 1.1, 3.3, defines it. Its
+// control and NumVFs are the host's, which takes the guest's writes as they
+// are; its System Page Size and VF BARs are the guest's own, the host's at 4
+// KiB and where enumeration or ReBIOS put them. Each VF the guest enables is a
+// function of its own, whose BARs are its slices of the VF BARs.
+struct viov {
+    // VF Enable and VF MSE as the guest last set them.
+    uint32_t control;
+    uint32_t page_size;
+    // A 64-bit VF BAR at the index of its lower register.
+    uint64_t guest[PCI_SRIOV_NUM_BARS];
+    uint8_t type_bits[PCI_SRIOV_NUM_BARS];
+    // Its VFs, total_vfs of them once it first enabled any, count of them
+    // enabled, at the routing ID offsets the host gave them.
+    struct vfunction *vfs;
+    struct pci_enum_function *functions;
+    size_t count;
+    uint16_t offset;
+    uint16_t stride;
+    size_t changes_logged;
+};
+
 struct vfunction {
     struct pci_enum_function *f;
     bool hidden;
+    // A physical function's SR-IOV, NULL for the others; a VF's physical
+    // function, and whether the guest reached its configuration space since
+    // its enable, which reads its capabilities and maps its memory.
+    struct viov *iov;
+    struct vfunction *pf;
+    bool ready;
     const struct pci_virt_hook *hook;
     void *hook_ctx;
     struct vmsi msi;
@@ -182,6 +222,9 @@ static struct {
     struct spinlock lock;
     struct vfunction *functions;
     size_t count;
+    // The physical functions with VFs.
+    struct vfunction **pfs;
+    size_t pf_count;
     // The guest-physical addresses the processor implements.
     uint64_t address_limit;
 } virt;
@@ -236,6 +279,26 @@ static struct vfunction *vfunction_find(struct pci_cfg_addr a) {
             high = mid;
         }
     }
+    return NULL;
+}
+
+// The functions in turn, each physical function's enabled VFs after it, from
+// *cursor 0 on: NULL after the last.
+static struct vfunction *each_function(uint64_t *cursor) {
+    size_t i = (size_t)(*cursor >> 32);
+    size_t k = (size_t)(uint32_t)*cursor;
+    for (; i < virt.count; i++, k = 0) {
+        struct vfunction *vf = &virt.functions[i];
+        if (k == 0) {
+            *cursor = (uint64_t)i << 32 | 1;
+            return vf;
+        }
+        if (vf->iov != NULL && k <= vf->iov->count) {
+            *cursor = (uint64_t)i << 32 | (k + 1);
+            return &vf->iov->vfs[k - 1];
+        }
+    }
+    *cursor = (uint64_t)i << 32;
     return NULL;
 }
 
@@ -303,9 +366,10 @@ static bool page_arbitrate(uintptr_t page);
 
 // What else is mapped in [base, end), which an unmapping there took away.
 static void map_again(uintptr_t base, uintptr_t end) {
-    for (size_t i = 0; i < virt.count; i++) {
+    uint64_t cursor = 0;
+    for (struct vfunction *vf; (vf = each_function(&cursor)) != NULL; ) {
         for (size_t k = 0; k <= BAR_COUNT; k++) {
-            struct vbar *b = &virt.functions[i].bars[k];
+            struct vbar *b = &vf->bars[k];
             if (!overlaps(b, base, end)) {
                 continue;
             }
@@ -324,8 +388,8 @@ static bool sizing(const struct vbar *b) {
 }
 
 static void bar_log(const struct vbar *b, const char *what) {
-    for (size_t i = 0; i < virt.count; i++) {
-        const struct vfunction *vf = &virt.functions[i];
+    uint64_t cursor = 0;
+    for (const struct vfunction *vf; (vf = each_function(&cursor)) != NULL; ) {
         if (b < vf->bars || b > &vf->bars[BAR_COUNT]) {
             continue;
         }
@@ -351,12 +415,71 @@ static bool decodes(const struct pci_enum_function *f, uint16_t space) {
     return (pci_cfg_read(f->addr, PCI_COMMAND, 2) & space) != 0;
 }
 
+// Whether the function's memory decodes for the guest: a VF's while the guest
+// has VF Enable and VF MSE set in its PF and has reached the VF since, as a
+// VF's Memory Space Enable is read-only zero (Single Root I/O Virtualization
+// and Sharing Specification 1.1, 3.3.3.4 and 3.4.1.3).
+static bool memory_decoded(const struct vfunction *vf) {
+    if (vf->pf != NULL) {
+        return vf->ready && (vf->pf->iov->control & VFS_ON) == VFS_ON;
+    }
+    return decodes(vf->f, PCI_COMMAND_MEMORY);
+}
+
+// The control register that turns the function's memory decoding on at the
+// host, and its bit: for a VF, its PF's VF MSE.
+static struct pci_cfg_addr memory_switch(
+    const struct vfunction *vf,
+    uint32_t *reg,
+    size_t *size,
+    uint32_t *bit
+) {
+    if (vf->pf != NULL) {
+        *reg = vf->pf->f->sriov_ext_cap + PCI_SRIOV_CTRL;
+        *size = 2;
+        *bit = PCI_SRIOV_CTRL_MSE;
+        return vf->pf->f->addr;
+    }
+    *reg = PCI_COMMAND;
+    *size = 2;
+    *bit = PCI_COMMAND_MEMORY;
+    return vf->f->addr;
+}
+
+// Whether the function decodes memory on the host.
+static bool host_memory(const struct vfunction *vf) {
+    uint32_t reg;
+    size_t size;
+    uint32_t bit;
+    struct pci_cfg_addr a = memory_switch(vf, &reg, &size, &bit);
+    return (pci_cfg_read(a, reg, size) & bit) != 0;
+}
+
+// Turns the function's memory decoding on at the host, for the hypervisor to
+// reach its BARs, and returns what memory_release() puts back.
+static uint32_t memory_hold(const struct vfunction *vf) {
+    uint32_t reg;
+    size_t size;
+    uint32_t bit;
+    struct pci_cfg_addr a = memory_switch(vf, &reg, &size, &bit);
+    uint32_t old = pci_cfg_read(a, reg, size);
+    pci_cfg_write(a, reg, size, old | bit);
+    return old;
+}
+
+static void memory_release(const struct vfunction *vf, uint32_t old) {
+    uint32_t reg;
+    size_t size;
+    uint32_t bit;
+    struct pci_cfg_addr a = memory_switch(vf, &reg, &size, &bit);
+    pci_cfg_write(a, reg, size, old);
+}
+
 // A BAR smaller than a page sits wherever the guest has nothing else, as the
 // hypervisor reaches it where its page cannot be the host's.
 static void sub_page_update(const struct vfunction *vf, struct vbar *b, bool is_rom) {
     uint64_t want = 0;
-    if (b->guest != 0 && (!is_rom || b->enabled) && !sizing(b)
-     && decodes(vf->f, PCI_COMMAND_MEMORY)) {
+    if (b->guest != 0 && (!is_rom || b->enabled) && !sizing(b) && memory_decoded(vf)) {
         uintptr_t page = page_down(b->guest);
         if (b->host == 0) {
             bar_log(b, "in no place, as the host has it nowhere");
@@ -397,7 +520,7 @@ static void bar_update(const struct vfunction *vf, struct vbar *b, bool is_rom) 
         return;
     }
     uint64_t want = 0;
-    if (b->guest != 0 && (!is_rom || b->enabled) && decodes(vf->f, PCI_COMMAND_MEMORY)) {
+    if (b->guest != 0 && (!is_rom || b->enabled) && memory_decoded(vf)) {
         if (b->host == 0) {
             if (!sizing(b)) {
                 bar_log(b, "in no place, as the host has it nowhere");
@@ -434,6 +557,9 @@ static struct vbar *bar_at(struct vfunction *vf, uint32_t reg, bool *upper) {
                  ? PCI_ROM_ADDRESS1
                  : PCI_ROM_ADDRESS;
     *upper = false;
+    if (vf->pf != NULL) {
+        return NULL;
+    }
     if (reg == rom) {
         return vf->bars[ROM_INDEX].kind == PCI_ENUM_BAR_MEM32 ? &vf->bars[ROM_INDEX] : NULL;
     }
@@ -985,19 +1111,22 @@ static void msix_init(struct vfunction *vf) {
         x->count = 0;
         return;
     }
-    // Without a region of its own, the guest has the table as it is.
-    int region = mmio_register(0, 0, &msix_ops, vf);
+    // Without a region of its own, the guest has the table as it is. A VF
+    // enabled again takes the region and entries it had.
+    int region = b->trap_count != 0 ? b->traps[0].region : mmio_register(0, 0, &msix_ops, vf);
     if (region < 0) {
         x->count = 0;
         return;
     }
     pci_cfg_write(f->addr, f->msix_cap + PCI_MSIX_FLAGS, 2, control & ~PCI_MSIX_FLAGS_ENABLE);
+    x->enabled = false;
     x->table = b->host + offset;
     x->page = page_down(x->table);
     mm_map_device(x->page, page_up(x->table + (uint64_t)x->count * PCI_MSIX_ENTRY_SIZE) - x->page);
-    x->entries = kmalloc(x->count * sizeof(struct vmsix_entry));
-    uint32_t command = pci_cfg_read(f->addr, PCI_COMMAND, 2);
-    pci_cfg_write(f->addr, PCI_COMMAND, 2, command | PCI_COMMAND_MEMORY);
+    if (x->entries == NULL) {
+        x->entries = kmalloc(x->count * sizeof(struct vmsix_entry));
+    }
+    uint32_t command = memory_hold(vf);
     for (size_t i = 0; i < x->count; i++) {
         struct vmsix_entry *e = &x->entries[i];
         uint64_t at = x->table + (uint64_t)i * PCI_MSIX_ENTRY_SIZE;
@@ -1009,9 +1138,10 @@ static void msix_init(struct vfunction *vf) {
         mmio_write_host(
             at + PCI_MSIX_ENTRY_VECTOR_CTRL, 4, e->control | PCI_MSIX_ENTRY_CTRL_MASKBIT
         );
+        e->armed = false;
         e->slot = (struct irq_slot){ .taken = msix_taken, .ctx = e, .requester = requester(f) };
     }
-    pci_cfg_write(f->addr, PCI_COMMAND, 2, command);
+    memory_release(vf, command);
     b->traps[0] = (struct bar_trap){ offset, (uint64_t)x->count * PCI_MSIX_ENTRY_SIZE, region };
     b->trap_count = 1;
 }
@@ -1036,6 +1166,394 @@ static void msi_init(struct vfunction *vf) {
 static bool in_rebar(const struct vfunction *vf, uint32_t offset) {
     uint32_t cap = vf->f->rebar_ext_cap;
     return cap != 0 && offset >= cap && offset < cap + REBAR_SIZE;
+}
+
+// Whether offset is in the function's SR-IOV capability, which a physical
+// function with VFs has as the guest's.
+static bool in_sriov(const struct vfunction *vf, uint32_t offset) {
+    uint32_t cap = vf->f->sriov_ext_cap;
+    return vf->iov != NULL && offset >= cap && offset < cap + SRIOV_SIZE;
+}
+
+// The VF BAR whose register is VF BAR i, if implemented: b its index, that of
+// a 64-bit one's lower register, and whether i is its upper one.
+static bool vf_bar_at(const struct vfunction *pf, size_t i, size_t *b, bool *upper) {
+    const struct pci_enum_function *f = pf->f;
+    *b = i;
+    *upper = false;
+    if (pci_enum_vf_span(f, i) != 0) {
+        return true;
+    }
+    if (i > 0 && f->vf_bars[i - 1].kind == PCI_ENUM_BAR_MEM64 && pci_enum_vf_span(f, i - 1) != 0) {
+        *b = i - 1;
+        *upper = true;
+        return true;
+    }
+    return false;
+}
+
+// One VF's memory of VF BAR b as the guest sizes it, as the host's at 4 KiB
+// would be at the guest's System Page Size: a multiple of it, as Single Root
+// I/O Virtualization and Sharing Specification 1.1, 3.3.13, asks. With other
+// than one bit set, which the specification leaves undefined, 4 KiB.
+static uint64_t vf_guest_size(const struct vfunction *pf, size_t b) {
+    uint64_t size = pf->f->vf_bars[b].size;
+    uint32_t pages = pf->iov->page_size;
+    uint64_t page = PAGE_SIZE;
+    if (pages != 0 && (pages & (pages - 1)) == 0) {
+        page <<= __builtin_ctz(pages);
+    }
+    return size > page ? size : page;
+}
+
+// Where VF k's memory of VF BAR b is for the guest: 0 where the guest has the
+// VF BAR nowhere.
+static uint64_t vf_guest_base(const struct vfunction *pf, size_t b, size_t k) {
+    uint64_t size = vf_guest_size(pf, b);
+    uint64_t base = pf->iov->guest[b] & ~(size - 1);
+    return base != 0 ? base + k * size : 0;
+}
+
+static uint32_t vf_bar_read(const struct vfunction *pf, size_t i) {
+    size_t b;
+    bool upper;
+    if (!vf_bar_at(pf, i, &b, &upper)) {
+        return 0;
+    }
+    uint64_t address = pf->iov->guest[b] & ~(vf_guest_size(pf, b) - 1);
+    if (upper) {
+        return (uint32_t)(address >> 32);
+    }
+    return ((uint32_t)address & BAR_ADDRESS) | pf->iov->type_bits[b];
+}
+
+static void vf_bar_write(struct vfunction *pf, size_t i, uint32_t value) {
+    size_t b;
+    bool upper;
+    if (!vf_bar_at(pf, i, &b, &upper)) {
+        return;
+    }
+    struct viov *iov = pf->iov;
+    uint64_t mask = ~(vf_guest_size(pf, b) - 1);
+    if (upper) {
+        iov->guest[b] = (iov->guest[b] & (uint64_t)0xffffffff) | ((uint64_t)value << 32 & mask);
+    } else {
+        iov->guest[b] = (iov->guest[b] & ~(uint64_t)0xffffffff) | (value & BAR_ADDRESS & mask);
+    }
+    for (size_t k = 0; k < iov->count; k++) {
+        struct vfunction *vf = &iov->vfs[k];
+        vf->bars[b].guest = vf_guest_base(pf, b, k);
+        bar_update(vf, &vf->bars[b], false);
+    }
+}
+
+// VF k as its PF's routing ID offsets place it, for the guest to reach, which
+// makes it ready; its BARs its slices of the VF BARs, mapped from then on. A
+// VF enabled again keeps what it had of the hypervisor's.
+static void vf_place(struct vfunction *pf, size_t k) {
+    struct viov *iov = pf->iov;
+    struct vfunction *vf = &iov->vfs[k];
+    struct pci_enum_function *f = &iov->functions[k];
+    uint16_t rid = (uint16_t)(requester(pf->f) + iov->offset + k * iov->stride);
+    f->addr = (struct pci_cfg_addr){
+        pf->f->addr.segment, (uint8_t)(rid >> 8), (rid >> 3) & 0x1f, rid & 7
+    };
+    if (vf->f == NULL) {
+        *vf = (struct vfunction){ .f = f, .pf = pf };
+    }
+    vf->ready = false;
+    for (size_t b = 0; b < PCI_SRIOV_NUM_BARS; b++) {
+        const struct pci_enum_bar *bar = &pf->f->vf_bars[b];
+        struct vbar *v = &vf->bars[b];
+        if (pci_enum_vf_span(pf->f, b) == 0) {
+            continue;
+        }
+        v->kind = bar->kind;
+        v->type_bits = iov->type_bits[b];
+        v->size = bar->size;
+        v->host = bar->base != 0 ? bar->base + k * bar->size : 0;
+        v->guest = vf_guest_base(pf, b, k);
+    }
+}
+
+// The first time since its enable that the guest reaches a VF, which it may
+// once the VF had time to start (Single Root I/O Virtualization and Sharing
+// Specification 1.1, 3.3.3.1): its capabilities, its MSI and MSI-X as after a
+// reset, and its memory.
+static void vf_ready(struct vfunction *vf) {
+    pci_enum_vf_read(vf->f, vf->pf->f);
+    if (vf->f->msi_cap != 0) {
+        msi_init(vf);
+    }
+    vf->msix.count = 0;
+    if (vf->f->msix_cap != 0) {
+        msix_init(vf);
+    }
+    vf->ready = true;
+    for (size_t b = 0; b < BAR_COUNT; b++) {
+        if (vf->bars[b].size != 0) {
+            bar_update(vf, &vf->bars[b], false);
+        }
+    }
+}
+
+// The VF at a, made ready, or NULL where no physical function has one enabled
+// there.
+static struct vfunction *vf_find(struct pci_cfg_addr a) {
+    uint16_t rid = (uint16_t)(a.bus << 8 | a.device << 3 | a.function);
+    for (size_t i = 0; i < virt.pf_count; i++) {
+        struct vfunction *pf = virt.pfs[i];
+        struct viov *iov = pf->iov;
+        if (iov->count == 0 || pf->f->addr.segment != a.segment) {
+            continue;
+        }
+        uint16_t delta = (uint16_t)(rid - requester(pf->f) - iov->offset);
+        size_t k = iov->stride != 0 ? delta / iov->stride : 0;
+        bool on = iov->stride != 0 ? delta % iov->stride == 0 : delta == 0;
+        if (!on || k >= iov->count) {
+            continue;
+        }
+        struct vfunction *vf = &iov->vfs[k];
+        if (!vf->ready) {
+            vf_ready(vf);
+        }
+        return vf;
+    }
+    return NULL;
+}
+
+static void vfs_log(struct vfunction *pf, const char *what, size_t count) {
+    struct viov *iov = pf->iov;
+    if (iov->changes_logged >= VF_CHANGES_LOGGED) {
+        return;
+    }
+    iov->changes_logged++;
+    printf("PCI " PCI_CFG_ADDR_FMT ": %zu VFs %s", PCI_CFG_ADDR_ARGS(pf->f->addr), count, what);
+    if (iov->count != 0) {
+        printf(", the first at " PCI_CFG_ADDR_FMT, PCI_CFG_ADDR_ARGS(iov->functions[0].addr));
+    }
+    printf("\n");
+}
+
+// The VFs that VF Enable rising brings: as many as NumVFs, up to TotalVFs.
+// Where the guest's System Page Size is larger than 4 KiB, each VF's memory
+// past the host's reads as nothing.
+static void vfs_enable(struct vfunction *pf) {
+    struct viov *iov = pf->iov;
+    const struct pci_enum_function *f = pf->f;
+    uint32_t cap = f->sriov_ext_cap;
+    size_t count = pci_cfg_read(f->addr, cap + PCI_SRIOV_NUM_VF, 2);
+    if (count > f->total_vfs) {
+        count = f->total_vfs;
+    }
+    iov->offset = (uint16_t)pci_cfg_read(f->addr, cap + PCI_SRIOV_VF_OFFSET, 2);
+    iov->stride = (uint16_t)pci_cfg_read(f->addr, cap + PCI_SRIOV_VF_STRIDE, 2);
+    if (iov->vfs == NULL && count != 0) {
+        iov->vfs = kmalloc(f->total_vfs * sizeof(struct vfunction));
+        iov->functions = kmalloc(f->total_vfs * sizeof(struct pci_enum_function));
+    }
+    for (size_t k = 0; k < count; k++) {
+        vf_place(pf, k);
+    }
+    iov->count = count;
+    vfs_log(pf, "enabled", count);
+    for (size_t b = 0; b < PCI_SRIOV_NUM_BARS && count != 0; b++) {
+        if (pci_enum_vf_span(f, b) != 0 && vf_guest_size(pf, b) > f->vf_bars[b].size) {
+            vfs_log(pf, "with a System Page Size larger than their memory", count);
+            break;
+        }
+    }
+}
+
+// The VFs going as VF Enable falls, or as a reset took them: their messages
+// stop, and their memory is unmapped.
+static void vfs_disable(struct vfunction *pf) {
+    struct viov *iov = pf->iov;
+    for (size_t k = 0; k < iov->count; k++) {
+        struct vfunction *vf = &iov->vfs[k];
+        if (vf->ready) {
+            vf->ready = false;
+            irq_slot_free(&vf->msi.slot);
+            vf->msix.enabled = false;
+            for (size_t i = 0; i < vf->msix.count; i++) {
+                vf->msix.entries[i].armed = false;
+                irq_slot_free(&vf->msix.entries[i].slot);
+            }
+        }
+        for (size_t b = 0; b < BAR_COUNT; b++) {
+            if (vf->bars[b].size != 0) {
+                bar_update(vf, &vf->bars[b], false);
+            }
+        }
+    }
+    size_t count = iov->count;
+    iov->count = 0;
+    if (count != 0) {
+        vfs_log(pf, "disabled", count);
+    }
+}
+
+// What the host's SR-IOV capability holds of ReBIOS's: its VF BARs where
+// enumeration or ReBIOS put them, and the System Page Size of 4 KiB.
+static void iov_host_set(const struct vfunction *pf) {
+    const struct pci_enum_function *f = pf->f;
+    uint32_t cap = f->sriov_ext_cap;
+    if (pci_cfg_read(f->addr, cap + PCI_SRIOV_SYS_PGSIZE, 4) != SRIOV_PAGE_4K) {
+        pci_cfg_write(f->addr, cap + PCI_SRIOV_SYS_PGSIZE, 4, SRIOV_PAGE_4K);
+    }
+    for (size_t b = 0; b < PCI_SRIOV_NUM_BARS; b++) {
+        const struct pci_enum_bar *bar = &f->vf_bars[b];
+        if (pci_enum_vf_span(f, b) == 0 || bar->base == 0) {
+            continue;
+        }
+        uint32_t reg = cap + PCI_SRIOV_BAR + 4 * (uint32_t)b;
+        uint32_t low = ((uint32_t)bar->base & BAR_ADDRESS) | pf->iov->type_bits[b];
+        if (bar->kind == PCI_ENUM_BAR_MEM64
+         && pci_cfg_read(f->addr, reg + 4, 4) != (uint32_t)(bar->base >> 32)) {
+            pci_cfg_write(f->addr, reg + 4, 4, (uint32_t)(bar->base >> 32));
+        }
+        if (pci_cfg_read(f->addr, reg, 4) != low) {
+            pci_cfg_write(f->addr, reg, 4, low);
+        }
+    }
+}
+
+// SR-IOV Control as the guest writes it, which the host takes as it is: the
+// VFs VF Enable brings get functions of their own after it rises, those it
+// takes lose them before it falls, and VF MSE maps and unmaps their memory.
+static void iov_control(struct vfunction *pf, uint32_t control) {
+    struct viov *iov = pf->iov;
+    bool was = (iov->control & PCI_SRIOV_CTRL_VFE) != 0;
+    bool now = (control & PCI_SRIOV_CTRL_VFE) != 0;
+    if (was && !now) {
+        vfs_disable(pf);
+    }
+    if (!was && now) {
+        iov_host_set(pf);
+    }
+    pci_cfg_write(pf->f->addr, pf->f->sriov_ext_cap + PCI_SRIOV_CTRL, 2, control);
+    iov->control = control & VFS_ON;
+    if (!was && now) {
+        vfs_enable(pf);
+        return;
+    }
+    for (size_t k = 0; k < iov->count; k++) {
+        struct vfunction *vf = &iov->vfs[k];
+        for (size_t b = 0; b < BAR_COUNT; b++) {
+            if (vf->bars[b].size != 0) {
+                bar_update(vf, &vf->bars[b], false);
+            }
+        }
+    }
+}
+
+static uint32_t iov_read(const struct vfunction *pf, uint32_t offset, size_t size) {
+    uint32_t reg = offset & ~(uint32_t)3;
+    uint32_t at = reg - pf->f->sriov_ext_cap;
+    uint32_t value;
+    if (at >= PCI_SRIOV_BAR && at < PCI_SRIOV_BAR + 4 * PCI_SRIOV_NUM_BARS) {
+        value = vf_bar_read(pf, (at - PCI_SRIOV_BAR) / 4);
+    } else if (at == PCI_SRIOV_SYS_PGSIZE) {
+        value = pf->iov->page_size;
+    } else {
+        value = pci_cfg_read(pf->f->addr, reg, 4);
+    }
+    return (value >> (8 * (offset & 3))) & all_ones(size);
+}
+
+// The System Page Size and VF BARs are the guest's own, the System Page Size
+// written only while VF Enable is clear, as the specification asks (3.3.13).
+// The rest is the host's, which takes the guest's writes, the status bits
+// clearing where written as ones.
+static void iov_write(struct vfunction *pf, uint32_t offset, size_t size, uint32_t value) {
+    struct viov *iov = pf->iov;
+    uint32_t reg = offset & ~(uint32_t)3;
+    uint32_t at = reg - pf->f->sriov_ext_cap;
+    unsigned int shift = 8 * (offset & 3);
+    uint32_t mask = all_ones(size) << shift;
+    uint32_t bits = (value << shift) & mask;
+    if (at >= PCI_SRIOV_BAR && at < PCI_SRIOV_BAR + 4 * PCI_SRIOV_NUM_BARS) {
+        size_t i = (at - PCI_SRIOV_BAR) / 4;
+        vf_bar_write(pf, i, (vf_bar_read(pf, i) & ~mask) | bits);
+    } else if (at == PCI_SRIOV_SYS_PGSIZE) {
+        if ((iov->control & PCI_SRIOV_CTRL_VFE) == 0) {
+            iov->page_size = (iov->page_size & ~mask) | bits;
+        }
+    } else if (at == PCI_SRIOV_CTRL) {
+        if ((mask & 0xffff) != 0) {
+            uint32_t control = pci_cfg_read(pf->f->addr, reg, 2);
+            iov_control(pf, (control & ~mask) | (bits & 0xffff));
+        }
+        if ((mask >> 16) != 0) {
+            pci_cfg_write(pf->f->addr, reg + PCI_SRIOV_STATUS - PCI_SRIOV_CTRL, 2, bits >> 16);
+        }
+    } else {
+        pci_cfg_write(pf->f->addr, offset, size, value);
+    }
+}
+
+// Whether a reset of the physical function took what its SR-IOV capability
+// holds on the host: the VFs the guest enabled, the System Page Size, or VF
+// BARs.
+static bool iov_lost(const struct vfunction *pf) {
+    const struct pci_enum_function *f = pf->f;
+    uint32_t cap = f->sriov_ext_cap;
+    if ((pf->iov->control & PCI_SRIOV_CTRL_VFE) != 0
+     && (pci_cfg_read(f->addr, cap + PCI_SRIOV_CTRL, 2) & PCI_SRIOV_CTRL_VFE) == 0) {
+        return true;
+    }
+    if (pci_cfg_read(f->addr, cap + PCI_SRIOV_SYS_PGSIZE, 4) != SRIOV_PAGE_4K) {
+        return true;
+    }
+    for (size_t b = 0; b < PCI_SRIOV_NUM_BARS; b++) {
+        const struct pci_enum_bar *bar = &f->vf_bars[b];
+        uint32_t reg = cap + PCI_SRIOV_BAR + 4 * (uint32_t)b;
+        if (pci_enum_vf_span(f, b) == 0 || bar->base == 0) {
+            continue;
+        }
+        if ((pci_cfg_read(f->addr, reg, 4) & BAR_ADDRESS) != ((uint32_t)bar->base & BAR_ADDRESS)
+         || (bar->kind == PCI_ENUM_BAR_MEM64
+          && pci_cfg_read(f->addr, reg + 4, 4) != (uint32_t)(bar->base >> 32))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// After a reset of the physical function, which clears VF Enable, so that its
+// VFs are gone, and puts the capability's registers back to their defaults
+// (Single Root I/O Virtualization and Sharing Specification 1.1, 2.2.1 and
+// 2.2.3): the guest's at theirs too, the host's as ReBIOS keeps them.
+static void iov_repair(struct vfunction *pf) {
+    struct viov *iov = pf->iov;
+    vfs_disable(pf);
+    iov->control = pci_cfg_read(pf->f->addr, pf->f->sriov_ext_cap + PCI_SRIOV_CTRL, 2) & VFS_ON;
+    iov->page_size = SRIOV_PAGE_4K;
+    for (size_t b = 0; b < PCI_SRIOV_NUM_BARS; b++) {
+        iov->guest[b] = 0;
+    }
+    iov_host_set(pf);
+}
+
+// A physical function's SR-IOV capability with VFs, its VF BARs where the plan
+// puts them for the guest.
+static void iov_init(struct vfunction *vf, const struct pci_plan_function *pf) {
+    const struct pci_enum_function *f = vf->f;
+    uint32_t cap = f->sriov_ext_cap;
+    if (cap == 0 || f->total_vfs == 0) {
+        return;
+    }
+    struct viov *iov = kmalloc(sizeof(struct viov));
+    iov->control = pci_cfg_read(f->addr, cap + PCI_SRIOV_CTRL, 2) & VFS_ON;
+    iov->page_size = SRIOV_PAGE_4K;
+    for (size_t b = 0; b < PCI_SRIOV_NUM_BARS; b++) {
+        if (pci_enum_vf_span(f, b) != 0) {
+            uint32_t reg = cap + PCI_SRIOV_BAR + 4 * (uint32_t)b;
+            iov->type_bits[b] = (uint8_t)(pci_cfg_read(f->addr, reg, 4) & ~BAR_ADDRESS);
+            iov->guest[b] = pf->vf_bars[b];
+        }
+    }
+    vf->iov = iov;
 }
 
 // The I/O BARs below 1000h, where ports are absent unless given.
@@ -1104,8 +1622,14 @@ static void legacy_io_follow(struct vfunction *vf) {
 
 static uint32_t function_read(struct pci_cfg_addr a, uint32_t offset, size_t size) {
     struct vfunction *vf = vfunction_find(a);
+    if (vf == NULL && virt.pf_count != 0) {
+        vf = vf_find(a);
+    }
     if (vf != NULL && vf->hidden) {
         return all_ones(size);
+    }
+    if (vf != NULL && in_sriov(vf, offset)) {
+        return iov_read(vf, offset, size);
     }
     uint32_t reg = offset & ~(uint32_t)3;
     uint32_t value;
@@ -1159,13 +1683,24 @@ static bool bar_lost(const struct vfunction *vf, size_t k) {
 // they had to.
 static bool reset_repair(struct vfunction *vf) {
     struct pci_cfg_addr a = vf->f->addr;
-    if (pci_cfg_read(a, PCI_VENDOR_ID, 2) == 0xffff) {
+    // A VF's Vendor ID reads as all ones: it is there while VF Enable is set.
+    bool present;
+    if (vf->pf != NULL) {
+        const struct pci_enum_function *pf = vf->pf->f;
+        uint32_t control = pci_cfg_read(pf->addr, pf->sriov_ext_cap + PCI_SRIOV_CTRL, 2);
+        present = (control & PCI_SRIOV_CTRL_VFE) != 0;
+    } else {
+        present = pci_cfg_read(a, PCI_VENDOR_ID, 2) != 0xffff;
+    }
+    if (!present) {
         return false;
     }
     bool lost = false;
-    for (size_t k = 0; k <= BAR_COUNT && !lost; k++) {
+    for (size_t k = 0; k <= BAR_COUNT && !lost && vf->pf == NULL; k++) {
         lost = bar_lost(vf, k);
     }
+    bool iov_gone = vf->iov != NULL && iov_lost(vf);
+    lost = lost || iov_gone;
     if (!lost && is_bridge(vf)) {
         lost = (pci_cfg_read(a, PCI_PRIMARY_BUS, 4) & BUS_NUMBERS_VIRTUAL) != vf->host_buses;
         for (size_t i = 0; i < ARRAY_COUNT(vf->host_windows) && !lost; i++) {
@@ -1191,7 +1726,7 @@ static bool reset_repair(struct vfunction *vf) {
         pci_cfg_write(a, PCI_COMMAND, 2, command & ~decode);
     }
     pci_enum_rebar_restore(vf->f);
-    for (size_t k = 0; k <= BAR_COUNT; k++) {
+    for (size_t k = 0; k <= BAR_COUNT && vf->pf == NULL; k++) {
         const struct vbar *b = &vf->bars[k];
         if (b->size == 0) {
             continue;
@@ -1220,6 +1755,9 @@ static bool reset_repair(struct vfunction *vf) {
         irq_slot_free(&vf->msix.entries[i].slot);
     }
     vf->msix_rearm = vf->msix.count != 0;
+    if (iov_gone) {
+        iov_repair(vf);
+    }
     if (vf->resets_logged < RESETS_LOGGED) {
         vf->resets_logged++;
         printf(
@@ -1233,8 +1771,7 @@ static bool reset_repair(struct vfunction *vf) {
 // The MSI-X entries a reset took from the function, once it decodes memory to
 // reach its table again.
 static void msix_rearm(struct vfunction *vf) {
-    if (!vf->msix_rearm
-     || (pci_cfg_read(vf->f->addr, PCI_COMMAND, 2) & PCI_COMMAND_MEMORY) == 0) {
+    if (!vf->msix_rearm || !host_memory(vf)) {
         return;
     }
     vf->msix_rearm = false;
@@ -1290,7 +1827,14 @@ static struct vfunction *function_write(
     uint32_t value
 ) {
     struct vfunction *vf = vfunction_find(a);
+    if (vf == NULL && virt.pf_count != 0) {
+        vf = vf_find(a);
+    }
     if (vf != NULL && (vf->hidden || in_rebar(vf, offset))) {
+        return NULL;
+    }
+    if (vf != NULL && in_sriov(vf, offset)) {
+        iov_write(vf, offset, size, value);
         return NULL;
     }
     bool command = vf != NULL && (offset & ~(uint32_t)3) == PCI_COMMAND;
@@ -1574,6 +2118,9 @@ static void vfunction_init(
     if (f->msix_cap != 0) {
         msix_init(vf);
     }
+    if (f->header_type == PCI_HEADER_TYPE_NORMAL) {
+        iov_init(vf, pf);
+    }
     if (f->header_type == PCI_HEADER_TYPE_BRIDGE) {
         vf->bus_numbers = guest_bus_numbers(f, pci_cfg_read(f->addr, PCI_PRIMARY_BUS, 4));
         vf->mem_base = pf->mem_base;
@@ -1624,6 +2171,15 @@ void pci_virt_init(void) {
         }
     }
     vga_path_mark();
+    for (size_t i = 0; i < virt.count; i++) {
+        virt.pf_count += virt.functions[i].iov != NULL;
+    }
+    virt.pfs = kmalloc((virt.pf_count != 0 ? virt.pf_count : 1) * sizeof(struct vfunction *));
+    for (size_t i = 0, n = 0; i < virt.count; i++) {
+        if (virt.functions[i].iov != NULL) {
+            virt.pfs[n++] = &virt.functions[i];
+        }
+    }
     uint32_t mapped = 0;
     for (size_t i = 0; i < virt.count; i++) {
         struct vfunction *vf = &virt.functions[i];
@@ -1825,8 +2381,8 @@ void pci_virt_untrap(struct pci_cfg_addr addr, unsigned int bar, uint64_t offset
 
 void pci_virt_repost(void) {
     spinlock_acquire(&virt.lock);
-    for (size_t i = 0; i < virt.count; i++) {
-        struct vfunction *vf = &virt.functions[i];
+    uint64_t cursor = 0;
+    for (struct vfunction *vf; (vf = each_function(&cursor)) != NULL; ) {
         struct vmsi *m = &vf->msi;
         if (vf->hidden) {
             continue;
