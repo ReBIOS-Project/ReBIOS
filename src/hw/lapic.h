@@ -117,7 +117,10 @@
 #define MSI_ADDRESS_LOGICAL ((uint32_t)1 << 2)
 
 // The calling processor's local APIC: whether it is in x2APIC mode, and its
-// APIC ID as CPUID reports it.
+// APIC ID as the APIC has it, which firmware may have changed from the one
+// CPUID gives, and Linux 7.3 takes from the APIC too (arch/x86/kernel/cpu/
+// topology_common.c, read_apic_id()); as CPUID gives it while the APIC is
+// disabled.
 bool lapic_x2apic(void);
 uint32_t lapic_cpu_apic_id(void);
 // Whether the processor has x2APIC mode, IA32_XAPIC_DISABLE_STATUS, and its

@@ -168,6 +168,10 @@ bool lapic_x2apic(void) {
 }
 
 uint32_t lapic_cpu_apic_id(void) {
+    if ((apic_base() & APIC_BASE_EN) != 0) {
+        uint32_t id = lapic_read(APIC_ID);
+        return lapic_x2apic() ? id : id >> 24;
+    }
     if (cpuid(0, 0).eax >= 0xb) {
         struct cpuid_regs topology = cpuid(0xb, 0);
         if (topology.ebx != 0) {
