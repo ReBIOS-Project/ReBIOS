@@ -451,8 +451,16 @@ static void window_write(
 ) {
     uint32_t reg = which == WINDOW_PREF ? PCI_PREF_MEMORY_BASE : PCI_MEMORY_BASE;
     uint32_t old = pci_cfg_read(p->addr, reg, 4);
+    bool wide = which == WINDOW_PREF && (old & 0xf) == PCI_PREF_RANGE_TYPE_64;
+    // The upper limit first, as Linux 7.3's pci_setup_bridge_mmio_pref()
+    // writes it: a window that was above 4 GiB, its base then above its limit,
+    // decodes nothing until the rest of it is in, rather than a range from
+    // below 4 GiB to above it.
+    if (wide) {
+        pci_cfg_write(p->addr, PCI_PREF_LIMIT_UPPER32, 4, 0);
+    }
     pci_cfg_write(p->addr, reg, 4, window_word(low, high, old));
-    if (which == WINDOW_PREF && (old & 0xf) == PCI_PREF_RANGE_TYPE_64) {
+    if (wide) {
         pci_cfg_write(p->addr, PCI_PREF_BASE_UPPER32, 4, (uint32_t)(low >> 32));
         pci_cfg_write(p->addr, PCI_PREF_LIMIT_UPPER32, 4, (uint32_t)((high - 1) >> 32));
     }
