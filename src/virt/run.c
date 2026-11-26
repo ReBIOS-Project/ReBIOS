@@ -1583,12 +1583,15 @@ static size_t string_block(
 ) {
     bool moves = insn->opcode == 0xa4 || insn->opcode == 0xa5;
     uintptr_t to_linear;
-    struct run_page *to = block_operand(v, rs, insn, true, size, delta, &count, &to_linear);
-    if (to == NULL) {
+    struct run_page *to_slot = block_operand(v, rs, insn, true, size, delta, &count, &to_linear);
+    if (to_slot == NULL) {
         return 0;
     }
+    // The source's lookup may give the source's page the destination's slot.
+    const struct run_page to_page = *to_slot;
+    const struct run_page *to = &to_page;
     uintptr_t from_linear = 0;
-    struct run_page *from = to;
+    const struct run_page *from = to;
     if (moves) {
         from = block_operand(v, rs, insn, false, size, delta, &count, &from_linear);
         if (from == NULL) {
