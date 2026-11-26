@@ -691,7 +691,11 @@ void vtd_suspend(void) {
     for (size_t i = 0; i < unit_count; i++) {
         struct vtd_unit *u = &units[i];
         invalidate_all(u);
-        global_command(u, GCMD_TE, false, "stop translating");
+        // As at the take-over, and as Linux 7.3's iommu_disable_translation()
+        // leaves it on for its suspend.
+        if (!u->keep_translating) {
+            global_command(u, GCMD_TE, false, "stop translating");
+        }
         if ((reg_read32(u, REG_GSTS) & GCMD_IRE) != 0) {
             global_command(u, GCMD_IRE, false, "stop remapping interrupts");
         }
