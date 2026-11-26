@@ -20,6 +20,9 @@
 #include <stdint.h>
 #include <uacpi/acpi.h>
 #include <uacpi/event.h>
+#include <uacpi/internal/context.h>
+#include <uacpi/internal/mutex.h>
+#include <uacpi/internal/types.h>
 #include <uacpi/kernel_api.h>
 #include <uacpi/namespace.h>
 #include <uacpi/opregion.h>
@@ -49,7 +52,10 @@
 // Queries in a row before the SCI_EVT flag counts as stuck.
 #define EC_QUERY_LIMIT 64
 
-#define EC_GLOBAL_LOCK_TIMEOUT 0xffff
+// Milliseconds, as Linux 7.3's EC driver waits for the Global Lock (ec.c,
+// ACPI_EC_UDELAY_GLK), and forever for the controller's own lock.
+#define EC_GLOBAL_LOCK_TIMEOUT 1000
+#define EC_LOCK_FOREVER 0xffff
 
 #define EC_HID "PNP0C09"
 
@@ -60,6 +66,8 @@ static struct {
     bool global_lock;
     unsigned int ports;
     uacpi_handle query_work;
+    // One transaction with the controller at a time.
+    uacpi_handle lock;
     // A work item must not be scheduled again before its handler runs.
     bool query_pending;
     // The handler on the namespace's root, from before it was loaded.
@@ -109,8 +117,36 @@ static bool ec_write(uint8_t address, uint8_t value) {
     return send_command(EC_WR) && send_data(address) && send_data(value) && wait_status(EC_IBF, 0);
 }
 
-// The firmware's fields over the EC's space take the global lock themselves
-// where they need it.
+// One transaction with the controller at a time, and the Global Lock with it
+// where the EC's _GLK asks for it, as firmware outside the OS uses the
+// controller too (ACPI 6.6, 6.5.7 and 12.7), taken as Linux 7.3's
+// acpi_ec_transaction() and acpi_ec_space_handler() take them: but where this
+// thread holds the Global Lock already, as AML accessing a field whose
+// LockRule is Lock does, which uacpi_acquire_global_lock() would wait on
+// itself for: uACPI's internal headers give its mutex and owner. Whether it
+// took the Global Lock goes in *global.
+static bool ec_lock(uint32_t *seq, bool *global) {
+    uacpi_kernel_wait_for_semaphore(ec.lock, EC_LOCK_FOREVER);
+    uacpi_mutex *mutex = g_uacpi_rt_ctx.global_lock_mutex;
+    *global = ec.global_lock && mutex != NULL && !uacpi_this_thread_owns_aml_mutex(mutex);
+    if (*global && uacpi_acquire_global_lock(EC_GLOBAL_LOCK_TIMEOUT, seq) != UACPI_STATUS_OK) {
+        uacpi_kernel_signal_semaphore(ec.lock);
+        printf(
+            "Embedded controller: the global lock stayed taken for %u ms\n",
+            EC_GLOBAL_LOCK_TIMEOUT
+        );
+        return false;
+    }
+    return true;
+}
+
+static void ec_unlock(uint32_t seq, bool global) {
+    if (global) {
+        uacpi_release_global_lock(seq);
+    }
+    uacpi_kernel_signal_semaphore(ec.lock);
+}
+
 static uacpi_status region_handler(uacpi_region_op op, uacpi_handle op_data) {
     switch (op) {
         case UACPI_REGION_OP_ATTACH:
@@ -127,18 +163,27 @@ static uacpi_status region_handler(uacpi_region_op op, uacpi_handle op_data) {
             if (rw->offset + rw->byte_width > 0x100) {
                 return UACPI_STATUS_INVALID_ARGUMENT;
             }
+            uint32_t seq = 0;
+            bool global;
+            if (!ec_lock(&seq, &global)) {
+                return UACPI_STATUS_HARDWARE_TIMEOUT;
+            }
             uint64_t value = op == UACPI_REGION_OP_READ ? 0 : rw->value;
-            for (size_t i = 0; i < rw->byte_width; i++) {
+            bool ok = true;
+            for (size_t i = 0; i < rw->byte_width && ok; i++) {
                 uint8_t address = (uint8_t)(rw->offset + i);
                 uint8_t byte = (uint8_t)(value >> (8 * i));
-                bool ok = op == UACPI_REGION_OP_READ
-                        ? ec_read(address, &byte)
-                        : ec_write(address, byte);
+                ok = op == UACPI_REGION_OP_READ
+                   ? ec_read(address, &byte)
+                   : ec_write(address, byte);
                 if (!ok) {
                     printf("Embedded controller timed out at %#x\n", address);
-                    return UACPI_STATUS_HARDWARE_TIMEOUT;
                 }
                 value |= (uint64_t)byte << (8 * i);
+            }
+            ec_unlock(seq, global);
+            if (!ok) {
+                return UACPI_STATUS_HARDWARE_TIMEOUT;
             }
             if (op == UACPI_REGION_OP_READ) {
                 rw->value = value;
@@ -153,14 +198,12 @@ static uacpi_status region_handler(uacpi_region_op op, uacpi_handle op_data) {
 
 static bool query(uint8_t *value) {
     uint32_t seq = 0;
-    if (ec.global_lock
-     && uacpi_acquire_global_lock(EC_GLOBAL_LOCK_TIMEOUT, &seq) != UACPI_STATUS_OK) {
+    bool global;
+    if (!ec_lock(&seq, &global)) {
         return false;
     }
     bool ok = send_command(EC_QR) && receive_data(value);
-    if (ec.global_lock) {
-        uacpi_release_global_lock(seq);
-    }
+    ec_unlock(seq, global);
     return ok;
 }
 
@@ -297,6 +340,7 @@ static bool gpe_find(uacpi_namespace_node **device, uacpi_u16 *idx) {
 }
 
 void ec_early_init(void) {
+    ec.lock = uacpi_kernel_create_semaphore(1);
     uacpi_table table;
     if (uacpi_table_find_by_signature(ACPI_ECDT_SIGNATURE, &table) == UACPI_STATUS_OK) {
         const struct acpi_ecdt *ecdt = table.ptr;
@@ -325,6 +369,9 @@ void ec_find(void) {
 void ec_init(void) {
     if (ec.node == NULL) {
         return;
+    }
+    if (ec.lock == NULL) {
+        ec.lock = uacpi_kernel_create_semaphore(1);
     }
 
     uint64_t glk;
