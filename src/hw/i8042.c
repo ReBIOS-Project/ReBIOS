@@ -35,11 +35,14 @@
 
 #define DEVICE_IDENTIFY 0xf2
 
-// As Linux 7.3's i8042 driver has it: the buffer it may hold, and how long it
-// waits for the controller. Devices get longer to answer.
+// As Linux 7.3's i8042 driver and libps2 have them: the bytes the controller
+// may hold; how long the driver waits for the controller, I8042_CTL_TIMEOUT
+// polls of 50 us, long enough for the controller to time out sending to a
+// mouse that is not there; and how long for a device's answer to a command,
+// which ps2_command() gives every command but a reset.
 #define BUFFER_SIZE 16
-#define CONTROLLER_TIMEOUT_US 10000
-#define DEVICE_TIMEOUT_US 100000
+#define CONTROLLER_TIMEOUT_US 500000
+#define DEVICE_TIMEOUT_US 500000
 #define POLL_US 50
 #define SEND_QUEUE_SIZE 64
 
@@ -63,6 +66,9 @@ const char *const i8042_mouse_ids[] = {
 // laptop, notebook, sub-notebook, convertible, and detachable (SMBIOS DSP0134
 // 3.9.0, Table 17).
 static const uint8_t portable_chassis[] = { 8, 9, 10, 14, 31, 32 };
+
+// The first bytes of keyboards' identities, Linux 7.3's ps2_is_keyboard_id().
+static const uint8_t keyboard_ids[] = { 0xab, 0xac, 0x2b, 0x5d, 0x60, 0x47 };
 
 static bool present;
 static bool keyboard;
@@ -119,6 +125,9 @@ static bool flush(void) {
     return false;
 }
 
+// Whether a device answers the identify command, its identity read as Linux
+// 7.3's libps2 reads it: one byte, then a second only where the first is a
+// keyboard's, as no other device sends one (ps2_adjust_timeout()).
 static bool identify(bool aux) {
     if ((aux && !command(I8042_COMMAND_WRITE_AUX)) || !wait_input_empty()) {
         return false;
@@ -128,8 +137,14 @@ static bool identify(bool aux) {
     if (!wait_output(&reply, DEVICE_TIMEOUT_US) || reply != I8042_DEVICE_ACK) {
         return false;
     }
-    // The identity's bytes, however many this device has.
-    while (wait_output(&reply, CONTROLLER_TIMEOUT_US)) {}
+    if (wait_output(&reply, DEVICE_TIMEOUT_US)) {
+        for (size_t i = 0; i < sizeof(keyboard_ids); i++) {
+            if (reply == keyboard_ids[i]) {
+                wait_output(&reply, DEVICE_TIMEOUT_US);
+                break;
+            }
+        }
+    }
     return true;
 }
 
