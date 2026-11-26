@@ -62,8 +62,20 @@
 #define RESETS_LOGGED 4
 
 // PCI Express Base Specification 6.0, 7.8.6: the capability header, then a
-// capability and a control register for each of up to six BARs.
+// capability and a control register for each of up to six BARs. A control
+// register's bits 2:0 are its BAR's index and bits 13:8 its size, encoding e
+// meaning 1 MiB << e; the capability register's bits 31:4 offer encodings 0 to
+// 27, and the control register's bits 31:16 those from 28 on.
 #define REBAR_SIZE ((uint32_t)0x34)
+#define REBAR_PAIR ((uint32_t)8)
+#define REBAR_INDEX ((uint32_t)0x7)
+#define REBAR_SIZE_SHIFT 8
+#define REBAR_SIZE_FIELD ((uint32_t)0x3f00)
+#define REBAR_ENCODING_BASE 20
+#define REBAR_CAPABILITY_SHIFT 4
+#define REBAR_CAPABILITY_SIZES 28
+#define REBAR_CONTROL_SHIFT 16
+#define REBAR_LAST 43
 
 // The SR-IOV capability's registers (Single Root I/O Virtualization and
 // Sharing Specification 1.1, 3.3), the System Page Size of 4 KiB that a
@@ -212,6 +224,7 @@ struct vfunction {
     // again, after a reset took them away.
     bool msix_rearm;
     size_t resets_logged;
+    size_t resizes_logged;
 };
 
 static struct {
@@ -510,6 +523,19 @@ static void sub_page_update(const struct vfunction *vf, struct vbar *b, bool is_
     gpt_flush();
 }
 
+// Takes the BAR's pages from the guest, and gives back what else is mapped
+// there.
+static void bar_unmap(struct vbar *b) {
+    if (b->mapped == 0) {
+        return;
+    }
+    uintptr_t base = page_down(b->mapped);
+    uintptr_t end = page_up(b->mapped + b->size);
+    b->mapped = 0;
+    gpt_map(base, 0, end - base, 0, 0);
+    map_again(base, end);
+}
+
 // Follows the guest's address and enables for the BAR. Where the guest puts it
 // somewhere it cannot map, such as at the size mask while it sizes the BAR, or
 // the host has it nowhere, as the firmware and ReBIOS left it unassigned, it
@@ -534,13 +560,7 @@ static void bar_update(const struct vfunction *vf, struct vbar *b, bool is_rom) 
     if (want == b->mapped) {
         return;
     }
-    if (b->mapped != 0) {
-        uintptr_t base = page_down(b->mapped);
-        uintptr_t end = page_up(b->mapped + b->size);
-        b->mapped = 0;
-        gpt_map(base, 0, end - base, 0, 0);
-        map_again(base, end);
-    }
+    bar_unmap(b);
     if (want != 0) {
         b->mapped = want;
         map(b);
@@ -1162,10 +1182,87 @@ static void msi_init(struct vfunction *vf) {
     m->slot = (struct irq_slot){ .taken = msi_taken, .ctx = vf, .requester = requester(vf->f) };
 }
 
-// Resizing a BAR would move it on the host, behind the guest's back.
 static bool in_rebar(const struct vfunction *vf, uint32_t offset) {
     uint32_t cap = vf->f->rebar_ext_cap;
     return cap != 0 && offset >= cap && offset < cap + REBAR_SIZE;
+}
+
+// The largest encoding of the BAR's size that the host has room for at the
+// BAR's base: the firmware's size, from before ReBIOS shrank it, or its own.
+static unsigned int rebar_most(const struct vfunction *vf, size_t index) {
+    if (index >= BAR_COUNT || vf->bars[index].size < ((size_t)1 << REBAR_ENCODING_BASE)) {
+        return 0;
+    }
+    const struct pci_enum_bar *bar = &vf->f->bars[index];
+    size_t room = bar->room > bar->size ? bar->room : bar->size;
+    return (unsigned int)(63 - __builtin_clzll(room)) - REBAR_ENCODING_BASE;
+}
+
+// What the guest reads of a Resizable BAR capability: only the sizes the host
+// has room for at each BAR's base, which pci_enum_rebar_resize() carries out.
+static uint32_t rebar_read(const struct vfunction *vf, uint32_t offset, size_t size) {
+    struct pci_cfg_addr a = vf->f->addr;
+    uint32_t cap = vf->f->rebar_ext_cap;
+    uint32_t reg = offset & ~(uint32_t)3;
+    uint32_t value = pci_cfg_read(a, reg, 4);
+    uint32_t at = reg - cap;
+    if (at >= 4 && at - 4 < REBAR_SIZE - 4) {
+        bool control = (at - 4) % REBAR_PAIR != 0;
+        uint32_t control_reg = control ? reg : reg + 4;
+        uint32_t index = pci_cfg_read(a, control_reg, 4) & REBAR_INDEX;
+        unsigned int most = rebar_most(vf, index);
+        for (size_t e = most + 1; e <= REBAR_LAST; e++) {
+            if (control && e >= REBAR_CAPABILITY_SIZES) {
+                value &= ~((uint32_t)1 << (e - REBAR_CAPABILITY_SIZES + REBAR_CONTROL_SHIFT));
+            } else if (!control && e < REBAR_CAPABILITY_SIZES) {
+                value &= ~((uint32_t)1 << (e + REBAR_CAPABILITY_SHIFT));
+            }
+        }
+    }
+    return (value >> (8 * (offset & 3))) & all_ones(size);
+}
+
+// A guest's change of a Resizable BAR's size, which the host takes where it
+// has room for it at the BAR's base, the guest's copy of the BAR then of the
+// new size, its address's bits below the size clear, as the hardware's are;
+// any other, and writes to the read-only registers, change nothing.
+static void rebar_write(struct vfunction *vf, uint32_t offset, size_t size, uint32_t value) {
+    struct pci_cfg_addr a = vf->f->addr;
+    uint32_t reg = offset & ~(uint32_t)3;
+    uint32_t at = reg - vf->f->rebar_ext_cap;
+    if (at < 8 || (at - 4) % REBAR_PAIR == 0) {
+        return;
+    }
+    unsigned int shift = 8 * (offset & 3);
+    uint32_t mask = all_ones(size) << shift;
+    uint32_t old = pci_cfg_read(a, reg, 4);
+    uint32_t now = (old & ~mask) | ((value << shift) & mask);
+    unsigned int from = (old & REBAR_SIZE_FIELD) >> REBAR_SIZE_SHIFT;
+    unsigned int to = (now & REBAR_SIZE_FIELD) >> REBAR_SIZE_SHIFT;
+    size_t index = old & REBAR_INDEX;
+    if (to == from) {
+        return;
+    }
+    size_t bytes = to <= REBAR_LAST ? (size_t)1 << (to + REBAR_ENCODING_BASE) : 0;
+    if (index >= BAR_COUNT || bytes == 0 || to > rebar_most(vf, index)
+     || !pci_enum_rebar_resize(vf->f, index, bytes)) {
+        if (vf->resizes_logged < RESETS_LOGGED) {
+            vf->resizes_logged++;
+            printf(
+                "PCI " PCI_CFG_ADDR_FMT " BAR%zu: a resize to 0x%llx refused, as the host has no "
+                "room for it\n",
+                PCI_CFG_ADDR_ARGS(a), index, (unsigned long long)bytes
+            );
+        }
+        return;
+    }
+    struct vbar *b = &vf->bars[index];
+    bar_unmap(b);
+    traps_move(b, 0);
+    gpt_flush();
+    b->size = vf->f->bars[index].size;
+    b->guest &= bar_mask(b);
+    bar_update(vf, b, false);
 }
 
 // Whether offset is in the function's SR-IOV capability, which a physical
@@ -1628,6 +1725,9 @@ static uint32_t function_read(struct pci_cfg_addr a, uint32_t offset, size_t siz
     if (vf != NULL && vf->hidden) {
         return all_ones(size);
     }
+    if (vf != NULL && in_rebar(vf, offset)) {
+        return rebar_read(vf, offset, size);
+    }
     if (vf != NULL && in_sriov(vf, offset)) {
         return iov_read(vf, offset, size);
     }
@@ -1830,7 +1930,11 @@ static struct vfunction *function_write(
     if (vf == NULL && virt.pf_count != 0) {
         vf = vf_find(a);
     }
-    if (vf != NULL && (vf->hidden || in_rebar(vf, offset))) {
+    if (vf != NULL && vf->hidden) {
+        return NULL;
+    }
+    if (vf != NULL && in_rebar(vf, offset)) {
+        rebar_write(vf, offset, size, value);
         return NULL;
     }
     if (vf != NULL && in_sriov(vf, offset)) {
