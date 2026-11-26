@@ -669,7 +669,9 @@ bool pci_assign_top(struct pci_enum_function *f, size_t index, uintptr_t *base, 
     }
     range_list_free(&room);
 
-    if (found && at[0] > first->base
+    // Memory that reaches above 4 GiB takes any room below it; memory below it
+    // only room higher up.
+    if (found && (high > FOUR_GIB || at[0] > first->base)
      && group_program(f, order, count, at, kinds, new_low, new_high)) {
         low = new_low;
         high = new_high;
