@@ -25,6 +25,7 @@
 #include <lib/log.h>
 #include <lib/util.h>
 #include <loader/efi_glue.h>
+#include <loader/fwtables.h>
 #include <loader/pci_io.h>
 #include <memory.h>
 #include <sys/x86.h>
@@ -86,19 +87,6 @@ static const uint16_t calpella_host_bridges[] = { 0x0040, 0x0062, 0x006a };
 #define VTISOCHCTRL_NON_ISOCH ((uint32_t)1 << 0)
 #define VTISOCHCTRL_TLB_ENTRIES ((uint32_t)0x1c)
 #define ISOCH_TLB_ENTRIES_ADVISED 16
-
-static const struct efi_guid acpi_20_guid = EFI_ACPI_20_TABLE_GUID;
-static const struct efi_guid acpi_10_guid = EFI_ACPI_10_TABLE_GUID;
-
-static const uint8_t *config_table(const struct efi_guid *guid) {
-    for (size_t i = 0; i < efi_st->number_of_table_entries; i++) {
-        const struct efi_configuration_table *entry = &efi_st->configuration_table[i];
-        if (memcmp(&entry->vendor_guid, guid, sizeof(struct efi_guid)) == 0) {
-            return entry->vendor_table;
-        }
-    }
-    return NULL;
-}
 
 // What the core needs of a VT-d unit, as boot services are the last chance to
 // go back: queued invalidation, and second-stage tables of 3 or 4 levels.
@@ -200,23 +188,15 @@ static int sdt_find_iommu(const uint8_t *sdt, size_t entry_size) {
     return result;
 }
 
+// In the tables the core takes.
 static int acpi_find_iommu(void) {
-    const uint8_t *rsdp = config_table(&acpi_20_guid);
-    if (rsdp == NULL) {
-        rsdp = config_table(&acpi_10_guid);
-    }
-    if (rsdp == NULL || memcmp(rsdp, "RSD PTR ", 8) != 0) {
+    size_t entry_size;
+    const uint8_t *root = fwtables_acpi_root(&entry_size);
+    if (root == NULL) {
         printf("No ACPI tables\n");
         return FOUND_NONE;
     }
-    if (rsdp[ACPI_RSDP_REVISION] >= 2) {
-        uintptr_t xsdt = read_le64(rsdp + ACPI_RSDP_XSDT);
-        if (xsdt != 0) {
-            return sdt_find_iommu((const uint8_t *)(uintptr_t)xsdt, 8);
-        }
-    }
-    uint32_t rsdt = read_le32(rsdp + ACPI_RSDP_RSDT);
-    return rsdt != 0 ? sdt_find_iommu((const uint8_t *)(uintptr_t)rsdt, 4) : FOUND_NONE;
+    return sdt_find_iommu(root, entry_size);
 }
 
 static bool listed(uint16_t id, const uint16_t *ids, size_t count) {

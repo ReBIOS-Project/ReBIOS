@@ -410,20 +410,27 @@ static bool root_sound(uintptr_t address, const char *signature) {
     return length >= ACPI_SDT_HEADER_SIZE && checksum8(root, length) == 0;
 }
 
-// The XSDT, or the RSDT where the XSDT is broken, as Linux 7.3 falls back for
-// boards with corrupt XSDTs (arch/x86/kernel/acpi/boot.c, disable_acpi_xsdt()
-// and acpi=rsdt), and NULL where neither is sound.
+// The XSDT wherever the RSDP gives one, else the RSDT, whatever their
+// checksums say, as Linux 7.3 takes them (drivers/acpi/acpica/tbutils.c,
+// acpi_tb_parse_root_table()), and NULL where the RSDP gives neither or the
+// root is shorter than its header.
 static const uint8_t *acpi_root(const struct acpi_rsdp *rsdp, size_t *entry_size) {
-    if (rsdp->revision >= 2 && rsdp->xsdt_addr != 0
-     && root_sound(rsdp->xsdt_addr, "XSDT")) {
+    uintptr_t address = rsdp->rsdt_addr;
+    *entry_size = sizeof(uint32_t);
+    if (rsdp->revision >= 2 && rsdp->xsdt_addr != 0) {
+        address = (uintptr_t)rsdp->xsdt_addr;
         *entry_size = sizeof(uint64_t);
-        return (const uint8_t *)(uintptr_t)rsdp->xsdt_addr;
     }
-    if (root_sound(rsdp->rsdt_addr, "RSDT")) {
-        *entry_size = sizeof(uint32_t);
-        return (const uint8_t *)(uintptr_t)rsdp->rsdt_addr;
+    const uint8_t *root = (const uint8_t *)address;
+    if (root == NULL || read_le32(root + ACPI_SDT_LENGTH) < ACPI_SDT_HEADER_SIZE) {
+        return NULL;
     }
-    return NULL;
+    return root;
+}
+
+const uint8_t *fwtables_acpi_root(size_t *entry_size) {
+    const struct acpi_rsdp *rsdp = (const struct acpi_rsdp *)fwtables_acpi_rsdp();
+    return rsdp != NULL ? acpi_root(rsdp, entry_size) : NULL;
 }
 
 bool fwtables_fadt_pm_profile(uint8_t *profile) {
@@ -653,22 +660,6 @@ static uint16_t bios_year(void) {
     return year > 9999 ? 0 : (uint16_t)year;
 }
 
-// uACPI takes the XSDT wherever the RSDP gives one, so where only the RSDT is
-// sound, it gets an ACPI 1.0 RSDP, which gives the RSDT alone.
-static uint64_t rsdp_for_rsdt(const struct acpi_rsdp *rsdp) {
-    uintptr_t copy = efi_glue_alloc_pages_typed(1, UINT32_MAX, EFI_ACPI_RECLAIM_MEMORY);
-    if (copy == 0) {
-        return (uintptr_t)rsdp;
-    }
-    struct acpi_rsdp *v1 = (struct acpi_rsdp *)copy;
-    memset(v1, 0, sizeof(struct acpi_rsdp));
-    memcpy(v1, rsdp, ACPI_RSDP_V1_SIZE);
-    v1->revision = 0;
-    v1->checksum = 0;
-    v1->checksum = (uint8_t)-checksum8(v1, ACPI_RSDP_V1_SIZE);
-    return copy;
-}
-
 void fwtables_collect(void) {
     uint64_t rsdp = rsdp_find(&acpi_20_guid, "2.0");
     if (rsdp == 0) {
@@ -678,13 +669,16 @@ void fwtables_collect(void) {
         printf("No usable ACPI RSDP\n");
     }
     const struct acpi_rsdp *found = (const struct acpi_rsdp *)(uintptr_t)rsdp;
-    if (found != NULL && found->revision >= 2 && found->xsdt_addr != 0
-     && !root_sound(found->xsdt_addr, "XSDT") && root_sound(found->rsdt_addr, "RSDT")) {
-        printf(
-            "The XSDT at %#llx is broken, so the ACPI tables come from the RSDT at %#x\n",
-            (unsigned long long)found->xsdt_addr, found->rsdt_addr
-        );
-        rsdp = rsdp_for_rsdt(found);
+    size_t entry_size = 0;
+    const uint8_t *root = found != NULL ? acpi_root(found, &entry_size) : NULL;
+    if (root != NULL) {
+        const char *signature = entry_size == sizeof(uint64_t) ? "XSDT" : "RSDT";
+        if (!root_sound((uintptr_t)root, signature)) {
+            printf(
+                "The ACPI %s at %#llx has a bad signature or checksum\n",
+                signature, (unsigned long long)(uintptr_t)root
+            );
+        }
     }
     loader_handoff->acpi_rsdp = rsdp;
 

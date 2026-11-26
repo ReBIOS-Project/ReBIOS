@@ -19,6 +19,7 @@
 #define LOADER__FWTABLES_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 // Fills loader_handoff->acpi_rsdp and smbios_entry.
@@ -32,6 +33,9 @@ const char *fwtables_smbios_string(uint8_t type, uint8_t offset);
 // The address of the RSDP in the firmware's configuration tables, ACPI 2.0's
 // where it is sound, else ACPI 1.0's, or 0. Needs no fwtables_collect().
 uintptr_t fwtables_acpi_rsdp(void);
+// The root table that RSDP gives, as fwtables.c takes it, its entries
+// entry_size bytes each, or NULL.
+const uint8_t *fwtables_acpi_root(size_t *entry_size);
 
 // Gets the FADT's preferred power management profile, if there is one.
 bool fwtables_fadt_pm_profile(uint8_t *profile);
