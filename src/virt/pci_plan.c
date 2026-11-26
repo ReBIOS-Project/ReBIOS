@@ -46,6 +46,7 @@
 #define ELEMENT_PREF_WINDOW 3
 #define ELEMENT_HIGH_WINDOW 4
 #define ELEMENT_LFB 5
+#define ELEMENT_VF_BAR 6
 
 // Where in a root bus or bridge an element goes: its memory window, or its one
 // prefetchable window, below or above 4 GiB. A root bus has one region for
@@ -72,8 +73,9 @@
 // windows above 4 GiB first (drivers/pci/bus.c, pci_bus_alloc_resource()).
 #define SLACK_HIGH ((uint64_t)16 << 30)
 
-// A BAR, an expansion ROM, a bridge's window, or the emulated VGA's linear
-// framebuffer, in the memory of the root bus or bridge it is behind.
+// A BAR, an expansion ROM, a bridge's window, the emulated VGA's linear
+// framebuffer, or a VF BAR's memory for all of its VFs, in the memory of the
+// root bus or bridge it is behind.
 struct element {
     uint32_t function;
     uint8_t kind;
@@ -239,6 +241,8 @@ static void host_layout(
         uintptr_t host = 0;
         if (e->kind == ELEMENT_BAR) {
             host = page_down(f->bars[e->bar].base);
+        } else if (e->kind == ELEMENT_VF_BAR) {
+            host = f->vf_bars[e->bar].base;
         } else if (e->kind == ELEMENT_PREF_WINDOW) {
             host = f->pref_base;
         } else if (e->kind == ELEMENT_LOW_WINDOW) {
@@ -370,6 +374,17 @@ static bool bar_high(
     const struct pci_enum_bar *bar
 ) {
     return bar->size > PCI_PLAN_LOW_BAR_MAX && bar->kind == PCI_ENUM_BAR_MEM64
+        && path_reaches_high(t, f, bar->prefetchable);
+}
+
+// As bar_high(), for VF BAR b's memory for all of the function's VFs.
+static bool vf_bar_high(
+    const struct pci_enum_topology *t,
+    const struct pci_enum_function *f,
+    size_t b
+) {
+    const struct pci_enum_bar *bar = &f->vf_bars[b];
+    return pci_enum_vf_span(f, b) > PCI_PLAN_LOW_BAR_MAX && bar->kind == PCI_ENUM_BAR_MEM64
         && path_reaches_high(t, f, bar->prefetchable);
 }
 
@@ -687,6 +702,10 @@ static void assign(const struct pci_enum_topology *t, struct container *containe
                 pf->rom = base + (f->rom.base & (e->size - 1));
                 break;
             }
+            case ELEMENT_VF_BAR: {
+                pf->vf_bars[e->bar] = base;
+                break;
+            }
             case ELEMENT_LOW_WINDOW: {
                 pf->mem_base = base;
                 pf->mem_limit = base + e->size - 1;
@@ -831,8 +850,11 @@ const struct pci_plan *pci_plan_make(
     }
     for (size_t i = 0; i < n && high_allowed; i++) {
         const struct pci_enum_function *f = &t->functions[i];
-        for (size_t b = 0; b < f->bar_count && b < 6; b++) {
-            if (!bar_high(t, f, &f->bars[b])) {
+        for (size_t b = 0; b < 6 + PCI_SRIOV_NUM_BARS; b++) {
+            bool high = b < 6
+                      ? b < f->bar_count && bar_high(t, f, &f->bars[b])
+                      : vf_bar_high(t, f, b - 6);
+            if (!high) {
                 continue;
             }
             for (const struct pci_enum_function *up = f->parent; up != NULL; up = up->parent) {
@@ -883,6 +905,34 @@ const struct pci_plan *pci_plan_make(
          && routed(f, f->rom.base, f->rom.size)) {
             size_t size = element_size(f->rom.size);
             element_add(c, (struct element){ i, ELEMENT_ROM, 0, SIDE_MEMORY, size, size, 0 });
+        }
+        // Firmware gives each VF BAR the memory of all of the function's VFs,
+        // as EDK II's PciBusDxe does (InitialVFs, which is TotalVFs where
+        // there is one root), its alignment one VF's.
+        for (size_t b = 0; b < PCI_SRIOV_NUM_BARS; b++) {
+            const struct pci_enum_bar *bar = &f->vf_bars[b];
+            uint64_t span = pci_enum_vf_span(f, b);
+            if (span == 0 || bar->base == 0) {
+                continue;
+            }
+            bool above = vf_bar_high(t, f, b);
+            if (above && !high_allowed) {
+                printf(
+                    "PCI " PCI_CFG_ADDR_FMT " VF BAR%zu: unassigned, as its 0x%llx bytes need "
+                    "room above 4 GiB (pci_high_windows)\n",
+                    PCI_CFG_ADDR_ARGS(f->addr), b, (unsigned long long)span
+                );
+                continue;
+            }
+            size_t side = SIDE_MEMORY;
+            if (above) {
+                side = SIDE_HIGH;
+            } else if (bar->prefetchable && pref_low) {
+                side = SIDE_PREF;
+            }
+            element_add(
+                c, (struct element){ i, ELEMENT_VF_BAR, b, side, element_size(span), bar->size, 0 }
+            );
         }
     }
     // In the memory of what the VGA's card is on: an installed Windows 7 keeps

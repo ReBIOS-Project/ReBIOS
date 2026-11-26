@@ -52,6 +52,9 @@ struct pci_plan_function {
     // A 64-bit BAR at the index of its lower register.
     uint64_t bars[6];
     uint64_t rom;
+    // A physical function's VF BARs, likewise, each where its VFs' memory
+    // starts.
+    uint64_t vf_bars[6];
     // Bridges: the windows, inclusive, base above limit when closed.
     uintptr_t mem_base;
     uint64_t mem_limit;
