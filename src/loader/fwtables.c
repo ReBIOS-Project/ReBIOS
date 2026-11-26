@@ -501,6 +501,26 @@ static const uint8_t *acpi_table(const char *signature) {
     return NULL;
 }
 
+size_t fwtables_madt_processors(void) {
+    const uint8_t *madt = acpi_table("APIC");
+    if (madt == NULL) {
+        return 0;
+    }
+    size_t length = read_le32(madt + ACPI_SDT_LENGTH);
+    size_t offset = sizeof(struct acpi_madt);
+    size_t count = 0;
+    const struct acpi_entry_hdr *entry;
+    while ((entry = acpi_madt_next(madt, length, &offset)) != NULL) {
+        uint32_t id;
+        uint32_t uid;
+        uint32_t flags;
+        if (acpi_madt_processor(entry, &id, &uid, &flags) && (flags & ACPI_PIC_ENABLED) != 0) {
+            count++;
+        }
+    }
+    return count;
+}
+
 static uint32_t table_length(const uint8_t *table) {
     return read_le32(table + ACPI_SDT_LENGTH);
 }

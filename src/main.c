@@ -44,6 +44,11 @@
 #include <sys/x86.h>
 
 #define CORE_HEAP_SIZE ((uint64_t)64 << 20)
+// And for each processor the core starts: its area, its vCPU, its VMCS or
+// VMCB, its nested and SIMD state, and its scratch for drawing the emulated
+// VGA, 66 to 69 pages measured at a screen 1024 pixels wide, with room for
+// wider screens and what it allocates later.
+#define CORE_HEAP_PER_PROCESSOR ((uint64_t)384 << 10)
 // The page tables the processor runs the guest's guests with, which the
 // hypervisor builds from the guest's and its own and drops when they outgrow
 // their share: 1/NESTED_HEAP_SHARE of the RAM, at most NESTED_HEAP_MAX.
@@ -319,7 +324,12 @@ efi_status efi_main(efi_handle image_handle, struct efi_system_table *system_tab
     if (nested_heap_size > NESTED_HEAP_MAX) {
         nested_heap_size = NESTED_HEAP_MAX;
     }
-    size_t heap_size = CORE_HEAP_SIZE + nested_heap_size;
+    size_t processors = fwtables_madt_processors();
+    size_t heap_size = CORE_HEAP_SIZE + processors * CORE_HEAP_PER_PROCESSOR + nested_heap_size;
+    printf(
+        "The core's heap: %zu MiB, for %zu processors and their guest's nested paging\n",
+        heap_size >> 20, processors
+    );
     uint64_t heap = loader_alloc_reserved(EFI_SIZE_TO_PAGES(heap_size), 0);
     if (heap == 0) {
         panic("Cannot allocate the core's heap\n");

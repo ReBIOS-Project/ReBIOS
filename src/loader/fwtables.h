@@ -37,6 +37,10 @@ uintptr_t fwtables_acpi_rsdp(void);
 // entry_size bytes each, or NULL.
 const uint8_t *fwtables_acpi_root(size_t *entry_size);
 
+// How many enabled processors the MADT lists, as the core starts them, or 0
+// where there is no MADT.
+size_t fwtables_madt_processors(void);
+
 // Gets the FADT's preferred power management profile, if there is one.
 bool fwtables_fadt_pm_profile(uint8_t *profile);
 
