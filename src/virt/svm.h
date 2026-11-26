@@ -555,6 +555,8 @@ extern bool svm_tlbictl;
 // The processor's VM_CR as the firmware left it.
 extern uint64_t svm_firmware_vm_cr;
 
+// The same as vmx_unusable() for SVM.
+const char *svm_unusable(bool *in_setup);
 bool svm_supported(void);
 // The guest's translations go before its next run, as when the hypervisor
 // changes its paging state or nested page tables (APM 24593 rev. 3.45, 15.16).

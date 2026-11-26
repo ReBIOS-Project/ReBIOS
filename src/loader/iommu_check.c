@@ -26,6 +26,7 @@
 #include <lib/util.h>
 #include <loader/efi_glue.h>
 #include <loader/fwtables.h>
+#include <loader/loader.h>
 #include <loader/pci_io.h>
 #include <memory.h>
 #include <sys/x86.h>
@@ -51,8 +52,6 @@
 #define FOUND_NONE 0
 #define FOUND_UNUSABLE 1
 #define FOUND_USABLE 2
-
-#define NOTICE_SECONDS 10
 
 #define IGFX_DEVFN (2 << 3)
 #define HOST_BRIDGE_GGC 0x52
@@ -331,6 +330,6 @@ bool iommu_check(void) {
             "If the machine has one, enable it in the firmware setup.\n"
         );
     }
-    efi_bs->stall(NOTICE_SECONDS * 1000000);
+    efi_bs->stall(LOADER_NOTICE_SECONDS * 1000000);
     return false;
 }

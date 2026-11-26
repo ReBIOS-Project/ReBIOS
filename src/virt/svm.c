@@ -221,23 +221,31 @@ static void svm_machine_check(struct vcpu *v) {
 
 void svm_enter(uintptr_t vmcb_pa, struct vcpu_gprs *gprs);
 
-bool svm_supported(void) {
-    if (cpuid(0x80000000, 0).eax < 0x8000000a) {
-        return false;
-    }
-    if ((cpuid(0x80000001, 0).ecx & ((uint32_t)1 << 2)) == 0) {
-        return false;
+const char *svm_unusable(bool *in_setup) {
+    *in_setup = true;
+    if (cpuid(0x80000000, 0).eax < 0x8000000a
+     || (cpuid(0x80000001, 0).ecx & ((uint32_t)1 << 2)) == 0) {
+        return "the processor shows no SVM";
     }
     if ((rdmsr(MSR_VM_CR) & VM_CR_SVMDIS) != 0) {
-        printf("SVM is disabled by the firmware\n");
+        return "SVM is disabled by the firmware";
+    }
+    *in_setup = false;
+    if ((cpuid(0x8000000a, 0).edx & SVM_FEATURE_NP) == 0) {
+        return "SVM lacks nested paging";
+    }
+    return NULL;
+}
+
+bool svm_supported(void) {
+    bool in_setup;
+    const char *unusable = svm_unusable(&in_setup);
+    if (unusable != NULL) {
+        printf("Not using SVM: %s\n", unusable);
         return false;
     }
 
     uint32_t features = cpuid(0x8000000a, 0).edx;
-    if ((features & SVM_FEATURE_NP) == 0) {
-        printf("SVM lacks nested paging\n");
-        return false;
-    }
     svm_lbr_virtualisation = (features & SVM_FEATURE_LBRV) != 0;
     svm_nrips = (features & SVM_FEATURE_NRIPS) != 0;
     svm_flush_by_asid = (features & SVM_FEATURE_FLUSH_BY_ASID) != 0;

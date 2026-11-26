@@ -234,15 +234,40 @@ static uint32_t adjust_controls(uint64_t cap, uint32_t want, uint32_t require, c
     return ((want | require) & (uint32_t)(cap >> 32)) | (uint32_t)cap;
 }
 
-bool vmx_supported(void) {
+const char *vmx_unusable(bool *in_setup) {
+    *in_setup = true;
     if ((cpuid(1, 0).ecx & ((uint32_t)1 << 5)) == 0) {
-        return false;
+        return "the processor shows no VMX";
     }
-
     uint64_t feature_control = rdmsr(MSR_IA32_FEATURE_CONTROL);
     if ((feature_control & FEATURE_CONTROL_LOCK) != 0
      && (feature_control & FEATURE_CONTROL_VMX_OUTSIDE_SMX) == 0) {
-        printf("VMX is disabled by the firmware\n");
+        return "VMX is disabled by the firmware";
+    }
+
+    *in_setup = false;
+    bool true_ctls = ((rdmsr(MSR_IA32_VMX_BASIC) >> 55) & 1) != 0;
+    uint32_t proc_msr = true_ctls ? MSR_IA32_VMX_TRUE_PROCBASED_CTLS : MSR_IA32_VMX_PROCBASED_CTLS;
+    if (!control_allowed(rdmsr(proc_msr), PROC_SECONDARY_CONTROLS)) {
+        return "VMX lacks secondary controls";
+    }
+    uint64_t proc2 = rdmsr(MSR_IA32_VMX_PROCBASED_CTLS2);
+    if (!control_allowed(proc2, PROC2_EPT | PROC2_UNRESTRICTED_GUEST)) {
+        return "VMX lacks EPT or unrestricted guest support";
+    }
+    uint64_t ept_needed = EPT_CAP_WALK_4 | EPT_CAP_WB | EPT_CAP_2M | EPT_CAP_INVEPT
+                        | EPT_CAP_INVEPT_ALL;
+    if ((rdmsr(MSR_IA32_VMX_EPT_VPID_CAP) & ept_needed) != ept_needed) {
+        return "VMX lacks required EPT capabilities";
+    }
+    return NULL;
+}
+
+bool vmx_supported(void) {
+    bool in_setup;
+    const char *unusable = vmx_unusable(&in_setup);
+    if (unusable != NULL) {
+        printf("Not using VMX: %s\n", unusable);
         return false;
     }
 
@@ -257,27 +282,12 @@ bool vmx_supported(void) {
     cr4_fixed0 = rdmsr(MSR_IA32_VMX_CR4_FIXED0);
     cr4_fixed1 = rdmsr(MSR_IA32_VMX_CR4_FIXED1);
 
-    if (!control_allowed(proc_cap, PROC_SECONDARY_CONTROLS)) {
-        printf("VMX lacks secondary controls\n");
-        return false;
-    }
     proc2_cap = rdmsr(MSR_IA32_VMX_PROCBASED_CTLS2);
     // The allowed 1-settings alone (SDM 325462-093 Vol. 3D, A.3.4).
     if (control_allowed(proc_cap, PROC_TERTIARY_CONTROLS)) {
         proc3_cap = rdmsr(MSR_IA32_VMX_PROCBASED_CTLS3);
     }
-    if (!control_allowed(proc2_cap, PROC2_EPT | PROC2_UNRESTRICTED_GUEST)) {
-        printf("VMX lacks EPT or unrestricted guest support\n");
-        return false;
-    }
-
     ept_vpid_cap = rdmsr(MSR_IA32_VMX_EPT_VPID_CAP);
-    uint64_t ept_needed = EPT_CAP_WALK_4 | EPT_CAP_WB | EPT_CAP_2M | EPT_CAP_INVEPT
-                        | EPT_CAP_INVEPT_ALL;
-    if ((ept_vpid_cap & ept_needed) != ept_needed) {
-        printf("VMX lacks required EPT capabilities\n");
-        return false;
-    }
 
     // Where Intel PT may trace in VMX operation, its output can go through
     // EPT, and exits and entries can switch it off and on again (SDM

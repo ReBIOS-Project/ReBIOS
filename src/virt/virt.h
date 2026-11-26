@@ -29,6 +29,10 @@ extern bool virt_vmx;
 // rev. 3.46, 13.1.7): DR0 with DataBkptExt, all four with AddrMaskExt.
 extern unsigned int virt_breakpoint_masks;
 
+// Why this processor cannot run ReBIOS, or NULL, with in_setup true where the
+// firmware's setup may give what it lacks, all without changing anything, so
+// that the loader can refuse the machine before ExitBootServices().
+const char *virt_unusable(bool *in_setup);
 // Picks VMX or SVM and sets up what all vCPUs share. Returns false if neither
 // is usable on this processor.
 bool virt_init(void);

@@ -42,6 +42,7 @@
 #include <loader/video.h>
 #include <memory.h>
 #include <sys/x86.h>
+#include <virt/virt.h>
 
 #define CORE_HEAP_SIZE ((uint64_t)64 << 20)
 // And for each processor the core starts: its area, its vCPU, its VMCS or
@@ -280,6 +281,18 @@ efi_status efi_main(efi_handle image_handle, struct efi_system_table *system_tab
 
     if (x86_cpu_vendor() == 0) {
         panic("ReBIOS runs on Intel's and AMD's processors alone\n");
+    }
+    // What virt_init() checks again once boot services are gone, the last
+    // chance to go back to the firmware.
+    bool in_setup;
+    const char *unusable = virt_unusable(&in_setup);
+    if (unusable != NULL) {
+        log_notice("ReBIOS cannot run here: %s.\n", unusable);
+        if (in_setup) {
+            log_notice("If it has Intel VT-x or AMD-V, enable it in the firmware setup.\n");
+        }
+        efi_bs->stall(LOADER_NOTICE_SECONDS * 1000000);
+        return EFI_UNSUPPORTED;
     }
     if (!iommu_check()) {
         return EFI_UNSUPPORTED;

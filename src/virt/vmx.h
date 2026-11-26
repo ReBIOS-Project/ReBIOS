@@ -551,6 +551,9 @@ struct vmx_vmcs {
     struct vmcs_cache *cache;
 };
 
+// Why VMX cannot serve ReBIOS on this processor, or NULL, with in_setup true
+// where the firmware's setup may give it, all without changing anything.
+const char *vmx_unusable(bool *in_setup);
 bool vmx_supported(void);
 void vmx_cpu_init(void);
 // Leaves VMX operation, the vCPU's VMCS cleared to memory first.

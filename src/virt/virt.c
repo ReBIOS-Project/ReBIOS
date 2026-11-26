@@ -84,15 +84,31 @@ void virt_reset(bool shown) {
     power_reset(false);
 }
 
+// Runs load the guest's status flags with SAHF (alu.S), which 64-bit mode has
+// where CPUID says so (SDM 325462-093 Vol. 2B, SAHF; APM 40332 rev. 4.11, Vol.
+// 3, SAHF), as every processor with VMX's unrestricted guest or SVM's nested
+// paging does.
+#define NO_LAHF_SAHF "the processor lacks LAHF and SAHF in 64-bit mode"
+
+static bool lahf_sahf(void) {
+    return (cpuid(0x80000001, 0).ecx & CPUID_80000001_ECX_LAHF_SAHF) != 0;
+}
+
+const char *virt_unusable(bool *in_setup) {
+    if (!lahf_sahf()) {
+        *in_setup = false;
+        return NO_LAHF_SAHF;
+    }
+    if (x86_cpu_vendor() == X86_CPU_VENDOR_INTEL) {
+        return vmx_unusable(in_setup);
+    }
+    return svm_unusable(in_setup);
+}
+
 bool virt_init(void) {
     bool intel = x86_cpu_vendor() == X86_CPU_VENDOR_INTEL;
-
-    // Runs load the guest's status flags with SAHF (alu.S), which 64-bit mode
-    // has where CPUID says so (SDM 325462-093 Vol. 2B, SAHF; APM 40332 rev.
-    // 4.11, Vol. 3, SAHF), as every processor with VMX's unrestricted guest or
-    // SVM's nested paging does.
-    if ((cpuid(0x80000001, 0).ecx & CPUID_80000001_ECX_LAHF_SAHF) == 0) {
-        printf("The processor lacks LAHF and SAHF in 64-bit mode\n");
+    if (!lahf_sahf()) {
+        printf("Not running: %s\n", NO_LAHF_SAHF);
         return false;
     }
 

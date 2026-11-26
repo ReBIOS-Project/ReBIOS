@@ -23,6 +23,10 @@
 #include <stdint.h>
 #include <handoff.h>
 
+// How long a notice that ReBIOS cannot run on the machine stays on the screen
+// before the firmware goes on.
+#define LOADER_NOTICE_SECONDS 10
+
 // What the core is told, filled in by the loader's modules.
 extern struct handoff *loader_handoff;
 
