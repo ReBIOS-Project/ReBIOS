@@ -56,6 +56,7 @@
 #define VMCS12_SHADOW ((uint32_t)1 << 31)
 #define VMCS12_LAUNCHED 8
 #define VMCS12_FIELDS 16
+#define VMCS12_SIZE 4096
 
 // VM-instruction error numbers (SDM 325462-093 Vol. 3C, Table 33-1).
 #define ERROR_VMCALL_IN_ROOT 1
@@ -155,7 +156,9 @@ static const uint16_t fields[] = {
 #define FIELD_COUNT ARRAY_COUNT(fields)
 #define MAX_INDEX 64
 
-_Static_assert(VMCS12_FIELDS + FIELD_COUNT * 8 <= 4096, "The VMCS12's fields run past its page.");
+_Static_assert(
+    VMCS12_FIELDS + FIELD_COUNT * 8 <= VMCS12_SIZE, "The VMCS12's fields run past its region."
+);
 
 // By width, type, and index: the slot plus one, or 0 where there is no such
 // field.
@@ -191,7 +194,17 @@ struct nvmx {
     bool vmxon;
     uint64_t vmxon_ptr;
     uint64_t current;
+    // The current VMCS's data, which the processor may keep in itself while it
+    // is active (SDM 325462-093 Vol. 3C, 27.11.1): a copy of its region, in
+    // cache12, which writes to the region in the guest's memory do not reach,
+    // as Linux 7.3's KVM keeps cached_vmcs12. What VM entry checks of it then
+    // holds for as long as the guest's guest runs. NULL while no VMCS is
+    // current.
     uint8_t *vmcs12;
+    uint8_t *cache12;
+    // The current VMCS's region in the guest's memory, where its data go back
+    // as it stops being current.
+    uint8_t *region12;
     // Whether the current VMCS is a shadow VMCS, which no entry takes.
     bool current_shadow;
     // VMCS02, which runs the guest's guest, while VMCS01 is the vCPU's, and
@@ -414,7 +427,7 @@ void nvmx_init(void) {
     apx_info = (cpuid_xcr0_allowed() & XCR0_APX) != 0;
 
     uint64_t basic = vmx_capability(MSR_IA32_VMX_BASIC);
-    cap_basic = VMCS12_REVISION | (uint64_t)4096 << BASIC_SIZE_SHIFT | BASIC_MEMTYPE_WB
+    cap_basic = VMCS12_REVISION | (uint64_t)VMCS12_SIZE << BASIC_SIZE_SHIFT | BASIC_MEMTYPE_WB
               | BASIC_INS_OUTS | BASIC_TRUE_CONTROLS | (basic & BASIC_NO_ERROR_CODE);
     if (vmx_fred_switched()) {
         cap_basic |= basic & BASIC_NESTED_EXCEPTION;
@@ -557,7 +570,7 @@ void nvmx_vcpu_init(struct vcpu *v) {
         return;
     }
     struct nvmx *n = kmalloc(sizeof(struct nvmx));
-    *n = (struct nvmx){ .current = NO_VMCS };
+    *n = (struct nvmx){ .current = NO_VMCS, .cache12 = kmalloc(VMCS12_SIZE) };
     if (shadowing) {
         n->shadow = vmx_shadow_vmcs_create();
     }
@@ -573,8 +586,8 @@ void nvmx_vcpu_power_on(struct vcpu *v) {
     ept02_drop_all(n);
     ipiv_leave(NULL, n, false);
     *n = (struct nvmx){
-        .current = NO_VMCS, .pi_vector = -1, .sipi = -1, .shadow = n->shadow,
-        .msr_bitmap = n->msr_bitmap
+        .current = NO_VMCS, .cache12 = n->cache12, .pi_vector = -1, .sipi = -1,
+        .shadow = n->shadow, .msr_bitmap = n->msr_bitmap
     };
     if (shadowing) {
         vmx_write(VMCS_VMREAD_BITMAP, (uint64_t)(uintptr_t)vmread_bitmap);
@@ -876,6 +889,26 @@ static bool valid_address(uintptr_t addr) {
     return (addr & 0xfff) == 0 && (addr >> phys_width) == 0;
 }
 
+// The VMCS at addr, whose region is at region, made current: its data copied
+// to cache12.
+static void current_load(struct nvmx *n, uint64_t addr, uint8_t *region) {
+    memcpy(n->cache12, region, VMCS12_SIZE);
+    n->current = addr;
+    n->region12 = region;
+    n->vmcs12 = n->cache12;
+}
+
+// The current VMCS no longer current, its data back in its region, where there
+// is one.
+static void current_release(struct nvmx *n) {
+    if (n->vmcs12 != NULL) {
+        memcpy(n->region12, n->vmcs12, VMCS12_SIZE);
+    }
+    n->current = NO_VMCS;
+    n->region12 = NULL;
+    n->vmcs12 = NULL;
+}
+
 static void vmxon(struct vcpu *v, struct nvmx *n, uint64_t info) {
     if (n->vmxon) {
         fail(v, ERROR_VMXON_IN_ROOT);
@@ -901,6 +934,7 @@ static void vmxon(struct vcpu *v, struct nvmx *n, uint64_t info) {
     atomic_fetch_add_explicit(&vmxon_count, 1, memory_order_release);
     n->vmxon_ptr = addr;
     n->current = NO_VMCS;
+    n->region12 = NULL;
     n->vmcs12 = NULL;
     // Outside VMX operation, the guest's VMREAD and VMWRITE are to fault.
     if (shadowing) {
@@ -919,8 +953,7 @@ static void vmxoff(struct vcpu *v, struct nvmx *n) {
     }
     n->vmxon = false;
     atomic_fetch_sub_explicit(&vmxon_count, 1, memory_order_release);
-    n->current = NO_VMCS;
-    n->vmcs12 = NULL;
+    current_release(n);
     ept02_drop_all(n);
     vmx_invept_all();
     succeed(v);
@@ -940,12 +973,13 @@ static void vmclear(struct vcpu *v, struct nvmx *n, uint64_t info) {
         fail(v, ERROR_VMCLEAR_VMXON);
         return;
     }
-    *(volatile uint32_t *)(region + VMCS12_LAUNCHED) = 0;
     if (addr == n->current) {
         shadow_store(v, n);
         shadow_unload();
-        n->current = NO_VMCS;
-        n->vmcs12 = NULL;
+        *(uint32_t *)(n->vmcs12 + VMCS12_LAUNCHED) = 0;
+        current_release(n);
+    } else {
+        *(volatile uint32_t *)(region + VMCS12_LAUNCHED) = 0;
     }
     succeed(v);
 }
@@ -974,8 +1008,8 @@ static void vmptrld(struct vcpu *v, struct nvmx *n, uint64_t info) {
     }
     if (addr != n->current) {
         shadow_store(v, n);
-        n->current = addr;
-        n->vmcs12 = region;
+        current_release(n);
+        current_load(n, addr, region);
         shadow_load(v, n, true);
     }
     n->current_shadow = shadow;
