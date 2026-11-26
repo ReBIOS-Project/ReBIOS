@@ -358,7 +358,9 @@ static void sub_page_update(const struct vfunction *vf, struct vbar *b, bool is_
     if (b->guest != 0 && (!is_rom || b->enabled) && !sizing(b)
      && decodes(vf->f, PCI_COMMAND_MEMORY)) {
         uintptr_t page = page_down(b->guest);
-        if (page + PAGE_SIZE <= virt.address_limit && layout_mmio_free(page, PAGE_SIZE)) {
+        if (b->host == 0) {
+            bar_log(b, "in no place, as the host has it nowhere");
+        } else if (page + PAGE_SIZE <= virt.address_limit && layout_mmio_free(page, PAGE_SIZE)) {
             want = b->guest;
         } else {
             bar_log(b, "in no place, as the guest has something else there");
@@ -386,8 +388,9 @@ static void sub_page_update(const struct vfunction *vf, struct vbar *b, bool is_
 }
 
 // Follows the guest's address and enables for the BAR. Where the guest puts it
-// somewhere it cannot map, such as at the size mask while it sizes the BAR, it
-// is in no place.
+// somewhere it cannot map, such as at the size mask while it sizes the BAR, or
+// the host has it nowhere, as the firmware and ReBIOS left it unassigned, it
+// is in no place, and the guest's accesses there decode nothing.
 static void bar_update(const struct vfunction *vf, struct vbar *b, bool is_rom) {
     if (sub_page(b)) {
         sub_page_update(vf, b, is_rom);
@@ -395,7 +398,11 @@ static void bar_update(const struct vfunction *vf, struct vbar *b, bool is_rom) 
     }
     uint64_t want = 0;
     if (b->guest != 0 && (!is_rom || b->enabled) && decodes(vf->f, PCI_COMMAND_MEMORY)) {
-        if (mappable(b, b->guest)) {
+        if (b->host == 0) {
+            if (!sizing(b)) {
+                bar_log(b, "in no place, as the host has it nowhere");
+            }
+        } else if (mappable(b, b->guest)) {
             want = b->guest;
         } else if (!sizing(b)) {
             bar_log(b, "in no place, as the guest has something else there");
@@ -972,7 +979,9 @@ static void msix_init(struct vfunction *vf) {
     struct vbar *b = bir < BAR_COUNT ? &vf->bars[bir] : NULL;
     x->count = (control & PCI_MSIX_FLAGS_QSIZE) + 1;
     uint64_t offset = table & ~PCI_MSIX_TABLE_BIR;
-    if (b == NULL || b->size == 0 || offset + (uint64_t)x->count * PCI_MSIX_ENTRY_SIZE > b->size) {
+    // A table in a BAR the host has nowhere is nowhere to the guest either.
+    if (b == NULL || b->size == 0 || b->host == 0
+     || offset + (uint64_t)x->count * PCI_MSIX_ENTRY_SIZE > b->size) {
         x->count = 0;
         return;
     }
@@ -1543,7 +1552,7 @@ static void vfunction_init(
             .size = bar->size, .host = bar->base, .guest = pf->bars[i]
         };
         // The hypervisor reaches it for the guest where no one page can.
-        if (bar->size < PAGE_SIZE) {
+        if (bar->size < PAGE_SIZE && bar->base != 0) {
             mm_map_device(page_down(bar->base), PAGE_SIZE);
         }
     }
@@ -1558,7 +1567,7 @@ static void vfunction_init(
             .guest = pf->rom,
             .enabled = (pci_cfg_read(f->addr, reg, 4) & PCI_ROM_ADDRESS_ENABLE) != 0
         };
-        if (f->rom.size < PAGE_SIZE) {
+        if (f->rom.size < PAGE_SIZE && f->rom.base != 0) {
             mm_map_device(page_down(f->rom.base), PAGE_SIZE);
         }
     }
