@@ -157,8 +157,7 @@ to disable **Above 4G Decoding** and there *should* be no need to disable
 If a video card in a slot has a legacy Video BIOS, ReBIOS has SeaBIOS run it,
 providing a pretty much native-like experience. Graphics in the processor or
 soldered to the board only get that if they came out before 2018, are the Vega
-graphics of AMD's processors from Raven Ridge to Lucienne (but for Barcelo,
-whose Video BIOS leaves the screen black at graphics modes), or with
+graphics of AMD's processors from Raven Ridge to Barcelo, or with
 `vga_emulation = never`: ReBIOS knows them by lists of their PCI IDs.
 
 Otherwise, ReBIOS emulates a complete legacy VGA with its own Video BIOS, drawn
