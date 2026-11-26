@@ -151,7 +151,6 @@ struct cpu {
     const struct vga_draw_ops *draw_ops;
     size_t draw_level;
     uint64_t draw_copy_ticks;
-    uint64_t draw_read_ticks;
     // What the processor draws the emulated VGA with (virt/vga.c).
     struct vga_scratch *vga_scratch;
     // Whether its vCPU waits rather than runs the guest: halted, or not

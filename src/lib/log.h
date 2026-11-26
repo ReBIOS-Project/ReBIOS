@@ -38,6 +38,9 @@ void log_set_screen(struct flanterm_context *screen);
 void log_move_screen(void *framebuffer);
 // The guest draws on the screen from now on: only panics still reach it.
 void log_hand_over_screen(void);
+// Until then, where the log is on the screen: it is drawn there again, over
+// whatever else was.
+void log_redraw(void);
 void vprintf(const char *fmt, va_list args);
 __attribute__((format(printf, 1, 2))) void printf(const char *fmt, ...);
 // Like printf(), but shown whatever the configuration.

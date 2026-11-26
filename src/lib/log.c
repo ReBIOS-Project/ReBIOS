@@ -266,6 +266,15 @@ void log_hand_over_screen(void) {
     atomic_store_explicit(&log_screen_handed_over, true, memory_order_release);
 }
 
+void log_redraw(void) {
+    spinlock_acquire(&log_lock);
+    if (log_console && log_screen != NULL
+     && !atomic_load_explicit(&log_screen_handed_over, memory_order_relaxed)) {
+        flanterm_full_refresh(log_screen);
+    }
+    spinlock_release(&log_lock);
+}
+
 void vprintf(const char *fmt, va_list args) {
     spinlock_acquire(&log_lock);
     vprintf_unlocked(fmt, args);

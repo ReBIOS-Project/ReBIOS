@@ -29,6 +29,8 @@
 bool vga_init(void);
 // On each other processor as it starts, after vga_init(): what it draws with.
 void vga_cpu_init(void);
+// Once every other processor has been started.
+void vga_cpus_started(void);
 bool vga_emulated(void);
 // Whether size bytes of ports from port on are all the emulated VGA's.
 bool vga_port_emulated(uint16_t port, size_t size);

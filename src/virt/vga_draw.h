@@ -190,12 +190,16 @@ void vga_draw_scale_alloc(struct vga_draw_scale *scale, size_t columns);
 void vga_draw_scale_set(struct vga_draw_scale *scale, size_t width, size_t columns, bool filter);
 
 // On the boot processor, after simd_cpu_init(): picks the fastest build of
-// each kernel on it, timing the copies to the framebuffer with rows rows of
-// the framebuffer at fb, pitch bytes apart, which it writes back as they were.
+// each kernel on it, but for the reads from the framebuffer, whose newest it
+// takes, timing the copies to the framebuffer with rows rows of the
+// framebuffer at fb, pitch bytes apart, which it paints black.
 void vga_draw_init(uint8_t *fb, size_t pitch, size_t rows);
 // The same on each other processor as it starts, which no other processor's
 // timing disturbs.
 void vga_draw_cpu_init(void);
+// Once every other processor has been started: the log is drawn again over the
+// rows when the last has painted them.
+void vga_draw_cpus_started(void);
 // This processor's picks, used between simd_begin(vga_draw_level()) and
 // simd_end().
 const struct vga_draw_ops *vga_draw_ops(void);

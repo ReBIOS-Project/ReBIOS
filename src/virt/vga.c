@@ -3966,7 +3966,8 @@ bool vga_init(void) {
         }
         plane_spread[b] = spread;
     }
-    // The framebuffer's bottom rows time the copies to it.
+    // The framebuffer's bottom rows time the copies to it, black until the log
+    // is drawn again once every processor has.
     size_t rows = fb->height < SHARE_LINES ? fb->height : SHARE_LINES;
     uint8_t *bottom = (uint8_t *)(uintptr_t)fb->base + (uint64_t)(fb->height - rows) * fb->pitch;
     vga_draw_init(bottom, fb->pitch, rows);
@@ -4014,4 +4015,10 @@ void vga_cpu_init(void) {
     }
     vga_draw_cpu_init();
     this_cpu()->vga_scratch = scratch_alloc();
+}
+
+void vga_cpus_started(void) {
+    if (vga.on) {
+        vga_draw_cpus_started();
+    }
 }

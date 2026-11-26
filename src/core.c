@@ -134,6 +134,7 @@ static void bsp_main(void *arg) {
     msr_allowed_init();
     lapic_host_init(VLAPIC_SPURIOUS_VECTOR, VLAPIC_TIMER_VECTOR);
     smp_start_aps();
+    vga_cpus_started();
     ioapic_init();
     remap_init(!virt_vmx && svm_avic, VLAPIC_KICK_VECTOR);
     vioapic_init();

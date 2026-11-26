@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License along with
 // ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -50,8 +51,7 @@ static const struct vga_draw_ops *const betters[SIMD_LEVELS] = {
 static struct vga_draw_ops levels[SIMD_LEVELS];
 
 // The buffers the kernels run on, the planes of a VGA frame, and the
-// framebuffer's rows, which the reads from it take and the copies to it write
-// back as they were.
+// framebuffer's rows, which the copies to it paint black from rows.
 static struct {
     uint8_t *a;
     uint8_t *b;
@@ -68,6 +68,11 @@ static struct {
 } bench;
 
 static struct cpu *copier;
+
+// The processors timing their copies to the framebuffer, and whether every
+// processor that was to start has.
+static _Atomic(size_t) timing;
+static atomic_bool all_started;
 
 void vga_draw_filter_position(
     size_t i,
@@ -165,10 +170,6 @@ static void run_copy_fb(const struct vga_draw_ops *ops) {
     ops->copy_fb(bench.fb, bench.rows, bench.fb_bytes);
 }
 
-static void run_read_fb(const struct vga_draw_ops *ops) {
-    ops->read_fb(bench.rows, bench.fb, bench.fb_bytes);
-}
-
 static void run_fill(const struct vga_draw_ops *ops) {
     ops->fill((uint32_t *)bench.dst, 0x123456, BENCH_PIXELS);
 }
@@ -236,6 +237,7 @@ static void run_graphics_line(const struct vga_draw_ops *ops) {
     ops->graphics_line(bench.pixels, &bench.frame, &scan);
 }
 
+// A kernel without a run is not timed.
 struct kernel {
     const char *name;
     size_t offset;
@@ -245,8 +247,10 @@ struct kernel {
 static const struct kernel kernels[] = {
     { "differ", offsetof(struct vga_draw_ops, differ), run_differ },
     { "copy", offsetof(struct vga_draw_ops, copy), run_copy },
-    // Before the copies to the framebuffer, which write back what it read.
-    { "read_fb", offsetof(struct vga_draw_ops, read_fb), run_read_fb },
+    // Timing it would read the framebuffer. The newest build is taken: those
+    // from SSE4.1's on read with streaming loads, made for write-combining
+    // memory (SDM 325462-093 Vol. 1, 12.10.3).
+    { "read_fb", offsetof(struct vga_draw_ops, read_fb), NULL },
     { "copy_fb", offsetof(struct vga_draw_ops, copy_fb), run_copy_fb },
     { "fill", offsetof(struct vga_draw_ops, fill), run_fill },
     { "convert8", offsetof(struct vga_draw_ops, convert8), run_convert8 },
@@ -321,7 +325,26 @@ static size_t fastest(const struct kernel *k, uint64_t *ticks) {
     return best;
 }
 
+// The level whose own build of a kernel the top level has.
+static size_t newest(const struct kernel *k, size_t top) {
+    size_t level = top;
+    while (level > 0 && slot(&levels[level - 1], k) == slot(&levels[top], k)) {
+        level--;
+    }
+    return level;
+}
+
+// The log is drawn again over the rows once the last processor has painted
+// them.
+static void timed(void) {
+    if (atomic_fetch_sub_explicit(&timing, 1, memory_order_seq_cst) == 1
+     && atomic_load_explicit(&all_started, memory_order_seq_cst)) {
+        log_redraw();
+    }
+}
+
 static void pick(struct cpu *cpu) {
+    atomic_fetch_add_explicit(&timing, 1, memory_order_seq_cst);
     struct vga_draw_ops *picked = kmalloc(sizeof(struct vga_draw_ops));
     size_t level = SIMD_SSE2;
     size_t top = SIMD_SSE2;
@@ -332,8 +355,10 @@ static void pick(struct cpu *cpu) {
     }
     simd_begin(top);
     for (size_t i = 0; i < ARRAY_COUNT(kernels); i++) {
-        uint64_t ticks;
-        size_t chosen = fastest(&kernels[i], &ticks);
+        uint64_t ticks = 0;
+        size_t chosen = kernels[i].run != NULL
+                      ? fastest(&kernels[i], &ticks)
+                      : newest(&kernels[i], top);
         any_kernel fn = slot(&levels[chosen], &kernels[i]);
         memcpy((uint8_t *)picked + kernels[i].offset, &fn, sizeof(any_kernel));
         if (chosen > level) {
@@ -342,11 +367,9 @@ static void pick(struct cpu *cpu) {
         if (kernels[i].run == run_copy_fb) {
             cpu->draw_copy_ticks = ticks;
         }
-        if (kernels[i].run == run_read_fb) {
-            cpu->draw_read_ticks = ticks;
-        }
     }
     simd_end();
+    timed();
     cpu->draw_ops = picked;
     cpu->draw_level = level;
     if (copier == NULL || cpu->draw_copy_ticks < copier->draw_copy_ticks) {
@@ -356,14 +379,10 @@ static void pick(struct cpu *cpu) {
     uint64_t rate = cpu->draw_copy_ticks != 0
                   ? bytes * time_tsc_hz() / cpu->draw_copy_ticks >> 20
                   : 0;
-    uint64_t read_rate = cpu->draw_read_ticks != 0
-                       ? bytes * time_tsc_hz() / cpu->draw_read_ticks >> 20
-                       : 0;
     printf(
         "Processor %#x draws the emulated VGA with up to %s, copying to the framebuffer at %llu "
-        "MiB/s and from it at %llu MiB/s\n",
-        cpu->apic_id, simd_level_name(level), (unsigned long long)rate,
-        (unsigned long long)read_rate
+        "MiB/s\n",
+        cpu->apic_id, simd_level_name(level), (unsigned long long)rate
     );
 }
 
@@ -420,6 +439,13 @@ void vga_draw_init(uint8_t *fb, size_t pitch, size_t rows) {
 
 void vga_draw_cpu_init(void) {
     pick(this_cpu());
+}
+
+void vga_draw_cpus_started(void) {
+    atomic_store_explicit(&all_started, true, memory_order_seq_cst);
+    if (atomic_load_explicit(&timing, memory_order_seq_cst) == 0) {
+        log_redraw();
+    }
 }
 
 const struct vga_draw_ops *vga_draw_ops(void) {
