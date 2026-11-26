@@ -107,6 +107,11 @@ static void room_find(
         if (g->rom.size != 0 && g->rom.base != 0) {
             take(room, g->rom.base, g->rom.size);
         }
+        for (size_t b = 0; b < PCI_SRIOV_NUM_BARS; b++) {
+            if (g->vf_bars[b].base != 0) {
+                take(room, g->vf_bars[b].base, pci_enum_vf_span(g, b));
+            }
+        }
         if (g->header_type != PCI_HEADER_TYPE_BRIDGE || above(g, f)) {
             continue;
         }
@@ -147,12 +152,13 @@ static void room_find(
     }
 }
 
-// The lowest address in room that holds size bytes at their alignment, a page
-// at least, so that the BAR shares its pages with nothing.
-static bool fit(const struct range_list *room, uint64_t size, uintptr_t *at) {
+// The lowest address in room that holds size bytes at align, each a page at
+// least, so that the BAR shares its pages with nothing.
+static bool fit(const struct range_list *room, uint64_t size, uint64_t align, uintptr_t *at) {
     uint64_t span = size > PAGE_SIZE ? size : PAGE_SIZE;
+    align = align > PAGE_SIZE ? align : PAGE_SIZE;
     for (size_t i = 0; i < room->count; i++) {
-        uint64_t start = align_up(room->r[i].base, span);
+        uint64_t start = align_up(room->r[i].base, align);
         if (start >= room->r[i].base && start < room->r[i].end
          && room->r[i].end - start >= span) {
             *at = (uintptr_t)start;
@@ -162,10 +168,13 @@ static bool fit(const struct range_list *room, uint64_t size, uintptr_t *at) {
     return false;
 }
 
-// Looks for an address in the window [base, end) of the bus that f is on.
+// Looks for an address in the window [base, end) of the bus that f is on, for
+// size bytes of the BAR's kind at align.
 static bool window_try(
     const struct pci_enum_function *f,
     const struct pci_enum_bar *bar,
+    uint64_t size,
+    uint64_t align,
     uintptr_t base,
     uintptr_t end,
     uintptr_t *at
@@ -178,7 +187,7 @@ static bool window_try(
     }
     struct range_list room = { 0 };
     room_find(&room, f, 0, base, end);
-    bool found = fit(&room, bar->size, at);
+    bool found = fit(&room, size, align, at);
     range_list_free(&room);
     return found;
 }
@@ -194,12 +203,15 @@ static const struct pci_host_bridge *host_bridge_of(const struct pci_enum_functi
     return NULL;
 }
 
-// An address for the BAR in a window of the bus that f is on. A prefetchable
-// BAR tries the prefetchable windows first, and one that is not prefetchable
-// takes none of them, as Linux 7.3's pci_bus_alloc_from_region() has it.
+// An address for size bytes of the BAR at align in a window of the bus that f
+// is on. A prefetchable BAR tries the prefetchable windows first, and one that
+// is not prefetchable takes none of them, as Linux 7.3's
+// pci_bus_alloc_from_region() has it.
 static bool place(
     const struct pci_enum_function *f,
     const struct pci_enum_bar *bar,
+    uint64_t size,
+    uint64_t align,
     uintptr_t *at
 ) {
     const struct pci_enum_function *p = f->parent;
@@ -208,11 +220,11 @@ static bool place(
             return false;
         }
         if (bar->prefetchable && p->pref_limit >= p->pref_base
-         && window_try(f, bar, p->pref_base, p->pref_limit + 1, at)) {
+         && window_try(f, bar, size, align, p->pref_base, p->pref_limit + 1, at)) {
             return true;
         }
         return p->mem_limit >= p->mem_base
-            && window_try(f, bar, p->mem_base, (uintptr_t)p->mem_limit + 1, at);
+            && window_try(f, bar, size, align, p->mem_base, (uintptr_t)p->mem_limit + 1, at);
     }
     const struct pci_host_bridge *hb = host_bridge_of(f);
     if (hb == NULL) {
@@ -224,7 +236,7 @@ static bool place(
             bool wanted = pass == 0
                         ? w->prefetchable == bar->prefetchable
                         : bar->prefetchable && !w->prefetchable;
-            if (wanted && window_try(f, bar, w->base, w->end, at)) {
+            if (wanted && window_try(f, bar, size, align, w->base, w->end, at)) {
                 return true;
             }
         }
@@ -267,6 +279,41 @@ static bool program(
     return stuck;
 }
 
+// Gives the BAR, of size bytes at align, an address in a window of its bus.
+static void assign(
+    struct pci_enum_function *f,
+    struct pci_enum_bar *bar,
+    const char *name,
+    size_t b,
+    uint64_t size,
+    uint64_t align
+) {
+    uintptr_t at;
+    if (!place(f, bar, size, align, &at)) {
+        printf(
+            "PCI " PCI_CFG_ADDR_FMT " %s%zu: left unassigned by the firmware, and no window of "
+            "its bus has room for its 0x%llx bytes\n",
+            PCI_CFG_ADDR_ARGS(f->addr), name, b, (unsigned long long)size
+        );
+        return;
+    }
+    if (!program(f, bar, at)) {
+        printf(
+            "PCI " PCI_CFG_ADDR_FMT " %s%zu: left unassigned by the firmware, and keeps no "
+            "address written to it\n",
+            PCI_CFG_ADDR_ARGS(f->addr), name, b
+        );
+        return;
+    }
+    bar->base = at;
+    printf(
+        "PCI " PCI_CFG_ADDR_FMT " %s%zu: left unassigned by the firmware, now at 0x%llx+0x%llx\n",
+        PCI_CFG_ADDR_ARGS(f->addr), name, b, (unsigned long long)at, (unsigned long long)size
+    );
+}
+
+// A VF BAR spans its VFs' memory from its base, aligned as one VF's BAR is
+// (Single Root I/O Virtualization and Sharing Specification 1.1, 3.3.14).
 void pci_assign_unassigned_bars(void) {
     const struct pci_enum_topology *t = pci_enum_topology();
     if (t == NULL) {
@@ -276,35 +323,17 @@ void pci_assign_unassigned_bars(void) {
         struct pci_enum_function *f = &t->functions[i];
         for (size_t b = 0; b < f->bar_count; b++) {
             struct pci_enum_bar *bar = &f->bars[b];
-            if ((bar->kind != PCI_ENUM_BAR_MEM32 && bar->kind != PCI_ENUM_BAR_MEM64)
-             || bar->size == 0
-             || bar->base != 0) {
-                continue;
+            bool memory = bar->kind == PCI_ENUM_BAR_MEM32 || bar->kind == PCI_ENUM_BAR_MEM64;
+            if (memory && bar->size != 0 && bar->base == 0) {
+                assign(f, bar, "BAR", b, bar->size, bar->size);
             }
-            uintptr_t at;
-            if (!place(f, bar, &at)) {
-                printf(
-                    "PCI " PCI_CFG_ADDR_FMT " BAR%zu: left unassigned by the firmware, and no "
-                    "window of its bus has room for its 0x%llx bytes\n",
-                    PCI_CFG_ADDR_ARGS(f->addr), b, (unsigned long long)bar->size
-                );
-                continue;
+        }
+        for (size_t b = 0; b < PCI_SRIOV_NUM_BARS; b++) {
+            struct pci_enum_bar *bar = &f->vf_bars[b];
+            uint64_t span = pci_enum_vf_span(f, b);
+            if (span != 0 && bar->base == 0) {
+                assign(f, bar, "VF BAR", b, span, bar->size);
             }
-            if (!program(f, bar, at)) {
-                printf(
-                    "PCI " PCI_CFG_ADDR_FMT " BAR%zu: left unassigned by the firmware, and "
-                    "keeps no address written to it\n",
-                    PCI_CFG_ADDR_ARGS(f->addr), b
-                );
-                continue;
-            }
-            bar->base = at;
-            printf(
-                "PCI " PCI_CFG_ADDR_FMT " BAR%zu: left unassigned by the firmware, now at "
-                "0x%llx+0x%llx\n",
-                PCI_CFG_ADDR_ARGS(f->addr), b, (unsigned long long)at,
-                (unsigned long long)bar->size
-            );
         }
     }
 }
@@ -392,6 +421,12 @@ static bool window_only(
         }
         if (g->rom.base != 0 && overlaps(base, last, g->rom.base, g->rom.size)) {
             return false;
+        }
+        for (size_t b = 0; b < PCI_SRIOV_NUM_BARS; b++) {
+            const struct pci_enum_bar *bar = &g->vf_bars[b];
+            if (bar->base != 0 && overlaps(base, last, bar->base, pci_enum_vf_span(g, b))) {
+                return false;
+            }
         }
         bool between = g == bridge || (above(g, f) && above(bridge, g));
         if (g->header_type != PCI_HEADER_TYPE_BRIDGE || between) {
