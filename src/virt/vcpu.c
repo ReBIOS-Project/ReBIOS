@@ -142,16 +142,22 @@ static struct spinlock world_lock;
 static _Atomic(struct cpu *) world_owner;
 // Odd while the others are paused.
 static _Atomic(uint64_t) world_epoch;
-static _Atomic(uint32_t) world_acks;
+// Whether the pausing processor had interrupts on, which it has off until it
+// resumes the others, so that a thread pausing them stays on the processor it
+// paused them from.
+static bool world_interrupts;
 
+// Each vCPU says which pause it stays out of the guest for, so that one that
+// comes from waiting for a start-up IPI meanwhile, which counts as out of the
+// guest, says so only for itself.
 static void service_pause(struct vcpu *v) {
     for (;;) {
-        uint64_t epoch = atomic_load_explicit(&world_epoch, memory_order_acquire);
+        uint64_t epoch = atomic_load_explicit(&world_epoch, memory_order_seq_cst);
         if ((epoch & 1) == 0
          || atomic_load_explicit(&world_owner, memory_order_acquire) == v->cpu) {
             return;
         }
-        atomic_fetch_add_explicit(&world_acks, 1, memory_order_acq_rel);
+        atomic_store_explicit(&v->paused_epoch, epoch, memory_order_release);
         while (atomic_load_explicit(&world_epoch, memory_order_acquire) == epoch) {
             cpu_relax();
         }
@@ -167,36 +173,54 @@ void vcpu_serve_pause(void) {
     }
 }
 
+// Whether the vCPU stays out of the guest for the pause of epoch: it said so,
+// or it waits for a start-up IPI, after which it sees to the pause before it
+// enters the guest.
+static bool out_for(const struct cpu *cpu, uint64_t epoch) {
+    const struct vcpu *v = cpu->vcpu;
+    if (v == NULL || !atomic_load_explicit(&cpu->online, memory_order_acquire)) {
+        return true;
+    }
+    return atomic_load_explicit(&v->paused_epoch, memory_order_acquire) == epoch
+        || atomic_load_explicit(&v->sipi, memory_order_seq_cst) == VCPU_SIPI_WAITING;
+}
+
 void vcpu_pause_others(void) {
+    bool interrupts = (read_rflags() & RFLAGS_IF) != 0;
+    cli();
     struct cpu *self = this_cpu();
     // Another pause may come first, which this one must not hold up.
     while (!spinlock_try(&world_lock)) {
         service_pause(self->vcpu);
         cpu_relax();
     }
-    atomic_store_explicit(&world_acks, 0, memory_order_relaxed);
+    world_interrupts = interrupts;
     atomic_store_explicit(&world_owner, self, memory_order_relaxed);
-    atomic_fetch_add_explicit(&world_epoch, 1, memory_order_seq_cst);
-    // Those waiting for a start-up IPI stay out of the guest anyway.
-    uint32_t expected = 0;
+    uint64_t epoch = atomic_fetch_add_explicit(&world_epoch, 1, memory_order_seq_cst) + 1;
     for (size_t i = 0; i < smp_cpu_count(); i++) {
         struct cpu *cpu = smp_cpu(i);
-        struct vcpu *v = cpu->vcpu;
-        if (cpu != self && atomic_load_explicit(&cpu->online, memory_order_acquire) && v != NULL
-         && atomic_load_explicit(&v->sipi, memory_order_acquire) != VCPU_SIPI_WAITING) {
-            expected++;
+        if (cpu != self && !out_for(cpu, epoch)) {
             vcpu_kick(cpu);
         }
     }
-    while (atomic_load_explicit(&world_acks, memory_order_acquire) < expected) {
-        cpu_relax();
+    // Each in turn, as each may go into or out of waiting for a start-up IPI
+    // meanwhile.
+    for (size_t i = 0; i < smp_cpu_count(); i++) {
+        struct cpu *cpu = smp_cpu(i);
+        while (cpu != self && !out_for(cpu, epoch)) {
+            cpu_relax();
+        }
     }
 }
 
 void vcpu_resume_others(void) {
+    bool interrupts = world_interrupts;
     atomic_store_explicit(&world_owner, NULL, memory_order_relaxed);
     atomic_fetch_add_explicit(&world_epoch, 1, memory_order_seq_cst);
     spinlock_release(&world_lock);
+    if (interrupts) {
+        sti();
+    }
 }
 
 bool vcpu_pause_pending(void) {
@@ -1257,7 +1281,7 @@ void vcpu_wait_for_sipi(struct vcpu *v) {
     for (;;) {
         cpu_slice_start();
         atomic_store_explicit(&cpu->kicked, false, memory_order_seq_cst);
-        if ((vector = atomic_load_explicit(&v->sipi, memory_order_acquire)) >= 0) {
+        if ((vector = atomic_load_explicit(&v->sipi, memory_order_seq_cst)) >= 0) {
             break;
         }
         sleep_check(v);

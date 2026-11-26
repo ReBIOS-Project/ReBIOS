@@ -1696,7 +1696,7 @@ static void deliver(struct vcpu *from, struct vcpu *to, uint32_t command) {
             // As on a processor, only a vCPU waiting for one takes it.
             int32_t waiting = VCPU_SIPI_WAITING;
             bool started = atomic_compare_exchange_strong_explicit(
-                &to->sipi, &waiting, (int32_t)vector, memory_order_release, memory_order_relaxed
+                &to->sipi, &waiting, (int32_t)vector, memory_order_seq_cst, memory_order_relaxed
             );
             if (!started) {
                 started = nvmx_sipi(to, vector);

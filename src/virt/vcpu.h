@@ -222,6 +222,9 @@ struct vcpu {
     // VCPU_SIPI_RUNNING, or else, where the processor cannot wait for one in
     // the guest, the vector of the one passed on to it.
     _Atomic(int32_t) sipi;
+    // The epoch of the last pause of the others' that the vCPU stayed out of
+    // the guest for.
+    _Atomic(uint64_t) paused_epoch;
 
     // The legacy BIOS's 32-bit flat mode, and the mode its 16-bit code was in
     // when it last switched there, for HYPERCALL_CALL32_*.
