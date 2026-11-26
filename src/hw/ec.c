@@ -22,6 +22,7 @@
 #include <uacpi/event.h>
 #include <uacpi/internal/context.h>
 #include <uacpi/internal/mutex.h>
+#include <uacpi/internal/namespace.h>
 #include <uacpi/internal/types.h>
 #include <uacpi/kernel_api.h>
 #include <uacpi/namespace.h>
@@ -37,6 +38,7 @@
 #include <hw/acpi.h>
 #include <lib/log.h>
 #include <lib/time.h>
+#include <lib/util.h>
 #include <sys/x86.h>
 
 // EC_SC status bits and commands, ACPI 6.6, 12.2.1 and 12.3.
@@ -339,6 +341,125 @@ static bool gpe_find(uacpi_namespace_node **device, uacpi_u16 *idx) {
     return found;
 }
 
+// Linux 7.3's EC driver runs the _REG methods of the regions that its handler
+// at the namespace's root covers in two steps: those in the EC's own scope, at
+// any depth, with its orphan _REG, then, for each device that its _STA says
+// present or functional, those directly in its scope, with its orphan _REG, an
+// absent device's whole scope left alone (drivers/acpi/ec.c,
+// ec_install_handlers() and acpi_ec_register_opregions(); drivers/acpi/scan.c,
+// acpi_bus_attach()). uACPI runs all of them at once, and has no public call
+// for one scope to a depth, so this reads its internal region state, as its
+// do_run_reg() does.
+struct reg_walk {
+    size_t ran;
+    size_t absent;
+};
+
+// _REG(EmbeddedControl, 1) of the scope: false where it has no such method.
+static bool reg_run(uacpi_namespace_node *scope) {
+    uacpi_namespace_node *reg;
+    uacpi_object_type type;
+    if (uacpi_namespace_node_find(scope, "_REG", &reg) != UACPI_STATUS_OK
+     || uacpi_namespace_node_type(reg, &type) != UACPI_STATUS_OK
+     || type != UACPI_OBJECT_METHOD) {
+        return false;
+    }
+    uacpi_object *args[] = {
+        uacpi_object_create_integer(UACPI_ADDRESS_SPACE_EMBEDDED_CONTROLLER),
+        uacpi_object_create_integer(ACPI_REG_CONNECT)
+    };
+    if (args[0] != NULL && args[1] != NULL) {
+        uacpi_object_array array = { args, ARRAY_COUNT(args) };
+        uacpi_status status = uacpi_execute(scope, "_REG", &array);
+        if (status != UACPI_STATUS_OK) {
+            const char *path = acpi_path(scope);
+            printf("Embedded controller: %s._REG: %s\n", path, uacpi_status_to_string(status));
+            acpi_path_free(path);
+        }
+    }
+    for (size_t i = 0; i < ARRAY_COUNT(args); i++) {
+        uacpi_object_unref(args[i]);
+    }
+    return true;
+}
+
+// An EmbeddedControl region whose handler is in and whose _REG has not run,
+// kept alive while it runs, as _REG may take it away.
+static uacpi_iteration_decision region_reg(
+    void *user,
+    uacpi_namespace_node *node,
+    uacpi_u32 depth
+) {
+    (void)depth;
+    struct reg_walk *walk = user;
+    uacpi_object *object = uacpi_namespace_node_get_object(node);
+    uacpi_operation_region *region = object != NULL ? object->op_region : NULL;
+    uint8_t skip = UACPI_OP_REGION_STATE_REG_EXECUTED | UACPI_OP_REGION_STATE_DISCONNECTING;
+    if (region == NULL || region->space != UACPI_ADDRESS_SPACE_EMBEDDED_CONTROLLER
+     || (region->state_flags & skip) != 0 || region->handler == NULL) {
+        return UACPI_ITERATION_DECISION_CONTINUE;
+    }
+    uacpi_object_ref(object);
+    if (reg_run(uacpi_namespace_node_parent(node))) {
+        region->state_flags |= UACPI_OP_REGION_STATE_REG_EXECUTED;
+        walk->ran++;
+    }
+    uacpi_object_unref(object);
+    return UACPI_ITERATION_DECISION_CONTINUE;
+}
+
+// The regions of the scope to depth, then its _REG where none of its own
+// regions is the EC's, which firmware may still wait on.
+static void scope_reg(uacpi_namespace_node *scope, uacpi_u32 depth, struct reg_walk *walk) {
+    uacpi_namespace_for_each_child(
+        scope, region_reg, NULL, UACPI_OBJECT_OPERATION_REGION_BIT, depth, walk
+    );
+    uacpi_namespace_node *child = NULL;
+    while (uacpi_namespace_node_next_typed(scope, &child, UACPI_OBJECT_OPERATION_REGION_BIT)
+        == UACPI_STATUS_OK) {
+        uacpi_object *object = uacpi_namespace_node_get_object(child);
+        uacpi_operation_region *region = object != NULL ? object->op_region : NULL;
+        if (region != NULL && region->space == UACPI_ADDRESS_SPACE_EMBEDDED_CONTROLLER) {
+            return;
+        }
+    }
+    walk->ran += reg_run(scope);
+}
+
+static uacpi_iteration_decision device_reg(
+    void *user,
+    uacpi_namespace_node *node,
+    uacpi_u32 depth
+) {
+    (void)depth;
+    struct reg_walk *walk = user;
+    uacpi_u32 status;
+    uacpi_u32 there = ACPI_STA_RESULT_DEVICE_PRESENT | ACPI_STA_RESULT_DEVICE_FUNCTIONING;
+    if (uacpi_eval_sta(node, &status) == UACPI_STATUS_OK && (status & there) == 0) {
+        walk->absent++;
+        return UACPI_ITERATION_DECISION_NEXT_PEER;
+    }
+    if (node != ec.node) {
+        scope_reg(node, 1, walk);
+    }
+    return UACPI_ITERATION_DECISION_CONTINUE;
+}
+
+static void reg_all(void) {
+    struct reg_walk walk = { 0 };
+    scope_reg(ec.node, UACPI_MAX_DEPTH_ANY, &walk);
+    scope_reg(uacpi_namespace_root(), 1, &walk);
+    uacpi_object_type_bits devices = UACPI_OBJECT_DEVICE_BIT | UACPI_OBJECT_PROCESSOR_BIT
+                                   | UACPI_OBJECT_THERMAL_ZONE_BIT;
+    uacpi_namespace_for_each_child(
+        uacpi_namespace_root(), device_reg, NULL, devices, UACPI_MAX_DEPTH_ANY, &walk
+    );
+    printf(
+        "Embedded controller: %zu _REG methods run, the scopes of %zu absent devices left alone\n",
+        walk.ran, walk.absent
+    );
+}
+
 void ec_early_init(void) {
     ec.lock = uacpi_kernel_create_semaphore(1);
     uacpi_table table;
@@ -385,11 +506,9 @@ void ec_init(void) {
     acpi_path_free(path);
 
     // Either way, _REG runs now.
-    uacpi_status status;
+    uacpi_status status = UACPI_STATUS_OK;
     if (ec.early) {
-        status = uacpi_reg_all_opregions(
-            uacpi_namespace_root(), UACPI_ADDRESS_SPACE_EMBEDDED_CONTROLLER
-        );
+        reg_all();
     } else {
         status = uacpi_install_address_space_handler(
             ec.node, UACPI_ADDRESS_SPACE_EMBEDDED_CONTROLLER, region_handler, NULL
