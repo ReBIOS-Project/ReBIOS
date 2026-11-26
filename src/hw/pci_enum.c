@@ -32,6 +32,7 @@
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/printf.h>
+#include <lib/time.h>
 #include <memory.h>
 
 #define CARDBUS_CAPABILITIES 0x14
@@ -51,6 +52,9 @@
 #define EXT_CAP_FIRST 0x100
 #define EXT_CAP_MAX_ENTRIES 512
 #define EXT_CAP_SRIOV 0x0010
+// The System Page Size of 4 KiB, and how long VFs take to go once disabled.
+#define SYSTEM_PAGE_4K ((uint32_t)1)
+#define VF_DISABLE_US 1000000
 #define EXT_CAP_REBAR 0x0015
 
 #define REBAR_CAPABILITY(n) (0x04 + 8 * (n))
@@ -75,7 +79,7 @@ struct segment_buses {
 
 // A BAR's registers before and while it is sized.
 struct bar_sample {
-    uint8_t reg;
+    uint16_t reg;
     uint8_t kind;
     bool prefetchable;
     bool rom;
@@ -184,7 +188,7 @@ static void decode_restore(const struct pci_enum_function *f, uint16_t command, 
 
 static void bar_sample_read(
     struct pci_cfg_addr addr,
-    uint8_t reg,
+    uint16_t reg,
     bool last_slot,
     struct bar_sample *s
 ) {
@@ -420,6 +424,57 @@ static void walk_extended_capabilities(struct pci_enum_function *f) {
     }
 }
 
+// A physical function's VFs, as Single Root I/O Virtualization and Sharing
+// Specification 1.1, 3.3.3.4, 3.3.13, and 3.3.14 have them: how many it can
+// have, and its VF BARs, sized as its BARs are, at the default System Page
+// Size of 4 KiB, with VF Enable and VF MSE clear, as VF memory then decodes
+// nowhere. VFs the firmware enabled are disabled first, as Linux 7.3's
+// sriov_init() does, the capability read again only after the second that the
+// specification asks for (3.3.3.1). VF BARs never decode I/O space.
+static void size_vf_bars(struct pci_enum_function *f) {
+    uint32_t cap = f->sriov_ext_cap;
+    if (cap == 0 || f->header_type != PCI_HEADER_TYPE_NORMAL) {
+        return;
+    }
+    uint32_t control = pci_cfg_read(f->addr, cap + PCI_SRIOV_CTRL, 2);
+    uint32_t enables = PCI_SRIOV_CTRL_VFE | PCI_SRIOV_CTRL_MSE;
+    if ((control & enables) != 0) {
+        pci_cfg_write(f->addr, cap + PCI_SRIOV_CTRL, 2, control & ~enables);
+    }
+    if ((control & PCI_SRIOV_CTRL_VFE) != 0) {
+        printf(
+            "PCI " PCI_CFG_ADDR_FMT ": the VFs the firmware enabled disabled\n",
+            PCI_CFG_ADDR_ARGS(f->addr)
+        );
+        time_udelay(VF_DISABLE_US);
+    }
+    f->total_vfs = (uint16_t)pci_cfg_read(f->addr, cap + PCI_SRIOV_TOTAL_VF, 2);
+    if (f->total_vfs == 0) {
+        return;
+    }
+    if (pci_cfg_read(f->addr, cap + PCI_SRIOV_SYS_PGSIZE, 4) != SYSTEM_PAGE_4K) {
+        pci_cfg_write(f->addr, cap + PCI_SRIOV_SYS_PGSIZE, 4, SYSTEM_PAGE_4K);
+    }
+    struct bar_sample samples[PCI_SRIOV_NUM_BARS];
+    for (size_t i = 0; i < PCI_SRIOV_NUM_BARS; i++) {
+        uint16_t reg = (uint16_t)(cap + PCI_SRIOV_BAR + 4 * i);
+        bar_sample_read(f->addr, reg, i + 1 == PCI_SRIOV_NUM_BARS, &samples[i]);
+        if (samples[i].kind == PCI_ENUM_BAR_IO) {
+            samples[i].kind = PCI_ENUM_BAR_NONE;
+        }
+        if (samples[i].kind == PCI_ENUM_BAR_MEM64 && i + 1 < PCI_SRIOV_NUM_BARS) {
+            i++;
+            samples[i] = (struct bar_sample){ .reg = (uint16_t)(reg + 4) };
+        }
+    }
+    for (size_t i = 0; i < PCI_SRIOV_NUM_BARS; i++) {
+        bar_sample_probe(f->addr, &samples[i]);
+    }
+    for (size_t i = 0; i < PCI_SRIOV_NUM_BARS; i++) {
+        bar_record(f, &samples[i], &f->vf_bars[i]);
+    }
+}
+
 static void read_bridge(struct pci_enum_function *f) {
     uint32_t buses = pci_cfg_read(f->addr, PCI_PRIMARY_BUS, 4);
     f->primary_bus = (uint8_t)buses;
@@ -522,6 +577,19 @@ static void log_function(const struct pci_enum_function *f) {
             (unsigned long long)f->rom.base, (unsigned long long)f->rom.size
         );
     }
+    if (f->total_vfs != 0) {
+        line_add(&line, " VFs %u", f->total_vfs);
+    }
+    for (size_t i = 0; i < PCI_SRIOV_NUM_BARS && f->total_vfs != 0; i++) {
+        const struct pci_enum_bar *bar = &f->vf_bars[i];
+        if (bar->size != 0) {
+            line_add(
+                &line, " VF BAR%zu %s 0x%llx+%u*0x%llx",
+                i, bar_kind_name(bar), (unsigned long long)bar->base, f->total_vfs,
+                (unsigned long long)bar->size
+            );
+        }
+    }
     if (is_bridge(f)) {
         line_add(
             &line, " pri %02x sec %02x sub %02x",
@@ -560,6 +628,7 @@ static void scan_function(struct function_list *list, struct pci_cfg_addr addr, 
 
     walk_capabilities(f);
     walk_extended_capabilities(f);
+    size_vf_bars(f);
 
     switch (f->header_type) {
         case PCI_HEADER_TYPE_NORMAL: {
@@ -794,6 +863,18 @@ struct pci_enum_function *pci_enum_find(struct pci_cfg_addr addr) {
         }
     }
     return NULL;
+}
+
+uint64_t pci_enum_vf_span(const struct pci_enum_function *f, size_t b) {
+    if (b >= PCI_SRIOV_NUM_BARS || f->total_vfs == 0) {
+        return 0;
+    }
+    const struct pci_enum_bar *bar = &f->vf_bars[b];
+    bool memory = bar->kind == PCI_ENUM_BAR_MEM32 || bar->kind == PCI_ENUM_BAR_MEM64;
+    if (!memory || bar->size == 0 || bar->size > UINT64_MAX / f->total_vfs) {
+        return 0;
+    }
+    return (uint64_t)bar->size * f->total_vfs;
 }
 
 struct pci_enum_function *pci_enum_vga(void) {

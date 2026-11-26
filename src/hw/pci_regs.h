@@ -110,6 +110,16 @@
 #define PCI_MSIX_ENTRY_CTRL_MASKBIT ((uint32_t)1)
 #define PCI_EXP_FLAGS 2
 
+// The SR-IOV extended capability (Single Root I/O Virtualization and Sharing
+// Specification 1.1, 3.3), which a physical function's VFs hang off.
+#define PCI_SRIOV_CTRL 0x08
+#define PCI_SRIOV_CTRL_VFE ((uint32_t)0x0001)
+#define PCI_SRIOV_CTRL_MSE ((uint32_t)0x0008)
+#define PCI_SRIOV_TOTAL_VF 0x0e
+#define PCI_SRIOV_SYS_PGSIZE 0x20
+#define PCI_SRIOV_BAR 0x24
+#define PCI_SRIOV_NUM_BARS 6
+
 // Class codes, by the names that Linux 7.3's include/linux/pci_ids.h gives
 // them, and the subclasses of base classes, after them.
 #define PCI_BASE_CLASS_STORAGE 0x01

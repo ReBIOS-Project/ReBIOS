@@ -34,7 +34,7 @@ struct pci_enum_bar {
     uint8_t kind;
     bool prefetchable;
     // Configuration space offset of its (lower) register.
-    uint8_t reg;
+    uint16_t reg;
     // As the firmware programmed it, and its size; size 0 means unimplemented.
     uintptr_t base;
     size_t size;
@@ -70,6 +70,12 @@ struct pci_enum_function {
     struct pci_enum_bar bars[6];
     // The expansion ROM BAR, kind PCI_ENUM_BAR_MEM32 if implemented.
     struct pci_enum_bar rom;
+    // A physical function's VFs (Single Root I/O Virtualization and Sharing
+    // Specification 1.1): the most it can have, and its VF BARs, each the size
+    // of one VF's at the default System Page Size of 4 KiB, holding total_vfs
+    // of them in a row from its base.
+    uint16_t total_vfs;
+    struct pci_enum_bar vf_bars[6];
 
     // Header types 1 and 2.
     uint8_t primary_bus;
@@ -111,6 +117,9 @@ const struct pci_enum_topology *pci_enum_scan(void);
 const struct pci_enum_topology *pci_enum_topology(void);
 
 struct pci_enum_function *pci_enum_find(struct pci_cfg_addr addr);
+
+// What the function's VF BAR b spans for all of its VFs: 0 where it has none.
+uint64_t pci_enum_vf_span(const struct pci_enum_function *f, size_t b);
 
 // The function of the PCI device that owns the legacy VGA resources, NULL
 // where there is none.
