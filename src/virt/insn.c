@@ -313,7 +313,7 @@ static void vex_rex(struct insn *insn, uint8_t rxb, bool w, bool long_mode) {
     }
 }
 
-bool insn_decode(struct vcpu *v, struct insn *insn) {
+bool insn_fetch(struct vcpu *v, uint8_t *bytes) {
     uint32_t cs = vcpu_seg_attrib(v, VCPU_SEG_CS);
     bool long_mode = (vcpu_efer(v) & EFER_LMA) != 0 && (cs & VCPU_SEG_L) != 0;
     uintptr_t linear = vcpu_rip(v);
@@ -323,7 +323,7 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
 
     // Zeroes past what can be read make the decoding stop short, as the
     // instruction then cannot be complete.
-    uint8_t bytes[INSN_MAX_LENGTH + 4] = { 0 };
+    memset(bytes, 0, INSN_MAX_LENGTH + 4);
     if (v->fetched_count == INSN_MAX_LENGTH && v->fetched_rip == vcpu_rip(v)) {
         memcpy(bytes, v->fetched, INSN_MAX_LENGTH);
     } else if (!guest_mem_linear_read(v, linear, bytes, INSN_MAX_LENGTH, true)) {
@@ -332,7 +332,12 @@ bool insn_decode(struct vcpu *v, struct insn *insn) {
             return false;
         }
     }
-    return insn_decode_bytes(v, bytes, insn);
+    return true;
+}
+
+bool insn_decode(struct vcpu *v, struct insn *insn) {
+    uint8_t bytes[INSN_MAX_LENGTH + 4];
+    return insn_fetch(v, bytes) && insn_decode_bytes(v, bytes, insn);
 }
 
 bool insn_decode_bytes(struct vcpu *v, const uint8_t *bytes, struct insn *insn) {

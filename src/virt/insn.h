@@ -137,6 +137,11 @@ struct insn_stack {
 // Returns 0 if it cannot be read or is not one of those instructions.
 unsigned int insn_length_intercepted(struct vcpu *v);
 
+// The bytes of the instruction at the guest's CS:RIP, INSN_MAX_LENGTH of them
+// and 4 zeroes after, zeroes too past what can be read, into bytes. Returns
+// false where none can be read.
+bool insn_fetch(struct vcpu *v, uint8_t *bytes);
+
 // Decodes any instruction at the guest's CS:RIP: its length, sizes, prefixes,
 // and ModRM operand. Returns false if it cannot be read or is not a valid
 // instruction.

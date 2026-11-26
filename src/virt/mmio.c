@@ -47,6 +47,8 @@
 
 // The accesses to where nothing decodes that are logged.
 #define ABSENT_REPORTS 16
+// How many instructions the log says it could not read and ran again.
+#define UNREAD_REPORTS 16
 
 struct region {
     _Atomic(uintptr_t) base;
@@ -1111,14 +1113,25 @@ static bool fault(struct vcpu *v, uintptr_t gpa, bool fetch) {
         fetch_fault(v, gpa);
         return true;
     }
-    struct insn insn;
-    if (!insn_decode(v, &insn)) {
-        // The guest's EPT or nested page tables may keep it from being read,
-        // where the guest's hypervisor takes the exit.
-        if (!nvmx_exit_pending(v) && !nsvm_exit_pending(v)) {
-            unsupported(v, gpa, "it cannot be read and decoded");
+    // One the hypervisor cannot read, as where another processor just changed
+    // its mapping, runs again, the processor fetching it anew; the guest's EPT
+    // or nested page tables may keep it from being read too, where the guest's
+    // hypervisor takes the exit.
+    uint8_t bytes[INSN_MAX_LENGTH + 4];
+    if (!insn_fetch(v, bytes)) {
+        static _Atomic(unsigned int) unread;
+        if (!nvmx_exit_pending(v) && !nsvm_exit_pending(v)
+         && atomic_fetch_add_explicit(&unread, 1, memory_order_relaxed) < UNREAD_REPORTS) {
+            printf(
+                "The instruction at %#llx that reached %#llx cannot be read, so it runs again\n",
+                (unsigned long long)vcpu_rip(v), (unsigned long long)gpa
+            );
         }
         return true;
+    }
+    struct insn insn;
+    if (!insn_decode_bytes(v, bytes, &insn)) {
+        unsupported(v, gpa, "it cannot be decoded");
     }
     int result = emulate(v, &insn, &guest_mem);
     if (result == EMULATE_UNSUPPORTED) {
