@@ -241,6 +241,11 @@ bool exit_msr_write(struct vcpu *v, uint32_t msr, uint64_t value) {
             return false;
         }
         uint64_t old = v->vmcb->save.efer;
+        // LME changes only while paging is off (APM 24593 rev. 3.46, 14.6.2),
+        // as Linux 7.3's KVM checks (set_efer()).
+        if ((vcpu_cr0(v) & CR0_PG) != 0 && ((old ^ value) & EFER_LME) != 0) {
+            return false;
+        }
         v->vmcb->save.efer = (value & ~(uint64_t)EFER_LMA) | (old & EFER_LMA) | EFER_SVME;
         nsvm_set_svme(v, (value & EFER_SVME) != 0);
         // The processor would have flushed them for the guest's own write.
