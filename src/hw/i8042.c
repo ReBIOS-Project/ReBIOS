@@ -35,6 +35,15 @@
 
 #define DEVICE_IDENTIFY 0xf2
 
+// What Linux 7.3's i8042_check_aux() loops back through the AUX output buffer,
+// the AUX test's answers it takes for a port that works, and how often it
+// reads the command byte back for its AUX-disable bit to follow.
+#define AUX_LOOP_BYTE 0x5a
+#define AUX_TEST_OK 0x00
+#define AUX_TEST_OK_NOTEBOOK 0xfa
+#define AUX_TEST_OK_GENERAL 0xff
+#define AUX_TOGGLE_TRIES 100
+
 // As Linux 7.3's i8042 driver and libps2 have them: the bytes the controller
 // may hold; how long the driver waits for the controller, I8042_CTL_TIMEOUT
 // polls of 50 us, long enough for the controller to time out sending to a
@@ -101,6 +110,20 @@ static bool wait_output(uint8_t *byte, uint64_t timeout_us) {
     return false;
 }
 
+// A byte from the controller, false where none comes, or where one that should
+// come from the AUX port does not.
+static bool wait_output_from(bool aux, uint8_t *byte) {
+    for (size_t i = 0; i < CONTROLLER_TIMEOUT_US / POLL_US; i++) {
+        uint8_t status = inb(I8042_PORT_COMMAND);
+        if ((status & I8042_STATUS_OUTPUT_FULL) != 0) {
+            *byte = inb(I8042_PORT_DATA);
+            return !aux || (status & I8042_STATUS_AUX_DATA) != 0;
+        }
+        time_udelay(POLL_US);
+    }
+    return false;
+}
+
 static bool command(uint8_t value) {
     if (!wait_input_empty()) {
         return false;
@@ -144,6 +167,61 @@ static bool identify(bool aux) {
                 break;
             }
         }
+    }
+    return true;
+}
+
+// The AUX port enabled or disabled, and whether the command byte's AUX-disable
+// bit follows, which takes some controllers a while (Linux 7.3's
+// i8042_toggle_aux()).
+static bool aux_toggle(bool on) {
+    if (!command(on ? I8042_COMMAND_AUX_ENABLE : I8042_COMMAND_AUX_DISABLE)) {
+        return false;
+    }
+    for (size_t i = 0; i < AUX_TOGGLE_TRIES; i++) {
+        time_udelay(POLL_US);
+        uint8_t value;
+        if (!command(I8042_COMMAND_READ_CCB) || !wait_output(&value, CONTROLLER_TIMEOUT_US)) {
+            return false;
+        }
+        if (((value & I8042_CCB_AUX_DISABLED) == 0) == on) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Whether the controller has an AUX port, as Linux 7.3's i8042_check_aux()
+// decides, which leaves it enabled: the AUX loopback gives its byte back, or
+// else the AUX test answers no error, or one of the errors chipsets report for
+// ports that work, which is why it is the second test; then the command byte's
+// AUX-disable bit follows the port being enabled. The test of its interrupt
+// that follows there needs interrupts, which the probe does not use.
+static bool aux_port(void) {
+    flush();
+    uint8_t loop = 0;
+    bool looped = command(I8042_COMMAND_WRITE_AUX_BUFFER) && wait_input_empty();
+    if (looped) {
+        outb(I8042_PORT_DATA, AUX_LOOP_BYTE);
+        looped = wait_output_from(true, &loop) && loop == AUX_LOOP_BYTE;
+    }
+    if (!looped) {
+        uint8_t test;
+        if (!command(I8042_COMMAND_AUX_TEST) || !wait_output(&test, CONTROLLER_TIMEOUT_US)) {
+            printf("Keyboard controller: no mouse port, as its AUX test went unanswered\n");
+            return false;
+        }
+        if (test != AUX_TEST_OK && test != AUX_TEST_OK_NOTEBOOK && test != AUX_TEST_OK_GENERAL) {
+            printf("Keyboard controller: no mouse port, as its AUX test answered %#x\n", test);
+            return false;
+        }
+    }
+    if (!aux_toggle(false)) {
+        printf("Keyboard controller: its mouse port does not disable\n");
+    }
+    if (!aux_toggle(true)) {
+        printf("Keyboard controller: no mouse port, as it does not enable\n");
+        return false;
     }
     return true;
 }
@@ -213,11 +291,7 @@ void i8042_init(bool translate) {
         flush();
     }
 
-    command(I8042_COMMAND_AUX_ENABLE);
-    uint8_t test;
-    bool test_passed = command(I8042_COMMAND_AUX_TEST) && wait_output(&test, CONTROLLER_TIMEOUT_US)
-                    && test == 0;
-    aux_device = test_passed && identify(true);
+    aux_device = aux_port() && identify(true);
     flush();
 
     ccb = I8042_CCB_SYSTEM | (keyboard ? I8042_CCB_KBD_INTERRUPT : I8042_CCB_KBD_DISABLED)
