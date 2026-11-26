@@ -26,7 +26,7 @@
 // Vendor-independent handling of the exits both backends share. The handlers
 // that complete the guest's instruction advance its RIP themselves.
 void exit_cpuid(struct vcpu *v);
-void exit_hypercall(struct vcpu *v);
+void exit_vmcall(struct vcpu *v);
 void exit_rdmsr(struct vcpu *v);
 void exit_wrmsr(struct vcpu *v);
 // An MSR the guest reads or writes as RDMSR or WRMSR would have it, but for

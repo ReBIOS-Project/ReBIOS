@@ -95,7 +95,7 @@ clone_repo_commit \
 clone_repo_commit \
     https://github.com/ReBIOS-Project/seabios.git \
     seabios \
-    4a0ad76516cd6c8c4131714b158045d14bc75fed
+    069069ce60e9c790f3d2a7b5493fb46704f6c4df
 
 touch .deps-obtained
 

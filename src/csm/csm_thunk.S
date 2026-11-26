@@ -19,13 +19,10 @@
 
 // The real-mode code through which the guest calls the CSM16, run with CS at
 // its start. The hypervisor sets up each call's registers and far pointer; the
-// call's AX and BX come back to it through a hypercall, which on SVM is
-// patched to VMMCALL.
+// call's AX and BX come back to it through a hypercall.
 .section .rodata
 .globl csm_thunk_start
 .type csm_thunk_start, %object
-.globl csm_thunk_hypercall
-.type csm_thunk_hypercall, %object
 .globl csm_thunk_halt
 .type csm_thunk_halt, %object
 .globl csm_thunk_entry
@@ -37,9 +34,7 @@ csm_thunk_start:
     lcallw *%cs:(csm_thunk_entry - csm_thunk_start)
     movl %eax, %esi
     movl $(HYPERCALL_MAGIC | HYPERCALL_CSM_RETURN), %eax
-csm_thunk_hypercall:
-    vmcall
-.size csm_thunk_hypercall, . - csm_thunk_hypercall
+    outb %al, $HYPERCALL_PORT
     jmp csm_thunk_start
 csm_thunk_halt:
     cli

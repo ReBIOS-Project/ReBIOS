@@ -157,7 +157,7 @@ struct vcpu {
     // runs again once the guest took its events.
     bool mmio_retry;
     // A port's handler says the same of the access it was given, which is not
-    // to happen yet.
+    // to happen yet, and a hypercall, that it set where the guest goes on.
     bool io_retry;
     // Set for work the hypervisor left for a later exit, which comes once the
     // guest has run as long as the hypervisor last did (vlapic.c).

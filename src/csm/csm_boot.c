@@ -48,12 +48,10 @@
 #include <virt/vcpu.h>
 #include <virt/vga.h>
 #include <virt/vgabios.h>
-#include <virt/virt.h>
 
 extern const uint8_t seabios_csm[];
 extern const uint8_t seabios_csm_end[];
 extern const uint8_t csm_thunk_start[];
-extern const uint8_t csm_thunk_hypercall[];
 extern const uint8_t csm_thunk_halt[];
 extern const uint8_t csm_thunk_entry[];
 extern const uint8_t csm_thunk_end[];
@@ -568,10 +566,6 @@ void csm_boot_start(struct vcpu *v) {
 
     uint8_t *thunk = layout_low(THUNK_BASE);
     memcpy(thunk, csm_thunk_start, csm_thunk_end - csm_thunk_start);
-    if (!virt_vmx) {
-        // VMMCALL in place of VMCALL.
-        thunk[csm_thunk_hypercall - csm_thunk_start + 2] = 0xd9;
-    }
     uint16_t entry[] = {
         csm.compat16->compatibility16_call_offset, csm.compat16->compatibility16_call_segment
     };

@@ -967,7 +967,7 @@ static void svm_handle_exit(struct vcpu *v) {
             break;
         }
         case SVM_EXIT_VMMCALL: {
-            exit_hypercall(v);
+            exit_vmcall(v);
             break;
         }
         case SVM_EXIT_IOIO: {

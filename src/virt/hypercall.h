@@ -18,9 +18,11 @@
 #ifndef VIRT__HYPERCALL_H
 #define VIRT__HYPERCALL_H
 
-// Hypercalls are VMCALL on Intel processors and VMMCALL on AMD's, with EAX
-// holding HYPERCALL_MAGIC in its top half and the function in its bottom half.
-// Anything else gets the #UD the instruction raises without a hypervisor.
+// Hypercalls are writes of AL to HYPERCALL_PORT, where firmware has its SMI
+// command port, with EAX holding HYPERCALL_MAGIC in its top half and the
+// function in its bottom half. The processor checks the I/O permissions of the
+// writer's task for the port first. Any other write is the port's own.
+#define HYPERCALL_PORT 0xb2
 #define HYPERCALL_MAGIC 0x52420000
 #define HYPERCALL_FUNCTION_MASK 0x0000ffff
 

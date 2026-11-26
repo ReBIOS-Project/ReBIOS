@@ -1395,7 +1395,7 @@ static void vmx_handle_exit(struct vcpu *v) {
             break;
         }
         case EXIT_REASON_VMCALL: {
-            exit_hypercall(v);
+            exit_vmcall(v);
             break;
         }
         case EXIT_REASON_CR_ACCESS: {

@@ -59,22 +59,19 @@ void exit_cpuid(struct vcpu *v) {
     vcpu_skip_instruction(v);
 }
 
-// A hypercall instruction that makes no hypercall does what it does on a PC: a
-// VMMCALL that nothing intercepts raises #UD (APM 24593 rev. 3.46, 15.18), and
-// so does a VMCALL outside VMX operation (SDM 325462-093 Vol. 3C, 33.3).
-static void not_hypercall(struct vcpu *v) {
+// VMCALL and VMMCALL do what they do on a PC: a VMMCALL that nothing
+// intercepts raises #UD (APM 24593 rev. 3.46, 15.18), and so does a VMCALL
+// outside VMX operation (SDM 325462-093 Vol. 3C, 33.3).
+void exit_vmcall(struct vcpu *v) {
     if (!virt_vmx || !nvmx_vmcall(v)) {
         vcpu_inject_exception(v, 6, false, 0);
     }
 }
 
-// VMCALL and VMMCALL.
-#define HYPERCALL_LENGTH 3
-
-// Whether the hypercall instruction at CS:RIP, its first byte and its last, is
-// where within says, as the guest's paging maps it.
-static bool code_in(struct vcpu *v, bool (*within)(uintptr_t gpa)) {
-    static const size_t ends[] = { 0, HYPERCALL_LENGTH - 1 };
+// Whether the instruction at CS:RIP, of length bytes, its first byte and its
+// last, is where within says, as the guest's paging maps it.
+static bool code_in(struct vcpu *v, size_t length, bool (*within)(uintptr_t gpa)) {
+    const size_t ends[] = { 0, length - 1 };
     struct vcpu_segment cs;
     vcpu_get_seg(v, VCPU_SEG_CS, &cs);
     bool long_mode = (vcpu_efer(v) & EFER_LMA) != 0 && (cs.attrib & VCPU_SEG_L) != 0;
@@ -92,34 +89,46 @@ static bool code_in(struct vcpu *v, bool (*within)(uintptr_t gpa)) {
     return true;
 }
 
-// Hypercalls are the legacy BIOS's. Until the boot, it and the option ROMs it
-// runs are all that runs, at CPL 0. From the boot on, they come from its
-// image's read-only part, at CPL 0, or in V86 mode, where memory managers and
-// Windows run it for DOS. The thunk's returns from its CSM16 calls come before
-// the boot, or where the boot fails.
-static bool allowed(struct vcpu *v, uint32_t function) {
-    bool v86 = (vcpu_rflags(v) & RFLAGS_VM) != 0;
-    if (vcpu_cpl(v) != 0 && !v86) {
+// Hypercalls are the legacy BIOS's, in whatever mode the processor let its
+// write to the port through, as V86 mode, where memory managers and Windows
+// run it for DOS, and never a nested guest's. Until the boot, it and the
+// option ROMs it runs are all that runs, at CPL 0. From the boot on, they come
+// from its image's read-only part. The thunk's returns from its CSM16 calls
+// come before the boot, or where the boot fails.
+static bool allowed(struct vcpu *v, size_t length, uint32_t function) {
+    if (nvmx_in_l2(v) || nsvm_in_l2(v)) {
         return false;
     }
+    bool ring0 = vcpu_cpl(v) == 0 && (vcpu_rflags(v) & RFLAGS_VM) == 0;
     if (!csm_boot_begun()) {
-        return !v86;
+        return ring0;
     }
     if (function == HYPERCALL_CSM_RETURN) {
-        return !v86 && code_in(v, csm_boot_thunk_code);
+        return ring0 && code_in(v, length, csm_boot_thunk_code);
     }
-    return code_in(v, csm_boot_bios_code);
+    return code_in(v, length, csm_boot_bios_code);
 }
 
-// Returns whether the guest is to go on after the hypercall instruction; the
-// others set where it goes on themselves.
+// The length of the instruction whose I/O exit this is: the VM-exit
+// instruction length (SDM 325462-093 Vol. 3C, 28.2.5), or up to the next RIP
+// that an IOIO intercept gives (APM 24593 rev. 3.46, 15.10.2).
+static size_t io_length(struct vcpu *v) {
+    if (virt_vmx) {
+        return (size_t)vmx_read(VMCS_EXIT_INSTR_LEN);
+    }
+    return (size_t)(v->vmcb->control.exitinfo2 - v->vmcb->save.rip);
+}
+
+// Carries out the hypercall that the write of AL at CS:RIP makes, if it makes
+// one, and returns whether it did; one that sets where the guest goes on
+// itself sets v->io_retry, so that the guest goes on there.
 static bool hypercall(struct vcpu *v) {
     uint32_t eax = (uint32_t)v->gprs.rax;
     uint32_t ebx = (uint32_t)v->gprs.rbx;
     uint32_t function = eax & HYPERCALL_FUNCTION_MASK;
 
-    if ((eax & ~HYPERCALL_FUNCTION_MASK) != HYPERCALL_MAGIC || !allowed(v, function)) {
-        not_hypercall(v);
+    if ((eax & ~HYPERCALL_FUNCTION_MASK) != HYPERCALL_MAGIC
+     || !allowed(v, io_length(v), function)) {
         return false;
     }
 
@@ -131,7 +140,8 @@ static bool hypercall(struct vcpu *v) {
         }
         case HYPERCALL_CSM_RETURN: {
             csm_boot_returned(v);
-            return false;
+            v->io_retry = true;
+            return true;
         }
         case HYPERCALL_RESET: {
             if (ebx == HYPERCALL_RESET_SHUTDOWN) {
@@ -140,7 +150,7 @@ static bool hypercall(struct vcpu *v) {
             if (ebx == HYPERCALL_RESET_COLD || ebx == HYPERCALL_RESET_WARM) {
                 power_reset(ebx == HYPERCALL_RESET_WARM);
             }
-            break;
+            return false;
         }
         case HYPERCALL_CALL32_INIT: {
             vcpu_save_mode(v, &v->call32_flat);
@@ -149,20 +159,22 @@ static bool hypercall(struct vcpu *v) {
         }
         case HYPERCALL_CALL32_ENTER: {
             if (!v->call32_ready) {
-                break;
+                return false;
             }
             vcpu_save_mode(v, &v->call32_saved);
             vcpu_load_mode(v, &v->call32_flat);
             vcpu_set_rip(v, ebx);
-            return false;
+            v->io_retry = true;
+            return true;
         }
         case HYPERCALL_CALL32_RETURN: {
             if (!v->call32_ready) {
-                break;
+                return false;
             }
             vcpu_load_mode(v, &v->call32_saved);
             vcpu_set_rip(v, ebx);
-            return false;
+            v->io_retry = true;
+            return true;
         }
         case HYPERCALL_USB_DISK: {
             usb_disk_call(ebx);
@@ -173,16 +185,8 @@ static bool hypercall(struct vcpu *v) {
             return true;
         }
         default: {
-            break;
+            return false;
         }
-    }
-    not_hypercall(v);
-    return false;
-}
-
-void exit_hypercall(struct vcpu *v) {
-    if (hypercall(v)) {
-        vcpu_skip_instruction(v);
     }
 }
 
@@ -295,6 +299,13 @@ static void port_access(struct vcpu *v, uint16_t port, size_t size, bool in, uin
 
 void exit_io(struct vcpu *v, uint16_t port, size_t size, bool in, uint32_t *value) {
     profile_io(port);
+    if (port == HYPERCALL_PORT && size == 1 && !in) {
+        vcpu_io_access(v, port, size);
+        if (!hypercall(v)) {
+            io_dispatch(v, port, size, in, value);
+        }
+        return;
+    }
     port_access(v, port, size, in, value);
 }
 

@@ -3358,15 +3358,28 @@ static size_t put_fixed_memory32(uint8_t *p, uintptr_t base, size_t size, bool w
     return 12;
 }
 
+// The hypercall port, which ACPI 6.6, 6.4.2.5 describes as a 16-bit decoded
+// port of its own, at p; returns its size.
+static size_t put_command_port(uint8_t *p) {
+    p[0] = ACPI_TAG_IO;
+    p[1] = 0x01;
+    put_le(p + 2, HYPERCALL_PORT, 2);
+    put_le(p + 4, HYPERCALL_PORT, 2);
+    p[6] = 1;
+    p[7] = 1;
+    return 8;
+}
+
 // The memory the guest finds at addresses of ReBIOS's own rather than in a
-// BAR, as a resource list, into crs, CLAIMS_MAX bytes; returns its size. An OS
-// keeps clear of such memory only once a motherboard resource claims it. Of
-// the block of ACPI devices' memory, for ACPI only what no device's _CRS
-// claims, as those devices claim theirs, but all of it for the Plug and Play
-// BIOS, which shows none of them.
-#define CLAIMS_MAX (5 * 12 + 2)
+// BAR, and the hypercall port, as a resource list, into crs, CLAIMS_MAX bytes;
+// returns its size. An OS keeps clear of such memory and ports only once a
+// motherboard resource claims them. Of the block of ACPI devices' memory, for
+// ACPI only what no device's _CRS claims, as those devices claim theirs, but
+// all of it for the Plug and Play BIOS, which shows none of them.
+#define CLAIMS_MAX (8 + 5 * 12 + 2)
 static size_t claims(uint8_t *crs, bool acpi) {
-    size_t size = put_fixed_memory32(crs, vacpi.mailbox, MBX_SIZE + DOORBELL_SIZE, true);
+    size_t size = put_command_port(crs);
+    size += put_fixed_memory32(crs + size, vacpi.mailbox, MBX_SIZE + DOORBELL_SIZE, true);
     uintptr_t devices_base;
     uintptr_t devices_end;
     bool devices = acpi
@@ -4786,7 +4799,31 @@ void vacpi_wake(void) {
     spinlock_release(&vacpi.lock);
 }
 
+// The hypercall port, where firmware has its SMI command port: virt/exit.c
+// takes the legacy BIOS's hypercalls from it first, and nothing else written
+// there does anything, nor does it read but all ones.
+static void command_access(
+    struct vcpu *v,
+    void *ctx,
+    uint16_t offset,
+    size_t size,
+    bool in,
+    uint32_t *value
+) {
+    (void)v;
+    (void)ctx;
+    (void)offset;
+    (void)size;
+    if (in) {
+        *value = 0xffffffff;
+    }
+}
+
 void vacpi_init(void) {
+    struct io_handler command = {
+        .base = HYPERCALL_PORT, .count = 1, .access = command_access, .bytes = true
+    };
+    io_register(&command);
     if (!acpi_init()) {
         return;
     }
