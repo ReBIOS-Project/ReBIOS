@@ -65,6 +65,7 @@ struct pci_enum_function {
     uint8_t pcie_cap;
     uint16_t rebar_ext_cap;
     uint16_t sriov_ext_cap;
+    uint16_t vf_rebar_ext_cap;
     // Device/Port Type from the PCI Express Capabilities register, valid if
     // pcie_cap is not 0.
     uint8_t pcie_port_type;

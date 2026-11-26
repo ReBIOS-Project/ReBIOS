@@ -56,6 +56,7 @@
 #define SYSTEM_PAGE_4K ((uint32_t)1)
 #define VF_DISABLE_US 1000000
 #define EXT_CAP_REBAR 0x0015
+#define EXT_CAP_VF_REBAR 0x0024
 
 #define REBAR_CAPABILITY(n) (0x04 + 8 * (n))
 #define REBAR_CONTROL(n) (0x08 + 8 * (n))
@@ -415,6 +416,8 @@ static void walk_extended_capabilities(struct pci_enum_function *f) {
             f->rebar_ext_cap = (uint16_t)offset;
         } else if (id == EXT_CAP_SRIOV && f->sriov_ext_cap == 0) {
             f->sriov_ext_cap = (uint16_t)offset;
+        } else if (id == EXT_CAP_VF_REBAR && f->vf_rebar_ext_cap == 0) {
+            f->vf_rebar_ext_cap = (uint16_t)offset;
         }
         // The low 2 bits of the next offset are reserved.
         offset = (header >> 20) & 0xffc;

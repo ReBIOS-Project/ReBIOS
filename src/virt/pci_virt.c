@@ -63,12 +63,15 @@
 
 // PCI Express Base Specification 6.0, 7.8.6: the capability header, then a
 // capability and a control register for each of up to six BARs. A control
-// register's bits 2:0 are its BAR's index and bits 13:8 its size, encoding e
-// meaning 1 MiB << e; the capability register's bits 31:4 offer encodings 0 to
-// 27, and the control register's bits 31:16 those from 28 on.
+// register's bits 2:0 are its BAR's index, the first's bits 7:5 how many BARs
+// the capability has, and bits 13:8 its size, encoding e meaning 1 MiB << e;
+// the capability register's bits 31:4 offer encodings 0 to 27, and the control
+// register's bits 31:16 those from 28 on.
 #define REBAR_SIZE ((uint32_t)0x34)
 #define REBAR_PAIR ((uint32_t)8)
 #define REBAR_INDEX ((uint32_t)0x7)
+#define REBAR_PAIRS ((uint32_t)0xe0)
+#define REBAR_PAIRS_SHIFT 5
 #define REBAR_SIZE_SHIFT 8
 #define REBAR_SIZE_FIELD ((uint32_t)0x3f00)
 #define REBAR_ENCODING_BASE 20
@@ -174,9 +177,11 @@ struct viov {
     // VF Enable and VF MSE as the guest last set them.
     uint32_t control;
     uint32_t page_size;
-    // A 64-bit VF BAR at the index of its lower register.
+    // A 64-bit VF BAR at the index of its lower register, and one VF's size of
+    // it on the host, which its VF Resizable BAR capability can change.
     uint64_t guest[PCI_SRIOV_NUM_BARS];
     uint8_t type_bits[PCI_SRIOV_NUM_BARS];
+    uint64_t vf_size[PCI_SRIOV_NUM_BARS];
     // Its VFs, total_vfs of them once it first enabled any, count of them
     // enabled, at the routing ID offsets the host gave them.
     struct vfunction *vfs;
@@ -1294,7 +1299,7 @@ static bool vf_bar_at(const struct vfunction *pf, size_t i, size_t *b, bool *upp
 // I/O Virtualization and Sharing Specification 1.1, 3.3.13, asks. With other
 // than one bit set, which the specification leaves undefined, 4 KiB.
 static uint64_t vf_guest_size(const struct vfunction *pf, size_t b) {
-    uint64_t size = pf->f->vf_bars[b].size;
+    uint64_t size = pf->iov->vf_size[b];
     uint32_t pages = pf->iov->page_size;
     uint64_t page = PAGE_SIZE;
     if (pages != 0 && (pages & (pages - 1)) == 0) {
@@ -1345,8 +1350,9 @@ static void vf_bar_write(struct vfunction *pf, size_t i, uint32_t value) {
 }
 
 // VF k as its PF's routing ID offsets place it, for the guest to reach, which
-// makes it ready; its BARs its slices of the VF BARs, mapped from then on. A
-// VF enabled again keeps what it had of the hypervisor's.
+// makes it ready; its BARs its slices of the VF BARs, mapped from then on, but
+// for those past the room the host has for the VF BAR. A VF enabled again
+// keeps what it had of the hypervisor's.
 static void vf_place(struct vfunction *pf, size_t k) {
     struct viov *iov = pf->iov;
     struct vfunction *vf = &iov->vfs[k];
@@ -1365,10 +1371,12 @@ static void vf_place(struct vfunction *pf, size_t k) {
         if (pci_enum_vf_span(pf->f, b) == 0) {
             continue;
         }
+        uint64_t size = iov->vf_size[b];
+        bool room = bar->base != 0 && (k + 1) * size <= pci_enum_vf_span(pf->f, b);
         v->kind = bar->kind;
         v->type_bits = iov->type_bits[b];
-        v->size = bar->size;
-        v->host = bar->base != 0 ? bar->base + k * bar->size : 0;
+        v->size = size;
+        v->host = room ? bar->base + k * size : 0;
         v->guest = vf_guest_base(pf, b, k);
     }
 }
@@ -1455,7 +1463,7 @@ static void vfs_enable(struct vfunction *pf) {
     iov->count = count;
     vfs_log(pf, "enabled", count);
     for (size_t b = 0; b < PCI_SRIOV_NUM_BARS && count != 0; b++) {
-        if (pci_enum_vf_span(f, b) != 0 && vf_guest_size(pf, b) > f->vf_bars[b].size) {
+        if (pci_enum_vf_span(f, b) != 0 && vf_guest_size(pf, b) > iov->vf_size[b]) {
             vfs_log(pf, "with a System Page Size larger than their memory", count);
             break;
         }
@@ -1589,6 +1597,113 @@ static void iov_write(struct vfunction *pf, uint32_t offset, size_t size, uint32
     }
 }
 
+static bool in_vf_rebar(const struct vfunction *vf, uint32_t offset) {
+    uint32_t cap = vf->f->vf_rebar_ext_cap;
+    return vf->iov != NULL && cap != 0 && offset >= cap && offset < cap + REBAR_SIZE;
+}
+
+// One VF's size of each VF BAR as the physical function's VF Resizable BAR
+// capability sets it on the host, laid out as the Resizable BAR capability is
+// (Linux 7.3's include/uapi/linux/pci_regs.h, PCI_VF_REBAR_CTRL).
+static void vf_rebar_sizes(struct vfunction *pf) {
+    const struct pci_enum_function *f = pf->f;
+    uint32_t cap = f->vf_rebar_ext_cap;
+    if (cap == 0) {
+        return;
+    }
+    uint32_t first = pci_cfg_read(f->addr, cap + REBAR_PAIR, 4);
+    size_t pairs = (first & REBAR_PAIRS) >> REBAR_PAIRS_SHIFT;
+    for (size_t n = 0; n < pairs && n < BAR_COUNT; n++) {
+        uint32_t control = pci_cfg_read(f->addr, cap + REBAR_PAIR * (uint32_t)(n + 1), 4);
+        size_t b = control & REBAR_INDEX;
+        unsigned int e = (control & REBAR_SIZE_FIELD) >> REBAR_SIZE_SHIFT;
+        if (b < PCI_SRIOV_NUM_BARS && pci_enum_vf_span(f, b) != 0 && e <= REBAR_LAST) {
+            pf->iov->vf_size[b] = (uint64_t)1 << (e + REBAR_ENCODING_BASE);
+        }
+    }
+}
+
+// Whether one VF's size of VF BAR b can be encoding e on the host: at least
+// one VF's slice fits in the room the host has for the VF BAR, from a base
+// aligned to it, as a BAR's must be.
+static bool vf_rebar_fits(const struct vfunction *pf, size_t b, size_t e) {
+    const struct pci_enum_function *f = pf->f;
+    if (b >= PCI_SRIOV_NUM_BARS || e > REBAR_LAST || f->vf_bars[b].base == 0) {
+        return false;
+    }
+    uint64_t size = (uint64_t)1 << (e + REBAR_ENCODING_BASE);
+    return size <= pci_enum_vf_span(f, b) && (f->vf_bars[b].base & (size - 1)) == 0;
+}
+
+// What the guest reads of a VF Resizable BAR capability: only the sizes that
+// vf_rebar_fits() lets the host take.
+static uint32_t vf_rebar_read(const struct vfunction *pf, uint32_t offset, size_t size) {
+    struct pci_cfg_addr a = pf->f->addr;
+    uint32_t cap = pf->f->vf_rebar_ext_cap;
+    uint32_t reg = offset & ~(uint32_t)3;
+    uint32_t value = pci_cfg_read(a, reg, 4);
+    uint32_t at = reg - cap;
+    if (at >= 4 && at - 4 < REBAR_SIZE - 4) {
+        bool control = (at - 4) % REBAR_PAIR != 0;
+        uint32_t control_reg = control ? reg : reg + 4;
+        size_t b = pci_cfg_read(a, control_reg, 4) & REBAR_INDEX;
+        for (size_t e = 0; e <= REBAR_LAST; e++) {
+            if (vf_rebar_fits(pf, b, e)) {
+                continue;
+            }
+            if (control && e >= REBAR_CAPABILITY_SIZES) {
+                value &= ~((uint32_t)1 << (e - REBAR_CAPABILITY_SIZES + REBAR_CONTROL_SHIFT));
+            } else if (!control && e < REBAR_CAPABILITY_SIZES) {
+                value &= ~((uint32_t)1 << (e + REBAR_CAPABILITY_SHIFT));
+            }
+        }
+    }
+    return (value >> (8 * (offset & 3))) & all_ones(size);
+}
+
+// A guest's change of one VF's size of a VF BAR, which the host takes while
+// the guest has VF Enable clear and the size fits, as Linux 7.3's
+// pci_iov_vf_bar_set_size() makes it with VF MSE clear; the VFs' slices are of
+// the new size from their next enable on. Any other, and writes to the
+// read-only registers, change nothing.
+static void vf_rebar_write(struct vfunction *pf, uint32_t offset, size_t size, uint32_t value) {
+    struct pci_cfg_addr a = pf->f->addr;
+    uint32_t reg = offset & ~(uint32_t)3;
+    uint32_t at = reg - pf->f->vf_rebar_ext_cap;
+    if (at < 8 || (at - 4) % REBAR_PAIR == 0) {
+        return;
+    }
+    unsigned int shift = 8 * (offset & 3);
+    uint32_t mask = all_ones(size) << shift;
+    uint32_t old = pci_cfg_read(a, reg, 4);
+    uint32_t now = (old & ~mask) | ((value << shift) & mask);
+    unsigned int to = (now & REBAR_SIZE_FIELD) >> REBAR_SIZE_SHIFT;
+    size_t b = old & REBAR_INDEX;
+    if (to == ((old & REBAR_SIZE_FIELD) >> REBAR_SIZE_SHIFT)) {
+        return;
+    }
+    bool enabled = (pf->iov->control & PCI_SRIOV_CTRL_VFE) != 0;
+    if (enabled || !vf_rebar_fits(pf, b, to)) {
+        unsigned long long bytes = 0;
+        if (to <= REBAR_LAST) {
+            bytes = (unsigned long long)1 << (to + REBAR_ENCODING_BASE);
+        }
+        const char *why = enabled ? "its VFs are enabled" : "the host has no room for it";
+        if (pf->resizes_logged < RESETS_LOGGED) {
+            pf->resizes_logged++;
+            printf(
+                "PCI " PCI_CFG_ADDR_FMT " VF BAR%zu: a resize of its VFs' to 0x%llx refused, "
+                "as %s\n",
+                PCI_CFG_ADDR_ARGS(a), b, bytes, why
+            );
+        }
+        return;
+    }
+    pci_cfg_write(a, reg, 4, (old & ~REBAR_SIZE_FIELD) | (now & REBAR_SIZE_FIELD));
+    vf_rebar_sizes(pf);
+    iov_host_set(pf);
+}
+
 // Whether a reset of the physical function took what its SR-IOV capability
 // holds on the host: the VFs the guest enabled, the System Page Size, or VF
 // BARs.
@@ -1629,6 +1744,7 @@ static void iov_repair(struct vfunction *pf) {
     for (size_t b = 0; b < PCI_SRIOV_NUM_BARS; b++) {
         iov->guest[b] = 0;
     }
+    vf_rebar_sizes(pf);
     iov_host_set(pf);
 }
 
@@ -1648,9 +1764,11 @@ static void iov_init(struct vfunction *vf, const struct pci_plan_function *pf) {
             uint32_t reg = cap + PCI_SRIOV_BAR + 4 * (uint32_t)b;
             iov->type_bits[b] = (uint8_t)(pci_cfg_read(f->addr, reg, 4) & ~BAR_ADDRESS);
             iov->guest[b] = pf->vf_bars[b];
+            iov->vf_size[b] = f->vf_bars[b].size;
         }
     }
     vf->iov = iov;
+    vf_rebar_sizes(vf);
 }
 
 // The I/O BARs below 1000h, where ports are absent unless given.
@@ -1730,6 +1848,9 @@ static uint32_t function_read(struct pci_cfg_addr a, uint32_t offset, size_t siz
     }
     if (vf != NULL && in_sriov(vf, offset)) {
         return iov_read(vf, offset, size);
+    }
+    if (vf != NULL && in_vf_rebar(vf, offset)) {
+        return vf_rebar_read(vf, offset, size);
     }
     uint32_t reg = offset & ~(uint32_t)3;
     uint32_t value;
@@ -1939,6 +2060,10 @@ static struct vfunction *function_write(
     }
     if (vf != NULL && in_sriov(vf, offset)) {
         iov_write(vf, offset, size, value);
+        return NULL;
+    }
+    if (vf != NULL && in_vf_rebar(vf, offset)) {
+        vf_rebar_write(vf, offset, size, value);
         return NULL;
     }
     bool command = vf != NULL && (offset & ~(uint32_t)3) == PCI_COMMAND;
