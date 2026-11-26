@@ -844,7 +844,11 @@ bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault) {
             if (!virt_vmx) {
                 return false;
             }
-            *fault = !msr_allowed(msr) || !rdmsr_safe(msr, value);
+            // The processor's own where it reads, also on the models whose
+            // tables in SDM 325462-093 Vol. 4 lack it: Linux 7.3 reads it on
+            // every Intel processor, unchecked in intel_pstate's
+            // core_get_max_pstate_physical().
+            *fault = !rdmsr_safe(msr, value);
             *value &= PLATFORM_INFO_KNOWN | (cpuid_faulting ? PLATFORM_INFO_CPUID_FAULT : 0);
             return true;
         }
