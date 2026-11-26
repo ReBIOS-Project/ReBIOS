@@ -70,10 +70,11 @@ static size_t saves;
 
 // How many bytes, want at most, a variable named name_size bytes may hold with
 // kept bytes of the store left for later, in *size, as Linux 7.3's
-// efi_query_variable_store() decides: 0 where the write would leave less than
-// STORE_RESERVE free. With collect, where too little is left, a write too
-// large to fit, which fails, first has the firmware collect the store's
-// garbage, where it does that after ExitBootServices().
+// efi_query_variable_store() decides, the name counted with the data: 0 where
+// the write would leave less than STORE_RESERVE free. With collect, where a
+// write of want bytes would leave too little, a write too large to fit, which
+// fails, first has the firmware collect the store's garbage, where it does
+// that after ExitBootServices().
 static efi_status room(
     size_t name_size,
     size_t want,
@@ -86,7 +87,8 @@ static efi_status room(
     efi_status status = efi_runtime_query_variable_info(
         ATTRIBUTES, &storage, &remaining, &max_size, wait
     );
-    if (status == EFI_SUCCESS && collect && remaining < want + kept + STORE_RESERVE) {
+    uint64_t taken = (uint64_t)name_size + kept + STORE_RESERVE;
+    if (status == EFI_SUCCESS && collect && remaining < want + taken) {
         printf(
             "The log's last save has the firmware collect its variable store's garbage, with "
             "%llu of %llu bytes free\n",
@@ -112,10 +114,10 @@ static efi_status room(
     if (status != EFI_SUCCESS) {
         return status;
     }
-    if (max_size <= name_size || remaining <= STORE_RESERVE + kept) {
+    if (max_size <= name_size || remaining <= taken) {
         return EFI_SUCCESS;
     }
-    uint64_t fits = remaining - STORE_RESERVE - kept;
+    uint64_t fits = remaining - taken;
     if (fits > max_size - name_size) {
         fits = max_size - name_size;
     }
@@ -136,12 +138,14 @@ static efi_status save(bool wait, bool last) {
         }
         uint16_t name[HANDOFF_LOG_PART_NAME_LEN];
         handoff_log_part_name(name, variables);
+        // What the variable may need: the text so far, after a gap's mark.
+        size_t pending = log_saved_count() - saved_count;
+        size_t want = gap_len + pending < LOG_SAVED_START ? gap_len + pending : LOG_SAVED_START;
         size_t size;
-        efi_status status = room(sizeof(name), LOG_SAVED_START, kept, wait, last && wait, &size);
+        efi_status status = room(sizeof(name), want, kept, wait, last && wait, &size);
         if (status != EFI_SUCCESS) {
             return status;
         }
-        size_t pending = log_saved_count() - saved_count;
         if (size < SAVE_MIN && size < gap_len + pending) {
             return EFI_OUT_OF_RESOURCES;
         }
