@@ -52,7 +52,6 @@
 #include <sys/mm.h>
 #include <sys/x86.h>
 #include <virt/devmem.h>
-#include <virt/gpt.h>
 #include <virt/guest_mem.h>
 #include <virt/hpet.h>
 #include <virt/hypercall.h>
@@ -60,7 +59,6 @@
 #include <virt/irq.h>
 #include <virt/isa_ports.h>
 #include <virt/layout.h>
-#include <virt/mmio.h>
 #include <virt/pci_plan.h>
 #include <virt/pci_virt.h>
 #include <virt/rtc.h>
@@ -70,7 +68,8 @@
 #include <virt/virt.h>
 
 // The mailbox the guest's AML calls the firmware's methods through: a header,
-// argument slots, and the result's data, then a page whose writes trap.
+// argument slots, and the result's data, which it rings by writing
+// MAILBOX_RING to the hypercall port.
 #define MBX_FUNCTION 0x00
 #define MBX_INDEX 0x04
 #define MBX_ARGC 0x08
@@ -90,7 +89,10 @@
 #define MBX_RDATA 0x1000
 #define MBX_RDATA_SIZE 0x1000
 #define MBX_SIZE 0x2000
-#define DOORBELL_SIZE 0x1000
+
+// The hypercall port's byte that rings the mailbox, as firmware's AML writes a
+// command for its SMM handler to its SMI command port.
+#define MAILBOX_RING 0x52
 
 #define FUNCTION_CALL 1
 #define FUNCTION_ELEMENT 2
@@ -245,7 +247,6 @@ struct uid_device {
 static struct {
     bool active;
     uintptr_t mailbox;
-    uint32_t doorbell;
     bool sci;
     uint32_t sci_gsi;
     uint16_t pm1_evt;
@@ -3067,7 +3068,7 @@ static void emit_rcal(struct aml *a) {
     aml_arg(a, 1);
     aml_name(a, "MARC");
     store_int_name(a, FUNCTION_CALL, "MFUN");
-    store_int_name(a, 1, "DOOR");
+    store_int_name(a, MAILBOX_RING, "DOOR");
     // A package comes back element by element.
     aml_begin(a, AML_IF);
     aml_op(a, AML_LEQUAL);
@@ -3091,7 +3092,7 @@ static void emit_rcal(struct aml *a) {
     aml_byte(a, AML_ZERO);
     aml_name(a, "MELT");
     store_int_name(a, FUNCTION_ELEMENT, "MFUN");
-    store_int_name(a, 1, "DOOR");
+    store_int_name(a, MAILBOX_RING, "DOOR");
     aml_op(a, AML_RETURN);
     aml_name(a, "RRES");
     aml_end(a);
@@ -3379,7 +3380,7 @@ static size_t put_command_port(uint8_t *p) {
 #define CLAIMS_MAX (8 + 5 * 12 + 2)
 static size_t claims(uint8_t *crs, bool acpi) {
     size_t size = put_command_port(crs);
-    size += put_fixed_memory32(crs + size, vacpi.mailbox, MBX_SIZE + DOORBELL_SIZE, true);
+    size += put_fixed_memory32(crs + size, vacpi.mailbox, MBX_SIZE, true);
     uintptr_t devices_base;
     uintptr_t devices_end;
     bool devices = acpi
@@ -3454,13 +3455,13 @@ static void emit_mailbox_device(struct aml *a) {
 
     aml_op(a, AML_OPERATION_REGION);
     aml_name(a, "DBLR");
-    aml_byte(a, AML_REGION_SYSTEM_MEMORY);
-    aml_int(a, vacpi.doorbell);
-    aml_int(a, 4);
+    aml_byte(a, AML_REGION_SYSTEM_IO);
+    aml_int(a, HYPERCALL_PORT);
+    aml_int(a, 1);
     aml_begin(a, AML_FIELD);
     aml_name(a, "DBLR");
-    aml_byte(a, AML_FIELD_DWORD_ACC);
-    aml_field_unit(a, "DOOR", 32);
+    aml_byte(a, AML_FIELD_BYTE_ACC);
+    aml_field_unit(a, "DOOR", 8);
     aml_end(a);
 
     aml_op(a, AML_MUTEX);
@@ -3661,7 +3662,7 @@ static void emit_sleep_and_events(struct aml *a) {
     aml_int(a, FUNCTION_NOTIFICATION);
     helper(a, "MFUN");
     aml_op(a, AML_STORE);
-    aml_int(a, 1);
+    aml_int(a, MAILBOX_RING);
     helper(a, "DOOR");
     aml_op(a, AML_STORE);
     helper(a, "MRTY");
@@ -4251,30 +4252,14 @@ static void mailbox_notification(void) {
     sci_update();
 }
 
-static uint64_t doorbell_read(struct vcpu *v, void *ctx, uint64_t offset, size_t size) {
-    (void)v;
-    (void)ctx;
-    (void)offset;
-    (void)size;
-    return 0;
-}
-
 bool vacpi_call_waits(const struct cpu *cpu) {
     return atomic_load_explicit(&vacpi.call, memory_order_acquire) == CALL_RUNNING
         && atomic_load_explicit(&vacpi.call_cpu, memory_order_relaxed) == cpu;
 }
 
-static void doorbell_write(
-    struct vcpu *v,
-    void *ctx,
-    uint64_t offset,
-    size_t size,
-    uint64_t value
-) {
-    (void)ctx;
-    (void)offset;
-    (void)size;
-    (void)value;
+// The mailbox's function, which goes once done, so that a ring of the port
+// that its AML did not make has nothing to do.
+static void mailbox_ring(struct vcpu *v) {
     uint32_t header[8];
     if (!guest_mem_phys_read(vacpi.mailbox, header, sizeof(header))) {
         return;
@@ -4304,7 +4289,8 @@ static void doorbell_write(
                 &vacpi.call, &state, CALL_NONE, memory_order_acquire, memory_order_relaxed
             );
             if (!finished) {
-                v->mmio_retry = true;
+                v->io_retry = true;
+                return;
             }
             break;
         }
@@ -4317,31 +4303,22 @@ static void doorbell_write(
             break;
         }
         default: {
-            write_result(NULL, 1);
-            break;
+            return;
         }
     }
+    uint32_t none = 0;
+    guest_mem_phys_write(vacpi.mailbox + MBX_FUNCTION, &none, sizeof(uint32_t));
 }
-
-static const struct mmio_ops doorbell_ops = {
-    .read = doorbell_read,
-    .write = doorbell_write,
-    .reads_virtual = true
-};
 
 static void mailbox_place(void) {
     if (vacpi.mailbox != 0) {
         return;
     }
-    vacpi.mailbox = layout_take(MBX_SIZE + DOORBELL_SIZE, PAGE_SIZE, E820_RESERVED);
+    vacpi.mailbox = layout_take(MBX_SIZE, PAGE_SIZE, E820_RESERVED);
     if (vacpi.mailbox == 0) {
         panic("No room in the guest's memory for its ACPI mailbox\n");
     }
-    vacpi.doorbell = vacpi.mailbox + MBX_SIZE;
-    gpt_map(vacpi.doorbell, 0, DOORBELL_SIZE, 0, 0);
-    gpt_flush();
     vacpi.call_work = uacpi_kernel_create_work_item();
-    mmio_register(vacpi.doorbell, DOORBELL_SIZE, &doorbell_ops, NULL);
 }
 
 // Until the guest takes the power button over, it powers the machine off, as
@@ -4800,8 +4777,9 @@ void vacpi_wake(void) {
 }
 
 // The hypercall port, where firmware has its SMI command port: virt/exit.c
-// takes the legacy BIOS's hypercalls from it first, and nothing else written
-// there does anything, nor does it read but all ones.
+// takes the legacy BIOS's hypercalls from it first, the guest's AML rings the
+// mailbox there, and nothing else written there does anything, nor does it
+// read but all ones.
 static void command_access(
     struct vcpu *v,
     void *ctx,
@@ -4810,12 +4788,13 @@ static void command_access(
     bool in,
     uint32_t *value
 ) {
-    (void)v;
     (void)ctx;
     (void)offset;
     (void)size;
     if (in) {
         *value = 0xffffffff;
+    } else if ((uint8_t)*value == MAILBOX_RING && vacpi.mailbox != 0) {
+        mailbox_ring(v);
     }
 }
 
