@@ -65,9 +65,10 @@ NVIDIA_PASCAL_LATER = re.compile(
     r'MX[23]\d0|Max-Q|Quadro P(5200|4200|3200|600|620|500|520)\b')
 NVIDIA_FIRST_TURING = 0x1e00
 
-# AMD's device IDs here are integrated graphics, and from before 2018 only up
-# to Kaveri's. No GPU for a slot has them.
-AMD_INTEGRATED_LATER = (0x1320, 0x1fff)
+# AMD's device IDs from 1000h to 1FFFh are integrated graphics, the ones from
+# before 2018 Kaveri's, 1300h-131Fh, around which Krackan Point's 1114h and the
+# others from 2018 on lie. No GPU for a slot has them.
+AMD_INTEGRATED_LATER = [(0x1000, 0x12ff), (0x1320, 0x1fff)]
 # Among them, AMD's APUs with Vega graphics, from Raven Ridge to Barcelo, whose
 # Video BIOS runs where the firmware's graphics output alone is stopped, as
 # loader/video.c does.
@@ -207,12 +208,13 @@ def main():
             allowed.append((NVIDIA, i, i, ANY, name))
 
     # AMD's.
-    start = AMD_INTEGRATED_LATER[0]
-    for device in AMD_VEGA_APUS + [AMD_INTEGRATED_LATER[1] + 1]:
-        if start < device:
-            blocked.append((AMD, start, device - 1, ANY,
-                            'Integrated graphics after Kaveri'))
-        start = device + 1
+    for first, last in AMD_INTEGRATED_LATER:
+        start = first
+        for device in [d for d in AMD_VEGA_APUS if first <= d <= last] + [last + 1]:
+            if start < device:
+                blocked.append((AMD, start, device - 1, ANY,
+                                'Integrated graphics after Kaveri'))
+            start = device + 1
     for first, last in AMD_BEFORE_RDNA:
         allowed.append((AMD, first, last, ANY, 'Up to Fiji and Vega, but for '
                         'those blocked'))
@@ -220,7 +222,7 @@ def main():
         allowed.append((AMD, device, device, ANY,
                         pci_ids[AMD].get(device, 'Vega APU')))
     for device, revision, name in amdgpu:
-        if AMD_INTEGRATED_LATER[0] <= device <= AMD_INTEGRATED_LATER[1]:
+        if any(first <= device <= last for first, last in AMD_INTEGRATED_LATER):
             continue
         if device < AMD_FIRST_RDNA or device > AMD_LAST_RDNA:
             if AMD_LATER_NAME.search(name):

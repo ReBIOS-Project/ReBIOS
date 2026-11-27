@@ -461,6 +461,7 @@ const struct gpu_lists_id gpu_lists_vbios_blocklist[] = {
     // GB205GLM [RTX PRO 3000 Blackwell Generation Laptop GPU].
     { 0x10de, 0x2f38, 0x2f38, ANY },
     { 0x10de, 0x2f58, 0x2f58, ANY }, // GB205M [GeForce RTX 5070 Ti Mobile].
+    { 0x1002, 0x1000, 0x12ff, ANY }, // Integrated graphics after Kaveri.
     { 0x1002, 0x1320, 0x15d7, ANY }, // Integrated graphics after Kaveri.
     { 0x1002, 0x15d9, 0x15dc, ANY }, // Integrated graphics after Kaveri.
     { 0x1002, 0x15de, 0x15e6, ANY }, // Integrated graphics after Kaveri.
