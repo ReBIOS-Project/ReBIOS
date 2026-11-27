@@ -98,9 +98,12 @@ struct device_ports {
     uint16_t base[MAX_RANGES];
     uint16_t count[MAX_RANGES];
     size_t ranges;
-    // ISA IRQs, and GSIs where an extended descriptor gives them.
+    // ISA IRQs, and GSIs where an extended descriptor gives them, with its
+    // trigger mode and polarity.
     uint32_t lines[MAX_LINES];
     bool line_is_gsi[MAX_LINES];
+    bool line_level[MAX_LINES];
+    bool line_active_low[MAX_LINES];
     size_t line_count;
 };
 
@@ -140,10 +143,18 @@ static bool takes_log(uint64_t base, uint64_t end) {
     return log != 0 && base < (uint64_t)log + UART_PORTS && log < end;
 }
 
-static void add_line(struct device_ports *d, uint32_t line, bool gsi) {
+static void add_line(
+    struct device_ports *d,
+    uint32_t line,
+    bool gsi,
+    uint8_t triggering,
+    uint8_t polarity
+) {
     if (d->line_count < MAX_LINES) {
         d->lines[d->line_count] = line;
         d->line_is_gsi[d->line_count] = gsi;
+        d->line_level[d->line_count] = triggering == UACPI_TRIGGERING_LEVEL;
+        d->line_active_low[d->line_count] = polarity == UACPI_POLARITY_ACTIVE_LOW;
         d->line_count++;
     }
 }
@@ -193,13 +204,19 @@ static uacpi_iteration_decision collect_range(void *user, uacpi_resource *resour
         }
         case UACPI_RESOURCE_TYPE_IRQ: {
             for (size_t i = 0; i < resource->irq.num_irqs; i++) {
-                add_line(d, resource->irq.irqs[i], false);
+                add_line(
+                    d, resource->irq.irqs[i], false, resource->irq.triggering,
+                    resource->irq.polarity
+                );
             }
             return UACPI_ITERATION_DECISION_CONTINUE;
         }
         case UACPI_RESOURCE_TYPE_EXTENDED_IRQ: {
             for (size_t i = 0; i < resource->extended_irq.num_irqs; i++) {
-                add_line(d, resource->extended_irq.irqs[i], true);
+                add_line(
+                    d, resource->extended_irq.irqs[i], true, resource->extended_irq.triggering,
+                    resource->extended_irq.polarity
+                );
             }
             return UACPI_ITERATION_DECISION_CONTINUE;
         }
@@ -234,9 +251,13 @@ static bool current_ports(uacpi_namespace_node *node, struct device_ports *d, bo
     return true;
 }
 
+// An Extended Interrupt descriptor says how its line is wired, as Linux 7.3's
+// acpi_dev_get_irqresource() takes it, while the MADT does for an IRQ
+// descriptor's.
 static void give_lines(const struct device_ports *d) {
     for (size_t i = 0; i < d->line_count; i++) {
         if (d->line_is_gsi[i]) {
+            irq_line_wired(d->lines[i], d->line_level[i], d->line_active_low[i]);
             irq_give_gsi(d->lines[i]);
         } else if (d->lines[i] < ISA_IRQS) {
             irq_give_isa_line(d->lines[i]);

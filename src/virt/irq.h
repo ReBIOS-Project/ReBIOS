@@ -157,6 +157,9 @@ void irq_isa_set(unsigned int irq, bool level);
 // Lets the host's line reach the guest: one that an ISA IRQ stands for stays
 // masked at the host unless a legacy device the guest gets has it.
 void irq_give_gsi(uint32_t gsi);
+// The trigger mode and polarity of a GSI's line, as a device's descriptor of
+// it says.
+void irq_line_wired(uint32_t gsi, bool level, bool active_low);
 void irq_give_isa_line(unsigned int irq);
 
 // Lets the lines of the namespace's devices that acpi_irq_device_lines() gives

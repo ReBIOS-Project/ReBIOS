@@ -626,6 +626,18 @@ static bool line_fixed(const struct route *r, uint32_t sci) {
         || (r->irq >= 0 && (HYPERVISOR_IRQS & (uint32_t)1 << r->irq) != 0);
 }
 
+void irq_line_wired(uint32_t gsi, bool level, bool active_low) {
+    if (gsi >= route_count || routes[gsi].io == NULL) {
+        return;
+    }
+    spinlock_acquire(&lock);
+    routes[gsi].level = level;
+    routes[gsi].active_low = active_low;
+    update();
+    spinlock_release(&lock);
+    kick_after_update();
+}
+
 bool irq_present_isa(uint32_t gsi, unsigned int irq) {
     if (irq >= ISA_IRQS || (HYPERVISOR_IRQS & (uint32_t)1 << irq) != 0
      || (presented & (uint32_t)1 << irq) != 0) {
