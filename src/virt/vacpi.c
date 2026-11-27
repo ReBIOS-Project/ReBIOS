@@ -5150,11 +5150,15 @@ void vacpi_init(void) {
     }
     acpi_unlock();
     for (size_t i = 0; i < vacpi.gpe_block_count; i++) {
+        // Each register of the block is a byte (ACPI 6.6, 4.8.4.1), so the
+        // bytes of a wider access that run past the block go to the ports they
+        // are for.
         struct io_handler gpe = {
             .base = vacpi.gpe_blocks[i].port,
             .count = 2 * (size_t)vacpi.gpe_blocks[i].bytes,
             .access = gpe_access,
-            .ctx = (void *)(uintptr_t)i
+            .ctx = (void *)(uintptr_t)i,
+            .bytes = true
         };
         io_register(&gpe);
     }
