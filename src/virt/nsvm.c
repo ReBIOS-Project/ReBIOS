@@ -2101,14 +2101,17 @@ static void prepare_vmcb02(struct nsvm *n) {
         }
         c->np_enable |= (n->pw ? SVM_NP_PW : 0) | (n->vpw ? SVM_NP_VPW : 0)
                       | (n->gaat ? SVM_NP_GAAT : 0);
-        // Its flushes drop the nested translations too, but for those of its
-        // ASID's non-global translations alone, which a change of its nested
-        // page tables does not take (APM 24593 rev. 3.46, 15.16.1).
-        if (c->tlb_control == SVM_TLB_FLUSH_ALL) {
-            npt02_drop_all(n);
-        } else if (c->tlb_control == SVM_TLB_FLUSH_ASID) {
-            npt02_drop_asid(n, c12->guest_asid);
-        }
+    }
+    // Its flushes drop the nested translations too, with nested paging or
+    // without, but for those of its ASID's non-global translations alone,
+    // which a change of its nested page tables does not take (APM 24593 rev.
+    // 3.46, 15.16.1 and Table B-1).
+    if (c->tlb_control == SVM_TLB_FLUSH_ALL) {
+        npt02_drop_all(n);
+    } else if (c->tlb_control == SVM_TLB_FLUSH_ASID) {
+        npt02_drop_asid(n, c12->guest_asid);
+    }
+    if (n->npt) {
         c->n_cr3 = npt02_root(n);
     }
     // A flush for the guest's INVLPGAs for the ASID, of all of its
