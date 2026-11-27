@@ -65,6 +65,12 @@ bool event_wait_ends(struct vcpu *v, bool masked);
 // Takes back what event_entry() set up, for an entry that did not happen.
 void event_cancel(struct vcpu *v);
 
+// Drops the events not yet delivered, as an INIT does: what the exit's handler
+// injected, a delivery an exit cut short, and NMIs not yet taken, as Linux
+// 7.3's KVM drops its queued exceptions, interrupts, and NMIs at an INIT
+// (kvm_vcpu_reset()).
+void event_drop(struct vcpu *v);
+
 // An interrupt the processor took, which all make the guest exit.
 void event_interrupt(uint8_t vector);
 

@@ -1337,6 +1337,7 @@ void vcpu_init_signal(struct vcpu *v) {
         printf("INIT for the boot processor, resetting\n");
         power_reset(true);
     }
+    event_drop(v);
     vlapic_reset(v);
     // It waits for a start-up IPI out of the guest, with its local APIC
     // software-disabled: the messages posted to it are routed again first.

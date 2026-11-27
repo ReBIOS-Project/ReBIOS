@@ -171,6 +171,20 @@ void event_cancel(struct vcpu *v) {
     vmx_write(VMCS_ENTRY_INTR_INFO, 0);
 }
 
+void event_drop(struct vcpu *v) {
+    if (virt_vmx) {
+        vmx_write(VMCS_ENTRY_INTR_INFO, 0);
+    } else {
+        v->vmcb->control.eventinj = 0;
+    }
+    v->injecting = false;
+    v->redeliver = 0;
+    v->nmi_pending = false;
+    v->nmi_sources = 0;
+    atomic_store_explicit(&v->cpu->nmi_pending, false, memory_order_relaxed);
+    atomic_store_explicit(&v->cpu->nmi_sources, 0, memory_order_relaxed);
+}
+
 bool event_cut_short(struct vcpu *v) {
     return (v->redeliver & EVENT_VALID) != 0;
 }
