@@ -306,6 +306,14 @@ void vcpu_interrupt_shadow(struct vcpu *v);
 // The same for a load of SS by MOV or POP that the guest's last instruction
 // made (SDM 325462-093 Vol. 3A, 7.8.3).
 void vcpu_ss_shadow(struct vcpu *v);
+// Which of those the guest's next instruction comes under, as VCPU_SHADOW_*,
+// SVM's one shadow taken as STI's; and their end, once that instruction is
+// done.
+#define VCPU_SHADOW_NONE 0
+#define VCPU_SHADOW_STI 1
+#define VCPU_SHADOW_SS 2
+int vcpu_shadow(struct vcpu *v);
+void vcpu_shadow_end(struct vcpu *v);
 // The end of a step, mmio.c's or ferr.c's.
 void vcpu_step_done(struct vcpu *v);
 

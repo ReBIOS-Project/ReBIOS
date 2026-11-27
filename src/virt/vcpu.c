@@ -336,6 +336,31 @@ void vcpu_ss_shadow(struct vcpu *v) {
     );
 }
 
+int vcpu_shadow(struct vcpu *v) {
+    if (!virt_vmx) {
+        return (v->vmcb->control.interrupt_shadow & 1) != 0 ? VCPU_SHADOW_STI : VCPU_SHADOW_NONE;
+    }
+    uint64_t intr = vmx_read(VMCS_GUEST_INTERRUPTIBILITY);
+    if ((intr & INTERRUPTIBILITY_MOV_SS) != 0) {
+        return VCPU_SHADOW_SS;
+    }
+    return (intr & INTERRUPTIBILITY_STI) != 0 ? VCPU_SHADOW_STI : VCPU_SHADOW_NONE;
+}
+
+void vcpu_shadow_end(struct vcpu *v) {
+    if (!virt_vmx) {
+        v->vmcb->control.interrupt_shadow = 0;
+        return;
+    }
+    uint64_t intr = vmx_read(VMCS_GUEST_INTERRUPTIBILITY);
+    if ((intr & (INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS)) != 0) {
+        vmx_write(
+            VMCS_GUEST_INTERRUPTIBILITY,
+            intr & ~(uint64_t)(INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS)
+        );
+    }
+}
+
 static void tick_return_check(struct vcpu *v) {
     if (pit_tick_returning(v->cpu) && event_interruptible(v)) {
         pit_tick_returned();
@@ -1156,19 +1181,8 @@ void vcpu_advance(struct vcpu *v, size_t length) {
     if ((rflags & RFLAGS_RF) != 0) {
         vcpu_set_rflags(v, rflags & ~(uint64_t)RFLAGS_RF);
     }
-    if (virt_vmx) {
-        vmx_write(VMCS_GUEST_RIP, next);
-        uint64_t intr = vmx_read(VMCS_GUEST_INTERRUPTIBILITY);
-        if ((intr & (INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS)) != 0) {
-            vmx_write(
-                VMCS_GUEST_INTERRUPTIBILITY,
-                intr & ~(uint64_t)(INTERRUPTIBILITY_STI | INTERRUPTIBILITY_MOV_SS)
-            );
-        }
-    } else {
-        v->vmcb->save.rip = next;
-        v->vmcb->control.interrupt_shadow = 0;
-    }
+    vcpu_set_rip(v, next);
+    vcpu_shadow_end(v);
     pmu_retired(v, 1, 0);
     vcpu_step_boundary(v);
 }

@@ -89,9 +89,9 @@
 // An STI that set IF, or a load of SS by MOV or POP, which keep interrupts off
 // until the next instruction is done (SDM 325462-093 Vol. 2B, STI; Vol. 3A,
 // 7.8.3).
-#define SHADOW_NONE 0
-#define SHADOW_STI 1
-#define SHADOW_SS 2
+#define SHADOW_NONE VCPU_SHADOW_NONE
+#define SHADOW_STI VCPU_SHADOW_STI
+#define SHADOW_SS VCPU_SHADOW_SS
 
 // Why a run ended, before the instruction at the guest's RIP, but for
 // STOP_PARTIAL, where it is part done.
@@ -2867,9 +2867,14 @@ static void store_state(struct vcpu *v, struct run_state *rs, bool last) {
         }
     }
     rs->segs_changed = 0;
-    if (last && rs->shadow == SHADOW_STI) {
+    if (!last) {
+        return;
+    }
+    // The shadow the run started under ended with its first instruction.
+    vcpu_shadow_end(v);
+    if (rs->shadow == SHADOW_STI) {
         vcpu_interrupt_shadow(v);
-    } else if (last && rs->shadow == SHADOW_SS) {
+    } else if (rs->shadow == SHADOW_SS) {
         vcpu_ss_shadow(v);
     }
 }
@@ -2891,7 +2896,8 @@ void run_begin(struct vcpu *v) {
     struct run_state *rs = v->run;
     uint64_t start = rdtsc();
     load_state(v, rs);
-    rs->shadow = SHADOW_NONE;
+    // The shadow the exit came under covers the run's first instruction.
+    rs->shadow = vcpu_shadow(v);
     rs->recheck = false;
     // The hypervisor's timers are the boot processor's to run.
     uint64_t deadline = v->cpu->bsp ? hv_timer_next() : 0;
@@ -2936,6 +2942,13 @@ void run_begin(struct vcpu *v) {
         // INTO's trap depends on OF as the instruction finds it.
         bool branch = rs->branches_counted && branch_instruction(rs, insn);
         stop = carry_out(v, rs, insn);
+        // The instruction a shadow covered is done, one that set TF or changed
+        // AC too: interrupts may come now.
+        bool done = stop == STOP_FLAGS || (stop == STOP_NONE && !rs->partial);
+        if (done && shadowed != SHADOW_NONE && rs->shadow == shadowed) {
+            rs->shadow = SHADOW_NONE;
+            rs->recheck = true;
+        }
         // An instruction that set TF or changed AC is done, and ends the run.
         if (stop == STOP_FLAGS) {
             count++;
@@ -2957,11 +2970,6 @@ void run_begin(struct vcpu *v) {
         if (!rs->partial) {
             retired++;
             branches += branch ? 1 : 0;
-        }
-        // The instruction a shadow covered is done: interrupts may come now.
-        if (shadowed != SHADOW_NONE && rs->shadow == shadowed && !rs->partial) {
-            rs->shadow = SHADOW_NONE;
-            rs->recheck = true;
         }
         if (rs->reached) {
             accesses++;
