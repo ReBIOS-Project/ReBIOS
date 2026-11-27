@@ -36,6 +36,7 @@
 #include <lib/time.h>
 #include <lib/util.h>
 #include <memory.h>
+#include <sys/cache.h>
 #include <sys/mm.h>
 #include <sys/x86.h>
 
@@ -217,6 +218,14 @@ static void tables_flush_caches(void) {
     }
 }
 
+// The lines of the tables that changed alone, where the units do not snoop
+// them, as Linux 7.3's __iommu_flush_cache() writes them back.
+void vtd_tables_written(const void *start, size_t size) {
+    if (!coherent) {
+        cache_write_back(start, size);
+    }
+}
+
 // Queues a descriptor, which the unit fetches at the next queue_sync(). Its
 // reads of the queue are snooped whatever ECAP.C says (D51397-019 rev. 5.20,
 // Appendix A), so only the tables the descriptors are about need writing back
@@ -282,7 +291,6 @@ static void invalidate_all(struct vtd_unit *u) {
 // Every unit's cached copies of the entries that an interrupt entry cache
 // invalidation descriptor names.
 static void remap_invalidate_desc(uint64_t desc) {
-    tables_flush_caches();
     spinlock_acquire(&queue_lock);
     for (size_t i = 0; i < unit_count; i++) {
         queue_add(&units[i], desc, 0);
@@ -669,6 +677,7 @@ void vtd_remap_free(uint16_t index, size_t count) {
         atomic_store_explicit(
             (_Atomic(uint64_t) *)&remap_table[(index + i) * 2], 0, memory_order_release
         );
+        vtd_tables_written(&remap_table[(index + i) * 2], sizeof(uint64_t));
         remap_invalidate((uint16_t)(index + i));
     }
     for (size_t i = 0; i < count; i++) {
@@ -681,6 +690,7 @@ void vtd_remap_free(uint16_t index, size_t count) {
 // 5.1.4).
 static void irte_store(uint16_t index, uint64_t low, uint64_t high) {
     x86_store16(&remap_table[index * 2], low, high);
+    vtd_tables_written(&remap_table[index * 2], 2 * sizeof(uint64_t));
 }
 
 static void irte_write(uint16_t index, uint64_t low, uint64_t high) {
@@ -793,10 +803,16 @@ void vtd_resume(void) {
     }
 }
 
+// A change to the DMA map, whose entries vtd_tables_written() wrote back
+// already: the context entries stay as they are, so the IOTLB alone holds what
+// changed.
 void vtd_flush(void) {
+    spinlock_acquire(&queue_lock);
     for (size_t i = 0; i < unit_count; i++) {
-        invalidate_all(&units[i]);
+        queue_add(&units[i], DESC_IOTLB | DESC_GLOBAL | iotlb_drain(&units[i]), 0);
+        queue_sync(&units[i]);
     }
+    spinlock_release(&queue_lock);
 }
 
 size_t vtd_report_faults(size_t limit) {

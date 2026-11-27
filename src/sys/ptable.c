@@ -21,6 +21,12 @@
 #include <sys/mm.h>
 #include <sys/x86.h>
 
+static void written(const struct ptable_format *format, const void *start, size_t size) {
+    if (format->written != NULL) {
+        format->written(start, size);
+    }
+}
+
 uint64_t *ptable_table_for(
     const struct ptable_format *format,
     uint64_t *root,
@@ -32,7 +38,9 @@ uint64_t *ptable_table_for(
         uint64_t *e = &table[x86_level_index(address, l)];
         if (!format->present(*e)) {
             uint64_t *next = page_alloc(1);
+            written(format, next, PAGE_SIZE);
             *e = format->table((uintptr_t)next, l);
+            written(format, e, sizeof(uint64_t));
         } else if (format->large(*e)) {
             uintptr_t base = x86_leaf_address(*e, l);
             uint64_t attributes = format->leaf_attributes(*e, l);
@@ -40,7 +48,9 @@ uint64_t *ptable_table_for(
             for (size_t i = 0; i < 512; i++) {
                 next[i] = format->leaf(base + i * x86_level_size(l - 1), attributes, l - 1);
             }
+            written(format, next, PAGE_SIZE);
             *e = format->table((uintptr_t)next, l);
+            written(format, e, sizeof(uint64_t));
         }
         table = (uint64_t *)(uintptr_t)(*e & PTE_ADDRESS);
     }
@@ -69,7 +79,9 @@ void ptable_map(
         uint64_t *table = ptable_table_for(format, root, address, level);
         // A leaf that replaces a table leaks the table, as processors or
         // IOMMUs may still walk it until their caches are flushed.
-        table[x86_level_index(address, level)] = format->leaf(target, attributes, level);
+        uint64_t *e = &table[x86_level_index(address, level)];
+        *e = format->leaf(target, attributes, level);
+        written(format, e, sizeof(uint64_t));
 
         address += x86_level_size(level);
         target += x86_level_size(level);

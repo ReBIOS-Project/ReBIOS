@@ -178,7 +178,7 @@ static uint64_t format_leaf_attributes(uint64_t e, size_t level) {
 }
 
 static const struct ptable_format table_format = {
-    entry_present, entry_large, table_entry, format_leaf, format_leaf_attributes
+    entry_present, entry_large, table_entry, format_leaf, format_leaf_attributes, NULL
 };
 
 void gpt_init(bool ept, bool huge_pages, bool dirty_flags) {

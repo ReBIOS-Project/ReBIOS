@@ -37,6 +37,9 @@ struct ptable_format {
     uint64_t (*leaf)(uintptr_t address, uint64_t attributes, size_t level);
     // The attributes of a leaf at level, for smaller leaves to map alike.
     uint64_t (*leaf_attributes)(uint64_t entry, size_t level);
+    // Where set, told of [start, start + size) once entries there are written,
+    // for walkers that do not snoop the processors' caches.
+    void (*written)(const void *start, size_t size);
 };
 
 // The table under root that holds the entry for address at level, making the

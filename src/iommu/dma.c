@@ -103,8 +103,15 @@ static uint64_t leaf_prot(uint64_t e, size_t level) {
     return write ? GPT_R | GPT_W : GPT_R;
 }
 
+// AMD-Vi's units snoop their tables, as ReBIOS has them do.
+static void entries_written(const void *start, size_t size) {
+    if (kind == IOMMU_TABLES_KIND_VTD) {
+        vtd_tables_written(start, size);
+    }
+}
+
 static const struct ptable_format table_format = {
-    entry_present, entry_leaf, table_entry, leaf_entry, leaf_prot
+    entry_present, entry_leaf, table_entry, leaf_entry, leaf_prot, entries_written
 };
 
 static void flush(void) {
