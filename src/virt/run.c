@@ -422,8 +422,12 @@ static int reach_all(
     int *place,
     struct run_page **page
 ) {
-    // Outside 64-bit mode the linear address space wraps at 4 GiB.
-    if (!rs->long_mode && linear + size > ((uint64_t)1 << 32)) {
+    // An access that wraps around the linear address space, at 4 GiB outside
+    // 64-bit mode and at 2^64 in it, is the processor's to carry out.
+    bool wraps = rs->long_mode
+               ? size - 1 > UINTPTR_MAX - linear
+               : linear + size > ((uint64_t)1 << 32);
+    if (wraps) {
         return STOP_DEVICE;
     }
     *place = MMIO_PLACE_OTHER;
