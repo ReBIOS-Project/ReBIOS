@@ -90,11 +90,15 @@ static uint8_t interrupt_handle;
 static uacpi_interrupt_handler sci_handler;
 static uacpi_handle sci_ctx;
 static uint32_t sci_irq;
+// The SCI handlers that have yet to return.
+static _Atomic(unsigned int) sci_running;
 
 static struct spinlock lock;
 static struct spinlock work_lock;
 static struct work *work_head;
 static struct work *work_tail;
+// The work that the AML thread took and has yet to finish.
+static size_t work_busy;
 
 // The work uACPI defers runs as a thread, so that what the firmware's AML
 // waits for keeps no CPU from the guest for long: once the time slice of the
@@ -560,8 +564,9 @@ void uacpi_kernel_schedule_work(
 }
 
 // Takes the oldest work off the queue, as a copy, since its handler may
-// schedule its item again or free it: false if there is none.
-static bool work_take(struct work *w) {
+// schedule its item again or free it: false if there is none. The AML thread's
+// counts as busy until work_done().
+static bool work_take(struct work *w, bool in_task) {
     spinlock_acquire(&work_lock);
     struct work *head = work_head;
     if (head != NULL) {
@@ -570,9 +575,26 @@ static bool work_take(struct work *w) {
         if (work_head == NULL) {
             work_tail = NULL;
         }
+        if (in_task) {
+            work_busy++;
+        }
     }
     spinlock_release(&work_lock);
     return head != NULL;
+}
+
+static void work_done(void) {
+    spinlock_acquire(&work_lock);
+    work_busy--;
+    spinlock_release(&work_lock);
+}
+
+// Whether work is queued or in the AML thread's hands.
+static bool work_left(void) {
+    spinlock_acquire(&work_lock);
+    bool left = work_head != NULL || work_busy != 0;
+    spinlock_release(&work_lock);
+    return left;
 }
 
 // In the AML thread, GPE methods on the boot processor, which alone carries
@@ -581,7 +603,7 @@ static void work_run(void) {
     bool in_task = thread_current() != NULL;
     bool outer = atomic_load_explicit(&aml_bsp, memory_order_relaxed);
     struct work w;
-    while (work_take(&w)) {
+    while (work_take(&w, in_task)) {
         if (in_task) {
             atomic_store_explicit(&aml_bsp, outer || w.bsp, memory_order_release);
             while (w.bsp && !this_cpu()->bsp) {
@@ -591,12 +613,31 @@ static void work_run(void) {
         w.handler(w.ctx);
         if (in_task) {
             atomic_store_explicit(&aml_bsp, outer, memory_order_release);
+            work_done();
         }
     }
 }
 
+void acpi_work_wait(void) {
+    while (atomic_load_explicit(&sci_running, memory_order_acquire) != 0) {
+        cpu_relax();
+    }
+    // Before the thread starts, the work runs here; in the thread, what it
+    // queued runs as part of its own work.
+    if (!atomic_load_explicit(&aml_started, memory_order_acquire) || thread_current() != NULL) {
+        work_run();
+        return;
+    }
+    // The thread finishes the work, in its order, carried on here where no
+    // other CPU runs it.
+    while (work_left()) {
+        acpi_slice();
+        cpu_relax();
+    }
+}
+
 uacpi_status uacpi_kernel_wait_for_work_completion(void) {
-    work_run();
+    acpi_work_wait();
     return UACPI_STATUS_OK;
 }
 
@@ -655,7 +696,9 @@ void acpi_sci_interrupt(void *ctx) {
     (void)ctx;
     acpi_lock();
     if (sci_handler != NULL) {
+        atomic_fetch_add_explicit(&sci_running, 1, memory_order_relaxed);
         sci_handler(sci_ctx);
+        atomic_fetch_sub_explicit(&sci_running, 1, memory_order_release);
     }
     acpi_unlock();
 }

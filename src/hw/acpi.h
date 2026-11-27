@@ -83,6 +83,10 @@ void acpi_namespace_start(void);
 // is another; whether the thread has work.
 void acpi_slice(void);
 bool acpi_working(void);
+// Waits for the SCI handlers that are running, then for the deferred work,
+// queued or under way, and what that work queues meanwhile, as uACPI's
+// uacpi_kernel_wait_for_work_completion() has it.
+void acpi_work_wait(void);
 
 // Whether the firmware shows a device with one of the IDs, a NULL-ended list,
 // as present or functioning by its _STA.
