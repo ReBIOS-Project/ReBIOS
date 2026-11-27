@@ -1518,20 +1518,32 @@ void vgabios_int10(struct vgabios_regs *r) {
             break;
         }
         case 0x0b: {
+            // The CGA's colour select register, which BDA 40:66 keeps (RBIL
+            // 61, MEM 0040h:0066h), the palette registers standing in for it
+            // in graphics modes as SeaBIOS's video BIOS has them
+            // (vgasrc/stdvga.c): BH=00h the border, and the background with
+            // bright colours 8 entries on and bit 4 the foreground's
+            // intensity; BH=01h the palette, bit 0 of each foreground entry.
+            const struct vgabios_mode *m = current_mode();
+            bool graphics = m != NULL && !is_text(m);
+            uint8_t select = vgabios_peekb(BDA, BDA_PALETTE);
             if (r->bh == 0) {
-                ac_write(0x11, r->bl & 0x0f);
-                const struct vgabios_mode *m = current_mode();
-                if (m != NULL && !is_text(m)) {
-                    ac_write(0x00, r->bl & 0x0f);
+                uint8_t colour = r->bl & 0x0f;
+                ac_write(0x11, colour);
+                if (graphics) {
+                    ac_write(0x00, (colour & 0x08) != 0 ? (uint8_t)(colour + 0x08) : colour);
+                    for (size_t i = 1; i < 4; i++) {
+                        ac_write(i, (uint8_t)((ac_read(i) & ~0x10) | (r->bl & 0x10)));
+                    }
                 }
+                select = (uint8_t)((select & 0xe0) | (r->bl & 0x1f));
             } else {
-                // The CGA palettes: green, red, and brown, or cyan, magenta,
-                // and white.
-                uint8_t base = (r->bl & 1) != 0 ? 3 : 2;
-                for (size_t i = 1; i < 4; i++) {
-                    ac_write(i, (uint8_t)(base + (i - 1) * 2));
+                for (size_t i = 1; graphics && i < 4; i++) {
+                    ac_write(i, (uint8_t)((ac_read(i) & ~0x01) | (r->bl & 0x01)));
                 }
+                select = (uint8_t)((select & ~0x20) | (r->bl & 0x01) << 5);
             }
+            vgabios_pokeb(BDA, BDA_PALETTE, select);
             break;
         }
         case 0x0c: {
