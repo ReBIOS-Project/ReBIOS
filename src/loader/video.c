@@ -875,7 +875,19 @@ void video_exit_boot_services(void) {
     if (handles != NULL) {
         efi_bs->free_pool(handles);
     }
+    // Where the graphics output in use has a path that leads to no device, it
+    // is the device's whose BAR holds its framebuffer, as gop_device() has it.
+    uint64_t base = video->framebuffer.base;
+    if (!driven && gop_handle != NULL && base != 0 && pci_io_display_holding(base, &dev)
+     && handoff_pci_address_equal(dev.address, video->vga_device)) {
+        driven = true;
+        gop = gop_handle;
+    }
     if (!driven) {
+        printf(
+            "No graphics output of " HANDOFF_PCI_ADDRESS_FMT " is found to stop\n",
+            HANDOFF_PCI_ADDRESS_ARGS(video->vga_device)
+        );
         return;
     }
 
