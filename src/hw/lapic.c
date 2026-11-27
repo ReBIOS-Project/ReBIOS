@@ -213,6 +213,12 @@ void lapic_send_ipi(uint32_t dest, uint32_t command) {
         x2apic_write(MSR_X2APIC_ICR, (uint64_t)dest << 32 | command);
         return;
     }
+    // Interrupts off from the wait to the command, as Linux 7.3's
+    // default_send_IPI_single_phys() has them: an IPI that a handler sends, or
+    // the code that a thread's preemption goes back to, between the two writes
+    // would otherwise take this one's destination.
+    bool interrupts = (read_rflags() & RFLAGS_IF) != 0;
+    cli();
     uint64_t deadline = time_ns() + IPI_TIMEOUT_NS;
     while ((*xapic_reg(APIC_ICR_LOW) & ICR_PENDING) != 0) {
         if (time_ns() > deadline) {
@@ -223,6 +229,9 @@ void lapic_send_ipi(uint32_t dest, uint32_t command) {
     }
     *xapic_reg(APIC_ICR_HIGH) = dest << 24;
     *xapic_reg(APIC_ICR_LOW) = command;
+    if (interrupts) {
+        sti();
+    }
     while ((*xapic_reg(APIC_ICR_LOW) & ICR_PENDING) != 0) {
         if (time_ns() > deadline) {
             printf("Local APIC %#x: IPI %#x not taken\n", lapic_cpu_apic_id(), command);
