@@ -140,6 +140,12 @@ bool acpi_eval_optional(
     uint64_t *value,
     bool *found
 );
+// The number of a PCI host bridge's bus, as Linux 7.3's acpi_pci_root_add()
+// takes it (drivers/acpi/pci_root.c): where its _CRS's bus ranges start, the
+// last one that has buses, else its _BBN, else 0, from_crs telling whether
+// _CRS gave it where it is not NULL. False, logged, where _BBN cannot be
+// evaluated.
+bool acpi_host_bridge_bus(uacpi_namespace_node *node, uint64_t *bus, bool *from_crs);
 
 // The MADT's interrupt controller structure at *offset, which moves past it:
 // NULL past the last, or at one that is too short or runs past the table. The

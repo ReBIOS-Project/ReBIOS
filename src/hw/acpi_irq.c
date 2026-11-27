@@ -148,7 +148,7 @@ static uacpi_iteration_decision host_bridge_found(
     uint64_t segment;
     uint64_t bus;
     if (!acpi_eval_optional(node, "_SEG", &segment, NULL)
-     || !acpi_eval_optional(node, "_BBN", &bus, NULL)) {
+     || !acpi_host_bridge_bus(node, &bus, NULL)) {
         return UACPI_ITERATION_DECISION_CONTINUE;
     }
 

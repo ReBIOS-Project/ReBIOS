@@ -25,6 +25,7 @@
 #include <uacpi/status.h>
 #include <uacpi/tables.h>
 #include <uacpi/types.h>
+#include <uacpi/uacpi.h>
 #include <uacpi/utilities.h>
 #include <hw/pci_host.h>
 #include <hw/acpi.h>
@@ -81,8 +82,6 @@ struct crs_scan {
     struct host_bridge *hb;
     // Where the memory it consumes goes.
     struct range_list *into;
-    bool bus_found;
-    uint64_t bus;
 };
 
 static struct pci_host host;
@@ -210,13 +209,6 @@ static void crs_address(
     size_t length,
     uint64_t translation
 ) {
-    if (common->type == UACPI_RANGE_BUS) {
-        if (s->hb != NULL && !s->bus_found) {
-            s->bus_found = true;
-            s->bus = minimum;
-        }
-        return;
-    }
     if (common->type != UACPI_RANGE_MEMORY || length == 0) {
         return;
     }
@@ -349,16 +341,16 @@ static void host_bridge_found(struct scan *r, uacpi_namespace_node *node) {
     }
 
     uint64_t segment;
-    uint64_t bbn;
-    bool has_bbn;
+    uint64_t bus;
+    bool from_crs;
     if (!acpi_eval_optional(node, "_SEG", &segment, NULL)
-     || !acpi_eval_optional(node, "_BBN", &bbn, &has_bbn)) {
+     || !acpi_host_bridge_bus(node, &bus, &from_crs)) {
         kfree(hb.windows);
         return;
     }
     // The low bits only, ACPI 6.6, 6.5.5 and 6.5.6.
     hb.segment = (uint16_t)segment;
-    hb.bus = scan.bus_found ? (uint8_t)scan.bus : (uint8_t)bbn;
+    hb.bus = (uint8_t)bus;
     for (size_t i = 0; i < hb.window_count; i++) {
         if (hb.windows[i].base < FOUR_GIB && hb.windows[i].end > ONE_MIB) {
             hb.low_window_count++;
@@ -366,7 +358,9 @@ static void host_bridge_found(struct scan *r, uacpi_namespace_node *node) {
     }
 
     const char *name = acpi_path(node);
-    if (scan.bus_found && has_bbn && (uint8_t)bbn != hb.bus) {
+    uint64_t bbn;
+    if (from_crs && uacpi_eval_simple_integer(node, "_BBN", &bbn) == UACPI_STATUS_OK
+     && (uint8_t)bbn != hb.bus) {
         printf(
             "PCI host bridge %s: _CRS starts at bus %02x, _BBN says %02x\n",
             name, hb.bus, (uint8_t)bbn

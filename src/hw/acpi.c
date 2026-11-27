@@ -1016,6 +1016,68 @@ bool acpi_eval_optional(
     return true;
 }
 
+struct bus_range {
+    bool found;
+    uint64_t start;
+};
+
+static uacpi_iteration_decision bus_range_found(void *user, uacpi_resource *resource) {
+    struct bus_range *range = user;
+    const uacpi_resource_address_common *common;
+    uint64_t minimum;
+    uint64_t length;
+    switch (resource->type) {
+        case UACPI_RESOURCE_TYPE_ADDRESS16: {
+            common = &resource->address16.common;
+            minimum = resource->address16.minimum;
+            length = resource->address16.address_length;
+            break;
+        }
+        case UACPI_RESOURCE_TYPE_ADDRESS32: {
+            common = &resource->address32.common;
+            minimum = resource->address32.minimum;
+            length = resource->address32.address_length;
+            break;
+        }
+        case UACPI_RESOURCE_TYPE_ADDRESS64: {
+            common = &resource->address64.common;
+            minimum = resource->address64.minimum;
+            length = resource->address64.address_length;
+            break;
+        }
+        case UACPI_RESOURCE_TYPE_ADDRESS64_EXTENDED: {
+            common = &resource->address64_extended.common;
+            minimum = resource->address64_extended.minimum;
+            length = resource->address64_extended.address_length;
+            break;
+        }
+        default: {
+            return UACPI_ITERATION_DECISION_CONTINUE;
+        }
+    }
+    if (common->type == UACPI_RANGE_BUS && length != 0) {
+        range->found = true;
+        range->start = minimum;
+    }
+    return UACPI_ITERATION_DECISION_CONTINUE;
+}
+
+bool acpi_host_bridge_bus(uacpi_namespace_node *node, uint64_t *bus, bool *from_crs) {
+    struct bus_range range = { false, 0 };
+    uacpi_status status = uacpi_for_each_device_resource(node, "_CRS", bus_range_found, &range);
+    if (status != UACPI_STATUS_OK && status != UACPI_STATUS_NOT_FOUND) {
+        acpi_log_failure(node, "_CRS", status);
+    }
+    if (from_crs != NULL) {
+        *from_crs = range.found;
+    }
+    if (range.found) {
+        *bus = range.start;
+        return true;
+    }
+    return acpi_eval_optional(node, "_BBN", bus, NULL);
+}
+
 const struct acpi_entry_hdr *acpi_madt_next(const void *madt, size_t length, size_t *offset) {
     if (*offset > length || length - *offset < sizeof(struct acpi_entry_hdr)) {
         return NULL;
