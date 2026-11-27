@@ -1328,6 +1328,8 @@ void vcpu_wait_for_sipi(struct vcpu *v) {
         asm volatile ("clgi" ::: "memory");
     }
     vcpu_startup(v, (uint8_t)vector);
+    // A pause that began while it waited, which counted it out.
+    service_pause(v);
 }
 
 void vcpu_init_signal(struct vcpu *v) {
