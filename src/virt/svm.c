@@ -870,9 +870,12 @@ static void svm_handle_exit(struct vcpu *v) {
     atomic_store_explicit(&v->last_exit, (uint32_t)c->exitcode, memory_order_relaxed);
     profile_exit(v, (uint32_t)c->exitcode);
     nsvm_sync_gif(v);
-    if (v->stepping && c->exitcode >= SVM_EXIT_EXCEPTION_BASE
-     && c->exitcode < SVM_EXIT_EXCEPTION_BASE + 32) {
-        svm_step_exception(v, (unsigned int)(c->exitcode - SVM_EXIT_EXCEPTION_BASE));
+    // A step ends at its trap or at a fault of its instruction, not at an INIT
+    // that SVM redirected, which waits for the step to end.
+    uint64_t step_vector = c->exitcode - SVM_EXIT_EXCEPTION_BASE;
+    bool step_exception = c->exitcode >= SVM_EXIT_EXCEPTION_BASE && step_vector < 32;
+    if (v->stepping && step_exception && step_vector != VECTOR_SX) {
+        svm_step_exception(v, (unsigned int)step_vector);
         return;
     }
     svm_gp_erratum(v);
