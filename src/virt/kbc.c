@@ -21,6 +21,7 @@
 #include <virt/kbc.h>
 #include <hw/i8042.h>
 #include <hw/isa.h>
+#include <lib/log.h>
 #include <lib/spinlock.h>
 #include <lib/time.h>
 #include <sys/x86.h>
@@ -39,7 +40,7 @@ struct vcpu;
 // scancodes v1.2g has them. Each port's device is the chipset's where it has
 // one, whose bytes and commands pass through, the chipset's controller
 // translating its keyboard's bytes as the guest's command byte asks, and
-// otherwise emulated. USB input reaches the guest through it either way, in
+// otherwise emulated, USB input of its kind reaching the guest through it, in
 // the format the guest asked for.
 
 // Both data lines idle, and the keyboard not inhibited, as AT controllers had
@@ -1061,6 +1062,9 @@ static void kbd_repeat_fired(void *ctx) {
 }
 
 void kbc_key(uint16_t usage, bool pressed, uint8_t modifiers) {
+    if (real_keyboard) {
+        return;
+    }
     spinlock_acquire(&lock);
     if (kbd_enabled) {
         key_bytes(usage, pressed, modifiers);
@@ -1078,6 +1082,9 @@ void kbc_key(uint16_t usage, bool pressed, uint8_t modifiers) {
 }
 
 void kbc_pointer(int32_t dx, int32_t dy, int32_t wheel, uint32_t buttons) {
+    if (real_aux) {
+        return;
+    }
     spinlock_acquire(&lock);
     if (aux_enabled || aux_remote) {
         aux_dx += dx;
@@ -1155,6 +1162,12 @@ void kbc_init(void) {
     i8042_init((ram[0] & I8042_CCB_TRANSLATE) != 0);
     real_keyboard = i8042_keyboard();
     real_aux = i8042_aux();
+    if (real_keyboard) {
+        printf("USB keyboards do not reach the guest's 8042, which passes the chipset's one\n");
+    }
+    if (real_aux) {
+        printf("USB mice do not reach the guest's 8042, which passes the chipset's one\n");
+    }
 
     kbd_repeat.fired = kbd_repeat_fired;
     hv_timer_add(&kbd_repeat);
