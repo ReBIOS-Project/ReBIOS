@@ -229,12 +229,16 @@ static void enter(struct vcpu *v) {
         status = uacpi_prepare_for_sleep_state(UACPI_SLEEP_STATE_S3);
     }
     bool slept = false;
+    // Whether this processor left VMX or SVM operation, for sleep_cpu_wake()
+    // to set it up again.
+    bool off = false;
     tsc_lost = 0;
     // By the TSC as tsc_restore() gives it back, the time asleep left out.
     uint64_t sleeping = 0;
     if (status == UACPI_STATUS_OK) {
         cli();
         virt_cpu_off();
+        off = true;
         sleeping = rdtsc();
         if (cpu_resume_save(&resume) == 0) {
             wbinvd();
@@ -247,7 +251,9 @@ static void enter(struct vcpu *v) {
             tsc_moved = tsc_lost;
         }
     }
-    sleep_cpu_wake(v->cpu);
+    if (off) {
+        sleep_cpu_wake(v->cpu);
+    }
     if (!slept) {
         printf("Cannot enter ACPI S3: %s\n", uacpi_status_to_string(status));
     }
