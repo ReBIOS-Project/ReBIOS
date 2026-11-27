@@ -18,6 +18,7 @@
 #ifndef HW__SMBIOS_H
 #define HW__SMBIOS_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <lib/util.h>
@@ -62,6 +63,21 @@ static inline void smbios_entry32_checksum(struct smbios_entry32 *eps) {
     );
     eps->checksum = 0;
     eps->checksum = (uint8_t)-checksum8(eps, eps->length);
+}
+
+// Whether want is part of a field that the handoff keeps, as Linux 7.3's
+// DMI_MATCH() matches.
+static inline bool smbios_dmi_contains(const char *field, const char *want) {
+    for (size_t at = 0; field[at] != 0; at++) {
+        size_t i = 0;
+        while (want[i] != 0 && field[at + i] == want[i]) {
+            i++;
+        }
+        if (want[i] == 0) {
+            return true;
+        }
+    }
+    return want[0] == 0;
 }
 
 #endif

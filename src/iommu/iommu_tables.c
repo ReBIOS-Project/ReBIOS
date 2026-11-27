@@ -26,6 +26,7 @@
 #include <hw/acpi.h>
 #include <hw/pci_cfg.h>
 #include <hw/pci_regs.h>
+#include <hw/smbios.h>
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/printf.h>
@@ -825,26 +826,12 @@ static const struct ivrs_ioapic_quirk ivrs_ioapic_quirks[] = {
     { "LENOVO", "81FB", { 32, 0 }, { 0x00a0, 0 } }
 };
 
-// Whether want is part of field, as Linux 7.3's DMI_MATCH() matches.
-static bool dmi_contains(const char *field, const char *want) {
-    for (size_t at = 0; field[at] != 0; at++) {
-        size_t i = 0;
-        while (want[i] != 0 && field[at + i] == want[i]) {
-            i++;
-        }
-        if (want[i] == 0) {
-            return true;
-        }
-    }
-    return want[0] == 0;
-}
-
 // Before the IVHD's own entries, which an added I/O APIC takes the place of.
 static void ivrs_quirks_apply(struct builder *b, uint16_t unit) {
     for (size_t i = 0; i < ARRAY_COUNT(ivrs_ioapic_quirks); i++) {
         const struct ivrs_ioapic_quirk *q = &ivrs_ioapic_quirks[i];
-        if (!dmi_contains(core_handoff->dmi_sys_vendor, q->sys_vendor)
-         || !dmi_contains(core_handoff->dmi_product_name, q->product_name)) {
+        if (!smbios_dmi_contains(core_handoff->dmi_sys_vendor, q->sys_vendor)
+         || !smbios_dmi_contains(core_handoff->dmi_product_name, q->product_name)) {
             continue;
         }
         for (size_t j = 0; j < ARRAY_COUNT(q->ids) && q->ids[j] != 0; j++) {

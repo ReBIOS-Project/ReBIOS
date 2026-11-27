@@ -91,6 +91,9 @@ _Static_assert(
 #define SMBIOS_TYPE_SYSTEM 1
 #define SMBIOS_SYSTEM_MANUFACTURER 0x04
 #define SMBIOS_SYSTEM_PRODUCT_NAME 0x05
+#define SMBIOS_TYPE_BASEBOARD 2
+#define SMBIOS_BASEBOARD_MANUFACTURER 0x04
+#define SMBIOS_BASEBOARD_PRODUCT 0x05
 #define SMBIOS_TYPE_ENCLOSURE 3
 #define SMBIOS_ENCLOSURE_TYPE 0x05
 #define SMBIOS_ENCLOSURE_TYPE_MASK 0x7f
@@ -640,10 +643,11 @@ static uint8_t chassis_type(void) {
     return structure[SMBIOS_ENCLOSURE_TYPE] & SMBIOS_ENCLOSURE_TYPE_MASK;
 }
 
-// SMBIOS's System Information structure's string at offset (DSP0134 3.9.0,
-// 7.2), cut short to fit.
-static void dmi_copy(char out[static HANDOFF_DMI_MAX], uint8_t offset) {
-    const char *string = fwtables_smbios_string(SMBIOS_TYPE_SYSTEM, offset);
+// The string at offset of SMBIOS's first structure of type, cut short to fit:
+// System Information's (DSP0134 3.10.0, 7.2) or Baseboard Information's (7.3,
+// Table 13), as Linux 7.3's dmi_decode() takes them.
+static void dmi_copy(char out[static HANDOFF_DMI_MAX], uint8_t type, uint8_t offset) {
+    const char *string = fwtables_smbios_string(type, offset);
     size_t len = 0;
     while (string != NULL && len < HANDOFF_DMI_MAX - 1 && string[len] != 0) {
         out[len] = string[len];
@@ -705,8 +709,12 @@ void fwtables_collect(void) {
     loader_handoff->smbios_entry = smbios_find();
     loader_handoff->bios_year = bios_year();
     loader_handoff->dmi_chassis_type = chassis_type();
-    dmi_copy(loader_handoff->dmi_sys_vendor, SMBIOS_SYSTEM_MANUFACTURER);
-    dmi_copy(loader_handoff->dmi_product_name, SMBIOS_SYSTEM_PRODUCT_NAME);
+    dmi_copy(loader_handoff->dmi_sys_vendor, SMBIOS_TYPE_SYSTEM, SMBIOS_SYSTEM_MANUFACTURER);
+    dmi_copy(loader_handoff->dmi_product_name, SMBIOS_TYPE_SYSTEM, SMBIOS_SYSTEM_PRODUCT_NAME);
+    dmi_copy(
+        loader_handoff->dmi_board_vendor, SMBIOS_TYPE_BASEBOARD, SMBIOS_BASEBOARD_MANUFACTURER
+    );
+    dmi_copy(loader_handoff->dmi_board_name, SMBIOS_TYPE_BASEBOARD, SMBIOS_BASEBOARD_PRODUCT);
     if (loader_handoff->smbios_entry == 0) {
         printf("No usable SMBIOS entry point\n");
     }

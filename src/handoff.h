@@ -363,11 +363,14 @@ struct handoff {
     uint64_t smbios_entry;
     // The year of the firmware's release, which SMBIOS gives, or 0.
     uint16_t bios_year;
-    // SMBIOS's system manufacturer and product name, cut short to fit, empty
-    // where there are none, which quirks are matched against as Linux 7.3
-    // matches its DMI tables' DMI_SYS_VENDOR and DMI_PRODUCT_NAME.
+    // SMBIOS's system manufacturer and product name, and its baseboard's
+    // manufacturer and product, cut short to fit, empty where there are none,
+    // which quirks are matched against as Linux 7.3 matches its DMI tables'
+    // DMI_SYS_VENDOR, DMI_PRODUCT_NAME, DMI_BOARD_VENDOR, and DMI_BOARD_NAME.
     char dmi_sys_vendor[HANDOFF_DMI_MAX];
     char dmi_product_name[HANDOFF_DMI_MAX];
+    char dmi_board_vendor[HANDOFF_DMI_MAX];
+    char dmi_board_name[HANDOFF_DMI_MAX];
     // SMBIOS's system enclosure type, without its lock bit, or 0, as Linux 7.3
     // matches DMI_CHASSIS_TYPE.
     uint8_t dmi_chassis_type;
