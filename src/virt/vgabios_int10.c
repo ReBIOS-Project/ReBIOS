@@ -871,6 +871,137 @@ static uint8_t read_pixel(uint16_t x, uint16_t y) {
     }
 }
 
+// The most scan lines a character has, as the CRTC's maximum scan line field
+// counts them.
+#define CELL_LINES_MAX 32
+
+// The ROM's own copy of the font that segment:offset points at, from its first
+// character on, for fonts of height lines: the guest's ROM, read-only, holds
+// the same bytes. NULL for any other font.
+static const uint8_t *rom_glyphs(uint16_t segment, uint16_t offset, uint8_t height) {
+    if (segment != vgabios_segment()) {
+        return NULL;
+    }
+    if (height == 8 && offset == VGABIOS_ROM_FONT8) {
+        return vgabios_tables_font8;
+    }
+    if (height == 8 && offset == VGABIOS_ROM_FONT8 + 128 * 8) {
+        return vgabios_tables_font8 + 128 * 8;
+    }
+    if (height == 14 && offset == VGABIOS_ROM_FONT14) {
+        return vgabios_tables_font14;
+    }
+    if (height == 16 && offset == VGABIOS_ROM_FONT16) {
+        return vgabios_tables_font16;
+    }
+    return NULL;
+}
+
+// Line r of the character cell at row and column in a graphics mode, a bit set
+// for each pixel that is not black, and the colour of the last such.
+static uint8_t cell_line(
+    const struct vgabios_mode *m,
+    uint8_t row,
+    uint8_t column,
+    uint8_t height,
+    size_t r,
+    uint8_t planes[static 4][CELL_LINES_MAX],
+    uint8_t *colour
+) {
+    uint16_t y = (uint16_t)(row * height + r);
+    uint8_t bits = 0;
+    for (size_t b = 0; b < 8; b++) {
+        uint8_t value;
+        switch (m->kind) {
+            case VGABIOS_MODE_CGA: {
+                uint16_t at = cga_offset((uint16_t)(column * 2 + b / 4), y);
+                value = (uint8_t)((vgabios_peekb(0xb800, at) >> ((3 - (b & 3)) * 2)) & 3);
+                break;
+            }
+            case VGABIOS_MODE_CGA1: {
+                value = (uint8_t)((vgabios_peekb(0xb800, cga_offset(column, y)) >> (7 - b)) & 1);
+                break;
+            }
+            case VGABIOS_MODE_PLANAR: {
+                value = 0;
+                for (size_t p = 0; p < 4; p++) {
+                    value |= (uint8_t)(((planes[p][r] >> (7 - b)) & 1) << p);
+                }
+                break;
+            }
+            default: {
+                value = vgabios_peekb(0xa000, (uint16_t)(y * m->width + column * (uint32_t)8 + b));
+                break;
+            }
+        }
+        if (value != 0) {
+            bits |= (uint8_t)(0x80 >> b);
+            *colour = value;
+        }
+    }
+    return bits;
+}
+
+// AH=08h in a graphics mode: the character whose glyph the cell at the
+// cursor's pixels that are not black match, as SeaBIOS's video BIOS reads it
+// (vgasrc/vgafb.c, gfx_read_char()), with their colour, or 0 for none.
+static uint16_t read_char(uint8_t page) {
+    const struct vgabios_mode *m = current_mode();
+    uint8_t height = vgabios_peekb(BDA, BDA_CHAR_HEIGHT);
+    uint16_t cursor = get_cursor(page);
+    uint8_t row = (uint8_t)(cursor >> 8);
+    uint8_t column = (uint8_t)cursor;
+    if (m == NULL || height == 0 || height > CELL_LINES_MAX
+     || column >= vgabios_peekw(BDA, BDA_COLUMNS)) {
+        return 0;
+    }
+    uint8_t planes[4][CELL_LINES_MAX];
+    if (m->kind == VGABIOS_MODE_PLANAR) {
+        uint16_t line = m->width / 8;
+        for (size_t p = 0; p < 4; p++) {
+            gc_write(0x04, p);
+            for (size_t r = 0; r < height; r++) {
+                uint16_t at = (uint16_t)((row * height + r) * line + column);
+                planes[p][r] = vgabios_peekb(0xa000, at);
+            }
+        }
+        gc_write(0x04, m->gc[4]);
+    }
+    uint8_t pattern[CELL_LINES_MAX];
+    uint8_t colour = 0;
+    for (size_t r = 0; r < height; r++) {
+        pattern[r] = cell_line(m, row, column, height, r, planes, &colour);
+    }
+    // CGA modes find characters 128-255 through INT 1Fh.
+    bool cga = m->kind == VGABIOS_MODE_CGA || m->kind == VGABIOS_MODE_CGA1;
+    uint16_t segments[] = { vgabios_peekw(0, VECTOR(0x43) + 2), 0 };
+    uint16_t offsets[] = { vgabios_peekw(0, VECTOR(0x43)), 0 };
+    if (cga) {
+        segments[1] = vgabios_peekw(0, VECTOR(0x1f) + 2);
+        offsets[1] = vgabios_peekw(0, VECTOR(0x1f));
+    }
+    const uint8_t *roms[2] = {
+        rom_glyphs(segments[0], offsets[0], height), rom_glyphs(segments[1], offsets[1], height)
+    };
+    for (size_t c = 0; c < 256; c++) {
+        size_t table = cga && c >= 128 ? 1 : 0;
+        size_t glyph = (c - table * 128) * height;
+        size_t r = 0;
+        for (; r < height; r++) {
+            uint8_t byte = roms[table] != NULL
+                         ? roms[table][glyph + r]
+                         : vgabios_peekb(segments[table], (uint16_t)(offsets[table] + glyph + r));
+            if (byte != pattern[r]) {
+                break;
+            }
+        }
+        if (r == height) {
+            return (uint16_t)(colour << 8 | c);
+        }
+    }
+    return 0;
+}
+
 static void write_string(struct vgabios_regs *r) {
     uint8_t page = r->bh & 7;
     uint16_t saved = get_cursor(page);
@@ -1378,7 +1509,7 @@ void vgabios_int10(struct vgabios_regs *r) {
         }
         case 0x08: {
             // The ROM reads text modes' characters itself.
-            r->ax = 0;
+            r->ax = read_char(r->bh & 7);
             break;
         }
         case 0x09:
