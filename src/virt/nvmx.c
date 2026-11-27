@@ -587,8 +587,12 @@ void nvmx_vcpu_power_on(struct vcpu *v) {
     ipiv_leave(NULL, n, false);
     *n = (struct nvmx){
         .current = NO_VMCS, .cache12 = n->cache12, .pi_vector = -1, .sipi = -1,
-        .shadow = n->shadow, .msr_bitmap = n->msr_bitmap
+        .shadow = n->shadow, .msr_bitmap = n->msr_bitmap, .other = n->other,
+        .created = n->created
     };
+    if (n->created) {
+        vmx_vmcs_reset(v, &n->other);
+    }
     if (shadowing) {
         vmx_write(VMCS_VMREAD_BITMAP, (uint64_t)(uintptr_t)vmread_bitmap);
         vmx_write(VMCS_VMWRITE_BITMAP, (uint64_t)(uintptr_t)vmwrite_bitmap);

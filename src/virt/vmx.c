@@ -685,7 +685,13 @@ void vmx_vmcs_create(struct vcpu *v, struct vmx_vmcs *vmcs) {
     vmcs->cache = cache_alloc();
     vmcs->vmcs = page_alloc(1);
     vmcs->pa = (uintptr_t)vmcs->vmcs;
+    vmx_vmcs_reset(v, vmcs);
+}
+
+void vmx_vmcs_reset(struct vcpu *v, struct vmx_vmcs *vmcs) {
+    memset(vmcs->cache, 0, sizeof(struct vmcs_cache));
     vmcs->launched = false;
+    vmclear(vmcs->pa);
     *(uint32_t *)vmcs->vmcs = (uint32_t)vmx_basic & 0x7fffffff;
     vmclear(vmcs->pa);
     vmptrld(vmcs->pa);

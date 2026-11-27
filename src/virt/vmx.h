@@ -573,6 +573,9 @@ bool vmx_tertiary_allowed(uint64_t control);
 uint64_t vmx_capability(uint32_t msr);
 // Another VMCS for the vCPU, with the hypervisor's host state alone.
 void vmx_vmcs_create(struct vcpu *v, struct vmx_vmcs *vmcs);
+// Sets such a VMCS up again as it was created, in the same page, as after a
+// power-on, which may leave nothing of it in memory.
+void vmx_vmcs_reset(struct vcpu *v, struct vmx_vmcs *vmcs);
 // A shadow VMCS (SDM 325462-093 Vol. 3C, 27.10), cleared: its address.
 uint64_t vmx_shadow_vmcs_create(void);
 // Accesses to a VMCS other than the vCPU's, which is current again after.
