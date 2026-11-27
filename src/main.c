@@ -252,11 +252,16 @@ efi_status efi_main(efi_handle image_handle, struct efi_system_table *system_tab
     // A serial card's port only answers once its I/O decoding is on.
     struct handoff_pci_address serial_card;
     bool serial_on_card = config.serial && pci_io_enable_io_port(config.serial_port, &serial_card);
-    log_init(
+    const char *serial_refused = log_init(
         config.serial ? config.serial_port : 0, config.serial_baud, serial_clock, config.verbose
     );
     if (serial_auto && config.serial_port == 0) {
         printf("No serial port in the firmware's SPCR or DBG2 table\n");
+    }
+    // The guest keeps a port that the log does not take.
+    if (serial_refused != NULL) {
+        printf("No log on serial port %#x, as %s\n", config.serial_port, serial_refused);
+        config.serial = false;
     }
     if (serial_on_card) {
         printf(

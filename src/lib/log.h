@@ -28,8 +28,14 @@ struct flanterm_context;
 struct handoff_log;
 
 // Until this is called, the log is kept, to be written out here. A serial port
-// of 0 means none.
-void log_init(uint16_t serial_port, uint32_t serial_baud, uint32_t serial_clock, bool console);
+// of 0 means none. Returns why the log does not go to the serial port, NULL
+// where it does or where there is none.
+const char *log_init(
+    uint16_t serial_port,
+    uint32_t serial_baud,
+    uint32_t serial_clock,
+    bool console
+);
 // What the log shows goes to this console from now on, rather than the
 // firmware's, as it lasts beyond ExitBootServices().
 void log_set_screen(struct flanterm_context *screen);

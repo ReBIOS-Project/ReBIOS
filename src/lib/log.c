@@ -242,12 +242,22 @@ static void log_start(void) {
     }
 }
 
-void log_init(uint16_t serial_port, uint32_t serial_baud, uint32_t serial_clock, bool console) {
-    if (serial_port != 0 && serial_init(serial_port, serial_baud, serial_clock)) {
-        log_serial_port = serial_port;
+const char *log_init(
+    uint16_t serial_port,
+    uint32_t serial_baud,
+    uint32_t serial_clock,
+    bool console
+) {
+    const char *refused = NULL;
+    if (serial_port != 0) {
+        refused = serial_init(serial_port, serial_baud, serial_clock);
+        if (refused == NULL) {
+            log_serial_port = serial_port;
+        }
     }
     log_console = console;
     log_start();
+    return refused;
 }
 
 void log_set_screen(struct flanterm_context *screen) {

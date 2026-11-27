@@ -18,11 +18,11 @@
 #ifndef HW__SERIAL_H
 #define HW__SERIAL_H
 
-#include <stdbool.h>
 #include <stdint.h>
 
-// A clock of 0 is the ISA part's.
-bool serial_init(uint16_t port, uint32_t baud, uint32_t clock);
+// A clock of 0 is the ISA part's. Returns NULL where the port is set up, and
+// otherwise why it is not.
+const char *serial_init(uint16_t port, uint32_t baud, uint32_t clock);
 void serial_putc(uint16_t port, char c);
 
 #endif

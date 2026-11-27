@@ -40,10 +40,13 @@
 // The ISA part's crystal, where the firmware's tables give no other.
 #define UART_CLOCK_ISA 1843200
 
-bool serial_init(uint16_t port, uint32_t baud, uint32_t clock) {
+const char *serial_init(uint16_t port, uint32_t baud, uint32_t clock) {
     // Below 100h are the motherboard's fixed ports, which the probe writes.
-    if (port < 0x100 || port > 0xfff8) {
-        return false;
+    if (port < 0x100) {
+        return "it is below 100h, among the motherboard's own ports";
+    }
+    if (port > 0xfff8) {
+        return "its registers run past port FFFFh";
     }
     // An absent port floats, where any 8250-compatible UART's divisor latch
     // reads back what was written.
@@ -53,7 +56,7 @@ bool serial_init(uint16_t port, uint32_t baud, uint32_t clock) {
     bool answered = inb(port + UART_DLL) == 0xa5 && inb(port + UART_DLM) == 0x5a;
     outb(port + UART_LCR, 0);
     if (!answered) {
-        return false;
+        return "no UART answers there";
     }
 
     uint32_t input = clock != 0 ? clock : UART_CLOCK_ISA;
@@ -72,7 +75,7 @@ bool serial_init(uint16_t port, uint32_t baud, uint32_t clock) {
     outb(port + UART_LCR, UART_LCR_8N1);
     outb(port + UART_FCR, UART_FCR_SETUP);
     outb(port + UART_MCR, UART_MCR_SETUP);
-    return true;
+    return NULL;
 }
 
 void serial_putc(uint16_t port, char c) {
