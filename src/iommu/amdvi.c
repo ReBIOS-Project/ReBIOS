@@ -1248,10 +1248,25 @@ size_t amdvi_report_faults(size_t limit) {
             head = (head + 1) % LOG_ENTRIES;
         }
         reg_write(u, REG_EVENT_HEAD, (uint64_t)head << 4);
-        if ((reg_read(u, REG_STATUS) & STATUS_EVENT_OVERFLOW) != 0) {
-            printf("AMD-Vi unit %zu: more events were lost\n", i);
-            reg_write(u, REG_STATUS, STATUS_EVENT_OVERFLOW);
+        if ((reg_read(u, REG_STATUS) & STATUS_EVENT_OVERFLOW) == 0) {
+            continue;
         }
+        // An overflow stops the log, which only EventLogEn going from 0 to 1
+        // starts again (AMD IOMMU 48882 rev. 3.11, 2.5.1), as Linux 7.3's
+        // amd_iommu_restart_log() has it.
+        uint64_t control = reg_read(u, REG_CONTROL);
+        bool stopped = (reg_read(u, REG_STATUS) & STATUS_EVENT_LOG_RUN) == 0;
+        if (stopped) {
+            reg_write(u, REG_CONTROL, control & ~CONTROL_EVENT_LOG_EN);
+        }
+        reg_write(u, REG_STATUS, STATUS_EVENT_OVERFLOW);
+        if (stopped) {
+            reg_write(u, REG_CONTROL, control | CONTROL_EVENT_LOG_EN);
+        }
+        printf(
+            "AMD-Vi unit %zu: more events were lost%s\n",
+            i, stopped ? ", and its event log, which stopped, starts again" : ""
+        );
     }
     return unshown;
 }
