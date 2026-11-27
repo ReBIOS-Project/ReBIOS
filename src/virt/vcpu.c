@@ -23,7 +23,6 @@
 #include <virt/vcpu.h>
 #include <hw/acpi.h>
 #include <hw/lapic.h>
-#include <hw/power.h>
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
@@ -1341,17 +1340,20 @@ void vcpu_init_signal(struct vcpu *v) {
     if (nsvm_init_signal(v)) {
         return;
     }
-    if (v->cpu->bsp) {
-        // Its INIT takes the boot processor back to the BIOS.
-        printf("INIT for the boot processor, resetting\n");
-        power_reset(true);
-    }
     event_drop(v);
     vlapic_reset(v);
-    // It waits for a start-up IPI out of the guest, with its local APIC
-    // software-disabled: the messages posted to it are routed again first.
+    // Its local APIC software-disabled, the messages posted to it are routed
+    // again.
     if (vlapic_post_changed(v)) {
         pci_virt_repost();
+    }
+    // The boot processor starts again at the reset vector with memory as it
+    // was (SDM 325462-093 Vol. 3A, Table 12-1), where the legacy BIOS resumes
+    // as the CMOS shutdown byte asks or resets the machine; the others wait
+    // for a start-up IPI out of the guest.
+    if (v->cpu->bsp) {
+        vcpu_set_reset_state(v);
+        return;
     }
     vcpu_wait_for_sipi(v);
 }
