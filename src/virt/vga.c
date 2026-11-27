@@ -3412,7 +3412,8 @@ static bool copy_on(const struct vga_draw_ops *ops, uint64_t until) {
 }
 
 // Whether this processor has a part in the frame left to take. A processor
-// that runs the guest leaves the frame to those whose vCPUs wait, if any do.
+// that runs the guest leaves the frame to those whose vCPUs wait, if any do,
+// waking one where none is at it, as one that nothing woke may sit halted.
 static bool work_left(void) {
     switch (atomic_load_explicit(&job.step, memory_order_acquire)) {
         case STEP_DRAW: {
@@ -3420,7 +3421,11 @@ static bool work_left(void) {
              && atomic_load_explicit(&job.draw_next, memory_order_relaxed) >= job.draw_chunks) {
                 return false;
             }
-            return idle_this() || idle_other() == NULL;
+            struct cpu *idle = idle_this() ? NULL : idle_other();
+            if (idle != NULL && atomic_load_explicit(&job.busy, memory_order_acquire) == 0) {
+                vcpu_wake(idle);
+            }
+            return idle == NULL;
         }
         case STEP_COPY: {
             return this_cpu() == job.copier;
