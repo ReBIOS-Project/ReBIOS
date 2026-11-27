@@ -517,18 +517,18 @@ void vmx_cpu_init(void) {
     }
 }
 
+// An unusable segment keeps its other fields beside the bit, as the processor
+// saves SS's DPL with it and VM entry checks CS's DPL against it (SDM
+// 325462-093 Vol. 3C, 29.3.1.2 and 30.3.2), as Linux 7.3's
+// vmx_segment_access_rights() keeps them.
 static uint32_t seg_to_ar(uint32_t attrib) {
-    if ((attrib & VCPU_SEG_UNUSABLE) != 0) {
-        return 0x10000;
-    }
-    return (attrib & 0xff) | ((attrib & 0xf00) << 4);
+    uint32_t ar = (attrib & 0xff) | ((attrib & 0xf00) << 4);
+    return (attrib & VCPU_SEG_UNUSABLE) != 0 ? ar | 0x10000 : ar;
 }
 
 static uint32_t ar_to_seg(uint32_t ar) {
-    if ((ar & 0x10000) != 0) {
-        return VCPU_SEG_UNUSABLE;
-    }
-    return (ar & 0xff) | ((ar >> 4) & 0xf00);
+    uint32_t attrib = (ar & 0xff) | ((ar >> 4) & 0xf00);
+    return (ar & 0x10000) != 0 ? attrib | VCPU_SEG_UNUSABLE : attrib;
 }
 
 static const uint32_t seg_sel_fields[] = {
