@@ -26,6 +26,8 @@
 #include <hw/pci_enum.h>
 #include <hw/pci_host.h>
 #include <hw/pci_regs.h>
+#include <hw/smbios.h>
+#include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/range.h>
 #include <lib/util.h>
@@ -37,6 +39,162 @@
 // own, so ReBIOS gives these their host addresses in the guest's place.
 
 #define BAR_MEMORY_ADDRESS ((uint32_t)0xfffffff0)
+
+// The firmware's memory map as Linux 7.3 makes an E820 table of it
+// (drivers/firmware/efi/libstub/x86-stub.c, setup_e820()): the descriptors of
+// the types it knows, each given an E820 type, adjoining ones of a type
+// merged; without the EfiMemoryMappedIO descriptors of 256 KiB or more, which
+// its efi_remove_e820_mmio() drops, as firmware describes PCI host bridge
+// windows with them.
+#define E820_RAM 1
+#define E820_RESERVED 2
+#define E820_ACPI 3
+#define E820_NVS 4
+#define E820_UNUSABLE 5
+#define E820_PMEM 7
+#define E820_MMIO_DROPPED 0x40000
+
+// What Linux 7.3's arch_remove_reservations() keeps out of every free range
+// that it allocates from: the BIOS area, the top 2 MiB below 4 GiB.
+#define BIOS_ROM_BASE ((uintptr_t)0xffe00000)
+
+// Linux 7.3's E820 clipping of the free ranges in host bridge windows applies
+// to firmware from before this year only (arch/x86/pci/acpi.c,
+// pci_acpi_crs_quirks()), as later firmware's reserved ranges may cover whole
+// windows, which then leave no room.
+#define E820_CLIP_YEAR_END 2023
+
+struct e820_entry {
+    uint64_t base;
+    uint64_t end;
+    uint8_t type;
+};
+
+// The machines that Linux 7.3's pci_crs_quirks has set_no_e820() for, whose
+// reserved ranges cover whole windows, matched as its DMI_MATCH() matches. An
+// empty string matches anything.
+struct no_e820_quirk {
+    const char *sys_vendor;
+    const char *product_name;
+    const char *product_version;
+    const char *board_name;
+};
+
+static const struct no_e820_quirk no_e820_quirks[] = {
+    { "LENOVO", "", "IIL", "" },
+    { "Acer", "Spin SP513-54N", "", "" },
+    { "", "", "", "X170KM-G" }
+};
+
+static struct e820_entry *e820;
+static size_t e820_count;
+static bool e820_clips;
+
+// An E820 type for the descriptor, or 0 for one that Linux 7.3 leaves out.
+static uint8_t e820_type(const struct efi_memory_descriptor *d, uint64_t size) {
+    switch (d->type) {
+        case EFI_MEMORY_MAPPED_IO: {
+            return size >= E820_MMIO_DROPPED ? 0 : E820_RESERVED;
+        }
+        case EFI_RESERVED_MEMORY_TYPE:
+        case EFI_RUNTIME_SERVICES_CODE:
+        case EFI_RUNTIME_SERVICES_DATA:
+        case EFI_MEMORY_MAPPED_IO_PORT_SPACE:
+        case EFI_PAL_CODE: {
+            return E820_RESERVED;
+        }
+        case EFI_UNUSABLE_MEMORY: {
+            return E820_UNUSABLE;
+        }
+        case EFI_ACPI_RECLAIM_MEMORY: {
+            return E820_ACPI;
+        }
+        case EFI_LOADER_CODE:
+        case EFI_LOADER_DATA:
+        case EFI_BOOT_SERVICES_CODE:
+        case EFI_BOOT_SERVICES_DATA:
+        case EFI_CONVENTIONAL_MEMORY:
+        case EFI_UNACCEPTED_MEMORY_TYPE: {
+            return E820_RAM;
+        }
+        case EFI_ACPI_MEMORY_NVS: {
+            return E820_NVS;
+        }
+        case EFI_PERSISTENT_MEMORY: {
+            return E820_PMEM;
+        }
+        default: {
+            return 0;
+        }
+    }
+}
+
+static bool e820_clips_decide(void) {
+    if (core_handoff->bios_year >= E820_CLIP_YEAR_END) {
+        printf(
+            "PCI: the firmware's memory map does not clip windows, as the firmware is from %u\n",
+            core_handoff->bios_year
+        );
+        return false;
+    }
+    for (size_t i = 0; i < ARRAY_COUNT(no_e820_quirks); i++) {
+        const struct no_e820_quirk *q = &no_e820_quirks[i];
+        if (smbios_dmi_contains(core_handoff->dmi_sys_vendor, q->sys_vendor)
+         && smbios_dmi_contains(core_handoff->dmi_product_name, q->product_name)
+         && smbios_dmi_contains(core_handoff->dmi_product_version, q->product_version)
+         && smbios_dmi_contains(core_handoff->dmi_board_name, q->board_name)) {
+            printf(
+                "PCI: the firmware's memory map does not clip windows, as Linux 7.3 has it for "
+                "this machine\n"
+            );
+            return false;
+        }
+    }
+    return true;
+}
+
+// The E820 table, sorted and merged as Linux 7.3's e820__update_table() has
+// it, made once.
+static void e820_make(void) {
+    if (e820 != NULL) {
+        return;
+    }
+    size_t capacity = 0;
+    for (size_t i = 0; ; i++) {
+        const struct efi_memory_descriptor *d = handoff_efi_desc(core_handoff, i);
+        if (d == NULL) {
+            break;
+        }
+        uint64_t d_end;
+        if (!handoff_efi_desc_end(d, &d_end) || d_end == d->physical_start) {
+            continue;
+        }
+        uint8_t type = e820_type(d, d_end - d->physical_start);
+        if (type == 0) {
+            continue;
+        }
+        e820 = heap_grow(e820, e820_count, &capacity, sizeof(struct e820_entry), 64);
+        size_t at = e820_count++;
+        while (at > 0 && e820[at - 1].base > d->physical_start) {
+            e820[at] = e820[at - 1];
+            at--;
+        }
+        e820[at] = (struct e820_entry){ d->physical_start, d_end, type };
+    }
+    size_t kept = 0;
+    for (size_t i = 0; i < e820_count; i++) {
+        if (kept != 0 && e820[kept - 1].type == e820[i].type
+         && e820[kept - 1].end >= e820[i].base) {
+            if (e820[i].end > e820[kept - 1].end) {
+                e820[kept - 1].end = e820[i].end;
+            }
+            continue;
+        }
+        e820[kept++] = e820[i];
+    }
+    e820_count = kept;
+    e820_clips = e820_clips_decide();
+}
 
 // Takes [base, base + size) out of room, to whole pages.
 static void take(struct range_list *room, uintptr_t base, uint64_t size) {
@@ -60,6 +218,75 @@ static void take_ranges(
     }
 }
 
+// How far Linux 7.3's e820__reserve_resources_late() pads the end of RAM
+// there, against firmware that lists no stolen RAM.
+static uint64_t ram_alignment(uint64_t at) {
+    if (at < ONE_MIB) {
+        return 0x10000;
+    }
+    if (at < 16 * ONE_MIB) {
+        return ONE_MIB;
+    }
+    return 64 * ONE_MIB;
+}
+
+// Takes out of room, for the window [base, end), what of the E820 table blocks
+// Linux 7.3's allocations there: the RAM, ACPI, NVS, and unusable ranges that
+// e820__reserve_resources() makes busy, and any range below 1 MiB; the RAM's
+// ends padded; and the other ranges that lie within the window, short of all
+// of it, which e820__reserve_resources_late() makes its children, where those
+// that hold all of it or overlap an end grow to be its parents and block
+// nothing (insert_resource_expand_to_fit()).
+static void room_take_e820(struct range_list *room, uintptr_t base, uintptr_t end) {
+    e820_make();
+    for (size_t i = 0; i < e820_count; i++) {
+        const struct e820_entry *e = &e820[i];
+        bool busy = e->type == E820_RAM || e->type == E820_ACPI || e->type == E820_NVS
+                 || e->type == E820_UNUSABLE || e->base < ONE_MIB;
+        bool child = e->base >= base && e->end <= end && (e->base != base || e->end != end);
+        if (busy || child) {
+            take(room, e->base, e->end - e->base);
+        }
+        if (e->type == E820_RAM) {
+            uint64_t padded = align_up(e->end, ram_alignment(e->end));
+            take(room, e->end, padded - e->end);
+        }
+    }
+}
+
+// Clips each free range in room around [base, end) as Linux 7.3's
+// resource_clip() does, which keeps only the larger part of a range that it
+// overlaps, as Linux holds each free range as one.
+static void room_clip(struct range_list *room, uint64_t base, uint64_t end) {
+    size_t i = 0;
+    while (i < room->count) {
+        struct range r = room->r[i];
+        if (r.end <= base || r.base >= end) {
+            i++;
+            continue;
+        }
+        // What is left at i, if anything, overlaps no more.
+        uint64_t low = r.base < base ? base - r.base : 0;
+        uint64_t high = r.end > end ? r.end - end : 0;
+        if (low > high) {
+            range_list_remove(room, (uintptr_t)base, r.end);
+        } else {
+            range_list_remove(room, r.base, end < r.end ? (uintptr_t)end : r.end);
+        }
+    }
+}
+
+// What Linux 7.3's arch_remove_reservations() keeps out of each free range:
+// the BIOS area, and, where it clips with the firmware's memory map, each of
+// its ranges.
+static void room_reserve(struct range_list *room) {
+    e820_make();
+    room_clip(room, BIOS_ROM_BASE, FOUR_GIB);
+    for (size_t i = 0; e820_clips && i < e820_count; i++) {
+        room_clip(room, e820[i].base, e820[i].end);
+    }
+}
+
 // Whether g is a bridge between f and its root bus.
 static bool above(const struct pci_enum_function *g, const struct pci_enum_function *f) {
     for (const struct pci_enum_function *p = f->parent; p != NULL; p = p->parent) {
@@ -80,10 +307,11 @@ static bool assigned(const struct pci_enum_bar *bar) {
     return memory && bar->size != 0 && bar->base != 0;
 }
 
-// What of [base, end) the host has nothing at: no function's BAR, no window of
-// a bridge but those above f, which hold it, no memory of ACPI's devices or of
-// the firmware's memory map, and not the framebuffer, where they do not move:
-// the BARs of f that moving has a bit for, and the framebuffer in them, do.
+// What of the window [base, end) the host has nothing at: no function's BAR,
+// no window of a bridge but those above f, which hold it, no memory of ACPI's
+// devices or of the firmware's memory map as Linux 7.3 keeps out of a window,
+// and not the framebuffer, where they do not move: the BARs of f that moving
+// has a bit for, and the framebuffer in them, do.
 static void room_find(
     struct range_list *room,
     const struct pci_enum_function *f,
@@ -129,16 +357,7 @@ static void room_find(
     take_ranges(room, host->tables, host->table_count);
     take_ranges(room, host->private, host->private_count);
     take_ranges(room, host->motherboard, host->motherboard_count);
-    for (size_t i = 0; ; i++) {
-        const struct efi_memory_descriptor *d = handoff_efi_desc(core_handoff, i);
-        if (d == NULL) {
-            break;
-        }
-        uint64_t d_end;
-        if (handoff_efi_desc_end(d, &d_end)) {
-            take(room, d->physical_start, d_end - d->physical_start);
-        }
-    }
+    room_take_e820(room, base, end);
     const struct handoff_framebuffer *fb = &core_handoff->video.framebuffer;
     bool fb_moves = false;
     for (size_t b = 0; b < f->bar_count; b++) {
@@ -179,14 +398,14 @@ static bool window_try(
     uintptr_t end,
     uintptr_t *at
 ) {
-    if (bar->kind == PCI_ENUM_BAR_MEM32 && end > FOUR_GIB) {
-        end = FOUR_GIB;
-    }
-    if (end <= base) {
+    uintptr_t limit = bar->kind == PCI_ENUM_BAR_MEM32 && end > FOUR_GIB ? FOUR_GIB : end;
+    if (limit <= base) {
         return false;
     }
     struct range_list room = { 0 };
     room_find(&room, f, 0, base, end);
+    range_list_remove(&room, limit, end);
+    room_reserve(&room);
     bool found = fit(&room, size, align, at);
     range_list_free(&room);
     return found;
@@ -681,11 +900,11 @@ bool pci_assign_top(struct pci_enum_function *f, size_t index, uintptr_t *base, 
     struct range_list room = { 0 };
     for (size_t i = 0; hb != NULL && i < hb->window_count; i++) {
         const struct pci_host_window *w = &hb->windows[i];
-        uint64_t w_end = w->end < FOUR_GIB ? w->end : FOUR_GIB;
-        if (w->base < w_end) {
-            room_find(&room, f, group, w->base, (uintptr_t)w_end);
+        if (w->base < FOUR_GIB) {
+            room_find(&room, f, group, w->base, w->end);
         }
     }
+    range_list_remove(&room, FOUR_GIB, UINTPTR_MAX);
     depth = 0;
     for (const struct pci_enum_function *p = f->parent; p != NULL; p = p->parent) {
         uint64_t other_base;
@@ -695,6 +914,7 @@ bool pci_assign_top(struct pci_enum_function *f, size_t index, uintptr_t *base, 
         }
         depth++;
     }
+    room_reserve(&room);
     uint64_t at[6];
     uint64_t new_low = 0;
     uint64_t new_high = 0;
