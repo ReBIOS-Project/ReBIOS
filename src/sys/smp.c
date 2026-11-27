@@ -19,6 +19,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <efi.h>
 #include <uacpi/acpi.h>
 #include <uacpi/status.h>
 #include <uacpi/tables.h>
@@ -34,6 +35,7 @@
 #include <lib/util.h>
 #include <memory.h>
 #include <sys/cpu.h>
+#include <sys/mm.h>
 #include <sys/simd.h>
 #include <sys/x86.h>
 #include <virt/sleep.h>
@@ -191,6 +193,43 @@ static uint32_t madt_aps(uint32_t **ids_out) {
 
 static void patch32(uint8_t *page, const uint8_t *field, uint64_t value) {
     write_le32(page + (field - ap_boot_start), (uint32_t)value);
+}
+
+void smp_boot_page_find(void) {
+    if (core_handoff->ap_boot != 0) {
+        return;
+    }
+    // The first such page in the map's order, as Linux takes the start of the
+    // first boot services region below 1 MiB, but never page 0, the null
+    // pointer to the hypervisor; nothing with the runtime attribute, which the
+    // firmware still owns.
+    for (size_t i = 0; ; i++) {
+        const struct efi_memory_descriptor *d = handoff_efi_desc(core_handoff, i);
+        if (d == NULL) {
+            break;
+        }
+        uint64_t end;
+        bool boot_services = d->type == EFI_BOOT_SERVICES_CODE
+                          || d->type == EFI_BOOT_SERVICES_DATA;
+        if (!boot_services || (d->attribute & EFI_MEMORY_RUNTIME) != 0
+         || !handoff_efi_desc_end(d, &end)) {
+            continue;
+        }
+        uint64_t page = d->physical_start > PAGE_SIZE ? page_up(d->physical_start) : PAGE_SIZE;
+        if (page + PAGE_SIZE <= end && page + PAGE_SIZE <= ONE_MIB) {
+            core_handoff->ap_boot = page;
+            printf(
+                "The page at %#llx, below 1 MiB, which boot services used, takes the start "
+                "trampoline\n",
+                (unsigned long long)page
+            );
+            return;
+        }
+    }
+    printf(
+        "No page below 1 MiB takes the start trampoline, so the other processors do not start, "
+        "and the guest gets no S3\n"
+    );
 }
 
 void smp_init(void) {

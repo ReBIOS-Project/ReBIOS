@@ -25,6 +25,7 @@
 #include <uacpi/sleep.h>
 #include <uacpi/status.h>
 #include <virt/sleep.h>
+#include <core.h>
 #include <hw/acpi.h>
 #include <hw/ioapic.h>
 #include <hw/lapic.h>
@@ -75,6 +76,10 @@ bool sleep_offered(uint8_t state) {
     }
     uacpi_namespace_node *node;
     if (uacpi_namespace_node_find(NULL, "\\_S3_", &node) != UACPI_STATUS_OK) {
+        return false;
+    }
+    // The firmware's waking vector is the start trampoline's page.
+    if (core_handoff->ap_boot == 0) {
         return false;
     }
     // Nothing lights the screen of an emulated VGA again after S3, so the

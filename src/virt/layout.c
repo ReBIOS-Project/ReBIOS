@@ -479,6 +479,10 @@ void layout_init(void) {
     // address is the null pointer to the hypervisor's accesses.
     range_list_remove(&free_ram, VGA_BASE, ONE_MIB);
     range_list_remove(&free_ram, 0, PAGE_SIZE);
+    // Nor the start trampoline's page, which may be one boot services used.
+    if (core_handoff->ap_boot != 0) {
+        range_list_remove(&free_ram, core_handoff->ap_boot, core_handoff->ap_boot + PAGE_SIZE);
+    }
 
     uintptr_t low_hpa;
     if (!take_block(&free_ram, TWO_MIB, &low_hpa)) {

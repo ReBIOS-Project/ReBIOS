@@ -113,6 +113,7 @@ static void bsp_main(void *arg) {
 
     rcba_find();
     cbtable_find();
+    smp_boot_page_find();
     layout_init();
     pci_virt_init();
     // The USB pool takes the guest's memory first, as its 2 MiB alignment

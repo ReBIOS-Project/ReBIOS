@@ -23,6 +23,11 @@
 #include <stdint.h>
 #include <sys/cpu.h>
 
+// Where the loader found no free page below 1 MiB for the start trampoline,
+// takes one that boot services used, now that they are gone, as Linux 7.3's
+// efi_free_boot_services() does, into the handoff's ap_boot, which is 0 where
+// there is none. Before the guest's memory is laid out.
+void smp_boot_page_find(void);
 // Finds the processors the MADT lists, and gives each its area. Needs
 // acpi_init().
 void smp_init(void);
