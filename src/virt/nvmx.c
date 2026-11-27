@@ -4680,6 +4680,9 @@ bool nvmx_before_entry(struct vcpu *v) {
         );
         set12(n, VMCS_GUEST_PHYS_ADDR, n->pending_gpa);
         set12(n, VMCS_GUEST_LINEAR_ADDR, n->pending_linear);
+        // After exit_to_l1()'s shadow_load(), which took them as 0.
+        shadow_update(v, n, VMCS_GUEST_PHYS_ADDR);
+        shadow_update(v, n, VMCS_GUEST_LINEAR_ADDR);
         return false;
     }
     // A start-up IPI ends the wait for one (SDM 325462-093 Vol. 3C, 28.2).
