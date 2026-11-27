@@ -4768,6 +4768,15 @@ void vacpi_sleep_woken(bool slept) {
         }
         bit_set(vacpi.gpe_armed, gpe, false);
     }
+    // The guest's RTC_EN is in the RTC well, which a sleep keeps (Intel
+    // 324645-006, 13.8.3.2), where the machine's may have been cleared as it
+    // woke.
+    spinlock_acquire(&vacpi.lock);
+    bool rtc = (vacpi.pm1_en & PM1_RTC) != 0;
+    spinlock_release(&vacpi.lock);
+    if (slept && rtc && vacpi.rtc_event) {
+        uacpi_enable_fixed_event(UACPI_FIXED_EVENT_RTC);
+    }
 }
 
 void vacpi_wake(void) {
