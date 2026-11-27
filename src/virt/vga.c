@@ -2712,7 +2712,10 @@ static void direct_map(void) {
         map_vram(WINDOW_BASE, (uint64_t)vbe.window_bank << 16, PLANE_SIZE);
     }
     gpt_flush();
+    // The framebuffer holds what the guest drew there, or will, which no frame
+    // shown before matches.
     out.vbe_valid = false;
+    out.valid = false;
 }
 
 // When the guest's mode leaves the framebuffer's, the start of video memory
