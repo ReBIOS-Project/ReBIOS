@@ -1042,6 +1042,10 @@ static bool vbe_window_at(uint32_t offset, size_t *at) {
     return offset < PLANE_SIZE && *at < vbe.vram_size;
 }
 
+// In direct mode the window may show the framebuffer, which a guest
+// instruction that the hypervisor carries out then reads through it: an
+// exception to the hypervisor never reading the framebuffer, as the read is
+// the guest's own.
 static uint8_t window_byte_read(bool vbe_mode, uint32_t offset) {
     if (vbe_mode) {
         size_t at;
