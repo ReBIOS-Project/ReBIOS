@@ -60,6 +60,12 @@
 // from.
 #define RUN_PAGES 16
 #define RUN_DECODED 4096
+// The pages the run last gave up for others, which an instruction that looked
+// one up before its later lookups took its place finds again without a walk,
+// as the processor's TLB would hold it for the instruction's access: a walk
+// again could find the guest's tables changed by another processor meanwhile.
+// More than one instruction gives up.
+#define RUN_GIVEN_UP 8
 
 #define NEED_READ 1
 #define NEED_WRITE 2
@@ -148,6 +154,8 @@ struct run_state {
     struct run_page pages[RUN_PAGES];
     size_t page_count;
     size_t victim;
+    struct run_page given_up[RUN_GIVEN_UP];
+    size_t given_up_next;
     uint64_t gpr[16];
     uint64_t rip;
     uint64_t rflags;
@@ -359,6 +367,14 @@ static struct run_page *page_get_all(
     if (p != NULL && (p->rights & need) == need) {
         return p;
     }
+    if (p == NULL) {
+        for (size_t i = 0; i < RUN_GIVEN_UP; i++) {
+            struct run_page *g = &rs->given_up[i];
+            if (g->linear == page && (g->rights & need) == need) {
+                return g;
+            }
+        }
+    }
     bool write = (need & NEED_WRITE) != 0;
     bool fetch = (need & NEED_FETCH) != 0;
     uint64_t gpa;
@@ -380,6 +396,7 @@ static struct run_page *page_get_all(
                 p = &rs->pages[rs->page_count++];
             } else {
                 p = &rs->pages[rs->victim++ % RUN_PAGES];
+                rs->given_up[rs->given_up_next++ % RUN_GIVEN_UP] = *p;
             }
         }
         *p = (struct run_page){ page, gpa, host, region, place, 0 };
@@ -2818,6 +2835,10 @@ static void load_state(struct vcpu *v, struct run_state *rs) {
     rs->branches_counted = v->pmu_branches != 0;
     rs->page_count = 0;
     rs->victim = 0;
+    // No page's address.
+    for (size_t i = 0; i < RUN_GIVEN_UP; i++) {
+        rs->given_up[i].linear = 1;
+    }
     rs->code_linear = 1;
     rs->port_count = 0;
 }
