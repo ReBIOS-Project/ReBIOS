@@ -226,7 +226,15 @@ static void enter(struct vcpu *v) {
     uintptr_t vector = smp_trampoline_wake(woken, wake_stack, WAKE_STACK_SIZE);
     uacpi_status status = uacpi_set_waking_vector(vector, 0);
     if (status == UACPI_STATUS_OK) {
+        // The firmware's AML runs here alone, as the deferred work's
+        // transactions with the embedded controller take no lock among
+        // ReBIOS's own.
+        acpi_work_wait();
         status = uacpi_prepare_for_sleep_state(UACPI_SLEEP_STATE_S3);
+    }
+    bool frozen = status == UACPI_STATUS_OK;
+    if (frozen) {
+        acpi_sleep_freeze();
     }
     bool slept = false;
     // Whether this processor left VMX or SVM operation, for sleep_cpu_wake()
@@ -256,6 +264,9 @@ static void enter(struct vcpu *v) {
     }
     if (!slept) {
         printf("Cannot enter ACPI S3: %s\n", uacpi_status_to_string(status));
+        if (frozen) {
+            acpi_sleep_thaw();
+        }
     }
     // What the machine's devices lost, the hypervisor's view of them gives
     // back, before anything reaches them.

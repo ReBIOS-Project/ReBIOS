@@ -87,6 +87,12 @@ bool acpi_working(void);
 // queued or under way, and what that work queues meanwhile, as uACPI's
 // uacpi_kernel_wait_for_work_completion() has it.
 void acpi_work_wait(void);
+// Before the machine sleeps, as Linux 7.3's acpi_pm_freeze() does
+// (drivers/acpi/sleep.c): the GPEs disabled, so that no more work comes, and
+// the work done. After a sleep that did not happen, the GPEs enabled again, as
+// its acpi_leave_sleep_state() has them.
+void acpi_sleep_freeze(void);
+void acpi_sleep_thaw(void);
 
 // Whether the firmware shows a device with one of the IDs, a NULL-ended list,
 // as present or functioning by its _STA.

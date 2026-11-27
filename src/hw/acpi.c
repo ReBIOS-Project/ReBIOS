@@ -641,6 +641,21 @@ uacpi_status uacpi_kernel_wait_for_work_completion(void) {
     return UACPI_STATUS_OK;
 }
 
+void acpi_sleep_freeze(void) {
+    uacpi_status status = uacpi_disable_all_gpes();
+    if (status != UACPI_STATUS_OK) {
+        printf("Cannot disable the ACPI GPEs for sleep: %s\n", uacpi_status_to_string(status));
+    }
+    acpi_work_wait();
+}
+
+void acpi_sleep_thaw(void) {
+    uacpi_status status = uacpi_enable_all_runtime_gpes();
+    if (status != UACPI_STATUS_OK) {
+        printf("Cannot enable the ACPI GPEs again: %s\n", uacpi_status_to_string(status));
+    }
+}
+
 void acpi_lock(void) {
     spinlock_acquire(&lock);
 }
