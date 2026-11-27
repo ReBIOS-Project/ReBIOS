@@ -3767,7 +3767,13 @@ void vacpi_fadt(uint8_t fadt[static VACPI_FADT_SIZE], uint32_t facs, uint32_t ds
     write_le32(fadt + FADT_DSDT, dsdt);
     // Dual 8259s or I/O APICs, the MADT telling which the guest has.
     fadt[FADT_INT_MODEL] = 1;
-    uint32_t flags = FADT_WBINVD | FADT_PROC_C1 | FADT_SLP_BUTTON | FADT_FIX_RTC;
+    uint32_t flags = FADT_WBINVD | FADT_PROC_C1 | FADT_SLP_BUTTON;
+    // The guest's PM1 registers have the RTC's wake status and enable where
+    // they follow the machine's, which have them only where its FADT says so
+    // too (ACPI 6.6, Table 5.10).
+    if (!vacpi.rtc_event) {
+        flags |= FADT_FIX_RTC;
+    }
     rtc_fadt_indexes(fadt + FADT_CENTURY, fadt + FADT_DAY_ALRM, fadt + FADT_MON_ALRM);
     struct acpi_fadt *host;
     if (uacpi_table_fadt(&host) == UACPI_STATUS_OK) {
@@ -3775,7 +3781,7 @@ void vacpi_fadt(uint8_t fadt[static VACPI_FADT_SIZE], uint32_t facs, uint32_t ds
         // Whether the machine can dock, as the namespace the guest gets is the
         // firmware's: Windows stops at a dock device of a system that does not
         // claim to support docking (ACPI 6.6, Table 5.10).
-        flags |= host->flags & ACPI_DCK_CAP;
+        flags |= host->flags & (ACPI_DCK_CAP | ACPI_FIX_RTC);
     }
     if (vacpi.pm1) {
         write_le32(fadt + FADT_PM1A_EVT_BLK, vacpi.pm1_evt);
