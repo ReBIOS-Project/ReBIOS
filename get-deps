@@ -65,7 +65,12 @@ clone_repo_commit \
 clone_repo_commit \
     https://github.com/osdev0/freestanding-lgrt.git \
     freestanding-lgrt \
-    fbc37e3babf39f464e6f49401e25bab71cc7f938
+    ad8e7c78ae2068d020358f89c01df897ed0b0959
+
+clone_repo_commit \
+    https://github.com/osdev0/gmake-toolchain-helper.git \
+    gmake-toolchain-helper \
+    4ca08736be746ee7ccb2c42959144afd99a02434
 
 clone_repo_commit \
     https://github.com/PicoEFI/PicoEFI.git \

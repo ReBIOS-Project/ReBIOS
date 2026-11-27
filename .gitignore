@@ -4,6 +4,7 @@
 /boot
 /freestanding-c-hdrs
 /freestanding-lgrt
+/gmake-toolchain-helper
 /picoefi
 /nanoprintf
 /flanterm

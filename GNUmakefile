@@ -140,50 +140,23 @@ NASMFLAGS := -g
 # User controllable linker flags. We set none by default.
 LDFLAGS :=
 
-# Ensure the dependencies have been obtained.
-ifneq ($(filter-out clean distclean dist,$(or $(MAKECMDGOALS),default)),)
+# The goals other than cleaning, uninstalling, and making a release tarball,
+# which need neither the dependencies nor a toolchain.
+override BUILD_GOALS := $(filter-out clean distclean dist uninstall,$(or $(MAKECMDGOALS),all))
+
+# Ensure the dependencies have been obtained, and set up the toolchain
+# helper, which records the flags as given, before the internal ones.
+ifneq ($(BUILD_GOALS),)
     ifeq ($(wildcard .deps-obtained),)
         $(error Please run the ./get-deps script first)
     endif
+    override TCH_ARCH := x86_64
+    override TCH_TARGET_MACRO := __x86_64__
+    override TCH_CLANG_TARGET := x86_64-unknown-none-elf
+    override TCH_SELECTORS := TOOLCHAIN TOOLCHAIN_PREFIX
+    override TCH_CROSS_HINT := use TOOLCHAIN=llvm or a cross compiler for x86_64 with TOOLCHAIN_PREFIX
+    include gmake-toolchain-helper/init.mk
 endif
-
-# Stop on a problem the checks below find, unless only cleaning, which needs
-# no toolchain.
-ifneq ($(filter-out clean distclean dist,$(or $(MAKECMDGOALS),default)),)
-    override TOOLCHAIN_ERROR = $(error $(1))
-else
-    override TOOLCHAIN_ERROR =
-endif
-
-# Check if CC is Clang.
-override CC_IS_CLANG := $(shell ! $(CC) --version 2>/dev/null | grep -q '^Target: '; echo $$?)
-
-# Macros to check if a flag is supported, used as $(call MACRO,flag), and
-# expanding to 1 or 0. A second argument names another spelling.
-
-# The name of a flag, up to any "=", with the dashes after the first made
-# optional, as compilers leave the value out or spell the flag differently.
-override FLAG_NAME = -$(subst -,-?,$(patsubst -%,%,$(firstword $(subst =, ,$(1)))))
-
-# Look for a diagnostic naming the flag, in the untranslated C locale. The
-# name has to stand on its own, as "-pie" would otherwise be found inside
-# a complaint about "-no-pie".
-override FLAG_IS_NAMED = grep -qE '(error|warning|note):.*[^[:alnum:]]($(call FLAG_NAME,$(1))$(if $(2),|$(call FLAG_NAME,$(2))))([^-[:alnum:]]|$$)'
-
-# Check if the compiler supports a flag when compiling.
-override CC_HAS_COMPILE_FLAG = $(shell LC_ALL=C $(CC) $(CFLAGS) $(1) -c -x c /dev/null -o /dev/null 2>&1 >/dev/null | $(call FLAG_IS_NAMED,$(1),$(2)); echo $$?)
-
-# Check if the compiler supports a flag when linking, linking nothing.
-override CC_HAS_LINK_FLAG = $(shell LC_ALL=C $(CC) $(CFLAGS) $(LDFLAGS) $(1) -Wl,--version 2>&1 >/dev/null | $(call FLAG_IS_NAMED,$(1),$(2)); echo $$?)
-
-# Check if the linker supports a flag by searching its help, as older GNU
-# ld take unknown flags for different ones (-no-pie for -n -o -pie).
-override LD_HAS_FLAG = $(shell ! LC_ALL=C $(CC) $(CFLAGS) $(LDFLAGS) -Wl,--help 2>/dev/null | grep -qE '(^|[[:space:]])-?$(1)([[:space:],=[]|$$)'; echo $$?)
-
-# Check if the linker supports a -z keyword, linking nothing, as LLD lists
-# none in its help and newer GNU ld stop at --version before warning of
-# unknown ones. Any mention counts, as gold does not call it an error.
-override LD_HAS_Z_FLAG = $(shell LC_ALL=C $(CC) $(CFLAGS) $(LDFLAGS) -Wl,-z,$(1) -o /dev/null 2>&1 >/dev/null | grep -qE '[^-[:alnum:]]$(1)([^-[:alnum:]]|$$)'; echo $$?)
 
 # Internal C flags that should not be changed by the user.
 override CFLAGS += \
@@ -231,16 +204,6 @@ override NASMFLAGS := \
     -i src/ \
     -Wall
 
-# If the C compiler is Clang, set the target as needed.
-ifeq ($(CC_IS_CLANG),1)
-    override CC += \
-        -target x86_64-unknown-none-elf
-    # Use LLD unless LDFLAGS picks another linker.
-    override LDFLAGS := \
-        -fuse-ld=lld \
-        $(LDFLAGS)
-endif
-
 # Internal linker flags that should not be changed by the user.
 override LDFLAGS += \
     -nostdlib \
@@ -254,112 +217,38 @@ override LDFLAGS += \
     -Wl,-T,picoefi/src/x86_64/link_script.lds \
     -Wl,-m,elf_x86_64
 
-# Check that the compiler works with the given flags, as the checks below
-# would otherwise blame a missing feature.
-override CC_COMPILE_ERROR := $(shell LC_ALL=C $(CC) $(CFLAGS) -c -x c /dev/null -o /dev/null 2>&1 >/dev/null | grep -i 'error:' | head -n 1)
-ifneq ($(CC_COMPILE_ERROR),)
-    $(call TOOLCHAIN_ERROR,The compiler does not work with the given CFLAGS: $(CC_COMPILE_ERROR))
+# Check the toolchain with the internal flags, which also makes Clang target
+# the architecture and link with LLD unless LDFLAGS picks another linker.
+ifneq ($(BUILD_GOALS),)
+    include gmake-toolchain-helper/check.mk
 endif
 
-# Check that the compiler emits ELF objects. Go by the macro for ELF targets,
-# as GNU as cannot write an object to standard output. Clang is given an ELF
-# target, and before version 17 did not define the macro for all of them.
-ifneq ($(CC_IS_CLANG),1)
-    override CC_EMITS_ELF := $(shell ! $(CC) $(CFLAGS) -dM -E -x c /dev/null 2>/dev/null | grep -q 'define __ELF__ 1'; echo $$?)
-    ifneq ($(CC_EMITS_ELF),1)
-        $(call TOOLCHAIN_ERROR,The compiler does not emit ELF objects)
-    endif
-endif
-
-# Some drivers ignore -fuse-ld on some targets, so look for the name of the
-# linker asked for in the banner of the one that runs, on each use.
-override CC_FUSE_LD := $(lastword $(filter -fuse-ld=%,$(CFLAGS) $(LDFLAGS)))
-override CC_FUSE_LD_NAME := $(firstword $(subst -, ,$(patsubst ld.%,%,$(notdir $(patsubst -fuse-ld=%,%,$(CC_FUSE_LD))))))
-# GNU ld calls itself ld, not bfd.
-override CC_LD_BANNER_NAME := $(patsubst bfd,ld,$(CC_FUSE_LD_NAME))
-override CC_LD_VERSION = $(shell LC_ALL=C $(CC) $(CFLAGS) $(LDFLAGS) -Wl,--version 2>/dev/null | head -n 1)
-override CC_RUNS_FUSE_LD = $(shell ! printf '%s\n' '$(subst ',,$(CC_LD_VERSION))' | grep -qiE '(^|[^[:alnum:]])$(CC_LD_BANNER_NAME)([^[:alnum:]]|$$)'; echo $$?)
-
-ifeq ($(CC_IS_CLANG),1)
-    # Clang hands freestanding links over to another compiler driver on
-    # some targets. Look for the linker flags being passed on as they
-    # are, which a linker Clang runs itself would be given translated,
-    # as the driver it picks need not be named "gcc" at all. The check
-    # is made again below, so it runs on each use. The print flag is
-    # kept in a variable, as older makes take a "#" in a call for a
-    # comment.
-    override CLANG_PRINT_COMMANDS := -\#\#\#
-    override CC_LINKS_VIA_DRIVER = $(shell ! $(CC) $(CFLAGS) $(LDFLAGS) -Wl,--version $(CLANG_PRINT_COMMANDS) 2>&1 | grep '^ "' | tail -n 1 | grep -q -- '-Wl,'; echo $$?)
-
-    # If it does, or runs another linker, link as for the Linux target,
-    # where Clang itself runs the linker asked for, and keep that target's
-    # configuration files out. The flag is looked for by compiling, as
-    # linking is not checked yet.
-    ifneq ($(CC_LINKS_VIA_DRIVER)$(CC_RUNS_FUSE_LD),01)
-        override LDFLAGS += \
-            -target x86_64-linux-gnu
-        ifeq ($(call CC_HAS_COMPILE_FLAG,--no-default-config),1)
-            override LDFLAGS += \
-                --no-default-config
-        endif
-
-        # Check that this worked, as the linker flags would otherwise
-        # reach a compiler driver that knows nothing of them, or another
-        # linker. If no linker runs at all, the check below says why.
-        ifeq ($(CC_LINKS_VIA_DRIVER),1)
-            $(call TOOLCHAIN_ERROR,The compiler still hands the link over to another compiler driver)
-        endif
-        ifneq ($(CC_LD_VERSION),)
-            ifneq ($(CC_RUNS_FUSE_LD),1)
-                $(call TOOLCHAIN_ERROR,The compiler still ignores $(CC_FUSE_LD) and runs another linker: $(CC_LD_VERSION))
-            endif
-        endif
-    endif
-endif
-
-# The same for linking, once Clang has a linker it can run.
-override CC_LINK_ERROR := $(shell LC_ALL=C $(CC) $(CFLAGS) $(LDFLAGS) -Wl,--version 2>&1 >/dev/null | grep -i 'error:' | head -n 1)
-ifneq ($(CC_LINK_ERROR),)
-    $(call TOOLCHAIN_ERROR,The linker does not work with the given LDFLAGS: $(CC_LINK_ERROR))
-endif
-
-# Check that the linker asked for is the one that runs, in any case.
-ifneq ($(CC_FUSE_LD),)
-    ifneq ($(CC_RUNS_FUSE_LD),1)
-        $(call TOOLCHAIN_ERROR,The compiler ignores $(CC_FUSE_LD) and runs another linker: $(CC_LD_VERSION))
-    endif
-endif
-
-ifeq ($(call CC_HAS_COMPILE_FLAG,-fno-stack-clash-protection),1)
-    override CFLAGS += \
-        -fno-stack-clash-protection
-endif
-
-ifeq ($(call CC_HAS_COMPILE_FLAG,-fcf-protection=none),1)
-    override CFLAGS += \
-        -fcf-protection=none
-endif
+# Flags that depend on the toolchain. When nothing is to be built, the
+# helper is not included: its macros expand to nothing, and TCH_CC_IS_CLANG
+# is empty.
+override CFLAGS += \
+    $(call TCH_DRIVER_HAS_COMPILE_FLAG,CC,-fno-stack-clash-protection)
+override CFLAGS += \
+    $(call TCH_DRIVER_HAS_COMPILE_FLAG,CC,-fcf-protection=none)
 
 # GCC needs this flag for interrupt handlers and Clang below 3.9 has no
 # name for it, where only a long double could reach the x87.
-ifeq ($(call CC_HAS_COMPILE_FLAG,-mno-80387),1)
-    override CFLAGS += \
-        -mno-80387
-endif
+override CFLAGS += \
+    $(call TCH_DRIVER_HAS_COMPILE_FLAG,CC,-mno-80387)
 
 # Older GCCs need this for ms_abi calls. Clang has no such flag.
-ifneq ($(CC_IS_CLANG),1)
+ifneq ($(TCH_CC_IS_CLANG),1)
     override CFLAGS += \
         -maccumulate-outgoing-args
 endif
 
 # Pack relative relocations where the linker can, as RELR tables take a
 # fraction of the room. LLD before 15 only knows --pack-dyn-relocs.
-ifeq ($(call LD_HAS_Z_FLAG,pack-relative-relocs),1)
+ifneq ($(call TCH_LINKER_HAS_Z_FLAG,pack-relative-relocs),)
     override LDFLAGS += \
         -Wl,-z,pack-relative-relocs
 else
-    ifeq ($(call LD_HAS_FLAG,--pack-dyn-relocs),1)
+    ifneq ($(call TCH_LINKER_HAS_FLAG,--pack-dyn-relocs),)
         override LDFLAGS += \
             -Wl,--pack-dyn-relocs=relr
     endif
@@ -367,10 +256,8 @@ endif
 
 # Tell the compiler as well if it takes the flag, as it otherwise passes
 # its own default on to the linker.
-ifeq ($(call CC_HAS_LINK_FLAG,-pie),1)
-    override LDFLAGS += \
-        -pie
-endif
+override LDFLAGS += \
+    $(call TCH_DRIVER_HAS_LINK_FLAG,-pie)
 
 # Use "find" to glob all *.c, *.S, and *.asm files in the tree and obtain the
 # object and header dependency file names.
@@ -392,21 +279,11 @@ all:
 -include $(HEADER_DEPS)
 
 # Each kind of file depends on records of the variables it is built with,
-# named after them. Each record gets its variable as set here, as target
-# specific values, like the -fno-lto below, would otherwise reach it
-# through the files depending on it.
-override VARSFILES := $(addprefix obj/,CC OBJCOPY CFLAGS CPPFLAGS LDFLAGS NASMFLAGS)
-$(foreach f,$(VARSFILES),$(eval $(f): override $(notdir $(f)) := $$($(notdir $(f)))))
-
-# Remake the records that differ, compared here rather than by a recipe run
-# every time, so that make can still tell when there is nothing to be done.
-override CHANGED_VARSFILES := $(foreach f,$(VARSFILES),$(shell printf '%s\n' '$(subst ','\'',$($(notdir $(f))))' | cmp -s - $(f) 2>/dev/null || echo $(f)))
-.PHONY: FORCE
-FORCE:
-$(CHANGED_VARSFILES): FORCE
-$(VARSFILES):
-	@mkdir -p "$(dir $@)"
-	@printf '%s\n' '$(subst ','\'',$($(notdir $@)))' > $@
+# named after them, which the toolchain helper remakes when they change.
+override TCH_RECORDS := $(addprefix obj/,CC OBJCOPY CFLAGS CPPFLAGS LDFLAGS NASMFLAGS)
+ifneq ($(BUILD_GOALS),)
+    include gmake-toolchain-helper/records.mk
+endif
 
 # Rule to convert the final ELF executable to a .EFI PE executable.
 bin/$(OUTPUT).efi: bin/$(OUTPUT) GNUmakefile obj/OBJCOPY
@@ -521,7 +398,7 @@ clean:
 # Remove everything built and generated including downloaded dependencies.
 .PHONY: distclean
 distclean: clean
-	rm -rf .deps-obtained .cache compile_commands.json freestanding-c-hdrs freestanding-lgrt picoefi nanoprintf flanterm uACPI tendril seabios edk2-ovmf-bins edk2-ovmf-bins.tar.gz
+	rm -rf .deps-obtained .cache compile_commands.json freestanding-c-hdrs freestanding-lgrt gmake-toolchain-helper picoefi nanoprintf flanterm uACPI tendril seabios edk2-ovmf-bins edk2-ovmf-bins.tar.gz
 
 # Release tarballs are named after the commit's tag, without its "v", or else
 # after its abbreviated hash, and their files are dated as the commit is.
@@ -541,7 +418,7 @@ dist:
 	cd "$(DIST_OUTPUT)" && ./get-deps
 	git -C "$(DIST_OUTPUT)/seabios" describe --always --tags --long >"$(DIST_OUTPUT)/seabios/.version"
 	cd "$(DIST_OUTPUT)" && rm -rf .gitignore .github
-	cd "$(DIST_OUTPUT)" && for d in freestanding-c-hdrs freestanding-lgrt picoefi nanoprintf flanterm uACPI tendril seabios; do rm -rf "$$d/.git" "$$d/.github" "$$d/.gitignore"; done
+	cd "$(DIST_OUTPUT)" && for d in freestanding-c-hdrs freestanding-lgrt gmake-toolchain-helper picoefi nanoprintf flanterm uACPI tendril seabios; do rm -rf "$$d/.git" "$$d/.github" "$$d/.gitignore"; done
 	rm -rf "$(DIST_OUTPUT)/nanoprintf/tests" "$(DIST_OUTPUT)/uACPI/tests"
 	find "$(DIST_OUTPUT)" -type f -perm -100 -exec chmod 755 '{}' +
 	find "$(DIST_OUTPUT)" -type f ! -perm -100 -exec chmod 644 '{}' +
@@ -563,7 +440,7 @@ install: all
 .PHONY: uninstall
 uninstall:
 	rm -f "$(DESTDIR)$(PREFIX)/share/$(OUTPUT)/$(OUTPUT).efi"
-	-rmdir "$(DESTDIR)$(PREFIX)/share/$(OUTPUT)"
+	rmdir "$(DESTDIR)$(PREFIX)/share/$(OUTPUT)" 2>/dev/null || :
 
 # Our version, for SeaBIOS's banner, found as SeaBIOS finds its own: from Git,
 # or else from the .version file of a release tarball.
