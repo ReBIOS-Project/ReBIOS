@@ -126,6 +126,7 @@
 #define EFER_LMSLE ((uint32_t)1 << 13)
 #define EFER_FFXSR ((uint32_t)1 << 14)
 #define EFER_TCE ((uint32_t)1 << 15)
+#define EFER_INTWB ((uint32_t)1 << 18)
 #define EFER_UAIE ((uint32_t)1 << 20)
 #define EFER_AIBRSE ((uint32_t)1 << 21)
 

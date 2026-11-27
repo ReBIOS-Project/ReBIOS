@@ -383,6 +383,7 @@ static const struct last_subleaf amd_last_subleaves[] = {
 #define CPUID_80000001_EDX_FFXSR ((uint32_t)1 << 25)
 #define CPUID_80000001_EDX_RDTSCP ((uint32_t)1 << 27)
 #define CPUID_80000001_EDX_LM ((uint32_t)1 << 29)
+#define CPUID_80000008_EBX_INT_WBINVD ((uint32_t)1 << 13)
 #define CPUID_80000008_EBX_LMSLE_UNSUPPORTED ((uint32_t)1 << 20)
 // INVLPGB's nested translations, which nested SVM drops for the guest
 // (nsvm.c).
@@ -622,8 +623,13 @@ uint64_t cpuid_efer_allowed(struct vcpu *v) {
         efer |= EFER_SVME;
     }
     if (!virt_vmx) {
-        if ((cpuid_guest(v, 0x80000008, 0).ebx & CPUID_80000008_EBX_LMSLE_UNSUPPORTED) == 0) {
+        uint32_t size_features = cpuid_guest(v, 0x80000008, 0).ebx;
+        if ((size_features & CPUID_80000008_EBX_LMSLE_UNSUPPORTED) == 0) {
             efer |= EFER_LMSLE;
+        }
+        // Interruptible WBINVD and WBNOINVD (APM 40332 rev. 4.11, 3.1.7).
+        if ((size_features & CPUID_80000008_EBX_INT_WBINVD) != 0) {
+            efer |= EFER_INTWB;
         }
         uint32_t features = cpuid_guest(v, 0x80000021, 0).eax;
         if ((features & CPUID_80000021_EAX_UPPER_ADDRESS_IGNORE) != 0) {
