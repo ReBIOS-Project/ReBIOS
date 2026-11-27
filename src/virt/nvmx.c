@@ -3829,6 +3829,8 @@ static void exit_to_l1(
     }
 
     uint64_t bndcfgs = vmx_mpx_passthrough() ? vmx_read(VMCS_GUEST_BNDCFGS) : 0;
+    uint64_t pat = vmx_read(VMCS_GUEST_PAT);
+    uint64_t efer = vmx_read(VMCS_GUEST_EFER);
     uint64_t perf = vmx_perf_global_switched() ? vmx_read(VMCS_GUEST_PERF_GLOBAL_CTRL) : 0;
     uint64_t lbr_ctl = vmx_lbr_switched() ? vmx_read(VMCS_GUEST_LBR_CTL) : 0;
     struct cet_state cet = vmx_cet_switched() ? cet_read() : (struct cet_state){ 0 };
@@ -3838,10 +3840,15 @@ static void exit_to_l1(
     if (vmx_mpx_passthrough()) {
         vmx_write(VMCS_GUEST_BNDCFGS, bndcfgs);
     }
-    // The guest's guest's IA32_PERF_GLOBAL_CTRL and CET state stay loaded, but
-    // where the entry failed on the guest state, before loading any (SDM
-    // 325462-093 Vol. 3C, 29.8).
+    // The guest's guest's IA32_PAT, IA32_EFER, IA32_PERF_GLOBAL_CTRL, and CET
+    // state stay loaded, but where the entry failed on the guest state, before
+    // loading any (SDM 325462-093 Vol. 3C, 29.8), and the exit loads the
+    // host's only where its controls say (30.5.1).
     bool loaded = !failed || (reason & 0xffff) != EXIT_REASON_INVALID_GUEST_STATE;
+    if (loaded) {
+        vmx_write(VMCS_GUEST_PAT, pat);
+        vmx_write(VMCS_GUEST_EFER, efer);
+    }
     if (vmx_perf_global_switched() && loaded) {
         vmx_write(VMCS_GUEST_PERF_GLOBAL_CTRL, perf);
     }
