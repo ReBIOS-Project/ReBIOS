@@ -4663,6 +4663,14 @@ bool nvmx_entry_failed(struct vcpu *v, uint32_t error) {
     return true;
 }
 
+// A wait of the guest's guest that ended for nothing it takes, as for a sleep
+// the guest asked for: the entry gives way to the vCPU's next turn, which
+// sleeps, or waits on.
+static bool wait_ended(struct vcpu *v) {
+    atomic_store_explicit(&v->cpu->kicked, true, memory_order_seq_cst);
+    return true;
+}
+
 // The guest's INIT, and its NMIs and interrupts where VMCS12 exits on them,
 // are exits of its guest's; else the guest's guest goes on, taking what the
 // guest does not, but after the windows the guest asks for, as those exits
@@ -4688,6 +4696,9 @@ bool nvmx_before_entry(struct vcpu *v) {
     // A start-up IPI ends the wait for one (SDM 325462-093 Vol. 3C, 28.2).
     if (atomic_load_explicit(&n->inactive, memory_order_relaxed) == ACTIVITY_WAIT_SIPI) {
         int vector = atomic_exchange_explicit(&n->sipi, -1, memory_order_seq_cst);
+        if (vector < 0) {
+            return wait_ended(v);
+        }
         exit_to_l1(v, n, EXIT_REASON_SIPI, (uint64_t)vector, 0, 0, false);
         return false;
     }
@@ -4727,10 +4738,8 @@ bool nvmx_before_entry(struct vcpu *v) {
             exit_to_l1(v, n, EXIT_REASON_PREEMPTION_TIMER, 0, 0, 0, false);
             return false;
         }
-        // Woken for nothing it takes, it waits on.
         if (!v->nmi_pending) {
-            nvmx_wait(v);
-            return nvmx_before_entry(v);
+            return wait_ended(v);
         }
         atomic_store_explicit(&n->inactive, ACTIVITY_ACTIVE, memory_order_seq_cst);
         vmx_write(VMCS_GUEST_ACTIVITY_STATE, ACTIVITY_ACTIVE);
