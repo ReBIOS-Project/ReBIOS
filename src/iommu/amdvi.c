@@ -710,18 +710,40 @@ static bool ga_log_start(struct amdvi_unit *u, uint32_t apic_id, uint8_t vector)
 }
 
 // The I/O APICs' interrupts come through the IOMMUs as well, so remapping
-// needs their device IDs, as Linux 7.3's check_ioapic_information() also asks.
+// needs their device IDs, and the southbridge's I/O APIC, the one with GSI
+// base 0, to have the FCH's, an SMBus controller's or an ISA bridge's, as
+// Linux 7.3's check_ioapic_information() and check_sb_ioapic() ask: firmware
+// that gives it a wrong one is common.
 void amdvi_remap_start(bool guest_vapic, uint8_t vector) {
+    bool southbridge = false;
     for (size_t i = 0; i < ioapic_count(); i++) {
-        uint8_t id = ioapic_get(i)->id;
-        if (iommu_tables_special_for(IOMMU_TABLES_SPECIAL_IOAPIC, id) == NULL) {
+        const struct ioapic *io = ioapic_get(i);
+        const struct iommu_tables_special_device *s = iommu_tables_special_for(
+            IOMMU_TABLES_SPECIAL_IOAPIC, io->id
+        );
+        if (s == NULL) {
             printf(
                 "AMD-Vi: interrupts are not remapped, as the IVRS gives I/O APIC %u no device "
                 "ID\n",
-                id
+                io->id
             );
             return;
         }
+        if (io->gsi_base == 0) {
+            struct pci_cfg_addr addr = {
+                s->segment, (uint8_t)(s->rid >> 8), (uint8_t)(s->rid >> 3 & 0x1f),
+                (uint8_t)(s->rid & 7)
+            };
+            uint32_t class = pci_cfg_read(addr, PCI_CLASS_DEVICE, 2);
+            southbridge = class == PCI_CLASS_SERIAL_SMBUS || class == PCI_CLASS_BRIDGE_ISA;
+        }
+    }
+    if (!southbridge) {
+        printf(
+            "AMD-Vi: interrupts are not remapped, as the IVRS gives the southbridge's I/O APIC, "
+            "the one with GSI base 0, no SMBus controller's or ISA bridge's device ID\n"
+        );
+        return;
     }
     // x2APIC mode's destinations need XTEn, and GAEn's 128-bit entries even
     // where nothing is posted (AMD IOMMU 48882 rev. 3.11, 2.2.5.3).
