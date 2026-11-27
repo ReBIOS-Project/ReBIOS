@@ -87,11 +87,22 @@ static const uint16_t calpella_host_bridges[] = { 0x0040, 0x0062, 0x006a };
 #define VTISOCHCTRL_TLB_ENTRIES ((uint32_t)0x1c)
 #define ISOCH_TLB_ENTRIES_ADVISED 16
 
+// Why the IOMMU that the firmware reports is of no use, the first reason
+// found, for the notice.
+static const char *unusable_why;
+
+static void unusable(const char *why) {
+    if (unusable_why == NULL) {
+        unusable_why = why;
+    }
+}
+
 // What the core needs of a VT-d unit, as boot services are the last chance to
 // go back: queued invalidation, and second-stage tables of 3 or 4 levels.
 static bool vtd_unit_usable(uintptr_t base) {
     if (base == 0) {
         printf("A VT-d unit has no register base\n");
+        unusable("a VT-d unit has no register base");
         return false;
     }
     const volatile uint64_t *regs = (const volatile uint64_t *)(uintptr_t)base;
@@ -99,6 +110,7 @@ static bool vtd_unit_usable(uintptr_t base) {
     uint64_t ecap = regs[VTD_ECAP / 8];
     if (cap == UINT64_MAX && ecap == UINT64_MAX) {
         printf("Nothing answers at the VT-d unit's registers, %#llx\n", (unsigned long long)base);
+        unusable("nothing answers at a VT-d unit's registers");
         return false;
     }
     if (((cap >> VTD_CAP_SAGAW_SHIFT) & VTD_SAGAW_3_OR_4_LEVELS) != 0
@@ -110,6 +122,7 @@ static bool vtd_unit_usable(uintptr_t base) {
         "%#llx, extended %#llx\n",
         (unsigned long long)base, (unsigned long long)cap, (unsigned long long)ecap
     );
+    unusable("a VT-d unit lacks queued invalidation, or 3 or 4-level tables");
     return false;
 }
 
@@ -130,7 +143,8 @@ static int iommu_table_check(const uint8_t *table) {
     size_t length = read_le32(table + ACPI_SDT_LENGTH);
     if (length < IOMMU_TABLE_HEADER_SIZE || checksum8(table, length) != 0) {
         printf("The %.4s table is malformed\n", (const char *)table);
-        return FOUND_NONE;
+        unusable(dmar ? "its DMAR table is malformed" : "its IVRS table is malformed");
+        return FOUND_UNUSABLE;
     }
 
     uint32_t units = 0;
@@ -149,6 +163,7 @@ static int iommu_table_check(const uint8_t *table) {
             units++;
             if (read_le64(table + offset + IVHD_BASE) == 0) {
                 printf("An AMD-Vi unit has no register base\n");
+                unusable("an AMD-Vi unit has no register base");
                 usable = false;
             }
         }
@@ -323,7 +338,7 @@ bool iommu_check(void) {
             "onboard audio in the firmware setup avoids this.\n"
         );
     } else if (found == FOUND_UNUSABLE) {
-        log_notice("ReBIOS cannot use the IOMMU the firmware reports.\n");
+        log_notice("ReBIOS cannot use the IOMMU the firmware reports: %s.\n", unusable_why);
     } else {
         log_notice(
             "ReBIOS needs an IOMMU (Intel VT-d or AMD-Vi), but the firmware reports none.\n"
