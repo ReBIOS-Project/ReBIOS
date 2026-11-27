@@ -617,6 +617,20 @@ static uint32_t window_word(uintptr_t address) {
     return (uint32_t)(address >> 16) & WINDOW_ADDRESS;
 }
 
+// A memory BAR's register, or its lower one, as the host has it: a ROM that
+// the host has nowhere stays off, whatever the guest enables.
+static uint32_t bar_host_word(const struct vfunction *vf, size_t k, uint32_t *reg) {
+    const struct vbar *b = &vf->bars[k];
+    if (k == ROM_INDEX) {
+        *reg = is_bridge(vf) ? PCI_ROM_ADDRESS1 : PCI_ROM_ADDRESS;
+        bool enabled = b->enabled && b->host != 0;
+        return ((uint32_t)b->host & PCI_ROM_ADDRESS_MASK)
+             | (enabled ? PCI_ROM_ADDRESS_ENABLE : 0);
+    }
+    *reg = vf->f->bars[k].reg;
+    return ((uint32_t)b->host & BAR_ADDRESS) | b->type_bits;
+}
+
 // The dword at reg of a register the hypervisor keeps.
 static uint32_t kept_read(struct vfunction *vf, uint32_t reg) {
     bool upper;
@@ -661,10 +675,8 @@ static void kept_write(struct vfunction *vf, uint32_t reg, uint32_t value) {
             b->guest = value & PCI_ROM_ADDRESS_MASK & (uint32_t)bar_mask(b);
             b->enabled = (value & PCI_ROM_ADDRESS_ENABLE) != 0;
             // The function decodes its ROM where the host has it.
-            uint32_t enable = b->enabled ? PCI_ROM_ADDRESS_ENABLE : 0;
-            pci_cfg_write(
-                vf->f->addr, reg, 4, ((uint32_t)b->host & PCI_ROM_ADDRESS_MASK) | enable
-            );
+            uint32_t host_reg;
+            pci_cfg_write(vf->f->addr, reg, 4, bar_host_word(vf, ROM_INDEX, &host_reg));
             bar_update(vf, b, true);
         } else if (upper) {
             b->guest = (b->guest & (uint64_t)0xffffffff) | ((uint64_t)value << 32 & bar_mask(b));
@@ -1866,18 +1878,6 @@ static uint32_t function_read(struct pci_cfg_addr a, uint32_t offset, size_t siz
         return vga != 0 && vf->vga_enable ? value | vga : value;
     }
     return (kept_read(vf, reg) >> (8 * (offset & 3))) & all_ones(size);
-}
-
-// A memory BAR's register, or its lower one, as the host has it.
-static uint32_t bar_host_word(const struct vfunction *vf, size_t k, uint32_t *reg) {
-    const struct vbar *b = &vf->bars[k];
-    if (k == ROM_INDEX) {
-        *reg = is_bridge(vf) ? PCI_ROM_ADDRESS1 : PCI_ROM_ADDRESS;
-        return ((uint32_t)b->host & PCI_ROM_ADDRESS_MASK)
-             | (b->enabled ? PCI_ROM_ADDRESS_ENABLE : 0);
-    }
-    *reg = vf->f->bars[k].reg;
-    return ((uint32_t)b->host & BAR_ADDRESS) | b->type_bits;
 }
 
 static bool bar_lost(const struct vfunction *vf, size_t k) {
