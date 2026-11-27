@@ -15,11 +15,13 @@
 // You should have received a copy of the GNU General Public License along with
 // ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <virt/microcode.h>
 #include <lib/heap.h>
+#include <lib/log.h>
 #include <lib/spinlock.h>
 #include <lib/util.h>
 #include <sys/fixup.h>
@@ -50,10 +52,23 @@
 // to this.
 #define AMD_PATCH_MAX ((size_t)32 << 10)
 
+// Loads refused for the log, at most.
+#define REFUSAL_REPORTS 16
+
 // One load at a time, as threads that share a core share its update (SDM
 // 325462-093 Vol. 3A, 12.11.6.3), its copy made under the lock, so that only
 // one is ever held.
 static struct spinlock lock;
+
+static void refused(const char *vendor, uint64_t address, const char *why) {
+    static _Atomic(unsigned int) reported;
+    if (atomic_fetch_add_explicit(&reported, 1, memory_order_relaxed) < REFUSAL_REPORTS) {
+        printf(
+            "The %s microcode update at %#llx is not loaded, as %s\n",
+            vendor, (unsigned long long)address, why
+        );
+    }
+}
 
 // The size of the update whose header is at header, or 0 where its sizes are
 // not an update's: its data has to fit in it, as Linux 7.3's
@@ -75,10 +90,16 @@ static void intel_load(struct vcpu *v, uint64_t data) {
     uint8_t header[INTEL_HEADER];
     if (data < INTEL_HEADER
      || !guest_mem_linear_read(v, data - INTEL_HEADER, header, sizeof(header), false)) {
+        refused("Intel", data, "its header cannot be read");
         return;
     }
     size_t total = intel_total(header);
-    if (total == 0 || total > INTEL_UPDATE_MAX) {
+    if (total == 0) {
+        refused("Intel", data, "its header's sizes are not an update's");
+        return;
+    }
+    if (total > INTEL_UPDATE_MAX) {
+        refused("Intel", data, "it is larger than the 4 MiB that ReBIOS copies");
         return;
     }
     spinlock_acquire(&lock);
@@ -86,8 +107,11 @@ static void intel_load(struct vcpu *v, uint64_t data) {
     // needs. The copy's own header is the one the processor reads, so it is
     // the one that has to give the copy's size.
     uint8_t *copy = kmalloc(total);
-    if (guest_mem_linear_read(v, data - INTEL_HEADER, copy, total, false)
-     && intel_total(copy) == total) {
+    if (!guest_mem_linear_read(v, data - INTEL_HEADER, copy, total, false)) {
+        refused("Intel", data, "it cannot be read");
+    } else if (intel_total(copy) != total) {
+        refused("Intel", data, "its header changed while it was copied");
+    } else {
         wrmsr_safe(MSR_IA32_BIOS_UPDT_TRIG, (uintptr_t)copy + INTEL_HEADER);
     }
     kfree(copy);
@@ -108,7 +132,9 @@ static void amd_load(struct vcpu *v, uint64_t patch) {
         }
         size += chunk;
     }
-    if (size != 0) {
+    if (size == 0) {
+        refused("AMD", patch, "it cannot be read");
+    } else {
         wrmsr_safe(MSR_AMD_PATCH_LOADER, (uintptr_t)copy);
         // Family 17h then drops the patch's translations, as Linux 7.3's
         // __apply_microcode_amd() does.
