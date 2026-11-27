@@ -91,6 +91,7 @@ _Static_assert(
 #define SMBIOS_TYPE_SYSTEM 1
 #define SMBIOS_SYSTEM_MANUFACTURER 0x04
 #define SMBIOS_SYSTEM_PRODUCT_NAME 0x05
+#define SMBIOS_SYSTEM_VERSION 0x06
 #define SMBIOS_TYPE_BASEBOARD 2
 #define SMBIOS_BASEBOARD_MANUFACTURER 0x04
 #define SMBIOS_BASEBOARD_PRODUCT 0x05
@@ -711,6 +712,7 @@ void fwtables_collect(void) {
     loader_handoff->dmi_chassis_type = chassis_type();
     dmi_copy(loader_handoff->dmi_sys_vendor, SMBIOS_TYPE_SYSTEM, SMBIOS_SYSTEM_MANUFACTURER);
     dmi_copy(loader_handoff->dmi_product_name, SMBIOS_TYPE_SYSTEM, SMBIOS_SYSTEM_PRODUCT_NAME);
+    dmi_copy(loader_handoff->dmi_product_version, SMBIOS_TYPE_SYSTEM, SMBIOS_SYSTEM_VERSION);
     dmi_copy(
         loader_handoff->dmi_board_vendor, SMBIOS_TYPE_BASEBOARD, SMBIOS_BASEBOARD_MANUFACTURER
     );
