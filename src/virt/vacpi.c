@@ -4208,9 +4208,49 @@ static void mailbox_take(uint32_t slot) {
     vacpi.taken_length[slot] = length;
 }
 
+// The bytes of a refused template that the log shows.
+#define REFUSED_TEMPLATE_SHOWN 64
+
+// A port's template that the guest's _SRS cannot have, as its OS made it.
+static void log_refused_template(uacpi_namespace_node *node, uacpi_data_view view) {
+    static const char digits[] = "0123456789abcdef";
+    char bytes[REFUSED_TEMPLATE_SHOWN * 3 + 1] = "";
+    size_t shown = view.length < REFUSED_TEMPLATE_SHOWN ? view.length : REFUSED_TEMPLATE_SHOWN;
+    for (size_t i = 0; i < shown; i++) {
+        bytes[i * 3] = digits[view.const_bytes[i] >> 4];
+        bytes[i * 3 + 1] = digits[view.const_bytes[i] & 0xf];
+        bytes[i * 3 + 2] = i + 1 < shown ? ' ' : '\0';
+    }
+    const char *path = acpi_path(node);
+    printf(
+        "The guest's template for %s, of %zu bytes, takes a port of the log's UART or "
+        "cannot be read whole: %s%s\n",
+        path, view.length, bytes, shown < view.length ? " ..." : ""
+    );
+    acpi_path_free(path);
+}
+
+// Whether a port's _SRS template may reach the firmware.
+static bool srs_settable(uacpi_namespace_node *node, uacpi_object *template) {
+    uacpi_data_view view;
+    bool settable = uacpi_object_get_type(template) != UACPI_OBJECT_BUFFER
+                 || uacpi_object_get_string_or_buffer(template, &view) != UACPI_STATUS_OK
+                 || isa_ports_settable(view.const_bytes, view.length);
+    if (!settable) {
+        log_refused_template(node, view);
+    }
+    return settable;
+}
+
 // Evaluates a method with the arguments in the slots, made anew for each
-// evaluation, as the method may change them.
-static uacpi_status eval_slots(uacpi_namespace_node *node, uint32_t argc, uacpi_object **ret) {
+// evaluation, as the method may change them. A port's _SRS, port, gets the
+// template that was checked, as the guest may change the mailbox meanwhile.
+static uacpi_status eval_slots(
+    uacpi_namespace_node *node,
+    uint32_t argc,
+    bool port,
+    uacpi_object **ret
+) {
     uacpi_object *args[MBX_SLOT_COUNT];
     bool whole = true;
     for (size_t i = 0; i < argc; i++) {
@@ -4225,7 +4265,14 @@ static uacpi_status eval_slots(uacpi_namespace_node *node, uint32_t argc, uacpi_
     }
     // The resources the guest sets, at the host's addresses.
     uacpi_object_name name = uacpi_namespace_node_name(node);
-    if (argc != 0 && memcmp(name.text, "_SRS", 4) == 0) {
+    bool srs = argc != 0 && memcmp(name.text, "_SRS", 4) == 0;
+    if (srs && port && !srs_settable(node, args[0])) {
+        for (size_t i = 0; i < argc; i++) {
+            uacpi_object_unref(args[i]);
+        }
+        return UACPI_STATUS_DENIED;
+    }
+    if (srs) {
         template_object(&args[0], false);
     }
     uacpi_object_array array = { .objects = args, .count = argc };
@@ -4281,8 +4328,10 @@ static bool osc_merge(uacpi_object **ret, uint32_t argc) {
         uacpi_namespace_node *osc;
         uacpi_status found = uacpi_namespace_node_find(vacpi.merged[i].node, "_OSC", &osc);
         uacpi_object *result = NULL;
-        bool usable = found == UACPI_STATUS_OK && eval_slots(osc, argc, &result) == UACPI_STATUS_OK
-                   && osc_dwords(result, other, count) && (other[0] & OSC_ERRORS) == 0;
+        bool usable = found == UACPI_STATUS_OK
+                   && eval_slots(osc, argc, false, &result) == UACPI_STATUS_OK
+                   && osc_dwords(result, other, count)
+                   && (other[0] & OSC_ERRORS) == 0;
         uacpi_object_unref(result);
         for (size_t d = 1; d < count; d++) {
             granted[d] &= usable ? other[d] : 0;
@@ -4308,47 +4357,6 @@ static uacpi_namespace_node *port_resources(uacpi_namespace_node *node) {
     }
     uacpi_namespace_node *device = uacpi_namespace_node_parent(node);
     return isa_ports_shown(device) ? device : NULL;
-}
-
-// The bytes of a refused template that the log shows.
-#define REFUSED_TEMPLATE_SHOWN 64
-
-// A port's template that the guest's _SRS cannot have, as its OS made it.
-static void log_refused_template(uacpi_namespace_node *node, uacpi_data_view view) {
-    static const char digits[] = "0123456789abcdef";
-    char bytes[REFUSED_TEMPLATE_SHOWN * 3 + 1] = "";
-    size_t shown = view.length < REFUSED_TEMPLATE_SHOWN ? view.length : REFUSED_TEMPLATE_SHOWN;
-    for (size_t i = 0; i < shown; i++) {
-        bytes[i * 3] = digits[view.const_bytes[i] >> 4];
-        bytes[i * 3 + 1] = digits[view.const_bytes[i] & 0xf];
-        bytes[i * 3 + 2] = i + 1 < shown ? ' ' : '\0';
-    }
-    const char *path = acpi_path(node);
-    printf(
-        "The guest's template for %s, of %zu bytes, takes a port of the log's UART or "
-        "cannot be read whole: %s%s\n",
-        path, view.length, bytes, shown < view.length ? " ..." : ""
-    );
-    acpi_path_free(path);
-}
-
-// Whether an _SRS's template, in the first slot, may reach the firmware.
-static bool srs_settable(uacpi_namespace_node *node, uint32_t argc) {
-    uacpi_object_name name = uacpi_namespace_node_name(node);
-    if (memcmp(name.text, "_SRS", 4) != 0 || argc == 0) {
-        return true;
-    }
-    uacpi_object *template = slot_object(0);
-    uacpi_data_view view;
-    bool settable = template == NULL
-                 || uacpi_object_get_type(template) != UACPI_OBJECT_BUFFER
-                 || uacpi_object_get_string_or_buffer(template, &view) != UACPI_STATUS_OK
-                 || isa_ports_settable(view.const_bytes, view.length);
-    if (!settable) {
-        log_refused_template(node, view);
-    }
-    uacpi_object_unref(template);
-    return settable;
 }
 
 // Whether the guest's stubs can rebuild a result exactly: integers, strings
@@ -4439,10 +4447,7 @@ static void mailbox_call(size_t index, uint32_t argc) {
     uacpi_namespace_node *node = vacpi.methods[index].node;
     uacpi_namespace_node *port = port_resources(node);
     uacpi_object *ret = NULL;
-    uacpi_status status = UACPI_STATUS_DENIED;
-    if (port == NULL || srs_settable(node, argc)) {
-        status = eval_slots(node, argc, &ret);
-    }
+    uacpi_status status = eval_slots(node, argc, port != NULL, &ret);
     if (status == UACPI_STATUS_OK && is_primary_osc(node) && !osc_merge(&ret, argc)) {
         status = UACPI_STATUS_OUT_OF_MEMORY;
     }
