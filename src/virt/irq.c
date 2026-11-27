@@ -127,6 +127,9 @@ struct route {
 
 static struct route *routes;
 static size_t route_count;
+// The levels irq_isa_set() gave the ISA lines of devices the hypervisor
+// provides, bit n for IRQ n.
+static uint16_t isa_levels;
 // The ISA IRQs irq_present_isa() gave devices, which PCI's stay off.
 static uint16_t presented;
 // Per processor, the slot each vector belongs to, and where the next search
@@ -1090,13 +1093,19 @@ void irq_isa_pulse(unsigned int irq) {
 }
 
 void irq_isa_set(unsigned int irq, bool level) {
+    if (irq >= ISA_IRQS) {
+        return;
+    }
+    uint16_t bit = (uint16_t)((uint32_t)1 << irq);
     spinlock_acquire(&lock);
+    bool rise = level && (isa_levels & bit) == 0;
+    isa_levels = (uint16_t)(level ? isa_levels | bit : isa_levels & ~bit);
     uint64_t vrte = 0;
     bool apic = isa_apic_entry(irq, &vrte);
     pic_set_irq(irq, level);
     extint_follow(false);
     spinlock_release(&lock);
-    if (apic && level) {
+    if (apic && rise) {
         isa_apic_deliver(vrte);
     }
     kick_after_update();
