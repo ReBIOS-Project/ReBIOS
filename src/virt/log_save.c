@@ -24,6 +24,7 @@
 #include <handoff.h>
 #include <lib/heap.h>
 #include <lib/log.h>
+#include <lib/spinlock.h>
 #include <lib/time.h>
 #include <lib/util.h>
 #include <memory.h>
@@ -63,9 +64,14 @@ static const char gap[] = "[...]\n";
 static struct hv_timer timer;
 // A variable's data, LOG_SAVED_START bytes at most.
 static char *text;
-// How much of the log the variables hold, and how many there are.
+// Taken around each save, which runs on the boot processor at times and on any
+// before a reset or power off: how much of the log the variables hold, how
+// many there are, and whether a last save ran, after which the periodic ones
+// stop, so that none writes the flash while the machine resets.
+static struct spinlock save_lock;
 static size_t saved_count;
 static size_t variables;
+static bool finished;
 static size_t saves;
 
 // How many bytes, want at most, a variable named name_size bytes may hold with
@@ -193,8 +199,20 @@ static void refused(efi_status status) {
 
 static void timer_fired(void *ctx) {
     (void)ctx;
-    if (log_saved_count() != saved_count) {
-        efi_status status = save(true, false);
+    if (!spinlock_try(&save_lock)) {
+        return;
+    }
+    if (finished) {
+        spinlock_release(&save_lock);
+        return;
+    }
+    efi_status status = EFI_SUCCESS;
+    bool saved = log_saved_count() != saved_count;
+    if (saved) {
+        status = save(true, false);
+    }
+    spinlock_release(&save_lock);
+    if (saved) {
         if (status != EFI_SUCCESS) {
             refused(status);
             return;
@@ -211,10 +229,18 @@ static void timer_fired(void *ctx) {
     hv_timer_set(&timer, rdtsc() + SAVE_INTERVAL_S * time_tsc_hz());
 }
 
+// A panic, which cannot wait, saves nothing while another save runs.
 static void keep(bool wait) {
+    if (wait) {
+        spinlock_acquire(&save_lock);
+    } else if (!spinlock_try(&save_lock)) {
+        return;
+    }
     if (log_saved_count() != saved_count) {
         save(wait, true);
     }
+    finished = true;
+    spinlock_release(&save_lock);
 }
 
 void log_save_start(void) {
