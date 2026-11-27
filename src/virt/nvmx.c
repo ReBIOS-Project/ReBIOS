@@ -4702,6 +4702,13 @@ bool nvmx_before_entry(struct vcpu *v) {
         exit_to_l1(v, n, EXIT_REASON_SIPI, (uint64_t)vector, 0, 0, false);
         return false;
     }
+    // A stepped instruction is to run, not an event's handler or an exit for
+    // the guest's hypervisor: they wait for the instruction boundary after it,
+    // which the step's own exit brings.
+    if (v->stepping) {
+        event_hold(v);
+        return true;
+    }
     // The guest's events wait for an instruction boundary: past the delivery
     // of what its entry injects, or of what an exit cut short, as on hardware
     // and in Linux 7.3's KVM. An interrupt of the hypervisor's own then ends
@@ -4788,11 +4795,6 @@ bool nvmx_before_entry(struct vcpu *v) {
     }
     uint64_t windows = PROC_INTR_WINDOW_EXITING | PROC_NMI_WINDOW_EXITING;
     vmx_write(VMCS_PROC_CONTROLS, vmx_read(VMCS_PROC_CONTROLS) & ~windows);
-    // A stepped instruction is to run, not an event's handler.
-    if (v->stepping) {
-        event_hold(v);
-        return true;
-    }
     event_entry_for(
         v, (pin & PIN_NMI_EXITING) == 0,
         (pin & PIN_EXT_INTR_EXITING) == 0 && (proc & PROC_INTR_WINDOW_EXITING) == 0

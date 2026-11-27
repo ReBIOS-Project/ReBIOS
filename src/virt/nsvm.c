@@ -3009,6 +3009,14 @@ bool nsvm_before_entry(struct vcpu *v) {
         exit_to_l1(v, n, n->pending_code, n->pending_info1, n->pending_info2, cut_short(v), false);
         return false;
     }
+    // A stepped instruction is to run, not an event's handler or an exit for
+    // the guest's hypervisor: they wait for the instruction boundary after it,
+    // which the step's own exit brings.
+    if (v->stepping) {
+        nsvm_interrupt_window(v, false);
+        event_hold(v);
+        return true;
+    }
     bool waiting = n->run_pending || v->injecting || (v->redeliver & SVM_EVENT_VALID) != 0;
     uint32_t misc = n->intercepts[3];
     struct cpu *cpu = v->cpu;
@@ -3048,11 +3056,6 @@ bool nsvm_before_entry(struct vcpu *v) {
         }
     }
     nsvm_interrupt_window(v, false);
-    // A stepped instruction is to run, not an event's handler.
-    if (v->stepping) {
-        event_hold(v);
-        return true;
-    }
     event_entry_for(
         v, n->gif && (misc & SVM_INTERCEPT_NMI) == 0, n->gif && (misc & SVM_INTERCEPT_INTR) == 0
     );
