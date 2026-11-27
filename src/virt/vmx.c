@@ -743,6 +743,22 @@ void vmx_vmcs_swap(struct vcpu *v, struct vmx_vmcs *other) {
     vmptrld(v->vmcs_pa);
 }
 
+void vmx_vmcs_swap_lost(struct vcpu *v, struct vmx_vmcs *other) {
+    struct vmx_vmcs current = {
+        .vmcs = v->vmcs,
+        .pa = v->vmcs_pa,
+        .launched = false,
+        .cache = v->vmcs_cache
+    };
+    memset(current.cache, 0, sizeof(struct vmcs_cache));
+    memset(other->cache, 0, sizeof(struct vmcs_cache));
+    v->vmcs = other->vmcs;
+    v->vmcs_pa = other->pa;
+    v->vmx_launched = false;
+    v->vmcs_cache = other->cache;
+    *other = current;
+}
+
 void vmx_vcpu_init(struct vcpu *v) {
     v->vmcs_cache = cache_alloc();
     v->vmcs = page_alloc(1);

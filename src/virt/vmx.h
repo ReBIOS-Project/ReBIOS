@@ -582,6 +582,10 @@ void vmx_other_write(uint32_t field, uint64_t value);
 void vmx_own_vmcs(struct vcpu *v);
 // Makes another VMCS the vCPU's current one, the current one going into it.
 void vmx_vmcs_swap(struct vcpu *v, struct vmx_vmcs *other);
+// As vmx_vmcs_swap(), for a power-on, which sets the vCPU's VMCS up anew:
+// neither VMCS is written, nor made current, and neither cache is kept, as
+// neither's state may be in memory after a sleep.
+void vmx_vmcs_swap_lost(struct vcpu *v, struct vmx_vmcs *other);
 
 uint64_t vmx_read(uint32_t field);
 

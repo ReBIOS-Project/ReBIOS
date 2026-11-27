@@ -595,6 +595,14 @@ void nvmx_vcpu_power_on(struct vcpu *v) {
     }
 }
 
+void nvmx_vcpu_leave(struct vcpu *v) {
+    struct nvmx *n = v->nvmx;
+    if (n != NULL && n->in_l2) {
+        vmx_vmcs_swap_lost(v, &n->other);
+        n->in_l2 = false;
+    }
+}
+
 // Fields that exist only where the guest is offered what they are for (SDM
 // 325462-093 Vol. 3D, Appendix B).
 static bool field_offered(uint32_t field) {

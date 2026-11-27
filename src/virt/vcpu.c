@@ -101,6 +101,10 @@ struct vcpu *vcpu_create(struct cpu *cpu) {
 
 void vcpu_power_on(struct vcpu *v) {
     atomic_store_explicit(&v->sipi, VCPU_SIPI_RUNNING, memory_order_release);
+    // The guest's guest goes with the power-on, as the processor leaves guest
+    // mode at a reset.
+    nvmx_vcpu_leave(v);
+    nsvm_vcpu_leave(v);
     if (virt_vmx) {
         vmx_vcpu_power_on(v);
     } else {

@@ -805,6 +805,13 @@ static void switch_vmcb(struct vcpu *v, struct nsvm *n, bool to_l2) {
     msr_amd_counters_mode(v);
 }
 
+void nsvm_vcpu_leave(struct vcpu *v) {
+    struct nsvm *n = v->nsvm;
+    if (n != NULL && n->in_l2) {
+        switch_vmcb(v, n, false);
+    }
+}
+
 // After a #VMEXIT, or a VMRUN that failed, the guest goes on after its VMRUN
 // with its global interrupt flag clear and its breakpoints disabled, and with
 // the single-step trap of its own TF (APM 24593 rev. 3.46, 15.5.1 and 15.6).

@@ -30,6 +30,9 @@ void nvmx_init(void);
 void nvmx_vcpu_init(struct vcpu *v);
 // The vCPU's nested state as at power-on, what it allocated kept.
 void nvmx_vcpu_power_on(struct vcpu *v);
+// Has a vCPU that runs the guest's guest run on the guest's own VMCS again, as
+// a power-on needs before the vCPU's state is reset.
+void nvmx_vcpu_leave(struct vcpu *v);
 
 // The guest's VMX instructions, by the exits they cause.
 void nvmx_instruction(struct vcpu *v, uint32_t reason);
