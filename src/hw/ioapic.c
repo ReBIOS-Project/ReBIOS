@@ -169,11 +169,6 @@ static void add(const struct acpi_madt_ioapic *entry) {
         }
     }
     count++;
-    uint64_t *rtes = kmalloc(io->pins * sizeof(uint64_t));
-    for (size_t pin = 0; pin < io->pins; pin++) {
-        rtes[pin] = ioapic_rte_read(io, (uint32_t)pin);
-    }
-    io->rtes = rtes;
 
     // Other delivery modes, such as SMI, are the firmware's.
     uint32_t masked = 0;
@@ -192,6 +187,12 @@ static void add(const struct acpi_madt_ioapic *entry) {
             remote_irr_clear(io, (uint32_t)i, low);
         }
     }
+    // As masked, for sleeping to give back.
+    uint64_t *rtes = kmalloc(io->pins * sizeof(uint64_t));
+    for (size_t pin = 0; pin < io->pins; pin++) {
+        rtes[pin] = ioapic_rte_read(io, (uint32_t)pin);
+    }
+    io->rtes = rtes;
     printf(
         "I/O APIC %u at %#llx, GSIs %u-%u: masked %u entries\n",
         entry->id, (unsigned long long)base, entry->gsi_base, entry->gsi_base + io->pins - 1,
