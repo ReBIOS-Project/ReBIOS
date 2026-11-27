@@ -55,6 +55,9 @@ static struct efi_runtime_services *services(void) {
 }
 
 void efi_runtime_init(void) {
+    if (fpu_area != NULL) {
+        return;
+    }
     fpu_xsave = (read_cr4() & CR4_OSXSAVE) != 0;
     // XSAVE's largest area, as the guest's XSETBV changes how much is in use.
     size_t size = fpu_xsave ? cpuid(0xd, 0).ecx : FXSAVE_SIZE;
@@ -151,6 +154,10 @@ static efi_status set_variable(void *ctx) {
     return services()->set_variable(a->name, a->guid, a->attributes, a->size, a->data);
 }
 
+static efi_status get_time(void *ctx) {
+    return services()->get_time(ctx, NULL);
+}
+
 static efi_status reset_system(void *ctx) {
     services()->reset_system(*(const uint32_t *)ctx, EFI_SUCCESS, 0, NULL);
     return EFI_DEVICE_ERROR;
@@ -195,6 +202,18 @@ efi_status efi_runtime_set_variable(
     }
     struct set_variable_args args = { name, guid, attributes, size, data };
     efi_status status = guarded(set_variable, &args);
+    end();
+    return status;
+}
+
+efi_status efi_runtime_get_time(struct efi_time *time) {
+    if (atomic_load_explicit(&broken, memory_order_acquire)) {
+        return EFI_UNSUPPORTED;
+    }
+    if (!begin(true)) {
+        return EFI_NOT_READY;
+    }
+    efi_status status = guarded(get_time, time);
     end();
     return status;
 }

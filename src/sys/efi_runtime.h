@@ -21,7 +21,7 @@
 #include <stdbool.h>
 #include <efi.h>
 
-// Before the first call.
+// Before the first call, on the boot processor; again does nothing.
 void efi_runtime_init(void);
 
 // The firmware's variable services, which the core calls one at a time, as
@@ -43,6 +43,10 @@ efi_status efi_runtime_set_variable(
     void *data,
     bool wait
 );
+
+// The firmware's clock (UEFI 2.11, 8.3.1), with what the variable services
+// return besides its own.
+efi_status efi_runtime_get_time(struct efi_time *time);
 
 // The firmware's reset, which returns if it fails.
 void efi_runtime_reset_system(uint32_t type);
