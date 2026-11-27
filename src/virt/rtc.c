@@ -19,6 +19,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <efi.h>
 #include <uacpi/acpi.h>
 #include <uacpi/namespace.h>
 #include <uacpi/platform/types.h>
@@ -38,6 +39,7 @@
 #include <lib/time.h>
 #include <lib/util.h>
 #include <sys/cpu.h>
+#include <sys/efi_runtime.h>
 #include <sys/smp.h>
 #include <sys/x86.h>
 #include <virt/hv_timer.h>
@@ -140,6 +142,11 @@
 #define SECONDS_PER_DAY 86400
 #define EPOCH_WEEKDAY 4
 
+// The firmware's clocks, which count while the machine sleeps.
+#define FIRMWARE_CLOCK_NONE 0
+#define FIRMWARE_CLOCK_TAD 1
+#define FIRMWARE_CLOCK_GET_TIME 2
+
 struct civil {
     int64_t year;
     unsigned int month;
@@ -179,6 +186,11 @@ static uint8_t date_alarm;
 static uint8_t alarms[3];
 static uint64_t periodic_tsc;
 static struct hv_timer timer;
+
+// What rtc_sleep() read of the firmware's clock, and when.
+static unsigned int sleep_clock;
+static int64_t sleep_time;
+static uint64_t sleep_tsc;
 
 // Howard Hinnant's days_from_civil() and civil_from_days().
 static int64_t days_from_civil(int64_t y, unsigned int m, unsigned int d) {
@@ -700,6 +712,12 @@ static bool real_works(void) {
     }
 }
 
+// Whether a firmware's time is one the emulated clock takes.
+static bool civil_valid(const struct civil *c) {
+    return c->year >= 1900 && c->year <= 2099 && c->month >= 1 && c->month <= 12 && c->day >= 1
+        && c->day <= 31 && c->hour <= 23 && c->minute <= 59 && c->second <= 59;
+}
+
 static const char *const tad_ids[] = { "ACPI000E", NULL };
 
 static uacpi_iteration_decision tad_found(
@@ -740,8 +758,27 @@ static bool tad_time(struct civil *c) {
         uacpi_object_unref(grt);
     }
     acpi_unlock();
-    return got && c->year >= 1900 && c->year <= 2099 && c->month >= 1 && c->month <= 12
-        && c->day >= 1 && c->day <= 31 && c->hour <= 23 && c->minute <= 59 && c->second <= 59;
+    return got && civil_valid(c);
+}
+
+// The time of the firmware's own clock: its Time and Alarm Device's, else its
+// GetTime()'s; which of them gave it, else FIRMWARE_CLOCK_NONE.
+static unsigned int firmware_time(int64_t *s) {
+    struct civil c = { 0 };
+    if (tad_time(&c)) {
+        *s = seconds_from_civil(&c);
+        return FIRMWARE_CLOCK_TAD;
+    }
+    struct efi_time t;
+    if (efi_runtime_get_time(&t) != EFI_SUCCESS) {
+        return FIRMWARE_CLOCK_NONE;
+    }
+    c = (struct civil){ t.year, t.month, t.day, t.hour, t.minute, t.second, 0 };
+    if (!civil_valid(&c)) {
+        return FIRMWARE_CLOCK_NONE;
+    }
+    *s = seconds_from_civil(&c);
+    return FIRMWARE_CLOCK_GET_TIME;
 }
 
 // From the Time and Alarm Device, else the firmware's GetTime() of the
@@ -794,8 +831,58 @@ static void ram_init(void) {
     ram[RAM_CENTURY] = (uint8_t)((hundreds / 10) << 4 | hundreds % 10);
 }
 
+void rtc_sleep(void) {
+    if (real) {
+        return;
+    }
+    sleep_clock = firmware_time(&sleep_time);
+    sleep_tsc = rdtsc();
+}
+
 void rtc_wake(void) {
     ram[RAM_SHUTDOWN_STATUS] = SHUTDOWN_S3_RESUME;
+    if (real) {
+        return;
+    }
+    int64_t woken_time = 0;
+    unsigned int clock_now = FIRMWARE_CLOCK_NONE;
+    if (sleep_clock != FIRMWARE_CLOCK_NONE) {
+        clock_now = firmware_time(&woken_time);
+    }
+    uint64_t now = rdtsc();
+    if (clock_now == FIRMWARE_CLOCK_NONE || clock_now != sleep_clock) {
+        printf(
+            "The guest's RTC loses the time the machine slept, as the firmware has no clock to "
+            "measure it with\n"
+        );
+        return;
+    }
+    // Less what the clock counted itself between the two readings, as the TSC
+    // did.
+    int64_t slept = woken_time - sleep_time - (int64_t)((now - sleep_tsc) / time_tsc_hz());
+    spinlock_acquire(&lock);
+    advance(now);
+    bool counts = !stopped();
+    if (counts && slept > 0) {
+        // As one of its updates would, the alarm looked at once.
+        clock_add(slept);
+        if (alarm_matches()) {
+            reg_c |= C_AF;
+        }
+        reg_c |= C_UF;
+        update_line();
+        schedule(now);
+    }
+    spinlock_release(&lock);
+    if (!counts) {
+        printf("The guest's RTC stays as it is across the sleep, as the guest stopped it\n");
+        return;
+    }
+    printf(
+        "The guest's RTC moves on by %lld s, the time the machine slept by the firmware's %s\n",
+        (long long)(slept > 0 ? slept : 0),
+        clock_now == FIRMWARE_CLOCK_TAD ? "Time and Alarm Device" : "GetTime()"
+    );
 }
 
 void rtc_init(void) {
@@ -813,6 +900,8 @@ void rtc_init(void) {
         century = RAM_CENTURY;
         day_alarm_index = REG_D;
         clock_start();
+        // For the firmware's GetTime() at S3.
+        efi_runtime_init();
     }
     ram_init();
     const char *how = "keeps the machine's time";

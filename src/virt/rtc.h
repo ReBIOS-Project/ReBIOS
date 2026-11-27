@@ -28,8 +28,12 @@ void rtc_sample(void);
 // The guest's RTC and CMOS RAM. After acpi_namespace_start() and
 // layout_init().
 void rtc_init(void);
+// Just before the machine sleeps, with the other processors stopped: the
+// firmware's clock, by which rtc_wake() moves the emulated clock on.
+void rtc_sleep(void);
 // The CMOS RAM as the guest finds it after waking from S3: the shutdown status
-// that has its BIOS resume rather than start.
+// that has its BIOS resume rather than start; and the emulated clock moved on
+// by the time the machine slept, as an RTC counts through S3.
 void rtc_wake(void);
 // The RTC's bytes the guest's FADT gives the indexes of (ACPI 6.6, Table 5.9):
 // its century, day-of-month alarm, and month alarm, 0 for none.

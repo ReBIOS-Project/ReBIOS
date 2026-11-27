@@ -218,6 +218,7 @@ static void enter(struct vcpu *v) {
     }
     uint64_t asked = rdtsc();
     printf("The guest puts the machine to sleep (S3)\n");
+    rtc_sleep();
     vacpi_sleep_arm();
     usb_suspend();
     kbc_suspend();
