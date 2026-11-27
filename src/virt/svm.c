@@ -21,8 +21,6 @@
 #include <stdint.h>
 #include <stdnoreturn.h>
 #include <virt/svm.h>
-#include <core.h>
-#include <handoff.h>
 #include <hw/power.h>
 #include <lib/log.h>
 #include <lib/util.h>
@@ -260,13 +258,10 @@ bool svm_supported(void) {
     svm_vmcb_addr_check = (features & SVM_FEATURE_VMCB_ADDR_CHECK) != 0;
     svm_svml = (features & SVM_FEATURE_SVML) != 0;
     svm_vnmi = svm_vgif && (features & SVM_FEATURE_VNMI) != 0;
-    // Unless the avic setting says otherwise, AVIC serves only from Zen 4 on,
-    // with x2AVIC, as Linux 7.3's KVM has it by default
-    // (arch/x86/kvm/svm/avic.c, avic_want_avic_enabled(), with
+    // AVIC serves only from Zen 4 on, with x2AVIC, as Linux 7.3's KVM has it
+    // by default (arch/x86/kvm/svm/avic.c, avic_want_avic_enabled(), with
     // arch/x86/kernel/cpu/amd.c's Zen 4 models): Windows hangs at its logo
-    // with AVIC on a Zen 3+ processor without x2AVIC. Never on family 17h,
-    // where AVIC may miss IPIs and AMD advises against it (56323 rev. 1.03 and
-    // 55449 rev. 1.21, erratum 1235).
+    // with AVIC on a Zen 3+ processor without x2AVIC.
     struct x86_cpu_signature signature = x86_cpu_signature();
     unsigned int zen = errata_amd_zen();
     divider_clear = zen == 1;
@@ -277,11 +272,8 @@ bool svm_supported(void) {
                    && ((signature.model >= 0x18 && signature.model <= 0x1f)
                     || (signature.model >= 0x60 && signature.model <= 0x7f));
     svm_vls = (features & SVM_FEATURE_VLS) != 0 && !vls_broken;
-    uint8_t setting = core_handoff->config.avic;
-    svm_avic = (features & SVM_FEATURE_AVIC) != 0 && signature.family != 0x17
-            && (setting == HANDOFF_AVIC_ALWAYS
-             || (setting == HANDOFF_AVIC_AUTO && (features & SVM_FEATURE_X2AVIC) != 0
-              && (zen == 4 || signature.family >= 0x1a)));
+    svm_avic = (features & SVM_FEATURE_AVIC) != 0 && (features & SVM_FEATURE_X2AVIC) != 0
+            && (zen == 4 || signature.family >= 0x1a);
     svm_x2avic = svm_avic && (features & SVM_FEATURE_X2AVIC) != 0;
     svm_avic_ext_lvt_reads = svm_avic && (features & SVM_FEATURE_EXT_LVT_AVIC_ACCESS) != 0;
     svm_eraps = cpuid(0x80000000, 0).eax >= 0x80000021

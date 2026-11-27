@@ -351,17 +351,6 @@ static bool apply_vga_filter(const struct setting *setting, struct span value) {
     return true;
 }
 
-// In the order of the HANDOFF_AVIC_* values.
-static const char *const avic_names[] = { "auto", "always", "never" };
-
-static bool apply_avic(const struct setting *setting, struct span value) {
-    if (!apply_choice(value, avic_names, 3, &config.avic)) {
-        return false;
-    }
-    printf("  %s = %s\n", setting->name, avic_names[config.avic]);
-    return true;
-}
-
 static const struct setting settings[] = {
     { .name = "serial", .apply = apply_boolean, .flag = &config.serial },
     { .name = "serial_port", .apply = apply_serial_port },
@@ -375,7 +364,6 @@ static const struct setting settings[] = {
     { .name = "vga_scale", .apply = apply_vga_scale },
     { .name = "vga_filter", .apply = apply_vga_filter },
     { .name = "profile", .apply = apply_boolean, .flag = &config.profile },
-    { .name = "avic", .apply = apply_avic },
     { .name = "cpuid_limit", .apply = apply_boolean, .flag = &config.cpuid_limit },
     { .name = "igpu_stolen_remap", .apply = apply_boolean, .flag = &config.igpu_stolen_remap },
     { .name = "legacy_usb", .apply = apply_boolean, .flag = &config.legacy_usb },
@@ -594,7 +582,6 @@ void config_load(void) {
     config.vga_scaling = HANDOFF_VGA_SCALING_STRETCH;
     config.vga_scale = 1;
     config.vga_filter = HANDOFF_VGA_FILTER_BILINEAR;
-    config.avic = HANDOFF_AVIC_AUTO;
     config.igpu_stolen_remap = true;
     config.legacy_usb = true;
 
@@ -624,7 +611,6 @@ void config_to_handoff(struct handoff_config *out) {
     out->vga_scale = config.vga_scale;
     out->vga_filter = config.vga_filter;
     out->profile = config.profile;
-    out->avic = config.avic;
     out->cpuid_limit = config.cpuid_limit;
     out->igpu_stolen_remap = config.igpu_stolen_remap;
     out->legacy_usb = config.legacy_usb;

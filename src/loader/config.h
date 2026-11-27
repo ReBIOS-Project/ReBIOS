@@ -41,8 +41,6 @@ struct config {
     // One of the HANDOFF_VGA_FILTER_* values.
     uint8_t vga_filter;
     bool profile;
-    // One of the HANDOFF_AVIC_* values.
-    uint8_t avic;
     bool cpuid_limit;
     bool igpu_stolen_remap;
     bool legacy_usb;

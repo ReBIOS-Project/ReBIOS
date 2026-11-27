@@ -165,13 +165,6 @@ struct handoff_block_device {
 #define HANDOFF_VGA_FILTER_NEAREST 0
 #define HANDOFF_VGA_FILTER_BILINEAR 1
 
-// When AMD's AVIC runs the guest's local APICs: on the processors it serves by
-// default (virt/svm.c), on all that have it but those AMD advises against it
-// on, or never.
-#define HANDOFF_AVIC_AUTO 0
-#define HANDOFF_AVIC_ALWAYS 1
-#define HANDOFF_AVIC_NEVER 2
-
 // Where ReBIOS keeps its log for the next start to write out: nowhere, in
 // memory (lib/log.c), or in EFI variables (virt/log_save.c).
 #define HANDOFF_SAVE_LOG_OFF 0
@@ -286,8 +279,6 @@ struct handoff_config {
     // One of the HANDOFF_VGA_FILTER_* values.
     uint8_t vga_filter;
     uint8_t profile;
-    // One of the HANDOFF_AVIC_* values.
-    uint8_t avic;
     // Whether the guest starts with CPUID's basic leaves limited to 2, as
     // firmware setting IA32_MISC_ENABLE's Limit CPUID Maxval would have it.
     uint8_t cpuid_limit;
