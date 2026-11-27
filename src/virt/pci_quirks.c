@@ -69,7 +69,9 @@
 // The RTL8168's ERI registers in its BAR 2, through which Windows' driver
 // writes the MSI-X table: the data at ERIDR, then the address at ERIAR with
 // ERIAR_MSIX as its type and ERIAR_FLAG to write, which reads back flipped
-// once done (Linux 7.3's drivers/net/ethernet/realtek/r8169_main.c).
+// once done. The address is a dword's (ERIAR_ADDR_BYTE_ALIGN in Linux 7.3's
+// drivers/net/ethernet/realtek/r8169_main.c): one that is not reaches no
+// entry, its write dropped and its read 0.
 #define RTL8168_DEVICE_ID 0x8168
 #define RTL8168_BAR 2
 #define RTL8168_ERIDR 0x70
@@ -412,8 +414,11 @@ static uint64_t rtl8168_read(struct vcpu *v, void *ctx, uint64_t offset, size_t 
     if (r->msix && size == 4 && offset == RTL8168_ERIAR) {
         value = r->address ^ RTL8168_ERIAR_FLAG;
     } else if (r->msix && size == 4 && offset == RTL8168_ERIDR) {
+        uint32_t at = r->address & RTL8168_ERIAR_OFFSET;
         uint64_t entry;
-        if (pci_virt_msix_access(r->addr, r->address & RTL8168_ERIAR_OFFSET, 4, false, &entry)) {
+        if (at % 4 != 0) {
+            value = 0;
+        } else if (pci_virt_msix_access(r->addr, at, 4, false, &entry)) {
             value = entry;
         }
     }

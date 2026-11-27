@@ -2563,7 +2563,7 @@ bool pci_virt_msix_access(
     uint64_t *value
 ) {
     struct vfunction *vf = vfunction_find(addr);
-    if (vf == NULL || vf->msix.count == 0
+    if (vf == NULL || vf->msix.count == 0 || offset % size != 0
      || offset + size > (uint64_t)vf->msix.count * PCI_MSIX_ENTRY_SIZE) {
         return false;
     }

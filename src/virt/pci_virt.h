@@ -78,7 +78,8 @@ void pci_virt_config_write(struct pci_cfg_addr addr, uint32_t offset, size_t siz
 
 // What the guest reads from the function's MSI-X table at offset from its
 // start, or writes there, as through the table itself, for a device's other
-// ways to it: false where the function has no such entry. After
+// ways to it: false where the function has no such entry, or where the access
+// is not naturally aligned, as one through the table is. After
 // pci_virt_init().
 bool pci_virt_msix_access(
     struct pci_cfg_addr addr,
