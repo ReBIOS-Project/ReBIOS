@@ -40,7 +40,10 @@
 #define INTEL_TOTAL_SIZE 32
 #define INTEL_DEFAULT_TOTAL 2048
 #define INTEL_GRANULE 1024
-#define INTEL_UPDATE_MAX ((size_t)1 << 20)
+
+// The largest Intel update copied, past the 1.6 MiB of the largest in Intel's
+// microcode release 20261110, Granite Rapids' (06-ad-01).
+#define INTEL_UPDATE_MAX ((size_t)4 << 20)
 
 // An AMD patch gives the loader no size, as the processor knows it: the
 // guest's pages from the address on are copied, as far as they are mapped, up
