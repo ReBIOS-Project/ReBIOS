@@ -1029,6 +1029,8 @@ void mmio_step_done(struct vcpu *v) {
         }
         vcpu_set_rip(v, s->rip);
         s->second = true;
+        // Nothing is delivered before the second run either.
+        vcpu_interrupt_shadow(v);
         return;
     }
     if (completed && s->stores_flags) {
