@@ -27,6 +27,10 @@
 #define RST_CNT_RST_CPU 0x04
 #define RST_CNT_FULL_RST 0x08
 
+// What keeps the guest's state beyond a reset or power off: power_reset() and
+// power_off() call it once, before the log is kept.
+void power_set_keeper(void (*keep)(void));
+
 // Through the firmware's reset service when the core can call it, else ACPI,
 // else the legacy reset mechanisms.
 noreturn void power_reset(bool warm);

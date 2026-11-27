@@ -25,11 +25,13 @@ struct vcpu;
 // Reads the machine's RTC once, unless the FADT says it has none, for
 // rtc_init() to see that its seconds count. Right after acpi_init().
 void rtc_sample(void);
-// The guest's RTC and CMOS RAM. After acpi_namespace_start() and
+// The guest's RTC and CMOS RAM, the latter as an earlier start kept it, and
+// kept again before a reset or power off. After acpi_namespace_start() and
 // layout_init().
 void rtc_init(void);
-// Just before the machine sleeps, with the other processors stopped: the
-// firmware's clock, by which rtc_wake() moves the emulated clock on.
+// Just before the machine sleeps, with the other processors stopped: the CMOS
+// RAM kept, and the firmware's clock, by which rtc_wake() moves the emulated
+// clock on.
 void rtc_sleep(void);
 // The CMOS RAM as the guest finds it after waking from S3: the shutdown status
 // that has its BIOS resume rather than start; and the emulated clock moved on

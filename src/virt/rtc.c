@@ -34,10 +34,12 @@
 #include <hw/acpi.h>
 #include <hw/cmos.h>
 #include <hw/isa.h>
+#include <hw/power.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
 #include <lib/time.h>
 #include <lib/util.h>
+#include <memory.h>
 #include <sys/cpu.h>
 #include <sys/efi_runtime.h>
 #include <sys/smp.h>
@@ -148,6 +150,9 @@
 #define FIRMWARE_CLOCK_TAD 1
 #define FIRMWARE_CLOCK_GET_TIME 2
 
+#define KEPT_ATTRIBUTES \
+    (EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS)
+
 struct civil {
     int64_t year;
     unsigned int month;
@@ -167,6 +172,11 @@ static uint8_t index;
 static uint8_t ext_index;
 static uint8_t ram[BANK_SIZE];
 static uint8_t ext_ram[BANK_SIZE];
+// Both banks as the next start finds them, as ram_keep() last kept them or
+// ram_init() set them up.
+static uint8_t kept[HANDOFF_CMOS_SIZE];
+static uint16_t kept_name[] = HANDOFF_CMOS_VARIABLE;
+static struct efi_guid kept_guid = HANDOFF_VARIABLE_GUID;
 
 // Whether the firmware's ACPI lists the machine's RTC.
 static bool listed;
@@ -824,9 +834,17 @@ static void clock_start(void) {
     hv_timer_add(&timer);
 }
 
-// The PC/AT's CMOS RAM, as a BIOS sets it up: an FPU, a VGA, no floppies, the
-// memory below and above 1 MiB, and the checksum over 10h-2Dh.
+// Both banks as an earlier start kept them, if one did, and then the PC/AT's
+// CMOS RAM as a BIOS sets it up at each start: no shutdown status, as this
+// start's memory is not the last one's, an FPU, a VGA, no floppies, the memory
+// below and above 1 MiB, and the checksum over 10h-2Dh.
 static void ram_init(void) {
+    const struct handoff *h = core_handoff;
+    if (h->cmos_valid) {
+        memcpy(ram, h->cmos, BANK_SIZE);
+        memcpy(ext_ram, h->cmos + BANK_SIZE, BANK_SIZE);
+    }
+    ram[RAM_SHUTDOWN_STATUS] = 0;
     ram[RAM_EQUIPMENT] = EQUIPMENT_FPU;
     ram[RAM_BASE_MEMORY] = (uint8_t)BASE_MEMORY_KIB;
     ram[RAM_BASE_MEMORY + 1] = (uint8_t)(BASE_MEMORY_KIB >> 8);
@@ -844,12 +862,43 @@ static void ram_init(void) {
     ram[RAM_CHECKSUM + 1] = (uint8_t)sum;
     // Where the machine's RTC keeps no century the guest finds, the firmware's
     // year gives it, else 20.
-    const struct handoff *h = core_handoff;
     unsigned int hundreds = h->time_valid ? h->time_year / 100 : 20;
     ram[RAM_CENTURY] = (uint8_t)((hundreds / 10) << 4 | hundreds % 10);
+    memcpy(kept, ram, BANK_SIZE);
+    memcpy(kept + BANK_SIZE, ext_ram, BANK_SIZE);
+}
+
+// Both banks for the next start, in an EFI variable, where the guest changed
+// them since they were last kept, or since this start began: an exception, as
+// it writes the firmware's flash although the user turned nothing on, so that
+// the CMOS RAM lasts through a restart and a power off, as a PC's battery
+// keeps it.
+static void ram_keep(void) {
+    uint8_t now[HANDOFF_CMOS_SIZE];
+    spinlock_acquire(&lock);
+    memcpy(now, ram, BANK_SIZE);
+    memcpy(now + BANK_SIZE, ext_ram, BANK_SIZE);
+    spinlock_release(&lock);
+    now[RAM_SHUTDOWN_STATUS] = 0;
+    if (memcmp(now, kept, sizeof(now)) == 0) {
+        return;
+    }
+    efi_status status = efi_runtime_set_variable(
+        kept_name, &kept_guid, KEPT_ATTRIBUTES, sizeof(now), now, true
+    );
+    if (status != EFI_SUCCESS) {
+        printf(
+            "The guest's CMOS RAM is not kept for the next start: status %#llx\n",
+            (unsigned long long)status
+        );
+        return;
+    }
+    memcpy(kept, now, sizeof(kept));
+    printf("The guest's CMOS RAM is kept for the next start\n");
 }
 
 void rtc_sleep(void) {
+    ram_keep();
     if (real) {
         return;
     }
@@ -918,10 +967,16 @@ void rtc_init(void) {
         century = RAM_CENTURY;
         day_alarm_index = REG_D;
         clock_start();
-        // For the firmware's GetTime() at S3.
-        efi_runtime_init();
     }
+    // For the firmware's GetTime() at S3, and its variables.
+    efi_runtime_init();
     ram_init();
+    power_set_keeper(ram_keep);
+    if (core_handoff->cmos_valid) {
+        printf("The guest's CMOS RAM is as an earlier start kept it\n");
+    } else {
+        printf("The guest's CMOS RAM starts as a BIOS sets it up, as no earlier start kept it\n");
+    }
     const char *how = "keeps the machine's time";
     if (!real && listed) {
         how = "is emulated, as the machine's does not work";

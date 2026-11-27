@@ -353,7 +353,10 @@ it adds back of the legacy PC:
   devices actually plugged in. The machine's serial and parallel ports reach
   the OS where the firmware's ACPI describes them, enabled or for the OS to
   turn on, but for the one ReBIOS logs to; other legacy ports read as absent,
-  as on a board without those devices.
+  as on a board without those devices. The CMOS RAM lasts through restarts
+  and power offs, as a PC's battery keeps it: ReBIOS keeps it in the EFI
+  variable `ReBIOSCmos`, written before a reset, a power off, or S3 only where
+  the OS changed it, each such write being a write of the firmware's flash.
 - **USB as a BIOS's legacy support has it.** ReBIOS drives the USB controllers
   itself, with [Tendril](https://github.com/Mintsuki/Tendril), until the OS
   asks for them, as a BIOS's legacy USB support does: USB keyboards and mice

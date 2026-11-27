@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License along with
 // ReBIOS. If not, see <https://www.gnu.org/licenses/>.
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -42,6 +43,19 @@
 #define RST_CNT_COLD (RST_CNT_SYS_RST | RST_CNT_RST_CPU | RST_CNT_FULL_RST)
 #define RST_CNT_SETUP_US 50
 
+static _Atomic(void (*)(void)) keeper;
+
+void power_set_keeper(void (*keep)(void)) {
+    atomic_store_explicit(&keeper, keep, memory_order_release);
+}
+
+static void keep(void) {
+    void (*keep_state)(void) = atomic_exchange_explicit(&keeper, NULL, memory_order_acq_rel);
+    if (keep_state != NULL) {
+        keep_state();
+    }
+}
+
 // ACPI's reset register, then the keyboard controller's reset line where there
 // is a controller, then the reset control register at CF9h where the
 // configuration ports beside it answer, as Linux 7.3 restarts. The firmware's
@@ -49,6 +63,7 @@
 // now.
 void power_reset(bool warm) {
     printf("Resetting the machine\n");
+    keep();
     log_keep();
     if (acpi_init()) {
         uacpi_reboot();
@@ -91,6 +106,7 @@ void power_reset(bool warm) {
 // for the reason it does in power_reset().
 void power_off(void) {
     printf("Powering the machine off\n");
+    keep();
     log_keep();
     if (acpi_init()) {
         uacpi_status status = uacpi_prepare_for_sleep_state(UACPI_SLEEP_STATE_S5);

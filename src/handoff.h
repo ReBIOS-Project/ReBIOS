@@ -174,6 +174,10 @@ struct handoff_block_device {
 // The vendor GUID of ReBIOS's EFI variables.
 #define HANDOFF_VARIABLE_GUID \
     { 0xd559b78d, 0x5494, 0x4c9e, { 0xb7, 0xf7, 0xe4, 0x92, 0xb0, 0x94, 0x64, 0x48 } }
+// The guest's CMOS RAM, its standard bank and then its extended one, which the
+// core keeps in this variable for the next start (virt/rtc.c).
+#define HANDOFF_CMOS_VARIABLE u"ReBIOSCmos"
+#define HANDOFF_CMOS_SIZE 256
 // With save_log = efi, the core keeps its log (virt/log_save.c) in parts, each
 // in a variable of its own, named after HANDOFF_LOG_VARIABLE and the part's
 // number, from 0 on, in 4 decimal digits (handoff_log_part_name()). ReBIOS
@@ -338,6 +342,11 @@ struct handoff {
     uint8_t time_minute;
     uint8_t time_second;
     uint64_t time_tsc;
+
+    // The guest's CMOS RAM as an earlier start kept it in
+    // HANDOFF_CMOS_VARIABLE: cmos_valid is false where none did.
+    bool cmos_valid;
+    uint8_t cmos[HANDOFF_CMOS_SIZE];
 
     // The memory map current at ExitBootServices().
     uint64_t efi_mmap;

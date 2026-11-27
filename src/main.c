@@ -223,6 +223,24 @@ static void record_time(void) {
     loader_handoff->time_valid = true;
 }
 
+// The guest's CMOS RAM that an earlier start kept, where it has the size the
+// core keeps.
+static void record_cmos(void) {
+    static uint16_t name[] = HANDOFF_CMOS_VARIABLE;
+    struct efi_guid guid = HANDOFF_VARIABLE_GUID;
+    size_t size = sizeof(loader_handoff->cmos);
+    efi_status status = efi_rt->get_variable(name, &guid, NULL, &size, loader_handoff->cmos);
+    if (status == EFI_SUCCESS && size == sizeof(loader_handoff->cmos)) {
+        loader_handoff->cmos_valid = true;
+    } else if (status != EFI_NOT_FOUND) {
+        printf(
+            "The guest's CMOS RAM kept by an earlier start is unusable: status %#llx, %llu "
+            "bytes\n",
+            (unsigned long long)status, (unsigned long long)size
+        );
+    }
+}
+
 efi_status efi_main(efi_handle image_handle, struct efi_system_table *system_table) {
     efi_image_handle = image_handle;
     efi_st = system_table;
@@ -363,6 +381,7 @@ efi_status efi_main(efi_handle image_handle, struct efi_system_table *system_tab
     loader_handoff->nested_heap_size = nested_heap_size;
     loader_handoff->tsc_hz = measure_tsc_hz();
     record_time();
+    record_cmos();
     config_to_handoff(&loader_handoff->config);
     fwtables_collect();
     drives_connect();
