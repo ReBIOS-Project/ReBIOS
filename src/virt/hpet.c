@@ -38,6 +38,7 @@
 #include <virt/irq.h>
 #include <virt/layout.h>
 #include <virt/mmio.h>
+#include <virt/rtc.h>
 #include <virt/vcpu.h>
 
 // IA-PC HPET Specification 1.0a, 2.3: the capabilities and configuration
@@ -131,6 +132,7 @@ static void guest_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size,
     spinlock_release(&lock);
     if (changed) {
         irq_hpet_route_changed();
+        rtc_hpet_route_changed();
     }
 }
 
@@ -209,6 +211,7 @@ void hpet_wake(void) {
     spinlock_release(&lock);
     if (changed) {
         irq_hpet_route_changed();
+        rtc_hpet_route_changed();
     }
 }
 

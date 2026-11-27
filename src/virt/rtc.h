@@ -35,6 +35,9 @@ void rtc_sleep(void);
 // that has its BIOS resume rather than start; and the emulated clock moved on
 // by the time the machine slept, as an RTC counts through S3.
 void rtc_wake(void);
+// After the guest's HPET took IRQ 8 or gave it back (hpet_replaces_pit()):
+// the emulated RTC lets go of its line or drives it again.
+void rtc_hpet_route_changed(void);
 // The RTC's bytes the guest's FADT gives the indexes of (ACPI 6.6, Table 5.9):
 // its century, day-of-month alarm, and month alarm, 0 for none.
 void rtc_fadt_indexes(uint8_t *century_index, uint8_t *day_alarm, uint8_t *month_alarm);

@@ -42,6 +42,7 @@
 #include <sys/efi_runtime.h>
 #include <sys/smp.h>
 #include <sys/x86.h>
+#include <virt/hpet.h>
 #include <virt/hv_timer.h>
 #include <virt/io.h>
 #include <virt/irq.h>
@@ -310,10 +311,27 @@ static bool irq_wanted(void) {
         || ((reg_c & C_UF) != 0 && (reg_b & B_UIE) != 0);
 }
 
+// Where the guest's HPET has the legacy replacement route, its timer 1 has IRQ
+// 8, and the RTC interrupts nothing (IA-PC HPET Specification 1.0a, 2.4.2.1).
 static void update_line(void) {
     bool wanted = irq_wanted();
     reg_c = (uint8_t)((reg_c & ~C_IRQF) | (wanted ? C_IRQF : 0));
-    irq_isa_set(ISA_IRQ_RTC, wanted);
+    if (!hpet_replaces_pit()) {
+        irq_isa_set(ISA_IRQ_RTC, wanted);
+    }
+}
+
+void rtc_hpet_route_changed(void) {
+    if (real) {
+        return;
+    }
+    spinlock_acquire(&lock);
+    if (hpet_replaces_pit()) {
+        irq_isa_set(ISA_IRQ_RTC, false);
+    } else {
+        update_line();
+    }
+    spinlock_release(&lock);
 }
 
 // Brings the clock to now, its updates setting UF, and AF where the alarm
