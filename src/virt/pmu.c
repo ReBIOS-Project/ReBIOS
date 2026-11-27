@@ -184,6 +184,18 @@ void pmu_programmed(struct vcpu *v) {
     }
 }
 
+bool pmu_amd_counts_now(struct vcpu *v, uint64_t evtsel) {
+    uint64_t host_guest = evtsel & (AMD_EVTSEL_HOST_ONLY | AMD_EVTSEL_GUEST_ONLY);
+    if (host_guest == 0) {
+        return true;
+    }
+    if (!nsvm_svme(v)) {
+        return false;
+    }
+    return host_guest == (AMD_EVTSEL_HOST_ONLY | AMD_EVTSEL_GUEST_ONLY)
+        || (host_guest == AMD_EVTSEL_GUEST_ONLY) == nsvm_in_l2(v);
+}
+
 static uint64_t width_mask(unsigned int width) {
     return width >= 64 ? UINT64_MAX : ((uint64_t)1 << width) - 1;
 }
@@ -298,10 +310,6 @@ static uint64_t amd_count(
         return 0;
     }
     unsigned int cpl = vcpu_cpl(v);
-    uint64_t excluded = 0;
-    if (nsvm_svme(v)) {
-        excluded = nsvm_in_l2(v) ? AMD_EVTSEL_HOST_ONLY : AMD_EVTSEL_GUEST_ONLY;
-    }
     uint64_t status = 0;
     for (size_t i = 0; i < gp_count; i++) {
         uint32_t bit = (uint32_t)1 << i;
@@ -310,9 +318,8 @@ static uint64_t amd_count(
             n = branches;
         }
         uint64_t evtsel = v->amd_perf_evt_sel[i];
-        uint64_t host_guest = evtsel & (AMD_EVTSEL_HOST_ONLY | AMD_EVTSEL_GUEST_ONLY);
         if (n == 0 || (global & ((uint64_t)1 << i)) == 0 || !counts_at(evtsel, cpl)
-         || (excluded != 0 && host_guest == excluded)) {
+         || !pmu_amd_counts_now(v, evtsel)) {
             continue;
         }
         uint32_t counter = MSR_AMD_PERF_CTR0 + (uint32_t)i;

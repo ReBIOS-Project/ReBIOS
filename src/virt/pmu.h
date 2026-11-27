@@ -35,5 +35,11 @@ void pmu_programmed(struct vcpu *v);
 // as the processor would have counted them at the guest's CPL, with the
 // overflows' status and interrupts.
 void pmu_retired(struct vcpu *v, uint64_t instructions, uint64_t branches);
+// Whether an AMD event select's host/guest-only field lets it count in the
+// vCPU's mode now: with neither bit, always; with either and the vCPU's
+// EFER.SVME clear, never; else with both, or the one of its mode (APM 24593
+// rev. 3.46, Table 13-4), as Linux 7.3's KVM has it
+// (amd_pmc_is_disabled_in_current_mode()).
+bool pmu_amd_counts_now(struct vcpu *v, uint64_t evtsel);
 
 #endif

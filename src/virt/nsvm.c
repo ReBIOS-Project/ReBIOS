@@ -39,6 +39,7 @@
 #include <virt/insn.h>
 #include <virt/irq.h>
 #include <virt/mmio.h>
+#include <virt/msr.h>
 #include <virt/pmu.h>
 #include <virt/svm.h>
 #include <virt/vcpu.h>
@@ -539,6 +540,7 @@ void nsvm_set_svme(struct vcpu *v, bool on) {
     if (n->in_l2) {
         n->svme02 = on;
         svme_gp_intercept(n);
+        msr_amd_counters_mode(v);
         return;
     }
     if (on == n->svme) {
@@ -546,6 +548,7 @@ void nsvm_set_svme(struct vcpu *v, bool on) {
     }
     n->svme = on;
     svme_gp_intercept(n);
+    msr_amd_counters_mode(v);
     if (on) {
         atomic_fetch_add_explicit(&svm_count, 1, memory_order_acq_rel);
     } else {
@@ -799,6 +802,7 @@ static void switch_vmcb(struct vcpu *v, struct nsvm *n, bool to_l2) {
         spec_ctrl_switch(n, to_l2);
     }
     n->in_l2 = to_l2;
+    msr_amd_counters_mode(v);
 }
 
 // After a #VMEXIT, or a VMRUN that failed, the guest goes on after its VMRUN

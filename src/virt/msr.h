@@ -43,6 +43,11 @@ void msr_cpu_init(void);
 bool msr_rdmsr(struct vcpu *v, uint32_t msr, uint64_t *value, bool *fault);
 bool msr_wrmsr(struct vcpu *v, uint32_t msr, uint64_t value, bool *fault);
 
+// Turns AMD's counters whose host/guest-only field the guest set on or off for
+// the vCPU's mode, as it enters or leaves its guest's guest or its EFER.SVME
+// changes.
+void msr_amd_counters_mode(struct vcpu *v);
+
 // Whether the guest's accesses to an MSR no module handles reach the
 // processor: for MSRs the hypervisor knows, of the processor's model, as safe
 // to give the guest; the others raise #GP as on a processor without them. The
