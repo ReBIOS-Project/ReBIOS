@@ -141,6 +141,13 @@ struct vlapic {
     // Something that decides where the guest's messages can be posted changed:
     // they are routed again before the vCPU enters the guest.
     bool post_recheck;
+    // The timer's mode and divisor as the guest last wrote them, as a register
+    // that the processor itself writes before an APIC-write exit (SDM
+    // 325462-093 Vol. 3C, 32.4.3.1) or AVIC's trap (APM 24593 rev. 3.46,
+    // 15.29.3.1) holds the new ones already, as Linux 7.3's KVM keeps them
+    // (lapic.c, apic_update_lvtt()).
+    uint32_t mode_written;
+    uint32_t divisor_written;
     // When the guest's timer next expires by the processor's TSC, or 0: the
     // processor's timer is the hypervisor's, which has its own uses for it.
     uint64_t timer_deadline;
@@ -963,6 +970,8 @@ static void reset_registers(struct vcpu *v) {
     }
     regs_set(vl, APIC_TIMER_INITIAL, 0);
     regs_set(vl, APIC_TIMER_DIVIDE, 0);
+    vl->mode_written = timer_mode(vl);
+    vl->divisor_written = timer_divisor(vl);
     if (ext_space) {
         // 8-bit APIC IDs stay on: a legacy BIOS turns them on, Linux 7.3
         // never, and starting the APs in xAPIC mode needs them where an APIC
@@ -2002,12 +2011,13 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
             if (!sw_enabled(vl)) {
                 value |= APIC_LVT_MASKED;
             }
-            uint32_t old_mode = timer_mode(vl);
             if (i == LVT_TIMER && !tsc_deadline_mode) {
                 value &= ~APIC_LVT_TIMER_TSC_DEADLINE;
             }
             regs_set(vl, reg, value);
             if (i == LVT_TIMER) {
+                uint32_t old_mode = vl->mode_written;
+                vl->mode_written = timer_mode(vl);
                 timer_mode_changed(vl, old_mode);
             }
             if (i == LVT_THERMAL) {
@@ -2074,16 +2084,20 @@ static bool reg_write(struct vcpu *v, uint32_t reg, uint32_t value) {
         }
         case APIC_TIMER_INITIAL: {
             // The IA32_TSC_DEADLINE MSR runs that mode (SDM 325462-093 Vol.
-            // 3A, 13.5.4.1).
+            // 3A, 13.5.4.1), where the count stays 0, as the mode's start left
+            // it, whatever the processor stored.
             if (timer_mode(vl) != APIC_LVT_TIMER_TSC_DEADLINE) {
                 regs_set(vl, APIC_TIMER_INITIAL, value);
                 vl->timer_deadline = value != 0 ? rdtsc() + timer_span(vl) : 0;
+            } else {
+                regs_set(vl, APIC_TIMER_INITIAL, 0);
             }
             return true;
         }
         case APIC_TIMER_DIVIDE: {
-            uint32_t old_divisor = timer_divisor(vl);
+            uint32_t old_divisor = vl->divisor_written;
             regs_set(vl, APIC_TIMER_DIVIDE, value & TIMER_DIVIDE_WRITABLE);
+            vl->divisor_written = timer_divisor(vl);
             uint64_t now = rdtsc();
             if (timer_mode(vl) != APIC_LVT_TIMER_TSC_DEADLINE && vl->timer_deadline > now) {
                 vl->timer_deadline = now
