@@ -529,8 +529,10 @@ void vcpu_before_entry(struct vcpu *v) {
     vga_refresh();
     nvmx_wait(v);
     // VMX operation blocks INIT, which its guest's exits take, and SVM's
-    // global interrupt flag holds it.
-    if (!nvmx_holds_init(v) && !nsvm_holds_init(v)
+    // global interrupt flag holds it. An instruction being stepped finishes
+    // first, as INIT comes at an instruction boundary, the others staying
+    // paused for an MMIO step until then.
+    if (!nvmx_holds_init(v) && !nsvm_holds_init(v) && !v->stepping
      && atomic_exchange_explicit(&v->cpu->init_pending, false, memory_order_acquire)) {
         vcpu_init_signal(v);
     }
