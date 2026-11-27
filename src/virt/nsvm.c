@@ -2899,6 +2899,7 @@ bool nsvm_init_signal(struct vcpu *v) {
     // The guest's guest is gone, its state with it, and so is SVM, which
     // INIT's clearing of EFER disables (APM 24593 rev. 3.46, 15.30.1).
     if (n->in_l2) {
+        avic_leave(n);
         switch_vmcb(v, n, false);
         v->gprs.rax = n->vmcb01->save.rax;
     }
