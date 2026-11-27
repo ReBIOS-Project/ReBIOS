@@ -1490,8 +1490,10 @@ static void vmx_handle_exit(struct vcpu *v) {
             vcpu_skip_instruction(v);
             break;
         }
+        // An INIT, which the guest's VMX operation, an instruction being
+        // stepped, and its guest's exit decide on from the next entry.
         case EXIT_REASON_INIT: {
-            vcpu_init_signal(v);
+            atomic_store_explicit(&v->cpu->init_pending, true, memory_order_release);
             break;
         }
         case EXIT_REASON_TRIPLE_FAULT: {
