@@ -224,9 +224,9 @@ static uint8_t *hpet_make(const uint8_t *hpet, size_t *length) {
         return NULL;
     }
     memcpy(&table, hpet, sizeof(struct acpi_hpet));
-    uint64_t address = table.address.address;
+    uint64_t address;
     uint64_t guest;
-    if (table.address.address_space_id != ACPI_AS_ID_SYS_MEM || hpet_hidden(address)
+    if (!acpi_hpet_address(&table, &address) || hpet_hidden(address)
      || !devmem_guest(address, address + 1, false, &guest)) {
         return NULL;
     }

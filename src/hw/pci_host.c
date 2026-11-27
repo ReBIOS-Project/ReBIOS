@@ -172,8 +172,9 @@ static void claim_hpets(struct scan *r) {
         if (table.hdr->length >= sizeof(struct acpi_hpet)) {
             struct acpi_hpet hpet;
             memcpy(&hpet, table.ptr, sizeof(struct acpi_hpet));
-            if (hpet.address.address_space_id == ACPI_AS_ID_SYS_MEM) {
-                claim_into(&r->devices, hpet.address.address, HPET_MMIO_SIZE);
+            uint64_t base;
+            if (acpi_hpet_address(&hpet, &base)) {
+                claim_into(&r->devices, base, HPET_MMIO_SIZE);
             }
         }
         uacpi_table_unref(&table);

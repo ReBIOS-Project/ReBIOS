@@ -880,6 +880,16 @@ bool acpi_motherboard_reserves(uint64_t base, uint64_t end) {
     return claim.claimed;
 }
 
+bool acpi_hpet_address(const struct acpi_hpet *hpet, uint64_t *address) {
+    uint64_t base = hpet->address.address;
+    if (hpet->address.address_space_id != ACPI_AS_ID_SYS_MEM || base == 0
+     || base == 0xfed0000000000000) {
+        return false;
+    }
+    *address = base;
+    return true;
+}
+
 bool acpi_claims_port(uint16_t port) {
     if (!init_ok) {
         return false;

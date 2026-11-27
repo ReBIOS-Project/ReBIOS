@@ -95,6 +95,11 @@ bool acpi_claims_port(uint16_t port);
 // one memory range of its current resources, as firmware reserves ECAM space
 // (Linux 7.3's is_acpi_reserved()).
 bool acpi_motherboard_reserves(uint64_t base, uint64_t end);
+// The address of the HPET that an HPET table describes, false where it gives
+// none that Linux 7.3 takes: one not in memory, at 0, or at
+// 0xfed0000000000000, which broken firmware gives for 0xfed00000
+// (arch/x86/kernel/acpi/boot.c, acpi_parse_hpet()).
+bool acpi_hpet_address(const struct acpi_hpet *hpet, uint64_t *address);
 
 // The SCI's interrupt as the FADT has it, which the caller connects to
 // acpi_sci_interrupt(). Returns false if uACPI has no SCI handler.

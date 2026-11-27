@@ -25,6 +25,7 @@
 #include <virt/hpet.h>
 #include <core.h>
 #include <handoff.h>
+#include <hw/acpi.h>
 #include <hw/isa.h>
 #include <lib/log.h>
 #include <lib/spinlock.h>
@@ -177,13 +178,16 @@ void hpet_init(void) {
         if (table.hdr->length >= sizeof(struct acpi_hpet)) {
             struct acpi_hpet hpet;
             memcpy(&hpet, table.ptr, sizeof(struct acpi_hpet));
-            uintptr_t base = hpet.address.address;
-            if (hpet.address.address_space_id == ACPI_AS_ID_SYS_MEM
-             && (base & (PAGE_SIZE - 1)) == 0
-             && hidden_count < MAX_HIDDEN
-             && (!allowed || fsb_capable(base))) {
+            uint64_t base;
+            if (!acpi_hpet_address(&hpet, &base)) {
+                printf(
+                    "HPET table ignored, as no HPET can be at its address %#llx in space %u\n",
+                    (unsigned long long)hpet.address.address, hpet.address.address_space_id
+                );
+            } else if ((base & (PAGE_SIZE - 1)) == 0 && hidden_count < MAX_HIDDEN
+                    && (!allowed || fsb_capable(base))) {
                 hide(base, allowed ? "its timers can deliver through the FSB" : "hpet is off");
-            } else if (hpet.address.address_space_id == ACPI_AS_ID_SYS_MEM && guest_base == 0) {
+            } else if (guest_base == 0) {
                 guest_base = base;
                 trap_writes(base);
                 give_lines(base);
