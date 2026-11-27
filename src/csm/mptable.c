@@ -260,6 +260,15 @@ static void isa_overrides_find(struct mp_input *in) {
             in->isa_flags[iso.source] = iso.flags & MP_FLAGS_MASK;
         }
     }
+    // As the guest's MADT has them.
+    for (size_t irq = 0; irq < ISA_IRQS; irq++) {
+        uint32_t gsi;
+        uint16_t flags;
+        if (irq_isa_override((unsigned int)irq, &gsi, &flags)) {
+            in->isa_gsi[irq] = gsi;
+            in->isa_flags[irq] = flags & MP_FLAGS_MASK;
+        }
+    }
 }
 
 static bool input_gather(struct mp_input *in) {

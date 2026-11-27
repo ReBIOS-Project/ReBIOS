@@ -75,6 +75,12 @@ unsigned int irq_host_isa_irq(unsigned int irq);
 // was put on the IRQ first, or where either line is the SCI's, the
 // hypervisor's, or one it drives. Before irq_give_device_lines().
 bool irq_present_isa(uint32_t gsi, unsigned int irq);
+// Where irq_present_isa() put a line that is level triggered or active low,
+// unlike an ISA IRQ's, on an ISA IRQ: the guest's entry for it and its MPS
+// INTI flags (ACPI 6.6, Table 5.26), which the guest's MADT and MP table give
+// that IRQ, as firmware gives them where a line is not wired as ISA has it.
+// False otherwise.
+bool irq_isa_override(unsigned int irq, uint32_t *gsi, uint16_t *flags);
 
 // After the guest changed an I/O APIC entry.
 void irq_gsi_changed(uint32_t gsi);

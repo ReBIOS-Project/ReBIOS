@@ -25,6 +25,7 @@
 #include <handoff.h>
 #include <hw/acpi.h>
 #include <hw/ioapic.h>
+#include <hw/isa.h>
 #include <lib/heap.h>
 #include <lib/log.h>
 #include <lib/util.h>
@@ -32,6 +33,7 @@
 #include <virt/devmem.h>
 #include <virt/guest_mem.h>
 #include <virt/hpet.h>
+#include <virt/irq.h>
 #include <virt/layout.h>
 #include <virt/pci_plan.h>
 #include <virt/vacpi.h>
@@ -159,6 +161,40 @@ static bool madt_entry_kept(const uint8_t *entry, size_t length) {
     }
 }
 
+// An ISA IRQ's Interrupt Source Override in the guest's MADT of out bytes: the
+// firmware's, if it has one, told the GSI and flags, else a new one after the
+// others. The new length.
+static size_t madt_override(
+    uint8_t *made,
+    size_t out,
+    uint8_t irq,
+    uint32_t gsi,
+    uint16_t flags
+) {
+    struct acpi_madt_interrupt_source_override iso = {
+        .hdr = {
+            .type = ACPI_MADT_ENTRY_TYPE_INTERRUPT_SOURCE_OVERRIDE,
+            .length = sizeof(struct acpi_madt_interrupt_source_override)
+        },
+        .bus = 0, .source = irq, .gsi = gsi, .flags = flags
+    };
+    size_t offset = sizeof(struct acpi_madt);
+    size_t at = offset;
+    const struct acpi_entry_hdr *hdr;
+    while ((hdr = acpi_madt_next(made, out, &offset)) != NULL) {
+        uint8_t *entry = made + at;
+        at = offset;
+        if (hdr->type == ACPI_MADT_ENTRY_TYPE_INTERRUPT_SOURCE_OVERRIDE
+         && entry[offsetof(struct acpi_madt_interrupt_source_override, bus)] == 0
+         && entry[offsetof(struct acpi_madt_interrupt_source_override, source)] == irq) {
+            memcpy(entry, &iso, sizeof(struct acpi_madt_interrupt_source_override));
+            return out;
+        }
+    }
+    memcpy(made + out, &iso, sizeof(struct acpi_madt_interrupt_source_override));
+    return out + sizeof(struct acpi_madt_interrupt_source_override);
+}
+
 // The guest's interrupt controllers, under the firmware's table's header: the
 // 8259 pair the hypervisor always gives, local APICs where a PC's are, and the
 // firmware's entries that madt_entry_kept() keeps, in its order.
@@ -167,7 +203,9 @@ static uint8_t *madt_make(const uint8_t *madt, size_t *length) {
     if (host_length < sizeof(struct acpi_madt)) {
         return NULL;
     }
-    uint8_t *made = kmalloc(host_length);
+    uint8_t *made = kmalloc(
+        host_length + ISA_IRQS * sizeof(struct acpi_madt_interrupt_source_override)
+    );
     memcpy(made, madt, ACPI_SDT_HEADER_SIZE);
     write_le32(
         made + offsetof(struct acpi_madt, local_interrupt_controller_address),
@@ -185,6 +223,13 @@ static uint8_t *madt_make(const uint8_t *madt, size_t *length) {
         if (madt_entry_kept(entry, hdr->length)) {
             memcpy(made + out, entry, hdr->length);
             out += hdr->length;
+        }
+    }
+    for (size_t irq = 0; irq < ISA_IRQS; irq++) {
+        uint32_t gsi;
+        uint16_t flags;
+        if (irq_isa_override((unsigned int)irq, &gsi, &flags)) {
+            out = madt_override(made, out, (uint8_t)irq, gsi, flags);
         }
     }
     write_le32(made + ACPI_SDT_LENGTH, (uint32_t)out);

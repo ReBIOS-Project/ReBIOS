@@ -638,6 +638,26 @@ void irq_line_wired(uint32_t gsi, bool level, bool active_low) {
     kick_after_update();
 }
 
+bool irq_isa_override(unsigned int irq, uint32_t *gsi, uint16_t *flags) {
+    uint32_t entry = irq_isa_gsi(irq);
+    bool found = false;
+    spinlock_acquire(&lock);
+    for (size_t i = 0; i < route_count; i++) {
+        const struct route *r = &routes[i];
+        if (r->irq != (int)irq || r->guest_gsi != entry || i == entry
+         || (!r->level && !r->active_low)) {
+            continue;
+        }
+        *gsi = entry;
+        *flags = (r->active_low ? ACPI_MADT_POLARITY_ACTIVE_LOW : ACPI_MADT_POLARITY_ACTIVE_HIGH)
+               | (r->level ? ACPI_MADT_TRIGGERING_LEVEL : ACPI_MADT_TRIGGERING_EDGE);
+        found = true;
+        break;
+    }
+    spinlock_release(&lock);
+    return found;
+}
+
 bool irq_present_isa(uint32_t gsi, unsigned int irq) {
     if (irq >= ISA_IRQS || (HYPERVISOR_IRQS & (uint32_t)1 << irq) != 0
      || (presented & (uint32_t)1 << irq) != 0) {
