@@ -1050,6 +1050,36 @@ static uint8_t window_byte_read(bool vbe_mode, uint32_t offset) {
     return mem_read(offset);
 }
 
+// The pages of video memory that size bytes from offset into the window reach,
+// as written for the next frame to show: the hypervisor's writes for the
+// guest, as a run's, leave no dirty flags. With the VGA lock held.
+static void window_mark_written(uint64_t offset, uint64_t size) {
+    size_t at;
+    if (!vbe.track || size == 0 || !vbe_window_at((uint32_t)offset, &at)) {
+        return;
+    }
+    size_t end = at + (size < PLANE_SIZE - offset ? size : PLANE_SIZE - offset);
+    if (end > vbe.vram_size) {
+        end = vbe.vram_size;
+    }
+    for (size_t page = at / PAGE_SIZE; page < page_count(end); page++) {
+        vbe.written_before[page / 64] |= (uint64_t)1 << (page % 64);
+    }
+    atomic_store_explicit(&vbe.written_before_any, true, memory_order_relaxed);
+}
+
+// window_mark_written() of count elements of size bytes, the first at offset
+// and each next one step bytes on.
+static void window_mark_elements(uint64_t offset, size_t size, int64_t step, size_t count) {
+    if (count == 0) {
+        return;
+    }
+    uint64_t last = offset + (uint64_t)step * (count - 1);
+    uint64_t low = step < 0 ? last : offset;
+    uint64_t high = (step < 0 ? offset : last) + size;
+    window_mark_written(low, high - low);
+}
+
 static void window_byte_write(bool vbe_mode, uint32_t offset, uint8_t byte) {
     size_t at;
     if (!vbe_mode) {
@@ -1086,6 +1116,7 @@ static void window_write(struct vcpu *v, void *ctx, uint64_t offset, size_t size
         for (size_t i = 0; i < size; i++) {
             window_byte_write(true, (uint32_t)(offset + i), (uint8_t)(value >> (8 * i)));
         }
+        window_mark_written(offset, size);
     }
     spinlock_release(&vga.lock);
 }
@@ -1137,6 +1168,7 @@ static void window_write_string(
                 window_byte_write(true, at + (uint32_t)i, element[i]);
             }
         }
+        window_mark_elements(offset, size, step, count);
     }
     spinlock_release(&vga.lock);
 }
@@ -1404,6 +1436,9 @@ static void window_move_string(
         for (size_t i = 0; i < size; i++) {
             window_byte_write(true, to + (uint32_t)i, element[i]);
         }
+    }
+    if (vbe_mode) {
+        window_mark_elements(destination, size, step, count);
     }
     spinlock_release(&vga.lock);
 }
