@@ -327,6 +327,9 @@ static struct {
     struct spinlock lock;
 
     uacpi_handle call_work;
+    // Taken where a call starts, and by what reads its result or stages its
+    // arguments, which wait for no call to run.
+    struct spinlock call_lock;
     _Atomic(uint32_t) call;
     size_t call_index;
     uint32_t call_argc;
@@ -4562,9 +4565,11 @@ static void mailbox_ring(struct vcpu *v) {
             // call not done does not complete, so that the guest takes its
             // interrupts and writes again.
             uint32_t state = CALL_NONE;
+            spinlock_acquire(&vacpi.call_lock);
             bool started = atomic_compare_exchange_strong_explicit(
                 &vacpi.call, &state, CALL_RUNNING, memory_order_acquire, memory_order_relaxed
             );
+            spinlock_release(&vacpi.call_lock);
             if (started) {
                 atomic_store_explicit(&vacpi.call_cpu, v->cpu, memory_order_relaxed);
                 vacpi.call_index = header[MBX_INDEX / 4];
@@ -4584,8 +4589,17 @@ static void mailbox_ring(struct vcpu *v) {
             }
             break;
         }
+        // A call under way, which only a guest that does not keep to MBXM
+        // would ring these meanwhile for, has its result and its arguments to
+        // itself: there is no element, and nothing is taken.
         case FUNCTION_ELEMENT: {
-            mailbox_element(header[MBX_ELEMENT / 4]);
+            spinlock_acquire(&vacpi.call_lock);
+            if (atomic_load_explicit(&vacpi.call, memory_order_acquire) == CALL_NONE) {
+                mailbox_element(header[MBX_ELEMENT / 4]);
+            } else {
+                write_result(NULL, true);
+            }
+            spinlock_release(&vacpi.call_lock);
             break;
         }
         case FUNCTION_NOTIFICATION: {
@@ -4593,7 +4607,11 @@ static void mailbox_ring(struct vcpu *v) {
             break;
         }
         case FUNCTION_TAKE: {
-            mailbox_take(header[MBX_INDEX / 4]);
+            spinlock_acquire(&vacpi.call_lock);
+            if (atomic_load_explicit(&vacpi.call, memory_order_acquire) == CALL_NONE) {
+                mailbox_take(header[MBX_INDEX / 4]);
+            }
+            spinlock_release(&vacpi.call_lock);
             break;
         }
         default: {
