@@ -91,6 +91,14 @@ int mmio_register(uintptr_t base, size_t size, const struct mmio_ops *ops, void 
 // moves.
 void mmio_move(int region, uintptr_t base, size_t size);
 
+// Where a region was when an access found it, the access's offsets taken from
+// there, whatever moves it meanwhile.
+struct mmio_place {
+    const void *region;
+    uint64_t base;
+    uint64_t size;
+};
+
 // A host register at hpa, which the hypervisor maps, as a region's access
 // reaches it: size 1, 2, 4, or 8.
 uint64_t mmio_read_host(uintptr_t hpa, size_t size);
@@ -154,16 +162,16 @@ bool mmio_store_run(
 // where write is true: memory that the guest has mapped write-back, as RAM and
 // the ROMs below 1 MiB are, and that only RAM is for writes, its host address
 // in *host, which it marks written for writes; a region that begins runs,
-// holding all of the page, in *region; or anything else.
+// holding all of the page, where *place says; or anything else.
 #define MMIO_PLACE_OTHER 0
 #define MMIO_PLACE_RAM 1
 #define MMIO_PLACE_RUN 2
-int mmio_page(uintptr_t gpa, bool write, uint8_t **host, const void **region);
-// An access of len bytes within a page of the region mmio_page() gave, of
+int mmio_page(uintptr_t gpa, bool write, uint8_t **host, struct mmio_place *place);
+// An access of len bytes within a page of the place mmio_page() gave, of
 // value's low bytes, or reading what it returns.
 uint64_t mmio_region_access(
     struct vcpu *v,
-    const void *region,
+    const struct mmio_place *place,
     uintptr_t gpa,
     size_t len,
     bool write,
@@ -177,7 +185,7 @@ uint64_t mmio_region_access(
 // each access.
 bool mmio_region_store(
     struct vcpu *v,
-    const void *region,
+    const struct mmio_place *place,
     uintptr_t gpa,
     const uint8_t *data,
     bool same,
@@ -187,7 +195,7 @@ bool mmio_region_store(
 );
 bool mmio_region_load(
     struct vcpu *v,
-    const void *region,
+    const struct mmio_place *place,
     uintptr_t gpa,
     uint8_t *data,
     size_t size,
@@ -196,7 +204,7 @@ bool mmio_region_load(
 );
 bool mmio_region_move(
     struct vcpu *v,
-    const void *region,
+    const struct mmio_place *place,
     uintptr_t to,
     uintptr_t from,
     size_t size,

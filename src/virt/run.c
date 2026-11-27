@@ -113,7 +113,7 @@ struct run_page {
     uintptr_t linear;
     uintptr_t gpa;
     uint8_t *host;
-    const void *region;
+    struct mmio_place region;
     int place;
     // NEED_*, as walks have checked them.
     unsigned int rights;
@@ -368,7 +368,7 @@ static struct run_page *page_get_all(
         return NULL;
     }
     uint8_t *host = NULL;
-    const void *region = NULL;
+    struct mmio_place region = { 0 };
     int place = mmio_page(gpa, write, &host, &region);
     if (place == MMIO_PLACE_OTHER || (fetch && place != MMIO_PLACE_RAM)) {
         return NULL;
@@ -641,7 +641,7 @@ static uint64_t linear_access(
         size_t chunk = PAGE_SIZE - offset < size - done ? PAGE_SIZE - offset : size - done;
         uint64_t part = value >> (done * 8);
         if (page->place == MMIO_PLACE_RUN) {
-            part = mmio_region_access(v, page->region, page->gpa + offset, chunk, write, part);
+            part = mmio_region_access(v, &page->region, page->gpa + offset, chunk, write, part);
         } else if (write) {
             ram_store(page->host + offset, chunk, part);
         } else {
@@ -903,7 +903,7 @@ static inline uint64_t load(
     }
     size_t offset = o->linear & (PAGE_SIZE - 1);
     if (p->place == MMIO_PLACE_RUN) {
-        uint64_t value = mmio_region_access(v, p->region, p->gpa + offset, o->size, false, 0);
+        uint64_t value = mmio_region_access(v, &p->region, p->gpa + offset, o->size, false, 0);
         return value & size_mask(o->size);
     }
     return ram_load(p->host + offset, o->size);
@@ -927,7 +927,7 @@ static inline void store(
     }
     size_t offset = o->linear & (PAGE_SIZE - 1);
     if (p->place == MMIO_PLACE_RUN) {
-        mmio_region_access(v, p->region, p->gpa + offset, o->size, true, value);
+        mmio_region_access(v, &p->region, p->gpa + offset, o->size, true, value);
     } else {
         ram_store(p->host + offset, o->size, value);
     }
@@ -1607,22 +1607,22 @@ static size_t string_block(
     if (!moves && to->place == MMIO_PLACE_RUN) {
         uint8_t value[8];
         write_le64(value, rs->gpr[0]);
-        done = mmio_region_store(v, to->region, to_gpa, value, true, size, delta, count);
+        done = mmio_region_store(v, &to->region, to_gpa, value, true, size, delta, count);
     } else if (!moves) {
         for (size_t n = 0; n < count; n++) {
             ram_store(to->host + to_offset + delta * (int64_t)n, size, rs->gpr[0]);
         }
     } else if (from->place == MMIO_PLACE_RUN && to->place == MMIO_PLACE_RUN) {
-        done = from->region == to->region
-            && mmio_region_move(v, to->region, to_gpa, from_gpa, size, delta, count);
+        done = from->region.region == to->region.region && from->region.base == to->region.base
+            && mmio_region_move(v, &to->region, to_gpa, from_gpa, size, delta, count);
     } else if (from->place == MMIO_PLACE_RUN) {
-        done = mmio_region_load(v, from->region, from_gpa, buf, size, delta, count);
+        done = mmio_region_load(v, &from->region, from_gpa, buf, size, delta, count);
         if (done) {
             ram_store_block(to->host + to_offset, buf, size, delta, count);
         }
     } else if (to->place == MMIO_PLACE_RUN) {
         ram_load_block(buf, from->host + from_offset, size, delta, count);
-        done = mmio_region_store(v, to->region, to_gpa, buf, false, size, delta, count);
+        done = mmio_region_store(v, &to->region, to_gpa, buf, false, size, delta, count);
     } else {
         for (size_t n = 0; n < count; n++) {
             uint64_t value = ram_load(from->host + from_offset + delta * (int64_t)n, size);
