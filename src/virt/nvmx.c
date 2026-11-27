@@ -3980,8 +3980,15 @@ static void vmlaunch(struct vcpu *v, struct nvmx *n, bool resume) {
     v->injecting = (get12(n, VMCS_ENTRY_INTR_INFO) & INTR_INFO_VALID) != 0;
     n->run_pending = true;
 
-    // The processor checks VMCS02's guest state, but for the link pointer and
-    // the activity states it does not enter VMCS02 in.
+    // The processor checks VMCS02's guest state, but for the CR4 bits of
+    // features the guest does not get, the link pointer, and the activity
+    // states it does not enter VMCS02 in (SDM 325462-093 Vol. 3C, 29.3.1.1,
+    // 29.3.1.5).
+    uint64_t cr4 = get12(n, VMCS_GUEST_CR4);
+    if ((cr4 & cap_cr4_fixed0) != cap_cr4_fixed0 || (cr4 & ~cap_cr4_fixed1) != 0) {
+        entry_failure(v, n, EXIT_REASON_INVALID_GUEST_STATE, QUAL_GUEST_STATE);
+        return;
+    }
     if (!link_pointer_valid(n)) {
         entry_failure(v, n, EXIT_REASON_INVALID_GUEST_STATE, QUAL_LINK_POINTER);
         return;
