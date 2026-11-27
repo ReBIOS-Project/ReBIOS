@@ -88,7 +88,16 @@
 #define MBX_SLOT_DATA_SIZE 0x200
 #define MBX_RDATA 0x1000
 #define MBX_RDATA_SIZE 0x1000
-#define MBX_SIZE 0x2000
+// Arguments of more than a slot holds, one at a time, each taken out as its
+// stub puts it there (FUNCTION_TAKE), and results of more than MBX_RDATA
+// holds; the bytes of a package argument's strings pass through the start of
+// MBX_BIG on their way into its serialisation.
+#define MBX_BIG 0x2000
+#define MBX_BIG_SIZE 0x10000
+#define MBX_RBIG 0x12000
+#define MBX_RBIG_SIZE 0x10000
+#define MBX_SCRATCH_SIZE 0x1000
+#define MBX_SIZE 0x22000
 
 // The hypercall port's byte that rings the mailbox, as firmware's AML writes a
 // command for its SMM handler to its SMI command port.
@@ -97,6 +106,7 @@
 #define FUNCTION_CALL 1
 #define FUNCTION_ELEMENT 2
 #define FUNCTION_NOTIFICATION 3
+#define FUNCTION_TAKE 4
 
 // Where the guest's call of a firmware method is.
 #define CALL_NONE 0
@@ -109,6 +119,8 @@
 #define TYPE_STRING 2
 #define TYPE_BUFFER 3
 #define TYPE_PACKAGE 4
+// An element of a package argument that SERP cannot carry.
+#define TYPE_REFUSED 0xff
 
 // GELT's second index when the element is not in a nested package.
 #define ELEMENT_NONE 0xffff
@@ -309,6 +321,9 @@ static struct {
     size_t queue_count;
     bool dropping;
     uacpi_object *last;
+    // The arguments of the call under way taken out of MBX_BIG.
+    uint8_t *taken[MBX_SLOT_COUNT];
+    uint32_t taken_length[MBX_SLOT_COUNT];
     struct spinlock lock;
 
     uacpi_handle call_work;
@@ -2634,25 +2649,92 @@ static void byte_at(struct aml *a, size_t buffer, size_t base, size_t offset) {
     aml_byte(a, AML_ZERO);
 }
 
-// Package arguments, of integers and buffers, as their stubs pass them on: for
-// each element, its type, a byte, its length, a word, then its bytes.
-static void emit_serp(struct aml *a) {
-    aml_method(a, "SERP", 1, 0);
+// If (LGreater (Local, value)) {, closed by aml_end().
+static void if_local_above(struct aml *a, size_t local, uint32_t value) {
+    aml_begin(a, AML_IF);
+    aml_op(a, AML_LGREATER);
+    aml_local(a, local);
+    aml_int(a, value);
+}
+
+// Store (value, Local).
+static void store_int_local(struct aml *a, uint32_t value, size_t local) {
     aml_op(a, AML_STORE);
-    aml_begin(a, AML_BUFFER);
-    aml_int(a, MBX_SLOT_DATA_SIZE);
+    aml_int(a, value);
+    aml_local(a, local);
+}
+
+// The bytes a package element's data takes in SERP's serialisation, into
+// Local6, Local4 holding the element and Local5 its type, which becomes
+// TYPE_REFUSED for one it cannot carry: a string of more than MSCR holds, a
+// buffer or package of more than an element's length takes, and what is not an
+// integer, string, buffer, or package. Vista's interpreter counts an empty
+// string as one less than none.
+static void emit_element_size(struct aml *a) {
+    store_int_local(a, 0, 6);
+    if_local_equals(a, 5, TYPE_INTEGER);
+    store_int_local(a, 4, 6);
     aml_end(a);
-    aml_local(a, 0);
+    if_local_equals(a, 5, TYPE_STRING);
+    {
+        aml_op(a, AML_STORE);
+        aml_op(a, AML_SIZE_OF);
+        aml_local(a, 4);
+        aml_local(a, 6);
+        if_local_equals(a, 6, UINT32_MAX);
+        store_int_local(a, 0, 6);
+        aml_end(a);
+        if_local_above(a, 6, MBX_SCRATCH_SIZE);
+        store_int_local(a, 0, 6);
+        store_int_local(a, TYPE_REFUSED, 5);
+        aml_end(a);
+    }
+    aml_end(a);
+    if_local_equals(a, 5, TYPE_BUFFER);
+    {
+        aml_op(a, AML_STORE);
+        aml_op(a, AML_SIZE_OF);
+        aml_local(a, 4);
+        aml_local(a, 6);
+        if_local_above(a, 6, 0xffff);
+        store_int_local(a, 0, 6);
+        store_int_local(a, TYPE_REFUSED, 5);
+        aml_end(a);
+    }
+    aml_end(a);
+    if_local_equals(a, 5, TYPE_PACKAGE);
+    {
+        aml_op(a, AML_STORE);
+        aml_name(a, "SERS");
+        aml_local(a, 4);
+        aml_local(a, 6);
+        if_local_above(a, 6, 0xffff);
+        store_int_local(a, 0, 6);
+        store_int_local(a, TYPE_REFUSED, 5);
+        aml_end(a);
+    }
+    aml_end(a);
+    aml_begin(a, AML_IF);
+    aml_op(a, AML_LOR);
+    aml_op(a, AML_LLESS);
+    aml_local(a, 5);
+    aml_int(a, TYPE_INTEGER);
+    aml_op(a, AML_LGREATER);
+    aml_local(a, 5);
+    aml_int(a, TYPE_PACKAGE);
+    store_int_local(a, TYPE_REFUSED, 5);
+    aml_end(a);
+}
+
+// SERS (package): the bytes of SERP's serialisation of it.
+static void emit_sers(struct aml *a) {
+    aml_method(a, "SERS", 1, 0);
+    store_int_local(a, 4, 0);
     aml_op(a, AML_STORE);
     aml_op(a, AML_SIZE_OF);
     aml_arg(a, 0);
     aml_local(a, 1);
-    aml_op(a, AML_STORE);
-    aml_int(a, 0);
-    aml_local(a, 2);
-    aml_op(a, AML_STORE);
-    aml_int(a, 0);
-    aml_local(a, 3);
+    store_int_local(a, 0, 2);
     aml_begin(a, AML_WHILE);
     aml_op(a, AML_LLESS);
     aml_local(a, 2);
@@ -2669,100 +2751,174 @@ static void emit_serp(struct aml *a) {
         aml_op(a, AML_OBJECT_TYPE);
         aml_local(a, 4);
         aml_local(a, 5);
-        aml_op(a, AML_STORE);
-        aml_local(a, 5);
-        byte_at(a, 0, 3, 0);
-        if_local_equals(a, 5, TYPE_INTEGER);
-        {
-            aml_op(a, AML_STORE);
-            aml_int(a, 4);
-            byte_at(a, 0, 3, 2);
-            for (size_t i = 0; i < 4; i++) {
-                aml_op(a, AML_STORE);
-                aml_op(a, AML_AND);
-                aml_op(a, AML_SHIFT_RIGHT);
-                aml_local(a, 4);
-                aml_int(a, 8 * i);
-                aml_byte(a, AML_ZERO);
-                aml_int(a, 0xff);
-                aml_byte(a, AML_ZERO);
-                byte_at(a, 0, 3, 4 + i);
-            }
-            aml_op(a, AML_ADD);
-            aml_local(a, 3);
-            aml_int(a, 8);
-            aml_local(a, 3);
-        }
-        aml_end(a);
-        aml_begin(a, AML_ELSE);
-        {
-            if_local_equals(a, 5, TYPE_BUFFER);
-            {
-                aml_op(a, AML_STORE);
-                aml_op(a, AML_SIZE_OF);
-                aml_local(a, 4);
-                aml_local(a, 6);
-                aml_op(a, AML_STORE);
-                aml_op(a, AML_AND);
-                aml_local(a, 6);
-                aml_int(a, 0xff);
-                aml_byte(a, AML_ZERO);
-                byte_at(a, 0, 3, 2);
-                aml_op(a, AML_STORE);
-                aml_op(a, AML_SHIFT_RIGHT);
-                aml_local(a, 6);
-                aml_int(a, 8);
-                aml_byte(a, AML_ZERO);
-                byte_at(a, 0, 3, 3);
-                aml_op(a, AML_STORE);
-                aml_int(a, 0);
-                aml_local(a, 7);
-                aml_begin(a, AML_WHILE);
-                aml_op(a, AML_LLESS);
-                aml_local(a, 7);
-                aml_local(a, 6);
-                aml_op(a, AML_STORE);
-                aml_op(a, AML_DEREF_OF);
-                aml_op(a, AML_INDEX);
-                aml_local(a, 4);
-                aml_local(a, 7);
-                aml_byte(a, AML_ZERO);
-                aml_op(a, AML_INDEX);
-                aml_local(a, 0);
-                aml_op(a, AML_ADD);
-                aml_op(a, AML_ADD);
-                aml_local(a, 3);
-                aml_int(a, 4);
-                aml_byte(a, AML_ZERO);
-                aml_local(a, 7);
-                aml_byte(a, AML_ZERO);
-                aml_byte(a, AML_ZERO);
-                aml_op(a, AML_INCREMENT);
-                aml_local(a, 7);
-                aml_end(a);
-                aml_op(a, AML_ADD);
-                aml_local(a, 3);
-                aml_op(a, AML_ADD);
-                aml_local(a, 6);
-                aml_int(a, 4);
-                aml_byte(a, AML_ZERO);
-                aml_local(a, 3);
-            }
-            aml_end(a);
-            aml_begin(a, AML_ELSE);
-            aml_op(a, AML_ADD);
-            aml_local(a, 3);
-            aml_int(a, 4);
-            aml_local(a, 3);
-            aml_end(a);
-        }
-        aml_end(a);
+        emit_element_size(a);
+        aml_op(a, AML_ADD);
+        aml_local(a, 0);
+        aml_op(a, AML_ADD);
+        aml_local(a, 6);
+        aml_int(a, 4);
+        aml_byte(a, AML_ZERO);
+        aml_local(a, 0);
         aml_op(a, AML_INCREMENT);
         aml_local(a, 2);
     }
     aml_end(a);
     aml_op(a, AML_RETURN);
     aml_local(a, 0);
+    aml_end(a);
+}
+
+// SERP (package): package arguments as their stubs pass them on, with which
+// slot_object()'s package_parse() makes them again: the element count, a
+// DWORD, then for each element its type, a byte, a byte of 0, its length, a
+// word, then its bytes: an integer's four, a string's characters, which pass
+// through MSCR as ACPI 1.0 has no conversion of a string to a buffer but a
+// field's, a buffer's bytes, and a package's serialisation; TYPE_REFUSED with
+// none for what it cannot carry.
+static void emit_serp(struct aml *a) {
+    aml_method(a, "SERP", 1, 0);
+    aml_op(a, AML_STORE);
+    aml_begin(a, AML_BUFFER);
+    aml_name(a, "SERS");
+    aml_arg(a, 0);
+    aml_end(a);
+    aml_local(a, 0);
+    aml_op(a, AML_STORE);
+    aml_op(a, AML_SIZE_OF);
+    aml_arg(a, 0);
+    aml_local(a, 1);
+    // MAX_PACKAGE elements at most, in the count's first byte.
+    aml_op(a, AML_STORE);
+    aml_local(a, 1);
+    aml_op(a, AML_INDEX);
+    aml_local(a, 0);
+    aml_int(a, 0);
+    aml_byte(a, AML_ZERO);
+    store_int_local(a, 4, 3);
+    store_int_local(a, 0, 2);
+    aml_begin(a, AML_WHILE);
+    aml_op(a, AML_LLESS);
+    aml_local(a, 2);
+    aml_local(a, 1);
+    {
+        aml_op(a, AML_STORE);
+        aml_op(a, AML_DEREF_OF);
+        aml_op(a, AML_INDEX);
+        aml_arg(a, 0);
+        aml_local(a, 2);
+        aml_byte(a, AML_ZERO);
+        aml_local(a, 4);
+        aml_op(a, AML_STORE);
+        aml_op(a, AML_OBJECT_TYPE);
+        aml_local(a, 4);
+        aml_local(a, 5);
+        emit_element_size(a);
+        aml_op(a, AML_STORE);
+        aml_local(a, 5);
+        byte_at(a, 0, 3, 0);
+        aml_op(a, AML_STORE);
+        aml_op(a, AML_AND);
+        aml_local(a, 6);
+        aml_int(a, 0xff);
+        aml_byte(a, AML_ZERO);
+        byte_at(a, 0, 3, 2);
+        aml_op(a, AML_STORE);
+        aml_op(a, AML_SHIFT_RIGHT);
+        aml_local(a, 6);
+        aml_int(a, 8);
+        aml_byte(a, AML_ZERO);
+        byte_at(a, 0, 3, 3);
+        if_local_equals(a, 5, TYPE_INTEGER);
+        for (size_t i = 0; i < 4; i++) {
+            aml_op(a, AML_STORE);
+            aml_op(a, AML_AND);
+            aml_op(a, AML_SHIFT_RIGHT);
+            aml_local(a, 4);
+            aml_int(a, 8 * i);
+            aml_byte(a, AML_ZERO);
+            aml_int(a, 0xff);
+            aml_byte(a, AML_ZERO);
+            byte_at(a, 0, 3, 4 + i);
+        }
+        aml_end(a);
+        aml_begin(a, AML_ELSE);
+        {
+            // The element's data as a buffer, into Local4.
+            if_local_equals(a, 5, TYPE_STRING);
+            if_local_above(a, 6, 0);
+            aml_op(a, AML_STORE);
+            aml_local(a, 4);
+            aml_name(a, "MSCR");
+            store_names(a, "MSCR", 4);
+            aml_end(a);
+            aml_end(a);
+            if_local_equals(a, 5, TYPE_PACKAGE);
+            aml_op(a, AML_STORE);
+            aml_name(a, "SERP");
+            aml_local(a, 4);
+            aml_local(a, 4);
+            aml_end(a);
+            store_int_local(a, 0, 7);
+            aml_begin(a, AML_WHILE);
+            aml_op(a, AML_LLESS);
+            aml_local(a, 7);
+            aml_local(a, 6);
+            aml_op(a, AML_STORE);
+            aml_op(a, AML_DEREF_OF);
+            aml_op(a, AML_INDEX);
+            aml_local(a, 4);
+            aml_local(a, 7);
+            aml_byte(a, AML_ZERO);
+            aml_op(a, AML_INDEX);
+            aml_local(a, 0);
+            aml_op(a, AML_ADD);
+            aml_op(a, AML_ADD);
+            aml_local(a, 3);
+            aml_int(a, 4);
+            aml_byte(a, AML_ZERO);
+            aml_local(a, 7);
+            aml_byte(a, AML_ZERO);
+            aml_byte(a, AML_ZERO);
+            aml_op(a, AML_INCREMENT);
+            aml_local(a, 7);
+            aml_end(a);
+        }
+        aml_end(a);
+        aml_op(a, AML_ADD);
+        aml_local(a, 3);
+        aml_op(a, AML_ADD);
+        aml_local(a, 6);
+        aml_int(a, 4);
+        aml_byte(a, AML_ZERO);
+        aml_local(a, 3);
+        aml_op(a, AML_INCREMENT);
+        aml_local(a, 2);
+    }
+    aml_end(a);
+    aml_op(a, AML_RETURN);
+    aml_local(a, 0);
+    aml_end(a);
+}
+
+// MTAK (object, slot): an argument of more than its slot holds, into MBX_BIG
+// for the hypervisor to take out, where it holds it.
+static void emit_mtak(struct aml *a) {
+    aml_method(a, "MTAK", 2, 0);
+    aml_begin(a, AML_IF);
+    aml_op(a, AML_LNOT);
+    aml_op(a, AML_LGREATER);
+    aml_op(a, AML_SIZE_OF);
+    aml_arg(a, 0);
+    aml_int(a, MBX_BIG_SIZE);
+    aml_op(a, AML_STORE);
+    aml_arg(a, 0);
+    aml_name(a, "MBIG");
+    aml_op(a, AML_STORE);
+    aml_arg(a, 1);
+    aml_name(a, "MIDX");
+    store_int_name(a, FUNCTION_TAKE, "MFUN");
+    store_int_name(a, MAILBOX_RING, "DOOR");
+    aml_end(a);
     aml_end(a);
 }
 
@@ -2842,24 +2998,41 @@ static void emit_puta(struct aml *a) {
         aml_op(a, AML_STORE);
         aml_local(a, 1);
         aml_name(a, length);
-        aml_begin(a, AML_IF);
-        aml_op(a, AML_LGREATER);
-        aml_local(a, 1);
-        aml_int(a, 0);
+        if_local_above(a, 1, MBX_SLOT_DATA_SIZE);
+        aml_name(a, "MTAK");
+        aml_arg(a, 1);
+        aml_int(a, slot);
+        aml_end(a);
+        aml_begin(a, AML_ELSE);
+        if_local_above(a, 1, 0);
         aml_op(a, AML_STORE);
         aml_arg(a, 1);
         aml_name(a, data);
+        aml_end(a);
         aml_end(a);
         aml_end(a);
         if_local_equals(a, 0, TYPE_PACKAGE);
         aml_op(a, AML_STORE);
-        aml_op(a, AML_SIZE_OF);
-        aml_arg(a, 1);
-        aml_name(a, length);
-        aml_op(a, AML_STORE);
         aml_name(a, "SERP");
         aml_arg(a, 1);
+        aml_local(a, 2);
+        aml_op(a, AML_STORE);
+        aml_op(a, AML_SIZE_OF);
+        aml_local(a, 2);
+        aml_local(a, 1);
+        aml_op(a, AML_STORE);
+        aml_local(a, 1);
+        aml_name(a, length);
+        if_local_above(a, 1, MBX_SLOT_DATA_SIZE);
+        aml_name(a, "MTAK");
+        aml_local(a, 2);
+        aml_int(a, slot);
+        aml_end(a);
+        aml_begin(a, AML_ELSE);
+        aml_op(a, AML_STORE);
+        aml_local(a, 2);
         aml_name(a, data);
+        aml_end(a);
         aml_end(a);
         aml_end(a);
     }
@@ -2878,7 +3051,12 @@ static void emit_rres(struct aml *a) {
     aml_end(a);
 
     store_names(a, "MRLN", 1);
+    if_local_above(a, 1, MBX_RDATA_SIZE);
+    store_names(a, "MRBG", 3);
+    aml_end(a);
+    aml_begin(a, AML_ELSE);
     store_names(a, "MRDT", 3);
+    aml_end(a);
     aml_op(a, AML_STORE);
     aml_int(a, 0);
     aml_local(a, 4);
@@ -3451,6 +3629,14 @@ static void emit_mailbox_device(struct aml *a) {
     }
     aml_field_unit(a, NULL, (MBX_RDATA - MBX_SLOTS - MBX_SLOT_COUNT * MBX_SLOT_SIZE) * 8);
     aml_field_unit(a, "MRDT", MBX_RDATA_SIZE * 8);
+    aml_field_unit(a, "MBIG", MBX_BIG_SIZE * 8);
+    aml_field_unit(a, "MRBG", MBX_RBIG_SIZE * 8);
+    aml_end(a);
+    aml_begin(a, AML_FIELD);
+    aml_name(a, "MBXR");
+    aml_byte(a, AML_FIELD_DWORD_ACC);
+    aml_field_unit(a, NULL, MBX_BIG * 8);
+    aml_field_unit(a, "MSCR", MBX_SCRATCH_SIZE * 8);
     aml_end(a);
 
     aml_op(a, AML_OPERATION_REGION);
@@ -3479,7 +3665,9 @@ static void emit_mailbox_device(struct aml *a) {
     }
     aml_end(a);
 
+    emit_sers(a);
     emit_serp(a);
+    emit_mtak(a);
     emit_puta(a);
     emit_rres(a);
     emit_rpkg(a);
@@ -3877,8 +4065,9 @@ static void write_result(uacpi_object *obj, uint32_t status) {
                 if (string) {
                     view.length = length;
                 }
-                if (view.length > MBX_RDATA_SIZE) {
-                    view.length = MBX_RDATA_SIZE;
+                // mailbox_call() refuses more than MBX_RBIG holds.
+                if (view.length > MBX_RBIG_SIZE) {
+                    view.length = MBX_RBIG_SIZE;
                 }
                 header[2] = (uint32_t)view.length;
                 break;
@@ -3896,74 +4085,143 @@ static void write_result(uacpi_object *obj, uint32_t status) {
     }
     guest_mem_phys_write(vacpi.mailbox + MBX_STATUS, header, sizeof(header));
     if (view.length != 0) {
-        guest_mem_phys_write(vacpi.mailbox + MBX_RDATA, view.const_bytes, view.length);
+        uintptr_t at = view.length > MBX_RDATA_SIZE ? MBX_RBIG : MBX_RDATA;
+        guest_mem_phys_write(vacpi.mailbox + at, view.const_bytes, view.length);
     }
 }
 
-// An argument the guest's AML put in a slot, as a uACPI object.
+// How deep a package argument's packages nest, at most.
+#define ARG_NESTING_MAX 8
+
+// A package argument as SERP serialised it: its element count, a DWORD, then
+// each element's type, a byte, a byte of 0, its length, a word, then its
+// bytes, a nested package's being its own serialisation. NULL where it does
+// not parse, or holds an element SERP refused.
+static uacpi_object *package_parse(const uint8_t *data, size_t length, size_t depth) {
+    if (depth == ARG_NESTING_MAX || length < 4) {
+        return NULL;
+    }
+    uint32_t count = read_le32(data);
+    if (count > MAX_PACKAGE) {
+        return NULL;
+    }
+    uacpi_object **elements = kmalloc((count != 0 ? count : 1) * sizeof(uacpi_object *));
+    if (elements == NULL) {
+        return NULL;
+    }
+    size_t made = 0;
+    size_t off = 4;
+    bool parsed = true;
+    while (made < count && parsed) {
+        parsed = off + 4 <= length;
+        uint8_t type = parsed ? data[off] : TYPE_REFUSED;
+        size_t element_length = parsed ? (size_t)data[off + 2] | (size_t)data[off + 3] << 8 : 0;
+        parsed = parsed && off + 4 + element_length <= length;
+        uacpi_data_view view = { .const_bytes = data + off + 4, .length = element_length };
+        uacpi_object *obj = NULL;
+        if (parsed && type == TYPE_INTEGER && element_length == 4) {
+            obj = uacpi_object_create_integer(read_le32(data + off + 4));
+        } else if (parsed && type == TYPE_STRING) {
+            obj = uacpi_object_create_string(view);
+        } else if (parsed && type == TYPE_BUFFER) {
+            obj = uacpi_object_create_buffer(view);
+        } else if (parsed && type == TYPE_PACKAGE) {
+            obj = package_parse(data + off + 4, element_length, depth + 1);
+        }
+        parsed = obj != NULL;
+        if (parsed) {
+            elements[made++] = obj;
+        }
+        off += 4 + element_length;
+    }
+    uacpi_object *pkg = NULL;
+    if (parsed) {
+        uacpi_object_array array = { .objects = elements, .count = made };
+        pkg = uacpi_object_create_package(array);
+    }
+    for (size_t i = 0; i < made; i++) {
+        uacpi_object_unref(elements[i]);
+    }
+    kfree(elements);
+    return pkg;
+}
+
+// An argument the guest's AML put in a slot, or of more than the slot holds in
+// MBX_BIG, which mailbox_take() took out, as a uACPI object: NULL for one the
+// mailbox does not carry whole.
 static uacpi_object *slot_object(size_t slot) {
     uintptr_t base = vacpi.mailbox + MBX_SLOTS + slot * MBX_SLOT_SIZE;
     uint32_t head[3];
     guest_mem_phys_read(base, head, sizeof(head));
     uint32_t type = head[0];
     size_t length = head[1];
-    uint8_t data[MBX_SLOT_DATA_SIZE];
-    if (length > MBX_SLOT_DATA_SIZE) {
-        length = MBX_SLOT_DATA_SIZE;
+    if (type == TYPE_INTEGER) {
+        return uacpi_object_create_integer(head[2]);
     }
+    if (type != TYPE_STRING && type != TYPE_BUFFER && type != TYPE_PACKAGE) {
+        return uacpi_object_create_integer(0);
+    }
+    uint8_t data[MBX_SLOT_DATA_SIZE];
+    const uint8_t *bytes = data;
+    if (length <= MBX_SLOT_DATA_SIZE) {
+        guest_mem_phys_read(base + MBX_SLOT_DATA, data, length);
+    } else if (vacpi.taken[slot] != NULL && vacpi.taken_length[slot] == length) {
+        bytes = vacpi.taken[slot];
+    } else {
+        return NULL;
+    }
+    uacpi_data_view view = { .const_bytes = bytes, .length = length };
     switch (type) {
-        case TYPE_INTEGER: {
-            return uacpi_object_create_integer(head[2]);
+        case TYPE_STRING: {
+            return uacpi_object_create_string(view);
         }
-        case TYPE_STRING:
         case TYPE_BUFFER: {
-            guest_mem_phys_read(base + MBX_SLOT_DATA, data, length);
-            uacpi_data_view view = { .const_bytes = data, .length = length };
-            return type == TYPE_STRING
-                 ? uacpi_object_create_string(view)
-                 : uacpi_object_create_buffer(view);
-        }
-        case TYPE_PACKAGE: {
-            guest_mem_phys_read(base + MBX_SLOT_DATA, data, MBX_SLOT_DATA_SIZE);
-            uacpi_object *elements[MAX_PACKAGE];
-            size_t count = 0;
-            size_t off = 0;
-            for (size_t i = 0; i < length && count < MAX_PACKAGE && off + 4 <= sizeof(data); i++) {
-                uint8_t etype = data[off];
-                uint32_t elength = (uint32_t)data[off + 2] | (uint32_t)data[off + 3] << 8;
-                if (off + 4 + elength > sizeof(data)) {
-                    break;
-                }
-                if (etype == TYPE_INTEGER && elength == 4) {
-                    uint32_t v = read_le32(data + off + 4);
-                    elements[count++] = uacpi_object_create_integer(v);
-                } else if (etype == TYPE_BUFFER) {
-                    uacpi_data_view view = { .const_bytes = data + off + 4, .length = elength };
-                    elements[count++] = uacpi_object_create_buffer(view);
-                } else {
-                    elements[count++] = uacpi_object_create_integer(0);
-                }
-                off += 4 + elength;
-            }
-            uacpi_object_array array = { .objects = elements, .count = count };
-            uacpi_object *pkg = uacpi_object_create_package(array);
-            for (size_t i = 0; i < count; i++) {
-                uacpi_object_unref(elements[i]);
-            }
-            return pkg;
+            return uacpi_object_create_buffer(view);
         }
         default: {
-            return uacpi_object_create_integer(0);
+            return package_parse(bytes, length, 0);
         }
     }
+}
+
+// An argument of more than a slot holds, which its stub put in MBX_BIG, taken
+// out before the next one takes its place there.
+static void mailbox_take(uint32_t slot) {
+    if (slot >= MBX_SLOT_COUNT) {
+        return;
+    }
+    uint32_t length = 0;
+    uintptr_t base = vacpi.mailbox + MBX_SLOTS + slot * MBX_SLOT_SIZE;
+    guest_mem_phys_read(base + MBX_SLOT_LENGTH, &length, sizeof(uint32_t));
+    kfree(vacpi.taken[slot]);
+    vacpi.taken[slot] = NULL;
+    vacpi.taken_length[slot] = 0;
+    if (length <= MBX_SLOT_DATA_SIZE || length > MBX_BIG_SIZE) {
+        return;
+    }
+    uint8_t *data = kmalloc(length);
+    if (data == NULL || !guest_mem_phys_read(vacpi.mailbox + MBX_BIG, data, length)) {
+        kfree(data);
+        return;
+    }
+    vacpi.taken[slot] = data;
+    vacpi.taken_length[slot] = length;
 }
 
 // Evaluates a method with the arguments in the slots, made anew for each
 // evaluation, as the method may change them.
 static uacpi_status eval_slots(uacpi_namespace_node *node, uint32_t argc, uacpi_object **ret) {
     uacpi_object *args[MBX_SLOT_COUNT];
+    bool whole = true;
     for (size_t i = 0; i < argc; i++) {
         args[i] = slot_object(i);
+        whole = whole && args[i] != NULL;
+    }
+    if (!whole) {
+        for (size_t i = 0; i < argc; i++) {
+            uacpi_object_unref(args[i]);
+        }
+        return UACPI_STATUS_INVALID_ARGUMENT;
     }
     // The resources the guest sets, at the host's addresses.
     uacpi_object_name name = uacpi_namespace_node_name(node);
@@ -4107,7 +4365,7 @@ static bool rebuildable(uacpi_object *obj, size_t depth) {
         case UACPI_OBJECT_STRING:
         case UACPI_OBJECT_BUFFER: {
             return uacpi_object_get_string_or_buffer(obj, &view) == UACPI_STATUS_OK
-                && view.length <= MBX_RDATA_SIZE;
+                && view.length <= MBX_RBIG_SIZE;
         }
         case UACPI_OBJECT_PACKAGE: {
             if (depth == 2 || uacpi_object_get_package(obj, &package) != UACPI_STATUS_OK
@@ -4192,6 +4450,14 @@ static void mailbox_call(size_t index, uint32_t argc) {
     if (status == UACPI_STATUS_OK && resource_name(name.text) && !template_object(&ret, true)) {
         status = UACPI_STATUS_OUT_OF_MEMORY;
     }
+    uacpi_data_view view;
+    bool bytes = status == UACPI_STATUS_OK && ret != NULL
+              && uacpi_object_get_string_or_buffer(ret, &view) == UACPI_STATUS_OK;
+    if (bytes && view.length > MBX_RBIG_SIZE) {
+        status = UACPI_STATUS_INVALID_ARGUMENT;
+        uacpi_object_unref(ret);
+        ret = NULL;
+    }
     if (status == UACPI_STATUS_OK && ret != NULL) {
         ret = result_for_guest(&vacpi.methods[index], ret);
         if (ret == NULL) {
@@ -4204,10 +4470,23 @@ static void mailbox_call(size_t index, uint32_t argc) {
     if (status == UACPI_STATUS_OK) {
         power_changed(node);
     }
-    if (status != UACPI_STATUS_OK) {
+    if (status == UACPI_STATUS_INVALID_ARGUMENT) {
+        const char *path = acpi_path(vacpi.methods[index].node);
+        printf(
+            "Guest call of %s: refused, as an argument or the result is more than the "
+            "mailbox carries, 64 KiB, or a package that it cannot carry whole\n",
+            path
+        );
+        acpi_path_free(path);
+    } else if (status != UACPI_STATUS_OK) {
         const char *path = acpi_path(vacpi.methods[index].node);
         printf("Guest call of %s: %s\n", path, uacpi_status_to_string(status));
         acpi_path_free(path);
+    }
+    for (size_t i = 0; i < MBX_SLOT_COUNT; i++) {
+        kfree(vacpi.taken[i]);
+        vacpi.taken[i] = NULL;
+        vacpi.taken_length[i] = 0;
     }
     if (vacpi.last != NULL) {
         uacpi_object_unref(vacpi.last);
@@ -4306,6 +4585,10 @@ static void mailbox_ring(struct vcpu *v) {
         }
         case FUNCTION_NOTIFICATION: {
             mailbox_notification();
+            break;
+        }
+        case FUNCTION_TAKE: {
+            mailbox_take(header[MBX_INDEX / 4]);
             break;
         }
         default: {
