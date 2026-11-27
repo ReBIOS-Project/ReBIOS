@@ -133,7 +133,7 @@ void vcpu_power_on(struct vcpu *v) {
     v->threads_due = 0;
     v->monitor_line = NULL;
     v->mwait_deadline = 0;
-    v->call32_ready = false;
+    v->call32_entered = false;
     // The I/O bitmaps vmx_vcpu_power_on() and svm_vcpu_power_on() set.
     v->rtc_lent = false;
     v->rtc_bitmaps = false;

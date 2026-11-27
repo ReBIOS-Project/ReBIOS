@@ -226,10 +226,10 @@ struct vcpu {
     // the guest for.
     _Atomic(uint64_t) paused_epoch;
 
-    // The legacy BIOS's 32-bit flat mode, and the mode its 16-bit code was in
-    // when it last switched there, for HYPERCALL_CALL32_*.
-    bool call32_ready;
-    struct vcpu_mode call32_flat;
+    // The mode the legacy BIOS's 16-bit code was in when it last switched to
+    // its 32-bit flat mode, for HYPERCALL_CALL32_*, and whether it did since
+    // the vCPU powered on.
+    bool call32_entered;
     struct vcpu_mode call32_saved;
     // For profile.c: the exit being handled, and when it began.
     unsigned int profile_slot;

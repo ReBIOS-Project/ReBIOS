@@ -22,6 +22,7 @@
 #include <csm/csm_boot.h>
 #include <hw/power.h>
 #include <lib/log.h>
+#include <lib/spinlock.h>
 #include <lib/util.h>
 #include <sys/fixup.h>
 #include <sys/x86.h>
@@ -119,6 +120,13 @@ static size_t io_length(struct vcpu *v) {
     return (size_t)(v->vmcb->control.exitinfo2 - v->vmcb->save.rip);
 }
 
+// The legacy BIOS's 32-bit flat mode, for HYPERCALL_CALL32_*, which it gives
+// once for every vCPU: what the mode holds stays in its image, which lasts
+// across S3.
+static struct spinlock call32_lock;
+static bool call32_ready;
+static struct vcpu_mode call32_flat;
+
 // Carries out the hypercall that the write of AL at CS:RIP makes, if it makes
 // one, and returns whether it did; one that sets where the guest goes on
 // itself sets v->io_retry, so that the guest goes on there.
@@ -153,22 +161,29 @@ static bool hypercall(struct vcpu *v) {
             return false;
         }
         case HYPERCALL_CALL32_INIT: {
-            vcpu_save_mode(v, &v->call32_flat);
-            v->call32_ready = true;
+            spinlock_acquire(&call32_lock);
+            vcpu_save_mode(v, &call32_flat);
+            call32_ready = true;
+            spinlock_release(&call32_lock);
             return true;
         }
         case HYPERCALL_CALL32_ENTER: {
-            if (!v->call32_ready) {
+            spinlock_acquire(&call32_lock);
+            bool ready = call32_ready;
+            struct vcpu_mode flat = call32_flat;
+            spinlock_release(&call32_lock);
+            if (!ready) {
                 return false;
             }
             vcpu_save_mode(v, &v->call32_saved);
-            vcpu_load_mode(v, &v->call32_flat);
+            v->call32_entered = true;
+            vcpu_load_mode(v, &flat);
             vcpu_set_rip(v, ebx);
             v->io_retry = true;
             return true;
         }
         case HYPERCALL_CALL32_RETURN: {
-            if (!v->call32_ready) {
+            if (!v->call32_entered) {
                 return false;
             }
             vcpu_load_mode(v, &v->call32_saved);
