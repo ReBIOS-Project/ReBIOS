@@ -1584,6 +1584,13 @@ static uint64_t npt02_fill(struct nsvm *n, uintptr_t gpa, const struct npt12_wal
     uint64_t *slot = &table[x86_level_index(gpa, level)];
     if ((*slot & PTE_P) != 0 && (*slot & PTE_PS) == 0 && level > 0) {
         npt02_free(n, (uint64_t *)(uintptr_t)(*slot & PTE_ADDRESS), level - 1);
+        // The processor's walk caches may still hold the tables' entries,
+        // which the next VMRUN, before the guest's guest runs again, flushes
+        // (APM 24593 rev. 3.46, 15.16.1).
+        struct vmcb_control *c = &n->vmcb02->control;
+        if (c->tlb_control != SVM_TLB_FLUSH_ALL) {
+            c->tlb_control = svm_flush_by_asid ? SVM_TLB_FLUSH_ASID : SVM_TLB_FLUSH_ALL;
+        }
     }
     *slot = npt02_leaf(n, w, hpa, prot, memtype, level);
     return *slot;
