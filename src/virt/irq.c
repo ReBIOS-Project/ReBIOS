@@ -393,6 +393,8 @@ static void virtual_deliver(struct route *r) {
 static void update(void) {
     resample();
 
+    // The 8259 inputs of the lines that leave the 8259 path asserted.
+    uint32_t left = 0;
     struct cpu *was = atomic_load_explicit(&extint_target, memory_order_relaxed);
     atomic_store_explicit(&extint_target, NULL, memory_order_relaxed);
     for (size_t gsi = 0; gsi < route_count; gsi++) {
@@ -411,8 +413,11 @@ static void update(void) {
         }
         int owner;
         uint64_t rte = desired(gsi, r, &owner);
-        if (owner != OWNER_PIC) {
+        if (owner != OWNER_PIC && r->asserted) {
             r->asserted = false;
+            if (r->irq >= 0) {
+                left |= (uint32_t)1 << r->irq;
+            }
         }
         if (owner != OWNER_MIRROR) {
             r->held = false;
@@ -422,6 +427,19 @@ static void update(void) {
         if (rte != r->host_rte) {
             ioapic_rte_write(r->io, r->pin, rte);
             r->host_rte = rte;
+        }
+    }
+
+    // Each goes low, as resample() lowers it, unless another of its lines is
+    // still asserted: nothing else would lower it.
+    for (size_t gsi = 0; gsi < route_count; gsi++) {
+        if (routes[gsi].asserted && routes[gsi].irq >= 0) {
+            left &= ~((uint32_t)1 << routes[gsi].irq);
+        }
+    }
+    for (size_t irq = 0; irq < ISA_IRQS; irq++) {
+        if ((left & (uint32_t)1 << irq) != 0) {
+            pic_set_irq(irq, false);
         }
     }
 
