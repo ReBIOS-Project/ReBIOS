@@ -1316,6 +1316,11 @@ void vcpu_wait_for_sipi(struct vcpu *v) {
         // The processor draws while it waits, the guest not running it.
         vga_refresh();
         threads_turn(v, true);
+        // What interrupts brought while the threads ran, whose kick for a
+        // start-up IPI would leave no trace for the halt.
+        if (atomic_load_explicit(&v->sipi, memory_order_seq_cst) >= 0) {
+            continue;
+        }
         if (vga_redrawing()) {
             cpu_relax();
         } else {
