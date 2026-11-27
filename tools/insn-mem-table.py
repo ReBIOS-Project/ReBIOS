@@ -571,7 +571,13 @@ def sdm_form(title, encodings, toks, syntax, op_en, modes, problems):
     if key['space'] == 'evex' and expected is not None and spec[0] == 'n' and spec[1] != expected:
         CORRECTED.append(where + ('size %d for %s, taken as %d' % (spec[1], tuple_type, expected),))
         spec = ('n', expected)
-    masked = 'w' in access and re.search(r'\{k1?\}', ops[position]) is not None
+    # An opmask's elements alone are written or read: a store's, the mask on
+    # its memory operand, and a load's, the mask on its destination, compares
+    # into mask registers and expanding loads among them (SDM 325462-093 Vol.
+    # 1, 15.6.1).
+    opmask = r'\{k\d?\}'
+    masked = ('w' in access and re.search(opmask, ops[position]) is not None) or (
+        access == 'r' and position != 0 and re.search(opmask, ops[0]) is not None)
     if mnemonic in VECTOR_MASKED:
         masked = True
     scale = tuple_scale(tuple_type, mnemonic, spec) if key['space'] == 'evex' else 0

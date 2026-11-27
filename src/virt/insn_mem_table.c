@@ -2541,13 +2541,13 @@ const struct insn_mem_table_form insn_mem_table_forms[] = {
     // RORX r32, r/m32, imm8.
     { VEX | 3, 0xf0, P_F2, R_ANY, W_ANY, 0, ND_ANY, NF_ANY, M_OTHER, R, S_FIXED, 4, 0, 0 },
     // VMOVSD xmm1{k1}{z}, m64.
-    { EVEX | 1, 0x10, P_F2, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 1, 0x10, P_F2, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VMOVSS xmm1{k1}{z}, m32.
-    { EVEX | 1, 0x10, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 1, 0x10, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VMOVUPD xmm1{k1}{z}, xmm2/m128.
-    { EVEX | 1, 0x10, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0x10, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VMOVUPS xmm1{k1}{z}, xmm2/m128.
-    { EVEX | 1, 0x10, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0x10, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VMOVSD m64{k1}, xmm1.
     { EVEX | 1, 0x11, P_F2, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, WM, S_FIXED, 8, 0, 0 },
     // VMOVSS m32{k1}, xmm1.
@@ -2557,43 +2557,43 @@ const struct insn_mem_table_form insn_mem_table_forms[] = {
     // VMOVUPS xmm2/m128{k1}{z}, xmm1.
     { EVEX | 1, 0x11, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, WM, S_VECTOR, 16, 0, 0 },
     // VMOVDDUP xmm1{k1}{z}, xmm2/m64.
-    { EVEX | 1, 0x12, P_F2, R_ANY, 1, 0, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 1, 0x12, P_F2, R_ANY, 1, 0, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VMOVDDUP ymm1{k1}{z}, ymm2/m256.
-    { EVEX | 1, 0x12, P_F2, R_ANY, 1, 1, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 32, 0, 0 },
+    { EVEX | 1, 0x12, P_F2, R_ANY, 1, 1, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 32, 0, 0 },
     // VMOVDDUP zmm1{k1}{z}, zmm2/m512.
-    { EVEX | 1, 0x12, P_F2, R_ANY, 1, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 64, 0, 0 },
+    { EVEX | 1, 0x12, P_F2, R_ANY, 1, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 64, 0, 0 },
     // VMOVLPD xmm2, xmm1, m64.
     { EVEX | 1, 0x12, P_66, R_ANY, 1, 0, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
     // VMOVLPS xmm2, xmm1, m64.
     { EVEX | 1, 0x12, P_NONE, R_ANY, 0, 0, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
     // VMOVSLDUP xmm1{k1}{z}, xmm2/m128.
-    { EVEX | 1, 0x12, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0x12, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VMOVLPD m64, xmm1.
     { EVEX | 1, 0x13, P_66, R_ANY, 1, 0, ND_ANY, NF_ANY, M_ALL, W, S_FIXED, 8, 0, 0 },
     // VMOVLPS m64, xmm1.
     { EVEX | 1, 0x13, P_NONE, R_ANY, 0, 0, ND_ANY, NF_ANY, M_ALL, W, S_FIXED, 8, 0, 0 },
     // VUNPCKLPD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 1, 0x14, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0x14, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VUNPCKLPS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 1, 0x14, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0x14, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VUNPCKHPD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 1, 0x15, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0x15, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VUNPCKHPS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 1, 0x15, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0x15, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VMOVHPD xmm2, xmm1, m64.
     { EVEX | 1, 0x16, P_66, R_ANY, 1, 0, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
     // VMOVHPS xmm2, xmm1, m64.
     { EVEX | 1, 0x16, P_NONE, R_ANY, 0, 0, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
     // VMOVSHDUP xmm1{k1}{z}, xmm2/m128.
-    { EVEX | 1, 0x16, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0x16, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VMOVHPD m64, xmm1.
     { EVEX | 1, 0x17, P_66, R_ANY, 1, 0, ND_ANY, NF_ANY, M_ALL, W, S_FIXED, 8, 0, 0 },
     // VMOVHPS m64, xmm1.
     { EVEX | 1, 0x17, P_NONE, R_ANY, 0, 0, ND_ANY, NF_ANY, M_ALL, W, S_FIXED, 8, 0, 0 },
     // VMOVAPD xmm1{k1}{z}, xmm2/m128.
-    { EVEX | 1, 0x28, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0x28, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VMOVAPS xmm1{k1}{z}, xmm2/m128.
-    { EVEX | 1, 0x28, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0x28, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VMOVAPD xmm2/m128{k1}{z}, xmm1.
     { EVEX | 1, 0x29, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, WM, S_VECTOR, 16, 0, 0 },
     // VMOVAPS xmm2/m128{k1}{z}, xmm1.
@@ -2631,121 +2631,121 @@ const struct insn_mem_table_form insn_mem_table_forms[] = {
     // VCOMISS xmm1, xmm2/m32{sae}.
     { EVEX | 1, 0x2f, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
     // VSQRTPD xmm1{k1}{z}, xmm2/m128/m64bcst.
-    { EVEX | 1, 0x51, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0x51, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VSQRTPS xmm1{k1}{z}, xmm2/m128/m32bcst.
-    { EVEX | 1, 0x51, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0x51, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VSQRTSD xmm1{k1}{z}, xmm2, xmm3/m64{er}.
-    { EVEX | 1, 0x51, P_F2, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 1, 0x51, P_F2, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VSQRTSS xmm1{k1}{z}, xmm2, xmm3/m32{er}.
-    { EVEX | 1, 0x51, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 1, 0x51, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VANDPD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 1, 0x54, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0x54, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VANDPS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 1, 0x54, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0x54, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VANDNPD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 1, 0x55, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0x55, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VANDNPS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 1, 0x55, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0x55, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VORPD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 1, 0x56, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0x56, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VORPS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 1, 0x56, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0x56, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VXORPD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 1, 0x57, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0x57, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VXORPS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 1, 0x57, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0x57, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VADDPD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 1, 0x58, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0x58, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VADDPS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 1, 0x58, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0x58, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VADDSD xmm1{k1}{z}, xmm2, xmm3/m64{er}.
-    { EVEX | 1, 0x58, P_F2, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 1, 0x58, P_F2, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VADDSS xmm1{k1}{z}, xmm2, xmm3/m32{er}.
-    { EVEX | 1, 0x58, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 1, 0x58, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VMULPD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 1, 0x59, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0x59, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VMULPS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 1, 0x59, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0x59, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VMULSD xmm1{k1}{z}, xmm2, xmm3/m64{er}.
-    { EVEX | 1, 0x59, P_F2, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 1, 0x59, P_F2, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VMULSS xmm1{k1}{z}, xmm2, xmm3/m32{er}.
-    { EVEX | 1, 0x59, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 1, 0x59, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VCVTPD2PS xmm1{k1}{z}, xmm2/m128/m64bcst.
-    { EVEX | 1, 0x5a, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0x5a, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VCVTPS2PD xmm1{k1}{z}, xmm2/m64/m32bcst.
-    { EVEX | 1, 0x5a, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 8, 4, 0 },
+    { EVEX | 1, 0x5a, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 8, 4, 0 },
     // VCVTSD2SS xmm1{k1}{z}, xmm2, xmm3/m64{er}.
-    { EVEX | 1, 0x5a, P_F2, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 1, 0x5a, P_F2, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VCVTSS2SD xmm1{k1}{z}, xmm2, xmm3/m32{sae}.
-    { EVEX | 1, 0x5a, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 1, 0x5a, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VCVTDQ2PS xmm1{k1}{z}, xmm2/m128/m32bcst.
-    { EVEX | 1, 0x5b, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0x5b, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VCVTQQ2PS xmm1{k1}{z}, xmm2/m128/m64bcst.
-    { EVEX | 1, 0x5b, P_NONE, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0x5b, P_NONE, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VCVTPS2DQ xmm1{k1}{z}, xmm2/m128/m32bcst.
-    { EVEX | 1, 0x5b, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0x5b, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VCVTTPS2DQ xmm1{k1}{z}, xmm2/m128/m32bcst.
-    { EVEX | 1, 0x5b, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0x5b, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VSUBPD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 1, 0x5c, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0x5c, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VSUBPS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 1, 0x5c, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0x5c, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VSUBSD xmm1{k1}{z}, xmm2, xmm3/m64{er}.
-    { EVEX | 1, 0x5c, P_F2, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 1, 0x5c, P_F2, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VSUBSS xmm1{k1}{z}, xmm2, xmm3/m32{er}.
-    { EVEX | 1, 0x5c, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 1, 0x5c, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VMINPD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 1, 0x5d, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0x5d, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VMINPS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 1, 0x5d, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0x5d, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VMINSD xmm1{k1}{z}, xmm2, xmm3/m64{sae}.
-    { EVEX | 1, 0x5d, P_F2, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 1, 0x5d, P_F2, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VMINSS xmm1{k1}{z}, xmm2, xmm3/m32{sae}.
-    { EVEX | 1, 0x5d, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 1, 0x5d, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VDIVPD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 1, 0x5e, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0x5e, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VDIVPS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 1, 0x5e, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0x5e, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VDIVSD xmm1{k1}{z}, xmm2, xmm3/m64{er}.
-    { EVEX | 1, 0x5e, P_F2, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 1, 0x5e, P_F2, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VDIVSS xmm1{k1}{z}, xmm2, xmm3/m32{er}.
-    { EVEX | 1, 0x5e, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 1, 0x5e, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VMAXPD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 1, 0x5f, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0x5f, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VMAXPS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 1, 0x5f, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0x5f, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VMAXSD xmm1{k1}{z}, xmm2, xmm3/m64{sae}.
-    { EVEX | 1, 0x5f, P_F2, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 1, 0x5f, P_F2, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VMAXSS xmm1{k1}{z}, xmm2, xmm3/m32{sae}.
-    { EVEX | 1, 0x5f, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 1, 0x5f, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VPUNPCKLBW xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0x60, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0x60, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPUNPCKLWD xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0x61, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0x61, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPUNPCKLDQ xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 1, 0x62, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0x62, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPACKSSWB xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0x63, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0x63, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPCMPGTB k1{k2}, xmm2, xmm3/m128.
-    { EVEX | 1, 0x64, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0x64, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPCMPGTW k1{k2}, xmm2, xmm3/m128.
-    { EVEX | 1, 0x65, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0x65, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPCMPGTD k1{k2}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 1, 0x66, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0x66, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPACKUSWB xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0x67, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0x67, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPUNPCKHBW xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0x68, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0x68, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPUNPCKHWD xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0x69, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0x69, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPUNPCKHDQ xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 1, 0x6a, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0x6a, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPACKSSDW xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 1, 0x6b, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0x6b, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPUNPCKLQDQ xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 1, 0x6c, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0x6c, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPUNPCKHQDQ xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 1, 0x6d, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0x6d, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VMOVD xmm1, r32/m32.
     { EVEX | 1, 0x6e, P_66, R_ANY, 0, 0, ND_ANY, NF_ANY, M_64, R, S_FIXED, 4, 0, 0 },
     // VMOVQ xmm1, r64/m64.
@@ -2753,89 +2753,89 @@ const struct insn_mem_table_form insn_mem_table_forms[] = {
     // VMOVD xmm1, r32/m32.
     { EVEX | 1, 0x6e, P_66, R_ANY, W_ANY, 0, ND_ANY, NF_ANY, M_OTHER, R, S_FIXED, 4, 0, 0 },
     // VMOVDQA32 xmm1{k1}{z}, xmm2/m128.
-    { EVEX | 1, 0x6f, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0x6f, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VMOVDQU8 xmm1{k1}{z}, xmm2/m128.
-    { EVEX | 1, 0x6f, P_F2, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0x6f, P_F2, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VMOVDQU32 xmm1{k1}{z}, xmm2/m128.
-    { EVEX | 1, 0x6f, P_F3, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0x6f, P_F3, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPSHUFD xmm1{k1}{z}, xmm2/m128/m32bcst, imm8.
-    { EVEX | 1, 0x70, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0x70, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPSHUFHW xmm1{k1}{z}, xmm2/m128, imm8.
-    { EVEX | 1, 0x70, P_F3, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0x70, P_F3, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPSHUFLW xmm1{k1}{z}, xmm2/m128, imm8.
-    { EVEX | 1, 0x70, P_F2, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0x70, P_F2, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPSLLW xmm1{k1}{z}, xmm2/m128, imm8.
-    { EVEX | 1, 0x71, P_66, 6, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0x71, P_66, 6, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPSRAW xmm1{k1}{z}, xmm2/m128, imm8.
-    { EVEX | 1, 0x71, P_66, 4, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0x71, P_66, 4, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPSRLW xmm1{k1}{z}, xmm2/m128, imm8.
-    { EVEX | 1, 0x71, P_66, 2, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0x71, P_66, 2, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPSLLD xmm1{k1}{z}, xmm2/m128/m32bcst, imm8.
-    { EVEX | 1, 0x72, P_66, 6, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0x72, P_66, 6, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPSRAD xmm1{k1}{z}, xmm2/m128/m32bcst, imm8.
-    { EVEX | 1, 0x72, P_66, 4, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0x72, P_66, 4, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPSRAQ xmm1{k1}{z}, xmm2/m128/m64bcst, imm8.
-    { EVEX | 1, 0x72, P_66, 4, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0x72, P_66, 4, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPSRLD xmm1{k1}{z}, xmm2/m128/m32bcst, imm8.
-    { EVEX | 1, 0x72, P_66, 2, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0x72, P_66, 2, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPROLD xmm1{k1}{z}, xmm2/m128/m32bcst, imm8.
-    { EVEX | 1, 0x72, P_66, 1, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0x72, P_66, 1, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPROLQ xmm1{k1}{z}, xmm2/m128/m64bcst, imm8.
-    { EVEX | 1, 0x72, P_66, 1, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0x72, P_66, 1, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPRORD xmm1{k1}{z}, xmm2/m128/m32bcst, imm8.
-    { EVEX | 1, 0x72, P_66, 0, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0x72, P_66, 0, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPRORQ xmm1{k1}{z}, xmm2/m128/m64bcst, imm8.
-    { EVEX | 1, 0x72, P_66, 0, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0x72, P_66, 0, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPSLLQ xmm1{k1}{z}, xmm2/m128/m64bcst, imm8.
-    { EVEX | 1, 0x73, P_66, 6, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0x73, P_66, 6, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPSRLQ xmm1{k1}{z}, xmm2/m128/m64bcst, imm8.
-    { EVEX | 1, 0x73, P_66, 2, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0x73, P_66, 2, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPSLLDQ xmm1, xmm2/m128, imm8.
     { EVEX | 1, 0x73, P_66, 7, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
     // VPSRLDQ xmm1, xmm2/m128, imm8.
     { EVEX | 1, 0x73, P_66, 3, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
     // VPCMPEQB k1{k2}, xmm2, xmm3 /m128.
-    { EVEX | 1, 0x74, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0x74, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPCMPEQW k1{k2}, xmm2, xmm3 /m128.
-    { EVEX | 1, 0x75, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0x75, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPCMPEQD k1{k2}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 1, 0x76, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0x76, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VCVTTPS2UDQ xmm1{k1}{z}, xmm2/m128/m32bcst.
-    { EVEX | 1, 0x78, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0x78, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VCVTTPD2UDQ xmm1{k1}{z}, xmm2/m128/m64bcst.
-    { EVEX | 1, 0x78, P_NONE, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0x78, P_NONE, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VCVTTPS2UQQ xmm1{k1}{z}, xmm2/m64/m32bcst.
-    { EVEX | 1, 0x78, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 8, 4, 0 },
+    { EVEX | 1, 0x78, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 8, 4, 0 },
     // VCVTTPD2UQQ xmm1{k1}{z}, xmm2/m128/m64bcst.
-    { EVEX | 1, 0x78, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0x78, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VCVTTSD2USI r32, xmm1/m64{sae}.
     { EVEX | 1, 0x78, P_F2, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
     // VCVTTSS2USI r32, xmm1/m32{sae}.
     { EVEX | 1, 0x78, P_F3, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
     // VCVTPS2UDQ xmm1{k1}{z}, xmm2/m128/m32bcst.
-    { EVEX | 1, 0x79, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0x79, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VCVTPD2UDQ xmm1{k1}{z}, xmm2/m128/m64bcst.
-    { EVEX | 1, 0x79, P_NONE, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0x79, P_NONE, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VCVTPS2UQQ xmm1{k1}{z}, xmm2/m64/m32bcst.
-    { EVEX | 1, 0x79, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 8, 4, 0 },
+    { EVEX | 1, 0x79, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 8, 4, 0 },
     // VCVTPD2UQQ xmm1{k1}{z}, xmm2/m128/m64bcst.
-    { EVEX | 1, 0x79, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0x79, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VCVTSD2USI r32, xmm1/m64{er}.
     { EVEX | 1, 0x79, P_F2, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
     // VCVTSS2USI r32, xmm1/m32{er}.
     { EVEX | 1, 0x79, P_F3, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
     // VCVTTPS2QQ xmm1{k1}{z}, xmm2/m64/m32bcst.
-    { EVEX | 1, 0x7a, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 8, 4, 0 },
+    { EVEX | 1, 0x7a, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 8, 4, 0 },
     // VCVTTPD2QQ xmm1{k1}{z}, xmm2/m128/m64bcst.
-    { EVEX | 1, 0x7a, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0x7a, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VCVTUDQ2PD xmm1{k1}{z}, xmm2/m64/m32bcst.
-    { EVEX | 1, 0x7a, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 8, 4, 0 },
+    { EVEX | 1, 0x7a, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 8, 4, 0 },
     // VCVTUQQ2PD xmm1{k1}{z}, xmm2/m128/m64bcst.
-    { EVEX | 1, 0x7a, P_F3, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0x7a, P_F3, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VCVTUDQ2PS xmm1{k1}{z}, xmm2/m128/m32bcst.
-    { EVEX | 1, 0x7a, P_F2, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0x7a, P_F2, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VCVTUQQ2PS xmm1{k1}{z}, xmm2/m128/m64bcst.
-    { EVEX | 1, 0x7a, P_F2, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0x7a, P_F2, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VCVTUSI2SD xmm1, xmm2, r/m32.
     { EVEX | 1, 0x7b, P_F2, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_64, R, S_FIXED, 4, 0, 0 },
     // VCVTUSI2SD xmm1, xmm2, r/m64{er}.
@@ -2845,9 +2845,9 @@ const struct insn_mem_table_form insn_mem_table_forms[] = {
     // VCVTUSI2SS xmm1, xmm2, r/m64{er}.
     { EVEX | 1, 0x7b, P_F3, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_64, R, S_FIXED, 8, 0, 0 },
     // VCVTPS2QQ xmm1{k1}{z}, xmm2/m64/m32bcst.
-    { EVEX | 1, 0x7b, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 8, 4, 0 },
+    { EVEX | 1, 0x7b, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 8, 4, 0 },
     // VCVTPD2QQ xmm1{k1}{z}, xmm2/m128/m64bcst.
-    { EVEX | 1, 0x7b, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0x7b, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VCVTUSI2SD xmm1, xmm2, r/m32.
     { EVEX | 1, 0x7b, P_F2, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_OTHER, R, S_FIXED, 4, 0, 0 },
     // VCVTUSI2SS xmm1, xmm2, r/m32{er}.
@@ -2883,351 +2883,351 @@ const struct insn_mem_table_form insn_mem_table_forms[] = {
     // KMOVW m16, k1.
     { EVEX | 1, 0x91, P_NONE, R_ANY, 0, 0, ND_ANY, NF_ANY, M_64, W, S_FIXED, 2, 0, 1 },
     // VCMPPD k1{k2}, xmm2, xmm3/m128/m64bcst, imm8.
-    { EVEX | 1, 0xc2, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0xc2, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VCMPPS k1{k2}, xmm2, xmm3/m128/m32bcst, imm8.
-    { EVEX | 1, 0xc2, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0xc2, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VCMPSD k1{k2}, xmm2, xmm3/m64{sae}, imm8.
-    { EVEX | 1, 0xc2, P_F2, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 1, 0xc2, P_F2, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VCMPSS k1{k2}, xmm2, xmm3/m32{sae}, imm8.
-    { EVEX | 1, 0xc2, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 1, 0xc2, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VPINSRW xmm1, xmm2, r32/m16, imm8.
     { EVEX | 1, 0xc4, P_66, R_ANY, W_ANY, 0, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
     // VSHUFPD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst, imm8.
-    { EVEX | 1, 0xc6, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0xc6, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VSHUFPS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst, imm8.
-    { EVEX | 1, 0xc6, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0xc6, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPSRLW xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0xd1, P_66, R_ANY, W_ANY, 0, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 1, 0xd1, P_66, R_ANY, W_ANY, 0, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VPSRLW ymm1{k1}{z}, ymm2, xmm3/m128.
-    { EVEX | 1, 0xd1, P_66, R_ANY, W_ANY, 1, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 1, 0xd1, P_66, R_ANY, W_ANY, 1, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VPSRLW zmm1{k1}{z}, zmm2, xmm3/m128.
-    { EVEX | 1, 0xd1, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 1, 0xd1, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VPSRLD xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0xd2, P_66, R_ANY, 0, 0, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 1, 0xd2, P_66, R_ANY, 0, 0, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VPSRLD ymm1{k1}{z}, ymm2, xmm3/m128.
-    { EVEX | 1, 0xd2, P_66, R_ANY, 0, 1, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 1, 0xd2, P_66, R_ANY, 0, 1, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VPSRLD zmm1{k1}{z}, zmm2, xmm3/m128.
-    { EVEX | 1, 0xd2, P_66, R_ANY, 0, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 1, 0xd2, P_66, R_ANY, 0, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VPSRLQ xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0xd3, P_66, R_ANY, 1, 0, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 1, 0xd3, P_66, R_ANY, 1, 0, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VPSRLQ ymm1{k1}{z}, ymm2, xmm3/m128.
-    { EVEX | 1, 0xd3, P_66, R_ANY, 1, 1, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 1, 0xd3, P_66, R_ANY, 1, 1, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VPSRLQ zmm1{k1}{z}, zmm2, xmm3/m128.
-    { EVEX | 1, 0xd3, P_66, R_ANY, 1, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 1, 0xd3, P_66, R_ANY, 1, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VPADDQ xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 1, 0xd4, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0xd4, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPMULLW xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0xd5, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0xd5, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VMOVQ xmm1/m64, xmm2.
     { EVEX | 1, 0xd6, P_66, R_ANY, 1, 0, ND_ANY, NF_ANY, M_ALL, W, S_FIXED, 8, 0, 0 },
     // VPSUBUSB xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0xd8, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0xd8, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPSUBUSW xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0xd9, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0xd9, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPMINUB xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0xda, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0xda, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPANDD xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 1, 0xdb, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0xdb, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPANDQ xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 1, 0xdb, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0xdb, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPADDUSB xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0xdc, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0xdc, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPADDUSW xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0xdd, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0xdd, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPMAXUB xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0xde, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0xde, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPANDND xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 1, 0xdf, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0xdf, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPANDNQ xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 1, 0xdf, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0xdf, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPAVGB xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0xe0, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0xe0, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPSRAW xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0xe1, P_66, R_ANY, W_ANY, 0, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 1, 0xe1, P_66, R_ANY, W_ANY, 0, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VPSRAW ymm1{k1}{z}, ymm2, xmm3/m128.
-    { EVEX | 1, 0xe1, P_66, R_ANY, W_ANY, 1, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 1, 0xe1, P_66, R_ANY, W_ANY, 1, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VPSRAW zmm1{k1}{z}, zmm2, xmm3/m128.
-    { EVEX | 1, 0xe1, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 1, 0xe1, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VPSRAD xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0xe2, P_66, R_ANY, W_ANY, 0, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 1, 0xe2, P_66, R_ANY, W_ANY, 0, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VPSRAD ymm1{k1}{z}, ymm2, xmm3/m128.
-    { EVEX | 1, 0xe2, P_66, R_ANY, W_ANY, 1, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 1, 0xe2, P_66, R_ANY, W_ANY, 1, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VPSRAD zmm1{k1}{z}, zmm2, xmm3/m128.
-    { EVEX | 1, 0xe2, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 1, 0xe2, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VPAVGW xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0xe3, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0xe3, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPMULHUW xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0xe4, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0xe4, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPMULHW xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0xe5, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0xe5, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VCVTDQ2PD xmm1{k1}{z}, xmm2/m64/m32bcst.
-    { EVEX | 1, 0xe6, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 8, 4, 0 },
+    { EVEX | 1, 0xe6, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 8, 4, 0 },
     // VCVTQQ2PD xmm1{k1}{z}, xmm2/m128/m64bcst.
-    { EVEX | 1, 0xe6, P_F3, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0xe6, P_F3, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VCVTPD2DQ xmm1{k1}{z}, xmm2/m128/m64bcst.
-    { EVEX | 1, 0xe6, P_F2, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0xe6, P_F2, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VCVTTPD2DQ xmm1{k1}{z}, xmm2/m128/m64bcst.
-    { EVEX | 1, 0xe6, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0xe6, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VMOVNTDQ m128, xmm1.
     { EVEX | 1, 0xe7, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, W, S_VECTOR, 16, 0, 0 },
     // VPSUBSB xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0xe8, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0xe8, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPSUBSW xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0xe9, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0xe9, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPMINSW xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0xea, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0xea, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPORD xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 1, 0xeb, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0xeb, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPORQ xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 1, 0xeb, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0xeb, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPADDSB xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0xec, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0xec, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPADDSW xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0xed, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0xed, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPMAXSW xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0xee, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0xee, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPXORD xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 1, 0xef, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0xef, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPXORQ xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 1, 0xef, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0xef, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPSLLW xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0xf1, P_66, R_ANY, W_ANY, 0, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 1, 0xf1, P_66, R_ANY, W_ANY, 0, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VPSLLW ymm1{k1}{z}, ymm2, xmm3/m128.
-    { EVEX | 1, 0xf1, P_66, R_ANY, W_ANY, 1, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 1, 0xf1, P_66, R_ANY, W_ANY, 1, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VPSLLW zmm1{k1}{z}, zmm2, xmm3/m128.
-    { EVEX | 1, 0xf1, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 1, 0xf1, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VPSLLD xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0xf2, P_66, R_ANY, 0, 0, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 1, 0xf2, P_66, R_ANY, 0, 0, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VPSLLD ymm1{k1}{z}, ymm2, xmm3/m128.
-    { EVEX | 1, 0xf2, P_66, R_ANY, 0, 1, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 1, 0xf2, P_66, R_ANY, 0, 1, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VPSLLD zmm1{k1}{z}, zmm2, xmm3/m128.
-    { EVEX | 1, 0xf2, P_66, R_ANY, 0, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 1, 0xf2, P_66, R_ANY, 0, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VPSLLQ xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0xf3, P_66, R_ANY, 1, 0, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 1, 0xf3, P_66, R_ANY, 1, 0, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VPSLLQ ymm1{k1}{z}, ymm2, xmm3/m128.
-    { EVEX | 1, 0xf3, P_66, R_ANY, 1, 1, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 1, 0xf3, P_66, R_ANY, 1, 1, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VPSLLQ zmm1{k1}{z}, zmm2, xmm3/m128.
-    { EVEX | 1, 0xf3, P_66, R_ANY, 1, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 1, 0xf3, P_66, R_ANY, 1, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VPMULUDQ xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 1, 0xf4, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0xf4, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPMADDWD xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0xf5, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0xf5, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPSADBW xmm1, xmm2, xmm3/m128.
     { EVEX | 1, 0xf6, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
     // VPSUBB xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0xf8, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0xf8, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPSUBW xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0xf9, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0xf9, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPSUBD xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 1, 0xfa, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0xfa, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPSUBQ xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 1, 0xfb, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 1, 0xfb, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPADDB xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0xfc, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0xfc, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPADDW xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 1, 0xfd, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 1, 0xfd, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPADDD xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 1, 0xfe, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 1, 0xfe, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPSHUFB xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 2, 0x00, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 2, 0x00, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPMADDUBSW xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 2, 0x04, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 2, 0x04, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPMULHRSW xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 2, 0x0b, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 2, 0x0b, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPERMILPS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x0c, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x0c, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPERMILPD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x0d, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x0d, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPMOVUSWB xmm1/m64{k1}{z}, xmm2.
     { EVEX | 2, 0x10, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, WM, S_VECTOR, 8, 0, 0 },
     // VPSRLVW xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 2, 0x10, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 2, 0x10, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPMOVUSDB xmm1/m32{k1}{z}, xmm2.
     { EVEX | 2, 0x11, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, WM, S_VECTOR, 4, 0, 0 },
     // VPSRAVW xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 2, 0x11, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 2, 0x11, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPMOVUSQB xmm1/m16{k1}{z}, xmm2.
     { EVEX | 2, 0x12, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, WM, S_VECTOR, 2, 0, 0 },
     // VPSLLVW xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 2, 0x12, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 2, 0x12, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VCVTPH2PS xmm1{k1}{z}, xmm2/m64.
-    { EVEX | 2, 0x13, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 8, 0, 0 },
+    { EVEX | 2, 0x13, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 8, 0, 0 },
     // VPMOVUSDW xmm1/m64{k1}{z}, xmm2.
     { EVEX | 2, 0x13, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, WM, S_VECTOR, 8, 0, 0 },
     // VPMOVUSQW xmm1/m32{k1}{z}, xmm2.
     { EVEX | 2, 0x14, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, WM, S_VECTOR, 4, 0, 0 },
     // VPRORVD xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x14, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x14, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPRORVQ xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x14, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x14, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPMOVUSQD xmm1/m64{k1}{z}, xmm2.
     { EVEX | 2, 0x15, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, WM, S_VECTOR, 8, 0, 0 },
     // VPROLVD xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x15, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x15, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPROLVQ xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x15, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x15, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPERMPS ymm1{k1}{z}, ymm2, ymm3/m256/m32bcst.
-    { EVEX | 2, 0x16, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x16, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPERMPD ymm1{k1}{z}, ymm2, ymm3/m256/m64bcst.
-    { EVEX | 2, 0x16, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x16, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VBROADCASTSS xmm1{k1}{z}, xmm2/m32.
-    { EVEX | 2, 0x18, P_66, R_ANY, 0, 0, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 2, 0x18, P_66, R_ANY, 0, 0, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VBROADCASTSS ymm1{k1}{z}, xmm2/m32.
-    { EVEX | 2, 0x18, P_66, R_ANY, 0, 1, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 2, 0x18, P_66, R_ANY, 0, 1, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VBROADCASTSS zmm1{k1}{z}, xmm2/m32.
-    { EVEX | 2, 0x18, P_66, R_ANY, 0, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 2, 0x18, P_66, R_ANY, 0, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VBROADCASTSD ymm1{k1}{z}, xmm2/m64.
-    { EVEX | 2, 0x19, P_66, R_ANY, W_ANY, 1, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 2, 0x19, P_66, R_ANY, W_ANY, 1, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VBROADCASTSD zmm1{k1}{z}, xmm2/m64.
-    { EVEX | 2, 0x19, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 2, 0x19, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VBROADCASTF32X4 ymm1{k1}{z}, m128.
-    { EVEX | 2, 0x1a, P_66, R_ANY, W_ANY, 1, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 2, 0x1a, P_66, R_ANY, W_ANY, 1, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VBROADCASTF32X4 zmm1{k1}{z}, m128.
-    { EVEX | 2, 0x1a, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 2, 0x1a, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VBROADCASTF32X8 zmm1{k1}{z}, m256.
-    { EVEX | 2, 0x1b, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 32, 0, 0 },
+    { EVEX | 2, 0x1b, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 32, 0, 0 },
     // VPABSB xmm1{k1}{z}, xmm2/m128.
-    { EVEX | 2, 0x1c, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 2, 0x1c, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPABSW xmm1{k1}{z}, xmm2/m128.
-    { EVEX | 2, 0x1d, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 2, 0x1d, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPABSD xmm1{k1}{z}, xmm2/m128/m32bcst.
-    { EVEX | 2, 0x1e, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x1e, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPABSQ xmm1{k1}{z}, xmm2/m128/m64bcst.
-    { EVEX | 2, 0x1f, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x1f, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPMOVSWB xmm1/m64{k1}{z}, xmm2.
     { EVEX | 2, 0x20, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, WM, S_VECTOR, 8, 0, 0 },
     // VPMOVSXBW xmm1{k1}{z}, xmm2/m64.
-    { EVEX | 2, 0x20, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 8, 0, 0 },
+    { EVEX | 2, 0x20, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 8, 0, 0 },
     // VPMOVSDB xmm1/m32{k1}{z}, xmm2.
     { EVEX | 2, 0x21, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, WM, S_VECTOR, 4, 0, 0 },
     // VPMOVSXBD xmm1{k1}{z}, xmm2/m32.
-    { EVEX | 2, 0x21, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 4, 0, 0 },
+    { EVEX | 2, 0x21, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 4, 0, 0 },
     // VPMOVSQB xmm1/m16{k1}{z}, xmm2.
     { EVEX | 2, 0x22, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, WM, S_VECTOR, 2, 0, 0 },
     // VPMOVSXBQ xmm1{k1}{z}, xmm2/m16.
-    { EVEX | 2, 0x22, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 2, 0, 0 },
+    { EVEX | 2, 0x22, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 2, 0, 0 },
     // VPMOVSDW xmm1/m64{k1}{z}, xmm2.
     { EVEX | 2, 0x23, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, WM, S_VECTOR, 8, 0, 0 },
     // VPMOVSXWD xmm1{k1}{z}, xmm2/m64.
-    { EVEX | 2, 0x23, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 8, 0, 0 },
+    { EVEX | 2, 0x23, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 8, 0, 0 },
     // VPMOVSQW xmm1/m32{k1}{z}, xmm2.
     { EVEX | 2, 0x24, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, WM, S_VECTOR, 4, 0, 0 },
     // VPMOVSXWQ xmm1{k1}{z}, xmm2/m32.
-    { EVEX | 2, 0x24, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 4, 0, 0 },
+    { EVEX | 2, 0x24, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 4, 0, 0 },
     // VPMOVSXDQ xmm1{k1}{z}, xmm2/m64.
-    { EVEX | 2, 0x25, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 8, 0, 0 },
+    { EVEX | 2, 0x25, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 8, 0, 0 },
     // VPMOVSQD xmm1/m64{k1}{z}, xmm2.
     { EVEX | 2, 0x25, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, WM, S_VECTOR, 8, 0, 0 },
     // VPTESTMB k2{k1}, xmm2, xmm3/m128.
-    { EVEX | 2, 0x26, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 2, 0x26, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPTESTNMB k2{k1}, xmm2, xmm3/m128.
-    { EVEX | 2, 0x26, P_F3, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 2, 0x26, P_F3, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPTESTMD k2{k1}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x27, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x27, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPTESTMQ k2{k1}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x27, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x27, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPTESTNMD k2{k1}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x27, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x27, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPTESTNMQ k2{k1}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x27, P_F3, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x27, P_F3, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPMULDQ xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x28, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x28, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPCMPEQQ k1{k2}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x29, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x29, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VMOVNTDQA xmm1, m128.
     { EVEX | 2, 0x2a, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
     // VPACKUSDW xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x2b, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x2b, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VSCALEFPS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x2c, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x2c, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VSCALEFPD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x2c, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x2c, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VSCALEFSS xmm1{k1}{z}, xmm2, xmm3/m32{er}.
-    { EVEX | 2, 0x2d, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 2, 0x2d, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VSCALEFSD xmm1{k1}{z}, xmm2, xmm3/m64{er}.
-    { EVEX | 2, 0x2d, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 2, 0x2d, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VPMOVWB xmm1/m64{k1}{z}, xmm2.
     { EVEX | 2, 0x30, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, WM, S_VECTOR, 8, 0, 0 },
     // VPMOVZXBW ymm1{k1}{z}, xmm2/m128.
-    { EVEX | 2, 0x30, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 8, 0, 0 },
+    { EVEX | 2, 0x30, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 8, 0, 0 },
     // VPMOVDB xmm1/m32{k1}{z}, xmm2.
     { EVEX | 2, 0x31, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, WM, S_VECTOR, 4, 0, 0 },
     // VPMOVZXBD xmm1{k1}{z}, xmm2/m32.
-    { EVEX | 2, 0x31, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 4, 0, 0 },
+    { EVEX | 2, 0x31, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 4, 0, 0 },
     // VPMOVQB xmm1/m16{k1}{z}, xmm2.
     { EVEX | 2, 0x32, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, WM, S_VECTOR, 2, 0, 0 },
     // VPMOVZXBQ xmm1{k1}{z}, xmm2/m16.
-    { EVEX | 2, 0x32, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 2, 0, 0 },
+    { EVEX | 2, 0x32, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 2, 0, 0 },
     // VPMOVDW xmm1/m64{k1}{z}, xmm2.
     { EVEX | 2, 0x33, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, WM, S_VECTOR, 8, 0, 0 },
     // VPMOVZXWD xmm1{k1}{z}, xmm2/m64.
-    { EVEX | 2, 0x33, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 8, 0, 0 },
+    { EVEX | 2, 0x33, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 8, 0, 0 },
     // VPMOVQW xmm1/m32{k1}{z}, xmm2.
     { EVEX | 2, 0x34, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, WM, S_VECTOR, 4, 0, 0 },
     // VPMOVZXWQ xmm1{k1}{z}, xmm2/m32.
-    { EVEX | 2, 0x34, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 4, 0, 0 },
+    { EVEX | 2, 0x34, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 4, 0, 0 },
     // VPMOVZXDQ xmm1{k1}{z}, xmm2/m64.
-    { EVEX | 2, 0x35, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 8, 0, 0 },
+    { EVEX | 2, 0x35, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 8, 0, 0 },
     // VPMOVQD xmm1/m128{k1}{z}, xmm2.
     { EVEX | 2, 0x35, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, WM, S_VECTOR, 8, 0, 0 },
     // VPERMD ymm1{k1}{z}, ymm2, ymm3/m256/m32bcst.
-    { EVEX | 2, 0x36, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x36, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPERMQ ymm1{k1}{z}, ymm2, ymm3/m256/m64bcst.
-    { EVEX | 2, 0x36, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x36, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPCMPGTQ k1{k2}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x37, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x37, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPMINSB xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 2, 0x38, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 2, 0x38, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPMINSD xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x39, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x39, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPMINSQ xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x39, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x39, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPMINUW xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 2, 0x3a, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 2, 0x3a, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPMINUD xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x3b, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x3b, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPMINUQ xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x3b, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x3b, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPMAXSB xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 2, 0x3c, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 2, 0x3c, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPMAXSD xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x3d, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x3d, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPMAXSQ xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x3d, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x3d, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPMAXUW xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 2, 0x3e, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 2, 0x3e, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPMAXUD xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x3f, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x3f, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPMAXUQ xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x3f, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x3f, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPMULLD xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x40, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x40, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPMULLQ xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x40, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x40, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VGETEXPPS xmm1{k1}{z}, xmm2/m128/m32bcst.
-    { EVEX | 2, 0x42, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x42, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VGETEXPPD xmm1{k1}{z}, xmm2/m128/m64bcst.
-    { EVEX | 2, 0x42, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x42, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VGETEXPSS xmm1{k1}{z}, xmm2, xmm3/m32{sae}.
-    { EVEX | 2, 0x43, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 2, 0x43, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VGETEXPSD xmm1{k1}{z}, xmm2, xmm3/m64{sae}.
-    { EVEX | 2, 0x43, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 2, 0x43, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VPLZCNTD xmm1{k1}{z}, xmm2/m128/m32bcst.
-    { EVEX | 2, 0x44, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x44, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPLZCNTQ xmm1{k1}{z}, xmm2/m128/m64bcst.
-    { EVEX | 2, 0x44, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x44, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPSRLVD xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x45, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x45, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPSRLVQ xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x45, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x45, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPSRAVD xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x46, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x46, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPSRAVQ xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x46, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x46, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPSLLVD xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x47, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x47, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPSLLVQ xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x47, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x47, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // LDTILECFG m512.
     { EVEX | 2, 0x49, P_NONE, 0, 0, 0, ND_ANY, NF_ANY, M_64, R, S_FIXED, 64, 0, 1 },
     // STTILECFG m512.
@@ -3243,139 +3243,139 @@ const struct insn_mem_table_form insn_mem_table_forms[] = {
     // TILESTORED sibmem, tmm1.
     { EVEX | 2, 0x4b, P_F3, R_ANY, 0, 0, ND_ANY, NF_ANY, M_64, W, S_UNKNOWN, 0, 0, 1 },
     // VRCP14PS xmm1{k1}{z}, xmm2/m128/m32bcst.
-    { EVEX | 2, 0x4c, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x4c, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VRCP14PD xmm1{k1}{z}, xmm2/m128/m64bcst.
-    { EVEX | 2, 0x4c, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x4c, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VRCP14SS xmm1{k1}{z}, xmm2, xmm3/m32.
-    { EVEX | 2, 0x4d, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 2, 0x4d, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VRCP14SD xmm1{k1}{z}, xmm2, xmm3/m64.
-    { EVEX | 2, 0x4d, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 2, 0x4d, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VRSQRT14PS xmm1{k1}{z}, xmm2/m128/m32bcst.
-    { EVEX | 2, 0x4e, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x4e, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VRSQRT14PD xmm1{k1}{z}, xmm2/m128/m64bcst.
-    { EVEX | 2, 0x4e, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x4e, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VRSQRT14SS xmm1{k1}{z}, xmm2, xmm3/m32.
-    { EVEX | 2, 0x4f, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 2, 0x4f, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VRSQRT14SD xmm1{k1}{z}, xmm2, xmm3/m64.
-    { EVEX | 2, 0x4f, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 2, 0x4f, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VPDPBUSD xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x50, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x50, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPDPBUSDS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x51, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x51, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VP4DPWSSD zmm1{k1}{z}, zmm2+3, m128.
-    { EVEX | 2, 0x52, P_F2, R_ANY, 0, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 2, 0x52, P_F2, R_ANY, 0, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VDPBF16PS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x52, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x52, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPDPWSSD xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x52, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x52, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VP4DPWSSDS zmm1{k1}{z}, zmm2+3, m128.
-    { EVEX | 2, 0x53, P_F2, R_ANY, 0, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 2, 0x53, P_F2, R_ANY, 0, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VPDPWSSDS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x53, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x53, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPOPCNTB xmm1{k1}{z}, xmm2/m128.
-    { EVEX | 2, 0x54, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 2, 0x54, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPOPCNTD xmm1{k1}{z}, xmm2/m128/m32bcst.
-    { EVEX | 2, 0x55, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x55, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPOPCNTQ xmm1{k1}{z}, xmm2/m128/m64bcst.
-    { EVEX | 2, 0x55, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x55, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPBROADCASTD xmm1{k1}{z}, xmm2/m32.
-    { EVEX | 2, 0x58, P_66, R_ANY, 0, 0, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 2, 0x58, P_66, R_ANY, 0, 0, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VPBROADCASTD ymm1{k1}{z}, xmm2/m32.
-    { EVEX | 2, 0x58, P_66, R_ANY, 0, 1, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 2, 0x58, P_66, R_ANY, 0, 1, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VPBROADCASTD zmm1{k1}{z}, xmm2/m32.
-    { EVEX | 2, 0x58, P_66, R_ANY, 0, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 2, 0x58, P_66, R_ANY, 0, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VPBROADCASTQ xmm1{k1}{z}, xmm2/m64.
-    { EVEX | 2, 0x59, P_66, R_ANY, W_ANY, 0, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 2, 0x59, P_66, R_ANY, W_ANY, 0, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VPBROADCASTQ ymm1{k1}{z}, xmm2/m64.
-    { EVEX | 2, 0x59, P_66, R_ANY, W_ANY, 1, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 2, 0x59, P_66, R_ANY, W_ANY, 1, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VPBROADCASTQ zmm1{k1}{z}, xmm2/m64.
-    { EVEX | 2, 0x59, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 2, 0x59, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VBROADCASTI32X4 ymm1{k1}{z}, m128.
-    { EVEX | 2, 0x5a, P_66, R_ANY, W_ANY, 1, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 2, 0x5a, P_66, R_ANY, W_ANY, 1, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VBROADCASTI32X4 zmm1{k1}{z}, m128.
-    { EVEX | 2, 0x5a, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 2, 0x5a, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VBROADCASTI32X8 zmm1{k1}{z}, m256.
-    { EVEX | 2, 0x5b, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 32, 0, 0 },
+    { EVEX | 2, 0x5b, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 32, 0, 0 },
     // VPEXPANDB xmm1{k1}{z}, m128.
-    { EVEX | 2, 0x62, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 1 },
+    { EVEX | 2, 0x62, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 1 },
     // VPEXPANDW xmm1{k1}{z}, m128.
-    { EVEX | 2, 0x62, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 2 },
+    { EVEX | 2, 0x62, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 2 },
     // VPCOMPRESSB m128{k1}, xmm1.
     { EVEX | 2, 0x63, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, WM, S_VECTOR, 16, 0, 1 },
     // VPCOMPRESSW m128{k1}, xmm1.
     { EVEX | 2, 0x63, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, WM, S_VECTOR, 16, 0, 2 },
     // VPBLENDMD xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x64, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x64, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPBLENDMQ xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x64, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x64, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VBLENDMPS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x65, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x65, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VBLENDMPD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x65, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x65, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPBLENDMB xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 2, 0x66, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 2, 0x66, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VP2INTERSECTD k1+1, xmm2, xmm3/m128/m32bcst.
     { EVEX | 2, 0x68, P_F2, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
     // VP2INTERSECTQ k1+1, xmm2, xmm3/m128/m64bcst.
     { EVEX | 2, 0x68, P_F2, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
     // VPSHLDVW xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 2, 0x70, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 2, 0x70, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPSHLDVD xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x71, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x71, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPSHLDVQ xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x71, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x71, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VCVTNE2PS2BF16 xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x72, P_F2, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x72, P_F2, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VCVTNEPS2BF16 xmm1{k1}{z}, xmm2/m128/m32bcst.
-    { EVEX | 2, 0x72, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x72, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPSHRDVW xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 2, 0x72, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 2, 0x72, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPSHRDVD xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x73, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x73, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPSHRDVQ xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x73, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x73, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPERMI2B xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 2, 0x75, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 2, 0x75, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPERMI2D xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x76, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x76, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPERMI2Q xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x76, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x76, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPERMI2PS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x77, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x77, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPERMI2PD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x77, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x77, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPBROADCASTB xmm1{k1}{z}, xmm2/m8.
-    { EVEX | 2, 0x78, P_66, R_ANY, 0, 0, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 1, 0, 0 },
+    { EVEX | 2, 0x78, P_66, R_ANY, 0, 0, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 1, 0, 0 },
     // VPBROADCASTB ymm1{k1}{z}, xmm2/m8.
-    { EVEX | 2, 0x78, P_66, R_ANY, 0, 1, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 1, 0, 0 },
+    { EVEX | 2, 0x78, P_66, R_ANY, 0, 1, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 1, 0, 0 },
     // VPBROADCASTB zmm1{k1}{z}, xmm2/m8.
-    { EVEX | 2, 0x78, P_66, R_ANY, 0, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 1, 0, 0 },
+    { EVEX | 2, 0x78, P_66, R_ANY, 0, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 1, 0, 0 },
     // VPBROADCASTW xmm1{k1}{z}, xmm2/m16.
-    { EVEX | 2, 0x79, P_66, R_ANY, 0, 0, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 2, 0x79, P_66, R_ANY, 0, 0, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VPBROADCASTW ymm1{k1}{z}, xmm2/m16.
-    { EVEX | 2, 0x79, P_66, R_ANY, 0, 1, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 2, 0x79, P_66, R_ANY, 0, 1, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VPBROADCASTW zmm1{k1}{z}, xmm2/m16.
-    { EVEX | 2, 0x79, P_66, R_ANY, 0, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 2, 0x79, P_66, R_ANY, 0, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VPERMT2B xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 2, 0x7d, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 2, 0x7d, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPERMT2D xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x7e, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x7e, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPERMT2Q xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x7e, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x7e, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPERMT2PS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x7f, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x7f, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPERMT2PD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x7f, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x7f, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPMULTISHIFTQB xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x83, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x83, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VEXPANDPS xmm1{k1}{z}, xmm2/m128.
-    { EVEX | 2, 0x88, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 4 },
+    { EVEX | 2, 0x88, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 4 },
     // VEXPANDPD xmm1{k1}{z}, xmm2/m128.
-    { EVEX | 2, 0x88, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 8 },
+    { EVEX | 2, 0x88, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 8 },
     // VPEXPANDD xmm1{k1}{z}, xmm2/m128.
-    { EVEX | 2, 0x89, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 4 },
+    { EVEX | 2, 0x89, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 4 },
     // VPEXPANDQ xmm1{k1}{z}, xmm2/m128.
-    { EVEX | 2, 0x89, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 8 },
+    { EVEX | 2, 0x89, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 8 },
     // VCOMPRESSPS xmm1/m128{k1}{z}, xmm2.
     { EVEX | 2, 0x8a, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, WM, S_VECTOR, 16, 0, 4 },
     // VCOMPRESSPD xmm1/m128{k1}{z}, xmm2.
@@ -3385,167 +3385,167 @@ const struct insn_mem_table_form insn_mem_table_forms[] = {
     // VPCOMPRESSQ xmm1/m128{k1}{z}, xmm2.
     { EVEX | 2, 0x8b, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, WM, S_VECTOR, 16, 0, 8 },
     // VPERMB xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 2, 0x8d, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 2, 0x8d, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPSHUFBITQMB k1{k2}, xmm2, xmm3/m128.
-    { EVEX | 2, 0x8f, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 2, 0x8f, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VFMADDSUB132PS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x96, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x96, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VFMADDSUB132PD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x96, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x96, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VFMSUBADD132PS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x97, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x97, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VFMSUBADD132PD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x97, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x97, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VFMADD132PS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x98, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x98, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VFMADD132PD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x98, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x98, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VFMADD132SS xmm1{k1}{z}, xmm2, xmm3/m32{er}.
-    { EVEX | 2, 0x99, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 2, 0x99, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VFMADD132SD xmm1{k1}{z}, xmm2, xmm3/m64{er}.
-    { EVEX | 2, 0x99, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 2, 0x99, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // V4FMADDPS zmm1{k1}{z}, zmm2+3, m128.
-    { EVEX | 2, 0x9a, P_F2, R_ANY, 0, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 2, 0x9a, P_F2, R_ANY, 0, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VFMSUB132PS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x9a, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x9a, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VFMSUB132PD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x9a, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x9a, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VFMSUB132SS xmm1{k1}{z}, xmm2, xmm3/m32{er}.
-    { EVEX | 2, 0x9b, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 2, 0x9b, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VFMSUB132SD xmm1{k1}{z}, xmm2, xmm3/m64{er}.
-    { EVEX | 2, 0x9b, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 2, 0x9b, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // V4FMADDSS xmm1{k1}{z}, xmm2+3, m128.
-    { EVEX | 2, 0x9b, P_F2, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 2, 0x9b, P_F2, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VFNMADD132PS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x9c, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x9c, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VFNMADD132PD xmm0{k1}{z}, xmm1, xmm2/m128/m64bcst.
-    { EVEX | 2, 0x9c, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x9c, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VFNMADD132SS xmm1{k1}{z}, xmm2, xmm3/m32{er}.
-    { EVEX | 2, 0x9d, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 2, 0x9d, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VFNMADD132SD xmm1{k1}{z}, xmm2, xmm3/m64{er}.
-    { EVEX | 2, 0x9d, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 2, 0x9d, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VFNMSUB132PS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0x9e, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0x9e, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VFNMSUB132PD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0x9e, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0x9e, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VFNMSUB132SS xmm1{k1}{z}, xmm2, xmm3/m32{er}.
-    { EVEX | 2, 0x9f, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 2, 0x9f, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VFNMSUB132SD xmm1{k1}{z}, xmm2, xmm3/m64{er}.
-    { EVEX | 2, 0x9f, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 2, 0x9f, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VFMADDSUB213PS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0xa6, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0xa6, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VFMADDSUB213PD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0xa6, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0xa6, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VFMSUBADD213PS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0xa7, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0xa7, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VFMSUBADD213PD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0xa7, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0xa7, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VFMADD213PS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0xa8, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0xa8, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VFMADD213PD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0xa8, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0xa8, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VFMADD213SS xmm1{k1}{z}, xmm2, xmm3/m32{er}.
-    { EVEX | 2, 0xa9, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 2, 0xa9, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VFMADD213SD xmm1{k1}{z}, xmm2, xmm3/m64{er}.
-    { EVEX | 2, 0xa9, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 2, 0xa9, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // V4FNMADDPS zmm1{k1}{z}, zmm2+3, m128.
-    { EVEX | 2, 0xaa, P_F2, R_ANY, 0, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 2, 0xaa, P_F2, R_ANY, 0, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VFMSUB213PS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0xaa, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0xaa, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VFMSUB213PD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0xaa, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0xaa, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VFMSUB213SS xmm1{k1}{z}, xmm2, xmm3/m32{er}.
-    { EVEX | 2, 0xab, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 2, 0xab, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VFMSUB213SD xmm1{k1}{z}, xmm2, xmm3/m64{er}.
-    { EVEX | 2, 0xab, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 2, 0xab, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // V4FNMADDSS xmm1{k1}{z}, xmm2+3, m128.
-    { EVEX | 2, 0xab, P_F2, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 2, 0xab, P_F2, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VFNMADD213PS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0xac, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0xac, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VFNMADD213PD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0xac, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0xac, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VFNMADD213SS xmm1{k1}{z}, xmm2, xmm3/m32{er}.
-    { EVEX | 2, 0xad, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 2, 0xad, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VFNMADD213SD xmm1{k1}{z}, xmm2, xmm3/m64{er}.
-    { EVEX | 2, 0xad, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 2, 0xad, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VFNMSUB213PS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0xae, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0xae, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VFNMSUB213PD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0xae, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0xae, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VFNMSUB213SS xmm1{k1}{z}, xmm2, xmm3/m32{er}.
-    { EVEX | 2, 0xaf, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 2, 0xaf, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VFNMSUB213SD xmm1{k1}{z}, xmm2, xmm3/m64{er}.
-    { EVEX | 2, 0xaf, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 2, 0xaf, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VPMADD52LUQ xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0xb4, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0xb4, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPMADD52HUQ xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0xb5, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0xb5, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VFMADDSUB231PS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0xb6, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0xb6, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VFMADDSUB231PD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0xb6, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0xb6, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VFMSUBADD231PS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0xb7, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0xb7, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VFMSUBADD231PD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0xb7, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0xb7, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VFMADD231PS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0xb8, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0xb8, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VFMADD231PD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0xb8, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0xb8, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VFMADD231SS xmm1{k1}{z}, xmm2, xmm3/m32{er}.
-    { EVEX | 2, 0xb9, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 2, 0xb9, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VFMADD231SD xmm1{k1}{z}, xmm2, xmm3/m64{er}.
-    { EVEX | 2, 0xb9, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 2, 0xb9, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VFMSUB231PS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0xba, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0xba, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VFMSUB231PD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0xba, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0xba, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VFMSUB231SS xmm1{k1}{z}, xmm2, xmm3/m32{er}.
-    { EVEX | 2, 0xbb, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 2, 0xbb, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VFMSUB231SD xmm1{k1}{z}, xmm2, xmm3/m64{er}.
-    { EVEX | 2, 0xbb, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 2, 0xbb, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VFNMADD231PS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0xbc, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0xbc, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VFNMADD231PD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0xbc, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0xbc, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VFNMADD231SS xmm1{k1}{z}, xmm2, xmm3/m32{er}.
-    { EVEX | 2, 0xbd, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 2, 0xbd, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VFNMADD231SD xmm1{k1}{z}, xmm2, xmm3/m64{er}.
-    { EVEX | 2, 0xbd, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 2, 0xbd, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VFNMSUB231PS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 2, 0xbe, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0xbe, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VFNMSUB231PD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst.
-    { EVEX | 2, 0xbe, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0xbe, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VFNMSUB231SS xmm1{k1}{z}, xmm2, xmm3/m32{er}.
-    { EVEX | 2, 0xbf, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 2, 0xbf, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VFNMSUB231SD xmm1{k1}{z}, xmm2, xmm3/m64{er}.
-    { EVEX | 2, 0xbf, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 2, 0xbf, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VPCONFLICTD xmm1{k1}{z}, xmm2/m128/m32bcst.
-    { EVEX | 2, 0xc4, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 2, 0xc4, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPCONFLICTQ xmm1{k1}{z}, xmm2/m128/m64bcst.
-    { EVEX | 2, 0xc4, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 2, 0xc4, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VEXP2PS zmm1{k1}{z}, zmm2/m512/m32bcst{sae}.
-    { EVEX | 2, 0xc8, P_66, R_ANY, 0, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 64, 4, 0 },
+    { EVEX | 2, 0xc8, P_66, R_ANY, 0, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 64, 4, 0 },
     // VEXP2PD zmm1{k1}{z}, zmm2/m512/m64bcst{sae}.
-    { EVEX | 2, 0xc8, P_66, R_ANY, 1, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 64, 8, 0 },
+    { EVEX | 2, 0xc8, P_66, R_ANY, 1, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 64, 8, 0 },
     // VRCP28PS zmm1{k1}{z}, zmm2/m512/m32bcst{sae}.
-    { EVEX | 2, 0xca, P_66, R_ANY, 0, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 64, 4, 0 },
+    { EVEX | 2, 0xca, P_66, R_ANY, 0, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 64, 4, 0 },
     // VRCP28PD zmm1{k1}{z}, zmm2/m512/m64bcst{sae}.
-    { EVEX | 2, 0xca, P_66, R_ANY, 1, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 64, 8, 0 },
+    { EVEX | 2, 0xca, P_66, R_ANY, 1, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 64, 8, 0 },
     // VRCP28SS xmm1{k1}{z}, xmm2, xmm3/m32{sae}.
-    { EVEX | 2, 0xcb, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 2, 0xcb, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VRCP28SD xmm1{k1}{z}, xmm2, xmm3/m64{sae}.
-    { EVEX | 2, 0xcb, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 2, 0xcb, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VRSQRT28PS zmm1{k1}{z}, zmm2/m512/m32bcst{sae}.
-    { EVEX | 2, 0xcc, P_66, R_ANY, 0, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 64, 4, 0 },
+    { EVEX | 2, 0xcc, P_66, R_ANY, 0, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 64, 4, 0 },
     // VRSQRT28PD zmm1{k1}{z}, zmm2/m512/m64bcst{sae}.
-    { EVEX | 2, 0xcc, P_66, R_ANY, 1, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 64, 8, 0 },
+    { EVEX | 2, 0xcc, P_66, R_ANY, 1, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 64, 8, 0 },
     // VRSQRT28SS xmm1{k1}{z}, xmm2, xmm3/m32{sae}.
-    { EVEX | 2, 0xcd, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 2, 0xcd, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VRSQRT28SD xmm1{k1}{z}, xmm2, xmm3/m64{sae}.
-    { EVEX | 2, 0xcd, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 2, 0xcd, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VGF2P8MULB xmm1{k1}{z}, xmm2, xmm3/m128.
-    { EVEX | 2, 0xcf, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 2, 0xcf, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VAESENC xmm1, xmm2, xmm3/m128.
     { EVEX | 2, 0xdc, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
     // VAESENCLAST xmm1, xmm2, xmm3/m128.
@@ -3667,31 +3667,31 @@ const struct insn_mem_table_form insn_mem_table_forms[] = {
     // SHRX r64, r64/m64, r64.
     { EVEX | 2, 0xf7, P_F2, R_ANY, 1, 0, ND_ANY, NF_ANY, M_64, R, S_FIXED, 8, 0, 1 },
     // VPERMQ ymm1{k1}{z}, ymm2/m256/m64bcst, imm8.
-    { EVEX | 3, 0x00, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 3, 0x00, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPERMPD ymm1{k1}{z}, ymm2/m256/m64bcst, imm8.
-    { EVEX | 3, 0x01, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 3, 0x01, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VALIGND xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst, imm8.
-    { EVEX | 3, 0x03, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 3, 0x03, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VALIGNQ xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst, imm8.
-    { EVEX | 3, 0x03, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 3, 0x03, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPERMILPS xmm1{k1}{z}, xmm2/m128/m32bcst, imm8.
-    { EVEX | 3, 0x04, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 3, 0x04, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPERMILPD xmm1{k1}{z}, xmm2/m128/m64bcst, imm8.
-    { EVEX | 3, 0x05, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 3, 0x05, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VRNDSCALEPH xmm1{k1}{z}, xmm2/m128/m16bcst, imm8.
-    { EVEX | 3, 0x08, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 3, 0x08, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VRNDSCALEPS xmm1{k1}{z}, xmm2/m128/m32bcst, imm8.
-    { EVEX | 3, 0x08, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 3, 0x08, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VRNDSCALEPD xmm1{k1}{z}, xmm2/m128/m64bcst, imm8.
-    { EVEX | 3, 0x09, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 3, 0x09, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VRNDSCALESH xmm1{k1}{z}, xmm2, xmm3/m16{sae}, imm8.
-    { EVEX | 3, 0x0a, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 3, 0x0a, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VRNDSCALESS xmm1{k1}{z}, xmm2, xmm3/m32{sae}, imm8.
-    { EVEX | 3, 0x0a, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 3, 0x0a, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VRNDSCALESD xmm1{k1}{z}, xmm2, xmm3/m64{sae}, imm8.
-    { EVEX | 3, 0x0b, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 3, 0x0b, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VPALIGNR xmm1{k1}{z}, xmm2, xmm3/m128, imm8.
-    { EVEX | 3, 0x0f, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 3, 0x0f, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPEXTRB reg/m8, xmm2, imm8.
     { EVEX | 3, 0x14, P_66, R_ANY, W_ANY, 0, ND_ANY, NF_ANY, M_ALL, W, S_FIXED, 1, 0, 0 },
     // VPEXTRW reg/m16, xmm2, imm8.
@@ -3705,27 +3705,27 @@ const struct insn_mem_table_form insn_mem_table_forms[] = {
     // VEXTRACTPS reg/m32, xmm1, imm8.
     { EVEX | 3, 0x17, P_66, R_ANY, W_ANY, 0, ND_ANY, NF_ANY, M_ALL, W, S_FIXED, 4, 0, 0 },
     // VINSERTF32X4 ymm1{k1}{z}, ymm2, xmm3/m128, imm8.
-    { EVEX | 3, 0x18, P_66, R_ANY, W_ANY, 1, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 3, 0x18, P_66, R_ANY, W_ANY, 1, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VINSERTF32X4 zmm1{k1}{z}, zmm2, xmm3/m128, imm8.
-    { EVEX | 3, 0x18, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 3, 0x18, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VEXTRACTF32X4 xmm1/m128{k1}{z}, ymm2, imm8.
     { EVEX | 3, 0x19, P_66, R_ANY, W_ANY, 1, ND_ANY, NF_ANY, M_ALL, WM, S_FIXED, 16, 0, 0 },
     // VEXTRACTF32x4 xmm1/m128{k1}{z}, zmm2, imm8.
     { EVEX | 3, 0x19, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, WM, S_FIXED, 16, 0, 0 },
     // VINSERTF32X8 zmm1{k1}{z}, zmm2, ymm3/m256, imm8.
-    { EVEX | 3, 0x1a, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 32, 0, 0 },
+    { EVEX | 3, 0x1a, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 32, 0, 0 },
     // VEXTRACTF32X8 ymm1/m256{k1}{z}, zmm2, imm8.
     { EVEX | 3, 0x1b, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, WM, S_FIXED, 32, 0, 0 },
     // VCVTPS2PH xmm1/m64{k1}{z}, xmm2, imm8.
     { EVEX | 3, 0x1d, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, WM, S_VECTOR, 8, 0, 0 },
     // VPCMPUD k1{k2}, xmm2, xmm3/m128/m32bcst, imm8.
-    { EVEX | 3, 0x1e, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 3, 0x1e, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPCMPUQ k1{k2}, xmm2, xmm3/m128/m64bcst, imm8.
-    { EVEX | 3, 0x1e, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 3, 0x1e, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPCMPD k1{k2}, xmm2, xmm3/m128/m32bcst, imm8.
-    { EVEX | 3, 0x1f, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 3, 0x1f, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPCMPQ k1{k2}, xmm2, xmm3/m128/m64bcst, imm8.
-    { EVEX | 3, 0x1f, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 3, 0x1f, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPINSRB xmm1, xmm2, r32/m8, imm8.
     { EVEX | 3, 0x20, P_66, R_ANY, W_ANY, 0, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 1, 0, 0 },
     // VINSERTPS xmm1, xmm2, xmm3/m32, imm8.
@@ -3737,109 +3737,109 @@ const struct insn_mem_table_form insn_mem_table_forms[] = {
     // VPINSRD xmm1, xmm2, r32/m32, imm8.
     { EVEX | 3, 0x22, P_66, R_ANY, W_ANY, 0, ND_ANY, NF_ANY, M_OTHER, R, S_FIXED, 4, 0, 0 },
     // VSHUFF32X4 ymm1{k1}{z}, ymm2, ymm3/m256/m32bcst, imm8.
-    { EVEX | 3, 0x23, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 3, 0x23, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VSHUFF64X2 ymm1{k1}{z}, ymm2, ymm3/m256/m64bcst, imm8.
-    { EVEX | 3, 0x23, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 3, 0x23, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPTERNLOGD xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst, imm8.
-    { EVEX | 3, 0x25, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 3, 0x25, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPTERNLOGQ xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst, imm8.
-    { EVEX | 3, 0x25, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 3, 0x25, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VGETMANTPS xmm1{k1}{z}, xmm2/m128/m32bcst, imm8.
-    { EVEX | 3, 0x26, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 3, 0x26, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VGETMANTPD xmm1{k1}{z}, xmm2/m128/m64bcst, imm8.
-    { EVEX | 3, 0x26, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 3, 0x26, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VGETMANTPH xmm1{k1}{z}, xmm2/m128/m16bcst, imm8.
-    { EVEX | 3, 0x26, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 3, 0x26, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VGETMANTSS xmm1{k1}{z}, xmm2, xmm3/m32{sae}, imm8.
-    { EVEX | 3, 0x27, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 3, 0x27, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VGETMANTSD xmm1{k1}{z}, xmm2, xmm3/m64{sae}, imm8.
-    { EVEX | 3, 0x27, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 3, 0x27, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VGETMANTSH xmm1{k1}{z}, xmm2, xmm3/m16{sae}, imm8.
-    { EVEX | 3, 0x27, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 3, 0x27, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VINSERTI32X4 ymm1{k1}{z}, ymm2, xmm3/m128, imm8.
-    { EVEX | 3, 0x38, P_66, R_ANY, W_ANY, 1, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 3, 0x38, P_66, R_ANY, W_ANY, 1, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VINSERTI32X4 zmm1{k1}{z}, zmm2, xmm3/m128, imm8.
-    { EVEX | 3, 0x38, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
+    { EVEX | 3, 0x38, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 16, 0, 0 },
     // VEXTRACTI32X4 xmm1/m128{k1}{z}, ymm2, imm8.
     { EVEX | 3, 0x39, P_66, R_ANY, W_ANY, 1, ND_ANY, NF_ANY, M_ALL, WM, S_FIXED, 16, 0, 0 },
     // VEXTRACTI32x4 xmm1/m128{k1}{z}, zmm2, imm8.
     { EVEX | 3, 0x39, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, WM, S_FIXED, 16, 0, 0 },
     // VINSERTI32X8 zmm1{k1}{z}, zmm2, ymm3/m256, imm8.
-    { EVEX | 3, 0x3a, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 32, 0, 0 },
+    { EVEX | 3, 0x3a, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 32, 0, 0 },
     // VEXTRACTI32X8 ymm1/m256{k1}{z}, zmm2, imm8.
     { EVEX | 3, 0x3b, P_66, R_ANY, W_ANY, 2, ND_ANY, NF_ANY, M_ALL, WM, S_FIXED, 32, 0, 0 },
     // VPCMPUB k1{k2}, xmm2, xmm3/m128, imm8.
-    { EVEX | 3, 0x3e, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 3, 0x3e, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPCMPB k1{k2}, xmm2, xmm3/m128, imm8.
-    { EVEX | 3, 0x3f, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 3, 0x3f, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VDBPSADBW xmm1{k1}{z}, xmm2, xmm3/m128, imm8.
-    { EVEX | 3, 0x42, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 3, 0x42, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VSHUFI32X4 ymm1{k1}{z}, ymm2, ymm3/m256/m32bcst, imm8.
-    { EVEX | 3, 0x43, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 3, 0x43, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VSHUFI64X2 ymm1{k1}{z}, ymm2, ymm3/m256/m64bcst, imm8.
-    { EVEX | 3, 0x43, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 3, 0x43, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPCLMULQDQ xmm1, xmm2, xmm3/m128, imm8.
     { EVEX | 3, 0x44, P_66, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
     // VRANGEPS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst, imm8.
-    { EVEX | 3, 0x50, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 3, 0x50, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VRANGEPD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst, imm8.
-    { EVEX | 3, 0x50, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 3, 0x50, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VRANGESS xmm1{k1}{z}, xmm2, xmm3/m32{sae}, imm8.
-    { EVEX | 3, 0x51, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 3, 0x51, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VRANGESD xmm1{k1}{z}, xmm2, xmm3/m64{sae}, imm8.
-    { EVEX | 3, 0x51, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 3, 0x51, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VFIXUPIMMPS xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst, imm8.
-    { EVEX | 3, 0x54, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 3, 0x54, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VFIXUPIMMPD xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst, imm8.
-    { EVEX | 3, 0x54, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 3, 0x54, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VFIXUPIMMSS xmm1{k1}{z}, xmm2, xmm3/m32{sae}, imm8.
-    { EVEX | 3, 0x55, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 3, 0x55, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VFIXUPIMMSD xmm1{k1}{z}, xmm2, xmm3/m64{sae}, imm8.
-    { EVEX | 3, 0x55, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 3, 0x55, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VREDUCEPS xmm1{k1}{z}, xmm2/m128/m32bcst, imm8.
-    { EVEX | 3, 0x56, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 3, 0x56, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VREDUCEPD xmm1{k1}{z}, xmm2/m128/m64bcst, imm8.
-    { EVEX | 3, 0x56, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 3, 0x56, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VREDUCEPH xmm1{k1}{z}, xmm2/m128/m16bcst, imm8.
-    { EVEX | 3, 0x56, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 3, 0x56, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VREDUCESS xmm1{k1}{z}, xmm2, xmm3/m32{sae}, imm8.
-    { EVEX | 3, 0x57, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 3, 0x57, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VREDUCESD xmm1{k1}{z}, xmm2, xmm3/m64{sae}, imm8/r.
-    { EVEX | 3, 0x57, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 3, 0x57, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VREDUCESH xmm1{k1}{z}, xmm2, xmm3/m16{sae}, imm8.
-    { EVEX | 3, 0x57, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 3, 0x57, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VFPCLASSPS k2{k1}, xmm2/m128/m32bcst, imm8.
-    { EVEX | 3, 0x66, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 3, 0x66, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VFPCLASSPD k2{k1}, xmm2/m128/m64bcst, imm8.
-    { EVEX | 3, 0x66, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 3, 0x66, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VFPCLASSPH k1{k2}, xmm1/m128/m16bcst, imm8.
-    { EVEX | 3, 0x66, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 3, 0x66, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VFPCLASSSS k2{k1}, xmm2/m32, imm8.
-    { EVEX | 3, 0x67, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 3, 0x67, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VFPCLASSSD k2{k1}, xmm2/m64, imm8.
-    { EVEX | 3, 0x67, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 3, 0x67, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VFPCLASSSH k1{k2}, xmm1/m16, imm8.
-    { EVEX | 3, 0x67, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 3, 0x67, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VPSHLDW xmm1{k1}{z}, xmm2, xmm3/m128, imm8.
-    { EVEX | 3, 0x70, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 3, 0x70, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPSHLDD xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst, imm8.
-    { EVEX | 3, 0x71, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 3, 0x71, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPSHLDQ xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst, imm8.
-    { EVEX | 3, 0x71, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 3, 0x71, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VPSHRDW xmm1{k1}{z}, xmm2, xmm3/m128, imm8.
-    { EVEX | 3, 0x72, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 0, 0 },
+    { EVEX | 3, 0x72, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 0, 0 },
     // VPSHRDD xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst, imm8.
-    { EVEX | 3, 0x73, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 3, 0x73, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VPSHRDQ xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst, imm8.
-    { EVEX | 3, 0x73, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 3, 0x73, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VCMPPH k1{k2}, xmm2, xmm3/m128/m16bcst, imm8.
-    { EVEX | 3, 0xc2, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 3, 0xc2, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VCMPSH k1{k2}, xmm2, xmm3/m16{sae}, imm8.
-    { EVEX | 3, 0xc2, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 3, 0xc2, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VGF2P8AFFINEQB xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst, imm8.
-    { EVEX | 3, 0xce, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 3, 0xce, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VGF2P8AFFINEINVQB xmm1{k1}{z}, xmm2, xmm3/m128/m64bcst, imm8.
-    { EVEX | 3, 0xcf, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 3, 0xcf, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // RORX r32, r32/m32, imm8.
     { EVEX | 3, 0xf0, P_F2, R_ANY, 0, 0, ND_ANY, NF_ANY, M_64, R, S_FIXED, 4, 0, 1 },
     // RORX r64, r64/m64, imm8.
@@ -4977,13 +4977,13 @@ const struct insn_mem_table_form insn_mem_table_forms[] = {
     // INC rv, rv/mv.
     { EVEX | 4, 0xff, P_NONE, 0, W_ANY, 0, 1, NF_ANY, M_64, R, S_OPERAND, 0, 0, 1 },
     // VMOVSH xmm1{k1}{z}, m16.
-    { EVEX | 5, 0x10, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 5, 0x10, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VMOVSH m16{k1}, xmm1.
     { EVEX | 5, 0x11, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, WM, S_FIXED, 2, 0, 0 },
     // VCVTPS2PHX xmm1{k1}{z}, xmm2/m128/m32bcst.
-    { EVEX | 5, 0x1d, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 5, 0x1d, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VCVTSS2SH xmm1{k1}{z}, xmm2, xmm3/m32{er}.
-    { EVEX | 5, 0x1d, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 5, 0x1d, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VCVTSI2SH xmm1, xmm2, r32/m32{er}.
     { EVEX | 5, 0x2a, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_64, R, S_FIXED, 4, 0, 0 },
     // VCVTSI2SH xmm1, xmm2, r64/m64{er}.
@@ -4999,187 +4999,187 @@ const struct insn_mem_table_form insn_mem_table_forms[] = {
     // VCOMISH xmm1, xmm2/m16{sae}.
     { EVEX | 5, 0x2f, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
     // VSQRTPH xmm1{k1}{z}, xmm2/m128/m16bcst.
-    { EVEX | 5, 0x51, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 5, 0x51, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VSQRTSH xmm1{k1}{z}, xmm2, xmm3/m16{er}.
-    { EVEX | 5, 0x51, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 5, 0x51, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VADDPH xmm1{k1}{z}, xmm2, xmm3/m128/m16bcst.
-    { EVEX | 5, 0x58, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 5, 0x58, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VADDSH xmm1{k1}{z}, xmm2, xmm3/m16{er}.
-    { EVEX | 5, 0x58, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 5, 0x58, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VMULPH xmm1{k1}{z}, xmm2, xmm3/m128/m16bcst.
-    { EVEX | 5, 0x59, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 5, 0x59, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VMULSH xmm1{k1}{z}, xmm2, xmm3/m16{er}.
-    { EVEX | 5, 0x59, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 5, 0x59, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VCVTPD2PH xmm1{k1}{z}, xmm2/m128/m64bcst.
-    { EVEX | 5, 0x5a, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 5, 0x5a, P_66, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VCVTPH2PD xmm1{k1}{z}, xmm2/m32/m16bcst.
-    { EVEX | 5, 0x5a, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 4, 2, 0 },
+    { EVEX | 5, 0x5a, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 4, 2, 0 },
     // VCVTSD2SH xmm1{k1}{z}, xmm2, xmm3/m64{er}.
-    { EVEX | 5, 0x5a, P_F2, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 8, 0, 0 },
+    { EVEX | 5, 0x5a, P_F2, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 8, 0, 0 },
     // VCVTSH2SD xmm1{k1}{z}, xmm2, xmm3/m16{sae}.
-    { EVEX | 5, 0x5a, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 5, 0x5a, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VCVTDQ2PH xmm1{k1}{z}, xmm2/m128/m32bcst.
-    { EVEX | 5, 0x5b, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 5, 0x5b, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VCVTQQ2PH xmm1{k1}{z}, xmm2/m128/m64bcst.
-    { EVEX | 5, 0x5b, P_NONE, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 5, 0x5b, P_NONE, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VCVTPH2DQ xmm1{k1}{z}, xmm2/m64/m16bcst.
-    { EVEX | 5, 0x5b, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 8, 2, 0 },
+    { EVEX | 5, 0x5b, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 8, 2, 0 },
     // VCVTTPH2DQ xmm1{k1}{z}, xmm2/m64/m16bcst.
-    { EVEX | 5, 0x5b, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 8, 2, 0 },
+    { EVEX | 5, 0x5b, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 8, 2, 0 },
     // VSUBPH xmm1{k1}{z}, xmm2, xmm3/m128/m16bcst.
-    { EVEX | 5, 0x5c, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 5, 0x5c, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VSUBSH xmm1{k1}{z}, xmm2, xmm3/m16{er}.
-    { EVEX | 5, 0x5c, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 5, 0x5c, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VMINPH xmm1{k1}{z}, xmm2, xmm3/m128/m16bcst.
-    { EVEX | 5, 0x5d, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 5, 0x5d, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VMINSH xmm1{k1}{z}, xmm2, xmm3/m16{sae}.
-    { EVEX | 5, 0x5d, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 5, 0x5d, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VDIVPH xmm1{k1}{z}, xmm2, xmm3/m128/m16bcst.
-    { EVEX | 5, 0x5e, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 5, 0x5e, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VDIVSH xmm1{k1}{z}, xmm2, xmm3/m16{er}.
-    { EVEX | 5, 0x5e, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 5, 0x5e, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VMAXPH xmm1{k1}{z}, xmm2, xmm3/m128/m16bcst.
-    { EVEX | 5, 0x5f, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 5, 0x5f, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VMAXSH xmm1{k1}{z}, xmm2, xmm3/m16{sae}.
-    { EVEX | 5, 0x5f, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 5, 0x5f, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VMOVW xmm1, reg/m16.
     { EVEX | 5, 0x6e, P_66, R_ANY, W_ANY, 0, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
     // VCVTTPH2UDQ xmm1{k1}{z}, xmm2/m64/m16bcst.
-    { EVEX | 5, 0x78, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 8, 2, 0 },
+    { EVEX | 5, 0x78, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 8, 2, 0 },
     // VCVTTPH2UQQ xmm1{k1}{z}, xmm2/m32/m16bcst.
-    { EVEX | 5, 0x78, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 4, 2, 0 },
+    { EVEX | 5, 0x78, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 4, 2, 0 },
     // VCVTTSH2USI r32, xmm1/m16{sae}.
     { EVEX | 5, 0x78, P_F3, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
     // VCVTPH2UDQ xmm1{k1}{z}, xmm2/m64/m16bcst.
-    { EVEX | 5, 0x79, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 8, 2, 0 },
+    { EVEX | 5, 0x79, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 8, 2, 0 },
     // VCVTPH2UQQ xmm1{k1}{z}, xmm2/m32/m16bcst.
-    { EVEX | 5, 0x79, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 4, 2, 0 },
+    { EVEX | 5, 0x79, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 4, 2, 0 },
     // VCVTSH2USI r32, xmm1/m16{er}.
     { EVEX | 5, 0x79, P_F3, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
     // VCVTTPH2QQ xmm1{k1}{z}, xmm2/m32/m16bcst.
-    { EVEX | 5, 0x7a, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 4, 2, 0 },
+    { EVEX | 5, 0x7a, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 4, 2, 0 },
     // VCVTUDQ2PH xmm1{k1}{z}, xmm2/m128/m32bcst.
-    { EVEX | 5, 0x7a, P_F2, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 5, 0x7a, P_F2, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VCVTUQQ2PH xmm1{k1}{z}, xmm2/m128/m64bcst.
-    { EVEX | 5, 0x7a, P_F2, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 8, 0 },
+    { EVEX | 5, 0x7a, P_F2, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 8, 0 },
     // VCVTUSI2SH xmm1, xmm2, r32/m32{er}.
     { EVEX | 5, 0x7b, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_64, R, S_FIXED, 4, 0, 0 },
     // VCVTUSI2SH xmm1, xmm2, r64/m64{er}.
     { EVEX | 5, 0x7b, P_F3, R_ANY, 1, L_ANY, ND_ANY, NF_ANY, M_64, R, S_FIXED, 8, 0, 0 },
     // VCVTPH2QQ xmm1{k1}{z}, xmm2/m32/m16bcst.
-    { EVEX | 5, 0x7b, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 4, 2, 0 },
+    { EVEX | 5, 0x7b, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 4, 2, 0 },
     // VCVTUSI2SH xmm1, xmm2, r32/m32{er}.
     { EVEX | 5, 0x7b, P_F3, R_ANY, W_ANY, L_ANY, ND_ANY, NF_ANY, M_OTHER, R, S_FIXED, 4, 0, 0 },
     // VCVTTPH2UW xmm1{k1}{z}, xmm2/m128/m16bcst.
-    { EVEX | 5, 0x7c, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 5, 0x7c, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VCVTTPH2W xmm1{k1}{z}, xmm2/m128/m16bcst.
-    { EVEX | 5, 0x7c, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 5, 0x7c, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VCVTPH2UW xmm1{k1}{z}, xmm2/m128/m16bcst.
-    { EVEX | 5, 0x7d, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 5, 0x7d, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VCVTPH2W xmm1{k1}{z}, xmm2/m128/m16bcst.
-    { EVEX | 5, 0x7d, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 5, 0x7d, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VCVTUW2PH xmm1{k1}{z}, xmm2/m128/m16bcst.
-    { EVEX | 5, 0x7d, P_F2, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 5, 0x7d, P_F2, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VCVTW2PH xmm1{k1}{z}, xmm2/m128/m16bcst.
-    { EVEX | 5, 0x7d, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 5, 0x7d, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VMOVW reg/m16, xmm1.
     { EVEX | 5, 0x7e, P_66, R_ANY, W_ANY, 0, ND_ANY, NF_ANY, M_ALL, W, S_FIXED, 2, 0, 0 },
     // VCVTPH2PSX xmm1{k1}{z}, xmm2/m64/m16bcst.
-    { EVEX | 6, 0x13, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 8, 2, 0 },
+    { EVEX | 6, 0x13, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 8, 2, 0 },
     // VCVTSH2SS xmm1{k1}{z}, xmm2, xmm3/m16{sae}.
-    { EVEX | 6, 0x13, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 6, 0x13, P_NONE, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VSCALEFPH xmm1{k1}{z}, xmm2, xmm3/m128/m16bcst.
-    { EVEX | 6, 0x2c, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 6, 0x2c, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VSCALEFSH xmm1{k1}{z}, xmm2, xmm3/m16{er}.
-    { EVEX | 6, 0x2d, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 6, 0x2d, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VGETEXPPH xmm1{k1}{z}, xmm2/m128/m16bcst.
-    { EVEX | 6, 0x42, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 6, 0x42, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VGETEXPSH xmm1{k1}{z}, xmm2, xmm3/m16{sae}.
-    { EVEX | 6, 0x43, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 6, 0x43, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VRCPPH xmm1{k1}{z}, xmm2/m128/m16bcst.
-    { EVEX | 6, 0x4c, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 6, 0x4c, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VRCPSH xmm1{k1}{z}, xmm2, xmm3/m16.
-    { EVEX | 6, 0x4d, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 6, 0x4d, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VRSQRTPH xmm1{k1}{z}, xmm2/m128/m16bcst.
-    { EVEX | 6, 0x4e, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 6, 0x4e, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VRSQRTSH xmm1{k1}{z}, xmm2, xmm3/m16.
-    { EVEX | 6, 0x4f, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 6, 0x4f, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VFCMADDCPH xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 6, 0x56, P_F2, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 6, 0x56, P_F2, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VFMADDCPH xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 6, 0x56, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 6, 0x56, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VFCMADDCSH xmm1{k1}{z}, xmm2, xmm3/m32{er}.
-    { EVEX | 6, 0x57, P_F2, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 6, 0x57, P_F2, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VFMADDCSH xmm1{k1}{z}, xmm2, xmm3/m32{er}.
-    { EVEX | 6, 0x57, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 6, 0x57, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VFMADDSUB132PH xmm1{k1}{z}, xmm2, xmm3/m128/m16bcst.
-    { EVEX | 6, 0x96, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 6, 0x96, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VFMSUBADD132PH xmm1{k1}{z}, xmm2, xmm3/m128/m16bcst.
-    { EVEX | 6, 0x97, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 6, 0x97, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VFMADD132PH xmm1{k1}{z}, xmm2, xmm3/m128/m16bcst.
-    { EVEX | 6, 0x98, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 6, 0x98, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VFMADD132SH xmm1{k1}{z}, xmm2, xmm3/m16{er}.
-    { EVEX | 6, 0x99, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 6, 0x99, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VFMSUB132PH xmm1{k1}{z}, xmm2, xmm3/m128/m16bcst.
-    { EVEX | 6, 0x9a, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 6, 0x9a, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VFMSUB132SH xmm1{k1}{z}, xmm2, xmm3/m16{er}.
-    { EVEX | 6, 0x9b, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 6, 0x9b, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VFNMADD132PH xmm1{k1}{z}, xmm2, xmm3/m128/m16bcst.
-    { EVEX | 6, 0x9c, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 6, 0x9c, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VFNMADD132SH xmm1{k1}{z}, xmm2, xmm3/m16{er}.
-    { EVEX | 6, 0x9d, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 6, 0x9d, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VFNMSUB132PH xmm1{k1}{z}, xmm2, xmm3/m128/m16bcst.
-    { EVEX | 6, 0x9e, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 6, 0x9e, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VFNMSUB132SH xmm1{k1}{z}, xmm2, xmm3/m16{er}.
-    { EVEX | 6, 0x9f, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 6, 0x9f, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VFMADDSUB213PH xmm1{k1}{z}, xmm2, xmm3/m128/m16bcst.
-    { EVEX | 6, 0xa6, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 6, 0xa6, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VFMSUBADD213PH xmm1{k1}{z}, xmm2, xmm3/m128/m16bcst.
-    { EVEX | 6, 0xa7, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 6, 0xa7, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VFMADD213PH xmm1{k1}{z}, xmm2, xmm3/m128/m16bcst.
-    { EVEX | 6, 0xa8, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 6, 0xa8, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VFMADD213SH xmm1{k1}{z}, xmm2, xmm3/m16{er}.
-    { EVEX | 6, 0xa9, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 6, 0xa9, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VFMSUB213PH xmm1{k1}{z}, xmm2, xmm3/m128/m16bcst.
-    { EVEX | 6, 0xaa, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 6, 0xaa, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VFMSUB213SH xmm1{k1}{z}, xmm2, xmm3/m16{er}.
-    { EVEX | 6, 0xab, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 6, 0xab, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VFNMADD213PH xmm1{k1}{z}, xmm2, xmm3/m128/m16bcst.
-    { EVEX | 6, 0xac, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 6, 0xac, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VFNMADD213SH xmm1{k1}{z}, xmm2, xmm3/m16{er}.
-    { EVEX | 6, 0xad, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 6, 0xad, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VFNMSUB213PH xmm1{k1}{z}, xmm2, xmm3/m128/m16bcst.
-    { EVEX | 6, 0xae, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 6, 0xae, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VFNMSUB213SH xmm1{k1}{z}, xmm2, xmm3/m16{er}.
-    { EVEX | 6, 0xaf, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 6, 0xaf, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VFMADDSUB231PH xmm1{k1}{z}, xmm2, xmm3/m128/m16bcst.
-    { EVEX | 6, 0xb6, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 6, 0xb6, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VFMSUBADD231PH xmm1{k1}{z}, xmm2, xmm3/m128/m16bcst.
-    { EVEX | 6, 0xb7, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 6, 0xb7, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VFMADD231PH xmm1{k1}{z}, xmm2, xmm3/m128/m16bcst.
-    { EVEX | 6, 0xb8, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 6, 0xb8, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VFMADD231SH xmm1{k1}{z}, xmm2, xmm3/m16{er}.
-    { EVEX | 6, 0xb9, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 6, 0xb9, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VFMSUB231PH xmm1{k1}{z}, xmm2, xmm3/m128/m16bcst.
-    { EVEX | 6, 0xba, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 6, 0xba, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VFMSUB231SH xmm1{k1}{z}, xmm2, xmm3/m16{er}.
-    { EVEX | 6, 0xbb, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 6, 0xbb, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VFNMADD231PH xmm1{k1}{z}, xmm2, xmm3/m128/m16bcst.
-    { EVEX | 6, 0xbc, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 6, 0xbc, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VFNMADD231SH xmm1{k1}{z}, xmm2, xmm3/m16{er}.
-    { EVEX | 6, 0xbd, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 6, 0xbd, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VFNMSUB231PH xmm1{k1}{z}, xmm2, xmm3/m128/m16bcst.
-    { EVEX | 6, 0xbe, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 2, 0 },
+    { EVEX | 6, 0xbe, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 2, 0 },
     // VFNMSUB231SH xmm1{k1}{z}, xmm2, xmm3/m16{er}.
-    { EVEX | 6, 0xbf, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 2, 0, 0 },
+    { EVEX | 6, 0xbf, P_66, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 2, 0, 0 },
     // VFCMULCPH xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 6, 0xd6, P_F2, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 6, 0xd6, P_F2, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VFMULCPH xmm1{k1}{z}, xmm2, xmm3/m128/m32bcst.
-    { EVEX | 6, 0xd6, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_VECTOR, 16, 4, 0 },
+    { EVEX | 6, 0xd6, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_VECTOR, 16, 4, 0 },
     // VFCMULCSH xmm1{k1}{z}, xmm2, xmm3/m32{er}.
-    { EVEX | 6, 0xd7, P_F2, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 6, 0xd7, P_F2, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VFMULCSH xmm1{k1}{z}, xmm2, xmm3/m32{er}.
-    { EVEX | 6, 0xd7, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 4, 0, 0 },
+    { EVEX | 6, 0xd7, P_F3, R_ANY, 0, L_ANY, ND_ANY, NF_ANY, M_ALL, RM, S_FIXED, 4, 0, 0 },
     // VPMACSSWW xmm1, xmm2, xmm3/m128, xmm4.
     { XOP | 8, 0x85, P_NONE, R_ANY, 0, 0, ND_ANY, NF_ANY, M_ALL, R, S_FIXED, 16, 0, 0 },
     // VPMACSSWD xmm1, xmm2, xmm3/m128, xmm4.
