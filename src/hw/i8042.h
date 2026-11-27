@@ -113,5 +113,14 @@ void i8042_send(bool aux, uint8_t byte);
 bool i8042_send_more(void);
 // Takes a byte from a device, if one waits.
 bool i8042_receive(bool *aux, uint8_t *byte);
+// Before S3, leaves the controller for the firmware as Linux 7.3's
+// i8042_controller_reset() does: its ports off, its self-test run, and the
+// firmware's command byte back. Anything queued is dropped.
+void i8042_suspend(void);
+// After S3, or an attempt at it that failed, sets the controller up again as
+// Linux 7.3's i8042_controller_resume() does, as the firmware may have reset
+// it: self-tested where the machine slept, its command byte written with its
+// ports off, then each port on again as before.
+void i8042_resume(bool slept);
 
 #endif

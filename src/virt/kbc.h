@@ -36,4 +36,9 @@ void kbc_pointer(int32_t dx, int32_t dy, int32_t wheel, uint32_t buttons);
 // boot keyboard's output report.
 uint8_t kbc_leds(void);
 
+// The chipset's controller before S3 and after it, or after an attempt at it
+// that failed, as i8042_suspend() and i8042_resume() have it.
+void kbc_suspend(void);
+void kbc_resume(bool slept);
+
 #endif

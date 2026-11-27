@@ -1138,6 +1138,18 @@ static void real_poll_fired(void *ctx) {
     hv_timer_set(&real_poll, rdtsc() + wait);
 }
 
+void kbc_suspend(void) {
+    spinlock_acquire(&lock);
+    i8042_suspend();
+    spinlock_release(&lock);
+}
+
+void kbc_resume(bool slept) {
+    spinlock_acquire(&lock);
+    i8042_resume(slept);
+    spinlock_release(&lock);
+}
+
 void kbc_init(void) {
     ram[0] = I8042_CCB_KBD_INTERRUPT | I8042_CCB_SYSTEM | I8042_CCB_TRANSLATE;
     i8042_init((ram[0] & I8042_CCB_TRANSLATE) != 0);

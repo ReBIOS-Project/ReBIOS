@@ -40,6 +40,7 @@
 #include <virt/hpet.h>
 #include <virt/irq.h>
 #include <virt/isa_dma.h>
+#include <virt/kbc.h>
 #include <virt/pci_virt.h>
 #include <virt/pit.h>
 #include <virt/rtc.h>
@@ -214,6 +215,7 @@ static void enter(struct vcpu *v) {
     printf("The guest puts the machine to sleep (S3)\n");
     vacpi_sleep_arm();
     usb_suspend();
+    kbc_suspend();
     dma_suspend();
     uintptr_t vector = smp_trampoline_wake(woken, wake_stack, WAKE_STACK_SIZE);
     uacpi_status status = uacpi_set_waking_vector(vector, 0);
@@ -256,6 +258,7 @@ static void enter(struct vcpu *v) {
         uacpi_prepare_for_wake_from_sleep_state(UACPI_SLEEP_STATE_S3);
         uacpi_wake_from_sleep_state(UACPI_SLEEP_STATE_S3);
     }
+    kbc_resume(slept);
     // Before the others start again, which would otherwise stop once more.
     atomic_store_explicit(&parked, 0, memory_order_relaxed);
     for (size_t i = 0; i < smp_cpu_count(); i++) {
