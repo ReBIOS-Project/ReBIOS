@@ -1,3 +1,191 @@
+2026-11-28  Mintsuki  <mintsuki@protonmail.com>
+
+    *** Release 0.14.0 ***
+
+    Noteworthy changes compared to the previous release, 0.13.0:
+
+    New features:
+        - Let the OS use a device's SR-IOV VFs: ReBIOS sizes the VF BARs,
+          gives those the firmware left unassigned room for all the VFs,
+          places them for the OS as firmware with SR-IOV support does, and
+          makes each VF the OS enables a function of its own, its slices of
+          the VF BARs mapped and its MSI and MSI-X handled as any function's.
+          A reset of the physical function takes its VFs away, and the VFs'
+          BARs resize through the VF Resizable BAR capability, as Linux's xe
+          resizes them on Intel's discrete GPUs, within the room the host
+          has. Where the OS enabled VFs, their BARs reached the host at the
+          OS's addresses, which could land on other devices.
+        - Let the OS resize a Resizable BAR, as Linux's amdgpu, xe, and i915
+          do, up to the size the firmware gave it, the capability offering
+          the OS only the sizes the host has room for: ReBIOS dropped every
+          resize, while the OS went on as if it had taken.
+        - Carry the OS's arguments to the firmware's ACPI methods and their
+          results whole: strings and buffers of up to 64 KiB both ways, such
+          as those of Dell's WMI interface, and package arguments with
+          strings and nested packages in them, where arguments were cut to
+          512 bytes and results to 4 KiB without a word. A call that still
+          cannot be carried whole is refused, which the log says. The ACPI
+          mailbox takes 136 KiB of the OS's memory, where it took 8 KiB.
+        - Keep the OS's CMOS RAM, both banks, through restarts and power
+          offs, as a PC's battery keeps it, in the EFI variable ReBIOSCmos,
+          written before a reset, a power off, or S3 only where the OS
+          changed it; at each start, as a BIOS's POST does, the shutdown
+          status is cleared and the equipment byte, the memory sizes, and
+          the checksum are set again.
+        - Stop drawing the emulated VGA for the rest of the boot once the
+          OS's native driver takes the GPU, at its first access to the
+          display controller's BARs, as found as Linux finds the device of
+          the firmware's framebuffer: the emulated VGA kept drawing into the
+          framebuffer, memory that the driver may use for something else.
+          While the watch waits, the emulated VGA's scrolls and mode sets
+          are 1 to 3 percent slower, a cost not yet found.
+        - Count the time the machine sleeps in S3 in the emulated RTC, by
+          the firmware's Time and Alarm Device or else its GetTime(), as a
+          PC's RTC counts it, where the OS woke as far behind as it slept.
+        - Find the mouse port of the machine's 8042, wait for a slow
+          controller, and set the controller up again after S3, as Linux's
+          i8042 driver does, its FORCENORESTORE quirk boards left alone: a
+          working PS/2 mouse or touchpad behind some chipsets got no relay, a
+          slow controller was taken for none, and the controller could lose
+          the keyboard's translation, its interrupts, or a port across S3.
+        - Give unassigned BARs room as Linux finds it in the firmware's
+          memory map, as for an Intel laptop's I2C touchpad controller, and
+          card ROMs that the firmware left at no address Linux would claim
+          an address of their own, so that the OS reads a card's ROM through
+          its BAR, where those reads reached the machine's flash.
+
+    Bug fixes:
+        - Move the framebuffer aperture of an AMD card whose video BIOS runs
+          below 4 GiB where the firmware put it above, so that the video BIOS
+          and 32-bit programs reach it, and write a moved bridge window's
+          upper limit first, as Linux does; Barcelo APUs run their own Video
+          BIOS again, as their black screens came from that aperture.
+        - Map a BAR or ROM that the host has nowhere to nothing for the OS,
+          where ReBIOS mapped it onto the host's memory from address 0.
+        - Stop letting a V86 task make the legacy BIOS's hypercalls, which
+          are now writes to port B2h, checked against the task's I/O
+          permissions as a write that raises an SMI there is on a PC:
+          a V86 task could run code of its own at CPL 0, power the machine
+          off, or have USB disks read into any memory. VMCALL and VMMCALL
+          raise #UD, as on a PC, and the AML rings the ACPI mailbox through
+          port B2h too, its trapped page gone from the memory map.
+        - Fix nested VMX: keep the OS's current VMCS in a copy of its own,
+          as KVM does, so that writes to its region while the nested guest
+          runs no longer reach ReBIOS; hold the nested guest's CR4 to the
+          fixed bits the OS was given; leave IA32_PAT and IA32_EFER as the
+          nested guest had them at an exit that loads neither; shadow the
+          addresses of an EPT exit that ReBIOS raises; keep a shadow posted
+          interrupt descriptor that an entry takes while it waits to be
+          freed; and let the machine sleep while a nested guest waits in the
+          shutdown or wait-for-SIPI state.
+        - Fix nested SVM: flush the nested guest's translations where its
+          nested page tables come to map large pages over smaller ones and
+          where a VMRUN without nested paging asks for a flush, give up a
+          nested guest's AVIC table at an INIT, and leave a nested guest at
+          S3, where the OS's VMCB and its guest's became one page.
+        - Handle an INIT that comes while ReBIOS handles an exit, steps an
+          instruction, or pauses the other processors, as the processor
+          handles it at an instruction boundary, where the machine could
+          stop, hang, or deliver a stale exception, and have the events for
+          a nested guest's hypervisor wait for the end of an instruction
+          ReBIOS steps; start a processor waiting for a start-up IPI when it
+          comes; start the boot processor again at the reset vector at an
+          INIT, so that the legacy BIOS resumes as the CMOS shutdown byte
+          asks, as software returning from 286 protected mode needs; and take
+          each processor's APIC ID from its local APIC, as Linux does, where
+          the boot processor could send itself an INIT.
+        - Fix the emulated VGA: banked VBE drawing shows at once, where it
+          showed about once a second; going back to a VGA mode leaves none
+          of the VBE picture; small changes show while the OS's processors
+          run; a copy to the screen from a page a run had not touched lands
+          where it should; and the runs after an access to the VGA keep the
+          pages they look up, end interrupt shadows with their instruction,
+          and give a wrapping access its page fault, where the machine could
+          stop.
+        - Fix the emulated video BIOS: INT 10h AH=08h reads characters back
+          in graphics modes, and AH=0Bh sets the CGA colour select as
+          SeaBIOS's video BIOS does; a call from V86 or protected mode no
+          longer hangs where an interrupt comes as the BIOS's code gets its
+          words.
+        - Emulate the VGA by default on AMD's Krackan Point integrated
+          graphics (Radeon 840M and 860M), as on the other integrated
+          graphics from 2018 on.
+        - Fix the emulated RTC: a date written one register at a time reads
+          back as written, its interrupt reaches the I/O APIC once per rise,
+          and it interrupts nothing while the HPET has IRQ 8.
+        - Fix S3: the firmware's AML that ReBIOS runs in the background
+          finishes before _PTS, its GPEs disabled, as Linux does; a failing
+          _PTS or \_S3_ leaves the machine awake, where ReBIOS panicked; the
+          RTC's alarm wakes the machine from every sleep the OS armed it for,
+          and the FADT no longer says its wake status is not in PM1 where
+          ReBIOS gives it there; I/O APIC entries that ReBIOS masked stay
+          masked; a VT-d unit in front of Intel graphics keeps translating, as
+          Linux keeps it; BIOS disk calls of SeaBIOS's 32-bit drivers, such as
+          for AHCI, NVMe, and USB disks, work from V86 mode after S3 and on
+          every processor; and on firmware with no free page below 1 MiB, the
+          start trampoline takes one that boot services used, as Linux does,
+          where the machine never woke.
+        - Fix the IOMMUs: an AMD-Vi event log that overflows starts again;
+          interrupts are remapped only where the IVRS gives the southbridge's
+          I/O APIC as Linux requires, or where the DMAR's INTR_REMAP flag says
+          the platform remaps; a DMAR with a wrong checksum is taken, as
+          Linux takes it; and VT-d units that do not snoop their tables get
+          only the changed entries written back, where every processor's
+          whole cache was.
+        - Fix the embedded controller: each transaction runs alone and holds
+          the ACPI Global Lock where _GLK asks for it, and _REG methods run
+          where Linux runs them.
+        - Give the OS MSR_PLATFORM_INFO on every Intel processor whose own
+          reads it, and the VERW_CLEAR bit where AMD's APM now has it; let
+          the OS set EFER.INTWB where CPUID shows interruptible WBINVD; raise
+          #GP at a change of EFER.LME while paging is on under SVM; follow
+          the Host Only and Guest Only bits of AMD's counters, and version
+          6's aliases of Intel's event selects; and keep the local APIC
+          timer's mode and divisor as written under APIC-register
+          virtualization and AVIC.
+        - Fix serial and parallel ports whose interrupt the firmware gives
+          level triggered or active low: the line is sensed so, and the MADT
+          and MP table say so; and leave a serial port that ReBIOS cannot
+          log to to the OS.
+        - Ignore an HPET table at address 0 or 0xfed0000000000000, as Linux
+          does, where ReBIOS used host memory at 0 as an HPET or stopped.
+        - Load Intel microcode updates of up to 4 MiB, as Granite Rapids',
+          Sierra Forest's, and Clearwater Forest's of 1.4 to 1.6 MiB are,
+          and check an update's sizes as Linux does, saying why one is
+          refused.
+        - Fix races between processors: in ReBIOS's IPIs in xAPIC mode, in
+          a trapped access that a BAR move overtakes, in a masked store to
+          emulated memory, in an instruction whose bytes another processor
+          takes away, in microcode loads, which held a copy per processor,
+          in the ACPI mailbox, in a port's _SRS template, in a USB
+          controller's configuration hook, and in saves of the log.
+        - Keep a level-triggered line that leaves the 8259's path while
+          asserted from requesting an idle device's IRQ over and over; keep
+          USB keyboards and mice off an 8042 port whose device is real; take
+          a host bridge's bus from its _CRS first, as Linux does; give the OS
+          only the device memory block it needs below the I/O APICs; refuse
+          unaligned accesses to an RTL8168's MSI-X table through its ERI
+          window, which overran ReBIOS's stack; stop an AVX-512 masked load
+          from emulated memory rather than read every element; and take a
+          GPE block's wide accesses a byte at a time.
+
+    Miscellaneous:
+        - Check the toolchain through gmake-toolchain-helper, as the latest
+          PicoEFI C template does, and update freestanding-lgrt and Tendril.
+        - Drop the avic setting: AVIC runs where it ran by default, on Zen 4
+          and later with x2AVIC.
+        - Refuse a processor without the VMX or SVM ReBIOS needs before it
+          leaves boot services, with the reason on the screen, and say why
+          an IOMMU the firmware reports cannot be used.
+        - Grow the core's heap with the processors, so that machines with
+          about 700 processors or more start.
+        - Take the firmware's XSDT whatever its checksum, as Linux does.
+        - Time the framebuffer at start without reading it, and stop a GOP
+          whose device path leads nowhere before ExitBootServices().
+        - With save_log = efi, have the firmware collect its variable store's
+          garbage only where the last save would leave less than 5120 bytes
+          free, as Linux does.
+
 2026-11-25  Mintsuki  <mintsuki@protonmail.com>
 
     *** Release 0.13.0 ***
