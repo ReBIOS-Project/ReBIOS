@@ -48,7 +48,8 @@
 #define AMD_PATCH_MAX ((size_t)32 << 10)
 
 // One load at a time, as threads that share a core share its update (SDM
-// 325462-093 Vol. 3A, 12.11.6.3).
+// 325462-093 Vol. 3A, 12.11.6.3), its copy made under the lock, so that only
+// one is ever held.
 static struct spinlock lock;
 
 static void intel_load(struct vcpu *v, uint64_t data) {
@@ -63,18 +64,19 @@ static void intel_load(struct vcpu *v, uint64_t data) {
     if (total < INTEL_DEFAULT_TOTAL || total > INTEL_UPDATE_MAX || total % INTEL_GRANULE != 0) {
         return;
     }
+    spinlock_acquire(&lock);
     // kmalloc()'s alignment keeps the data 16-byte aligned, as the trigger
     // needs.
     uint8_t *copy = kmalloc(total);
     if (guest_mem_linear_read(v, data - INTEL_HEADER, copy, total, false)) {
-        spinlock_acquire(&lock);
         wrmsr_safe(MSR_IA32_BIOS_UPDT_TRIG, (uintptr_t)copy + INTEL_HEADER);
-        spinlock_release(&lock);
     }
     kfree(copy);
+    spinlock_release(&lock);
 }
 
 static void amd_load(struct vcpu *v, uint64_t patch) {
+    spinlock_acquire(&lock);
     uint8_t *copy = kmalloc(AMD_PATCH_MAX);
     size_t size = 0;
     while (size < AMD_PATCH_MAX) {
@@ -88,7 +90,6 @@ static void amd_load(struct vcpu *v, uint64_t patch) {
         size += chunk;
     }
     if (size != 0) {
-        spinlock_acquire(&lock);
         wrmsr_safe(MSR_AMD_PATCH_LOADER, (uintptr_t)copy);
         // Family 17h then drops the patch's translations, as Linux 7.3's
         // __apply_microcode_amd() does.
@@ -98,9 +99,9 @@ static void amd_load(struct vcpu *v, uint64_t patch) {
                 invlpg(page);
             }
         }
-        spinlock_release(&lock);
     }
     kfree(copy);
+    spinlock_release(&lock);
 }
 
 void microcode_load(struct vcpu *v, uint64_t address) {
