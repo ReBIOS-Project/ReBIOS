@@ -3829,6 +3829,7 @@ void vga_card_place(void) {
         return;
     }
     uintptr_t was = f->bars[AMD_APERTURE_BAR].base;
+    uintptr_t rom_was = f->rom.base;
     struct handoff_framebuffer *fb = &h->video.framebuffer;
     bool fb_inside = fb->present && fb->base >= was
                   && fb->base - was < f->bars[AMD_APERTURE_BAR].size;
@@ -3855,6 +3856,13 @@ void vga_card_place(void) {
             "PCI " PCI_CFG_ADDR_FMT " BAR0: moved from %#llx to %#llx, as high below 4 GiB as "
             "the host has room\n",
             PCI_CFG_ADDR_ARGS(f->addr), (unsigned long long)was, (unsigned long long)now
+        );
+    }
+    if (f->rom.base != rom_was) {
+        printf(
+            "PCI " PCI_CFG_ADDR_FMT " ROM: moved with BAR0 from %#llx to %#llx\n",
+            PCI_CFG_ADDR_ARGS(f->addr), (unsigned long long)rom_was,
+            (unsigned long long)f->rom.base
         );
     }
     printf(

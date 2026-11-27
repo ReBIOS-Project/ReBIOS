@@ -29,6 +29,7 @@
 #include <hw/smbios.h>
 #include <lib/heap.h>
 #include <lib/log.h>
+#include <lib/printf.h>
 #include <lib/range.h>
 #include <lib/util.h>
 #include <sys/mm.h>
@@ -39,6 +40,12 @@
 // own, so ReBIOS gives these their host addresses in the guest's place.
 
 #define BAR_MEMORY_ADDRESS ((uint32_t)0xfffffff0)
+// The group bit and member index of a function's expansion ROM among its BARs.
+#define ROM_MEMBER 6
+#define MEMBERS_MAX 7
+
+// Why a BAR at 0 gets an address.
+#define UNASSIGNED "left unassigned by the firmware"
 
 // The firmware's memory map as Linux 7.3 makes an E820 table of it
 // (drivers/firmware/efi/libstub/x86-stub.c, setup_e820()): the descriptors of
@@ -302,6 +309,12 @@ static uint64_t span_of(const struct pci_enum_bar *bar) {
     return bar->size > PAGE_SIZE ? bar->size : PAGE_SIZE;
 }
 
+// A member of a group of f's that moves together: one of its BARs by index,
+// or, as ROM_MEMBER, its expansion ROM.
+static const struct pci_enum_bar *member_of(const struct pci_enum_function *f, size_t index) {
+    return index == ROM_MEMBER ? &f->rom : &f->bars[index];
+}
+
 static bool assigned(const struct pci_enum_bar *bar) {
     bool memory = bar->kind == PCI_ENUM_BAR_MEM32 || bar->kind == PCI_ENUM_BAR_MEM64;
     return memory && bar->size != 0 && bar->base != 0;
@@ -332,7 +345,8 @@ static void room_find(
                 take(room, bar->base, bar->size);
             }
         }
-        if (g->rom.size != 0 && g->rom.base != 0) {
+        if (g->rom.size != 0 && g->rom.base != 0
+         && !(g == f && (moving & (uint32_t)1 << ROM_MEMBER) != 0)) {
             take(room, g->rom.base, g->rom.size);
         }
         for (size_t b = 0; b < PCI_SRIOV_NUM_BARS; b++) {
@@ -464,7 +478,9 @@ static bool place(
 }
 
 // Writes the address to the BAR with the function's memory decoding off, so
-// that no half-written address decodes, and reads it back.
+// that no half-written address decodes, and reads it back. An expansion ROM
+// BAR keeps its enable bit, its bits 10:1 being reserved (PCI Local Bus
+// Specification 3.0, 6.2.5.2).
 static bool program(
     const struct pci_enum_function *f,
     const struct pci_enum_bar *bar,
@@ -476,12 +492,14 @@ static bool program(
         pci_cfg_write(f->addr, PCI_COMMAND, 2, command & ~PCI_COMMAND_MEMORY);
     }
     bool wide = bar->kind == PCI_ENUM_BAR_MEM64;
-    uint32_t type = pci_cfg_read(f->addr, bar->reg, 4) & ~BAR_MEMORY_ADDRESS;
-    pci_cfg_write(f->addr, bar->reg, 4, ((uint32_t)at & BAR_MEMORY_ADDRESS) | type);
+    uint32_t address = bar == &f->rom ? PCI_ROM_ADDRESS_MASK : BAR_MEMORY_ADDRESS;
+    uint32_t kept = bar == &f->rom ? PCI_ROM_ADDRESS_ENABLE : ~BAR_MEMORY_ADDRESS;
+    uint32_t type = pci_cfg_read(f->addr, bar->reg, 4) & kept;
+    pci_cfg_write(f->addr, bar->reg, 4, ((uint32_t)at & address) | type);
     if (wide) {
         pci_cfg_write(f->addr, bar->reg + 4, 4, (uint32_t)((uint64_t)at >> 32));
     }
-    uint64_t read = pci_cfg_read(f->addr, bar->reg, 4) & BAR_MEMORY_ADDRESS;
+    uint64_t read = pci_cfg_read(f->addr, bar->reg, 4) & address;
     if (wide) {
         read |= (uint64_t)pci_cfg_read(f->addr, bar->reg + 4, 4) << 32;
     }
@@ -498,37 +516,129 @@ static bool program(
     return stuck;
 }
 
-// Gives the BAR, of size bytes at align, an address in a window of its bus.
+// Gives the BAR, of size bytes at align, an address in a window of its bus
+// that suits a BAR of kind's kind and prefetchability, saying why it needed
+// one.
 static void assign(
     struct pci_enum_function *f,
     struct pci_enum_bar *bar,
+    const struct pci_enum_bar *kind,
     const char *name,
-    size_t b,
+    const char *why,
     uint64_t size,
     uint64_t align
 ) {
     uintptr_t at;
-    if (!place(f, bar, size, align, &at)) {
+    if (!place(f, kind, size, align, &at)) {
         printf(
-            "PCI " PCI_CFG_ADDR_FMT " %s%zu: left unassigned by the firmware, and no window of "
-            "its bus has room for its 0x%llx bytes\n",
-            PCI_CFG_ADDR_ARGS(f->addr), name, b, (unsigned long long)size
+            "PCI " PCI_CFG_ADDR_FMT " %s: %s, and no window of its bus has room for its 0x%llx "
+            "bytes\n",
+            PCI_CFG_ADDR_ARGS(f->addr), name, why, (unsigned long long)size
         );
         return;
     }
     if (!program(f, bar, at)) {
         printf(
-            "PCI " PCI_CFG_ADDR_FMT " %s%zu: left unassigned by the firmware, and keeps no "
-            "address written to it\n",
-            PCI_CFG_ADDR_ARGS(f->addr), name, b
+            "PCI " PCI_CFG_ADDR_FMT " %s: %s, and keeps no address written to it\n",
+            PCI_CFG_ADDR_ARGS(f->addr), name, why
         );
         return;
     }
     bar->base = at;
     printf(
-        "PCI " PCI_CFG_ADDR_FMT " %s%zu: left unassigned by the firmware, now at 0x%llx+0x%llx\n",
-        PCI_CFG_ADDR_ARGS(f->addr), name, b, (unsigned long long)at, (unsigned long long)size
+        "PCI " PCI_CFG_ADDR_FMT " %s: %s, now at 0x%llx+0x%llx\n",
+        PCI_CFG_ADDR_ARGS(f->addr), name, why, (unsigned long long)at, (unsigned long long)size
     );
+}
+
+static bool overlaps(uint64_t base, uint64_t last, uint64_t other, uint64_t size) {
+    return size != 0 && other <= last && other + size - 1 >= base;
+}
+
+// Why the address the firmware left in the ROM of f, the function at index, is
+// not one that Linux 7.3 claims for it (arch/x86/pci/i386.c's
+// pcibios_allocate_dev_rom_resource()), NULL where it is: in a window of its
+// bus, prefetchable or not, as pci_find_parent_resource() takes either for a
+// ROM, and clear of every BAR, of the windows of the bridges not above f, and
+// of the ROMs before it. Without host bridges known, any window goes.
+static const char *rom_unclaimed(const struct pci_enum_function *f, size_t index) {
+    uint64_t base = f->rom.base;
+    uint64_t last = base + f->rom.size - 1;
+    const struct pci_enum_function *p = f->parent;
+    bool held = true;
+    if (p != NULL) {
+        held = p->header_type == PCI_HEADER_TYPE_BRIDGE
+            && ((p->mem_limit >= p->mem_base && base >= p->mem_base && last <= p->mem_limit)
+             || (p->pref_limit >= p->pref_base && base >= p->pref_base
+              && last <= p->pref_limit));
+    } else {
+        const struct pci_host_bridge *hb = host_bridge_of(f);
+        held = hb == NULL;
+        for (size_t w = 0; hb != NULL && w < hb->window_count; w++) {
+            held = held || (base >= hb->windows[w].base && last < hb->windows[w].end);
+        }
+    }
+    if (!held) {
+        return "outside the windows of its bus";
+    }
+    const char *over = "over another BAR, ROM, or bridge window";
+    const struct pci_enum_topology *t = pci_enum_topology();
+    for (size_t i = 0; i < t->function_count; i++) {
+        const struct pci_enum_function *g = &t->functions[i];
+        for (size_t b = 0; b < g->bar_count; b++) {
+            const struct pci_enum_bar *bar = &g->bars[b];
+            if (assigned(bar) && overlaps(base, last, bar->base, bar->size)) {
+                return over;
+            }
+        }
+        if (i < index && g->rom.base != 0 && overlaps(base, last, g->rom.base, g->rom.size)) {
+            return over;
+        }
+        for (size_t b = 0; b < PCI_SRIOV_NUM_BARS; b++) {
+            const struct pci_enum_bar *bar = &g->vf_bars[b];
+            if (bar->base != 0 && overlaps(base, last, bar->base, pci_enum_vf_span(g, b))) {
+                return over;
+            }
+        }
+        if (g->header_type != PCI_HEADER_TYPE_BRIDGE || above(g, f)) {
+            continue;
+        }
+        if ((g->mem_limit >= g->mem_base
+          && overlaps(base, last, g->mem_base, (uint64_t)g->mem_limit - g->mem_base + 1))
+         || (g->pref_limit >= g->pref_base
+          && overlaps(base, last, g->pref_base, g->pref_limit - g->pref_base + 1))) {
+            return over;
+        }
+    }
+    return NULL;
+}
+
+// Gives the ROM of f, the function at index, an address where the firmware
+// left it none that Linux 7.3 claims, as Linux then gives it one, with the ROM
+// taken as prefetchable as Linux takes it (drivers/pci/probe.c's
+// pci_read_bases()); else it has none.
+static void rom_assign(struct pci_enum_function *f, size_t index) {
+    struct pci_enum_bar *rom = &f->rom;
+    if (rom->kind != PCI_ENUM_BAR_MEM32 || rom->size == 0) {
+        return;
+    }
+    char why[96];
+    if (rom->base == 0) {
+        snprintf(why, sizeof(why), UNASSIGNED);
+    } else {
+        const char *unclaimed = rom_unclaimed(f, index);
+        if (unclaimed == NULL) {
+            return;
+        }
+        snprintf(
+            why, sizeof(why), "left by the firmware at 0x%llx, %s",
+            (unsigned long long)rom->base, unclaimed
+        );
+    }
+    rom->base = 0;
+    struct pci_enum_bar kind = *rom;
+    kind.prefetchable = true;
+    assign(f, rom, &kind, "ROM", why, rom->size, rom->size);
 }
 
 // A VF BAR spans its VFs' memory from its base, aligned as one VF's BAR is
@@ -544,16 +654,25 @@ void pci_assign_unassigned_bars(void) {
             struct pci_enum_bar *bar = &f->bars[b];
             bool memory = bar->kind == PCI_ENUM_BAR_MEM32 || bar->kind == PCI_ENUM_BAR_MEM64;
             if (memory && bar->size != 0 && bar->base == 0) {
-                assign(f, bar, "BAR", b, bar->size, bar->size);
+                char name[16];
+                snprintf(name, sizeof(name), "BAR%zu", b);
+                assign(f, bar, bar, name, UNASSIGNED, bar->size, bar->size);
             }
         }
         for (size_t b = 0; b < PCI_SRIOV_NUM_BARS; b++) {
             struct pci_enum_bar *bar = &f->vf_bars[b];
             uint64_t span = pci_enum_vf_span(f, b);
             if (span != 0 && bar->base == 0) {
-                assign(f, bar, "VF BAR", b, span, bar->size);
+                char name[16];
+                snprintf(name, sizeof(name), "VF BAR%zu", b);
+                assign(f, bar, bar, name, UNASSIGNED, span, bar->size);
             }
         }
+    }
+    // A ROM that is off is optional, as Linux 7.3 has it
+    // (pci_resource_is_optional()): its address comes after every BAR's.
+    for (size_t i = 0; i < t->function_count; i++) {
+        rom_assign(&t->functions[i], i);
     }
 }
 
@@ -603,10 +722,6 @@ static bool window_holding(
     return false;
 }
 
-static bool overlaps(uint64_t base, uint64_t last, uint64_t other, uint64_t size) {
-    return size != 0 && other <= last && other + size - 1 >= base;
-}
-
 // Whether a window of the bridge holds f's BARs that group has a bit for and
 // nothing else but the windows of the bridges between the bridge and f.
 static bool window_only(
@@ -638,7 +753,10 @@ static bool window_only(
                 return false;
             }
         }
-        if (g->rom.base != 0 && overlaps(base, last, g->rom.base, g->rom.size)) {
+        bool rom_member = g == f && (group & (uint32_t)1 << ROM_MEMBER) != 0;
+        bool rom_inside = g->rom.base >= base && g->rom.base + g->rom.size - 1 <= last;
+        if (g->rom.base != 0
+         && (rom_member ? !rom_inside : overlaps(base, last, g->rom.base, g->rom.size))) {
             return false;
         }
         for (size_t b = 0; b < PCI_SRIOV_NUM_BARS; b++) {
@@ -678,7 +796,7 @@ static bool lay_down(
     uint64_t granule = bridged ? PCI_MEMORY_GRANULE : PAGE_SIZE;
     uint64_t cursor = align_down(end, granule);
     for (size_t k = 0; k < count; k++) {
-        uint64_t span = span_of(&f->bars[order[k]]);
+        uint64_t span = span_of(member_of(f, order[k]));
         if (cursor < begin + span) {
             return false;
         }
@@ -686,7 +804,7 @@ static bool lay_down(
         cursor = at[k];
     }
     *low = align_down(cursor, granule);
-    *high = align_up(at[0] + span_of(&f->bars[order[0]]), granule);
+    *high = align_up(at[0] + span_of(member_of(f, order[0])), granule);
     return *low >= begin && *high <= end;
 }
 
@@ -736,15 +854,18 @@ static void bar_word_write(
     const struct pci_enum_bar *bar,
     uint64_t at
 ) {
-    uint32_t type = pci_cfg_read(f->addr, bar->reg, 4) & ~BAR_MEMORY_ADDRESS;
-    pci_cfg_write(f->addr, bar->reg, 4, ((uint32_t)at & BAR_MEMORY_ADDRESS) | type);
+    uint32_t address = bar == &f->rom ? PCI_ROM_ADDRESS_MASK : BAR_MEMORY_ADDRESS;
+    uint32_t kept = bar == &f->rom ? PCI_ROM_ADDRESS_ENABLE : ~BAR_MEMORY_ADDRESS;
+    uint32_t type = pci_cfg_read(f->addr, bar->reg, 4) & kept;
+    pci_cfg_write(f->addr, bar->reg, 4, ((uint32_t)at & address) | type);
     if (bar->kind == PCI_ENUM_BAR_MEM64) {
         pci_cfg_write(f->addr, bar->reg + 4, 4, (uint32_t)(at >> 32));
     }
 }
 
 static uint64_t bar_word_read(const struct pci_enum_function *f, const struct pci_enum_bar *bar) {
-    uint64_t at = pci_cfg_read(f->addr, bar->reg, 4) & BAR_MEMORY_ADDRESS;
+    uint32_t address = bar == &f->rom ? PCI_ROM_ADDRESS_MASK : BAR_MEMORY_ADDRESS;
+    uint64_t at = pci_cfg_read(f->addr, bar->reg, 4) & address;
     if (bar->kind == PCI_ENUM_BAR_MEM64) {
         at |= (uint64_t)pci_cfg_read(f->addr, bar->reg + 4, 4) << 32;
     }
@@ -767,7 +888,7 @@ static bool group_program(
     pci_cfg_write(f->addr, PCI_COMMAND, 2, command & ~PCI_COMMAND_MEMORY);
     bool took = true;
     for (size_t k = 0; k < count; k++) {
-        const struct pci_enum_bar *bar = &f->bars[order[k]];
+        const struct pci_enum_bar *bar = member_of(f, order[k]);
         bar_word_write(f, bar, at[k]);
         took = took && bar_word_read(f, bar) == at[k];
     }
@@ -779,7 +900,7 @@ static bool group_program(
     }
     if (!took) {
         for (size_t k = 0; k < count; k++) {
-            bar_word_write(f, &f->bars[order[k]], f->bars[order[k]].base);
+            bar_word_write(f, member_of(f, order[k]), member_of(f, order[k])->base);
         }
         depth = 0;
         for (struct pci_enum_function *p = f->parent; p != NULL; p = p->parent) {
@@ -796,8 +917,9 @@ static bool group_program(
     }
     // A Resizable BAR there has room for its size and no more.
     for (size_t k = 0; k < count; k++) {
-        f->bars[order[k]].base = at[k];
-        f->bars[order[k]].room = 0;
+        struct pci_enum_bar *bar = order[k] == ROM_MEMBER ? &f->rom : &f->bars[order[k]];
+        bar->base = at[k];
+        bar->room = 0;
     }
     depth = 0;
     for (struct pci_enum_function *p = f->parent; p != NULL; p = p->parent) {
@@ -844,6 +966,13 @@ bool pci_assign_top(struct pci_enum_function *f, size_t index, uintptr_t *base, 
             group |= (uint32_t)1 << b;
         }
     }
+    // Behind a bridge, f's expansion ROM in that window moves with them, such
+    // as one that ReBIOS gave an address there.
+    const struct pci_enum_bar *rom = &f->rom;
+    if (f->parent != NULL && rom->base != 0 && rom->size != 0 && rom->base >= w_base
+     && rom->base + rom->size - 1 <= w_last) {
+        group |= (uint32_t)1 << ROM_MEMBER;
+    }
 
     // The window of each bridge above f that holds what is below it.
     size_t kinds[CHAIN_MAX];
@@ -879,15 +1008,16 @@ bool pci_assign_top(struct pci_enum_function *f, size_t index, uintptr_t *base, 
     }
 
     // BAR index first, the others after it, largest first.
-    size_t order[6];
+    size_t order[MEMBERS_MAX];
     size_t count = 0;
     order[count++] = index;
-    for (size_t b = 0; b < f->bar_count && b < 6; b++) {
-        if (b == index || (group & (uint32_t)1 << b) == 0) {
+    for (size_t b = 0; b < MEMBERS_MAX; b++) {
+        bool none = b < ROM_MEMBER && b >= f->bar_count;
+        if (b == index || none || (group & (uint32_t)1 << b) == 0) {
             continue;
         }
         size_t k = count++;
-        while (k > 1 && f->bars[order[k - 1]].size < f->bars[b].size) {
+        while (k > 1 && member_of(f, order[k - 1])->size < member_of(f, b)->size) {
             order[k] = order[k - 1];
             k--;
         }
@@ -915,7 +1045,7 @@ bool pci_assign_top(struct pci_enum_function *f, size_t index, uintptr_t *base, 
         depth++;
     }
     room_reserve(&room);
-    uint64_t at[6];
+    uint64_t at[MEMBERS_MAX];
     uint64_t new_low = 0;
     uint64_t new_high = 0;
     bool found = false;

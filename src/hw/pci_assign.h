@@ -29,13 +29,14 @@ struct pci_enum_function;
 // topology. Needs pci_enum_scan() and acpi_init().
 void pci_assign_unassigned_bars(void);
 
-// Moves the BAR of f at index, with f's other BARs in the window of the bridge
-// above it that holds it (on a root bus, its other prefetchable BARs), and the
-// windows that hold them of the bridges above, which must hold nothing else,
-// as high below 4 GiB as the host has room, BAR index highest. Gives [*base,
-// *end), the range they take on f's root bus; where they stay put, as high as
-// they go already or with no room higher, where they are. False where a window
-// holds more or they are above 4 GiB with no room below.
+// Moves the BAR of f at index, with f's other BARs and its expansion ROM in
+// the window of the bridge above it that holds it (on a root bus, its other
+// prefetchable BARs), and the windows that hold them of the bridges above,
+// which must hold nothing else, as high below 4 GiB as the host has room, BAR
+// index highest. Gives [*base, *end), the range they take on f's root bus;
+// where they stay put, as high as they go already or with no room higher,
+// where they are. False where a window holds more or they are above 4 GiB with
+// no room below.
 bool pci_assign_top(struct pci_enum_function *f, size_t index, uintptr_t *base, uintptr_t *end);
 
 #endif
