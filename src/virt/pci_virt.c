@@ -2431,12 +2431,16 @@ void pci_virt_init(void) {
     printf("PCI: %u of the guest's BARs mapped onto the host's\n", mapped);
 }
 
+// Under the lock, as configuration accesses of other processors call the hook
+// with its context.
 void pci_virt_hook(struct pci_cfg_addr addr, const struct pci_virt_hook *hook, void *ctx) {
+    spinlock_acquire(&virt.lock);
     struct vfunction *vf = vfunction_find(addr);
     if (vf != NULL) {
         vf->hook_ctx = ctx;
         vf->hook = hook;
     }
+    spinlock_release(&virt.lock);
 }
 
 bool pci_virt_trap(
