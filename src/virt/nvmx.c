@@ -3019,6 +3019,8 @@ static void ipiv_enter(struct nvmx *n) {
     if ((info & PID_SN) == 0) {
         struct ipiv_slot *slot = slot_find(get12(n, VMCS_POSTED_INTR_DESC));
         if (slot != NULL && slot->live == NULL) {
+            // A slot in use is not one to free once its bits are posted.
+            slot->dying = false;
             slot->live = cpu;
             slot_notify(slot, cpu, VLAPIC_NESTED_POSTED_VECTOR);
             n->ipiv_live = slot;
