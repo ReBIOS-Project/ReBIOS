@@ -166,17 +166,17 @@ static uint8_t sampled_seconds;
 static uint64_t sampled_tsc;
 static bool sampled;
 
-// The emulated clock: seconds since 1970, counting from second_tsc unless
-// stopped, its registers, and the day of the week as far from the date's as
-// the guest set it.
-static int64_t seconds;
+// The emulated clock: its time and date registers, counting from second_tsc
+// unless stopped, each as the guest wrote it or the clock's last update left
+// it, as an MC146818 keeps them, its day of the week, 0 for Sunday, its own;
+// and its other registers.
+static struct civil clock;
 static uint64_t second_tsc;
 static uint8_t reg_a = A_DV_NORMAL;
 static uint8_t reg_b = B_24_HOUR;
 static uint8_t reg_c;
 static uint8_t date_alarm;
 static uint8_t alarms[3];
-static unsigned int weekday_offset;
 static uint64_t periodic_tsc;
 static struct hv_timer timer;
 
@@ -202,8 +202,12 @@ static void civil_from_days(int64_t z, int64_t *y, unsigned int *m, unsigned int
     *y = (int64_t)yoe + era * 400 + (*m <= 2);
 }
 
+static int64_t days_of(int64_t s) {
+    return s >= 0 ? s / SECONDS_PER_DAY : (s - SECONDS_PER_DAY + 1) / SECONDS_PER_DAY;
+}
+
 static struct civil civil_from_seconds(int64_t s) {
-    int64_t days = s >= 0 ? s / SECONDS_PER_DAY : (s - SECONDS_PER_DAY + 1) / SECONDS_PER_DAY;
+    int64_t days = days_of(s);
     int64_t in_day = s - days * SECONDS_PER_DAY;
     struct civil c;
     civil_from_days(days, &c.year, &c.month, &c.day);
@@ -218,6 +222,16 @@ static int64_t seconds_from_civil(const struct civil *c) {
     int64_t days = days_from_civil(c->year, c->month, c->day);
     return days * SECONDS_PER_DAY + (int64_t)c->hour * 3600 + (int64_t)c->minute * 60
          + c->second;
+}
+
+// Moves the clock on by n seconds, as its updates do: its date as a valid
+// one's, and its day of the week by the days that pass.
+static void clock_add(int64_t n) {
+    int64_t before = seconds_from_civil(&clock);
+    unsigned int weekday = clock.weekday;
+    clock = civil_from_seconds(before + n);
+    int64_t days = days_of(before + n) - days_of(before);
+    clock.weekday = (unsigned int)(((int64_t)weekday + days % 7 + 7) % 7);
 }
 
 // A register's value in the clock's data mode, and back, as an MC146818 keeps
@@ -257,15 +271,15 @@ static bool stopped(void) {
 }
 
 static bool alarm_matches(void) {
-    struct civil c = civil_from_seconds(seconds);
-    uint8_t now[] = { encode(c.second), encode(c.minute), encode_hours(c.hour) };
+    const struct civil *c = &clock;
+    uint8_t now[] = { encode(c->second), encode(c->minute), encode_hours(c->hour) };
     for (size_t i = 0; i < 3; i++) {
         if ((alarms[i] & ALARM_ANY) != ALARM_ANY && alarms[i] != now[i]) {
             return false;
         }
     }
     uint8_t day = date_alarm & D_DATE_ALARM;
-    return day == 0 || decode(day) == c.day;
+    return day == 0 || decode(day) == c->day;
 }
 
 static uint64_t periodic_period(void) {
@@ -301,13 +315,13 @@ static void advance(uint64_t now) {
         second_tsc += elapsed * hz;
         if (elapsed <= STEPS_MAX) {
             for (size_t i = 0; i < elapsed; i++) {
-                seconds++;
+                clock_add(1);
                 if (alarm_matches()) {
                     reg_c |= C_AF;
                 }
             }
         } else {
-            seconds += (int64_t)elapsed;
+            clock_add((int64_t)elapsed);
             if (alarm_matches()) {
                 reg_c |= C_AF;
             }
@@ -352,7 +366,7 @@ static void timer_fired(void *ctx) {
 static uint8_t clock_read(uint8_t reg) {
     uint64_t now = rdtsc();
     advance(now);
-    struct civil c = civil_from_seconds(seconds);
+    struct civil c = clock;
     switch (reg) {
         case REG_SECONDS: {
             return encode(c.second);
@@ -364,7 +378,7 @@ static uint8_t clock_read(uint8_t reg) {
             return encode_hours(c.hour);
         }
         case REG_DAY_OF_WEEK: {
-            return encode((c.weekday + weekday_offset) % 7 + 1);
+            return encode(c.weekday + 1);
         }
         case REG_DAY: {
             return encode(c.day);
@@ -411,8 +425,7 @@ static uint8_t clock_read(uint8_t reg) {
 static void clock_write(uint8_t reg, uint8_t value) {
     uint64_t now = rdtsc();
     advance(now);
-    struct civil c = civil_from_seconds(seconds);
-    unsigned int weekday = (c.weekday + weekday_offset) % 7;
+    struct civil c = clock;
     switch (reg) {
         case REG_SECONDS: {
             c.second = decode(value) % 60;
@@ -427,7 +440,7 @@ static void clock_write(uint8_t reg, uint8_t value) {
             break;
         }
         case REG_DAY_OF_WEEK: {
-            weekday = (decode(value) + 6) % 7;
+            c.weekday = (decode(value) + 6) % 7;
             break;
         }
         case REG_DAY: {
@@ -488,8 +501,7 @@ static void clock_write(uint8_t reg, uint8_t value) {
             break;
         }
     }
-    seconds = seconds_from_civil(&c);
-    weekday_offset = (weekday + 7 - civil_from_seconds(seconds).weekday) % 7;
+    clock = c;
 }
 
 static bool clock_register(uint8_t reg) {
@@ -750,7 +762,7 @@ static void clock_start(void) {
     } else {
         printf("The guest's RTC starts from 2000-01-01, as the firmware gave no time\n");
     }
-    seconds = seconds_from_civil(&c);
+    clock = civil_from_seconds(seconds_from_civil(&c));
     second_tsc = tsc;
     periodic_tsc = tsc;
     timer.fired = timer_fired;
