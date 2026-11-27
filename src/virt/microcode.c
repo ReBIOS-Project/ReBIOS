@@ -52,23 +52,39 @@
 // one is ever held.
 static struct spinlock lock;
 
+// The size of the update whose header is at header, or 0 where its sizes are
+// not an update's: its data has to fit in it, as Linux 7.3's
+// intel_microcode_sanity_check() has it.
+static size_t intel_total(const uint8_t *header) {
+    uint32_t data = read_le32(header + INTEL_DATA_SIZE);
+    if (data == 0) {
+        return INTEL_DEFAULT_TOTAL;
+    }
+    size_t total = read_le32(header + INTEL_TOTAL_SIZE);
+    if (total < INTEL_DEFAULT_TOTAL || total % INTEL_GRANULE != 0
+     || (size_t)data + INTEL_HEADER > total) {
+        return 0;
+    }
+    return total;
+}
+
 static void intel_load(struct vcpu *v, uint64_t data) {
     uint8_t header[INTEL_HEADER];
     if (data < INTEL_HEADER
      || !guest_mem_linear_read(v, data - INTEL_HEADER, header, sizeof(header), false)) {
         return;
     }
-    size_t total = read_le32(header + INTEL_DATA_SIZE) == 0
-                 ? INTEL_DEFAULT_TOTAL
-                 : read_le32(header + INTEL_TOTAL_SIZE);
-    if (total < INTEL_DEFAULT_TOTAL || total > INTEL_UPDATE_MAX || total % INTEL_GRANULE != 0) {
+    size_t total = intel_total(header);
+    if (total == 0 || total > INTEL_UPDATE_MAX) {
         return;
     }
     spinlock_acquire(&lock);
     // kmalloc()'s alignment keeps the data 16-byte aligned, as the trigger
-    // needs.
+    // needs. The copy's own header is the one the processor reads, so it is
+    // the one that has to give the copy's size.
     uint8_t *copy = kmalloc(total);
-    if (guest_mem_linear_read(v, data - INTEL_HEADER, copy, total, false)) {
+    if (guest_mem_linear_read(v, data - INTEL_HEADER, copy, total, false)
+     && intel_total(copy) == total) {
         wrmsr_safe(MSR_IA32_BIOS_UPDT_TRIG, (uintptr_t)copy + INTEL_HEADER);
     }
     kfree(copy);
