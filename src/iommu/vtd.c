@@ -19,7 +19,11 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <uacpi/acpi.h>
+#include <uacpi/status.h>
+#include <uacpi/tables.h>
 #include <iommu/vtd.h>
+#include <hw/acpi.h>
 #include <hw/ioapic.h>
 #include <hw/lapic.h>
 #include <hw/pci_cfg.h>
@@ -31,6 +35,7 @@
 #include <lib/spinlock.h>
 #include <lib/time.h>
 #include <lib/util.h>
+#include <memory.h>
 #include <sys/mm.h>
 #include <sys/x86.h>
 
@@ -168,6 +173,8 @@ static struct spinlock remap_lock;
 static bool posting;
 // Whether every unit snoops the processor's caches when reading the tables.
 static bool coherent = true;
+// The DMAR's flags.
+static uint32_t dmar_flags;
 
 static uint32_t reg_read32(const struct vtd_unit *u, uint32_t reg) {
     return *(volatile uint32_t *)(uintptr_t)(u->base + reg);
@@ -354,6 +361,7 @@ static bool keep_translating(const struct iommu_tables *tables, uint32_t index, 
 }
 
 bool vtd_probe(const struct iommu_tables *tables, size_t *leaf_level) {
+    dmar_flags = tables->vtd_flags;
     unit_count = tables->unit_count;
     units = kmalloc(unit_count * sizeof(struct vtd_unit));
     size_t leaf = 2;
@@ -516,13 +524,58 @@ static void unit_enable(struct vtd_unit *u, uintptr_t pml4) {
     global_command(u, GCMD_TE, true, "start translating");
 }
 
+// Whether the platform has interrupts remapped, as Linux 7.3's
+// intel_prepare_irq_remapping() asks: the DMAR's INTR_REMAP flag set, which
+// firmware clears where its setup turns remapping off, and every I/O APIC that
+// the MADT lists under a unit (dmar_ir_support(), parse_ioapics_under_ir();
+// VT-d D51397-019 rev. 5.20, 8.1, 8.3.1.1). The MADT's I/O APICs are read
+// here, as the IOMMU starts before them; one at address 0 is a field the
+// firmware left unfilled, as ioapic_init() has it.
+static bool platform_remaps(bool tell) {
+    if ((dmar_flags & ACPI_DMAR_INTR_REMAP) == 0) {
+        if (tell) {
+            printf("VT-d: interrupts are not remapped, as the DMAR says the platform does not\n");
+        }
+        return false;
+    }
+    struct uacpi_table table;
+    if (!acpi_tables_ready()
+     || uacpi_table_find_by_signature(ACPI_MADT_SIGNATURE, &table) != UACPI_STATUS_OK) {
+        return true;
+    }
+    bool listed = true;
+    size_t offset = sizeof(struct acpi_madt);
+    const struct acpi_entry_hdr *hdr;
+    while (listed && (hdr = acpi_madt_next(table.ptr, table.hdr->length, &offset)) != NULL) {
+        struct acpi_madt_ioapic entry;
+        if (hdr->type != ACPI_MADT_ENTRY_TYPE_IOAPIC
+         || hdr->length < sizeof(struct acpi_madt_ioapic)) {
+            continue;
+        }
+        memcpy(&entry, hdr, sizeof(struct acpi_madt_ioapic));
+        if (entry.address != 0
+         && iommu_tables_special_for(IOMMU_TABLES_SPECIAL_IOAPIC, entry.id) == NULL) {
+            listed = false;
+            if (tell) {
+                printf(
+                    "VT-d: interrupts are not remapped, as the DMAR lists I/O APIC %u under no "
+                    "unit\n",
+                    entry.id
+                );
+            }
+        }
+    }
+    uacpi_table_unref(&table);
+    return listed;
+}
+
 bool vtd_remap_x2apic_capable(void) {
     for (size_t i = 0; i < unit_count; i++) {
         if ((units[i].ecap & (ECAP_IR | ECAP_EIM)) != (ECAP_IR | ECAP_EIM)) {
             return false;
         }
     }
-    return !remapping_broken();
+    return !remapping_broken() && platform_remaps(false);
 }
 
 // The units the hypervisor's, with queued invalidation, and interrupt
@@ -560,6 +613,7 @@ void vtd_start(bool x2apic) {
         printf("VT-d: the I/O hub cannot remap interrupts safely (its revision's erratum)\n");
         remap = false;
     }
+    remap = remap && platform_remaps(true);
     if (!remap) {
         printf("VT-d: interrupts are not remapped, so the guest's devices can send any\n");
         return;
