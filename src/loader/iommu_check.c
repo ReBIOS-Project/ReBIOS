@@ -141,10 +141,20 @@ static int iommu_table_check(const uint8_t *table) {
         );
     }
     size_t length = read_le32(table + ACPI_SDT_LENGTH);
-    if (length < IOMMU_TABLE_HEADER_SIZE || checksum8(table, length) != 0) {
-        printf("The %.4s table is malformed\n", (const char *)table);
-        unusable(dmar ? "its DMAR table is malformed" : "its IVRS table is malformed");
+    if (length < IOMMU_TABLE_HEADER_SIZE) {
+        printf("The %.4s table is too short\n", (const char *)table);
+        unusable(dmar ? "its DMAR table is too short" : "its IVRS table is too short");
         return FOUND_UNUSABLE;
+    }
+    // Linux 7.3 takes a DMAR whatever its checksum, as ACPICA only warns of a
+    // wrong one (ACPI_CHECKSUM_ABORT), but refuses such an IVRS
+    // (check_ivrs_checksum()).
+    if (checksum8(table, length) != 0) {
+        printf("The %.4s table's checksum is wrong\n", (const char *)table);
+        if (!dmar) {
+            unusable("its IVRS table's checksum is wrong");
+            return FOUND_UNUSABLE;
+        }
     }
 
     uint32_t units = 0;
