@@ -40,6 +40,16 @@
 #define CPUID_1_ECX_PDCM ((uint32_t)1 << 15)
 #define PERF_CAPABILITIES_FW_WRITE ((uint64_t)1 << 13)
 
+// Version 6's aliases of a general counter's counter and event select, 4 apart
+// from one counter to the next, which a counter that CPUID.23H.01H alone
+// enumerates has alone, and the enumeration (SDM 325462-093 Vol. 3B, 22.2.6.1
+// and 22.2.9).
+#define MSR_IA32_PMC_GP0_CTR 0x1900
+#define MSR_IA32_PMC_GP0_CFG_A 0x1901
+#define PMC_GP_STRIDE 4
+#define CPUID_7_1_EAX_ARCH_PERFMON_EXT ((uint32_t)1 << 8)
+#define CPUID_23_EAX_COUNTERS_SUBLEAF ((uint32_t)1 << 1)
+
 // AMD's core performance counters (APM 24593 rev. 3.46, 13.2.1):
 // the legacy counters, those of PerfCtrExtCore, and PerfMonV2's global
 // registers.
@@ -92,11 +102,15 @@
 #define GLOBAL_STATUS_LBR_FROZEN ((uint64_t)1 << 58)
 #define GLOBAL_STATUS_FROZEN ((uint64_t)1 << 59)
 
-// Intel's: the architectural performance monitoring version, the general and
-// fixed counters and their widths, and whether IA32_A_PMCi takes their full
-// width. AMD's: whether it has PerfCtrExtCore's counters, and PerfMonV2.
+// Intel's: the architectural performance monitoring version, the general
+// counters, those of them that have the legacy MSRs, and the fixed counters,
+// with their widths, and whether IA32_A_PMCi takes their full width. AMD's:
+// whether it has PerfCtrExtCore's counters, and PerfMonV2. gp_count is one
+// past the last general counter, whose bit gp_counters has.
 static unsigned int intel_version;
 static size_t gp_count;
+static uint32_t gp_counters;
+static size_t legacy_count;
 static unsigned int gp_width;
 static size_t fixed_count;
 static unsigned int fixed_width;
@@ -113,7 +127,7 @@ void pmu_init(void) {
         // processor, and tell pmu_programmed() what its counters count.
         struct cpuid_regs r = cpuid(0xa, 0);
         intel_version = r.eax & 0xff;
-        gp_count = (r.eax >> 8) & 0xff;
+        legacy_count = (r.eax >> 8) & 0xff;
         gp_width = (r.eax >> 16) & 0xff;
         if (intel_version >= 2) {
             fixed_count = r.edx & 0x1f;
@@ -123,11 +137,29 @@ void pmu_init(void) {
         full_width_writes = (cpuid(1, 0).ecx & CPUID_1_ECX_PDCM) != 0
                          && rdmsr_safe(MSR_IA32_PERF_CAPABILITIES, &capabilities)
                          && (capabilities & PERF_CAPABILITIES_FW_WRITE) != 0;
-        if (gp_count > FIXED0) {
-            gp_count = FIXED0;
+        if (legacy_count > FIXED0) {
+            legacy_count = FIXED0;
         }
+        gp_counters = ((uint32_t)1 << legacy_count) - 1;
+        // The general counters that CPUID.23H.01H enumerates instead, as Linux
+        // 7.3's update_pmu_cap_from_perfmonext() takes them.
+        if (cpuid(0, 0).eax >= 0x23 && (cpuid(7, 1).eax & CPUID_7_1_EAX_ARCH_PERFMON_EXT) != 0
+         && (cpuid(0x23, 0).eax & CPUID_23_EAX_COUNTERS_SUBLEAF) != 0) {
+            gp_counters = cpuid(0x23, 1).eax & (((uint32_t)1 << FIXED0) - 1);
+        }
+        gp_count = gp_counters == 0 ? 0 : 32 - (size_t)__builtin_clz(gp_counters);
         for (size_t i = 0; i < gp_count; i++) {
-            virt_intercept_msr(MSR_IA32_PERFEVTSEL0 + (uint32_t)i, false, true);
+            if ((gp_counters & (uint32_t)1 << i) == 0) {
+                continue;
+            }
+            if (i < legacy_count) {
+                virt_intercept_msr(MSR_IA32_PERFEVTSEL0 + (uint32_t)i, false, true);
+            }
+            if (intel_version >= 6) {
+                virt_intercept_msr(
+                    MSR_IA32_PMC_GP0_CFG_A + PMC_GP_STRIDE * (uint32_t)i, false, true
+                );
+            }
         }
         if (fixed_count != 0) {
             virt_intercept_msr(MSR_IA32_FIXED_CTR_CTRL, false, true);
@@ -139,15 +171,37 @@ void pmu_init(void) {
     amd_global = extended >= 0x80000022
               && (cpuid(0x80000022, 0).eax & CPUID_80000022_EAX_PERFMON_V2) != 0;
     gp_count = amd_extended ? AMD_COUNTERS : 4;
+    gp_counters = ((uint32_t)1 << gp_count) - 1;
     gp_width = AMD_WIDTH;
+}
+
+// Intel's general counter i's event select and counter: its legacy MSRs where
+// it has them, else version 6's aliases.
+static uint32_t evtsel_msr(size_t i) {
+    if (i < legacy_count) {
+        return MSR_IA32_PERFEVTSEL0 + (uint32_t)i;
+    }
+    return MSR_IA32_PMC_GP0_CFG_A + PMC_GP_STRIDE * (uint32_t)i;
+}
+
+static uint32_t counter_msr(size_t i) {
+    if (i < legacy_count) {
+        return MSR_IA32_PMC0 + (uint32_t)i;
+    }
+    return MSR_IA32_PMC_GP0_CTR + PMC_GP_STRIDE * (uint32_t)i;
 }
 
 bool pmu_programming(uint32_t msr) {
     if (!virt_vmx) {
         return false;
     }
-    if (msr >= MSR_IA32_PERFEVTSEL0 && msr < MSR_IA32_PERFEVTSEL0 + gp_count) {
-        return true;
+    if (msr >= MSR_IA32_PERFEVTSEL0 && msr < MSR_IA32_PERFEVTSEL0 + legacy_count) {
+        return (gp_counters >> (msr - MSR_IA32_PERFEVTSEL0) & 1) != 0;
+    }
+    uint32_t alias = msr - MSR_IA32_PMC_GP0_CFG_A;
+    if (intel_version >= 6 && msr >= MSR_IA32_PMC_GP0_CFG_A && alias % PMC_GP_STRIDE == 0
+     && alias / PMC_GP_STRIDE < gp_count) {
+        return (gp_counters >> (alias / PMC_GP_STRIDE) & 1) != 0;
     }
     return fixed_count != 0 && msr == MSR_IA32_FIXED_CTR_CTRL;
 }
@@ -165,9 +219,12 @@ void pmu_programmed(struct vcpu *v) {
     v->pmu_instructions = 0;
     v->pmu_branches = 0;
     for (size_t i = 0; i < gp_count; i++) {
+        if ((gp_counters & (uint32_t)1 << i) == 0) {
+            continue;
+        }
         uint64_t evtsel = v->amd_perf_evt_sel[i];
         if (virt_vmx) {
-            evtsel = rdmsr(MSR_IA32_PERFEVTSEL0 + (uint32_t)i);
+            evtsel = rdmsr(evtsel_msr(i));
         }
         if ((evtsel & EVTSEL_EN) == 0) {
             continue;
@@ -270,16 +327,19 @@ static uint64_t intel_count(
         if (n == 0 || (global & ((uint64_t)1 << i)) == 0) {
             continue;
         }
-        uint64_t evtsel = rdmsr(MSR_IA32_PERFEVTSEL0 + (uint32_t)i);
+        uint64_t evtsel = rdmsr(evtsel_msr(i));
         if (!counts_at(evtsel, cpl)) {
             continue;
         }
         bool overflow;
-        uint64_t value = sum(rdmsr(MSR_IA32_PMC0 + (uint32_t)i), n, gp_width, shown, &overflow);
+        uint64_t value = sum(rdmsr(counter_msr(i)), n, gp_width, shown, &overflow);
         // IA32_PMCi takes bits 31:0 sign-extended, which hold the value where
-        // its upper bits all equal bit 31 (SDM 325462-093 Vol. 3B, 22.2.8).
+        // its upper bits all equal bit 31 (SDM 325462-093 Vol. 3B, 22.2.8);
+        // version 6's alias, the whole value (22.2.6.1).
         uint64_t upper = value >> 31;
-        if (full_width_writes) {
+        if (i >= legacy_count) {
+            wrmsr(counter_msr(i), value);
+        } else if (full_width_writes) {
             wrmsr(MSR_IA32_A_PMC0 + (uint32_t)i, value);
         } else if (upper == 0 || upper == width_mask(gp_width) >> 31) {
             wrmsr(MSR_IA32_PMC0 + (uint32_t)i, value);
