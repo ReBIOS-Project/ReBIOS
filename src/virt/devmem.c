@@ -139,13 +139,30 @@ static bool overlaps(
 
 // Whether the guest may get the host's [base, end): none of the guest's legacy
 // memory, the host's RAM, the configuration space windows, or the IOMMUs.
-static bool usable(uintptr_t base, uintptr_t end) {
+static bool allowed(uintptr_t base, uintptr_t end) {
     const struct pci_host *host = pci_host_scan();
-    if (base < ONE_MIB || end <= base || end - base > RANGE_MAX || !layout_host_kept(base, end)
-     || overlaps(host->private, host->private_count, base, end)) {
+    return base >= ONE_MIB && end > base && end - base <= RANGE_MAX && layout_host_kept(base, end)
+        && !overlaps(host->private, host->private_count, base, end);
+}
+
+static bool usable(uintptr_t base, uintptr_t end) {
+    if (!allowed(base, end)) {
         printf(
             "Device memory at 0x%llx-0x%llx is not the guest's\n",
             (unsigned long long)base, (unsigned long long)(end - 1)
+        );
+        return false;
+    }
+    return true;
+}
+
+// Whether size bytes fit in the block from at, and says so where not.
+static bool fits(uintptr_t at, size_t size, uintptr_t base) {
+    if (size > devmem.block_end - at) {
+        printf(
+            "Device memory at 0x%llx-0x%llx does not fit in the guest's block, so it is not "
+            "the guest's\n",
+            (unsigned long long)base, (unsigned long long)(base + size - 1)
         );
         return false;
     }
@@ -168,22 +185,31 @@ void devmem_plan(void) {
     for (size_t i = 0; i < devmem.read_only.count; i++) {
         range_list_remove(&devices, devmem.read_only.r[i].base, devmem.read_only.r[i].end);
     }
+    // Room for the ranges the guest gets alone.
     size_t total = 0;
     for (size_t i = 0; i < devices.count; i++) {
-        total += devices.r[i].end - devices.r[i].base;
+        if (allowed(devices.r[i].base, devices.r[i].end)) {
+            total += devices.r[i].end - devices.r[i].base;
+        }
     }
     for (size_t i = 0; i < host->tpm_count; i++) {
-        if (!tpm_span(host, &host->tpms[i])) {
-            total += host->tpms[i].end - host->tpms[i].base;
+        const struct pci_host_range *r = &host->tpms[i];
+        if (!tpm_span(host, r) && allowed(r->base, r->end)) {
+            total += r->end - r->base;
         }
     }
     // Room for each, and for its alignment.
     for (size_t i = 0; i < devmem.trapped_count; i++) {
-        size_t trapped = devmem.trapped[i].end - devmem.trapped[i].base;
-        total += power_above(trapped) + trapped;
+        const struct pci_host_range *r = &devmem.trapped[i];
+        if (allowed(r->base, r->end)) {
+            total += power_above(r->end - r->base) + (r->end - r->base);
+        }
     }
     for (size_t i = 0; i < devmem.read_only.count; i++) {
-        total += devmem.read_only.r[i].end - devmem.read_only.r[i].base;
+        const struct range *r = &devmem.read_only.r[i];
+        if (allowed(r->base, r->end)) {
+            total += r->end - r->base;
+        }
     }
     size_t size = align_up(total + SPARE, BLOCK_ALIGN);
     uintptr_t top = BLOCK_TOP;
@@ -196,13 +222,18 @@ void devmem_plan(void) {
             }
         }
     }
+    // Above the guest's legacy memory whatever the ranges add up to, those
+    // that do not fit left out.
+    if (size > top - ONE_MIB) {
+        size = top - ONE_MIB;
+    }
     devmem.block_base = top - size;
     devmem.block_end = top;
 
     uintptr_t at = devmem.block_base;
     for (size_t i = 0; i < devices.count; i++) {
         const struct range *r = &devices.r[i];
-        if (usable(r->base, r->end)) {
+        if (usable(r->base, r->end) && fits(at, r->end - r->base, r->base)) {
             place(r->base, at, r->end - r->base, PLACED_MAPPED);
             at += r->end - r->base;
         }
@@ -210,15 +241,15 @@ void devmem_plan(void) {
     range_list_free(&devices);
     for (size_t i = 0; i < devmem.trapped_count; i++) {
         const struct pci_host_range *r = &devmem.trapped[i];
-        if (usable(r->base, r->end)) {
-            at = align_up(at, power_above(r->end - r->base));
-            place(r->base, at, r->end - r->base, PLACED_TRAPPED);
-            at += r->end - r->base;
+        uintptr_t aligned = align_up(at, power_above(r->end - r->base));
+        if (usable(r->base, r->end) && fits(aligned, r->end - r->base, r->base)) {
+            place(r->base, aligned, r->end - r->base, PLACED_TRAPPED);
+            at = aligned + (r->end - r->base);
         }
     }
     for (size_t i = 0; i < devmem.read_only.count; i++) {
         const struct range *r = &devmem.read_only.r[i];
-        if (usable(r->base, r->end)) {
+        if (usable(r->base, r->end) && fits(at, r->end - r->base, r->base)) {
             place(r->base, at, r->end - r->base, PLACED_READ_ONLY);
             at += r->end - r->base;
         }
@@ -235,7 +266,7 @@ void devmem_plan(void) {
             if (guest + (r->end - r->base) > devmem.tpm_end) {
                 devmem.tpm_end = guest + (r->end - r->base);
             }
-        } else {
+        } else if (fits(at, r->end - r->base, r->base)) {
             place(r->base, at, r->end - r->base, PLACED_MAPPED);
             at += r->end - r->base;
         }
